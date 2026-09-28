@@ -389,6 +389,9 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 	s.pushScope()
+	iterScope := s.scope
+	drainCleanupFloor := -1
+	var drainBinder scopedCleanupBinding
 	iterIndexValue := indexValue
 	if stmt.Reverse {
 		lastIndex := C.LLVMBuildSub(s.builder, countValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.rev.last"))
@@ -433,6 +436,25 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			s.popScope()
 			return err
 		}
+		// docs/126 D1 for a move-drain: each element is moved OUT of the container into
+		// the binder, so the binder owns it for one iteration. Arm its destructor like any
+		// drop-typed local; the body's `move x` clears the flag, and an unconsumed binder
+		// is dropped at the end of the iteration instead of leaking.
+		if stmt.MovedSource {
+			if namePattern, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && namePattern.Name != "_" {
+				if binding, found := s.lookupBinding(namePattern.Name); found {
+					armed, err := s.registerDropCleanup(namePattern.Name, binding.ptr, itemType)
+					if err != nil {
+						s.popScope()
+						return err
+					}
+					if armed {
+						drainCleanupFloor = len(s.scopedCleanups) - 1
+						drainBinder = s.scopedCleanups[drainCleanupFloor]
+					}
+				}
+			}
+		}
 	} else {
 		itemPtr, resolvedItemType, err := s.emitIterLoopElementAddress(iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
@@ -447,6 +469,22 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			s.popScope()
 			return err
 		}
+	}
+	// A filtered-out drained element still belongs to the binder: route the filters'
+	// skip edge through a block that drops it before stepping.
+	filterSkipBB := stepBB
+	if drainCleanupFloor >= 0 && (stmt.PatternFilter != nil || stmt.WhereFilter != nil || stmt.Filter != nil) {
+		filterSkipBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.drain.filtered"))
+		resumeBB := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMPositionBuilderAtEnd(s.builder, filterSkipBB)
+		if err := s.emitConditionalDrop(drainBinder); err != nil {
+			s.popScope()
+			return err
+		}
+		if !s.currentBlockTerminated() {
+			C.LLVMBuildBr(s.builder, stepBB)
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, resumeBB)
 	}
 	if stmt.PatternFilter != nil {
 		filterValue := boundItemValue
@@ -467,7 +505,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			}
 		}
 		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.pattern.filter.body"))
-		if _, _, err := s.emitMatchPatternTest(stmt.PatternFilter, filterValue, nil, filterType, nil, nil, nil, filterBodyBB, stepBB); err != nil {
+		if _, _, err := s.emitMatchPatternTest(stmt.PatternFilter, filterValue, nil, filterType, nil, nil, nil, filterBodyBB, filterSkipBB); err != nil {
 			s.popScope()
 			return err
 		}
@@ -475,7 +513,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	if stmt.WhereFilter != nil {
 		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.where.filter.body"))
-		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.WhereFilter, filterBodyBB, stepBB, "iter.where.filter"); err != nil {
+		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.WhereFilter, filterBodyBB, filterSkipBB, "iter.where.filter"); err != nil {
 			s.popScope()
 			return err
 		}
@@ -483,19 +521,32 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	if stmt.Filter != nil {
 		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.filter.body"))
-		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.Filter, filterBodyBB, stepBB, "iter.filter"); err != nil {
+		if err := s.emitIterFilterBranch(stmt.Pattern, iterSourceType, boundItemValue, stmt.Filter, filterBodyBB, filterSkipBB, "iter.filter"); err != nil {
 			s.popScope()
 			return err
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 	}
 	s.pushLoopTargets(exitBB, stepBB)
+	if drainCleanupFloor >= 0 {
+		// The binder belongs to this iteration: a break/continue leaving it must drop it too.
+		s.loopCleanupFloors[len(s.loopCleanupFloors)-1] = drainCleanupFloor
+	}
 	if err := s.emitBlock(stmt.Body, true); err != nil {
 		s.popLoopTargets()
+		s.discardScopeCleanups(iterScope)
 		s.popScope()
 		return err
 	}
 	s.popLoopTargets()
+	if drainCleanupFloor >= 0 {
+		if s.currentBlockTerminated() {
+			s.discardScopeCleanups(iterScope)
+		} else if err := s.emitScopeCleanups(iterScope); err != nil {
+			s.popScope()
+			return err
+		}
+	}
 	s.popScope()
 	if !s.currentBlockTerminated() {
 		C.LLVMBuildBr(s.builder, stepBB)
