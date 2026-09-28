@@ -510,6 +510,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			n.WriteThrough = true
 			if ident, ok := stripOptimizationParens(n.Target).(*ast.Ident); ok {
 				a.requireWriteThroughTarget(ident, ref)
+				// A write through the reference uses its referent exactly as a read does: a
+				// store through a ref into storage a push has since moved is a use-after-free.
+				a.reportInvalidStorageViewUse(ident)
 				if targetSym, ok := a.currentScope.Lookup(ident.Name); ok && a.isInvalidUninitializedSymbol(targetSym) {
 					a.errorf(n.Pos(), "cannot write through uninitialized reference %q; initialize or rebind the reference first", ident.Name)
 				}
@@ -553,9 +556,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if !n.Optional {
 			a.recordAssignmentRefinement(n.Target, targetType, valueType)
-			a.recordRegionRefAssignment(n.Target, n.Value)
-			a.recordStorageViewAssignment(n.Target, n.Value)
-			a.recordStorageContainerAliasTarget(n.Target, n.Value, targetType, valueType)
+			// A store through a reference (`w <- 5`) leaves w bound to the same referent: keep its
+			// region and storage-view facts. Recording the scalar as a rebind erased them, so a
+			// later push followed by another use of w went unchecked.
+			if !n.WriteThrough {
+				a.recordRegionRefAssignment(n.Target, n.Value)
+				a.recordStorageViewAssignment(n.Target, n.Value)
+				a.recordStorageContainerAliasTarget(n.Target, n.Value, targetType, valueType)
+			}
 		}
 		if a.lvalueStorageOutlivesFunction(n.Target) {
 			a.checkLocalArenaEscape(n.Value, valueType, "store")
@@ -1031,6 +1039,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		bodyPermissionRefStart := len(a.currentFunctionUsedPermissionRefs)
 		progressObligationIndex := a.recordProgressLoopObligation(n)
+		// The condition runs again before every iteration: its view uses belong to the back-edge check.
+		a.pushStorageViewLoopUseFrame(a.currentScope, n.Body)
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) && !IsInvalidType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType)
@@ -1061,6 +1071,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
 		a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerBase]
 		a.loopDepth--
+		a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(n.Body))
 		continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(n.Body), outerScope, n.Pos())
 		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {

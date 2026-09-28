@@ -34,9 +34,19 @@ func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 		return
 	}
 	dep, ok := a.currentStorageViewDeps[sym]
-	if !ok || dep.Valid {
+	if !ok {
 		return
 	}
+	a.noteStorageViewLoopUse(sym, expr, ident.Name, dep.Valid)
+	if dep.Valid {
+		return
+	}
+	a.flagStaleStorageViewUse(expr, ident.Name, dep)
+}
+
+// flagStaleStorageViewUse reports a use of a view whose storage dependency is invalid: a pending
+// error (or, under unsafe-permission enforcement, a required stale-ref permission).
+func (a *Analyzer) flagStaleStorageViewUse(expr ast.Expr, viewName string, dep storageViewDependencyState) {
 	if a.enforceUnsafePermissions {
 		if a.storageViewStaleUses != nil {
 			a.storageViewStaleUses[expr] = dep
@@ -47,7 +57,7 @@ func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 	// Defer: if the source darray is given a reserve_commit stack (stable base) by the per-function
 	// region inference, the view stays valid across growth and this error is dropped in the
 	// post-pass; otherwise it is emitted there. The decl offset identifies the source precisely.
-	pending := pendingStorageViewError{expr: expr, viewName: ident.Name, dep: dep, allSourcesHaveDecls: len(dep.Sources) > 0}
+	pending := pendingStorageViewError{expr: expr, viewName: viewName, dep: dep, allSourcesHaveDecls: len(dep.Sources) > 0}
 	for _, source := range dep.Sources {
 		srcSym, ok := a.currentScope.Lookup(source)
 		if !ok || srcSym == nil || srcSym.Node == nil {

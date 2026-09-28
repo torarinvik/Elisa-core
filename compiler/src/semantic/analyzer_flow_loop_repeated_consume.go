@@ -22,6 +22,8 @@ type loopAffineFrame struct {
 	outer     *Scope
 	continued map[affineValueKey]affineValueState
 	broken    map[affineValueKey]affineValueState
+	// storageContinued joins the storage-view states at each `continue` (the back edge).
+	storageContinued map[*Symbol]storageViewDependencyState
 }
 
 func (a *Analyzer) pushLoopAffineFrame() {
@@ -54,6 +56,7 @@ func (a *Analyzer) noteLoopJumpAffineState(isBreak bool) {
 		frame.broken = mergeAffineValueStates(frame.broken, state)
 	} else {
 		frame.continued = mergeAffineValueStates(frame.continued, state)
+		a.noteLoopJumpStorageViewState(frame)
 	}
 }
 

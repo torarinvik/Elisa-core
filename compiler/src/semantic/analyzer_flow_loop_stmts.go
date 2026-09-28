@@ -293,9 +293,11 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	entryAffine := a.cloneAffineValueStates()
 	outerScope := a.currentScope
 	a.pushLoopAffineFrame()
+	a.pushStorageViewLoopUseFrame(outerScope, stmt.Body)
 	a.loopDepth++
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	a.loopDepth--
+	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	a.currentIndexBounds = savedIndexBounds
 	a.currentBoundEqual = savedBoundEqual
@@ -602,6 +604,8 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		}
 		a.analyzeNestedMatchPattern(stmt.PatternFilter, patternType, valueExpr, loopScope)
 	}
+	// The filters run again on every iteration: their view uses belong to the back-edge check.
+	a.pushStorageViewLoopUseFrame(a.currentScope, stmt.Body)
 	if stmt.WhereFilter != nil {
 		condType := a.analyzeCondExprInScope(stmt.WhereFilter, loopScope)
 		if !IsBoolType(condType) {
@@ -649,6 +653,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		bodySnapshot = a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	}
 	a.loopDepth--
+	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	if iterLockKey != "" {
 		if iterLockHadPrior {

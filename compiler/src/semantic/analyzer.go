@@ -449,8 +449,10 @@ type Analyzer struct {
 	loopDepth                       int
 	// loopAffineFrames collects each loop's `continue` affine states; loopRepeatReported keeps the
 	// repeated-consume diagnostic to one per root across nested loops.
-	loopAffineFrames   []loopAffineFrame
-	loopRepeatReported map[*Symbol]bool
+	loopAffineFrames []loopAffineFrame
+	// storageViewLoopUseFrames records each enclosing loop's first view uses (back-edge check).
+	storageViewLoopUseFrames []storageViewLoopUseFrame
+	loopRepeatReported       map[*Symbol]bool
 	// protocolLeakReported dedupes "must be consumed before scope exit" between an early exit
 	// (return, try, break, continue) and the end of the function.
 	protocolLeakReported map[affineValueKey]bool
