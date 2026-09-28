@@ -288,7 +288,9 @@ func (a *Analyzer) storageViewDependencyForBorrowedPlace(place ast.Expr) (storag
 	switch p := stripOptimizationParens(place).(type) {
 	case *ast.IndexExpr:
 		if a.borrowedPlaceContainerIsRelocatable(p.Object) {
-			return storageViewDependencyFromSource(p.Object)
+			dep, ok := storageViewDependencyFromSource(p.Object)
+			dep.Interior = ok
+			return dep, ok
 		}
 	}
 	return storageViewDependencyState{}, false
@@ -512,6 +514,7 @@ func mergeStorageViewDependencies(dependencies ...storageViewDependencyState) (s
 				merged.ContainerAliases = append(merged.ContainerAliases, alias)
 			}
 		}
+		merged.Interior = merged.Interior || dependency.Interior
 		if !dependency.Valid {
 			merged.Valid = false
 			if merged.InvalidatedBy == "" {
@@ -590,11 +593,45 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 			}
 		}
 	}
+	a.invalidateStorageViewDeps(mutatedSources, reason, false)
+}
+
+// invalidateStorageViewsForMutableRefArg invalidates interior references into a container passed
+// to a MUTABLE reference parameter that can reach relocatable storage (a darray, or a struct that
+// may hold one). The callee is analyzed in its own scope, so its push/clear through the borrow is
+// invisible here; the call site is the only place a live `&xs[i]` can be seen outliving it. The
+// iteration lock has its own call-site guard (checkIteratorInvalidationForMutableRefArg), so this
+// touches only the storage-view facts. A stable backing (reserve_commit/fixed) still drops the
+// error in the pending post-pass, exactly as for a direct push.
+func (a *Analyzer) invalidateStorageViewsForMutableRefArg(arg ast.Expr, callee string) {
+	if a == nil || arg == nil || len(a.currentStorageViewDeps) == 0 {
+		return
+	}
+	place := stripOptimizationParens(arg)
+	if addr, ok := place.(*ast.AddrOfExpr); ok {
+		place = addr.Operand
+	}
+	key := optimizationExprString(place)
+	if key == "" {
+		return
+	}
+	mutatedSources := map[string]bool{key: true}
+	for _, root := range a.mutationRootsForTarget(place) {
+		mutatedSources[root] = true
+	}
+	a.invalidateStorageViewDeps(mutatedSources, fmt.Sprintf("mutable borrow of %s by %s", key, callee), true)
+}
+
+// invalidateStorageViewDeps marks every live view depending on MUTATED_SOURCES stale. With
+// INTERIOR_ONLY, only addresses into a container buffer are affected: a value merely derived
+// from the container (a comprehension copy, a parse result) survives a callee's borrow, which
+// cannot relocate storage the value does not point into.
+func (a *Analyzer) invalidateStorageViewDeps(mutatedSources map[string]bool, reason string, interiorOnly bool) {
 	if len(a.currentStorageViewDeps) == 0 {
 		return
 	}
 	for sym, dep := range a.currentStorageViewDeps {
-		if !dep.Valid || !storageViewDependsOnAny(dep, mutatedSources) {
+		if !dep.Valid || (interiorOnly && !dep.Interior) || !storageViewDependsOnAny(dep, mutatedSources) {
 			continue
 		}
 		matchedSource := storageViewMatchedMutationSource(dep, mutatedSources)

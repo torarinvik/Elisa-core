@@ -690,6 +690,10 @@ type storageViewDependencyState struct {
 	ContainerAliases []string
 	Valid            bool
 	InvalidatedBy    string
+	// Interior: the view is (or carries) an address INTO a relocatable container's buffer
+	// (`&xs[i]`), not merely a value derived from it. Only these are invalidated by a callee's
+	// mutable borrow; see invalidateStorageViewsForMutableRefArg.
+	Interior bool
 }
 
 type regionDependencyState struct {

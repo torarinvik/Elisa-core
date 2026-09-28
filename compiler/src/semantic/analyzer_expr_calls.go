@@ -830,8 +830,12 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				// buffer mid-iteration, which the function-local lock cannot see (the callee is
 				// analyzed in its own scope). Conservatively reject any mutable-ref pass of an
 				// iterated container (or a borrow alias of one) — the callee MIGHT relocate it.
-				if _, isDArray := stripRefForBounds(rt.Elem).(*DArrayType); isDArray {
+				switch stripRefForBounds(rt.Elem).(type) {
+				case *DArrayType:
 					a.checkIteratorInvalidationForMutableRefArg(loweredArgs[i])
+					a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
+				case *StructType:
+					a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
 				}
 			}
 		}
