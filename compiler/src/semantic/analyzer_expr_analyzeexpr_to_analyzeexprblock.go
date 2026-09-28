@@ -306,6 +306,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.RaiseExpr:
 		errorType := a.analyzeExpr(n.Error)
+		// A `raise` leaves the function like a `return`: every must-consume value
+		// still live here leaks on the error path.
+		a.reportUnconsumedProtocolValuesOnExit()
 		currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 		if !ok {
 			// Bare expr-lambda inference (docs/64 Phase 5b): the lambda's error return is not yet known;
@@ -919,13 +922,20 @@ func (a *Analyzer) analyzeRecoveryClause(recovery *ast.RecoveryClause, expected 
 	if recovery == nil {
 		return invalidType
 	}
+	// A recovery that leaves the function (`else return`, `else raise`, a block
+	// that always exits) never reaches the code after the expression, so what it
+	// consumes must not flow into the fall-through affine state.
+	fallThrough := a.cloneAffineValueStates()
 	switch recovery.Kind {
 	case ast.RecoveryValue:
 		return a.analyzeExpr(recovery.Value)
 	case ast.RecoveryRaise:
-		return a.analyzeExpr(&ast.RaiseExpr{Position: recovery.Position, Error: recovery.Value})
+		a.analyzeExpr(&ast.RaiseExpr{Position: recovery.Position, Error: recovery.Value})
+		a.currentAffineValues = fallThrough
+		return neverType
 	case ast.RecoveryReturn:
 		a.analyzeRecoveryReturn(recovery)
+		a.currentAffineValues = fallThrough
 		return neverType
 	case ast.RecoveryVoid:
 		if expected != nil && !isVoidType(expected) && !IsInvalidType(expected) {
@@ -943,6 +953,7 @@ func (a *Analyzer) analyzeRecoveryClause(recovery *ast.RecoveryClause, expected 
 		}
 		a.analyzeBlockInScope(recovery.Body, scope)
 		if blockDefinitelyExits(recovery.Body) {
+			a.currentAffineValues = fallThrough
 			return neverType
 		}
 		if expected != nil && !isVoidType(expected) && !IsInvalidType(expected) {
@@ -966,6 +977,8 @@ func (a *Analyzer) analyzeRecoveryReturn(recovery *ast.RecoveryClause) {
 		if !isVoidType(a.currentReturn) {
 			a.errorf(recovery.Position, "return recovery expects %s, got void", a.currentReturn)
 		}
+		// `else return` leaves the function: live must-consume values leak.
+		a.reportUnconsumedProtocolValuesOnExit()
 		return
 	}
 	valueType := a.analyzeExpr(recovery.Value)
@@ -975,6 +988,7 @@ func (a *Analyzer) analyzeRecoveryReturn(recovery *ast.RecoveryClause) {
 		a.reportShapeMismatchNotes(recovery.Position, expectedReturn, valueType)
 	}
 	a.consumeAffineValueExpr(recovery.Value, expectedReturn, "return")
+	a.reportUnconsumedProtocolValuesOnExit()
 }
 
 // narrowedOptionalDeclaredType returns the declared optional type of a place that an
