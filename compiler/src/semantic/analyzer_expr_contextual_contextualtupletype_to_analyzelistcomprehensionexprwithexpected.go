@@ -647,6 +647,11 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 			if !builtinDArrayExtendSourceCompatible(expectedDArray.Elem, sourceType) {
 				a.errorf(elem.Pos(), "spread darray literal element expects a compatible darray or array source of %s, got %s", expectedDArray.Elem, sourceType)
 			}
+			// A spread is a bulk copy, exactly like `extend`: it would duplicate every
+			// linear handle in the source, so it gets the same rejection.
+			if a.containsAffineHandleValues(expectedDArray.Elem, map[string]bool{}) {
+				a.errorf(elem.Pos(), "spread darray literal does not support affine element type %s; push elements individually with explicit move", expectedDArray.Elem)
+			}
 			continue
 		}
 		itemType := a.analyzeValueExpr(elem, elemType)
