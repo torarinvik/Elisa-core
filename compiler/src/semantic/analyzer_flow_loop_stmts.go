@@ -290,9 +290,13 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 	mergedStorageViewDeps := a.cloneStorageViewDeps()
+	entryAffine := a.cloneAffineValueStates()
+	outerScope := a.currentScope
+	a.pushLoopAffineFrame()
 	a.loopDepth++
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	a.loopDepth--
+	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	a.currentIndexBounds = savedIndexBounds
 	a.currentBoundEqual = savedBoundEqual
 	a.currentViewStaticLen = savedViewStaticLen
@@ -308,6 +312,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		// reference usable after the loop (use-after-realloc).
 		mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 	}
+	mergedAffine = mergeAffineValueStates(mergedAffine, continuedAffine)
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
@@ -632,6 +637,9 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		iterLockPrior, iterLockHadPrior = a.currentIteratedSources[iterLockKey]
 		a.currentIteratedSources[iterLockKey] = stmt.Pos()
 	}
+	entryAffine := a.cloneAffineValueStates()
+	outerScope := a.currentScope
+	a.pushLoopAffineFrame()
 	a.loopDepth++
 	if stmt.Filter != nil {
 		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.Filter, true)
@@ -641,6 +649,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		bodySnapshot = a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	}
 	a.loopDepth--
+	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	if iterLockKey != "" {
 		if iterLockHadPrior {
 			a.currentIteratedSources[iterLockKey] = iterLockPrior
@@ -656,6 +665,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		// Propagate interior-reference invalidations out of the loop (see the range-loop merge).
 		mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 	}
+	mergedAffine = mergeAffineValueStates(mergedAffine, continuedAffine)
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues

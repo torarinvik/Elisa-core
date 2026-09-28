@@ -784,6 +784,13 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		}
 		a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
 	}
+	// Everything below runs once per element (the source above runs once): a value declared outside
+	// that is live here and consumed by the end is consumed on every iteration.
+	comprehensionEntryAffine := a.cloneAffineValueStates()
+	comprehensionOuterScope := a.currentScope
+	defer func() {
+		a.checkLoopRepeatedConsume(comprehensionEntryAffine, a.currentAffineValues, comprehensionOuterScope, expr.Pos())
+	}()
 	// Comma-head bindings: per-element `name [:T] = e` lets, declared in the loop scope
 	// before the filter/value/key are checked. Later bindings (and the body/filter) see
 	// earlier ones. Each is recomputed per iteration (the backend emits them in the loop body).

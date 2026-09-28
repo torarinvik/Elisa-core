@@ -874,12 +874,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		} else if a.breakLeavesValueBlock() {
 			a.errorf(n.Pos(), "`break` may not jump out of a value block (docs/119 E5); a block ends only in its tail value — decide before the block, or make the loop a loop expression")
 		}
+		a.noteLoopJumpAffineState(true)
 	case *ast.ContinueStmt:
 		if a.loopDepth == 0 {
 			a.errorf(n.Pos(), "continue is only valid inside a loop")
 		} else if a.breakLeavesValueBlock() {
 			a.errorf(n.Pos(), "`continue` may not jump out of a value block (docs/119 E5); a block ends only in its tail value — decide before the block, or make the loop a loop expression")
 		}
+		a.noteLoopJumpAffineState(false)
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) && !IsInvalidType(condType) {
@@ -1042,6 +1044,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// The count-up exit fact `i <= bound` is sound only if `i <= bound` at ENTRY; evaluate on the
 		// pristine pre-loop scope, since the body's `i <- i + 1` mutates i's tracked value below.
 		countUpExitSound := a.countUpExitFactSound(n)
+		entryAffine := a.cloneAffineValueStates()
+		outerScope := a.currentScope
+		a.pushLoopAffineFrame()
 		a.loopDepth++
 		// Push the proven outer-loop invariants onto the stack so that nested inner-loop invariant
 		// proofs can use them as additional hypotheses (for variables the inner loop doesn't mutate).
@@ -1050,6 +1055,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
 		a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerBase]
 		a.loopDepth--
+		continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(n.Body), outerScope, n.Pos())
 		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
@@ -1058,6 +1064,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
 			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 		}
+		mergedAffine = mergeAffineValueStates(mergedAffine, continuedAffine)
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentFunctionValues = mergedFunctionValues

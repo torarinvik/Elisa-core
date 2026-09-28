@@ -447,6 +447,10 @@ type Analyzer struct {
 	currentFunctionExpectsVectorize bool
 	currentProgressSummary          *FunctionProgressSummary
 	loopDepth                       int
+	// loopAffineFrames collects each loop's `continue` affine states; loopRepeatReported keeps the
+	// repeated-consume diagnostic to one per root across nested loops.
+	loopAffineFrames   []loopAffineFrame
+	loopRepeatReported map[*Symbol]bool
 	// activeOuterLoopInvariants is a stack of proven outer-loop invariant clauses accumulated as the
 	// analyzer descends into nested loops. Each push corresponds to one WhileStmt whose invariants were
 	// fully proven; each pop happens after the body is analyzed. The inner-loop invariant prover reads
