@@ -603,6 +603,24 @@ func (a *Analyzer) invalidateStorageViewsForSourceMode(source ast.Expr, reason s
 	a.invalidateStorageViewsForSourceScoped(source, reason, replaced, true)
 }
 
+// iteratedSourceEnclosedBy returns the iterated place that PLACE strictly encloses (`s` encloses
+// `s.items` and `s.rows[0]`), or "". The smallest key wins so the report is deterministic.
+func iteratedSourceEnclosedBy[V any](iterated map[string]V, place string) string {
+	best := ""
+	for key := range iterated {
+		if len(key) <= len(place) || key[:len(place)] != place {
+			continue
+		}
+		if next := key[len(place)]; next != '.' && next != '[' {
+			continue
+		}
+		if best == "" || key < best {
+			best = key
+		}
+	}
+	return best
+}
+
 // invalidateStorageViewsForSourceScoped is the chokepoint. followAliases=false limits the
 // mutation to the place's OWN storage: replacing a value-typed local (`f <- other` over a
 // struct built from `buf`) rewrites f's bytes and leaves `buf` -- and views into it -- intact.
@@ -624,6 +642,11 @@ func (a *Analyzer) invalidateStorageViewsForSourceScoped(source ast.Expr, reason
 	// through — the same machinery that invalidates interior references.
 	if _, iterated := a.currentIteratedSources[key]; iterated {
 		a.errorf(source.Pos(), "cannot mutate %q while it is being iterated: %s would move its buffer out from under the loop. Iterate by index up to a saved count, collect into a separate darray, or back it with a stable region (reserve_commit/fixed)", key, reason)
+	} else if enclosed := iteratedSourceEnclosedBy(a.currentIteratedSources, key); replaced && enclosed != "" {
+		// Replacing a place that ENCLOSES the iterand (`s <- S{...}` inside `for v in
+		// s.items:`) replaces the iterand's header along with it: the loop keeps walking the
+		// old buffer exactly as after `s.items <- [..]`.
+		a.errorf(source.Pos(), "cannot mutate %q while it is being iterated: %s would move its buffer out from under the loop. Iterate by index up to a saved count, collect into a separate darray, or back it with a stable region (reserve_commit/fixed)", enclosed, reason)
 	} else {
 		// Alias vector: the mutation reaches an iterated container THROUGH a borrow local
 		// (`ys: mutable darray[T]& = &xs; for v in xs: ys.push(v)`). The lock keys on the

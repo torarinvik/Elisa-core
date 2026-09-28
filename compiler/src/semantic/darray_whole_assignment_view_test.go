@@ -136,3 +136,44 @@ def value_rebuilt_twice(file: Unit) -> u8:
 		t.Fatalf("expected these references to stay valid, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// Replacing a place that ENCLOSES the iterated field (`s` or `o.s` while iterating `s.items` /
+// `o.s.items`) replaces the iterand's header with it. Before, only the exact iterated spelling was
+// locked, so all three shapes compiled and the loop kept walking the replaced buffer. Replacing a
+// sibling field, a field whose name merely shares a prefix, or the owner after the loop is fine.
+func TestIteratedFieldRejectsEnclosingReplacement(t *testing.T) {
+	const decls = `struct S:
+    items: mutable darray[i64]
+    itemsx: mutable darray[i64]
+    n: mutable i64
+
+struct O:
+    s: mutable S
+    k: mutable i64
+
+`
+	rejected := map[string]string{
+		"owner":       "def f(s: mutable S&, t: S) -> void:\n    for v in s.items:\n        s <- t\n",
+		"middle":      "def f(o: mutable O&, t: S) -> void:\n    for v in o.s.items:\n        o.s <- t\n",
+		"outer":       "def f(o: mutable O&, t: O) -> void:\n    for v in o.s.items:\n        o <- t\n",
+		"local_owner": "def f(t: S) -> i64:\n    mutable s: S = t\n    for v in s.items:\n        s <- t\n    return s.n\n",
+	}
+	for name, body := range rejected {
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "enclosing_"+name+".elisa", decls+body, AnalyzeOptions{})
+		if !strings.Contains(allDiagnostics(result), "items\" while it is being iterated: reassignment of") {
+			t.Fatalf("%s: expected replacing the iterand's owner to be rejected, got:\n%s", name, allDiagnostics(result))
+		}
+	}
+	accepted := map[string]string{
+		"sibling_scalar": "def f(s: mutable S&) -> void:\n    for v in s.items:\n        s.n <- v\n",
+		"sibling_owner":  "def f(o: mutable O&) -> void:\n    for v in o.s.items:\n        o.k <- v\n",
+		"prefix_name":    "def f(s: mutable S&, t: S) -> void:\n    for v in s.itemsx:\n        s.items <- t.items\n",
+		"after_loop":     "def f(s: mutable S&, t: S) -> void:\n    for v in s.items:\n        pass\n    s <- t\n",
+	}
+	for name, body := range accepted {
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "enclosing_ok_"+name+".elisa", decls+body, AnalyzeOptions{})
+		if strings.Contains(allDiagnostics(result), "being iterated") {
+			t.Fatalf("%s: expected no iteration finding, got:\n%s", name, allDiagnostics(result))
+		}
+	}
+}
