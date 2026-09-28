@@ -818,6 +818,18 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 	if err := s.emitRefinementPostconditionChecks(); err != nil {
 		return err
 	}
+	// Materialize the returned value BEFORE any scoped cleanup or region free runs. The
+	// value may still live in function-owned storage: a returned `T&` is auto-dereferenced
+	// by coerceValue, and a large aggregate `load` is lowered to a memcpy from its source
+	// pointer by storeValue. Either one emitted after arena_free reads freed memory.
+	if s.currentBlockTerminated() {
+		// The value expression itself left the function (e.g. a `raise` inside it).
+		return nil
+	}
+	finish, err := s.materializeFunctionReturn(value, actual)
+	if err != nil {
+		return err
+	}
 	if err := s.emitActiveScopedCleanup(); err != nil {
 		return err
 	}
@@ -827,82 +839,72 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 	if err := s.emitRegionCleanup(); err != nil {
 		return err
 	}
+	if err := s.emitHeapTempCleanup(); err != nil {
+		return err
+	}
+	finish()
+	return nil
+}
+
+// materializeFunctionReturn coerces the returned value and writes any out-slot (sret or
+// error-union payload) at the current insertion point, returning the terminator to emit
+// once cleanups have run.
+func (s *functionState) materializeFunctionReturn(value C.LLVMValueRef, actual semantic.Type) (func(), error) {
 	if retUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType); ok {
 		coerced, err := s.coerceValue(value, actual, retUnion)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if isVoidType(retUnion.Value) {
-			if err := s.emitHeapTempCleanup(); err != nil {
-				return err
-			}
-			C.LLVMBuildRet(s.builder, coerced)
-			return nil
+			return func() { C.LLVMBuildRet(s.builder, coerced) }, nil
 		}
 		if s.resultSlot == nil {
-			return fmt.Errorf("function %s is missing a hidden return slot for %s", s.decl.Name, retUnion.String())
+			return nil, fmt.Errorf("function %s is missing a hidden return slot for %s", s.decl.Name, retUnion.String())
 		}
 		errorCode, err := s.extractErrorUnionCode(coerced, retUnion)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		payload, err := s.extractErrorUnionPayload(coerced, retUnion)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// A non-void error union uses a split ABI (scalar error return plus payload
 		// out-pointer).  Large payloads must use the same memcpy-aware store path as
 		// ordinary sret returns; a raw LLVM aggregate store makes llc -O0 expand a
 		// multi-hundred-KB value into megabytes of elementwise machine code.
 		if err := s.storeValue(s.resultSlot, payload, retUnion.Value, "errunion.ret"); err != nil {
-			return err
+			return nil, err
 		}
-		if err := s.emitHeapTempCleanup(); err != nil {
-			return err
-		}
-		C.LLVMBuildRet(s.builder, errorCode)
-		return nil
+		return func() { C.LLVMBuildRet(s.builder, errorCode) }, nil
 	}
 	if isVoidType(s.fnType.Return) {
 		// `return <void-expr>` (e.g. `return void_fn()`): the value expression was
 		// already emitted for its side effects by the caller. A void function must
 		// terminate with RetVoid — building a value `ret` here yields an invalid
 		// `ret void <badref>` that the module verifier rejects.
-		if err := s.emitHeapTempCleanup(); err != nil {
-			return err
-		}
 		if s.mainReturnsStatus {
 			zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-			C.LLVMBuildRet(s.builder, zero)
-		} else {
-			C.LLVMBuildRetVoid(s.builder)
+			return func() { C.LLVMBuildRet(s.builder, zero) }, nil
 		}
-		return nil
+		return func() { C.LLVMBuildRetVoid(s.builder) }, nil
 	}
 	coerced, err := s.coerceValue(value, actual, s.fnType.Return)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if s.sretReturn {
 		// Large aggregate return: write the value through the sret out-pointer
 		// (memcpy-lowered when `coerced` is a load) and return void.
 		if s.resultSlot == nil {
-			return fmt.Errorf("function is missing the sret return slot")
+			return nil, fmt.Errorf("function is missing the sret return slot")
 		}
 		if err := s.storeValue(s.resultSlot, coerced, s.fnType.Return, "sret.ret"); err != nil {
-			return err
+			return nil, err
 		}
-		if err := s.emitHeapTempCleanup(); err != nil {
-			return err
-		}
-		C.LLVMBuildRetVoid(s.builder)
-		return nil
+		return func() { C.LLVMBuildRetVoid(s.builder) }, nil
 	}
-	if err := s.emitHeapTempCleanup(); err != nil {
-		return err
-	}
-	C.LLVMBuildRet(s.builder, coerced)
-	return nil
+	return func() { C.LLVMBuildRet(s.builder, coerced) }, nil
 }
 func (s *functionState) emitRegionCleanup() error {
 	for i := len(s.regions) - 1; i >= 0; i-- {
