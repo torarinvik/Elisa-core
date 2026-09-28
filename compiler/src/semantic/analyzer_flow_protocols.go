@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"sort"
 	"strings"
 
 	"elisacore/src/ast"
@@ -556,11 +557,52 @@ func mapsCloneBool(src map[string]bool) map[string]bool {
 }
 
 func (a *Analyzer) reportUnconsumedProtocolValues() {
+	a.reportUnconsumedProtocolValuesWhere(nil)
+}
+
+// reportUnconsumedProtocolValuesOnExit is the check at an early function exit
+// (`return`, a propagating `try`): every live must-consume value leaks there.
+func (a *Analyzer) reportUnconsumedProtocolValuesOnExit() {
+	a.reportUnconsumedProtocolValuesWhere(func(*Symbol) bool { return true })
+}
+
+// reportUnconsumedProtocolValuesWhere reports the live must-consume values of
+// the current affine state whose root satisfies leaving (every root when nil).
+// Each root is reported once per analysis: an early exit and the function end
+// can both see the same leak.
+func (a *Analyzer) reportUnconsumedProtocolValuesWhere(leaving func(*Symbol) bool) {
 	if a.currentAffineValues == nil {
 		return
 	}
-	for key, state := range a.currentAffineValues {
+	keys := make([]affineValueKey, 0, len(a.currentAffineValues))
+	for key := range a.currentAffineValues {
+		if key.Root != nil {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Root.Name != keys[j].Root.Name {
+			return keys[i].Root.Name < keys[j].Root.Name
+		}
+		return keys[i].Path < keys[j].Path
+	})
+	for _, key := range keys {
+		state := a.currentAffineValues[key]
 		if key.Root == nil || (state.LiveProtocolType == nil && state.LiveProtocolDescription == "") {
+			continue
+		}
+		// Region owners are discharged by the region machinery at the end of
+		// their scope (synthesized `__auto_*` regions included), not by user
+		// code on the exit path, so only the function-end check (leaving nil)
+		// applies to them. A `lock m as g:` guard is likewise released by the
+		// lock block on every exit from it.
+		if leaving != nil && (key.Root.Kind == SymbolRegion || !leaving(key.Root)) {
+			continue
+		}
+		if _, lockGuard := key.Root.Node.(*ast.LockStmt); leaving != nil && lockGuard {
+			continue
+		}
+		if a.protocolLeakReported[key] {
 			continue
 		}
 		if key.Root.Kind == SymbolRegion && key.Path == "" {
@@ -568,6 +610,10 @@ func (a *Analyzer) reportUnconsumedProtocolValues() {
 				continue
 			}
 		}
+		if a.protocolLeakReported == nil {
+			a.protocolLeakReported = map[affineValueKey]bool{}
+		}
+		a.protocolLeakReported[key] = true
 		pos := lexer.Pos{}
 		if key.Root.Node != nil {
 			pos = key.Root.Node.Pos()

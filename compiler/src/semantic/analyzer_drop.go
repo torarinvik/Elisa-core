@@ -287,6 +287,8 @@ func (a *Analyzer) noteImplicitDropEdge(edge DropEdge, pos lexer.Pos) {
 // invisible path.
 func (a *Analyzer) noteTryPropagationDrops(pos lexer.Pos) {
 	a.noteImplicitDropEdge(DropEdgeTry, pos)
+	// The same invisible return leaks every live must-consume value.
+	a.reportUnconsumedProtocolValuesOnExit()
 }
 
 func (a *Analyzer) recordDropSite(local dropLocalBinding, edge DropEdge, pos lexer.Pos) {

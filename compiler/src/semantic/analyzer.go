@@ -451,6 +451,9 @@ type Analyzer struct {
 	// repeated-consume diagnostic to one per root across nested loops.
 	loopAffineFrames   []loopAffineFrame
 	loopRepeatReported map[*Symbol]bool
+	// protocolLeakReported dedupes "must be consumed before scope exit" between an early exit
+	// (return, try, break, continue) and the end of the function.
+	protocolLeakReported map[affineValueKey]bool
 	// activeOuterLoopInvariants is a stack of proven outer-loop invariant clauses accumulated as the
 	// analyzer descends into nested loops. Each push corresponds to one WhileStmt whose invariants were
 	// fully proven; each pop happens after the body is analyzed. The inner-loop invariant prover reads

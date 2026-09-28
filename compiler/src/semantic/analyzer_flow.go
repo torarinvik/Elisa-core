@@ -732,6 +732,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// path notes its edge further down, after the returned value has had its
 			// own chance to consume — `return move f` must suppress f's drop.)
 			a.noteImplicitDropEdge(DropEdgeReturn, n.Pos())
+			a.reportUnconsumedProtocolValuesOnExit()
 			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
 				if !SameType(currentUnion.Value, a.namedTypes["void"]) {
 					a.errorf(n.Pos(), "return value required for %s", a.currentReturn)
@@ -868,6 +869,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// local still holding a value dies here. Recorded AFTER the return value's own
 		// consumption so `return move f` correctly suppresses f's drop.
 		a.noteImplicitDropEdge(DropEdgeReturn, n.Pos())
+		// A `return` leaves every scope: a must-consume value still live here leaks on
+		// this path even when the fall-through path consumes it.
+		a.reportUnconsumedProtocolValuesOnExit()
 	case *ast.BreakStmt:
 		if a.loopDepth == 0 {
 			a.errorf(n.Pos(), "break is only valid inside a loop")
@@ -875,6 +879,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "`break` may not jump out of a value block (docs/119 E5); a block ends only in its tail value — decide before the block, or make the loop a loop expression")
 		}
 		a.noteLoopJumpAffineState(true)
+		a.reportLoopBodyLeaksOnJump()
 	case *ast.ContinueStmt:
 		if a.loopDepth == 0 {
 			a.errorf(n.Pos(), "continue is only valid inside a loop")
@@ -882,6 +887,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "`continue` may not jump out of a value block (docs/119 E5); a block ends only in its tail value — decide before the block, or make the loop a loop expression")
 		}
 		a.noteLoopJumpAffineState(false)
+		a.reportLoopBodyLeaksOnJump()
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) && !IsInvalidType(condType) {

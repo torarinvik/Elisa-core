@@ -19,12 +19,13 @@ import (
 // the code after the loop.
 type loopAffineFrame struct {
 	depth     int
+	outer     *Scope
 	continued map[affineValueKey]affineValueState
 	broken    map[affineValueKey]affineValueState
 }
 
 func (a *Analyzer) pushLoopAffineFrame() {
-	a.loopAffineFrames = append(a.loopAffineFrames, loopAffineFrame{depth: a.loopDepth + 1})
+	a.loopAffineFrames = append(a.loopAffineFrames, loopAffineFrame{depth: a.loopDepth + 1, outer: a.currentScope})
 }
 
 func (a *Analyzer) popLoopAffineFrame() loopAffineFrame {
@@ -149,4 +150,21 @@ func affineStatesVisibleFrom(states map[affineValueKey]affineValueState, outer *
 		}
 	}
 	return kept
+}
+
+// reportLoopBodyLeaksOnJump rejects a `break` or `continue` that leaves the loop
+// body while a must-consume value declared in the body is still live: the jump
+// ends that value's scope on this path (a per-iteration linear local released
+// only on the fall-through path leaks on the early one). Values declared
+// outside the loop stay in scope and are checked where their own scope ends.
+func (a *Analyzer) reportLoopBodyLeaksOnJump() {
+	n := len(a.loopAffineFrames)
+	if n == 0 || a.loopAffineFrames[n-1].depth != a.loopDepth || a.loopAffineFrames[n-1].outer == nil {
+		return
+	}
+	outer := a.loopAffineFrames[n-1].outer
+	a.reportUnconsumedProtocolValuesWhere(func(root *Symbol) bool {
+		sym, ok := outer.Lookup(root.Name)
+		return !ok || sym != root
+	})
 }
