@@ -360,6 +360,34 @@ type Analyzer struct {
 	// is such a local — the locally-constructed analogue of threading a struct param's
 	// region. Consumed by attachStructLocalArgRegion at call sites.
 	currentStructLocalAllocRegion map[*Symbol]string
+	// currentElementReads / currentElementStates track the element provenance of eligible
+	// function-local containers (see region_local_container_elements.go).
+	currentElementReads  map[*ast.IndexExpr]bool
+	currentElementStates map[*Symbol]regionRefState
+	// currentElementBinderLoops are the by-value `for x in xs` loops over an eligible local
+	// container whose binder may take the container's tracked element provenance;
+	// iterBinderElementStates holds that provenance per binder symbol.
+	currentElementBinderLoops map[*ast.IterForStmt]bool
+	// ambientFillAnalyzed / ambientFillFresh summarize each function for callers that pass it a
+	// local container to fill: analyzed once its body was checked with diagnostics on, fresh when
+	// that body may put data allocated in a caller's arena into a parameter container (a void
+	// grower's adoption sanction fired or it called a region-polymorphic function, or a parameter
+	// was forwarded to a callee not known to fill it only from its arguments).
+	ambientFillAnalyzed map[*ast.FuncDecl]bool
+	ambientFillFresh    map[*ast.FuncDecl]bool
+	// fillMayAdoptSet is the lazily built syntactic over-approximation of ambientFillFresh
+	// (see fillMayAdopt).
+	fillMayAdoptSet map[*ast.FuncDecl]bool
+	// returnElementStmtStates / returnElementStmtUnknown record, per return statement, the element
+	// provenance of the returned container (region_return_element_summary.go);
+	// returnElementSummaries holds each function's published summary.
+	returnElementStmtStates  map[*ast.ReturnStmt]regionRefState
+	returnElementStmtUnknown map[*ast.ReturnStmt]bool
+	returnElementSummaries   map[*ast.FuncDecl]regionRefState
+	iterBinderElementStates   map[*Symbol]regionRefState
+	// comprehensionElementStates holds the provenance of each list comprehension's element
+	// expression, read in the binder scope, for a local container it initializes.
+	comprehensionElementStates map[*ast.ListComprehensionExpr]regionRefState
 	currentAffineValues           map[affineValueKey]affineValueState
 	currentBorrowedOwnerRefs      map[*Symbol]borrowedOwnerRefState
 	currentFunctionValues         map[*Symbol]*FuncType
@@ -572,7 +600,46 @@ type Analyzer struct {
 	// funcDeclUsings records each function declaration's file/module `using` imports so
 	// speculative re-analyses (return-provenance / borrowed-owner-ref inference) resolve
 	// unqualified names exactly as the body's real analysis does.
-	funcDeclUsings                   map[*ast.FuncDecl][]string
+	funcDeclUsings map[*ast.FuncDecl][]string
+	// Return-borrow summaries (returnBorrowFlowForFunc), memoized once a function's body has been
+	// analyzed: before that its expression types are missing and the summary is conservative.
+	returnBorrowFuncAnalyzed  map[*ast.FuncDecl]bool
+	returnBorrowFuncSummaries map[*ast.FuncDecl]returnBorrowFlow
+	returnBorrowQueryMemo     map[*ast.FuncDecl]returnBorrowQueryEntry
+	// Query memos per root function, kept while one function is being analyzed: repeated queries
+	// rooted at the same function reuse the callee summaries (returnBorrowRootMemo).
+	returnBorrowRootMemos    map[*ast.FuncDecl]map[*ast.FuncDecl]returnBorrowQueryEntry
+	returnBorrowRootMemosFor *ast.FuncDecl
+	// returnBorrowMayTarget answers per (holder, referent) type pair.
+	returnBorrowMayTargetMemo       map[[2]Type]bool
+	returnBorrowResultMayTargetMemo map[[2]Type]bool
+	returnBorrowCutLog              []*ast.FuncDecl
+	// returnBorrowCycleAssume is the current fixpoint approximation of each function whose
+	// summary is being computed; a recursive call inside it reads this instead of recursing.
+	returnBorrowCycleAssume map[*ast.FuncDecl]returnBorrowFlow
+	// returnBorrowLateFrames holds the deferred store checks of functions analyzed while
+	// returnBorrowLateEnabled is set; they are evaluated once every body has been analyzed.
+	returnBorrowLateFrames   []returnBorrowLateFrame
+	returnBorrowLateEnabled  bool
+	returnBorrowContentReads bool
+	iterBindingSources       map[*Symbol]ast.Expr
+	iterBindingByRef         map[*Symbol]bool
+	// Deferred local-borrow store checks and the per-binding store environment they are evaluated
+	// against (analyzer_return_borrow_store_env.go).
+	returnBorrowDeferFrames      []*returnBorrowDeferFrame
+	returnBorrowDeclEnv          map[returnBorrowBinderKey]returnBorrowFlow
+	returnBorrowDeclRecording    map[returnBorrowBinderKey]returnBorrowFlow
+	returnBorrowDeclRecordingFn  *ast.FuncDecl
+	returnBorrowDeclChanged      bool
+	returnBorrowDeclConservative map[string]bool
+	returnBorrowDeclRefLinks     map[string][]string
+	// returnBorrowSynthesizedBinders are the binder patterns value comprehensions and single-binder
+	// queries synthesize; the return-borrow walker defines them (returnBorrowFlowForComprehension,
+	// returnBorrowFlowForQuery).
+	returnBorrowSynthesizedBinders   map[ast.Node]bool
+	returnBorrowDeclProcessedCalls   map[*ast.CallExpr]bool
+	returnBorrowWalkFn               *ast.FuncDecl
+	returnBorrowReboundNames         map[*ast.FuncDecl]map[string]bool
 	returnProvenanceLocalInProgress  map[*Symbol]bool
 	returnBorrowedOwnerRefInProgress map[*ast.FuncDecl]bool
 	// inReturnBorrowCapture is true only while computing a return statement's
@@ -789,6 +856,22 @@ type affineValueKey struct {
 
 type poolScopeState struct {
 	Name string
+	// Node is the pool statement; a submit's pool argument must resolve to it.
+	Node *ast.PoolStmt
+	// OuterRegions are the regions live when the pool statement began. The pool
+	// joins its workers at scope exit, before any of them is released, so a task
+	// may depend on them. Regions declared inside the body die before the join.
+	OuterRegions map[*Symbol]int
+	// Joined records the outer-region dependencies handed to tasks, so the pool
+	// exit can reject a reset/destroy of one inside the body (before the join).
+	Joined *[]poolJoinedRegionDependency
+}
+
+type poolJoinedRegionDependency struct {
+	Region     *Symbol
+	Generation int
+	Pos        lexer.Pos
+	CallName   string
 }
 
 type AnalyzeOptions struct {
@@ -990,6 +1073,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
+		ambientFillAnalyzed:               map[*ast.FuncDecl]bool{},
+		ambientFillFresh:                  map[*ast.FuncDecl]bool{},
 		funcDeclUsings:                    map[*ast.FuncDecl][]string{},
 		returnProvenanceLocalInProgress:   map[*Symbol]bool{},
 		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
@@ -1094,7 +1179,9 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// structured ParamContracts (removing them from Requires), so the call-site entailment check and
 	// the callee-body assumption can compose value contracts through first-class functions.
 	a.expandHigherOrderContracts(activeDecls)
+	a.returnBorrowLateEnabled = true
 	a.analyzeDecls(activeDecls)
+	a.evaluateLateReturnBorrowFrames()
 	// A4: discharge each protocol default method's own contract against its own body (the default
 	// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
 	// after foldInterfaceBases so an inherited member/law the default uses is in scope.

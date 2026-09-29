@@ -179,10 +179,22 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
-	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name})
+	outerRegions := make(map[*Symbol]int, len(savedRegions))
+	for region, state := range savedRegions {
+		if !state.Destroyed {
+			outerRegions[region] = state.Generation
+		}
+	}
+	joined := []poolJoinedRegionDependency{}
+	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name, Node: stmt, OuterRegions: outerRegions, Joined: &joined})
 	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: true}, stmt.Pos())
 	for _, inner := range stmt.Body {
 		a.analyzeStmt(inner)
+	}
+	for _, dep := range joined {
+		if state, ok := a.currentRegions[dep.Region]; !ok || state.Destroyed || state.Generation != dep.Generation {
+			a.errorf(dep.Pos, threadLocalRegionDependencyMessage(dep.CallName, dep.Region.Name))
+		}
 	}
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
@@ -575,6 +587,46 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 
 	loopScope := NewScope(a.currentScope)
 	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	// The return-borrow flow walk reads a loop binding's borrows from the iterated source: an
+	// element (or a field destructured from it) holds only what the container holds.
+	if a.iterBindingSources == nil {
+		a.iterBindingSources = map[*Symbol]ast.Expr{}
+	}
+	// A by-value binder over an eligible tracked local container takes the container's element
+	// provenance (ownedExtractionRegion reads it instead of the container's own region).
+	binderElementState, binderTracked := regionRefState{}, false
+	if a.currentElementBinderLoops[stmt] && stmt.Mode == ast.IterBindValue && a.currentScope != nil {
+		if ident, ok := stmt.Source.(*ast.Ident); ok {
+			if sourceSym, ok := a.currentScope.Lookup(ident.Name); ok {
+				binderElementState, binderTracked = a.currentElementStates[sourceSym]
+			}
+		}
+	}
+	for _, sym := range loopScope.Symbols {
+		a.iterBindingSources[sym] = stmt.Source
+		if binderTracked {
+			if a.iterBinderElementStates == nil {
+				a.iterBinderElementStates = map[*Symbol]regionRefState{}
+			}
+			a.iterBinderElementStates[sym] = cloneRegionRefState(binderElementState)
+		}
+		if stmt.Mode != ast.IterBindValue {
+			if a.iterBindingByRef == nil {
+				a.iterBindingByRef = map[*Symbol]bool{}
+			}
+			a.iterBindingByRef[sym] = true
+		}
+	}
+	// A by-value binder is an element copy: a view element keeps pointing wherever the
+	// container's elements point, so the binder carries the element provenance an index
+	// read would (`for c in caps: dst.push(c)` must be checked like `dst.push(caps[i])`).
+	if stmt.Mode == ast.IterBindValue && !stmt.MovedSource {
+		if state, ok := a.iterBinderRegionRefState(stmt.Source, sourceType, info.ItemType, binderElementState, binderTracked); ok {
+			for _, sym := range loopScope.Symbols {
+				a.recordResolvedRegionRefBinding(sym, state)
+			}
+		}
+	}
 	var movedElemSym *Symbol
 	if stmt.MovedSource {
 		// Register the moved element as a per-iteration must-consume value (a no-op when the
@@ -793,7 +845,7 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	}
 	// No enclosing `pool workers(w):` scope is required: `parallel for` falls back to the implicit
 	// default pool (perf_cores() workers). An explicit pool scope still overrides the worker count.
-	a.validateThreadTransferArg("parallel for", stmt.Source, sourceType)
+	a.validateThreadTransferArg("parallel for", stmt.Source, sourceType, nil)
 
 	loopScope := NewScope(a.currentScope)
 	loopSym := &Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: itemType, Node: stmt, Mutable: false}
@@ -823,9 +875,9 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 			continue
 		}
 		if bindingExpr, ok := a.currentValueBindings[sym]; ok && bindingExpr != nil {
-			a.validateThreadTransferArg("parallel for", bindingExpr, sym.Type)
+			a.validateThreadTransferArg("parallel for", bindingExpr, sym.Type, nil)
 		} else {
-			a.validateThreadTransferArg("parallel for", &ast.Ident{Position: stmt.Position, Name: name}, sym.Type)
+			a.validateThreadTransferArg("parallel for", &ast.Ident{Position: stmt.Position, Name: name}, sym.Type, nil)
 		}
 	}
 	for _, msg := range captureCollector.errors {
@@ -1039,4 +1091,34 @@ func (a *Analyzer) parallelForCaptureTypeAllowed(t Type, seen map[string]bool) b
 	default:
 		return false
 	}
+}
+
+// iterBinderRegionRefState is the region provenance of one by-value element of source: the
+// tracked element provenance of an eligible local container, else the merge of the source's
+// per-index states, bounded by the container's region when the element owns arena storage.
+func (a *Analyzer) iterBinderRegionRefState(source ast.Expr, sourceType Type, itemType Type, tracked regionRefState, isTracked bool) (regionRefState, bool) {
+	if itemType == nil || !a.typeCanContainRegionRefs(itemType, map[string]bool{}) {
+		return regionRefState{}, false
+	}
+	if isTracked {
+		if !hasRegionProvenance(tracked) {
+			return regionRefState{}, false
+		}
+		return cloneRegionRefState(tracked), true
+	}
+	state, ok := regionRefState{}, false
+	if srcState, srcOK := a.regionRefStateForExpr(source); srcOK && hasRegionProvenance(srcState) {
+		state, ok = summarizeRegionIndexStates(srcState)
+	}
+	if a.typeMayOwnArenaStorage(itemType, map[string]bool{}) {
+		if owner, ownerOK := a.containerRegionDependency(sourceType); ownerOK {
+			if !ok {
+				return owner, true
+			}
+			if merged, mergedOK := mergeRegionRefStates(state, owner); mergedOK {
+				return merged, true
+			}
+		}
+	}
+	return state, ok
 }

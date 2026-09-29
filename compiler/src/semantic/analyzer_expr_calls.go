@@ -193,6 +193,14 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	// docs/119 §6.2: the same value-receiver mutation is a hidden write when it targets an
 	// outer binding inside a value block — `xs.push(v)` on an uncaptured outer `xs` is E4.
 	defer a.checkValueBlockMutatingBuiltinMethod(expr)
+	// A call may store a borrow of this frame through a `mutable T&` argument that outlives it.
+	defer a.queueCallArgumentStoreChecks(expr)
+	// …and a borrow of a function-local REGION's storage (a local darray's bytes) the same way.
+	defer a.checkCallArgumentRegionStoreEscape(expr)
+	// A tracked local container a callee fills takes on the provenance of its other arguments.
+	defer a.recordCallFilledElementStates(expr)
+	// …and a void grower that may allocate its grown container's elements in the adopted arena.
+	defer a.noteAmbientCallFill(expr)
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.
@@ -626,7 +634,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			if a.enforceUnsafePermissions && threadTransferRequiresUnsafeThreadShare(argType, map[string]bool{}) {
 				a.recordFunctionPermissionRefs(unsafeThreadShareRefs(orderedArgs[i].Pos()))
 			}
-			a.validateThreadTransferArg(ft.Name, orderedArgs[i], argType)
+			var joinPool *poolScopeState
+			if ft.Name == "pool_submit1" {
+				joinPool = a.joinedPoolScopeForArg(orderedArgs[0])
+			}
+			a.validateThreadTransferArg(ft.Name, orderedArgs[i], argType, joinPool)
 			// Transferring an owned region into a worker thread: `move`-ing the
 			// owner consumes it here (the thread now owns it; the worker's
 			// `owned` parameter discharges it). Passing an owner WITHOUT move

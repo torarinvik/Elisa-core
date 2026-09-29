@@ -592,8 +592,17 @@ func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *s
 // argument is the only value that can be copied into report. The scan is conservative; a false
 // positive retains caller ownership, while a false negative would leave a dangling container
 // header after the temporary arena is freed.
-func adoptedEscapeNamesForBody(body []ast.Stmt) map[string]bool {
+//
+// roots are the function's parameters: a value copied into a parameter-rooted aggregate
+// (`out.push(e)`, `p.items.push(v)`) is observed by the caller, so it escapes exactly like a
+// returned value.
+func adoptedEscapeNamesForBody(body []ast.Stmt, roots ...string) map[string]bool {
 	escaped := map[string]bool{}
+	for _, root := range roots {
+		if root != "" {
+			escaped[root] = true
+		}
+	}
 	// dependencies records values copied into a mutable aggregate.  A returned
 	// aggregate is an escape root, so every value copied into it must use the
 	// caller-owned region too.  This is especially important for a struct pushed
@@ -760,8 +769,31 @@ func adoptedEscapeNamesForBody(body []ast.Stmt) map[string]bool {
 			return
 		}
 		if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
-			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && mutatesAggregate(field.Field) {
+			field, isField := call.Func.(*ast.FieldExpr)
+			if isField && field != nil && mutatesAggregate(field.Field) {
 				addDependencies(aggregateRootName(field.Object), call.Args)
+			} else if !isField || field == nil || !adoptedEscapeReadOnlyMethods[field.Field] {
+				// Any other call may store one operand into another through a writable
+				// parameter (`put(out, E{name: xs.as_sview()})`): each place operand depends
+				// on the others, so an escaping owner (a caller-visible parameter) keeps
+				// what the callee may store into it in the caller arena.
+				operands := append([]ast.Expr(nil), call.Args...)
+				if isField && field != nil {
+					operands = append(operands, field.Object)
+				}
+				for i, operand := range operands {
+					owner := aggregateRootName(operand)
+					if owner == "" {
+						continue
+					}
+					others := make([]ast.Expr, 0, len(operands)-1)
+					for j, other := range operands {
+						if j != i {
+							others = append(others, other)
+						}
+					}
+					addDependencies(owner, others)
+				}
 			}
 		}
 		if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
@@ -1314,8 +1346,11 @@ func adoptedRegionEscapingStacks(region *ast.RegionStmt, asn semantic.RegionStac
 	for changed := true; changed; {
 		changed = false
 		for owner, sources := range dependencies {
+			// An owner outside the region's stacks (a parameter such as `out` in
+			// `out.push(e)`, or an enclosing local) outlives the region, so what is copied
+			// into it escapes.
 			ownerStack, ownerKnown := asn.StackOf[owner]
-			if !ownerKnown || !escaped[ownerStack] {
+			if ownerKnown && !escaped[ownerStack] {
 				continue
 			}
 			for source := range sources {
@@ -1473,7 +1508,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			// own backing allocation and reserve_commit correctly rejects the non-tail
 			// realloc. Escaping locals retain the adopted caller owner.
 			savedTreeOwner := s.treeAllocOwner
-			if scratch := s.adoptedScratchForLocal(n.Name); scratch != nil {
+			// The owner also routes growth arenas of OTHER locals the initializer mutates
+			// (`e: E = name(sub)` grows sub.store through an lmut param), so an initializer
+			// that names an escaping local keeps the caller owner.
+			if scratch := s.adoptedScratchForLocal(n.Name); scratch != nil && !exprNamesAnyOf(n.Value, s.adoptedEscapeNames) {
 				s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: scratch}
 				defer func() { s.treeAllocOwner = savedTreeOwner }()
 			}
@@ -2048,4 +2086,71 @@ func backendAssertedCondition(result *semantic.Result, expr ast.Expr) (ast.Expr,
 		return nil, false
 	}
 	return call.Args[0], true
+}
+
+// paramNames lists the parameters that can own or reference caller-visible storage: the escape
+// roots of adoptedEscapeNamesForBody.
+func paramNames(params []ast.ParamDecl) []string {
+	names := make([]string, 0, len(params))
+	for _, param := range params {
+		if named, ok := param.Type.(*ast.NamedType); ok && named != nil && adoptedEscapeScalarTypes[named.Name] {
+			continue
+		}
+		names = append(names, param.Name)
+	}
+	return names
+}
+
+// exprNamesAnyOf reports whether expr mentions an identifier in names.
+func exprNamesAnyOf(expr ast.Expr, names map[string]bool) bool {
+	if expr == nil || len(names) == 0 {
+		return false
+	}
+	found := false
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if ident, ok := v.Interface().(*ast.Ident); ok && ident != nil {
+				found = names[ident.Name]
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(expr))
+	return found
+}
+
+// adoptedEscapeReadOnlyMethods are builtin methods that never store an operand into another.
+var adoptedEscapeReadOnlyMethods = map[string]bool{
+	"count": true, "len": true, "is_empty": true, "contains": true, "get": true, "at": true,
+	"first": true, "last": true, "starts_with": true, "ends_with": true, "index_of": true,
+	"find": true, "has": true, "has_key": true, "contains_key": true, "eq": true, "equals": true,
+	"compare": true, "cmp": true, "hash": true, "reserve": true, "clear": true, "pop": true,
+}
+
+// adoptedEscapeScalarTypes are parameter types that cannot own or reference storage, so a
+// parameter of one is never an escape root.
+var adoptedEscapeScalarTypes = map[string]bool{
+	"i8": true, "i16": true, "i32": true, "i64": true, "u8": true, "u16": true, "u32": true,
+	"u64": true, "usize": true, "isize": true, "f32": true, "f64": true, "bool": true, "char": true,
 }

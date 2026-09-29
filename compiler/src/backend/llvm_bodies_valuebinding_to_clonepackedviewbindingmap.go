@@ -605,7 +605,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnType:             fnType,
 		builder:            builder,
 		typeMap:            typeBindings,
-		adoptedEscapeNames: adoptedEscapeNamesForBody(decl.Body),
+		adoptedEscapeNames: adoptedEscapeNamesForBody(decl.Body, paramNames(decl.Params)...),
 		mainReturnsStatus:  decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
 	}
 	// MONOMORPHIZATION: re-analyze this body with the type parameters bound to their

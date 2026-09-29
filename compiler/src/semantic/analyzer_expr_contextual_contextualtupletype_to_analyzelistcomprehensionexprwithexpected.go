@@ -782,7 +782,23 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 				{Position: expr.Pos(), Name: expr.SecondName},
 			}}
 		}
+		if a.returnBorrowSynthesizedBinders == nil {
+			a.returnBorrowSynthesizedBinders = map[ast.Node]bool{}
+		}
+		a.returnBorrowSynthesizedBinders[pattern] = true
 		a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
+		// A binder is a by-value element copy of the source: it carries the element provenance
+		// an index read would, so `[x for x in xs]` keeps what xs's elements point into.
+		if a.iterBindingSources == nil {
+			a.iterBindingSources = map[*Symbol]ast.Expr{}
+		}
+		state, hasState := a.iterBinderRegionRefState(expr.Source, sourceType, info.ItemType, regionRefState{}, false)
+		for _, sym := range loopScope.Symbols {
+			a.iterBindingSources[sym] = expr.Source
+			if hasState {
+				a.recordResolvedRegionRefBinding(sym, state)
+			}
+		}
 	}
 	// Everything below runs once per element (the source above runs once): a value declared outside
 	// that is live here and consumed by the end is consumed on every iteration.
@@ -892,6 +908,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	savedScope := a.currentScope
 	a.currentScope = loopScope
 	valueType := a.analyzeValueExpr(expr.Value, expectedElem)
+	a.recordComprehensionElementState(expr)
 	a.currentScope = savedScope
 	if expr.Parallel {
 		return a.lowerParallelListComprehension(expr, valueType, expectedDArray, useExpectedDArray)

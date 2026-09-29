@@ -1167,8 +1167,13 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
             _ = memcpy(arena_heap_void_from_mutable(newptr).cast[mutable void&], arena_u8_from_void(oldptr).cast[void&], oldsz)
 
-        arena_reclaim_allocation(a, oldptr, old_slots, oldsz)
-
+        # The old block is NOT reclaimed. A darray header copy shares its buffer (docs/84):
+        # after `b = a` and an allocation that makes `a` stop being the arena tail, `a`'s next
+        # growth moves it while `b` still reads the old block, and handing that block to the
+        # free list let the next allocation overwrite `b`'s elements (a silent wrong answer in
+        # safe code). The block dies with the arena instead, as a Go slice's old backing array
+        # does. arena_reclaim_allocation stays for a caller that can prove no copy of the
+        # header exists.
         arena_profile_allocation_event(
             ELISA_PROFILE_ALLOCATION_REALLOC_MOVE,
             newptr.cast[uintptr],

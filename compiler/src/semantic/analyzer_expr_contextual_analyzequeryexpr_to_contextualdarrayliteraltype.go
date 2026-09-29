@@ -39,6 +39,11 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 	pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name})
 	if expr.Pattern != nil {
 		pattern = expr.Pattern
+	} else {
+		if a.returnBorrowSynthesizedBinders == nil {
+			a.returnBorrowSynthesizedBinders = map[ast.Node]bool{}
+		}
+		a.returnBorrowSynthesizedBinders[pattern] = true
 	}
 	a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
 	if expr.PatternFilter != nil {

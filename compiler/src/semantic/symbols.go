@@ -442,6 +442,11 @@ type Symbol struct {
 	// Deprecated, when non-empty, is the `@deprecated("...")` message; calling this
 	// function emits a deprecation diagnostic at the use site.
 	Deprecated string
+	// HomeRegion, on a by-value struct local that owns region-less container fields, names
+	// the shortest region its buffers can live in: the ambient region at the declaration,
+	// narrowed on every later write through the local. A struct TYPE never carries its
+	// fields' regions, so without this a view into `local.buf` had no provenance at all.
+	HomeRegion string
 }
 
 func symbolAliasRoot(sym *Symbol) *Symbol {
@@ -452,7 +457,10 @@ func symbolAliasRoot(sym *Symbol) *Symbol {
 }
 
 type Scope struct {
-	Parent      *Scope
+	Parent *Scope
+	// defineHook, inherited by child scopes, observes every successful Define (the return-borrow
+	// store environment's binder census, analyzer_return_borrow_store_env.go).
+	defineHook  func(*Symbol)
 	Symbols     map[string]*Symbol
 	Refinements map[string]Type
 	// narrowedOptionals records, for a place whose refinement narrowed `T?` down to `T`
@@ -528,7 +536,11 @@ type Scope struct {
 }
 
 func NewScope(parent *Scope) *Scope {
-	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, narrowedOptionals: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
+	var hook func(*Symbol)
+	if parent != nil {
+		hook = parent.defineHook
+	}
+	return &Scope{Parent: parent, defineHook: hook, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, narrowedOptionals: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -536,6 +548,9 @@ func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
 		return existing, false
 	}
 	s.Symbols[sym.Name] = sym
+	if s.defineHook != nil {
+		s.defineHook(sym)
+	}
 	return sym, true
 }
 

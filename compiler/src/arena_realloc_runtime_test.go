@@ -63,12 +63,12 @@ def chained_realloc_runtime_test() -> void:
 		}
 	}
 }
-// A non-tail darray backing allocation must be returned to its owning region
-// after the replacement is copied. This is the case that occurs when recursive
-// AST construction grows one side table after another allocation has already
-// been made. The next allocation should reuse the reclaimed span instead of
-// permanently retaining another block from the bump cursor.
-func TestRunCLIChainedDarrayReusesNonTailBacking(t *testing.T) {
+// A non-tail darray backing allocation must NOT be returned to its owning region
+// after the replacement is copied: a darray header copy shares the buffer (docs/84),
+// so `snapshot` below still reads the old block after `xs` moves. Reclaiming it let
+// `reused` be carved out of it and overwrite `snapshot[0]` — a silent wrong answer
+// in safe code. The old block dies with the arena instead.
+func TestRunCLIChainedDarrayKeepsNonTailBacking(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
@@ -85,6 +85,7 @@ def chained_non_tail_realloc_runtime_test() -> void:
         in arena:
             xs: mutable darray[i64] @arena = []
             xs.push(7)
+            snapshot: darray[i64] @arena = xs
             filler: mutable darray[i64] @arena = []
             filler.push(11)
             before: usize = arena_used_slots(&arena)
@@ -100,10 +101,10 @@ def chained_non_tail_realloc_runtime_test() -> void:
                 panic("non-tail darray did not grow to the expected capacity")
             if after_grow != 32:
                 panic("non-tail darray replacement allocation accounting failed")
-            if after_reuse != 32:
-                panic("non-tail darray backing was not reclaimed and reused")
-            if xs[0] != 7 or xs[8] != 8 or filler[0] != 11 or reused[0] != 13:
-                panic("non-tail darray reuse corrupted live data")
+            if after_reuse != 40:
+                panic("non-tail darray backing was reclaimed and reused under a live header copy")
+            if xs[0] != 7 or xs[8] != 8 or filler[0] != 11 or reused[0] != 13 or snapshot[0] != 7:
+                panic("non-tail darray growth corrupted live data")
         arena_free(&arena)
 `
 	full := "include \"" + std + "\"\n" + src

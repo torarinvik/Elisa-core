@@ -141,6 +141,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// region gets that region recorded, so a call site can thread it into a callee's
 		// struct-ref region param (see region_struct_local.go).
 		a.recordStructLocalAllocRegion(sym, bindingType, n.Value, valueType)
+		a.recordStructLocalHomeRegion(sym)
+		a.recordLocalContainerElementInit(sym, n.Value)
 		a.recordRefinementChecks(n)
 		a.seedWhereRefinementFact(n)
 		if (n.Value == nil || isZeroedInitializer(n.Value)) && a.typeHasInvalidZeroValue(bindingType) {
@@ -587,6 +589,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// Reassigning a struct local invalidates any region recorded at its declaration; re-record
 		// from the new RHS or clear, so a later call never threads a stale (possibly dead) region.
 		a.invalidateStructLocalAllocRegionOnAssign(n.Target)
+		a.narrowStructLocalHomeRegionOnWrite(n.Target)
 		a.checkStoredBorrowEscapesLocal(n.Target, targetType, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
@@ -755,6 +758,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.validateCurrentFuncPoststates()
 			return
 		}
+		a.noteReturnElementState(n)
 		valueType := a.analyzeValueExpr(n.Value, a.currentReturn)
 		if a.currentReturn == nil {
 			a.errorf(n.Pos(), "unexpected return value")
@@ -798,11 +802,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				// 2-3) makes the return sound; an explicitly-named local region (`in
 				// scratch:`) is never region-polymorphic and always errors.
 				regionPoly := a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic
+				prepassPoly := regionPoly
 				if isSynthesizedAutoRegion(region.Name) && a.currentFuncType != nil {
 					// Belt-and-suspenders: the pre-pass already set this from a syntactic scan, but
 					// keep the flow-based confirmation so the classification never under-reports.
 					a.currentFuncType.RegionPolymorphic = true
-					regionPoly = true
+					// Only the pre-pass makes the backend thread the region. A return that only this
+					// walk classifies stays unthreaded, so a REFERENCE it returns points into a frame
+					// that is gone: `return firstp(xs)` over a local darray. A scalar carries no
+					// reference out, so the suppression stands for it.
+					if !prepassPoly && !returnTypeIsScalarValue(a.currentReturn) && a.typeCarriesBorrowedStorage(valueType, map[Type]bool{}) {
+						regionPoly = false
+					} else {
+						regionPoly = true
+					}
 				}
 				// docs/75: in a region-polymorphic function the synthesized `__auto_*` region is
 				// threaded from the caller (the hidden `__region_auto` Arena& param), so the result

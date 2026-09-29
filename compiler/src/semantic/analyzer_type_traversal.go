@@ -284,6 +284,63 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	}
 }
 
+// typeMayOwnArenaStorage reports whether a value of type t may own storage allocated in an
+// arena (a container buffer, a packed store), as opposed to only viewing storage owned
+// elsewhere. A by-value copy of such a value out of a container still points into the arena
+// the container allocated it in. Anything not known to be a pure view or scalar counts.
+func (a *Analyzer) typeMayOwnArenaStorage(t Type, seen map[string]bool) bool {
+	switch t.(type) {
+	case nil:
+		return false
+	case *RefType, *ViewType, *SViewType, *CStrType, *PackedVariantViewType, *FuncType:
+		return false
+	case *DArrayType, *DictType, *SetType, *PackedEnumStoreType, *OpaqueType, *TypeParamType:
+		return true
+	}
+	key := t.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *BuiltinType, *BitIntType, *IDType, *ConstEnumType, *NullType, *NeverType:
+		return false
+	case *ArrayType:
+		return a.typeMayOwnArenaStorage(tt.Elem, seen)
+	case *OptionalType:
+		return a.typeMayOwnArenaStorage(tt.Value, seen)
+	case *AggregateStateType:
+		return a.typeMayOwnArenaStorage(tt.Base, seen)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if a.typeMayOwnArenaStorage(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *StructType:
+		for _, field := range tt.Fields {
+			if a.typeMayOwnArenaStorage(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *EnumType:
+		if tt.Packed {
+			return true
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if a.typeMayOwnArenaStorage(payload, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return true
+}
+
 func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValueKey, seen map[string]bool) (borrowedOwnerRefState, bool) {
 	if t == nil || !a.containsBorrowedOwnerRefValues(t, map[string]bool{}) {
 		return borrowedOwnerRefState{}, false

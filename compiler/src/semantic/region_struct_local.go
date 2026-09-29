@@ -256,3 +256,40 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 	}
 	return argType
 }
+
+// structOwnsRegionlessBuffers reports a by-value struct whose container fields carry no
+// region of their own (their storage lives wherever the struct value was built).
+func structOwnsRegionlessBuffers(t Type) bool {
+	st, ok := StripAggregateStateType(t).(*StructType)
+	return ok && structHasRegionlessContainerField(st)
+}
+
+// recordStructLocalHomeRegion pins a fresh struct local's buffers to the ambient region at
+// its declaration -- the region a container local declared at the same point is stamped with.
+func (a *Analyzer) recordStructLocalHomeRegion(sym *Symbol) {
+	if a == nil || sym == nil || sym.Kind != SymbolLocal || !structOwnsRegionlessBuffers(sym.Type) {
+		return
+	}
+	sym.HomeRegion = a.activeContainerRegionName()
+}
+
+// narrowStructLocalHomeRegionOnWrite: a write through the local (`s = v`, `s.buf = v`) can
+// install storage from any region live at the write, and every live region outlives the
+// ambient one there. Keep whichever of the old and new ambient regions dies first.
+func (a *Analyzer) narrowStructLocalHomeRegionOnWrite(target ast.Expr) {
+	if a == nil || a.currentScope == nil {
+		return
+	}
+	ident := rootIdentExpr(target)
+	if ident == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil || sym.HomeRegion == "" {
+		return
+	}
+	current := a.activeContainerRegionName()
+	if current != "" && a.regionStoreEscapes(sym.HomeRegion, current) {
+		sym.HomeRegion = current
+	}
+}

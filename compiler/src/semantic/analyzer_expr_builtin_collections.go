@@ -377,6 +377,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		bulkPush = true
 	}
 	argType := a.analyzeValueExpr(expr.Args[0], pushArgType)
+	a.checkRetainedBorrowEscapesLocal(fieldExpr.Object, expr.Args[0], pushArgType, "darray push")
 	if !bulkPush {
 		if !AssignableTo(darrayType.Elem, argType) {
 			if builtinDArrayExtendSourceCompatible(darrayType.Elem, argType) {
@@ -397,6 +398,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// container into a longer-lived target leaves dangling element references
 		// once the source region is freed.
 		a.checkNestedRegionBulkStoreEscape(expr.Args[0], fieldExpr.Object, darrayType, darrayType.Elem, argType)
+		a.recordLocalContainerElementPush(fieldExpr.Object, expr.Args[0], true)
 		// A bulk source that is itself a FRESH producer (`xs.push([v])`) hides its interior region
 		// behind its own (the container's) region; descend into it.
 		a.checkFreshProducerElementEscape(fieldExpr.Object, darrayType, expr.Args[0])
@@ -405,6 +407,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// region outlives it would leave the longer-lived buffer holding a dangling
 		// reference once the inner region is freed.
 		a.checkNestedRegionElementStoreEscape(expr.Args[0], darrayType, darrayType.Elem, argType)
+		a.recordLocalContainerElementPush(fieldExpr.Object, expr.Args[0], false)
 		// A pushed FRESH producer (`ol.push([v])`, a ternary, a struct literal) hides its interior
 		// region behind its own (the container's) region, so the element check above misses it; check
 		// the pushed value's interior region against the container's lifetime.
@@ -600,6 +603,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	a.checkNestedRegionBulkStoreEscape(expr.Args[0], fieldExpr.Object, darrayType, darrayType.Elem, sourceType)
 	// A fresh-producer source (`ol.extend([v])`) hides its interior region behind its own; descend in.
 	a.checkFreshProducerElementEscape(fieldExpr.Object, darrayType, expr.Args[0])
+	a.recordLocalContainerElementPush(fieldExpr.Object, expr.Args[0], true)
 	resultType := receiverRefType
 	if resultType == nil {
 		resultType = &RefType{

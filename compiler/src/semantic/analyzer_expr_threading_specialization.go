@@ -294,7 +294,7 @@ func (a *Analyzer) emitLegacyRawAtomicDiagnostic(pos lexer.Pos, format string, a
 	a.errorf(pos, "raw concurrency surface removed: "+format, args...)
 }
 
-func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {
+func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type, joinPool *poolScopeState) {
 	// An owned region moved into the worker is an exclusive ownership transfer,
 	// not sharing — the caller relinquishes it, so it need not be structurally
 	// shareable. The transfer/consume is recorded by the caller (see the
@@ -310,9 +310,33 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 	if !ok {
 		return
 	}
-	if region, _, ok := firstLiveRegionDependency(state); ok && region != nil {
-		a.errorf(arg.Pos(), threadLocalRegionDependencyMessage(callName, region.Name))
+	var escaping *Symbol
+	var joined []poolJoinedRegionDependency
+	for region, dep := range state.Deps {
+		if !dep.Valid || region == nil {
+			continue
+		}
+		if isSynthesizedAutoRegion(region.Name) && (joinPool != nil || callName == "parallel for" || returnTypeIsScalarValue(argType)) {
+			// The function's own auto region outlives a scope that joins its workers, and a scalar
+			// value carries no borrow the worker could dereference through the type system.
+			continue
+		}
+		if joinPool != nil {
+			if generation, outer := joinPool.OuterRegions[region]; outer && generation == dep.Generation {
+				joined = append(joined, poolJoinedRegionDependency{Region: region, Generation: dep.Generation, Pos: arg.Pos(), CallName: callName})
+				continue
+			}
+		}
+		if escaping == nil || region.Name < escaping.Name {
+			escaping = region
+		}
+	}
+	if escaping != nil {
+		a.errorf(arg.Pos(), threadLocalRegionDependencyMessage(callName, escaping.Name))
 		return
+	}
+	if joinPool != nil && joinPool.Joined != nil {
+		*joinPool.Joined = append(*joinPool.Joined, joined...)
 	}
 	if store, dep, ok := firstNonShareablePackedStoreDependency(state); ok {
 		label := "<packed store>"
@@ -738,4 +762,38 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 	default:
 		return expected, false
 	}
+}
+
+// joinedPoolScopeForArg resolves a pool_submit1 pool argument (`(&pool).cast[...]`
+// or a bare pool binding) to the enclosing `pool`/`nursery` statement that owns
+// it. Tasks submitted to that pool are joined when the statement exits.
+func (a *Analyzer) joinedPoolScopeForArg(poolArg ast.Expr) *poolScopeState {
+	for poolArg != nil {
+		switch n := poolArg.(type) {
+		case *ast.ParenExpr:
+			poolArg = n.Inner
+		case *ast.CastExpr:
+			poolArg = n.Operand
+		case *ast.AddrOfExpr:
+			poolArg = n.Operand
+		case *ast.Ident:
+			if a.currentScope == nil {
+				return nil
+			}
+			sym, ok := a.currentScope.Lookup(n.Name)
+			if !ok || sym == nil {
+				return nil
+			}
+			for i := len(a.currentPoolScopes) - 1; i >= 0; i-- {
+				pool := &a.currentPoolScopes[i]
+				if pool.Node != nil && sym.Node == ast.Node(pool.Node) {
+					return pool
+				}
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+	return nil
 }

@@ -383,12 +383,58 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	// regiony extends exprResultIsRegionAllocated with local knowledge: an ident naming a
 	// region-fed local, a struct literal wrapping one, or a region-less container literal
 	// (allocated in the inferred region) all carry region-allocated data.
+	// rootedInRegionLocal reports whether an argument hands the callee a region-fed
+	// local's storage: the local itself, a field/element of it, or its address. A call
+	// that receives such an argument can return a value sharing that storage — a darray
+	// field copied out (`return E.X(p.items)`) copies the HEADER, not the buffer.
+	rootedInRegionLocal := func(arg ast.Expr) bool {
+		for {
+			switch e := unwrapParenForRegionPoly(arg).(type) {
+			case *ast.AddrOfExpr:
+				arg = e.Operand
+				continue
+			case *ast.MoveExpr:
+				arg = e.Operand
+				continue
+			}
+			break
+		}
+		root := rootIdentExpr(unwrapParenForRegionPoly(arg))
+		return root != nil && regionLocals[root.Name]
+	}
+	// callSharesRegionLocal: an ordinary call whose receiver or argument is rooted in a
+	// region-fed local may return that local's storage. The callee's own classification
+	// cannot see this — the callee allocates nothing (`def f(p: P&) -> E: return
+	// E.X(p.items)`) — so without this rule the caller freed its auto region at `ret`
+	// while the returned payload still pointed into it: element reads came back zero, a
+	// silent wrong answer in safe code. Gated on a region-carrying return type; a false
+	// match only threads the caller's region, which is sound.
+	callSharesRegionLocal := func(callee ast.Expr, args []ast.Expr) bool {
+		if !retCarriesRegionStorage {
+			return false
+		}
+		if fe, ok := unwrapParenForRegionPoly(callee).(*ast.FieldExpr); ok && fe != nil && rootedInRegionLocal(fe.Object) {
+			return true
+		}
+		for _, arg := range args {
+			if arg != nil && rootedInRegionLocal(arg) {
+				return true
+			}
+		}
+		return false
+	}
 	var regiony func(value ast.Expr) bool
 	regiony = func(value ast.Expr) bool {
 		value = unwrapParenForRegionPoly(value)
 		switch e := value.(type) {
 		case *ast.Ident:
 			return regionLocals[e.Name]
+		case *ast.AddrOfExpr:
+			// `r: P& = &p` makes `r` a way to reach `p`'s storage, so a later `f(r)`
+			// shares it exactly as `f(&p)` does.
+			if retCarriesRegionStorage && rootedInRegionLocal(e.Operand) {
+				return true
+			}
 		case *ast.FieldExpr:
 			// A BARE `return b.items`, where `b` is a region-fed local: the field's BUFFER lives
 			// in `b`'s region, so this function must thread the caller's region exactly as the
@@ -410,6 +456,10 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 				}
 			}
 		case *ast.StructLitExpr:
+			// Pre-analysis a call `f(&p)` parses as this node too.
+			if callSharesRegionLocal(nil, e.Args) {
+				return true
+			}
 			for _, arg := range e.Args {
 				if arg == nil {
 					continue
@@ -446,6 +496,9 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 			// items: items}`) was already classified and worked, which is what makes this a bug
 			// rather than a policy. Packed enums are excluded: a packed constructor is a handle
 			// into a store, already covered by regionBackedEnumConstructor above.
+			if callSharesRegionLocal(e.Func, e.Args) {
+				return true
+			}
 			if retCarriesRegionStorage && a.callIsInlineEnumConstructor(e) {
 				for _, arg := range e.Args {
 					if arg == nil {

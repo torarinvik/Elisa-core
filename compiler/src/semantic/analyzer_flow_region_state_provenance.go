@@ -138,6 +138,18 @@ func (a *Analyzer) instantiateReturnProvenanceArgState(index int, args []ast.Exp
 		}
 	}
 	argState, ok := a.regionRefStateForExpr(args[index])
+	if !ok || !hasRegionProvenance(argState) {
+		// A region-less container binding (`xs: darray[u8]` in an inferred auto region) carries its
+		// region on its type, not in a provenance state. A callee result that borrows the argument's
+		// buffer still dies with that region.
+		if state, typeOK := a.containerRegionDependency(a.exprTypes[stripAddrOfParens(args[index])]); typeOK {
+			argState, ok = state, true
+		} else if state, paramOK := a.paramRootRegionDependency(stripAddrOfParens(args[index])); paramOK && (isBufferOwningType(a.exprTypes[stripAddrOfParens(args[index])]) || structOwnsRegionlessBuffers(stripRefForBounds(a.exprTypes[stripAddrOfParens(args[index])]))) {
+			// The same region-less container reached as one of our own parameters: the
+			// result borrows the caller's argument.
+			argState, ok = state, true
+		}
+	}
 	if ctx != nil {
 		ctx.argStates[index] = instantiateReturnProvenanceArgResult{state: argState, ok: ok, computed: true}
 	}
@@ -312,4 +324,17 @@ func hasPackedStoreDependencies(state regionRefState) bool {
 		}
 	}
 	return false
+}
+
+func stripAddrOfParens(expr ast.Expr) ast.Expr {
+	for {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.AddrOfExpr:
+			expr = n.Operand
+		default:
+			return expr
+		}
+	}
 }

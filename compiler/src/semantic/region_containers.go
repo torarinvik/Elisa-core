@@ -1055,6 +1055,19 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		if state, ok := a.regionRefStateForExpr(argExpr); ok {
 			if parameterRegion, known := a.currentParamRegionFromRefState(state); known {
 				valueRegion = parameterRegion
+			} else if region := liveLocalRegionDependencyName(state); region != "" {
+				// A call result that borrows a local container's buffer (`out.push(bytes_view(xs))`)
+				// has a region-free nominal type; its provenance still names the container's region.
+				// A synthesized auto region that ADOPTS the caller's arena (regionPolyAutoAdopts)
+				// frees nothing, so a borrow of its storage is caller-owned: the same sanction the
+				// fresh-enum-payload path below grants.
+				if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+					return
+				}
+				if a.regionStoreEscapes(targetRegion, region) {
+					a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+				}
+				return
 			}
 		}
 	}
@@ -1074,15 +1087,17 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 			valueRegion = a.structInteriorTaintRegion(argExpr)
 		}
 		if valueRegion == "" {
+			// An owned element/field read (`xs[0].items`, `b.items`, `xs.pop()`, a loop binder)
+			// copies only a header; its backing lives in the root's region.
+			valueRegion = a.ownedExtractionRegion(argExpr)
+		}
+		if valueRegion == "" {
 			return
 		}
 		// Sanctioned adopted cases (mirrors the backend's regionPolyAutoAdopts): the function's
 		// synthesized auto region ADOPTS a caller-provided arena, so the wrapped payload actually
 		// lands in caller-owned storage and nothing dangles.
-		if a.currentFuncDecl != nil && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
-			return
-		}
-		if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
+		if a.autoRegionAdoptsCallerArena(targetRegion) {
 			return
 		}
 	}
@@ -1256,7 +1271,7 @@ func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 			return r
 		}
 	}
-	if r := a.structInteriorTaintRegion(expr); r != "" {
+	if r := a.innerRegion(a.structInteriorTaintRegion(expr), a.ownedExtractionRegion(expr)); r != "" {
 		return r
 	}
 	// A region-polymorphic call result is region-less by type but lives in the AMBIENT
@@ -1589,7 +1604,7 @@ func (a *Analyzer) valueInteriorRegion(expr ast.Expr) string {
 			if i < len(n.Spreads) && n.Spreads[i] {
 				continue // spreads are bulk-checked at the store site (with the scalar-elem exemption).
 			}
-			r = a.innerRegion(r, a.valueInteriorRegion(elem))
+			r = a.innerRegion(r, a.innerRegion(a.nestedFreshStorageRegion(elem), a.valueInteriorRegion(elem)))
 		}
 		return r
 	case *ast.ListComprehensionExpr:
@@ -1603,7 +1618,7 @@ func (a *Analyzer) valueInteriorRegion(expr ast.Expr) string {
 	case *ast.StructLitExpr:
 		r := ""
 		for _, arg := range n.Args {
-			r = a.innerRegion(r, a.valueInteriorRegion(arg))
+			r = a.innerRegion(r, a.innerRegion(a.nestedFreshStorageRegion(arg), a.valueInteriorRegion(arg)))
 		}
 		for _, spread := range n.Spreads {
 			r = a.innerRegion(r, a.valueInteriorRegion(spread))
@@ -1669,6 +1684,7 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 	// regionPolyAutoAdopts routes it there — so nothing dangles. Mirrors the enum-ctor element
 	// check; keeps `out.push(Holder{items: make_vals(10)})` consistent with the enum-ctor form.
 	if a.currentFuncDecl != nil && targetRegion != "" && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
+		a.noteAmbientFillFresh()
 		return
 	}
 	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic && targetRegion != "" {
@@ -1871,4 +1887,323 @@ func (a *Analyzer) activeContainerRegionName() string {
 		return ident.Name
 	}
 	return ""
+}
+
+// liveLocalRegionDependencyName returns the lexically smallest live region a
+// provenance state depends on (deterministic across map order), or "".
+func liveLocalRegionDependencyName(state regionRefState) string {
+	name := ""
+	for region, dep := range state.Deps {
+		if region == nil || !dep.Valid {
+			continue
+		}
+		if name == "" || region.Name < name {
+			name = region.Name
+		}
+	}
+	return name
+}
+
+// autoRegionAdoptsCallerArena mirrors the backend's regionPolyAutoAdopts: in a region-polymorphic
+// function, or a void grower whose ambient region is bound to targetRegion's container, every
+// synthesized `__auto_*` region allocates into the caller-provided arena instead of its own.
+func (a *Analyzer) autoRegionAdoptsCallerArena(targetRegion string) bool {
+	if a == nil {
+		return false
+	}
+	if a.currentFuncDecl != nil && targetRegion != "" && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
+		a.noteAmbientFillFresh()
+		return true
+	}
+	return a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic
+}
+
+// checkCallArgumentRegionStoreEscape: a call whose `mutable C&` parameter receives a container
+// that outlives a local region may store another argument into it. `put(out, E{name:
+// xs.as_sview()})` with put pushing its second argument into out leaves the caller's out holding
+// a view of xs's bytes, which live in a function-local region freed on return. The direct form
+// `out.push(...)` is checked by checkNestedRegionElementStoreEscape; the callee's own checks
+// accept the store (both are its parameters), so the caller checks every argument the call may
+// store, with the same adoption sanction.
+func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
+	if a == nil || call == nil || a.suppressDiagnostics || a.staticContextDepth != 0 || a.currentFuncDecl == nil {
+		return
+	}
+	fnType := a.returnBorrowCalleeSignature(call)
+	if fnType == nil {
+		return
+	}
+	args := returnBorrowCallArgs(call)
+	for index, paramType := range fnType.Params {
+		if index >= len(args) || !a.returnBorrowWritableParam(paramType) {
+			continue
+		}
+		containerType := stripRefForBounds(a.exprTypes[args[index]])
+		targetRegion := containerRegion(containerType)
+		if targetRegion == "" {
+			continue
+		}
+		if !a.containerMayHoldRegionRefs(containerType) {
+			continue
+		}
+		stored := containerElementPointees(containerType)
+		for other, arg := range args {
+			if other == index {
+				continue
+			}
+			// The callee can only store region data reachable from this argument if some value it
+			// reaches has a type the container's elements may point at: a `darray[Pattern]` of
+			// handles cannot become the bytes an `sview` element points into.
+			if !stored.intersects(argumentRegionPointees(a.exprTypes[arg])) {
+				continue
+			}
+			state, ok := a.regionRefStateForExpr(arg)
+			if !ok {
+				continue
+			}
+			for _, region := range liveLocalRegionDependencyNames(state) {
+				if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+					continue
+				}
+				if a.regionStoreEscapes(targetRegion, region) {
+					a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived region %q through argument %d; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before the call", regionDisplayName(region), regionDisplayName(targetRegion), index+1, regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+					break
+				}
+			}
+		}
+	}
+}
+
+// liveLocalRegionDependencyNames lists every live region a region-ref state depends on, including
+// through aggregate fields, in a deterministic order.
+func liveLocalRegionDependencyNames(state regionRefState) []string {
+	seen := map[string]bool{}
+	var collect func(regionRefState)
+	collect = func(s regionRefState) {
+		for region, dep := range s.Deps {
+			if region != nil && dep.Valid {
+				seen[region.Name] = true
+			}
+		}
+		for _, field := range s.Fields {
+			collect(field)
+		}
+	}
+	collect(state)
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// containerMayHoldRegionRefs reports whether a container's elements (dict keys or values) can
+// hold a region reference.
+func (a *Analyzer) containerMayHoldRegionRefs(t Type) bool {
+	can := func(elem Type) bool { return elem != nil && a.typeCanContainRegionRefs(elem, map[string]bool{}) }
+	switch tt := t.(type) {
+	case *DArrayType:
+		return can(tt.Elem)
+	case *DictType:
+		return can(tt.Key) || can(tt.Value)
+	case *SetType:
+		return can(tt.Elem)
+	}
+	return false
+}
+
+// regionPointees is the set of types (keyed by spelling) a value may point at through region
+// storage; wildcard means any type (a type parameter, closure or opaque storage).
+type regionPointees struct {
+	keys     map[string]bool
+	wildcard bool
+}
+
+func (p regionPointees) intersects(other regionPointees) bool {
+	if len(p.keys) == 0 && !p.wildcard || len(other.keys) == 0 && !other.wildcard {
+		return false
+	}
+	if p.wildcard || other.wildcard {
+		return true
+	}
+	for key := range p.keys {
+		if other.keys[key] {
+			return true
+		}
+	}
+	return false
+}
+
+// containerElementPointees lists what a container's stored elements may point at; the
+// elements themselves live in the container's own region, so they are not included.
+func containerElementPointees(t Type) regionPointees {
+	p := regionPointees{keys: map[string]bool{}}
+	switch tt := t.(type) {
+	case *DArrayType:
+		collectRegionPointees(tt.Elem, &p, map[Type]bool{})
+	case *DictType:
+		collectRegionPointees(tt.Key, &p, map[Type]bool{})
+		collectRegionPointees(tt.Value, &p, map[Type]bool{})
+	case *SetType:
+		collectRegionPointees(tt.Elem, &p, map[Type]bool{})
+	default:
+		p.wildcard = true
+	}
+	return p
+}
+
+// argumentRegionPointees lists what a pointer into an argument's own region may point at. A
+// container, view or reference argument's region holds its elements (and their inline parts),
+// not what those elements point at in turn: a local `darray[Pattern]` of packed handles yields
+// only `Pattern` slots. An aggregate's region state is the union of its fields', so it keeps
+// the full transitive set.
+func argumentRegionPointees(t Type) regionPointees {
+	p := regionPointees{keys: map[string]bool{}}
+	collectImmediateRegionPointees(t, &p, map[Type]bool{})
+	return p
+}
+
+func collectImmediateRegionPointees(t Type, p *regionPointees, seen map[Type]bool) {
+	if t == nil {
+		p.wildcard = true
+		return
+	}
+	switch tt := t.(type) {
+	case *CStrType, *SViewType:
+		p.keys["u8"] = true
+	case *DArrayType:
+		collectInlineRegionPointees(tt.Elem, p, map[Type]bool{})
+	case *ViewType:
+		collectInlineRegionPointees(tt.Elem, p, map[Type]bool{})
+	case *SetType:
+		collectInlineRegionPointees(tt.Elem, p, map[Type]bool{})
+	case *DictType:
+		collectInlineRegionPointees(tt.Key, p, map[Type]bool{})
+		collectInlineRegionPointees(tt.Value, p, map[Type]bool{})
+	case *RefType:
+		collectInlineRegionPointees(tt.Elem, p, map[Type]bool{})
+		collectImmediateRegionPointees(tt.Elem, p, seen)
+	case *OptionalType:
+		collectImmediateRegionPointees(tt.Value, p, seen)
+	case *ErrorUnionType:
+		collectImmediateRegionPointees(tt.Value, p, seen)
+	case *EnumType:
+		if tt.Packed {
+			// A packed handle points at a store row, never into another value's inline slots.
+			p.keys[tt.String()] = true
+			return
+		}
+		collectRegionPointees(t, p, seen)
+	default:
+		collectRegionPointees(t, p, seen)
+	}
+}
+
+// collectInlineRegionPointees adds t and every type stored inline in a value of t: the
+// targets a pointer into storage that holds t values may have.
+func collectInlineRegionPointees(t Type, p *regionPointees, seen map[Type]bool) {
+	if t == nil {
+		p.wildcard = true
+		return
+	}
+	if seen[t] {
+		return
+	}
+	seen[t] = true
+	p.keys[t.String()] = true
+	switch tt := t.(type) {
+	case *StructType:
+		if tt.Store {
+			p.wildcard = true
+			return
+		}
+		for _, field := range tt.Fields {
+			collectInlineRegionPointees(field.Type, p, seen)
+		}
+	case *TupleType:
+		for _, field := range tt.Fields {
+			collectInlineRegionPointees(field.Type, p, seen)
+		}
+	case *ArrayType:
+		collectInlineRegionPointees(tt.Elem, p, seen)
+	case *OptionalType:
+		collectInlineRegionPointees(tt.Value, p, seen)
+	case *ErrorUnionType:
+		collectInlineRegionPointees(tt.Value, p, seen)
+	case *AggregateStateType:
+		collectInlineRegionPointees(tt.Base, p, seen)
+	case *EnumType:
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				collectInlineRegionPointees(payload, p, seen)
+			}
+		}
+	case *BuiltinType, *BitIntType, *CStrType, *SViewType, *DArrayType, *ViewType, *DictType, *SetType, *RefType, *ConstEnumType, *IDType, *NullType, *NeverType, *ErrorSetType:
+	default:
+		p.wildcard = true
+	}
+}
+
+func collectRegionPointees(t Type, p *regionPointees, seen map[Type]bool) {
+	if t == nil || p.wildcard || seen[t] {
+		return
+	}
+	seen[t] = true
+	point := func(elem Type) {
+		if elem == nil {
+			p.wildcard = true
+			return
+		}
+		p.keys[elem.String()] = true
+		collectRegionPointees(elem, p, seen)
+	}
+	switch tt := t.(type) {
+	case *BuiltinType, *BitIntType, *NullType, *NeverType, *IDType, *ConstEnumType, *ErrorSetType, *ConstValueType:
+	case *CStrType, *SViewType:
+		p.keys["u8"] = true
+	case *DArrayType:
+		point(tt.Elem)
+	case *ViewType:
+		point(tt.Elem)
+	case *RefType:
+		point(tt.Elem)
+	case *ArrayType:
+		collectRegionPointees(tt.Elem, p, seen)
+	case *OptionalType:
+		collectRegionPointees(tt.Value, p, seen)
+	case *ErrorUnionType:
+		collectRegionPointees(tt.Value, p, seen)
+	case *DictType:
+		point(tt.Key)
+		point(tt.Value)
+	case *SetType:
+		point(tt.Elem)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			collectRegionPointees(field.Type, p, seen)
+		}
+	case *AggregateStateType:
+		collectRegionPointees(tt.Base, p, seen)
+	case *StructType:
+		if tt.Store {
+			p.wildcard = true
+			return
+		}
+		for _, field := range tt.Fields {
+			collectRegionPointees(field.Type, p, seen)
+		}
+	case *EnumType:
+		if tt.Packed {
+			// A packed handle points at a store row, never into another value's inline slots.
+			p.keys[tt.String()] = true
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				collectRegionPointees(payload, p, seen)
+			}
+		}
+	default:
+		p.wildcard = true
+	}
 }

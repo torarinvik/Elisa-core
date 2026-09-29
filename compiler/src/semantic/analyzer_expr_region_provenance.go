@@ -1,6 +1,8 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+)
 
 func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	if expr == nil {
@@ -14,6 +16,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	case *ast.MoveExpr:
 		return a.regionRefStateForExpr(n.Operand)
 	case *ast.AddrOfExpr:
+		if state, ok := a.regionRefStateForBufferAddress(n.Operand); ok {
+			return state, true
+		}
 		return a.regionRefStateForExpr(n.Operand)
 	case *ast.Ident:
 		if a.currentScope == nil {
@@ -134,6 +139,26 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		return mergeRegionRefStatesWithExplicitFields(unionStates, fieldStates)
+	case *ast.TupleExpr:
+		// A tuple carries its elements' regions exactly like a struct literal carries its fields':
+		// `t <- (true, xs[0:2])` out of a region block must not erase the view's region.
+		tupleType, _ := a.exprTypes[n].(*TupleType)
+		fieldStates := map[string]regionRefState{}
+		unionStates := make([]regionRefState, 0, len(n.Elems))
+		for i, elem := range n.Elems {
+			elemState, ok := a.regionRefStateForExpr(elem)
+			if !ok || !hasRegionProvenance(elemState) {
+				continue
+			}
+			if tupleType != nil && i < len(tupleType.Fields) && tupleType.Fields[i].Name != "" {
+				fieldStates[tupleType.Fields[i].Name] = elemState
+			}
+			unionStates = append(unionStates, elemState)
+		}
+		if len(unionStates) == 0 {
+			return regionRefState{}, false
+		}
+		return mergeRegionRefStatesWithExplicitFields(unionStates, fieldStates)
 	case *ast.RecordUpdateExpr:
 		actual := a.exprTypes[n]
 		fields, ok := a.resolvedStructFields(actual)
@@ -207,7 +232,18 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if !ok {
 			return regionRefState{}, false
 		}
-		return projectRegionFieldState(state, n.Field)
+		if projected, ok := projectRegionFieldState(state, n.Field); ok {
+			return projected, true
+		}
+		// The raw buffer pointer of a builtin view/container (`view.data`, `xs.items`)
+		// points into the storage the whole value's provenance describes.
+		if _, isRef := a.exprTypes[n].(*RefType); isRef && len(state.Fields) == 0 && hasRegionProvenance(state) {
+			switch StripAggregateStateType(stripRefForBounds(a.exprTypes[n.Object])).(type) {
+			case *SViewType, *ViewType, *CStrType, *DArrayType:
+				return cloneRegionRefState(state), true
+			}
+		}
+		return regionRefState{}, false
 	case *ast.IndexExpr:
 		if n.Fallback != nil {
 			return a.regionRefStateForRecoveredExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
@@ -219,16 +255,24 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
 			return regionRefState{}, false
 		}
-		state, ok := a.regionRefStateForExpr(n.Object)
-		if !ok || !hasRegionDependencies(state) {
-			if !ok || len(state.Fields) == 0 {
-				return regionRefState{}, false
+		state, ok := a.regionRefStateForIndexElement(n)
+		// An element that owns arena storage (`xs[0]` of a `darray[darray[u8]]`) copies only a
+		// header; its backing may live anywhere that outlives the container — including the
+		// container's own region, where nothing else records it. Bound it by the container's
+		// region unless the container's element tracker already names every element's storage
+		// (elementStorageState), which is exact and does not over-approximate.
+		_, tracked := a.localContainerElementState(n)
+		if !tracked && a.typeMayOwnArenaStorage(resultType, map[string]bool{}) {
+			if owner, ownerOK := a.containerRegionDependency(a.exprTypes[n.Object]); ownerOK {
+				if !ok {
+					return owner, true
+				}
+				if merged, mergedOK := mergeRegionRefStates(state, owner); mergedOK {
+					return merged, true
+				}
 			}
 		}
-		if fieldState, ok := projectRegionIndexState(state, n.Index, a.evalConstExpr); ok {
-			return fieldState, true
-		}
-		return cloneRegionRefState(state), true
+		return state, ok
 	case *ast.SliceExpr:
 		if viewType, ok := a.exprTypes[n.Object].(*ViewType); ok && viewType.SurfaceName == "packedtags" {
 			return a.regionRefStateForExpr(n.Object)
@@ -242,6 +286,15 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		return summarizeRegionIndexStates(state)
+	case *ast.BinaryExpr:
+		// Pointer arithmetic (`p + n`, `n + p`, `p - n`) stays inside the pointee's buffer.
+		if binaryExprRequiresUnsafePointerArithmetic(n.Op, a.exprTypes[n.Left], a.exprTypes[n.Right]) {
+			if _, ok := a.exprTypes[n.Left].(*RefType); ok {
+				return a.regionRefStateForExpr(n.Left)
+			}
+			return a.regionRefStateForExpr(n.Right)
+		}
+		return regionRefState{}, false
 	case *ast.TryExpr:
 		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.CatchExpr:
@@ -348,10 +401,46 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if state, ok := a.containerRegionDependency(a.exprTypes[n]); ok {
 			return state, true
 		}
+		// `buf.as_sview()` / `buf.as_cstr()` borrow the receiver's buffer. A region-less
+		// receiver (a parameter) stamps no region on the result type; carry the receiver's
+		// own provenance instead.
+		if builtin, ok := a.exprTypes[n.Func].(*FuncType); ok && builtin != nil && (builtin.Name == "darray.sview" || builtin.Name == "darray.cstr") {
+			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
+				if state, ok := a.regionRefStateForExpr(field.Object); ok && hasRegionProvenance(state) {
+					return state, true
+				}
+				if state, ok := a.containerRegionDependency(a.exprTypes[field.Object]); ok {
+					return state, true
+				}
+				return a.paramRootRegionDependency(field.Object)
+			}
+		}
 		return regionRefState{}, false
 	default:
 		return regionRefState{}, false
 	}
+}
+
+// regionRefStateForIndexElement is the provenance of the by-value element copy `xs[i]`.
+func (a *Analyzer) regionRefStateForIndexElement(n *ast.IndexExpr) (regionRefState, bool) {
+	if elemState, ok := a.localContainerElementState(n); ok {
+		// An element copy of a tracked local container carries the provenance of the values
+		// pushed into it, not the container's own region.
+		if !hasRegionProvenance(elemState) {
+			return regionRefState{}, false
+		}
+		return cloneRegionRefState(elemState), true
+	}
+	state, ok := a.regionRefStateForExpr(n.Object)
+	if !ok || !hasRegionDependencies(state) {
+		if !ok || len(state.Fields) == 0 {
+			return regionRefState{}, false
+		}
+	}
+	if fieldState, ok := projectRegionIndexState(state, n.Index, a.evalConstExpr); ok {
+		return fieldState, true
+	}
+	return cloneRegionRefState(state), true
 }
 
 func (a *Analyzer) regionRefStateForLambdaCaptures(expr *ast.LambdaExpr) (regionRefState, bool) {
@@ -606,4 +695,95 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForLocalIdent(ident *ast.Iden
 	defer delete(a.returnBorrowedOwnerLocalProgress, sym)
 	a.inferFuncReturnBorrowedOwnerRefsForExpr(decl.Value, fnType)
 	return fnType.ReturnBorrowedOwnerRefsKnown
+}
+
+// regionRefStateForBufferAddress gives `&xs[i]` (and `&xs[i].field`) the region of xs's element
+// buffer. The element itself may be a scalar that carries no region, but its ADDRESS lives in the
+// buffer, so the reference dies with the buffer's region: `firstp(xs: darray[u8]&) -> u8&` returning
+// `&xs[0]` must hand its caller a borrow tied to the argument's region, not a region-less one.
+func (a *Analyzer) regionRefStateForBufferAddress(operand ast.Expr) (regionRefState, bool) {
+	for operand != nil {
+		switch n := operand.(type) {
+		case *ast.ParenExpr:
+			operand = n.Inner
+		case *ast.FieldExpr:
+			// A field reached through a reference lives in the pointee, not in a buffer this
+			// expression names; leave that to the ordinary provenance walk.
+			if _, isRef := a.exprTypes[n.Object].(*RefType); isRef {
+				return regionRefState{}, false
+			}
+			operand = n.Object
+		case *ast.IndexExpr:
+			if n.Fallback != nil {
+				return regionRefState{}, false
+			}
+			objectType := a.exprTypes[n.Object]
+			switch StripAggregateStateType(stripRefForBounds(objectType)).(type) {
+			case *DArrayType, *ViewType, *SViewType, *CStrType, *DictType, *SetType:
+				if state, ok := a.regionRefStateForExpr(n.Object); ok && hasRegionProvenance(state) {
+					return summarizeRegionIndexStates(state)
+				}
+				if state, ok := a.containerRegionDependency(objectType); ok {
+					return state, true
+				}
+				// A parameter's buffer belongs to the caller's argument. Its element type
+				// may hold no references (darray[u8]), so the parameter has no abstract
+				// region state; the address still borrows the argument's storage.
+				return a.paramRootRegionDependency(n.Object)
+			}
+			operand = n.Object
+		default:
+			return regionRefState{}, false
+		}
+	}
+	return regionRefState{}, false
+}
+
+// paramRootRegionDependency reports a parameter dependency when expr names a
+// parameter or a by-value field path of one.
+func (a *Analyzer) paramRootRegionDependency(expr ast.Expr) (regionRefState, bool) {
+	for expr != nil {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.FieldExpr:
+			if _, isRef := a.exprTypes[n.Object].(*RefType); isRef {
+				return regionRefState{}, false
+			}
+			expr = n.Object
+		case *ast.Ident:
+			if a.currentScope == nil {
+				return regionRefState{}, false
+			}
+			sym, ok := a.currentScope.Lookup(n.Name)
+			if !ok || sym == nil {
+				return regionRefState{}, false
+			}
+			if sym.Kind == SymbolParam {
+				return regionRefStateFromParamDependency(sym.ParamIndex), true
+			}
+			// A struct local's region-less buffers live in its home region.
+			if sym.Kind == SymbolLocal && sym.HomeRegion != "" && structOwnsRegionlessBuffers(sym.Type) {
+				region, state := a.lookupRegionState(sym.HomeRegion)
+				if region == nil || state.Destroyed {
+					return regionRefState{}, false
+				}
+				return regionRefStateFromDependency(region, state.Generation), true
+			}
+			return regionRefState{}, false
+		default:
+			return regionRefState{}, false
+		}
+	}
+	return regionRefState{}, false
+}
+
+// isBufferOwningType reports container types whose elements live in a buffer that a
+// borrowed view or element address can point into.
+func isBufferOwningType(t Type) bool {
+	switch StripAggregateStateType(stripRefForBounds(t)).(type) {
+	case *DArrayType, *DictType, *SetType, *CStrType:
+		return true
+	}
+	return false
 }

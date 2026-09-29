@@ -16,6 +16,12 @@ import (
 // analyzeBlockInScope; function bodies are iterated directly here, so they need the same threading.)
 func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
 	savedSizeGuards := len(a.overlaySizeGuards)
+	savedElementReads, savedElementStates, savedBinderLoops := a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops
+	a.currentElementReads, a.currentElementBinderLoops = a.scanLocalContainerElementReads(body)
+	a.currentElementStates = map[*Symbol]regionRefState{}
+	defer func() {
+		a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops = savedElementReads, savedElementStates, savedBinderLoops
+	}()
 	for _, stmt := range body {
 		a.analyzeStmt(stmt)
 		a.applyOverlayFallthroughGuard(stmt)
@@ -124,6 +130,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentTrustedAssumeProgressDepth = 0
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	a.beginReturnBorrowSummary(fn)
 	a.currentFuncDecl = fn
 	a.currentFuncType = fnType
 	if fn != nil && (fn.IsGhost || fn.IsLaw) {
@@ -305,6 +312,14 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	}
 	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)
 	a.reportUnconsumedProtocolValues()
+	a.finishReturnBorrowSummary(fn)
+	if fn != nil && !a.suppressDiagnostics {
+		if a.ambientFillAnalyzed == nil {
+			a.ambientFillAnalyzed = map[*ast.FuncDecl]bool{}
+		}
+		a.ambientFillAnalyzed[fn] = true
+		a.finishReturnElementSummary(fn)
+	}
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.currentFuncDecl = savedFuncDecl
