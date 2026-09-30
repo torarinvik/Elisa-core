@@ -22,13 +22,13 @@ const fillMayAdoptScopePrelude = `enum E:
     B
 
 def grow(out: mutable darray[i64]&) -> void:
-    out.push(1)
+    out.push(1 + 1)
 
 `
 
 func fillMayAdoptForTest(t *testing.T, src string) bool {
 	t.Helper()
-	l := lexer.New("fill_may_adopt_scope.elisa", []byte(fillMayAdoptScopePrelude+src))
+	l := lexer.New("fill_may_adopt_scope.elisa", []byte(fillMayAdoptPreludeFor()+src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lex errors: %v", errs)
@@ -207,7 +207,7 @@ def walk(statements: darray[St], consumed: mutable darray[sview]&) -> void:
                 xs.push(s.as_sview())
 `
 	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "loop_declared_container_bad.elisa", rejected)
-	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "is stored into longer-lived region") {
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, "is stored into longer-lived region") && !strings.Contains(all, "on a later iteration") {
 		t.Fatalf("a view carried around the inner loop must be rejected, got: %s", all)
 	}
 }
@@ -317,4 +317,34 @@ def walk(names: darray[sview]&, dst: mutable darray[sview]&) -> void:
 			t.Fatalf("%s: must be accepted, got: %s", name, strings.Join(errs, "\n"))
 		}
 	}
+}
+
+// A void grower that only moves values it was handed (no constructors, no concatenation, no
+// unknown callee) cannot put caller-arena data into its container, so it must not seed the
+// closure; one that builds fresh data still does.
+func TestFillMayAdoptPureGrowerDoesNotSeed(t *testing.T) {
+	pure := strings.Replace(fillMayAdoptScopePrelude, "out.push(1 + 1)", "out.push(1)", 1)
+	if fillMayAdoptWithPrelude(t, pure, "def w(out: mutable darray[i64]&) -> void:\n    grow(out)\n") {
+		t.Fatalf("a grower that only pushes a scalar must not make its caller adopt")
+	}
+	if !fillMayAdoptWithPrelude(t, fillMayAdoptScopePrelude, "def w(out: mutable darray[i64]&) -> void:\n    grow(out)\n") {
+		t.Fatalf("a grower that builds fresh data must make its caller adopt")
+	}
+}
+
+func fillMayAdoptWithPrelude(t *testing.T, prelude, src string) bool {
+	t.Helper()
+	saved := fillMayAdoptScopePreludeOverride
+	fillMayAdoptScopePreludeOverride = prelude
+	defer func() { fillMayAdoptScopePreludeOverride = saved }()
+	return fillMayAdoptForTest(t, src)
+}
+
+var fillMayAdoptScopePreludeOverride string
+
+func fillMayAdoptPreludeFor() string {
+	if fillMayAdoptScopePreludeOverride != "" {
+		return fillMayAdoptScopePreludeOverride
+	}
+	return fillMayAdoptScopePrelude
 }

@@ -1432,7 +1432,7 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 				returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForExpr(n.Expr, aliases, active, localBindings))
 			}
 		case *ast.DiscardStmt:
-			if call := returnBorrowDiscardedCall(n); call != nil {
+			if call := a.returnBorrowDiscardedCall(n); call != nil {
 				a.noteReturnBorrowCallArgumentStores(call, aliases, active, localBindings)
 			}
 		case *ast.IfStmt:
@@ -1676,8 +1676,12 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 				return true
 			}
 		}
-		call, ok := e.(*ast.CallExpr)
-		if !ok || call == nil {
+		call, isCall := e.(*ast.CallExpr)
+		if lit, isLit := e.(*ast.StructLitExpr); isLit && lit != nil {
+			// Parens are walked separately: only the node itself is a call here.
+			call, isCall = a.returnBorrowAsCall(lit), true
+		}
+		if !isCall || call == nil {
 			return false
 		}
 		if a.returnBorrowRecordingActive() {
@@ -1735,9 +1739,15 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 // ADDRESS when the writable parameter can hold a borrow into the referent and only what the
 // referent holds otherwise.
 func (a *Analyzer) returnBorrowCallOtherArgsFlow(args []ast.Expr, skip int, params []Type, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
+	return a.returnBorrowCallOtherArgsFlowWhere(args, skip, params, nil, aliases, active, localBindings)
+}
+
+// returnBorrowCallOtherArgsFlowWhere is returnBorrowCallOtherArgsFlow restricted to the arguments
+// keep admits (nil admits all).
+func (a *Analyzer) returnBorrowCallOtherArgsFlowWhere(args []ast.Expr, skip int, params []Type, keep func(int) bool, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
 	flow := returnBorrowFlow{}
 	for other, arg := range args {
-		if other == skip {
+		if other == skip || (keep != nil && !keep(other)) {
 			continue
 		}
 		if params != nil && other < len(params) {

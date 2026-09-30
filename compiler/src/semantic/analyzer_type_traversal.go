@@ -294,7 +294,12 @@ func (a *Analyzer) typeMayOwnArenaStorage(t Type, seen map[string]bool) bool {
 		return false
 	case *RefType, *ViewType, *SViewType, *CStrType, *PackedVariantViewType, *FuncType:
 		return false
-	case *DArrayType, *DictType, *SetType, *PackedEnumStoreType, *OpaqueType, *TypeParamType:
+	case *OpaqueType:
+		// An `extern T` handle is foreign memory the C side allocated and owns; safe code has
+		// no way to put Elisa arena storage behind it, so copying one out of a region-fed
+		// aggregate (`structs.context`) copies a pointer the region never backed.
+		return false
+	case *DArrayType, *DictType, *SetType, *PackedEnumStoreType, *TypeParamType:
 		return true
 	}
 	key := t.String()

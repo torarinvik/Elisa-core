@@ -32,7 +32,7 @@ func (a *Analyzer) noteReturnElementState(n *ast.ReturnStmt) {
 		return
 	}
 	if prior, seen := a.returnElementStmtStates[n]; seen {
-		merged, mergedOK := mergeRegionRefStates(prior, state)
+		merged, mergedOK := mergeReturnElementStates(prior, state)
 		if !mergedOK {
 			a.returnElementStmtUnknown[n] = true
 			return
@@ -117,6 +117,8 @@ func (a *Analyzer) finishReturnElementSummary(fn *ast.FuncDecl) {
 	if fn == nil || len(fn.TypeParams) != 0 || len(fn.GenericParams) != 0 {
 		return
 	}
+	// A summary assumed for a recursive function is dropped unless the body still supports it.
+	delete(a.returnElementSummaries, fn)
 	var returns []*ast.ReturnStmt
 	returnElementWalk(reflect.ValueOf(fn.Body), func(ret *ast.ReturnStmt) {
 		returns = append(returns, ret)
@@ -130,7 +132,7 @@ func (a *Analyzer) finishReturnElementSummary(fn *ast.FuncDecl) {
 		if !recorded || a.returnElementStmtUnknown[ret] {
 			return
 		}
-		merged, ok := mergeRegionRefStates(summary, state)
+		merged, ok := mergeReturnElementStates(summary, state)
 		if !ok {
 			return
 		}
@@ -194,6 +196,7 @@ func (a *Analyzer) callReturnedElementState(call *ast.CallExpr) (regionRefState,
 	if !ok || decl == nil {
 		return regionRefState{}, false
 	}
+	a.ensureProvisionalSummaries(decl)
 	summary, known := a.returnElementSummaries[decl]
 	if !known || len(call.Args) != len(decl.Params) {
 		return regionRefState{}, false
@@ -233,4 +236,14 @@ func (a *Analyzer) callReturnedElementState(call *ast.CallExpr) (regionRefState,
 		return regionRefState{}, false
 	}
 	return merged, true
+}
+
+// mergeReturnElementStates merges two element states of returned containers. Two states that
+// carry no provenance (an empty container, `[]`) merge to the empty state: a return with no
+// elements contributes no provenance, and mergeRegionRefStates reports that as a failure.
+func mergeReturnElementStates(left, right regionRefState) (regionRefState, bool) {
+	if !hasRegionProvenance(left) && !hasRegionProvenance(right) {
+		return regionRefState{}, true
+	}
+	return mergeRegionRefStates(left, right)
 }

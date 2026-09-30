@@ -16,11 +16,11 @@ import (
 // analyzeBlockInScope; function bodies are iterated directly here, so they need the same threading.)
 func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
 	savedSizeGuards := len(a.overlaySizeGuards)
-	savedElementReads, savedElementStates, savedBinderLoops := a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops
-	a.currentElementReads, a.currentElementBinderLoops = a.scanLocalContainerElementReads(body)
+	savedElementReads, savedElementStates, savedBinderLoops, savedLoop := a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops, a.currentElementLoop
+	a.currentElementReads, a.currentElementBinderLoops, a.currentElementLoop = a.scanLocalContainerElementReads(body)
 	a.currentElementStates = map[*Symbol]regionRefState{}
 	defer func() {
-		a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops = savedElementReads, savedElementStates, savedBinderLoops
+		a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops, a.currentElementLoop = savedElementReads, savedElementStates, savedBinderLoops, savedLoop
 	}()
 	for _, stmt := range body {
 		a.analyzeStmt(stmt)
@@ -32,6 +32,9 @@ func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
 // analyzeFunc analyzes a function body with its type parameters left OPAQUE (the
 // template pass). See analyzeFuncWithTypeArgs for the monomorphized re-analysis.
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
+	if fn != nil && !a.suppressDiagnostics && a.convergeDepth == 0 && !a.ambientFillAnalyzed[fn] && a.summaryAnalyzable(fn) && a.summaryRelevant(fn) && a.funcIsCyclic(fn) {
+		a.convergeSummaries(fn)
+	}
 	a.analyzeFuncWithTypeArgs(fn, nil)
 }
 
@@ -56,6 +59,16 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	}
 	// Deferred storage-view errors are scoped per function: a nested function resolves its own
 	// pending uses at its checkRegionLifetimes; restore the enclosing function's pending afterward.
+	if a.funcAnalysisActive == nil {
+		a.funcAnalysisActive = map[*ast.FuncDecl]bool{}
+	}
+	wasActive := a.funcAnalysisActive[fn]
+	a.funcAnalysisActive[fn] = true
+	defer func() {
+		if !wasActive {
+			delete(a.funcAnalysisActive, fn)
+		}
+	}()
 	savedPending := a.pendingStorageViewErrors
 	a.pendingStorageViewErrors = nil
 	defer func() { a.pendingStorageViewErrors = savedPending }()
@@ -313,7 +326,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)
 	a.reportUnconsumedProtocolValues()
 	a.finishReturnBorrowSummary(fn)
-	if fn != nil && !a.suppressDiagnostics {
+	if fn != nil && (!a.suppressDiagnostics || a.provisionalSummaryFn == fn) {
 		if a.ambientFillAnalyzed == nil {
 			a.ambientFillAnalyzed = map[*ast.FuncDecl]bool{}
 		}

@@ -364,10 +364,15 @@ type Analyzer struct {
 	// function-local containers (see region_local_container_elements.go).
 	currentElementReads  map[*ast.IndexExpr]bool
 	currentElementStates map[*Symbol]regionRefState
+	// storeFlowBinderIndexes caches each function's binding sites for the store-flow summaries.
+	storeFlowBinderIndexes map[*ast.FuncDecl]*storeFlowBinderIndex
 	// currentElementBinderLoops are the by-value `for x in xs` loops over an eligible local
 	// container whose binder may take the container's tracked element provenance;
 	// iterBinderElementStates holds that provenance per binder symbol.
 	currentElementBinderLoops map[*ast.IterForStmt]bool
+	// currentElementLoop holds the in-loop reads of containers the same loop also pushes into,
+	// with the assumptions those reads made (region_local_container_loop_reads.go).
+	currentElementLoop *elementLoopInfo
 	// ambientFillAnalyzed / ambientFillFresh summarize each function for callers that pass it a
 	// local container to fill: analyzed once its body was checked with diagnostics on, fresh when
 	// that body may put data allocated in a caller's arena into a parameter container (a void
@@ -378,22 +383,44 @@ type Analyzer struct {
 	// fillMayAdoptSet is the lazily built syntactic over-approximation of ambientFillFresh
 	// (see fillMayAdopt).
 	fillMayAdoptSet map[*ast.FuncDecl]bool
+	// funcAnalysisActive holds the functions whose body analysis is on the stack;
+	// provisionalSummaryFn is the function a quiet on-demand analysis is publishing summaries for.
+	funcAnalysisActive   map[*ast.FuncDecl]bool
+	provisionalSummaryFn *ast.FuncDecl
+	// summary convergence state (region_summary_convergence.go)
+	convergeDepth       int
+	storeFlowSummaries  map[*ast.FuncDecl]*storeFlowSummary
+	storeFlowInProgress map[*ast.FuncDecl]*storeFlowSummary
+	storeFlowActive     map[*ast.FuncDecl]bool
+	storeFlowBinds      bool
+	storeFlowParams     map[string]bool
+	storeFlowDarrays    map[string]bool
+	storeFlowViews      map[string]bool
+	storeFlowLocals     map[string]bool
+	storeFlowNamedTypes map[string]string
+	storeFlowEnv        map[string]string
+	storeFlowStmtEnv    map[uintptr]map[string]string
+	declaredFuncNames   map[string]bool
+	convMembers         map[*ast.FuncDecl]bool
+	cyclicFuncSet       map[*ast.FuncDecl]bool
+	callEdgeCache       map[*ast.FuncDecl][]*ast.FuncDecl
+	callDeclsByName     map[string][]*ast.FuncDecl
 	// returnElementStmtStates / returnElementStmtUnknown record, per return statement, the element
 	// provenance of the returned container (region_return_element_summary.go);
 	// returnElementSummaries holds each function's published summary.
 	returnElementStmtStates  map[*ast.ReturnStmt]regionRefState
 	returnElementStmtUnknown map[*ast.ReturnStmt]bool
 	returnElementSummaries   map[*ast.FuncDecl]regionRefState
-	iterBinderElementStates   map[*Symbol]regionRefState
+	iterBinderElementStates  map[*Symbol]regionRefState
 	// comprehensionElementStates holds the provenance of each list comprehension's element
 	// expression, read in the binder scope, for a local container it initializes.
-	comprehensionElementStates map[*ast.ListComprehensionExpr]regionRefState
-	currentAffineValues           map[affineValueKey]affineValueState
-	currentBorrowedOwnerRefs      map[*Symbol]borrowedOwnerRefState
-	currentFunctionValues         map[*Symbol]*FuncType
-	currentSpecializedValueTypes  map[*Symbol]Type
-	currentValueBindings          map[*Symbol]ast.Expr
-	currentStorageViewDeps        map[*Symbol]storageViewDependencyState
+	comprehensionElementStates   map[*ast.ListComprehensionExpr]regionRefState
+	currentAffineValues          map[affineValueKey]affineValueState
+	currentBorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
+	currentFunctionValues        map[*Symbol]*FuncType
+	currentSpecializedValueTypes map[*Symbol]Type
+	currentValueBindings         map[*Symbol]ast.Expr
+	currentStorageViewDeps       map[*Symbol]storageViewDependencyState
 	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
 	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
 	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.

@@ -726,16 +726,28 @@ func returnBorrowWalkedStmt(stmt ast.Stmt) bool {
 
 // returnBorrowDiscardedCall returns the call of `_ = f(x)` (also `parser, _ <- parser.advance()`,
 // whose lmut thread is claimed): its result is dropped, exactly like a call statement.
-func returnBorrowDiscardedCall(stmt ast.Stmt) *ast.CallExpr {
+func (a *Analyzer) returnBorrowDiscardedCall(stmt ast.Stmt) *ast.CallExpr {
 	discard, ok := stmt.(*ast.DiscardStmt)
 	if !ok || discard == nil {
 		return nil
 	}
-	call, isCall := returnBorrowStripParens(discard.Value).(*ast.CallExpr)
-	if !isCall || call == nil {
-		return nil
+	return a.returnBorrowAsCall(discard.Value)
+}
+
+// returnBorrowAsCall returns the call an expression is: a CallExpr, or a `Name(args)` the parser
+// read as a struct literal that analysis lowered to a call (a PascalCase function such as an
+// extern `LLVMBuildCall2(...)`, a generic function, a cast or init hook). The lowered call shares
+// the literal's argument nodes, so modeling it models the literal's stores.
+func (a *Analyzer) returnBorrowAsCall(expr ast.Expr) *ast.CallExpr {
+	switch n := returnBorrowStripParens(expr).(type) {
+	case *ast.CallExpr:
+		return n
+	case *ast.StructLitExpr:
+		if n != nil && a.loweredInitCalls != nil {
+			return a.loweredInitCalls[n]
+		}
 	}
-	return call
+	return nil
 }
 
 // returnBorrowUntrustedNames collects the local names with a write the walker does not model.
@@ -785,7 +797,7 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 			}
 			node := v.Interface()
 			if stmt, ok := node.(ast.Stmt); ok {
-				if inExpr || (!returnBorrowWalkedStmt(stmt) && returnBorrowDiscardedCall(stmt) == nil) {
+				if inExpr || (!returnBorrowWalkedStmt(stmt) && a.returnBorrowDiscardedCall(stmt) == nil) {
 					collectReturnBorrowNodeNames(v, untrusted)
 					return
 				}
@@ -846,9 +858,9 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 						markAll(n.Store)
 					}
 				case *ast.DiscardStmt:
-					discarded[returnBorrowDiscardedCall(n)] = true
+					discarded[a.returnBorrowDiscardedCall(n)] = true
 				case *ast.ExprStmt:
-					if call, isCall := returnBorrowStripParens(n.Expr).(*ast.CallExpr); isCall && call != nil {
+					if call := a.returnBorrowAsCall(n.Expr); call != nil {
 						discarded[call] = true
 					}
 					// A value-form loop (`for x in xs |acc| -> acc:`) desugars to an ExprBlock
@@ -860,6 +872,11 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 				}
 			}
 			if expr, ok := node.(ast.Expr); ok {
+				if lit, isLit := expr.(*ast.StructLitExpr); isLit {
+					if call := a.returnBorrowAsCall(lit); call != nil {
+						expr = call
+					}
+				}
 				switch n := expr.(type) {
 				case *ast.LambdaExpr:
 					collectReturnBorrowNodeNames(v, untrusted)
@@ -1253,6 +1270,9 @@ func (a *Analyzer) returnBorrowCallArgStoreFlow(call *ast.CallExpr, index int) r
 		}
 	}
 	args := returnBorrowCallArgs(call)
-	flow := a.returnBorrowCallOtherArgsFlow(args, index, fnType.Params, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+	// A summarized callee states which arguments' contents may reach the written parameter; the
+	// others cannot be stored through it.
+	keep := func(other int) bool { return !a.callArgNeverReaches(call, other, index) }
+	flow := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, keep, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 	return flow
 }

@@ -42,6 +42,11 @@ type localContainerElementScan struct {
 	// pushedIn records, per enclosing loop, the container names pushed into inside it.
 	pushedIn map[ast.Node]map[string]bool
 	loops    []ast.Node
+	// modLoops maps each element-adding site (a pushed argument, a filling call) to its loops.
+	modLoops map[ast.Node][]ast.Node
+	// scalarUse are reads whose copy is only compared: they need no in-loop assumption.
+	scalarUse map[*ast.IndexExpr]bool
+	extendIn  map[ast.Node]map[string]bool
 	// declLoops are the loops enclosing a name's only declaration; a name declared more than
 	// once, or mentioned before its declaration, is in multiDecl.
 	declLoops map[string][]ast.Node
@@ -64,6 +69,8 @@ type localContainerElementScan struct {
 	// argByValue reports whether a call's argument binds a by-value (non-reference, non-view)
 	// parameter of a directly resolved callee.
 	argByValue func(call *ast.CallExpr, index int) bool
+	// ufcsCall predicts the direct call a receiver-form call is rewritten to, or nil.
+	ufcsCall func(call *ast.CallExpr) *ast.CallExpr
 }
 
 type localContainerElementRead struct {
@@ -80,11 +87,12 @@ var (
 
 // scanLocalContainerElementReads computes, for one function body, the index reads whose
 // element provenance may be used (see the file comment).
-func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.IndexExpr]bool, map[*ast.IterForStmt]bool) {
+func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.IndexExpr]bool, map[*ast.IterForStmt]bool, *elementLoopInfo) {
 	scan := &localContainerElementScan{
 		argReadOnly:       a.callArgBindsReadOnlyParam,
 		argFillable:       a.callArgFillsWritableParam,
 		argByValue:        a.callArgBindsByValueParam,
+		ufcsCall:          a.predictedUFCSScanCall(),
 		ineligible:        map[string]bool{},
 		pushedIn:          map[ast.Node]map[string]bool{},
 		declLoops:         map[string][]ast.Node{},
@@ -94,6 +102,9 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 		acceptedReads:     map[*ast.IndexExpr]bool{},
 		visited:           map[uintptr]bool{},
 		addrArgs:          map[*ast.AddrOfExpr]addrArgSite{},
+		modLoops:          map[ast.Node][]ast.Node{},
+		scalarUse:         map[*ast.IndexExpr]bool{},
+		extendIn:          map[ast.Node]map[string]bool{},
 	}
 	for _, stmt := range body {
 		scan.walkNode(stmt, nil, "")
@@ -110,9 +121,29 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 		return true
 	}
 	out := map[*ast.IndexExpr]bool{}
+	var loop *elementLoopInfo
 	for _, read := range scan.reads {
 		if accepted(read) {
 			out[read.node] = true
+			continue
+		}
+		// Rejected only because an enclosing loop also pushes into the container: the read may
+		// use the elements pushed before it, as long as no later push in that loop adds
+		// anything they lack (checked at each such push; region_local_container_loop_reads.go).
+		if scan.ineligible[read.name] || scan.scalarUse[read.node] {
+			continue
+		}
+		for _, l := range read.loops {
+			if scan.pushedIn[l][read.name] {
+				if scan.extendIn[l][read.name] {
+					break
+				}
+				if loop == nil {
+					loop = &elementLoopInfo{reads: map[*ast.IndexExpr]ast.Node{}, modLoops: scan.modLoops}
+				}
+				loop.reads[read.node] = l
+				break
+			}
 		}
 	}
 	binders := map[*ast.IterForStmt]bool{}
@@ -121,7 +152,7 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 			binders[read.loop] = true
 		}
 	}
-	return out, binders
+	return out, binders, loop
 }
 
 func isElementScanLoop(node ast.Node) bool {
@@ -140,15 +171,15 @@ func isElementScanOpaque(node ast.Node) bool {
 	return false
 }
 
-// statementContainerCall matches the statement `xs.push(v)` / `xs.extend(src)` / `xs.reserve(n)`
-// on a bare name.
+// statementContainerCall matches the statement `xs.push(v)` / `xs.extend(src)` / `xs.reserve(n)` /
+// `xs.truncate(n)` on a bare name (truncation only drops elements: the survivors keep their state).
 func statementContainerCall(stmt *ast.ExprStmt) (*ast.FieldExpr, *ast.Ident, bool) {
 	call, ok := stmt.Expr.(*ast.CallExpr)
 	if !ok || call.SafeReceiver != nil || call.Safe || call.HasArgForward || len(call.Args) != 1 || len(call.ArgNames) != 0 {
 		return nil, nil, false
 	}
 	callee, ok := call.Func.(*ast.FieldExpr)
-	if !ok || callee.Safe || (callee.Field != "push" && callee.Field != "extend" && callee.Field != "reserve") {
+	if !ok || callee.Safe || (callee.Field != "push" && callee.Field != "extend" && callee.Field != "reserve" && callee.Field != "truncate") {
 		return nil, nil, false
 	}
 	receiver, ok := callee.Object.(*ast.Ident)
@@ -179,6 +210,16 @@ func (s *localContainerElementScan) markChildren(node ast.Node) {
 			s.acceptedReceivers[callee] = true
 			if callee.Field == "push" || callee.Field == "extend" {
 				s.markPushed(receiver.Name)
+				s.modLoops[n.Expr.(*ast.CallExpr).Args[0]] = append([]ast.Node(nil), s.loops...)
+				if callee.Field == "extend" {
+					// A bulk add usually stops tracking: an in-loop read keeps the conservative state.
+					for _, loop := range s.loops {
+						if s.extendIn[loop] == nil {
+							s.extendIn[loop] = map[string]bool{}
+						}
+						s.extendIn[loop][receiver.Name] = true
+					}
+				}
 			}
 		}
 	case *ast.CallExpr:
@@ -206,6 +247,12 @@ func (s *localContainerElementScan) markChildren(node ast.Node) {
 			s.multiDecl[n.Name] = true
 		}
 		s.declLoops[n.Name] = append([]ast.Node(nil), s.loops...)
+	case *ast.AssignStmt:
+		// `y <- xs[i]` copies the element into y (or into a field or element of it); the store
+		// checks read the same tracked provenance a declaration does.
+		if !n.WriteThrough && n.AsOverlayCall == nil {
+			s.acceptRead(n.Value)
+		}
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			s.acceptRead(arg)
@@ -217,6 +264,14 @@ func (s *localContainerElementScan) markChildren(node ast.Node) {
 	case *ast.BinaryExpr:
 		s.acceptRead(n.Left)
 		s.acceptRead(n.Right)
+		if isComparisonOp(n.Op) {
+			// A comparison yields a bool: the operand's provenance flows nowhere.
+			for _, operand := range []ast.Expr{n.Left, n.Right} {
+				if index, isIndex := stripParenExpr(operand).(*ast.IndexExpr); isIndex {
+					s.scalarUse[index] = true
+				}
+			}
+		}
 	case *ast.ReturnStmt:
 		s.acceptRead(n.Value)
 	}
@@ -394,15 +449,26 @@ func (s *localContainerElementScan) classifyIdent(ident *ast.Ident, parent ast.N
 		}
 	case *ast.CallExpr:
 		if field == "Args" && len(p.ArgNames) == 0 && !p.HasArgForward && s.argReadOnly != nil {
+			// A receiver-form call `recv.f(xs)` is rewritten to `f(recv, xs)` only during the
+			// body's analysis; judge it as that call here. A prediction the rewrite does not
+			// confirm is harmless: the flow judges the analyzed call and stops tracking any
+			// container it cannot describe (recordCallFilledElementStates).
+			judged, shift := p, 0
+			if s.ufcsCall != nil {
+				if rewritten := s.ufcsCall(p); rewritten != nil {
+					judged, shift = rewritten, 1
+				}
+			}
 			for index, arg := range p.Args {
 				if arg == ast.Expr(ident) {
-					if s.argReadOnly(p, index) {
+					if s.argReadOnly(judged, index+shift) {
 						return
 					}
-					if s.argFillable != nil && s.argFillable(p, index) {
+					if s.argFillable != nil && s.argFillable(judged, index+shift) {
 						// The call adds elements, like a push: a read in an enclosing loop
 						// may see the previous iteration's fill.
 						s.markPushed(name)
+						s.modLoops[p] = append([]ast.Node(nil), s.loops...)
 						return
 					}
 					break
@@ -417,6 +483,17 @@ func (s *localContainerElementScan) classifyIdent(ident *ast.Ident, parent ast.N
 			}
 			if s.argFillable != nil && s.argFillable(site.call, site.index) {
 				s.markPushed(name)
+				s.modLoops[site.call] = append([]ast.Node(nil), s.loops...)
+				return
+			}
+		}
+	case *ast.AssignStmt:
+		// `xs <- f(args)` replaces every element with the call result's, whose provenance the
+		// callee's return-element summary describes; the flow records it (or stops tracking).
+		if field == "Target" && !p.Optional && ast.Expr(ident) == p.Target {
+			if _, isCall := stripParenExpr(p.Value).(*ast.CallExpr); isCall {
+				s.markPushed(name)
+				s.modLoops[p] = append([]ast.Node(nil), s.loops...)
 				return
 			}
 		}
@@ -429,6 +506,12 @@ func (s *localContainerElementScan) classifyIdent(ident *ast.Ident, parent ast.N
 	case *ast.QueryExpr:
 		// `any x in xs where ...`: the binder is a by-value element copy.
 		if field == "Source" {
+			return
+		}
+	case *ast.ListComprehensionExpr:
+		// `[f(x) for x in xs]` only reads xs: its binder is a by-value element copy, and the new
+		// list's element provenance is computed from the binder, not from xs's tracked state.
+		if field == "Source" && p.Owner == nil {
 			return
 		}
 	}
@@ -448,6 +531,16 @@ func (a *Analyzer) recordLocalContainerElementInit(sym *Symbol, value ast.Expr) 
 			return
 		}
 		a.currentElementStates[sym] = cloneRegionRefState(state)
+		return
+	}
+	if tern, ok := stripParenExpr(value).(*ast.TernaryExpr); ok {
+		// `f(args) if c else []`: the elements are one branch's, so their provenance is the merge.
+		state, known := a.ternaryInitElementState(tern)
+		if _, isDArray := stripRefForBounds(sym.Type).(*DArrayType); !known || !isDArray {
+			delete(a.currentElementStates, sym)
+			return
+		}
+		a.currentElementStates[sym] = state
 		return
 	}
 	if call, ok := stripParenExpr(value).(*ast.CallExpr); ok {
@@ -488,6 +581,45 @@ func (a *Analyzer) recordLocalContainerElementInit(sym *Symbol, value ast.Expr) 
 	a.currentElementStates[sym] = merged
 }
 
+// ternaryInitElementState describes a ternary initializer whose branches are each a call
+// with a return-element summary, `[]`, or such a ternary.
+func (a *Analyzer) ternaryInitElementState(tern *ast.TernaryExpr) (regionRefState, bool) {
+	states := make([]regionRefState, 0, 2)
+	for _, branch := range []ast.Expr{tern.Value, tern.Alt} {
+		switch b := stripParenExpr(branch).(type) {
+		case *ast.CallExpr:
+			state, known := a.callReturnedElementState(b)
+			if !known {
+				return regionRefState{}, false
+			}
+			states = append(states, state)
+		case *ast.ListLitExpr:
+			if len(b.Elems) != 0 || b.Brace || b.Owner != nil || b.Keys != nil {
+				return regionRefState{}, false
+			}
+		case *ast.TernaryExpr:
+			state, known := a.ternaryInitElementState(b)
+			if !known {
+				return regionRefState{}, false
+			}
+			states = append(states, state)
+		default:
+			return regionRefState{}, false
+		}
+	}
+	provenanced := states[:0]
+	for _, state := range states {
+		if hasRegionProvenance(state) {
+			provenanced = append(provenanced, state)
+		}
+	}
+	if len(provenanced) == 0 {
+		// Every branch is `[]` or a call whose elements carry no region provenance.
+		return regionRefState{}, true
+	}
+	return mergeRegionRefStates(provenanced...)
+}
+
 // recordComprehensionElementState records the provenance of a list comprehension's element
 // expression while its binders are in scope; one without provenance records the empty state.
 func (a *Analyzer) recordComprehensionElementState(expr *ast.ListComprehensionExpr) {
@@ -503,6 +635,38 @@ func (a *Analyzer) recordComprehensionElementState(expr *ast.ListComprehensionEx
 		return
 	}
 	a.comprehensionElementStates[expr] = state
+}
+
+// recordLocalContainerElementAssign replaces a tracked local container's element state on a
+// whole assignment `xs <- f(args)` with the callee's summarized return-element provenance;
+// a call without a summary stops tracking the container.
+func (a *Analyzer) recordLocalContainerElementAssign(n *ast.AssignStmt) {
+	if a.currentElementStates == nil || a.currentScope == nil || n == nil || n.Optional {
+		return
+	}
+	ident, ok := n.Target.(*ast.Ident)
+	if !ok {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return
+	}
+	if _, tracked := a.currentElementStates[sym]; !tracked {
+		return
+	}
+	call, isCall := stripParenExpr(n.Value).(*ast.CallExpr)
+	state, known := regionRefState{}, false
+	if isCall {
+		state, known = a.callReturnedElementState(call)
+	}
+	if _, isDArray := stripRefForBounds(sym.Type).(*DArrayType); !known || !isDArray {
+		a.checkElementLoopAssumptions(sym, n, regionRefState{}, false)
+		delete(a.currentElementStates, sym)
+		return
+	}
+	a.checkElementLoopAssumptions(sym, n, state, true)
+	a.currentElementStates[sym] = cloneRegionRefState(state)
 }
 
 // recordLocalContainerElementPush merges a pushed value's provenance into the receiver's
@@ -532,26 +696,32 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 			// copies whose provenance was recorded from its element expression.
 			state, recorded := a.comprehensionElementStates[comp]
 			if !recorded || comp.Owner != nil || comp.Parallel {
+				a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
+				a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
 				delete(a.currentElementStates, sym)
 				return
 			}
 			merged, _ := mergeRegionRefStates(existing, state)
+			a.checkElementLoopAssumptions(sym, arg, merged, true)
 			a.currentElementStates[sym] = merged
 			return
 		}
 		source, isIdent := stripParenExpr(arg).(*ast.Ident)
 		if !isIdent {
+			a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
 			delete(a.currentElementStates, sym)
 			return
 		}
 		sourceSym, found := a.currentScope.Lookup(source.Name)
 		if !found || sourceSym == nil || sourceSym.Kind != SymbolParam {
+			a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
 			delete(a.currentElementStates, sym)
 			return
 		}
 	}
 	state, ok, known := a.elementStorageState(arg)
 	if !known {
+		a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
 		delete(a.currentElementStates, sym)
 		return
 	}
@@ -559,14 +729,22 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 		return
 	}
 	merged, _ := mergeRegionRefStates(existing, state)
+	a.checkElementLoopAssumptions(sym, arg, merged, true)
 	a.currentElementStates[sym] = merged
 }
 
 // localContainerElementState returns the tracked element provenance for a by-value read
 // `xs[i]` of an eligible local container.
 func (a *Analyzer) localContainerElementState(n *ast.IndexExpr) (regionRefState, bool) {
-	if !a.currentElementReads[n] || a.currentScope == nil {
+	if a.currentScope == nil {
 		return regionRefState{}, false
+	}
+	loopRead := false
+	if !a.currentElementReads[n] {
+		if a.currentElementLoop == nil || a.currentElementLoop.reads[n] == nil {
+			return regionRefState{}, false
+		}
+		loopRead = true
 	}
 	ident, ok := n.Object.(*ast.Ident)
 	if !ok {
@@ -577,6 +755,9 @@ func (a *Analyzer) localContainerElementState(n *ast.IndexExpr) (regionRefState,
 		return regionRefState{}, false
 	}
 	state, ok := a.currentElementStates[sym]
+	if ok && loopRead {
+		a.currentElementLoop.assume(sym, state, n)
+	}
 	return state, ok
 }
 
@@ -683,6 +864,7 @@ func (a *Analyzer) callArgFillsWritableParam(call *ast.CallExpr, index int) bool
 	if len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 {
 		return false
 	}
+	a.ensureProvisionalSummaries(decl)
 	if a.ambientFillAnalyzed[decl] {
 		if a.ambientFillFresh[decl] {
 			return false
@@ -722,6 +904,7 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 			continue
 		}
 		if !a.callArgFillsWritableParam(call, index) {
+			a.checkElementLoopAssumptions(sym, call, regionRefState{}, false)
 			delete(a.currentElementStates, sym)
 			continue
 		}
@@ -735,9 +918,21 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 			// sview could view: what it can hand
 			// the filled container is its ELEMENTS (merged below), not its own storage.
 			ownStorageIsOnlyElements := false
-			if id, isIdent := stripAddrAndParens(otherArg).(*ast.Ident); isIdent && isSviewDarrayType(sym.Type) {
+			if id, isIdent := stripAddrAndParens(otherArg).(*ast.Ident); isIdent && containerElementsHoldOnlyViews(sym.Type) {
 				if otherSym, found := a.currentScope.Lookup(id.Name); found && otherSym != nil && (isSviewDarrayType(otherSym.Type) || isNonByteScalarContainerType(otherSym.Type)) {
 					ownStorageIsOnlyElements = true
+				}
+			} else if isIdent {
+				// A filled container whose elements are not view-only (`darray[Ast::Expr]`) still
+				// cannot receive a `darray[sview]`/`darray[u32]` argument's STORAGE when no part of
+				// its element type can hold that container's header, a reference or a generic view:
+				// that storage has no bytes an sview could view either.
+				if otherSym, found := a.currentScope.Lookup(id.Name); found && otherSym != nil {
+					if elemName, ok := headerOnlyDarrayElemTypeName(otherSym.Type); ok {
+						if filledElem, ok := darrayElemType(sym.Type); ok && !typeMayReachDarrayStorage(filledElem, elemName) {
+							ownStorageIsOnlyElements = true
+						}
+					}
 				}
 			}
 			if state, ok := a.regionRefStateForExpr(otherArg); ok && !ownStorageIsOnlyElements && hasRegionProvenance(state) {
@@ -760,9 +955,11 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 			}
 		}
 		if !known {
+			a.checkElementLoopAssumptions(sym, call, regionRefState{}, false)
 			delete(a.currentElementStates, sym)
 			continue
 		}
+		a.checkElementLoopAssumptions(sym, call, merged, true)
 		a.currentElementStates[sym] = merged
 	}
 }
@@ -770,7 +967,7 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 // noteAmbientFillFresh records that the current void grower used its adoption sanction: data
 // allocated in the adopted arena may reach its grown container.
 func (a *Analyzer) noteAmbientFillFresh() {
-	if a.currentFuncDecl == nil || a.suppressDiagnostics {
+	if a.currentFuncDecl == nil || a.summariesOff() {
 		return
 	}
 	if a.ambientFillFresh == nil {
@@ -785,7 +982,7 @@ func (a *Analyzer) noteAmbientFillFresh() {
 // writable parameter of a callee not known to fill it only from its other arguments.
 func (a *Analyzer) noteAmbientCallFill(call *ast.CallExpr) {
 	fn := a.currentFuncDecl
-	if fn == nil || call == nil || a.suppressDiagnostics {
+	if fn == nil || call == nil || a.summariesOff() {
 		return
 	}
 	// A direct self-call can only put in a container what this body puts there elsewhere: it is
@@ -843,6 +1040,49 @@ func isSviewDarrayType(t Type) bool {
 	return isView
 }
 
+// containerElementsHoldOnlyViews reports a darray (through a reference) whose elements borrow
+// only through sviews: every reachable component is an sview, a scalar, or an inline aggregate of
+// them (no reference, view, cstr, nested container or opaque type). Such an element can view
+// bytes, but cannot point at another container's storage or share its buffer, so a
+// `darray[sview]` or non-byte scalar container can hand it only its ELEMENTS.
+func containerElementsHoldOnlyViews(t Type) bool {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		t = ref.Elem
+	}
+	darray, ok := t.(*DArrayType)
+	if !ok || darray == nil || darray.Elem == nil {
+		return false
+	}
+	return typeComponentsViewOnly(darray.Elem)
+}
+
+// typeComponentsViewOnly reports a type whose every component is a view or a plain scalar —
+// nothing that owns region storage. Anything opaque is not view-only.
+func typeComponentsViewOnly(t Type) bool {
+	if t == nil {
+		return false
+	}
+	components, opaque := []Type{}, false
+	collectReturnBorrowComponents(StripAggregateStateType(t), false, &components, &opaque, map[Type]bool{})
+	if opaque {
+		return false
+	}
+	for _, component := range components {
+		switch c := component.(type) {
+		case *BuiltinType:
+			switch c.Name {
+			case "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize", "f32", "f64", "bool", "char":
+			default:
+				return false
+			}
+		case *SViewType, *BitIntType, *ConstEnumType, *BitGroupType, *StructType, *EnumType, *TupleType, *ArrayType, *OptionalType, *ErrorUnionType:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // isNonByteScalarContainerType reports a darray or fixed array (through a reference) whose
 // element type holds no byte anywhere (no u8/i8 scalar, array or nested darray of them): the
 // container's own storage holds no bytes a `darray[sview]` element could view, so what a callee
@@ -889,4 +1129,138 @@ func isNonByteScalarContainerType(t Type) bool {
 		}
 	}
 	return true
+}
+
+// summariesOff reports whether the current body's fill summary must not be recorded: a quiet
+// pass publishes summaries only when it is the on-demand pass for exactly this function.
+func (a *Analyzer) summariesOff() bool {
+	return a.suppressDiagnostics && a.provisionalSummaryFn != a.currentFuncDecl
+}
+
+// ensureProvisionalSummaries analyzes a callee that a caller reaches before the declaration-order
+// pass does, quietly, so its fill and return-element summaries exist at the call site. Without
+// it a later-declared callee is judged by the coarse fallbacks, which over-report. The real pass
+// still runs later and republishes the same summaries with diagnostics on. A callee on a call
+// cycle is solved by summaryConvergence instead (region_summary_convergence.go).
+func (a *Analyzer) ensureProvisionalSummaries(decl *ast.FuncDecl) {
+	if a == nil || decl == nil || a.ambientFillAnalyzed[decl] || (a.suppressDiagnostics && a.provisionalSummaryFn == nil) {
+		return
+	}
+	if a.funcAnalysisActive[decl] {
+		a.assumeSummaryForActive(decl)
+		return
+	}
+	if !a.summaryAnalyzable(decl) {
+		return
+	}
+	// Only a callee whose summary can feed a store or return check is worth a second analysis.
+	if !a.summaryRelevant(decl) {
+		return
+	}
+	if a.convergeDepth == 0 && a.funcIsCyclic(decl) {
+		a.convergeSummaries(decl)
+		return
+	}
+	a.analyzeQuietly(decl)
+}
+
+func (a *Analyzer) summaryAnalyzable(decl *ast.FuncDecl) bool {
+	if len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 || decl.IsContract || decl.Body == nil {
+		return false
+	}
+	if _, ok := a.symbolForFuncDecl(decl); !ok {
+		return false
+	}
+	return a.funcDeclSymbols[decl] != nil
+}
+
+// analyzeQuietly runs decl's body analysis with diagnostics off, publishing its summaries.
+func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return
+	}
+	if a.convergeDepth > 0 {
+		a.convMembers[decl] = true
+	}
+	savedNamespace, savedUsings := a.currentNamespace, a.currentUsings
+	savedSuppress, savedOpt, savedProvisional := a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn
+	savedStatic := a.staticContextDepth
+	if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+		if idx := strings.LastIndex(fnType.Name, "."); idx >= 0 {
+			a.currentNamespace = fnType.Name[:idx]
+		} else {
+			a.currentNamespace = ""
+		}
+	}
+	a.currentUsings = append([]string(nil), a.funcDeclUsings[decl]...)
+	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = true, true, decl
+	a.staticContextDepth = 0
+	proofMark := len(a.proofReport)
+	a.analyzeFuncWithTypeArgs(decl, nil)
+	if len(a.proofReport) > proofMark {
+		a.proofReport = a.proofReport[:proofMark] // a quiet pass reports nothing
+	}
+	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
+	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = savedSuppress, savedOpt, savedProvisional
+	a.staticContextDepth = savedStatic
+	returnElementWalk(reflect.ValueOf(decl.Body), func(ret *ast.ReturnStmt) {
+		delete(a.returnElementStmtStates, ret)
+		delete(a.returnElementStmtUnknown, ret)
+	}, map[uintptr]bool{})
+}
+
+// headerOnlyDarrayElemTypeName reports a `darray[E]` (through a reference) whose element E is
+// `sview` or a non-byte scalar, returning E's name.
+func headerOnlyDarrayElemTypeName(t Type) (string, bool) {
+	elem, ok := darrayElemType(t)
+	if !ok {
+		return "", false
+	}
+	switch e := StripAggregateStateType(elem).(type) {
+	case *SViewType:
+		return "sview", true
+	case *BuiltinType:
+		switch e.Name {
+		case "bool", "u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64", "char":
+			return e.Name, true
+		}
+	}
+	return "", false
+}
+
+// darrayElemType returns the element type of a `darray[E]` (through a reference).
+func darrayElemType(t Type) (Type, bool) {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		t = ref.Elem
+	}
+	darray, ok := t.(*DArrayType)
+	if !ok || darray == nil || darray.Elem == nil {
+		return nil, false
+	}
+	return darray.Elem, true
+}
+
+// predictedUFCSScanCall returns the scan's predictor for receiver-form calls: `recv.f(args)`
+// whose name has exactly one free UFCS function is judged as `f(recv, args)`. Predictions are
+// memoized per call so the synthetic call is built once.
+func (a *Analyzer) predictedUFCSScanCall() func(call *ast.CallExpr) *ast.CallExpr {
+	memo := map[*ast.CallExpr]*ast.CallExpr{}
+	return func(call *ast.CallExpr) *ast.CallExpr {
+		if call == nil {
+			return nil
+		}
+		if rewritten, seen := memo[call]; seen {
+			return rewritten
+		}
+		var rewritten *ast.CallExpr
+		if fieldExpr, ok := call.Func.(*ast.FieldExpr); ok && fieldExpr != nil && fieldExpr.Object != nil && len(a.ufcsFunctionsByName[fieldExpr.Field]) == 1 {
+			args := make([]ast.Expr, 0, len(call.Args)+1)
+			args = append(args, fieldExpr.Object)
+			args = append(args, call.Args...)
+			rewritten = &ast.CallExpr{Position: call.Position, Func: &ast.Ident{Position: fieldExpr.Position, Name: fieldExpr.Field}, Args: args}
+		}
+		memo[call] = rewritten
+		return rewritten
+	}
 }

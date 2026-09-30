@@ -1957,9 +1957,18 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 			if !stored.intersects(argumentRegionPointees(a.exprTypes[arg])) {
 				continue
 			}
+			if a.callArgsKeptApart(call, index, other) {
+				continue
+			}
 			state, ok := a.regionRefStateForExpr(arg)
 			if !ok {
 				continue
+			}
+			if elemState, onlyElements := a.headerOnlyArgumentElementState(arg, containerType); onlyElements {
+				// A `darray[sview]` argument's own storage holds only view headers: no bytes the
+				// container's views could point into, and no part of its elements can hold that
+				// container's header. What the callee can store from it is its ELEMENTS.
+				state = elemState
 			}
 			for _, region := range liveLocalRegionDependencyNames(state) {
 				if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
@@ -2206,4 +2215,32 @@ func collectRegionPointees(t Type, p *regionPointees, seen map[Type]bool) {
 	default:
 		p.wildcard = true
 	}
+}
+
+// headerOnlyArgumentElementState: when arg is a local `darray[E]` (E `sview` or a non-byte
+// scalar) with a tracked element state, and no part of the target container's element type can
+// hold a `darray[E]` header, a reference or a generic view, the callee can store only copies of
+// arg's elements into the container — return those elements' state.
+func (a *Analyzer) headerOnlyArgumentElementState(arg ast.Expr, containerType Type) (regionRefState, bool) {
+	ident, ok := stripAddrAndParens(arg).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil || a.currentElementStates == nil {
+		return regionRefState{}, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return regionRefState{}, false
+	}
+	elemName, ok := headerOnlyDarrayElemTypeName(sym.Type)
+	if !ok {
+		return regionRefState{}, false
+	}
+	targetElem, ok := darrayElemType(containerType)
+	if !ok || typeMayReachDarrayStorage(targetElem, elemName) {
+		return regionRefState{}, false
+	}
+	elems, tracked := a.currentElementStates[sym]
+	if !tracked {
+		return regionRefState{}, false
+	}
+	return elems, true
 }

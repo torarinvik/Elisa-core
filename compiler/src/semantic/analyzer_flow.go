@@ -500,6 +500,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		a.reassignTargets = savedReassignTargets
+		a.recordLocalContainerElementAssign(n)
 		if restoreAllocExpr {
 			a.currentAllocExpr = savedAllocExpr
 		}

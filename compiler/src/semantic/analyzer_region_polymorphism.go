@@ -409,9 +409,67 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	// while the returned payload still pointed into it: element reads came back zero, a
 	// silent wrong answer in safe code. Gated on a region-carrying return type; a false
 	// match only threads the caller's region, which is sound.
+	// viewElementLocals: locals whose every declaration spells `darray[sview]` (and that no
+	// tuple bind or parameter also names). Such a container's own storage holds only view
+	// HEADERS — no bytes a view can point into — so when nothing in this function's return
+	// type can hold a `darray[sview]` header, a reference or a generic view, a callee handed
+	// that container can return copies of its elements, never its storage. The
+	// element's backing is whatever the pushed view already pointed at, which this call does
+	// not change; treating the container as sharing its region with the result made every
+	// caller of a `path_text(names, table)`-style helper adopt a region it never touched.
+	viewElementLocals := map[string]bool{}
+	if fn != nil && retCarriesRegionStorage {
+		if ft := a.funcTypeForRegionPoly(fn); ft != nil {
+			blocked := map[string]bool{}
+			for _, param := range fn.Params {
+				blocked[param.Name] = true
+			}
+			fillMayAdoptWalk(reflect.ValueOf(fn.Body), func(node any) {
+				switch s := node.(type) {
+				case *ast.VarDeclStmt:
+					if elem, ok := headerOnlyDarrayElemName(s.Type); ok && !typeMayReachDarrayStorage(ft.Return, elem) {
+						viewElementLocals[s.Name] = true
+					} else {
+						blocked[s.Name] = true
+					}
+				case *ast.TupleBindStmt:
+					for _, nm := range s.Names {
+						blocked[nm.Name] = true
+					}
+				}
+			})
+			for name := range blocked {
+				delete(viewElementLocals, name)
+			}
+		}
+	}
 	callSharesRegionLocal := func(callee ast.Expr, args []ast.Expr) bool {
 		if !retCarriesRegionStorage {
 			return false
+		}
+		if len(viewElementLocals) > 0 {
+			kept := make([]ast.Expr, 0, len(args))
+			for _, arg := range args {
+				inner := arg
+				for {
+					switch e := unwrapParenForRegionPoly(inner).(type) {
+					case *ast.AddrOfExpr:
+						inner = e.Operand
+						continue
+					case *ast.MoveExpr:
+						inner = e.Operand
+						continue
+					}
+					break
+				}
+				// The container itself, an element copy (`names[i]`) or a scalar field
+				// (`names.count`): none of them is the container's storage.
+				if id := rootIdentExpr(unwrapParenForRegionPoly(inner)); id != nil && viewElementLocals[id.Name] {
+					continue
+				}
+				kept = append(kept, arg)
+			}
+			args = kept
 		}
 		if fe, ok := unwrapParenForRegionPoly(callee).(*ast.FieldExpr); ok && fe != nil && rootedInRegionLocal(fe.Object) {
 			return true
@@ -1593,4 +1651,125 @@ func bodyAllocatesInferredContainers(stmts []ast.Stmt) bool {
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// headerOnlyDarrayElemName reports a type expression spelled `darray[E]` where E is `sview` or
+// a non-byte scalar, returning E's name. Such a container's storage holds no bytes a view could
+// point into: what a callee can hand back from it is a copy of an element, never its storage.
+func headerOnlyDarrayElemName(t ast.TypeExpr) (string, bool) {
+	bt, ok := t.(*ast.BuiltinTypeExpr)
+	if !ok || bt == nil || bt.Name != "darray" || len(bt.TypeArgs) != 1 || bt.Region != "" {
+		return "", false
+	}
+	name := ""
+	switch elem := bt.TypeArgs[0].(type) {
+	case *ast.NamedType:
+		if elem == nil || elem.Region != "" {
+			return "", false
+		}
+		name = elem.Name
+	case *ast.BuiltinTypeExpr:
+		if elem == nil || len(elem.TypeArgs) != 0 || elem.Region != "" {
+			return "", false
+		}
+		name = elem.Name
+	default:
+		return "", false
+	}
+	switch name {
+	case "sview", "bool", "u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64", "char":
+		return name, true
+	}
+	return "", false
+}
+
+// typeMayReachDarrayStorage reports whether a value of type t could hold (or point at) the
+// storage of a `darray[elem]`: such a header anywhere inside it, any reference or generic view
+// (which may point at the container or its element slots), or anything opaque. A PACKED enum
+// value is a handle into its store: its payload rows live in that store, whose own region every
+// store into it is checked against, so the handle itself reaches no caller container.
+func typeMayReachDarrayStorage(t Type, elem string) bool {
+	return typeMayReachDarrayStorageRec(t, elem, map[Type]bool{})
+}
+
+func typeMayReachDarrayStorageRec(t Type, elem string, seen map[Type]bool) bool {
+	if t == nil {
+		return true
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *SViewType, *CStrType, *BitIntType, *ConstEnumType, *BitGroupType, *IDType, *NullType, *NeverType:
+		return false
+	case *BuiltinType:
+		switch tt.Name {
+		case "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize", "f32", "f64", "bool", "char", "void":
+			return false
+		}
+		return true
+	case *ArrayType:
+		return typeMayReachDarrayStorageRec(tt.Elem, elem, seen)
+	case *OptionalType:
+		return typeMayReachDarrayStorageRec(tt.Value, elem, seen)
+	case *ErrorUnionType:
+		return typeMayReachDarrayStorageRec(tt.Value, elem, seen)
+	case *AggregateStateType:
+		return typeMayReachDarrayStorageRec(tt.Base, elem, seen)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if typeMayReachDarrayStorageRec(field.Type, elem, seen) {
+				return true
+			}
+		}
+		return false
+	case *StructType:
+		if len(tt.TypeParams) > 0 {
+			return true
+		}
+		for _, field := range tt.Fields {
+			if typeMayReachDarrayStorageRec(field.Type, elem, seen) {
+				return true
+			}
+		}
+		return false
+	case *EnumType:
+		if tt.Packed {
+			return false
+		}
+		for _, field := range tt.Common {
+			if typeMayReachDarrayStorageRec(field.Type, elem, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if typeMayReachDarrayStorageRec(payload, elem, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	case *DArrayType:
+		if tt.Elem == nil {
+			return true
+		}
+		switch e := StripAggregateStateType(tt.Elem).(type) {
+		case *SViewType:
+			if elem == "sview" {
+				return true
+			}
+		case *BuiltinType:
+			if e.Name == elem {
+				return true
+			}
+		}
+		return typeMayReachDarrayStorageRec(tt.Elem, elem, seen)
+	case *DictType:
+		return typeMayReachDarrayStorageRec(tt.Key, elem, seen) || typeMayReachDarrayStorageRec(tt.Value, elem, seen)
+	case *SetType:
+		return typeMayReachDarrayStorageRec(tt.Elem, elem, seen)
+	}
+	return true
 }
