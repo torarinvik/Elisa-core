@@ -263,6 +263,12 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 		if a.returnBorrowRecordingActive() || a.returnBorrowEnvActive() {
 			return a.returnBorrowFlowForSlice(n, aliases, active, localBindings)
 		}
+		// A slice of an inline fixed array (`buf[0:2]` with `buf: u8[4]`) views the FRAME itself: the
+		// bytes live in the function's stack slot, not in an arena that could be adopted from the
+		// caller, so the summary must carry the local borrow even though it does not trace slices.
+		if a.sliceViewsFrameArray(n) {
+			return returnBorrowFlow{Local: true}
+		}
 	case *ast.AddrOfExpr:
 		if param := a.borrowedContainerParamRoot(n.Operand); param != nil {
 			return returnBorrowFlow{Params: map[int]bool{param.ParamIndex: true}}
@@ -2234,4 +2240,48 @@ func (a *Analyzer) returnBorrowLocalRebound(name string) bool {
 		a.returnBorrowReboundNames[fn] = rebound
 	}
 	return rebound[name]
+}
+
+// sliceViewsFrameArray reports a slice whose bytes are an inline fixed array held by value in a local
+// or by-value parameter of the current function (`buf[0:2]`, `s.arr[1:]`, `grid[2][0:4]`). Every step
+// from the root to the sliced array must be a by-value field or fixed-array index, so a reference, a
+// view, a container element or a global anywhere on the path keeps the slice out of this rule.
+func (a *Analyzer) sliceViewsFrameArray(n *ast.SliceExpr) bool {
+	if a == nil || n == nil || a.currentScope == nil {
+		return false
+	}
+	if _, ok := a.exprTypes[stripParenExpr(n.Object)].(*ArrayType); !ok {
+		return false
+	}
+	root := stripParenExpr(n.Object)
+	for {
+		switch step := root.(type) {
+		case *ast.FieldExpr:
+			if _, ok := a.exprTypes[stripParenExpr(step.Object)].(*StructType); !ok {
+				return false
+			}
+			root = stripParenExpr(step.Object)
+			continue
+		case *ast.IndexExpr:
+			if _, ok := a.exprTypes[stripParenExpr(step.Object)].(*ArrayType); !ok {
+				return false
+			}
+			root = stripParenExpr(step.Object)
+			continue
+		}
+		break
+	}
+	ident, ok := root.(*ast.Ident)
+	if !ok || ident == nil {
+		return false
+	}
+	sym, found := a.currentScope.Lookup(ident.Name)
+	if !found || sym == nil || (sym.Kind != SymbolLocal && sym.Kind != SymbolParam) {
+		return false
+	}
+	switch sym.Type.(type) {
+	case *ArrayType, *StructType:
+		return true
+	}
+	return false
 }

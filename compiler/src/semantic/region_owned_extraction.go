@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 )
 
@@ -110,6 +112,16 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 		}
 		return a.innerRegion(own, a.ownedStorageRootRegion(n.Object, seen))
 	case *ast.CallExpr:
+		if ident, isIdent := stripParenExpr(n.Func).(*ast.Ident); isIdent && ident != nil && len(n.Args) > 0 && isDictElementAccessHelper(ident.Name) {
+			// `d.get(k)` / `d.get_or_insert(k, v)` on a runtime-backed dict is rewritten to a call of the
+			// arena helper with the dict as its first argument. The result still points into the dict's
+			// own entry storage, so it shares the receiver's backing exactly like the method form.
+			receiver := stripParenExpr(n.Args[0])
+			if containerMethodYieldsElement(a.exprTypes[receiver], a.exprTypes[e]) {
+				return a.innerRegion(own, a.ownedStorageRootRegion(receiver, seen))
+			}
+			return own
+		}
 		field, ok := stripParenExpr(n.Func).(*ast.FieldExpr)
 		if !ok || field == nil || field.Object == nil {
 			return own
@@ -247,4 +259,11 @@ func (a *Analyzer) innermostTrackedRegion(state regionRefState) string {
 		}
 	}
 	return r
+}
+
+// isDictElementAccessHelper reports whether a call target names the runtime helper a dict element
+// lookup is rewritten to (`arena_dict_get`, its `_mut`/`_cstr_view` forms, `arena_dict_get_or_insert`),
+// possibly behind the `__ovl__` overload-resolution prefix.
+func isDictElementAccessHelper(name string) bool {
+	return strings.Contains(name, "arena_dict_get")
 }
