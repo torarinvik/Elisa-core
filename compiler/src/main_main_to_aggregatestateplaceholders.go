@@ -19,7 +19,10 @@ import (
 )
 
 func main() {
-	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+	stop := startCPUProfile()
+	code := runCLI(os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
 	switch n := typ.(type) {
