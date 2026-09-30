@@ -278,7 +278,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"%DynDict__cstr__Symbol = type { ptr, i64, i64, i64, ptr }",
 				"%Scope = type { ptr, %DynDict__cstr__Symbol, i64 }",
 				"%ParserState = type { %DynArrayView, i64, ptr }",
-				"define %DynArrayView @make_tokens()",
+				"define %DynArrayView @make_tokens(ptr",
 				"define i32 @frontend_scope_stress(ptr",
 				"define i64 @frontend_region_token(i64",
 				"define i32 @frontend_smoke(ptr",

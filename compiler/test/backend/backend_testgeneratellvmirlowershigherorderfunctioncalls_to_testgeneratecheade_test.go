@@ -172,7 +172,7 @@ func TestGenerateLLVMIRLowersBuiltinStringAndSViewSyntax(t *testing.T) {
 def first_code(text: u8[4]) -> i64:
 	return text[1].i64()
 
-def slice_text(text: u8[4]) -> view[u8]:
+def slice_text(text: u8[4]&) -> view[u8]:
     return text[1:3]
 
 def view_char(text: sview[0, 4]) -> char:
@@ -189,7 +189,7 @@ def view_char(text: sview[0, 4]) -> char:
 		"define i64 @first_char([4 x i8]",
 		"define i64 @first_code([4 x i8]",
 		"zext i8",
-		"define %DynArrayView @slice_text([4 x i8]",
+		"define %DynArrayView @slice_text(ptr",
 		"insertvalue %DynArrayView",
 		"define i64 @view_char(%StringView",
 		"declare i64 @ctx_string_view_index(%StringView, i64)",

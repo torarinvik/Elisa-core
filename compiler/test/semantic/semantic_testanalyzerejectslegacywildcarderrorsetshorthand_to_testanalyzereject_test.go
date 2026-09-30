@@ -241,7 +241,7 @@ func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
-	src := `def middle(values: i32[4]) -> view[i32]:
+	src := `def middle(values: i32[4]&) -> view[i32]:
 	part: view[i32] = values[1:3]
 	return part
 `

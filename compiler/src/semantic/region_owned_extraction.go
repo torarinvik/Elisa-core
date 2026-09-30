@@ -22,7 +22,7 @@ func (a *Analyzer) ownedExtractionRegion(expr ast.Expr) string {
 	if ref, ok := t.(*RefType); ok && ref != nil {
 		t = ref.Elem
 	}
-	if t == nil || !a.typeMayOwnArenaStorage(t, map[string]bool{}) {
+	if t == nil || (!a.typeMayOwnArenaStorage(t, map[string]bool{}) && !a.isDArrayByteViewCall(expr)) {
 		return ""
 	}
 	return a.ownedStorageRootRegion(expr, map[ast.Expr]bool{})
@@ -125,6 +125,11 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 		field, ok := stripParenExpr(n.Func).(*ast.FieldExpr)
 		if !ok || field == nil || field.Object == nil {
 			return own
+		}
+		if a.isDArrayByteViewCall(n) {
+			// A byte view of a darray/dstr borrows the receiver's own backing (`v.as_sview()` where
+			// `v` was read out of a dict): the view lives exactly as long as that storage.
+			return a.innerRegion(own, a.ownedStorageRootRegion(field.Object, seen))
 		}
 		if !containerMethodYieldsElement(a.exprTypes[stripParenExpr(field.Object)], a.exprTypes[e]) {
 			return own
@@ -266,4 +271,29 @@ func (a *Analyzer) innermostTrackedRegion(state regionRefState) string {
 // possibly behind the `__ovl__` overload-resolution prefix.
 func isDictElementAccessHelper(name string) bool {
 	return strings.Contains(name, "arena_dict_get")
+}
+
+func (a *Analyzer) derefContainerType(t Type) Type {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		return ref.Elem
+	}
+	return t
+}
+
+// isDArrayByteViewCall reports `xs.as_sview()` / `xs.as_cstr()` style calls on a darray receiver.
+func (a *Analyzer) isDArrayByteViewCall(expr ast.Expr) bool {
+	call, ok := stripParenExpr(expr).(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	field, ok := stripParenExpr(call.Func).(*ast.FieldExpr)
+	if !ok || field == nil || field.Object == nil {
+		return false
+	}
+	switch field.Field {
+	case "as_sview", "as_cstr", "sview", "cstr":
+		_, isDArray := a.derefContainerType(a.exprTypes[stripParenExpr(field.Object)]).(*DArrayType)
+		return isDArray
+	}
+	return false
 }

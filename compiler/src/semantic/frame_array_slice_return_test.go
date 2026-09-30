@@ -73,3 +73,47 @@ def interp(out: mutable darray[darray[u8]]&) -> void:
 		t.Fatalf("expected escape error, got: %v", result.Errors())
 	}
 }
+
+// A byte view of a dict-owned dstr shares the dict's backing; storing it into a caller container
+// dangles once the local dict's region is freed.
+func TestDictGetElementByteViewStoreRejected(t *testing.T) {
+	src := `def arena_dict_get[T](m: dict[i32, T]&, key: i32) -> T&?:
+    return null
+
+def f(out: mutable darray[sview]&) -> void:
+    can Memory.Allocate:
+        d: mutable dict[i32, dstr] = {}
+        d.put(1, [65, 66])
+        v: dstr& = get d.get(1) else return
+        out.push(v.as_sview())
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "dict_get_byte_view_store.elisa", src)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "longer-lived region") {
+		t.Fatalf("expected longer-lived region escape error, got: %v", result.Errors())
+	}
+}
+
+// A returned closure copies its captured container headers, but the function has no hidden region
+// parameter to thread through a function-typed result, so the captured backing is freed at return.
+func TestReturnedClosureCapturingLocalContainerRejected(t *testing.T) {
+	src := `def mk() -> fn() -> i32:
+    can Memory.Allocate:
+        xs: mutable darray[u8] = [65, 66]
+        return fn () => xs[0].i32()
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "returned_closure_local.elisa", src)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "local region") {
+		t.Fatalf("expected local region escape error, got: %v", result.Errors())
+	}
+}
+
+func TestReturnedClosureCapturingScalarAllowed(t *testing.T) {
+	src := `def mk(n: i32) -> fn() -> i32:
+    k: i32 = n + 1
+    return fn () => k
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "returned_closure_scalar.elisa", src)
+	if all := strings.Join(result.Errors(), "\n"); all != "" {
+		t.Fatalf("unexpected errors:\n%s", all)
+	}
+}

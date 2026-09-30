@@ -82,8 +82,9 @@ def scope_contains(scope: Scope&, name: cstr) -> bool:
         current <- current.parent
     return false
 
-def make_tokens() -> view[Token]:
-    values: Token[2] = [Token{kind: TokenKind.Def, span: SourceSpan{line: 1, column: 1}, text: "def"}, Token{kind: TokenKind.Ident, span: SourceSpan{line: 1, column: 5}, text: "parse_file"}]
+def make_tokens(values: mutable Token[2]&) -> view[Token]:
+    values[0] <- Token{kind: TokenKind.Def, span: SourceSpan{line: 1, column: 1}, text: "def"}
+    values[1] <- Token{kind: TokenKind.Ident, span: SourceSpan{line: 1, column: 5}, text: "parse_file"}
     return values[0:2]
 
 def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[RuntimeError]:
@@ -119,6 +120,7 @@ def frontend_region_token(line: int, column: int) -> int:
     return out
 
 def frontend_smoke(name: cstr) -> bool error[RuntimeError]:
-    tokens: view[Token] = make_tokens()
+    token_storage: mutable Token[2] = [Token{kind: TokenKind.Def, span: SourceSpan{line: 0, column: 0}, text: ""}, Token{kind: TokenKind.Def, span: SourceSpan{line: 0, column: 0}, text: ""}]
+    tokens: view[Token] = make_tokens(&token_storage)
     region_column: int = frontend_region_token(2, 7)
     return (try frontend_scope_stress(tokens, name)) and region_column == 7

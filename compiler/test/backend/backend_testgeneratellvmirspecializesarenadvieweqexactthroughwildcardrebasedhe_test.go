@@ -563,7 +563,7 @@ func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testi
 	data: mutable void&?
 	len: mutable usize
 
-def slice_owned(values: i32[4]) -> view[i32]:
+def slice_owned(values: i32[4]&) -> view[i32]:
 	return values[1:3]
 
 def head_ref(values: i32[4]&) -> i32:
@@ -577,7 +577,7 @@ def head_ref(values: i32[4]&) -> i32:
 
 	checks := []string{
 		"%DynArrayView = type { ptr, i64 }",
-		"define %DynArrayView @slice_owned([4 x i32]",
+		"define %DynArrayView @slice_owned(ptr",
 		"define i32 @head_ref(ptr",
 		"getelementptr [4 x i32], ptr",
 		"insertvalue %DynArrayView",

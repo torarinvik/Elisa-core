@@ -720,7 +720,12 @@ func adoptedEscapeNamesForBody(body []ast.Stmt, roots ...string) map[string]bool
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
 				// A field/scope callee is a receiver, not a copied value. Its
-				// ordinary arguments are still escape candidates.
+				// ordinary arguments are still escape candidates. A method that may
+				// hand back a view of its receiver (`d.as_sview()`) makes the
+				// receiver itself an escape candidate too.
+				if field, isField := call.Func.(*ast.FieldExpr); isField && field != nil && (!adoptedEscapeReadOnlyMethods[field.Field] || adoptedEscapeElementMethods[field.Field]) {
+					collectExpr(reflect.ValueOf(field.Object))
+				}
 				for _, arg := range call.Args {
 					collectExpr(reflect.ValueOf(arg))
 				}
@@ -2146,6 +2151,13 @@ var adoptedEscapeReadOnlyMethods = map[string]bool{
 	"first": true, "last": true, "starts_with": true, "ends_with": true, "index_of": true,
 	"find": true, "has": true, "has_key": true, "contains_key": true, "eq": true, "equals": true,
 	"compare": true, "cmp": true, "hash": true, "reserve": true, "clear": true, "pop": true,
+}
+
+// adoptedEscapeElementMethods are the read-only methods whose result is an element that shares
+// the receiver's backing storage (`xs.pop()` of a darray of darrays): a returned result keeps the
+// receiver in the caller arena.
+var adoptedEscapeElementMethods = map[string]bool{
+	"get": true, "at": true, "first": true, "last": true, "pop": true, "find": true,
 }
 
 // adoptedEscapeScalarTypes are parameter types that cannot own or reference storage, so a

@@ -816,6 +816,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 					} else {
 						regionPoly = true
 					}
+					// A returned closure captures its locals' container headers by value, but the
+					// hidden region parameter is never threaded through a function-typed result:
+					// the captured backing is freed at return no matter what the caller supplies.
+					if _, isFn := valueType.(*FuncType); isFn {
+						regionPoly = false
+					}
 				}
 				// docs/75: in a region-polymorphic function the synthesized `__auto_*` region is
 				// threaded from the caller (the hidden `__region_auto` Arena& param), so the result
