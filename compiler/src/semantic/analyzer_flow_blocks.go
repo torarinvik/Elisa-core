@@ -43,6 +43,18 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 }
 
 func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scope) {
+	// The prepass only acts on VarDeclStmt entries; a block without one has nothing to do, so skip
+	// building the whole-scope-chain type map (a map walk per block).
+	hasVarDecl := false
+	for _, stmt := range stmts {
+		if decl, ok := stmt.(*ast.VarDeclStmt); ok && decl != nil {
+			hasVarDecl = true
+			break
+		}
+	}
+	if !hasVarDecl {
+		return
+	}
 	known := inferDArrayBuilderKnownTypes(scope)
 	// This prepass resolves explicit local types before the ordinary statement walk.
 	// Give it a private lexical scope and publish each preceding local there so a

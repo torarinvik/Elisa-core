@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"maps"
+
 	"elisacore/src/ast"
 )
 
@@ -35,9 +37,9 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 
 	// Snapshot the analyzer's live type map, not the Result's view of it: Result.ExprTypes
 	// aliases a.exprTypes, and the re-analysis writes through the analyzer.
-	saved := make(map[ast.Expr]Type, len(a.exprTypes))
-	for expr, typ := range a.exprTypes {
-		saved[expr] = typ
+	saved := maps.Clone(a.exprTypes)
+	if saved == nil {
+		saved = map[ast.Expr]Type{}
 	}
 	savedDiagnostics := len(a.diagnostics)
 
@@ -45,7 +47,9 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 
 	overlay := map[ast.Expr]Type{}
 	for expr, typ := range a.exprTypes {
-		if previous, ok := saved[expr]; !ok || !SameType(previous, typ) {
+		// Pointer-identical types are trivially the same; skip the canonical-key computation for
+		// the (vast majority of) entries the re-analysis left untouched.
+		if previous, ok := saved[expr]; !ok || (previous != typ && !SameType(previous, typ)) {
 			overlay[expr] = typ
 		}
 	}

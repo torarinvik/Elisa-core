@@ -23,6 +23,11 @@ func populateBasicFlowInstrs(cfg *CFG) {
 // information, so spelling alone is not a sound identity check.
 func (a *Analyzer) populateAnalyzerFlowInstrs(cfg *CFG) {
 	populateBasicFlowInstrs(cfg)
+	// Only freeze facts are filtered by the allowed set, so scanning every recorded expression type
+	// (the whole program's, once per function) is needed only when this CFG has a freeze fact.
+	if !cfgHasFreezeFlowInstr(cfg) {
+		return
+	}
 	builtinFreezePositions := make(map[lexer.Pos]struct{})
 	if a != nil {
 		for expr := range a.exprTypes {
@@ -35,6 +40,24 @@ func (a *Analyzer) populateAnalyzerFlowInstrs(cfg *CFG) {
 	filterFreezeFlowInstrs(cfg, builtinFreezePositions)
 }
 
+func isFreezeFlowInstr(instr FlowInstr) bool {
+	return instr.Note == "freeze produces frozen store" || instr.Note == "freeze rebases store provenance"
+}
+
+func cfgHasFreezeFlowInstr(cfg *CFG) bool {
+	if cfg == nil {
+		return false
+	}
+	for blockIndex := range cfg.Blocks {
+		for _, instr := range cfg.Blocks[blockIndex].Instrs {
+			if isFreezeFlowInstr(instr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func filterFreezeFlowInstrs(cfg *CFG, allowed map[lexer.Pos]struct{}) {
 	if cfg == nil {
 		return
@@ -43,7 +66,7 @@ func filterFreezeFlowInstrs(cfg *CFG, allowed map[lexer.Pos]struct{}) {
 		block := &cfg.Blocks[blockIndex]
 		filtered := block.Instrs[:0]
 		for _, instr := range block.Instrs {
-			isFreezeFact := instr.Note == "freeze produces frozen store" || instr.Note == "freeze rebases store provenance"
+			isFreezeFact := isFreezeFlowInstr(instr)
 			if isFreezeFact {
 				if _, ok := allowed[instr.Position]; !ok {
 					continue
