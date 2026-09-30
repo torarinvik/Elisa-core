@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // fillMayAdopt reports whether a function may put data allocated in a caller's arena into a
@@ -59,7 +60,11 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			continue
 		}
 		result[decl] = false
-		if decl.AmbientGrownContainerRegion != "" {
+		// A void grower is a seed only if its body can put freshly allocated data (data in the
+		// adopted arena) into its container: a construction, an allocating call, or a call to a
+		// region-polymorphic callee. One that only moves argument-derived values around adopts
+		// nothing, and its callers' fills stay tracked. Calls into other seeds close over callers.
+		if decl.AmbientGrownContainerRegion != "" && a.fillMayAdoptFreshShapes(decl, byName) {
 			seed(decl)
 		}
 		valueParams := map[string]bool{}
@@ -407,4 +412,76 @@ func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]boo
 			fillMayAdoptWalkSeen(iter.Value(), visit, seen)
 		}
 	}
+}
+
+// fillMayAdoptNonAllocatingMethods are builtin container methods that never allocate a value of
+// their own: they read, or move their arguments into the receiver.
+var fillMayAdoptNonAllocatingMethods = map[string]bool{
+	"push": true, "pop": true, "count": true, "len": true, "clear": true, "is_empty": true, "get": true,
+	"contains": true, "insert": true, "remove": true, "reserve": true, "as_sview": true, "slice": true,
+	"starts_with": true, "ends_with": true, "find": true, "index_of": true, "first": true, "last": true,
+	"truncate": true, "swap": true, "extend": true, "append": true,
+}
+
+// fillMayAdoptFreshShapes reports whether the body of a void grower can construct data in the
+// arena it adopts: an aggregate or list construction, a lambda, a `+` (string concatenation), an
+// f-string, a call to a builtin or constructor that allocates, or a call whose callee may be
+// region-polymorphic (the threaded region is the adopted one). It mirrors noteAmbientFillFresh's
+// two direct sources; the third (a parameter passed to a callee not known to fill only from its
+// arguments) is a call into another seed, which the caller closure covers.
+func (a *Analyzer) fillMayAdoptFreshShapes(decl *ast.FuncDecl, byName map[string][]*ast.FuncDecl) bool {
+	fresh := false
+	polyCallee := func(name string) bool {
+		for _, callee := range byName[name] {
+			sym := a.funcDeclSymbols[callee]
+			if sym == nil {
+				return true
+			}
+			fnType, ok := sym.Type.(*FuncType)
+			if !ok || fnType == nil || fnType.RegionPolymorphic {
+				return true
+			}
+		}
+		return false
+	}
+	fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(v any) {
+		if fresh {
+			return
+		}
+		switch n := v.(type) {
+		case *ast.StructLitExpr, *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.LambdaExpr,
+			*ast.TupleExpr, *ast.RecordUpdateExpr, *ast.AllocExpr, *ast.QueryExpr, *ast.FoldExpr,
+			*ast.MachineFromExpr, *ast.EmitExpr, *ast.FuncDecl:
+			fresh = true
+		case *ast.BinaryExpr:
+			if n.Op == lexer.TOKEN_PLUS || n.LoweredCall != nil {
+				fresh = true
+			}
+		case *ast.CallExpr:
+			target := n.Func
+			if special, ok := target.(*ast.SpecializeExpr); ok && special != nil {
+				target = special.Operand
+			}
+			switch callee := target.(type) {
+			case *ast.Ident:
+				if fillMayAdoptIntrinsics[callee.Name] {
+					return
+				}
+				if n.FStringLowering || len(byName[callee.Name]) == 0 || polyCallee(callee.Name) {
+					fresh = true
+				}
+			case *ast.FieldExpr:
+				if len(byName[callee.Field]) == 0 {
+					if !fillMayAdoptNonAllocatingMethods[callee.Field] {
+						fresh = true
+					}
+				} else if polyCallee(callee.Field) {
+					fresh = true
+				}
+			default:
+				fresh = true
+			}
+		}
+	})
+	return fresh
 }

@@ -61,6 +61,9 @@ type localContainerElementScan struct {
 	// that can only fill it with data reachable from its other arguments (see
 	// callArgFillsWritableParam); the analysis merges those arguments' provenance at the call.
 	argFillable func(call *ast.CallExpr, index int) bool
+	// argByValue reports whether a call's argument binds a by-value (non-reference, non-view)
+	// parameter of a directly resolved callee.
+	argByValue func(call *ast.CallExpr, index int) bool
 }
 
 type localContainerElementRead struct {
@@ -81,6 +84,7 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 	scan := &localContainerElementScan{
 		argReadOnly:       a.callArgBindsReadOnlyParam,
 		argFillable:       a.callArgFillsWritableParam,
+		argByValue:        a.callArgBindsByValueParam,
 		ineligible:        map[string]bool{},
 		pushedIn:          map[ast.Node]map[string]bool{},
 		declLoops:         map[string][]ast.Node{},
@@ -155,8 +159,15 @@ func statementContainerCall(stmt *ast.ExprStmt) (*ast.FieldExpr, *ast.Ident, boo
 }
 
 func (s *localContainerElementScan) acceptRead(expr ast.Expr) {
-	if index, ok := expr.(*ast.IndexExpr); ok {
-		s.acceptedReads[index] = true
+	switch n := expr.(type) {
+	case *ast.IndexExpr:
+		s.acceptedReads[n] = true
+	case *ast.ParenExpr:
+		s.acceptRead(n.Inner)
+	case *ast.TernaryExpr:
+		// The value's provenance is the merge of its branches' (regionRefStateForExpr).
+		s.acceptRead(n.Value)
+		s.acceptRead(n.Alt)
 	}
 }
 
@@ -171,6 +182,15 @@ func (s *localContainerElementScan) markChildren(node ast.Node) {
 			}
 		}
 	case *ast.CallExpr:
+		if len(n.ArgNames) == 0 && !n.HasArgForward && s.argByValue != nil {
+			// `f(xs[i])` into a by-value parameter hands the callee a copy of the element; the copy
+			// carries the element's tracked provenance exactly as a struct-literal field does.
+			for index, arg := range n.Args {
+				if _, isIndex := arg.(*ast.IndexExpr); isIndex && s.argByValue(n, index) {
+					s.acceptRead(arg)
+				}
+			}
+		}
 		if len(n.Args) == 1 && len(n.ArgNames) == 0 {
 			if callee, ok := n.Func.(*ast.FieldExpr); ok && callee.Field == "push" {
 				// The pushed value is copied into the target container (statement or
@@ -507,6 +527,18 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 		// Only a parameter source is modelled: its elements are no shorter-lived than its region,
 		// as for a by-value read `src[i]`. A local source's elements may be shorter-lived than the
 		// container that holds them.
+		if comp, isComp := stripParenExpr(arg).(*ast.ListComprehensionExpr); isComp {
+			// `xs.extend([f(x) for x in src])`: the comprehension's elements are fresh by-value
+			// copies whose provenance was recorded from its element expression.
+			state, recorded := a.comprehensionElementStates[comp]
+			if !recorded || comp.Owner != nil || comp.Parallel {
+				delete(a.currentElementStates, sym)
+				return
+			}
+			merged, _ := mergeRegionRefStates(existing, state)
+			a.currentElementStates[sym] = merged
+			return
+		}
 		source, isIdent := stripParenExpr(arg).(*ast.Ident)
 		if !isIdent {
 			delete(a.currentElementStates, sym)
@@ -605,6 +637,28 @@ func (a *Analyzer) callArgBindsReadOnlyParam(call *ast.CallExpr, index int) bool
 	return true
 }
 
+// callArgBindsByValueParam reports whether argument index of a direct call binds a by-value
+// parameter: not `mutable`, not a reference, not a view of the argument's storage.
+func (a *Analyzer) callArgBindsByValueParam(call *ast.CallExpr, index int) bool {
+	decl, ok := a.resolveReadOnlyScanCallee(call)
+	if !ok || decl == nil || index >= len(decl.Params) || decl.Params[index].Mutable {
+		return false
+	}
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || fnType.Variadic || index >= len(fnType.Params) {
+		return false
+	}
+	switch fnType.Params[index].(type) {
+	case *RefType, *ViewType:
+		return false
+	}
+	return true
+}
+
 // callArgFillsWritableParam reports whether argument index of a direct call binds a writable
 // parameter of a callee that cannot allocate into the caller's arenas: not region-polymorphic,
 // not the void grower whose ambient region is this parameter's container, no explicit region
@@ -677,11 +731,12 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 			if other == index {
 				continue
 			}
-			// A `darray[sview]` holds views, never bytes a `darray[sview]` could view: what it can hand
+			// A `darray[sview]`, or a container of non-byte scalars (`darray[u32]`), holds no bytes an
+			// sview could view: what it can hand
 			// the filled container is its ELEMENTS (merged below), not its own storage.
 			ownStorageIsOnlyElements := false
 			if id, isIdent := stripAddrAndParens(otherArg).(*ast.Ident); isIdent && isSviewDarrayType(sym.Type) {
-				if otherSym, found := a.currentScope.Lookup(id.Name); found && otherSym != nil && isSviewDarrayType(otherSym.Type) {
+				if otherSym, found := a.currentScope.Lookup(id.Name); found && otherSym != nil && (isSviewDarrayType(otherSym.Type) || isNonByteScalarContainerType(otherSym.Type)) {
 					ownStorageIsOnlyElements = true
 				}
 			}
@@ -786,4 +841,52 @@ func isSviewDarrayType(t Type) bool {
 	}
 	_, isView := darray.Elem.(*SViewType)
 	return isView
+}
+
+// isNonByteScalarContainerType reports a darray or fixed array (through a reference) whose
+// element type holds no byte anywhere (no u8/i8 scalar, array or nested darray of them): the
+// container's own storage holds no bytes a `darray[sview]` element could view, so what a callee
+// can hand a filled `darray[sview]` from it is its ELEMENTS, never its storage. Anything opaque
+// (a type parameter, an unresolved type) is not exempt.
+func isNonByteScalarContainerType(t Type) bool {
+	if ref, ok := t.(*RefType); ok && ref != nil {
+		t = ref.Elem
+	}
+	var elem Type
+	switch c := t.(type) {
+	case *DArrayType:
+		if c == nil {
+			return false
+		}
+		elem = c.Elem
+	case *ArrayType:
+		if c == nil {
+			return false
+		}
+		elem = c.Elem
+	default:
+		return false
+	}
+	if elem == nil {
+		return false
+	}
+	components, opaque := []Type{}, false
+	collectReturnBorrowComponents(StripAggregateStateType(elem), false, &components, &opaque, map[Type]bool{})
+	if opaque {
+		return false
+	}
+	for _, component := range components {
+		switch c := component.(type) {
+		case *BuiltinType:
+			switch c.Name {
+			case "u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64", "bool":
+			default:
+				return false
+			}
+		case *CStrType:
+			return false
+		case *OptionalType, *ErrorUnionType:
+		}
+	}
+	return true
 }

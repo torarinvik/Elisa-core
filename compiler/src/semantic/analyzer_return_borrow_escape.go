@@ -183,7 +183,71 @@ func (a *Analyzer) typeMayHoldFrameBorrow(t Type, seen map[Type]bool) bool {
 
 func (a *Analyzer) returnBorrowFlowForExpr(expr ast.Expr, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
 	flow := a.returnBorrowFlowForExprInner(expr, aliases, active, localBindings)
+	if !flow.empty() && expr != nil {
+		// A value whose type holds no reference, view, closure or generic part cannot carry a
+		// borrow of anything: `ValueType{kind, bits}` computed from reference arguments is a copy.
+		if t, ok := a.exprTypes[expr]; ok && a.typeIsBorrowFree(t, map[Type]bool{}) {
+			return returnBorrowFlow{}
+		}
+	}
 	return flow
+}
+
+// typeIsBorrowFree is a positive whitelist: scalars, extern handles and by-value aggregates or
+// containers built only from them. Anything else (references, views, strings, closures, type
+// parameters, generics, unresolved types) may carry a borrow.
+func (a *Analyzer) typeIsBorrowFree(t Type, seen map[Type]bool) bool {
+	if t == nil {
+		return false
+	}
+	if seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *BuiltinType:
+		return tt.Name != "void" && tt.Name != "any"
+	case *BitIntType, *ConstEnumType, *BitGroupType, *OpaqueType:
+		return true
+	case *ArrayType:
+		return a.typeIsBorrowFree(tt.Elem, seen)
+	case *DArrayType:
+		return a.typeIsBorrowFree(tt.Elem, seen)
+	case *OptionalType:
+		return a.typeIsBorrowFree(tt.Value, seen)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if !a.typeIsBorrowFree(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *StructType:
+		if len(tt.TypeParams) > 0 {
+			return false
+		}
+		for _, field := range tt.Fields {
+			if field.IsTail || !a.typeIsBorrowFree(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *EnumType:
+		for _, field := range tt.Common {
+			if !a.typeIsBorrowFree(field.Type, seen) {
+				return false
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if !a.typeIsBorrowFree(payload, seen) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
@@ -1140,6 +1204,35 @@ func (a *Analyzer) defineReturnBorrowConditionBindings(cond ast.Expr, aliases ma
 			a.defineReturnBorrowConditionBindings(n.Right, aliases, active, localBindings)
 		case lexer.TOKEN_IS:
 			a.defineReturnBorrowPatternTestBindings(n, aliases, active, localBindings)
+		case lexer.TOKEN_OR:
+			// `x is P(b) or y is Q(b)`: the shared binder is the payload of whichever
+			// alternative matched, so it holds the union of the alternatives' flows.
+			var tests []*ast.BinaryExpr
+			collectOrPatternTests(n, &tests)
+			merged := map[string]returnBorrowFlow{}
+			nodes := map[string]ast.Node{}
+			var order []string
+			for _, test := range tests {
+				_, subject, pattern, ok := unwrapDirectConditionPattern(test)
+				if !ok || pattern == nil {
+					continue
+				}
+				subjectFlow := a.returnBorrowFlowForExpr(subject, aliases, active, localBindings)
+				for _, binder := range returnBorrowMatchPatternBinders(pattern, nil) {
+					flow := subjectFlow
+					if binder.view {
+						flow = mergeReturnBorrowFlow(flow, a.returnBorrowAddressFlow(subject, aliases, active, localBindings))
+					}
+					if _, seen := merged[binder.name]; !seen {
+						order = append(order, binder.name)
+						nodes[binder.name] = n
+					}
+					merged[binder.name] = mergeReturnBorrowFlow(merged[binder.name], flow)
+				}
+			}
+			for _, name := range order {
+				a.defineReturnBorrowBinding(aliases, name, nodes[name], nil, merged[name])
+			}
 		}
 	case *ast.OptionalBindExpr:
 		if n.Name == "" || n.Name == "_" {
@@ -2058,6 +2151,9 @@ func (a *Analyzer) collectReturnBorrowTargets(t Type, out *[]Type, opaque *bool,
 	case *SViewType, *CStrType:
 		*out = append(*out, &BuiltinType{Name: "u8"}, &BuiltinType{Name: "i8"})
 	case *BuiltinType, *BitIntType, *ConstEnumType, *BitGroupType:
+	case *OpaqueType:
+		// An `extern` handle type (LLVMValueRef, ...) is a foreign pointer the language cannot
+		// dereference: it holds no Elisa reference or view, so it targets nothing.
 	case *ArrayType:
 		a.collectReturnBorrowTargets(tt.Elem, out, opaque, seen)
 	case *DArrayType:
@@ -2113,7 +2209,7 @@ func collectReturnBorrowComponents(t Type, inlineOnly bool, out *[]Type, opaque 
 	seen[t] = true
 	*out = append(*out, t)
 	switch tt := t.(type) {
-	case *RefType, *ViewType, *SViewType, *CStrType, *BuiltinType, *BitIntType, *ConstEnumType, *BitGroupType:
+	case *RefType, *ViewType, *SViewType, *CStrType, *BuiltinType, *BitIntType, *ConstEnumType, *BitGroupType, *OpaqueType:
 	case *ArrayType:
 		collectReturnBorrowComponents(tt.Elem, inlineOnly, out, opaque, seen)
 	case *DArrayType:
@@ -2284,4 +2380,20 @@ func (a *Analyzer) sliceViewsFrameArray(n *ast.SliceExpr) bool {
 		return true
 	}
 	return false
+}
+
+// collectOrPatternTests gathers the `is` tests of an or-chain of pattern conditions.
+func collectOrPatternTests(expr ast.Expr, out *[]*ast.BinaryExpr) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		collectOrPatternTests(n.Inner, out)
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_OR:
+			collectOrPatternTests(n.Left, out)
+			collectOrPatternTests(n.Right, out)
+		case lexer.TOKEN_IS:
+			*out = append(*out, n)
+		}
+	}
 }

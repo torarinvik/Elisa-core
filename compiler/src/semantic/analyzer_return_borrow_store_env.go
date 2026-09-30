@@ -584,6 +584,10 @@ func returnBorrowMarkConditionBinders(cond ast.Expr, modeled map[ast.Node]bool) 
 		case lexer.TOKEN_AND:
 			returnBorrowMarkConditionBinders(n.Left, modeled)
 			returnBorrowMarkConditionBinders(n.Right, modeled)
+		case lexer.TOKEN_OR:
+			// The analysis defines the alternatives' shared binders with the or-expression as
+			// their node; the walk defines them under that same node.
+			modeled[n] = true
 		case lexer.TOKEN_IS:
 			if _, _, pattern, ok := unwrapDirectConditionPattern(n); ok && pattern != nil {
 				for _, binder := range returnBorrowMatchPatternBinders(pattern, nil) {
