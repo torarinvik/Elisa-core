@@ -126,8 +126,12 @@ func storageViewScalarBindingType(t Type) bool {
 }
 
 func (a *Analyzer) recordStorageViewAssignment(target ast.Expr, value ast.Expr) {
-	ident, ok := target.(*ast.Ident)
-	if !ok || a.currentScope == nil {
+	if a.currentScope == nil {
+		return
+	}
+	ident, ok := stripOptimizationParens(target).(*ast.Ident)
+	if !ok {
+		a.recordStorageViewPlaceStore(target, value)
 		return
 	}
 	sym, ok := a.currentScope.Lookup(ident.Name)
@@ -135,6 +139,49 @@ func (a *Analyzer) recordStorageViewAssignment(target ast.Expr, value ast.Expr) 
 		return
 	}
 	a.recordStorageViewBinding(sym, value)
+}
+
+// recordStorageViewPlaceStore: a view stored into a field or element of a local
+// (`h.s <- buf.as_sview()`, `vs[0] <- view`) makes the holder's root carry the
+// view's backing dependency, so a later relocation of the backing turns a read
+// through the holder (or through a copy of it) into a stale-view error. The
+// dependency is merged, never replaced: other fields may still hold older views.
+func (a *Analyzer) recordStorageViewPlaceStore(target ast.Expr, value ast.Expr) {
+	root := storageViewPlaceRoot(target)
+	if root == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(root.Name)
+	if !ok || sym == nil || storageViewScalarBindingType(sym.Type) {
+		return
+	}
+	dep, ok := a.storageViewDependencyForExpr(value)
+	if !ok || len(dep.Sources) == 0 {
+		return
+	}
+	if a.currentStorageViewDeps == nil {
+		a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{}
+	}
+	if previous, exists := a.currentStorageViewDeps[sym]; exists {
+		dep, _ = mergeStorageViewDependencies(previous, dep)
+	}
+	a.currentStorageViewDeps[sym] = dep
+}
+
+func storageViewPlaceRoot(place ast.Expr) *ast.Ident {
+	for place != nil {
+		switch p := stripOptimizationParens(place).(type) {
+		case *ast.FieldExpr:
+			place = p.Object
+		case *ast.IndexExpr:
+			place = p.Object
+		case *ast.Ident:
+			return p
+		default:
+			return nil
+		}
+	}
+	return nil
 }
 
 func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDependencyState, bool) {
@@ -148,6 +195,8 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 		return a.storageViewDependencyForExpr(n.Operand)
 	case *ast.CastExpr:
 		return a.storageViewDependencyForExpr(n.Operand)
+	case *ast.CanExpr:
+		return a.storageViewDependencyForExpr(n.Expr)
 	case *ast.AddrOfExpr:
 		// A reference taken INTO a relocatable container (a darray) dangles if the
 		// container is later grown/relocated (deep audit #6). Record a dependency

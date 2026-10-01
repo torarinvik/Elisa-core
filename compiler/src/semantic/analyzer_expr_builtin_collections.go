@@ -446,6 +446,10 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	}
 	a.exprTypes[expr] = resultType
 	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray push"))
+	if len(expr.Args) == 1 {
+		// The pushed element may itself be a view: the container now holds it.
+		a.recordStorageViewPlaceStore(fieldExpr.Object, expr.Args[0])
+	}
 	a.invalidateIndexBoundsForContainer(fieldExpr.Object)
 	return resultType, true
 }

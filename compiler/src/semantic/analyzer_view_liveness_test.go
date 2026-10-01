@@ -133,3 +133,39 @@ def f() -> i64:
 		})
 	}
 }
+
+// A view stored into a field or element of a local, pushed into a darray, or produced by a
+// `.cast[...] can ...` stays tied to its backing: growing the backing over a relocating
+// (chained) arena invalidates reads through the holder and through copies of the holder.
+func TestAnalyzeViewStoredIntoHolderInvalidatedBySourcePush(t *testing.T) {
+	prefix := `struct Holder:
+    s: mutable sview
+    n: i64
+
+def build(owner: Arena) -> i64 can[Unsafe.PointerCast]:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        buf: mutable darray[u8] = []
+        buf.push(65.u8())
+        h: mutable Holder = Holder{s: "", n: 0}
+        vs: mutable darray[sview] = [""]
+        ws: mutable darray[sview] = []
+        c: mutable u8& = &buf[0]
+`
+	cases := map[string][2]string{
+		"field_store": {"        h.s <- buf.as_sview()\n        buf.push(1.u8())\n        return h.s[0].i64()\n", `"h" cannot be used`},
+		"index_store": {"        vs[0] <- buf.as_sview()\n        buf.push(1.u8())\n        return vs[0][0].i64()\n", `"vs" cannot be used`},
+		"cast_rebind": {"        c <- (&buf[0]).cast[u8&] can Unsafe.PointerCast\n        buf.push(1.u8())\n        return c.i64()\n", `"c" cannot be used`},
+		"holder_copy": {"        ws.push(buf.as_sview())\n        xs: darray[sview] = ws\n        buf.push(1.u8())\n        return xs[0][0].i64()\n", `"xs" cannot be used`},
+		"struct_copy": {"        h.s <- buf.as_sview()\n        g: Holder = h\n        buf.push(1.u8())\n        return g.s[0].i64()\n", `"g" cannot be used`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "holder_view_"+name+".elisa", prefix+c[0])
+			all := strings.Join(result.Errors(), "\n")
+			if !strings.Contains(all, c[1]+": storage dependency facts were invalidated by darray push of buf") {
+				t.Fatalf("expected stale-view error %s, got:\n%s", c[1], all)
+			}
+		})
+	}
+}
