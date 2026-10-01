@@ -248,7 +248,7 @@ func (a *Analyzer) reportNonExhaustiveTupleMatchExpr(pos lexer.Pos, hasWildcard 
 	a.errorf(pos, "non-exhaustive tuple match expression; add a final _ arm")
 }
 func (a *Analyzer) bindPackedVariantViewAliasForBody(pattern ast.MatchPattern, enumType *EnumType, valueExpr ast.Expr, body []ast.Stmt, scope *Scope) {
-	if a == nil || scope == nil || enumType == nil || !matchBodyReferencesVariantFields(body, valueExpr) {
+	if a == nil || scope == nil || enumType == nil {
 		return
 	}
 	variantPattern, ok := pattern.(*ast.MatchVariantPattern)
@@ -257,6 +257,9 @@ func (a *Analyzer) bindPackedVariantViewAliasForBody(pattern ast.MatchPattern, e
 	}
 	variant, ok := enumType.Variant(variantPattern.Variant)
 	if !ok || variant == nil {
+		return
+	}
+	if !matchBodyReferencesVariantFields(body, valueExpr) && !a.matchVariantPatternBindsAffinePayload(variantPattern, variant) {
 		return
 	}
 	ident, ok := unwrapPackedVariantViewExpr(valueExpr).(*ast.Ident)

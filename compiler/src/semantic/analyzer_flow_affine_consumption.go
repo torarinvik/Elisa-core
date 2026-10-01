@@ -163,6 +163,38 @@ func (a *Analyzer) recordAffineConsumption(key affineValueKey, reason string) {
 		}
 		a.currentAffineValues[existingKey] = existingState
 	}
+	// Match payload binders are ownership aliases, not independent values.  A
+	// binder such as `taken` may still have a local affine state created while
+	// analyzing the arm, but consuming `move taken` records the source as
+	// `job.thread`.  Propagate that consumption to the alias root as well so
+	// scope-exit/drop checks do not mistake the binder for a second live owner.
+	if a.currentValueBindings == nil || key.Root == nil {
+		return
+	}
+	for aliasRoot, bound := range a.currentValueBindings {
+		if aliasRoot == nil || bound == nil {
+			continue
+		}
+		// Ordinary immutable locals also appear in currentValueBindings, but
+		// consuming their initializer is a transfer INTO the new local and must
+		// not mark that destination consumed.  Only match-pattern binders are
+		// aliases introduced by destructuring the already-owned source.
+		if _, patternBinder := aliasRoot.Node.(*ast.MatchBindPattern); !patternBinder {
+			continue
+		}
+		boundKey, ok := a.lookupAffineValueKey(bound)
+		if !ok || boundKey.Root != key.Root || !affinePathContains(key.Path, boundKey.Path) {
+			continue
+		}
+		aliasKey := affineValueKey{Root: aliasRoot}
+		aliasState := a.currentAffineValues[aliasKey]
+		aliasState.LiveProtocolType = nil
+		aliasState.LiveProtocolDescription = ""
+		if aliasState.ConsumedBy == "" {
+			aliasState.ConsumedBy = reason
+		}
+		a.currentAffineValues[aliasKey] = aliasState
+	}
 }
 
 func (a *Analyzer) consumeHandledErrorUnionExpr(expr ast.Expr, unionType *ErrorUnionType, reason string) {
@@ -262,6 +294,31 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 		if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
 			return affineValueKey{}, false
 		}
+		// A packed-enum match body may receive a refined variant-view symbol that
+		// deliberately shadows the scrutinee (for example, `job` becomes a
+		// `Job.Run` view so its payload fields are visible).  The view does not own
+		// a second value: its AliasOf symbol owns the same storage.  Resolve the
+		// affine root through that ownership alias before handling ordinary value
+		// bindings, otherwise `move job.thread` discharges only the view root and
+		// leaves the original scrutinee's payload obligation live.
+		if _, packedView := sym.Type.(*PackedVariantViewType); packedView && sym.AliasOf != nil {
+			return affineValueKey{Root: sym.AliasOf}, true
+		}
+		// Match binders are immutable ownership aliases.  In particular, a
+		// packed-enum arm such as `Job.Run(thread: taken)` binds `taken` to the
+		// affine payload path `job.thread`; consuming `taken` must therefore
+		// discharge the payload stored in `job`, not create an unrelated affine
+		// root for the arm-local binder.  Ordinary immutable locals are different:
+		// their initializer is a transfer INTO the new local, so they retain their
+		// own affine root and must not resolve back to the initializer here.
+		_, patternBinder := sym.Node.(*ast.MatchBindPattern)
+		if patternBinder && a.currentValueBindings != nil {
+			if bound, boundOK := a.currentValueBindings[sym]; boundOK && bound != nil {
+				if boundKey, keyOK := a.lookupAffineValueKey(bound); keyOK {
+					return boundKey, true
+				}
+			}
+		}
 		return affineValueKey{Root: sym}, true
 	case *ast.FieldExpr:
 		base, ok := a.lookupAffineValueKey(n.Object)
@@ -271,6 +328,22 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 		objType := a.exprTypes[n.Object]
 		if objType == nil {
 			objType = a.analyzeExpr(n.Object)
+		}
+		// A packed-enum match refines the scrutinee to a variant view for the
+		// arm.  Payload labels are not common fields on the enum's base type,
+		// but they are real affine paths in that refined view (for example
+		// `job.thread`).  Resolve this before the ordinary field lookup so the
+		// ownership alias tracker does not emit a misleading "no common field"
+		// diagnostic while recording a pattern binder.
+		if viewType, viewOK := a.lookupRefinedPackedVariantView(n.Object); viewOK {
+			if _, fieldOK := viewType.Field(n.Field); fieldOK {
+				if base.Path == "" {
+					base.Path = n.Field
+				} else {
+					base.Path = base.Path + "." + n.Field
+				}
+				return base, true
+			}
 		}
 		field, ok := a.lookupField(objType, n.Field, n.Pos())
 		if !ok || !a.containsTrackedProtocolCarrierValues(field.Type, map[string]bool{}) {

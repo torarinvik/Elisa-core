@@ -368,12 +368,23 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, stmt.Value, scope, i, len(stmt.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
-			hasWildcard = true
-		}
-		a.analyzeMatchArmGuard(arm.Guard, scope)
-		a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, stmt.Value, arm.Body, scope)
-		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
+		armHasWildcard := false
+		armSnapshot := a.analyzeBlockWithAffineClonePrepared(arm.Body, scope, func() {
+			armHasWildcard = a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, stmt.Value, scope, i, len(stmt.Arms), matchArmCoverageSink(arm.Guard, covered))
+			if armHasWildcard && arm.Guard == nil {
+				hasWildcard = true
+			}
+			a.analyzeMatchArmGuard(arm.Guard, scope)
+			a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, stmt.Value, arm.Body, scope)
+			if variantPattern, ok := arm.Pattern.(*ast.MatchVariantPattern); ok {
+				a.refineAffineEnumVariant(stmt.Value, enumType, variantPattern)
+			}
+			// A payload binder is an ownership alias of the matched enum's affine
+			// field. Resolve it only after installing the packed-variant view so the
+			// source projection (for example, `job.thread`) uses the refined payload
+			// type rather than the enum's common-field table.
+			a.recordAffineMatchPatternBindings(arm.Pattern, enumType, stmt.Value, scope)
+		})
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine

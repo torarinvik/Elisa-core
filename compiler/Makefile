@@ -1,6 +1,6 @@
 # Elisa compiler — test ergonomics.
 #
-# WHY THIS EXISTS: `go test ./src/...` is ~8 minutes. 97% of that is ONE package
+# WHY THIS EXISTS: `go test ./src/...` is usually several minutes. 97% of that is ONE package
 # (elisacore/src, ~453s) whose ~186 "runtime" tests each take an Elisa program all the
 # way to a native binary (LLVM -> clang link -> execute). Every other package is <=10s
 # or cached. So the fast inner loop is "run the dedicated packages, NOT ./src/...".
@@ -35,12 +35,13 @@ test-semantic:
 test-prover:
 	go test ./src/semantic/ ./src/smt/
 
-# test-full: THE FULL SUITE — SLOW (~8 minutes; includes the elisacore/src native-runtime tests).
+# test-full: THE FULL SUITE — SLOW (the elisacore/src native-runtime tests can exceed
+# Go's 10-minute default timeout on a cold or newly upgraded toolchain).
 # Run this only as the final pre-commit gate, never in the inner loop.
 .PHONY: test-full
 test-full:
-	@echo ">>> FULL SUITE — this is the ~8-minute run (native-runtime and fixture tests). <<<"
-	go test -p 1 ./...
+	@echo ">>> FULL SUITE — slow native-runtime and fixture tests; timeout is 30m. <<<"
+	go test -p 1 -timeout 30m ./...
 
 # build: build the local worktree binary.  Keep this target local so compiler
 # dogfooding cannot overwrite the user's installed compiler or race another
@@ -65,6 +66,6 @@ help:
 	@echo "make test          fast inner-loop packages (~12s)        [default]"
 	@echo "make test-semantic verification/prover blast radius (~10s)"
 	@echo "make test-prover   semantic + smt"
-	@echo "make test-full     FULL suite, SLOW ~8min (pre-commit only)"
+	@echo "make test-full     FULL suite, SLOW (30m timeout; pre-commit only)"
 	@echo "make build          build local compiler -> compiler/bin/elisac"
 	@echo "make install        explicitly install -> ~/.elisac/elisac-stage0"

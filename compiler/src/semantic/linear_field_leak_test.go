@@ -41,3 +41,39 @@ def f() -> void:
 		t.Fatalf("droppable affine field must NOT require consumption; got:\n%s", all)
 	}
 }
+
+func TestAffinePayloadPatternMoveConsumesMatchedField(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "affine_payload_pattern_move.elisa", `enum Job:
+    Run(thread: Thread[i64, Joinable])
+    Done
+
+extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
+
+def finish(job: Job) -> i64 can[Thread.Join]:
+    match job:
+        Job.Run(thread: taken):
+            return join(move taken)
+        Job.Done:
+            return 0
+`)
+	if all := strings.Join(result.Errors(), "\n"); all != "" {
+		t.Fatalf("moving the match binder should consume its affine payload field; got:\n%s", all)
+	}
+}
+
+func TestAffinePayloadPatternWithoutMoveStillLeaks(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "affine_payload_pattern_leak.elisa", `enum Job:
+    Run(thread: Thread[i64, Joinable])
+    Done
+
+def reject(job: Job) -> i64:
+    match job:
+        Job.Run(thread: taken):
+            return 0
+        Job.Done:
+            return 0
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "must be consumed") {
+		t.Fatalf("an unconsumed affine match payload must remain an error; got:\n%s", all)
+	}
+}
