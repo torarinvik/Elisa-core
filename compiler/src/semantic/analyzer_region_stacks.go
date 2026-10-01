@@ -433,6 +433,36 @@ func earlyFreeDerivedNames(body []ast.Stmt, name string) map[string]bool {
 						}
 					}
 				}
+				if call, ok := v.Interface().(ast.CallExpr); ok {
+					// `hs.push(H{f: fn() => s[0]})` / `fill(&out, s)`: a derived value stored into a
+					// container keeps the object alive as long as the container.
+					argMentions := false
+					for _, arg := range call.Args {
+						if mentions(reflect.ValueOf(arg)) {
+							argMentions = true
+						}
+					}
+					if argMentions {
+						var roots []string
+						if field, ok := call.Func.(*ast.FieldExpr); ok {
+							roots = append(roots, earlyFreePlaceRoot(field.Object))
+						}
+						for _, arg := range call.Args {
+							if unary, ok := arg.(*ast.UnaryExpr); ok && unary.Op == lexer.TOKEN_AMPERSAND {
+								roots = append(roots, earlyFreePlaceRoot(unary.Operand))
+							}
+							if addr, ok := arg.(*ast.AddrOfExpr); ok {
+								roots = append(roots, earlyFreePlaceRoot(addr.Operand))
+							}
+						}
+						for _, root := range roots {
+							if root != "" && !derived[root] {
+								derived[root] = true
+								changed = true
+							}
+						}
+					}
+				}
 				for i := 0; i < v.NumField(); i++ {
 					walk(v.Field(i))
 				}
@@ -899,4 +929,19 @@ func (a *Analyzer) dumpRegionStackAssignment(region *ast.RegionStmt, asn RegionS
 		}
 		fmt.Fprintf(os.Stderr, "  stack %d (%s, %s)%s: %v\n", s, asn.StackKind[s], asn.stackStrategy(s), ef, byStack[s])
 	}
+}
+
+// earlyFreePlaceRoot: the local a place expression (`a`, `a.b[i]`, `(a)`) is rooted in.
+func earlyFreePlaceRoot(e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name
+	case *ast.FieldExpr:
+		return earlyFreePlaceRoot(x.Object)
+	case *ast.IndexExpr:
+		return earlyFreePlaceRoot(x.Object)
+	case *ast.ParenExpr:
+		return earlyFreePlaceRoot(x.Inner)
+	}
+	return ""
 }

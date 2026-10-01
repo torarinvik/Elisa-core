@@ -95,3 +95,41 @@ func TestAnalyzeAcceptsScalarClosureInReturnedTuple(t *testing.T) {
 		t.Fatalf("a closure capturing only a scalar must be accepted, got:\n%s", all)
 	}
 }
+
+// A view stored INTO a container (`vs.push(s)`, `vs.extend([s])`, `keep(&vs, s)`, or a closure
+// capturing it pushed into a darray of structs) keeps the source alive as long as the container:
+// early-freeing buf after its own last mention left `vs[0]` reading freed memory (segfault).
+func TestRegionStacksDoesNotEarlyFreeObjectStoredIntoContainer(t *testing.T) {
+	prefix := `struct H:
+    f: fn() -> i64
+
+def keep(out: mutable darray[sview]&, s: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        out.push(s)
+
+def f() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        vs: mutable darray[sview] = []
+        hs: mutable darray[H] = []
+        buf: mutable darray[u8] = [65.u8()]
+        s: sview = buf.as_sview()
+`
+	cases := map[string]string{
+		"push":    "        vs.push(s)\n        buf.push(1.u8())\n        return vs[0][0].i64()\n",
+		"extend":  "        vs.extend([s])\n        buf.push(1.u8())\n        return vs[0][0].i64()\n",
+		"addr_of": "        keep(&vs, s)\n        buf.push(1.u8())\n        return vs[0][0].i64()\n",
+		"closure": "        hs.push(H{f: fn() => s[0].i64()})\n        buf.push(1.u8())\n        return hs[0].f()\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "b2_store_"+name+".elisa", prefix+body, AnalyzeOptions{})
+			for _, asn := range result.RegionStacks {
+				if stack, ok := asn.StackOf["buf"]; ok {
+					if _, freed := asn.StackEarlyFreeAfter[stack]; freed {
+						t.Fatalf("buf is reachable through a container and must not be early-freed, got %v", asn.StackEarlyFreeAfter)
+					}
+				}
+			}
+		})
+	}
+}
