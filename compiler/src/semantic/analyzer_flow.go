@@ -577,7 +577,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// slot dangles once the inner region is freed. Decided by the region
 		// outlives-lattice, independent of whether the target outlives the
 		// function (the function-outliving case is handled just above).
+		diagsBeforeNested := len(a.diagnostics)
 		a.checkNestedRegionStoreEscape(n.Target, n.Value, targetType, valueType)
+		// An indexed store into a container (`diags[0] <- v`) writes an ELEMENT exactly like
+		// `diags.push(v)`; apply the push's element-store rule so a value borrowing local storage
+		// cannot be stored into a longer-lived (e.g. parameter) container's region. Skipped when
+		// the slot check above already reported, to avoid a duplicate at a second position.
+		if len(a.diagnostics) == diagsBeforeNested {
+			a.checkIndexedElementStoreEscape(n.Target, n.Value, valueType)
+		}
 		// A list literal `[v]` stored into a longer-lived container copies an inner-region element's
 		// header; the store-site check above only sees the literal's own (target) region, so the
 		// element regions are checked separately.
@@ -1386,4 +1394,72 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 		return
 	}
 	a.consumeAffineValueExpr(stmt.Value, valueType, "move-as destructure")
+}
+
+// checkIndexedElementStoreEscape routes `container[i] <- v` through the same element-store
+// escape rule as `container.push(v)` / `dict.put(k, v)`.
+func (a *Analyzer) checkIndexedElementStoreEscape(target, value ast.Expr, valueType Type) {
+	idx, ok := target.(*ast.IndexExpr)
+	if !ok || idx == nil || idx.Index2 != nil {
+		return
+	}
+	objType := a.exprTypes[idx.Object]
+	for {
+		ref, isRef := objType.(*RefType)
+		if !isRef || ref == nil {
+			break
+		}
+		objType = ref.Elem
+	}
+	switch ct := objType.(type) {
+	case *DArrayType:
+		if ct != nil && ct.Region == "" {
+			// A region-less container parameter that is only index-stored (never grown) gets no
+			// inferred `__rg_<param>` region; its storage is still caller-owned and outlives every
+			// local region, so name it the same way the grown form is named for the check.
+			if name := a.indexedStoreParamRoot(idx.Object); name != "" {
+				copied := *ct
+				copied.Region = "__rg_" + name
+				ct = &copied
+				// Scope the synthetic name as a caller-owned region param for this check only.
+				a.regionParamScopes = append(a.regionParamScopes, map[string]bool{copied.Region: true})
+				defer func() { a.regionParamScopes = a.regionParamScopes[:len(a.regionParamScopes)-1] }()
+			}
+		}
+		if ct != nil {
+			a.checkNestedRegionElementStoreEscape(value, ct, ct.Elem, valueType)
+			// Fresh producers (struct/list literals, ternaries) and by-value copies hide their
+			// interior region behind their own type; mirror push's interior checks.
+			a.checkFreshProducerElementEscape(idx.Object, ct, value)
+			if !isFreshContainerProducer(value) {
+				a.checkInteriorRegionAgainstTarget(idx.Object, containerRegion(ct), value, "by-value copy")
+			}
+		}
+	case *DictType:
+		if ct != nil {
+			a.checkNestedRegionElementStoreEscape(value, ct, ct.Value, valueType)
+		}
+	}
+}
+
+// indexedStoreParamRoot returns the parameter name when expr is a plain identifier naming (not
+// shadowing) a parameter of the current function, else "".
+func (a *Analyzer) indexedStoreParamRoot(expr ast.Expr) string {
+	id, ok := expr.(*ast.Ident)
+	if !ok || id == nil || a.currentFuncDecl == nil || a.currentScope == nil {
+		return ""
+	}
+	sym, ok := a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil {
+		return ""
+	}
+	for i := range a.currentFuncDecl.Params {
+		if a.currentFuncDecl.Params[i].Name != id.Name {
+			continue
+		}
+		if paramSym, ok := a.currentFuncParamSymbol(i); ok && paramSym == sym {
+			return id.Name
+		}
+	}
+	return ""
 }
