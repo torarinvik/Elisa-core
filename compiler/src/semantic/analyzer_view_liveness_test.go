@@ -169,3 +169,44 @@ def build(owner: Arena) -> i64 can[Unsafe.PointerCast]:
 		})
 	}
 }
+
+// Field-path keys: growing one darray field of a root cannot move a sibling field's buffer when
+// the two element types differ (no shallow copy can make a darray[u8] and a darray[u32] share a
+// backing). Same-typed siblings may share one (`P{storage: buf, lines: buf}`), so they still
+// overlap, as do growth of the viewed field itself and replacement of the whole root.
+func TestAnalyzeFieldPathViewSiblingGrowth(t *testing.T) {
+	prefix := `struct P:
+    storage: mutable darray[u8]
+    lines: mutable darray[u32]
+    bytes: mutable darray[u8]
+    names: mutable darray[sview]
+
+def bytes_view_range(buf: darray[u8], start: usize, count: usize) -> sview:
+    return buf.as_sview()
+
+def grow(p: lmut P) -> u8:
+    view: sview = bytes_view_range(p.storage, 0, p.storage.count)
+`
+	cases := map[string][2]string{
+		"other_elem_type":  {"    p.lines <- p.lines.push(3.u32())\n    p.lines.push(4.u32())\n    return view[0]\n", ""},
+		"sview_elem_type":  {"    p.names <- p.names.push(view)\n    return view[0]\n", ""},
+		"same_elem_type":   {"    p.bytes <- p.bytes.push(3.u8())\n    return view[0]\n", `"view" cannot be used: storage dependency facts were invalidated by darray push of p.bytes`},
+		"viewed_field":     {"    p.storage <- p.storage.push(3.u8())\n    return view[0]\n", `"view" cannot be used: storage dependency facts were invalidated by darray push of p.storage`},
+		"root_replacement": {"    p <- P{storage: [], lines: [], bytes: [], names: []}\n    return view[0]\n", `"view" cannot be used: storage dependency facts were invalidated by reassignment of p`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "field_path_view_"+name+".elisa", prefix+c[0])
+			all := strings.Join(result.Errors(), "\n")
+			if c[1] == "" {
+				if strings.Contains(all, "cannot be used") {
+					t.Fatalf("unexpected stale-view error:\n%s", all)
+				}
+				return
+			}
+			if !strings.Contains(all, c[1]) {
+				t.Fatalf("expected %s, got:\n%s", c[1], all)
+			}
+		})
+	}
+}

@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -414,7 +416,7 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	}
 	name := callBaseName(call)
 	switch name {
-	case "bytes_view":
+	case "bytes_view", "bytes_view_range", "bytes_view_range_ref":
 		if len(call.Args) >= 1 {
 			return storageViewDependencyFromSource(call.Args[0])
 		}
@@ -746,7 +748,109 @@ func (a *Analyzer) invalidateStorageViewsForSourceScoped(source ast.Expr, reason
 			}
 		}
 	}
-	a.invalidateStorageViewDepsMode(mutatedSources, reason, false, replaced)
+	a.invalidateStorageViewDepsSparing(mutatedSources, reason, false, replaced, a.storageViewSiblingSpare(key))
+}
+
+// storageViewSiblingSpare returns a predicate naming the view sources a mutation of the field
+// path KEY provably cannot reach, or nil. Sibling darray fields of one root may share a buffer
+// (darray copies are shallow: `P{storage: buf, lines: buf}`), so the root-overlap rule stays the
+// default. The one sound exception is a sibling whose ELEMENT type differs: a darray[u8] and a
+// darray[u32] can never name the same backing, so growing `p.lines` cannot move or overwrite
+// the bytes behind a view of `p.storage`. Only concrete element types qualify (builtins, sview,
+// cstr, non-generic structs); anything generic keeps the conservative overlap.
+func (a *Analyzer) storageViewSiblingSpare(key string) func(source, candidate string) bool {
+	root := storageViewSourceRoot(key)
+	if root == key || strings.Contains(key, "[") {
+		return nil
+	}
+	mutatedElem := a.storageViewFieldPathElem(key)
+	if mutatedElem == "" {
+		return nil
+	}
+	return func(source, candidate string) bool {
+		if candidate != key && candidate != root {
+			return false
+		}
+		if source == key || strings.Contains(source, "[") || storageViewSourceRoot(source) != root || source == root {
+			return false
+		}
+		if strings.HasPrefix(source, key+".") || strings.HasPrefix(key, source+".") {
+			return false
+		}
+		elem := a.storageViewFieldPathElem(source)
+		return elem != "" && elem != mutatedElem
+	}
+}
+
+// storageViewFieldPathElem resolves a dotted field path (`p.a.b`) from the current scope to a
+// darray of a concrete element type and returns that element's key, or "".
+func (a *Analyzer) storageViewFieldPathElem(path string) string {
+	if a == nil || a.currentScope == nil {
+		return ""
+	}
+	parts := strings.Split(path, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	sym, ok := a.currentScope.Lookup(parts[0])
+	if !ok || sym == nil {
+		return ""
+	}
+	current := a.currentTrackedValueType(sym)
+	if current == nil {
+		current = sym.Type
+	}
+	for _, name := range parts[1:] {
+		structType, ok := StripAggregateStateType(stripStorageViewRefs(current)).(*StructType)
+		if !ok || structType == nil {
+			return ""
+		}
+		field, ok := structType.Fields[name]
+		if !ok {
+			return ""
+		}
+		current = field.Type
+	}
+	darray, ok := StripAggregateStateType(stripStorageViewRefs(current)).(*DArrayType)
+	if !ok || darray == nil {
+		return ""
+	}
+	return storageViewConcreteElemKey(darray.Elem)
+}
+
+// storageViewConcreteElemKey names a concrete, non-generic element type, or returns "" when
+// the type could stand for another (a type parameter, a generic aggregate). Equal keys are
+// treated as possibly-aliasing, so a collision only costs precision.
+func storageViewConcreteElemKey(t Type) string {
+	switch elem := StripAggregateStateType(t).(type) {
+	case *BuiltinType:
+		if elem != nil {
+			return "builtin " + elem.Name
+		}
+	case *SViewType:
+		if elem != nil {
+			return "sview"
+		}
+	case *CStrType:
+		if elem != nil {
+			return "cstr"
+		}
+	case *StructType:
+		if elem != nil && len(elem.TypeParams) == 0 && len(elem.GenericParams) == 0 {
+			return "struct " + elem.Namespace + "::" + elem.Name
+		}
+	}
+	return ""
+}
+
+func stripStorageViewRefs(t Type) Type {
+	for {
+		ref, ok := t.(*RefType)
+		if !ok || ref == nil {
+			return t
+		}
+		t = ref.Elem
+	}
 }
 
 // invalidateStorageViewsForWholeAssignment invalidates interior references into a container
@@ -830,14 +934,35 @@ func (a *Analyzer) invalidateStorageViewDeps(mutatedSources map[string]bool, rea
 }
 
 func (a *Analyzer) invalidateStorageViewDepsMode(mutatedSources map[string]bool, reason string, interiorOnly, replaced bool) {
+	a.invalidateStorageViewDepsSparing(mutatedSources, reason, interiorOnly, replaced, nil)
+}
+
+// invalidateStorageViewDepsSparing is invalidateStorageViewDepsMode; SPARE(source, candidate)
+// exempts a (view source, mutated source) pair proven disjoint (see storageViewSiblingSpare).
+func (a *Analyzer) invalidateStorageViewDepsSparing(mutatedSources map[string]bool, reason string, interiorOnly, replaced bool, spare func(source, candidate string) bool) {
 	if len(a.currentStorageViewDeps) == 0 {
 		return
 	}
+	candidates := sortedStorageViewSources(mutatedSources)
 	for sym, dep := range a.currentStorageViewDeps {
-		if !dep.Valid || (interiorOnly && !dep.Interior) || !storageViewDependsOnAny(dep, mutatedSources) {
+		if !dep.Valid || (interiorOnly && !dep.Interior) {
 			continue
 		}
-		matchedSource := storageViewMatchedMutationSource(dep, mutatedSources)
+		matchedSource := ""
+		for _, source := range dep.Sources {
+			for _, candidate := range candidates {
+				if storageViewSourcesOverlap(source, candidate) && (spare == nil || !spare(source, candidate)) {
+					matchedSource = candidate
+					break
+				}
+			}
+			if matchedSource != "" {
+				break
+			}
+		}
+		if matchedSource == "" {
+			continue
+		}
 		dep.Valid = false
 		dep.InvalidatedBy = reason
 		dep.Replaced = replaced
@@ -846,6 +971,15 @@ func (a *Analyzer) invalidateStorageViewDepsMode(mutatedSources map[string]bool,
 		}
 		a.currentStorageViewDeps[sym] = dep
 	}
+}
+
+func sortedStorageViewSources(sources map[string]bool) []string {
+	out := make([]string, 0, len(sources))
+	for source := range sources {
+		out = append(out, source)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func storageViewMutationReason(source ast.Expr, operation string) string {
