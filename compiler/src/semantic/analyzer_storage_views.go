@@ -443,6 +443,18 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 		}
 		return a.storageViewDependencyForBorrowedExpr(call.Args[0])
 	}
+	// An enum variant construction (`Tok.Word(v)`) carries its payloads' borrows: the
+	// enum value stays dependent on whatever storage a payload view points into, so a
+	// later relocation of that storage must invalidate the enum value too.
+	if a.isEnumVariantConstructorCall(call) {
+		var deps []storageViewDependencyState
+		for _, argument := range call.Args {
+			if dep, ok := a.storageViewDependencyForExpr(argument); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	}
 	if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && field.Field == "view" && field.Object != nil {
 		return storageViewDependencyFromSource(field.Object)
 	}
@@ -793,4 +805,27 @@ func storageViewMutationReason(source ast.Expr, operation string) string {
 		key = "container"
 	}
 	return fmt.Sprintf("%s of %s", operation, key)
+}
+
+// isEnumVariantConstructorCall reports whether CALL is `Enum.Variant(...)` for a visible
+// enum type with that variant. Side-effect free (enumVariantExprType reports errors).
+func (a *Analyzer) isEnumVariantConstructorCall(call *ast.CallExpr) bool {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok || field == nil || field.Object == nil {
+		return false
+	}
+	baseName, ok := qualifiedTypePathFromExpr(field.Object)
+	if !ok {
+		return false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		return false
+	}
+	_, ok = enumType.Variant(field.Field)
+	return ok
 }

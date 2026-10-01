@@ -828,7 +828,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 					// A returned closure captures its locals' container headers by value, but the
 					// hidden region parameter is never threaded through a function-typed result:
 					// the captured backing is freed at return no matter what the caller supplies.
-					if _, isFn := valueType.(*FuncType); isFn {
+					// The same holds for a closure nested in an aggregate result (`return (1, fn() => r[0])`).
+					if valueTypeCarriesClosure(valueType, map[Type]bool{}) {
 						regionPoly = false
 					}
 				}
@@ -1462,4 +1463,35 @@ func (a *Analyzer) indexedStoreParamRoot(expr ast.Expr) string {
 		}
 	}
 	return ""
+}
+
+// valueTypeCarriesClosure reports whether a value of type t holds a function value by value: the
+// function itself, or one nested in a tuple, optional, fixed array or struct field. Such a value
+// carries its captures' container headers, which no threaded region parameter keeps alive.
+func valueTypeCarriesClosure(t Type, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *FuncType:
+		return true
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if valueTypeCarriesClosure(field.Type, seen) {
+				return true
+			}
+		}
+	case *OptionalType:
+		return valueTypeCarriesClosure(tt.Value, seen)
+	case *ArrayType:
+		return valueTypeCarriesClosure(tt.Elem, seen)
+	case *StructType:
+		for _, field := range tt.Fields {
+			if valueTypeCarriesClosure(field.Type, seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
