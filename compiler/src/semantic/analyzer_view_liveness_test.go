@@ -210,3 +210,78 @@ def grow(p: lmut P) -> u8:
 		})
 	}
 }
+
+// A view returned by a user function depends on the argument storage the callee's returns
+// borrow from, traced syntactically through returns, locals, field paths and nested calls
+// (impl methods union over every impl). Growth of exactly that storage invalidates the view;
+// growth of an unrelated sibling, or of a darray that only HOLDS copies of views, does not.
+func TestAnalyzeUserCallReturnedViewGrowth(t *testing.T) {
+	prefix := `struct H:
+    buf: mutable darray[u8]
+    other: mutable darray[u32]
+    views: mutable darray[sview]
+
+protocol Named:
+    def name(self: Self&) -> sview
+
+impl Named for H:
+    def name(self: Self&) -> sview:
+        return self.buf.as_sview()
+
+def bytes_view_range(buf: darray[u8], start: usize, count: usize) -> sview:
+    return buf.as_sview()
+
+def head(h: H&) -> sview:
+    v: sview = bytes_view_range(h.buf, 0, h.buf.count)
+    return v
+
+def first(h: H&) -> sview:
+    return h.views[0]
+
+def via[T: Named](x: T&) -> sview:
+    return x.name()
+
+`
+	cases := map[string][2]string{
+		"free_fn_grow":       {"def f(h: lmut H) -> u8:\n    v: sview = head(&h)\n    h.buf <- h.buf.push(1.u8())\n    return v[0]\n", `"v" cannot be used: storage dependency facts were invalidated by darray push of h.buf`},
+		"ufcs_grow":          {"def f(h: lmut H) -> u8:\n    v: sview = h.head()\n    h.buf <- h.buf.push(1.u8())\n    return v[0]\n", `"v" cannot be used`},
+		"impl_method_grow":   {"def f(h: lmut H) -> u8:\n    v: sview = h.name()\n    h.buf <- h.buf.push(1.u8())\n    return v[0]\n", `"v" cannot be used`},
+		"generic_dispatch":   {"def f(h: lmut H) -> u8:\n    v: sview = via(&h)\n    h.buf <- h.buf.push(1.u8())\n    return v[0]\n", `"v" cannot be used`},
+		"sibling_grow":       {"def f(h: lmut H) -> u8:\n    v: sview = head(&h)\n    h.other <- h.other.push(1.u32())\n    return v[0]\n", ""},
+		"sibling_elem_store": {"def f(h: lmut H) -> u8:\n    v: sview = head(&h)\n    h.other[0] <- 2.u32()\n    return v[0]\n", ""},
+		"view_holder_grow":   {"def f(h: lmut H) -> u8:\n    v: sview = first(&h)\n    h.views <- h.views.push(\"x\")\n    return v[0]\n", ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "user_call_view_"+name+".elisa", prefix+c[0])
+			all := strings.Join(result.Errors(), "\n")
+			if c[1] == "" {
+				if strings.Contains(all, "cannot be used") {
+					t.Fatalf("unexpected stale-view error:\n%s", all)
+				}
+				return
+			}
+			if !strings.Contains(all, c[1]) {
+				t.Fatalf("missing %q in:\n%s", c[1], all)
+			}
+		})
+	}
+}
+
+// A generic callee's template summary says nothing about a `T` result, so `id(view_of_local)`
+// used to return a view of freed storage; the syntactic return origins carry the argument's
+// region through, exactly as for the non-generic `id(x: sview)`.
+func TestAnalyzeGenericIdentityReturnsLocalView(t *testing.T) {
+	src := `def id[T](x: T) -> T:
+    return x
+
+def leak() -> sview:
+    buf: darray[u8] = [65.u8(), 66.u8()]
+    return id(buf.as_sview())
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "generic_identity_local_view.elisa", src)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "cannot return value: region dependency facts include local region") {
+		t.Fatalf("missing local-region escape in:\n%s", all)
+	}
+}

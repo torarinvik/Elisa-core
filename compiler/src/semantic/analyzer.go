@@ -144,6 +144,7 @@ type Analyzer struct {
 	regionPolyCandidateFnTypes map[string][]*FuncType
 	extensionMethodsByName     map[string][]*ExtensionMethod
 	ufcsFunctionsByName        map[string][]*Symbol
+	storageViewReturnOrigins   map[*ast.FuncDecl]*storageViewReturnOriginSummary
 	permissions                map[string]*PermissionSet
 	capabilityAliases          map[string][]ast.PermissionRef
 	globalScope                *Scope

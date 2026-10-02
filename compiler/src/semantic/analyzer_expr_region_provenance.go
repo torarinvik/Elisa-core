@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"strings"
 )
 
 func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
@@ -374,6 +375,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			}
 			return mergeRegionRefStatesWithExplicitFields(states, fieldStates)
 		}
+		if state, ok := a.regionRefStateForThreadHandleCall(n); ok {
+			return state, true
+		}
 		fnType, _ := a.exprTypes[n.Func].(*FuncType)
 		if fnType == nil && len(n.Args) == 1 && a.isTypeConstructorCall(n) {
 			return a.regionRefStateForExpr(n.Args[0])
@@ -391,8 +395,22 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 				a.inferFuncReturnProvenanceForExpr(n.Func, fnType)
 			}
 			if fnType.ReturnProvenanceKnown {
+				if state, ok := a.instantiateReturnProvenance(fnType.ReturnProvenance, n.Args); ok && hasRegionProvenance(state) {
+					return state, true
+				}
+				// A generic callee's summary is computed over its template (`id[T](x: T) -> T`
+				// carries nothing for a type parameter); fall through to the syntactic origins.
+				if state, ok := a.regionRefStateForCallOrigins(n); ok {
+					return state, true
+				}
 				return a.instantiateReturnProvenance(fnType.ReturnProvenance, n.Args)
 			}
+		}
+		if state, ok := a.regionRefStateForCallOrigins(n); ok {
+			return state, true
+		}
+		if state, ok := a.regionRefStateForThreadHandleCall(n); ok {
+			return state, true
 		}
 		// A call may have a concrete region directly on its result type even when
 		// it has no inferred return-provenance summary (notably built-in view
@@ -786,4 +804,67 @@ func isBufferOwningType(t Type) bool {
 		return true
 	}
 	return false
+}
+
+// regionRefStateForCallOrigins is the provenance of a borrowed result traced through the
+// callee's syntactic return origins (storageViewReturnOriginsFor): the merged provenance of
+// every argument a return borrows from or copies. Only for generic callees, whose template
+// summary cannot see that a `T` result carries a view.
+func (a *Analyzer) regionRefStateForCallOrigins(call *ast.CallExpr) (regionRefState, bool) {
+	resultType := a.exprTypes[call]
+	if resultType == nil || !a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
+		return regionRefState{}, false
+	}
+	decls, args, ok := a.storageViewOriginCallee(call)
+	if !ok {
+		return regionRefState{}, false
+	}
+	generic := false
+	for _, decl := range decls {
+		if decl != nil && (len(decl.TypeParams) > 0 || len(decl.GenericParams) > 0) {
+			generic = true
+		}
+	}
+	if !generic {
+		return regionRefState{}, false
+	}
+	summary := a.storageViewReturnOriginsForAll(decls, 0)
+	if !summary.Known {
+		return regionRefState{}, false
+	}
+	var states []regionRefState
+	for _, origin := range summary.Origins {
+		if origin.Param < 0 || origin.Param >= len(args) || args[origin.Param] == nil {
+			continue
+		}
+		if state, ok := a.regionRefStateForExpr(args[origin.Param]); ok && hasRegionProvenance(state) {
+			states = append(states, state)
+		}
+	}
+	if len(states) == 0 {
+		return regionRefState{}, false
+	}
+	return mergeRegionRefStates(states...)
+}
+
+// regionRefStateForThreadHandleCall: a thread handle (`spawn1(fn(a) => v[0] + a, 0)`) owns the
+// closure it runs, so it carries the provenance of every capture until joined. Returning the
+// handle out of the frame that owns a captured view hands the thread freed memory.
+func (a *Analyzer) regionRefStateForThreadHandleCall(call *ast.CallExpr) (regionRefState, bool) {
+	resultType := a.exprTypes[call]
+	if resultType == nil || !strings.HasPrefix(resultType.String(), "Thread[") {
+		return regionRefState{}, false
+	}
+	var states []regionRefState
+	for _, argument := range call.Args {
+		if lambda, isLambda := stripOptimizationParens(argument).(*ast.LambdaExpr); isLambda && lambda != nil {
+			if state, ok := a.regionRefStateForLambdaCaptures(lambda); ok && hasRegionProvenance(state) {
+				states = append(states, state)
+			}
+		}
+	}
+	if len(states) == 0 {
+		return regionRefState{}, false
+	}
+	return mergeRegionRefStates(states...)
 }

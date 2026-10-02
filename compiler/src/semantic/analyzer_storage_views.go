@@ -293,6 +293,33 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 		return a.storageViewDependencyForLambda(n)
 	case *ast.CallExpr:
 		return a.storageViewDependencyForCall(n)
+	case *ast.IndexExpr:
+		// An element read out of a container of views (`views[0]` over `darray[sview]`)
+		// still points wherever the container's elements point.
+		if resultType := a.exprTypes[n]; resultType != nil && a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
+			var deps []storageViewDependencyState
+			if dep, ok := a.storageViewDependencyForExpr(n.Object); ok {
+				deps = append(deps, dep)
+			}
+			if dep, ok := a.storageViewDependencyForExpr(n.Fallback); ok {
+				deps = append(deps, dep)
+			}
+			return mergeStorageViewDependencies(deps...)
+		}
+		return storageViewDependencyState{}, false
+	case *ast.MatchExpr:
+		var deps []storageViewDependencyState
+		for _, arm := range n.Arms {
+			if dep, ok := a.storageViewDependencyForExpr(storageViewTailValue(arm.Body)); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	case *ast.ExprBlock:
+		if dep, ok := a.storageViewDependencyForExpr(n.Value); ok {
+			return dep, true
+		}
+		return a.storageViewDependencyForExpr(storageViewTailValue(n.Stmts))
 	default:
 		return storageViewDependencyState{}, false
 	}
@@ -515,7 +542,92 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 			return storageViewDependencyFromSource(field.Object)
 		}
 	}
-	return storageViewDependencyState{}, false
+	return a.storageViewDependencyForUserCall(call)
+}
+
+// storageViewDependencyForUserCall: a user function whose result may retain borrowed
+// storage (`def name(self: Holder&) -> sview: return bytes_view_range(self.buf, ...)`,
+// `first[T](xs: darray[T]&) -> T` over a darray of views) depends on whatever the
+// arguments its return-borrow summary names depend on. Without this, a view returned
+// by a helper survived a later push/replacement of the argument's storage.
+func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storageViewDependencyState, bool) {
+	if a.currentStorageViewDeps == nil && a.currentScope == nil {
+		return storageViewDependencyState{}, false
+	}
+	resultType := a.exprTypes[call]
+	// A thread handle owns the closure it runs: the spawned body reads every view the
+	// closure captured, so the handle depends on them until joined.
+	if resultType != nil && strings.HasPrefix(resultType.String(), "Thread[") {
+		var deps []storageViewDependencyState
+		for _, argument := range call.Args {
+			if lambda, isLambda := stripOptimizationParens(argument).(*ast.LambdaExpr); isLambda && lambda != nil {
+				if dep, ok := a.storageViewDependencyForExpr(lambda); ok {
+					deps = append(deps, dep)
+				}
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	}
+	if !storageViewTopLevelBorrowType(resultType) {
+		return storageViewDependencyState{}, false
+	}
+	// A reference to a container HEADER (`-> mutable darray[T]&` returning `&state.items`)
+	// survives the container's own growth; its relocation hazard is tracked as a container
+	// alias, not as a buffer dependency.
+	if ref, isRef := resultType.(*RefType); isRef && ref != nil {
+		switch stripStorageViewRefs(ref.Elem).(type) {
+		case *DArrayType, *DictType, *SetType:
+			return storageViewDependencyState{}, false
+		}
+		if b, isBuiltin := stripStorageViewRefs(ref.Elem).(*BuiltinType); isBuiltin && b != nil && b.Name == "dstr" {
+			return storageViewDependencyState{}, false
+		}
+	}
+	// Trace which argument field paths the callee's returns borrow from (a syntactic
+	// summary); an untraceable callee records nothing rather than every argument.
+	decls, args, ok := a.storageViewOriginCallee(call)
+	if !ok {
+		return storageViewDependencyState{}, false
+	}
+	summary := a.storageViewReturnOriginsForAll(decls, 0)
+	if !summary.Known {
+		return storageViewDependencyState{}, false
+	}
+	var deps []storageViewDependencyState
+	for _, origin := range summary.Origins {
+		if origin.Param < 0 || origin.Param >= len(args) || args[origin.Param] == nil {
+			continue
+		}
+		arg := stripOptimizationParens(args[origin.Param])
+		if addr, isAddr := arg.(*ast.AddrOfExpr); isAddr && addr != nil && addr.Operand != nil {
+			arg = stripOptimizationParens(addr.Operand)
+		}
+		if !origin.Into {
+			if dep, ok := a.storageViewDependencyForExpr(arg); ok {
+				deps = append(deps, dep)
+			}
+			continue
+		}
+		if origin.Suffix == "" {
+			if storageViewScalarBindingType(stripStorageViewRefs(a.exprTypes[arg])) {
+				continue
+			}
+			if dep, ok := a.storageViewDependencyForExpr(arg); ok {
+				deps = append(deps, dep)
+			}
+			// Only an argument that OWNS relocatable storage can have the result's backing
+			// moved by a later mutation; arena handles hand out stable addresses.
+			if !a.storageViewTypeOwnsRelocatable(stripStorageViewRefs(a.exprTypes[arg]), map[Type]bool{}) {
+				continue
+			}
+		}
+		key := optimizationExprString(arg)
+		if key == "" {
+			continue
+		}
+		deps = append(deps, storageViewDependencyState{Sources: []string{key + origin.Suffix}, Valid: true})
+	}
+	return mergeStorageViewDependencies(deps...)
 }
 
 func (a *Analyzer) storageViewDependencyForBorrowedExpr(expr ast.Expr) (storageViewDependencyState, bool) {
@@ -759,8 +871,13 @@ func (a *Analyzer) invalidateStorageViewsForSourceScoped(source ast.Expr, reason
 // the bytes behind a view of `p.storage`. Only concrete element types qualify (builtins, sview,
 // cstr, non-generic structs); anything generic keeps the conservative overlap.
 func (a *Analyzer) storageViewSiblingSpare(key string) func(source, candidate string) bool {
+	// An element store `p.a[i] = x` writes in place inside p.a's buffer: siblings of p.a are
+	// as untouched as by a push to p.a, so the field path before the index decides.
+	if cut := strings.Index(key, "["); cut >= 0 {
+		key = key[:cut]
+	}
 	root := storageViewSourceRoot(key)
-	if root == key || strings.Contains(key, "[") {
+	if root == key {
 		return nil
 	}
 	mutatedElem := a.storageViewFieldPathElem(key)
@@ -768,13 +885,15 @@ func (a *Analyzer) storageViewSiblingSpare(key string) func(source, candidate st
 		return nil
 	}
 	return func(source, candidate string) bool {
-		if candidate != key && candidate != root {
+		// Alias expansion can add other paths under the same root; the mutated storage is
+		// still KEY's, so the sibling argument applies to them too.
+		if storageViewSourceRoot(candidate) != root {
 			return false
 		}
 		if source == key || strings.Contains(source, "[") || storageViewSourceRoot(source) != root || source == root {
 			return false
 		}
-		if strings.HasPrefix(source, key+".") || strings.HasPrefix(key, source+".") {
+		if strings.HasPrefix(source, key+".") || strings.HasPrefix(source, key+"[") || strings.HasPrefix(key, source+".") {
 			return false
 		}
 		elem := a.storageViewFieldPathElem(source)
@@ -838,6 +957,11 @@ func storageViewConcreteElemKey(t Type) string {
 	case *StructType:
 		if elem != nil && len(elem.TypeParams) == 0 && len(elem.GenericParams) == 0 {
 			return "struct " + elem.Namespace + "::" + elem.Name
+		}
+	case *EnumType:
+		// Enum types carry no namespace; the type's identity distinguishes them.
+		if elem != nil {
+			return fmt.Sprintf("enum %p", elem)
 		}
 	}
 	return ""
@@ -1011,4 +1135,74 @@ func (a *Analyzer) isEnumVariantConstructorCall(call *ast.CallExpr) bool {
 	}
 	_, ok = enumType.Variant(field.Field)
 	return ok
+}
+
+// storageViewTypeOwnsRelocatable: t (by value) owns storage a mutation can relocate.
+func (a *Analyzer) storageViewTypeOwnsRelocatable(t Type, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *DArrayType, *DictType, *SetType:
+		return true
+	case *BuiltinType:
+		return isDStrType(tt)
+	case *ArrayType:
+		return a.storageViewTypeOwnsRelocatable(tt.Elem, seen)
+	case *OptionalType:
+		return a.storageViewTypeOwnsRelocatable(tt.Value, seen)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if a.storageViewTypeOwnsRelocatable(field.Type, seen) {
+				return true
+			}
+		}
+	case *StructType:
+		for _, field := range tt.Fields {
+			if a.storageViewTypeOwnsRelocatable(field.Type, seen) {
+				return true
+			}
+		}
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := make(map[string]Type, len(base.TypeParams))
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				if a.storageViewTypeOwnsRelocatable(a.substituteType(field.Type, bindings, nil, nil, nil), seen) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// storageViewTailValue is the value expression a value-position body ends with.
+func storageViewTailValue(body []ast.Stmt) ast.Expr {
+	if len(body) == 0 {
+		return nil
+	}
+	if stmt, ok := body[len(body)-1].(*ast.ExprStmt); ok && stmt != nil {
+		return stmt.Expr
+	}
+	return nil
+}
+
+// storageViewTopLevelBorrowType: the value IS a borrow (a view, a reference, or an optional
+// of one), not an aggregate that merely contains some. A helper returning a freshly built
+// aggregate (`semantic_loop_view(&file) -> Ast::File`) is not tracked as a view of its args.
+func storageViewTopLevelBorrowType(t Type) bool {
+	if opt, ok := t.(*OptionalType); ok && opt != nil {
+		t = opt.Value
+	}
+	switch t.(type) {
+	case *RefType, *ViewType, *SViewType, *CStrType:
+		return true
+	}
+	return false
 }
