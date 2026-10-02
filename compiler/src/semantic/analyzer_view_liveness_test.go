@@ -285,3 +285,88 @@ def leak() -> sview:
 		t.Fatalf("missing local-region escape in:\n%s", all)
 	}
 }
+
+// Three stale-view holes: a `mutable dstr&` helper may reallocate the string a view borrows;
+// a view bound in a match arm must survive the arm merge; and an enum-returning helper that
+// wraps a view of its argument carries that argument's storage dependency to the caller.
+func TestAnalyzeStaleViewHelperAndMatchHoles(t *testing.T) {
+	enumPrefix := `def mk(n: i64) -> darray[u8]:
+    b: mutable darray[u8] = []
+    for i in 0..<n:
+        b.push(65.u8())
+    return b
+
+enum Tok:
+    Word(text: sview)
+    Nil
+
+enum Num:
+    Val(n: i64)
+    Nil
+
+def wrap(b: darray[u8]&) -> Tok:
+    return Tok.Word(b.as_sview())
+
+def num(b: darray[u8]&) -> Num:
+    return Num.Val(b.count.i64())
+
+`
+	cases := map[string][2]string{
+		"dstr_mut_ref_helper": {`def reset(d: mutable dstr&) -> void:
+    d <- "Zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+
+def g(d: mutable dstr&) -> i64:
+    s: sview = d.as_sview()
+    reset(d)
+    return s[0].i64()
+`, `"s" cannot be used`},
+		"match_arm_bind_then_replace": {enumPrefix + `def main() -> i64:
+    buf: mutable darray[u8] = mk(4)
+    t: Tok = Tok.Word(buf.as_sview())
+    v: mutable sview = ""
+    match t:
+        Tok.Word(text): v <- text
+        Tok.Nil: v <- ""
+    buf <- mk(1)
+    return v[0].i64()
+`, `"v" cannot be used`},
+		"enum_helper_return": {enumPrefix + `def main() -> i64:
+    buf: mutable darray[u8] = mk(4)
+    t: Tok = wrap(buf)
+    buf <- mk(1)
+    return match t:
+        Tok.Word(text): text[0].i64()
+        Tok.Nil: 1
+`, `"t" cannot be used`},
+		"enum_helper_no_mutation": {enumPrefix + `def main() -> i64:
+    buf: mutable darray[u8] = mk(4)
+    t: Tok = wrap(buf)
+    return match t:
+        Tok.Word(text): text[0].i64()
+        Tok.Nil: 1
+`, ""},
+		"scalar_enum_helper": {enumPrefix + `def main() -> i64:
+    buf: mutable darray[u8] = mk(4)
+    t: Num = num(buf)
+    buf <- mk(1)
+    return match t:
+        Num.Val(n): n
+        Num.Nil: 1
+`, ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "stale_view_"+name+".elisa", c[0])
+			all := strings.Join(result.Errors(), "\n")
+			if c[1] == "" {
+				if strings.Contains(all, "cannot be used") {
+					t.Fatalf("unexpected stale-view error:\n%s", all)
+				}
+				return
+			}
+			if !strings.Contains(all, c[1]) {
+				t.Fatalf("missing %q in:\n%s", c[1], all)
+			}
+		})
+	}
+}

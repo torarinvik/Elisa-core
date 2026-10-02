@@ -323,8 +323,33 @@ func (a *Analyzer) checkBorrowEscapesLocal(value ast.Expr, valueType Type, messa
 			return
 		}
 	}
-	if prov, known := a.borrowProvenanceStorage(value); known && prov == RefStorageStack {
+	prov, known := a.borrowProvenanceStorage(value)
+	// A cast cannot lengthen the storage it borrows: `(&x).cast[static u8&]` on a frame local still
+	// points into the frame, so the cast's declared storage class does not hide the dangle. This is
+	// a guaranteed dangle, so (like a bare `&x` return) the Unsafe.PointerCast opt-out does not cover it.
+	if inner, ok := stripParenCasts(value); ok {
+		if innerProv, innerKnown := a.borrowProvenanceStorage(inner); innerKnown && innerProv == RefStorageStack {
+			prov, known = innerProv, innerKnown
+		}
+	}
+	if known && prov == RefStorageStack {
 		a.errorf(value.Pos(), "%s. Return/store the value or owner by value, or clone it into a longer-lived region (clone[dstr]/clone[darray[...]])", message)
+	}
+}
+
+// stripParenCasts peels parens and ref casts off a borrow; ok reports at least one cast was peeled.
+func stripParenCasts(expr ast.Expr) (ast.Expr, bool) {
+	peeled := false
+	for {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.CastExpr:
+			expr = n.Operand
+			peeled = true
+		default:
+			return expr, peeled
+		}
 	}
 }
 

@@ -856,6 +856,12 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				case *StructType:
 					a.checkIteratorInvalidationForEnclosingMutableRefArg(loweredArgs[i])
 					a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
+				case *BuiltinType:
+					// A callee given a dstr by mutable ref may reassign or grow it, moving
+					// the buffer a live `as_sview()` of it points into.
+					if isDStrType(stripRefForBounds(rt.Elem).(*BuiltinType)) {
+						a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
+					}
 				}
 			}
 		}

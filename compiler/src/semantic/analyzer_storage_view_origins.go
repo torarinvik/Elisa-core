@@ -156,6 +156,22 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 			}
 			return a.storageViewOriginsOfExpr(n.Args[0], params, locals, depth, hops+1, true)
 		}
+		// An enum variant construction (`Tok.Word(b.as_sview())`) borrows whatever its
+		// payload arguments borrow; payloads of a type that cannot hold a borrow are skipped.
+		if a.isEnumVariantConstructorCall(n) {
+			var out []storageViewReturnOrigin
+			for _, argument := range n.Args {
+				if t := a.exprTypes[argument]; t != nil && !a.typeCarriesBorrowedStorage(t, map[Type]bool{}) {
+					continue
+				}
+				mapped, ok := a.storageViewOriginsOfExpr(argument, params, locals, depth, hops+1, into)
+				if !ok {
+					return nil, false
+				}
+				out = append(out, mapped...)
+			}
+			return out, true
+		}
 		// A dict value reference (`m.get(k)`, rewritten to an overload-mangled arena_dict_get)
 		// points into the dict's bucket array: it borrows the dict argument.
 		dictHelper := callBaseName(n)

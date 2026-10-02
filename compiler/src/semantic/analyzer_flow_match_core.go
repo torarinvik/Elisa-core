@@ -356,6 +356,10 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 	var mergedSpecializedValueTypes map[*Symbol]Type
 	var mergedAliasCarriers map[string][]string
 	var mergedAliasCarrierFieldOverrides map[string]map[string][]string
+	// Storage-view deps merge like an if: start from the pre-match state and union in every
+	// fallthrough arm, so a view assigned inside an arm (`v <- text`) keeps its backing
+	// dependency after the match.
+	mergedStorageViewDeps := a.cloneStorageViewDeps()
 	hasFallthrough := false
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	covered := map[string]bool{}
@@ -398,6 +402,7 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 				mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierSnapshot(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, armSnapshot)
 			}
+			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, armSnapshot.StorageViewDeps)
 		}
 		if arm.Guard == nil {
 			// A guarded arm can fail at runtime, so it never shadows later arms.
@@ -428,6 +433,7 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.currentAliasCarriers = mergedAliasCarriers
 	a.currentAliasCarrierFieldOverrides = mergedAliasCarrierFieldOverrides
+	a.currentStorageViewDeps = mergedStorageViewDeps
 	a.recordAffineDestructureConsumption(stmt.Value, valueType, "match over affine enum")
 }
 

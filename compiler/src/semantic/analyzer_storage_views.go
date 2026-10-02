@@ -542,7 +542,11 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && field.Object != nil {
 		switch field.Field {
 		case "as_sview", "as_cstr":
-			return storageViewDependencyFromSource(field.Object)
+			// The view addresses the receiver's buffer directly, so a callee given the
+			// receiver by mutable ref (which may reassign or grow it) dangles it: Interior.
+			dep, ok := storageViewDependencyFromSource(field.Object)
+			dep.Interior = ok
+			return dep, ok
 		}
 	}
 	return a.storageViewDependencyForUserCall(call)
@@ -572,7 +576,11 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 		return mergeStorageViewDependencies(deps...)
 	}
 	if !storageViewTopLevelBorrowType(resultType) {
-		return storageViewDependencyState{}, false
+		// An enum result can carry a payload view into an argument (`wrap(b) -> Tok`
+		// returning `Tok.Word(b.as_sview())`); trace it through the return summary.
+		if _, isEnum := resultType.(*EnumType); !isEnum || !a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
+			return storageViewDependencyState{}, false
+		}
 	}
 	// A reference to a container HEADER (`-> mutable darray[T]&` returning `&state.items`)
 	// survives the container's own growth; its relocation hazard is tracked as a container
