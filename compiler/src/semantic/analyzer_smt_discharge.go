@@ -1282,6 +1282,38 @@ func (a *Analyzer) clearSMTAssertFacts() {
 }
 
 func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
+	a.invalidateSMTAssertFactsForTargetPreservingNullness(target, "")
+}
+
+// A direct reference argument passes the pointer value, not its caller-side slot.
+// The callee may mutate the pointee, but cannot rebind that value. &slot and field
+// arguments deliberately retain whole-target invalidation.
+func (a *Analyzer) invalidateSMTAssertFactsForPointeeCall(target ast.Expr) {
+	preserve := ""
+	if id, ok := stripOptimizationParens(target).(*ast.Ident); ok && a.currentScope != nil {
+		if sym, found := a.currentScope.Lookup(id.Name); found {
+			if _, isPointer := sym.Type.(*RefType); isPointer {
+				preserve = id.Name
+			}
+		}
+	}
+	a.invalidateSMTAssertFactsForTargetPreservingNullness(target, preserve)
+}
+
+func pointerNullnessFact(expr ast.Expr, name string) bool {
+	expr = stripOptimizationParens(expr)
+	if neg, ok := expr.(*ast.UnaryExpr); ok && neg.Op == lexer.TOKEN_NOT {
+		return pointerNullnessFact(neg.Operand, name)
+	}
+	bin, ok := expr.(*ast.BinaryExpr)
+	if !ok || (bin.Op != lexer.TOKEN_EQEQ && bin.Op != lexer.TOKEN_BANGEQ) {
+		return false
+	}
+	id, ok := stripOptimizationParens(nullComparePointer(bin)).(*ast.Ident)
+	return ok && id.Name == name
+}
+
+func (a *Analyzer) invalidateSMTAssertFactsForTargetPreservingNullness(target ast.Expr, preserve string) {
 	// Drop facts depending on the target's structural root OR any place it aliases (a borrow local
 	// mutated through writes the underlying place — audit cluster C). No identifiable root ⇒ clear all.
 	roots := a.mutationRootsForTarget(target)
@@ -1299,6 +1331,10 @@ func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
 		}
 		out := sc.smtAssertFacts[:0]
 		for _, fact := range sc.smtAssertFacts {
+			if preserve != "" && pointerNullnessFact(fact.Expr, preserve) {
+				out = append(out, fact)
+				continue
+			}
 			// Consult the fact's own deps() via the unified predicate, mirroring range-fact invalidation.
 			if factInvalidatedBy(assertHypothesisFact{fact: fact}, rootSet) {
 				continue
@@ -1336,7 +1372,7 @@ func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {
 			continue
 		}
 		if rt, ok := a.exprTypes[arg].(*RefType); ok && rt != nil && rt.Mutable {
-			a.invalidateSMTAssertFactsForTarget(arg)
+			a.invalidateSMTAssertFactsForPointeeCall(arg)
 		}
 	}
 }

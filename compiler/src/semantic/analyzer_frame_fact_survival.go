@@ -49,7 +49,7 @@ func (a *Analyzer) invalidateSMTAssertFactsFramed(ft *FuncType, args []ast.Expr)
 			continue // a by-value or immutable-borrow argument cannot be written
 		}
 		if !ft.FrameBounded {
-			a.invalidateSMTAssertFactsForTarget(arg) // unbounded callee: conservative
+			a.invalidateSMTAssertFactsForPointeeCall(arg) // only pointer-value nullness may survive
 			continue
 		}
 		root, fields, ok := frameWritePath(arg)
