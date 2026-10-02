@@ -213,6 +213,13 @@ func (a *Analyzer) validateSegmentFlowStmt(stmt ast.Stmt, owner *segmentOwnerSta
 		a.validateSegmentFlowStmts(n.Body, owner)
 	case *ast.CanStmt:
 		a.validateSegmentFlowStmts(n.Body, owner)
+	case *ast.RegionStmt:
+		// Explicit `region` blocks and the auto-region the compiler wraps around an allocating
+		// body run straight through: without this arm the whole body went unchecked.
+		a.validateSegmentFlowStmts(n.Body, owner)
+	case *ast.ScopeStmt:
+		a.validateSegmentFlowExpr(n.Guard, owner)
+		a.validateSegmentFlowStmts(n.Body, owner)
 	case *ast.PoolStmt:
 		a.validateSegmentFlowExpr(n.Workers, owner)
 		a.validateSegmentFlowStmts(n.Body, owner)
@@ -448,6 +455,11 @@ func (a *Analyzer) validateSegmentAgnosticStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "@segment_agnostic code cannot grant Segment.Host, Segment.Guest, or Unsafe.SegmentMutation; route segment establishment through a @segment_establishing entry thunk")
 		}
 		a.validateSegmentAgnosticStmts(n.Body)
+	case *ast.RegionStmt:
+		a.validateSegmentAgnosticStmts(n.Body)
+	case *ast.ScopeStmt:
+		a.validateSegmentAgnosticExpr(n.Guard)
+		a.validateSegmentAgnosticStmts(n.Body)
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
 		if permissionRefsContainSegmentDependency(refs) {
@@ -675,6 +687,11 @@ func (a *Analyzer) validateReentrantSafeStmt(stmt ast.Stmt) {
 		a.validateReentrantSafeExpr(n.Store)
 		a.validateReentrantSafeStmts(n.Body)
 	case *ast.CanStmt:
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.RegionStmt:
+		a.validateReentrantSafeStmts(n.Body)
+	case *ast.ScopeStmt:
+		a.validateReentrantSafeExpr(n.Guard)
 		a.validateReentrantSafeStmts(n.Body)
 	case *ast.WhileStmt:
 		a.validateReentrantSafeExpr(n.Cond)

@@ -186,6 +186,11 @@ func (a *Analyzer) collectSentinelTaints(stmts []ast.Stmt, sentinels map[string]
 			if n != nil {
 				a.collectSentinelTaints(n.Body, sentinels, tainted)
 			}
+		default:
+			// region/scope/pool/lock bodies, including the auto-region around an allocating body.
+			for _, child := range inlineChildBlocks(stmt) {
+				a.collectSentinelTaints(child, sentinels, tainted)
+			}
 		}
 	}
 }

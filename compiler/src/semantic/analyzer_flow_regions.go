@@ -306,6 +306,16 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 		a.errorf(stmt.Pos(), "missing builtin Arena type for region lowering")
 		arenaType = invalidType
 	}
+	// Regions are keyed by NAME throughout the outlives lattice (types carry the region
+	// name), so a region that reopens the name of a region still open around it would
+	// be indistinguishable from it: a value of the inner region stored into a local of
+	// the outer one compared as the same region and was accepted, then read freed memory.
+	for _, open := range a.regionLiveStack {
+		if open == stmt.Name {
+			a.errorf(stmt.Pos(), "region %q shadows an enclosing region of the same name; values of the two cannot be told apart, so rename the inner region", stmt.Name)
+			break
+		}
+	}
 	sym := &Symbol{Name: stmt.Name, Kind: SymbolRegion, Type: arenaType, Node: stmt, Mutable: false}
 	a.defineLocal(sym, stmt.Pos())
 	if a.currentRegions != nil {

@@ -327,7 +327,6 @@ func callMutableArgRoots(call *ast.CallExpr) map[string]bool {
 	return roots
 }
 
-
 // exprBlockPureOverOuter reports whether a value block is provably pure over OUTER
 // state (docs/119 §6.4): with an empty capture set, E4 has already rejected every
 // direct write and every mutating call to a non-local binding, and there is no
@@ -416,8 +415,24 @@ func collectBlockBoundNames(stmts []ast.Stmt, out map[string]bool) {
 				}
 				collectBlockBoundNames(arm.Body, out)
 			}
+		default:
+			for _, child := range inlineChildBlocks(s) {
+				collectBlockBoundNames(child, out)
+			}
 		}
 	}
+}
+
+// inlineChildBlocks: the bodies of the block statements (`can`, `trusted`, `region`,
+// `in`, `scope`, pool, lock, ...) that run inline. Without them a write inside
+// `can Abort.Panic:` (or the auto-region around an allocating body) escaped E4 unseen.
+// A static-if is left out: its inactive branches are never analysed, so walking them could
+// report on dead code.
+func inlineChildBlocks(stmt ast.Stmt) [][]ast.Stmt {
+	if _, isStaticIf := stmt.(*ast.StaticIfStmt); isStaticIf {
+		return nil
+	}
+	return returnBorrowChildBlocks(stmt)
 }
 
 // walkValueBlockMutations reports E4 for any direct assignment whose root binding is
@@ -448,6 +463,10 @@ func (a *Analyzer) walkValueBlockMutations(stmts []ast.Stmt, local map[string]bo
 		case *ast.MatchStmt:
 			for _, arm := range n.Arms {
 				a.walkValueBlockMutations(arm.Body, local)
+			}
+		default:
+			for _, child := range inlineChildBlocks(s) {
+				a.walkValueBlockMutations(child, local)
 			}
 		}
 	}
