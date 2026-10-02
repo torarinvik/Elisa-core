@@ -329,3 +329,36 @@ func (a *Analyzer) resolveMatchVariantPayloadValueExpr(value ast.Expr, pattern *
 	}
 	return a.resolveVariantPayloadValueExpr(value, pattern.EnumName, pattern.Variant, key)
 }
+
+// enterVariantPayloadPattern resolves a variant payload's value expression. When it cannot be
+// resolved (a mutable or parameter scrutinee), the payload's bindings still borrow the
+// scrutinee's storage: the scrutinee is installed as the storage-view fallback for the nested
+// pattern so a payload view bound by a match/`is` pattern goes stale when the scrutinee's
+// backing storage is mutated. Call the returned restore after analyzing the payload pattern.
+func (a *Analyzer) enterVariantPayloadPattern(value ast.Expr, pattern *ast.MatchVariantPattern, key string) (ast.Expr, func()) {
+	if value == nil {
+		return nil, func() {}
+	}
+	if resolved, ok := a.resolveMatchVariantPayloadValueExpr(value, pattern, key); ok && resolved != nil {
+		saved := a.patternStorageFallback
+		a.patternStorageFallback = nil
+		return resolved, func() { a.patternStorageFallback = saved }
+	}
+	saved := a.patternStorageFallback
+	if saved == nil {
+		a.patternStorageFallback = value
+	}
+	return nil, func() { a.patternStorageFallback = saved }
+}
+
+// recordPatternStorageViewBinding records the storage facts of a pattern binding, falling back
+// to the enclosing unresolved variant scrutinee (see enterVariantPayloadPattern).
+func (a *Analyzer) recordPatternStorageViewBinding(sym *Symbol, value ast.Expr) {
+	if value == nil {
+		value = a.patternStorageFallback
+	}
+	if value == nil {
+		return
+	}
+	a.recordStorageViewBinding(sym, value)
+}

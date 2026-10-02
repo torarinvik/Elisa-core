@@ -422,6 +422,7 @@ type Analyzer struct {
 	currentSpecializedValueTypes map[*Symbol]Type
 	currentValueBindings         map[*Symbol]ast.Expr
 	currentStorageViewDeps       map[*Symbol]storageViewDependencyState
+	patternStorageFallback       ast.Expr
 	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
 	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
 	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.

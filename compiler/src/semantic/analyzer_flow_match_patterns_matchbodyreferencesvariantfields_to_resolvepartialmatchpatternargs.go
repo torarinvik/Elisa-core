@@ -332,6 +332,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 		a.recordFunctionValueBinding(sym, valueExpr)
 		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
 		a.recordRegionRefBinding(sym, valueExpr)
+		a.recordPatternStorageViewBinding(sym, valueExpr)
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:
@@ -357,8 +358,9 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 				if arg == nil {
 					continue
 				}
-				payloadExpr, _ := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+				payloadExpr, restore := a.enterVariantPayloadPattern(valueExpr, p, moveBindVariantFieldKey(variant, i))
 				a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
+				restore()
 			}
 		case *ConstEnumType:
 			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, variantBase.Name)

@@ -239,6 +239,7 @@ func (a *Analyzer) bindExpectPatternLocal(scope *Scope, name string, typ Type, n
 			a.recordFunctionValueBinding(existing, valueExpr)
 			a.recordImmutableSymbolOptimizationFacts(existing, valueExpr)
 			a.recordRegionRefBinding(existing, valueExpr)
+			a.recordPatternStorageViewBinding(existing, valueExpr)
 		}
 		return
 	}
@@ -250,6 +251,7 @@ func (a *Analyzer) bindExpectPatternLocal(scope *Scope, name string, typ Type, n
 		a.recordFunctionValueBinding(sym, valueExpr)
 		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
 		a.recordRegionRefBinding(sym, valueExpr)
+		a.recordPatternStorageViewBinding(sym, valueExpr)
 	}
 }
 
@@ -319,14 +321,9 @@ func (a *Analyzer) bindExpectPatternLocals(scope *Scope, pattern ast.MatchPatter
 				if arg == nil {
 					continue
 				}
-				var payloadExpr ast.Expr
-				if valueExpr != nil {
-					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-					if ok {
-						payloadExpr = resolvedExpr
-					}
-				}
+				payloadExpr, restore := a.enterVariantPayloadPattern(valueExpr, p, moveBindVariantFieldKey(variant, i))
 				a.bindExpectPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
+				restore()
 			}
 		}
 	}

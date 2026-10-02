@@ -106,8 +106,9 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 			if arg == nil {
 				continue
 			}
-			payloadExpr, _ := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+			payloadExpr, restore := a.enterVariantPayloadPattern(valueExpr, p, moveBindVariantFieldKey(variant, i))
 			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
+			restore()
 		}
 		return false
 	case *ast.MatchOrPattern:

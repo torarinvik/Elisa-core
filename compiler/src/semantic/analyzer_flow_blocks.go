@@ -1172,6 +1172,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 				a.recordFunctionValueBinding(sym, n.Left)
 				a.recordImmutableSymbolOptimizationFacts(sym, n.Left)
 				a.recordRegionRefBinding(sym, n.Left)
+				a.recordStorageViewBinding(sym, n.Left)
 			}
 		}
 	}
@@ -1193,6 +1194,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 				a.recordFunctionValueBinding(sym, valueExpr)
 				a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
 				a.recordRegionRefBinding(sym, valueExpr)
+				a.recordPatternStorageViewBinding(sym, valueExpr)
 			}
 		}
 	}
@@ -1221,6 +1223,7 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			a.recordFunctionValueBinding(sym, valueExpr)
 			a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
 			a.recordRegionRefBinding(sym, valueExpr)
+			a.recordPatternStorageViewBinding(sym, valueExpr)
 		}
 	case *ast.MatchStructPattern:
 		if a.analyzeCountMatchPattern(p, expected) {
@@ -1276,14 +1279,9 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 				if arg == nil {
 					continue
 				}
-				var payloadExpr ast.Expr
-				if valueExpr != nil {
-					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-					if ok {
-						payloadExpr = resolvedExpr
-					}
-				}
+				payloadExpr, restore := a.enterVariantPayloadPattern(valueExpr, p, moveBindVariantFieldKey(variant, i))
 				a.bindConditionStructPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
+				restore()
 			}
 		}
 	}
