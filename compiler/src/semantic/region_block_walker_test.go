@@ -117,3 +117,34 @@ func TestSequentialSameNameRegionsAreAccepted(t *testing.T) {
 		t.Fatalf("sibling regions may reuse a name, got:\n%s", got)
 	}
 }
+
+// A user-written `in auto:` block is freed at its exit like `region NAME:`, so a
+// view stored out of it into an enclosing local dangles (the backend read a freed
+// arena: SIGSEGV at run time). Only compiler-inferred auto regions are exempt.
+func TestUserAutoRegionViewStoreOutIsRejected(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "user_auto_store.elisa", `def main() -> i64:
+    kept: mutable sview = ""
+    in auto:
+        b: mutable darray[u8] = [65.u8()]
+        kept <- b.as_sview()
+    return kept[0].i64() - 65
+`)
+	if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, `is stored into "kept", which outlives the region`) {
+		t.Fatalf("expected the in-auto store escape to be rejected, got:\n%s", got)
+	}
+}
+
+// Declaring the target inside the `in auto:` block stays legal.
+func TestUserAutoRegionInnerStoreIsAccepted(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "user_auto_inner.elisa", `def main() -> i64:
+    in auto:
+        kept: mutable sview = ""
+        b: mutable darray[u8] = [65.u8()]
+        kept <- b.as_sview()
+        return kept[0].i64() - 65
+    return 0
+`)
+	if got := strings.Join(result.Errors(), "\n"); strings.Contains(got, "outlives the region") {
+		t.Fatalf("inner store must stay legal, got:\n%s", got)
+	}
+}

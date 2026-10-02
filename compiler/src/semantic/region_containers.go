@@ -1532,13 +1532,29 @@ func (a *Analyzer) checkStructCopyInteriorRegionEscape(targetExpr ast.Expr, targ
 	}
 }
 
+// isUserAutoRegion reports whether a synthesized `__auto_*` region is one the user
+// wrote as `in auto:`. Unlike an inferred function-body region it is freed at its
+// block's exit (no adoption), so a value stored out of it dangles exactly like one
+// stored out of `region NAME:`.
+func (a *Analyzer) isUserAutoRegion(name string) bool {
+	if a == nil || a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || sym.Kind != SymbolRegion {
+		return false
+	}
+	region, isRegion := sym.Node.(*ast.RegionStmt)
+	return isRegion && region != nil && region.UserAuto
+}
+
 // checkRegionlessTargetStoreEscape rejects storing region-allocated data into a
 // region-less binding that outlives the region's block. The target outlives the
 // region exactly when its defining scope strictly encloses the region's
 // declaration scope (it was declared before the region block opened, so it is
-// still live after the region is freed). Synthesized `in auto:` regions are
-// excluded: their lifetimes are governed by the region-return/adoption
-// machinery, not the explicit-region lattice.
+// still live after the region is freed). Compiler-inferred auto regions are
+// excluded (the region-return/adoption machinery governs them); a user-written
+// `in auto:` block is not, since the backend frees it at block exit.
 func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRegion string) {
 	if a == nil || targetExpr == nil {
 		return
@@ -1554,7 +1570,7 @@ func (a *Analyzer) checkRegionlessTargetStoreEscapeInScope(targetExpr ast.Expr, 
 	if a == nil || targetExpr == nil {
 		return
 	}
-	if isSynthesizedAutoRegion(valueRegion) {
+	if isSynthesizedAutoRegion(valueRegion) && !a.isUserAutoRegion(valueRegion) {
 		return
 	}
 	regionSym, state := a.lookupRegionState(valueRegion)
