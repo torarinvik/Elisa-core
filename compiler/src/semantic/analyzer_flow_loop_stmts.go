@@ -186,7 +186,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 		}
 	}
 	joined := []poolJoinedRegionDependency{}
-	joinedViews := []*ast.Ident{}
+	joinedViews := []poolJoinedView{}
 	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name, Node: stmt, OuterRegions: outerRegions, Joined: &joined, JoinedViews: &joinedViews})
 	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: true}, stmt.Pos())
 	for _, inner := range stmt.Body {
@@ -199,11 +199,21 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	}
 	// A submitted view is live until the join: report it at the submit site if its backing
 	// was invalidated anywhere later in the body.
-	for _, ident := range joinedViews {
-		if sym, ok := a.currentScope.Lookup(ident.Name); ok && a.currentStorageViewDeps != nil {
-			if dep, ok := a.currentStorageViewDeps[sym]; ok && !dep.Valid {
-				a.flagStaleStorageViewUse(ident, ident.Name, dep)
+	for _, view := range joinedViews {
+		sym := view.Sym
+		if sym == nil {
+			if found, ok := a.currentScope.Lookup(view.Name); ok {
+				sym = found
 			}
+		}
+		if sym == nil || a.currentStorageViewDeps == nil {
+			continue
+		}
+		if dep, ok := a.currentStorageViewDeps[sym]; ok && !dep.Valid {
+			a.flagStaleStorageViewUse(view.Expr, view.Name, dep)
+		}
+		if view.Sym != nil {
+			delete(a.currentStorageViewDeps, view.Sym)
 		}
 	}
 	a.currentScope = savedScope

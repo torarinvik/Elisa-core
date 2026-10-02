@@ -72,3 +72,43 @@ def main() -> i64:
 		t.Fatalf("expected raw spawn1 inside an auto-region body to be rejected, got:\n%s", got)
 	}
 }
+
+// An unnamed view argument (a helper's returned view) is live until the join too.
+func TestNurserySubmittedTemporaryViewGrownBeforeJoinIsRejected(t *testing.T) {
+	for _, arg := range []string{"pv(buf)", "buf.as_sview()"} {
+		result := analyzeTreeTestSourceWithSemanticErrors(t, "nursery_submit_temp_view_grow.elisa", nurseryViewPrelude+`
+def pv(b: darray[u8]&) -> sview:
+    return b.as_sview()
+
+def main() -> i64:
+    can Parallel, Memory.Allocate, Abort.Panic:
+        buf: mutable darray[u8] = [65.u8()]
+        nursery workers(2):
+            submit first(`+arg+`)
+            for i in 0..<64:
+                buf.push(1.u8())
+        return 0
+`)
+		if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, "cannot be used") {
+			t.Fatalf("%s: expected the submitted temporary view to be rejected, got:\n%s", arg, got)
+		}
+	}
+}
+
+func TestNurserySubmittedTemporaryViewWithoutGrowthIsAccepted(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "nursery_submit_temp_view_ok.elisa", nurseryViewPrelude+`
+def pv(b: darray[u8]&) -> sview:
+    return b.as_sview()
+
+def main() -> i64:
+    can Parallel, Memory.Allocate, Abort.Panic:
+        buf: mutable darray[u8] = [65.u8()]
+        nursery workers(2):
+            submit first(pv(buf))
+        buf.push(1.u8())
+        return 0
+`)
+	if got := strings.Join(result.Errors(), "\n"); strings.Contains(got, "cannot be used") {
+		t.Fatalf("growth after the join must not invalidate the temporary view, got:\n%s", got)
+	}
+}

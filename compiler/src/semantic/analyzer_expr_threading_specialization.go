@@ -306,14 +306,33 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType)
 		return
 	}
-	if joinPool != nil && joinPool.JoinedViews != nil && a.currentScope != nil && a.currentStorageViewDeps != nil {
-		collectClauseIdents(arg, func(ident *ast.Ident) {
-			if sym, ok := a.currentScope.Lookup(ident.Name); ok {
-				if dep, ok := a.currentStorageViewDeps[sym]; ok && dep.Valid {
-					*joinPool.JoinedViews = append(*joinPool.JoinedViews, ident)
+	if joinPool != nil && joinPool.JoinedViews != nil && a.currentScope != nil {
+		named := false
+		if a.currentStorageViewDeps != nil {
+			collectClauseIdents(arg, func(ident *ast.Ident) {
+				if sym, ok := a.currentScope.Lookup(ident.Name); ok {
+					if dep, ok := a.currentStorageViewDeps[sym]; ok && dep.Valid {
+						*joinPool.JoinedViews = append(*joinPool.JoinedViews, poolJoinedView{Expr: ident, Name: ident.Name})
+						named = true
+					}
 				}
+			})
+		}
+		// An unnamed view argument is just as live until the join as a named one.
+		if !named {
+			if dep, ok := a.storageViewDependencyForExpr(arg); ok && dep.Valid && len(dep.Sources) > 0 {
+				name := optimizationExprString(arg)
+				if name == "" {
+					name = "submitted view"
+				}
+				sym := &Symbol{Name: name, Kind: SymbolLocal, Type: argType, Node: arg}
+				if a.currentStorageViewDeps == nil {
+					a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{}
+				}
+				a.currentStorageViewDeps[sym] = dep
+				*joinPool.JoinedViews = append(*joinPool.JoinedViews, poolJoinedView{Expr: arg, Name: name, Sym: sym})
 			}
-		})
+		}
 	}
 	state, ok := a.regionRefStateForExpr(arg)
 	if !ok {

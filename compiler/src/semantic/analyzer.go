@@ -897,7 +897,16 @@ type poolScopeState struct {
 	// JoinedViews records the storage views handed to tasks. A task may read its view
 	// at any point until the join, so the pool exit re-checks each one: a growth of the
 	// backing anywhere in the body (even after the submit) is a use-after-free race.
-	JoinedViews *[]*ast.Ident
+	JoinedViews *[]poolJoinedView
+}
+
+// poolJoinedView is one view handed to a task: a named view local (Sym nil, looked up by
+// name at the join) or an unnamed view argument (`submit f(pv(buf))`, `f(buf.as_sview())`),
+// tracked under a synthetic symbol that lives in currentStorageViewDeps until the join.
+type poolJoinedView struct {
+	Expr ast.Expr
+	Name string
+	Sym  *Symbol
 }
 
 type poolJoinedRegionDependency struct {
