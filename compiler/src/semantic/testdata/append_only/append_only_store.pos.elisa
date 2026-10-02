@@ -1,0 +1,26 @@
+module NameStore:
+    @append_only
+    struct Store:
+        private:
+            current: mutable darray[u8]
+            retired: mutable darray[darray[u8]]
+
+    def new_store() -> Store:
+        return Store{current: [], retired: []}
+
+    def make_room[@r](store: mutable Store& @r, needed: usize) -> void:
+        return if store.current.count + needed <= store.current.capacity
+        store.retired.push(store.current)
+        store.current <- []
+        store.current.reserve(needed if needed > 64 else 64)
+    def append[@r](store: mutable Store& @r, byte: u8) -> usize:
+        make_room(store, 1)
+        start: usize = store.current.count
+        store.current.push(byte)
+        return start
+
+def main() -> i32:
+    store: mutable NameStore::Store = NameStore::new_store()
+    first: usize = NameStore::append(store, 104)
+    second: usize = NameStore::append(store, 105)
+    return (first + second).i32() - 1

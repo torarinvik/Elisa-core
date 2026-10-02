@@ -632,11 +632,21 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 				continue
 			}
 		}
+		// An `@append_only` store never moves bytes a view points into (its make_room
+		// retires a full buffer instead of growing it, which the store checker enforces),
+		// so the view does not depend on later borrows of the store.
+		if storageViewPathCrossesAppendOnly(a.exprTypes[arg], origin.Suffix) {
+			continue
+		}
 		key := optimizationExprString(arg)
 		if key == "" {
 			continue
 		}
-		deps = append(deps, storageViewDependencyState{Sources: []string{key + origin.Suffix}, Valid: true})
+		// An "into" origin is an address into the argument's own relocatable storage, so a
+		// callee later handed that storage by `mutable T&` (which may grow, clear or reassign
+		// it) ends the buffer the result points into: Interior. A whole-struct borrow ends it
+		// only when that callee may write the field it lies in (storageViewCalleeWriteSpare).
+		deps = append(deps, storageViewDependencyState{Sources: []string{key + origin.Suffix}, Valid: true, Interior: true})
 	}
 	return mergeStorageViewDependencies(deps...)
 }
@@ -1018,6 +1028,34 @@ func storageViewConcreteElemKey(t Type) string {
 	return ""
 }
 
+// storageViewPathCrossesAppendOnly: the argument type, or a struct reached along the origin's
+// `.field` suffix, is an `@append_only` store (a view below it never relocates).
+func storageViewPathCrossesAppendOnly(t Type, suffix string) bool {
+	segments := strings.Split(strings.TrimPrefix(suffix, "."), ".")
+	for i := 0; i <= len(segments); i++ {
+		st, isStruct := stripStorageViewRefs(t).(*StructType)
+		if !isStruct || st == nil {
+			return false
+		}
+		if st.AppendOnly {
+			return true
+		}
+		if i == len(segments) || segments[i] == "" {
+			return false
+		}
+		name := segments[i]
+		if cut := strings.IndexByte(name, '['); cut >= 0 {
+			return false
+		}
+		field, ok := st.Fields[name]
+		if !ok {
+			return false
+		}
+		t = field.Type
+	}
+	return false
+}
+
 func stripStorageViewRefs(t Type) Type {
 	for {
 		ref, ok := t.(*RefType)
@@ -1082,6 +1120,12 @@ func (a *Analyzer) invalidateStorageViewsForWholeAssignment(target ast.Expr, tar
 // touches only the storage-view facts. A stable backing (reserve_commit/fixed) still drops the
 // error in the pending post-pass, exactly as for a direct push.
 func (a *Analyzer) invalidateStorageViewsForMutableRefArg(arg ast.Expr, callee string) {
+	a.invalidateStorageViewsForMutableRefArgSparing(arg, callee, nil)
+}
+
+// invalidateStorageViewsForMutableRefArgSparing is invalidateStorageViewsForMutableRefArg with a
+// per-callee SPARE (see storageViewCalleeWriteSpare): field views the callee cannot write survive.
+func (a *Analyzer) invalidateStorageViewsForMutableRefArgSparing(arg ast.Expr, callee string, spare func(source, candidate string) bool) {
 	if a == nil || arg == nil || len(a.currentStorageViewDeps) == 0 {
 		return
 	}
@@ -1097,7 +1141,7 @@ func (a *Analyzer) invalidateStorageViewsForMutableRefArg(arg ast.Expr, callee s
 	for _, root := range a.mutationRootsForTarget(place) {
 		mutatedSources[root] = true
 	}
-	a.invalidateStorageViewDeps(mutatedSources, fmt.Sprintf("mutable borrow of %s by %s", key, callee), true)
+	a.invalidateStorageViewDepsSparing(mutatedSources, fmt.Sprintf("mutable borrow of %s by %s", key, callee), true, false, spare)
 }
 
 // invalidateStorageViewDeps marks every live view depending on MUTATED_SOURCES stale. With

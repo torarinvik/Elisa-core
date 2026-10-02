@@ -207,7 +207,7 @@ func isSupportedEnumAnnotation(name string) bool {
 
 func isSupportedStructAnnotation(name string) bool {
 	switch name {
-	case "align", "fixed_layout", "c_bind", "abi_layout", "intrusive":
+	case "align", "fixed_layout", "c_bind", "abi_layout", "intrusive", "append_only":
 		return true
 	default:
 		return false
@@ -362,6 +362,9 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 			}
 		case "abi_layout":
 			a.validateStructAbiLayoutAnnotation(structDecl, annotation)
+		case "append_only":
+			// Shape and surface rules live in analyzer_append_only_store.go.
+			structType.AppendOnly = true
 		case "c_bind":
 			// @c_bind(header, name) binds the struct to an exact C type; an optional
 			// trailing `prefix` flag (@c_bind(header, name, prefix)) marks `name` as a

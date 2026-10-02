@@ -432,6 +432,9 @@ type StructType struct {
 	DerivedStateMap    map[string]*StructDerivedState
 	Fields             map[string]Field
 	Affine             bool
+	// AppendOnly: `@append_only` store (analyzer_append_only_store.go). Its buffers never
+	// reallocate under a view, so a view into one survives later borrows of the store.
+	AppendOnly bool
 	// Resource: synthesized from `extern resource Name` (docs/127 §3.2); see ast.StructDecl.Resource.
 	Resource bool
 	// Droppable: `affine` (use-at-most-once, may be dropped) vs `linear`

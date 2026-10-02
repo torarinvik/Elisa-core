@@ -188,6 +188,7 @@ type Analyzer struct {
 	// frame-aware fact survival). Populated in analyzeResolvedCallExprWithExpected, consumed (and
 	// cleared) by invalidateSMTAssertFactsForCall.
 	callFrameContexts            map[*ast.CallExpr]callFrameCtx
+	storageViewCalleeWriteCache  map[storageViewCalleeWriteKey]storageViewCalleeWrites
 	currentProofCitation         *scopedProofCitation
 	currentClosedWorldTheory     string
 	storageViewStaleUses         map[ast.Expr]storageViewDependencyState
@@ -394,20 +395,21 @@ type Analyzer struct {
 	storeFlowInProgress map[*ast.FuncDecl]*storeFlowSummary
 	storeFlowActive     map[*ast.FuncDecl]bool
 	// storeFlowSCC caches each function's call-graph component (region_store_flow_summary.go).
-	storeFlowSCC        map[*ast.FuncDecl][]*ast.FuncDecl
-	storeFlowBinds      bool
-	storeFlowParams     map[string]bool
-	storeFlowDarrays    map[string]bool
-	storeFlowViews      map[string]bool
-	storeFlowLocals     map[string]bool
-	storeFlowNamedTypes map[string]string
-	storeFlowEnv        map[string]string
-	storeFlowStmtEnv    map[uintptr]map[string]string
-	declaredFuncNames   map[string]bool
-	convMembers         map[*ast.FuncDecl]bool
-	cyclicFuncSet       map[*ast.FuncDecl]bool
-	callEdgeCache       map[*ast.FuncDecl][]*ast.FuncDecl
-	callDeclsByName     map[string][]*ast.FuncDecl
+	storeFlowSCC                map[*ast.FuncDecl][]*ast.FuncDecl
+	storeFlowBinds              bool
+	storeFlowParams             map[string]bool
+	storeFlowDarrays            map[string]bool
+	storeFlowViews              map[string]bool
+	storeFlowLocals             map[string]bool
+	storeFlowNamedTypes         map[string]string
+	storeFlowEnv                map[string]string
+	storeFlowStmtEnv            map[uintptr]map[string]string
+	declaredFuncNames           map[string]bool
+	convMembers                 map[*ast.FuncDecl]bool
+	cyclicFuncSet               map[*ast.FuncDecl]bool
+	callEdgeCache               map[*ast.FuncDecl][]*ast.FuncDecl
+	callDeclsByName             map[string][]*ast.FuncDecl
+	storageViewWriteDeclsByName map[string][]*ast.FuncDecl
 	// returnElementStmtStates / returnElementStmtUnknown record, per return statement, the element
 	// provenance of the returned container (region_return_element_summary.go);
 	// returnElementSummaries holds each function's published summary.
@@ -1195,6 +1197,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.synthesizeDefaultImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
+	a.checkAppendOnlyStores(activeDecls)
 	// docs/75 S2: rewrite zero-annotation grown container ref params into the explicit
 	// `[@r]`/`@r` form BEFORE FuncTypes are built, so callee-side region inference reuses
 	// the proven S1 region-param threading end-to-end.
