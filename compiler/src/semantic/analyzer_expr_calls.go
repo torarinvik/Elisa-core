@@ -205,6 +205,12 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.
 	a.invalidateStorageViewsForRelocatingDictCall(expr)
+	// The method form (`m.put(k, v)`, `m.get_or_insert(k, v)`) is only rewritten to the
+	// arena_dict_* helper during dispatch, so the pre-dispatch check above sees no helper name;
+	// re-check once the rewrite has happened.
+	if expr != nil && callBaseName(expr) == "" {
+		defer a.invalidateStorageViewsForRelocatingDictCall(expr)
+	}
 	if expr != nil && expr.Safe {
 		return a.analyzeSafeCallExpr(expr)
 	}

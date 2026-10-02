@@ -442,6 +442,9 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 		return storageViewDependencyState{}, false
 	}
 	name := callBaseName(call)
+	if base := overloadedDictHelperName(name); base != "" {
+		name = base
+	}
 	switch name {
 	case "bytes_view", "bytes_view_range", "bytes_view_range_ref":
 		if len(call.Args) >= 1 {
@@ -654,6 +657,25 @@ func callBaseName(call *ast.CallExpr) string {
 	return ""
 }
 
+// overloadedDictHelperName recovers the runtime dict helper behind an overload-resolved callee
+// (`__ovl__arena_dict_get__mutable_dict_K_T__arena_dict_get`): the method form `m.get(k)` /
+// `m.put(k, v)` is rewritten to the arena_dict_* helper and then overload-mangled, so a plain
+// name switch misses it and the interior reference escapes the dict-insert invalidation.
+func overloadedDictHelperName(name string) string {
+	const prefix = "__ovl__"
+	if !strings.HasPrefix(name, prefix) {
+		return ""
+	}
+	visible := strings.TrimPrefix(name, prefix)
+	if i := strings.Index(visible, "__"); i >= 0 {
+		visible = visible[:i]
+	}
+	if !strings.HasPrefix(visible, "arena_dict_") {
+		return ""
+	}
+	return visible
+}
+
 // dictContainerArgBase peels a dict argument (`m.ref[mutable dict&]` = cast of &m, or a bare
 // `m`) down to the underlying container lvalue, so the dependency source key matches between the
 // borrow-producing get and the invalidating insert.
@@ -674,6 +696,10 @@ func dictContainerArgBase(expr ast.Expr) ast.Expr {
 	}
 }
 
+// The invalidation is a REPLACEMENT: a rehash re-slots every entry inside the bucket array even
+// when a reserve_commit backing keeps its base fixed, so a stable backing cannot excuse a stale
+// value reference (it would read whichever entry now occupies the old slot).
+//
 // invalidateStorageViewsForRelocatingDictCall invalidates interior references into a dict when a
 // relocating insert (arena_dict_put/put_checked/get_or_insert, which can resize → realloc the
 // bucket array) is performed on it — so a stale `arena_dict_get` reference used afterward is a
@@ -682,7 +708,24 @@ func (a *Analyzer) invalidateStorageViewsForRelocatingDictCall(call *ast.CallExp
 	if call == nil {
 		return
 	}
-	switch callBaseName(call) {
+	name := callBaseName(call)
+	if base := overloadedDictHelperName(name); base != "" {
+		name = base
+	}
+	// The value-returning method form (`m <- m.put(k, v)`) stays a method call on the dict
+	// receiver; it inserts into (and may rehash) the same bucket array.
+	if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && name == "" {
+		switch field.Field {
+		case "put", "put_checked", "put_or_panic", "get_or_insert", "get_or_insert_checked", "get_or_insert_or_panic", "reserve":
+			if _, isDict := stripRefForBounds(a.exprTypes[field.Object]).(*DictType); isDict {
+				base := dictContainerArgBase(field.Object)
+				a.invalidateStorageViewsForSourceMode(base, "dict insert (may rehash and relocate the bucket array)", true)
+				a.invalidateIndexBoundsForContainer(base)
+			}
+		}
+		return
+	}
+	switch name {
 	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_put_or_panic", "arena_dict_get_or_insert", "arena_dict_get_or_insert_checked", "arena_dict_get_or_insert_or_panic":
 	default:
 		return
@@ -691,7 +734,7 @@ func (a *Analyzer) invalidateStorageViewsForRelocatingDictCall(call *ast.CallExp
 		return
 	}
 	base := dictContainerArgBase(call.Args[1])
-	a.invalidateStorageViewsForSource(base, "dict insert (may rehash and relocate the bucket array)")
+	a.invalidateStorageViewsForSourceMode(base, "dict insert (may rehash and relocate the bucket array)", true)
 	a.invalidateIndexBoundsForContainer(base)
 }
 

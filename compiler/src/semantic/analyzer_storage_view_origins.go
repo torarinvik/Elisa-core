@@ -156,10 +156,27 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 			}
 			return a.storageViewOriginsOfExpr(n.Args[0], params, locals, depth, hops+1, true)
 		}
+		// A dict value reference (`m.get(k)`, rewritten to an overload-mangled arena_dict_get)
+		// points into the dict's bucket array: it borrows the dict argument.
+		dictHelper := callBaseName(n)
+		if base := overloadedDictHelperName(dictHelper); base != "" {
+			dictHelper = base
+		}
+		switch dictHelper {
+		case "arena_dict_get", "arena_dict_get_mut", "arena_dict_get_cstr_view", "arena_dict_get_cstr_view_mut":
+			if len(n.Args) == 0 {
+				return nil, false
+			}
+			return a.storageViewOriginsOfExpr(dictContainerArgBase(n.Args[0]), params, locals, depth, hops+1, true)
+		}
 		if field, isField := n.Func.(*ast.FieldExpr); isField && field != nil && field.Object != nil {
 			switch field.Field {
 			case "as_sview", "as_cstr", "view":
 				return a.storageViewOriginsOfExpr(field.Object, params, locals, depth, hops+1, true)
+			case "get", "get_mut":
+				if _, isDict := stripRefForBounds(a.exprTypes[field.Object]).(*DictType); isDict {
+					return a.storageViewOriginsOfExpr(field.Object, params, locals, depth, hops+1, true)
+				}
 			}
 		}
 		decls, args, ok := a.storageViewOriginCallee(n)
