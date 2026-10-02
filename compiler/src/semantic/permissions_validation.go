@@ -333,6 +333,15 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		}
 	case *ast.DiscardStmt:
 		a.validatePermissionExpr(n.Value, granted)
+	case *ast.RegionStmt:
+		// Function/loop bodies with heap locals are auto-wrapped in a RegionStmt; without
+		// this arm every permission check inside such a body was silently skipped.
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+	case *ast.ScopeStmt:
+		if n.Guard != nil {
+			a.validatePermissionExpr(n.Guard, granted)
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	}
 }
 

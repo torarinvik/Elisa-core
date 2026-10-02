@@ -315,6 +315,12 @@ def read(owner: mutable Arena&) -> char:
 }
 
 func TestSViewOfStableReserveCommitBufferSurvivesGrowth(t *testing.T) {
+	// This only passed because permission validation skipped every `region` body. The
+	// reserve_commit exemption for views exists only for SYNTHESIZED regions
+	// (resolvePendingStorageViewErrors); an explicit `region ... using reserve_commit`
+	// view is stale in default mode too (`view "view" cannot be used`). Extending the
+	// exemption to explicit regions is a relaxation and needs an owner decision.
+	t.Skip("explicit reserve_commit regions are not exempt from view invalidation; owner decision pending")
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_stable_reserve_commit.elisa", `def read() -> char:
 	can Memory.Allocate, Abort.Panic:
 		region storage(4096) using reserve_commit:

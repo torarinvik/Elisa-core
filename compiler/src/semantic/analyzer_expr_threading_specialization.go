@@ -306,6 +306,15 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType)
 		return
 	}
+	if joinPool != nil && joinPool.JoinedViews != nil && a.currentScope != nil && a.currentStorageViewDeps != nil {
+		collectClauseIdents(arg, func(ident *ast.Ident) {
+			if sym, ok := a.currentScope.Lookup(ident.Name); ok {
+				if dep, ok := a.currentStorageViewDeps[sym]; ok && dep.Valid {
+					*joinPool.JoinedViews = append(*joinPool.JoinedViews, ident)
+				}
+			}
+		})
+	}
 	state, ok := a.regionRefStateForExpr(arg)
 	if !ok {
 		return

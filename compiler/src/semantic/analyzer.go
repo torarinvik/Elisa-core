@@ -893,6 +893,10 @@ type poolScopeState struct {
 	// Joined records the outer-region dependencies handed to tasks, so the pool
 	// exit can reject a reset/destroy of one inside the body (before the join).
 	Joined *[]poolJoinedRegionDependency
+	// JoinedViews records the storage views handed to tasks. A task may read its view
+	// at any point until the join, so the pool exit re-checks each one: a growth of the
+	// backing anywhere in the body (even after the submit) is a use-after-free race.
+	JoinedViews *[]*ast.Ident
 }
 
 type poolJoinedRegionDependency struct {
