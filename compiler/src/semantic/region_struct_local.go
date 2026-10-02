@@ -206,16 +206,16 @@ func (a *Analyzer) structLocalRegionIsLive(region string) bool {
 // thread it into the callee. Returns argType unchanged unless the parameter is a region-param
 // struct ref and the argument is a region-bearing struct local. The region lands on the RefType
 // wrapper, not the StructType — preserving the struct-type-region invariant.
-func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType Type, regionParams map[string]bool) Type {
+func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType Type, regionParams map[string]bool) (ast.Expr, Type) {
 	if a == nil || len(regionParams) == 0 {
-		return argType
+		return arg, argType
 	}
 	pr, ok := paramType.(*RefType)
 	if !ok || pr == nil || pr.Region == "" || !regionParams[pr.Region] {
-		return argType
+		return arg, argType
 	}
 	if _, ok := pr.Elem.(*StructType); !ok {
-		return argType
+		return arg, argType
 	}
 	region := a.structLocalArgRegion(arg)
 	// A nested struct field reached through a region-carrying reference inherits the
@@ -231,7 +231,7 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 		}
 	}
 	if region == "" {
-		return argType
+		return arg, argType
 	}
 	// USE-SITE LIVENESS GATE: only thread a region that is still live at the call. A recorded
 	// named region whose `region r:` scope has already exited (or been `destroy`ed) is DEAD;
@@ -239,22 +239,36 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 	// Falling through (return argType unchanged) makes the binding fail → conservative
 	// "cannot infer region parameter" rejection. This only REMOVES threadings, never adds — sound.
 	if !a.structLocalRegionIsLive(region) {
-		return argType
+		return arg, argType
 	}
 	// The argument is a struct VALUE (auto-ref'd at the call) or already a region-less struct ref.
 	// Produce a `Struct& @region` whose RefType carries the threadable region.
 	switch at := argType.(type) {
 	case *RefType:
 		if at.Region != "" {
-			return argType
+			return arg, argType
 		}
 		cp := cloneRefType(at)
 		cp.Region = region
-		return cp
+		return arg, cp
 	case *StructType:
-		return &RefType{Mutable: true, Region: region, Elem: at}
+		// The argument is a struct VALUE. Pass its address, exactly as the ordinary
+		// call-argument auto-ref does: the call must carry an explicit address-of so the
+		// backend passes a pointer rather than loading the struct by value (a bare field
+		// path was otherwise lowered as a by-value load into a pointer parameter), and the
+		// address must be as writable as the parameter demands (an immutable binding must
+		// not be written through a `mutable T& @r` formal).
+		autoref := &ast.AddrOfExpr{Position: arg.Pos(), Operand: arg}
+		ref, ok := a.analyzeExpr(autoref).(*RefType)
+		if !ok || ref == nil || ref.Region != "" || (pr.Mutable && !ref.Mutable) {
+			return arg, argType
+		}
+		cp := cloneRefType(ref)
+		cp.Region = region
+		a.exprTypes[autoref] = cp
+		return autoref, cp
 	}
-	return argType
+	return arg, argType
 }
 
 // structOwnsRegionlessBuffers reports a by-value struct whose container fields carry no
