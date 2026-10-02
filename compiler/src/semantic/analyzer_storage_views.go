@@ -636,7 +636,10 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 		if key == "" {
 			continue
 		}
-		deps = append(deps, storageViewDependencyState{Sources: []string{key + origin.Suffix}, Valid: true})
+		// An "into" origin is an address into the argument's own relocatable storage, so a
+		// callee later handed that storage by `mutable T&` (which may grow, clear or reassign
+		// it) ends the buffer the result points into: Interior.
+		deps = append(deps, storageViewDependencyState{Sources: []string{key + origin.Suffix}, Valid: true, Interior: true})
 	}
 	return mergeStorageViewDependencies(deps...)
 }
@@ -1082,6 +1085,10 @@ func (a *Analyzer) invalidateStorageViewsForWholeAssignment(target ast.Expr, tar
 // touches only the storage-view facts. A stable backing (reserve_commit/fixed) still drops the
 // error in the pending post-pass, exactly as for a direct push.
 func (a *Analyzer) invalidateStorageViewsForMutableRefArg(arg ast.Expr, callee string) {
+	a.invalidateStorageViewsForMutableRefArgMode(arg, callee, true)
+}
+
+func (a *Analyzer) invalidateStorageViewsForMutableRefArgMode(arg ast.Expr, callee string, interiorOnly bool) {
 	if a == nil || arg == nil || len(a.currentStorageViewDeps) == 0 {
 		return
 	}
@@ -1097,7 +1104,7 @@ func (a *Analyzer) invalidateStorageViewsForMutableRefArg(arg ast.Expr, callee s
 	for _, root := range a.mutationRootsForTarget(place) {
 		mutatedSources[root] = true
 	}
-	a.invalidateStorageViewDeps(mutatedSources, fmt.Sprintf("mutable borrow of %s by %s", key, callee), true)
+	a.invalidateStorageViewDeps(mutatedSources, fmt.Sprintf("mutable borrow of %s by %s", key, callee), interiorOnly)
 }
 
 // invalidateStorageViewDeps marks every live view depending on MUTATED_SOURCES stale. With
