@@ -1002,6 +1002,7 @@ var storeFlowReadOnlyMethods = map[string]bool{
 func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled map[*ast.CallExpr][]string, nested *[]reflect.Value, calls *[]*ast.CallExpr, callsOnly bool) []string {
 	var names []string
 	callDepth := 0
+	condDepth := 0 // inside a ternary condition: a bool, so its names reach no value
 	a.storeFlowBinds = false
 	rename := map[string]string{}
 	for name, renamed := range a.storeFlowEnv {
@@ -1034,7 +1035,7 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				walk(v.Index(i))
 			}
 		case reflect.String:
-			if storeFlowVariableName(v.String()) && (!callsOnly || callDepth > 0) {
+			if condDepth == 0 && storeFlowVariableName(v.String()) && (!callsOnly || callDepth > 0) {
 				name := v.String()
 				if renamed, ok := rename[name]; ok {
 					name = renamed
@@ -1079,6 +1080,16 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				}
 				return
 			}
+			if tern, ok := v.Interface().(*ast.TernaryExpr); ok && tern != nil && !storeFlowHasBindingExpr(reflect.ValueOf(&tern.Cond).Elem()) {
+				// `value if cond else alt`: only the branches become the value. The condition is
+				// still walked so its calls (and the statements nested in it) are recorded.
+				walk(reflect.ValueOf(&tern.Value).Elem())
+				condDepth++
+				walk(reflect.ValueOf(&tern.Cond).Elem())
+				condDepth--
+				walk(reflect.ValueOf(&tern.Alt).Elem())
+				return
+			}
 			if storeFlowBindingExprs[v.Type().Elem().Name()] {
 				a.storeFlowBinds = true
 			}
@@ -1095,7 +1106,9 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				defer func() { callDepth-- }()
 				*calls = append(*calls, call)
 				if retNames, isHandled := handled[call]; isHandled {
-					names = append(names, retNames...)
+					if condDepth == 0 {
+						names = append(names, retNames...)
+					}
 					return
 				}
 				// A declared function's own name is not a variable.
@@ -1141,6 +1154,45 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 	}
 	walk(root)
 	return names
+}
+
+// storeFlowHasBindingExpr: a condition that binds (`v is Some(r)`) hands its binders to the
+// branches, so its names must stay connected to the value.
+func storeFlowHasBindingExpr(v reflect.Value) bool {
+	found := false
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if found || !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if storeFlowBindingExprs[v.Type().Elem().Name()] {
+				found = true
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if v.Type().Field(i).IsExported() {
+					walk(v.Field(i))
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(v)
+	return found
 }
 
 func (a *Analyzer) isDeclaredFuncName(name string) bool {
