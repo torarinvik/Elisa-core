@@ -29,3 +29,11 @@ append_only_ternary_copy.neg.elisa	may only be passed by reference to its own mo
 append_only_iterate_store.neg.elisa	may only be passed by reference to its own module's functions
 append_only_outside_module.neg.elisa	must be declared inside a module
 append_only_decl_public.neg.elisa	must have exactly two private fields
+append_only_holder_copy_local.neg.elisa	must be moved explicitly before
+append_only_holder_assign.neg.elisa	must be moved explicitly before
+append_only_holder_arg.neg.elisa	must be moved explicitly before
+append_only_holder_nested.neg.elisa	must be moved explicitly before
+append_only_holder_field_copy.neg.elisa	must be moved explicitly before
+append_only_holder_deref.neg.elisa	must be moved explicitly before
+append_only_holder_record_update.neg.elisa	must be moved explicitly before
+append_only_holder_return_copy.neg.elisa	must be moved explicitly before

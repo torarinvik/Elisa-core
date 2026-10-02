@@ -43,14 +43,20 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 }
 
 func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {
+	return a.typeContainsWithSeen(t, isAffineHandleType, "affine-handle traversal", seen, depth)
+}
+
+// typeContainsWithSeen reports whether a value of type t holds, by value anywhere inside it,
+// a type matching leaf.
+func (a *Analyzer) typeContainsWithSeen(t Type, leaf func(Type) bool, what string, seen map[Type]bool, depth int) bool {
 	if t == nil {
 		return false
 	}
 	if depth > semanticTraversalDepthLimit {
-		a.reportSemanticDepthLimit("affine-handle traversal", semanticTraversalDepthLimit)
+		a.reportSemanticDepthLimit(what, semanticTraversalDepthLimit)
 		return false
 	}
-	if isAffineHandleType(t) {
+	if leaf(t) {
 		return true
 	}
 	if seen[t] {
@@ -59,21 +65,21 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 	seen[t] = true
 	switch tt := t.(type) {
 	case *ArrayType:
-		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Elem, leaf, what, seen, depth+1)
 	case *DArrayType:
-		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Elem, leaf, what, seen, depth+1)
 	case *ViewType:
-		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Elem, leaf, what, seen, depth+1)
 	case *OptionalType:
-		return a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Value, leaf, what, seen, depth+1)
 	case *ErrorUnionType:
-		if a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1) {
+		if a.typeContainsWithSeen(tt.Value, leaf, what, seen, depth+1) {
 			return true
 		}
 		if tt.Errors != nil {
 			for _, payloads := range tt.Errors.Payloads {
 				for _, payloadType := range payloads {
-					if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
+					if a.typeContainsWithSeen(payloadType, leaf, what, seen, depth+1) {
 						return true
 					}
 				}
@@ -81,32 +87,32 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 		}
 		return false
 	case *DictType:
-		return a.containsAffineHandleValuesWithSeen(tt.Key, seen, depth+1) || a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Key, leaf, what, seen, depth+1) || a.typeContainsWithSeen(tt.Value, leaf, what, seen, depth+1)
 	case *SetType:
-		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Elem, leaf, what, seen, depth+1)
 	case *DictEntryType:
-		return a.containsAffineHandleValuesWithSeen(tt.Dict, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Dict, leaf, what, seen, depth+1)
 	case *PackedVariantViewType:
 		for _, field := range tt.Enum.Common {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
+			if a.typeContainsWithSeen(field.Type, leaf, what, seen, depth+1) {
 				return true
 			}
 		}
 		for _, payloadType := range tt.Variant.Payload {
-			if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
+			if a.typeContainsWithSeen(payloadType, leaf, what, seen, depth+1) {
 				return true
 			}
 		}
 		return false
 	case *EnumType:
 		for _, field := range tt.Common {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
+			if a.typeContainsWithSeen(field.Type, leaf, what, seen, depth+1) {
 				return true
 			}
 		}
 		for _, variant := range tt.Variants {
 			for _, payloadType := range variant.Payload {
-				if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
+				if a.typeContainsWithSeen(payloadType, leaf, what, seen, depth+1) {
 					return true
 				}
 			}
@@ -125,21 +131,21 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				if a.containsAffineHandleValuesWithSeen(fieldType, seen, depth+1) {
+				if a.typeContainsWithSeen(fieldType, leaf, what, seen, depth+1) {
 					return true
 				}
 			}
 			return false
 		}
 		for _, arg := range tt.Args {
-			if a.containsAffineHandleValuesWithSeen(arg, seen, depth+1) {
+			if a.typeContainsWithSeen(arg, leaf, what, seen, depth+1) {
 				return true
 			}
 		}
-		return a.containsAffineHandleValuesWithSeen(tt.Base, seen, depth+1)
+		return a.typeContainsWithSeen(tt.Base, leaf, what, seen, depth+1)
 	case *StructType:
 		for _, field := range tt.Fields {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
+			if a.typeContainsWithSeen(field.Type, leaf, what, seen, depth+1) {
 				return true
 			}
 		}

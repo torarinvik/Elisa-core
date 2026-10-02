@@ -365,6 +365,11 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 		case "append_only":
 			// Shape and surface rules live in analyzer_append_only_store.go.
 			structType.AppendOnly = true
+			// Two copies of a store header append into the same spare capacity and
+			// overwrite each other's viewed bytes, so a store, and every aggregate that
+			// holds one, is affine: it moves, it never copies.
+			structType.Affine = true
+			structType.Droppable = true
 		case "c_bind":
 			// @c_bind(header, name) binds the struct to an exact C type; an optional
 			// trailing `prefix` flag (@c_bind(header, name, prefix)) marks `name` as a
