@@ -120,6 +120,10 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 		return a.storageViewOriginsOfExpr(n.Operand, params, locals, depth, hops+1, into)
 	case *ast.StringLit:
 		return nil, true
+	case *ast.NullLit:
+		// `return null` from a `T&?` helper borrows nothing: it adds no origin and must not
+		// make the whole summary unknown (which would drop the other returns' origins).
+		return nil, true
 	case *ast.Ident:
 		if value, isLocal := locals[n.Name]; isLocal {
 			if value == nil {
