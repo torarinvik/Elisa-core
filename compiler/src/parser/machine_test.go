@@ -1,6 +1,9 @@
 package parser
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1093,5 +1096,21 @@ func TestMachineInputBindPattern(t *testing.T) {
 	bodyBind, ok := dispatch.Then[0].(*ast.VarDeclStmt)
 	if !ok || bodyBind.Name != "character" {
 		t.Fatalf("expected body-local input binding, got %#v", dispatch.Then[0])
+	}
+}
+
+// A state with no arms (and no `start`) used to panic in buildMachineArmChain with an index out
+// of range after the "has no arms" diagnostic was recorded (fuzz finding F19).
+func TestMachineStateWithoutArmsReportsInsteadOfPanicking(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("testdata", "machine", "state_without_arms.neg.elisa"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, errs := parseSourceFile(t, string(src))
+	got := fmt.Sprint(errs)
+	for _, want := range []string{"machine has no `start` declaration", `machine state "Build" has no arms`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %q, got: %s", want, got)
+		}
 	}
 }

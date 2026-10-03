@@ -1,0 +1,3 @@
+def build[@r](rows: mutable darray[darray[i64]]& @r) -> void:
+        machine over rows for state in states:
+            state Build

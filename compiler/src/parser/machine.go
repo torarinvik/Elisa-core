@@ -1188,6 +1188,11 @@ func lowerMachineTransitionAfterScope(arm *machineArm, target *machineState, enu
 // total dispatch, but a guarantee the machine can never spin on an unhandled input even if
 // a hole ever slipped past the checker.
 func buildMachineArmChain(pos lexer.Pos, arms []loweredMachineArm) []ast.Stmt {
+	// A state with no arms was already refused ("machine state %q has no arms"); keep the
+	// desugar total so the diagnostic is reported instead of an index-out-of-range panic.
+	if len(arms) == 0 {
+		return []ast.Stmt{&ast.BreakStmt{Position: pos}}
+	}
 	if len(arms) == 1 && arms[0].cond == nil {
 		return arms[0].body
 	}
