@@ -545,7 +545,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 			p.errorf("the tree `fold … as … into …` expression has been removed (docs/81); use a recursive function with `match` over the `enum … is` hierarchy")
 			return p.parseExprAfterRemovedPrefixKeyword()
 		}
-		if p.cur().Text == "rewrite" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
+		if p.looksLikeLegacyRewriteExpr() {
 			return p.parseRewriteExpr()
 		}
 		// Contextual `get` prefix: the optional analog of `try`. Recognized only
