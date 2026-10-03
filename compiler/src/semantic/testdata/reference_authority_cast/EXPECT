@@ -1,0 +1,3 @@
+forge_int_to_ref.neg.elisa	forging a reference from an integer
+upgrade_ref_param.neg.elisa	upgrading a read-only reference to a mutable one
+upgrade_ref_value.neg.elisa	upgrading a read-only reference to a mutable one

@@ -1,0 +1,5 @@
+# A plain integer reinterpreted as a reference has no provenance: rejected in every mode.
+def main() -> int:
+    addr: i64 = 4096
+    r: i64& = addr.cast[i64&]
+    return 0

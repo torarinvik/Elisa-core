@@ -1,0 +1,41 @@
+# Sound reborrows (same or lesser capability), a mutable local, and granted forge/upgrade.
+struct Box:
+    n: mutable i64
+
+def set(b: mutable Box&):
+    b.n <- 3
+
+def via(self: mutable Box&):
+    set((&self).cast[mutable Box&])
+
+def weaken(self: mutable Box&) -> i64:
+    r: Box& = (&self).cast[Box&]
+    return r.n
+
+def ok_mut_local() -> i64:
+    v: mutable i64 = 1
+    m: mutable i64& = (&v).cast[mutable i64&]
+    m <- 2
+    return v
+
+# `&v` of a by-value binding borrows frame-owned storage, not foreign memory.
+def own_local() -> i64:
+    v: i64 = 1
+    m: mutable i64& = (&v).cast[mutable i64&]
+    return m
+
+def granted(x: i64&):
+    trusted Unsafe.PointerCast:
+        m: mutable i64& = (&x).cast[mutable i64&]
+        m <- 5
+
+def granted_forge() -> i64:
+    addr: i64 = 4096
+    trusted Unsafe.PointerCast:
+        r: i64& = addr.cast[i64&]
+    return 0
+
+def main() -> int:
+    b: mutable Box = Box{n: 1}
+    via(&b)
+    return 0

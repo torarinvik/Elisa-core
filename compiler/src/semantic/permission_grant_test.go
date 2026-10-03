@@ -350,8 +350,8 @@ def build(value: uintptr) -> heap u8&:
     return value.cast[heap u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if !strings.Contains(all, `pointer cast requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.PointerCast or a surrounding can ...: block`) {
-		t.Fatalf("expected missing unsafe pointer cast grant warning, got:\n%s", all)
+	if !strings.Contains(all, `forging a reference from an integer (`+"`.cast`"+` of a number to a reference type) requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.PointerCast or a surrounding can ...: block`) {
+		t.Fatalf("expected missing unsafe pointer cast grant error, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("build")
 	if !ok {
