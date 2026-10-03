@@ -125,7 +125,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 	case *ast.ZeroedLit:
 		return g.constZero(expected)
 	case *ast.StringLit:
-		return g.constGlobalStringPtr(n.Value)
+		return g.constStringLiteralValue(n.Value, expected)
 	case *ast.CharLit:
 		llvmType, err := g.lowerType(actual)
 		if err != nil {
@@ -498,6 +498,33 @@ func (g *llvmGenerator) constGlobalStringPtr(value string) (C.LLVMValueRef, erro
 	return C.LLVMConstInBoundsGEP2(arrayType, global, llvmValueSlicePtr(indices), C.unsigned(len(indices))), nil
 }
 
+// constStringLiteralValue lowers a string literal in a constant initializer. A `u8&`/cstr target
+// takes the bare pointer; an sview target (`global gk: sview = ""`) needs the two-field
+// StringView {data, len} value, exactly as emitStringLiteral builds it in a function body --
+// handing LLVM the bare pointer made the initializer type disagree with the global's.
+func (g *llvmGenerator) constStringLiteralValue(value string, expected semantic.Type) (C.LLVMValueRef, error) {
+	data, err := g.constGlobalStringPtr(value)
+	if err != nil {
+		return nil, err
+	}
+	if expected == nil || !isStringViewCarrierType(expected) {
+		return data, nil
+	}
+	if _, isRef := expected.(*semantic.RefType); isRef {
+		return data, nil
+	}
+	viewType, err := g.lowerType(expected)
+	if err != nil {
+		return nil, err
+	}
+	i64Type, err := g.lowerType(g.result.NamedTypes["i64"])
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMValueRef{data, C.LLVMConstInt(i64Type, C.ulonglong(len(value)), 0)}
+	return C.LLVMConstNamedStruct(viewType, llvmValueSlicePtr(fields), C.unsigned(len(fields))), nil
+}
+
 func (g *llvmGenerator) constValueAsLLVM(value semantic.ConstValue, expected semantic.Type) (C.LLVMValueRef, error) {
 	switch value.Kind {
 	case semantic.ConstInt:
@@ -523,7 +550,7 @@ func (g *llvmGenerator) constValueAsLLVM(value semantic.ConstValue, expected sem
 		}
 		return C.LLVMConstInt(llvmType, raw, 0), nil
 	case semantic.ConstString:
-		return g.constGlobalStringPtr(value.String)
+		return g.constStringLiteralValue(value.String, expected)
 	default:
 		return nil, fmt.Errorf("unsupported const value kind %d", value.Kind)
 	}
