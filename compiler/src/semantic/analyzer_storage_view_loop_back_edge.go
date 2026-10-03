@@ -48,6 +48,24 @@ func (a *Analyzer) noteStorageViewLoopMutation(candidates []string, reason strin
 	}
 	for i := range a.storageViewLoopUseFrames {
 		frame := &a.storageViewLoopUseFrames[i]
+		// A container declared inside the body is a fresh one each iteration: growing it
+		// cannot move the backing an earlier iteration's view points into.
+		outerOnly := candidates[:0:0]
+		for _, candidate := range candidates {
+			root := storageViewSourceRoot(candidate)
+			if a.currentScope != nil && frame.outer != nil {
+				inner, innerOK := a.currentScope.Lookup(root)
+				outer, outerOK := frame.outer.Lookup(root)
+				if innerOK && (!outerOK || inner != outer) {
+					continue
+				}
+			}
+			outerOnly = append(outerOnly, candidate)
+		}
+		if len(outerOnly) == 0 {
+			continue
+		}
+		candidates := outerOnly
 		frame.mutations = append(frame.mutations, storageViewLoopMutation{candidates: candidates, reason: reason, interiorOnly: interiorOnly, replaced: replaced, spare: spare})
 	}
 }
