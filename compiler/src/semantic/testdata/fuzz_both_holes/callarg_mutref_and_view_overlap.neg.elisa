@@ -1,0 +1,24 @@
+# F3: use() may grow b through its mutable reference and then read s, a view of the same buffer.
+def use(b: mutable darray[u8]&, s: sview) -> i64:
+    b.push(1.u8())
+    return s.len.i64()
+
+def use_view(b: mutable darray[u8]&, s: view[u8]) -> i64:
+    b.push(1.u8())
+    return s.len.i64()
+
+def m1() -> i64:
+    buf: mutable darray[u8] = [65.u8()]
+    return use(&buf, buf.as_sview())
+
+def m2() -> i64:
+    buf: mutable darray[u8] = [65.u8()]
+    v: sview = buf.as_sview()
+    return use(&buf, v)
+
+def m3() -> i64:
+    buf: mutable darray[u8] = [65.u8()]
+    return use_view(&buf, buf[0:1])
+
+def main() -> i64:
+    return m1() + m2() + m3()

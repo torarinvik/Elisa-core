@@ -1,0 +1,12 @@
+setter_store_through_local_view.neg.elisa	default	:11:22-23: value escapes its `in auto:` scope via store into longer-lived storage through argument 1
+setter_store_through_local_view.neg.elisa	default	:16:12-13: value escapes its `in auto:` scope via store into longer-lived storage through argument 1
+callarg_mutref_and_view_overlap.neg.elisa	strict	:12:15-16: mutable alias requires can[Unsafe]
+callarg_mutref_and_view_overlap.neg.elisa	strict	:17:15-16: mutable alias requires can[Unsafe]
+callarg_mutref_and_view_overlap.neg.elisa	strict	:21:20-21: mutable alias requires can[Unsafe]
+aff_closure_move_called_twice.neg.elisa	default	:11:19-20: one-shot closure "g" cannot be used: usage facts were consumed by call to "g"
+aff_closure_move_then_use_capture.neg.elisa	default	:11:28-29: linear value "h" cannot be used: usage facts were consumed by move into closure (captured "h")
+aff_closure_one_shot_escapes.neg.elisa	default	:14:18-19: one-shot closure "g" can only be called directly
+aff_closure_one_shot_unbound.neg.elisa	default	:13:18-20: a closure that moves captured "h" can be called at most once
+aff_closure_one_shot_in_loop.neg.elisa	default	is consumed on every iteration
+drain_with_live_ref.neg.elisa	strict	:8:12-13: stale reference requires can[Unsafe]
+move_with_live_view.neg.elisa	strict	:9:12-13: stale reference requires can[Unsafe]

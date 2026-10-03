@@ -1,0 +1,14 @@
+# F12: a one-shot closure called inside a loop runs its move on every iteration.
+affine struct Hd:
+    v: i64
+
+def take(h: Hd) -> i64:
+    return h.v
+
+def main() -> i64:
+    h: Hd = Hd{v: 7}
+    g: fn() -> i64 = fn() => take(move h)
+    t: mutable i64 = 0
+    for i in 0..<3 |t|:
+        t <- t + g()
+    return t

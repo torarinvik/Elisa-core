@@ -1,0 +1,13 @@
+# F12: a closure that moves a capture must be bound to a local to be tracked as one-shot.
+affine struct Hd:
+    v: i64
+
+def take(h: Hd) -> i64:
+    return h.v
+
+def apply(f: fn() -> i64) -> i64:
+    return f() + f()
+
+def main() -> i64:
+    h: Hd = Hd{v: 7}
+    return apply(fn() => take(move h))

@@ -1,0 +1,63 @@
+# Shapes the four rules must keep accepting.
+affine struct Hd:
+    v: i64
+
+struct Hs:
+    s: mutable sview
+
+def take(h: Hd) -> i64:
+    return h.v
+
+def apply(f: fn() -> i64) -> i64:
+    return f() + f()
+
+def set(h: mutable Hs&, s: sview) -> void:
+    h.s <- s
+
+def keep_param(h: mutable Hs&, s: sview) -> void:
+    set(h, s)
+
+def keep_literal(h: mutable Hs&) -> void:
+    set(h, "lit")
+
+def use(b: mutable darray[u8]&, s: sview) -> i64:
+    b.push(1.u8())
+    return s.len.i64()
+
+def disjoint() -> i64:
+    buf: mutable darray[u8] = [65.u8()]
+    other: darray[u8] = [66.u8()]
+    return use(&buf, other.as_sview())
+
+def one_shot(c: bool) -> i64:
+    h: Hd = Hd{v: 7}
+    g = fn() => take(move h)
+    if c:
+        return g()
+    return g()
+
+def plain_closure() -> i64:
+    k: i64 = 3
+    g: fn() -> i64 = fn() => k + 1
+    return g() + apply(g)
+
+def drain_words() -> i64:
+    words: mutable darray[sview] = ["a", "bb"]
+    t: mutable i64 = 0
+    for w in move words |t|:
+        t <- t + w.len.i64()
+    return t
+
+def drain_after_copy() -> i64:
+    buf: mutable darray[i64] = [41, 42]
+    x: i64 = buf[0]
+    t: mutable i64 = 0
+    for e in move buf |t|:
+        t <- t + e
+    return x + t
+
+def main() -> i64:
+    h: mutable Hs = Hs{s: ""}
+    keep_param(&h, "p")
+    keep_literal(&h)
+    return disjoint() + one_shot(true) + plain_closure() + drain_words() + drain_after_copy()
