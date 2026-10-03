@@ -8,6 +8,13 @@
 # (Elisa-compiler scripts/install_stage1.sh), and the explicit names say which
 # one a command line is using. There is deliberately no bare `elisac`; a stale
 # one from before the rename is removed so nothing can resolve to it by accident.
+# Only the primary checkout installs. Agents work in linked worktrees (scratch branches with
+# uncommitted experiments); a checkout there must not replace the shared ~/.elisac binary that
+# every other session compiles with. In a linked worktree --git-dir differs from
+# --git-common-dir.
+if [ "$(git rev-parse --absolute-git-dir 2>/dev/null)" != "$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" ]; then
+    exit 0
+fi
 COMPILER_DIR="$(git rev-parse --show-toplevel)/compiler"
 [ -d "$COMPILER_DIR" ] || exit 0
 mkdir -p "${HOME}/.elisac"
