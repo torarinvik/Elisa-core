@@ -28,7 +28,7 @@ type pendingStorageViewError struct {
 
 func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 	ident, ok := stripOptimizationParens(expr).(*ast.Ident)
-	if !ok || ident == nil || a.currentScope == nil || a.currentStorageViewDeps == nil {
+	if !ok || ident == nil || a.currentScope == nil || (a.currentStorageViewDeps == nil && len(a.storageViewLoopUseFrames) == 0) {
 		return
 	}
 	sym, ok := a.currentScope.Lookup(ident.Name)
@@ -37,6 +37,13 @@ func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 	}
 	dep, ok := a.currentStorageViewDeps[sym]
 	if !ok {
+		// A binding that holds no view YET can still be read at the top of a loop body and
+		// assigned a view further down (`if k > 0: use(v)` ... `v <- buf.as_sview()`): the
+		// next iteration then reads the view the previous one left behind, which a later
+		// relocation of its backing dangles. Record the use so the back-edge check sees it.
+		if len(a.storageViewLoopUseFrames) > 0 && !storageViewScalarBindingType(sym.Type) {
+			a.noteStorageViewLoopUse(sym, expr, ident.Name, true)
+		}
 		return
 	}
 	a.noteStorageViewLoopUse(sym, expr, ident.Name, dep.Valid)
@@ -639,12 +646,20 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 			continue
 		}
 		arg := stripOptimizationParens(args[origin.Param])
+		passed := arg
 		if addr, isAddr := arg.(*ast.AddrOfExpr); isAddr && addr != nil && addr.Operand != nil {
 			arg = stripOptimizationParens(addr.Operand)
 		}
 		if !origin.Into {
-			if dep, ok := a.storageViewDependencyForExpr(arg); ok {
+			// The callee returns the argument itself (`idf(x: T&) -> T&: return x`), so the
+			// result borrows whatever the PASSED expression borrows -- for `idf(&buf[0])` an
+			// interior reference into buf's relocatable buffer, not the scalar `buf[0]`.
+			if dep, ok := a.storageViewDependencyForExpr(passed); ok {
 				deps = append(deps, dep)
+			} else if passed != arg {
+				if dep, ok := a.storageViewDependencyForExpr(arg); ok {
+					deps = append(deps, dep)
+				}
 			}
 			continue
 		}

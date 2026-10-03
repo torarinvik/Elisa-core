@@ -1,0 +1,10 @@
+def idf(x: i64&) -> i64&:
+    return x
+
+def f(buf: mutable darray[i64]&) -> i64:
+    v: i64& = idf(&buf[0])
+    acc: mutable i64 = 0
+    for k in 0..<2 |acc, buf|:
+        acc <- acc + v
+        buf.push(1)
+    return acc

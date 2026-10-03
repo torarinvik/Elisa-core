@@ -1,0 +1,22 @@
+def idf(x: i64&) -> i64&:
+    return x
+
+def f(buf: mutable darray[i64]&) -> i64:
+    v: i64& = idf(&buf[0])
+    t: i64 = v
+    buf.push(1)
+    return t
+
+def g(buf: mutable darray[u8]&) -> i64:
+    v: mutable sview = ""
+    t: mutable i64 = 0
+    for k in 0..<3 |v, t, buf|:
+        v <- buf.as_sview()
+        t <- t + v.len.i64()
+        buf.push(1.u8())
+    return t
+
+def main() -> i64:
+    a: mutable darray[i64] = [1]
+    b: mutable darray[u8] = [65.u8()]
+    return f(&a) + g(&b)

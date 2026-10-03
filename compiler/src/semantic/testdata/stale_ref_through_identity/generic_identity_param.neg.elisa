@@ -1,0 +1,7 @@
+def gid[T](x: T) -> T:
+    return x
+
+def f(buf: mutable darray[i64]&) -> i64:
+    v: i64& = gid(&buf[0])
+    buf.push(1)
+    return v

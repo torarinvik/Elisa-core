@@ -1,0 +1,9 @@
+def f(buf: mutable darray[u8]&) -> i64:
+    v: mutable sview = ""
+    t: mutable i64 = 0
+    for k in 0..<3 |v, t, buf|:
+        if k > 0:
+            t <- t + v[0].i64()
+        v <- buf.as_sview()
+        buf.push(1.u8())
+    return t
