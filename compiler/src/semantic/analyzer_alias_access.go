@@ -369,12 +369,15 @@ func (a *Analyzer) viewArgAliasRootsDepth(arg ast.Expr, depth int) []string {
 	}
 	switch n := stripOptimizationParens(arg).(type) {
 	case *ast.SliceExpr:
+		if !a.viewSourceOwnsBuffer(n.Object) {
+			return nil
+		}
 		if root := a.aliasRootForExpr(n.Object); root != "" {
 			return []string{root}
 		}
 	case *ast.CallExpr:
 		field, ok := n.Func.(*ast.FieldExpr)
-		if !ok || field == nil || field.Object == nil || len(n.Args) != 0 {
+		if !ok || field == nil || field.Object == nil || len(n.Args) != 0 || !a.viewSourceOwnsBuffer(field.Object) {
 			return nil
 		}
 		switch field.Field {
@@ -396,6 +399,20 @@ func (a *Analyzer) viewArgAliasRootsDepth(arg ast.Expr, depth int) []string {
 		}
 	}
 	return nil
+}
+
+// viewSourceOwnsBuffer: the viewed expression is a container whose own buffer the view points
+// into (a darray, a fixed array, a dstr), not another view (slicing an sview views ITS bytes).
+func (a *Analyzer) viewSourceOwnsBuffer(source ast.Expr) bool {
+	switch t := StripAggregateStateType(stripRefForBounds(a.exprTypes[source])).(type) {
+	case *DArrayType, *ArrayType:
+		return true
+	case *BuiltinType:
+		return t != nil && t.Name == "dstr"
+	case *StructType:
+		return t != nil && t.Name == "dstr"
+	}
+	return false
 }
 
 func typeExprHasExplicitMutableRef(expr ast.TypeExpr) bool {
