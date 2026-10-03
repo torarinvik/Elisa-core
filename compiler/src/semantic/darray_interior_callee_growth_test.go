@@ -52,6 +52,20 @@ def f() -> i64:
     grow_bag(&bag)
     return r
 `,
+		// A bytes view addresses the field's buffer directly, exactly like `as_sview()`.
+		"struct_bytes_view": `struct Src:
+    source: mutable darray[u8]
+    names: mutable darray[i64]
+
+def grow_source(p: mutable Src&) -> void:
+    p.source.push(67.u8())
+
+def f() -> u8:
+    mutable p: Src = Src{source: [65.u8(), 66.u8()], names: []}
+    v: sview = bytes_view_range(p.source, 0, 2)
+    grow_source(p)
+    return v[1]
+`,
 	}
 	for name, source := range cases {
 		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "callee_growth_"+name+".elisa", source, AnalyzeOptions{})
@@ -95,6 +109,18 @@ def other_container(xs: mutable darray[i64]&, ys: mutable darray[i64]&) -> i64:
     r: i64& = &xs[1]
     grow(ys)
     return r
+
+struct Src:
+    source: mutable darray[u8]
+    names: mutable darray[i64]
+
+def grow_names_only(p: mutable Src&) -> void:
+    p.names.push(1)
+
+def sibling_bytes_view(p: mutable Src&) -> u8:
+    v: sview = bytes_view_range(p.source, 0, 2)
+    grow_names_only(p)
+    return v[1]
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "callee_no_growth.elisa", source, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "storage dependency facts were invalidated") {

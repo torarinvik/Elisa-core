@@ -448,7 +448,13 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	switch name {
 	case "bytes_view", "bytes_view_range", "bytes_view_range_ref":
 		if len(call.Args) >= 1 {
-			return storageViewDependencyFromSource(call.Args[0])
+			// The view addresses the argument's buffer directly (like `as_sview`), so a callee
+			// later given that storage by mutable ref -- a whole-struct `mutable P&` that may grow
+			// `p.source` -- dangles it: Interior (storageViewCalleeWriteSpare still spares fields
+			// the callee cannot write).
+			dep, ok := storageViewDependencyFromSource(call.Args[0])
+			dep.Interior = ok
+			return dep, ok
 		}
 		return storageViewDependencyState{}, false
 	case "sview", "string_view_slice", "string_view_prefix", "string_view_suffix":
