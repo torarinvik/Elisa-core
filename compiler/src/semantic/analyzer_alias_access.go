@@ -339,6 +339,38 @@ func refAliasAccessMode(t Type) (aliasAccessMode, bool) {
 	return aliasAccessRead, true
 }
 
+// viewAliasAccessMode classifies a by-value view parameter (sview, cstr, view[T]) as a borrow of the
+// storage its argument views: read-only, or writable for a `mutable view[T]`.
+func viewAliasAccessMode(t Type) (aliasAccessMode, bool) {
+	switch tt := t.(type) {
+	case *SViewType, *CStrType:
+		return aliasAccessRead, true
+	case *ViewType:
+		if tt != nil && tt.Mutable {
+			return aliasAccessWrite, true
+		}
+		return aliasAccessRead, true
+	}
+	return aliasAccessRead, false
+}
+
+// viewArgAliasRoots names the container storage a view argument points into, from its storage-view
+// dependency (the same facts a later growth uses to invalidate the view). A view that is not known
+// to point into tracked storage (a literal, a parameter view) has none.
+func (a *Analyzer) viewArgAliasRoots(arg ast.Expr) []string {
+	dep, ok := a.storageViewDependencyForExpr(arg)
+	if !ok {
+		return nil
+	}
+	var roots []string
+	for _, source := range dep.Sources {
+		if source != "" {
+			roots = append(roots, source)
+		}
+	}
+	return roots
+}
+
 func typeExprHasExplicitMutableRef(expr ast.TypeExpr) bool {
 	switch n := expr.(type) {
 	case *ast.MutableType:
@@ -616,13 +648,24 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 	}
 	for i := 0; i < limit; i++ {
 		mode, ok := refAliasAccessMode(paramTypes[i])
-		if !ok {
+		var roots []string
+		if ok {
+			// An arg may resolve to several alias roots (a reference returned from a call that
+			// aliases multiple params). Each is a storage the arg might touch, so any conflicting
+			// with this mutable use is a real alias.
+			roots = a.aliasRootsForExpr(args[i])
+		} else if viewMode, isView := viewAliasAccessMode(paramTypes[i]); isView {
+			// A view argument (`buf.as_sview()`, `buf[0:n]`, a bound view of buf) borrows the
+			// storage it views exactly like `&buf[0]` does: `use(&buf, buf.as_sview())` lets the
+			// callee grow buf through its mutable reference and then read the dangling view.
+			roots = a.viewArgAliasRoots(args[i])
+			mode = viewMode
+			if len(roots) == 0 {
+				continue
+			}
+		} else {
 			continue
 		}
-		// An arg may resolve to several alias roots (a reference returned from a call that
-		// aliases multiple params). Each is a storage the arg might touch, so any conflicting
-		// with this mutable use is a real alias.
-		roots := a.aliasRootsForExpr(args[i])
 		conflict := false
 		for _, root := range roots {
 			// Exact-root live state, discounting the arg's own outstanding binding so

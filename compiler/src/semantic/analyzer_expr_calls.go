@@ -197,6 +197,8 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	defer a.queueCallArgumentStoreChecks(expr)
 	// …and a borrow of a function-local REGION's storage (a local darray's bytes) the same way.
 	defer a.checkCallArgumentRegionStoreEscape(expr)
+	// …and the same for a non-container holder (`set(h, b.as_sview())`, set storing into h.s).
+	defer a.checkCallArgumentHolderStoreEscape(expr)
 	// A tracked local container a callee fills takes on the provenance of its other arguments.
 	defer a.recordCallFilledElementStates(expr)
 	// …and a void grower that may allocate its grown container's elements in the adopted arena.
