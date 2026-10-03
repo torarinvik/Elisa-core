@@ -41,6 +41,29 @@ func TestTypestateLoopJoin(t *testing.T) {
         read_file(file)
     read_file(file)
 `, false},
+		{"match_same_exit", `def use(file: mutable ProtocolFile[Closed]&, flag: i64) ensures file => Open:
+    match flag:
+        0:
+            open_file(file)
+        _:
+            open_file(file)
+    read_file(file)
+`, false},
+		{"match_different_exits", `def use(file: mutable ProtocolFile[Closed]&, flag: i64) ensures file => Open:
+    match flag:
+        0:
+            open_file(file)
+        _:
+            pass
+    read_file(file)
+`, true},
+		{"match_arm_uses_entry_state", `def use(file: mutable ProtocolFile[Closed]&, flag: i64) ensures file => Open:
+    match flag:
+        0:
+            open_file(file)
+        _:
+            read_file(file)
+`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "typestate_loop_join.elisa", typestateLoopJoinProtocol+tc.body, AnalyzeOptions{})
