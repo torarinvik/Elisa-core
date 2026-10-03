@@ -428,44 +428,217 @@ func (u *nameUnion) unionAll(names []string) {
 }
 
 // storeFlowSummaryFor returns the (memoized) summary of decl, or nil when none can be trusted.
+//
+// Recursion is solved per strongly connected component of the call graph (callEdgesOf, by
+// name, a superset of the calls storeFlowCallee resolves). Every member of decl's component
+// starts from the least summary ("connects nothing") and a worklist recomputes members, growing
+// a member's assumption by union and re-queueing its in-component callers whenever it grows,
+// until no summary grows. The whole component is then memoized at once. Callees outside the
+// component cannot reach back into it, so their summaries settle (and are memoized) on their
+// own. Memoizing a member before its component settled made `eb` -> `ea` -> `eb` cache `eb` as
+// "never stores r into out" although `ea` does, letting a local reference escape.
 func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
-	if decl == nil || decl.Body == nil || len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 {
+	if !storeFlowSummarizable(decl) {
 		return nil
 	}
 	if s, ok := a.storeFlowSummaries[decl]; ok {
 		return s
 	}
-	if a.storeFlowInProgress[decl] != nil {
-		return a.storeFlowInProgress[decl] // self-recursion: the current assumption
+	if s := a.storeFlowInProgress[decl]; s != nil {
+		return s // a member of the component being solved: its current assumption
 	}
 	if a.storeFlowActive[decl] {
-		return nil // mutual recursion: callers unify conservatively
+		return nil // defensive: no assumption yet, callers unify conservatively
 	}
 	if a.storeFlowSummaries == nil {
 		a.storeFlowSummaries = map[*ast.FuncDecl]*storeFlowSummary{}
 		a.storeFlowInProgress = map[*ast.FuncDecl]*storeFlowSummary{}
 		a.storeFlowActive = map[*ast.FuncDecl]bool{}
 	}
-	a.storeFlowActive[decl] = true
-	assumption := &storeFlowSummary{conn: make([][]bool, len(decl.Params))}
-	for i := range assumption.conn {
-		assumption.conn[i] = make([]bool, len(decl.Params))
-		assumption.conn[i][i] = true
+	members := a.storeFlowComponent(decl)
+	inSCC := map[*ast.FuncDecl]bool{}
+	for _, m := range members {
+		inSCC[m] = true
 	}
-	var result *storeFlowSummary
-	for round := 0; round <= len(decl.Params)+1; round++ {
-		a.storeFlowInProgress[decl] = assumption
-		next := a.computeStoreFlow(decl)
-		if reflect.DeepEqual(next.conn, assumption.conn) {
-			result = next
+	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
+	budget := 1
+	for _, m := range members {
+		a.storeFlowActive[m] = true
+		n := len(m.Params)
+		a.storeFlowInProgress[m] = newStoreFlowSummary(n)
+		budget += n*n + 2*n + 1 // each growth adds at least one bit
+		for _, c := range a.callEdgesOf(m) {
+			if inSCC[c] {
+				callers[c] = append(callers[c], m)
+			}
+		}
+	}
+	queued := map[*ast.FuncDecl]bool{}
+	work := append([]*ast.FuncDecl(nil), members...)
+	for _, m := range members {
+		queued[m] = true
+	}
+	settled := true
+	for len(work) > 0 {
+		m := work[0]
+		work = work[1:]
+		queued[m] = false
+		next := a.computeStoreFlow(m)
+		cur := a.storeFlowInProgress[m]
+		if next == nil {
+			settled = false
 			break
 		}
-		assumption = next
+		if storeFlowSummaryWithin(next, cur) {
+			continue
+		}
+		budget--
+		if budget < 0 {
+			settled = false
+			break
+		}
+		a.storeFlowInProgress[m] = storeFlowSummaryJoin(cur, next)
+		for _, c := range callers[m] {
+			if !queued[c] {
+				queued[c] = true
+				work = append(work, c)
+			}
+		}
 	}
-	delete(a.storeFlowInProgress, decl)
-	delete(a.storeFlowActive, decl)
-	a.storeFlowSummaries[decl] = result // nil when it did not settle
-	return result
+	for _, m := range members {
+		s := a.storeFlowInProgress[m]
+		delete(a.storeFlowInProgress, m)
+		delete(a.storeFlowActive, m)
+		if !settled {
+			s = nil
+		}
+		a.storeFlowSummaries[m] = s // nil when it did not settle
+	}
+	return a.storeFlowSummaries[decl]
+}
+
+func storeFlowSummarizable(decl *ast.FuncDecl) bool {
+	return decl != nil && decl.Body != nil && len(decl.TypeParams) == 0 && len(decl.GenericParams) == 0
+}
+
+// storeFlowComponent returns the summarizable members of decl's strongly connected component
+// (iterative Tarjan over callEdgesOf). Every component found on the way is cached, so each
+// function's component is computed once.
+func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
+	if comp, ok := a.storeFlowSCC[decl]; ok {
+		return comp
+	}
+	if a.storeFlowSCC == nil {
+		a.storeFlowSCC = map[*ast.FuncDecl][]*ast.FuncDecl{}
+	}
+	index := map[*ast.FuncDecl]int{}
+	low := map[*ast.FuncDecl]int{}
+	onStack := map[*ast.FuncDecl]bool{}
+	var stack []*ast.FuncDecl
+	type frame struct {
+		fn   *ast.FuncDecl
+		next int
+	}
+	counter := 0
+	edges := func(fn *ast.FuncDecl) []*ast.FuncDecl {
+		var out []*ast.FuncDecl
+		for _, c := range a.callEdgesOf(fn) {
+			if !storeFlowSummarizable(c) {
+				continue
+			}
+			if _, done := a.storeFlowSCC[c]; !done {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	push := func(fn *ast.FuncDecl) frame {
+		index[fn], low[fn] = counter, counter
+		counter++
+		stack = append(stack, fn)
+		onStack[fn] = true
+		return frame{fn: fn}
+	}
+	succ := map[*ast.FuncDecl][]*ast.FuncDecl{decl: edges(decl)}
+	frames := []frame{push(decl)}
+	for len(frames) > 0 {
+		top := &frames[len(frames)-1]
+		if top.next < len(succ[top.fn]) {
+			c := succ[top.fn][top.next]
+			top.next++
+			if _, seen := index[c]; !seen {
+				succ[c] = edges(c)
+				frames = append(frames, push(c))
+			} else if onStack[c] && index[c] < low[top.fn] {
+				low[top.fn] = index[c]
+			}
+			continue
+		}
+		fn := top.fn
+		frames = frames[:len(frames)-1]
+		if len(frames) > 0 && low[fn] < low[frames[len(frames)-1].fn] {
+			low[frames[len(frames)-1].fn] = low[fn]
+		}
+		if low[fn] == index[fn] {
+			var comp []*ast.FuncDecl
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				onStack[w] = false
+				comp = append(comp, w)
+				if w == fn {
+					break
+				}
+			}
+			for _, w := range comp {
+				a.storeFlowSCC[w] = comp
+			}
+		}
+	}
+	return a.storeFlowSCC[decl]
+}
+
+// newStoreFlowSummary is the least summary: each parameter reaches only itself.
+func newStoreFlowSummary(n int) *storeFlowSummary {
+	s := &storeFlowSummary{conn: make([][]bool, n), reach: make([][]bool, n), retConn: make([]bool, n), written: make([]bool, n)}
+	for i := 0; i < n; i++ {
+		s.conn[i] = make([]bool, n)
+		s.reach[i] = make([]bool, n)
+		s.conn[i][i] = true
+		s.reach[i][i] = true
+	}
+	return s
+}
+
+// storeFlowSummaryWithin reports that every flow x states, y states too.
+func storeFlowSummaryWithin(x, y *storeFlowSummary) bool {
+	n := len(y.conn)
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if x.conn[i][j] && !y.conn[i][j] || x.reach[i][j] && !y.reach[i][j] {
+				return false
+			}
+		}
+		if x.retConn[i] && !y.retConn[i] || x.written[i] && !y.written[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// storeFlowSummaryJoin is the pointwise union of two summaries of the same function.
+func storeFlowSummaryJoin(x, y *storeFlowSummary) *storeFlowSummary {
+	n := len(y.conn)
+	out := newStoreFlowSummary(n)
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			out.conn[i][j] = x.conn[i][j] || y.conn[i][j]
+			out.reach[i][j] = x.reach[i][j] || y.reach[i][j]
+		}
+		out.retConn[i] = x.retConn[i] || y.retConn[i]
+		out.written[i] = x.written[i] || y.written[i]
+	}
+	return out
 }
 
 func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {

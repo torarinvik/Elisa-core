@@ -393,6 +393,8 @@ type Analyzer struct {
 	storeFlowSummaries  map[*ast.FuncDecl]*storeFlowSummary
 	storeFlowInProgress map[*ast.FuncDecl]*storeFlowSummary
 	storeFlowActive     map[*ast.FuncDecl]bool
+	// storeFlowSCC caches each function's call-graph component (region_store_flow_summary.go).
+	storeFlowSCC        map[*ast.FuncDecl][]*ast.FuncDecl
 	storeFlowBinds      bool
 	storeFlowParams     map[string]bool
 	storeFlowDarrays    map[string]bool
