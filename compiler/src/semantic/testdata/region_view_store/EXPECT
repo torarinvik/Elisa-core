@@ -1,0 +1,6 @@
+region_view_store_tuple_literal.neg.elisa	value in region "scratch" is stored into "t"
+region_view_store_tuple_call_whole.neg.elisa	value in region "scratch" is stored into "t"
+region_view_store_tuple_call_field.neg.elisa	value in region "scratch" is stored into
+region_view_store_struct_literal.neg.elisa	value in region "scratch" is stored into "t"
+region_view_store_tuple_field.neg.elisa	field "v" is immutable
+tuple_immutable_field_store.neg.elisa	field "v" is immutable

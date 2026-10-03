@@ -1,0 +1,11 @@
+def pick(xs: darray[i64]&) -> (known: bool, v: view[i64]):
+    return (true, xs[0:2])
+
+def main() -> i32:
+    can Memory.Allocate:
+        base: mutable darray[i64] = [0]
+        v: mutable view[i64] = base[0:0]
+        region scratch(4096):
+            xs: mutable darray[i64] = [1, 2, 3]
+            v <- pick(&xs).v
+        return v[1].i32()
