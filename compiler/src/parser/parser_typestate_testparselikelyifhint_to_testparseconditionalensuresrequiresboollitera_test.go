@@ -143,20 +143,6 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 		t.Fatalf("expected call callee open, got %T %#v", call.Func, call.Func)
 	}
 }
-func TestParseSequenceRewriteExprRejected(t *testing.T) {
-	for _, src := range []string{
-		"def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0:\n                    emit item\n",
-		"def concat(owner: mutable Arena&, left: view[u32], right: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            segments: darray[view[u32]] = [left, right]\n            return rewrite segments as sequence[u32]:\n                segment:\n                    emit all segment\n",
-	} {
-		_, errs := parseSourceFile(t, src)
-		if len(errs) == 0 {
-			t.Fatalf("expected `rewrite … as sequence[T]:` to be rejected, but parse succeeded for:\n%s", src)
-		}
-		if !strings.Contains(strings.Join(errs, "\n"), "`rewrite … as sequence[T]:` has been removed") {
-			t.Fatalf("expected rewrite removal diagnostic, got: %v", errs)
-		}
-	}
-}
 func TestParseDeferStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer block:\n        pass\n    defer function:\n        pass\n    return 0\n")
 	if len(errs) != 0 {

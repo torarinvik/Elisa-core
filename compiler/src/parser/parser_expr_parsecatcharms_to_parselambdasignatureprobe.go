@@ -62,41 +62,6 @@ func (p *Parser) parseCatchArmBody(pos lexer.Pos) []ast.Stmt {
 	value := p.parseExpr()
 	return []ast.Stmt{&ast.ExprStmt{Position: pos, Expr: value}}
 }
-// looksLikeLegacyRewriteExpr reports whether the cursor sits on the removed
-// `rewrite EXPR as sequence[T]:` expression. `rewrite` is an ordinary identifier
-// everywhere else (a local, parameter, field, capture or function name), so the
-// claim needs the whole legacy head on one line: an operand starting with an
-// identifier and a later `as sequence`. Stage1 gates the same diagnostic on the
-// `as` ahead (Elisa-compiler parser_expr.elisa, rewrite_as_ahead).
-func (p *Parser) looksLikeLegacyRewriteExpr() bool {
-	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "rewrite" {
-		return false
-	}
-	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
-		return false
-	}
-	for i := p.pos + 2; i+1 < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
-		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
-			return false
-		case lexer.TOKEN_AS:
-			next := p.tokens[i+1]
-			return next.Kind == lexer.TOKEN_IDENT && next.Text == "sequence"
-		}
-	}
-	return false
-}
-func (p *Parser) parseRewriteExpr() ast.Expr {
-	pos := p.cur().Pos
-	p.expectIdentText("rewrite")
-	p.errorAt(pos, "`rewrite … as sequence[T]:` has been removed; build the result explicitly with a `darray[T] = []` and a `for` loop that `.push(…)`es each element (`emit all` → an inner push loop)")
-	value := p.parseExpr()
-	p.expect(lexer.TOKEN_AS)
-	root := p.parseTypeExpr()
-	rewriteDefault := p.matchIdentText("default")
-	arms := p.parseVisitArms()
-	return &ast.FoldExpr{Position: pos, Keyword: "rewrite", Value: value, Root: root, ResultType: root, RewriteDefault: rewriteDefault, Arms: arms}
-}
 func (p *Parser) parseExprAfterRemovedPrefixKeyword() ast.Expr {
 	// Recovery for removed prefix-keyword expressions (docs/81): consume the keyword and
 	// parse the operand so one clear error is reported instead of a cascade.

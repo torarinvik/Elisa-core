@@ -545,9 +545,6 @@ func (p *Parser) parsePrimary() ast.Expr {
 			p.errorf("the tree `fold … as … into …` expression has been removed (docs/81); use a recursive function with `match` over the `enum … is` hierarchy")
 			return p.parseExprAfterRemovedPrefixKeyword()
 		}
-		if p.looksLikeLegacyRewriteExpr() {
-			return p.parseRewriteExpr()
-		}
 		// Contextual `get` prefix: the optional analog of `try`. Recognized only
 		// when immediately followed by an identifier (the start of the operand),
 		// so call sites like `get(x)`, method calls `x.get(i)`, indexing `get[i]`,
@@ -932,7 +929,7 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 		return
 	}
 	// A completed value expression followed by `as` is a removed `expr as T` cast (the legitimate
-	// `as` uses — is/match aliases, visit/fold/rewrite, with/lock/mark/export — are consumed within
+	// `as` uses — is/match aliases, visit/fold, with/lock/mark/export — are consumed within
 	// their own parsers before reaching here). Point at the modern cast model and recover.
 	if p.peek() == lexer.TOKEN_AS {
 		pos := p.cur().Pos

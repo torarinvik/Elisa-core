@@ -1324,24 +1324,18 @@ Current rules:
 
 - `static generate:` is declaration-level only
 - declaration `emit` is valid inside `static generate:`
-- sequence-rewrite `emit` is also valid inside `rewrite ... as sequence[T]:` arms
 - `${expr}` may appear inside generated identifiers or member paths; the expression must evaluate to a compile-time string, integer, or reflection record with a `name`
 - generated declarations are parsed as normal Elisa declarations and then use the normal semantic and backend paths
 - generated declarations are inserted where the generator appears, so ordinary declaration visibility and duplicate-name diagnostics apply
 
-Inside sequence rewrites, `emit` appends values into the output sequence being built. `emit value` appends one element, `emit all values` appends every element from a `darray` or `view`, and `emit nothing` leaves the current arm without output.
+The `rewrite ... as sequence[T]:` expression has been removed, and `rewrite` is an ordinary identifier. Build such a result explicitly instead:
 
 ```elisa
 def compact(items: view[u32]) -> darray[u32]:
-    return rewrite items as sequence[u32]:
-        item when item != 0:
-            emit item
-
-def concat(left: view[u32], right: view[u32]) -> darray[u32]:
-    segments: darray[view[u32]] = [left, right]
-    return rewrite segments as sequence[u32]:
-        segment:
-            emit all segment
+    out: mutable darray[u32] = []
+    for item in items:
+        out.push(item) if item != 0
+    return out
 ```
 
 ## Grammar recovery policies

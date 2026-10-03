@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// `rewrite` is an ordinary identifier: only the exact removed
-// `rewrite EXPR as sequence[T]:` head is claimed (for its migration diagnostic).
+// `rewrite` is an ordinary identifier, as in stage1: the removed
+// `rewrite … as sequence[T]:` expression no longer reserves the word.
 func TestParseRewriteIsOrdinaryIdentifier(t *testing.T) {
 	for _, src := range []string{
 		// local (tuple-typed, as in elisa-proof's kernel), field access, capture list
@@ -26,10 +26,15 @@ func TestParseRewriteIsOrdinaryIdentifier(t *testing.T) {
 	}
 }
 
-func TestParseLegacyRewriteExprReportsOnce(t *testing.T) {
+// The removed `rewrite EXPR as sequence[T]:` expression has no special form or
+// migration hint any more: it is just a malformed statement around the identifier.
+func TestParseLegacyRewriteShapeIsPlainSyntaxError(t *testing.T) {
 	src := "def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0:\n                    emit item\n"
 	_, errs := parseSourceFile(t, src)
-	if len(errs) != 1 || !strings.Contains(errs[0], "`rewrite … as sequence[T]:` has been removed") {
-		t.Fatalf("expected exactly the rewrite removal diagnostic, got: %v", errs)
+	if len(errs) == 0 {
+		t.Fatalf("expected the legacy rewrite shape to be rejected")
+	}
+	if joined := strings.Join(errs, "\n"); strings.Contains(joined, "has been removed; build the result") {
+		t.Fatalf("expected no rewrite migration hint, got: %v", errs)
 	}
 }
