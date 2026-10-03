@@ -182,6 +182,14 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	// resolve as const-enum member access.
 	a.rewriteForeignEnumValidatorCallee(expr)
 	defer a.invalidateSMTAssertFactsForCall(expr)
+	if ident, isIdent := expr.Func.(*ast.Ident); isIdent {
+		if _, _, isOneShot := a.oneShotClosureSymbol(ident); isOneShot {
+			savedCallee := a.oneShotCallee
+			a.oneShotCallee = ident
+			defer func() { a.oneShotCallee = savedCallee }()
+			defer a.consumeOneShotClosureCall(expr)
+		}
+	}
 	// A mutating BUILTIN collection method (`xs.clear()`, `d.put(...)`, `s.add(...)`) is modeled with a
 	// VALUE receiver, not a `T&` ref, so it slips past the ref-arg fact invalidation below — leaving a
 	// stale predicate/range/written-const fact (e.g. `NonEmpty` surviving `xs.clear()`). Drop the

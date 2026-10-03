@@ -20,6 +20,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	}()
 	switch n := expr.(type) {
 	case *ast.Ident:
+		a.checkOneShotClosureUse(n)
 		if a.currentScope != nil {
 			// A private global reachable through the scope chain must still respect
 			// visibility: skip it here so resolution falls through to the global

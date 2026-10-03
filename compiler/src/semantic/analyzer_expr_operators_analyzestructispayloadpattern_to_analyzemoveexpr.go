@@ -196,5 +196,29 @@ func (a *Analyzer) analyzeMoveExpr(expr *ast.MoveExpr) Type {
 	if expr == nil {
 		return invalidType
 	}
-	return a.analyzeExpr(expr.Operand)
+	result := a.analyzeExpr(expr.Operand)
+	a.invalidateStorageViewsForMovedContainer(expr.Operand, result)
+	return result
+}
+
+// invalidateStorageViewsForMovedContainer: `move xs` hands xs's buffer (and its elements) to a
+// new owner -- a callee that may free or drain it, or a `for e in move xs` drain that moves every
+// element out. A reference or view taken into xs before the move (`x = &xs[0]`, `xs.as_sview()`)
+// no longer points into storage this function owns, exactly as after a relocating push, so it is
+// funnelled through the same storage-view invalidation and a later use is a stale reference.
+func (a *Analyzer) invalidateStorageViewsForMovedContainer(operand ast.Expr, operandType Type) {
+	if a == nil || operand == nil || len(a.currentStorageViewDeps) == 0 {
+		return
+	}
+	switch stripRefForBounds(operandType).(type) {
+	case *DArrayType, *DictType, *SetType:
+	default:
+		return
+	}
+	switch stripOptimizationParens(operand).(type) {
+	case *ast.Ident, *ast.FieldExpr:
+	default:
+		return
+	}
+	a.invalidateStorageViewsForSource(stripOptimizationParens(operand), storageViewMutationReason(operand, "move"))
 }

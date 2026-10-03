@@ -578,6 +578,9 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		if moveDrainBodyHasNonLocalExit(stmt.Body) {
 			a.errorf(stmt.Pos(), "a `for ... in move` drain must consume every element; `break`/`return` inside the drain body would leak the remaining un-consumed elements")
 		}
+		// The drain moves every element out of the source: a reference or view taken into it
+		// before the loop is stale from here on, in the body and after it.
+		a.invalidateStorageViewsForMovedContainer(stmt.Source, sourceType)
 	}
 	if stmt.Mode == ast.IterBindValue && !stmt.MovedSource && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
 		// AUTO-BORROW: read-only iteration over affine elements binds by reference —
