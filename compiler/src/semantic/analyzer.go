@@ -306,7 +306,10 @@ type Analyzer struct {
 	// `old(expr)` pseudo-call (the value of expr at function entry).
 	inEnsureContext bool
 	currentFuncDecl *ast.FuncDecl
-	currentFuncType *FuncType
+	// globalStorageAliasLocals marks by-value container locals that share a global's storage
+	// (see analyzer_global_storage_return.go).
+	globalStorageAliasLocals map[*Symbol]string
+	currentFuncType          *FuncType
 	// currentChangesPaths / currentPreservesPaths and their Has flags hold the resolved frame
 	// conditions (docs/87) of the function being analyzed, so the mutation sites can enforce that
 	// every caller-visible write lands in the declared `changes` set and never touches a `preserves`

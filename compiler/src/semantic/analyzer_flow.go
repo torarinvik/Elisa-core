@@ -260,6 +260,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		a.recordLocalRefAliasBinding(n, sym, n.Value, aliasAccessType)
+		a.noteGlobalStorageAliasLocal(sym, n.Value, bindingType)
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
 			a.remapPackedStoreDependencies(from, sym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))
 		}
@@ -639,6 +640,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if AssignableTo(targetType, valueType) {
 			a.bindActivePackedStoreType(targetType)
 		}
+		a.noteGlobalStorageAliasAssignment(n.Target, n.Value, targetType)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 		a.invalidateSMTAssertFactsForTarget(n.Target)
@@ -741,6 +743,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if AssignableTo(targetType, valueType) {
 			a.bindActivePackedStoreType(targetType)
 		}
+		a.noteGlobalStorageAliasAssignment(n.Target, n.Value, targetType)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 		a.invalidateSMTAssertFactsForTarget(n.Target)
 		a.recordSMTAssignmentFact(n.Target, n.Value)
@@ -778,6 +781,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.dischargeEnsureBooleans(n)
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
+		a.checkGlobalStorageReturnEscape(n.Value)
 		if !a.checkTupleReturnRegionEscapes(n.Value, valueType, a.currentReturn) {
 			a.checkReturnRegionContainerEscape(n.Value, valueType)
 			a.checkRegionAggregateReturnEscape(n.Value, valueType)
