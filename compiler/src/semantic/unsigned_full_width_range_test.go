@@ -11,6 +11,9 @@ func TestUnsignedFullWidthSaturatingIncrementContract(t *testing.T) {
 	src := `
 def probe(x: u64) -> u64:
     ensure result >= 1
+    ensure result >= x
+    ensure x >= 18446744073709551615u64 or result == x + 1
+    ensure x < 18446744073709551615u64 or result == x
     return x if x >= 18446744073709551615u64
     return x + 1
 `

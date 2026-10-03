@@ -2129,7 +2129,11 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 	case *ast.IntLit:
 		// Unsigned literals must enter SMT as their mathematical value, not the
 		// signed bit pattern used by the general constant folder.
-		if signed, _, typed := smtIntWidthSign(tr.a.exprTypes[n]); typed && !signed {
+		signed, _, typed := smtIntWidthSign(tr.a.exprTypes[n])
+		// Contract substitution clones AST nodes without exprTypes entries; the
+		// literal's preserved explicit suffix remains authoritative there.
+		unsignedSuffix := n.Suffix == "u" || n.Suffix == "u8" || n.Suffix == "u16" || n.Suffix == "u32" || n.Suffix == "u64" || n.Suffix == "usize"
+		if (typed && !signed) || unsignedSuffix {
 			if v, ok := tr.a.unsignedConstBound(n); ok {
 				return v.String(), true
 			}

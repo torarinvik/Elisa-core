@@ -497,9 +497,16 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 			return nil, false
 		}
 	case *ast.IntLit:
-		if c, ok := tr.a.constIntValue(n); ok {
+		term, ok := tr.termEnv(n, env)
+		if !ok {
+			return nil, false
+		}
+		// The int64-folding lane may hold only a signed payload of a u64
+		// literal. Keep the exact unsigned term when that payload differs.
+		if c, ok := tr.a.constIntValue(n); ok && term == smtInt(c) {
 			return vcIntLit{Val: c}, true
 		}
+		return vcOpaque{SMT: term}, true
 	case *ast.Ident:
 		// A plain free integer variable (mutable locals, params) becomes a substitutable vcVar — the WP
 		// transport target. termEnv returns exactly smtVar(name) for that form; env-bound or const-folded
