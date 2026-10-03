@@ -37,3 +37,6 @@ append_only_holder_field_copy.neg.elisa	must be moved explicitly before
 append_only_holder_deref.neg.elisa	must be moved explicitly before
 append_only_holder_record_update.neg.elisa	must be moved explicitly before
 append_only_holder_return_copy.neg.elisa	must be moved explicitly before
+append_only_thread_use_after_move.neg.elisa	must be moved explicitly before
+append_only_ternary_bare_tail.neg.elisa	must be moved explicitly before
+append_only_ternary_move_twice.neg.elisa	usage facts were consumed

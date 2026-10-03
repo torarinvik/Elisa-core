@@ -30,7 +30,7 @@ func TestAppendOnlyStoreBypassRoutes(t *testing.T) {
 
 func TestAppendOnlyStorePositive(t *testing.T) {
 	// The store itself, and a struct holding one: moves and `&` borrows of the holder stay legal.
-	for _, name := range []string{"append_only_store.pos.elisa", "append_only_holder.pos.elisa"} {
+	for _, name := range []string{"append_only_store.pos.elisa", "append_only_holder.pos.elisa", "append_only_ternary_move.pos.elisa"} {
 		source, err := os.ReadFile(filepath.Join("testdata", "append_only", name))
 		if err != nil {
 			t.Fatal(err)

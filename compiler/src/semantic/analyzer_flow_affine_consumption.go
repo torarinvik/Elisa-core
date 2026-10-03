@@ -129,6 +129,24 @@ func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason s
 		a.recordAffineConsumption(key, reason)
 		return
 	}
+	// A value-position `if` is a TernaryExpr whose branches may be ExprBlocks (docs/119 §4).
+	// Each branch tail is moved into the destination, so each must satisfy the same rule as
+	// a direct value: an explicit move is consumed, a bare affine name is rejected. Without
+	// this, `x <- if k: q else: q` left q live and a later `move q` made two owners.
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.consumeAffineValueExpr(n.Inner, expected, reason)
+		return
+	case *ast.TernaryExpr:
+		a.consumeAffineValueExpr(n.Value, expected, reason)
+		a.consumeAffineValueExpr(n.Alt, expected, reason)
+		return
+	case *ast.ExprBlock:
+		if n.Value != nil {
+			a.consumeAffineValueExpr(n.Value, expected, reason)
+		}
+		return
+	}
 	if _, ok := a.lookupAffineValueKey(expr); ok {
 		affineType := expected
 		if actual := a.exprTypes[expr]; actual != nil && a.containsAffineHandleValues(actual, map[string]bool{}) {
