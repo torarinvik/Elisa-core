@@ -125,6 +125,7 @@ type NamespaceDecl struct {
 	// `module Foo:` (and only one may exist).
 	Extend bool
 }
+
 // UsingDecl drops the qualifier on names from another module. Three forms:
 //   - wildcard `using Foo`:        Name="Foo" — all of Foo's public names unqualified.
 //   - selective `using Foo::bar`:  Name="Foo", Member="bar" — just `bar` unqualified.
@@ -155,8 +156,8 @@ type EnumDecl struct {
 	// Layout selects the physical layout of a recursive enum (docs/76): the `enum X layout soa|aos:`
 	// suffix. StructLayoutDefault means the compiler's default (AoS-in-arena for a recursive enum).
 	// LayoutSet records whether a `layout` suffix was written at all.
-	Layout                   StructLayoutMode
-	LayoutSet                bool
+	Layout       StructLayoutMode
+	LayoutSet    bool
 	LayoutSparse bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
 	IndexWidth   string // the `(handle: uN)` sub-option: "u8"|"u16"|"u32"|"u64"|"ptr"; "" = default (u32)
 	// Parent is the qualified name of the enum this one refines (docs/77): the `enum Child is Parent:`
@@ -340,21 +341,21 @@ type GrammarInfixTableDecl struct {
 type GrammarDynamicInfixSpec struct {
 	// FixityRef is the dotted host callback: token -> (active: bool,
 	// precedence: i64, right_assoc: bool, info: T-opaque).
-	FixityRef string
+	FixityRef  string
 	ReturnType TypeExpr
-	Atom GrammarTerm
+	Atom       GrammarTerm
 	// CombineParams names (left, op_token, right, info) for the Combine expr.
 	CombineParams []string
-	Combine Expr
+	Combine       Expr
 }
 
 // GrammarDynamicClimbTerm is the synthesized body of a dynamic infix table's
 // climb production; it never appears in user-written grammars.
 type GrammarDynamicClimbTerm struct {
-	Position lexer.Pos
-	TableName string
+	Position    lexer.Pos
+	TableName   string
 	MinPrecName string
-	Spec *GrammarDynamicInfixSpec
+	Spec        *GrammarDynamicInfixSpec
 }
 type GrammarProductionDecl struct {
 	Position      lexer.Pos
@@ -645,7 +646,12 @@ type StructDecl struct {
 	NamedStateCases    []string
 	TerminalStateCases []string
 	DerivedStates      []DerivedStateDecl
-	Affine             bool
+	// A protocol graph contains state edges, never function names or signatures.
+	// HasDerivedStateBlock distinguishes an empty (invalid) derive block from
+	// predicate-free protocol states.
+	HasDerivedStateBlock bool
+	StateTransitions     []StateTransitionDecl
+	Affine               bool
 	// Resource marks a struct synthesized from `extern resource Name` (docs/127 §3.2): its
 	// single `__handle` field is the native handle, it must declare `__drop__`, and the
 	// extern boundary passes the handle itself in place of the struct.
@@ -661,6 +667,12 @@ type StructDecl struct {
 	// in the struct body, referencing `self.field`). Checked in debug builds after construction and
 	// after each `s.field <- ...` store (`zeroed` construction is exempt).
 	Invariants []Expr
+}
+
+type StateTransitionDecl struct {
+	Position lexer.Pos
+	From     string
+	To       string
 }
 
 // IsOldCall reports whether a call expression is the contract `old(expr)` pseudo-call (the value of

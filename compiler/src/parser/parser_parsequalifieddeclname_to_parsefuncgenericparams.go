@@ -945,6 +945,8 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 
 	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
 	derivedStates := make([]ast.DerivedStateDecl, 0)
+	hasDerivedStateBlock := false
+	var stateTransitions []ast.StateTransitionDecl
 	var invariants []ast.Expr
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
@@ -952,7 +954,12 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 			break
 		}
 		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "derive" {
+			hasDerivedStateBlock = true
 			derivedStates = append(derivedStates, p.parseDerivedStateBlock()...)
+			continue
+		}
+		if p.peekIdentText("transitions") && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE {
+			stateTransitions = append(stateTransitions, p.parseStateTransitionGraph()...)
 			continue
 		}
 		// `invariant <bool-expr>` field-contract over the struct's fields (referencing self.field).
@@ -983,7 +990,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, Droppable: droppable, ReprC: reprC, Layout: layout, Fields: fields, Invariants: invariants}
+	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, HasDerivedStateBlock: hasDerivedStateBlock, StateTransitions: stateTransitions, Affine: affine, Droppable: droppable, ReprC: reprC, Layout: layout, Fields: fields, Invariants: invariants}
 }
 func (p *Parser) peekNamedStructStateBracket() bool {
 	return p.peek() == lexer.TOKEN_LBRACKET && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "state"

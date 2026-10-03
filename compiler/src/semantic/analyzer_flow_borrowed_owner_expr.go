@@ -246,6 +246,9 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		return projectBorrowedOwnerRefIndexState(state, n.Index, a.evalConstExpr)
 	case *ast.CallExpr:
+		if a.isCompilerBuiltinHelperCall(n, "transition") && len(n.Args) == 1 {
+			return a.borrowedOwnerRefStateForExpr(n.Args[0])
+		}
 		if state, ok := a.borrowedOwnerRefStateForProofCarryingViewCall(n); ok {
 			return state, true
 		}

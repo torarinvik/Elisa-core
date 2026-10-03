@@ -375,6 +375,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			}
 			return mergeRegionRefStatesWithExplicitFields(states, fieldStates)
 		}
+		if a.isCompilerBuiltinHelperCall(n, "transition") && len(n.Args) == 1 {
+			return a.regionRefStateForExpr(n.Args[0])
+		}
 		if state, ok := a.regionRefStateForThreadHandleCall(n); ok {
 			return state, true
 		}

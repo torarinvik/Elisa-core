@@ -88,6 +88,9 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 	if len(base.NamedStateCases) == 0 {
 		return targetType
 	}
+	if base.ProtocolStates {
+		return a.protocolStructLiteralType(expr, base, targetType)
+	}
 	desiredState, ok := namedStateCurrentArg(targetType)
 	if !ok || desiredState == nil {
 		return targetType
