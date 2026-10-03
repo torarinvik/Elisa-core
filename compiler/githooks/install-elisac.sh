@@ -20,6 +20,9 @@ COMPILER_DIR="$(git rev-parse --show-toplevel)/compiler"
 mkdir -p "${HOME}/.elisac"
 if go build -C "$COMPILER_DIR" -o "${HOME}/.elisac/elisac-stage0" ./src 2>/tmp/elisac-autoinstall.log; then
     rm -f "${HOME}/.elisac/elisac"
+    # Scripts that read stage0 from the checkout (ELISACORE_BIN defaults, the stage1 seed) use
+    # compiler/bin/elisac; a stale copy there rejected current sources. Refresh it atomically.
+    cp "${HOME}/.elisac/elisac-stage0" "$COMPILER_DIR/bin/elisac.tmp.$$" && mv -f "$COMPILER_DIR/bin/elisac.tmp.$$" "$COMPILER_DIR/bin/elisac"
     echo "[hook] elisac-stage0 reinstalled -> ${HOME}/.elisac/elisac-stage0"
 else
     echo "[hook] elisac rebuild FAILED (binary left as-is); see /tmp/elisac-autoinstall.log" >&2
