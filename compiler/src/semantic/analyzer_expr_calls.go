@@ -853,9 +853,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 					a.checkIteratorInvalidationForMutableRefArg(loweredArgs[i])
 					a.checkIteratorInvalidationForEnclosingMutableRefArg(loweredArgs[i])
 					a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
+					a.recordStorageViewCalleeStores(expr, loweredArgs, i)
 				case *StructType:
 					a.checkIteratorInvalidationForEnclosingMutableRefArg(loweredArgs[i])
 					a.invalidateStorageViewsForMutableRefArgSparing(loweredArgs[i], appliedType.Name, a.storageViewCalleeWriteSpare(expr, loweredArgs[i]))
+					a.recordStorageViewCalleeStores(expr, loweredArgs, i)
 				case *BuiltinType:
 					// A callee given a dstr by mutable ref may reassign or grow it, moving
 					// the buffer a live `as_sview()` of it points into.

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"sort"
 
 	"elisacore/src/ast"
@@ -16,6 +17,61 @@ type storageViewLoopUseFrame struct {
 	outer    *Scope
 	body     []ast.Stmt
 	firstUse map[*Symbol]storageViewLoopUse
+	// holders: outer bindings a view was stored INTO in the body (a push, a place store, or a
+	// callee given the holder by mutable reference). Their dependency accumulates across
+	// iterations; mutations: every relocating mutation the body performs.
+	holders   map[*Symbol]bool
+	mutations []storageViewLoopMutation
+}
+
+type storageViewLoopMutation struct {
+	candidates   []string
+	reason       string
+	interiorOnly bool
+	replaced     bool
+	spare        func(source, candidate string) bool
+}
+
+func (a *Analyzer) noteStorageViewLoopHolder(sym *Symbol) {
+	for i := range a.storageViewLoopUseFrames {
+		frame := &a.storageViewLoopUseFrames[i]
+		if frame.holders == nil {
+			frame.holders = map[*Symbol]bool{}
+		}
+		frame.holders[sym] = true
+	}
+}
+
+func (a *Analyzer) noteStorageViewLoopMutation(candidates []string, reason string, interiorOnly, replaced bool, spare func(source, candidate string) bool) {
+	if len(candidates) == 0 {
+		return
+	}
+	for i := range a.storageViewLoopUseFrames {
+		frame := &a.storageViewLoopUseFrames[i]
+		frame.mutations = append(frame.mutations, storageViewLoopMutation{candidates: candidates, reason: reason, interiorOnly: interiorOnly, replaced: replaced, spare: spare})
+	}
+}
+
+// holderLoopDependency: a holder keeps every view stored into it, so the view an iteration
+// stores is still inside it when the NEXT iteration relocates its backing. A holder whose
+// back-edge dependency is still valid is therefore stale on the back edge (and after the loop)
+// when any mutation the body performs reaches one of its sources.
+func (frame *storageViewLoopUseFrame) holderLoopDependency(sym *Symbol, dep storageViewDependencyState) storageViewDependencyState {
+	if !dep.Valid || !frame.holders[sym] {
+		return dep
+	}
+	for _, m := range frame.mutations {
+		if m.interiorOnly && !dep.Interior {
+			continue
+		}
+		if matched := storageViewDepMatchedSource(dep, m.candidates, m.spare); matched != "" {
+			dep.Valid = false
+			dep.InvalidatedBy = fmt.Sprintf("%s on a later loop iteration (matched mutation source %q)", m.reason, matched)
+			dep.Replaced = m.replaced
+			return dep
+		}
+	}
+	return dep
 }
 
 type storageViewLoopUse struct {
@@ -71,7 +127,18 @@ func (a *Analyzer) noteLoopJumpStorageViewState(frame *loopAffineFrame) {
 // before finishLoopAffineFrame pops the loop's affine frame (which holds the `continue` states).
 func (a *Analyzer) checkStorageViewLoopBackEdge(bodyDeps map[*Symbol]storageViewDependencyState, bodyExits bool) {
 	frame := a.popStorageViewLoopUseFrame()
-	if len(frame.firstUse) == 0 || frame.outer == nil {
+	if frame.outer == nil {
+		return
+	}
+	// A holder stays stale after the loop too: the exit state is the back-edge state.
+	for sym := range frame.holders {
+		if dep, ok := a.currentStorageViewDeps[sym]; ok {
+			if found, visible := frame.outer.Lookup(sym.Name); visible && found == sym {
+				a.currentStorageViewDeps[sym] = frame.holderLoopDependency(sym, dep)
+			}
+		}
+	}
+	if len(frame.firstUse) == 0 {
 		return
 	}
 	var backEdge map[*Symbol]storageViewDependencyState
@@ -98,6 +165,9 @@ func (a *Analyzer) checkStorageViewLoopBackEdge(bodyDeps map[*Symbol]storageView
 			continue // declared in the body: fresh every iteration
 		}
 		dep, ok := backEdge[sym]
+		if ok {
+			dep = frame.holderLoopDependency(sym, dep)
+		}
 		if !ok || dep.Valid {
 			continue
 		}

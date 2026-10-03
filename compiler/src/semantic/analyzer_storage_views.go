@@ -164,10 +164,39 @@ func (a *Analyzer) recordStorageViewPlaceStore(target ast.Expr, value ast.Expr) 
 	if a.currentStorageViewDeps == nil {
 		a.currentStorageViewDeps = map[*Symbol]storageViewDependencyState{}
 	}
-	if previous, exists := a.currentStorageViewDeps[sym]; exists {
+	previous, exists := a.currentStorageViewDeps[sym]
+	// The store is a use of the holder in every enclosing loop, and makes it a holder there:
+	// see checkStorageViewLoopHolders.
+	a.noteStorageViewLoopUse(sym, root, root.Name, !exists || previous.Valid)
+	a.noteStorageViewLoopHolder(sym)
+	if exists {
 		dep, _ = mergeStorageViewDependencies(previous, dep)
 	}
 	a.currentStorageViewDeps[sym] = dep
+}
+
+// recordStorageViewCalleeStores: a callee handed a container by mutable reference may store
+// another argument into it (`add_row(held, v)` doing `h.push(v)`), exactly like a direct
+// `held.push(v)`. The container's root then carries each such argument's backing dependency,
+// so a later relocation of that backing (a later push, or the loop back edge) makes a use of
+// the holder a stale-view error. The call itself is a use of the holder in every enclosing
+// loop: on the next iteration it hands the callee a holder whose earlier views may dangle.
+// The store-flow summary (callArgNeverReaches) spares the arguments the callee provably never
+// stores into that parameter; anything it cannot prove is recorded.
+func (a *Analyzer) recordStorageViewCalleeStores(call *ast.CallExpr, args []ast.Expr, index int) {
+	if call == nil || index < 0 || index >= len(args) {
+		return
+	}
+	target := stripOptimizationParens(args[index])
+	if addr, ok := target.(*ast.AddrOfExpr); ok {
+		target = stripOptimizationParens(addr.Operand)
+	}
+	for j, arg := range args {
+		if j == index || arg == nil || a.callArgNeverReaches(call, j, index) {
+			continue
+		}
+		a.recordStorageViewPlaceStore(target, arg)
+	}
 }
 
 func storageViewPlaceRoot(place ast.Expr) *ast.Ident {
@@ -1159,26 +1188,16 @@ func (a *Analyzer) invalidateStorageViewDepsMode(mutatedSources map[string]bool,
 // invalidateStorageViewDepsSparing is invalidateStorageViewDepsMode; SPARE(source, candidate)
 // exempts a (view source, mutated source) pair proven disjoint (see storageViewSiblingSpare).
 func (a *Analyzer) invalidateStorageViewDepsSparing(mutatedSources map[string]bool, reason string, interiorOnly, replaced bool, spare func(source, candidate string) bool) {
+	candidates := sortedStorageViewSources(mutatedSources)
+	a.noteStorageViewLoopMutation(candidates, reason, interiorOnly, replaced, spare)
 	if len(a.currentStorageViewDeps) == 0 {
 		return
 	}
-	candidates := sortedStorageViewSources(mutatedSources)
 	for sym, dep := range a.currentStorageViewDeps {
 		if !dep.Valid || (interiorOnly && !dep.Interior) {
 			continue
 		}
-		matchedSource := ""
-		for _, source := range dep.Sources {
-			for _, candidate := range candidates {
-				if storageViewSourcesOverlap(source, candidate) && (spare == nil || !spare(source, candidate)) {
-					matchedSource = candidate
-					break
-				}
-			}
-			if matchedSource != "" {
-				break
-			}
-		}
+		matchedSource := storageViewDepMatchedSource(dep, candidates, spare)
 		if matchedSource == "" {
 			continue
 		}
@@ -1190,6 +1209,19 @@ func (a *Analyzer) invalidateStorageViewDepsSparing(mutatedSources map[string]bo
 		}
 		a.currentStorageViewDeps[sym] = dep
 	}
+}
+
+// storageViewDepMatchedSource names the first mutated candidate that reaches one of dep's
+// sources (and is not spared), or "".
+func storageViewDepMatchedSource(dep storageViewDependencyState, candidates []string, spare func(source, candidate string) bool) string {
+	for _, source := range dep.Sources {
+		for _, candidate := range candidates {
+			if storageViewSourcesOverlap(source, candidate) && (spare == nil || !spare(source, candidate)) {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
 
 func sortedStorageViewSources(sources map[string]bool) []string {

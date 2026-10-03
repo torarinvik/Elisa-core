@@ -1,0 +1,20 @@
+def add_row(h: mutable darray[sview]&, v: sview):
+    h.push(v)
+
+def count_only(h: mutable darray[sview]&, v: sview):
+    h.clear()
+
+def main() -> i32:
+    storage: mutable darray[u8] = []
+    storage.push(65)
+    held: mutable darray[sview] = []
+    for i in 0..<4:
+        v: sview = storage.as_sview()
+        add_row(held, v)
+    other: mutable darray[u8] = []
+    held2: mutable darray[sview] = []
+    for i in 0..<4:
+        other.push(66)
+        v: sview = storage.as_sview()
+        add_row(held2, v)
+    return i32(held.count + held2.count)

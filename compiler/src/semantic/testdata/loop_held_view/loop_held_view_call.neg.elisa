@@ -1,0 +1,11 @@
+def add_row(h: mutable darray[sview]&, v: sview):
+    h.push(v)
+
+def main() -> i32:
+    storage: mutable darray[u8] = []
+    held: mutable darray[sview] = []
+    for i in 0..<4:
+        storage.push(65)
+        v: sview = storage.as_sview()
+        add_row(held, v)
+    return 0
