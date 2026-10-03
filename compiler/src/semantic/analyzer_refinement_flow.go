@@ -122,6 +122,12 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	if !ok || !cok {
 		return
 	}
+	// numRange has signed int64 endpoints. The const folder represents a high
+	// u64 literal as negative bits, which cannot describe an unsigned bound.
+	// Leave that comparison to the width-aware SMT guard instead.
+	if signed, _, typed := smtIntWidthSign(a.exprTypes[identExpr]); typed && !signed && c < 0 {
+		return
+	}
 	// The FALSY branch (the fall-through after `if a < c: return …`, or an else) narrows by the
 	// LOGICAL NEGATION of the comparison: `not (a < c)` is `a >= c`. `==` falsy is `!=`, which is not
 	// a single contiguous range, so it contributes nothing (default below). This is what makes an

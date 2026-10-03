@@ -2127,6 +2127,13 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 	case *ast.ParenExpr:
 		return tr.termEnv(n.Inner, env)
 	case *ast.IntLit:
+		// Unsigned literals must enter SMT as their mathematical value, not the
+		// signed bit pattern used by the general constant folder.
+		if signed, _, typed := smtIntWidthSign(tr.a.exprTypes[n]); typed && !signed {
+			if v, ok := tr.a.unsignedConstBound(n); ok {
+				return v.String(), true
+			}
+		}
 		if c, ok := tr.a.constIntValue(n); ok {
 			return smtInt(c), true
 		}
