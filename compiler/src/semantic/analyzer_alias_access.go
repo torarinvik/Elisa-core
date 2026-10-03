@@ -354,21 +354,48 @@ func viewAliasAccessMode(t Type) (aliasAccessMode, bool) {
 	return aliasAccessRead, false
 }
 
-// viewArgAliasRoots names the container storage a view argument points into, from its storage-view
-// dependency (the same facts a later growth uses to invalidate the view). A view that is not known
-// to point into tracked storage (a literal, a parameter view) has none.
+// viewArgAliasRoots names the container storage a view argument's bytes ARE: `xs.as_sview()`,
+// `xs.as_cstr()`, `xs.view()`, `xs[a:b]`, or a local bound to one of those. A view merely read out
+// of a container (an sview element or field, a helper's result) points at bytes the container
+// does not own, so a callee growing the container cannot dangle it; it has no root here. This is
+// the same syntactic set stage1's check_call_argument_exclusivity treats as `&xs[..]`.
 func (a *Analyzer) viewArgAliasRoots(arg ast.Expr) []string {
-	dep, ok := a.storageViewDependencyForExpr(arg)
-	if !ok {
+	return a.viewArgAliasRootsDepth(arg, 0)
+}
+
+func (a *Analyzer) viewArgAliasRootsDepth(arg ast.Expr, depth int) []string {
+	if arg == nil || depth > 8 {
 		return nil
 	}
-	var roots []string
-	for _, source := range dep.Sources {
-		if source != "" {
-			roots = append(roots, source)
+	switch n := stripOptimizationParens(arg).(type) {
+	case *ast.SliceExpr:
+		if root := a.aliasRootForExpr(n.Object); root != "" {
+			return []string{root}
+		}
+	case *ast.CallExpr:
+		field, ok := n.Func.(*ast.FieldExpr)
+		if !ok || field == nil || field.Object == nil || len(n.Args) != 0 {
+			return nil
+		}
+		switch field.Field {
+		case "as_sview", "as_cstr", "view":
+			if root := a.aliasRootForExpr(field.Object); root != "" {
+				return []string{root}
+			}
+		}
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return nil
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym == nil || sym.Kind != SymbolLocal {
+			return nil
+		}
+		if value, bound := a.currentValueBindings[sym]; bound && value != nil {
+			return a.viewArgAliasRootsDepth(value, depth+1)
 		}
 	}
-	return roots
+	return nil
 }
 
 func typeExprHasExplicitMutableRef(expr ast.TypeExpr) bool {
