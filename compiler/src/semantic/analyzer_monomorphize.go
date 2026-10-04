@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"maps"
+	"reflect"
 
 	"elisacore/src/ast"
 )
@@ -35,18 +35,28 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 	}
 	a := r.analyzer
 
-	// Snapshot the analyzer's live type map, not the Result's view of it: Result.ExprTypes
-	// aliases a.exprTypes, and the re-analysis writes through the analyzer.
-	saved := maps.Clone(a.exprTypes)
-	if saved == nil {
-		saved = map[ast.Expr]Type{}
+	// Re-analysis writes types for expressions in this function. Snapshot only those
+	// entries instead of copying the whole program's expression map for every instance.
+	functionExprs := make(map[ast.Expr]struct{})
+	collectSpecializedFunctionExprs(fn, functionExprs)
+	saved := make(map[ast.Expr]Type, len(functionExprs))
+	for expr := range functionExprs {
+		if typ, ok := a.exprTypes[expr]; ok {
+			saved[expr] = typ
+		}
 	}
 	savedDiagnostics := len(a.diagnostics)
 
 	a.analyzeFuncWithTypeArgs(fn, typeArgs)
 
-	overlay := map[ast.Expr]Type{}
-	for expr, typ := range a.exprTypes {
+	overlay := make(map[ast.Expr]Type)
+	// Include any expression nodes synthesized during re-analysis as well.
+	collectSpecializedFunctionExprs(fn, functionExprs)
+	for expr := range functionExprs {
+		typ, exists := a.exprTypes[expr]
+		if !exists {
+			continue
+		}
 		// Pointer-identical types are trivially the same; skip the canonical-key computation for
 		// the (vast majority of) entries the re-analysis left untouched.
 		if previous, ok := saved[expr]; !ok || (previous != typ && !SameType(previous, typ)) {
@@ -54,8 +64,15 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 		}
 	}
 
-	a.exprTypes = saved
-	r.ExprTypes = saved
+	// Restore original annotations and remove types attached only to synthesized nodes.
+	for expr := range functionExprs {
+		if previous, ok := saved[expr]; ok {
+			a.exprTypes[expr] = previous
+		} else {
+			delete(a.exprTypes, expr)
+		}
+	}
+	r.ExprTypes = a.exprTypes
 	if len(a.diagnostics) > savedDiagnostics {
 		// The speculative pass's diagnostics are discarded; forget them in the
 		// once-only set too, or a real report of the same text would be swallowed later.
@@ -70,6 +87,14 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 	return overlay
 }
 
+func collectSpecializedFunctionExprs(fn *ast.FuncDecl, exprs map[ast.Expr]struct{}) {
+	fillMayAdoptWalk(reflect.ValueOf(fn), func(node any) {
+		if expr, ok := node.(ast.Expr); ok {
+			exprs[expr] = struct{}{}
+		}
+	})
+}
+
 // funcTypeParamBindings pairs a declaration's generic parameters with concrete arguments,
 // in declaration order.
 //
@@ -80,9 +105,9 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 // holding `Box[i64, N]` with N unresolved, so the backend lowered an opaque instance and
 // emitted `GEP into unsized type!` — invalid IR for a program the analyzer accepted:
 //
-//     struct Box[T, N: usize]:
-//         items: mutable T[N]
-//     def box_len[T, N: usize](b: mutable Box[T, N]&) -> usize: ...
+//	struct Box[T, N: usize]:
+//	    items: mutable T[N]
+//	def box_len[T, N: usize](b: mutable Box[T, N]&) -> usize: ...
 //
 // That is what made elisacore_std's own InlineVec[T, N] uncompilable.
 //
