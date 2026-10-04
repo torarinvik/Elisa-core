@@ -11,8 +11,20 @@ import (
 var llvmAttributeGroupRe = regexp.MustCompile(`attributes #([0-9]+) = \{([^}]*)\}`)
 var llvmSegmentAgnosticFunctionRe = regexp.MustCompile(`(?s)define[^@]*@([A-Za-z_.$][A-Za-z0-9_.$]*)\([^)]*\)\s+#([0-9]+)[^{]*\{(.*?)\n\}`)
 
+const (
+	llvmSegmentAgnosticAttr     = `"elisacore.segment_agnostic"="true"`
+	llvmAsyncEntryAttr          = `"elisacore.async_entry"="true"`
+	llvmSegmentEstablishingAttr = `"elisacore.segment_establishing"="true"`
+)
+
 func validateSegmentAgnosticLLVMIR(ir string) error {
 	if strings.TrimSpace(ir) == "" {
+		return nil
+	}
+	// Every rejection below needs one of these markers in a function's attribute group. A module
+	// that mentions none of them anywhere cannot fail, and skipping the two whole-module regex
+	// scans there saves seconds on a large module (they were ~4% of compiling the stage1 driver).
+	if !strings.Contains(ir, llvmSegmentAgnosticAttr) && !strings.Contains(ir, llvmAsyncEntryAttr) && !strings.Contains(ir, llvmSegmentEstablishingAttr) {
 		return nil
 	}
 	attrsByID := map[string]string{}
@@ -27,9 +39,9 @@ func validateSegmentAgnosticLLVMIR(ir string) error {
 		}
 		name := match[1]
 		attrs := attrsByID[match[2]]
-		isSegmentAgnostic := strings.Contains(attrs, `"elisacore.segment_agnostic"="true"`)
-		isAsyncEntry := strings.Contains(attrs, `"elisacore.async_entry"="true"`)
-		isSegmentEstablishing := strings.Contains(attrs, `"elisacore.segment_establishing"="true"`)
+		isSegmentAgnostic := strings.Contains(attrs, llvmSegmentAgnosticAttr)
+		isAsyncEntry := strings.Contains(attrs, llvmAsyncEntryAttr)
+		isSegmentEstablishing := strings.Contains(attrs, llvmSegmentEstablishingAttr)
 		if isSegmentAgnostic && llvmAttrsContainStackProtector(attrs) {
 			return fmt.Errorf("@segment_agnostic function %q lowered with stack-protector attributes {%s}; this would create a hidden Segment.Host dependency", name, attrs)
 		}

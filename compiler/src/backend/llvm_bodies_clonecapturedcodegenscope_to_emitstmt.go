@@ -516,6 +516,11 @@ func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *s
 		}
 	}
 	dependencies := map[string]map[string]bool{}
+	// ownerOrder lists dependencies' keys in source order (first mutating call). The fixed point
+	// walks owners in this order so that a local copied into several caller aggregates
+	// (`active.push(x)`, `seen.push(x)`) is deterministically given the FIRST one's arena. Ranging
+	// over the map instead picked a different arena on different runs of the same compile.
+	var ownerOrder []string
 	var walk func(reflect.Value)
 	walk = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -539,6 +544,7 @@ func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *s
 						if deps == nil {
 							deps = map[string]bool{}
 							dependencies[dst] = deps
+							ownerOrder = append(ownerOrder, dst)
 						}
 						for _, arg := range call.Args {
 							for name := range backendAggregateIdentifierNames(arg) {
@@ -568,7 +574,8 @@ func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *s
 	}
 	for changed := true; changed; {
 		changed = false
-		for owner, sources := range dependencies {
+		for _, owner := range ownerOrder {
+			sources := dependencies[owner]
 			arena, escapes := result[owner]
 			if !escapes || arena == nil {
 				continue

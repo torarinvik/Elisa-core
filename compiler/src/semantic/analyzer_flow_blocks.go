@@ -82,15 +82,15 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 		}
 		if decl.Type != nil {
 			typ := a.resolveType(decl.Type)
-			known[decl.Name] = typ
+			known.set(decl.Name, typ)
 			definePrepassLocal(decl, typ)
 			continue
 		}
 		if !semanticListLiteralExpr(decl.Value) {
 			if typ := inferKnownDArrayBuilderExprType(decl.Value, known); typ != nil {
-				known[decl.Name] = typ
+				known.set(decl.Name, typ)
 			}
-			definePrepassLocal(decl, known[decl.Name])
+			definePrepassLocal(decl, known.get(decl.Name))
 			continue
 		}
 		elem := inferDArrayBuilderElemTypeExpr(decl.Value)
@@ -131,7 +131,7 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 				}
 				a.ambiguousDArrayBuilders[decl] = true
 			}
-			definePrepassLocal(decl, known[decl.Name])
+			definePrepassLocal(decl, known.get(decl.Name))
 			continue
 		}
 		decl.Mutable = true
@@ -144,31 +144,46 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 			},
 		}
 		typ := a.resolveType(decl.Type)
-		known[decl.Name] = typ
+		known.set(decl.Name, typ)
 		definePrepassLocal(decl, typ)
 	}
 }
 
-func inferDArrayBuilderKnownTypes(scope *Scope) map[string]Type {
-	known := map[string]Type{}
-	var seed func(*Scope)
-	seed = func(cur *Scope) {
-		if cur == nil {
-			return
+// darrayBuilderKnownTypes is the builder prepass's view of binding types: the block's own
+// declarations (local), else the innermost local or parameter of the scope chain with a valid
+// type. It used to be a map snapshot of every binding of the whole chain -- the global scope's
+// symbols walked too -- taken for every block that declares a local; lookups are all it needs.
+type darrayBuilderKnownTypes struct {
+	scope *Scope
+	local map[string]Type
+}
+
+func inferDArrayBuilderKnownTypes(scope *Scope) *darrayBuilderKnownTypes {
+	return &darrayBuilderKnownTypes{scope: scope, local: map[string]Type{}}
+}
+
+func (k *darrayBuilderKnownTypes) get(name string) Type {
+	if k == nil {
+		return nil
+	}
+	if typ, ok := k.local[name]; ok {
+		return typ
+	}
+	for cur := k.scope; cur != nil; cur = cur.Parent {
+		sym := cur.Symbols[name]
+		if sym == nil || sym.Type == nil || IsInvalidType(sym.Type) {
+			continue
 		}
-		seed(cur.Parent)
-		for name, sym := range cur.Symbols {
-			if sym == nil || sym.Type == nil || IsInvalidType(sym.Type) {
-				continue
-			}
-			switch sym.Kind {
-			case SymbolLocal, SymbolParam:
-				known[name] = sym.Type
-			}
+		switch sym.Kind {
+		case SymbolLocal, SymbolParam:
+			return sym.Type
 		}
 	}
-	seed(scope)
-	return known
+	return nil
+}
+
+func (k *darrayBuilderKnownTypes) set(name string, typ Type) {
+	k.local[name] = typ
 }
 
 func stmtUsesUntypedDArrayBuilderLocal(stmt ast.Stmt, name string) bool {
@@ -366,7 +381,7 @@ func inferDArrayBuilderElemTypeExpr(value ast.Expr) ast.TypeExpr {
 	return nil
 }
 
-func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string, known map[string]Type) ast.TypeExpr {
+func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string, known *darrayBuilderKnownTypes) ast.TypeExpr {
 	var found ast.TypeExpr
 	var visitExpr func(ast.Expr)
 	visitExpr = func(expr ast.Expr) {
@@ -471,7 +486,7 @@ func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string, known map[string]Typ
 	return found
 }
 
-func inferDArrayBuilderElemTypeFromKnownExpr(expr ast.Expr, known map[string]Type) ast.TypeExpr {
+func inferDArrayBuilderElemTypeFromKnownExpr(expr ast.Expr, known *darrayBuilderKnownTypes) ast.TypeExpr {
 	typ := inferKnownDArrayBuilderExprType(expr, known)
 	if typ == nil || IsInvalidType(typ) {
 		return nil
@@ -479,7 +494,7 @@ func inferDArrayBuilderElemTypeFromKnownExpr(expr ast.Expr, known map[string]Typ
 	return astTypeExprForBuiltinMethodRewrite(expr.Pos(), typ)
 }
 
-func inferKnownDArrayBuilderExprType(expr ast.Expr, known map[string]Type) Type {
+func inferKnownDArrayBuilderExprType(expr ast.Expr, known *darrayBuilderKnownTypes) Type {
 	expr = stripParenExpr(expr)
 	switch e := expr.(type) {
 	case *ast.Ident:
@@ -509,21 +524,21 @@ func inferKnownDArrayBuilderExprType(expr ast.Expr, known map[string]Type) Type 
 	}
 }
 
-func inferKnownIdentType(name string, known map[string]Type) Type {
-	typ := known[name]
+func inferKnownIdentType(name string, known *darrayBuilderKnownTypes) Type {
+	typ := known.get(name)
 	if ref, ok := typ.(*RefType); ok && ref != nil {
 		typ = ref.Elem
 	}
 	return typ
 }
 
-func inferDArrayExtendElemTypeFromKnownExpr(expr ast.Expr, known map[string]Type) ast.TypeExpr {
+func inferDArrayExtendElemTypeFromKnownExpr(expr ast.Expr, known *darrayBuilderKnownTypes) ast.TypeExpr {
 	expr = stripParenExpr(expr)
 	ident, ok := expr.(*ast.Ident)
 	if !ok || ident == nil {
 		return nil
 	}
-	typ := known[ident.Name]
+	typ := known.get(ident.Name)
 	if ref, ok := typ.(*RefType); ok && ref != nil {
 		typ = ref.Elem
 	}

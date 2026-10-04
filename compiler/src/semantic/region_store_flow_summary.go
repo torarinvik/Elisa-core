@@ -1530,13 +1530,7 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
 	if !a.storeFlowDarrayPlace(fn.Object) {
 		return false
 	}
-	var syms []*Symbol
-	for name, byName := range a.ufcsFunctionsByName {
-		if fillMayAdoptLastSegment(name) == fn.Field {
-			syms = append(syms, byName...)
-		}
-	}
-	for _, sym := range syms {
+	for _, sym := range a.ufcsFunctionsWithLastSegment(fn.Field) {
 		if sym == nil {
 			return false
 		}
@@ -1555,6 +1549,22 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
 		}
 	}
 	return true
+}
+
+// ufcsFunctionsWithLastSegment lists every UFCS function whose registered name ends in segment
+// (`push` matches `push` and `Mod.push`). The index is rebuilt only after a new registration;
+// scanning every UFCS name at each darray growth call was ~2% of analysis.
+func (a *Analyzer) ufcsFunctionsWithLastSegment(segment string) []*Symbol {
+	if a.ufcsByLastSegment == nil || a.ufcsByLastSegmentVersion != a.ufcsFunctionsVersion {
+		index := make(map[string][]*Symbol, len(a.ufcsFunctionsByName))
+		for name, byName := range a.ufcsFunctionsByName {
+			last := fillMayAdoptLastSegment(name)
+			index[last] = append(index[last], byName...)
+		}
+		a.ufcsByLastSegment = index
+		a.ufcsByLastSegmentVersion = a.ufcsFunctionsVersion
+	}
+	return a.ufcsByLastSegment[segment]
 }
 
 // storeFlowDarrayPlace reports a receiver that is certainly a builtin darray: a local or
