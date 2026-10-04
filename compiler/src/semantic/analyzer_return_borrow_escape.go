@@ -435,17 +435,19 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 		// The condition's unwraps are in scope in the taken branch.
 		savedScope := a.currentScope
 		a.currentScope = NewScope(savedScope)
-		valueAliases := cloneReturnBorrowAliases(aliases)
+		valueAliases := a.beginReturnBorrowBranch(aliases)
 		a.defineReturnBorrowConditionBindings(n.Cond, valueAliases, active, localBindings)
 		value := a.returnBorrowFlowForExpr(n.Value, valueAliases, active, localBindings)
+		a.endReturnBorrowBranch(aliases)
 		a.currentScope = savedScope
 		return mergeReturnBorrowFlow(value, alt)
 	case *ast.ExprBlock:
 		savedScope := a.currentScope
 		a.currentScope = NewScope(savedScope)
-		blockAliases := cloneReturnBorrowAliases(aliases)
+		blockAliases := a.beginReturnBorrowBranch(aliases)
 		flow := a.returnBorrowFlowForStatements(n.Stmts, blockAliases, active, localBindings, false)
 		flow = mergeReturnBorrowFlow(flow, a.returnBorrowFlowForExpr(n.Value, blockAliases, active, localBindings))
+		a.endReturnBorrowBranch(aliases)
 		a.currentScope = savedScope
 		return flow
 	case *ast.CallExpr:
@@ -872,7 +874,7 @@ func (a *Analyzer) returnBorrowFlowForComprehension(n *ast.ListComprehensionExpr
 	for _, outer := range []ast.Expr{n.Source, n.RangeEnd, n.RangeStep, n.Owner} {
 		a.noteReturnBorrowCallArgumentStores(outer, aliases, active, localBindings)
 	}
-	env := cloneReturnBorrowAliases(aliases)
+	env := a.beginReturnBorrowBranch(aliases)
 	outerScope := a.currentScope
 	a.currentScope = NewScope(outerScope)
 	a.defineReturnBorrowBinding(env, n.Name, n, nil, binderFlow)
@@ -882,6 +884,7 @@ func (a *Analyzer) returnBorrowFlowForComprehension(n *ast.ListComprehensionExpr
 	}
 	flow := a.returnBorrowFlowForExpr(n.Value, env, active, localBindings)
 	flow = mergeReturnBorrowFlow(flow, a.returnBorrowFlowForExpr(n.Key, env, active, localBindings))
+	a.endReturnBorrowBranch(aliases)
 	a.currentScope = outerScope
 	return flow
 }
@@ -893,11 +896,15 @@ func (a *Analyzer) returnBorrowFlowForComprehension(n *ast.ListComprehensionExpr
 func (a *Analyzer) returnBorrowFlowForQuery(n *ast.QueryExpr, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
 	a.noteReturnBorrowCallArgumentStores(n.Source, aliases, active, localBindings)
 	a.noteReturnBorrowCallArgumentStores(n.Owner, aliases, active, localBindings)
-	env := cloneReturnBorrowAliases(aliases)
+	binderFlow := a.returnBorrowIterValueFlow(n.Source, aliases, active, localBindings)
+	env := a.beginReturnBorrowBranch(aliases)
 	outerScope := a.currentScope
 	a.currentScope = NewScope(outerScope)
-	defer func() { a.currentScope = outerScope }()
-	a.defineReturnBorrowBinding(env, n.Name, n, nil, a.returnBorrowIterValueFlow(n.Source, aliases, active, localBindings))
+	defer func() {
+		a.endReturnBorrowBranch(aliases)
+		a.currentScope = outerScope
+	}()
+	a.defineReturnBorrowBinding(env, n.Name, n, nil, binderFlow)
 	a.noteReturnBorrowCallArgumentStores(n.Filter, env, active, localBindings)
 	a.noteReturnBorrowCallArgumentStores(n.Projection, env, active, localBindings)
 	switch n.Kind {
@@ -919,12 +926,12 @@ func (a *Analyzer) noteReturnBorrowConditionStores(cond ast.Expr, aliases map[st
 		a.noteReturnBorrowCallArgumentStores(cond, aliases, active, localBindings)
 		return
 	}
-	env := cloneReturnBorrowAliases(aliases)
+	env := a.beginReturnBorrowBranch(aliases)
 	outerScope := a.currentScope
 	a.currentScope = NewScope(outerScope)
 	a.noteReturnBorrowAndChainStores(cond, env, active, localBindings)
 	a.currentScope = outerScope
-	mergeReturnBorrowAliasMaps(aliases, env)
+	a.joinReturnBorrowBranch(aliases, a.endReturnBorrowBranch(aliases), nil)
 }
 
 func (a *Analyzer) noteReturnBorrowAndChainStores(cond ast.Expr, env map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) {
@@ -952,11 +959,24 @@ func (a *Analyzer) returnBorrowFlowForMatchExpr(n *ast.MatchExpr, aliases map[st
 	subjectFlow := a.returnBorrowFlowForExpr(n.Value, aliases, active, localBindings)
 	var flow returnBorrowFlow
 	armEnvs := make([]map[string]returnBorrowFlow, 0, len(n.Arms))
+	var armChanges [][]returnBorrowBranchChange
 	for _, arm := range n.Arms {
-		armEnv := cloneReturnBorrowAliases(aliases)
+		binders := returnBorrowMatchPatternBinders(arm.Pattern, nil)
+		// A view binder's flow reads the subject's address in the environment BEFORE this arm's
+		// binders, so such an arm keeps a private clone; any other arm walks in place.
+		cloned := false
+		for _, binder := range binders {
+			cloned = cloned || binder.view
+		}
+		var armEnv map[string]returnBorrowFlow
+		if cloned {
+			armEnv = cloneReturnBorrowAliases(aliases)
+		} else {
+			armEnv = a.beginReturnBorrowBranch(aliases)
+		}
 		outerScope := a.currentScope
 		a.currentScope = NewScope(outerScope)
-		for _, binder := range returnBorrowMatchPatternBinders(arm.Pattern, nil) {
+		for _, binder := range binders {
 			binderFlow := subjectFlow
 			if binder.view {
 				binderFlow = mergeReturnBorrowFlow(binderFlow, a.returnBorrowAddressFlow(n.Value, aliases, active, localBindings))
@@ -966,11 +986,18 @@ func (a *Analyzer) returnBorrowFlowForMatchExpr(n *ast.MatchExpr, aliases map[st
 		a.noteReturnBorrowCallArgumentStores(arm.Guard, armEnv, active, localBindings)
 		flow = mergeReturnBorrowFlow(flow, a.returnBorrowFlowForStatements(arm.Body, armEnv, active, localBindings, true))
 		a.currentScope = outerScope
-		armEnvs = append(armEnvs, armEnv)
+		if cloned {
+			armEnvs = append(armEnvs, armEnv)
+		} else {
+			armChanges = append(armChanges, a.endReturnBorrowBranch(aliases))
+		}
 	}
 	// Each arm starts from the environment before the match; their writes join afterwards.
 	for _, env := range armEnvs {
-		mergeReturnBorrowAliasMaps(aliases, env)
+		a.mergeReturnBorrowAliasMaps(aliases, env)
+	}
+	for _, changes := range armChanges {
+		a.joinReturnBorrowBranch(aliases, changes, nil)
 	}
 	return flow
 }
@@ -1323,7 +1350,7 @@ func (a *Analyzer) allBorrowedParamFlow(fn *ast.FuncDecl) returnBorrowFlow {
 func (a *Analyzer) returnBorrowFlowForValueBlock(block *ast.ExprBlock, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) (returnBorrowFlow, returnBorrowFlow) {
 	outerScope := a.currentScope
 	a.currentScope = NewScope(outerScope)
-	blockEnv := cloneReturnBorrowAliases(aliases)
+	blockEnv := a.beginReturnBorrowBranch(aliases)
 	returned := a.returnBorrowFlowForStatements(block.Stmts, blockEnv, active, localBindings, false)
 	var value returnBorrowFlow
 	if inner, isBlock := block.Value.(*ast.ExprBlock); isBlock && inner != nil {
@@ -1335,9 +1362,10 @@ func (a *Analyzer) returnBorrowFlowForValueBlock(block *ast.ExprBlock, aliases m
 		value = a.returnBorrowFlowForExpr(block.Value, blockEnv, active, localBindings)
 	}
 	a.currentScope = outerScope
-	for name := range aliases {
-		aliases[name] = mergeReturnBorrowFlow(aliases[name], blockEnv[name])
-	}
+	// The block's writes to bindings that existed before it flow back out; its own locals do not.
+	a.joinReturnBorrowBranch(aliases, a.endReturnBorrowBranch(aliases), func(change returnBorrowBranchChange) bool {
+		return !change.existedBefore
+	})
 	return returned, value
 }
 
@@ -1413,7 +1441,7 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			default:
 				binderFlow = a.returnBorrowIterValueFlow(n.Source, aliases, active, localBindings)
 			}
-			loopEnv := cloneReturnBorrowAliases(aliases)
+			loopEnv := a.beginReturnBorrowBranch(aliases)
 			outerScope := a.currentScope
 			a.currentScope = NewScope(outerScope)
 			names := returnBorrowIterPatternNames(n.Pattern)
@@ -1422,14 +1450,14 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			}
 			returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(n.Body, loopEnv, active, localBindings, false))
 			a.currentScope = outerScope
+			// The loop binders are the loop's own: an outer binding of the same name keeps its value.
+			binderNames := map[string]bool{}
 			for _, name := range names {
-				if outer, existed := aliases[name]; existed {
-					loopEnv[name] = outer
-				} else {
-					delete(loopEnv, name)
-				}
+				binderNames[name] = true
 			}
-			mergeReturnBorrowAliasMaps(aliases, loopEnv)
+			a.joinReturnBorrowBranch(aliases, a.endReturnBorrowBranch(aliases), func(change returnBorrowBranchChange) bool {
+				return binderNames[change.name]
+			})
 		case *ast.ReturnStmt:
 			a.noteReturnBorrowCallArgumentStores(n.Value, aliases, active, localBindings)
 			returnType := a.returnBorrowWalkReturnType()
@@ -1462,31 +1490,31 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			for _, clause := range n.Elifs {
 				a.noteReturnBorrowConditionStores(clause.Cond, aliases, active, localBindings)
 			}
-			branchEnvs := make([]map[string]returnBorrowFlow, 0, len(n.Elifs)+2)
+			branchChanges := make([][]returnBorrowBranchChange, 0, len(n.Elifs)+2)
 			outerScope := a.currentScope
-			thenEnv := cloneReturnBorrowAliases(aliases)
+			thenEnv := a.beginReturnBorrowBranch(aliases)
 			a.currentScope = NewScope(outerScope)
 			a.defineReturnBorrowConditionBindings(n.Cond, thenEnv, active, localBindings)
 			returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(n.Then, thenEnv, active, localBindings, false))
-			branchEnvs = append(branchEnvs, thenEnv)
+			branchChanges = append(branchChanges, a.endReturnBorrowBranch(aliases))
 			for _, clause := range n.Elifs {
-				elifEnv := cloneReturnBorrowAliases(aliases)
+				elifEnv := a.beginReturnBorrowBranch(aliases)
 				a.currentScope = NewScope(outerScope)
 				a.defineReturnBorrowConditionBindings(clause.Cond, elifEnv, active, localBindings)
 				returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(clause.Body, elifEnv, active, localBindings, false))
-				branchEnvs = append(branchEnvs, elifEnv)
+				branchChanges = append(branchChanges, a.endReturnBorrowBranch(aliases))
 			}
-			elseEnv := cloneReturnBorrowAliases(aliases)
+			elseEnv := a.beginReturnBorrowBranch(aliases)
 			a.currentScope = NewScope(outerScope)
 			returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(n.Else, elseEnv, active, localBindings, false))
 			a.currentScope = outerScope
-			branchEnvs = append(branchEnvs, elseEnv)
-			for _, env := range branchEnvs {
-				mergeReturnBorrowAliasMaps(aliases, env)
+			branchChanges = append(branchChanges, a.endReturnBorrowBranch(aliases))
+			for _, changes := range branchChanges {
+				a.joinReturnBorrowBranch(aliases, changes, nil)
 			}
 		case *ast.WhileStmt:
 			a.noteReturnBorrowCallArgumentStores(n.Cond, aliases, active, localBindings)
-			loopEnv := cloneReturnBorrowAliases(aliases)
+			loopEnv := a.beginReturnBorrowBranch(aliases)
 			outerScope := a.currentScope
 			a.currentScope = NewScope(outerScope)
 			// `while current is v`: v is rebound from the subject on every iteration; a read of the
@@ -1494,17 +1522,17 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			a.defineReturnBorrowConditionBindings(n.Cond, loopEnv, active, localBindings)
 			returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(n.Body, loopEnv, active, localBindings, false))
 			a.currentScope = outerScope
-			mergeReturnBorrowAliasMaps(aliases, loopEnv)
+			a.joinReturnBorrowBranch(aliases, a.endReturnBorrowBranch(aliases), nil)
 		case *ast.ForStmt:
 			a.noteReturnBorrowCallArgumentStores(n.Start, aliases, active, localBindings)
 			a.noteReturnBorrowCallArgumentStores(n.End, aliases, active, localBindings)
 			a.noteReturnBorrowCallArgumentStores(n.Step, aliases, active, localBindings)
-			loopEnv := cloneReturnBorrowAliases(aliases)
+			loopEnv := a.beginReturnBorrowBranch(aliases)
 			outerScope := a.currentScope
 			a.currentScope = NewScope(outerScope)
 			returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(n.Body, loopEnv, active, localBindings, false))
 			a.currentScope = outerScope
-			mergeReturnBorrowAliasMaps(aliases, loopEnv)
+			a.joinReturnBorrowBranch(aliases, a.endReturnBorrowBranch(aliases), nil)
 		case *ast.CanStmt, *ast.ScopeStmt, *ast.RegionStmt, *ast.InStoreStmt, *ast.PoolStmt, *ast.LockStmt,
 			*ast.CheckpointStmt, *ast.GroupedCheckpointStmt, *ast.StaticBlockStmt,
 			*ast.ParallelForStmt, *ast.StaticIfStmt:
@@ -1512,17 +1540,17 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			// etc. is a return of the function all the same. Without these arms every aggregate
 			// return inside an effect block escaped the check (`can Abort.Panic: return H{r: &x}`).
 			// A static-if's branches are alternatives: each starts from the environment before it.
-			blockEnvs := []map[string]returnBorrowFlow{}
+			var blockChanges [][]returnBorrowBranchChange
 			for _, body := range returnBorrowChildBlocks(n) {
-				blockEnv := cloneReturnBorrowAliases(aliases)
+				blockEnv := a.beginReturnBorrowBranch(aliases)
 				outerScope := a.currentScope
 				a.currentScope = NewScope(outerScope)
 				returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(body, blockEnv, active, localBindings, false))
 				a.currentScope = outerScope
-				blockEnvs = append(blockEnvs, blockEnv)
+				blockChanges = append(blockChanges, a.endReturnBorrowBranch(aliases))
 			}
-			for _, env := range blockEnvs {
-				mergeReturnBorrowAliasMaps(aliases, env)
+			for _, changes := range blockChanges {
+				a.joinReturnBorrowBranch(aliases, changes, nil)
 			}
 		case *ast.MatchStmt:
 			a.noteReturnBorrowCallArgumentStores(n.Value, aliases, active, localBindings)
@@ -1541,9 +1569,9 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 				subjectFlow = a.returnBorrowFlowForExpr(n.Value, aliases, active, localBindings)
 			}
 			// Every arm starts from the environment before the match; their writes join afterwards.
-			armEnvs := make([]map[string]returnBorrowFlow, 0, len(n.Arms))
+			armChanges := make([][]returnBorrowBranchChange, 0, len(n.Arms))
 			for index, arm := range n.Arms {
-				armEnv := cloneReturnBorrowAliases(aliases)
+				armEnv := a.beginReturnBorrowBranch(aliases)
 				outerScope := a.currentScope
 				a.currentScope = NewScope(outerScope)
 				for _, binder := range binders[index] {
@@ -1556,10 +1584,10 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 				a.noteReturnBorrowCallArgumentStores(arm.Guard, armEnv, active, localBindings)
 				returned = mergeReturnBorrowFlow(returned, a.returnBorrowFlowForStatements(arm.Body, armEnv, active, localBindings, false))
 				a.currentScope = outerScope
-				armEnvs = append(armEnvs, armEnv)
+				armChanges = append(armChanges, a.endReturnBorrowBranch(aliases))
 			}
-			for _, env := range armEnvs {
-				mergeReturnBorrowAliasMaps(aliases, env)
+			for _, changes := range armChanges {
+				a.joinReturnBorrowBranch(aliases, changes, nil)
 			}
 		}
 	}
@@ -1574,13 +1602,13 @@ func cloneReturnBorrowAliases(src map[string]returnBorrowFlow) map[string]return
 	return cloned
 }
 
-func mergeReturnBorrowAliasMaps(dst, src map[string]returnBorrowFlow) {
+func (a *Analyzer) mergeReturnBorrowAliasMaps(dst, src map[string]returnBorrowFlow) {
 	if dst == nil {
 		// The caller keeps no alias environment (a value walked outside a body).
 		return
 	}
 	for name, flow := range src {
-		dst[name] = mergeReturnBorrowFlow(dst[name], flow)
+		a.writeReturnBorrowAlias(dst, name, mergeReturnBorrowFlow(dst[name], flow))
 	}
 }
 
@@ -1687,12 +1715,13 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 			binders := map[ast.Node]bool{}
 			returnBorrowMarkConditionBinders(n.Cond, binders)
 			if len(binders) > 0 {
-				env := cloneReturnBorrowAliases(aliases)
+				env := a.beginReturnBorrowBranch(aliases)
 				outerScope := a.currentScope
 				a.currentScope = NewScope(outerScope)
 				a.noteReturnBorrowAndChainStores(n.Cond, env, active, localBindings)
 				a.defineReturnBorrowConditionBindings(n.Cond, env, active, localBindings)
 				a.noteReturnBorrowCallArgumentStores(n.Value, env, active, localBindings)
+				a.endReturnBorrowBranch(aliases)
 				a.currentScope = outerScope
 				a.noteReturnBorrowCallArgumentStores(n.Alt, aliases, active, localBindings)
 				return true

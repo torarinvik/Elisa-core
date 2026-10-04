@@ -144,6 +144,10 @@ type Analyzer struct {
 	regionPolyCandidateFnTypes map[string][]*FuncType
 	extensionMethodsByName     map[string][]*ExtensionMethod
 	ufcsFunctionsByName        map[string][]*Symbol
+	// returnBorrowAliasFrames/Journal undo a return-borrow branch's writes to its alias
+	// environment (analyzer_return_borrow_alias_journal.go).
+	returnBorrowAliasFrames  []returnBorrowAliasFrame
+	returnBorrowAliasJournal []returnBorrowAliasJournalEntry
 	// ufcsFunctionsVersion counts registrations into ufcsFunctionsByName; ufcsByLastSegment is
 	// that map re-keyed by each name's last `.`/`:` segment, valid while its version matches.
 	ufcsFunctionsVersion       int

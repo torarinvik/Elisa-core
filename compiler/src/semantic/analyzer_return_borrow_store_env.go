@@ -378,7 +378,7 @@ func (a *Analyzer) setReturnBorrowAlias(aliases map[string]returnBorrowFlow, nam
 	if merge {
 		flow = mergeReturnBorrowFlow(aliases[name], flow)
 	}
-	aliases[name] = flow
+	a.writeReturnBorrowAlias(aliases, name, flow)
 	if !a.returnBorrowRecordingActive() || a.currentScope == nil {
 		return
 	}
