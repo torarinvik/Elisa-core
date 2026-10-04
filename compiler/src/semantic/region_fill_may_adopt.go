@@ -3,6 +3,7 @@ package semantic
 import (
 	"reflect"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -377,7 +378,14 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 }
 
 func fillMayAdoptWalk(v reflect.Value, visit func(any)) {
-	fillMayAdoptWalkSeen(v, visit, map[uintptr]bool{})
+	seen := fillMayAdoptSeenPool.Get().(map[uintptr]bool)
+	fillMayAdoptWalkSeen(v, visit, seen)
+	clear(seen)
+	fillMayAdoptSeenPool.Put(seen)
+}
+
+var fillMayAdoptSeenPool = sync.Pool{
+	New: func() any { return make(map[uintptr]bool) },
 }
 
 func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]bool) {
@@ -397,10 +405,8 @@ func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]boo
 			fillMayAdoptWalkSeen(v.Elem(), visit, seen)
 		}
 	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).IsExported() {
-				fillMayAdoptWalkSeen(v.Field(i), visit, seen)
-			}
+		for _, i := range fillMayAdoptExportedFields(v.Type()) {
+			fillMayAdoptWalkSeen(v.Field(i), visit, seen)
 		}
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
@@ -412,6 +418,22 @@ func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]boo
 			fillMayAdoptWalkSeen(iter.Value(), visit, seen)
 		}
 	}
+}
+
+var fillMayAdoptFieldCache sync.Map // map[reflect.Type][]int
+
+func fillMayAdoptExportedFields(t reflect.Type) []int {
+	if cached, ok := fillMayAdoptFieldCache.Load(t); ok {
+		return cached.([]int)
+	}
+	indices := make([]int, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		if t.Field(i).IsExported() {
+			indices = append(indices, i)
+		}
+	}
+	cached, _ := fillMayAdoptFieldCache.LoadOrStore(t, indices)
+	return cached.([]int)
 }
 
 // fillMayAdoptNonAllocatingMethods are builtin container methods that never allocate a value of
