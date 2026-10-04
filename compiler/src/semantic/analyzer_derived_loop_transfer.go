@@ -22,19 +22,30 @@ type derivedLoopTransfer struct {
 
 func (a *Analyzer) captureDerivedLoopEntry(scope *Scope) derivedLoopState {
 	out := derivedLoopState{}
-	seen := map[string]bool{}
+	// Only derived-state bindings are captured, and they are rare, so the shadowing check runs
+	// for those alone: a binding is visible unless a scope nearer the loop declares its name.
+	// (Recording every name of the whole chain -- globals included -- on every loop head was
+	// ~10% of all analyzer allocation.)
+	var inner []*Scope
 	for cur := scope; cur != nil; cur = cur.Parent {
 		for name, sym := range cur.Symbols {
-			if seen[name] {
-				continue
-			}
-			seen[name] = true
 			base, ok := trackedNamedStateStructBase(sym.Type)
 			if !ok || base == nil || base.ProtocolStates || len(base.DerivedStates) == 0 {
 				continue
 			}
+			shadowed := false
+			for _, nearer := range inner {
+				if _, declared := nearer.Symbols[name]; declared {
+					shadowed = true
+					break
+				}
+			}
+			if shadowed {
+				continue
+			}
 			out[sym] = a.currentTrackedValueType(sym)
 		}
+		inner = append(inner, cur)
 	}
 	return derivedLoopState(a.cloneTrackedValueTypeMapWithSeen(map[*Symbol]Type(out), map[Type]Type{}))
 }
