@@ -104,6 +104,10 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	var typ ast.TypeExpr
 	if p.peek() == lexer.TOKEN_LPAREN {
 		typ = p.parseTupleTypeExpr()
+		// parseBaseType normally consumes the reference suffix. A grouped type
+		// is already a complete type expression, so consume its suffix here:
+		// `(T&) &` must add a reference around, not inside, the parentheses.
+		typ, _ = p.parseRefTypeSuffixes(typ, typ.Pos(), ast.RefStorageAny, false, "")
 	} else {
 		storage, explicit, label, region := p.parseRefStorageQualifier()
 		typ = p.parseBaseType(storage, explicit, label, region)
@@ -298,6 +302,16 @@ func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
 func (p *Parser) parseTupleTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_LPAREN)
+	// Parentheses also group a type expression. This is required to compose
+	// reference capabilities: `(mutable T&) &` means a readonly reference to a
+	// mutable reference, while `mutable (T&) &` marks the outer reference
+	// mutable. Named-field tuple types remain unambiguous because their first
+	// token pair is `IDENT :`.
+	if p.peek() != lexer.TOKEN_RPAREN && !(p.peek() == lexer.TOKEN_IDENT && p.peekAt(1) == lexer.TOKEN_COLON) {
+		elem := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		return elem
+	}
 	fields := make([]ast.TupleTypeField, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
