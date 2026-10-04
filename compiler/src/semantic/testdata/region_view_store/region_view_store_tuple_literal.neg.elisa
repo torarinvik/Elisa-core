@@ -1,0 +1,8 @@
+def main() -> i32:
+    can Memory.Allocate:
+        base: mutable darray[i64] = [0]
+        t: mutable (known: bool, v: view[i64]) = (false, base[0:0])
+        region scratch(4096):
+            xs: mutable darray[i64] = [1, 2, 3]
+            t <- (true, xs[0:2])
+        return t.v[1].i32()

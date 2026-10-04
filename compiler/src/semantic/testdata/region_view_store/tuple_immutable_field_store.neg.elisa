@@ -1,0 +1,6 @@
+def main() -> i32:
+    can Memory.Allocate:
+        base: mutable darray[i64] = [4, 7, 9]
+        t: (known: bool, v: view[i64]) = (false, base[0:0])
+        t.v <- base[0:2]
+        return t.v[1].i32() - 7
