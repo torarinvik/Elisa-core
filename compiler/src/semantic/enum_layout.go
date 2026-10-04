@@ -81,7 +81,12 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 	descendants := map[string][]string{} // X -> all transitive refinements of X (excluding X)
 	for name, ed := range byName {
 		_ = name
-		for p := ed.Parent; p != ""; {
+		// A cyclic `is` chain (`enum Node is Node`, `A is B` + `B is A`) is rejected later by
+		// the hierarchy checker; here it must merely terminate. Without the visited set the walk
+		// appended to descendants forever and the compiler died out of memory.
+		visited := map[string]bool{ed.Name: true}
+		for p := ed.Parent; p != "" && !visited[p]; {
+			visited[p] = true
 			descendants[p] = append(descendants[p], ed.Name)
 			parentDecl, ok := byName[p]
 			if !ok {
