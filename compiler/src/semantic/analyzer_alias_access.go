@@ -339,6 +339,82 @@ func refAliasAccessMode(t Type) (aliasAccessMode, bool) {
 	return aliasAccessRead, true
 }
 
+// viewAliasAccessMode classifies a by-value view parameter (sview, cstr, view[T]) as a borrow of the
+// storage its argument views: read-only, or writable for a `mutable view[T]`.
+func viewAliasAccessMode(t Type) (aliasAccessMode, bool) {
+	switch tt := t.(type) {
+	case *SViewType, *CStrType:
+		return aliasAccessRead, true
+	case *ViewType:
+		if tt != nil && tt.Mutable {
+			return aliasAccessWrite, true
+		}
+		return aliasAccessRead, true
+	}
+	return aliasAccessRead, false
+}
+
+// viewArgAliasRoots names the container storage a view argument's bytes ARE: `xs.as_sview()`,
+// `xs.as_cstr()`, `xs.view()`, `xs[a:b]`, or a local bound to one of those. A view merely read out
+// of a container (an sview element or field, a helper's result) points at bytes the container
+// does not own, so a callee growing the container cannot dangle it; it has no root here. This is
+// the same syntactic set stage1's check_call_argument_exclusivity treats as `&xs[..]`.
+func (a *Analyzer) viewArgAliasRoots(arg ast.Expr) []string {
+	return a.viewArgAliasRootsDepth(arg, 0)
+}
+
+func (a *Analyzer) viewArgAliasRootsDepth(arg ast.Expr, depth int) []string {
+	if arg == nil || depth > 8 {
+		return nil
+	}
+	switch n := stripOptimizationParens(arg).(type) {
+	case *ast.SliceExpr:
+		if !a.viewSourceOwnsBuffer(n.Object) {
+			return nil
+		}
+		if root := a.aliasRootForExpr(n.Object); root != "" {
+			return []string{root}
+		}
+	case *ast.CallExpr:
+		field, ok := n.Func.(*ast.FieldExpr)
+		if !ok || field == nil || field.Object == nil || len(n.Args) != 0 || !a.viewSourceOwnsBuffer(field.Object) {
+			return nil
+		}
+		switch field.Field {
+		case "as_sview", "as_cstr", "view":
+			if root := a.aliasRootForExpr(field.Object); root != "" {
+				return []string{root}
+			}
+		}
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return nil
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym == nil || sym.Kind != SymbolLocal {
+			return nil
+		}
+		if value, bound := a.currentValueBindings[sym]; bound && value != nil {
+			return a.viewArgAliasRootsDepth(value, depth+1)
+		}
+	}
+	return nil
+}
+
+// viewSourceOwnsBuffer: the viewed expression is a container whose own buffer the view points
+// into (a darray, a fixed array, a dstr), not another view (slicing an sview views ITS bytes).
+func (a *Analyzer) viewSourceOwnsBuffer(source ast.Expr) bool {
+	switch t := StripAggregateStateType(stripRefForBounds(a.exprTypes[source])).(type) {
+	case *DArrayType, *ArrayType:
+		return true
+	case *BuiltinType:
+		return t != nil && t.Name == "dstr"
+	case *StructType:
+		return t != nil && t.Name == "dstr"
+	}
+	return false
+}
+
 func typeExprHasExplicitMutableRef(expr ast.TypeExpr) bool {
 	switch n := expr.(type) {
 	case *ast.MutableType:
@@ -616,13 +692,24 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 	}
 	for i := 0; i < limit; i++ {
 		mode, ok := refAliasAccessMode(paramTypes[i])
-		if !ok {
+		var roots []string
+		if ok {
+			// An arg may resolve to several alias roots (a reference returned from a call that
+			// aliases multiple params). Each is a storage the arg might touch, so any conflicting
+			// with this mutable use is a real alias.
+			roots = a.aliasRootsForExpr(args[i])
+		} else if viewMode, isView := viewAliasAccessMode(paramTypes[i]); isView {
+			// A view argument (`buf.as_sview()`, `buf[0:n]`, a bound view of buf) borrows the
+			// storage it views exactly like `&buf[0]` does: `use(&buf, buf.as_sview())` lets the
+			// callee grow buf through its mutable reference and then read the dangling view.
+			roots = a.viewArgAliasRoots(args[i])
+			mode = viewMode
+			if len(roots) == 0 {
+				continue
+			}
+		} else {
 			continue
 		}
-		// An arg may resolve to several alias roots (a reference returned from a call that
-		// aliases multiple params). Each is a storage the arg might touch, so any conflicting
-		// with this mutable use is a real alias.
-		roots := a.aliasRootsForExpr(args[i])
 		conflict := false
 		for _, root := range roots {
 			// Exact-root live state, discounting the arg's own outstanding binding so

@@ -1,0 +1,8 @@
+# F16: x points into buf; the drain moves every element out of buf.
+def main() -> i64:
+    buf: mutable darray[i64] = [41, 42]
+    x: i64& = &buf[0]
+    t: mutable i64 = 0
+    for e in move buf |t|:
+        t <- t + e
+    return x + t

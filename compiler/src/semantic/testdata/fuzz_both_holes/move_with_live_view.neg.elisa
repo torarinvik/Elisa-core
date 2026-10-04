@@ -1,0 +1,9 @@
+# F16: a view of buf outlives the move of buf into a callee.
+def eat(xs: darray[i64]) -> i64:
+    return xs.len.i64()
+
+def main() -> i64:
+    buf: mutable darray[i64] = [41, 42]
+    v: view[i64] = buf[0:1]
+    t: i64 = eat(move buf)
+    return v.len.i64() + t

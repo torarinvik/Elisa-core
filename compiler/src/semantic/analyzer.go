@@ -251,6 +251,11 @@ type Analyzer struct {
 	deferInfo             map[*ast.DeferStmt]*DeferInfo
 	foldInfo              map[*ast.FoldExpr]*FoldInfo
 	lambdaInfo            map[*ast.LambdaExpr]*LambdaInfo
+	// One-shot closures (analyzer_one_shot_closure.go).
+	oneShotLambdas        map[*ast.LambdaExpr]string
+	oneShotClosureSyms    map[*Symbol]string
+	pendingClosureBinding *ast.LambdaExpr
+	oneShotCallee         *ast.Ident
 	symbolFacts           map[*Symbol]OptimizationFacts
 	funcDeclSymbols       map[*ast.FuncDecl]*Symbol
 	declVisibility        map[ast.Decl]string

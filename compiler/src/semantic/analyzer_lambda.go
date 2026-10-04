@@ -146,6 +146,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	}
 
 	captures := a.collectLambdaCaptures(expr)
+	a.checkOneShotClosureCaptures(expr, captures)
 	if a.lambdaInfo == nil {
 		a.lambdaInfo = map[*ast.LambdaExpr]*LambdaInfo{}
 	}
@@ -219,9 +220,13 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentRegionFactTransforms = nil
 	a.currentFuncSawPlainValueReturn = false
 
+	pendingBinding := a.pendingClosureBinding
+	a.pendingClosureBinding = nil
+	captureSyms := make([]*Symbol, 0, len(captures))
 	for _, capture := range captures {
 		sym := &Symbol{Name: capture.name, Kind: SymbolLocal, Type: capture.typ, Node: expr, Mutable: capture.mutable}
 		a.defineLocal(sym, expr.Position)
+		captureSyms = append(captureSyms, sym)
 		a.recordValueBinding(sym, nil)
 		if fnType, ok := capture.typ.(*FuncType); ok {
 			a.currentFunctionValues[sym] = a.cloneFunctionValueType(fnType)
@@ -346,6 +351,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		}
 	}
 
+	movedCaptures := a.lambdaMovedCaptures(captureSyms)
 	if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
 		fnType.ReturnProvenance = summary
 	} else {
@@ -388,6 +394,9 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentRegionFactTransforms = savedRegionFactTransforms
 	a.currentFuncSawPlainValueReturn = savedSawPlainValueReturn
 
+	a.pendingClosureBinding = pendingBinding
+	a.consumeOneShotClosureCaptures(expr, movedCaptures)
+	a.pendingClosureBinding = nil
 	a.recordAnalyzedExprType(expr, fnType)
 	return fnType
 }

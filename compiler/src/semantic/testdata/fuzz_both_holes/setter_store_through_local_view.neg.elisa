@@ -1,0 +1,21 @@
+# F2: set() stores its view argument into the caller's holder; b's bytes live in fill's
+# `in auto:` region, freed when fill returns.
+struct Hs:
+    s: mutable sview
+
+def set(h: mutable Hs&, s: sview) -> void:
+    h.s <- s
+
+def fill(h: mutable Hs&) -> void:
+    b: mutable darray[u8] = [65.u8()]
+    set(h, b.as_sview())
+
+def fill_bound(h: mutable Hs&) -> void:
+    b: mutable darray[u8] = [65.u8()]
+    v: sview = b.as_sview()
+    set(h, v)
+
+def main() -> i64:
+    h: mutable Hs = Hs{s: ""}
+    fill(&h)
+    return h.s.len.i64()

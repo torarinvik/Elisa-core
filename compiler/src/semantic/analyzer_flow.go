@@ -60,7 +60,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				if isZeroedInitializer(n.Value) {
 					a.zeroedPlaceholderExpected = declType
 				}
+				if lambda, isLambda := stripOptimizationParens(n.Value).(*ast.LambdaExpr); isLambda {
+					a.pendingClosureBinding = lambda
+				}
 				valueType = a.analyzeValueExpr(n.Value, declType)
+				a.pendingClosureBinding = nil
 				a.zeroedPlaceholderExpected = previousZeroedPlaceholder
 			}
 			if a.checkVoidBinding(n.Pos(), n.Name, declType, valueType, true) {
@@ -145,6 +149,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.derivedLoopLocals[n] = sym
 			}
 		}
+		a.bindOneShotClosure(sym, n.Value)
 		// A freshly-constructed struct local whose container fields are backed by the ambient
 		// region gets that region recorded, so a call site can thread it into a callee's
 		// struct-ref region param (see region_struct_local.go).

@@ -1,0 +1,20 @@
+# F1 (fuzz): stage0 ACCEPTS returning a view of a local darray / of a struct local's darray
+# field, and is sound doing so: the function is region-polymorphic, so the darray (and its
+# growth) is allocated in the caller's arena (`@mk(ptr %0)`, arena_alloc on %0), measured to
+# return the right bytes at -O0 and -O2 after 5000 pushes and a scribbling region loop.
+# stage1's view-typed results carry no region slot, so stage1 rejects both shapes instead.
+struct HU:
+    bytes: mutable darray[u8]
+
+def mk_field() -> sview:
+    h: mutable HU = HU{bytes: [65.u8(), 65.u8()]}
+    v: sview = h.bytes.as_sview()
+    return v
+
+def mk_local() -> sview:
+    bytes: mutable darray[u8] = [65.u8(), 65.u8()]
+    v: sview = bytes.as_sview()
+    return v
+
+def main() -> i64:
+    return mk_field().len.i64() + mk_local().len.i64()

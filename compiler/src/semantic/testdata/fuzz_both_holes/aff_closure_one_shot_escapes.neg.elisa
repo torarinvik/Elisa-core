@@ -1,0 +1,14 @@
+# F12: a one-shot closure may only be called directly; passing it lets the callee call it twice.
+affine struct Hd:
+    v: i64
+
+def take(h: Hd) -> i64:
+    return h.v
+
+def apply(f: fn() -> i64) -> i64:
+    return f() + f()
+
+def main() -> i64:
+    h: Hd = Hd{v: 7}
+    g: fn() -> i64 = fn() => take(move h)
+    return apply(g)
