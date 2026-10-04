@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"elisacore/src/ast"
@@ -58,7 +59,8 @@ func (a *Analyzer) buildRequiresFailureDiagnostic(req ast.Expr, subst map[string
 	var facts []string
 	seen := map[string]bool{}
 	rangeFacts := a.visibleRangeFacts()
-	for name, r := range rangeFacts {
+	for _, name := range sortedRangeFactNames(rangeFacts) {
+		r := rangeFacts[name]
 		if !goalVars[name] {
 			continue
 		}
@@ -261,7 +263,8 @@ func (a *Analyzer) buildEnsureFailureDiagnostic(clause ast.Expr, subst map[strin
 	var facts []string
 	seen := map[string]bool{}
 	rangeFacts := a.visibleRangeFacts()
-	for name, r := range rangeFacts {
+	for _, name := range sortedRangeFactNames(rangeFacts) {
+		r := rangeFacts[name]
 		if !goalVars[name] {
 			continue
 		}
@@ -433,7 +436,8 @@ func (a *Analyzer) buildRequiresFailureDiagnosticWithProvenance(req ast.Expr, su
 
 	// Range facts.
 	rangeFacts := a.visibleRangeFacts()
-	for name, r := range rangeFacts {
+	for _, name := range sortedRangeFactNames(rangeFacts) {
+		r := rangeFacts[name]
 		if !goalVars[name] {
 			continue
 		}
@@ -503,7 +507,8 @@ func (a *Analyzer) buildEnsureFailureDiagnosticWithProvenance(clause ast.Expr, s
 	seen := map[string]bool{}
 
 	rangeFacts := a.visibleRangeFacts()
-	for name, r := range rangeFacts {
+	for _, name := range sortedRangeFactNames(rangeFacts) {
+		r := rangeFacts[name]
 		if !goalVars[name] {
 			continue
 		}
@@ -629,4 +634,16 @@ func buildSuggestion(req ast.Expr, subst map[string]ast.Expr, counterexample str
 	}
 	// Generic: suggest asserting the goal or adding a requires to the caller.
 	return fmt.Sprintf("add `%s` before the call to make the fact visible to the prover, or add `requires %s` to the calling function", assertCallForm(goal), goal)
+}
+
+// sortedRangeFactNames returns the subjects of a visibleRangeFacts map in name order.
+// The known-facts lists above are capped (5 entries), so walking the map directly made
+// both the ORDER and the SELECTION of facts in a proof diagnostic vary run to run.
+func sortedRangeFactNames(facts map[string]numRange) []string {
+	names := make([]string, 0, len(facts))
+	for name := range facts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
