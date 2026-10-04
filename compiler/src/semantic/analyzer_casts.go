@@ -431,3 +431,62 @@ func (a *Analyzer) exprSummary(expr ast.Expr) string {
 		return "?"
 	}
 }
+
+// castForgesOrUpgradesReference reports the two pointer casts that manufacture authority the
+// source never had, and that therefore ALWAYS require Unsafe.PointerCast (a hard error in every
+// mode, not the default-mode warning other pointer reinterprets get):
+//
+//   - "forge": a plain number reinterpreted as a reference (`addr.cast[i64&]`) — there is no
+//     provenance at all behind the result.
+//   - "upgrade": a read-only reference reinterpreted as a mutable one (`r.cast[mutable T&]` or
+//     the reborrow `(&r).cast[mutable T&]` with `r: T&`) — write capability over storage
+//     this function does not own is invented.
+//
+// The reborrow idiom `(&r).cast[U]` (r already a reference; the cast yields the REFERENT) is
+// judged by the referent, so `(&self).cast[mutable T&]` with `self: mutable T&` stays a sound
+// reborrow, and `(&v).cast[...]` of a by-value binding (frame-owned storage) is not judged here.
+func (a *Analyzer) castForgesOrUpgradesReference(cast *ast.CastExpr, src, dst Type) string {
+	if a == nil || cast == nil || IsInvalidType(src) || IsInvalidType(dst) || SameType(src, dst) {
+		return ""
+	}
+	if containsTypeParam(src) || containsTypeParam(dst) {
+		return ""
+	}
+	dstRef, ok := dst.(*RefType)
+	if !ok || dstRef == nil {
+		return ""
+	}
+	if IsNumericType(src) && !isStorageTagType(src) {
+		return "forge"
+	}
+	srcRef, ok := src.(*RefType)
+	if !ok || srcRef == nil || !dstRef.Mutable || srcRef.Mutable {
+		return ""
+	}
+	operand := cast.Operand
+	for {
+		if paren, ok := operand.(*ast.ParenExpr); ok {
+			operand = paren.Inner
+			continue
+		}
+		break
+	}
+	if _, isAddr := operand.(*ast.AddrOfExpr); isAddr {
+		// `&v` of a by-value binding borrows storage this frame OWNS (a local or a by-value
+		// param): casting that borrow to mutable writes no one else's memory, and the legacy
+		// `(&owner).cast[mutable Arena&]` idiom depends on it. Only a reborrow through a
+		// READ-ONLY reference (`(&x).cast[mutable T&]`, x: T&) reaches foreign storage.
+		inner, ok := srcRef.Elem.(*RefType)
+		if !ok || inner == nil || inner.Mutable {
+			return ""
+		}
+	}
+	return "upgrade"
+}
+
+func referenceAuthorityCastLabel(kind string) string {
+	if kind == "forge" {
+		return "forging a reference from an integer (`.cast` of a number to a reference type)"
+	}
+	return "upgrading a read-only reference to a mutable one (`.cast[mutable T&]` of a non-mutable reference)"
+}

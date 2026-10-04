@@ -79,6 +79,20 @@ func missingGrantedPermissionFamilies(refs []ast.PermissionRef, granted map[stri
 	return missing
 }
 
+// errorOnMissingLocalGrant is warnOnMissingLocalGrant for operations whose Unsafe opt-out is
+// mandatory in every mode (no permissive-mode warning). The trusted runtime stdlib keeps its
+// exemption.
+func (a *Analyzer) errorOnMissingLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
+	missing := missingGrantedPermissionFamilies(refs, granted)
+	if len(missing) == 0 {
+		return
+	}
+	if isRuntimeStdPermissionInternal(pos.File) && allUnsafeFamilies(missing) {
+		return
+	}
+	a.errorf(pos, "%s", effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing)))
+}
+
 func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
 	missing := missingGrantedPermissionFamilies(refs, granted)
 	if len(missing) == 0 {
@@ -454,6 +468,10 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 			// Unsafe.GuestHostPointerCast, so a guest address can never be
 			// silently dereferenced as a host pointer.
 			a.warnOnMissingLocalGrant(n.Pos(), "guest-host pointer cast", unsafeGuestHostPointerCastRefs(n.Position), granted)
+		} else if kind := a.castForgesOrUpgradesReference(n, src, dst); n.Origin != ast.CastExprOriginIndirectCall && kind != "" {
+			// Inventing provenance or write capability is never a default-mode warning: it
+			// hard-errors without an Unsafe.PointerCast grant in every mode.
+			a.errorOnMissingLocalGrant(n.Pos(), referenceAuthorityCastLabel(kind), unsafePointerCastRefs(n.Position), granted)
 		} else if n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
 			// Memory-safety opt-out: hard-errors under enforcement, warns in permissive
 			// mode (warnOnMissingLocalGrant picks the severity). Surfaced in BOTH modes so

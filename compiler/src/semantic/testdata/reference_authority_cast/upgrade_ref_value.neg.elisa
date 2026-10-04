@@ -1,0 +1,9 @@
+# Casting a read-only reference VALUE to a mutable one invents write capability.
+def poke(x: i64&):
+    m: mutable i64& = x.cast[mutable i64&]
+    m <- 5
+
+def main() -> int:
+    v: i64 = 1
+    poke(&v)
+    return 0
