@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"elisacore/src/ast"
@@ -841,7 +843,8 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 		if !ok {
 			return
 		}
-		for name, typ := range bindings {
+		for _, name := range slices.Sorted(maps.Keys(bindings)) { // map: sort for a stable report order
+			typ := bindings[name]
 			if prev, exists := out[name]; exists {
 				if !SameType(prev, typ) {
 					a.errorf(p.Pos(), "condition binding %q has inconsistent types %s and %s", name, prev, typ)
@@ -941,7 +944,8 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 			for name, typ := range left {
 				out[name] = typ
 			}
-			for name, typ := range right {
+			for _, name := range slices.Sorted(maps.Keys(right)) { // map: sort for a stable report order
+				typ := right[name]
 				if prev, ok := out[name]; ok && !SameType(prev, typ) {
 					a.errorf(n.Pos(), "condition binding %q has inconsistent types %s and %s", name, prev, typ)
 					continue

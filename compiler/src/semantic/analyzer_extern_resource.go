@@ -1,6 +1,11 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"maps"
+	"slices"
+
+	"elisacore/src/ast"
+)
 
 // `extern resource Name` (docs/127 §3.2). The parser desugared it into the handle type
 // `Name__native` and the struct `Name{__handle: Name__native}`; these checks add the two
@@ -13,8 +18,8 @@ import "elisacore/src/ast"
 //	    native constructor hands back is the point, so it returns `Name` or `Name?`.
 
 func (a *Analyzer) checkResourceDrops() {
-	for _, t := range a.namedTypes {
-		st, ok := t.(*StructType)
+	for _, name := range slices.Sorted(maps.Keys(a.namedTypes)) { // map: sort for a stable report order
+		st, ok := a.namedTypes[name].(*StructType)
 		if !ok || st == nil || !st.Resource || st.DropHook != "" {
 			continue
 		}

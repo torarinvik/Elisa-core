@@ -707,16 +707,18 @@ type Analyzer struct {
 	// re-entering a symbol already on the resolution stack returns "no function-value type" instead of
 	// recursing until the goroutine stack overflows.
 	functionValueResolveInProgress map[*Symbol]bool
-	sinkParamInferenceInProgress   map[*ast.FuncDecl]bool
-	parallelForInfo                map[*ast.ParallelForStmt]*ParallelForInfo
-	callArgDisjoint                map[*ast.CallExpr]*CallArgDisjointInfo
-	disjointCallSites              map[*ast.FuncDecl][]callDisjointObservation
-	funcDisjointParams             map[*ast.FuncDecl]*FuncDisjointParamInfo
-	lawIsCalls                     map[*ast.BinaryExpr]*ast.CallExpr
-	builtinModularLaws             map[string]*ast.FuncDecl
-	lemmaCalls                     map[*ast.CallExpr]bool
-	ghostDecls                     map[*ast.VarDeclStmt]bool
-	ghostContracts                 map[ast.Expr]bool
+	// projectedFieldResolveInProgress: the same guard for resolveProjectedFieldValueExprAtPath.
+	projectedFieldResolveInProgress map[*Symbol]bool
+	sinkParamInferenceInProgress    map[*ast.FuncDecl]bool
+	parallelForInfo                 map[*ast.ParallelForStmt]*ParallelForInfo
+	callArgDisjoint                 map[*ast.CallExpr]*CallArgDisjointInfo
+	disjointCallSites               map[*ast.FuncDecl][]callDisjointObservation
+	funcDisjointParams              map[*ast.FuncDecl]*FuncDisjointParamInfo
+	lawIsCalls                      map[*ast.BinaryExpr]*ast.CallExpr
+	builtinModularLaws              map[string]*ast.FuncDecl
+	lemmaCalls                      map[*ast.CallExpr]bool
+	ghostDecls                      map[*ast.VarDeclStmt]bool
+	ghostContracts                  map[ast.Expr]bool
 	// ghostReadAllowed, when > 0, permits reading a `ghost` variable (the analyzer is inside a
 	// contract clause or another ghost initializer). Outside these contexts a ghost read is a hard
 	// error — that is the ghost-to-real flow barrier that keeps erasure sound.
@@ -1176,6 +1178,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// predicates. Both passes operate on already-collected type skeletons, so
 	// enum payloads can still resolve struct types declared later in the file.
 	a.populateStructFields(activeDecls)
+	a.checkStructByValueCycles(activeDecls)
 	a.assignHierarchyEnumTags(activeDecls)
 	a.inheritHierarchyCommonFields(activeDecls)
 	generatedDecls := make(map[ast.Decl]bool)

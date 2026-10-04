@@ -98,7 +98,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					return
 				}
 				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
-					if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
+					// Following the binding (not functionValueTypeForExpr directly) marks sym
+					// in progress, so a self-referential initializer (`const X: i32 = X + 1`)
+					// stops here instead of recursing until the Go stack overflows.
+					if fnType, ok := a.functionValueTypeFollowingBinding(sym, valueExpr); ok {
 						result = promoteWritableRefType(fnType, symbolPromotesWritableRef(sym))
 						return
 					}

@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -181,7 +183,7 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 	// protects the generated match from being non-exhaustive; executing it would silently mark
 	// the machine done with an uninitialized result for a reachable enum variant. Require a
 	// handler for every variant before lowering so the source graph and runtime graph agree.
-	for state := range valid {
+	for _, state := range slices.Sorted(maps.Keys(valid)) { // map: sort for a stable report order
 		if !armByState[state] {
 			a.errorf(expr.Position, "machine state %q has no arm — every enum variant must be handled (docs/125 §5)", state)
 			ok = false
