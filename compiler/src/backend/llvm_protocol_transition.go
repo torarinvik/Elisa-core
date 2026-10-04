@@ -23,34 +23,10 @@ func (s *functionState) emitProtocolTransitionCall(expr *ast.CallExpr) (C.LLVMVa
 		return nil, nil, true, fmt.Errorf("invalid checked protocol transition arity")
 	}
 	target := s.exprType(expr)
-	targetLLVM, err := s.g.lowerType(target)
+	value, source, err := s.emitExpr(expr.Args[0], s.exprType(expr.Args[0]))
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value, _, err := s.emitExpr(expr.Args[0], s.exprType(expr.Args[0]))
-	if err != nil {
-		return nil, nil, true, err
-	}
-	sourceLLVM := C.LLVMTypeOf(value)
-	if sourceLLVM == targetLLVM {
-		return value, target, true, nil
-	}
-	if C.LLVMGetTypeKind(sourceLLVM) != C.LLVMStructTypeKind || C.LLVMGetTypeKind(targetLLVM) != C.LLVMStructTypeKind {
-		return nil, nil, true, fmt.Errorf("protocol transition requires direct aggregate lowering")
-	}
-	count := C.LLVMCountStructElementTypes(sourceLLVM)
-	if count != C.LLVMCountStructElementTypes(targetLLVM) {
-		return nil, nil, true, fmt.Errorf("protocol transition changes payload layout")
-	}
-	for i := C.unsigned(0); i < count; i++ {
-		if C.LLVMStructGetTypeAtIndex(sourceLLVM, i) != C.LLVMStructGetTypeAtIndex(targetLLVM, i) {
-			return nil, nil, true, fmt.Errorf("protocol transition changes payload field %d", i)
-		}
-	}
-	result := C.LLVMGetUndef(targetLLVM)
-	for i := C.unsigned(0); i < count; i++ {
-		field := C.LLVMBuildExtractValue(s.builder, value, i, cStringFree("transition.payload"))
-		result = C.LLVMBuildInsertValue(s.builder, result, field, i, cStringFree("transition.result"))
-	}
-	return result, target, true, nil
+	result, actual, err := s.emitNamedStatePayloadRetype(value, source, target, "transition")
+	return result, actual, true, err
 }

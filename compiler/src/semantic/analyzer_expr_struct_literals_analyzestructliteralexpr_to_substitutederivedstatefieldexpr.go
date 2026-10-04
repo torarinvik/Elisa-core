@@ -494,6 +494,19 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 	if ok {
 		expr.ResolvedArgsValid = true
 		expr.ResolvedArgs = ordered
+		if base, hasStates := namedStateStructBase(resolvedBaseType); hasStates && !base.ProtocolStates {
+			updates := make(map[string]ast.Expr, len(expr.Args))
+			for i, value := range expr.Args {
+				updates[expr.ArgName(i)] = value
+			}
+			if state := a.inferRecordUpdateNamedState(expr.Pos(), base, updates); state != nil {
+				resultType = replaceTrackedNamedStateArg(resolvedBaseType, state)
+				if resultType == nil {
+					a.errorf(expr.Pos(), "record update cannot resolve derived state family %q", base.Name)
+					resultType = invalidType
+				}
+			}
+		}
 	}
 	a.consumeAffineValueExpr(expr.Base, resolvedBaseType, "record update")
 	return resultType
@@ -575,12 +588,80 @@ func (a *Analyzer) inferStructLiteralNamedState(expr *ast.StructLitExpr, base *S
 	}
 	fieldValues, ok := structLiteralFieldValues(expr, base)
 	if !ok {
+		if len(base.NamedStateCases) == 1 {
+			a.errorf(expr.Pos(), "struct literal %q cannot establish its only derived state from incomplete fields", expr.Name)
+		}
 		return fullNamedStateType(base)
 	}
+	return a.inferNamedStateForFieldValues(expr.Pos(), "struct literal", expr.Name, base, fieldValues)
+}
+
+// Unchanged fields are intentionally absent: reading the base AST again after
+// argument analysis could observe a later mutation rather than the captured
+// input payload. Preserve the input state only when every predicate is unchanged.
+func (a *Analyzer) inferRecordUpdateNamedState(pos lexer.Pos, base *StructType, updates map[string]ast.Expr) Type {
+	if len(updates) == 0 {
+		return nil
+	}
+	changed := false
+	for _, derived := range base.DerivedStates {
+		if recordUpdatePredicateMayChange(derived.Condition, updates, 0) {
+			changed = true
+			break
+		}
+	}
+	if !changed && len(base.DerivedStates) != 0 {
+		return nil
+	}
+	return a.inferNamedStateForFieldValues(pos, "record update", base.Name, base, updates)
+}
+
+func recordUpdatePredicateMayChange(expr ast.Expr, updates map[string]ast.Expr, depth int) bool {
+	if expr == nil || depth >= 128 {
+		return true
+	}
+	if _, field := expr.(*ast.FieldExpr); field {
+		current := expr
+		rootField := ""
+		for remaining := 128 - depth; remaining > 0; remaining-- {
+			switch node := current.(type) {
+			case *ast.FieldExpr:
+				rootField = node.Field
+				current = node.Object
+			case *ast.Ident:
+				if node.Name != "self" || rootField == "" {
+					return true
+				}
+				_, changed := updates[rootField]
+				return changed
+			default:
+				return true
+			}
+		}
+		return true
+	}
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit, *ast.NullLit:
+		return false
+	case *ast.ParenExpr:
+		return recordUpdatePredicateMayChange(n.Inner, updates, depth+1)
+	case *ast.UnaryExpr:
+		return recordUpdatePredicateMayChange(n.Operand, updates, depth+1)
+	case *ast.BinaryExpr:
+		return recordUpdatePredicateMayChange(n.Left, updates, depth+1) || recordUpdatePredicateMayChange(n.Right, updates, depth+1)
+	default:
+		return true
+	}
+}
+
+func (a *Analyzer) inferNamedStateForFieldValues(pos lexer.Pos, kind, name string, base *StructType, fieldValues map[string]ast.Expr) Type {
 	trueStates := make([]string, 0, len(base.NamedStateCases))
 	for _, stateName := range base.NamedStateCases {
 		proven, value := a.evaluateDerivedStateForFields(base, stateName, fieldValues)
 		if !proven {
+			if len(base.NamedStateCases) == 1 {
+				a.errorf(pos, "%s %q cannot establish its only derived state from an unknown predicate", kind, name)
+			}
 			return fullNamedStateType(base)
 		}
 		if value {
@@ -591,10 +672,10 @@ func (a *Analyzer) inferStructLiteralNamedState(expr *ast.StructLitExpr, base *S
 		return newNamedStateType(base.Name, base.NamedStateCases, trueStates)
 	}
 	if len(trueStates) == 0 {
-		a.errorf(expr.Pos(), "struct literal %q does not satisfy any derived state", expr.Name)
+		a.errorf(pos, "%s %q does not satisfy any derived state", kind, name)
 		return fullNamedStateType(base)
 	}
-	a.errorf(expr.Pos(), "struct literal %q satisfies multiple derived states: %s", expr.Name, strings.Join(trueStates, ", "))
+	a.errorf(pos, "%s %q satisfies multiple derived states: %s", kind, name, strings.Join(trueStates, ", "))
 	return fullNamedStateType(base)
 }
 func (a *Analyzer) proveStructLiteralNamedState(expr *ast.StructLitExpr, base *StructType, desired Type) bool {
