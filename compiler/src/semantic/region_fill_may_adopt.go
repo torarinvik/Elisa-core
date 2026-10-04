@@ -122,10 +122,20 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 				})
 			}
 		}
+		// One pass per list: a statement's idents are shadowed by every local declared before it
+		// in the list. (Walking the remaining statements once per local was quadratic in block
+		// length: ~3% of compiling the stage1 driver.)
 		fillMayAdoptStmtLists(reflect.ValueOf(decl.Body), func(list []ast.Stmt) {
-			for i, stmt := range list {
+			var declaredBefore map[string]bool
+			for _, stmt := range list {
+				if len(declaredBefore) != 0 {
+					markScoped(declaredBefore, stmt)
+				}
 				if local, ok := stmt.(*ast.VarDeclStmt); ok && local != nil {
-					markScoped(map[string]bool{local.Name: true}, list[i+1:])
+					if declaredBefore == nil {
+						declaredBefore = map[string]bool{}
+					}
+					declaredBefore[local.Name] = true
 				}
 			}
 		})
