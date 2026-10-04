@@ -1,8 +1,10 @@
 package semantic
 
 import (
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 
 	"elisacore/src/ast"
@@ -1406,7 +1408,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 		if srcRegion == "" {
 			continue
 		}
-		for tj := range targets[i] {
+		for _, tj := range slices.Sorted(maps.Keys(targets[i])) { // map: sort for a stable report order
 			if tj == storeTargetGlobal {
 				// The callee stores the argument into program-lifetime storage (a global/perm
 				// container, or relayed there) — that outlives every local region unconditionally.

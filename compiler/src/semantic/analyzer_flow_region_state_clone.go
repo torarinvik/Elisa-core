@@ -1,5 +1,10 @@
 package semantic
 
+import (
+	"slices"
+	"strings"
+)
+
 func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
 	if a.currentRegions == nil {
 		return nil
@@ -53,6 +58,8 @@ func joinRegionStateBranches(entry map[*Symbol]regionState, branches []map[*Symb
 		joinedState.Generation = maxGeneration
 		joined[sym] = joinedState
 	}
+	// entry is a map; order the report (one diagnostic per symbol) by name.
+	slices.SortStableFunc(inconsistent, func(x, y *Symbol) int { return strings.Compare(x.Name, y.Name) })
 	return joined, inconsistent
 }
 

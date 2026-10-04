@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -759,14 +761,16 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					// and the impl's `ensure` must imply the protocol's (covariant). docs P1.
 					a.checkProtocolImplContractVariance(methodInfo, member, interfaceName, receiver, name)
 				}
-				for name := range iface.AssociatedTypes {
+				// Sorted: iface.AssociatedTypes and iface.Methods are maps, and a map walk
+				// reported several missing members in a different order on every run.
+				for _, name := range slices.Sorted(maps.Keys(iface.AssociatedTypes)) {
 					// Defaults were already inherited above; a still-missing associated type has no
 					// default and the impl must bind it explicitly.
 					if _, ok := impl.AssociatedTypes[name]; !ok {
 						a.errorf(decl.Pos(), "impl of interface %q for %s is missing associated type %q", interfaceName, receiver, name)
 					}
 				}
-				for name := range iface.Methods {
+				for _, name := range slices.Sorted(maps.Keys(iface.Methods)) {
 					if _, ok := impl.Methods[name]; !ok {
 						a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver, name)
 					}
