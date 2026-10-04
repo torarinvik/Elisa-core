@@ -144,6 +144,11 @@ type Analyzer struct {
 	regionPolyCandidateFnTypes map[string][]*FuncType
 	extensionMethodsByName     map[string][]*ExtensionMethod
 	ufcsFunctionsByName        map[string][]*Symbol
+	// ufcsFunctionsVersion counts registrations into ufcsFunctionsByName; ufcsByLastSegment is
+	// that map re-keyed by each name's last `.`/`:` segment, valid while its version matches.
+	ufcsFunctionsVersion       int
+	ufcsByLastSegment          map[string][]*Symbol
+	ufcsByLastSegmentVersion   int
 	storageViewReturnOrigins   map[*ast.FuncDecl]*storageViewReturnOriginSummary
 	permissions                map[string]*PermissionSet
 	capabilityAliases          map[string][]ast.PermissionRef
