@@ -137,6 +137,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		bindingType = a.stampContainerRegion(bindingType)
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
 		a.defineLocal(sym, n.Pos())
+		if len(a.loopAffineFrames) != 0 {
+			if base, named := trackedNamedStateStructBase(sym.Type); named && base != nil && !base.ProtocolStates {
+				if a.derivedLoopLocals == nil {
+					a.derivedLoopLocals = map[*ast.VarDeclStmt]*Symbol{}
+				}
+				a.derivedLoopLocals[n] = sym
+			}
+		}
 		// A freshly-constructed struct local whose container fields are backed by the ambient
 		// region gets that region recorded, so a call site can thread it into a callee's
 		// struct-ref region param (see region_struct_local.go).
@@ -447,6 +455,18 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.AdoptStmt:
 		a.analyzeAdoptStmt(n)
 	case *ast.AssignStmt:
+		if len(a.loopAffineFrames) != 0 {
+			if ident, plain := stripOptimizationParens(n.Target).(*ast.Ident); plain {
+				if sym, found := a.currentScope.Lookup(ident.Name); found {
+					if ref, borrowed := sym.Type.(*RefType); borrowed && returnTypeIsScalarValue(ref.Elem) {
+						if a.derivedLoopAliasWrites == nil {
+							a.derivedLoopAliasWrites = map[*ast.AssignStmt]bool{}
+						}
+						a.derivedLoopAliasWrites[n] = true
+					}
+				}
+			}
+		}
 		// A guest-overlay write `base.field[mem] = value` (docs/107) is desugared to a
 		// MemoryManager_WriteU<N> call stashed on n.AsOverlayCall and consumed here, before the
 		// normal assignment path would try (and fail) to take the address of the overlay accessor.
@@ -1011,10 +1031,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if len(n.Else) == 0 {
 			if !conditionIsConstant || !constantCondition {
 				regionBranches = append(regionBranches, entryRegions)
+				functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
+				specializedValueTypeBranches = append(specializedValueTypeBranches, a.currentSpecializedValueTypes)
+				rangeBranches = append(rangeBranches, entryRangeFacts)
 			}
-			functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
-			specializedValueTypeBranches = append(specializedValueTypeBranches, a.currentSpecializedValueTypes)
-			rangeBranches = append(rangeBranches, entryRangeFacts)
 		}
 		if mergedAffine == nil {
 			// Every taken branch diverged and an else covered the remaining
@@ -1079,6 +1099,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedFunctionValues := a.cloneFunctionValueBindings()
 		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+		derivedEntry := a.captureDerivedLoopEntry(a.currentScope)
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
 		// Verify leading `invariant` clauses inductively (establishment + preservation) BEFORE the body
 		// is analyzed — the body's own mutations (`i <- i + 1`) invalidate the entry facts upward, so
@@ -1102,13 +1123,19 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerBase]
 		a.loopDepth--
 		a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(n.Body))
+		if cond, literal := n.Cond.(*ast.BoolLit); !literal || cond.Value {
+			mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
+		}
 		continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(n.Body), outerScope, n.Pos())
 		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
-			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+			// A literal-false body is checked, but cannot change the exit typestate.
+			if cond, literal := n.Cond.(*ast.BoolLit); !literal || cond.Value {
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+			}
 			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 		}
 		mergedAffine = mergeAffineValueStates(mergedAffine, continuedAffine)
@@ -1116,6 +1143,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentFunctionValues = mergedFunctionValues
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+		if exit := a.checkDerivedLoopTransfer(n.Body, n.Cond, nil, derivedEntry, n.Pos()); exit != nil {
+			for root, typ := range exit {
+				a.bindTrackedValueType(root, typ)
+			}
+		}
 		a.currentStorageViewDeps = mergedStorageViewDeps
 		// Export `inv ∧ ¬cond` as after-loop facts when every invariant was proven inductive above.
 		if loopExitFactsSound {

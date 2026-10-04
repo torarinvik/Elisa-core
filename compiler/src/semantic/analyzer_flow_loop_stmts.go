@@ -321,15 +321,22 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	derivedEntry := a.captureDerivedLoopEntry(a.currentScope)
 	mergedStorageViewDeps := a.cloneStorageViewDeps()
 	entryAffine := a.cloneAffineValueStates()
 	outerScope := a.currentScope
+	// Classify the entry range before checking mutations in the body. Restrict
+	// this exclusion to the built-in ascending, default-step range.
+	_, emptyRange, _ := a.classifyDerivedLiteralRange(stmt)
 	a.pushLoopAffineFrame()
 	a.pushStorageViewLoopUseFrame(outerScope, stmt.Body)
 	a.loopDepth++
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	a.loopDepth--
 	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
+	if !emptyRange {
+		mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
+	}
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	a.currentIndexBounds = savedIndexBounds
 	a.currentBoundEqual = savedBoundEqual
@@ -339,7 +346,9 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
-		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+		if !emptyRange {
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+		}
 		// A storage-view interior reference invalidated by a mutation inside the loop body (e.g. a
 		// darray push or relocating dict insert) stays invalid after the loop — the body may have
 		// run. Without this merge the invalidation was discarded at block exit, leaving a stale
@@ -351,6 +360,11 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	if exit := a.checkDerivedLoopTransfer(stmt.Body, nil, stmt, derivedEntry, stmt.Pos()); exit != nil {
+		for root, typ := range exit {
+			a.bindTrackedValueType(root, typ)
+		}
+	}
 	a.currentStorageViewDeps = mergedStorageViewDeps
 	a.maybeAutoReserveCountingFill(stmt)
 }
@@ -726,6 +740,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	}
 	a.loopDepth--
 	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
+	mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	if iterLockKey != "" {
 		if iterLockHadPrior {

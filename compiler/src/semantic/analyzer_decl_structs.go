@@ -55,7 +55,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 				return
 			}
 			a.analyzeStructAnnotations(stDecl, st)
-			a.withGenericParams(stDecl.GenericParams, nil, func() {
+			a.withGenericParams(st.GenericParams, nil, func() {
 				a.withRegionParams(stDecl.RegionParams, func() {
 					concreteFields := stDecl.Fields[:0:0]
 					for _, field := range stDecl.Fields {
@@ -240,14 +240,20 @@ func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *Struc
 	st.NamedStateCases = append([]string(nil), stDecl.NamedStateCases...)
 	st.TerminalStateCases = append([]string(nil), stDecl.TerminalStateCases...)
 	if len(stDecl.NamedStateCases) == 0 {
+		if len(stDecl.StateTransitions) != 0 {
+			a.errorf(stDecl.Pos(), "transitions: requires a named struct state parameter")
+		}
 		if len(stDecl.DerivedStates) != 0 {
 			a.errorf(stDecl.DerivedStates[0].Position, "derive state: requires a named struct state parameter like [state Alive | Dead]")
 		}
 		return
 	}
-	if len(stDecl.DerivedStates) == 0 {
-		a.errorf(stDecl.Pos(), "struct %q declares named states but is missing a derive state: block", stDecl.Name)
+	if len(stDecl.DerivedStates) == 0 && !stDecl.HasDerivedStateBlock {
+		a.validateProtocolStateGraph(stDecl, st)
 		return
+	}
+	if len(stDecl.StateTransitions) != 0 {
+		a.errorf(stDecl.Pos(), "struct %q cannot combine a protocol transition graph with derive state:", stDecl.Name)
 	}
 	declared := make(map[string]bool, len(stDecl.NamedStateCases))
 	for _, name := range stDecl.NamedStateCases {

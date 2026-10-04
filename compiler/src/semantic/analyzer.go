@@ -199,6 +199,11 @@ type Analyzer struct {
 	ambiguousDArrayBuilders      map[*ast.VarDeclStmt]bool
 	treeConstructorCallees       map[ast.Expr]bool
 	resolvedCastHooks            map[ast.Expr]*Symbol
+	// Exact lexical identities recorded by the ordinary pass for the separate
+	// bounded derived-state loop transfer. Never resolve these by spelling later.
+	derivedLoopBindings          map[*ast.Ident]*Symbol
+	derivedLoopLocals            map[*ast.VarDeclStmt]*Symbol
+	derivedLoopAliasWrites       map[*ast.AssignStmt]bool
 	unsafeLifetimeWidenCasts     map[*ast.CastExpr]bool
 	unsafeBufferReinterpretCasts map[*ast.CastExpr]bool
 	// nulTerminatedBuffers names darray locals a `push(0)` has NUL-terminated, so a

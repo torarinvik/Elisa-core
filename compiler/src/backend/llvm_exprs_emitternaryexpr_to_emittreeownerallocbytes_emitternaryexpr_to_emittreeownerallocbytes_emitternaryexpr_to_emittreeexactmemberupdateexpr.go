@@ -487,7 +487,11 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 		}
 		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(field.Index), cStringFree("record.update"))
 	}
-	return value, baseType, nil
+	target := s.exprType(expr)
+	if target == nil {
+		target = baseType
+	}
+	return s.emitNamedStatePayloadRetype(value, baseType, target, "record.state")
 }
 func (s *functionState) rewriteDefaultExactMemberType(_ ast.Expr) (semantic.Type, bool) {
 	return nil, false

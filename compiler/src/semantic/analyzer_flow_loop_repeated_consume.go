@@ -24,6 +24,12 @@ type loopAffineFrame struct {
 	broken    map[affineValueKey]affineValueState
 	// storageContinued joins the storage-view states at each `continue` (the back edge).
 	storageContinued map[*Symbol]storageViewDependencyState
+	// Jump edges carry current value types as well as ownership states. In
+	// particular, a break skips the body's fall-through snapshot entirely.
+	specializedContinued   map[*Symbol]Type
+	specializedBroken      map[*Symbol]Type
+	hasSpecializedContinue bool
+	hasSpecializedBreak    bool
 }
 
 func (a *Analyzer) pushLoopAffineFrame() {
@@ -48,6 +54,18 @@ func (a *Analyzer) noteLoopJumpAffineState(isBreak bool) {
 		return
 	}
 	frame := &a.loopAffineFrames[n-1]
+	// Keep the edges separate: only continue participates in a future cyclic
+	// loop-head transfer. Both edges conservatively contribute to loop exit.
+	types, seenTypes := &frame.specializedContinued, &frame.hasSpecializedContinue
+	if isBreak {
+		types, seenTypes = &frame.specializedBroken, &frame.hasSpecializedBreak
+	}
+	if !*seenTypes {
+		*types = a.cloneSpecializedValueTypeBindings()
+		*seenTypes = true
+	} else {
+		*types = a.mergeSpecializedValueTypeBindings(*types, a.currentSpecializedValueTypes)
+	}
 	state := a.cloneAffineValueStates()
 	if state == nil {
 		state = map[affineValueKey]affineValueState{}
@@ -58,6 +76,23 @@ func (a *Analyzer) noteLoopJumpAffineState(isBreak bool) {
 		frame.continued = mergeAffineValueStates(frame.continued, state)
 		a.noteLoopJumpStorageViewState(frame)
 	}
+}
+
+// mergeLoopJumpSpecializedTypes must run before finishLoopAffineFrame pops the
+// frame. Keep the zero-iteration predecessor and all explicit jump exits.
+func (a *Analyzer) mergeLoopJumpSpecializedTypes(entry map[*Symbol]Type) map[*Symbol]Type {
+	n := len(a.loopAffineFrames)
+	if n == 0 || a.loopAffineFrames[n-1].depth != a.loopDepth+1 {
+		return entry
+	}
+	frame := &a.loopAffineFrames[n-1]
+	if frame.hasSpecializedContinue {
+		entry = a.mergeSpecializedValueTypeBindings(entry, frame.specializedContinued)
+	}
+	if frame.hasSpecializedBreak {
+		entry = a.mergeSpecializedValueTypeBindings(entry, frame.specializedBroken)
+	}
+	return entry
 }
 
 // checkLoopRepeatedConsume rejects a value that is live when the loop is

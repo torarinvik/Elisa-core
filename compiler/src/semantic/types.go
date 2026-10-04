@@ -430,6 +430,8 @@ type StructType struct {
 	TerminalStateCases []string
 	DerivedStates      []StructDerivedState
 	DerivedStateMap    map[string]*StructDerivedState
+	ProtocolStates     bool
+	StateTransitions   []ast.StateTransitionDecl
 	Fields             map[string]Field
 	Affine             bool
 	// AppendOnly: `@append_only` store (analyzer_append_only_store.go). Its buffers never
@@ -639,17 +641,17 @@ type FuncType struct {
 	// arcp + contract), matching clang -ffast-math. Set by @fast_math. Enables FP reassociation and
 	// thus auto-vectorization of reduction/elementwise loops. Off by default; opt-in only because it
 	// reorders FP operations (results may differ by more than the contract/reciprocal tier).
-	FastMath                    bool
-	HasNoRecurse                bool
-	HasAsyncEntry               bool
-	HasSegmentAgnostic          bool
-	HasSegmentEstablishing      bool
-	HasReentrantSafe            bool
-	SegmentTransition           FuncSegmentTransition
-	TemperatureMode             FuncTemperatureMode
-	HasTemperatureMode          bool
-	CallConv                    string
-	IsNativeExtern              bool // a non-generic `extern`: the callee may be native C, so the signature is an ABI boundary (see extern_optional_abi.go)
+	FastMath               bool
+	HasNoRecurse           bool
+	HasAsyncEntry          bool
+	HasSegmentAgnostic     bool
+	HasSegmentEstablishing bool
+	HasReentrantSafe       bool
+	SegmentTransition      FuncSegmentTransition
+	TemperatureMode        FuncTemperatureMode
+	HasTemperatureMode     bool
+	CallConv               string
+	IsNativeExtern         bool // a non-generic `extern`: the callee may be native C, so the signature is an ABI boundary (see extern_optional_abi.go)
 	// CParamPlan, when non-nil, is the C parameter order of a C-ABI extern whose Elisa-facing
 	// parameter list differs from the native prototype: `@bounds(buf, count)` turns `buf: T&`
 	// into `buf: view[T]` and removes `count`, and the plan says where the view's pointer and
@@ -665,7 +667,7 @@ type FuncType struct {
 	TrustedExtern      bool
 	// BoundsLengthNames are the length parameters `@bounds` removed, for the call-site
 	// message when a caller still passes one.
-	BoundsLengthNames []string
+	BoundsLengthNames           []string
 	IntrinsicName               string
 	GuardEffects                []FuncGuardEffect
 	BoundaryPointerParamIndices []int
