@@ -2,7 +2,7 @@ include "./elisacore_std/elisacore_runtime.elisa"
 
 @test
 def std_mutex_condvar_native_smoke():
-	can Memory.Allocate, Memory.Release, Sync.Lock, Sync.Unlock, Sync.Notify, Thread.Sleep, Thread.Yield, Abort.Panic:
+	can Memory.Allocate, Memory.Release, Sync.Lock, Sync.Unlock, Sync.Notify, Thread.Sleep, Thread.Yield, Abort.Panic, Unsafe.PointerCast:
 		mu: Mutex = mutex()
 		cv: CondVar = condvar()
 		assert mu.handle != null
@@ -40,7 +40,7 @@ struct BarrierProbe:
 	rounds: i64
 
 def barrier_probe_worker(p: BarrierProbe) -> i64:
-	can Atomic, Thread.Yield:
+	can Atomic, Thread.Yield, Unsafe.PointerCast:
 		po: mutable i64& = p.out.cast[mutable i64&]
 		for r in 0..<p.rounds:
 			barrier_wait(p.gate)
@@ -49,7 +49,7 @@ def barrier_probe_worker(p: BarrierProbe) -> i64:
 
 @test
 def std_barrier_native_smoke():
-	can Parallel:
+	can Parallel, Unsafe.PointerCast:
 		backing: mutable darray[i64] = []
 		_ = backing.resize(2.usize())
 		out: mutable darray[i64] = []

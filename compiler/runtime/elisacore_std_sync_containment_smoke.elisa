@@ -1,7 +1,7 @@
 include "./elisacore_std/elisacore_runtime.elisa"
 
 def encaps_bump(slot: uintptr) -> i64:
-	can Atomic:
+	can Atomic, Unsafe.PointerCast:
 		c: mutable AtomicCell[i64]& = slot.cast[mutable AtomicCell[i64]&]
 		_ = atomic_fetch_add_acqrel(c, 1)
 		return 0
@@ -15,7 +15,7 @@ def encaps_bump(slot: uintptr) -> i64:
 # callers (not just `can Pooled:`/`can Parallel:` alias users).
 @test
 def std_sync_containment_smoke():
-	can Pool.Create, Pool.Submit, Pool.WaitAll, Pool.Shutdown, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+	can Pool.Create, Pool.Submit, Pool.WaitAll, Pool.Shutdown, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange, Unsafe.PointerCast:
 		counter: mutable darray[i64] = []
 		_ = counter.resize(1.usize())
 		counter[0.usize()] <- 0

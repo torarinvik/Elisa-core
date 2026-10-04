@@ -247,6 +247,7 @@ var schemaRootTypes = []reflect.Type{
 	reflect.TypeOf(ast.SliceExpr{}),
 	reflect.TypeOf(ast.SpecializeExpr{}),
 	reflect.TypeOf(ast.StateSetTypeExpr{}),
+	reflect.TypeOf(ast.StateTransitionDecl{}),
 	reflect.TypeOf(ast.StaticAssertBlockDecl{}),
 	reflect.TypeOf(ast.StaticAssertBlockStmt{}),
 	reflect.TypeOf(ast.StaticAssertDecl{}),

@@ -1629,6 +1629,8 @@ F StructDecl 16 StateParamCount
 F StructDecl 17 TerminalStateCases
 F StructDecl 18 TypeParams
 F StructDecl 19 Resource
+F StructDecl 20 HasDerivedStateBlock
+F StructDecl 21 StateTransitions
 
 T 255 StructLitExpr
 F StructLitExpr 1 ArgNames
@@ -1780,3 +1782,8 @@ F lexer.Token 1 Kind
 F lexer.Token 2 Pos
 F lexer.Token 3 Suffix
 F lexer.Token 4 Text
+
+T 280 StateTransitionDecl
+F StateTransitionDecl 1 From
+F StateTransitionDecl 2 Position
+F StateTransitionDecl 3 To

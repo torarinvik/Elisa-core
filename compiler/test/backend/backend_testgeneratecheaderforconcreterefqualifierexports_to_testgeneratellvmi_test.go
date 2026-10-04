@@ -421,7 +421,8 @@ func TestGenerateLLVMIRLowersPointerIntegerCasts(t *testing.T) {
 	return ptr.uintptr()
 
 def bits_ptr(bits: uintptr) -> u8&:
-	return bits.cast[u8&]
+	can Unsafe.PointerCast:
+		return bits.cast[u8&]
 `
 	result := parseAndAnalyze(t, "backend_pointer_integer_casts.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)

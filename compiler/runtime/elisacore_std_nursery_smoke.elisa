@@ -1,7 +1,7 @@
 include "./elisacore_std/elisacore_runtime.elisa"
 
 def nursery_bump(slot: uintptr) -> i64:
-	can Atomic:
+	can Atomic, Unsafe.PointerCast:
 		c: mutable AtomicCell[i64]& = slot.cast[mutable AtomicCell[i64]&]
 		_ = atomic_fetch_add_acqrel(c, 1)
 		return 0
@@ -10,7 +10,7 @@ def nursery_bump(slot: uintptr) -> i64:
 # shared counter reads exactly N right after the `nursery:` block (no manual wait-all).
 @test
 def std_nursery_native_smoke():
-	can Parallel:
+	can Parallel, Unsafe.PointerCast:
 		counter: mutable darray[i64] = []
 		_ = counter.resize(1.usize())
 		counter[0.usize()] <- 0
@@ -24,7 +24,7 @@ def std_nursery_native_smoke():
 # the default worker count is perf_cores() queried at runtime.
 @test
 def std_nursery_default_workers_smoke():
-	can Parallel:
+	can Parallel, Unsafe.PointerCast:
 		n: i64 = perf_cores()
 		assert n > 0
 		counter: mutable darray[i64] = []
