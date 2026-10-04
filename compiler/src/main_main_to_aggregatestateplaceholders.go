@@ -20,7 +20,9 @@ import (
 
 func main() {
 	stop := startCPUProfile()
+	stopMem := startMemProfile()
 	code := runCLI(os.Args[1:], os.Stdout, os.Stderr)
+	stopMem()
 	stop()
 	os.Exit(code)
 }
