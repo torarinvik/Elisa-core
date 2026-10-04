@@ -40,14 +40,14 @@ func (a *Analyzer) updateNamedStateTypeAtPath(root *Symbol, current Type, struct
 	if base, ok := trackedNamedStateStructBase(updatedCurrent); ok && base != nil {
 		if len(steps) == 0 {
 			if unknown {
-				if widened := replaceTrackedNamedStateArg(updatedCurrent, fullNamedStateType(base)); widened != nil {
+				if widened := replaceTrackedNamedStateArg(updatedCurrent, unknownNamedStateType(base)); widened != nil {
 					return widened, !SameType(widened, current)
 				}
 			} else if trackedType, ok := applyNamedStateFromActualType(updatedCurrent, valueType); ok {
 				return trackedType, !SameType(trackedType, current)
 			}
 		} else if namedStateAssignmentAffectsDerivedState(base, steps) {
-			state := fullNamedStateType(base)
+			state := unknownNamedStateType(base)
 			if !unknown && len(steps) == 1 && steps[0].Field != "" {
 				if inferredState, ok := a.inferDirectFieldAssignedNamedState(pos, root, structSteps, base, steps[0].Field, value, current); ok {
 					state = inferredState

@@ -76,11 +76,14 @@ type ConstValueType struct {
 type StructStateCaseType struct {
 	StructName string
 	Case       string
+	// Unknown distinguishes possible cases from established predicate evidence.
+	Unknown bool
 }
 
 type StructStateSetType struct {
 	StructName string
 	Cases      []string
+	Unknown    bool
 }
 
 type RefStorageValueType struct {

@@ -138,6 +138,9 @@ func (a *Analyzer) recordFreshReturnBindings(actual Type) {
 }
 
 func (a *Analyzer) reportShapeMismatchNotes(pos lexer.Pos, expected Type, actual Type) {
+	if state, ok := namedStateCurrentArg(peelNamedStateRefs(StripAggregateStateType(actual))); ok && namedStateEvidenceUnknown(state) {
+		a.errorf(pos, "note: cannot establish required derived state from unknown predicate evidence")
+	}
 	for _, note := range shapeMismatchNotes(expected, actual) {
 		a.errorf(pos, "note: %s", note)
 	}

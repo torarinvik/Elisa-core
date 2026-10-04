@@ -148,7 +148,7 @@ func (t *derivedLoopTransfer) update(current Type, updates map[string]ast.Expr) 
 	changed := false
 	for _, rule := range base.DerivedStates {
 		if !t.step(0) {
-			return replaceTrackedNamedStateArg(current, fullNamedStateType(base))
+			return replaceTrackedNamedStateArg(current, unknownNamedStateType(base))
 		}
 		if recordUpdatePredicateMayChange(rule.Condition, updates, 0) {
 			changed = true
@@ -167,18 +167,18 @@ func (t *derivedLoopTransfer) update(current Type, updates map[string]ast.Expr) 
 	possible := []string{}
 	for _, state := range base.NamedStateCases {
 		if !t.step(0) {
-			return replaceTrackedNamedStateArg(current, fullNamedStateType(base))
+			return replaceTrackedNamedStateArg(current, unknownNamedStateType(base))
 		}
 		known, holds := t.a.evaluateDerivedStateForFields(base, state, constants)
 		if !known {
-			return replaceTrackedNamedStateArg(current, fullNamedStateType(base))
+			return replaceTrackedNamedStateArg(current, unknownNamedStateType(base))
 		}
 		if holds {
 			possible = append(possible, state)
 		}
 	}
 	if len(possible) != 1 {
-		return replaceTrackedNamedStateArg(current, fullNamedStateType(base))
+		return replaceTrackedNamedStateArg(current, unknownNamedStateType(base))
 	}
 	return replaceTrackedNamedStateArg(current, newNamedStateType(base.Name, base.NamedStateCases, possible))
 }

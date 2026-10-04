@@ -111,10 +111,12 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyTag(b, "structstatecase")
 		appendKeyString(b, tt.StructName)
 		appendKeyString(b, tt.Case)
+		appendKeyBool(b, tt.Unknown)
 	case *StructStateSetType:
 		appendKeyTag(b, "structstateset")
 		appendKeyString(b, tt.StructName)
 		appendKeyStringSlice(b, tt.Cases)
+		appendKeyBool(b, tt.Unknown)
 	case *RefStorageValueType:
 		appendKeyTag(b, "refstoragevalue")
 		appendKeyInt(b, int(tt.Storage))

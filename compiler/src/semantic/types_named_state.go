@@ -133,7 +133,7 @@ func fullNamedStateType(base *StructType) Type {
 func sameNamedStateType(a Type, b Type) bool {
 	acases, astruct, aok := namedStateTypeCases(a)
 	bcases, bstruct, bok := namedStateTypeCases(b)
-	if !aok || !bok || astruct != bstruct || len(acases) != len(bcases) {
+	if !aok || !bok || astruct != bstruct || len(acases) != len(bcases) || namedStateEvidenceUnknown(a) != namedStateEvidenceUnknown(b) {
 		return false
 	}
 	for i := range acases {
@@ -147,7 +147,7 @@ func sameNamedStateType(a Type, b Type) bool {
 func namedStateTypeAssignable(dst Type, src Type) bool {
 	dstCases, dstStruct, dstOK := namedStateTypeCases(dst)
 	srcCases, srcStruct, srcOK := namedStateTypeCases(src)
-	if !dstOK || !srcOK || dstStruct != srcStruct {
+	if !dstOK || !srcOK || dstStruct != srcStruct || (!namedStateEvidenceUnknown(dst) && namedStateEvidenceUnknown(src)) {
 		return false
 	}
 	allowed := make(map[string]bool, len(dstCases))
@@ -197,7 +197,7 @@ func mergeNamedStateTypes(a Type, b Type, allowed []string) Type {
 			merged = append(merged, name)
 		}
 	}
-	return newNamedStateType(astruct, allowed, merged)
+	return withNamedStateEvidence(newNamedStateType(astruct, allowed, merged), namedStateEvidenceUnknown(a) || namedStateEvidenceUnknown(b))
 }
 
 func subtractNamedStateType(current Type, remove Type, allowed []string) Type {
@@ -216,7 +216,40 @@ func subtractNamedStateType(current Type, remove Type, allowed []string) Type {
 			remaining = append(remaining, name)
 		}
 	}
-	return newNamedStateType(structName, allowed, remaining)
+	return withNamedStateEvidence(newNamedStateType(structName, allowed, remaining), namedStateEvidenceUnknown(current))
+}
+
+func namedStateEvidenceUnknown(t Type) bool {
+	switch state := t.(type) {
+	case *StructStateCaseType:
+		return state != nil && state.Unknown
+	case *StructStateSetType:
+		return state != nil && state.Unknown
+	}
+	return false
+}
+
+// State atoms are immutable. Never mutate a declaration's shared state argument.
+func withNamedStateEvidence(t Type, unknown bool) Type {
+	switch state := t.(type) {
+	case *StructStateCaseType:
+		cloned := *state
+		cloned.Unknown = unknown
+		return &cloned
+	case *StructStateSetType:
+		cloned := *state
+		cloned.Unknown = unknown
+		return &cloned
+	}
+	return t
+}
+
+func unknownNamedStateType(base *StructType) Type {
+	if base == nil {
+		return nil
+	}
+	// Predicate-free protocol graphs have no predicate evidence to lose.
+	return withNamedStateEvidence(fullNamedStateType(base), !base.ProtocolStates && len(base.DerivedStates) != 0 && !derivedStateFamilyTotal(base))
 }
 
 func intersectNamedStateType(a Type, b Type, allowed []string) Type {

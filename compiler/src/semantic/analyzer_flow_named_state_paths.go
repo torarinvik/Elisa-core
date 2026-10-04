@@ -315,7 +315,7 @@ func (a *Analyzer) inferDirectFieldAssignedNamedState(pos lexer.Pos, root *Symbo
 	// health + 1 > 0` and keep the state narrow. A multi-state current type carries no usable fact.
 	var hypExpr ast.Expr
 	if cur, ok := trackedNamedStateCurrentArg(peelNamedStateRefs(current)); ok {
-		if cases, _, ok := namedStateTypeCases(cur); ok && len(cases) == 1 {
+		if cases, _, ok := namedStateTypeCases(cur); ok && len(cases) == 1 && !namedStateEvidenceUnknown(cur) {
 			if derived := base.DerivedStateMap[cases[0]]; derived != nil && derived.Condition != nil {
 				if h, ok := substituteDerivedStateFieldExpr(derived.Condition, oldFields); ok {
 					hypExpr = h
@@ -370,10 +370,9 @@ func (a *Analyzer) inferDirectFieldAssignedNamedState(pos lexer.Pos, root *Symbo
 			return fullNamedStateType(base), true
 		}
 	}
-	// SMT refinement was involved: narrow only when exactly one state survives exclusion (sound by the
-	// exhaustiveness of derived states — every other state proven impossible). Otherwise leave it to the
-	// caller to widen (no error: an undecidable assignment is not a definite bug).
-	if len(possible) == 1 {
+	// Excluding other cases does not prove this predicate: families need not
+	// cover every payload. Establish the remaining predicate independently.
+	if len(possible) == 1 && a.derivedStateProvablyTrue(base, possible[0], fieldValues, hypExpr) {
 		return newNamedStateType(base.Name, base.NamedStateCases, possible), true
 	}
 	return nil, false
@@ -411,6 +410,14 @@ func peelNamedStateRefs(t Type) Type {
 // where a `requires` clause alone is sufficient to exclude the state (e.g. `requires g.value + amt <
 // g.cap / 2` guaranteeing the post-value stays below the Low/High threshold).
 func (a *Analyzer) derivedStateProvablyExcluded(base *StructType, stateName string, fieldValues map[string]ast.Expr, hyp ast.Expr) bool {
+	return a.derivedStateProvePolarity(base, stateName, fieldValues, hyp, false)
+}
+
+func (a *Analyzer) derivedStateProvablyTrue(base *StructType, stateName string, fieldValues map[string]ast.Expr, hyp ast.Expr) bool {
+	return a.derivedStateProvePolarity(base, stateName, fieldValues, hyp, true)
+}
+
+func (a *Analyzer) derivedStateProvePolarity(base *StructType, stateName string, fieldValues map[string]ast.Expr, hyp ast.Expr, truthy bool) bool {
 	derived := base.DerivedStateMap[stateName]
 	if derived == nil || derived.Condition == nil {
 		return false
@@ -436,6 +443,10 @@ func (a *Analyzer) derivedStateProvablyExcluded(base *StructType, stateName stri
 		// unsat of `hyp ∧ condition` means the state is impossible after the assignment.
 		extraHyps = "(assert " + hypTerm + ")\n"
 	}
-	proven, _ := a.smtCheckVC(tr, "(not "+condTerm+")", extraHyps)
+	goal := condTerm
+	if !truthy {
+		goal = "(not " + condTerm + ")"
+	}
+	proven, _ := a.smtCheckVC(tr, goal, extraHyps)
 	return proven
 }

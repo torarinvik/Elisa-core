@@ -591,7 +591,7 @@ func (a *Analyzer) inferStructLiteralNamedState(expr *ast.StructLitExpr, base *S
 		if len(base.NamedStateCases) == 1 {
 			a.errorf(expr.Pos(), "struct literal %q cannot establish its only derived state from incomplete fields", expr.Name)
 		}
-		return fullNamedStateType(base)
+		return unknownNamedStateType(base)
 	}
 	return a.inferNamedStateForFieldValues(expr.Pos(), "struct literal", expr.Name, base, fieldValues)
 }
@@ -662,7 +662,7 @@ func (a *Analyzer) inferNamedStateForFieldValues(pos lexer.Pos, kind, name strin
 			if len(base.NamedStateCases) == 1 {
 				a.errorf(pos, "%s %q cannot establish its only derived state from an unknown predicate", kind, name)
 			}
-			return fullNamedStateType(base)
+			return unknownNamedStateType(base)
 		}
 		if value {
 			trueStates = append(trueStates, stateName)

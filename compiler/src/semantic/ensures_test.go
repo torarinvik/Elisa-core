@@ -272,7 +272,7 @@ func TestSemanticConditionalEnsuresJoinOnPlainCall(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def expect_done(job: ParseJob[Ready | Failed]&) -> void:
+def expect_done(job: ParseJob[Ready | Failed]&) -> void ensures job => Ready | Failed:
 	pass
 
 def finish(job: mutable ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:

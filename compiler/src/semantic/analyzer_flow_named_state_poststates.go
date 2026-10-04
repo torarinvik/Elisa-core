@@ -30,7 +30,7 @@ func (a *Analyzer) widenNamedStatesDeepWithSeen(t Type, seen map[Type]bool) (Typ
 		return &cloned, true
 	case *StructType:
 		if base, ok := namedStateStructBase(tt); ok && base != nil {
-			if widened := replaceTrackedNamedStateArg(tt, fullNamedStateType(base)); widened != nil && !SameType(widened, t) {
+			if widened := replaceTrackedNamedStateArg(tt, unknownNamedStateType(base)); widened != nil && !SameType(widened, t) {
 				if next, ok := a.widenNamedStatesDeepWithSeen(widened, seen); ok {
 					return next, true
 				}
@@ -56,7 +56,7 @@ func (a *Analyzer) widenNamedStatesDeepWithSeen(t Type, seen map[Type]bool) (Typ
 		current := tt
 		changed := false
 		if base, ok := current.Base.(*StructType); ok && base != nil && len(base.NamedStateCases) != 0 {
-			fullState := fullNamedStateType(base)
+			fullState := unknownNamedStateType(base)
 			if currentState, ok := namedStateCurrentArg(current); ok && currentState != nil && !sameNamedStateType(currentState, fullState) {
 				idx := namedStateArgIndex(base)
 				if idx >= 0 && idx < len(current.Args) {
