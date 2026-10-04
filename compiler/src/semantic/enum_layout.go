@@ -196,11 +196,14 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 	// If any member of a hierarchy is recursive, the whole hierarchy is region-backed (it shares one
 	// store), so promote the root and every refinement — including non-recursive leaves and the root.
 	rootOf := func(name string) string {
+		seen := map[string]bool{}
 		for {
 			ed, ok := byName[name]
-			if !ok || ed.Parent == "" {
+			if !ok || ed.Parent == "" || seen[name] {
+				// seen: a cyclic `is` chain has no root; stop (the cycle is diagnosed elsewhere).
 				return name
 			}
+			seen[name] = true
 			name = ed.Parent
 		}
 	}
