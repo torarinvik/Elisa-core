@@ -164,23 +164,23 @@ static if ELISA_TARGET_OS_POSIX:
 			cv.handle <- null
 
 	def ctx_platform_mutex_lock(handle: void&) -> int:
-		can Sync.Lock, Unsafe.PointerCast:
+		can Sync.Lock:
 			return pthread_mutex_lock(handle)
 
 	def ctx_platform_mutex_unlock(handle: void&) -> int:
-		can Sync.Unlock, Unsafe.PointerCast:
+		can Sync.Unlock:
 			return pthread_mutex_unlock(handle)
 
 	def ctx_platform_cond_wait(cond: void&, mutex: void&) -> int:
-		can Sync.Wait, Unsafe.PointerCast:
+		can Sync.Wait:
 			return pthread_cond_wait(cond, mutex)
 
 	def ctx_platform_cond_signal(cond: void&) -> int:
-		can Sync.Notify, Unsafe.PointerCast:
+		can Sync.Notify:
 			return pthread_cond_signal(cond)
 
 	def ctx_platform_cond_broadcast(cond: void&) -> int:
-		can Sync.Notify, Unsafe.PointerCast:
+		can Sync.Notify:
 			return pthread_cond_broadcast(cond)
 
 	def ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> i32:
@@ -283,31 +283,31 @@ static elif ELISA_TARGET_OS_WINDOWS:
 
 	def ctx_platform_mutex_lock(handle: void&) -> int:
 		can Sync.Lock:
-			EnterCriticalSection((handle.cast[mutable Win32CriticalSection&] can Unsafe.PointerCast))
+			EnterCriticalSection(handle.cast[mutable Win32CriticalSection&])
 			return 0
 
 	def ctx_platform_mutex_unlock(handle: void&) -> int:
 		can Sync.Unlock:
-			LeaveCriticalSection((handle.cast[mutable Win32CriticalSection&] can Unsafe.PointerCast))
+			LeaveCriticalSection(handle.cast[mutable Win32CriticalSection&])
 			return 0
 
 	def ctx_platform_cond_wait(cond: void&, mutex: void&) -> int:
 		can Sync.Wait:
 			ok: bool = SleepConditionVariableCS(
-				(cond.cast[mutable Win32ConditionVariable&] can Unsafe.PointerCast),
-				(mutex.cast[mutable Win32CriticalSection&] can Unsafe.PointerCast),
+				cond.cast[mutable Win32ConditionVariable&],
+				mutex.cast[mutable Win32CriticalSection&],
 				WIN32_WAIT_INFINITE
 			)
 			return 0 if ok else -1
 
 	def ctx_platform_cond_signal(cond: void&) -> int:
 		can Sync.Notify:
-			WakeConditionVariable((cond.cast[mutable Win32ConditionVariable&] can Unsafe.PointerCast))
+			WakeConditionVariable(cond.cast[mutable Win32ConditionVariable&])
 			return 0
 
 	def ctx_platform_cond_broadcast(cond: void&) -> int:
 		can Sync.Notify:
-			WakeAllConditionVariable((cond.cast[mutable Win32ConditionVariable&] can Unsafe.PointerCast))
+			WakeAllConditionVariable(cond.cast[mutable Win32ConditionVariable&])
 			return 0
 
 # ------------------------------------------------------------
@@ -601,7 +601,7 @@ def ctx_pool_broadcast(c: void&):
 def ctx_pool_worker_main(arg: void&?) -> void&?:
 	can Abort.Panic:
 		null return if arg == null
-		state: mutable heap ConcurrencyPoolState& = arg.cast[mutable heap ConcurrencyPoolState&] can Unsafe.PointerCast
+		state: mutable heap ConcurrencyPoolState& = arg.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
 		dc: void& = ctx_sync_handle(state.done_cond)
@@ -778,7 +778,7 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 def ctx_pool_wait_record(handle: uintptr):
 	can Memory.Release, Abort.Panic:
 		return if handle == 0
-		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
+		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&]
 		state: mutable heap ConcurrencyPoolState& = rec.pool.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
 		dc: void& = ctx_sync_handle(state.done_cond)

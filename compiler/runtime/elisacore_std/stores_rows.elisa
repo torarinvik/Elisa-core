@@ -66,7 +66,7 @@ def ctx_packed_store_reserve(a: mutable Arena&, needed_rows: usize, state_bits: 
 
         packed_store_ensure_metadata_capacity(a, state, needed_rows)
 def ctx_packed_store_row_ptr_at(state_bits: mutable void&, index: usize) -> mutable void&:
-    can Abort.Panic, Unsafe.PointerCast:
+    can Abort.Panic:
         handle: uintptr = ctx_packed_store_word_handle_at(state_bits, index)
         if handle == 0.uintptr():
             panic("packed store row handle is null")

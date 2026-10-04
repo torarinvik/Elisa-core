@@ -476,7 +476,7 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
         trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
             cache: mutable ArenaRegionCache& = &__elisa_region_cache
             if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
-                parked: mutable heap Region& = r.cast[mutable heap Region&] can Unsafe.PointerCast
+                parked: mutable heap Region& = r.cast[mutable heap Region&]
                 parked.next <- cache.slot
                 cache.slot <- parked
                 cache.reclaimed_spans <- cache.reclaimed_spans + 1
@@ -489,90 +489,6 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
 # before so RSS never pins a large one-off block.
 const REGION_CACHE_MAX_SLOTS: usize = 131072
 const REGION_CACHE_MAX_ENTRIES: usize = 128
-
-# RESERVATION-sized regions get a parked list of their own. stage0 gives every function's
-# auto region the reserve_commit strategy, so in a stage0-built program (the seed product)
-# the first allocation of EVERY call maps a 256 MiB reservation and its arena_free unmaps
-# it again: 23.8k mmap/munmap pairs compiling just the runtime, ~760k for the self-compile,
-# each re-faulting the pages it touches (8.5M minor faults, ~60 s of system time). The
-# reservation itself is address space, not memory, so parking it is free; what a parked
-# block pins is only the pages its last owner touched, and those are zeroed on park. A
-# region whose owner touched more than RESERVE_CACHE_MAX_USED_SLOTS is unmapped exactly as
-# before, so the parked list can never hold more than
-# RESERVE_CACHE_MAX_ENTRIES * RESERVE_CACHE_MAX_USED_SLOTS words resident (8 MiB on 64-bit).
-# Kept apart from the small list so a 1 MiB request never takes (and chains into) a
-# reservation, and a reservation request never walks 128 small blocks.
-const RESERVE_CACHE_MAX_ENTRIES: usize = 32
-const RESERVE_CACHE_MAX_USED_SLOTS: usize = 32768
-
-global mutable __elisa_reserve_region_cache: ArenaRegionCache = ArenaRegionCache{slot: null, reclaimed_spans: 0}
-
-@internal
-def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
-    result: mutable heap Region&? = null
-    __elisa_arena_cache_lock_acquire()
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        reuse_cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache
-        reuse_previous: mutable heap Region&? = null
-        reuse_cursor: mutable heap Region&? = reuse_cache.slot
-        reuse_probes: mutable usize = RESERVE_CACHE_MAX_ENTRIES
-        while reuse_cursor != null and reuse_probes > 0:
-            reuse_probes <- reuse_probes - 1
-            cache_candidate: mutable heap Region&? = reuse_cursor
-            if cache_candidate is cached and cached.capacity >= capacity:
-                if reuse_previous is previous:
-                    previous.next <- cached.next
-                else:
-                    reuse_cache.slot <- cached.next
-                reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
-                cached.next <- null
-                cached.count <- 0
-                cached.owner_tag <- owner_tag
-                cached.owner_next <- null
-                cached.global_index <- 0
-                cached.committed <- 0
-                cached.free_list <- null
-                result <- cached
-                break
-            reuse_previous <- reuse_cursor
-            reuse_cursor <- reuse_cursor.next
-    __elisa_arena_cache_lock_release()
-    return result
-
-@internal
-def arena_reserve_cache_try_park(r: heap Region&) -> bool:
-    can Abort.Panic:
-        false return if r.capacity <= REGION_CACHE_MAX_SLOTS
-        if r.count > r.capacity:
-            panic("arena cursor exceeds region capacity")
-        false return if r.count > RESERVE_CACHE_MAX_USED_SLOTS
-
-        room: mutable bool = false
-        __elisa_arena_cache_lock_acquire()
-        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-            cache: ArenaRegionCache& = &__elisa_reserve_region_cache
-            room <- cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES
-        __elisa_arena_cache_lock_release()
-        false return if not room
-
-        # Same zeroing contract as the small list: a fresh anonymous mmap is kernel-zeroed.
-        used_bytes: usize = arena_region_payload_bytes(r.count)
-        if used_bytes > 0:
-            trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
-                _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
-
-        parked_ok: mutable bool = false
-        __elisa_arena_cache_lock_acquire()
-        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-            cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache
-            if cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES:
-                parked: mutable heap Region& = r.cast[mutable heap Region&] can Unsafe.PointerCast
-                parked.next <- cache.slot
-                cache.slot <- parked
-                cache.reclaimed_spans <- cache.reclaimed_spans + 1
-                parked_ok <- true
-        __elisa_arena_cache_lock_release()
-        return parked_ok
 
 @internal
 def arena_checked_add_usize(left: usize, right: usize) -> usize:
@@ -632,14 +548,9 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         # Reuse the parked region when it is big enough — its own (possibly larger)
         # capacity is kept, exactly as if the caller had asked for that size.
         static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            if capacity > REGION_CACHE_MAX_SLOTS:
-                reserved_region: mutable heap Region&? = arena_reserve_cache_take(capacity, owner_tag)
-                if reserved_region is reserved:
-                    return reserved
-            else:
-                cached_region: mutable heap Region&? = arena_region_cache_take(capacity, owner_tag)
-                if cached_region is cached:
-                    return cached
+            cached_region: mutable heap Region&? = arena_region_cache_take(capacity, owner_tag)
+            if cached_region is cached:
+                return cached
         static else:
             pass
 
@@ -1000,8 +911,6 @@ def free_region(r: heap Region&):
             # publishing a parked region so a concurrent cache consumer never observes
             # stale bytes from its former owner.
             if arena_region_cache_try_park(r):
-                return
-            if arena_reserve_cache_try_park(r):
                 return
             size_bytes: usize = arena_region_total_bytes(r.capacity)
             ret: mutable int = 0

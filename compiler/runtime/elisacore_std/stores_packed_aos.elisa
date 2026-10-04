@@ -92,7 +92,7 @@ def ctx_aos_store_record_side_words_at(a: mutable Arena&, words: void&, state_bi
         chunk_index: usize = index_usize / state.chunk_records
         offset_in_chunk: usize = (index_usize - chunk_index * state.chunk_records) * state.side_words
         side_base: uintptr = state.side_chunks[chunk_index]
-        dst: mutable uintptr& = side_base.cast[mutable heap u8&].cast[mutable uintptr&] can Unsafe.PointerCast
+        dst: mutable uintptr& = side_base.cast[mutable heap u8&].cast[mutable uintptr&]
         src: uintptr& = words.cast[uintptr&]
         for w in 0..<state.side_words:
             dst[offset_in_chunk + w] <- src[w]
@@ -108,5 +108,5 @@ def ctx_aos_store_read_side_word(state_bits: mutable void&, index: u32, word_off
         chunk_index: usize = index_usize / state.chunk_records
         offset_in_chunk: usize = (index_usize - chunk_index * state.chunk_records) * state.side_words
         side_base: uintptr = state.side_chunks[chunk_index]
-        side: uintptr& = side_base.cast[heap u8&].cast[uintptr&] can Unsafe.PointerCast
+        side: uintptr& = side_base.cast[heap u8&].cast[uintptr&]
         return side[offset_in_chunk + word_offset]
