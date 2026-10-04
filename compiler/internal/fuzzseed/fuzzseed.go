@@ -147,3 +147,25 @@ func LimitStack() {
 }
 
 var stackOnce sync.Once
+
+// NoteInput records the input a worker is about to run in $ELISA_FUZZ_EVENT_DIR/last-<pid>
+// (when set). A fatal runtime error (stack overflow, out of memory) kills the worker
+// without a recoverable panic, and when that happens during minimization the go fuzz
+// coordinator saves a different, often harmless, input. The dead worker's last-<pid>
+// file is then the real crasher.
+func NoteInput(input []byte) {
+	dir := os.Getenv("ELISA_FUZZ_EVENT_DIR")
+	if dir == "" {
+		return
+	}
+	noteOnce.Do(func() {
+		_ = os.MkdirAll(dir, 0o755)
+		notePath = filepath.Join(dir, fmt.Sprintf("last-%d", os.Getpid()))
+	})
+	_ = os.WriteFile(notePath, input, 0o644)
+}
+
+var (
+	noteOnce sync.Once
+	notePath string
+)

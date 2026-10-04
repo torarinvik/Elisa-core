@@ -50,6 +50,7 @@ func FuzzChecker(f *testing.F) {
 		if fuzzParseClean(src) == nil {
 			return
 		}
+		fuzzseed.NoteInput(src)
 		stop := fuzzseed.Watchdog(60*time.Second, "checker", src)
 		defer stop()
 		first := fuzzAnalyzeText(src)

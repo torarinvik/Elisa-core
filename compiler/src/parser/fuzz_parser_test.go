@@ -28,6 +28,7 @@ func FuzzParser(f *testing.F) {
 		if len(src) > fuzzseed.MaxInput {
 			return
 		}
+		fuzzseed.NoteInput(src)
 		stop := fuzzseed.Watchdog(20*time.Second, "parser", src)
 		defer stop()
 		errs1, notes1 := fuzzParse(src)
