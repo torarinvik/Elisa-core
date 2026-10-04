@@ -1108,7 +1108,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
-			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+			// A literal-false body is checked, but cannot change the exit typestate.
+			if cond, literal := n.Cond.(*ast.BoolLit); !literal || cond.Value {
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+			}
 			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, bodySnapshot.StorageViewDeps)
 		}
 		mergedAffine = mergeAffineValueStates(mergedAffine, continuedAffine)

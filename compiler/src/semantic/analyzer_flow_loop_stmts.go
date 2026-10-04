@@ -324,6 +324,14 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	mergedStorageViewDeps := a.cloneStorageViewDeps()
 	entryAffine := a.cloneAffineValueStates()
 	outerScope := a.currentScope
+	// Classify the entry range before checking mutations in the body. Restrict
+	// this exclusion to the built-in ascending, default-step range.
+	emptyRange := false
+	if stmt.Op == lexer.TOKEN_RANGE_LT && stmt.Step == nil {
+		start, startKnown := a.constIntValue(stmt.Start)
+		end, endKnown := a.constIntValue(stmt.End)
+		emptyRange = startKnown && endKnown && start >= end
+	}
 	a.pushLoopAffineFrame()
 	a.pushStorageViewLoopUseFrame(outerScope, stmt.Body)
 	a.loopDepth++
@@ -339,7 +347,9 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
-		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+		if !emptyRange {
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+		}
 		// A storage-view interior reference invalidated by a mutation inside the loop body (e.g. a
 		// darray push or relocating dict insert) stays invalid after the loop — the body may have
 		// run. Without this merge the invalidation was discarded at block exit, leaving a stale
