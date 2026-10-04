@@ -116,3 +116,100 @@ func TestProtocolGraphModuleAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestProtocolGraphEveryIncomingState(t *testing.T) {
+	prelude := strings.Replace(protocolGraphPrelude, "        Open -> Closed\n", "", 1)
+	for _, tc := range []struct{ name, source, message string }{
+		{"union_rejects_illegal_peer", `def invalid(file: File[Closed | Open]) -> File[Closed]:
+    transition[Closed](move file)
+`, "illegal protocol transition Open -> Closed"},
+		{"reordered_union_rejects_illegal_peer", `def invalid(file: File[Open | Closed]) -> File[Closed]:
+    transition[Closed](move file)
+`, "illegal protocol transition Open -> Closed"},
+		{"borrowed_alias", `type Borrowed = File[Closed]&
+type Again = Borrowed
+def invalid(file: Again) -> File[Open]:
+    transition[Open](move file)
+`, "owned state-qualified"},
+		{"linear_mutable_alias", `type Borrowed = lmut File[Closed]
+def invalid(file: Borrowed) -> File[Open]:
+    transition[Open](move file)
+`, "owned state-qualified"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, tc.name+".elisa", prelude+tc.source, AnalyzeOptions{})
+			if diagnostics := allDiagnostics(result); !strings.Contains(diagnostics, tc.message) {
+				t.Fatalf("wanted %q, got:\n%s", tc.message, diagnostics)
+			}
+		})
+	}
+	for _, source := range []string{
+		`def valid(file: File[Closed | Open]) -> File[Open]:
+    transition[Open](move file)
+`,
+		`type Owned = File[Closed]
+def valid(file: Owned) -> File[Open]:
+    transition[Open](move file)
+`,
+	} {
+		analyzeTreeTestSource(t, "all_paths_valid.elisa", prelude+source)
+	}
+}
+
+func TestProtocolGraphAuthorityBoundaries(t *testing.T) {
+	owned := "module Vault:\n    " + strings.ReplaceAll(strings.TrimSpace(protocolGraphPrelude), "\n", "\n    ") + "\n\n"
+	for _, tc := range []struct{ name, source string }{
+		{"peer", "module Peer:\n    def invalid(file: Vault::File[Closed]) -> Vault::File[Open]:\n        transition[Open](move file)\n"},
+		{"prefix_collision", "module VaultKit:\n    def invalid(file: Vault::File[Closed]) -> Vault::File[Open]:\n        transition[Open](move file)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, tc.name+".elisa", owned+tc.source, AnalyzeOptions{})
+			if diagnostics := allDiagnostics(result); !strings.Contains(diagnostics, "private to its owning module") {
+				t.Fatal(diagnostics)
+			}
+		})
+	}
+	analyzeTreeTestSource(t, "descendant_authority.elisa", owned+`module Vault::Child::Deep:
+    def any_operation_name(file: Vault::File[Closed]) -> Vault::File[Open]:
+        transition[Open](move file)
+`)
+	root := protocolGraphPrelude + `module Child:
+    def invalid(file: File[Closed]) -> File[Open]:
+        transition[Open](move file)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "root_boundary.elisa", root, AnalyzeOptions{})
+	if diagnostics := allDiagnostics(result); !strings.Contains(diagnostics, "private to its owning module") {
+		t.Fatal(diagnostics)
+	}
+}
+
+func TestProtocolGraphCanonicalStateOwnerIdentity(t *testing.T) {
+	owned := "module Left:\n    " + strings.ReplaceAll(strings.TrimSpace(protocolGraphPrelude), "\n", "\n    ") + "\n\n"
+	owned += "module Right:\n    " + strings.ReplaceAll(strings.TrimSpace(protocolGraphPrelude), "\n", "\n    ") + "\n\n"
+	result := analyzeTreeTestSource(t, "state_owner_identity.elisa", owned)
+	left := result.NamedTypes["Left.File"].(*StructType)
+	right := result.NamedTypes["Right.File"].(*StructType)
+	if left.GenericParams[0].StateOwner != left.Name || right.GenericParams[0].StateOwner != right.Name {
+		t.Fatal("semantic state parameters lost canonical family identity")
+	}
+	if left.Decl.GenericParams[0].StateOwner != "File" || right.Decl.GenericParams[0].StateOwner != "File" {
+		t.Fatal("qualification mutated the source AST")
+	}
+	leftState := newNamedStateType(left.GenericParams[0].StateOwner, left.NamedStateCases, []string{"Open"})
+	rightState := newNamedStateType(right.GenericParams[0].StateOwner, right.NamedStateCases, []string{"Open"})
+	if SameType(leftState, rightState) || AssignableTo(leftState, rightState) || CanonicalTypeID(leftState) == CanonicalTypeID(rightState) {
+		t.Fatal("equal state spellings in separate families acquired the same identity")
+	}
+}
+
+func TestProtocolGraphUserTransitionFunctionIsOrdinary(t *testing.T) {
+	analyzeTreeTestSource(t, "user_transition.elisa", protocolGraphPrelude+`enum Open:
+    Value
+
+def transition[T](file: File[Closed]) -> File[Closed]:
+    return move file
+
+def ordinary(file: File[Closed]) -> File[Closed]:
+    transition[Open](move file)
+`)
+}

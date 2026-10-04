@@ -55,7 +55,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 				return
 			}
 			a.analyzeStructAnnotations(stDecl, st)
-			a.withGenericParams(stDecl.GenericParams, nil, func() {
+			a.withGenericParams(st.GenericParams, nil, func() {
 				a.withRegionParams(stDecl.RegionParams, func() {
 					concreteFields := stDecl.Fields[:0:0]
 					for _, field := range stDecl.Fields {

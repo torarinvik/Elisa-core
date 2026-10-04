@@ -165,6 +165,15 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					Store:              storeDecl != nil,
 					StoreFieldOrder:    make([]string, 0, len(n.Fields)),
 				}
+				// Parser metadata uses the source leaf name. Semantic state arguments
+				// must use the canonical family name, just like transitions and derives.
+				// Keep the AST unchanged: its names remain source-resolution inputs.
+				for i := range st.GenericParams {
+					param := &st.GenericParams[i]
+					if param.Kind == ast.GenericParamState && len(param.StateCases) != 0 && param.StateOwner == n.Name {
+						param.StateOwner = qualifiedName
+					}
+				}
 				a.namedTypes[qualifiedName] = st
 				markPrivate(qualifiedName)
 			case *ast.StoreDecl:
