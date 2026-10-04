@@ -228,16 +228,16 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 				}
 				if a.currentValueBindings != nil {
 					if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
-						return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+						return a.resolveProjectedFieldValueThroughSymbol(sym, valueExpr, path)
 					}
 					if root := symbolAliasRoot(sym); root != nil && root != sym {
 						if valueExpr, ok := a.currentValueBindings[root]; ok && valueExpr != nil {
-							return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+							return a.resolveProjectedFieldValueThroughSymbol(root, valueExpr, path)
 						}
 					}
 				}
 				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
-					return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+					return a.resolveProjectedFieldValueThroughSymbol(sym, valueExpr, path)
 				}
 				return nil, false
 			}
@@ -250,7 +250,7 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		if !ok {
 			return nil, false
 		}
-		return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+		return a.resolveProjectedFieldValueThroughSymbol(sym, valueExpr, path)
 	case *ast.ListLitExpr:
 		step := path[0]
 		if step.Index == nil || step.Field != "" || step.Wildcard {
@@ -667,4 +667,20 @@ func (a *Analyzer) extractProjectedBorrowSourcePath(expr ast.Expr) (ast.Expr, []
 	default:
 		return expr, nil, true
 	}
+}
+
+// resolveProjectedFieldValueThroughSymbol follows sym's bound value expression, refusing to
+// re-enter a symbol already being followed. `h = h.r` binds h to an expression that projects
+// out of h itself; without the guard every lap prepended another `.r` step to the path and the
+// analysis never terminated (the path slice grew until memory ran out).
+func (a *Analyzer) resolveProjectedFieldValueThroughSymbol(sym *Symbol, valueExpr ast.Expr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
+	if a.projectedFieldResolveInProgress == nil {
+		a.projectedFieldResolveInProgress = map[*Symbol]bool{}
+	}
+	if a.projectedFieldResolveInProgress[sym] {
+		return nil, false
+	}
+	a.projectedFieldResolveInProgress[sym] = true
+	defer delete(a.projectedFieldResolveInProgress, sym)
+	return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
 }
