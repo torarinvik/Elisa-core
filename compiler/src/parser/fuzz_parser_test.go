@@ -29,7 +29,7 @@ func FuzzParser(f *testing.F) {
 			return
 		}
 		fuzzseed.NoteInput(src)
-		stop := fuzzseed.Watchdog(20*time.Second, "parser", src)
+		stop := fuzzseed.Watchdog(8*time.Second, "parser", src)
 		defer stop()
 		errs1, notes1 := fuzzParse(src)
 		errs2, notes2 := fuzzParse(src)

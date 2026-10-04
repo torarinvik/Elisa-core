@@ -111,8 +111,8 @@ func Seeds() [][]byte {
 }
 
 // Watchdog fails loudly when one input runs longer than limit, dumping every goroutine
-// so the hung frame is visible. The go fuzz engine has no per-input deadline of its own;
-// a killed worker makes it save the in-flight input as a crasher, which is what we want.
+// so the hung frame is visible. Keep limit under ~10s: the go fuzz coordinator kills a
+// worker that stops responding for about that long, silently, and the stack is lost.
 // Call the returned stop function when the input finishes.
 func Watchdog(limit time.Duration, label string, input []byte) func() {
 	timer := time.AfterFunc(limit, func() {
