@@ -9,7 +9,11 @@ import (
 
 func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
+	chain := 0
 	for {
+		// chain counts the postfix operators already applied; the iteration that finds none exits.
+		p.checkChainDepth(chain)
+		chain++
 		// Column scan: `<EnumName> of .field` (docs/76 §5). Tightly guarded —
 		// only when the left side is a bare type name, the soft keyword `of`
 		// follows, and a `.field` selector comes next. This sequence is not

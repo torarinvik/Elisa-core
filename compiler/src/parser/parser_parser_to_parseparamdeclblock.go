@@ -8,11 +8,13 @@ import (
 )
 
 type Parser struct {
-	tokens             []lexer.Token
-	pos                int
-	errors             []string
-	notices            []string
-	exprBlockDepth     int
+	tokens         []lexer.Token
+	pos            int
+	errors         []string
+	notices        []string
+	exprBlockDepth int
+	// nestDepth counts the recursive parsing levels currently open; see MaxNestingDepth.
+	nestDepth          int
 	rebindCounter      int
 	poolScopes         []string
 	nurseryGroupByPool map[string]string
@@ -280,6 +282,7 @@ func (p *Parser) skipRejectedDecl() {
 
 func (p *Parser) ParseFile(filename string) *ast.File {
 	file := &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount()), DeclVisibility: p.declVisibility}
+	defer p.recoverNestingOverflow()
 	p.skipNewlines()
 	for p.peek() != lexer.TOKEN_EOF {
 		decl := p.parseDecl()
