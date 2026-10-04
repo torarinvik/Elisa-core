@@ -1167,6 +1167,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// predicates. Both passes operate on already-collected type skeletons, so
 	// enum payloads can still resolve struct types declared later in the file.
 	a.populateStructFields(activeDecls)
+	a.checkStructByValueCycles(activeDecls)
 	a.assignHierarchyEnumTags(activeDecls)
 	a.inheritHierarchyCommonFields(activeDecls)
 	generatedDecls := make(map[ast.Decl]bool)
