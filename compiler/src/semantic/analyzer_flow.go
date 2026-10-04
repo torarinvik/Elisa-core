@@ -1102,6 +1102,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerBase]
 		a.loopDepth--
 		a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(n.Body))
+		if cond, literal := n.Cond.(*ast.BoolLit); !literal || cond.Value {
+			mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
+		}
 		continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(n.Body), outerScope, n.Pos())
 		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {

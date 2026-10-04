@@ -338,6 +338,9 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	a.loopDepth--
 	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
+	if !emptyRange {
+		mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
+	}
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	a.currentIndexBounds = savedIndexBounds
 	a.currentBoundEqual = savedBoundEqual
@@ -736,6 +739,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	}
 	a.loopDepth--
 	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
+	mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
 	if iterLockKey != "" {
 		if iterLockHadPrior {
