@@ -321,17 +321,13 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	mergedFunctionValues := a.cloneFunctionValueBindings()
 	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	derivedEntry := a.captureDerivedLoopEntry(a.currentScope)
 	mergedStorageViewDeps := a.cloneStorageViewDeps()
 	entryAffine := a.cloneAffineValueStates()
 	outerScope := a.currentScope
 	// Classify the entry range before checking mutations in the body. Restrict
 	// this exclusion to the built-in ascending, default-step range.
-	emptyRange := false
-	if stmt.Op == lexer.TOKEN_RANGE_LT && stmt.Step == nil {
-		start, startKnown := a.constIntValue(stmt.Start)
-		end, endKnown := a.constIntValue(stmt.End)
-		emptyRange = startKnown && endKnown && start >= end
-	}
+	_, emptyRange, _ := a.classifyDerivedLiteralRange(stmt)
 	a.pushLoopAffineFrame()
 	a.pushStorageViewLoopUseFrame(outerScope, stmt.Body)
 	a.loopDepth++
@@ -364,6 +360,11 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	if exit := a.checkDerivedLoopTransfer(stmt.Body, nil, stmt, derivedEntry, stmt.Pos()); exit != nil {
+		for root, typ := range exit {
+			a.bindTrackedValueType(root, typ)
+		}
+	}
 	a.currentStorageViewDeps = mergedStorageViewDeps
 	a.maybeAutoReserveCountingFill(stmt)
 }

@@ -27,6 +27,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// accessed from outside its owning module. Locals/params are never
 			// Private, so this only affects qualified globals.
 			if sym, ok := a.currentScope.Lookup(n.Name); ok && a.globalNameIsVisible(sym, n.Name) {
+				if len(a.storageViewLoopUseFrames) != 0 || len(a.loopAffineFrames) != 0 {
+					if base, named := trackedNamedStateStructBase(sym.Type); named && base != nil && !base.ProtocolStates {
+						if a.derivedLoopBindings == nil {
+							a.derivedLoopBindings = map[*ast.Ident]*Symbol{}
+						}
+						a.derivedLoopBindings[n] = sym
+					}
+				}
 				result = promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 				if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 					a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
