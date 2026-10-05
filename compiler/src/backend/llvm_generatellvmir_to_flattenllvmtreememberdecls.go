@@ -23,8 +23,10 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"unsafe"
 )
 
@@ -282,7 +284,8 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 	}
 	beginModuleCStringLifetime()
 	g.transientCStringLifetime = true
-	for _, sym := range result.GlobalScope.Symbols {
+	for _, name := range slices.Sorted(maps.Keys(result.GlobalScope.Symbols)) { // map: sort so a shared node resolves the same way every run
+		sym := result.GlobalScope.Symbols[name]
 		if sym == nil || sym.Node == nil {
 			continue
 		}
