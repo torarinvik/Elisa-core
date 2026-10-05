@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -463,7 +465,8 @@ func (a *Analyzer) activePackedStoreRegionState(enumType *EnumType) (regionRefSt
 		return regionRefState{}, false
 	}
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
-		for _, sym := range scope.Symbols {
+		for _, symName := range slices.Sorted(maps.Keys(scope.Symbols)) { // map: sort so the chosen store binding is stable
+			sym := scope.Symbols[symName]
 			storeType, ok := sym.Type.(*PackedEnumStoreType)
 			if !ok || storeType == nil || storeType.Enum != enumType || !SameType(storeType, activeStore) {
 				continue

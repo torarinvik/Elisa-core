@@ -2,7 +2,9 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3801,7 +3803,9 @@ func (tr *smtTranslator) abstractMethodReturnType(call *ast.CallExpr) Type {
 		// was never analyzed in this caller context). Fall back to the in-scope bound type-param
 		// interfaces: find the unique one declaring a method of this name.
 		for i := len(tr.a.typeParamInterfaceScopes) - 1; i >= 0 && iface == nil; i-- {
-			for _, bound := range tr.a.typeParamInterfaceScopes[i] {
+			scope := tr.a.typeParamInterfaceScopes[i]
+			for _, boundName := range slices.Sorted(maps.Keys(scope)) { // map: sort so the chosen bound is stable
+				bound := scope[boundName]
 				if bound == nil {
 					continue
 				}

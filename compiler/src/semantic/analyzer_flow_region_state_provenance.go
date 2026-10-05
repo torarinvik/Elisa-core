@@ -1,13 +1,16 @@
 package semantic
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 
 	"elisacore/src/ast"
 )
 
 func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
-	for region, dep := range state.Deps {
+	for _, region := range sortedSymbolKeys(state.Deps) { // map: sort so the reported dependency is stable
+		dep := state.Deps[region]
 		if !dep.Valid {
 			return region, dep, true
 		}
@@ -204,7 +207,8 @@ func (a *Analyzer) instantiateReturnProvenanceWithContext(state regionRefState, 
 }
 
 func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
-	for region, dep := range state.Deps {
+	for _, region := range sortedSymbolKeys(state.Deps) { // map: sort so the chosen region is stable
+		dep := state.Deps[region]
 		if dep.Valid {
 			return region, dep, true
 		}
@@ -301,12 +305,14 @@ func rebaseRegionDependencyInState(state regionRefState, from, to *Symbol, gen i
 }
 
 func firstNonShareablePackedStoreDependency(state regionRefState) (*Symbol, packedStoreDependencyState, bool) {
-	for store, dep := range state.StoreDeps {
+	for _, store := range sortedSymbolKeys(state.StoreDeps) { // map: sort so the reported store is stable
+		dep := state.StoreDeps[store]
 		if dep.Type == nil || !IsFrozenPackedEnumStoreType(dep.Type) {
 			return store, dep, true
 		}
 	}
-	for _, fieldState := range state.Fields {
+	for _, fieldName := range slices.Sorted(maps.Keys(state.Fields)) { // map: sort so the reported field is stable
+		fieldState := state.Fields[fieldName]
 		if store, dep, ok := firstNonShareablePackedStoreDependency(fieldState); ok {
 			return store, dep, true
 		}

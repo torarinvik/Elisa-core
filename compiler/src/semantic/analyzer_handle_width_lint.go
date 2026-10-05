@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -94,7 +95,13 @@ func (a *Analyzer) flagNarrowableHandleLoop(loop *ast.ForStmt) {
 	if recursiveCall || len(perRoot) == 0 {
 		return
 	}
-	for root, perIter := range perRoot {
+	roots := make([]*EnumType, 0, len(perRoot))
+	for root := range perRoot {
+		roots = append(roots, root)
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].Name < roots[j].Name }) // map: sort for a stable report order
+	for _, root := range roots {
+		perIter := perRoot[root]
 		total := bound * perIter
 		switch {
 		case total <= 254:

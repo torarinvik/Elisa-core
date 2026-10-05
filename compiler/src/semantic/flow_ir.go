@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"elisacore/src/ast"
@@ -181,7 +183,7 @@ func VerifyCFG(cfg *CFG) error {
 			return fmt.Errorf("CFG block %d has unknown terminator %q", block.ID, block.Terminator.Kind)
 		}
 	}
-	for id := range exits {
+	for _, id := range slices.Sorted(maps.Keys(exits)) { // map: sort so the reported block is stable
 		kind := cfg.Blocks[id].Terminator.Kind
 		switch kind {
 		case CFGTerminatorFallthrough, CFGTerminatorReturn, CFGTerminatorErrorExit,

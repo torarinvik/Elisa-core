@@ -340,7 +340,8 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 	}
 	var escaping *Symbol
 	var joined []poolJoinedRegionDependency
-	for region, dep := range state.Deps {
+	for _, region := range sortedSymbolKeys(state.Deps) { // map: sort for a stable report order
+		dep := state.Deps[region]
 		if !dep.Valid || region == nil {
 			continue
 		}

@@ -1,7 +1,9 @@
 package semantic
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 
 	"elisacore/src/ast"
 )
@@ -214,7 +216,7 @@ func (a *Analyzer) callReturnedElementState(call *ast.CallExpr) (regionRefState,
 	indices := map[int]bool{}
 	regionRefStateParamIndices(summary, indices, map[uintptr]bool{})
 	states := []regionRefState{}
-	for index := range indices {
+	for _, index := range slices.Sorted(maps.Keys(indices)) { // map: sort — the merge below is order-sensitive
 		if index < 0 || index >= len(call.Args) {
 			return regionRefState{}, false
 		}

@@ -183,7 +183,8 @@ func LookupStaticImplUnifying(impls map[string]*StaticImpl, interfaceName string
 	if impl, ok := LookupStaticImpl(impls, interfaceName, receiver); ok {
 		return impl, nil, true
 	}
-	for _, impl := range impls {
+	for _, key := range slices.Sorted(maps.Keys(impls)) { // map: sort so overlapping parametric impls resolve the same way every run
+		impl := impls[key]
 		if impl == nil || impl.InterfaceName != interfaceName || len(impl.TypeParams) == 0 {
 			continue
 		}
@@ -380,12 +381,15 @@ func (a *Analyzer) typePathNameForReceiver(receiver Type) (string, bool) {
 		return "", false
 	}
 	receiver = unwrapReceiverRef(receiver)
+	// Several names may denote one type (export aliases, tag/store names); take the smallest so
+	// the rewritten callee / harness type name is the same every run.
+	best, found := "", false
 	for name, t := range a.namedTypes {
-		if t != nil && SameType(t, receiver) {
-			return name, true
+		if t != nil && SameType(t, receiver) && (!found || name < best) {
+			best, found = name, true
 		}
 	}
-	return "", false
+	return best, found
 }
 
 // staticImplMethodForReceiver finds the protocol-impl (or synthesized default-method) impl that

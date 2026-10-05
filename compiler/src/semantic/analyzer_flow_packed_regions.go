@@ -411,7 +411,11 @@ func (a *Analyzer) resolvePackedStoreDependenciesInState(state regionRefState) (
 	changed := false
 	storeDepsCloned := false
 	fieldsCloned := false
-	for store, dep := range state.StoreDeps {
+	for _, store := range sortedSymbolKeys(state.StoreDeps) { // map: snapshot + sort — the loop rewrites keys, and colliding targets must resolve the same way every run
+		dep, present := state.StoreDeps[store]
+		if !present {
+			continue
+		}
 		nextStore, nextDep, depChanged := a.resolvePackedStoreDependency(store, dep)
 		if !depChanged {
 			continue

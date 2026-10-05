@@ -226,12 +226,8 @@ func (a *Analyzer) lemmaAndLawDecls() []*ast.FuncDecl {
 			}
 		}
 	}
-	out := make([]*ast.FuncDecl, 0, len(decls))
-	for decl := range decls {
-		out = append(out, decl)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	// Name, then position: same-named lemmas from different modules must not tie on map order.
+	return sortedFuncDeclKeys(decls)
 }
 
 func lemmaSuggestionClauses(decl *ast.FuncDecl) []ast.Expr {
