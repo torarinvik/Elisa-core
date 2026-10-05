@@ -2013,6 +2013,16 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		return
 	}
 	args := returnBorrowCallArgs(call)
+	// What each argument may point at depends only on its type; compute it once per argument,
+	// not once per (writable param, argument) pair.
+	argPointees := make([]*regionPointees, len(args))
+	storePointeesOf := func(other int) regionPointees {
+		if argPointees[other] == nil {
+			pointees := argumentStorePointees(a.exprTypes[args[other]])
+			argPointees[other] = &pointees
+		}
+		return *argPointees[other]
+	}
 	for index, paramType := range fnType.Params {
 		if index >= len(args) || !a.returnBorrowWritableParam(paramType) {
 			continue
@@ -2033,7 +2043,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 			// The callee can only store region data reachable from this argument if some value it
 			// reaches has a type the container's elements may point at: a `darray[Pattern]` of
 			// handles cannot become the bytes an `sview` element points into.
-			if !stored.intersects(argumentStorePointees(a.exprTypes[arg])) {
+			if !stored.intersects(storePointeesOf(other)) {
 				continue
 			}
 			// Store-flow is directed: the container in `other` is dangerous only
