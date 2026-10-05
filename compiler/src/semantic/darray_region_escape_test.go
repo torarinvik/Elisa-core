@@ -54,6 +54,59 @@ def add(self: mutable Bag&, owner: mutable Arena&, value: i64) -> void:
 	}
 }
 
+// A region-parametric copy preserves the source element lifetime. When the
+// result is written back to the same caller-owned container, that formal
+// region must remain a parameter dependency rather than becoming a local
+// allocation dependency in the return-element summary.
+func TestRegionParametricCopiedElementsCanReturnToSameContainer(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_same_container.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def restore(values: mutable darray[E]&):
+    retained: mutable darray[E] = copy_values(values)
+    values[0] <- retained[0]
+
+def main() -> i64:
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("same-region element copy must be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The same helper must not hide a genuinely shorter-lived payload: the
+// caller-owned output outlives the local arena and its byte-backed view.
+func TestRegionParametricCopyStillRejectsShorterLivedPayload(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_short_payload.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def escape(out: mutable darray[E]&):
+    arena: Arena = zeroed
+    in arena:
+        bytes: mutable darray[u8] = [65.u8()]
+        source: mutable darray[E] = [E.Name(bytes.as_sview())]
+        retained: mutable darray[E] = copy_values(source)
+        out.push(retained[0])
+
+def main() -> i64:
+    return 0
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "longer-lived region") && !strings.Contains(joined, "use-after-free") {
+		t.Fatalf("expected shorter-lived payload escape to be rejected, got:\n%s", joined)
+	}
+}
+
 // Returning a local collection whose backing was grown in a function-local
 // arena is a use-after-free (the backing is freed on return).
 func TestReturnLocalCollectionGrownInLocalArenaIsRejected(t *testing.T) {
