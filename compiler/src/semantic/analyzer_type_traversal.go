@@ -542,7 +542,7 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 				continue
 			}
 			if state.Fields == nil {
-				state.Fields = map[string]regionRefState{}
+				state.Fields = make(map[string]regionRefState, len(tt.Fields))
 			}
 			state.Fields[field.Name] = fieldState
 		}
@@ -564,7 +564,7 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 					continue
 				}
 				if state.Fields == nil {
-					state.Fields = map[string]regionRefState{}
+					state.Fields = make(map[string]regionRefState, len(base.Fields))
 				}
 				state.Fields[field.Name] = fieldState
 			}
