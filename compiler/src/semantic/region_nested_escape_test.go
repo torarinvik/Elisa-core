@@ -680,7 +680,7 @@ def grow_two(out: mutable darray[Holder]&, tally: mutable darray[i64]&) -> void 
 // Bulk vector of the enum-ctor payload hole: `out.extend([Item.Row(make_vals(10))])` in a
 // TWO-container grower — the list-literal interior scan (valueInteriorRegion) was enum-blind,
 // so this compiled and use-after-freed silently (segfault at 2000 iterations). Now the ctor
-// element classifies via enumCtorPayloadFreshRegion and the store is rejected.
+// element classifies via enumCtorPayloadRegion and the store is rejected.
 func TestNestedRegionExtendEnumCtorElementTwoContainerGrowerRejected(t *testing.T) {
 	res := analyzeTreeTestSourceWithSemanticErrors(t, "extend_enum_payload_grower_escape.elisa", `enum Item:
     Row(vals: darray[i64])
@@ -728,7 +728,54 @@ def grow_two(out: mutable darray[Item]&, tally: mutable darray[i64]&) -> void ca
 	}
 }
 
-// enumCtorPayloadFreshRegion must classify WITHOUT side effects: packedAllocConstructorInfo
+// An existing outer-region payload remains outer-region data when an enum
+// wrapper is constructed inside a nested allocation context. The wrapper does
+// not relocate the payload into the current arena.
+func TestEnumPayloadExistingOuterRegionInsideNestedRegionAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "enum_existing_outer_payload_inner_context.elisa", `enum E:
+    Name(text: sview)
+
+enum Holder:
+    Empty()
+    Items(values: darray[E])
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            values: mutable darray[E] @outer = []
+            out: mutable darray[Holder] @outer = [Holder.Empty()]
+            region inner(4096):
+                out[0] <- Holder.Items(values)
+            return 0
+`)
+	if errs := res.Errors(); len(errs) != 0 {
+		t.Fatalf("enum wrapping must not shorten an existing outer-region payload, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The corresponding truly inner payload must still be rejected. Preferring a
+// payload's own region over the ambient region is not permission to ignore the
+// payload's actual lifetime.
+func TestEnumPayloadInnerRegionInsideNestedRegionRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "enum_inner_payload_inner_context.elisa", `enum Holder:
+    Empty()
+    Items(values: darray[u8])
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            out: mutable darray[Holder] @outer = [Holder.Empty()]
+            region inner(4096):
+                values: mutable darray[u8] @inner = []
+                out[0] <- Holder.Items(values)
+            return 0
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, `region "inner"`) || !strings.Contains(all, "outlives") {
+		t.Fatalf("enum wrapper must preserve and reject its genuinely inner payload region, got:\n%s", all)
+	}
+}
+
+// enumCtorPayloadRegion must classify WITHOUT side effects: packedAllocConstructorInfo
 // reports "enum has no variant" as it resolves, so calling it from the taint recorder
 // fabricated that diagnostic for a legitimate non-variant member call on an enum-named type.
 // (Caught as a real regression in TestAnalyzeFunctionAnalysisRecordsProduceAndRebaseTransforms.)

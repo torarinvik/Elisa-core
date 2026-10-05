@@ -54,6 +54,185 @@ def add(self: mutable Bag&, owner: mutable Arena&, value: i64) -> void:
 	}
 }
 
+// A region-parametric copy preserves the source element lifetime. When the
+// result is written back to the same caller-owned container, that formal
+// region must remain a parameter dependency rather than becoming a local
+// allocation dependency in the return-element summary.
+func TestRegionParametricCopiedElementsCanReturnToSameContainer(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_same_container.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def restore(values: mutable darray[E]&):
+    retained: mutable darray[E] = copy_values(values)
+    values[0] <- retained[0]
+
+def main() -> i64:
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("same-region element copy must be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// A local call-result binding inside a loop keeps the callee's region even
+// when loop-local element summaries are unavailable; its backing array is not
+// allocated in the loop's synthetic auto region.
+func TestRegionParametricCopyBindingKeepsReturnedRegionInsideLoop(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_loop_binding.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def restore(values: mutable darray[E]&):
+    for index in 0..<values.count:
+        retained: mutable darray[E] = copy_values(values)
+        values[index] <- retained[index]
+
+def main() -> i64:
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("loop-local call result must keep its returned region, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The same helper must not hide a genuinely shorter-lived payload: the
+// caller-owned output outlives the local arena and its byte-backed view.
+func TestRegionParametricCopyStillRejectsShorterLivedPayload(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_short_payload.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def escape(out: mutable darray[E]&):
+    arena: Arena = zeroed
+    in arena:
+        bytes: mutable darray[u8] = [65.u8()]
+        source: mutable darray[E] = [E.Name(bytes.as_sview())]
+        retained: mutable darray[E] = copy_values(source)
+        out.push(retained[0])
+
+def main() -> i64:
+    return 0
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "longer-lived region") && !strings.Contains(joined, "use-after-free") {
+		t.Fatalf("expected shorter-lived payload escape to be rejected, got:\n%s", joined)
+	}
+}
+
+// A region-parametric copy does not make a borrowed payload outlive its source.
+// The source and destination parameters below have independent lifetimes, so
+// copying elements from @source into @target must be rejected unless their
+// regions are tied by the signature.
+func TestRegionParametricCopyCannotEscapeIntoIndependentTargetRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_independent_target.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@source](source: darray[E]& @source) -> darray[E] @source:
+    result: mutable darray[E] @source = []
+    result.extend(source)
+    return result
+
+def forward_same_region[@r](source: darray[E]& @r, target: mutable darray[E]& @r):
+    retained: mutable darray[E] @r = copy_values(source)
+    target.extend(retained)
+
+def forward[@source, @target](source: darray[E]& @source, target: mutable darray[E]& @target):
+    retained: mutable darray[E] @source = copy_values(source)
+    target.extend(retained)
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "longer-lived") {
+		t.Fatalf("copying a source-region payload into an independent target region must be rejected while a tied-region copy remains valid, got:\n%s", joined)
+	}
+}
+
+// An explicit shared region is the supported way to make the copy-and-forward
+// operation safe; the independent-region refusal must not reject this case.
+func TestRegionParametricCopyIntoTiedTargetRegionIsAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_tied_target.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def forward_same_region[@r](source: darray[E]& @r, target: mutable darray[E]& @r):
+    retained: mutable darray[E] @r = copy_values(source)
+    target.extend(retained)
+`)
+	if errs := strings.Join(result.Errors(), "\n"); errs != "" {
+		t.Fatalf("copying into a target tied to the same region must remain valid, got:\n%s", errs)
+	}
+}
+
+// Nested containers carry region-owned headers even when their scalar payloads
+// do not. Forwarding a copied row into an independently-lived outer container
+// must therefore be rejected just like forwarding a view-bearing enum value.
+func TestRegionParametricNestedRowsCannotEscapeIntoIndependentTargetRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_nested_rows_independent_target.elisa", `def copy_rows[@source](source: darray[darray[u8]]& @source) -> darray[darray[u8]] @source:
+    result: mutable darray[darray[u8]] @source = []
+    result.extend(source)
+    return result
+
+def forward[@source, @target](source: darray[darray[u8]]& @source, target: mutable darray[darray[u8]]& @target):
+    retained: mutable darray[darray[u8]] @source = copy_rows(source)
+    target.extend(retained)
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "longer-lived") {
+		t.Fatalf("nested row headers must not escape from an independent source region into the target, got:\n%s", joined)
+	}
+}
+
+func TestRegionParametricNestedRowsIntoTiedTargetRegionAreAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_nested_rows_tied_target.elisa", `def copy_rows[@r](source: darray[darray[u8]]& @r) -> darray[darray[u8]] @r:
+    result: mutable darray[darray[u8]] @r = []
+    result.extend(source)
+    return result
+
+def forward_same_region[@r](source: darray[darray[u8]]& @r, target: mutable darray[darray[u8]]& @r):
+    retained: mutable darray[darray[u8]] @r = copy_rows(source)
+    target.extend(retained)
+`)
+	if errs := strings.Join(result.Errors(), "\n"); errs != "" {
+		t.Fatalf("nested row headers copied within one tied region must remain valid, got:\n%s", errs)
+	}
+}
+
+// Wrapping an already-region-stamped container in an inline enum preserves the
+// payload's actual region; it is not reallocated in the current nested region.
+func TestEnumPayloadUsesExistingContainerRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "enum_payload_existing_region.elisa", `enum E:
+    Name(text: sview)
+
+enum Holder:
+    Items(values: darray[E])
+
+def retain[@r, @s](values: darray[E] @r, unrelated: darray[i64] @s, out: mutable darray[Holder]& @r):
+    out.push(Holder.Items(values))
+
+def main() -> i64:
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("enum wrapper must retain its payload container's region, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // Returning a local collection whose backing was grown in a function-local
 // arena is a use-after-free (the backing is freed on return).
 func TestReturnLocalCollectionGrownInLocalArenaIsRejected(t *testing.T) {

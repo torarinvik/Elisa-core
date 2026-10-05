@@ -493,6 +493,7 @@ F FuncDecl 33 TypeParams
 F FuncDecl 34 Uses
 F FuncDecl 35 Variadic
 F FuncDecl 36 ReturnRegion
+F FuncDecl 37 InferredRegionParams
 
 T 72 FuncTypeExpr
 F FuncTypeExpr 1 Params

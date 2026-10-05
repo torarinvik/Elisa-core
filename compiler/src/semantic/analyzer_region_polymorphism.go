@@ -1755,6 +1755,11 @@ func typeMayReachDarrayStorageRec(t Type, elem string, seen map[Type]bool) bool 
 		if tt.Elem == nil {
 			return true
 		}
+		// A nested header with the same element type can directly retain the source
+		// darray's storage even when that element type is a user-defined aggregate.
+		if tt.Elem.String() == elem {
+			return true
+		}
 		switch e := StripAggregateStateType(tt.Elem).(type) {
 		case *SViewType:
 			if elem == "sview" {
