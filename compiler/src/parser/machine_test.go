@@ -334,7 +334,7 @@ def run(total: mutable i64) -> i64:
 	}
 }
 
-func TestMachineRefusalBranchInArm(t *testing.T) {
+func TestMachineBranchFallsThroughToSharedTransition(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Text
         start Text
@@ -344,8 +344,176 @@ func TestMachineRefusalBranchInArm(t *testing.T) {
             -> Text
 `)
 	_, errs := parseSourceFile(t, src)
-	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "cannot branch") {
-		t.Fatalf("expected branch refusal, got %v", errs)
+	if len(errs) != 0 {
+		t.Fatalf("branch should continue to its shared transition: %v", errs)
+	}
+}
+
+func TestMachineBranchLocalTransitions(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                if lexer.peek(2) == '}':
+                    lexer <- lexer.advance_char()
+                    -> Write
+                lexer <- lexer.advance_char()
+                -> Read
+            else:
+                -> Write
+        Write, _:
+            -> Read
+`)
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected branch-transition parse errors: %v", errs)
+	}
+	if len(file.Decls) == 0 {
+		t.Fatal("machine desugaring missing")
+	}
+	if strings.Contains(fmt.Sprintf("%#v", file), "BreakStmt") {
+		t.Fatal("branch transition parser marker escaped lowering")
+	}
+}
+
+func TestMachineBranchTransitionRejectsStatementsAfterDecision(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                -> Write
+                lexer <- lexer.advance_char()
+            else:
+                -> Read
+        Write, _:
+            -> Read
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "continues after its `->` decision") {
+		t.Fatalf("expected post-transition branch refusal, got %v", errs)
+	}
+}
+
+func TestMachineBranchTransitionRejectsScopedNameCapture(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                value: i64 = 7
+                -> Write
+            lexer <- lexer.advance_char()
+            -> Read
+        Write, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "branch-local declaration cannot share a continuation") {
+		t.Fatalf("expected conservative branch-scope refusal, got %v", errs)
+	}
+}
+
+func TestMachineBranchTransitionGuardsSharedSuffix(t *testing.T) {
+	src := `def scan(cursor: mutable i64) -> i64:
+    machine over cursor while cursor < 50:
+        state A
+        state B
+        state C
+        start A
+        A, _:
+            if cursor == 0:
+                if cursor == 0:
+                    cursor <- 1
+                    -> B
+            cursor <- cursor + 2
+            -> C
+        B, _:
+            cursor <- cursor + 10
+            break
+        C, _:
+            break
+    return cursor
+def main() -> i64:
+    return 0 if scan(0) == 11 and scan(1) == 3 else 1
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected shared-suffix errors: %v", errs)
+	}
+	if len(file.Decls) == 0 {
+		t.Fatal("machine desugaring missing")
+	}
+	pos := lexer.Pos{File: "test.elisa", Line: 8, Col: 17, Offset: 200}
+	branch := &ast.IfStmt{Cond: &ast.BoolLit{Value: true}, Then: []ast.Stmt{&ast.BreakStmt{Position: pos}}}
+	suffix := &ast.AssignStmt{Target: &ast.Ident{Name: "cursor"}, Value: &ast.IntLit{Value: "1"}}
+	states := map[string]*machineState{"Write": {name: "Write"}}
+	lowered := lowerMachineBranchTransitions([]ast.Stmt{branch, suffix}, map[lexer.Pos]string{pos: "Write"}, states, func(p lexer.Pos, name string) ast.Expr { return &ast.Ident{Position: p, Name: name} }, "mode", nil)
+	if len(lowered) != 1 {
+		t.Fatalf("shared-suffix lowering emitted %d outer statements, want one continuation branch", len(lowered))
+	}
+	ifStmt, ok := lowered[0].(*ast.IfStmt)
+	if !ok || len(ifStmt.Then) != 1 {
+		t.Fatalf("terminal branch = %#v, want one mode store", lowered[0])
+	}
+	if _, ok := ifStmt.Then[0].(*ast.AssignStmt); !ok {
+		t.Fatalf("arrow marker did not lower to mode assignment: %T", ifStmt.Then[0])
+	}
+	if len(ifStmt.Else) != 1 {
+		t.Fatalf("fallthrough branch has %d suffix statements, want one", len(ifStmt.Else))
+	}
+	if _, ok := ifStmt.Else[0].(*ast.AssignStmt); !ok {
+		t.Fatalf("shared suffix was not placed on the fallthrough branch: %T", ifStmt.Else[0])
+	}
+}
+
+func TestMachineBranchReturnAndBreakFlow(t *testing.T) {
+	valid := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                return 1
+            -> Write
+        Write, _:
+            break
+`)
+	if _, errs := parseSourceFile(t, valid); len(errs) != 0 {
+		t.Fatalf("return path plus shared transition should be complete: %v", errs)
+	}
+	incomplete := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                return 1
+        Write, _:
+            break
+`)
+	_, errs := parseSourceFile(t, incomplete)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "makes no decision") {
+		t.Fatalf("expected a live fallthrough path refusal, got %v", errs)
+	}
+	complete := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                return 1
+            else:
+                return 2
+        Write, _:
+            break
+`)
+	if _, errs := parseSourceFile(t, complete); len(errs) != 0 {
+		t.Fatalf("both returning paths should be complete: %v", errs)
 	}
 }
 
