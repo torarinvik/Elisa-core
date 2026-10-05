@@ -517,10 +517,50 @@ func (p *Parser) parseMachineBranch(arm *machineArm) ast.Stmt {
 		p.expect(lexer.TOKEN_DEDENT)
 	}
 	branch := &ast.IfStmt{Position: pos, Cond: cond, Then: thenBody, Else: elseBody, FromSource: true}
-	if hasMachineBranchMarker(branch, arm.branchTransitions) && machineBranchCanFallThrough([]ast.Stmt{branch}, arm.branchTransitions) && machineBranchHasLocalDecl(branch) {
-		p.errorf("a branch-local declaration cannot share a continuation with a branch transition yet")
+	if hasMachineBranchMarker(branch, arm.branchTransitions) && machineBranchHasFallthroughLocalDecl(branch, arm.branchTransitions) {
+		p.errorf("a declaration in a fallthrough branch cannot share a continuation with a branch transition")
 	}
 	return branch
+}
+
+// A local in a branch that terminates never scopes over the copied continuation.
+// Reject only locals whose branch can fall through, where continuation duplication
+// could accidentally resolve a name to that branch-local binding.
+func machineBranchHasFallthroughLocalDecl(stmt ast.Stmt, markers map[lexer.Pos]string) bool {
+	n, ok := stmt.(*ast.IfStmt)
+	if !ok {
+		return false
+	}
+	if machineBranchCanFallThrough(n.Then, markers) && machineBranchHasLocalDeclInSequence(n.Then) {
+		return true
+	}
+	if len(n.Else) > 0 && machineBranchCanFallThrough(n.Else, markers) && machineBranchHasLocalDeclInSequence(n.Else) {
+		return true
+	}
+	for _, clause := range n.Elifs {
+		if machineBranchCanFallThrough(clause.Body, markers) && machineBranchHasLocalDeclInSequence(clause.Body) {
+			return true
+		}
+	}
+	return machineBranchHasFallthroughLocalDeclInSequence(n.Then, markers) || machineBranchHasFallthroughLocalDeclInSequence(n.Else, markers)
+}
+
+func machineBranchHasFallthroughLocalDeclInSequence(stmts []ast.Stmt, markers map[lexer.Pos]string) bool {
+	for _, stmt := range stmts {
+		if n, ok := stmt.(*ast.IfStmt); ok && machineBranchHasFallthroughLocalDecl(n, markers) {
+			return true
+		}
+	}
+	return false
+}
+
+func machineBranchHasLocalDeclInSequence(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		if machineBranchHasLocalDecl(stmt) {
+			return true
+		}
+	}
+	return false
 }
 
 func machineBranchHasLocalDecl(stmt ast.Stmt) bool {
@@ -661,7 +701,7 @@ func (p *Parser) validateMachineArmStmt(stmt ast.Stmt, arm *machineArm) {
 		for _, inner := range s.Body {
 			p.validateMachineArmStmt(inner, arm)
 		}
-	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt:
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt, *ast.DiscardStmt:
 		_ = s // allowed straight-line forms; mutation targets are checked at desugar time
 	default:
 		p.errorf("machine arms allow only straight-line statements ending in `-> State`, `return`, or `break` (docs/123 §5)")
@@ -694,7 +734,7 @@ func (p *Parser) validateMachineBranchStmt(stmt ast.Stmt, arm *machineArm) {
 		for _, inner := range s.Body {
 			p.validateMachineBranchStmt(inner, arm)
 		}
-	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt:
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt, *ast.DiscardStmt:
 		_ = s
 	default:
 		p.errorf("machine branches allow straight-line statements and terminal decisions only")

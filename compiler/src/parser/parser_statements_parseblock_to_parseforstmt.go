@@ -312,7 +312,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case lexer.TOKEN_BREAK:
 		pos := p.cur().Pos
 		p.advance()
-		if p.peek() != lexer.TOKEN_IF && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF {
+		if p.peek() != lexer.TOKEN_IF && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 			// docs/125 §6b: the value admits a postfix statement guard, so
 			// `break found if item == sought` is `if item == sought: break found`. It is the
 			// only spelling of a conditional value-break that survives -Wflow-strict's

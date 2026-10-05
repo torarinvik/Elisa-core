@@ -398,7 +398,7 @@ func TestMachineBranchTransitionRejectsStatementsAfterDecision(t *testing.T) {
 	}
 }
 
-func TestMachineBranchTransitionRejectsScopedNameCapture(t *testing.T) {
+func TestMachineBranchTransitionAllowsTerminalBranchLocal(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Read
         state Write
@@ -413,8 +413,57 @@ func TestMachineBranchTransitionRejectsScopedNameCapture(t *testing.T) {
             break
 `)
 	_, errs := parseSourceFile(t, src)
-	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "branch-local declaration cannot share a continuation") {
-		t.Fatalf("expected conservative branch-scope refusal, got %v", errs)
+	if len(errs) != 0 {
+		t.Fatalf("terminal branch-local declaration should not capture the fallthrough continuation: %v", errs)
+	}
+}
+
+func TestMachineBranchCatchOkBindingAndNestedLocal(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            catch read_value():
+                ok payload:
+                    lexer <- lexer.with_value(payload)
+                error failure:
+                    _ = try report_error(failure)
+                    raise failure
+            if lexer.current_char() < 0:
+                errno: i64 = lexer.error_code()
+                if errno == 4:
+                    -> Write
+                lexer <- lexer.mark_failed(errno)
+                -> Write
+            -> Read
+        Write, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected catch/bind/scoped-branch errors: %v", errs)
+	}
+}
+
+func TestMachineBranchTransitionRejectsFallthroughBranchLocal(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                value: i64 = 7
+                lexer <- lexer.advance_char()
+            else:
+                -> Write
+            -> Read
+        Write, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "declaration in a fallthrough branch") {
+		t.Fatalf("expected fallthrough branch-scope refusal, got %v", errs)
 	}
 }
 
