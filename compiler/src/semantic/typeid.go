@@ -48,7 +48,9 @@ func TryCanonicalTypeID(t Type) (TypeID, bool) {
 
 func canonicalTypeIDKey(t Type) (string, bool) {
 	var b strings.Builder
-	active := map[Type]int{}
+	b.Grow(64)
+	var stack [16]typeIDActiveFrame
+	active := &typeIDActive{frames: stack[:0]}
 	nextCycleID := 1
 	if !appendTypeIDKey(&b, t, active, &nextCycleID) {
 		return "", false
@@ -56,21 +58,47 @@ func canonicalTypeIDKey(t Type) (string, bool) {
 	return b.String(), true
 }
 
-func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleID *int) bool {
+// typeIDActive is the stack of types on the current key path (a type met again on its own
+// path is a cycle). Paths are short, so a linear scan of a stack beats a map allocated per key.
+type typeIDActive struct {
+	frames []typeIDActiveFrame
+}
+
+type typeIDActiveFrame struct {
+	t  Type
+	id int
+}
+
+func (s *typeIDActive) lookup(t Type) (int, bool) {
+	for i := len(s.frames) - 1; i >= 0; i-- {
+		if s.frames[i].t == t {
+			return s.frames[i].id, true
+		}
+	}
+	return 0, false
+}
+
+func (s *typeIDActive) push(t Type, id int) {
+	s.frames = append(s.frames, typeIDActiveFrame{t: t, id: id})
+}
+
+func (s *typeIDActive) pop() { s.frames = s.frames[:len(s.frames)-1] }
+
+func appendTypeIDKey(b *strings.Builder, t Type, active *typeIDActive, nextCycleID *int) bool {
 	if t == nil {
 		appendKeyTag(b, "nil")
 		return true
 	}
-	if id, ok := active[t]; ok {
+	if id, ok := active.lookup(t); ok {
 		appendKeyTag(b, "cycle")
 		appendKeyInt(b, id)
 		return true
 	}
-	active[t] = *nextCycleID
+	active.push(t, *nextCycleID)
 	appendKeyTag(b, "node")
 	appendKeyInt(b, *nextCycleID)
 	*nextCycleID++
-	defer delete(active, t)
+	defer active.pop()
 	switch tt := t.(type) {
 	case *InvalidType:
 		appendKeyTag(b, "invalid")
@@ -302,7 +330,7 @@ func appendShapeIDKey(b *strings.Builder, shape Shape) bool {
 	return true
 }
 
-func appendTypeSliceIDKey(b *strings.Builder, types []Type, active map[Type]int, nextCycleID *int) bool {
+func appendTypeSliceIDKey(b *strings.Builder, types []Type, active *typeIDActive, nextCycleID *int) bool {
 	appendKeyLen(b, len(types))
 	for _, typ := range types {
 		if !appendTypeIDKey(b, typ, active, nextCycleID) {
