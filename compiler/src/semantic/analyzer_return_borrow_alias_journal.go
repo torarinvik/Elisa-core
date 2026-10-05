@@ -101,6 +101,10 @@ func (a *Analyzer) endReturnBorrowBranch(aliases map[string]returnBorrowFlow) []
 				continue
 			}
 			if flow, ok := aliases[entry.name]; ok {
+				if changes == nil {
+					// At most one change per remaining entry: size once instead of regrowing.
+					changes = make([]returnBorrowBranchChange, 0, len(entries)-index)
+				}
 				changes = append(changes, returnBorrowBranchChange{name: entry.name, flow: flow, existedBefore: entry.existed})
 			}
 		}
