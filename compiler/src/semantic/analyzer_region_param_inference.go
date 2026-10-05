@@ -403,7 +403,10 @@ inspectPath:
 func (a *Analyzer) forwardTargetsRequireRegion(targets []regionForwardTarget) bool {
 	for _, target := range targets {
 		callee := target.callee
-		if callee == nil || target.argPos < 0 {
+		// A callee without region params can never require one; skip expanding (copying) its
+		// parameter list. Any duplicate-parameter diagnostic that expansion reports was already
+		// reported when the callee's signature was collected, before any body is analyzed.
+		if callee == nil || target.argPos < 0 || len(callee.RegionParams) == 0 {
 			continue
 		}
 		params := a.expandedFuncDeclParams(callee)
