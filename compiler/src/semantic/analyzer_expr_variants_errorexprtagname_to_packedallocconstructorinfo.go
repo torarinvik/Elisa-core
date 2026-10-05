@@ -2,8 +2,6 @@ package semantic
 
 import (
 	"elisacore/src/ast"
-	"maps"
-	"slices"
 	"strings"
 )
 
@@ -465,20 +463,33 @@ func (a *Analyzer) activePackedStoreRegionState(enumType *EnumType) (regionRefSt
 		return regionRefState{}, false
 	}
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
-		for _, symName := range slices.Sorted(maps.Keys(scope.Symbols)) { // map: sort so the chosen store binding is stable
-			sym := scope.Symbols[symName]
-			storeType, ok := sym.Type.(*PackedEnumStoreType)
-			if !ok || storeType == nil || storeType.Enum != enumType || !SameType(storeType, activeStore) {
+		// The innermost scope holding a matching store binding wins, and within it the binding
+		// with the smallest name (map order is random, so pick by name for a stable answer).
+		// Scanning for the minimum avoids sorting every name of every enclosing scope, the
+		// global scope included, on each call.
+		var sym *Symbol
+		var storeType *PackedEnumStoreType
+		bestName := ""
+		for symName, candidate := range scope.Symbols {
+			if sym != nil && symName >= bestName {
 				continue
 			}
-			if a.currentRegionRefs != nil {
-				if state, ok := a.currentRegionRefs[sym]; ok && hasRegionProvenance(state) {
-					state = a.canonicalizeStoredRegionRefBinding(sym, state)
-					return cloneRegionRefState(state), true
-				}
+			candidateStore, ok := candidate.Type.(*PackedEnumStoreType)
+			if !ok || candidateStore == nil || candidateStore.Enum != enumType || !SameType(candidateStore, activeStore) {
+				continue
 			}
-			return regionRefStateFromPackedStoreDependency(sym, storeType), true
+			sym, storeType, bestName = candidate, candidateStore, symName
 		}
+		if sym == nil {
+			continue
+		}
+		if a.currentRegionRefs != nil {
+			if state, ok := a.currentRegionRefs[sym]; ok && hasRegionProvenance(state) {
+				state = a.canonicalizeStoredRegionRefBinding(sym, state)
+				return cloneRegionRefState(state), true
+			}
+		}
+		return regionRefStateFromPackedStoreDependency(sym, storeType), true
 	}
 	return regionRefState{}, false
 }
