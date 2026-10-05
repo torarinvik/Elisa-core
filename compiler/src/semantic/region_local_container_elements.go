@@ -3,6 +3,7 @@ package semantic
 import (
 	"reflect"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 )
@@ -377,18 +378,38 @@ func (s *localContainerElementScan) walkValue(v reflect.Value, owner ast.Node, f
 }
 
 func (s *localContainerElementScan) walkStructFields(v reflect.Value, owner ast.Node) {
-	t := v.Type()
+	for _, f := range localContainerScanFields(v.Type()) {
+		s.walkValue(v.Field(f.index), owner, f.name)
+	}
+}
+
+type localContainerScanField struct {
+	index int
+	name  string
+}
+
+var localContainerScanFieldCache sync.Map // map[reflect.Type][]localContainerScanField
+
+// localContainerScanFields lists a struct type's exported fields that walkStructFields descends
+// into (maps, funcs and channels are skipped), cached per type instead of re-derived per node.
+func localContainerScanFields(t reflect.Type) []localContainerScanField {
+	if cached, ok := localContainerScanFieldCache.Load(t); ok {
+		return cached.([]localContainerScanField)
+	}
+	var fields []localContainerScanField
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if !f.IsExported() {
 			continue
 		}
-		fv := v.Field(i)
-		if fv.Kind() == reflect.Map || fv.Kind() == reflect.Func || fv.Kind() == reflect.Chan {
+		switch f.Type.Kind() {
+		case reflect.Map, reflect.Func, reflect.Chan:
 			continue
 		}
-		s.walkValue(fv, owner, f.Name)
+		fields = append(fields, localContainerScanField{index: i, name: f.Name})
 	}
+	cached, _ := localContainerScanFieldCache.LoadOrStore(t, fields)
+	return cached.([]localContainerScanField)
 }
 
 // stringFieldMayNameLocal reports whether a string field could name a local variable. Labels

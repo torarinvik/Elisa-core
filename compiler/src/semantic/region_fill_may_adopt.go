@@ -373,10 +373,8 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 				walk(v.Elem())
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				if v.Type().Field(i).IsExported() {
-					walk(v.Field(i))
-				}
+			for _, i := range fillMayAdoptExportedFields(v.Type()) {
+				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
 			if v.Type() == stmtList && v.CanInterface() {
