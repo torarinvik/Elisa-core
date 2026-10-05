@@ -687,6 +687,7 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 	if !tracked {
 		return
 	}
+	bulkParamIndex := -1
 	if bulk {
 		// Only a parameter source is modelled: its elements are no shorter-lived than its region,
 		// as for a by-value read `src[i]`. A local source's elements may be shorter-lived than the
@@ -716,6 +717,22 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 		if !found || sourceSym == nil || sourceSym.Kind != SymbolParam {
 			a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
 			delete(a.currentElementStates, sym)
+			return
+		}
+		bulkParamIndex = sourceSym.ParamIndex
+	}
+	if bulk && bulkParamIndex >= 0 {
+		if container, ok := stripRefForBounds(sym.Type).(*DArrayType); ok && container != nil && a.typeMayOwnArenaStorage(container.Elem, map[string]bool{}) {
+			// `extend(param)` copies the parameter's elements, not the parameter's
+			// backing buffer. Their unknown nested references are conservatively
+			// bounded by the source parameter's lifetime. Recording a concrete
+			// symbolic-region dependency here loses the return summary for region-
+			// polymorphic copies (especially when the element type comes from an
+			// imported module and its payload provenance is opaque).
+			state := regionRefStateFromParamDependency(bulkParamIndex)
+			merged, _ := mergeRegionRefStates(existing, state)
+			a.checkElementLoopAssumptions(sym, arg, merged, true)
+			a.currentElementStates[sym] = merged
 			return
 		}
 	}

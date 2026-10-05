@@ -246,6 +246,16 @@ func (a *Analyzer) elementStorageState(expr ast.Expr) (state regionRefState, ok 
 	if sym == nil || regionState.Destroyed {
 		return regionRefState{}, false, false
 	}
+	// A region-parametric container can name the same lifetime twice: once as the
+	// caller-parameter dependency carried by its elements, and once as the
+	// function's symbolic region (`@r`) on the container type. The symbolic
+	// region is not a local allocation to retain in a return summary. If the
+	// existing provenance already resolves to that exact formal parameter
+	// region, it fully represents the lifetime; adding the lexical region
+	// dependency would make a valid summary look local and unreturnable.
+	if parameterRegion, known := a.currentParamRegionFromRefState(state); known && parameterRegion == region {
+		return state, true, true
+	}
 	dep := regionRefStateFromDependency(sym, regionState.Generation)
 	if !ok {
 		return dep, true, true
