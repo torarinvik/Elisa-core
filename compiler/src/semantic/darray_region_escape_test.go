@@ -132,6 +132,87 @@ def main() -> i64:
 	}
 }
 
+// A region-parametric copy does not make a borrowed payload outlive its source.
+// The source and destination parameters below have independent lifetimes, so
+// copying elements from @source into @target must be rejected unless their
+// regions are tied by the signature.
+func TestRegionParametricCopyCannotEscapeIntoIndependentTargetRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_independent_target.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@source](source: darray[E]& @source) -> darray[E] @source:
+    result: mutable darray[E] @source = []
+    result.extend(source)
+    return result
+
+def forward_same_region[@r](source: darray[E]& @r, target: mutable darray[E]& @r):
+    retained: mutable darray[E] @r = copy_values(source)
+    target.extend(retained)
+
+def forward[@source, @target](source: darray[E]& @source, target: mutable darray[E]& @target):
+    retained: mutable darray[E] @source = copy_values(source)
+    target.extend(retained)
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "longer-lived") {
+		t.Fatalf("copying a source-region payload into an independent target region must be rejected while a tied-region copy remains valid, got:\n%s", joined)
+	}
+}
+
+// An explicit shared region is the supported way to make the copy-and-forward
+// operation safe; the independent-region refusal must not reject this case.
+func TestRegionParametricCopyIntoTiedTargetRegionIsAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_tied_target.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def forward_same_region[@r](source: darray[E]& @r, target: mutable darray[E]& @r):
+    retained: mutable darray[E] @r = copy_values(source)
+    target.extend(retained)
+`)
+	if errs := strings.Join(result.Errors(), "\n"); errs != "" {
+		t.Fatalf("copying into a target tied to the same region must remain valid, got:\n%s", errs)
+	}
+}
+
+// Nested containers carry region-owned headers even when their scalar payloads
+// do not. Forwarding a copied row into an independently-lived outer container
+// must therefore be rejected just like forwarding a view-bearing enum value.
+func TestRegionParametricNestedRowsCannotEscapeIntoIndependentTargetRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_nested_rows_independent_target.elisa", `def copy_rows[@source](source: darray[darray[u8]]& @source) -> darray[darray[u8]] @source:
+    result: mutable darray[darray[u8]] @source = []
+    result.extend(source)
+    return result
+
+def forward[@source, @target](source: darray[darray[u8]]& @source, target: mutable darray[darray[u8]]& @target):
+    retained: mutable darray[darray[u8]] @source = copy_rows(source)
+    target.extend(retained)
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "longer-lived") {
+		t.Fatalf("nested row headers must not escape from an independent source region into the target, got:\n%s", joined)
+	}
+}
+
+func TestRegionParametricNestedRowsIntoTiedTargetRegionAreAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_nested_rows_tied_target.elisa", `def copy_rows[@r](source: darray[darray[u8]]& @r) -> darray[darray[u8]] @r:
+    result: mutable darray[darray[u8]] @r = []
+    result.extend(source)
+    return result
+
+def forward_same_region[@r](source: darray[darray[u8]]& @r, target: mutable darray[darray[u8]]& @r):
+    retained: mutable darray[darray[u8]] @r = copy_rows(source)
+    target.extend(retained)
+`)
+	if errs := strings.Join(result.Errors(), "\n"); errs != "" {
+		t.Fatalf("nested row headers copied within one tied region must remain valid, got:\n%s", errs)
+	}
+}
+
 // Wrapping an already-region-stamped container in an inline enum preserves the
 // payload's actual region; it is not reallocated in the current nested region.
 func TestEnumPayloadUsesExistingContainerRegion(t *testing.T) {

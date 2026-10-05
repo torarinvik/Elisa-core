@@ -268,7 +268,7 @@ struct P:
     position: mutable usize
     params: mutable darray[Prm]
 
-def fill(parser: lmut P, items: mutable darray[Prm]&, bytes: mutable darray[u8]&) -> bool:
+def fill[@r](parser: lmut P, items: mutable darray[Prm]& @r, bytes: mutable darray[u8]& @r) -> bool:
     can Memory.Allocate, Abort.Panic:
         bytes.push(65)
         items.push(Prm{name: bytes.as_sview(), has_default: false})
@@ -296,7 +296,7 @@ struct P:
     position: mutable usize
     params: mutable darray[Prm]
 
-def fill(parser: lmut P, items: mutable darray[Prm]&, bytes: mutable darray[u8]&) -> bool:
+def fill[@r](parser: lmut P, items: mutable darray[Prm]& @r, bytes: mutable darray[u8]& @r) -> bool:
     can Memory.Allocate, Abort.Panic:
         bytes.push(65)
         items.push(Prm{name: bytes.as_sview(), has_default: false})

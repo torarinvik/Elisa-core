@@ -150,6 +150,11 @@ type FuncDecl struct {
 	Name         string
 	TypeParams   []string
 	RegionParams []string
+	// InferredRegionParams are region binders synthesized by semantic inference.
+	// They are a subset of RegionParams; source-declared binders remain distinct
+	// so escape checking can distinguish a user's independent lifetimes from
+	// compiler-generated container-growth plumbing.
+	InferredRegionParams []string
 	// AmbientGrownContainerRegion names a `__rg_<param>` region (one of RegionParams) inferred for a
 	// container parameter this function grows by INSERTING region-allocated values (the void-grower
 	// shape `out.push(make_node())`). The backend binds this function's ambient allocation region to

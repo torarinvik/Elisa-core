@@ -224,6 +224,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		name := "__rg_" + p.Name
 		stamp(name)
 		fn.RegionParams = append(fn.RegionParams, name)
+		fn.InferredRegionParams = append(fn.InferredRegionParams, name)
 		inferred[p.Name] = name
 		changed = true
 	}

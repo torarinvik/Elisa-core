@@ -902,10 +902,11 @@ func (a *Analyzer) regionIsAncestor(outer, inner string) bool {
 // the value is PROVABLY at least as long-lived as the target:
 //
 //   - same region                        → safe
-//   - value region is a caller-owned param / heap / untracked long-lived arena
-//     (ordinal not a tracked local)        → safe (outlives any local target)
-//   - target is a tracked-local but value is region-param/untracked-long-lived
-//     → safe (value outlives the local target)
+//   - a caller-owned value region written into a local target → safe
+//   - two uses of the same caller-owned region → safe
+//   - distinct source-declared caller-owned region parameters → unsafe unless
+//     an outlives relation is proven; either region may end before the other
+//   - heap / untracked long-lived value region → safe for local targets
 //   - both are tracked locals and the target is a true ANCESTOR of the value
 //     (genuine nesting: target outlives value)            → UNSAFE
 //   - both are tracked locals that are INCOMPARABLE (disjoint sibling regions,
@@ -918,16 +919,34 @@ func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 	}
 	_, targetTracked := a.regionLifetimeOrdinal(targetRegion)
 	_, valueTracked := a.regionLifetimeOrdinal(valueRegion)
+	valueIsParam := a.lookupRegionParam(valueRegion)
+	targetIsParam := a.lookupRegionParam(targetRegion)
+	if valueIsParam {
+		if targetIsParam {
+			// Distinct source-declared region parameters are independently supplied
+			// by the caller. Neither is known to outlive the other, so storing a
+			// borrowed payload across them is unsafe unless the signature ties them
+			// to the same name (handled by the equality fast path above). Generated
+			// __rg_* binders use a separate inference contract; call-site validation
+			// for relations between those binders is outside this source-declared
+			// parameter check.
+			if a.isSourceDeclaredRegionParam(valueRegion) && a.isSourceDeclaredRegionParam(targetRegion) {
+				return !a.regionOutlives(valueRegion, targetRegion)
+			}
+			return false
+		}
+		// Caller-owned storage outlives a region local to this function.
+		return false
+	}
 	// A value in an untracked region (heap, borrowed/process arena, unknown name)
-	// or in a caller-owned region param outlives every local target — never an
-	// escape on the value side.
-	if !valueTracked || a.lookupRegionParam(valueRegion) {
+	// outlives every local target — never an escape on the value side.
+	if !valueTracked {
 		return false
 	}
 	// Value is a tracked local region. If the target is NOT a tracked local
 	// (it's a param/heap/long-lived arena), the value is shorter-lived than the
 	// target → the original outlives rule already handled this as unsafe.
-	if !targetTracked || a.lookupRegionParam(targetRegion) {
+	if !targetTracked || targetIsParam {
 		return a.regionOutlives(targetRegion, valueRegion)
 	}
 	// Both are tracked local regions. Safe ONLY when the value's region provably
@@ -935,6 +954,24 @@ func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 	// target. Otherwise (target ancestor of value, OR disjoint siblings) it is
 	// not provably safe → reject.
 	return !a.regionIsAncestor(valueRegion, targetRegion)
+}
+
+func (a *Analyzer) isSourceDeclaredRegionParam(region string) bool {
+	if a == nil || a.currentFuncDecl == nil || region == "" {
+		return false
+	}
+	for _, parameter := range a.currentFuncDecl.RegionParams {
+		if parameter != region {
+			continue
+		}
+		for _, inferred := range a.currentFuncDecl.InferredRegionParams {
+			if inferred == region {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // checkNestedRegionStoreEscape rejects storing a value whose region is freed
