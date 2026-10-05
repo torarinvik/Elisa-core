@@ -20,6 +20,7 @@ func (a *Analyzer) semanticLimitPos() lexer.Pos {
 }
 
 func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
+	a.semanticLimitHits++
 	if a.semanticLimitDiagnostics == nil {
 		a.semanticLimitDiagnostics = map[string]bool{}
 	}
@@ -39,7 +40,24 @@ func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
 }
 
 func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
-	return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	// The answer is reachability of an affine handle through t's by-value type graph, a pure
+	// function of t once declaration shapes are final. Before that, or when the traversal hit
+	// the depth limit (which reports a diagnostic per function), compute it afresh.
+	if !a.typeShapesFrozen || t == nil {
+		return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	}
+	if cached, ok := a.affineHandleMemo[t]; ok {
+		return cached
+	}
+	hits := a.semanticLimitHits
+	result := a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	if a.semanticLimitHits == hits {
+		if a.affineHandleMemo == nil {
+			a.affineHandleMemo = map[Type]bool{}
+		}
+		a.affineHandleMemo[t] = result
+	}
+	return result
 }
 
 func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {

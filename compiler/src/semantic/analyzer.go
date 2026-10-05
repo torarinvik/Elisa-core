@@ -763,6 +763,14 @@ type Analyzer struct {
 	resolvedValueNames       map[*ast.Ident]string
 	currentImplicitScopes    []map[string]ast.Expr
 	semanticLimitDiagnostics map[string]bool
+	// semanticLimitHits counts reportSemanticDepthLimit calls, so a memo can tell whether a
+	// traversal was cut short (and must not be cached).
+	semanticLimitHits int
+	// typeShapesFrozen is set once every declaration's type has its final fields and
+	// affinity (just before body analysis); type-predicate memos are only valid after it.
+	typeShapesFrozen bool
+	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
+	affineHandleMemo map[Type]bool
 }
 
 type castHookSignature struct {
@@ -1253,6 +1261,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// the callee-body assumption can compose value contracts through first-class functions.
 	a.expandHigherOrderContracts(activeDecls)
 	a.returnBorrowLateEnabled = true
+	a.typeShapesFrozen = true
 	a.analyzeDecls(activeDecls)
 	a.evaluateLateReturnBorrowFrames()
 	// A4: discharge each protocol default method's own contract against its own body (the default
