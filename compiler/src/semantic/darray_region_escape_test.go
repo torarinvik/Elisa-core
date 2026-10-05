@@ -79,6 +79,31 @@ def main() -> i64:
 	}
 }
 
+// A local call-result binding inside a loop keeps the callee's region even
+// when loop-local element summaries are unavailable; its backing array is not
+// allocated in the loop's synthetic auto region.
+func TestRegionParametricCopyBindingKeepsReturnedRegionInsideLoop(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_param_copy_loop_binding.elisa", `enum E:
+    Name(text: sview)
+
+def copy_values[@r](source: darray[E]& @r) -> darray[E] @r:
+    result: mutable darray[E] @r = []
+    result.extend(source)
+    return result
+
+def restore(values: mutable darray[E]&):
+    for index in 0..<values.count:
+        retained: mutable darray[E] = copy_values(values)
+        values[index] <- retained[index]
+
+def main() -> i64:
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("loop-local call result must keep its returned region, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // The same helper must not hide a genuinely shorter-lived payload: the
 // caller-owned output outlives the local arena and its byte-backed view.
 func TestRegionParametricCopyStillRejectsShorterLivedPayload(t *testing.T) {
@@ -104,6 +129,26 @@ def main() -> i64:
 	joined := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(joined, "longer-lived region") && !strings.Contains(joined, "use-after-free") {
 		t.Fatalf("expected shorter-lived payload escape to be rejected, got:\n%s", joined)
+	}
+}
+
+// Wrapping an already-region-stamped container in an inline enum preserves the
+// payload's actual region; it is not reallocated in the current nested region.
+func TestEnumPayloadUsesExistingContainerRegion(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "enum_payload_existing_region.elisa", `enum E:
+    Name(text: sview)
+
+enum Holder:
+    Items(values: darray[E])
+
+def retain[@r, @s](values: darray[E] @r, unrelated: darray[i64] @s, out: mutable darray[Holder]& @r):
+    out.push(Holder.Items(values))
+
+def main() -> i64:
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("enum wrapper must retain its payload container's region, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

@@ -1080,7 +1080,7 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		// container here) — use that as the value's region. The one sanctioned exception: a
 		// void grower whose ambient region was bound to this very target (adoption routes the
 		// payload into the target's arena, so nothing dangles).
-		valueRegion = a.enumCtorPayloadFreshRegion(argExpr)
+		valueRegion = a.enumCtorPayloadRegion(argExpr)
 		if valueRegion == "" {
 			// The ctor may have been bound to a local first (`node = Item.Row(mk()); out.push(node)`)
 			// — the taint side-table carries the payload's region across that binding.
@@ -1157,13 +1157,13 @@ func (a *Analyzer) currentParamRegionFromRefState(state regionRefState) (string,
 	return region, valid && seenParam
 }
 
-// enumCtorPayloadFreshRegion classifies an enum-constructor expression — bare (`Item.Row(x)`) or
+// enumCtorPayloadRegion classifies an enum-constructor expression — bare (`Item.Row(x)`) or
 // through `new` (`new Stmt.Block(body: kids)`) — whose payload arguments carry region storage.
-// The enum TYPE carries no region stamp, so region checks were blind to the wrapped payload; the
-// payload actually lives in the INNERMOST active allocation region (what stampContainerRegion
-// would have stamped on a bare container here), which this returns. "" when the expression is not
-// such a ctor, its payload is region-free, or no allocation region is active.
-func (a *Analyzer) enumCtorPayloadFreshRegion(expr ast.Expr) string {
+// The enum TYPE carries no region stamp, so region checks must inspect the wrapped payloads. An
+// existing region-bearing payload keeps its own region; only a region-carrying expression with no
+// recoverable provenance falls back to the active allocation region. The shortest comparable
+// payload region is returned so a fresh, shorter-lived payload is not hidden by an older one.
+func (a *Analyzer) enumCtorPayloadRegion(expr ast.Expr) string {
 	if a == nil || expr == nil {
 		return ""
 	}
@@ -1197,12 +1197,19 @@ func (a *Analyzer) enumCtorPayloadFreshRegion(expr ast.Expr) string {
 	if _, isVariant := enumType.Variant(fieldExpr.Field); !isVariant {
 		return ""
 	}
+	region := ""
 	for _, payloadArg := range call.Args {
-		if typeCarriesRegionStorage(a.exprTypes[payloadArg]) {
-			return a.activeContainerRegionName()
+		payloadType := a.exprTypes[payloadArg]
+		if !typeCarriesRegionStorage(payloadType) {
+			continue
 		}
+		payloadRegion := a.valueStoreRegion(payloadArg, payloadType)
+		if payloadRegion == "" {
+			payloadRegion = a.activeContainerRegionName()
+		}
+		region = a.innerRegion(region, payloadRegion)
 	}
-	return ""
+	return region
 }
 
 // checkNestedRegionBulkStoreEscape is the bulk form of the element-store check
@@ -1352,7 +1359,7 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	// enum type carries no region stamp and the ctor expression is gone by the time `node` is
 	// pushed. Checked BEFORE the container gates below: a PACKED handle deliberately fails
 	// typeCarriesRegionStorage, yet its variant payload dangles just the same.
-	if region := a.enumCtorPayloadFreshRegion(value); region != "" {
+	if region := a.enumCtorPayloadRegion(value); region != "" {
 		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
 		return
 	}
@@ -1646,8 +1653,8 @@ func (a *Analyzer) valueInteriorRegion(expr ast.Expr) string {
 		}
 		// An enum-ctor element (`[Item.Row(make_vals(10))]` fed to extend/assign) carries its
 		// payload's fresh region even though the enum type is unstamped — same blindness the
-		// element-store check had (enumCtorPayloadFreshRegion).
-		return a.enumCtorPayloadFreshRegion(stripped)
+		// element-store check had (enumCtorPayloadRegion).
+		return a.enumCtorPayloadRegion(stripped)
 	}
 }
 

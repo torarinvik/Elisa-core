@@ -130,6 +130,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if specializedViewType, ok := concreteBorrowedViewBindingType(bindingType, valueType); ok {
 			bindingType = specializedViewType
 		}
+		if specializedContainerType, ok := concreteContainerRegionBindingType(bindingType, valueType); ok {
+			bindingType = specializedContainerType
+		}
 		if !n.Mutable {
 			if specializedType, ok := a.specializeCallbackCarryingType(bindingType, valueType); ok {
 				bindingType = specializedType
@@ -1370,6 +1373,27 @@ func concreteBorrowedViewBindingType(declared Type, actual Type) (Type, bool) {
 	// pointee survives until the last use of `view`.
 	specialized := *declaredSView
 	specialized.Region = actualSView.Region
+	return &specialized, true
+}
+
+// concreteContainerRegionBindingType preserves the storage region of a
+// region-carrying container returned by an initializer when the written local
+// type leaves its region unspecified. The annotation constrains the container
+// shape and element type; it does not relocate the returned backing buffer.
+// Without this specialization, stampContainerRegion could incorrectly assign
+// the local's ambient auto region, making later reads appear shorter-lived than
+// the actual returned container (or, worse, losing a lifetime constraint).
+func concreteContainerRegionBindingType(declared Type, actual Type) (Type, bool) {
+	declaredArray, ok := declared.(*DArrayType)
+	if !ok || declaredArray == nil || declaredArray.Region != "" {
+		return nil, false
+	}
+	actualArray, ok := actual.(*DArrayType)
+	if !ok || actualArray == nil || actualArray.Region == "" || !SameType(declaredArray.Elem, actualArray.Elem) {
+		return nil, false
+	}
+	specialized := *declaredArray
+	specialized.Region = actualArray.Region
 	return &specialized, true
 }
 
