@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -551,7 +553,8 @@ func bindCallArgs(dst map[string]Value, params []ast.ParamDecl, positional []Val
 		used[params[i].Name] = true
 		dst[params[i].Name] = arg.Clone()
 	}
-	for name, value := range named {
+	for _, name := range slices.Sorted(maps.Keys(named)) { // map: sort so the reported argument is stable
+		value := named[name]
 		if used[name] {
 			return fmt.Errorf("argument %q provided more than once", name)
 		}

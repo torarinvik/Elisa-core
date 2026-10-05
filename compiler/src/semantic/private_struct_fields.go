@@ -45,7 +45,8 @@ func (a *Analyzer) checkPrivateZeroedType(t Type, pos lexer.Pos, seen map[Type]b
 	seen[t] = true
 	switch value := t.(type) {
 	case *StructType:
-		for name, field := range value.Fields {
+		for _, name := range orderedStructFieldNames(value) { // map: declaration order for a stable report order
+			field := value.Fields[name]
 			a.checkPrivateStructField(value, name, pos)
 			a.checkPrivateZeroedType(field.Type, pos, seen)
 		}
@@ -53,7 +54,8 @@ func (a *Analyzer) checkPrivateZeroedType(t Type, pos lexer.Pos, seen map[Type]b
 		if base, ok := value.Base.(*StructType); ok {
 			bindings := genericBindingsForStructInstance(base, value.Args)
 			regions := regionBindingsForStructInstance(base, value.Args)
-			for name, field := range base.Fields {
+			for _, name := range orderedStructFieldNames(base) { // map: declaration order for a stable report order
+				field := base.Fields[name]
 				a.checkPrivateStructField(base, name, pos)
 				a.checkPrivateZeroedType(a.substituteType(field.Type, bindings, nil, regions, nil), pos, seen)
 			}

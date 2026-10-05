@@ -282,15 +282,21 @@ func (a *Analyzer) lookupAffineValueStateForKey(key affineValueKey) (affineValue
 	if ok && state.ConsumedBy != "" {
 		return state, true
 	}
+	// Several related paths may be consumed; pick the one with the smallest path so the state
+	// behind a use-after-move diagnostic is the same every run (the map order is not).
+	var best affineValueState
+	bestPath, found := "", false
 	for existing, existingState := range a.currentAffineValues {
 		if existing.Root != key.Root {
 			continue
 		}
 		if existingState.ConsumedBy != "" && (affinePathContains(existing.Path, key.Path) || affinePathContains(key.Path, existing.Path)) {
-			return existingState, true
+			if !found || existing.Path < bestPath {
+				best, bestPath, found = existingState, existing.Path, true
+			}
 		}
 	}
-	return affineValueState{}, false
+	return best, found
 }
 
 func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {

@@ -3,6 +3,8 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"maps"
+	"slices"
 )
 
 // R2 — state-flag ban (docs/121 §3-R2). A loop-carried integer/bool binding that is
@@ -21,7 +23,7 @@ func (a *Analyzer) checkFlowStateFlag(info *loopFlowInfo) {
 	if info == nil {
 		return
 	}
-	for name := range info.carried {
+	for _, name := range slices.Sorted(maps.Keys(info.carried)) { // map: sort for a stable report order
 		boolTests, intCmps := info.comparisonSites(name)
 		assignBranches := info.assignBranchCount(name)
 		if assignBranches < 2 {

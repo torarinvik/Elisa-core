@@ -1172,7 +1172,9 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 			a.bindConditionPatternLocals(scope, n.Right, true)
 			return
 		case lexer.TOKEN_OR:
-			for name, typ := range a.collectGuaranteedTruthyConditionBindingTypes(n) {
+			truthy := a.collectGuaranteedTruthyConditionBindingTypes(n)
+			for _, name := range slices.Sorted(maps.Keys(truthy)) { // map: sort for a stable report order
+				typ := truthy[name]
 				sym := &Symbol{Name: name, Kind: SymbolLocal, Type: typ, Node: n, Mutable: false}
 				a.defineLocalInScope(scope, sym, n.Pos())
 			}

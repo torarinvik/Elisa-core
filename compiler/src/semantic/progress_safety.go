@@ -279,7 +279,8 @@ func (a *Analyzer) validateProgressBlocking(decls []scopedDecl) {
 		funcs[fn.Name] = fn
 		namesByDecl[fn] = name
 	}
-	for fn, name := range namesByDecl {
+	for _, fn := range sortedFuncDeclKeys(namesByDecl) { // map: source order for a stable report order
+		name := namesByDecl[fn]
 		summary := a.progressSummaries[fn]
 		if summary == nil || !summary.HasBlocking || summary.HasUnsafeBlockMain {
 			continue
@@ -704,7 +705,7 @@ func progressTarjan(names map[*ast.FuncDecl]string, edges map[*ast.FuncDecl]map[
 		stack = append(stack, v)
 		onStack[v] = true
 
-		for w := range edges[v] {
+		for _, w := range sortedFuncDeclKeys(edges[v]) { // map: source order so component membership order is stable
 			if _, ok := names[w]; !ok {
 				continue
 			}
@@ -734,7 +735,7 @@ func progressTarjan(names map[*ast.FuncDecl]string, edges map[*ast.FuncDecl]map[
 		components = append(components, component)
 	}
 
-	for fn := range names {
+	for _, fn := range sortedFuncDeclKeys(names) { // map: source order so component order is stable
 		if indices[fn] == 0 {
 			strongConnect(fn)
 		}

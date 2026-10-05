@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -131,7 +133,11 @@ func renderSubstitutedGoal(expr ast.Expr, subst map[string]ast.Expr) string {
 	}
 	// Build a textual substitution: replace param idents with their argument text.
 	raw := unparse.FormatExpr(expr)
-	for paramName, argExpr := range subst {
+	// Substitution is sequential, so order it: longest names first, ties by name — never map order.
+	paramNames := slices.Sorted(maps.Keys(subst))
+	sort.SliceStable(paramNames, func(i, j int) bool { return len(paramNames[i]) > len(paramNames[j]) })
+	for _, paramName := range paramNames {
+		argExpr := subst[paramName]
 		if argExpr == nil {
 			continue
 		}

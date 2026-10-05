@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 
 	"elisacore/src/ast"
@@ -473,7 +475,8 @@ func (a *Analyzer) associatedTypeProjectionRefinement(t Type) ([]ast.RefinementP
 	var hullPred ast.RefinementPredExpr
 	var loV, hiV int64
 	count := 0
-	for _, impl := range a.staticImpls {
+	for _, implKey := range slices.Sorted(maps.Keys(a.staticImpls)) { // map: sort so the law name / hull predicate come from the same impl every run
+		impl := a.staticImpls[implKey]
 		if impl == nil || impl.InterfaceName != proj.InterfaceName {
 			continue
 		}

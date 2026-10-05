@@ -21,7 +21,9 @@ package semantic
 // at slot 0, so a node kind this file never heard of is checked conservatively, not skipped.
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 
 	"elisacore/src/ast"
@@ -211,7 +213,8 @@ func (a *Analyzer) checkAppendOnlyStores(decls []scopedDecl) {
 		return
 	}
 	owners := map[string]string{}
-	for name, store := range facts.stores {
+	for _, name := range slices.Sorted(maps.Keys(facts.stores)) { // map: sort so a module with two stores names the same owner every run
+		store := facts.stores[name]
 		if store.module != "" {
 			owners[store.module] = name
 		}

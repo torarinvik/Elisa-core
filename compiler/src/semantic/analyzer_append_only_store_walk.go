@@ -3,7 +3,9 @@ package semantic
 // The body walk of the `@append_only` store check (rules in analyzer_append_only_store.go).
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -78,7 +80,7 @@ func (f *aoFacts) calleeIsOwn(env *aoEnv, callee ast.Expr) (string, bool) {
 	if len(name) < len(id.Name) {
 		prefix := id.Name[:len(id.Name)-len(name)-1]
 		module = ""
-		for ns := range f.ownerModules() {
+		for _, ns := range slices.Sorted(maps.Keys(f.ownerModules())) { // map: sort so a suffix tie resolves the same way every run
 			if ns == prefix || (len(ns) > len(prefix) && ns[len(ns)-len(prefix)-1:] == "."+prefix) {
 				module = ns
 			}

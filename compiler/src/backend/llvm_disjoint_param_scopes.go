@@ -138,6 +138,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"sort"
 	"unsafe"
 )
 
@@ -200,6 +201,9 @@ func (s *functionState) initDisjointParamScopes() {
 	if len(group) < 2 {
 		return
 	}
+	// SelfNoalias is a map: sort so the sibling scope lists (noalias/alias.scope metadata) are
+	// emitted in the same order every run.
+	sort.Ints(group)
 
 	st := &disjointParamScopeState{
 		domain:   fmt.Sprintf("elisa.disjoint.%s.aa", sanitizeIdentifier(s.decl.Name)),

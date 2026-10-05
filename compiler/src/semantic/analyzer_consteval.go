@@ -235,70 +235,31 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return ConstValue{}, false
 		}
 	case *ast.BinaryExpr:
-		left, ok := a.evalConstExpr(n.Left)
+		// `a + b + c + …` parses left-leaning, so a flat chain is a tree as deep as it is long;
+		// recursing on Left overflowed the Go stack at a few hundred thousand terms. Walk the left
+		// spine iteratively, evaluate its leaf, then fold back up — the same left-to-right order.
+		var spineBuf [8]*ast.BinaryExpr
+		spine := append(spineBuf[:0], n)
+		leaf := n.Left
+		for {
+			inner, ok := leaf.(*ast.BinaryExpr)
+			if !ok {
+				break
+			}
+			spine = append(spine, inner)
+			leaf = inner.Left
+		}
+		value, ok := a.evalConstExpr(leaf)
 		if !ok {
 			return ConstValue{}, false
 		}
-		if n.Op == lexer.TOKEN_IN {
-			list, ok := a.membershipCandidateList(n.Right)
-			if !ok || list == nil {
+		for i := len(spine) - 1; i >= 0; i-- {
+			value, ok = a.evalConstBinaryWithLeft(spine[i], value)
+			if !ok {
 				return ConstValue{}, false
 			}
-			for _, elem := range list.Elems {
-				if rangeExpr, ok := elem.(*ast.MembershipRangeExpr); ok {
-					matched, ok := a.evalConstMembershipRange(left, rangeExpr)
-					if !ok {
-						return ConstValue{}, false
-					}
-					if matched.Bool {
-						return matched, true
-					}
-					continue
-				}
-				candidate, ok := a.evalConstExpr(elem)
-				if !ok {
-					return ConstValue{}, false
-				}
-				matched, ok := a.evalConstEquality(left, candidate, true)
-				if !ok {
-					return ConstValue{}, false
-				}
-				if matched.Bool {
-					return matched, true
-				}
-			}
-			return ConstValue{Kind: ConstBool, Bool: false}, true
 		}
-		right, ok := a.evalConstExpr(n.Right)
-		if !ok {
-			return ConstValue{}, false
-		}
-		switch n.Op {
-		case lexer.TOKEN_AND:
-			if left.Kind != ConstBool || right.Kind != ConstBool {
-				return ConstValue{}, false
-			}
-			return ConstValue{Kind: ConstBool, Bool: left.Bool && right.Bool}, true
-		case lexer.TOKEN_OR:
-			if left.Kind != ConstBool || right.Kind != ConstBool {
-				return ConstValue{}, false
-			}
-			return ConstValue{Kind: ConstBool, Bool: left.Bool || right.Bool}, true
-		case lexer.TOKEN_EQEQ:
-			return a.evalConstEquality(left, right, true)
-		case lexer.TOKEN_BANGEQ:
-			return a.evalConstEquality(left, right, false)
-		case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ,
-			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
-			lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
-			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
-			if result, ok := evalConstNumericBinary(n.Op, left, right); ok {
-				return result, true
-			}
-			return ConstValue{}, false
-		default:
-			return ConstValue{}, false
-		}
+		return value, true
 	case *ast.TernaryExpr:
 		cond, ok := a.evalConstBoolExpr(n.Cond)
 		if !ok {
@@ -2918,5 +2879,69 @@ func narrowUnsignedConstCast(value uint64, name string) uint64 {
 		return uint64(uint32(value))
 	default:
 		return value
+	}
+}
+
+// evalConstBinaryWithLeft finishes a binary constant fold whose left operand is already known.
+func (a *Analyzer) evalConstBinaryWithLeft(n *ast.BinaryExpr, left ConstValue) (ConstValue, bool) {
+	if n.Op == lexer.TOKEN_IN {
+		list, ok := a.membershipCandidateList(n.Right)
+		if !ok || list == nil {
+			return ConstValue{}, false
+		}
+		for _, elem := range list.Elems {
+			if rangeExpr, ok := elem.(*ast.MembershipRangeExpr); ok {
+				matched, ok := a.evalConstMembershipRange(left, rangeExpr)
+				if !ok {
+					return ConstValue{}, false
+				}
+				if matched.Bool {
+					return matched, true
+				}
+				continue
+			}
+			candidate, ok := a.evalConstExpr(elem)
+			if !ok {
+				return ConstValue{}, false
+			}
+			matched, ok := a.evalConstEquality(left, candidate, true)
+			if !ok {
+				return ConstValue{}, false
+			}
+			if matched.Bool {
+				return matched, true
+			}
+		}
+		return ConstValue{Kind: ConstBool, Bool: false}, true
+	}
+	right, ok := a.evalConstExpr(n.Right)
+	if !ok {
+		return ConstValue{}, false
+	}
+	switch n.Op {
+	case lexer.TOKEN_AND:
+		if left.Kind != ConstBool || right.Kind != ConstBool {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstBool, Bool: left.Bool && right.Bool}, true
+	case lexer.TOKEN_OR:
+		if left.Kind != ConstBool || right.Kind != ConstBool {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstBool, Bool: left.Bool || right.Bool}, true
+	case lexer.TOKEN_EQEQ:
+		return a.evalConstEquality(left, right, true)
+	case lexer.TOKEN_BANGEQ:
+		return a.evalConstEquality(left, right, false)
+	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ,
+		lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
+		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
+		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		if result, ok := evalConstNumericBinary(n.Op, left, right); ok {
+			return result, true
+		}
+		return ConstValue{}, false
+	default:
+		return ConstValue{}, false
 	}
 }

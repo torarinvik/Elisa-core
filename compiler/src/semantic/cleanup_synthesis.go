@@ -140,7 +140,8 @@ func createStructCleanupOps(fields map[string]Field, seen map[string]bool) []Typ
 		return nil
 	}
 	ops := make([]TypeBoundCleanupOp, 0, len(fields))
-	for name, field := range fields {
+	for _, name := range sortedFieldNames(fields) { // map: sort — the op list reaches the cleanup plan in facts and codegen
+		field := fields[name]
 		fieldOps := createTypeBoundOps(field.Type, seen)
 		for _, op := range fieldOps {
 			ops = append(ops, op.WithPrependedPath(name))

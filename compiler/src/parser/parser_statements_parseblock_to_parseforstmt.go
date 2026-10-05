@@ -8,6 +8,8 @@ import (
 )
 
 func (p *Parser) parseBlock() []ast.Stmt {
+	p.enterNesting()
+	defer p.leaveNesting()
 	p.expect(lexer.TOKEN_INDENT)
 	stmts := make([]ast.Stmt, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {

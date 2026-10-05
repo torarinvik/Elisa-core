@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -349,7 +351,8 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 					states = append(states, state)
 					fieldStates[moveBindVariantFieldKey(variant, i)] = state
 				}
-				for name, arg := range commonArgs {
+				for _, name := range slices.Sorted(maps.Keys(commonArgs)) { // map: sort so the merged provenance is stable
+					arg := commonArgs[name]
 					state, ok := a.regionRefStateForExpr(arg)
 					if !ok || !hasRegionProvenance(state) {
 						continue
