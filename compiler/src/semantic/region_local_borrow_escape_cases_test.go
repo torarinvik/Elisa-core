@@ -430,11 +430,11 @@ func TestLocalBorrowEscapeFalsePositiveReductions(t *testing.T) {
 	}
 }
 
-// Known misses: real escapes the analysis does not yet report (the base misses them too). The
-// test pins the current behaviour so a fix shows up here; flip it to a rejection when one lands.
-var localBorrowEscapeKnownMisses = []localBorrowEscapeCase{
+// These cases were previously known misses: a short-lived view was copied through an aggregate
+// element into a longer-lived output. The call-site store checker now rejects both.
+var localBorrowEscapeNewlyDetected = []localBorrowEscapeCase{
 	// A local view pushed into a copied container before the walker fills the out-param.
-	{name: "re1n", src: `enum Ex:
+	{name: "re1n", ok: false, src: `enum Ex:
     Leaf(name: sview, kids: darray[i64])
     Empty
 
@@ -452,7 +452,7 @@ def main() -> i32:
     return 0
 `},
 	// The same without the comprehension copy.
-	{name: "re2n", src: `enum Ex:
+	{name: "re2n", ok: false, src: `enum Ex:
     Leaf(name: sview)
     Empty
 
@@ -470,13 +470,17 @@ def main() -> i32:
 `},
 }
 
-func TestLocalBorrowEscapeKnownMisses(t *testing.T) {
-	for _, tc := range localBorrowEscapeKnownMisses {
+func TestLocalBorrowEscapeNewlyDetected(t *testing.T) {
+	for _, tc := range localBorrowEscapeNewlyDetected {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, err := range localBorrowEscapeErrors(t, tc.name, tc.src) {
-				if isLocalBorrowEscapeError(err) {
-					t.Fatalf("known miss is now rejected; move it to localBorrowEscapeCases as a negative: %s", err)
+			errs := localBorrowEscapeErrors(t, tc.name, tc.src)
+			for _, err := range errs {
+				if !isLocalBorrowEscapeError(err) {
+					t.Fatalf("newly detected escape must fail only on a region error, got: %s", err)
 				}
+			}
+			if len(errs) == 0 {
+				t.Fatalf("previously missed short-lived view escape must now be rejected")
 			}
 		})
 	}

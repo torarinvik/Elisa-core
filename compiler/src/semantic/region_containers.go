@@ -2014,20 +2014,23 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 			// The callee can only store region data reachable from this argument if some value it
 			// reaches has a type the container's elements may point at: a `darray[Pattern]` of
 			// handles cannot become the bytes an `sview` element points into.
-			if !stored.intersects(argumentRegionPointees(a.exprTypes[arg])) {
+			if !stored.intersects(argumentStorePointees(a.exprTypes[arg])) {
 				continue
 			}
-			if a.callArgsKeptApart(call, index, other) {
+			// Store-flow is directed: the container in `other` is dangerous only
+			// when its contents can reach the writable container at `index`.
+			// Symmetric connectivity alone also includes the reverse-only case
+			// (the target feeds the source), which cannot create this escape.
+			if a.callArgNeverReaches(call, other, index) || a.callArgsKeptApart(call, index, other) {
 				continue
 			}
 			state, ok := a.regionRefStateForExpr(arg)
 			if !ok {
 				continue
 			}
-			if elemState, onlyElements := a.headerOnlyArgumentElementState(arg, containerType); onlyElements {
-				// A `darray[sview]` argument's own storage holds only view headers: no bytes the
-				// container's views could point into, and no part of its elements can hold that
-				// container's header. What the callee can store from it is its ELEMENTS.
+			if elemState, onlyElements := a.callArgumentElementStateWithoutHeaderEscape(arg, containerType); onlyElements {
+				// The destination cannot retain the source darray header, so only the
+				// source elements' tracked provenance can escape through this argument.
 				state = elemState
 			}
 			for _, region := range liveLocalRegionDependencyNames(state) {
@@ -2130,6 +2133,16 @@ func containerElementPointees(t Type) regionPointees {
 func argumentRegionPointees(t Type) regionPointees {
 	p := regionPointees{keys: map[string]bool{}}
 	collectImmediateRegionPointees(t, &p, map[Type]bool{})
+	return p
+}
+
+// argumentStorePointees includes references carried by values reachable from an argument, not
+// only references into the argument's own backing region. For example, a darray[Record] whose
+// records contain sviews can supply the viewed bytes to a callee even though those bytes are not
+// stored inline in the darray itself.
+func argumentStorePointees(t Type) regionPointees {
+	p := argumentRegionPointees(t)
+	collectRegionPointees(t, &p, map[Type]bool{})
 	return p
 }
 
@@ -2277,11 +2290,11 @@ func collectRegionPointees(t Type, p *regionPointees, seen map[Type]bool) {
 	}
 }
 
-// headerOnlyArgumentElementState: when arg is a local `darray[E]` (E `sview` or a non-byte
-// scalar) with a tracked element state, and no part of the target container's element type can
-// hold a `darray[E]` header, a reference or a generic view, the callee can store only copies of
-// arg's elements into the container — return those elements' state.
-func (a *Analyzer) headerOnlyArgumentElementState(arg ast.Expr, containerType Type) (regionRefState, bool) {
+// callArgumentElementStateWithoutHeaderEscape returns tracked element provenance for a local
+// darray argument when the destination cannot retain the source darray's backing storage. The
+// element type may be any concrete aggregate: each element's state retains nested borrows, while
+// the temporary source buffer is not itself stored by a callee that only copies its elements.
+func (a *Analyzer) callArgumentElementStateWithoutHeaderEscape(arg ast.Expr, containerType Type) (regionRefState, bool) {
 	ident, ok := stripAddrAndParens(arg).(*ast.Ident)
 	if !ok || ident == nil || a.currentScope == nil || a.currentElementStates == nil {
 		return regionRefState{}, false
@@ -2290,17 +2303,49 @@ func (a *Analyzer) headerOnlyArgumentElementState(arg ast.Expr, containerType Ty
 	if !ok || sym == nil {
 		return regionRefState{}, false
 	}
-	elemName, ok := headerOnlyDarrayElemTypeName(sym.Type)
-	if !ok {
+	sourceElem, ok := darrayElemType(sym.Type)
+	if !ok || sourceElem == nil {
 		return regionRefState{}, false
 	}
 	targetElem, ok := darrayElemType(containerType)
-	if !ok || typeMayReachDarrayStorage(targetElem, elemName) {
+	if !ok || typeMayReachDarrayStorage(targetElem, sourceElem.String()) {
 		return regionRefState{}, false
 	}
 	elems, tracked := a.currentElementStates[sym]
 	if !tracked {
 		return regionRefState{}, false
 	}
+	if inlineContainerElementValue(sourceElem) {
+		// Element tracking also records where an inline aggregate's array slot
+		// lives. Copying the aggregate by value does not retain that slot. Remove
+		// only this root dependency: nested field states still retain real borrows
+		// into the same region (including a view stored in an aggregate field).
+		if sourceRegion := containerRegion(sym.Type); sourceRegion != "" {
+			elems = withoutRootRegionDependency(elems, sourceRegion)
+		}
+	}
 	return elems, true
+}
+
+func inlineContainerElementValue(t Type) bool {
+	switch element := StripAggregateStateType(t).(type) {
+	case *StructType:
+		return element != nil && !element.Store
+	case *EnumType:
+		return element != nil && !element.Packed
+	case *TupleType, *ArrayType, *OptionalType, *ErrorUnionType:
+		return true
+	default:
+		return false
+	}
+}
+
+func withoutRootRegionDependency(state regionRefState, name string) regionRefState {
+	state = cloneRegionRefState(state)
+	for region := range state.Deps {
+		if region != nil && region.Name == name {
+			delete(state.Deps, region)
+		}
+	}
+	return state
 }
