@@ -261,6 +261,21 @@ func cloneRegionRefFields(src map[string]regionRefState) map[string]regionRefSta
 	return cloned
 }
 
+// shareRegionRefFields returns src itself, normalizing an empty map to nil exactly as
+// cloneRegionRefFields does (reflect.DeepEqual-based convergence checks tell the two apart).
+func shareRegionRefFields(src map[string]regionRefState) map[string]regionRefState {
+	if len(src) == 0 {
+		return nil
+	}
+	return src
+}
+
+// cloneRegionRefState copies a state so the caller may edit its Deps, StoreDeps and
+// ParamDeps in place. Fields is SHARED, not copied: every writer of a regionRefState
+// Fields map either builds a fresh map or clones it first (cloneRegionRefFields) before
+// writing, so a Fields map is immutable once it is reachable from a state. Nested field
+// maps were already shared by the old one-level copy; copying the top level bought
+// nothing and was ~15% of all bytes allocated by a self-compile.
 func cloneRegionRefState(state regionRefState) regionRefState {
 	return regionRefState{
 		Deps:                    cloneRegionDependencyStates(state.Deps),
@@ -268,7 +283,7 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 		DirectParamDep:          state.DirectParamDep,
 		HasDirectParamDep:       state.HasDirectParamDep,
 		ParamDeps:               cloneRegionParamDeps(state.ParamDeps),
-		Fields:                  cloneRegionRefFields(state.Fields),
+		Fields:                  shareRegionRefFields(state.Fields),
 		PackedStoreSummary:      state.PackedStoreSummary,
 		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
 		ParamOnlySummary:        state.ParamOnlySummary,
