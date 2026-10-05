@@ -40,22 +40,37 @@ func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
 }
 
 func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
-	// The answer is reachability of an affine handle through t's by-value type graph, a pure
-	// function of t once declaration shapes are final. Before that, or when the traversal hit
-	// the depth limit (which reports a diagnostic per function), compute it afresh.
-	if !a.typeShapesFrozen || t == nil {
-		return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	switch t.(type) {
+	case *ArrayType, *DArrayType, *ViewType, *OptionalType, *ErrorUnionType, *DictType, *SetType,
+		*DictEntryType, *PackedVariantViewType, *EnumType, *GenericInstanceType, *StructType:
+	default:
+		// typeContainsWithSeen descends into none of these, and isAffineHandleType holds only
+		// for struct and generic-instance types: the answer is false without a traversal.
+		return false
 	}
-	if cached, ok := a.affineHandleMemo[t]; ok {
+	return a.memoTypePredicate(&a.affineHandleMemo, t, func() bool {
+		return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	})
+}
+
+// memoTypePredicate caches a predicate over t's by-value type graph (reachability of some
+// leaf), a pure function of t once declaration shapes are final. Before that, or when the
+// traversal hit the depth limit (which reports a diagnostic per function), it is computed
+// afresh.
+func (a *Analyzer) memoTypePredicate(memo *map[Type]bool, t Type, compute func() bool) bool {
+	if !a.typeShapesFrozen || t == nil {
+		return compute()
+	}
+	if cached, ok := (*memo)[t]; ok {
 		return cached
 	}
 	hits := a.semanticLimitHits
-	result := a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	result := compute()
 	if a.semanticLimitHits == hits {
-		if a.affineHandleMemo == nil {
-			a.affineHandleMemo = map[Type]bool{}
+		if *memo == nil {
+			*memo = map[Type]bool{}
 		}
-		a.affineHandleMemo[t] = result
+		(*memo)[t] = result
 	}
 	return result
 }

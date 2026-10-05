@@ -35,7 +35,7 @@ func (a *Analyzer) checkCallArgumentHolderStoreEscape(call *ast.CallExpr) {
 			continue
 		}
 		holderType := stripRefForBounds(a.exprTypes[args[index]])
-		if containerRegion(holderType) != "" || !a.typeMayHoldFrameBorrow(ref.Elem, map[Type]bool{}) {
+		if a.containerRegionOf(holderType) != "" || !a.typeMayHoldFrameBorrow(ref.Elem, map[Type]bool{}) {
 			continue
 		}
 		place := returnBorrowStripAddr(args[index])

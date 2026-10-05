@@ -61,6 +61,23 @@ func (a *Analyzer) stampContainerRegion(t Type) Type {
 // containerRegion peels ref wrappers and returns the allocation region of the
 // underlying container (darray or dict), or "" if t is not a region-carrying
 // container.
+// containerRegionOf is containerRegion, memoized per type once declaration shapes are final
+// (the struct/tuple case walks the whole by-value type graph).
+func (a *Analyzer) containerRegionOf(t Type) string {
+	if !a.typeShapesFrozen || t == nil {
+		return containerRegion(t)
+	}
+	if region, ok := a.containerRegionMemo[t]; ok {
+		return region
+	}
+	region := containerRegion(t)
+	if a.containerRegionMemo == nil {
+		a.containerRegionMemo = map[Type]string{}
+	}
+	a.containerRegionMemo[t] = region
+	return region
+}
+
 func containerRegion(t Type) string {
 	for {
 		switch tt := t.(type) {
@@ -2001,7 +2018,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 			continue
 		}
 		containerType := stripRefForBounds(a.exprTypes[args[index]])
-		targetRegion := containerRegion(containerType)
+		targetRegion := a.containerRegionOf(containerType)
 		if targetRegion == "" {
 			continue
 		}

@@ -776,6 +776,10 @@ type Analyzer struct {
 	typeShapesFrozen bool
 	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
 	affineHandleMemo map[Type]bool
+	// borrowedOwnerRefMemo caches containsBorrowedOwnerRefValues likewise.
+	borrowedOwnerRefMemo map[Type]bool
+	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
+	containerRegionMemo map[Type]string
 }
 
 type castHookSignature struct {

@@ -20,7 +20,9 @@ func borrowableOwnerRefElemType(t Type) (Type, bool) {
 }
 
 func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) bool {
-	return a.containsBorrowedOwnerRefValuesWithSeen(t, map[Type]bool{}, 0)
+	return a.memoTypePredicate(&a.borrowedOwnerRefMemo, t, func() bool {
+		return a.containsBorrowedOwnerRefValuesWithSeen(t, map[Type]bool{}, 0)
+	})
 }
 
 func (a *Analyzer) containsBorrowedOwnerRefValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {
