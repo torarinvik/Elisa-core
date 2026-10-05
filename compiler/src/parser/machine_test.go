@@ -467,6 +467,26 @@ func TestMachineBranchTransitionRejectsFallthroughBranchLocal(t *testing.T) {
 	}
 }
 
+func TestMachineBranchTransitionRejectsMarkerInsideCanWrapper(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read
+        state Write
+        start Read
+        Read, _:
+            if lexer.peek(1) == '{':
+                can Unsafe:
+                    -> Write
+            else:
+                -> Read
+        Write, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 {
+		t.Fatal("branch transition inside a can wrapper must be rejected until wrapper scope is preserved")
+	}
+}
+
 func TestMachineBranchTransitionGuardsSharedSuffix(t *testing.T) {
 	src := `def scan(cursor: mutable i64) -> i64:
     machine over cursor while cursor < 50:
