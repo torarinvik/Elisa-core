@@ -4,6 +4,8 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"unicode/utf8"
 )
@@ -481,7 +483,8 @@ func (i *Interpreter) constructStruct(decl *ast.StructDecl, positional []Value, 
 		fields[field.Name] = value.Clone()
 		used[field.Name] = true
 	}
-	for name, value := range named {
+	for _, name := range slices.Sorted(maps.Keys(named)) { // map: sort so the reported field is stable
+		value := named[name]
 		if _, ok := fieldDecls[name]; !ok {
 			return VoidValue(), fmt.Errorf("struct %q has no field %q", decl.Name, name)
 		}
