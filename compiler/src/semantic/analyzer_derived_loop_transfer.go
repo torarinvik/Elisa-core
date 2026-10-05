@@ -27,27 +27,66 @@ func (a *Analyzer) captureDerivedLoopEntry(scope *Scope) derivedLoopState {
 	// (Recording every name of the whole chain -- globals included -- on every loop head was
 	// ~10% of all analyzer allocation.)
 	var inner []*Scope
-	for cur := scope; cur != nil; cur = cur.Parent {
-		for name, sym := range cur.Symbols {
-			base, ok := trackedNamedStateStructBase(sym.Type)
-			if !ok || base == nil || base.ProtocolStates || len(base.DerivedStates) == 0 {
-				continue
+	capture := func(name string, sym *Symbol) {
+		for _, nearer := range inner {
+			if _, declared := nearer.Symbols[name]; declared {
+				return
 			}
-			shadowed := false
-			for _, nearer := range inner {
-				if _, declared := nearer.Symbols[name]; declared {
-					shadowed = true
-					break
+		}
+		out[sym] = a.currentTrackedValueType(sym)
+	}
+	for cur := scope; cur != nil; cur = cur.Parent {
+		if cur == a.globalScope && a.typeShapesFrozen {
+			// The global scope is the large one and every loop head walks it: use its cached
+			// candidate list.
+			for _, candidate := range a.globalDerivedLoopCandidateList() {
+				capture(candidate.name, candidate.sym)
+			}
+		} else {
+			for name, sym := range cur.Symbols {
+				if isDerivedLoopCandidate(sym) {
+					capture(name, sym)
 				}
 			}
-			if shadowed {
-				continue
-			}
-			out[sym] = a.currentTrackedValueType(sym)
 		}
 		inner = append(inner, cur)
 	}
 	return derivedLoopState(a.cloneTrackedValueTypeMapWithSeen(map[*Symbol]Type(out), map[Type]Type{}))
+}
+
+type derivedLoopCandidate struct {
+	name string
+	sym  *Symbol
+}
+
+type derivedLoopCandidates struct {
+	valid   bool
+	version uint64
+	epoch   uint64
+	list    []derivedLoopCandidate
+}
+
+func isDerivedLoopCandidate(sym *Symbol) bool {
+	base, ok := trackedNamedStateStructBase(sym.Type)
+	return ok && base != nil && !base.ProtocolStates && len(base.DerivedStates) != 0
+}
+
+// globalDerivedLoopCandidateList lists the global scope's derived-state bindings, cached while
+// the global scope's symbols and every symbol's type are unchanged.
+func (a *Analyzer) globalDerivedLoopCandidateList() []derivedLoopCandidate {
+	cache := &a.globalDerivedLoopCandidates
+	scope := a.globalScope
+	if cache.valid && cache.version == scope.symbolsVersion && cache.epoch == a.symbolTypeEpoch {
+		return cache.list
+	}
+	var list []derivedLoopCandidate
+	for name, sym := range scope.Symbols {
+		if isDerivedLoopCandidate(sym) {
+			list = append(list, derivedLoopCandidate{name: name, sym: sym})
+		}
+	}
+	*cache = derivedLoopCandidates{valid: true, version: scope.symbolsVersion, epoch: a.symbolTypeEpoch, list: list}
+	return list
 }
 
 func (t *derivedLoopTransfer) clone(s derivedLoopState) derivedLoopState {

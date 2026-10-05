@@ -780,6 +780,11 @@ type Analyzer struct {
 	borrowedOwnerRefMemo map[Type]bool
 	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
 	containerRegionMemo map[Type]string
+	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
+	symbolTypeEpoch uint64
+	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for
+	// captureDerivedLoopEntry (valid for one globalScope symbolsVersion and symbolTypeEpoch).
+	globalDerivedLoopCandidates derivedLoopCandidates
 }
 
 type castHookSignature struct {

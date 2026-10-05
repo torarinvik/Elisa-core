@@ -232,6 +232,8 @@ func (a *Analyzer) bindExpectPatternLocal(scope *Scope, name string, typ Type, n
 	if existing, ok := scope.Symbols[name]; ok {
 		if !SameType(existing.Type, typ) {
 			existing.Type = typ
+			scope.symbolsVersion++
+			a.symbolTypeEpoch++
 		}
 		if valueExpr != nil {
 			a.recordValueBinding(existing, valueExpr)

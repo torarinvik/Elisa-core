@@ -256,6 +256,7 @@ func (a *Analyzer) snapshotReturnBorrowScope() (*Scope, bool) {
 		for name, sym := range level.Symbols {
 			if _, exists := flat.Symbols[name]; !exists {
 				flat.Symbols[name] = sym
+				flat.symbolsVersion++
 			}
 		}
 	}
