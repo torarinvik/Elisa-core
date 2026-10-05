@@ -515,7 +515,12 @@ type Analyzer struct {
 	// coupling §8 flagged). It rides EXACTLY the same clone/save/restore/invalidate sites as
 	// currentIndexBounds, so it can never outlive a branch or survive a mutation that the index facts
 	// themselves wouldn't (soundness).
-	currentBoundEqual                 map[string]map[string]bool
+	currentBoundEqual map[string]map[string]bool
+	// indexBoundsShared / boundEqualShared mark currentIndexBounds / currentBoundEqual as possibly
+	// aliased by an enclosing block's saved copy: a writer clones first (ownIndexBounds /
+	// ownBoundEqual). Entering a block only sets the flag instead of copying both maps.
+	indexBoundsShared                 bool
+	boundEqualShared                  bool
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	// currentFunctionGuardedIndexes collects the positions of index accesses in the current function

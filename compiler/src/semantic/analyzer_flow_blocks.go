@@ -1320,8 +1320,8 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	savedAliasCarriers := a.currentAliasCarriers
 	savedAliasCarrierFieldOverrides := a.currentAliasCarrierFieldOverrides
 	savedPackedVariantViews := a.currentPackedVariantViews
-	savedIndexBounds := a.currentIndexBounds
-	savedBoundEqual := a.currentBoundEqual
+	savedIndexBounds, savedIndexBoundsShared := a.currentIndexBounds, a.indexBoundsShared
+	savedBoundEqual, savedBoundEqualShared := a.currentBoundEqual, a.boundEqualShared
 	savedViewStaticLen := a.currentViewStaticLen
 	savedViewMutable := a.currentViewMutable
 	a.currentAffineValues = a.cloneAffineValueStates()
@@ -1334,8 +1334,9 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentAliasBindings = a.cloneAliasBindings()
 	a.currentAliasCarriers = a.cloneAliasCarriers()
 	a.currentAliasCarrierFieldOverrides = a.cloneAliasCarrierFieldOverrides()
-	a.currentIndexBounds = cloneIndexBoundFacts(a.currentIndexBounds)
-	a.currentBoundEqual = cloneBoundEqual(a.currentBoundEqual)
+	// Copy-on-write: the block shares the entry maps until it first writes one.
+	a.indexBoundsShared = true
+	a.boundEqualShared = true
 	a.currentViewStaticLen = cloneViewStaticLen(a.currentViewStaticLen)
 	a.currentViewMutable = cloneViewMutable(a.currentViewMutable)
 	if prepare != nil {
@@ -1354,8 +1355,8 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentAliasCarriers = savedAliasCarriers
 	a.currentAliasCarrierFieldOverrides = savedAliasCarrierFieldOverrides
 	a.currentPackedVariantViews = savedPackedVariantViews
-	a.currentIndexBounds = savedIndexBounds
-	a.currentBoundEqual = savedBoundEqual
+	a.currentIndexBounds, a.indexBoundsShared = savedIndexBounds, savedIndexBoundsShared
+	a.currentBoundEqual, a.boundEqualShared = savedBoundEqual, savedBoundEqualShared
 	a.currentViewStaticLen = savedViewStaticLen
 	a.currentViewMutable = savedViewMutable
 	return snapshot

@@ -29,6 +29,23 @@ func cloneIndexBoundFacts(src map[string]indexBoundFact) map[string]indexBoundFa
 	return out
 }
 
+// ownIndexBounds makes currentIndexBounds safe to write: a map still shared with an enclosing
+// block's saved state is replaced by a private copy first.
+func (a *Analyzer) ownIndexBounds() {
+	if a.indexBoundsShared {
+		a.currentIndexBounds = cloneIndexBoundFacts(a.currentIndexBounds)
+		a.indexBoundsShared = false
+	}
+}
+
+// ownBoundEqual is ownIndexBounds for currentBoundEqual (a deep copy: writers edit the inner sets).
+func (a *Analyzer) ownBoundEqual() {
+	if a.boundEqualShared {
+		a.currentBoundEqual = cloneBoundEqual(a.currentBoundEqual)
+		a.boundEqualShared = false
+	}
+}
+
 // cloneBoundEqual deep-copies the bound-equality adjacency so a branch/loop scope edits its own
 // copy (mirrors cloneIndexBoundFacts; rides the same save/restore sites).
 func cloneBoundEqual(src map[string]map[string]bool) map[string]map[string]bool {
@@ -52,6 +69,7 @@ func (a *Analyzer) recordBoundEqual(x, y string) {
 	if x == "" || y == "" || x == y {
 		return
 	}
+	a.ownBoundEqual()
 	if a.currentBoundEqual == nil {
 		a.currentBoundEqual = map[string]map[string]bool{}
 	}
@@ -100,6 +118,7 @@ func (a *Analyzer) invalidateBoundEqualReferencingBase(base string) {
 	if a == nil || len(a.currentBoundEqual) == 0 || base == "" {
 		return
 	}
+	a.ownBoundEqual()
 	for key, neighbors := range a.currentBoundEqual {
 		if indexBoundUpperReferencesBase(key, base) {
 			delete(a.currentBoundEqual, key)
@@ -237,6 +256,7 @@ func (a *Analyzer) applyIndexBoundsFactsForCondition(cond ast.Expr, truthy bool)
 	if len(facts) == 0 {
 		return
 	}
+	a.ownIndexBounds()
 	if a.currentIndexBounds == nil {
 		a.currentIndexBounds = make(map[string]indexBoundFact, len(facts))
 	}
@@ -270,6 +290,7 @@ func (a *Analyzer) invalidateIndexBoundsForAssignedTarget(target ast.Expr) {
 	}
 	// If the index variable itself is reassigned, its upper-bound proof no longer
 	// holds for the new value.
+	a.ownIndexBounds()
 	delete(a.currentIndexBounds, base)
 	// A reassigned view binding may no longer be the slice that established its
 	// static length / mutability.
@@ -295,6 +316,7 @@ func (a *Analyzer) invalidateIndexBoundsReferencingBase(base string) {
 	if a == nil || len(a.currentIndexBounds) == 0 || base == "" {
 		return
 	}
+	a.ownIndexBounds()
 	for name, fact := range a.currentIndexBounds {
 		if indexBoundUpperReferencesBase(fact.Upper, base) {
 			delete(a.currentIndexBounds, name)

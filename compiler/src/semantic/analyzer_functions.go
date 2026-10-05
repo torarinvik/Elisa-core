@@ -744,6 +744,7 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 	// from one function body into the next. This is the single per-function entry hook (called
 	// unconditionally before each body, and nowhere else).
 	a.currentBoundEqual = nil
+	a.boundEqualShared = false
 	a.ghostReadAllowed++ // `requires` is a spec position: ghost vars/functions are readable here.
 	defer func() { a.ghostReadAllowed-- }()
 	for i, req := range fn.Requires {
