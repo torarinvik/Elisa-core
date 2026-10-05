@@ -285,7 +285,7 @@ func (a *Analyzer) applyConditionalCallConditionRefinements(scope *Scope, call *
 			continue
 		}
 		if root.Name != "" {
-			scope.Refinements[root.Name] = updated
+			scope.setRefinement(root.Name, updated)
 		}
 	}
 }
@@ -563,7 +563,7 @@ func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, 
 		// `r <- v` on a `mutable T&` binding stores THROUGH the reference: the pointer, and so its
 		// proven null state, is unchanged. Only what was known about the referent is stale.
 		// (With no refinement in force there is nothing to keep: the path below is unchanged.)
-		a.currentScope.Refinements[key] = cloneRefTypeWithState(declared, current.State)
+		a.currentScope.setRefinement(key, cloneRefTypeWithState(declared, current.State))
 		a.currentScope.SetNarrowedOptional(key, nil)
 		return
 	}
@@ -573,7 +573,7 @@ func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, 
 		a.currentScope.SetNarrowedOptional(key, nil)
 		return
 	}
-	a.currentScope.Refinements[key] = refined
+	a.currentScope.setRefinement(key, refined)
 	// Remember the optional we narrowed AWAY from, so absence can still be asked about.
 	// nil on every other outcome, which also shadows a stale entry from an outer scope
 	// (`x <- 5` in a branch, then `x <- null`).

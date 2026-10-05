@@ -377,7 +377,7 @@ func (a *Analyzer) bindTrackedValueType(sym *Symbol, tracked Type) {
 	}
 	a.currentSpecializedValueTypes[sym] = a.cloneTrackedValueType(tracked)
 	if a.currentScope != nil && sym.Name != "" {
-		a.currentScope.Refinements[sym.Name] = tracked
+		a.currentScope.setRefinement(sym.Name, tracked)
 	}
 	a.refreshTerminalTypestateTracking(sym, tracked)
 }

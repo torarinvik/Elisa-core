@@ -362,7 +362,7 @@ func (a *Analyzer) bindRefinedExprType(scope *Scope, expr ast.Expr, refined Type
 	if !ok {
 		return
 	}
-	scope.Refinements[key] = refined
+	scope.setRefinement(key, refined)
 }
 
 func (a *Analyzer) bindMatchedPackedVariantView(expr ast.Expr, viewType *PackedVariantViewType) {

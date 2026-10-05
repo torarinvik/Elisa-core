@@ -543,7 +543,10 @@ func NewScope(parent *Scope) *Scope {
 	if parent != nil {
 		hook = parent.defineHook
 	}
-	return &Scope{Parent: parent, defineHook: hook, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, narrowedOptionals: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
+	// Refinements, narrowedOptionals and ConditionalBindingHints stay nil until first written
+	// (setRefinement, SetNarrowedOptional, setConditionalBindingHint): most scopes never write
+	// them, and three empty maps per scope were most of NewScope's cost.
+	return &Scope{Parent: parent, defineHook: hook, Symbols: map[string]*Symbol{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -585,6 +588,20 @@ func (s *Scope) LookupNarrowedOptional(key string) (Type, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (s *Scope) setRefinement(key string, t Type) {
+	if s.Refinements == nil {
+		s.Refinements = map[string]Type{}
+	}
+	s.Refinements[key] = t
+}
+
+func (s *Scope) setConditionalBindingHint(name, hint string) {
+	if s.ConditionalBindingHints == nil {
+		s.ConditionalBindingHints = map[string]string{}
+	}
+	s.ConditionalBindingHints[name] = hint
 }
 
 func (s *Scope) SetNarrowedOptional(key string, declared Type) {

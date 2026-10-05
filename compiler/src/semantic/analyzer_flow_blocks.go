@@ -1126,7 +1126,7 @@ func (a *Analyzer) recordConditionalBindingHints(scope *Scope, expr ast.Expr, tr
 					hint = fmt.Sprintf("identifier %q is not available here because truthy `or` condition bindings are only introduced when every successful branch binds that name", name)
 				}
 				if hint != "" {
-					scope.ConditionalBindingHints[name] = hint
+					scope.setConditionalBindingHint(name, hint)
 				}
 			}
 			a.recordConditionalBindingHints(scope, n.Left, true)
