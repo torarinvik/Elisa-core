@@ -159,6 +159,12 @@ func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel Optimization
 		return err
 	}
 
+	if jobs := codegenJobs(); jobs > 1 {
+		if done, err := g.emitObjectParallel(outputPath, jobs); done || err != nil {
+			return err
+		}
+	}
+
 	pathC := cString(outputPath)
 	defer C.free(unsafe.Pointer(pathC))
 
