@@ -24,6 +24,16 @@ def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
             equal <- false if lhs.data[index] != rhs.data[index]
     return 1 if equal else 0
 
+# Counted guest text may include embedded NUL bytes, so do not route it through
+# the C-string `sview` constructor. This is the freestanding counterpart of the
+# native runtime boundary and intentionally imports no `env` helper.
+def unsafe_sview_bounded_bytes(data: u8&, count: usize) -> sview can[Unsafe.PointerCast]:
+    signed_count: mutable i64 = count.i64()
+    if signed_count < 0 or signed_count.usize() != count:
+        signed_count <- 0
+    trusted Unsafe.PointerCast:
+        return StringView{data: data, len: signed_count}
+
 global mutable wasm_component_heap_cursor: u32 = 1048576
 global mutable wasm_component_free_chunk: u32 = 0
 

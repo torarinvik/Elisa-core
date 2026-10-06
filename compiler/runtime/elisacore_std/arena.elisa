@@ -476,9 +476,10 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
         trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
             cache: mutable ArenaRegionCache& = &__elisa_region_cache
             if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
-                parked: mutable heap Region& = r.cast[mutable heap Region&]
-                parked.next <- cache.slot
-                cache.slot <- parked
+                trusted Unsafe.PointerCast:
+                    parked: mutable heap Region& = r.cast[mutable heap Region&]
+                    parked.next <- cache.slot
+                    cache.slot <- parked
                 cache.reclaimed_spans <- cache.reclaimed_spans + 1
                 parked_ok <- true
         __elisa_arena_cache_lock_release()
@@ -489,6 +490,91 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
 # before so RSS never pins a large one-off block.
 const REGION_CACHE_MAX_SLOTS: usize = 131072
 const REGION_CACHE_MAX_ENTRIES: usize = 128
+
+# RESERVATION-sized regions get a parked list of their own. stage0 gives every function's
+# auto region the reserve_commit strategy, so in a stage0-built program (the seed product)
+# the first allocation of EVERY call maps a 256 MiB reservation and its arena_free unmaps
+# it again: 23.8k mmap/munmap pairs compiling just the runtime, ~760k for the self-compile,
+# each re-faulting the pages it touches (8.5M minor faults, ~60 s of system time). The
+# reservation itself is address space, not memory, so parking it is free; what a parked
+# block pins is only the pages its last owner touched, and those are zeroed on park. A
+# region whose owner touched more than RESERVE_CACHE_MAX_USED_SLOTS is unmapped exactly as
+# before, so the parked list can never hold more than
+# RESERVE_CACHE_MAX_ENTRIES * RESERVE_CACHE_MAX_USED_SLOTS words resident (8 MiB on 64-bit).
+# Kept apart from the small list so a 1 MiB request never takes (and chains into) a
+# reservation, and a reservation request never walks 128 small blocks.
+const RESERVE_CACHE_MAX_ENTRIES: usize = 32
+const RESERVE_CACHE_MAX_USED_SLOTS: usize = 32768
+
+global mutable __elisa_reserve_region_cache: ArenaRegionCache = ArenaRegionCache{slot: null, reclaimed_spans: 0}
+
+@internal
+def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
+    result: mutable heap Region&? = null
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        reuse_cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache
+        reuse_previous: mutable heap Region&? = null
+        reuse_cursor: mutable heap Region&? = reuse_cache.slot
+        reuse_probes: mutable usize = RESERVE_CACHE_MAX_ENTRIES
+        while reuse_cursor != null and reuse_probes > 0:
+            reuse_probes <- reuse_probes - 1
+            cache_candidate: mutable heap Region&? = reuse_cursor
+            if cache_candidate is cached and cached.capacity >= capacity:
+                if reuse_previous is previous:
+                    previous.next <- cached.next
+                else:
+                    reuse_cache.slot <- cached.next
+                reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
+                cached.next <- null
+                cached.count <- 0
+                cached.owner_tag <- owner_tag
+                cached.owner_next <- null
+                cached.global_index <- 0
+                cached.committed <- 0
+                cached.free_list <- null
+                result <- cached
+                break
+            reuse_previous <- reuse_cursor
+            reuse_cursor <- reuse_cursor.next
+    __elisa_arena_cache_lock_release()
+    return result
+
+@internal
+def arena_reserve_cache_try_park(r: heap Region&) -> bool:
+    can Abort.Panic:
+        false return if r.capacity <= REGION_CACHE_MAX_SLOTS
+        if r.count > r.capacity:
+            panic("arena cursor exceeds region capacity")
+        false return if r.count > RESERVE_CACHE_MAX_USED_SLOTS
+
+        room: mutable bool = false
+        __elisa_arena_cache_lock_acquire()
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+            cache: ArenaRegionCache& = &__elisa_reserve_region_cache
+            room <- cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES
+        __elisa_arena_cache_lock_release()
+        false return if not room
+
+        # Same zeroing contract as the small list: a fresh anonymous mmap is kernel-zeroed.
+        used_bytes: usize = arena_region_payload_bytes(r.count)
+        if used_bytes > 0:
+            trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+                _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
+
+        parked_ok: mutable bool = false
+        __elisa_arena_cache_lock_acquire()
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+            cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache
+            if cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES:
+                trusted Unsafe.PointerCast:
+                    parked: mutable heap Region& = r.cast[mutable heap Region&]
+                    parked.next <- cache.slot
+                    cache.slot <- parked
+                cache.reclaimed_spans <- cache.reclaimed_spans + 1
+                parked_ok <- true
+        __elisa_arena_cache_lock_release()
+        return parked_ok
 
 @internal
 def arena_checked_add_usize(left: usize, right: usize) -> usize:
@@ -548,9 +634,14 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         # Reuse the parked region when it is big enough — its own (possibly larger)
         # capacity is kept, exactly as if the caller had asked for that size.
         static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            cached_region: mutable heap Region&? = arena_region_cache_take(capacity, owner_tag)
-            if cached_region is cached:
-                return cached
+            if capacity > REGION_CACHE_MAX_SLOTS:
+                reserved_region: mutable heap Region&? = arena_reserve_cache_take(capacity, owner_tag)
+                if reserved_region is reserved:
+                    return reserved
+            else:
+                cached_region: mutable heap Region&? = arena_region_cache_take(capacity, owner_tag)
+                if cached_region is cached:
+                    return cached
         static else:
             pass
 
@@ -911,6 +1002,8 @@ def free_region(r: heap Region&):
             # publishing a parked region so a concurrent cache consumer never observes
             # stale bytes from its former owner.
             if arena_region_cache_try_park(r):
+                return
+            if arena_reserve_cache_try_park(r):
                 return
             size_bytes: usize = arena_region_total_bytes(r.capacity)
             ret: mutable int = 0
@@ -1286,6 +1379,7 @@ def arena_reset(a: mutable Arena&):
     a.end <- a.begin
     a.end_index <- 0
     arena_free_hint_clear(a.cast[uintptr])
+    collection_arena_memo_pooled(a)
     arena_profile_allocation_event(
         ELISA_PROFILE_ALLOCATION_REGION_RESET,
         0.uintptr(),
@@ -1314,6 +1408,7 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
 
     a.end as & <- region
     arena_free_hint_clear(a.cast[uintptr])
+    collection_arena_memo_pooled(a)
 
     region_index: mutable usize = 0
     current: mutable heap Region&? = a.begin
@@ -1362,6 +1457,7 @@ def arena_free(a: mutable Arena&):
             while r != null:
                 r0: mutable heap Region& = r
                 r <- r.next
+                collection_stack_memo_forget(r0) if r0.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
                 trusted Unsafe.RawExtern:
                     free_region_backend(r0, a.strategy)
 
@@ -1375,6 +1471,7 @@ def arena_trim(a: mutable Arena&):
             while r != null:
                 r0: mutable heap Region& = r
                 r <- r.next
+                collection_stack_memo_forget(r0) if r0.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
                 trusted Unsafe.RawExtern:
                     free_region_backend(r0, a.strategy)
 
@@ -1405,6 +1502,7 @@ def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
     c: mutable heap Region&? = child.begin
     trusted Unsafe.AssumeProgress:
         while c != null:
+            collection_stack_memo_forget(c) if c.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr()
             c.owner_tag <- 1.uintptr()
             c <- c.next
 
@@ -1475,6 +1573,183 @@ def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
 # its spare through owner_next; DynDict/DynSet are untouched (pinned in both compilers),
 # so the live stack is found by matching the table pointer against the chain.
 
+# Growth used to find a collection's stack by walking the arena's WHOLE region chain
+# (every bump block plus every other collection's stack), and a new stack walked the
+# chain again for a pooled one and once more for the tail: O(chain) per growth, ~37% of
+# a self-compile. Two direct-mapped memo tables make those lookups O(1) on a hit; a miss
+# falls back to the original walk, so a memo can only ever make a lookup faster.
+#
+# COLLECTION_STACK_MEMO: data-base address -> the stack Region, with the arena (address
+# and `begin` block) whose chain it was found in or linked into. It is the only memo
+# that holds a Region pointer, and it is purged by REGION IDENTITY at the two places a
+# stack leaves its chain alive or dead: arena_free/arena_trim (before the block is
+# released or parked) and arena_adopt (before the stack is retagged as an adopted
+# block). So an entry never names a freed or re-owned region. A hit additionally
+# requires the caller's arena address AND its `begin` block to match the entry, so a
+# different arena header that reuses an old address cannot pick up another chain's
+# stack.
+#
+# COLLECTION_ARENA_MEMO: arena address (+ `begin`) -> the data base of the last stack
+# linked into that arena (resolved through the stack memo, never dereferenced on its
+# own) and whether a full walk found NO pooled stack. Both are hints: a stale "no pooled
+# stack" only skips reuse and maps a fresh stack, which is always safe; it is cleared on
+# reset/rewind (which pool every stack) and when acquire pools a spare.
+const COLLECTION_STACK_MEMO_SLOTS: usize = 4096
+const COLLECTION_ARENA_MEMO_SLOTS: usize = 256
+
+struct CollectionStackMemoEntry:
+    table: mutable uintptr
+    region: mutable heap Region&?
+    arena: mutable uintptr
+    begin: mutable uintptr
+
+struct CollectionArenaMemoEntry:
+    arena: mutable uintptr
+    begin: mutable uintptr
+    last_table: mutable uintptr
+    no_pooled: mutable bool
+
+global mutable __elisa_collection_stack_memo: CollectionStackMemoEntry[COLLECTION_STACK_MEMO_SLOTS] = zeroed
+global mutable __elisa_collection_arena_memo: CollectionArenaMemoEntry[COLLECTION_ARENA_MEMO_SLOTS] = zeroed
+
+@internal
+def collection_memo_hash(key: uintptr, slots: usize) -> usize:
+    mixed: uintptr = (key >> 4.uintptr()) ^ (key >> 13.uintptr()) ^ (key >> 22.uintptr())
+    return (mixed & (slots - 1).uintptr()).usize()
+
+@internal
+def collection_region_addr(r: heap Region&) -> uintptr:
+    return r.cast[uintptr]
+
+@internal
+def collection_region_table_addr(r: heap Region&) -> uintptr:
+    trusted Unsafe.PointerCast:
+        return arena_heap_u8_from_region_data(r).cast[uintptr]
+
+@internal
+def collection_table_addr(table: void&) -> uintptr:
+    trusted Unsafe.PointerCast:
+        return table.cast[uintptr]
+
+@internal
+def collection_arena_addr(a: Arena&) -> uintptr:
+    return a.cast[uintptr]
+
+@internal
+def collection_arena_begin_addr(a: Arena&) -> uintptr:
+    first: heap Region&? = a.begin
+    return 0.uintptr() if first == null
+    first_region: heap Region& = first
+    return collection_region_addr(first_region)
+
+# Record `r` (a collection stack linked into `a`'s chain) in the stack memo.
+@internal
+def collection_stack_memo_put(a: Arena&, r: mutable heap Region&):
+    key: uintptr = collection_region_table_addr(r)
+    arena_key: uintptr = collection_arena_addr(a)
+    begin_key: uintptr = collection_arena_begin_addr(a)
+    slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+        entry.table <- key
+        entry.region <- r
+        entry.arena <- arena_key
+        entry.begin <- begin_key
+    __elisa_arena_cache_lock_release()
+
+# The memoised stack whose data base is `key` in arena `a`, or null.
+@internal
+def collection_stack_memo_get(a: Arena&, key: uintptr) -> mutable heap Region&?:
+    result: mutable heap Region&? = null
+    return result if key == 0.uintptr()
+    arena_key: uintptr = collection_arena_addr(a)
+    begin_key: uintptr = collection_arena_begin_addr(a)
+    return result if begin_key == 0.uintptr()
+    slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+        if entry.table == key and entry.arena == arena_key and entry.begin == begin_key:
+            result <- entry.region
+    __elisa_arena_cache_lock_release()
+    return result
+
+# Drop `r` from the stack memo. Called for every collection-tagged region before it is
+# released, parked or retagged; a no-op when its slot holds another stack.
+@internal
+def collection_stack_memo_forget(r: heap Region&):
+    key: uintptr = collection_region_table_addr(r)
+    region_key: uintptr = collection_region_addr(r)
+    slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+        held: heap Region&? = entry.region
+        if held is held_region and collection_region_addr(held_region) == region_key:
+            entry.table <- 0.uintptr()
+            entry.region <- null
+            entry.arena <- 0.uintptr()
+            entry.begin <- 0.uintptr()
+    __elisa_arena_cache_lock_release()
+
+@internal
+def collection_arena_memo_last_table(a: Arena&) -> uintptr:
+    result: mutable uintptr = 0.uintptr()
+    arena_key: uintptr = collection_arena_addr(a)
+    begin_key: uintptr = collection_arena_begin_addr(a)
+    slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+        if entry.arena == arena_key and entry.begin == begin_key:
+            result <- entry.last_table
+    __elisa_arena_cache_lock_release()
+    return result
+
+@internal
+def collection_arena_memo_no_pooled(a: Arena&) -> bool:
+    result: mutable bool = false
+    arena_key: uintptr = collection_arena_addr(a)
+    begin_key: uintptr = collection_arena_begin_addr(a)
+    slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+        if entry.arena == arena_key and entry.begin == begin_key:
+            result <- entry.no_pooled
+    __elisa_arena_cache_lock_release()
+    return result
+
+# Update `a`'s arena memo: `last_table` when non-zero, and the no-pooled hint.
+@internal
+def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool):
+    arena_key: uintptr = collection_arena_addr(a)
+    begin_key: uintptr = collection_arena_begin_addr(a)
+    return if begin_key == 0.uintptr()
+    slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+        if entry.arena != arena_key or entry.begin != begin_key:
+            entry.arena <- arena_key
+            entry.begin <- begin_key
+            entry.last_table <- 0.uintptr()
+        entry.last_table <- last_table if last_table != 0.uintptr()
+        entry.no_pooled <- no_pooled
+    __elisa_arena_cache_lock_release()
+
+# Reset/rewind pool every stack of `a`: the no-pooled hint no longer holds.
+@internal
+def collection_arena_memo_pooled(a: Arena&):
+    arena_key: uintptr = collection_arena_addr(a)
+    slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+        entry.no_pooled <- false if entry.arena == arena_key
+    __elisa_arena_cache_lock_release()
+
 # The table a stack holds: its data base.
 def collection_stack_table(r: heap Region&) -> mutable heap void&:
     return arena_heap_void_from_data_base(arena_heap_u8_from_region_data(r), 0)
@@ -1485,12 +1760,18 @@ def collection_stack_table(r: heap Region&) -> mutable heap void&:
 # base -- matched, never computed. Walked only on growth.
 @internal
 def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap Region&?:
-    trusted [Unsafe.PointerCast, Unsafe.AssumeProgress]:
-        target: uintptr = table.cast[heap u8&].uintptr()
+    target: uintptr = collection_table_addr(table)
+    memo: mutable heap Region&? = collection_stack_memo_get(a, target)
+    if memo is memo_stack and memo_stack.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr():
+        return memo_stack
+    trusted Unsafe.AssumeProgress:
         cursor: mutable heap Region&? = a.begin
         while cursor != null:
-            return cursor if cursor.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and arena_heap_u8_from_region_data(cursor).uintptr() == target
-            cursor <- cursor.next
+            found: mutable heap Region& = cursor
+            if found.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and collection_region_table_addr(found) == target:
+                collection_stack_memo_put(a, found)
+                return found
+            cursor <- found.next
     return null
 
 # Link a fresh stack at the chain's tail. Never at a.end: an empty arena first
@@ -1503,6 +1784,10 @@ def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&):
             _ = arena_alloc(a, size_of(uintptr))
         assert a.end != null
         last_block: mutable heap Region&? = a.end
+        # The last stack linked into this arena is at or past the tail found last time;
+        # start there instead of re-walking every stack behind a.end.
+        last_linked: mutable heap Region&? = collection_stack_memo_get(a, collection_arena_memo_last_table(a))
+        last_block <- last_linked if last_linked != null
         trusted Unsafe.AssumeProgress:
             while last_block != null and last_block.next != null:
                 last_block <- last_block.next
@@ -1510,6 +1795,8 @@ def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&):
         tail_region: mutable heap Region& = last_block
         tail_region.next as & <- fresh
         fresh.global_index <- tail_region.global_index + 1
+        collection_stack_memo_put(a, fresh)
+        collection_arena_memo_set(a, collection_region_table_addr(fresh), collection_arena_memo_no_pooled(a))
 
 # Claim a stack for a table of `needed_slots` (uintptr slots) in arena `a`, for the
 # collection whose current table is `live_table` (null when it has none). Preference:
@@ -1529,15 +1816,23 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
                 spare: mutable heap Region&? = live_stack.owner_next
                 chosen <- spare if spare != null and spare.capacity >= needed_slots
 
-        if chosen == null:
+        if chosen == null and not collection_arena_memo_no_pooled(a):
             probe: mutable heap Region&? = a.begin
+            saw_pooled: mutable bool = false
             trusted Unsafe.AssumeProgress:
                 while probe != null:
-                    if probe.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and probe.count == 0 and probe.capacity >= needed_slots:
-                        chosen <- probe
-                        probe <- null
+                    if probe.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and probe.count == 0:
+                        saw_pooled <- true
+                        if probe.capacity >= needed_slots:
+                            chosen <- probe
+                            probe <- null
+                        else:
+                            probe <- probe.next
                     else:
                         probe <- probe.next
+            # A full walk that met no pooled stack at all: later acquires skip the walk
+            # until something pools a stack again.
+            collection_arena_memo_set(a, 0.uintptr(), true) if not saw_pooled
 
         # Fresh, from the arena's own block source so arena_free's strategy-dispatched
         # free matches it. Running out is a panic inside new_region_*; there is no error
@@ -1562,6 +1857,7 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
 
         assert chosen != null
         claimed: mutable heap Region& = chosen
+        collection_stack_memo_put(a, claimed)
         claimed.count <- needed_slots
         claimed.free_list <- null
         arena_region_ensure_committed(claimed, arena_region_total_bytes(needed_slots))
@@ -1585,6 +1881,7 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
                 dropped_stack: mutable heap Region& = dropped
                 dropped_stack.count <- 0
                 dropped_stack.owner_next <- null
+                collection_arena_memo_set(a, 0.uintptr(), false)
             old_live.owner_next <- null
             claimed.owner_next <- old_live
         else:
@@ -1596,6 +1893,7 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
 # allocation pressure and retained table capacity are not understated.
 def collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void:
     return if table == null
+    return if elisa_profile_allocation_negotiate(ELISA_PROFILE_ALLOCATION_ABI_V1) != 1.u32()
     old_table: void& = table
     old_backing: mutable heap Region&? = collection_stack_of_table(a, old_table)
     if old_backing != null:

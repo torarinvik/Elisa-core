@@ -222,6 +222,12 @@ const REGION_CACHE_MAX_SLOTS: usize = 131072
 
 const REGION_CACHE_MAX_ENTRIES: usize = 128
 
+const RESERVE_CACHE_MAX_ENTRIES: usize = 32
+
+const RESERVE_CACHE_MAX_USED_SLOTS: usize = 32768
+
+extern __elisa_reserve_region_cache: ArenaRegionCache
+
 extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&
 
 extern new_region(capacity: usize) -> mutable heap Region&
@@ -263,6 +269,26 @@ extern arena_free(a: mutable Arena&)
 extern arena_trim(a: mutable Arena&)
 
 extern arena_adopt(parent: mutable Arena&, child: mutable Arena&)
+
+const COLLECTION_STACK_MEMO_SLOTS: usize = 4096
+
+const COLLECTION_ARENA_MEMO_SLOTS: usize = 256
+
+struct CollectionStackMemoEntry:
+    table: mutable uintptr
+    region: mutable heap Region&?
+    arena: mutable uintptr
+    begin: mutable uintptr
+
+struct CollectionArenaMemoEntry:
+    arena: mutable uintptr
+    begin: mutable uintptr
+    last_table: mutable uintptr
+    no_pooled: mutable bool
+
+extern __elisa_collection_stack_memo: CollectionStackMemoEntry[COLLECTION_STACK_MEMO_SLOTS]
+
+extern __elisa_collection_arena_memo: CollectionArenaMemoEntry[COLLECTION_ARENA_MEMO_SLOTS]
 
 extern collection_stack_table(r: heap Region&) -> mutable heap void&
 
