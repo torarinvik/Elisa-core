@@ -576,6 +576,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			n.ArgManifest = true // codegen emits only the call; nothing to assign
 			return
 		}
+		// docs/120 §8 field-path arg-manifest `report.cache <- bump(report.cache)`: the same
+		// manifest for a field place of a mutable root; the call writes through the field's address.
+		if a.isLmutPlaceArgManifest(n.Target, n.Value, valueType) {
+			n.ArgManifest = true
+			return
+		}
 		// docs/120 §8 place-manifest: `place <- place.push(v)` — a mutating builtin whose
 		// receiver is the same place as the target. The builtin returns a ref (never void), so
 		// this bypasses the void arg-manifest above; erase to the in-place call all the same.
