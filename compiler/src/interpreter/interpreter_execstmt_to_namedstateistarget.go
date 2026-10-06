@@ -98,21 +98,13 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 		}
 		return controlSignal{kind: signalReturn, value: value}, nil
 	case *ast.IfStmt:
-		cond, err := i.evalExpr(frame, n.Cond)
-		if err != nil {
-			return controlSignal{}, annotateRuntimeError(n.Pos(), err)
-		}
-		if truth, err := requireBool(cond); err != nil {
+		if truth, err := i.evalCondition(frame, n.Cond); err != nil {
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)
 		} else if truth {
 			return i.execBlock(frame, n.Then)
 		}
 		for _, clause := range n.Elifs {
-			clauseValue, err := i.evalExpr(frame, clause.Cond)
-			if err != nil {
-				return controlSignal{}, annotateRuntimeError(clause.Position, err)
-			}
-			truth, err := requireBool(clauseValue)
+			truth, err := i.evalCondition(frame, clause.Cond)
 			if err != nil {
 				return controlSignal{}, annotateRuntimeError(clause.Position, err)
 			}
@@ -411,6 +403,13 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		if err != nil {
 			return VoidValue(), err
 		}
+		if obj.kind == valueDict {
+			found := dictLookup(obj, index)
+			if found.IsNull() && n.Fallback != nil {
+				return i.evalExpr(frame, n.Fallback)
+			}
+			return found, nil
+		}
 		idx, err := requireInt(index)
 		if err != nil {
 			return VoidValue(), err
@@ -448,6 +447,9 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		}
 		return sliceValue(obj, startIndex, endIndex)
 	case *ast.ListLitExpr:
+		if i.isDictLiteral(n) {
+			return i.evalDictLiteral(frame, n)
+		}
 		values := make([]Value, 0, len(n.Elems))
 		for _, elem := range n.Elems {
 			value, err := i.evalExpr(frame, elem)

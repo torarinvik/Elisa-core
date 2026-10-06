@@ -73,8 +73,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			} else if declType == nil {
 				declType = valueType
 			} else if !AssignableTo(declType, valueType) {
-				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
-				a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
+				if a.isDictIndexPayloadProjection(n.Value, declType) {
+					// Parity with stage1 (check_value_against): `d[k]` is a fallible
+					// `V&?` lookup, never the payload itself.
+					a.errorf(n.Pos(), "variable %q expects %s, got optional reference to dictionary value", n.Name, declType)
+				} else {
+					a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
+					a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
+				}
 			}
 			// Nested-region escape: binding an inner-@r value into a variable whose
 			// declared type names an outer region dangles once the inner region is

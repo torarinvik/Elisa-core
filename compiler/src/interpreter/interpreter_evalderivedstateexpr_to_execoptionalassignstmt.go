@@ -631,6 +631,17 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 		if err != nil {
 			return nil, err
 		}
+		if derefValue(parent.get()).kind == valueDict {
+			key := indexValue
+			return &valueSlot{
+				get: func() Value {
+					return dictLookup(derefValue(parent.get()), key)
+				},
+				set: func(value Value) error {
+					return parent.set(dictStore(derefValue(parent.get()), key, value))
+				},
+			}, nil
+		}
 		index, err := requireInt(indexValue)
 		if err != nil {
 			return nil, err

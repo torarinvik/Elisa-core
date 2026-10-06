@@ -40,6 +40,7 @@ const (
 	valueStruct
 	valueFunction
 	valueRef
+	valueDict
 )
 
 type Value struct {
@@ -53,6 +54,7 @@ type Value struct {
 	funcName  string
 	lambdaVal *lambdaValue
 	refSlot   *valueSlot
+	keysVal   []Value
 }
 type StructValue struct {
 	Name       string
@@ -267,6 +269,8 @@ func (v Value) String() string {
 			parts = append(parts, elem.String())
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case valueDict:
+		return dictString(v)
 	case valueStruct:
 		if v.structVal == nil {
 			return "<invalid-struct>"
@@ -293,10 +297,16 @@ func (v Value) String() string {
 func (v Value) Clone() Value {
 	cloned := v
 	switch v.kind {
-	case valueList:
+	case valueList, valueDict:
 		cloned.listVal = make([]Value, len(v.listVal))
 		for i, elem := range v.listVal {
 			cloned.listVal[i] = elem.Clone()
+		}
+		if v.kind == valueDict {
+			cloned.keysVal = make([]Value, len(v.keysVal))
+			for i, key := range v.keysVal {
+				cloned.keysVal[i] = key.Clone()
+			}
 		}
 	case valueStruct:
 		if v.structVal != nil {
