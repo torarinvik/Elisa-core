@@ -301,13 +301,14 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		}
 	}
 
-	savedIndexBounds := a.currentIndexBounds
-	savedBoundEqual := a.currentBoundEqual
+	savedIndexBounds, savedIndexBoundsShared := a.currentIndexBounds, a.indexBoundsShared
+	savedBoundEqual, savedBoundEqualShared := a.currentBoundEqual, a.boundEqualShared
 	savedViewStaticLen := a.currentViewStaticLen
 	savedViewMutable := a.currentViewMutable
 	a.currentViewStaticLen = cloneViewStaticLen(savedViewStaticLen)
 	a.currentViewMutable = cloneViewMutable(savedViewMutable)
 	a.currentBoundEqual = cloneBoundEqual(savedBoundEqual)
+	a.boundEqualShared = false
 	loopIndexBounds := cloneIndexBoundFacts(savedIndexBounds)
 	if stmt.Op == lexer.TOKEN_RANGE_LT && isZeroOptimizationExpr(stmt.Start) {
 		if loopIndexBounds == nil {
@@ -316,6 +317,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		loopIndexBounds[stmt.Name] = indexBoundFact{Upper: optimizationExprString(stmt.End), NonNeg: true}
 	}
 	a.currentIndexBounds = loopIndexBounds
+	a.indexBoundsShared = false
 
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
@@ -338,8 +340,8 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		mergedSpecializedValueTypes = a.mergeLoopJumpSpecializedTypes(mergedSpecializedValueTypes)
 	}
 	continuedAffine := a.finishLoopAffineFrame(entryAffine, bodySnapshot.Affine, blockDefinitelyExits(stmt.Body), outerScope, stmt.Pos())
-	a.currentIndexBounds = savedIndexBounds
-	a.currentBoundEqual = savedBoundEqual
+	a.currentIndexBounds, a.indexBoundsShared = savedIndexBounds, savedIndexBoundsShared
+	a.currentBoundEqual, a.boundEqualShared = savedBoundEqual, savedBoundEqualShared
 	a.currentViewStaticLen = savedViewStaticLen
 	a.currentViewMutable = savedViewMutable
 	if !blockDefinitelyExits(stmt.Body) {

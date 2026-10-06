@@ -104,6 +104,7 @@ func (a *Analyzer) remangleBareReceiverOverload(visibleName string, existing *Sy
 		fnType.Name = existing.Name
 	}
 	a.globalScope.Symbols[existing.Name] = existing
+	a.globalScope.symbolsVersion++
 	a.registerUFCSFunction(visibleName, existing)
 }
 

@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
+	"slices"
 )
 
 // R6 — single mutation per binding per path (docs/121 §3-R6). When one loop-carried binding is
@@ -22,7 +24,7 @@ func (a *Analyzer) checkFlowSingleMutation(info *loopFlowInfo) {
 	if info == nil {
 		return
 	}
-	for name := range info.carried {
+	for _, name := range slices.Sorted(maps.Keys(info.carried)) { // map: sort for a stable report order
 		if flowSequentialBranchMutations(info.body, name) >= 2 {
 			a.flowLintWarnOnly(info.pos, "%s", flowSingleMutationMessage(name))
 		}

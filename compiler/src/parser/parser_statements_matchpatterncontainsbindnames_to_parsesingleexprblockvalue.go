@@ -776,8 +776,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_COMMA {
 		comma := p.cur()
 		commaIndex := p.pos
+		errorsBefore, noticesBefore := len(p.errors), len(p.notices)
 		tuple := p.parseTupleExprFromFirst(expr.Pos(), expr)
 		if p.exprBlockDepth == 0 && p.peek() != lexer.TOKEN_EOF && !(p.peek() == lexer.TOKEN_NEWLINE && p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_DEDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_EOF)) {
+			// The tuple parse is abandoned and the tokens after the comma are parsed again, so
+			// drop what it reported: kept, every rewind re-reported each later comma, making a
+			// run of n commas cost O(n^2) duplicate diagnostics (4000 commas: 2M lines, ~40 s).
+			p.errors, p.notices = p.errors[:errorsBefore], p.notices[:noticesBefore]
 			p.errorAt(comma.Pos, "unexpected token , in expression")
 			p.pos = commaIndex + 1
 			p.expectNewline()

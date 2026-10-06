@@ -14,6 +14,8 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 )
 
@@ -378,7 +380,8 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 				return nil, packedPayloadValueCache{}, err
 			}
 		}
-		for name, typ := range bindings {
+		for _, name := range slices.Sorted(maps.Keys(bindings)) { // map: sort so the allocas land in a stable order
+			typ := bindings[name]
 			if _, ok := s.lookupBinding(name); ok {
 				continue
 			}

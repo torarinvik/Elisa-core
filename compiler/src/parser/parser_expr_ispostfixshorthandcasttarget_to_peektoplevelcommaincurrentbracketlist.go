@@ -68,6 +68,8 @@ func (p *Parser) peekOwnedQualifier() bool {
 }
 
 func (p *Parser) parseTypeExpr() ast.TypeExpr {
+	p.enterNesting()
+	defer p.leaveNesting()
 	if p.peekOwnedQualifier() {
 		p.advance()
 		elem := p.parseTypeExpr()

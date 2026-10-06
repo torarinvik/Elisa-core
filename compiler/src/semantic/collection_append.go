@@ -55,6 +55,33 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 		if !v.IsValid() || !v.CanInterface() {
 			return
 		}
+		// Only a []ast.Stmt or an *ast.AugAssignStmt is unboxed below; test the dynamic type
+		// first, since Interface() on every visited struct and scalar copies it to the heap.
+		dynamic := v.Type()
+		if v.Kind() == reflect.Interface {
+			if v.IsNil() {
+				dynamic = nil
+			} else {
+				dynamic = v.Elem().Type()
+			}
+		}
+		if dynamic != collectionAppendStmtListType && dynamic != collectionAppendAugAssignType {
+			switch v.Kind() {
+			case reflect.Interface, reflect.Pointer:
+				if !v.IsNil() {
+					walk(v.Elem(), env)
+				}
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					walk(v.Field(i), env)
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					walk(v.Index(i), env)
+				}
+			}
+			return
+		}
 		if list, ok := v.Interface().([]ast.Stmt); ok {
 			nested := map[string]Type{}
 			for k, t := range env {
@@ -106,3 +133,8 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 	}
 	walk(reflect.ValueOf(fn.Body), types)
 }
+
+var (
+	collectionAppendStmtListType  = reflect.TypeOf([]ast.Stmt(nil))
+	collectionAppendAugAssignType = reflect.TypeOf((*ast.AugAssignStmt)(nil))
+)

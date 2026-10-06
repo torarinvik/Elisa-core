@@ -68,6 +68,37 @@ func sameGenericParam(a ast.GenericParam, b ast.GenericParam) bool {
 	return a.Kind == b.Kind && a.Name == b.Name && a.InterfaceBound == b.InterfaceBound && a.StateOwner == b.StateOwner && sameStringList(a.StateCases, b.StateCases)
 }
 
+type canonicalTypeIDResult struct {
+	id TypeID
+	ok bool
+}
+
+func tryCanonicalTypeIDResult(t Type) canonicalTypeIDResult {
+	if t == nil || IsInvalidType(t) {
+		return canonicalTypeIDResult{}
+	}
+	id, ok := TryCanonicalTypeID(t)
+	return canonicalTypeIDResult{id: id, ok: ok}
+}
+
+// sameTypeWithCanonicalIDs is SameType(a, b) given each side's precomputed canonical ID, for
+// callers comparing one type against many.
+func sameTypeWithCanonicalIDs(a Type, aID canonicalTypeIDResult, b Type, bID canonicalTypeIDResult) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if IsInvalidType(a) || IsInvalidType(b) {
+		return true
+	}
+	if sameTypeRuntimeCompatible(a, b) {
+		return true
+	}
+	if aID.ok && bID.ok {
+		return aID.id == bID.id
+	}
+	return SameType(a, b)
+}
+
 func SameType(a, b Type) bool {
 	if a == nil || b == nil {
 		return a == b

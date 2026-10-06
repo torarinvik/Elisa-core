@@ -37,18 +37,21 @@ func (a *Analyzer) widenNamedStatesDeepWithSeen(t Type, seen map[Type]bool) (Typ
 				return widened, true
 			}
 		}
-		changed := false
-		fields := cloneStructFields(tt.Fields)
+		// Most structs hold no named state anywhere: clone the field map only on the first
+		// widened field.
+		var fields map[string]Field
 		for name, field := range tt.Fields {
 			nextField, ok := a.widenNamedStatesDeepWithSeen(field.Type, seen)
 			if !ok {
 				continue
 			}
+			if fields == nil {
+				fields = cloneStructFields(tt.Fields)
+			}
 			field.Type = nextField
 			fields[name] = field
-			changed = true
 		}
-		if !changed {
+		if fields == nil {
 			return nil, false
 		}
 		return cloneStructTypeWithFields(tt, fields), true
@@ -76,9 +79,23 @@ func (a *Analyzer) widenNamedStatesDeepWithSeen(t Type, seen map[Type]bool) (Typ
 			}
 			return nil, false
 		}
-		fields := cloneStructFields(baseStruct.Fields)
+		// Resolve the instance's field types once (lookupResolvedFieldType per field re-resolved,
+		// and re-substituted, every field for each one), and clone the field map only on the
+		// first widened field.
+		var resolvedTypes map[string]Type
+		if len(baseStruct.Fields) != 0 {
+			if resolved, ok := a.resolvedStructFields(current); ok {
+				resolvedTypes = make(map[string]Type, len(resolved))
+				for _, field := range resolved {
+					if _, dup := resolvedTypes[field.Name]; !dup {
+						resolvedTypes[field.Name] = field.Type
+					}
+				}
+			}
+		}
+		var fields map[string]Field
 		for name, field := range baseStruct.Fields {
-			currentFieldType, ok := a.lookupResolvedFieldType(current, name)
+			currentFieldType, ok := resolvedTypes[name]
 			if !ok {
 				currentFieldType = field.Type
 			}
@@ -86,12 +103,18 @@ func (a *Analyzer) widenNamedStatesDeepWithSeen(t Type, seen map[Type]bool) (Typ
 			if !ok {
 				continue
 			}
+			if fields == nil {
+				fields = cloneStructFields(baseStruct.Fields)
+			}
 			field.Type = nextField
 			fields[name] = field
 			changed = true
 		}
 		if !changed {
 			return nil, false
+		}
+		if fields == nil {
+			fields = cloneStructFields(baseStruct.Fields)
 		}
 		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
 		cloned := *current

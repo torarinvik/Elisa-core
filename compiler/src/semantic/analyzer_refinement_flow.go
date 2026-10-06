@@ -3,6 +3,8 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"maps"
+	"slices"
 )
 
 // numRange is a closed integer interval fact: lo <= value <= hi, with either bound optionally
@@ -2184,7 +2186,8 @@ func (a *Analyzer) scaleAffine(expr ast.Expr, k int64, scope *Scope) (affineForm
 // entailment on that side fails and the prover declines (fail-closed, docs/85 §9.2).
 func (a *Analyzer) boundAffine(f affineForm, scope *Scope) numRange {
 	out := numRange{loKnown: true, lo: f.c, hiKnown: true, hi: f.c}
-	for name, coeff := range f.terms {
+	for _, name := range slices.Sorted(maps.Keys(f.terms)) { // map: sort — checked summation order decides where an overflow opens a bound
+		coeff := f.terms[name]
 		r, ok := a.lookupRangeFact(name)
 		if !ok {
 			// No branch-derived range, but a live written-constant fact (e.g. an immutable local

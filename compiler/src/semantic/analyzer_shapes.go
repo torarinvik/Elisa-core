@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"elisacore/src/lexer"
 )
@@ -63,7 +65,8 @@ func inferredFreshReturnShapeParams(status map[string]freshReturnStatus) []strin
 		return nil
 	}
 	out := make([]string, 0, len(status))
-	for name, shapeStatus := range status {
+	for _, name := range slices.Sorted(maps.Keys(status)) { // map: sort — the list is compared positionally and exported
+		shapeStatus := status[name]
 		if shapeStatus == freshReturnAlways {
 			out = append(out, name)
 		}

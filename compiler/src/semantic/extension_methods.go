@@ -396,4 +396,5 @@ func (a *Analyzer) registerUFCSFunction(visibleName string, sym *Symbol) {
 		}
 	}
 	a.ufcsFunctionsByName[visibleName] = append(methods, sym)
+	a.ufcsFunctionsVersion++
 }

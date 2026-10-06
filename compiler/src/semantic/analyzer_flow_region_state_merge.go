@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"elisacore/src/ast"
@@ -258,7 +260,8 @@ func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
 		return summary, true
 	}
 	indexStates := make([]regionRefState, 0, len(state.Fields))
-	for name, fieldState := range state.Fields {
+	for _, name := range slices.Sorted(maps.Keys(state.Fields)) { // map: sort — the merge below is order-sensitive
+		fieldState := state.Fields[name]
 		if !isRegionIndexFieldKey(name) {
 			continue
 		}

@@ -83,7 +83,15 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			valueParams[param.Name] = true
 			declare(param.Name, param.Type)
 		}
-		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(v any) {
+		// The four whole-body passes below visit the same nodes in the same order; walk the
+		// body by reflection once and replay the visit sequence (nothing here edits the AST).
+		bodyNodes := fillMayAdoptNodes(reflect.ValueOf(decl.Body))
+		forEachBodyNode := func(visit func(any)) {
+			for _, node := range bodyNodes {
+				visit(node)
+			}
+		}
+		forEachBodyNode(func(v any) {
 			switch n := v.(type) {
 			case *ast.LambdaExpr:
 				for _, param := range n.Params {
@@ -122,10 +130,20 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 				})
 			}
 		}
+		// One pass per list: a statement's idents are shadowed by every local declared before it
+		// in the list. (Walking the remaining statements once per local was quadratic in block
+		// length: ~3% of compiling the stage1 driver.)
 		fillMayAdoptStmtLists(reflect.ValueOf(decl.Body), func(list []ast.Stmt) {
-			for i, stmt := range list {
+			var declaredBefore map[string]bool
+			for _, stmt := range list {
+				if len(declaredBefore) != 0 {
+					markScoped(declaredBefore, stmt)
+				}
 				if local, ok := stmt.(*ast.VarDeclStmt); ok && local != nil {
-					markScoped(map[string]bool{local.Name: true}, list[i+1:])
+					if declaredBefore == nil {
+						declaredBefore = map[string]bool{}
+					}
+					declaredBefore[local.Name] = true
 				}
 			}
 		})
@@ -138,7 +156,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			markScoped(binders, arm.Guard, arm.Body)
 		}
 		nestedDef := false
-		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(v any) {
+		forEachBodyNode(func(v any) {
 			switch n := v.(type) {
 			case *ast.FuncDecl:
 				nestedDef = true
@@ -170,7 +188,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 			armShadowed = map[*ast.Ident]bool{}
 		}
 		unknown := false
-		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(v any) {
+		forEachBodyNode(func(v any) {
 			switch n := v.(type) {
 			case *ast.Ident:
 				// Any mention, not only a callee: a function referenced as a value may be called later.
@@ -197,7 +215,7 @@ func (a *Analyzer) computeFillMayAdopt() map[*ast.FuncDecl]bool {
 				}
 			}
 		})
-		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(v any) {
+		forEachBodyNode(func(v any) {
 			call, ok := v.(*ast.CallExpr)
 			if !ok || call == nil || unknown {
 				return
@@ -355,10 +373,8 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 				walk(v.Elem())
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				if v.Type().Field(i).IsExported() {
-					walk(v.Field(i))
-				}
+			for _, i := range fillMayAdoptExportedFields(v.Type()) {
+				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
 			if v.Type() == stmtList && v.CanInterface() {
@@ -375,6 +391,13 @@ func fillMayAdoptStmtLists(v reflect.Value, visit func([]ast.Stmt)) {
 		}
 	}
 	walk(v)
+}
+
+// fillMayAdoptNodes returns the nodes fillMayAdoptWalk(v, ...) would visit, in visit order.
+func fillMayAdoptNodes(v reflect.Value) []any {
+	var nodes []any
+	fillMayAdoptWalk(v, func(node any) { nodes = append(nodes, node) })
+	return nodes
 }
 
 func fillMayAdoptWalk(v reflect.Value, visit func(any)) {

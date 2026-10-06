@@ -144,6 +144,15 @@ type Analyzer struct {
 	regionPolyCandidateFnTypes map[string][]*FuncType
 	extensionMethodsByName     map[string][]*ExtensionMethod
 	ufcsFunctionsByName        map[string][]*Symbol
+	// returnBorrowAliasFrames/Journal undo a return-borrow branch's writes to its alias
+	// environment (analyzer_return_borrow_alias_journal.go).
+	returnBorrowAliasFrames  []returnBorrowAliasFrame
+	returnBorrowAliasJournal []returnBorrowAliasJournalEntry
+	// ufcsFunctionsVersion counts registrations into ufcsFunctionsByName; ufcsByLastSegment is
+	// that map re-keyed by each name's last `.`/`:` segment, valid while its version matches.
+	ufcsFunctionsVersion       int
+	ufcsByLastSegment          map[string][]*Symbol
+	ufcsByLastSegmentVersion   int
 	storageViewReturnOrigins   map[*ast.FuncDecl]*storageViewReturnOriginSummary
 	permissions                map[string]*PermissionSet
 	capabilityAliases          map[string][]ast.PermissionRef
@@ -506,7 +515,12 @@ type Analyzer struct {
 	// coupling §8 flagged). It rides EXACTLY the same clone/save/restore/invalidate sites as
 	// currentIndexBounds, so it can never outlive a branch or survive a mutation that the index facts
 	// themselves wouldn't (soundness).
-	currentBoundEqual                 map[string]map[string]bool
+	currentBoundEqual map[string]map[string]bool
+	// indexBoundsShared / boundEqualShared mark currentIndexBounds / currentBoundEqual as possibly
+	// aliased by an enclosing block's saved copy: a writer clones first (ownIndexBounds /
+	// ownBoundEqual). Entering a block only sets the flag instead of copying both maps.
+	indexBoundsShared                 bool
+	boundEqualShared                  bool
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	// currentFunctionGuardedIndexes collects the positions of index accesses in the current function
@@ -698,16 +712,18 @@ type Analyzer struct {
 	// re-entering a symbol already on the resolution stack returns "no function-value type" instead of
 	// recursing until the goroutine stack overflows.
 	functionValueResolveInProgress map[*Symbol]bool
-	sinkParamInferenceInProgress   map[*ast.FuncDecl]bool
-	parallelForInfo                map[*ast.ParallelForStmt]*ParallelForInfo
-	callArgDisjoint                map[*ast.CallExpr]*CallArgDisjointInfo
-	disjointCallSites              map[*ast.FuncDecl][]callDisjointObservation
-	funcDisjointParams             map[*ast.FuncDecl]*FuncDisjointParamInfo
-	lawIsCalls                     map[*ast.BinaryExpr]*ast.CallExpr
-	builtinModularLaws             map[string]*ast.FuncDecl
-	lemmaCalls                     map[*ast.CallExpr]bool
-	ghostDecls                     map[*ast.VarDeclStmt]bool
-	ghostContracts                 map[ast.Expr]bool
+	// projectedFieldResolveInProgress: the same guard for resolveProjectedFieldValueExprAtPath.
+	projectedFieldResolveInProgress map[*Symbol]bool
+	sinkParamInferenceInProgress    map[*ast.FuncDecl]bool
+	parallelForInfo                 map[*ast.ParallelForStmt]*ParallelForInfo
+	callArgDisjoint                 map[*ast.CallExpr]*CallArgDisjointInfo
+	disjointCallSites               map[*ast.FuncDecl][]callDisjointObservation
+	funcDisjointParams              map[*ast.FuncDecl]*FuncDisjointParamInfo
+	lawIsCalls                      map[*ast.BinaryExpr]*ast.CallExpr
+	builtinModularLaws              map[string]*ast.FuncDecl
+	lemmaCalls                      map[*ast.CallExpr]bool
+	ghostDecls                      map[*ast.VarDeclStmt]bool
+	ghostContracts                  map[ast.Expr]bool
 	// ghostReadAllowed, when > 0, permits reading a `ghost` variable (the analyzer is inside a
 	// contract clause or another ghost initializer). Outside these contexts a ghost read is a hard
 	// error — that is the ghost-to-real flow barrier that keeps erasure sound.
@@ -752,6 +768,23 @@ type Analyzer struct {
 	resolvedValueNames       map[*ast.Ident]string
 	currentImplicitScopes    []map[string]ast.Expr
 	semanticLimitDiagnostics map[string]bool
+	// semanticLimitHits counts reportSemanticDepthLimit calls, so a memo can tell whether a
+	// traversal was cut short (and must not be cached).
+	semanticLimitHits int
+	// typeShapesFrozen is set once every declaration's type has its final fields and
+	// affinity (just before body analysis); type-predicate memos are only valid after it.
+	typeShapesFrozen bool
+	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
+	affineHandleMemo map[Type]bool
+	// borrowedOwnerRefMemo caches containsBorrowedOwnerRefValues likewise.
+	borrowedOwnerRefMemo map[Type]bool
+	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
+	containerRegionMemo map[Type]string
+	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
+	symbolTypeEpoch uint64
+	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for
+	// captureDerivedLoopEntry (valid for one globalScope symbolsVersion and symbolTypeEpoch).
+	globalDerivedLoopCandidates derivedLoopCandidates
 }
 
 type castHookSignature struct {
@@ -1167,6 +1200,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// predicates. Both passes operate on already-collected type skeletons, so
 	// enum payloads can still resolve struct types declared later in the file.
 	a.populateStructFields(activeDecls)
+	a.checkStructByValueCycles(activeDecls)
 	a.assignHierarchyEnumTags(activeDecls)
 	a.inheritHierarchyCommonFields(activeDecls)
 	generatedDecls := make(map[ast.Decl]bool)
@@ -1241,6 +1275,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// the callee-body assumption can compose value contracts through first-class functions.
 	a.expandHigherOrderContracts(activeDecls)
 	a.returnBorrowLateEnabled = true
+	a.typeShapesFrozen = true
 	a.analyzeDecls(activeDecls)
 	a.evaluateLateReturnBorrowFrames()
 	// A4: discharge each protocol default method's own contract against its own body (the default

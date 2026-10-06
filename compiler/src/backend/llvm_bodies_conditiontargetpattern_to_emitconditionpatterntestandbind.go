@@ -15,6 +15,8 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 )
 
@@ -488,7 +490,8 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 				for name, typ := range left {
 					out[name] = typ
 				}
-				for name, typ := range right {
+				for _, name := range slices.Sorted(maps.Keys(right)) { // map: sort so the first conflict reported is stable
+					typ := right[name]
 					if prev, ok := out[name]; ok && !semantic.SameType(prev, typ) {
 						return nil, fmt.Errorf("condition binding %q has inconsistent types %s and %s", name, prev.String(), typ.String())
 					}
@@ -741,7 +744,8 @@ func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, ex
 		if err != nil {
 			return err
 		}
-		for name, typ := range bindings {
+		for _, name := range slices.Sorted(maps.Keys(bindings)) { // map: sort so the first conflict reported is stable
+			typ := bindings[name]
 			if prev, ok := out[name]; ok && !semantic.SameType(prev, typ) {
 				return fmt.Errorf("condition binding %q has inconsistent types %s and %s", name, prev.String(), typ.String())
 			}

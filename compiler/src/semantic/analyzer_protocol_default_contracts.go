@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
+	"slices"
 )
 
 // Protocol DEFAULT-method contract soundness (docs P1/A4).
@@ -40,7 +42,8 @@ func (a *Analyzer) checkProtocolDefaultMethodContracts(decls []scopedDecl) {
 			if !ok || iface == nil {
 				return
 			}
-			for _, member := range iface.Methods {
+			for _, methodName := range slices.Sorted(maps.Keys(iface.Methods)) { // map: sort for a stable report order
+				member := iface.Methods[methodName]
 				if member == nil || member.Default == nil {
 					continue
 				}

@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1066,7 +1068,12 @@ func parseComposeDirective(text string) (flag string, name string, args []string
 }
 
 func substituteParams(text string, subst map[string]string) string {
-	for name, arg := range subst {
+	// Substitution is sequential, so the hole order must not depend on map order: longest names
+	// first (a hole whose name contains another's is never clipped), ties by name.
+	names := slices.Sorted(maps.Keys(subst))
+	sort.SliceStable(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	for _, name := range names {
+		arg := subst[name]
 		// Legacy bracketed form (kept as an alias).
 		text = strings.ReplaceAll(text, "<"+name+">", arg)
 		// Native bare-name form (matches the template surface): replace a whole-word hole
@@ -1230,12 +1237,12 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 		if usesSymbolAddress(inst.Text) && !requireSet["relocation.symbol"] && !requireSet["pic"] {
 			issues = append(issues, Issue{Severity: "error", Code: "symbol-relocation-intent-missing", File: path, Line: inst.Line, Message: "symbol address/value use requires relocation.symbol or pic intent"})
 		}
-		for seg := range segmentOverridesUsed(inst.Text) {
+		for _, seg := range slices.Sorted(maps.Keys(segmentOverridesUsed(inst.Text))) { // map: sort for a stable report order
 			if !hasSegmentCapability(requireSet, seg) {
 				issues = append(issues, Issue{Severity: "error", Code: "segment-access-intent-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("%s segment access requires x86_64.segment.%s or x86_64.segment", seg, seg)})
 			}
 		}
-		for seg := range segmentRegistersUsed(inst.Text) {
+		for _, seg := range slices.Sorted(maps.Keys(segmentRegistersUsed(inst.Text))) { // map: sort for a stable report order
 			if !hasSegmentCapability(requireSet, seg) {
 				issues = append(issues, Issue{Severity: "error", Code: "segment-register-intent-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("%s segment register use requires x86_64.segment.%s or x86_64.segment", seg, seg)})
 			}
@@ -1547,7 +1554,7 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 		issues = append(issues, Issue{Severity: "error", Code: "return-register-not-written", File: path, Line: fn.Line, Message: fmt.Sprintf("non-void EASM export declares ret = %s but the body does not write it", returnReg)})
 	}
 	if !requireSet["input.unused"] {
-		for reg := range inputRegs {
+		for _, reg := range slices.Sorted(maps.Keys(inputRegs)) { // map: sort for a stable report order
 			if !inputRegRead[reg] {
 				issues = append(issues, Issue{Severity: "error", Code: "input-register-unused", File: path, Line: fn.Line, Message: fmt.Sprintf("input register %s is declared but not read before being overwritten or returning", reg)})
 			}

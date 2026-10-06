@@ -380,34 +380,46 @@ func (a *Analyzer) lookupOptimizationFactsForExpr(expr ast.Expr) (OptimizationFa
 }
 
 func (a *Analyzer) boundCallExpr(expr ast.Expr) (*ast.CallExpr, bool) {
+	return a.boundCallExprVisiting(expr, nil)
+}
+
+// boundCallExprVisiting follows identifier bindings to the call that produced them. visited
+// holds the symbols already followed: a binding whose initializer names the binding itself
+// (the identifier resolves to the same symbol once it is in scope, e.g. `e: T& = e.cast[U]`
+// read later as `e.field`) used to recurse until a fatal Go stack overflow.
+func (a *Analyzer) boundCallExprVisiting(expr ast.Expr, visited map[*Symbol]bool) (*ast.CallExpr, bool) {
 	if expr == nil {
 		return nil, false
 	}
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return a.boundCallExpr(n.Inner)
+		return a.boundCallExprVisiting(n.Inner, visited)
 	case *ast.CastExpr:
-		return a.boundCallExpr(n.Operand)
+		return a.boundCallExprVisiting(n.Operand, visited)
 	case *ast.MoveExpr:
-		return a.boundCallExpr(n.Operand)
+		return a.boundCallExprVisiting(n.Operand, visited)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, false
 		}
 		sym, ok := a.currentScope.Lookup(n.Name)
-		if !ok || sym.Mutable {
+		if !ok || sym.Mutable || visited[sym] {
 			return nil, false
 		}
+		if visited == nil {
+			visited = map[*Symbol]bool{}
+		}
+		visited[sym] = true
 		if a.currentValueBindings != nil {
 			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
-				return a.boundCallExpr(valueExpr)
+				return a.boundCallExprVisiting(valueExpr, visited)
 			}
 		}
 		decl, ok := sym.Node.(*ast.VarDeclStmt)
 		if !ok || decl.Value == nil {
 			return nil, false
 		}
-		return a.boundCallExpr(decl.Value)
+		return a.boundCallExprVisiting(decl.Value, visited)
 	case *ast.CallExpr:
 		return n, true
 	default:

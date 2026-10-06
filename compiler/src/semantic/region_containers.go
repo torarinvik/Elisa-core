@@ -1,8 +1,10 @@
 package semantic
 
 import (
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 
 	"elisacore/src/ast"
@@ -59,6 +61,23 @@ func (a *Analyzer) stampContainerRegion(t Type) Type {
 // containerRegion peels ref wrappers and returns the allocation region of the
 // underlying container (darray or dict), or "" if t is not a region-carrying
 // container.
+// containerRegionOf is containerRegion, memoized per type once declaration shapes are final
+// (the struct/tuple case walks the whole by-value type graph).
+func (a *Analyzer) containerRegionOf(t Type) string {
+	if !a.typeShapesFrozen || t == nil {
+		return containerRegion(t)
+	}
+	if region, ok := a.containerRegionMemo[t]; ok {
+		return region
+	}
+	region := containerRegion(t)
+	if a.containerRegionMemo == nil {
+		a.containerRegionMemo = map[Type]string{}
+	}
+	a.containerRegionMemo[t] = region
+	return region
+}
+
 func containerRegion(t Type) string {
 	for {
 		switch tt := t.(type) {
@@ -1450,7 +1469,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 		if srcRegion == "" {
 			continue
 		}
-		for tj := range targets[i] {
+		for _, tj := range slices.Sorted(maps.Keys(targets[i])) { // map: sort for a stable report order
 			if tj == storeTargetGlobal {
 				// The callee stores the argument into program-lifetime storage (a global/perm
 				// container, or relayed there) — that outlives every local region unconditionally.
@@ -1994,12 +2013,22 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		return
 	}
 	args := returnBorrowCallArgs(call)
+	// What each argument may point at depends only on its type; compute it once per argument,
+	// not once per (writable param, argument) pair.
+	argPointees := make([]*regionPointees, len(args))
+	storePointeesOf := func(other int) regionPointees {
+		if argPointees[other] == nil {
+			pointees := argumentStorePointees(a.exprTypes[args[other]])
+			argPointees[other] = &pointees
+		}
+		return *argPointees[other]
+	}
 	for index, paramType := range fnType.Params {
 		if index >= len(args) || !a.returnBorrowWritableParam(paramType) {
 			continue
 		}
 		containerType := stripRefForBounds(a.exprTypes[args[index]])
-		targetRegion := containerRegion(containerType)
+		targetRegion := a.containerRegionOf(containerType)
 		if targetRegion == "" {
 			continue
 		}
@@ -2014,7 +2043,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 			// The callee can only store region data reachable from this argument if some value it
 			// reaches has a type the container's elements may point at: a `darray[Pattern]` of
 			// handles cannot become the bytes an `sview` element points into.
-			if !stored.intersects(argumentStorePointees(a.exprTypes[arg])) {
+			if !stored.intersects(storePointeesOf(other)) {
 				continue
 			}
 			// Store-flow is directed: the container in `other` is dangerous only

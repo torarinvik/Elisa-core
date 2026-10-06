@@ -354,6 +354,7 @@ func (a *Analyzer) defineExternImplementationGlobal(visibleName string, sym *Sym
 		}
 		a.mergeExternMetadataIntoImplementation(existing, sym)
 		a.globalScope.Symbols[visibleName] = sym
+		a.globalScope.symbolsVersion++
 		return true
 	case sym.Kind == SymbolExternFunc && existing.Kind == SymbolFunc:
 		if externFunctionCanOverloadWithImplementation(sym, existing) {

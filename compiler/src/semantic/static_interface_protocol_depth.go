@@ -1,6 +1,9 @@
 package semantic
 
 import (
+	"maps"
+	"slices"
+
 	"elisacore/src/ast"
 )
 
@@ -154,7 +157,10 @@ func (a *Analyzer) synthesizeDefaultImplMembers(decls []scopedDecl) {
 				bodySubst = map[string]ast.Expr{staticInterfaceSelfName: &ast.Ident{Position: decl.Position, Name: name}}
 			}
 			synthesized := make([]ast.ImplMember, 0, len(iface.Methods))
-			for methodName, method := range iface.Methods {
+			// Sorted: iface.Methods is a map, and the walk order became the order of the
+			// synthesized members appended to the impl (and of its diagnostics).
+			for _, methodName := range slices.Sorted(maps.Keys(iface.Methods)) {
+				method := iface.Methods[methodName]
 				if method == nil || method.Default == nil {
 					continue
 				}

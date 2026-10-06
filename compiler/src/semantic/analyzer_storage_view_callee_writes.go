@@ -149,6 +149,13 @@ type storageViewWriteSolve struct {
 	prov    map[storageViewCalleeWriteKey]storageViewCalleeWrites
 	visited map[storageViewCalleeWriteKey]bool
 	changed bool
+	bodies  map[*ast.FuncDecl]storageViewSolveBody
+}
+
+// storageViewSolveBody is a callee body's reflect-walk node list and local names (read-only).
+type storageViewSolveBody struct {
+	nodes  []any
+	locals map[string]bool
 }
 
 func (w storageViewCalleeWrites) covers(other storageViewCalleeWrites) bool {
@@ -188,10 +195,19 @@ func (a *Analyzer) storageViewCalleeWritesForDecl(decl *ast.FuncDecl, param int,
 		// A bodiless (extern/abstract) callee: nothing to read, assume it writes everything.
 		writes.All = true
 	}
-	var nodes []any
-	fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(node any) { nodes = append(nodes, node) })
+	// A body's node list and local names depend only on the decl; walk it once per solve, not
+	// once per (parameter, round).
+	body, cached := solve.bodies[decl]
+	if !cached {
+		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(node any) { body.nodes = append(body.nodes, node) })
+		body.locals = storageViewDeclLocalNames(decl, body.nodes)
+		if solve.bodies == nil {
+			solve.bodies = map[*ast.FuncDecl]storageViewSolveBody{}
+		}
+		solve.bodies[decl] = body
+	}
+	nodes, locals := body.nodes, body.locals
 	handled := map[*ast.Ident]bool{}
-	locals := storageViewDeclLocalNames(decl, nodes)
 	markRooted := func(expr ast.Expr, asWrite bool) {
 		if expr == nil {
 			return

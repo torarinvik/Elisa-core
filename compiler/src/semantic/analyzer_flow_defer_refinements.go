@@ -362,7 +362,7 @@ func (a *Analyzer) bindRefinedExprType(scope *Scope, expr ast.Expr, refined Type
 	if !ok {
 		return
 	}
-	scope.Refinements[key] = refined
+	scope.setRefinement(key, refined)
 }
 
 func (a *Analyzer) bindMatchedPackedVariantView(expr ast.Expr, viewType *PackedVariantViewType) {
@@ -398,7 +398,8 @@ func (a *Analyzer) lookupRefinedPackedVariantView(expr ast.Expr) (*PackedVariant
 			return viewType, true
 		}
 	}
-	for candidate, viewType := range a.currentPackedVariantViews {
+	for _, candidate := range sortedSymbolKeys(a.currentPackedVariantViews) { // map: sort so a shadowed name resolves the same way every run
+		viewType := a.currentPackedVariantViews[candidate]
 		if candidate != nil && candidate.Name == ident.Name && viewType != nil {
 			return viewType, true
 		}

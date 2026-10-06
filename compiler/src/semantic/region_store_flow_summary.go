@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"unicode"
 
 	"elisacore/src/ast"
@@ -741,6 +742,45 @@ func storeFlowEndsInReturn(body []ast.Stmt) bool {
 
 var astStmtType = reflect.TypeOf((*ast.Stmt)(nil)).Elem()
 var astTypeExprType = reflect.TypeOf((*ast.TypeExpr)(nil)).Elem()
+var astMatchArmType = reflect.TypeOf(ast.MatchArm{})
+
+// storeFlowTypeInfo caches what storeFlowMentions asks of a reflect.Type on every node it
+// visits: method-set tests (Implements) and the struct field filter were ~4 s of a stage1
+// driver compile when recomputed per node.
+type storeFlowTypeInfo struct {
+	isStmt     bool  // pointer type implementing ast.Stmt
+	isTypeExpr bool  // pointer type implementing ast.TypeExpr
+	binding    bool  // pointer to a storeFlowBindingExprs node
+	fields     []int // struct: exported fields to walk, in declaration order
+}
+
+var storeFlowTypeInfoCache sync.Map // map[reflect.Type]*storeFlowTypeInfo
+
+func storeFlowTypeInfoOf(t reflect.Type) *storeFlowTypeInfo {
+	if cached, ok := storeFlowTypeInfoCache.Load(t); ok {
+		return cached.(*storeFlowTypeInfo)
+	}
+	info := &storeFlowTypeInfo{}
+	switch t.Kind() {
+	case reflect.Pointer:
+		info.isStmt = t.Implements(astStmtType)
+		info.isTypeExpr = t.Implements(astTypeExprType)
+		info.binding = storeFlowBindingExprs[t.Elem().Name()]
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if !field.IsExported() {
+				continue
+			}
+			if storeFlowSkipFields[field.Name] && (field.Type.Kind() == reflect.String || field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String) {
+				continue
+			}
+			info.fields = append(info.fields, i)
+		}
+	}
+	cached, _ := storeFlowTypeInfoCache.LoadOrStore(t, info)
+	return cached.(*storeFlowTypeInfo)
+}
 
 // storeFlowStmt applies unit to statement stmt and then to the statements nested in it.
 func (a *Analyzer) storeFlowStmt(stmt reflect.Value, seen map[uintptr]bool, unit func(stmt reflect.Value) []reflect.Value) {
@@ -1010,14 +1050,7 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 	}
 	var walk func(v reflect.Value)
 	walkStructFields := func(v reflect.Value) {
-		for i := 0; i < v.NumField(); i++ {
-			field := v.Type().Field(i)
-			if !field.IsExported() {
-				continue
-			}
-			if storeFlowSkipFields[field.Name] && (field.Type.Kind() == reflect.String || field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String) {
-				continue
-			}
+		for _, i := range storeFlowTypeInfoOf(v.Type()).fields {
 			walk(v.Field(i))
 		}
 	}
@@ -1046,7 +1079,8 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 			if v.IsNil() || !v.CanInterface() {
 				return
 			}
-			if v.Type().Implements(astStmtType) && v.Pointer() != self {
+			info := storeFlowTypeInfoOf(v.Type())
+			if info.isStmt && v.Pointer() != self {
 				*nested = append(*nested, v)
 				if a.storeFlowStmtEnv != nil {
 					env := make(map[string]string, len(rename))
@@ -1057,7 +1091,7 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				}
 				return
 			}
-			if v.Type().Implements(astTypeExprType) {
+			if info.isTypeExpr {
 				return // type syntax names types, not values
 			}
 			if comp, ok := v.Interface().(*ast.ListComprehensionExpr); ok {
@@ -1090,7 +1124,7 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				walk(reflect.ValueOf(&tern.Alt).Elem())
 				return
 			}
-			if storeFlowBindingExprs[v.Type().Elem().Name()] {
+			if info.binding {
 				a.storeFlowBinds = true
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
@@ -1126,7 +1160,12 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 			}
 			walk(v.Elem())
 		case reflect.Struct:
-			if arm, ok := v.Interface().(ast.MatchArm); ok && v.CanAddr() {
+			// Test the type before boxing: Interface() on a struct value copies it to the heap.
+			if v.Type() != astMatchArmType || !v.CanAddr() {
+				walkStructFields(v)
+				return
+			}
+			if arm, ok := v.Interface().(ast.MatchArm); ok {
 				// A match arm's pattern binders are scoped to that arm (its guard and body):
 				// distinct arms and matches reusing a binder name must not be unified through it.
 				saved := map[string]string{}
@@ -1180,10 +1219,8 @@ func storeFlowHasBindingExpr(v reflect.Value) bool {
 			}
 			walk(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				if v.Type().Field(i).IsExported() {
-					walk(v.Field(i))
-				}
+			for _, i := range fillMayAdoptExportedFields(v.Type()) {
+				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {
@@ -1530,13 +1567,7 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
 	if !a.storeFlowDarrayPlace(fn.Object) {
 		return false
 	}
-	var syms []*Symbol
-	for name, byName := range a.ufcsFunctionsByName {
-		if fillMayAdoptLastSegment(name) == fn.Field {
-			syms = append(syms, byName...)
-		}
-	}
-	for _, sym := range syms {
+	for _, sym := range a.ufcsFunctionsWithLastSegment(fn.Field) {
 		if sym == nil {
 			return false
 		}
@@ -1555,6 +1586,22 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
 		}
 	}
 	return true
+}
+
+// ufcsFunctionsWithLastSegment lists every UFCS function whose registered name ends in segment
+// (`push` matches `push` and `Mod.push`). The index is rebuilt only after a new registration;
+// scanning every UFCS name at each darray growth call was ~2% of analysis.
+func (a *Analyzer) ufcsFunctionsWithLastSegment(segment string) []*Symbol {
+	if a.ufcsByLastSegment == nil || a.ufcsByLastSegmentVersion != a.ufcsFunctionsVersion {
+		index := make(map[string][]*Symbol, len(a.ufcsFunctionsByName))
+		for name, byName := range a.ufcsFunctionsByName {
+			last := fillMayAdoptLastSegment(name)
+			index[last] = append(index[last], byName...)
+		}
+		a.ufcsByLastSegment = index
+		a.ufcsByLastSegmentVersion = a.ufcsFunctionsVersion
+	}
+	return a.ufcsByLastSegment[segment]
 }
 
 // storeFlowDarrayPlace reports a receiver that is certainly a builtin darray: a local or

@@ -94,6 +94,8 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 	}
 }
 func (p *Parser) parseExpr() ast.Expr {
+	p.enterNesting()
+	defer p.leaveNesting()
 	// Quantifier prefix (docs/90 brick 90-4), only in law/spec bodies: `forall i: <body>` /
 	// `exists i: <body>`. Gated on allowQuantifiers so ordinary code can name a variable `forall`.
 	if p.allowQuantifiers && p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "forall" || p.cur().Text == "exists") && p.quantifierStartsHere() {
@@ -714,7 +716,10 @@ func recoveryFallbackExpr(recovery *ast.RecoveryClause) ast.Expr {
 }
 func (p *Parser) parseOr() ast.Expr {
 	left := p.parseAnd()
+	chain := 0
 	for p.peek() == lexer.TOKEN_OR {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		p.advance()
 		right := p.parseAnd()
@@ -724,7 +729,10 @@ func (p *Parser) parseOr() ast.Expr {
 }
 func (p *Parser) parseAnd() ast.Expr {
 	left := p.parseNot()
+	chain := 0
 	for p.peek() == lexer.TOKEN_AND {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		p.advance()
 		right := p.parseNot()
@@ -736,24 +744,27 @@ func (p *Parser) parseNot() ast.Expr {
 	if p.peek() == lexer.TOKEN_NOT {
 		pos := p.cur().Pos
 		p.advance()
-		operand := p.parseNot()
+		operand := p.parseNestedNot()
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: operand}
 	}
 	if p.matchIdentText("let") {
 		pos := p.tokens[p.pos-1].Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
-		value := p.parseNot()
+		value := p.parseNestedNot()
 		return &ast.OptionalBindExpr{Position: pos, Name: name, Value: value}
 	}
 	return p.parseComparison()
 }
 func (p *Parser) parseComparison() ast.Expr {
 	left := p.parseAs()
+	chain := 0
 	for p.peek() == lexer.TOKEN_EQEQ || p.peek() == lexer.TOKEN_BANGEQ ||
 		p.peek() == lexer.TOKEN_LT || p.peek() == lexer.TOKEN_GT ||
 		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ ||
 		(!p.disallowIsComparison && p.peek() == lexer.TOKEN_IS) || p.membershipLiteralAhead() || p.notInMembershipAhead() {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		if p.notInMembershipAhead() {
 			p.advance()
@@ -990,7 +1001,10 @@ func (p *Parser) parseStructIsTestExpr() ast.Expr {
 }
 func (p *Parser) parseBitwiseOr() ast.Expr {
 	left := p.parseBitwiseXor()
+	chain := 0
 	for p.peek() == lexer.TOKEN_PIPE {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		p.advance()
 		right := p.parseBitwiseXor()
@@ -1000,7 +1014,10 @@ func (p *Parser) parseBitwiseOr() ast.Expr {
 }
 func (p *Parser) parseBitwiseXor() ast.Expr {
 	left := p.parseBitwiseAnd()
+	chain := 0
 	for p.peek() == lexer.TOKEN_CARET {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		p.advance()
 		right := p.parseBitwiseAnd()
@@ -1010,7 +1027,10 @@ func (p *Parser) parseBitwiseXor() ast.Expr {
 }
 func (p *Parser) parseBitwiseAnd() ast.Expr {
 	left := p.parseShift()
+	chain := 0
 	for p.peek() == lexer.TOKEN_AMPERSAND {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		p.advance()
 		right := p.parseShift()
@@ -1020,7 +1040,10 @@ func (p *Parser) parseBitwiseAnd() ast.Expr {
 }
 func (p *Parser) parseShift() ast.Expr {
 	left := p.parseAddSub()
+	chain := 0
 	for p.peek() == lexer.TOKEN_LSHIFT || p.peek() == lexer.TOKEN_RSHIFT {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		op := p.advance()
 		right := p.parseAddSub()
@@ -1030,7 +1053,10 @@ func (p *Parser) parseShift() ast.Expr {
 }
 func (p *Parser) parseAddSub() ast.Expr {
 	left := p.parseMulDiv()
+	chain := 0
 	for p.peek() == lexer.TOKEN_PLUS || p.peek() == lexer.TOKEN_MINUS {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		op := p.advance()
 		right := p.parseMulDiv()
@@ -1040,7 +1066,10 @@ func (p *Parser) parseAddSub() ast.Expr {
 }
 func (p *Parser) parseMulDiv() ast.Expr {
 	left := p.parseUnary()
+	chain := 0
 	for p.peek() == lexer.TOKEN_STAR || p.peek() == lexer.TOKEN_SLASH || p.peek() == lexer.TOKEN_PERCENT {
+		chain++
+		p.checkChainDepth(chain)
 		pos := p.cur().Pos
 		op := p.advance()
 		right := p.parseUnary()
@@ -1067,7 +1096,7 @@ func (p *Parser) parseUnary() ast.Expr {
 			explicitPool = p.parseExpr()
 			p.expect(lexer.TOKEN_RBRACKET)
 		}
-		callExpr := p.parseUnary()
+		callExpr := p.parseNestedUnary()
 		call, ok := callExpr.(*ast.CallExpr)
 		if !ok {
 			p.errorf("submit expects a call like submit work(arg) or submit[pool] work(arg)")
@@ -1125,7 +1154,7 @@ func (p *Parser) parseUnary() ast.Expr {
 	}
 	if p.matchIdentText("await") {
 		pos := p.tokens[p.pos-1].Pos
-		operand := p.parseUnary()
+		operand := p.parseNestedUnary()
 		return &ast.CallExpr{
 			Position: pos,
 			Func:     &ast.Ident{Position: pos, Name: "pool_await"},
@@ -1134,31 +1163,31 @@ func (p *Parser) parseUnary() ast.Expr {
 	}
 	if p.matchIdentText("move") {
 		pos := p.tokens[p.pos-1].Pos
-		operand := p.parseUnary()
+		operand := p.parseNestedUnary()
 		return &ast.MoveExpr{Position: pos, Operand: operand}
 	}
 	if p.peek() == lexer.TOKEN_MINUS {
 		pos := p.cur().Pos
 		p.advance()
-		operand := p.parseUnary()
+		operand := p.parseNestedUnary()
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Operand: operand}
 	}
 	if p.peek() == lexer.TOKEN_TILDE {
 		pos := p.cur().Pos
 		p.advance()
-		operand := p.parseUnary()
+		operand := p.parseNestedUnary()
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_TILDE, Operand: operand}
 	}
 	if p.peek() == lexer.TOKEN_BANG {
 		pos := p.cur().Pos
 		p.advance()
-		operand := p.parseUnary()
+		operand := p.parseNestedUnary()
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_BANG, Operand: operand}
 	}
 	if p.peek() == lexer.TOKEN_AMPERSAND {
 		pos := p.cur().Pos
 		p.advance()
-		operand := p.parseUnary()
+		operand := p.parseNestedUnary()
 		return &ast.AddrOfExpr{Position: pos, Operand: operand}
 	}
 	return p.parsePostfix()
@@ -1224,4 +1253,19 @@ func (p *Parser) parseCatchExpr() ast.Expr {
 // boundary belongs to the NEXT statement.
 func (p *Parser) prevTokenIsDedent() bool {
 	return p.pos > 0 && p.tokens[p.pos-1].Kind == lexer.TOKEN_DEDENT
+}
+
+// parseNestedUnary parses the operand of a prefix operator; the extra level counts toward
+// MaxNestingDepth (`- - - … x`), while a plain primary costs nothing beyond its parseExpr.
+func (p *Parser) parseNestedUnary() ast.Expr {
+	p.enterNesting()
+	defer p.leaveNesting()
+	return p.parseUnary()
+}
+
+// parseNestedNot parses the operand of `not` / `let` the same way.
+func (p *Parser) parseNestedNot() ast.Expr {
+	p.enterNesting()
+	defer p.leaveNesting()
+	return p.parseNot()
 }

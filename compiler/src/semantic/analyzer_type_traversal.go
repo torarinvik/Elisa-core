@@ -20,6 +20,7 @@ func (a *Analyzer) semanticLimitPos() lexer.Pos {
 }
 
 func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
+	a.semanticLimitHits++
 	if a.semanticLimitDiagnostics == nil {
 		a.semanticLimitDiagnostics = map[string]bool{}
 	}
@@ -39,7 +40,39 @@ func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
 }
 
 func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
-	return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	switch t.(type) {
+	case *ArrayType, *DArrayType, *ViewType, *OptionalType, *ErrorUnionType, *DictType, *SetType,
+		*DictEntryType, *PackedVariantViewType, *EnumType, *GenericInstanceType, *StructType:
+	default:
+		// typeContainsWithSeen descends into none of these, and isAffineHandleType holds only
+		// for struct and generic-instance types: the answer is false without a traversal.
+		return false
+	}
+	return a.memoTypePredicate(&a.affineHandleMemo, t, func() bool {
+		return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+	})
+}
+
+// memoTypePredicate caches a predicate over t's by-value type graph (reachability of some
+// leaf), a pure function of t once declaration shapes are final. Before that, or when the
+// traversal hit the depth limit (which reports a diagnostic per function), it is computed
+// afresh.
+func (a *Analyzer) memoTypePredicate(memo *map[Type]bool, t Type, compute func() bool) bool {
+	if !a.typeShapesFrozen || t == nil {
+		return compute()
+	}
+	if cached, ok := (*memo)[t]; ok {
+		return cached
+	}
+	hits := a.semanticLimitHits
+	result := compute()
+	if a.semanticLimitHits == hits {
+		if *memo == nil {
+			*memo = map[Type]bool{}
+		}
+		(*memo)[t] = result
+	}
+	return result
 }
 
 func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {
@@ -509,7 +542,7 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 				continue
 			}
 			if state.Fields == nil {
-				state.Fields = map[string]regionRefState{}
+				state.Fields = make(map[string]regionRefState, len(tt.Fields))
 			}
 			state.Fields[field.Name] = fieldState
 		}
@@ -531,7 +564,7 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 					continue
 				}
 				if state.Fields == nil {
-					state.Fields = map[string]regionRefState{}
+					state.Fields = make(map[string]regionRefState, len(base.Fields))
 				}
 				state.Fields[field.Name] = fieldState
 			}

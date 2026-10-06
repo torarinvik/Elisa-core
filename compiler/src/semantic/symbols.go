@@ -460,9 +460,12 @@ type Scope struct {
 	Parent *Scope
 	// defineHook, inherited by child scopes, observes every successful Define (the return-borrow
 	// store environment's binder census, analyzer_return_borrow_store_env.go).
-	defineHook  func(*Symbol)
-	Symbols     map[string]*Symbol
-	Refinements map[string]Type
+	defineHook func(*Symbol)
+	Symbols    map[string]*Symbol
+	// symbolsVersion changes whenever Symbols gains, loses or replaces an entry, or an entry's
+	// Type is reassigned; caches derived from a scope's symbols are valid while it is unchanged.
+	symbolsVersion uint64
+	Refinements    map[string]Type
 	// narrowedOptionals records, for a place whose refinement narrowed `T?` down to `T`
 	// (recordAssignmentRefinement, after `x <- 5`), the DECLARED optional type. The
 	// narrowing is a useful fact -- `x` reads as a plain T afterwards -- but it must not
@@ -540,7 +543,10 @@ func NewScope(parent *Scope) *Scope {
 	if parent != nil {
 		hook = parent.defineHook
 	}
-	return &Scope{Parent: parent, defineHook: hook, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, narrowedOptionals: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
+	// Refinements, narrowedOptionals and ConditionalBindingHints stay nil until first written
+	// (setRefinement, SetNarrowedOptional, setConditionalBindingHint): most scopes never write
+	// them, and three empty maps per scope were most of NewScope's cost.
+	return &Scope{Parent: parent, defineHook: hook, Symbols: map[string]*Symbol{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -548,6 +554,7 @@ func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
 		return existing, false
 	}
 	s.Symbols[sym.Name] = sym
+	s.symbolsVersion++
 	if s.defineHook != nil {
 		s.defineHook(sym)
 	}
@@ -581,6 +588,20 @@ func (s *Scope) LookupNarrowedOptional(key string) (Type, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (s *Scope) setRefinement(key string, t Type) {
+	if s.Refinements == nil {
+		s.Refinements = map[string]Type{}
+	}
+	s.Refinements[key] = t
+}
+
+func (s *Scope) setConditionalBindingHint(name, hint string) {
+	if s.ConditionalBindingHints == nil {
+		s.ConditionalBindingHints = map[string]string{}
+	}
+	s.ConditionalBindingHints[name] = hint
 }
 
 func (s *Scope) SetNarrowedOptional(key string, declared Type) {

@@ -2,6 +2,8 @@ package easm
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -152,7 +154,8 @@ func easmCopyKnownUInt(m map[string]uint64) map[string]uint64 {
 // `labels:` contract — i.e. to give the merge point an explicit type, exactly as TAL requires.
 func checkMergeConsistency(path string, fn *Function, jumpPreds map[string][]easmMergeSnap, entry map[string]easmMergeSnap, fallReachable map[string]bool, contracts map[string]LabelContract) []Issue {
 	var issues []Issue
-	for label, preds := range jumpPreds {
+	for _, label := range slices.Sorted(maps.Keys(jumpPreds)) { // map: sort for a stable report order
+		preds := jumpPreds[label]
 		if len(preds) == 0 {
 			continue
 		}

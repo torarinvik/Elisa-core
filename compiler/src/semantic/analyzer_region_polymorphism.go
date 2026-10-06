@@ -2,7 +2,9 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 
 	"elisacore/src/ast"
@@ -1566,7 +1568,8 @@ func (a *Analyzer) regionPolyProtocolMethodImplFuncTypes(callee *ast.FieldExpr) 
 		return nil
 	}
 	var out []*FuncType
-	for _, impl := range a.staticImpls {
+	for _, implKey := range slices.Sorted(maps.Keys(a.staticImpls)) { // map: sort so the first region-polymorphic impl is the same every run
+		impl := a.staticImpls[implKey]
 		if impl == nil || impl.InterfaceName != ifaceName {
 			continue
 		}

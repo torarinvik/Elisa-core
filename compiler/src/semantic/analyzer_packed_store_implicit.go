@@ -591,7 +591,8 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) 
 		}
 	case *StructType:
 		if tt != nil {
-			for _, field := range tt.Fields {
+			for _, name := range orderedStructFieldNames(tt) { // map: declaration order so the depth guard cuts the same payloads every run
+				field := tt.Fields[name]
 				collectPackedEnumsInTypeDepth(field.Type, out, depth+1)
 			}
 		}
