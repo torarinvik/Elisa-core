@@ -19,6 +19,8 @@ import (
 )
 
 func main() {
+	// A parallel -emit obj re-runs this executable as a partition worker; it exits here.
+	backend.RunPartitionWorkerIfRequested()
 	applyDefaultGCPercent()
 	stop := startCPUProfile()
 	stopMem := startMemProfile()

@@ -3,12 +3,14 @@
 // Port of the stage1 design (Elisa-compiler/src/backend/codegen_parallel_emit.elisa).
 // The optimized, verified module is partitioned by function: defined functions are
 // split into N contiguous runs of roughly equal instruction count. Stage1 forks one
-// child per run; stage0 is a Go process and cannot fork, so instead the module is
-// serialized once to an in-memory bitcode buffer and N pthreads each parse their own
-// copy into their OWN LLVMContext, build their OWN target machine (same triple, CPU,
-// features, codegen level, reloc and code model as the serial path), restrict the copy
-// to their partition and write `<out>.part<k>.o`. The Go caller merges the parts with
-// `ld -r` (honoring $ELISA_LD).
+// child per run. Stage0 is a Go process and cannot fork, and LLVM's pass pipeline is not
+// safe to run in several threads of one process (concurrent default<O3> in separate
+// LLVMContexts crashed in SimplifyCFG), so the module is written once to a bitcode file
+// and N worker PROCESSES (this executable re-run in worker mode, see
+// llvm_parallel_emit.go) each parse it into a fresh context, build their own target
+// machine (same triple, CPU, features, codegen level, reloc and code model as the serial
+// path), restrict the module to their partition and write `<out>.part<k>.o`. The Go
+// caller merges the parts with `ld -r` (honoring $ELISA_LD).
 //
 // Linkage is rewritten identically in every partition so cross-partition references
 // resolve: a function or mutable/external global with internal or private linkage
@@ -19,8 +21,14 @@
 // aliasee became a declaration has its uses redirected to the aliasee and turns private.
 //
 // The partitioning is a pure function of the module, so output is deterministic.
+//
+// Opt-in parallel optimization (ELISACORE_PARALLEL_OPT=1): the module is partitioned
+// BEFORE the default<O*> pipeline and each worker optimizes its own partition, so
+// cross-partition inlining is lost. To limit that, a non-owner keeps an
+// available_externally copy of every partitioned function of at most `import_weight`
+// instructions (ThinLTO-style import) instead of a bare declaration: it can still be
+// inlined there, and the pipeline drops the copy before codegen.
 
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +37,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 
 #include "parallel_emit.h"
 
@@ -153,7 +162,7 @@ static long long part_function_owners(LLVMModuleRef m, int jobs, long long **own
 	return total;
 }
 
-static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t count, int part) {
+static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t count, int part, long long import_weight) {
 	long long ordinal = 0;
 	for (LLVMValueRef g = LLVMGetFirstGlobal(m); g; g = LLVMGetNextGlobal(g), ordinal++) {
 		if (part_global_owned(g)) {
@@ -173,7 +182,11 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 		if (owner >= 0) {
 			part_externalize(f, ordinal);
 			if (owner != part) {
-				part_strip_body(f);
+				if (import_weight > 0 && part_function_weight(f) <= import_weight) {
+					LLVMSetLinkage(f, LLVMAvailableExternallyLinkage);
+				} else {
+					part_strip_body(f);
+				}
 			}
 		}
 	}
@@ -190,127 +203,88 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 	return 1;
 }
 
-typedef struct {
-	const char *bitcode;
-	size_t bitcode_len;
-	const long long *owners;
-	size_t owner_count;
-	int part;
-	const char *triple;
-	const char *cpu;
-	const char *features;
-	const char *path;
-	char *error;
-} part_worker;
-
-static void *part_worker_run(void *arg) {
-	part_worker *w = arg;
-	char *msg = NULL;
-	LLVMContextRef ctx = LLVMContextCreate();
-	LLVMMemoryBufferRef buf = LLVMCreateMemoryBufferWithMemoryRange(w->bitcode, w->bitcode_len, "elisa.part", 0);
-	LLVMModuleRef m = NULL;
-	if (LLVMParseBitcodeInContext2(ctx, buf, &m) != 0 || m == NULL) {
-		w->error = strdup("failed to parse partition bitcode");
-		LLVMDisposeMemoryBuffer(buf);
-		LLVMContextDispose(ctx);
-		return NULL;
+// Same options as elisacoreRunOptimizationPipeline in llvm_target.go.
+static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *pipeline, char **error) {
+	LLVMPassBuilderOptionsRef options = LLVMCreatePassBuilderOptions();
+	LLVMPassBuilderOptionsSetLoopInterleaving(options, 1);
+	LLVMPassBuilderOptionsSetLoopVectorization(options, 1);
+	LLVMPassBuilderOptionsSetSLPVectorization(options, 1);
+	LLVMPassBuilderOptionsSetLoopUnrolling(options, 1);
+	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
+	LLVMDisposePassBuilderOptions(options);
+	if (err == NULL) {
+		return 1;
 	}
-	LLVMDisposeMemoryBuffer(buf);
-	if (!part_restrict_module(m, w->owners, w->owner_count, w->part)) {
-		w->error = strdup("partition function list does not match the source module");
-		LLVMDisposeModule(m);
-		LLVMContextDispose(ctx);
-		return NULL;
-	}
-	LLVMTargetRef target;
-	if (LLVMGetTargetFromTriple(w->triple, &target, &msg) != 0) {
-		w->error = strdup(msg ? msg : "failed to resolve partition target");
-		if (msg) LLVMDisposeMessage(msg);
-		LLVMDisposeModule(m);
-		LLVMContextDispose(ctx);
-		return NULL;
-	}
-	LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, w->triple, w->cpu, w->features,
-		LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
-	if (tm == NULL) {
-		w->error = strdup("failed to create partition target machine");
-	} else {
-		if (LLVMTargetMachineEmitToFile(tm, m, (char *)w->path, LLVMObjectFile, &msg) != 0) {
-			w->error = strdup(msg ? msg : "partition object emission failed");
-			if (msg) LLVMDisposeMessage(msg);
-		}
-		LLVMDisposeTargetMachine(tm);
-	}
-	LLVMDisposeModule(m);
-	LLVMContextDispose(ctx);
-	return NULL;
+	char *msg = LLVMGetErrorMessage(err);
+	*error = strdup(msg);
+	LLVMDisposeErrorMessage(msg);
+	return 0;
 }
 
-int elisacoreParallelEmit(LLVMModuleRef m, LLVMTargetMachineRef tm, int jobs, long long min_weight,
-                          const char *const *paths, char **error_out) {
-	*error_out = NULL;
+// Parent side: decide whether to partition and serialize the module for the workers.
+int elisacorePartitionPrepare(LLVMModuleRef m, int jobs, long long min_weight, const char *bitcode_path) {
 	long long *owners = NULL;
 	size_t count = 0;
 	long long total = part_function_owners(m, jobs, &owners, &count);
+	free(owners);
 	if (total < min_weight) {
-		free(owners);
 		return 0;
 	}
-	LLVMMemoryBufferRef bc = LLVMWriteBitcodeToMemoryBuffer(m);
-	if (bc == NULL) {
-		free(owners);
-		*error_out = strdup("failed to serialize module bitcode");
-		return -1;
+	return LLVMWriteBitcodeToFile(m, bitcode_path) == 0 ? 1 : -1;
+}
+
+static int part_fail(char **error_out, const char *text) {
+	*error_out = strdup(text ? text : "unknown partition worker error");
+	return 0;
+}
+
+// Worker side (a separate process): parse, restrict to `part`, optionally optimize, emit.
+int elisacorePartitionWorker(const char *bitcode_path, int jobs, int part, const char *pipeline,
+                             long long import_weight, const char *triple, const char *cpu,
+                             const char *features, const char *out_path, char **error_out) {
+	*error_out = NULL;
+	char *msg = NULL;
+	LLVMMemoryBufferRef buf = NULL;
+	if (LLVMCreateMemoryBufferWithContentsOfFile(bitcode_path, &buf, &msg) != 0) {
+		int r = part_fail(error_out, msg);
+		if (msg) LLVMDisposeMessage(msg);
+		return r;
 	}
-	char *triple = LLVMGetTargetMachineTriple(tm);
-	char *cpu = LLVMGetTargetMachineCPU(tm);
-	char *features = LLVMGetTargetMachineFeatureString(tm);
-	part_worker *workers = calloc((size_t)jobs, sizeof(part_worker));
-	pthread_t *threads = calloc((size_t)jobs, sizeof(pthread_t));
-	int *started = calloc((size_t)jobs, sizeof(int));
-	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	// Codegen of deep functions recurses; give workers a generous stack.
-	pthread_attr_setstacksize(&attr, 512u * 1024u * 1024u);
-	for (int k = 0; k < jobs; k++) {
-		part_worker *w = &workers[k];
-		w->bitcode = LLVMGetBufferStart(bc);
-		w->bitcode_len = LLVMGetBufferSize(bc);
-		w->owners = owners;
-		w->owner_count = count;
-		w->part = k;
-		w->triple = triple;
-		w->cpu = cpu;
-		w->features = features;
-		w->path = paths[k];
-		if (pthread_create(&threads[k], &attr, part_worker_run, w) == 0) {
-			started[k] = 1;
-		} else {
-			part_worker_run(w);
-		}
+	LLVMContextRef ctx = LLVMContextCreate();
+	LLVMModuleRef m = NULL;
+	if (LLVMParseBitcodeInContext2(ctx, buf, &m) != 0 || m == NULL) {
+		LLVMDisposeMemoryBuffer(buf);
+		return part_fail(error_out, "failed to parse partition bitcode");
 	}
-	pthread_attr_destroy(&attr);
-	int ok = 1;
-	for (int k = 0; k < jobs; k++) {
-		if (started[k]) {
-			pthread_join(threads[k], NULL);
-		}
-		if (workers[k].error != NULL) {
-			if (ok) {
-				*error_out = workers[k].error;
-				ok = 0;
-			} else {
-				free(workers[k].error);
-			}
-		}
-	}
-	free(started);
-	free(threads);
-	free(workers);
-	LLVMDisposeMessage(triple);
-	LLVMDisposeMessage(cpu);
-	LLVMDisposeMessage(features);
-	LLVMDisposeMemoryBuffer(bc);
+	LLVMDisposeMemoryBuffer(buf);
+	// The owners are recomputed from the identical module, so every worker agrees.
+	long long *owners = NULL;
+	size_t count = 0;
+	part_function_owners(m, jobs, &owners, &count);
+	int ok = part_restrict_module(m, owners, count, part, import_weight);
 	free(owners);
-	return ok ? 1 : -1;
+	if (!ok) {
+		return part_fail(error_out, "partition function list does not match the source module");
+	}
+	LLVMTargetRef target;
+	if (LLVMGetTargetFromTriple(triple, &target, &msg) != 0) {
+		int r = part_fail(error_out, msg);
+		if (msg) LLVMDisposeMessage(msg);
+		return r;
+	}
+	LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features,
+		LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+	if (tm == NULL) {
+		return part_fail(error_out, "failed to create partition target machine");
+	}
+	if (pipeline != NULL && pipeline[0] != 0 && !part_optimize(m, tm, pipeline, error_out)) {
+		return 0;
+	}
+	if (LLVMTargetMachineEmitToFile(tm, m, (char *)out_path, LLVMObjectFile, &msg) != 0) {
+		int r = part_fail(error_out, msg ? msg : "partition object emission failed");
+		if (msg) LLVMDisposeMessage(msg);
+		return r;
+	}
+	// The process exits right after; skip tearing down the module and context.
+	return 1;
 }
