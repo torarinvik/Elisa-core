@@ -123,9 +123,8 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 	// docs/76 Phase 3: an enum is a recursive AST node not only when it references ITSELF by value,
 	// but when it can reach itself through a chain of by-value enum payload references (mutual
 	// recursion, e.g. Tree↔Forest, Expr↔Stmt). Promote every enum in such a cycle. Computed once over
-	// all enum decls before the type-creation loop so each enum's Packed/RecursivePlain flags are set
-	// consistently when its EnumType is built below.
-	recursiveEnums := computeRecursiveEnumSet(decls)
+	// all enum decls before the type-creation loop so source recursion and store layout remain distinct.
+	recursiveEnums, storeBackedEnums := computeEnumStoreSets(decls)
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			markPrivate := func(name string) {
@@ -223,16 +222,16 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
-				// docs/76 Phase 3: a plain `enum` whose variant references the enum by value is a
-				// recursive AST node — promote it to the region-backed machinery (set the AST's Packed
-				// flag here, before any consumer runs, so the whole pipeline sees it consistently and
-				// the order-dependent type-graph below is built once). The default storage is AoS.
-				recursivePlain := false
-				if !n.Packed && recursiveEnums[n.Name] {
+				// A plain recursive enum or hierarchy with common fields needs the store-backed
+				// lowering, but this is not a source `packed enum`. Keep Packed as the backend's
+				// representation bit and preserve both source origin and actual recursion separately.
+				sourcePacked := n.Packed
+				storeBackedPlain := !sourcePacked && storeBackedEnums[n.Name]
+				recursivePlain := !sourcePacked && recursiveEnums[n.Name]
+				if storeBackedPlain {
 					n.Packed = true
-					recursivePlain = true
 				}
-				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n, Layout: n.Layout, LayoutSet: n.LayoutSet, LayoutSparse: n.LayoutSparse, IndexWidth: n.IndexWidth, RecursivePlain: recursivePlain}
+				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, SourcePacked: sourcePacked, StoreBackedPlain: storeBackedPlain, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n, Layout: n.Layout, LayoutSet: n.LayoutSet, LayoutSparse: n.LayoutSparse, IndexWidth: n.IndexWidth, RecursivePlain: recursivePlain}
 				a.namedTypes[qualifiedName] = enumType
 				markPrivate(qualifiedName)
 				if n.Packed {

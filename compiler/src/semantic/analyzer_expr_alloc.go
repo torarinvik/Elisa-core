@@ -51,7 +51,7 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		// mutated in place so downstream passes and codegen see one canonical
 		// auto-alloc shape (same pattern as IndexExpr.AsSpecialize).
 		if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.Packed {
-			if _, hasStore := a.lookupPackedStore(enumType); hasStore || !enumType.RecursivePlain {
+			if _, hasStore := a.lookupPackedStore(enumType); hasStore || !enumType.StoreBackedPlain {
 				return a.analyzeScopedPackedAllocExpr(expr)
 			}
 		}

@@ -1,0 +1,7 @@
+enum Node layout(handle: u32): pass
+
+enum Leaf is Node:
+    Item
+
+def read(node: Node, store: Node.Store[Local]) -> i64:
+    return 0

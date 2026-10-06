@@ -332,8 +332,13 @@ type PackedVariantViewType struct {
 }
 
 type EnumType struct {
-	Name                    string
-	Packed                  bool
+	Name   string
+	Packed bool
+	// SourcePacked records whether the source used `packed enum`. Packed is also the
+	// internal store-backed representation flag; plain recursive/common-field
+	// hierarchies use the same backend carrier without becoming source Packed enums.
+	SourcePacked            bool
+	StoreBackedPlain        bool
 	PackedProfile           string
 	HasPackedProfile        bool
 	PackedABIOverride       string
@@ -353,10 +358,10 @@ type EnumType struct {
 	LayoutSet    bool
 	LayoutSparse bool
 	IndexWidth   string // "u8"|"u16"|"u32"|"u64"; "" = default u32 (docs/76 opaque index handle)
-	// RecursivePlain (docs/76 Phase 3) is set when a plain `enum` (no `packed` keyword) was promoted
-	// to the region-backed machinery because a variant references the enum by value (a recursive AST
-	// node). It selects the AoS storage mode by default and lets the migration diagnostics (Phase 4)
-	// distinguish "the user wrote `packed enum`" from "the compiler promoted a recursive plain enum".
+	// RecursivePlain (docs/76 Phase 3) is set only when a plain enum participates in a by-value
+	// recursive cycle. StoreBackedPlain also covers non-recursive hierarchies whose common fields
+	// require a root row store. Keeping these origins separate prevents storage layout from being
+	// mistaken for a source-level packed declaration or a termination measure.
 	RecursivePlain bool
 	// Parent (docs/77) is the enum this one refines via `enum Child is Parent:`. nil means a root.
 	// Child's cases are a subset of Parent's, so Child <: Parent (sealed nominal subtyping). Resolved

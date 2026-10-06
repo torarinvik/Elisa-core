@@ -67,7 +67,7 @@ func (e *EnumType) MaxNodeCount() uint64 {
 // `*ast.NamedType` payloads count — a reference (`Expr&`) or container (`darray[Expr]`) is already
 // indirect and does not force the node into a store. Every enum in a recursive cycle is promoted to
 // the region-backed AoS machinery.
-func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
+func computeEnumStoreSets(decls []scopedDecl) (map[string]bool, map[string]bool) {
 	byName := map[string]*ast.EnumDecl{}
 	for _, scoped := range decls {
 		if ed, ok := scoped.Decl.(*ast.EnumDecl); ok && ed != nil {
@@ -162,7 +162,7 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 		}
 		return out
 	}
-	result := map[string]bool{}
+	recursive := map[string]bool{}
 	for start := range byName {
 		visited := map[string]bool{}
 		var reachesStart func(cur string) bool
@@ -181,20 +181,25 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 			return false
 		}
 		if reachesStart(start) {
-			result[start] = true
+			recursive[start] = true
 		}
+	}
+	// Recursion is a source property, not a storage-layout decision. Keep it separate from common
+	// fields below: both can require a store, but only a cycle participates in structural termination.
+	storeBacked := make(map[string]bool, len(recursive))
+	for name := range recursive {
+		storeBacked[name] = true
 	}
 	// `common(...)` fields are per-node shared metadata, and the store row is where they live: the
-	// value layout has no slot for them (constructor args were rejected, reads failed). Declaring
-	// commons therefore promotes the hierarchy to the region-backed store machinery even without
-	// by-value recursion — "you asked for node metadata; you have nodes, and nodes live in stores".
+	// value layout has no slot for them. They require the hierarchy store but do not make the enum
+	// recursively-defined.
 	for name, ed := range byName {
 		if !ed.Packed && len(ed.Common) > 0 {
-			result[name] = true
+			storeBacked[name] = true
 		}
 	}
-	// If any member of a hierarchy is recursive, the whole hierarchy is region-backed (it shares one
-	// store), so promote the root and every refinement — including non-recursive leaves and the root.
+	// Store representation is family-wide. A recursive member or root common field promotes the
+	// hierarchy root and all refinements, but the recursive set remains precise for termination.
 	rootOf := func(name string) string {
 		seen := map[string]bool{}
 		for {
@@ -207,17 +212,21 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 			name = ed.Parent
 		}
 	}
-	for name := range byName {
-		if !result[name] {
-			continue
-		}
-		root := rootOf(name)
-		result[root] = true
-		for _, d := range descendants[root] {
-			result[d] = true
+	propagateHierarchy := func(set map[string]bool) {
+		for name := range byName {
+			if !set[name] {
+				continue
+			}
+			root := rootOf(name)
+			set[root] = true
+			for _, d := range descendants[root] {
+				set[d] = true
+			}
 		}
 	}
-	return result
+	propagateHierarchy(recursive)
+	propagateHierarchy(storeBacked)
+	return recursive, storeBacked
 }
 
 // reference is wrapped in a reference type-expr and a container puts the name behind type args, so a
@@ -263,8 +272,8 @@ func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl, enumType *EnumType
 	if enumDecl.IndexWidth == "ptr" {
 		if enumDecl.Layout == ast.StructLayoutSOA {
 			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires stable record addresses; `layout(soa)` columns relocate — use the AoS layout or an index handle (`handle: u32`)", enumDecl.Name)
-		} else if enumType != nil && !enumType.RecursivePlain {
-			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires a recursive region-backed enum (an AoS store record to point at); this enum has no store — use an index width or drop the option", enumDecl.Name)
+		} else if enumType != nil && !enumType.StoreBackedPlain {
+			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires a plain store-backed enum (an AoS store record to point at); this enum has no supported store — use an index width or drop the option", enumDecl.Name)
 		}
 	}
 	switch enumDecl.Layout {
