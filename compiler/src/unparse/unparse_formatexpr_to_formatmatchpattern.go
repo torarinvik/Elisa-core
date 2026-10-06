@@ -247,7 +247,10 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.StructLitExpr:
 		typeName := formatStructLiteralTypeName(n.Name, n.TypeArgs)
 		if n.Brace {
-			parts := make([]string, 0, len(n.Args)+len(n.Spreads))
+			parts := make([]string, 0, len(n.Args)+len(n.Spreads)+1)
+			if n.CopyBase != nil {
+				parts = append(parts, ".."+formatExpr(n.CopyBase))
+			}
 			for _, spread := range n.Spreads {
 				parts = append(parts, "..."+formatExpr(spread))
 			}

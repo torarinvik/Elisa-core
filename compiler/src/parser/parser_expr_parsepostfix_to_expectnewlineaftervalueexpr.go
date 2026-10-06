@@ -577,9 +577,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 				if p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
 					typeArgs := p.parseStructLiteralTypeArgs()
 					p.expect(lexer.TOKEN_LBRACE)
-					args, argNames, spreads := p.parseStructLiteralBraceFields()
+					args, argNames, spreads, copyBase := p.parseStructLiteralBraceFields()
 					p.expect(lexer.TOKEN_RBRACE)
-					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads}
+					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads, CopyBase: copyBase}
 				}
 				if p.peek() == lexer.TOKEN_LPAREN {
 					p.advance()
@@ -589,9 +589,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 				}
 				if p.peek() == lexer.TOKEN_LBRACE {
 					p.advance()
-					args, argNames, spreads := p.parseStructLiteralBraceFields()
+					args, argNames, spreads, copyBase := p.parseStructLiteralBraceFields()
 					p.expect(lexer.TOKEN_RBRACE)
-					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads}
+					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads, CopyBase: copyBase}
 				}
 			}
 			return &ast.Ident{Position: tok.Pos, Name: qualified}
@@ -606,9 +606,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
 			typeArgs := p.parseStructLiteralTypeArgs()
 			p.expect(lexer.TOKEN_LBRACE)
-			args, argNames, spreads := p.parseStructLiteralBraceFields()
+			args, argNames, spreads, copyBase := p.parseStructLiteralBraceFields()
 			p.expect(lexer.TOKEN_RBRACE)
-			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads}
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads, CopyBase: copyBase}
 		}
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
@@ -618,9 +618,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.peek() == lexer.TOKEN_LBRACE && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
-			args, argNames, spreads := p.parseStructLiteralBraceFields()
+			args, argNames, spreads, copyBase := p.parseStructLiteralBraceFields()
 			p.expect(lexer.TOKEN_RBRACE)
-			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads}
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads, CopyBase: copyBase}
 		}
 		return &ast.Ident{Position: tok.Pos, Name: tok.Text}
 	case lexer.TOKEN_LPAREN:
@@ -820,14 +820,39 @@ func (p *Parser) parseStructLiteralTypeArgs() []ast.TypeExpr {
 	p.expect(lexer.TOKEN_RBRACKET)
 	return args
 }
-func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Expr) {
+func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Expr, ast.Expr) {
 	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
 	argNames := make([]string, 0, cap(args))
 	spreads := make([]ast.Expr, 0, 1)
+	var copyBase ast.Expr
 	if p.peek() == lexer.TOKEN_RBRACE {
-		return args, argNames, nil
+		return args, argNames, nil, nil
 	}
-	for {
+	for entry := 0; ; entry++ {
+		if p.peek() == lexer.TOKEN_RANGE {
+			// Copy-update `T{..base, field: value}`: every field not written
+			// is taken from `base` (semantic analysis desugars it).
+			basePos := p.cur().Pos
+			p.advance()
+			baseExpr := p.parseExpr()
+			switch {
+			case copyBase != nil:
+				p.errorAt(basePos, "struct literal may have at most one `..base` copy source")
+			case entry != 0:
+				p.errorAt(basePos, "struct literal copy source `..base` must be the first entry")
+			case !isStructCopyBasePath(baseExpr):
+				p.errorAt(basePos, "struct literal copy source `..base` must be an identifier or field path (`a.b.c`); bind other expressions to a local first")
+			default:
+				copyBase = baseExpr
+			}
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			if p.peek() == lexer.TOKEN_RBRACE {
+				break
+			}
+			continue
+		}
 		if p.peek() == lexer.TOKEN_ELLIPSIS {
 			spreadPos := p.cur().Pos
 			p.advance()
@@ -856,7 +881,26 @@ func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Ex
 			break
 		}
 	}
-	return args, argNames, spreads
+	return args, argNames, spreads, copyBase
+}
+
+// isStructCopyBasePath reports whether expr is an identifier or a plain field
+// path `a.b.c`, the only forms accepted as a copy-update `..base` (so the base
+// is trivially evaluated once per desugared field read).
+func isStructCopyBasePath(expr ast.Expr) bool {
+	for {
+		switch e := expr.(type) {
+		case *ast.Ident:
+			return !strings.Contains(e.Name, "::")
+		case *ast.FieldExpr:
+			if e.Safe {
+				return false
+			}
+			expr = e.Object
+		default:
+			return false
+		}
+	}
 }
 func (p *Parser) parseStructLiteralParenArgs() ([]ast.Expr, []string) {
 	args, argNames, _, _, hasArgForward, _ := p.parseCallArgs()

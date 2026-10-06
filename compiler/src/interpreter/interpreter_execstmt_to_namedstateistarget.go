@@ -551,8 +551,24 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		if !ok || decl == nil {
 			return VoidValue(), fmt.Errorf("unknown struct %q", n.Name)
 		}
-		args := make([]Value, 0, len(n.Args))
-		for _, arg := range n.Args {
+		// Prefer the analyzer's field-ordered arguments: they place named
+		// fields by name and include filled-in defaults and desugared
+		// `..base` copies, which the raw source-order Args do not.
+		argExprs := n.Args
+		if n.ResolvedArgsValid && len(n.ResolvedArgs) == len(decl.Fields) {
+			complete := true
+			for _, arg := range n.ResolvedArgs {
+				if arg == nil {
+					complete = false
+					break
+				}
+			}
+			if complete {
+				argExprs = n.ResolvedArgs
+			}
+		}
+		args := make([]Value, 0, len(argExprs))
+		for _, arg := range argExprs {
 			value, err := i.evalExpr(frame, arg)
 			if err != nil {
 				return VoidValue(), err

@@ -174,7 +174,12 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if len(n.Args) != 0 && args == nil {
 			return nil
 		}
+		copyBase := cloneDefaultArgExpr(n.CopyBase)
+		if n.CopyBase != nil && copyBase == nil {
+			return nil
+		}
 		return &ast.StructLitExpr{
+			CopyBase: copyBase,
 			Position: n.Position,
 			Name:     n.Name,
 			TypeArgs: append([]ast.TypeExpr(nil), n.TypeArgs...),
