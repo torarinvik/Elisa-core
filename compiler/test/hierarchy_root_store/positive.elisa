@@ -1,0 +1,26 @@
+enum Node layout(handle: u32):
+    common:
+        value: i64
+    pass
+
+enum Leaf is Node:
+    Item
+
+@test
+def verify() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region r(4096):
+            store: Node.Store[Local] = Node.Store(r)
+            in store:
+                node: Node = new[store] Leaf.Item(value: 11)
+                if node.value != 11:
+                    panic("hierarchy root common field did not round-trip through Store")
+
+def main() -> i64 can[Memory.Allocate, Abort.Panic]:
+    region r(4096):
+        store: Node.Store[Local] = Node.Store(r)
+        in store:
+            node: Node = new[store] Leaf.Item(value: 11)
+            return 0 if node.value == 11
+            return 1
+    return 2

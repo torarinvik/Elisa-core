@@ -110,7 +110,7 @@ func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, valueExpr ast.Expr, actu
 		if _, ok := a.lookupPackedStore(enumType); ok {
 			return
 		}
-		if enumType.RecursivePlain && a.currentAllocExpr != nil {
+		if enumType.StoreBackedPlain && a.currentAllocExpr != nil {
 			return // active arena scope: store resolves on demand at codegen (see validateMatchStore)
 		}
 		a.errorf(pos, "packed enum move-as over %q requires an in %s clause", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)))

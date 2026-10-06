@@ -282,7 +282,7 @@ func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *Enum
 		}
 		switch annotation.Name {
 		case "packed_profile":
-			if !enumDecl.Packed {
+			if !enumType.SourcePacked {
 				a.errorf(annotation.Position, "@packed_profile on enum %q requires a packed enum", enumDecl.Name)
 				continue
 			}

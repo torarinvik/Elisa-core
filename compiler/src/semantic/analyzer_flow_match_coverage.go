@@ -77,7 +77,7 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 		// ACTIVE arena scope (`in owner:`) resolves its store on demand at codegen — the same
 		// get-or-create the entry-point call sites use, so handles parsed into that arena match
 		// against the same store instance.
-		if enumType.RecursivePlain && a.currentAllocExpr != nil {
+		if enumType.StoreBackedPlain && a.currentAllocExpr != nil {
 			return
 		}
 		a.errorf(pos, "packed enum match over %q requires an in %s clause", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)))

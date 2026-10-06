@@ -1009,7 +1009,7 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 		// rule (regionBackedEnumConstructor) and analyzeAllocExprWithExpected.
 		if e.Owner == nil {
 			if enumType, _, ok := a.packedAllocConstructorInfo(e.Value); ok && enumType != nil && enumType.Packed {
-				return enumType.RecursivePlain
+				return enumType.StoreBackedPlain
 			}
 			return true
 		}

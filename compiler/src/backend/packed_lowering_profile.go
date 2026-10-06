@@ -83,7 +83,7 @@ func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumTy
 	// per node, dense index handle) — the speed default — unless the author opted into the columnar
 	// layout with `enum X layout soa`. Verified at scale (binary-trees N=18: 0.38s/22MB, ~5.5x faster
 	// and 4x lighter than SoA, beating the struct form and hand-written C++/Rust arenas).
-	if root.RecursivePlain && !(root.LayoutSet && root.Layout == ast.StructLayoutSOA) {
+	if root.StoreBackedPlain && !(root.LayoutSet && root.Layout == ast.StructLayoutSOA) {
 		return packedEnumABIAoS
 	}
 	return p.canonicalPackedMode()

@@ -369,8 +369,8 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 			// enum with no active explicit store is an implicit `new[auto]` into the inferred region.
 			// The region-poly pre-pass now recognizes such constructors, so the building function is
 			// region-polymorphic and a region is threaded (no no-region recursion). An explicit
-			// `packed enum` (not RecursivePlain) keeps the explicit-store path.
-			if enumType.RecursivePlain {
+			// Explicit source Packed enums keep the explicit-store path.
+			if enumType.StoreBackedPlain {
 				if _, hasStore := a.lookupPackedStore(enumType); !hasStore {
 					alloc.AutoRegion = true
 					return a.analyzeAutoAllocExpr(alloc, expected)

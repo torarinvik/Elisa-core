@@ -73,14 +73,14 @@ func (a *Analyzer) flagNarrowableHandleLoop(loop *ast.ForStmt) {
 		case *ast.AllocExpr:
 			if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.Packed {
 				root := enumType.Root()
-				if root.RecursivePlain && root.IndexWidth == "" {
+				if root.StoreBackedPlain && root.IndexWidth == "" {
 					perRoot[root]++
 				}
 			}
 		case *ast.CallExpr:
 			if et, ok := a.regionBackedEnumConstructor(n); ok && et != nil {
 				root := et.Root()
-				if root.RecursivePlain && root.IndexWidth == "" {
+				if root.StoreBackedPlain && root.IndexWidth == "" {
 					perRoot[root]++
 				}
 			} else if _, ok := n.Func.(*ast.Ident); ok {

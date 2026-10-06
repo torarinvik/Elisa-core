@@ -15,10 +15,10 @@ import (
 // (e.g. the JSON parser's JsonNode). This is the precise gate on implicit packed-store injection.
 func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[string]bool {
 	out := map[string]bool{}
-	// docs/76: a recursive plain enum is region-backed by design (the default), independent of whether
-	// any call site uses `new[auto]` syntax — its bare constructors allocate into the region too.
+	// Store-backed plain enums are region-backed by design, independent of whether any call site uses
+	// `new[auto]` syntax — their bare constructors allocate into the region too.
 	for _, t := range a.namedTypes {
-		if et, ok := t.(*EnumType); ok && et != nil && et.RecursivePlain {
+		if et, ok := t.(*EnumType); ok && et != nil && et.StoreBackedPlain {
 			out[et.Root().Name] = true // docs/77: region-backed by hierarchy root
 		}
 	}
