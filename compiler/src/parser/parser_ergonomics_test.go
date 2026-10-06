@@ -467,6 +467,31 @@ def load(flag: bool) -> i64:
 	}
 }
 
+func TestParseCatchExprOkPayloadBinding(t *testing.T) {
+	file, errs := parseSourceFile(t, `error ReadError:
+	Failed
+extern read_value() -> i64 error[ReadError]
+def load() -> i64:
+	return catch read_value():
+		ok payload:
+			payload
+		error failure:
+			0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[2].(*ast.FuncDecl)
+	ret := fn.Body[0].(*ast.ReturnStmt)
+	catchExpr := ret.Value.(*ast.CatchExpr)
+	if catchExpr.Success.Name != "payload" || catchExpr.Success.ErrorBinding {
+		t.Fatalf("unexpected success payload binding: %#v", catchExpr.Success)
+	}
+	if len(catchExpr.Arms) != 1 || catchExpr.Arms[0].Name != "failure" || !catchExpr.Arms[0].ErrorBinding {
+		t.Fatalf("unexpected error arms: %#v", catchExpr.Arms)
+	}
+}
+
 func TestParseErrorDeclPayloadVariants(t *testing.T) {
 	file, errs := parseSourceFile(t, `error PascalBackendError:
 	UnsupportedType(span: Span, type_expr: PascalType.Type)

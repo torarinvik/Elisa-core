@@ -1,0 +1,24 @@
+def scan(cursor: mutable i64) -> i64:
+    machine over cursor while cursor < 50:
+        state A
+        state B
+        state C
+        start A
+        A, _:
+            if cursor == 0:
+                if cursor == 0:
+                    cursor <- 1
+                    -> B
+            cursor <- cursor + 2
+            -> C
+        B, _:
+            cursor <- cursor + 10
+            break
+        C, _:
+            break
+    return cursor
+
+def main(argc: i64, argv: mutable void&) -> i64:
+    cursor: i64 = argc - 1
+    expected: i64 = 11 if cursor == 0 else 3
+    return 0 if scan(cursor) == expected else 1

@@ -329,10 +329,10 @@ func (a *Analyzer) analyzeBuiltinDictIndexExpr(expr *ast.IndexExpr, objType Type
 	}
 	if !helperVisible {
 		a.analyzeExpr(expr.Index)
-		// Fall back to the ENTRY VALUE type (not the runtime ref-optional):
-		// without the prelude the ref plumbing does not exist, and the value
-		// type keeps reads and index-assignments quiet in bare analysis.
-		var result Type = dictType.Value
+		// Type the lookup as the same optional reference the runtime helper
+		// returns: `d[k]` is fallible (absent on a missing key) with or
+		// without the prelude, matching stage1.
+		var result Type = builtinDictEntryValueRefType(dictType, mutable)
 		if expr.Fallback != nil {
 			fallbackType := a.analyzeValueExpr(expr.Fallback, dictType.Value)
 			if !IsNeverType(fallbackType) && !AssignableTo(dictType.Value, fallbackType) {
@@ -573,4 +573,23 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.get_or_insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true
+}
+
+// isDictIndexPayloadProjection reports whether value is a plain `d[k]` lookup (no
+// fallback) whose dictionary payload would fit declType: the binding failed only
+// because the lookup is an optional reference, not the payload itself.
+func (a *Analyzer) isDictIndexPayloadProjection(value ast.Expr, declType Type) bool {
+	idx, ok := stripOptimizationParens(value).(*ast.IndexExpr)
+	if !ok || idx == nil || idx.Fallback != nil || declType == nil || IsInvalidType(declType) {
+		return false
+	}
+	objType := a.exprTypes[idx.Object]
+	if objType == nil {
+		return false
+	}
+	dictType, _, ok := builtinDictReceiverType(objType)
+	if !ok || dictType == nil || dictType.Value == nil {
+		return false
+	}
+	return AssignableTo(declType, dictType.Value)
 }

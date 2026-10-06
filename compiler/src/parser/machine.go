@@ -73,19 +73,21 @@ const (
 )
 
 type machineArm struct {
-	pos         lexer.Pos
-	state       string
-	payload     []machinePayloadPat
-	inputs      []ast.Expr          // literal alternatives (`'a' | 'b'`); nil when inputWild
-	inputRanges []machineInputRange // range alternatives (`'0'..='9'`), OR'd with inputs
-	inputWild   bool
-	inputBind   string // input bind pattern: names the input value for guard/body
-	guard       ast.Expr
-	body        []ast.Stmt // statements before the exit; excludes the transition line
-	exit        machineExitKind
-	target      string // transition target state
-	targetPos   lexer.Pos
-	args        []ast.Expr // transition payload args
+	pos               lexer.Pos
+	state             string
+	payload           []machinePayloadPat
+	inputs            []ast.Expr          // literal alternatives (`'a' | 'b'`); nil when inputWild
+	inputRanges       []machineInputRange // range alternatives (`'0'..='9'`), OR'd with inputs
+	inputWild         bool
+	inputBind         string // input bind pattern: names the input value for guard/body
+	guard             ast.Expr
+	body              []ast.Stmt // statements before the exit; excludes the transition line
+	exit              machineExitKind
+	target            string // transition target state
+	targetPos         lexer.Pos
+	args              []ast.Expr           // transition payload args
+	branchTransitions map[lexer.Pos]string // branch-local `-> State` markers, represented as BreakStmt until lowering
+	branchExit        bool                 // the parsed conditional has no paths left for a following arm statement
 }
 
 // machineInputRange is a range alternative in a machine arm header (`Num, '0'..='9':`),
@@ -427,16 +429,16 @@ argScan:
 	return machinePayloadPat{pos: pos, cond: expr}
 }
 
-// parseMachineArmBody parses the arm's statements and enforces the docs/123 §5 refusals
-// that are visible line-by-line: no branching statements, the decision (`->`/return/break)
-// is the final statement, and nothing follows it.
+// parseMachineArmBody parses straight-line statements and conditional paths. Shared
+// fallthrough statements may follow a partial branch; the complete arm must end in one
+// transition, return, or break on every path.
 func (p *Parser) parseMachineArmBody(arm *machineArm) {
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		if arm.exit != machineExitNone {
+		if arm.exit != machineExitNone || arm.branchExit {
 			p.errorf("machine arm continues after its `->`/return/break decision — the decision must be the arm's final statement")
 			// consume the rest of the arm so parsing resumes at the DEDENT
 			for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
@@ -463,6 +465,17 @@ func (p *Parser) parseMachineArmBody(arm *machineArm) {
 			p.expectNewline()
 			continue
 		}
+		if p.peek() == lexer.TOKEN_IF {
+			if arm.exit != machineExitNone || arm.branchExit {
+				p.errorf("machine arm continues after its branch decision")
+				break
+			}
+			branch := p.parseMachineBranch(arm)
+			arm.body = append(arm.body, branch)
+			arm.branchExit = !machineBranchCanFallThrough([]ast.Stmt{branch}, arm.branchTransitions)
+			p.validateMachineArmStmt(branch, arm)
+			continue
+		}
 		stmt := p.parseStmt()
 		// A desugaring inside the arm (e.g. `ghost:`) may buffer extra flat statements.
 		if len(p.pendingStmts) > 0 {
@@ -484,18 +497,203 @@ func (p *Parser) parseMachineArmBody(arm *machineArm) {
 	}
 }
 
-// validateMachineArmStmt enforces the per-statement refusals and records return/break
-// exits. Branching statements are refused outright — including postfix guards, which
-// desugar to an IfStmt: inside a machine ALL discrimination lives in the arm header.
+// parseMachineBranch parses one conditional branch. A path may end in a transition, return,
+// or break, or fall through to a shared suffix. The temporary BreakStmt transition markers
+// are replaced during lowering while retaining the source branch structure.
+func (p *Parser) parseMachineBranch(arm *machineArm) ast.Stmt {
+	pos := p.expect(lexer.TOKEN_IF).Pos
+	cond := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	thenBody := p.parseMachineBranchBody(arm)
+	p.expect(lexer.TOKEN_DEDENT)
+	var elseBody []ast.Stmt
+	if p.match(lexer.TOKEN_ELSE) {
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		p.expect(lexer.TOKEN_INDENT)
+		elseBody = p.parseMachineBranchBody(arm)
+		p.expect(lexer.TOKEN_DEDENT)
+	}
+	branch := &ast.IfStmt{Position: pos, Cond: cond, Then: thenBody, Else: elseBody, FromSource: true}
+	if hasMachineBranchMarker(branch, arm.branchTransitions) && machineBranchHasFallthroughLocalDecl(branch, arm.branchTransitions) {
+		p.errorf("a declaration in a fallthrough branch cannot share a continuation with a branch transition")
+	}
+	return branch
+}
+
+// A local in a branch that terminates never scopes over the copied continuation.
+// Reject only locals whose branch can fall through, where continuation duplication
+// could accidentally resolve a name to that branch-local binding.
+func machineBranchHasFallthroughLocalDecl(stmt ast.Stmt, markers map[lexer.Pos]string) bool {
+	n, ok := stmt.(*ast.IfStmt)
+	if !ok {
+		return false
+	}
+	if machineBranchCanFallThrough(n.Then, markers) && machineBranchHasLocalDeclInSequence(n.Then) {
+		return true
+	}
+	if len(n.Else) > 0 && machineBranchCanFallThrough(n.Else, markers) && machineBranchHasLocalDeclInSequence(n.Else) {
+		return true
+	}
+	for _, clause := range n.Elifs {
+		if machineBranchCanFallThrough(clause.Body, markers) && machineBranchHasLocalDeclInSequence(clause.Body) {
+			return true
+		}
+	}
+	return machineBranchHasFallthroughLocalDeclInSequence(n.Then, markers) || machineBranchHasFallthroughLocalDeclInSequence(n.Else, markers)
+}
+
+func machineBranchHasFallthroughLocalDeclInSequence(stmts []ast.Stmt, markers map[lexer.Pos]string) bool {
+	for _, stmt := range stmts {
+		if n, ok := stmt.(*ast.IfStmt); ok && machineBranchHasFallthroughLocalDecl(n, markers) {
+			return true
+		}
+	}
+	return false
+}
+
+func machineBranchHasLocalDeclInSequence(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		if machineBranchHasLocalDecl(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func machineBranchHasLocalDecl(stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.VarDeclStmt, *ast.LetDestructureStmt, *ast.TupleBindStmt, *ast.MoveBindStmt:
+		return true
+	case *ast.IfStmt:
+		for _, child := range n.Then {
+			if machineBranchHasLocalDecl(child) {
+				return true
+			}
+		}
+		for _, child := range n.Else {
+			if machineBranchHasLocalDecl(child) {
+				return true
+			}
+		}
+		for _, clause := range n.Elifs {
+			for _, child := range clause.Body {
+				if machineBranchHasLocalDecl(child) {
+					return true
+				}
+			}
+		}
+	case *ast.CanStmt:
+		for _, child := range n.Body {
+			if machineBranchHasLocalDecl(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (p *Parser) parseMachineBranchBody(arm *machineArm) []ast.Stmt {
+	var body []ast.Stmt
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		if p.peek() == lexer.TOKEN_IF {
+			branch := p.parseMachineBranch(arm)
+			body = append(body, branch)
+			if !machineBranchCanFallThrough([]ast.Stmt{branch}, arm.branchTransitions) && p.peek() != lexer.TOKEN_DEDENT {
+				p.errorf("machine branch continues after every path has reached a terminal decision")
+				for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+					p.advance()
+				}
+				return body
+			}
+			continue
+		}
+		if p.peek() == lexer.TOKEN_ARROW {
+			arrow := p.advance()
+			target := p.expect(lexer.TOKEN_IDENT).Text
+			if p.peek() == lexer.TOKEN_LPAREN {
+				p.errorf("branch-local machine transitions currently require payload-less states")
+				p.advance()
+				for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+					p.advance()
+				}
+				p.match(lexer.TOKEN_RPAREN)
+			}
+			p.expectNewline()
+			if arm.branchTransitions == nil {
+				arm.branchTransitions = map[lexer.Pos]string{}
+			}
+			arm.branchTransitions[arrow.Pos] = target
+			body = append(body, &ast.BreakStmt{Position: arrow.Pos})
+			if p.peek() != lexer.TOKEN_DEDENT {
+				p.errorf("machine branch continues after its `->` decision")
+				for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+					p.advance()
+				}
+			}
+			return body
+		}
+		stmt := p.parseStmt()
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+	}
+	return body
+}
+
+func machineBranchCanFallThrough(stmts []ast.Stmt, markers map[lexer.Pos]string) bool {
+	canFall := true
+	for _, stmt := range stmts {
+		if !canFall {
+			return false
+		}
+		switch n := stmt.(type) {
+		case *ast.BreakStmt:
+			canFall = false
+		case *ast.ReturnStmt:
+			canFall = false
+		case *ast.IfStmt:
+			thenFalls := machineBranchCanFallThrough(n.Then, markers)
+			elseFalls := len(n.Else) == 0 || machineBranchCanFallThrough(n.Else, markers)
+			for _, clause := range n.Elifs {
+				thenFalls = thenFalls || machineBranchCanFallThrough(clause.Body, markers)
+			}
+			canFall = thenFalls || elseFalls
+		}
+	}
+	return canFall
+}
+
+// validateMachineArmStmt enforces straight-line restrictions and records un-nested exits.
 func (p *Parser) validateMachineArmStmt(stmt ast.Stmt, arm *machineArm) {
 	switch s := stmt.(type) {
 	case *ast.ReturnStmt:
 		arm.exit = machineExitReturn
 	case *ast.BreakStmt:
-		arm.exit = machineExitBreak
+		if _, transitionMarker := arm.branchTransitions[s.Position]; !transitionMarker {
+			arm.exit = machineExitBreak
+		}
 	case *ast.ContinueStmt:
 		p.errorf("machine arms cannot `continue` — every arm ends in `-> State`, `return`, or `break` (docs/123 §5)")
-	case *ast.IfStmt, *ast.MatchStmt, *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt:
+	case *ast.IfStmt:
+		for _, inner := range s.Then {
+			p.validateMachineBranchStmt(inner, arm)
+		}
+		for _, inner := range s.Else {
+			p.validateMachineBranchStmt(inner, arm)
+		}
+		for _, clause := range s.Elifs {
+			for _, inner := range clause.Body {
+				p.validateMachineBranchStmt(inner, arm)
+			}
+		}
+	case *ast.MatchStmt, *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt:
 		p.errorf("machine arms cannot branch or loop (docs/123 §5) — move the condition into the arm header (`State, input if guard:`) or split into separate arms")
 	case *ast.CanStmt:
 		// A postfix `can Effect` clause wraps its statement in a CanStmt — a transparent
@@ -503,11 +701,72 @@ func (p *Parser) validateMachineArmStmt(stmt ast.Stmt, arm *machineArm) {
 		for _, inner := range s.Body {
 			p.validateMachineArmStmt(inner, arm)
 		}
-	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt:
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt, *ast.DiscardStmt:
 		_ = s // allowed straight-line forms; mutation targets are checked at desugar time
 	default:
 		p.errorf("machine arms allow only straight-line statements ending in `-> State`, `return`, or `break` (docs/123 §5)")
 	}
+}
+
+// validateMachineBranchStmt applies the arm's straight-line restrictions inside a branch
+// without treating a branch-local return/break as the whole arm's exit.
+func (p *Parser) validateMachineBranchStmt(stmt ast.Stmt, arm *machineArm) {
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt, *ast.BreakStmt:
+		return
+	case *ast.ContinueStmt:
+		p.errorf("machine arms cannot `continue` — every path must end in a transition, return, or break")
+	case *ast.IfStmt:
+		for _, inner := range s.Then {
+			p.validateMachineBranchStmt(inner, arm)
+		}
+		for _, inner := range s.Else {
+			p.validateMachineBranchStmt(inner, arm)
+		}
+		for _, clause := range s.Elifs {
+			for _, inner := range clause.Body {
+				p.validateMachineBranchStmt(inner, arm)
+			}
+		}
+	case *ast.MatchStmt, *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt:
+		p.errorf("machine branch cannot contain match or loop control")
+	case *ast.CanStmt:
+		for _, inner := range s.Body {
+			p.validateMachineBranchStmt(inner, arm)
+		}
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt, *ast.DiscardStmt:
+		_ = s
+	default:
+		p.errorf("machine branches allow straight-line statements and terminal decisions only")
+	}
+}
+
+func hasMachineBranchMarker(stmt *ast.IfStmt, markers map[lexer.Pos]string) bool {
+	if len(markers) == 0 {
+		return false
+	}
+	var scan func([]ast.Stmt) bool
+	scan = func(stmts []ast.Stmt) bool {
+		for _, stmt := range stmts {
+			switch n := stmt.(type) {
+			case *ast.BreakStmt:
+				if _, ok := markers[n.Position]; ok {
+					return true
+				}
+			case *ast.IfStmt:
+				if scan(n.Then) || scan(n.Else) {
+					return true
+				}
+				for _, clause := range n.Elifs {
+					if scan(clause.Body) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	return scan(stmt.Then) || scan(stmt.Else)
 }
 
 // --- desugar -------------------------------------------------------------------------
@@ -577,8 +836,19 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 			p.errorf("machine arm %s(...) expects %d payload pattern(s), got %d", arm.state, len(st.fields), len(arm.payload))
 			continue
 		}
-		if arm.exit == machineExitNone {
+		if machineBranchCanFallThrough(arm.body, arm.branchTransitions) && arm.exit != machineExitTransition {
 			p.errorf("machine arm %q makes no decision — end it with `-> State`, `return`, or `break` (docs/123 §5)", arm.state)
+		}
+		for _, targetName := range arm.branchTransitions {
+			target, ok := stateByName[targetName]
+			if !ok {
+				p.errorf("machine branch transition `-> %s` names undeclared state", targetName)
+			} else if len(target.fields) != 0 {
+				p.errorf("branch-local machine transitions currently require payload-less states")
+			}
+		}
+		if len(arm.branchTransitions) != 0 && arm.exit == machineExitTransition && len(arm.args) != 0 {
+			p.errorf("a shared transition after branch-local arrows cannot carry payload arguments yet")
 		}
 		if arm.exit == machineExitTransition {
 			target, ok := stateByName[arm.target]
@@ -1059,6 +1329,7 @@ func (p *Parser) lowerMachineArm(arm *machineArm, st *machineState, stateByName 
 	}
 	body = append(body, aliasDecls...)
 	body = append(body, arm.body...)
+	var sharedTransition []ast.Stmt
 	if arm.exit == machineExitTransition {
 		if target, ok := stateByName[arm.target]; ok {
 			// The dispatch arm already has a scope of its own, but that is also the
@@ -1068,20 +1339,112 @@ func (p *Parser) lowerMachineArm(arm *machineArm, st *machineState, stateByName 
 			// body in one more lexical scope and emit the actual payload stores after
 			// it.  Transition arguments are captured before leaving that scope so a
 			// valid `-> Next(local)` keeps working as well.
+			var transition []ast.Stmt
 			if machineArmDeclaresAnyField(body, target.fields) {
-				tempDecls, captures, transition := lowerMachineTransitionAfterScope(arm, target, enumMember, modeVar)
+				tempDecls, captures, payloadTransition := lowerMachineTransitionAfterScope(arm, target, enumMember, modeVar)
 				captures = append(body, captures...)
 				body = append(tempDecls, &ast.CanStmt{Position: arm.pos, Body: captures})
-				body = append(body, transition...)
+				transition = payloadTransition
 			} else {
-				body = append(body, lowerMachineTransition(arm, target, enumMember, modeVar)...)
+				transition = lowerMachineTransition(arm, target, enumMember, modeVar)
+			}
+			if len(arm.branchTransitions) != 0 {
+				sharedTransition = transition
+			} else {
+				body = append(body, transition...)
 			}
 		}
+	}
+	if len(arm.branchTransitions) != 0 {
+		body = lowerMachineBranchTransitions(body, arm.branchTransitions, stateByName, enumMember, modeVar, sharedTransition)
 	}
 	if len(body) == 0 {
 		body = append(body, &ast.PassStmt{Position: arm.pos})
 	}
 	return loweredMachineArm{pos: arm.pos, cond: cond, body: body}
+}
+
+// lowerMachineBranchTransitions replaces the parser's BreakStmt markers with the same
+// payload-less mode assignment used by an ordinary arm transition. The nested IfStmt tree
+// remains intact, so branch-local decisions preserve source control flow.
+func lowerMachineBranchTransitions(stmts []ast.Stmt, targets map[lexer.Pos]string, states map[string]*machineState, enumMember func(lexer.Pos, string) ast.Expr, modeVar string, suffix []ast.Stmt) []ast.Stmt {
+	var hasControl func(ast.Stmt) bool
+	hasControl = func(stmt ast.Stmt) bool {
+		switch n := stmt.(type) {
+		case *ast.BreakStmt:
+			if _, ok := targets[n.Position]; ok {
+				return true
+			}
+			return true // a source break terminates this path as well
+		case *ast.ReturnStmt:
+			return true
+		case *ast.IfStmt:
+			for _, child := range n.Then {
+				if hasControl(child) {
+					return true
+				}
+			}
+			for _, child := range n.Else {
+				if hasControl(child) {
+					return true
+				}
+			}
+			for _, clause := range n.Elifs {
+				for _, child := range clause.Body {
+					if hasControl(child) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	var lowerSequence func([]ast.Stmt, []ast.Stmt) []ast.Stmt
+	lowerSequence = func(source, continuation []ast.Stmt) []ast.Stmt {
+		if len(source) == 0 {
+			return append([]ast.Stmt(nil), continuation...)
+		}
+		stmt := source[0]
+		rest := source[1:]
+		switch n := stmt.(type) {
+		case *ast.BreakStmt:
+			if targetName, ok := targets[n.Position]; ok {
+				if target, exists := states[targetName]; exists && len(target.fields) == 0 {
+					return []ast.Stmt{&ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: modeVar}, Value: enumMember(n.Position, targetName)}}
+				}
+			}
+			return []ast.Stmt{stmt}
+		case *ast.ReturnStmt:
+			return []ast.Stmt{stmt}
+		case *ast.IfStmt:
+			if !hasControl(stmt) {
+				copy := *n
+				copy.Then = lowerSequence(n.Then, nil)
+				copy.Else = lowerSequence(n.Else, nil)
+				copy.Elifs = append([]ast.ElifClause(nil), n.Elifs...)
+				for i := range copy.Elifs {
+					copy.Elifs[i].Body = lowerSequence(n.Elifs[i].Body, nil)
+				}
+				return append([]ast.Stmt{&copy}, lowerSequence(rest, continuation)...)
+			}
+			remaining := lowerSequence(rest, continuation)
+			copy := *n
+			copy.Then = lowerSequence(n.Then, remaining)
+			if len(n.Else) == 0 {
+				copy.Else = append([]ast.Stmt(nil), remaining...)
+			} else {
+				copy.Else = lowerSequence(n.Else, remaining)
+			}
+			copy.Elifs = append([]ast.ElifClause(nil), n.Elifs...)
+			for i := range copy.Elifs {
+				copy.Elifs[i].Body = lowerSequence(n.Elifs[i].Body, remaining)
+			}
+			return []ast.Stmt{&copy}
+		default:
+			return append([]ast.Stmt{stmt}, lowerSequence(rest, continuation)...)
+		}
+	}
+	return lowerSequence(stmts, suffix)
 }
 
 // machineArmDeclaresAnyField reports whether the lowered arm body introduces a

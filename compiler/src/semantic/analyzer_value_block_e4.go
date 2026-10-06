@@ -250,7 +250,10 @@ func (a *Analyzer) checkLinearMutation(call *ast.CallExpr, arg ast.Expr) {
 			return
 		}
 	}
-	a.errorf(arg.Pos(), "mutation of `lmut` value %q must be a reassignment (docs/120 §10): write `%s <- …` so the dataflow is visible (a bare mutating call is a hidden mutation)", name, name)
+	// Name the mutated PLACE: a field-path argument (`bump(report.cache)`) is threaded by the
+	// field-path manifest `report.cache <- bump(report.cache)`, so suggest that spelling.
+	place := lmutMutatedPlaceName(arg, name)
+	a.errorf(arg.Pos(), "mutation of `lmut` value %q must be a reassignment (docs/120 §10): write `%s <- …` so the dataflow is visible (a bare mutating call is a hidden mutation)", place, place)
 }
 
 // callThreadsName reports whether call is a sanctioned threading of the binding `name`:

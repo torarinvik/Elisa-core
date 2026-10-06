@@ -1643,6 +1643,7 @@ F StructLitExpr 6 ResolvedArgs
 F StructLitExpr 7 ResolvedArgsValid
 F StructLitExpr 8 Spreads
 F StructLitExpr 9 TypeArgs
+F StructLitExpr 10 CopyBase
 
 T 256 StructTestExpr
 F StructTestExpr 1 Pattern

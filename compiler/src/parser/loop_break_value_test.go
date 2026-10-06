@@ -64,6 +64,17 @@ func valueBreakAssignment(t *testing.T, stmt ast.Stmt, accumulator string) ast.E
 	return assign.Value
 }
 
+func TestPlainBreakAtDedentIsNotParsedAsValueBreak(t *testing.T) {
+	_, errs := parseSourceFile(t, `def f() -> i64:
+	while true:
+		break
+	return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("break before a dedent should parse without a value: %v", errs)
+	}
+}
+
 func TestBreakValueDesugarsToAccumulatorWrite(t *testing.T) {
 	src := "def f(n: i64) -> bool:\n    found: bool = for i in 0..<n |hit = false| -> hit:\n        break true\n    return found\n"
 	file, errs, _ := parseSourceWithNotices(t, src)

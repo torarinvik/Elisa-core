@@ -73,8 +73,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			} else if declType == nil {
 				declType = valueType
 			} else if !AssignableTo(declType, valueType) {
-				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
-				a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
+				if a.isDictIndexPayloadProjection(n.Value, declType) {
+					// Parity with stage1 (check_value_against): `d[k]` is a fallible
+					// `V&?` lookup, never the payload itself.
+					a.errorf(n.Pos(), "variable %q expects %s, got optional reference to dictionary value", n.Name, declType)
+				} else {
+					a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
+					a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
+				}
 			}
 			// Nested-region escape: binding an inner-@r value into a variable whose
 			// declared type names an outer region dangles once the inner region is
@@ -568,6 +574,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if id, ok := n.Target.(*ast.Ident); ok &&
 			a.isLmutArgManifest([]ast.TupleBindName{{Position: id.Position, Name: id.Name}}, n.Value, valueType, false) {
 			n.ArgManifest = true // codegen emits only the call; nothing to assign
+			return
+		}
+		// docs/120 §8 field-path arg-manifest `report.cache <- bump(report.cache)`: the same
+		// manifest for a field place of a mutable root; the call writes through the field's address.
+		if a.isLmutPlaceArgManifest(n.Target, n.Value, valueType) {
+			n.ArgManifest = true
 			return
 		}
 		// docs/120 §8 place-manifest: `place <- place.push(v)` — a mutating builtin whose

@@ -229,6 +229,13 @@ func (ops *packedStoreOps) canUseOptimizedIndexSOADirectPrefixRead(enumType *sem
 	if ops.s.g.packedModeForEnum(enumType) != packedEnumABIIndexSOA {
 		return false
 	}
+	// The direct reads address PackedStoreState's fields by offset, which needs its layout.
+	// A program that does not include the store runtime source (the runtime object provides
+	// the helpers) has no such type; the helper-call path is equivalent, so take it instead
+	// of failing with "packed store state type is unavailable".
+	if _, ok := ops.s.g.result.NamedTypes["PackedStoreState"].(*semantic.StructType); !ok {
+		return false
+	}
 	return ops.storeType != nil && semantic.IsFrozenPackedEnumStoreType(ops.storeType)
 }
 func (ops *packedStoreOps) canUseOptimizedIndexSOADirectMetadataRead(enumType *semantic.EnumType) bool {

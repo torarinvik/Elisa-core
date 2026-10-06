@@ -84,6 +84,7 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		}
 		a.consumeAffineValueExpr(spread, targetType, "move into struct literal spread base")
 	}
+	a.desugarStructLiteralCopyBase(expr, base, targetType)
 	a.analyzeStructLiteralArgs(expr, base, bindings, regionBindings)
 	if len(base.NamedStateCases) == 0 {
 		return targetType

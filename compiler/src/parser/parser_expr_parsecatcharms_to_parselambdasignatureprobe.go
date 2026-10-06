@@ -32,6 +32,16 @@ func (p *Parser) parseCatchArms() (ast.CatchArm, []ast.CatchArm) {
 	return success, arms
 }
 func (p *Parser) parseCatchArm() ast.CatchArm {
+	// `ok value:` binds the successful payload. Keep the legacy
+	// `Variant(value):` spelling below for tagged-union catch arms.
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "ok" && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+		pos := p.cur().Pos
+		p.advance()
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		body := p.parseCatchArmBody(pos)
+		return ast.CatchArm{Position: pos, Name: name, Body: body}
+	}
 	if p.peek() == lexer.TOKEN_ERROR && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		p.advance()
@@ -68,6 +78,7 @@ func (p *Parser) parseExprAfterRemovedPrefixKeyword() ast.Expr {
 	p.advance()
 	return p.parseExpr()
 }
+
 // isLambdaKeyword reports whether text introduces a lambda expression: the canonical
 // `fn`, a Unicode lambda letter, or the removed `lambda` spelling (still recognized so
 // parseLambdaExpr can emit a directed migration error). The Unicode set is the BMP lambda

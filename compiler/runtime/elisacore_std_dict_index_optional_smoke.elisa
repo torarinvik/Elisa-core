@@ -1,0 +1,19 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+# `d[k]` is a fallible optional reference (`V&?`, stage1 parity): a missing key is
+# absent, never a trap. Unwrap it with `get ... else` or an `is` binding.
+@test
+def std_dict_index_optional_smoke():
+	d: mutable dict[i64, i64] = {1: 40, 7: 3}
+	missing: i64 = get d[2] else 2
+	assert missing == 2
+	present: i64 = get d[7] else 100
+	assert present == 3
+	hit: mutable i64 = 0
+	if d[1] is found:
+		hit <- found
+	assert hit == 40
+	miss: mutable i64 = 0
+	if d[9] is other:
+		miss <- other
+	assert miss == 0

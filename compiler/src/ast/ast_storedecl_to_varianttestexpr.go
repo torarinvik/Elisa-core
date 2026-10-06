@@ -986,6 +986,10 @@ type StructLitExpr struct {
 	ArgNames []string
 	Brace    bool
 	Spreads  []Expr
+	// CopyBase is the `..base` of a copy-update literal `T{..base, f: v}`.
+	// Semantic analysis desugars it into explicit `f: base.f` entries for every
+	// field not written, then clears it, so later passes see an ordinary literal.
+	CopyBase Expr
 
 	ResolvedArgsValid bool
 	ResolvedArgs      []Expr

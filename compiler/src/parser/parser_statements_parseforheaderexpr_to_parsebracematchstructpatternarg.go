@@ -689,6 +689,34 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 		}
 		return false
 	}
+	// docs/120 §8 field-path lmut forwarding: `report.cache <- grow(report.cache)` passes a
+	// struct FIELD of a constructed local by reference, so the callee may grow that field's
+	// region-less containers exactly as it would the whole local's. Only an explicit argument
+	// counts (not a UFCS receiver, which is how every field method read is spelled).
+	fieldArgForwardsConstructed := func(args []ast.Expr) bool {
+		for _, arg := range args {
+			inner := unwrapParenExprAST(arg)
+			if addr, ok := inner.(*ast.AddrOfExpr); ok && addr != nil {
+				inner = unwrapParenExprAST(addr.Operand)
+			}
+			field, ok := inner.(*ast.FieldExpr)
+			if !ok || field == nil {
+				continue
+			}
+			for {
+				obj := unwrapParenExprAST(field.Object)
+				if next, ok := obj.(*ast.FieldExpr); ok && next != nil {
+					field = next
+					continue
+				}
+				if id, ok := obj.(*ast.Ident); ok && id != nil && constructed[id.Name] {
+					return true
+				}
+				break
+			}
+		}
+		return false
+	}
 	found := false
 	var scan func(v reflect.Value)
 	scan = func(v reflect.Value) {
@@ -703,6 +731,10 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 			if expr, ok := v.Interface().(ast.Expr); ok {
 				_, args, isCall := ast.PrepassCallShape(expr)
 				if isCall && argForwardsConstructed(args) {
+					found = true
+					return
+				}
+				if call, ok := expr.(*ast.CallExpr); ok && call != nil && fieldArgForwardsConstructed(call.Args) {
 					found = true
 					return
 				}
