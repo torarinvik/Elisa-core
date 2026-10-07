@@ -345,6 +345,73 @@ func sameSignatureModuloParamNames(a, b Type) bool {
 	return SameType(blankNames(fa), blankNames(fb))
 }
 
+// eraseBorrowRegion removes one explicit region binder from direct references and
+// optional references. It deliberately does not walk arbitrary aggregates or
+// generic arguments: protocol conformance may refine only an ordinary borrow of
+// one input, never an opaque region-bearing value.
+func eraseBorrowRegion(t Type, region string) (Type, int) {
+	switch value := t.(type) {
+	case *RefType:
+		clone := *value
+		hits := 0
+		if clone.Region == region {
+			clone.Region = ""
+			hits++
+		}
+		return &clone, hits
+	case *OptionalType:
+		inner, hits := eraseBorrowRegion(value.Value, region)
+		if hits == 0 {
+			return t, 0
+		}
+		return &OptionalType{Value: inner}, hits
+	default:
+		return t, 0
+	}
+}
+
+// sameSignatureModuloParamNamesOrBorrowRegion permits one narrowly safe
+// protocol implementation refinement: a method may explicitly bind one region
+// on exactly one borrowed input and return a borrow in that same region, while
+// the protocol keeps its existing implicit borrowed-reference surface. All
+// value types, mutability, arity, other generic parameters, and effects remain
+// subject to the ordinary exact conformance checks.
+func sameSignatureModuloParamNamesOrBorrowRegion(expected, actual Type) bool {
+	if sameSignatureModuloParamNames(expected, actual) {
+		return true
+	}
+	ef, eok := expected.(*FuncType)
+	af, aok := actual.(*FuncType)
+	if !eok || !aok || len(ef.RegionParams) != 0 || len(af.RegionParams) != 1 || len(ef.Params) != len(af.Params) {
+		return false
+	}
+	region := af.RegionParams[0]
+	if region == "" || (af.ReturnRegion != "" && af.ReturnRegion != region) {
+		return false
+	}
+	clone := *af
+	clone.RegionParams = nil
+	clone.Params = append([]Type(nil), af.Params...)
+	borrowedInputs := 0
+	for i, parameter := range clone.Params {
+		stripped, hits := eraseBorrowRegion(parameter, region)
+		if hits > 0 {
+			borrowedInputs++
+		}
+		clone.Params[i] = stripped
+	}
+	if borrowedInputs != 1 {
+		return false
+	}
+	returned, returnHits := eraseBorrowRegion(af.Return, region)
+	if returnHits == 0 {
+		return false
+	}
+	clone.Return = returned
+	clone.ReturnRegion = ""
+	return sameSignatureModuloParamNames(ef, &clone)
+}
+
 func sameConstValue(a ConstValue, b ConstValue) bool {
 	if a.Kind != b.Kind || a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.String != b.String || a.Some != b.Some || len(a.Elems) != len(b.Elems) || len(a.Fields) != len(b.Fields) {
 		return false
