@@ -369,7 +369,32 @@ func (a *Analyzer) specializeInterfaceMethodSignature(signature *FuncType, recei
 	if specialized == nil {
 		return signature
 	}
+	// A protocol's `Self& @r` is unresolved when its declaration is analyzed, so
+	// resolveType cannot apply the normal container rule that moves @r from the
+	// reference wrapper onto a concrete darray/dict/set type. Apply that same rule
+	// after Self substitution, for both call-site dispatch and impl conformance.
+	// Without this normalization a darray implementation appears to drop its owner
+	// region even though its concrete signature carries it on DArrayType.Region.
+	for i, param := range specialized.Params {
+		specialized.Params[i] = normalizeSpecializedContainerRefRegion(param)
+	}
+	specialized.Return = normalizeSpecializedContainerRefRegion(specialized.Return)
 	return specialized
+}
+
+func normalizeSpecializedContainerRefRegion(t Type) Type {
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil || ref.Region == "" {
+		return t
+	}
+	stamped, ok := stampContainerRegion(ref.Elem, ref.Region)
+	if !ok {
+		return t
+	}
+	clone := *ref
+	clone.Elem = stamped
+	clone.Region = ""
+	return &clone
 }
 
 // typePathNameForReceiver reverse-resolves a concrete receiver type back to a visible
