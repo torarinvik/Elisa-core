@@ -155,8 +155,23 @@ func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel Optimization
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
+	jobs := codegenJobs()
+	if jobs > 1 && optLevel != OptimizationLevel0 && !g.optimizedForCodegen && parallelOptEnabled() {
+		// Opt-in: optimize each partition in its worker (see parallel_emit.c). This skips
+		// the module-wide verifyAutovecExpectations, which needs the optimized module.
+		pipeline := fmt.Sprintf("default<O%d>", int(optLevel))
+		if done, err := g.emitObjectParallel(outputPath, jobs, pipeline, parallelOptImportWeight()); done || err != nil {
+			return err
+		}
+	}
 	if err := g.optimizeModule(optLevel); err != nil {
 		return err
+	}
+
+	if jobs > 1 {
+		if done, err := g.emitObjectParallel(outputPath, jobs, "", 0); done || err != nil {
+			return err
+		}
 	}
 
 	pathC := cString(outputPath)
