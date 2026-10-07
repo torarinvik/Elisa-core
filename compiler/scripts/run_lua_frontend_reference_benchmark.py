@@ -8,6 +8,7 @@ This script only compares parse throughput because the elisacore-only modes
 
 from __future__ import annotations
 
+import elisa_platform
 import argparse
 import json
 import re
@@ -75,7 +76,7 @@ def build_elisacore_harness(compiler_dir: Path, frontend_path: Path, harness_pat
             "clang",
             opt_level,
             "-pthread",
-            "-Wl,-undefined,dynamic_lookup",
+            *elisa_platform.LD_ALLOW_UNDEFINED,
             "-I",
             str(out_dir),
             str(harness_path),

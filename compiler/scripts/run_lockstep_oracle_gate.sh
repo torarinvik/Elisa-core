@@ -6,10 +6,12 @@
 # in CI -- a silent skip would let the oracle bit-rot unnoticed -- and runs the oracle test family,
 # including the production-representative real-AeroLib-stub check.
 set -euo pipefail
+# shellcheck source=compiler/scripts/platform.sh
+source "$(dirname "${BASH_SOURCE[0]}")/platform.sh"
 
 echo "== locating llvm-mc / clang (the oracle assembles + links both bodies) =="
 LLVM_MC="$(command -v llvm-mc || true)"
-for p in /opt/homebrew/opt/llvm/bin/llvm-mc /usr/local/opt/llvm/bin/llvm-mc /usr/lib/llvm-*/bin/llvm-mc; do
+for p in "$ELISA_LLVM_BIN_DIR/llvm-mc" /opt/homebrew/opt/llvm/bin/llvm-mc /usr/local/opt/llvm/bin/llvm-mc /usr/lib/llvm-*/bin/llvm-mc; do
   [ -z "${LLVM_MC}" ] && [ -x "$p" ] && LLVM_MC="$p"
 done
 if [ -z "${LLVM_MC}" ]; then

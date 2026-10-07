@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPILER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${COMPILER_DIR}/.." && pwd)"
+# shellcheck source=compiler/scripts/platform.sh
+source "${SCRIPT_DIR}/platform.sh"
 
 OUT_DIR=""
 BASELINE_BENCHTIME="1x"
@@ -122,7 +124,7 @@ build_native_ultra() {
     cd "$COMPILER_DIR"
     go run ./src -O3 -emit header -o "$header_path" ../Code/benchmarks/packed_lowering_ml_ast_ultra_core.elisa
     go run ./src -O3 -emit obj -o "$object_path" ../Code/benchmarks/packed_lowering_ml_ast_ultra_core.elisa
-    clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I "$build_dir" \
+    clang -O3 -pthread $ELISA_LD_ALLOW_UNDEFINED -I "$build_dir" \
       ../Code/benchmarks/packed_lowering_ml_ast_bench.c \
       ../Code/benchmarks/json_parser_runtime_shims.c \
       "$object_path" \
