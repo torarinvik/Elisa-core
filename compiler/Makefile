@@ -10,6 +10,20 @@
 
 .DEFAULT_GOAL := test
 
+# LLVM for cgo: the #cgo lines in src/backend carry per-OS defaults (Homebrew on macOS,
+# /usr/lib/llvm-* on Linux). When llvm-config is reachable (LLVM_CONFIG, else PATH) and the
+# caller set no CGO_CFLAGS/CGO_LDFLAGS, point cgo at that toolchain instead, with an rpath so
+# the binary finds libLLVM without LD_LIBRARY_PATH. Mirrors Elisa-compiler's scripts/platform.sh.
+LLVM_CONFIG ?= $(shell command -v llvm-config 2>/dev/null || command -v llvm-config-21 2>/dev/null)
+ifneq ($(strip $(LLVM_CONFIG)),)
+ifeq ($(origin CGO_CFLAGS),undefined)
+export CGO_CFLAGS := -O2 -g -I$(shell $(LLVM_CONFIG) --includedir)
+endif
+ifeq ($(origin CGO_LDFLAGS),undefined)
+export CGO_LDFLAGS := -L$(shell $(LLVM_CONFIG) --libdir) -Wl,-rpath,$(shell $(LLVM_CONFIG) --libdir)
+endif
+endif
+
 # Fast packages: everything EXCEPT the heavy elisacore/src package. ~12s cold, instant cached.
 # Includes the fixture suites under ./test/ that are fast (analyzer/lexer-level, no native
 # runtime) and green — gating them here stops the silent rot that let removed-syntax and

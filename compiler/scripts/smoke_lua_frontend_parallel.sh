@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+# shellcheck source=compiler/scripts/platform.sh
+source "$SCRIPT_DIR/platform.sh"
 INPUT_PATH=${1:-"$REPO_ROOT/Code/benchmarks/lua_frontend_benchmark_corpus/closure_pipeline.lua"}
 WORKERS=${2:-4}
 ITERATIONS=${3:-12}
@@ -152,7 +154,7 @@ int main(int argc, char **argv) {
 }
 EOF
 
-clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I "$TMP_RUN" \
+clang -O3 -pthread $ELISA_LD_ALLOW_UNDEFINED -I "$TMP_RUN" \
     "$TMP_RUN/lua_frontend_parallel_smoke.c" \
     ../Code/benchmarks/json_parser_runtime_shims.c \
     "$TMP_RUN/lua_frontend.o" \

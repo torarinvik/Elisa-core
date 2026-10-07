@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -161,7 +162,7 @@ func runLockstepOracle(path string, fn *Function, tb TargetBody, bindings []orac
 	if err := os.WriteFile(cPath, []byte(oracleCSource(bindings)), 0o644); err != nil {
 		return issuePtr(lockstepOracleSkip(path, tb.Line, fn.Name, err.Error()))
 	}
-	cmd := exec.Command(clang, "-arch", "x86_64", cPath, refObj, targetObj, "-o", exePath)
+	cmd := exec.Command(clang, append(oracleClangArgs(), cPath, refObj, targetObj, "-o", exePath)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return issuePtr(lockstepOracleSkip(path, tb.Line, fn.Name, fmt.Sprintf("could not link oracle probe: %v\n%s", err, out)))
 	}
@@ -193,7 +194,7 @@ func assembleOracleObject(llvmMC, dir, sym string, insts []Instruction) (string,
 	if err := os.WriteFile(sPath, asm.Bytes(), 0o644); err != nil {
 		return "", err
 	}
-	cmd := exec.Command(llvmMC, "--assemble", "--filetype=obj", "--triple=x86_64-apple-darwin", "-o", oPath, sPath)
+	cmd := exec.Command(llvmMC, "--assemble", "--filetype=obj", "--triple="+oracleTriple(), "-o", oPath, sPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("llvm-mc could not assemble oracle body: %v\n%s", err, out)
 	}
@@ -316,4 +317,21 @@ func stackPointerWritten(text string) bool {
 	}
 	dst := strings.TrimSpace(parts[len(parts)-1])
 	return canonicalX86GPR(strings.TrimPrefix(dst, "%")) == "rsp"
+}
+
+// The oracle bodies are x86-64 SysV code: Mach-O on macOS (run under Rosetta on arm64 hosts),
+// ELF on Linux. The symbols keep their leading underscore on both, since the C probe names
+// them with explicit asm labels.
+func oracleTriple() string {
+	if runtime.GOOS == "darwin" {
+		return "x86_64-apple-darwin"
+	}
+	return "x86_64-unknown-linux-gnu"
+}
+
+func oracleClangArgs() []string {
+	if runtime.GOOS == "darwin" {
+		return []string{"-arch", "x86_64"}
+	}
+	return []string{"-target", "x86_64-unknown-linux-gnu"}
 }

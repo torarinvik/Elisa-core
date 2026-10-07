@@ -10,6 +10,7 @@ records a skip instead of failing the whole sweep.
 
 from __future__ import annotations
 
+import elisa_platform
 import argparse
 import json
 import re
@@ -182,7 +183,7 @@ def build_benchmark_executable(
             "clang",
             opt_level,
             "-pthread",
-            "-Wl,-undefined,dynamic_lookup",
+            *elisa_platform.LD_ALLOW_UNDEFINED,
             "-I",
             str(out_dir),
             str(harness_path),
