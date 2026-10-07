@@ -638,7 +638,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordStructInteriorRegionTaint(n.Target, n.Value, valueType)
 		// Reassigning a struct local invalidates any region recorded at its declaration; re-record
 		// from the new RHS or clear, so a later call never threads a stale (possibly dead) region.
-		a.invalidateStructLocalAllocRegionOnAssign(n.Target)
+		a.invalidateStructLocalAllocRegionOnAssign(n.Target, n.Value, valueType)
 		a.narrowStructLocalHomeRegionOnWrite(n.Target)
 		a.checkStoredBorrowEscapesLocal(n.Target, targetType, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {

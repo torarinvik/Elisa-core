@@ -130,7 +130,7 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 // use after `inner` dies must NOT thread `inner`. Clearing reverts the local to the conservative
 // "cannot infer region parameter" rejection — sound at the cost of re-rejecting the (niche)
 // reassign-then-thread pattern, which a future use-site liveness check could re-admit.
-func (a *Analyzer) invalidateStructLocalAllocRegionOnAssign(target ast.Expr) {
+func (a *Analyzer) invalidateStructLocalAllocRegionOnAssign(target, value ast.Expr, valueType Type) {
 	if a == nil || a.currentStructLocalAllocRegion == nil || a.currentScope == nil {
 		return
 	}
@@ -140,6 +140,11 @@ func (a *Analyzer) invalidateStructLocalAllocRegionOnAssign(target ast.Expr) {
 	}
 	if sym, ok := a.currentScope.Lookup(ident.Name); ok && sym != nil {
 		delete(a.currentStructLocalAllocRegion, sym)
+		// Re-admit only a source whose owner is independently known at this exact
+		// assignment. Unknown values remain unthreadable; known dead owners still fail
+		// the use-site liveness check. This preserves declaration-time invalidation
+		// while allowing a safe same-owner or longer-lived local copy.
+		a.recordStructLocalAllocRegion(sym, sym.Type, value, valueType)
 	}
 }
 
