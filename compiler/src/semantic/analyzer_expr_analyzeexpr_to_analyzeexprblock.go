@@ -813,6 +813,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		// borrowed element cannot outlive the darray/view that contains it.
 		if indexed, ok := stripParenExpr(n.Operand).(*ast.IndexExpr); ok && indexed != nil {
 			region = containerRegion(a.exprTypes[indexed.Object])
+			// A darray's `.items` is its lowered backing array. Its own
+			// type does not carry the source container's region, so indexing
+			// `values.items[i]` must inherit the region of `values` itself.
+			// This keeps the returned element borrow tied to the owning
+			// darray while leaving unrelated field/index paths unchanged.
+			if field, ok := stripParenExpr(indexed.Object).(*ast.FieldExpr); ok && field != nil && field.Field == "items" {
+				region = containerRegion(a.exprTypes[field.Object])
+			}
 		}
 		result = &RefType{Elem: inner, Mutable: a.exprCanYieldWritableRef(n.Operand), State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), Region: region, ExplicitStorage: true}
 		return
