@@ -807,7 +807,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				}
 			}
 		}
-		result = &RefType{Elem: inner, Mutable: a.exprCanYieldWritableRef(n.Operand), State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
+		region := ""
+		// Taking the address of a container element borrows the container's
+		// backing storage. Keep that owner on the resulting reference so a
+		// borrowed element cannot outlive the darray/view that contains it.
+		if indexed, ok := stripParenExpr(n.Operand).(*ast.IndexExpr); ok && indexed != nil {
+			region = containerRegion(a.exprTypes[indexed.Object])
+		}
+		result = &RefType{Elem: inner, Mutable: a.exprCanYieldWritableRef(n.Operand), State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), Region: region, ExplicitStorage: true}
 		return
 	case *ast.SpecializeExpr:
 		result = a.analyzeSpecializeExpr(n)
