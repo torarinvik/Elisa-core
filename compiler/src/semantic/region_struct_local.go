@@ -107,6 +107,14 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 		a.currentStructLocalAllocRegion[sym] = region
 		return
 	}
+	// A by-value copy preserves the container descriptors and therefore the backing
+	// region of a previously recorded local. Carry only that exact source region; the
+	// use-site liveness check in attachStructLocalArgRegion still rejects a dead owner,
+	// and reassignment of this destination clears the record.
+	if sourceRegion := a.structLocalArgRegion(value); sourceRegion != "" {
+		a.currentStructLocalAllocRegion[sym] = sourceRegion
+		return
+	}
 	// Region-poly builder call: result lives in the ambient region (same as a literal).
 	if a.exprIsRegionPolyResultCarryingRegionData(value, valueType) {
 		a.currentStructLocalAllocRegion[sym] = region

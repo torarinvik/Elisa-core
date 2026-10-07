@@ -642,6 +642,7 @@ func unwrapParenExprAST(e ast.Expr) ast.Expr {
 
 func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 	constructed := map[string]bool{}
+	var declarations []*ast.VarDeclStmt
 	var collect func(v reflect.Value)
 	collect = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -653,6 +654,7 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 				return
 			}
 			if vd, ok := v.Interface().(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
+				declarations = append(declarations, vd)
 				if _, isLit := unwrapParenExprAST(vd.Value).(*ast.StructLitExpr); isLit {
 					constructed[vd.Name] = true
 				}
@@ -674,6 +676,24 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 		}
 	}
 	collect(reflect.ValueOf(stmts))
+	// A by-value local copy of a constructed struct still carries the same container
+	// backing regions. Treat simple identifier/parenthesized copies as aliases for the
+	// purpose of deciding whether the function needs an ambient region. Semantic analysis
+	// records and validates the actual source symbol's region before threading it, so this
+	// syntax-only prepass cannot grant a borrow or bypass reassignment/liveness checks.
+	for changed := true; changed; {
+		changed = false
+		for _, vd := range declarations {
+			if vd == nil || constructed[vd.Name] || vd.Value == nil {
+				continue
+			}
+			value := unwrapParenExprAST(vd.Value)
+			if id, ok := value.(*ast.Ident); ok && id != nil && constructed[id.Name] {
+				constructed[vd.Name] = true
+				changed = true
+			}
+		}
+	}
 	if len(constructed) == 0 {
 		return false
 	}
