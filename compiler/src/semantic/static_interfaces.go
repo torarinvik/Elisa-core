@@ -369,7 +369,33 @@ func (a *Analyzer) specializeInterfaceMethodSignature(signature *FuncType, recei
 	if specialized == nil {
 		return signature
 	}
+	// A protocol method commonly spells an owner borrow as `Self& @r`. Once
+	// Self is specialized to a region-carrying container, normalize that
+	// reference exactly as resolveType does for a source-level
+	// `darray[T]& @r`: the region belongs to the container, not its reference.
+	// Without this pass the protocol side retains RefType.Region while an impl
+	// method's parsed signature has already stamped DArrayType.Region, causing
+	// a false conformance mismatch and losing the owner tie during specialization.
+	for i, parameter := range specialized.Params {
+		specialized.Params[i] = normalizeSpecializedContainerRefRegion(parameter)
+	}
+	specialized.Return = normalizeSpecializedContainerRefRegion(specialized.Return)
 	return specialized
+}
+
+func normalizeSpecializedContainerRefRegion(t Type) Type {
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil || ref.Region == "" {
+		return t
+	}
+	stamped, changed := stampContainerRegion(ref.Elem, ref.Region)
+	if !changed {
+		return t
+	}
+	clone := *ref
+	clone.Elem = stamped
+	clone.Region = ""
+	return &clone
 }
 
 // typePathNameForReceiver reverse-resolves a concrete receiver type back to a visible
