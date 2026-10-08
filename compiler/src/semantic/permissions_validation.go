@@ -80,14 +80,10 @@ func missingGrantedPermissionFamilies(refs []ast.PermissionRef, granted map[stri
 }
 
 // errorOnMissingLocalGrant is warnOnMissingLocalGrant for operations whose Unsafe opt-out is
-// mandatory in every mode (no permissive-mode warning). The trusted runtime stdlib keeps its
-// exemption.
+// mandatory in every mode (no permissive-mode warning).
 func (a *Analyzer) errorOnMissingLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
 	missing := missingGrantedPermissionFamilies(refs, granted)
 	if len(missing) == 0 {
-		return
-	}
-	if isRuntimeStdPermissionInternal(pos.File) && allUnsafeFamilies(missing) {
 		return
 	}
 	a.errorf(pos, "%s", effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing)))
@@ -96,9 +92,6 @@ func (a *Analyzer) errorOnMissingLocalGrant(pos lexer.Pos, label string, refs []
 func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
 	missing := missingGrantedPermissionFamilies(refs, granted)
 	if len(missing) == 0 {
-		return
-	}
-	if isRuntimeStdPermissionInternal(pos.File) && allUnsafeFamilies(missing) {
 		return
 	}
 	msg := effectAuthorityGrantMessage(label, missing, permissionGrantHint(refs, missing))
@@ -132,13 +125,9 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 	a.warnf(pos, msg)
 }
 
-// isRuntimeStdPermissionInternal reports whether a source file is part of the trusted
-// runtime standard library (the `elisacore_std` directory). The stdlib is the trusted
-// foundation — like Rust's `std`, it implements the safe abstractions with raw-memory
-// internals — so its unsafe operations are exempt from the Unsafe.* grant requirement that
-// is ENFORCED for ordinary user code. This is what lets `EnforceUnsafePermissions` be on
-// for every build path (the user-facing "loud escape hatch" contract) without forcing the
-// runtime's ~hundreds of internal raw-pointer ops to each carry a grant.
+// isRuntimeStdPermissionInternal identifies runtime source for specialized surface
+// restrictions (for example, wrappers implementing raw concurrency primitives).
+// It does not authorize effects or suppress inferred permission rows.
 func isRuntimeStdPermissionInternal(path string) bool {
 	// Real builds carry the full include path, so the parent directory identifies the whole
 	// stdlib (every file, not a hand-maintained subset).
@@ -150,7 +139,7 @@ func isRuntimeStdPermissionInternal(path string) bool {
 	return runtimeStdBaseNames[filepath.Base(path)]
 }
 
-// runtimeStdBaseNames is the set of trusted stdlib source files, by bare name. Keep in sync
+// runtimeStdBaseNames identifies stdlib source files by bare name. Keep in sync
 // with runtime/elisacore_std/*.elisa (the directory check above covers full-path builds).
 var runtimeStdBaseNames = map[string]bool{
 	"allocator.elisa": true, "arena.elisa": true,
@@ -729,13 +718,6 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	}
 	missing := missingGrantedPermissionFamilies(requiredRefs, granted)
 	if len(missing) == 0 {
-		return
-	}
-	// The runtime standard library is the trusted implementation boundary for
-	// low-level operations. Its public wrappers may call raw profiler/allocator
-	// externs without forcing every caller to grant Unsafe.RawExtern; ordinary
-	// user code still reaches the warning/error paths below.
-	if isRuntimeStdPermissionInternal(pos.File) && allUnsafeFamilies(missing) {
 		return
 	}
 	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(requiredRefs, missing)))

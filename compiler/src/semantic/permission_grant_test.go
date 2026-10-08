@@ -1725,3 +1725,87 @@ def main() -> i64:
 		t.Fatalf("an unshadowed read must still require Global.Read, got:\n%s", got)
 	}
 }
+
+func TestExplicitUnsafeTrackingIndependentOfSourceIdentity(t *testing.T) {
+	for _, filename := range []string{"ordinary.elisa", "/tmp/project/elisacore_std/probe.elisa"} {
+		for _, strict := range []bool{false, true} {
+			mode := "permissive"
+			if strict {
+				mode = "strict"
+			}
+			t.Run(filename+"/"+mode, func(t *testing.T) {
+				result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, filename, `
+def tracked() -> i32:
+    can Unsafe.PointerCast:
+        return 0
+
+def hidden() -> i32:
+    trusted Unsafe.PointerCast:
+        can Unsafe.PointerCast:
+            return 0
+
+def selective() -> i32:
+    trusted Unsafe.PointerCast:
+        can Unsafe.MutableGlobal:
+            return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: strict})
+				for name, want := range map[string]string{"tracked": " can[Unsafe.PointerCast]", "hidden": "", "selective": " can[Unsafe.MutableGlobal]"} {
+					sym, ok := result.GlobalScope.Lookup(name)
+					if !ok {
+						t.Fatalf("missing function %s", name)
+					}
+					fn, ok := sym.Type.(*FuncType)
+					if !ok {
+						t.Fatalf("unexpected function type %T", sym.Type)
+					}
+					if got := PermissionRefsString(fn.PermissionRefs); got != want {
+						t.Errorf("%s row = %q, want %q", name, got, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestGlobalHeaderContractDoesNotAuthorizeBody(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "header_global.elisa", `
+global mutable value: i32 = 0
+
+def read() -> i32 can[Global.Read]:
+    return value
+`, AnalyzeOptions{})
+	if all := allDiagnostics(result); !strings.Contains(all, "explicit local effect grant") {
+		t.Fatalf("expected missing body-local grant despite declared caller contract, got:\n%s", all)
+	}
+}
+
+func TestGroupedGlobalGrantSemanticEquivalence(t *testing.T) {
+	for _, grant := range []string{"Global.Read, Global.Write", "Global{Read,Write}"} {
+		result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "grouped_global.elisa", `
+global mutable value: i32 = 0
+
+def increment():
+    can `+grant+`:
+        value <- value + 1
+`, AnalyzeOptions{})
+		if all := allDiagnostics(result); strings.Contains(all, "explicit local effect grant") {
+			t.Fatalf("grant %s did not authorize both axes: %s", grant, all)
+		}
+		sym, _ := result.GlobalScope.Lookup("increment")
+		if got := PermissionRefsString(sym.Type.(*FuncType).PermissionRefs); got != " can[Global.Read, Global.Write]" {
+			t.Fatalf("grant %s inferred %q", grant, got)
+		}
+	}
+}
+
+func TestRuntimeSourceRequiresExplicitUnsafeGrant(t *testing.T) {
+	for _, filename := range []string{"pointer_grant.elisa", "/tmp/project/elisacore_std/probe.elisa"} {
+		result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, filename, `
+def build(value: uintptr) -> heap u8&:
+    return value.cast[heap u8&]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+		if all := allDiagnostics(result); !strings.Contains(all, "add can Unsafe.PointerCast") || len(result.Errors()) == 0 {
+			t.Fatalf("%s must reject ungranted pointer cast, got:\n%s", filename, all)
+		}
+	}
+}

@@ -243,3 +243,31 @@ def run() -> void can[FooEffect, ConsoleEffect.Write]:
 		t.Fatalf("unexpected unparse output:\n%s", got)
 	}
 }
+
+func TestGroupedGlobalPermissionFormatterRoundTrip(t *testing.T) {
+	grouped, errs := parseSourceFile(t, `def f() -> i32 can[Global{Read,Write}]:
+    can Global{Read,Write}:
+        return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("grouped permission parse: %v", errs)
+	}
+	formatted := unparse.FormatFile(grouped)
+	reparsed, errs := parseSourceFile(t, formatted)
+	if len(errs) != 0 {
+		t.Fatalf("formatted permission parse: %v\n%s", errs, formatted)
+	}
+	if next := unparse.FormatFile(reparsed); next != formatted {
+		t.Fatalf("formatter not stable:\n%s\n%s", formatted, next)
+	}
+	expanded, errs := parseSourceFile(t, `def f() -> i32 can[Global.Read, Global.Write]:
+    can Global.Read, Global.Write:
+        return 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("expanded permission parse: %v", errs)
+	}
+	if got := unparse.FormatFile(expanded); got != formatted {
+		t.Fatalf("grouped and expanded differ:\n%s\n%s", formatted, got)
+	}
+}

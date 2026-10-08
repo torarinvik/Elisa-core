@@ -51,7 +51,11 @@ func (a *Analyzer) checkImplEffectErrorFrameVariance(
 	protoDecl, implDecl ast.Node,
 	implPos lexer.Pos,
 ) {
-	a.checkImplEffectSubset(interfaceName, methodName, expected, actual, implPos)
+	// Body-local can effects are inferred after static interface registration.
+	// Compare completed rows so omitted method headers cannot evade conformance.
+	a.deferredImplEffectChecks = append(a.deferredImplEffectChecks, func() {
+		a.checkImplEffectSubset(interfaceName, methodName, expected, actual, implPos)
+	})
 	a.checkImplErrorSubset(interfaceName, methodName, expected, actual, implPos)
 	a.checkImplChangesSubset(interfaceName, methodName, protoDecl, implDecl, implPos)
 }

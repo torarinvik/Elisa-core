@@ -304,18 +304,10 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
 		inferredRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
-		// Trusted-runtime ENCAPSULATION: the stdlib implements safe abstractions with
-		// raw-memory/panic internals, so those implementation details are not propagated
-		// into the function's public signature (like Rust's `std` not being `unsafe` to
-		// call). Ordinary user code is still required to declare explicit low-level
-		// allocation, panic, and Unsafe grants.
-		if a.enforceUnsafePermissions && fn != nil && isRuntimeStdPermissionInternal(fn.Pos().File) {
-			fnType.PermissionRefs = filterOutTrustedStdlibPermissionRefs(fnType.PermissionRefs)
-			fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
-		} else {
-			fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
-			fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
-		}
+		// Only explicit trusted scopes suppress inferred effects. Source identity
+		// must not erase effects authorized by an ordinary can scope.
+		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
+		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 		a.checkHotContract(fn, fnType)
 		a.checkPerfContracts(fn, fnType)
 		a.checkLawContract(fn, fnType)

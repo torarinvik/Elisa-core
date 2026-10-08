@@ -158,3 +158,23 @@ impl Sink for AuditedVec:
 		t.Fatalf("impl with a subset changes frame must conform, got:\n%s", allDiagnostics(result))
 	}
 }
+
+func TestImplInferredEffectRespectsProtocolContract(t *testing.T) {
+	for _, contract := range []string{"", " can[Global.Read]"} {
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "inferred_protocol.elisa", `
+global mutable counter: i32 = 0
+struct Item:
+    value: i32
+protocol Readable:
+    def read(self: Self) -> i32`+contract+`
+impl Readable for Item:
+    def read(self: Item) -> i32:
+        can Global.Read:
+            return counter
+`, AnalyzeOptions{})
+		rejected := contains(allDiagnostics(result), "subset of the protocol")
+		if rejected != (contract == "") {
+			t.Fatalf("contract %q inferred conformance mismatch:\n%s", contract, allDiagnostics(result))
+		}
+	}
+}

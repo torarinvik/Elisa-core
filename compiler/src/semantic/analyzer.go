@@ -88,9 +88,10 @@ const (
 )
 
 type Analyzer struct {
-	file        *ast.File
-	diagnostics []Diagnostic
-	namedTypes  map[string]Type
+	deferredImplEffectChecks []func()
+	file                     *ast.File
+	diagnostics              []Diagnostic
+	namedTypes               map[string]Type
 	// refineAliases registers named refinement aliases (`refine Name(..) = Base where Pred`,
 	// docs/85 "Level 2") by qualified name. They are pure desugaring sugar: a binder-position use
 	// expands to the equivalent anonymous WhereRefinementTypeExpr (see
@@ -1282,6 +1283,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
 	a.checkProtocolDefaultMethodContracts(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
+	for _, check := range a.deferredImplEffectChecks {
+		check()
+	}
+	a.deferredImplEffectChecks = nil
 	if options.EnforceProgressSafety {
 		a.validateProgressBlocking(activeDecls)
 		a.validateProgressRecursion(activeDecls)
