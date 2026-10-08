@@ -189,3 +189,144 @@ def store():
 		})
 	}
 }
+
+func TestMutableGlobalLoweredDefaultsAndMethods(t *testing.T) {
+	tests := []struct{ name, source, want string }{
+		{"branch_callback", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def pure() -> i32:
+    return 0
+def test(condition: bool) -> i32:
+    f: mutable fn() -> i32 can[Global.Read] = pure
+    if condition:
+        f <- reader
+    else:
+        f <- pure
+    return f()
+`, "requires can[Global]"},
+		{"default_call", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def consume(x: i32 = reader()) -> i32:
+    return x
+def test() -> i32:
+    return consume()
+`, "requires can[Global]"},
+		{"default_callback", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def consume(f: fn() -> i32 can[Global.Read] = reader) -> i32:
+    can Global.Read:
+        return f()
+def test() -> i32:
+    return consume()
+`, "requires can[Global]"},
+		{"default_granted", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def consume(x: i32 = reader()) -> i32:
+    return x
+def test() -> i32:
+    can Global.Read:
+        return consume()
+`, ""},
+		{"default_nested", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def consume(x: i32 = reader()) -> i32:
+    return x
+def nested(x: i32 = consume()) -> i32:
+    return x
+def test() -> i32:
+    return nested()
+`, "requires can[Global]"},
+		{"default_read", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def consume(x: i32 = hot) -> i32:
+    return x
+def test() -> i32:
+    return consume()
+`, "mutable global read"},
+		{"default_unused_callback", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def consume(f: fn() -> i32 can[Global.Read] = reader) -> i32:
+    return 0
+def test() -> i32:
+    return consume()
+`, "requires can[Global]"},
+		{"generic", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def read_generic[T](value: T) -> i32:
+    can Global.Read:
+        return hot
+def test(value: i32) -> i32:
+    return read_generic[i32](value)
+`, "requires can[Global]"},
+		{"method", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+struct Box:
+    value: i32
+impl Box:
+    def read(self: Box) -> i32:
+        can Global.Read:
+            return hot
+def test(box: Box) -> i32:
+    return box.read()
+`, "requires can[Global]"},
+		{"paren", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def test() -> i32:
+    return (reader)()
+`, "requires can[Global]"},
+		{"factory", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def factory() -> fn() -> i32 can[Global.Read]:
+    return reader
+def test() -> i32:
+    f = factory()
+    return f()
+`, "requires can[Global]"},
+		{"factory_granted", `global mutable hot: i32 = 0
+def reader() -> i32:
+    can Global.Read:
+        return hot
+def factory() -> fn() -> i32 can[Global.Read]:
+    return reader
+def test() -> i32:
+    f = factory()
+    can Global.Read:
+        return f()
+`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, tt.name+".elisa", tt.source, AnalyzeOptions{})
+			errors := strings.Join(result.Errors(), "\n")
+			if tt.want == "" {
+				if errors != "" {
+					t.Fatalf("unexpected errors: %s", errors)
+				}
+			} else if !strings.Contains(errors, tt.want) {
+				t.Fatalf("missing %q: %s", tt.want, errors)
+			}
+		})
+	}
+}

@@ -635,10 +635,12 @@ type FuncType struct {
 	PermissionRefs         []ast.PermissionRef
 	// MutableGlobalPermissionRefs tracks mandatory effects separately from immutable global reads.
 	MutableGlobalPermissionRefs []ast.PermissionRef
-	Permissions                 []string
-	ShapeParams                 []string
-	FreshReturnShapeParams      []string
-	Static                      bool
+	// Retain declaration identities when function-value joins precede the effect fixpoint.
+	MutableGlobalSourceNames []string
+	Permissions              []string
+	ShapeParams              []string
+	FreshReturnShapeParams   []string
+	Static                   bool
 	// CapturesThreadUnsafe marks a closure that captures a value which is not safe to
 	// share across threads (a non-static mutable ref, a darray/dict, etc.). Closures
 	// capture by value, so capturing such a *reference* copies the pointer and shares its

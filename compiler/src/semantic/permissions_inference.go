@@ -4,7 +4,29 @@ import (
 	"elisacore/src/ast"
 )
 
+// permissionFunctionDecls includes implementation members; they are executable
+// functions with the same authority obligations as top-level declarations.
+func permissionFunctionDecls(decls []scopedDecl) []scopedDecl {
+	var functions []scopedDecl
+	for _, scoped := range decls {
+		switch declaration := scoped.Decl.(type) {
+		case *ast.FuncDecl:
+			functions = append(functions, scoped)
+		case *ast.ImplDecl:
+			for _, member := range declaration.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					nested := scoped
+					nested.Decl = fn
+					functions = append(functions, nested)
+				}
+			}
+		}
+	}
+	return functions
+}
+
 func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
+	decls = permissionFunctionDecls(decls)
 	for iter := 0; iter < len(decls)+4; iter++ {
 		changed := false
 		for _, scoped := range decls {
@@ -340,7 +362,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.addRefs(c.analyzer.mutableGlobalCallbackRefs(n))
 		c.collectExpr(n.Func)
 		c.collectExpr(n.SafeReceiver)
-		for _, arg := range n.Args {
+		for _, arg := range n.LoweredArgs() {
 			c.collectExpr(arg)
 		}
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.exprRequiresUnsafeAlias(n) {

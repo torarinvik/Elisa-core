@@ -18,3 +18,13 @@ All compilation and tests ran remotely in the isolated `/root/work/global-mutabl
 - Default CLI fixtures containing a direct ungranted read and direct ungranted write each exited 1, respectively reporting `mutable global read` with required `Global.Read` and `mutable global write` with required `Global.Write` (`cli-read.log`, `cli-write.log`). No warning-enforcement flags were supplied.
 
 This qualifies stage0 enforcement and its runtime migration. Stage1 enforcement and proof admission integration are separate lanes and are not certified by this result.
+
+## Follow-up: defaults, methods and function-value joins
+
+Actual default CLI qualification found three admission gaps after the initial commit: omitted default expressions were skipped by the permission traversal, implementation method bodies were absent from the effect fixpoint, and branch-joined callback types lost concrete declaration identities before that fixpoint. Defaults are executable expressions: both a direct mutable-global read and a nested `reader()` call were valid source programs and incorrectly admitted.
+
+The follow-up traverses resolved lowered arguments at the caller's grant scope, includes implementation members in inference and validation, and preserves function-value declaration sources through branch joins and type substitution. A default callback transfers its actual authority even when the receiving function does not invoke it. Caller grants discharge default evaluation; merely declaring a default does not execute it.
+
+Factory callback qualification used an explicit `fn() -> i32 can[Global.Read]` return type. Creating the callback without a grant is allowed; invoking it without Read fails, and invoking it inside a Read grant passes. Explicit declared Global rows are mandatory; inferred immutable-global advisory rows remain distinct. Parenthesized and explicitly generic calls already rejected missing grants.
+
+Remote focused regressions passed (0.021s); the complete semantic suite passed again (58.518s). CLI fixtures and logs are retained under `grants-cli-qualification` in the isolated remote checkout. The frontend rebuild passed with an empty build log and complete default runtime admission exited 0. Final CLI branch-callback and factory-invocation negatives exited 1; granted factory invocation exited 0.

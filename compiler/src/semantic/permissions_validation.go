@@ -8,7 +8,7 @@ import (
 )
 
 func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
-	for _, scoped := range decls {
+	for _, scoped := range permissionFunctionDecls(decls) {
 		fn, ok := scoped.Decl.(*ast.FuncDecl)
 		if !ok {
 			continue
@@ -450,7 +450,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.errorOnMissingLocalGrant(n.Pos(), "callback argument", a.mutableGlobalCallbackRefs(n), granted)
 		a.validatePermissionExpr(n.Func, granted)
 		a.validatePermissionExpr(n.SafeReceiver, granted)
-		for _, arg := range n.Args {
+		for _, arg := range n.LoweredArgs() {
 			a.validatePermissionExpr(arg, granted)
 		}
 		if a.enforceUnsafePermissions && a.exprRequiresUnsafeAlias(n) {

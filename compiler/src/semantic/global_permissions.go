@@ -193,6 +193,11 @@ func (a *Analyzer) mandatoryGlobalPermissionRefs(fn *FuncType) []ast.PermissionR
 		return nil
 	}
 	refs := append([]ast.PermissionRef(nil), fn.MutableGlobalPermissionRefs...)
+	for _, name := range fn.MutableGlobalSourceNames {
+		if source := a.functionTypes[name]; source != nil {
+			refs = append(refs, source.MutableGlobalPermissionRefs...)
+		}
+	}
 	// Generic/function-value copies may predate the effect fixpoint. Resolve the
 	// named declaration's final mutable row instead of trusting that stale copy.
 	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
@@ -225,7 +230,7 @@ func mutableGlobalReferenceType(t Type) bool {
 // ability to perform its accesses, just as handing out a writable reference does.
 func (a *Analyzer) mutableGlobalCallbackRefs(call *ast.CallExpr) []ast.PermissionRef {
 	var refs []ast.PermissionRef
-	for _, arg := range call.Args {
+	for _, arg := range call.LoweredArgs() {
 		if callback, ok := a.exprTypes[arg].(*FuncType); ok {
 			refs = append(refs, a.mandatoryGlobalPermissionRefs(callback)...)
 		}
