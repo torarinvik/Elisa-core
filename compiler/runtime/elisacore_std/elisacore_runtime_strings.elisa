@@ -265,22 +265,23 @@ def string_views_eq(lhs: sview, rhs: sview) -> int:
     return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs_len) == 0 else 0
 
 def string_view_copy(view: sview) -> cstr:
-    can Memory.Allocate, Abort.Panic:
-        if view.len <= 0:
-            trusted Unsafe.PointerCast:
-                return intern_small_string("", 0).cast[cstr]
-        view_len: usize = runtime_checked_i64_to_usize(view.len)
-        if view_len <= 8:
-            trusted Unsafe.PointerCast:
-                return intern_small_string(view.data, view_len).cast[cstr]
+    trusted Global.Read, Global.Write:
+        can Memory.Allocate, Abort.Panic:
+            if view.len <= 0:
+                trusted Unsafe.PointerCast:
+                    return intern_small_string("", 0).cast[cstr]
+            view_len: usize = runtime_checked_i64_to_usize(view.len)
+            if view_len <= 8:
+                trusted Unsafe.PointerCast:
+                    return intern_small_string(view.data, view_len).cast[cstr]
 
-        allocation_bytes: usize = runtime_checked_add_usize(view_len, 1)
-        out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&]
-        memcpy(out.cast[mutable void&], view.data.cast[void&], view_len)
-        out[view_len] <- 0
-        register_perm_string_len(out.cast[u8&], view_len)
-        trusted Unsafe.PointerCast:
-            return out.cast[cstr]
+            allocation_bytes: usize = runtime_checked_add_usize(view_len, 1)
+            out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&]
+            memcpy(out.cast[mutable void&], view.data.cast[void&], view_len)
+            out[view_len] <- 0
+            register_perm_string_len(out.cast[u8&], view_len)
+            trusted Unsafe.PointerCast:
+                return out.cast[cstr]
 
 # ------------------------------------------------------------
 # Ergonomic, bounds-safe string-view helpers

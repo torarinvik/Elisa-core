@@ -730,14 +730,15 @@ def pool_shutdown(pool: mutable ThreadPool&):
 global mutable __elisa_default_pool_state: void&? = null
 
 def default_pool() -> ThreadPool:
-	can Pool.Create, Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
-		if __elisa_default_pool_state == null:
-			workers: usize = perf_cores().usize()
-			state: mutable heap ConcurrencyPoolState& = ctx_pool_state_new(workers)
-			__elisa_default_pool_state <- state.cast[void&]
-		out: ThreadPool = zeroed
-		out.handle <- __elisa_default_pool_state
-		return move out
+	trusted Global.Read, Global.Write:
+		can Pool.Create, Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
+			if __elisa_default_pool_state == null:
+				workers: usize = perf_cores().usize()
+				state: mutable heap ConcurrencyPoolState& = ctx_pool_state_new(workers)
+				__elisa_default_pool_state <- state.cast[void&]
+			out: ThreadPool = zeroed
+			out.handle <- __elisa_default_pool_state
+			return move out
 
 # Enqueue (entry, arg) on the pool's FIFO queue and wake one worker. Returns a Task
 # whose `handle` is the completion record (as a uintptr) the awaiter waits on.

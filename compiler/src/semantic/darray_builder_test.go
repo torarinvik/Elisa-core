@@ -1621,7 +1621,8 @@ func TestAnalyzeGlobalDArrayGrowthBindsToPerm(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "global_darray_growth_perm.elisa", `global mutable g_list: mutable darray[i64] = zeroed
 
 def add(x: i64) -> void:
-    g_list.push(x)
+    can Global{Read, Write}:
+        g_list.push(x)
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if strings.Contains(all, `requires an active in <arena>: scope`) {

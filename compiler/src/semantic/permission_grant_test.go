@@ -562,8 +562,8 @@ def read_counter() -> int:
     return counter
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if strings.Contains(all, `global read requires`) {
-		t.Fatalf("expected direct global read to infer permission without local diagnostic, got:\n%s", all)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `mutable global read requires`) {
+		t.Fatalf("expected direct global read to require a local grant, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("read_counter")
 	if !ok {
@@ -611,8 +611,8 @@ def set_counter(value: int) -> void:
     counter <- value
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if strings.Contains(all, `global write requires`) {
-		t.Fatalf("expected direct global write to infer permission without local diagnostic, got:\n%s", all)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), `mutable global write requires`) {
+		t.Fatalf("expected direct global write to require a local grant, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("set_counter")
 	if !ok {
@@ -1611,12 +1611,8 @@ def build() -> i64:
 	}
 }
 
-// -Wglobals (EnforceGlobalPermissions) promotes the Global family from a
-// declaration-only annotation to a real requirement: an INFERRED Global.Read /
-// Global.Write propagates to callers the way Memory.Allocate does. Off, the same
-// program is silent -- which is the pre-existing default and what every codebase
-// that predates the dial relies on.
-func TestGlobalPermissionsRequiredOnlyUnderTheDial(t *testing.T) {
+// Mutable-global grants are mandatory regardless of the legacy -Wglobals dial.
+func TestGlobalPermissionsRequiredByDefault(t *testing.T) {
 	const src = `
 global mutable hot: i32 = 0
 
@@ -1629,8 +1625,8 @@ def main() -> i64:
 	return 0
 `
 	off := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_dial_off.elisa", src, AnalyzeOptions{})
-	if got := allDiagnostics(off); strings.Contains(got, "can[Global]") {
-		t.Fatalf("Global must stay silent without the dial, got:\n%s", got)
+	if got := strings.Join(off.Errors(), "\n"); !strings.Contains(got, "mutable global read") || !strings.Contains(got, "mutable global write") || !strings.Contains(got, `call to "bump"`) {
+		t.Fatalf("mutable Global grants must be errors without the dial, got:\n%s", got)
 	}
 
 	on := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_dial_on.elisa", src, AnalyzeOptions{EnforceGlobalPermissions: true})
@@ -1675,8 +1671,9 @@ func TestGlobalBraceSugarGrantsBothMembers(t *testing.T) {
 global mutable hot: i32 = 0
 
 def bump() -> i32:
-	hot <- hot + 1
-	return hot
+	can Global{Read, Write}:
+		hot <- hot + 1
+		return hot
 
 def main() -> i64:
 	can Global{Read, Write}:

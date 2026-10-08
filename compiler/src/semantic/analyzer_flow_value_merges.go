@@ -190,6 +190,7 @@ func (a *Analyzer) mergeFunctionValueTypes(dst *FuncType, src *FuncType) (*FuncT
 	merged.DeclaredPermissionRefs = mergePermissionRefs(dst.DeclaredPermissionRefs, src.DeclaredPermissionRefs)
 	merged.DeclaredPermissions = mergePermissionFamilies(dst.DeclaredPermissions, src.DeclaredPermissions)
 	merged.PermissionRefs = mergePermissionRefs(dst.PermissionRefs, src.PermissionRefs)
+	merged.MutableGlobalPermissionRefs = mergePermissionRefs(dst.MutableGlobalPermissionRefs, src.MutableGlobalPermissionRefs)
 	merged.Permissions = mergePermissionFamilies(dst.Permissions, src.Permissions)
 	if sameFuncGuardEffects(dst.GuardEffects, src.GuardEffects) {
 		merged.GuardEffects = cloneFuncGuardEffects(dst.GuardEffects)

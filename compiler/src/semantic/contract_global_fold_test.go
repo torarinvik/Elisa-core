@@ -46,7 +46,8 @@ def clamp_i32(v: i32, lo: i32, hi: i32) -> i32:
     return lo if v < lo else (hi if v > hi else v)
 
 def use_global(x: i32) -> i32:
-    return clamp_i32(x, 8, CAP)
+    can Global.Read:
+        return clamp_i32(x, 8, CAP)
 `
 	result := analyzeTreeTestSource(t, "mut_global_nofold.elisa", src)
 	if !hasRuntimeCheck(result) {

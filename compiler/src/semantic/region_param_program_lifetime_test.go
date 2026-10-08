@@ -34,10 +34,12 @@ func TestProgramLifetimeGlobalArenaGrowthStructFieldAccepted(t *testing.T) {
 struct Holder:
     items: mutable darray[i64]
 def grow(out: mutable darray[i64]&, v: i64) -> void:
-    in g_arena:
-        out.push(v)
+    can Global{Read, Write}:
+        in g_arena:
+            out.push(v)
 def use(h: mutable Holder&) -> void:
-    grow(&h.items, 7)
+    can Global{Read, Write}:
+        grow(&h.items, 7)
 `).Errors(), " | ")
 	if errs != "" {
 		t.Fatalf("growth into a global arena called with a struct-field container must compile, got: %s", errs)

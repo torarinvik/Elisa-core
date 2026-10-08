@@ -369,6 +369,10 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
 	fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
 	fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
+	mutableCollector := permissionEffectCollector{analyzer: a, mutableGlobalsOnly: true, returnType: fnType.Return}
+	mutableCollector.collectStmts(expr.Body)
+	mutableCollector.collectExpr(expr.BodyExpr)
+	fnType.MutableGlobalPermissionRefs = mutableCollector.refs()
 
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn

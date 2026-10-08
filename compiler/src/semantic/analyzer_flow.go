@@ -148,6 +148,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// `in <region>:` scope carries that region in its type; escape checks and
 		// codegen arena routing consult it (see REGION_CONTAINERS_DESIGN.md).
 		bindingType = a.stampContainerRegion(bindingType)
+		if mutableGlobalReferenceType(bindingType) && !a.suppressDiagnostics {
+			if root := globalReferenceStorageExpr(n.Value); root != nil {
+				if _, global := a.mutableGlobalStorageRoot(root); global {
+					if a.mutableGlobalBorrowRefs == nil {
+						a.mutableGlobalBorrowRefs = make(map[*ast.VarDeclStmt][]ast.PermissionRef)
+					}
+					a.mutableGlobalBorrowRefs[n] = globalWriteRefs(root.Pos())
+				}
+			}
+		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
 		a.defineLocal(sym, n.Pos())
 		if len(a.loopAffineFrames) != 0 {

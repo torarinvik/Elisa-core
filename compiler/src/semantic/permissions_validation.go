@@ -203,6 +203,7 @@ func (a *Analyzer) validatePermissionStmts(stmts []ast.Stmt, granted map[string]
 func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
+		a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", a.mutableGlobalBorrowRefs[n], granted)
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
@@ -242,6 +243,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionWriteTarget(n.Target, false, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.ReturnStmt:
+		if a.currentFuncType != nil {
+			a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", a.mutableGlobalReturnedRefRefs(n.Value, a.currentFuncType.Return), granted)
+		}
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
@@ -259,9 +263,15 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 			a.validatePermissionExpr(n.Store, granted)
 		}
 		for _, arm := range n.Arms {
+			a.validatePermissionExpr(arm.Guard, granted)
 			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
 		}
 	case *ast.InStoreStmt:
+		if root := globalReferenceStorageExpr(n.Store); root != nil {
+			if _, global := a.mutableGlobalStorageRoot(root); global {
+				a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", globalWriteRefs(root.Pos()), granted)
+			}
+		}
 		a.validatePermissionExpr(n.Store, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.CanStmt:
@@ -363,6 +373,12 @@ func (a *Analyzer) validatePermissionWriteTarget(expr ast.Expr, alsoRead bool, g
 	if expr == nil {
 		return
 	}
+	if _, ok := a.mutableGlobalStorageRoot(expr); ok {
+		a.errorOnMissingLocalGrant(expr.Pos(), "mutable global write", globalWriteRefs(expr.Pos()), granted)
+		if alsoRead {
+			a.errorOnMissingLocalGrant(expr.Pos(), "mutable global read", globalReadRefs(expr.Pos()), granted)
+		}
+	}
 	if sym, ok := a.globalStorageRoot(expr); ok {
 		if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 			a.warnOnMissingLocalGrant(expr.Pos(), "mutable global access", unsafeMutableGlobalRefs(expr.Pos()), granted)
@@ -370,15 +386,35 @@ func (a *Analyzer) validatePermissionWriteTarget(expr ast.Expr, alsoRead bool, g
 	}
 	switch n := expr.(type) {
 	case *ast.FieldExpr:
-		if globalStorageRootExpr(expr) != n.Object {
-			a.validatePermissionWriteTarget(n.Object, alsoRead, granted)
-		}
+		a.validatePermissionTargetOperands(n.Object, granted)
 	case *ast.IndexExpr:
+		a.validatePermissionTargetOperands(n.Object, granted)
 		a.validatePermissionExpr(n.Index, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
 	case *ast.SliceExpr:
+		a.validatePermissionTargetOperands(n.Object, granted)
 		a.validatePermissionExpr(n.Start, granted)
 		a.validatePermissionExpr(n.End, granted)
+	case *ast.ParenExpr:
+		a.validatePermissionTargetOperands(n.Inner, granted)
+	}
+}
+
+// Walk subscript operands without treating the assignment's storage root as a read.
+func (a *Analyzer) validatePermissionTargetOperands(expr ast.Expr, granted map[string]bool) {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		a.validatePermissionTargetOperands(n.Object, granted)
+	case *ast.IndexExpr:
+		a.validatePermissionTargetOperands(n.Object, granted)
+		a.validatePermissionExpr(n.Index, granted)
+		a.validatePermissionExpr(n.Fallback, granted)
+	case *ast.SliceExpr:
+		a.validatePermissionTargetOperands(n.Object, granted)
+		a.validatePermissionExpr(n.Start, granted)
+		a.validatePermissionExpr(n.End, granted)
+	case *ast.ParenExpr:
+		a.validatePermissionTargetOperands(n.Inner, granted)
 	}
 }
 
@@ -388,7 +424,10 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if sym, ok := a.globalStorageSymbolForIdent(n.Name); ok {
+		if _, ok := a.mutableGlobalStorageRoot(n); ok {
+			a.errorOnMissingLocalGrant(n.Pos(), "mutable global read", globalReadRefs(n.Position), granted)
+		}
+		if sym, ok := a.globalStorageRoot(n); ok {
 			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				a.warnOnMissingLocalGrant(n.Pos(), "mutable global access", unsafeMutableGlobalRefs(n.Position), granted)
 			}
@@ -407,6 +446,8 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.UnaryExpr:
 		a.validatePermissionExpr(n.Operand, granted)
 	case *ast.CallExpr:
+		a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", a.mutableGlobalCallWriteRefs(n), granted)
+		a.errorOnMissingLocalGrant(n.Pos(), "callback argument", a.mutableGlobalCallbackRefs(n), granted)
 		a.validatePermissionExpr(n.Func, granted)
 		a.validatePermissionExpr(n.SafeReceiver, granted)
 		for _, arg := range n.Args {
@@ -515,6 +556,47 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		for _, elem := range n.Elems {
 			a.validatePermissionExpr(elem, granted)
 		}
+	case *ast.ListComprehensionExpr:
+		for _, b := range n.Bindings {
+			if vd, ok := b.(*ast.VarDeclStmt); ok {
+				a.validatePermissionStmt(vd, granted)
+			}
+		}
+		a.validatePermissionExpr(n.Key, granted)
+		a.validatePermissionExpr(n.Value, granted)
+		a.validatePermissionExpr(n.Source, granted)
+		a.validatePermissionExpr(n.RangeEnd, granted)
+		a.validatePermissionExpr(n.RangeStep, granted)
+		a.validatePermissionExpr(n.Filter, granted)
+		a.validatePermissionExpr(n.Owner, granted)
+	case *ast.QueryExpr:
+		a.validatePermissionExpr(n.Source, granted)
+		a.validatePermissionExpr(n.Filter, granted)
+		a.validatePermissionExpr(n.Projection, granted)
+		a.validatePermissionExpr(n.Owner, granted)
+	case *ast.ExprBlock:
+		// A value block is an executable expression. Its leading statements and
+		// tail value can contain calls/effects just like a function body; skipping
+		// it under-reports effects when a block is used as an initializer or return.
+		a.validatePermissionStmts(n.Stmts, granted)
+		a.validatePermissionExpr(n.Value, granted)
+	case *ast.CatchExpr:
+		a.validatePermissionExpr(n.Value, granted)
+		a.validatePermissionStmts(n.Success.Body, granted)
+		for _, arm := range n.Arms {
+			a.validatePermissionStmts(arm.Body, granted)
+		}
+	case *ast.LambdaExpr:
+		savedFunc := a.currentFuncType
+		if ft, ok := a.exprTypes[n].(*FuncType); ok {
+			a.currentFuncType = ft
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+		a.validatePermissionExpr(n.BodyExpr, granted)
+		if a.currentFuncType != nil {
+			a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", a.mutableGlobalReturnedRefRefs(n.BodyExpr, a.currentFuncType.Return), granted)
+		}
+		a.currentFuncType = savedFunc
 	case *ast.ParenExpr:
 		a.validatePermissionExpr(n.Inner, granted)
 	case *ast.RaiseExpr:
@@ -524,12 +606,24 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if n.Fallback != nil {
 			a.validatePermissionExpr(n.Fallback, granted)
 		}
+		if n.Recovery != nil {
+			a.validatePermissionExpr(n.Recovery.Value, granted)
+			a.validatePermissionStmts(n.Recovery.Body, cloneGrantedPermissionFamilies(granted))
+		}
 	case *ast.UnwrapElseExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
+		if n.Recovery != nil {
+			a.validatePermissionExpr(n.Recovery.Value, granted)
+			a.validatePermissionStmts(n.Recovery.Body, cloneGrantedPermissionFamilies(granted))
+		}
 	case *ast.GetExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
+		if n.Recovery != nil {
+			a.validatePermissionExpr(n.Recovery.Value, granted)
+			a.validatePermissionStmts(n.Recovery.Body, cloneGrantedPermissionFamilies(granted))
+		}
 	case *ast.OptionalBindExpr:
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.AllocExpr:
@@ -549,6 +643,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 			a.validatePermissionExpr(n.Store, granted)
 		}
 		for _, arm := range n.Arms {
+			a.validatePermissionExpr(arm.Guard, granted)
 			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
 		}
 	case *ast.FoldExpr:
@@ -605,13 +700,18 @@ func (a *Analyzer) warnOnLegacyRawConcurrencyCall(pos lexer.Pos, fnType *FuncTyp
 }
 
 func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, granted map[string]bool) {
-	if fnType == nil || len(fnType.Permissions) == 0 {
+	if fnType == nil {
+		return
+	}
+	mandatoryRefs := a.mandatoryGlobalPermissionRefs(fnType)
+	a.errorOnMissingLocalGrant(pos, "call to "+quoteFactTarget(fnType.Name), mandatoryRefs, granted)
+	if len(fnType.Permissions) == 0 {
 		return
 	}
 	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
-	requiredRefs := a.permissionRefsRequiringLocalGrant(fnType)
+	requiredRefs := missingGrantedPermissionRefs(a.permissionRefsRequiringLocalGrant(fnType), a.grantedPermissionRefs(mandatoryRefs))
 	missingRefs := missingGrantedPermissionRefs(requiredRefs, granted)
 	for _, ref := range missingRefs {
 		if ref.Name == "Unsafe" && ref.Member == "SegmentMutation" {

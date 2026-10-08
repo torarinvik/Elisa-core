@@ -80,7 +80,8 @@ func TestAnalyzeAcceptsGlobalStorageReturnsThatDoNotShare(t *testing.T) {
 		"global_ref.pos.elisa": `global mutable gitems: mutable darray[i64] = zeroed
 
 def items_of() -> darray[i64]&:
-    return &gitems
+    can Global.Read:
+        return &gitems
 `,
 		"global_scalar.pos.elisa": `struct Box:
     items: mutable darray[i64]
@@ -97,9 +98,10 @@ def count() -> i64:
 		"global_fresh.pos.elisa": `global mutable gitems: mutable darray[i64] = zeroed
 
 def items_of() -> darray[i64]:
-    out: mutable darray[i64] = []
-    out.extend([v for v in gitems])
-    return out
+    can Global.Read:
+        out: mutable darray[i64] = []
+        out.extend([v for v in gitems])
+        return out
 `,
 	}
 	for name, source := range cases {

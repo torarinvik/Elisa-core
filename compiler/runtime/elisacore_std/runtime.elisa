@@ -7,22 +7,28 @@
 # ------------------------------------------------------------
 
 def int_to_string(value: i64) -> cstr:
-    return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
+    trusted Global.Read, Global.Write:
+        return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
 
 def int_to_string_scratch(value: i64) -> cstr:
-    return int_to_string_into(&scratch_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
+    trusted Global.Read, Global.Write:
+        return int_to_string_into(&scratch_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
 
 def bool_to_string(value: int) -> cstr:
-    return bool_to_string_into(&perm_arena, value)
+    trusted Global.Read:
+        return bool_to_string_into(&perm_arena, value)
 
 def bool_to_string_scratch(value: int) -> cstr:
-    return bool_to_string_into(&scratch_arena, value)
+    trusted Global.Read:
+        return bool_to_string_into(&scratch_arena, value)
 
 def char_to_string(value: i64) -> cstr:
-    return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic
+    trusted Global.Read:
+        return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic
 
 def char_to_string_scratch(value: i64) -> cstr:
-    return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic
+    trusted Global.Read:
+        return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic
 
 def uint_to_string_scratch(value: u64) -> cstr:
     can Memory.Allocate, Console.Format, Abort.Panic:

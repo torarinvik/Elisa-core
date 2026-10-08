@@ -22,6 +22,13 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 					return
 				}
 				usedRefs := a.collectFunctionPermissionRefs(fn)
+				mutableCollector := permissionEffectCollector{analyzer: a, mutableGlobalsOnly: true, returnType: fnType.Return}
+				mutableCollector.collectStmts(fn.Body)
+				mutableRefs := mutableCollector.refs()
+				if !samePermissionRefs(fnType.MutableGlobalPermissionRefs, mutableRefs) {
+					fnType.MutableGlobalPermissionRefs = mutableRefs
+					changed = true
+				}
 				// The body collector runs after ordinary function analysis and can
 				// rediscover Unsafe implementation details through newly inferred
 				// callees. Apply the same trusted-runtime boundary at the fixpoint;
@@ -51,7 +58,12 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 	if fn == nil {
 		return nil
 	}
-	collector := permissionEffectCollector{analyzer: a, shadowed: collectShadowedNames(fn)}
+	collector := permissionEffectCollector{analyzer: a}
+	if sym, ok := a.symbolForFuncDecl(fn); ok {
+		if ft, ok := sym.Type.(*FuncType); ok {
+			collector.returnType = ft.Return
+		}
+	}
 	// docs/126 §3: a moved-in drop-typed parameter is released by this frame, so its
 	// destructor's effects belong to this function's own row.
 	collector.addRefs(a.implicitDropPermissionRefs(fn))
@@ -60,12 +72,10 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 }
 
 type permissionEffectCollector struct {
-	analyzer *Analyzer
-	seen     []ast.PermissionRef
-	// Names the enclosing function binds (parameters and locals). The collector walks a
-	// body with no scope pushed, so without this a parameter named after a global reads
-	// as that global; see permission_collector_shadowing.go.
-	shadowed map[string]bool
+	analyzer           *Analyzer
+	seen               []ast.PermissionRef
+	mutableGlobalsOnly bool
+	returnType         Type
 }
 
 func (c *permissionEffectCollector) refs() []ast.PermissionRef {
@@ -88,6 +98,14 @@ func withoutAcknowledgmentRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 
 func (c *permissionEffectCollector) addRefs(refs []ast.PermissionRef) {
 	if len(refs) == 0 {
+		return
+	}
+	if c.mutableGlobalsOnly {
+		for _, ref := range refs {
+			if isGlobalPermissionRef(ref) {
+				c.seen = append(c.seen, ref)
+			}
+		}
 		return
 	}
 	c.seen = append(c.seen, refs...)
@@ -118,6 +136,7 @@ func (c *permissionEffectCollector) collectStmts(stmts []ast.Stmt) {
 func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
+		c.addRefs(c.analyzer.mutableGlobalBorrowRefs[n])
 		if n.Value != nil {
 			c.collectExpr(n.Value)
 		}
@@ -157,6 +176,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectWriteTarget(n.Target, false)
 		c.collectExpr(n.Value)
 	case *ast.ReturnStmt:
+		c.addRefs(c.analyzer.mutableGlobalReturnedRefRefs(n.Value, c.returnType))
 		c.collectExpr(n.Value)
 	case *ast.IfStmt:
 		c.collectExpr(n.Cond)
@@ -170,9 +190,15 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Store)
 		for _, arm := range n.Arms {
+			c.collectExpr(arm.Guard)
 			c.collectStmts(arm.Body)
 		}
 	case *ast.InStoreStmt:
+		if root := globalReferenceStorageExpr(n.Store); root != nil {
+			if _, global := c.analyzer.mutableGlobalStorageRoot(root); global {
+				c.addRefs(globalWriteRefs(root.Pos()))
+			}
+		}
 		c.collectExpr(n.Store)
 		c.collectStmts(n.Body)
 	case *ast.CanStmt:
@@ -194,7 +220,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		// nothing ever REQUIRES them, so they must not join the function's inferred
 		// effect row (they would otherwise cascade `can[ComplexFlow]` obligations up
 		// every caller chain — see registerBuiltinPermission's contract for both).
-		c.addRefs(withoutAcknowledgmentRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)))
+		if !c.mutableGlobalsOnly {
+			c.addRefs(withoutAcknowledgmentRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)))
+		}
 		c.collectStmts(n.Body)
 	case *ast.SignalStmt:
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
@@ -274,7 +302,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if sym, ok := c.globalStorageSymbolForIdent(n.Name); ok {
+		sym, ok := c.analyzer.globalStorageRoot(n)
+		if ok && (!c.mutableGlobalsOnly || (sym.Kind == SymbolGlobal && sym.Mutable)) {
 			c.addRefs(globalReadRefs(n.Position))
 			if c.analyzer.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				c.addRefs(unsafeMutableGlobalRefs(n.Position))
@@ -307,6 +336,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		}
 		c.collectExpr(n.Operand)
 	case *ast.CallExpr:
+		c.addRefs(c.analyzer.mutableGlobalCallWriteRefs(n))
+		c.addRefs(c.analyzer.mutableGlobalCallbackRefs(n))
 		c.collectExpr(n.Func)
 		c.collectExpr(n.SafeReceiver)
 		for _, arg := range n.Args {
@@ -319,7 +350,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.addRefs(unsafeIndirectCallRefs(n.Position))
 		}
 		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
-			c.addRefs(functionPermissionRefs(fnType))
+			if c.mutableGlobalsOnly {
+				c.addRefs(c.analyzer.mandatoryGlobalPermissionRefs(fnType))
+			} else {
+				c.addRefs(functionPermissionRefs(fnType))
+			}
 			if c.analyzer.enforceUnsafePermissions {
 				if (fnType.Name == "spawn1" || fnType.Name == "spawn_daemon") && len(n.Args) > 1 {
 					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprTypes[n.Args[1]], map[string]bool{}) {
@@ -372,7 +407,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		}
 		if sym, ok := c.analyzer.resolvedCastHooks[n]; ok {
 			if fnType, ok := sym.Type.(*FuncType); ok {
-				c.addRefs(functionPermissionRefs(fnType))
+				if c.mutableGlobalsOnly {
+					c.addRefs(c.analyzer.mandatoryGlobalPermissionRefs(fnType))
+				} else {
+					c.addRefs(functionPermissionRefs(fnType))
+				}
 			}
 		}
 	case *ast.TernaryExpr:
@@ -408,7 +447,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.ListComprehensionExpr:
 		for _, b := range n.Bindings {
 			if vd, ok := b.(*ast.VarDeclStmt); ok {
-				c.collectExpr(vd.Value)
+				c.collectStmt(vd)
 			}
 		}
 		c.collectExpr(n.Key)
@@ -423,6 +462,13 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Filter)
 		c.collectExpr(n.Projection)
 		c.collectExpr(n.Owner)
+	case *ast.LambdaExpr:
+		if ft, ok := c.analyzer.exprTypes[n].(*FuncType); ok {
+			collector := permissionEffectCollector{analyzer: c.analyzer, mutableGlobalsOnly: true, returnType: ft.Return}
+			collector.collectStmts(n.Body)
+			collector.collectExpr(n.BodyExpr)
+			ft.MutableGlobalPermissionRefs = collector.refs()
+		}
 	case *ast.ExprBlock:
 		// A value block is an executable expression. Its leading statements and
 		// tail value can contain calls/effects just like a function body; skipping
@@ -472,7 +518,9 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			})
 			break
 		}
-		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
+		if !c.mutableGlobalsOnly {
+			c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
+		}
 		c.collectExpr(n.Expr)
 	case *ast.MatchExpr:
 		c.collectExpr(n.Value)
@@ -503,7 +551,7 @@ func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead b
 	if expr == nil {
 		return
 	}
-	if sym, ok := c.globalStorageRoot(expr); ok {
+	if sym, ok := c.analyzer.globalStorageRoot(expr); ok && (!c.mutableGlobalsOnly || (sym.Kind == SymbolGlobal && sym.Mutable)) {
 		c.addRefs(globalWriteRefs(expr.Pos()))
 		if alsoRead {
 			c.addRefs(globalReadRefs(expr.Pos()))
@@ -514,14 +562,33 @@ func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead b
 	}
 	switch n := expr.(type) {
 	case *ast.FieldExpr:
-		if globalStorageRootExpr(expr) != n.Object {
-			c.collectWriteTarget(n.Object, alsoRead)
-		}
+		c.collectTargetOperands(n.Object)
 	case *ast.IndexExpr:
+		c.collectTargetOperands(n.Object)
 		c.collectExpr(n.Index)
 		c.collectExpr(n.Fallback)
 	case *ast.SliceExpr:
+		c.collectTargetOperands(n.Object)
 		c.collectExpr(n.Start)
 		c.collectExpr(n.End)
+	case *ast.ParenExpr:
+		c.collectTargetOperands(n.Inner)
+	}
+}
+
+func (c *permissionEffectCollector) collectTargetOperands(expr ast.Expr) {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		c.collectTargetOperands(n.Object)
+	case *ast.IndexExpr:
+		c.collectTargetOperands(n.Object)
+		c.collectExpr(n.Index)
+		c.collectExpr(n.Fallback)
+	case *ast.SliceExpr:
+		c.collectTargetOperands(n.Object)
+		c.collectExpr(n.Start)
+		c.collectExpr(n.End)
+	case *ast.ParenExpr:
+		c.collectTargetOperands(n.Inner)
 	}
 }

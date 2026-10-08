@@ -769,6 +769,8 @@ type Analyzer struct {
 	reportedDotModuleTypes   map[string]bool
 	resolvedTypeNames        map[ast.TypeExpr]string
 	contextualTypeBindings   map[ast.TypeExpr]Type
+	mutableGlobalBorrowRefs  map[*ast.VarDeclStmt][]ast.PermissionRef
+	resolvedGlobalStorage    map[*ast.Ident]*Symbol
 	resolvedValueNames       map[*ast.Ident]string
 	currentImplicitScopes    []map[string]ast.Expr
 	semanticLimitDiagnostics map[string]bool
@@ -972,15 +974,8 @@ type poolJoinedRegionDependency struct {
 
 type AnalyzeOptions struct {
 	EnforceUnsafePermissions bool
-	// EnforceGlobalPermissions makes the Global family a REQUIREMENT rather than a
-	// declaration-only annotation (`-Wglobals`, implied by `-Wstrict`). Reading a
-	// `global` already infers Global.Read and writing one infers Global.Write at
-	// every access; without this the inferred ref is dropped unless the function
-	// happens to declare it, so only hand-written rows are ever checked. With it on
-	// they propagate to callers like Memory.Allocate, and a function's `can` row
-	// states whether it touches process-wide state. Reading a `const` is pure and
-	// carries no effect either way. Off by default: it is correct for new code and a
-	// large diff for existing code.
+	// EnforceGlobalPermissions additionally checks inferred immutable-global/extern
+	// effects. Mutable globals always require explicit Global.Read/Write grants.
 	EnforceGlobalPermissions bool
 	EnforceProgressSafety    bool
 	// EnforceStrictConcurrency promotes legacy raw-concurrency migration diagnostics

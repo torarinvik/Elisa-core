@@ -132,25 +132,26 @@ def elisa_trace_cstr_or_empty(value: cstr?) -> cstr:
 
 # Plain step record: just function + line (the execution path).
 def elisa_trace_record(name: cstr, line: u32) -> void:
-    elisa_trace_maybe_install_fault_handler() if not elisa_trace_fault_checked
-    elisa_trace_total <- elisa_trace_total + 1
-    # Collapse a consecutive run of the same plain step (e.g. a hot loop body) into a
-    # single entry with a repeat count, so a tight loop does not flush the whole ring.
-    if elisa_trace_pos > 0:
-        last: usize = ((elisa_trace_pos - 1) % ELISA_TRACE_CAP.u64()).usize()
-        # Compare the name by POINTER (the compiler passes one constant string per
-        # function, so identity == same function) -- cheap, and avoids a string compare on
-        # the hot path. cstr `==` would do a ctx_streq.
-        previous_name: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[last].name)
-        if elisa_trace_ring[last].has_value == 0 and elisa_trace_ring[last].line == line and previous_name.cast[uintptr] == name.cast[uintptr]:
-            elisa_trace_ring[last].repeat <- elisa_trace_ring[last].repeat + 1
-            return
-    idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
-    elisa_trace_ring[idx].name <- name
-    elisa_trace_ring[idx].line <- line
-    elisa_trace_ring[idx].repeat <- 0
-    elisa_trace_ring[idx].has_value <- 0
-    elisa_trace_pos <- elisa_trace_pos + 1
+    trusted Global.Read, Global.Write:
+        elisa_trace_maybe_install_fault_handler() if not elisa_trace_fault_checked
+        elisa_trace_total <- elisa_trace_total + 1
+        # Collapse a consecutive run of the same plain step (e.g. a hot loop body) into a
+        # single entry with a repeat count, so a tight loop does not flush the whole ring.
+        if elisa_trace_pos > 0:
+            last: usize = ((elisa_trace_pos - 1) % ELISA_TRACE_CAP.u64()).usize()
+            # Compare the name by POINTER (the compiler passes one constant string per
+            # function, so identity == same function) -- cheap, and avoids a string compare on
+            # the hot path. cstr `==` would do a ctx_streq.
+            previous_name: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[last].name)
+            if elisa_trace_ring[last].has_value == 0 and elisa_trace_ring[last].line == line and previous_name.cast[uintptr] == name.cast[uintptr]:
+                elisa_trace_ring[last].repeat <- elisa_trace_ring[last].repeat + 1
+                return
+        idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
+        elisa_trace_ring[idx].name <- name
+        elisa_trace_ring[idx].line <- line
+        elisa_trace_ring[idx].repeat <- 0
+        elisa_trace_ring[idx].has_value <- 0
+        elisa_trace_pos <- elisa_trace_pos + 1
 
 
 def elisa_trace_record_id(name: cstr, line: u32, identity: u64) -> void:
@@ -177,23 +178,25 @@ def elisa_trace_function_exit_id(name: cstr, line: u32, identity: u64) -> void:
 
 # Value record: a variable received a (scalar/pointer) value at this step.
 def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32) -> void:
-    elisa_trace_total <- elisa_trace_total + 1
-    idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
-    elisa_trace_ring[idx].name <- name
-    elisa_trace_ring[idx].line <- line
-    elisa_trace_ring[idx].var_name <- var_name
-    elisa_trace_ring[idx].value <- value
-    elisa_trace_ring[idx].repeat <- 0
-    elisa_trace_ring[idx].has_value <- 1
-    elisa_trace_ring[idx].is_signed <- 1 if signed != 0 else 0
-    elisa_trace_pos <- elisa_trace_pos + 1
+    trusted Global.Read, Global.Write:
+        elisa_trace_total <- elisa_trace_total + 1
+        idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
+        elisa_trace_ring[idx].name <- name
+        elisa_trace_ring[idx].line <- line
+        elisa_trace_ring[idx].var_name <- var_name
+        elisa_trace_ring[idx].value <- value
+        elisa_trace_ring[idx].repeat <- 0
+        elisa_trace_ring[idx].has_value <- 1
+        elisa_trace_ring[idx].is_signed <- 1 if signed != 0 else 0
+        elisa_trace_pos <- elisa_trace_pos + 1
 
 
 def elisa_trace_record_value_id(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32, identity: u64) -> void:
     elisa_trace_record_value(name, line, var_name, value, signed)
 
 def elisa_trace_count() -> u64:
-    return elisa_trace_total
+    trusted Global.Read:
+        return elisa_trace_total
 
 # On a fault, print the recent trace then restore the default disposition and re-raise so
 # the original crash still happens (core dump etc.). snprintf/write in a handler is not
@@ -232,69 +235,79 @@ def elisa_trace_install_fault_handler() -> void:
 # program's own signal handling (e.g. the emulator installs its SIGSEGV handler later,
 # which then overrides this one -- the emulator should call elisa_trace_dump() itself).
 def elisa_trace_maybe_install_fault_handler() -> void:
-    return if elisa_trace_fault_checked
-    elisa_trace_fault_checked <- true
-    elisa_trace_install_fault_handler() if getenv("ELISA_TRACE_ON_FAULT") != null
+    trusted Global.Read, Global.Write:
+        return if elisa_trace_fault_checked
+        elisa_trace_fault_checked <- true
+        elisa_trace_install_fault_handler() if getenv("ELISA_TRACE_ON_FAULT") != null
 
 def elisa_trace_dump() -> void:
-    entries: u64 = elisa_trace_pos
-    n: mutable u64 = entries
-    n <- ELISA_TRACE_CAP.u64() if n > ELISA_TRACE_CAP.u64()
-    hdr: mutable u8[160] = zeroed
-    hw: int = snprintf(hdr[0], 160, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
-    write(2, (&hdr[0]).cast[void&], hw.usize()) can Console if hw > 0
-    i: mutable u64 = 0
-    while i < n:
-        idx: usize = ((elisa_trace_pos - 1 - i) % ELISA_TRACE_CAP.u64()).usize()
-        nm: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[idx].name)
-        ln: u32 = elisa_trace_ring[idx].line
-        rep: u32 = elisa_trace_ring[idx].repeat
-        buf: mutable u8[256] = zeroed
-        w: mutable int = 0
-        # Trace-line format selected by priority (value > repeat > plain): a classification
-        # value drives one `match` transition rather than a hidden if/elif ladder.
-        line_kind: i64 = 0 if elisa_trace_ring[idx].has_value != 0 else (1 if rep != 0 else 2)
-        match line_kind:
-            0:
-                vn: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[idx].var_name)
-                vv: u64 = elisa_trace_ring[idx].value
-                w <- snprintf(buf[0], 256, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
-            1:
-                w <- snprintf(buf[0], 256, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1) can Console.Format
-            _:
-                w <- snprintf(buf[0], 256, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
-        if w > 0:
-            wn: mutable usize = w.usize()
-            wn <- 256 if wn > 256
-            _ = write(2, (&buf[0]).cast[void&], wn) can Console
-        i <- i + 1
+    trusted Global.Read:
+        entries: u64 = elisa_trace_pos
+        n: mutable u64 = entries
+        n <- ELISA_TRACE_CAP.u64() if n > ELISA_TRACE_CAP.u64()
+        hdr: mutable u8[160] = zeroed
+        hw: int = snprintf(hdr[0], 160, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
+        write(2, (&hdr[0]).cast[void&], hw.usize()) can Console if hw > 0
+        i: mutable u64 = 0
+        while i < n:
+            idx: usize = ((elisa_trace_pos - 1 - i) % ELISA_TRACE_CAP.u64()).usize()
+            nm: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[idx].name)
+            ln: u32 = elisa_trace_ring[idx].line
+            rep: u32 = elisa_trace_ring[idx].repeat
+            buf: mutable u8[256] = zeroed
+            w: mutable int = 0
+            # Trace-line format selected by priority (value > repeat > plain): a classification
+            # value drives one `match` transition rather than a hidden if/elif ladder.
+            line_kind: i64 = 0 if elisa_trace_ring[idx].has_value != 0 else (1 if rep != 0 else 2)
+            match line_kind:
+                0:
+                    vn: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[idx].var_name)
+                    vv: u64 = elisa_trace_ring[idx].value
+                    w <- snprintf(buf[0], 256, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
+                1:
+                    w <- snprintf(buf[0], 256, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1) can Console.Format
+                _:
+                    w <- snprintf(buf[0], 256, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
+            if w > 0:
+                wn: mutable usize = w.usize()
+                wn <- 256 if wn > 256
+                _ = write(2, (&buf[0]).cast[void&], wn) can Console
+            i <- i + 1
 
 def debug_referee_set_enabled(enabled: bool) can[Debug.Referee]:
-    debug_referee_enabled <- enabled
+    trusted Global.Write:
+        debug_referee_enabled <- enabled
 
 def debug_referee_set_trace_enabled(enabled: bool) can[Debug.Referee]:
-    debug_referee_trace_enabled <- enabled
+    trusted Global.Write:
+        debug_referee_trace_enabled <- enabled
 
 def debug_referee_reset() can[Debug.Referee]:
-    debug_referee_sequence <- 0
-    debug_referee_event_count <- 0
-    debug_referee_last_event <- DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null}
+    trusted Global.Write:
+        debug_referee_sequence <- 0
+        debug_referee_event_count <- 0
+        debug_referee_last_event <- DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null}
 
 def debug_referee_last_reason() -> int:
-    return debug_referee_last_event.reason
+    trusted Global.Read:
+        return debug_referee_last_event.reason
 
 def debug_referee_last_value() -> uintptr:
-    return debug_referee_last_event.value
+    trusted Global.Read:
+        return debug_referee_last_event.value
 
 def debug_referee_last_kind() -> int:
-    return debug_referee_last_event.kind
+    trusted Global.Read:
+        return debug_referee_last_event.kind
 
 def debug_referee_trace_count() -> usize:
-    return debug_referee_event_count
+    trusted Global.Read:
+        return debug_referee_event_count
 
 def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
-    DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null} return if index >= DEBUG_REFEREE_TRACE_CAP
-    return debug_referee_events[index]
+    trusted Global.Read:
+        DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null} return if index >= DEBUG_REFEREE_TRACE_CAP
+        return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
     # Compare at a width that can represent the x86-64 sentinels. On a 32-bit
@@ -325,115 +338,135 @@ def debug_referee_pointer_reason(value: uintptr) -> int:
     return DEBUG_REFEREE_REASON_OK
 
 def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr) can[Debug.Referee]:
-    debug_referee_sequence <- debug_referee_sequence + 1
-    event: DebugRefereeEvent = DebugRefereeEvent{sequence: debug_referee_sequence, kind: kind, reason: reason, value: value, label: label}
-    debug_referee_last_event <- event
+    trusted Global.Read, Global.Write:
+        debug_referee_sequence <- debug_referee_sequence + 1
+        event: DebugRefereeEvent = DebugRefereeEvent{sequence: debug_referee_sequence, kind: kind, reason: reason, value: value, label: label}
+        debug_referee_last_event <- event
 
-    if debug_referee_trace_enabled:
-        slot: usize = debug_referee_event_count % DEBUG_REFEREE_TRACE_CAP
-        debug_referee_events[slot] <- event
-        debug_referee_event_count <- debug_referee_event_count + 1
+        if debug_referee_trace_enabled:
+            slot: usize = debug_referee_event_count % DEBUG_REFEREE_TRACE_CAP
+            debug_referee_events[slot] <- event
+            debug_referee_event_count <- debug_referee_event_count + 1
 
 def debug_referee_trace_value(label: cstr, value: uintptr) can[Debug.Referee]:
-    can Debug.Referee:
-        debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
+    trusted Global.Read:
+        can Debug.Referee:
+            debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
 
 def debug_referee_checkpoint(label: cstr) can[Debug.Referee]:
-    can Debug.Referee:
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0, label) if debug_referee_trace_enabled
+    trusted Global.Read:
+        can Debug.Referee:
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0, label) if debug_referee_trace_enabled
 
 def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
-    can Debug.Referee:
-        reason: int = debug_referee_pointer_reason(value)
-        if reason != DEBUG_REFEREE_REASON_OK:
-            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, reason, value, label)
-            return false
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
-        return true
+    trusted Global.Read:
+        can Debug.Referee:
+            reason: int = debug_referee_pointer_reason(value)
+            if reason != DEBUG_REFEREE_REASON_OK:
+                debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, reason, value, label)
+                return false
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
+            return true
 
 def debug_referee_check_callable(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
-    can Debug.Referee:
-        reason: int = debug_referee_pointer_reason(value)
-        if reason != DEBUG_REFEREE_REASON_OK:
-            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, reason, value, label)
-            return false
-        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
-        return true
+    trusted Global.Read:
+        can Debug.Referee:
+            reason: int = debug_referee_pointer_reason(value)
+            if reason != DEBUG_REFEREE_REASON_OK:
+                debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, reason, value, label)
+                return false
+            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
+            return true
 
 def debug_referee_assert_pointer(label: cstr, value: uintptr) can[Debug.Referee, Abort.Panic]:
-    can Debug.Referee, Abort.Panic:
-        return if not debug_referee_enabled
-        return if debug_referee_check_pointer(label, value)
-        panic("debug referee stopped unsafe pointer")
+    trusted Global.Read:
+        can Debug.Referee, Abort.Panic:
+            return if not debug_referee_enabled
+            return if debug_referee_check_pointer(label, value)
+            panic("debug referee stopped unsafe pointer")
 
 def debug_referee_assert_callable(label: cstr, value: uintptr) can[Debug.Referee, Abort.Panic]:
-    can Debug.Referee, Abort.Panic:
-        return if not debug_referee_enabled
-        return if debug_referee_check_callable(label, value)
-        panic("debug referee stopped unsafe callable")
+    trusted Global.Read:
+        can Debug.Referee, Abort.Panic:
+            return if not debug_referee_enabled
+            return if debug_referee_check_callable(label, value)
+            panic("debug referee stopped unsafe callable")
 
 def debug_trace_set_enabled(enabled: bool) can[Debug.Trace]:
-    debug_trace_enabled <- enabled
+    trusted Global.Write:
+        debug_trace_enabled <- enabled
 
 def debug_trace_reset() can[Debug.Trace]:
-    debug_trace_sequence <- 0
-    debug_trace_event_count <- 0
-    debug_trace_overflowed <- false
-    debug_trace_hash <- DEBUG_TRACE_HASH_INITIAL
-    debug_trace_last_event <- DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null}
+    trusted Global.Write:
+        debug_trace_sequence <- 0
+        debug_trace_event_count <- 0
+        debug_trace_overflowed <- false
+        debug_trace_hash <- DEBUG_TRACE_HASH_INITIAL
+        debug_trace_last_event <- DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null}
 
 def debug_trace_count() -> usize:
-    return debug_trace_event_count
+    trusted Global.Read:
+        return debug_trace_event_count
 
 def debug_trace_fingerprint() -> u64:
-    return debug_trace_hash
+    trusted Global.Read:
+        return debug_trace_hash
 
 def debug_trace_did_overflow() -> bool:
-    return debug_trace_overflowed
+    trusted Global.Read:
+        return debug_trace_overflowed
 
 def debug_trace_event_at(index: usize) -> DebugTraceEvent:
-    DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null} return if index >= DEBUG_TRACE_TAPE_CAP
-    return debug_trace_events[index]
+    trusted Global.Read:
+        DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null} return if index >= DEBUG_TRACE_TAPE_CAP
+        return debug_trace_events[index]
 
 def debug_trace_event_kind_at(index: usize) -> int:
-    0 return if index >= DEBUG_TRACE_TAPE_CAP
-    return debug_trace_events[index].kind
+    trusted Global.Read:
+        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return debug_trace_events[index].kind
 
 def debug_trace_event_a_at(index: usize) -> uintptr:
-    0 return if index >= DEBUG_TRACE_TAPE_CAP
-    return debug_trace_events[index].a
+    trusted Global.Read:
+        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return debug_trace_events[index].a
 
 def debug_trace_event_b_at(index: usize) -> uintptr:
-    0 return if index >= DEBUG_TRACE_TAPE_CAP
-    return debug_trace_events[index].b
+    trusted Global.Read:
+        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return debug_trace_events[index].b
 
 def debug_trace_event_c_at(index: usize) -> uintptr:
-    0 return if index >= DEBUG_TRACE_TAPE_CAP
-    return debug_trace_events[index].c
+    trusted Global.Read:
+        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return debug_trace_events[index].c
 
 def debug_trace_last_kind() -> int:
-    return debug_trace_last_event.kind
+    trusted Global.Read:
+        return debug_trace_last_event.kind
 
 def debug_trace_mix_word(word: uintptr) can[Debug.Trace]:
-    debug_trace_hash <- (debug_trace_hash ^ word.u64()) * DEBUG_TRACE_HASH_PRIME
+    trusted Global.Read, Global.Write:
+        debug_trace_hash <- (debug_trace_hash ^ word.u64()) * DEBUG_TRACE_HASH_PRIME
 
 def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]:
-    can Debug.Trace:
-        return if not debug_trace_enabled
+    trusted Global.Read, Global.Write:
+        can Debug.Trace:
+            return if not debug_trace_enabled
 
-        debug_trace_sequence <- debug_trace_sequence + 1
-        event: DebugTraceEvent = DebugTraceEvent{sequence: debug_trace_sequence, kind: kind, a: a, b: b, c: c, label: label}
-        debug_trace_last_event <- event
+            debug_trace_sequence <- debug_trace_sequence + 1
+            event: DebugTraceEvent = DebugTraceEvent{sequence: debug_trace_sequence, kind: kind, a: a, b: b, c: c, label: label}
+            debug_trace_last_event <- event
 
-        debug_trace_mix_word(debug_trace_sequence.uintptr())
-        debug_trace_mix_word(kind.uintptr())
-        debug_trace_mix_word(a)
-        debug_trace_mix_word(b)
-        debug_trace_mix_word(c)
+            debug_trace_mix_word(debug_trace_sequence.uintptr())
+            debug_trace_mix_word(kind.uintptr())
+            debug_trace_mix_word(a)
+            debug_trace_mix_word(b)
+            debug_trace_mix_word(c)
 
-        debug_trace_events[debug_trace_event_count] <- event if debug_trace_event_count < DEBUG_TRACE_TAPE_CAP
-        debug_trace_overflowed <- true if not (debug_trace_event_count < DEBUG_TRACE_TAPE_CAP)
-        debug_trace_event_count <- debug_trace_event_count + 1
+            debug_trace_events[debug_trace_event_count] <- event if debug_trace_event_count < DEBUG_TRACE_TAPE_CAP
+            debug_trace_overflowed <- true if not (debug_trace_event_count < DEBUG_TRACE_TAPE_CAP)
+            debug_trace_event_count <- debug_trace_event_count + 1
 
 def debug_trace_checkpoint(label: cstr) can[Debug.Trace]:
     can Debug.Trace:
@@ -448,5 +481,6 @@ def debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[De
         debug_trace_record(DEBUG_TRACE_KIND_BOUNDARY, label, a, b, c)
 
 def debug_trace_assert_fingerprint(expected: u64) can[Debug.Trace, Abort.Panic]:
-    can Abort.Panic:
-        panic("debug trace fingerprint mismatch") if debug_trace_hash != expected
+    trusted Global.Read:
+        can Abort.Panic:
+            panic("debug trace fingerprint mismatch") if debug_trace_hash != expected

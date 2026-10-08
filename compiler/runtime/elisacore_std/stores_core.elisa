@@ -17,13 +17,13 @@ struct StoreRowStats:
 global mutable __elisa_store_row_stats: StoreRowStats = StoreRowStats{rows: 0}
 
 def ctx_store_rows_observed() -> usize:
-    trusted Unsafe.MutableGlobal:
+    trusted Unsafe.MutableGlobal, Global.Read:
         stats: StoreRowStats& = &__elisa_store_row_stats
         return stats.rows
 
 @internal
 def store_rows_note():
-    trusted Unsafe.MutableGlobal:
+    trusted Unsafe.MutableGlobal, Global.Read, Global.Write:
         stats: mutable StoreRowStats& = &__elisa_store_row_stats
         stats.rows <- stats.rows + 1
 

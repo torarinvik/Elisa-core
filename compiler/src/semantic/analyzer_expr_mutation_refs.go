@@ -112,6 +112,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 				return invalidType
 			}
 		}
+		a.recordResolvedGlobalStorage(n, sym)
 		if !sym.Mutable {
 			if ref, ok := sym.Type.(*RefType); ok {
 				if !ref.Mutable {
@@ -625,6 +626,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 				return invalidType
 			}
 		}
+		a.recordResolvedGlobalStorage(n, sym)
 		if !sym.Mutable {
 			if ref, ok := sym.Type.(*RefType); ok {
 				if !ref.Mutable {

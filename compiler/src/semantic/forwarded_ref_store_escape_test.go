@@ -40,7 +40,8 @@ def f(out: mutable Box&, x: mutable u8&) -> void:
 func TestForwardedHeapRefIntoGlobalAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "fwdref_heap_ok.elisa", `global mutable g: mutable heap u8&? = null
 def f(x: mutable heap u8&) -> void:
-    g <- x
+    can Global.Write:
+        g <- x
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("expected a heap-annotated forwarded ref store to be accepted, got:\n%s", strings.Join(errs, "\n"))
@@ -66,7 +67,7 @@ func TestForwardedRefReturnAccepted(t *testing.T) {
 func TestForwardedRefTrustedStaleRefAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "fwdref_trusted_ok.elisa", `global mutable g: mutable u8&? = null
 def f(x: mutable u8&) -> void:
-    trusted Unsafe.StaleRef:
+    trusted Unsafe.StaleRef, Global.Write:
         g <- x
 `)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -81,7 +82,7 @@ def f(x: mutable u8&) -> void:
 func TestForwardedRefCanStaleRefAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "fwdref_can_ok.elisa", `global mutable g: mutable u8&? = null
 def f(x: mutable u8&) -> void:
-    can Unsafe.StaleRef:
+    can Unsafe.StaleRef, Global.Write:
         g <- x
 `)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -95,10 +96,11 @@ def f(x: mutable u8&) -> void:
 func TestForwardedRefCanStaleRefPropagatesToCaller(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "fwdref_can_propagate.elisa", `global mutable g: mutable u8&? = null
 def store(x: mutable u8&) -> void:
-    can Unsafe.StaleRef:
+    can Unsafe.StaleRef, Global.Write:
         g <- x
 def caller(x: mutable u8&) -> void:
-    store(x)
+    can Global.Write:
+        store(x)
 `)
 	joined := strings.Join(append(result.Errors(), result.Warnings()...), "\n")
 	if !strings.Contains(joined, "StaleRef") {

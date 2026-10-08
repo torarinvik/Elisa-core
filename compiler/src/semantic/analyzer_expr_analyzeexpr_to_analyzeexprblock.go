@@ -36,6 +36,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 						a.derivedLoopBindings[n] = sym
 					}
 				}
+				a.recordResolvedGlobalStorage(n, sym)
 				result = promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 				if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 					a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
@@ -132,6 +133,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if a.resolvedValueNames != nil && canonical != "" && canonical != n.Name {
 				a.resolvedValueNames[n] = canonical
 			}
+			a.recordResolvedGlobalStorage(n, sym)
 			result = promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 			if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 				a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
