@@ -135,6 +135,10 @@ type Analyzer struct {
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
 	regionPolyFn *ast.FuncDecl
+	// packedStoreBuilders maps a function to the packed hierarchy roots it builds nodes of,
+	// directly or through a callee (computeTransitiveStoreNeeds); store-capturing submission
+	// rejects a worker that builds into the store it shares.
+	packedStoreBuilders map[*FuncType]map[string]string
 	// regionPolyCandidateFnTypes maps a candidate function's SIMPLE name to its
 	// FuncType(s), built once per classification pre-pass. It resolves a constructor
 	// call (`Parser(args)`) to its `def Parser(...)->Parser` FuncType even when a

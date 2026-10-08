@@ -87,6 +87,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitProtocolTransitionCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitStoreCapturingSubmitCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitVaArgCall(expr); handled {
 		return value, actualType, err
 	}

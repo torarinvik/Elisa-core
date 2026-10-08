@@ -178,6 +178,10 @@ func (a *Analyzer) funcConstructsPackedEnumRoots(fn *ast.FuncDecl) map[string]*E
 func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBacked map[string]bool) map[*FuncType]map[string]*EnumType {
 	needs := map[*FuncType]map[string]*EnumType{}
 	callees := map[*FuncType]map[*FuncType]bool{}
+	// builds: the roots each function constructs nodes of, directly or through a callee. A worker
+	// submitted to another thread with a captured store must build none (analyzer_submit_store_capture.go).
+	// The value names the function that constructs the nodes (the diagnostic's witness).
+	builds := map[*FuncType]map[string]string{}
 	var order []*FuncType
 	for _, fn := range funcs {
 		ft := a.funcTypeForRegionPoly(fn)
@@ -206,6 +210,20 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 			if regionBacked[name] && et.HandleIsPointer() {
 				needs[ft][name] = et
 			}
+			if regionBacked[name] {
+				if builds[ft] == nil {
+					builds[ft] = map[string]string{}
+				}
+				builds[ft][name] = fn.Name
+			}
+		}
+		for name := range a.funcBarePackedVariantRoots(fn) {
+			if regionBacked[name] {
+				if builds[ft] == nil {
+					builds[ft] = map[string]string{}
+				}
+				builds[ft][name] = fn.Name
+			}
 		}
 		// regionPolyFn supplies the generic-param protocol bounds so `B.method(...)`
 		// dispatches contribute call-graph edges to every impl (union over impls —
@@ -224,9 +242,19 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 						changed = true
 					}
 				}
+				for name, witness := range builds[g] {
+					if _, ok := builds[ft][name]; !ok {
+						if builds[ft] == nil {
+							builds[ft] = map[string]string{}
+						}
+						builds[ft][name] = witness
+						changed = true
+					}
+				}
 			}
 		}
 	}
+	a.packedStoreBuilders = builds
 	return needs
 }
 
