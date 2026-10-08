@@ -289,11 +289,11 @@ def print(value: cstr) -> void can[Console.Write]:
     printr(value) can Console.Write
     _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
 
-def printr[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def printr[T: Str](value: T) -> void can[Memory.Allocate, Console{Format,Write}, Abort.Panic]:
     converted: cstr = T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
     printr(converted) can Console.Write
 
-def print[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def print[T: Str](value: T) -> void can[Memory.Allocate, Console{Format,Write}, Abort.Panic]:
     converted: cstr = T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
     print(converted) can Console.Write
 
