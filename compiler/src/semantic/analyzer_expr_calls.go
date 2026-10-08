@@ -47,13 +47,7 @@ func (a *Analyzer) assignableArenaRegionParam(pattern, actual Type, expr ast.Exp
 }
 
 func callHasUnresolvedRegionContext(expr ast.Expr, expected Type, regionParams map[string]bool, bindings map[string]Type, regionBindings map[string]string) bool {
-	for {
-		paren, ok := expr.(*ast.ParenExpr)
-		if !ok || paren == nil {
-			break
-		}
-		expr = paren.Inner
-	}
+	expr = unwrapParenForRegionPoly(expr)
 	if _, ok := expr.(*ast.CallExpr); !ok {
 		return false
 	}

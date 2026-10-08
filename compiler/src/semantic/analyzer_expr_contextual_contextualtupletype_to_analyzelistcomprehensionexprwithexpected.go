@@ -97,6 +97,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		a.recordAnalyzedExprType(expr, expected)
 		return expected
 	}
+	if grant, ok := expr.(*ast.CanExpr); ok && grant != nil {
+		result := a.analyzeCanExprWithExpected(grant, expected)
+		a.recordAnalyzedExprType(grant, result)
+		return result
+	}
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		result := a.analyzeValueExpr(paren.Inner, expected)
 		a.recordAnalyzedExprType(paren, result)

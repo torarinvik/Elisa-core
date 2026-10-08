@@ -1168,11 +1168,20 @@ func (a *Analyzer) callIsInlineEnumConstructor(call *ast.CallExpr) bool {
 
 func unwrapParenForRegionPoly(value ast.Expr) ast.Expr {
 	for {
-		paren, ok := value.(*ast.ParenExpr)
-		if !ok || paren == nil {
+		switch wrapped := value.(type) {
+		case *ast.ParenExpr:
+			if wrapped == nil {
+				return value
+			}
+			value = wrapped.Inner
+		case *ast.CanExpr:
+			if wrapped == nil {
+				return value
+			}
+			value = wrapped.Expr
+		default:
 			return value
 		}
-		value = paren.Inner
 	}
 }
 

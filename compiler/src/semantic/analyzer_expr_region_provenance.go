@@ -12,6 +12,8 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return regionRefState{}, false
 	}
 	switch n := expr.(type) {
+	case *ast.CanExpr:
+		return a.regionRefStateForExpr(n.Expr)
 	case *ast.ParenExpr:
 		return a.regionRefStateForExpr(n.Inner)
 	case *ast.CastExpr:
@@ -568,6 +570,8 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.CanExpr:
+		a.inferFuncReturnProvenanceForExpr(n.Expr, fnType)
 	case *ast.ParenExpr:
 		a.inferFuncReturnProvenanceForExpr(n.Inner, fnType)
 	case *ast.FieldExpr:
@@ -657,6 +661,8 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForExpr(expr ast.Expr, fnType
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.CanExpr:
+		a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Expr, fnType)
 	case *ast.ParenExpr:
 		a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Inner, fnType)
 	case *ast.FieldExpr:
@@ -728,6 +734,8 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForLocalIdent(ident *ast.Iden
 func (a *Analyzer) regionRefStateForBufferAddress(operand ast.Expr) (regionRefState, bool) {
 	for operand != nil {
 		switch n := operand.(type) {
+		case *ast.CanExpr:
+			operand = n.Expr
 		case *ast.ParenExpr:
 			operand = n.Inner
 		case *ast.FieldExpr:
@@ -768,6 +776,8 @@ func (a *Analyzer) regionRefStateForBufferAddress(operand ast.Expr) (regionRefSt
 func (a *Analyzer) paramRootRegionDependency(expr ast.Expr) (regionRefState, bool) {
 	for expr != nil {
 		switch n := expr.(type) {
+		case *ast.CanExpr:
+			expr = n.Expr
 		case *ast.ParenExpr:
 			expr = n.Inner
 		case *ast.FieldExpr:

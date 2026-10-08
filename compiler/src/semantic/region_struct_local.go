@@ -103,7 +103,7 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 	if !ok || !structHasRegionlessContainerField(st) {
 		return
 	}
-	if _, isLit := stripParenExpr(value).(*ast.StructLitExpr); isLit {
+	if _, isLit := unwrapParenForRegionPoly(value).(*ast.StructLitExpr); isLit {
 		a.currentStructLocalAllocRegion[sym] = region
 		return
 	}
@@ -157,6 +157,9 @@ func (a *Analyzer) structLocalArgRegion(arg ast.Expr) string {
 	// Accept `bag` and `&bag` / `(&bag)` reborrow forms.
 	for {
 		switch e := arg.(type) {
+		case *ast.CanExpr:
+			arg = e.Expr
+			continue
 		case *ast.ParenExpr:
 			arg = e.Inner
 			continue

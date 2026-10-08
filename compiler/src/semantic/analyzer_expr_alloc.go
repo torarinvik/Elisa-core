@@ -5,6 +5,10 @@ import (
 )
 
 func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
+	return a.analyzeCanExprWithExpected(expr, nil)
+}
+
+func (a *Analyzer) analyzeCanExprWithExpected(expr *ast.CanExpr, expected Type) Type {
 	if expr == nil {
 		return invalidType
 	}
@@ -16,7 +20,7 @@ func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
 	if !expr.SuppressPermissionInference {
 		a.recordFunctionPermissionRefs(refs)
 	}
-	return a.analyzeExpr(expr.Expr)
+	return a.analyzeValueExpr(expr.Expr, expected)
 }
 
 func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
