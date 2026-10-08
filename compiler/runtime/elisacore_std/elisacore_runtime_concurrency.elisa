@@ -542,8 +542,8 @@ def join_native_callback_u32(thread: Thread[u32, Joinable], fallback: u32) -> u3
 		handle: uintptr = thread.handle
 		state_bits: void&? = thread.state
 		_ = move thread
-		result: u32 = native_callback_context_join_u32_voidp(handle, state_bits.cast[mutable heap void&?], fallback)
-		native_callback_context_free(state_bits.cast[mutable heap void&?])
+		result: u32 = (native_callback_context_join_u32_voidp(handle, state_bits.cast[mutable heap void&?], fallback) can Unsafe.PointerCast)
+		(native_callback_context_free(state_bits.cast[mutable heap void&?]) can Unsafe.PointerCast)
 		return result
 
 def detach_raw(thread: Thread[void&?, Joinable]):
@@ -644,12 +644,18 @@ def ctx_pool_push_worker(state: mutable heap ConcurrencyPoolState&, whandle: uin
 		node.next <- null if state.workers == null else state.workers.cast[heap ConcurrencyRawTaskNode&]
 		state.workers <- node.cast[void&]
 
+# Only this allocator-owned, exact-size conversion hides PointerCast. Callers
+# cannot supply an arbitrary raw carrier; ctx_concurrency_alloc rejects null.
+def ctx_pool_state_allocate() -> mutable heap ConcurrencyPoolState&:
+	raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyPoolState)) can Memory.Allocate, Abort.Panic
+	trusted Unsafe.PointerCast:
+		return raw.cast[mutable heap ConcurrencyPoolState&]
+
 # Allocate + initialize a pool state and spawn its persistent workers. Shared by
 # pool_new and the lazily-created default pool.
 def ctx_pool_state_new(threads: usize) -> mutable heap ConcurrencyPoolState&:
 	can Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
-		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyPoolState))
-		state: mutable heap ConcurrencyPoolState& = raw.cast[mutable heap ConcurrencyPoolState&]
+		state: mutable heap ConcurrencyPoolState& = ctx_pool_state_allocate() can Memory.Allocate, Abort.Panic
 		nworkers: mutable usize = threads
 		nworkers <- 1.usize() if nworkers < 1.usize()
 		state.worker_count <- nworkers
@@ -730,7 +736,7 @@ def pool_shutdown(pool: mutable ThreadPool&):
 global mutable __elisa_default_pool_state: void&? = null
 
 def default_pool() -> ThreadPool:
-	trusted Global.Read, Global.Write:
+	can Global{Read,Write}:
 		can Pool.Create, Memory.Allocate, Memory.Release, Thread.Spawn, Abort.Panic:
 			if __elisa_default_pool_state == null:
 				workers: usize = perf_cores().usize()
@@ -861,7 +867,7 @@ def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -
 		arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
 		result: R = fn(arg_box.value)
 		ctx_concurrency_result_write[R](state.result_bits, result)
-		ctx_concurrency_work1_release(state.cast[mutable void&])
+		(ctx_concurrency_work1_release(state.cast[mutable void&]) can Unsafe.PointerCast)
 		return state.cast[void&]
 
 def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
@@ -870,7 +876,7 @@ def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 		live_bits: void& = state_bits
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
 		result: R = ctx_concurrency_result_read[R](state.result_bits)
-		ctx_concurrency_work1_release(state.cast[mutable void&])
+		(ctx_concurrency_work1_release(state.cast[mutable void&]) can Unsafe.PointerCast)
 		return result
 
 def ctx_thread_from_raw[R, S](raw: Thread[void&?, S]) -> Thread[R, S]:
@@ -927,11 +933,11 @@ def spawn1[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joina
 
 def join[R](thread: Thread[R, Joinable]) -> R:
 	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		take_result: fn(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
+		take_result = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = thread.state
 		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
 		_ = join_raw(move raw)
-		result: R = take_result(state_bits)
+		result: R = take_result(state_bits) can Unsafe.PointerCast
 		return result
 
 def detach[R](thread: Thread[R, Joinable]):
@@ -993,11 +999,11 @@ def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R c
 
 def pool_await[R](task: Task[R, Pending]) -> R:
 	can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		take_result: fn(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
+		take_result = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = task.state
 		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
 		_ = pool_await_raw(move raw)
-		result: R = take_result(state_bits)
+		result: R = take_result(state_bits) can Unsafe.PointerCast
 		return result
 
 def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
@@ -1073,7 +1079,8 @@ static else:
 # (use `barrier_make` over a darray[i64] of length >= 2 that outlives the
 # workers). The struct is all scalars, so it is structurally thread-shareable and
 # may be passed by value to each worker; copies share the same backing cells.
-# The only unsafe step -- viewing the backing as atomics -- is encapsulated here.
+# Viewing the raw address carrier as atomics requires tracked PointerCast authority.
+# A forged Barrier does not establish backing provenance or its required lifetime.
 # ------------------------------------------------------------
 struct Barrier:
 	state: uintptr
@@ -1090,8 +1097,8 @@ def barrier_make(backing: mutable darray[i64]&, total: i64) -> Barrier:
 # per-thread state: the current generation is read before arrival and waited on.
 def barrier_wait(b: Barrier) -> void:
 	can Atomics.Load, Atomics.Store, Atomics.Rmw, Thread.Yield:
-		cnt: mutable AtomicSlot[i64]& = b.state.cast[mutable AtomicSlot[i64]&]
-		gen: mutable AtomicSlot[i64]& = (b.state + 8).cast[mutable AtomicSlot[i64]&]
+		cnt: mutable AtomicSlot[i64]& = (b.state.cast[mutable AtomicSlot[i64]&] can Unsafe.PointerCast)
+		gen: mutable AtomicSlot[i64]& = ((b.state + 8).cast[mutable AtomicSlot[i64]&] can Unsafe.PointerCast)
 		g: i64 = load(gen, MemoryOrder.Acquire)
 		arrived: i64 = fetch_add(cnt, 1, MemoryOrder.AcqRel) + 1
 		if arrived == b.total:

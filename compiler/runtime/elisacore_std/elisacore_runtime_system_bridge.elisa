@@ -34,7 +34,7 @@ global mutable elisacore_bridge_system_last_event_type: int = 0
 global mutable elisacore_bridge_system_load_exec_calls: int = 0
 
 def elisacore_bridge_resolve_user_slot(user_id_in: int) -> int:
-    trusted Global.Read:
+    can Global.Read:
         user_id: mutable int = user_id_in
         user_id <- elisacore_bridge_user_ids[0] if user_id == 0xFF
         i: mutable int = 0
@@ -58,43 +58,42 @@ def elisacore_bridge_user_name_byte(slot: int, index: usize) -> u32:
     return 0.u32()
 
 def elisacore_bridge_userservice_get_initial_user(out_user_id: mutable int&?) -> int:
-    trusted Global.Read:
-        ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if out_user_id == null
+    ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if out_user_id == null
+    can Global.Read:
         out_user_id <- elisacore_bridge_user_ids[0]
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_userservice_get_initial_user_value() -> int:
-    trusted Global.Read:
-        return elisacore_bridge_user_ids[0]
+    return elisacore_bridge_user_ids[0] can Global.Read
 
 def elisacore_bridge_userservice_get_login_user_id_at(index: int) -> int:
-    trusted Global.Read:
-        -1 return if index < 0 or index >= ELISACORE_BRIDGE_USER_CAP
-        return elisacore_bridge_user_ids[index.usize()]
+    -1 return if index < 0 or index >= ELISACORE_BRIDGE_USER_CAP
+    return elisacore_bridge_user_ids[index.usize()] can Global.Read
 
 def elisacore_bridge_userservice_get_user_color_status(user_id: int) -> int:
-    ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if elisacore_bridge_resolve_user_slot(user_id) < 0
+    can Global.Read:
+        ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if elisacore_bridge_resolve_user_slot(user_id) < 0
     return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_userservice_get_user_color_value(user_id: int) -> u32:
-    trusted Global.Read:
-        slot: int = elisacore_bridge_resolve_user_slot(user_id)
+    can Global.Read:
+        slot: int = elisacore_bridge_resolve_user_slot(user_id) can Global.Read
         0.u32() return if slot < 0
         return elisacore_bridge_user_colors[slot.usize()]
 
 def elisacore_bridge_userservice_get_user_name_status(user_id: int, cap: usize) -> int:
-    slot: int = elisacore_bridge_resolve_user_slot(user_id)
+    slot: int = elisacore_bridge_resolve_user_slot(user_id) can Global.Read
     ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if slot < 0
     ELISACORE_BRIDGE_USER_BUFFER_TOO_SHORT return if cap <= elisacore_bridge_user_name_len(slot)
     return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_userservice_get_user_name_byte(user_id: int, index: usize) -> u32:
-    slot: int = elisacore_bridge_resolve_user_slot(user_id)
+    slot: int = elisacore_bridge_resolve_user_slot(user_id) can Global.Read
     0.u32() return if slot < 0 or index > 16
     return elisacore_bridge_user_name_byte(slot, index)
 
 def elisacore_bridge_userservice_get_event(out_event_kind: mutable u32&?, out_user_id: mutable int&?) -> int:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         ELISACORE_BRIDGE_USER_NO_EVENT return if elisacore_bridge_user_event_count == 0
         ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if out_event_kind == null or out_user_id == null
         head: usize = elisacore_bridge_user_event_head.usize()
@@ -102,76 +101,72 @@ def elisacore_bridge_userservice_get_event(out_event_kind: mutable u32&?, out_us
         out_user_id <- elisacore_bridge_user_event_uid_q[head]
         elisacore_bridge_user_event_head <- (elisacore_bridge_user_event_head + 1) % ELISACORE_BRIDGE_USER_EVENT_CAP
         elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count - 1
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_userservice_get_event_status() -> int:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         ELISACORE_BRIDGE_USER_NO_EVENT return if elisacore_bridge_user_event_count == 0
         head: usize = elisacore_bridge_user_event_head.usize()
         elisacore_bridge_user_last_event_kind <- elisacore_bridge_user_event_kind_q[head]
         elisacore_bridge_user_last_event_uid <- elisacore_bridge_user_event_uid_q[head]
         elisacore_bridge_user_event_head <- (elisacore_bridge_user_event_head + 1) % ELISACORE_BRIDGE_USER_EVENT_CAP
         elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count - 1
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_userservice_get_event_kind_value() -> u32:
-    trusted Global.Read:
-        return elisacore_bridge_user_last_event_kind
+    return elisacore_bridge_user_last_event_kind can Global.Read
 
 def elisacore_bridge_userservice_get_event_user_id_value() -> int:
-    trusted Global.Read:
-        return elisacore_bridge_user_last_event_uid
+    return elisacore_bridge_user_last_event_uid can Global.Read
 
 def elisacore_bridge_userservice_test_push_event(event_kind: u32, user_id: int) -> int:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         ELISACORE_BRIDGE_ORBIS_OK return if elisacore_bridge_user_event_count >= ELISACORE_BRIDGE_USER_EVENT_CAP
         tail_index: usize = elisacore_bridge_user_event_tail.usize()
         elisacore_bridge_user_event_kind_q[tail_index] <- event_kind
         elisacore_bridge_user_event_uid_q[tail_index] <- user_id
         elisacore_bridge_user_event_tail <- (elisacore_bridge_user_event_tail + 1) % ELISACORE_BRIDGE_USER_EVENT_CAP
         elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count + 1
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_load_exec(path: mutable u8&?, argv: mutable void&?) -> int:
-    trusted Global.Read, Global.Write:
-        _ = argv
+    _ = argv
+    can Global{Read,Write}:
         elisacore_bridge_system_load_exec_calls <- elisacore_bridge_system_load_exec_calls + 1
-        ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path == null
-        ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path[0] == 0.u8()
-        return ELISACORE_BRIDGE_ORBIS_OK
+    ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path == null
+    ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path[0] == 0.u8()
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_receive_event(out_event_type: mutable int&?) -> int:
-    trusted Global.Read, Global.Write:
-        ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_event_type == null
+    ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_event_type == null
+    can Global{Read,Write}:
         ELISACORE_BRIDGE_SYSTEM_NO_EVENT return if elisacore_bridge_system_event_count == 0
         head: usize = elisacore_bridge_system_event_head.usize()
         out_event_type <- elisacore_bridge_system_event_q[head]
         elisacore_bridge_system_event_head <- (elisacore_bridge_system_event_head + 1) % ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
         elisacore_bridge_system_event_count <- elisacore_bridge_system_event_count - 1
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_receive_event_status() -> int:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         ELISACORE_BRIDGE_SYSTEM_NO_EVENT return if elisacore_bridge_system_event_count == 0
         head: usize = elisacore_bridge_system_event_head.usize()
         elisacore_bridge_system_last_event_type <- elisacore_bridge_system_event_q[head]
         elisacore_bridge_system_event_head <- (elisacore_bridge_system_event_head + 1) % ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
         elisacore_bridge_system_event_count <- elisacore_bridge_system_event_count - 1
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_receive_event_type_value() -> int:
-    trusted Global.Read:
-        return elisacore_bridge_system_last_event_type
+    return elisacore_bridge_system_last_event_type can Global.Read
 
 def elisacore_bridge_systemservice_get_status_event_count(out_count: mutable int&?) -> int:
-    trusted Global.Read:
-        ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_count == null
+    ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_count == null
+    can Global.Read:
         out_count <- elisacore_bridge_system_event_count
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_get_status_event_count_value() -> int:
-    trusted Global.Read:
-        return elisacore_bridge_system_event_count
+    return elisacore_bridge_system_event_count can Global.Read
 
 def elisacore_bridge_systemservice_get_display_safe_area_ratio(out_ratio: mutable f32&?) -> int:
     ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_ratio == null
@@ -182,71 +177,70 @@ def elisacore_bridge_systemservice_get_display_safe_area_ratio_value() -> f32:
     return 1.0
 
 def elisacore_bridge_systemservice_test_push_event(event_type: int) -> int:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         ELISACORE_BRIDGE_ORBIS_OK return if elisacore_bridge_system_event_count >= ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
         tail_index: usize = elisacore_bridge_system_event_tail.usize()
         elisacore_bridge_system_event_q[tail_index] <- event_type
         elisacore_bridge_system_event_tail <- (elisacore_bridge_system_event_tail + 1) % ELISACORE_BRIDGE_SYSTEM_EVENT_CAP
         elisacore_bridge_system_event_count <- elisacore_bridge_system_event_count + 1
-        return ELISACORE_BRIDGE_ORBIS_OK
+    return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_test_get_load_exec_call_count() -> int:
-    trusted Global.Read:
-        return elisacore_bridge_system_load_exec_calls
+    return elisacore_bridge_system_load_exec_calls can Global.Read
 
 def ffi_userservice_get_initial_user(out_user_id: mutable int&?) -> int:
-    return elisacore_bridge_userservice_get_initial_user(out_user_id)
+    return elisacore_bridge_userservice_get_initial_user(out_user_id) can Global.Read
 
 def ffi_userservice_get_initial_user_value() -> int:
-    return elisacore_bridge_userservice_get_initial_user_value()
+    return elisacore_bridge_userservice_get_initial_user_value() can Global.Read
 
 def ffi_userservice_get_login_user_id_at(index: int) -> int:
-    return elisacore_bridge_userservice_get_login_user_id_at(index)
+    return elisacore_bridge_userservice_get_login_user_id_at(index) can Global.Read
 
 def ffi_userservice_get_user_color_status(user_id: int) -> int:
-    return elisacore_bridge_userservice_get_user_color_status(user_id)
+    return elisacore_bridge_userservice_get_user_color_status(user_id) can Global.Read
 
 def ffi_userservice_get_user_color_value(user_id: int) -> u32:
-    return elisacore_bridge_userservice_get_user_color_value(user_id)
+    return elisacore_bridge_userservice_get_user_color_value(user_id) can Global.Read
 
 def ffi_userservice_get_user_name_status(user_id: int, cap: usize) -> int:
-    return elisacore_bridge_userservice_get_user_name_status(user_id, cap)
+    return elisacore_bridge_userservice_get_user_name_status(user_id, cap) can Global.Read
 
 def ffi_userservice_get_user_name_byte(user_id: int, index: usize) -> u32:
-    return elisacore_bridge_userservice_get_user_name_byte(user_id, index)
+    return elisacore_bridge_userservice_get_user_name_byte(user_id, index) can Global.Read
 
 def ffi_userservice_get_event(out_event_kind: mutable u32&?, out_user_id: mutable int&?) -> int:
-    return elisacore_bridge_userservice_get_event(out_event_kind, out_user_id)
+    return elisacore_bridge_userservice_get_event(out_event_kind, out_user_id) can Global{Read,Write}
 
 def ffi_userservice_get_event_status() -> int:
-    return elisacore_bridge_userservice_get_event_status()
+    return elisacore_bridge_userservice_get_event_status() can Global{Read,Write}
 
 def ffi_userservice_get_event_kind_value() -> u32:
-    return elisacore_bridge_userservice_get_event_kind_value()
+    return elisacore_bridge_userservice_get_event_kind_value() can Global.Read
 
 def ffi_userservice_get_event_user_id_value() -> int:
-    return elisacore_bridge_userservice_get_event_user_id_value()
+    return elisacore_bridge_userservice_get_event_user_id_value() can Global.Read
 
 def ffi_userservice_test_push_event(event_kind: u32, user_id: int) -> int:
-    return elisacore_bridge_userservice_test_push_event(event_kind, user_id)
+    return elisacore_bridge_userservice_test_push_event(event_kind, user_id) can Global{Read,Write}
 
 def ffi_systemservice_load_exec(path: mutable u8&?, argv: mutable void&?) -> int:
-    return elisacore_bridge_systemservice_load_exec(path, argv)
+    return elisacore_bridge_systemservice_load_exec(path, argv) can Global{Read,Write}
 
 def ffi_systemservice_receive_event(out_event_type: mutable int&?) -> int:
-    return elisacore_bridge_systemservice_receive_event(out_event_type)
+    return elisacore_bridge_systemservice_receive_event(out_event_type) can Global{Read,Write}
 
 def ffi_systemservice_receive_event_status() -> int:
-    return elisacore_bridge_systemservice_receive_event_status()
+    return elisacore_bridge_systemservice_receive_event_status() can Global{Read,Write}
 
 def ffi_systemservice_receive_event_type_value() -> int:
-    return elisacore_bridge_systemservice_receive_event_type_value()
+    return elisacore_bridge_systemservice_receive_event_type_value() can Global.Read
 
 def ffi_systemservice_get_status_event_count(out_count: mutable int&?) -> int:
-    return elisacore_bridge_systemservice_get_status_event_count(out_count)
+    return elisacore_bridge_systemservice_get_status_event_count(out_count) can Global.Read
 
 def ffi_systemservice_get_status_event_count_value() -> int:
-    return elisacore_bridge_systemservice_get_status_event_count_value()
+    return elisacore_bridge_systemservice_get_status_event_count_value() can Global.Read
 
 def ffi_systemservice_get_display_safe_area_ratio(out_ratio: mutable f32&?) -> int:
     return elisacore_bridge_systemservice_get_display_safe_area_ratio(out_ratio)
@@ -255,7 +249,7 @@ def ffi_systemservice_get_display_safe_area_ratio_value() -> f32:
     return elisacore_bridge_systemservice_get_display_safe_area_ratio_value()
 
 def ffi_systemservice_test_push_event(event_type: int) -> int:
-    return elisacore_bridge_systemservice_test_push_event(event_type)
+    return elisacore_bridge_systemservice_test_push_event(event_type) can Global{Read,Write}
 
 def ffi_systemservice_test_get_load_exec_call_count() -> int:
-    return elisacore_bridge_systemservice_test_get_load_exec_call_count()
+    return elisacore_bridge_systemservice_test_get_load_exec_call_count() can Global.Read

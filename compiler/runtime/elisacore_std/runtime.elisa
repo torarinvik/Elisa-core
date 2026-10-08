@@ -7,28 +7,22 @@
 # ------------------------------------------------------------
 
 def int_to_string(value: i64) -> cstr:
-    trusted Global.Read, Global.Write:
-        return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
+    return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
 
 def int_to_string_scratch(value: i64) -> cstr:
-    trusted Global.Read, Global.Write:
-        return int_to_string_into(&scratch_arena, value) can Memory.Allocate, Console.Format, Abort.Panic
+    return int_to_string_into(&scratch_arena, value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
 
 def bool_to_string(value: int) -> cstr:
-    trusted Global.Read:
-        return bool_to_string_into(&perm_arena, value)
+    return bool_to_string_into(&perm_arena, value) can Global.Read
 
 def bool_to_string_scratch(value: int) -> cstr:
-    trusted Global.Read:
-        return bool_to_string_into(&scratch_arena, value)
+    return bool_to_string_into(&scratch_arena, value) can Global.Read
 
 def char_to_string(value: i64) -> cstr:
-    trusted Global.Read:
-        return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic
+    return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def char_to_string_scratch(value: i64) -> cstr:
-    trusted Global.Read:
-        return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic
+    return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def uint_to_string_scratch(value: u64) -> cstr:
     can Memory.Allocate, Console.Format, Abort.Panic:
@@ -36,7 +30,7 @@ def uint_to_string_scratch(value: u64) -> cstr:
         panic("uint_to_string_scratch: snprintf failed") if len < 0
         string_len: usize = len.usize()
         allocation_bytes: usize = runtime_checked_add_usize(string_len, 1)
-        out: mutable heap u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&]
+        out: mutable heap u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&] can Global{Read,Write}
         snprintf(out.cast[mutable u8&?], allocation_bytes, "%llu", value)
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
@@ -47,7 +41,7 @@ def float_to_string_scratch(value: f64) -> cstr:
         panic("float_to_string_scratch: snprintf failed") if len < 0
         string_len: usize = len.usize()
         allocation_bytes: usize = runtime_checked_add_usize(string_len, 1)
-        out: mutable heap u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&]
+        out: mutable heap u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&] can Global{Read,Write}
         snprintf(out.cast[mutable u8&?], allocation_bytes, "%g", value)
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
@@ -75,28 +69,28 @@ def streq(lhs: cstr?, rhs: cstr?) -> int:
 # ============================================================
 
 def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result]:
-    return concat2(lhs, rhs) can Memory.Allocate, Abort.Panic
+    return concat2(lhs, rhs) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def rt_concat2_scratch(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result]:
-    return concat2_scratch(lhs, rhs) can Memory.Allocate, Abort.Panic
+    return concat2_scratch(lhs, rhs) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def rt_int_to_string(value: i64) -> cstr[shape_out]:
-    return int_to_string(value) can Memory.Allocate, Console.Format, Abort.Panic
+    return int_to_string(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
 
 def rt_int_to_string_scratch(value: i64) -> cstr[shape_out]:
-    return int_to_string_scratch(value) can Memory.Allocate, Console.Format, Abort.Panic
+    return int_to_string_scratch(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
 
 def rt_bool_to_string(value: int) -> cstr[shape_out]:
-    return bool_to_string(value)
+    return bool_to_string(value) can Global.Read
 
 def rt_bool_to_string_scratch(value: int) -> cstr[shape_out]:
-    return bool_to_string_scratch(value)
+    return bool_to_string_scratch(value) can Global.Read
 
 def rt_char_to_string(value: i64) -> cstr[shape_out]:
-    return char_to_string(value) can Memory.Allocate, Abort.Panic
+    return char_to_string(value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def rt_char_to_string_scratch(value: i64) -> cstr[shape_out]:
-    return char_to_string_scratch(value) can Memory.Allocate, Abort.Panic
+    return char_to_string_scratch(value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def ctx_strlen(value: cstr[shape_in]) -> i64:
     return string_len(value)
@@ -114,7 +108,7 @@ def ctx_string_index(value: cstr[shape_in], index: i64) -> i64:
     return string_index(value, index)
 
 def ctx_string_slice(value: cstr[shape_in], start: i64, end: i64) -> cstr[shape_out]:
-    return string_slice(value, start, end) can Memory.Allocate, Abort.Panic
+    return string_slice(value, start, end) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> sview:
     return sview(value, start, end)
@@ -145,10 +139,10 @@ def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
     return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
 
 def ctx_string_from_view(view: sview) -> cstr[shape_out]:
-    return string_view_copy(view) can Memory.Allocate, Abort.Panic
+    return string_view_copy(view) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def rt_reset_scratch():
-    reset_scratch()
+    reset_scratch() can Global{Read,Write}
 
 def rt_puts(value: cstr?) -> int:
     safe_value: cstr = value if value != null else ""
@@ -204,7 +198,7 @@ protocol Index:
     def __index__(self: Self&, key: Key) -> Elem&
 
 protocol Str:
-    def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]
+    def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}]
 
 impl Str for cstr:
     def __cast__(self: cstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
@@ -216,67 +210,67 @@ impl Str for bool:
 
 impl Str for sview:
     def __cast__(self: sview) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return string_view_copy(self)
+        return string_view_copy(self) can Global{Read,Write}
 
 impl Str for dstr:
     def __cast__(self: dstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return string_view_copy(bytes_view(self))
+        return string_view_copy(bytes_view(self)) can Global{Read,Write}
 
 impl Str for char:
     def __cast__(self: char) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return char_to_string_scratch(self.i64())
+        return char_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for int:
     def __cast__(self: int) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64())
+        return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for i64:
     def __cast__(self: i64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self)
+        return int_to_string_scratch(self) can Global{Read,Write}
 
 impl Str for i32:
     def __cast__(self: i32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64())
+        return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for i16:
     def __cast__(self: i16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64())
+        return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for i8:
     def __cast__(self: i8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64())
+        return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for u32:
     def __cast__(self: u32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64())
+        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for u16:
     def __cast__(self: u16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64())
+        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for u8:
     def __cast__(self: u8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64())
+        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for u64:
     def __cast__(self: u64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self)
+        return uint_to_string_scratch(self) can Global{Read,Write}
 
 impl Str for usize:
     def __cast__(self: usize) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64())
+        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for uintptr:
     def __cast__(self: uintptr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64())
+        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for f64:
     def __cast__(self: f64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return float_to_string_scratch(self)
+        return float_to_string_scratch(self) can Global{Read,Write}
 
 impl Str for f32:
     def __cast__(self: f32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return float_to_string_scratch(self.f64())
+        return float_to_string_scratch(self.f64()) can Global{Read,Write}
 
 def printr(value: cstr) -> void can[Console.Write]:
     length: usize = runtime_strlen(value)
@@ -288,10 +282,10 @@ def print(value: cstr) -> void can[Console.Write]:
     _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
 
 def printr[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    printr(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic) can Console.Write
+    printr(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}) can Console.Write
 
 def print[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    print(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic) can Console.Write
+    print(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}) can Console.Write
 
 def printr(value: dstr) -> void can[Console.Write]:
     return if value.count == 0 or value.items == null

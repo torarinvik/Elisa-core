@@ -144,18 +144,17 @@ def runtime_checked_i64_to_usize(value: i64) -> usize:
 		return converted
 
 def alloc_perm(size: i64) -> mutable heap void&:
-	trusted Global.Read, Global.Write:
+	can Global{Read,Write}:
 		resolved: usize = size.usize() if size > 0 else 1
 		return arena_alloc(&perm_arena, resolved) can Memory.Allocate, Abort.Panic
 
 def alloc_scratch(size: i64) -> mutable heap void&:
-	trusted Global.Read, Global.Write:
+	can Global{Read,Write}:
 		resolved: usize = size.usize() if size > 0 else 1
 		return arena_alloc(&scratch_arena, resolved) can Memory.Allocate, Abort.Panic
 
 def reset_scratch():
-	trusted Global.Read, Global.Write:
-		arena_reset(&scratch_arena)
+	arena_reset(&scratch_arena) can Global{Read,Write}
 
 # ------------------------------------------------------------
 # String length cache (pointer-keyed hash table)
@@ -169,7 +168,7 @@ def string_len_bucket(ptr: u8&) -> usize:
 	return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
 
 def register_perm_string_len(ptr: u8&?, len: usize):
-	trusted Global.Read, Global.Write:
+	can Global{Read,Write}:
 		can Memory.Allocate, Abort.Panic:
 			return if ptr == null or len == 0
 
@@ -194,11 +193,9 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 			string_len_cache[bucket] <- new_entry
 
 def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
-	trusted Global.Read, Global.Write:
-		0 return if ptr == null
-
-		bucket: usize = string_len_bucket(ptr)
-
+	0 return if ptr == null
+	bucket: usize = string_len_bucket(ptr)
+	can Global{Read,Write}:
 		prev: mutable heap StringLenCacheEntry&? = null
 		entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
 
@@ -248,10 +245,10 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
 		# test-first cache experiments on dedicated branches.
 		allocation_bytes: usize = runtime_checked_add_usize(len, 1)
-		out: mutable heap u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&]
+		out: mutable heap u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&] can Global{Read,Write}
 		memcpy(out.cast[mutable void&], src.cast[void&], len) if len > 0
 		out[len] <- 0
-		register_perm_string_len(out.cast[u8&], len)
+		register_perm_string_len(out.cast[u8&], len) can Global{Read,Write}
 		return out
 
 # ------------------------------------------------------------
@@ -259,7 +256,7 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 # ------------------------------------------------------------
 
 def int_to_string_into(arena: mutable Arena&, value: i64) -> cstr:
-	trusted Global.Read:
+	can Global.Read:
 		can Memory.Allocate, Console.Format, Abort.Panic:
 			len: int = snprintf(null, 0, "%lld", value)
 			panic("int_to_string_into: snprintf failed") if len < 0
@@ -270,12 +267,12 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> cstr:
 				text: u8[9]
 				snprintf(&text[0], allocation_bytes, "%lld", value)
 				trusted Unsafe.PointerCast:
-					return intern_small_string(&text[0], string_len).cast[cstr]
+					return intern_small_string(&text[0], string_len).cast[cstr] can Global{Read,Write}
 
-			out: mutable heap u8& = arena_alloc(arena, allocation_bytes).cast[heap u8&]
+			out: mutable heap u8& = (arena_alloc(arena, allocation_bytes) can Global{Read,Write}).cast[heap u8&]
 			snprintf(out.cast[mutable u8&?], allocation_bytes, "%lld", value)
 
-			register_perm_string_len(out.cast[u8&], string_len) if arena == &perm_arena
+			register_perm_string_len(out.cast[u8&], string_len) can Global{Read,Write} if arena == &perm_arena
 
 			trusted Unsafe.PointerCast:
 				return out.cast[cstr]
@@ -291,4 +288,4 @@ def char_to_string_into(arena: Arena&, value: i64) -> cstr:
 		text[0] <- value.u8()
 		text[1] <- 0
 		trusted Unsafe.PointerCast:
-			return intern_small_string(&text[0], 1).cast[cstr]
+			return intern_small_string(&text[0], 1).cast[cstr] can Global{Read,Write}

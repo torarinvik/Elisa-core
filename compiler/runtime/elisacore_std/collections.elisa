@@ -170,7 +170,7 @@ def collections_mutable_items_from_data[T](data: mutable void&) -> mutable T&:
 # stays O(1) syscalls rather than O(size) interpreted iterations.
 def arena_box_zeroed[T](a: mutable Arena&) -> mutable heap T&:
     can Memory.Allocate, Abort.Panic:
-        raw: mutable heap void& = arena_alloc(a, size_of(T))
+        raw: mutable heap void& = (arena_alloc(a, size_of(T)) can Global{Read,Write})
         trusted Unsafe.RawExtern:
             memset(raw, 0, size_of(T))
         return collections_items_from_alloc[T](raw)
@@ -194,14 +194,14 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         new_size: usize = new_capacity * size_of(T)
 
         if da.items == null:
-            da.items as & <- collections_items_from_alloc[T](arena_alloc(a, new_size))
+            da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}))
         else:
-            resized: heap void& = arena_realloc(
+            resized: heap void& = (arena_realloc(
                 a,
                 collections_mutable_void_from_items[T](da.items),
                 old_size,
                 new_size
-            )
+            ) can Global{Read,Write})
             da.items as & <- collections_items_from_alloc[T](resized)
 
         da.capacity <- new_capacity
@@ -283,7 +283,7 @@ def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_o
     can Memory.Allocate, Abort.Panic:
         zeroed return if view.len == 0
 
-        items: mutable T& = collections_items_from_alloc[T](arena_alloc(a, view.len * size_of(T)))
+        items: mutable T& = collections_items_from_alloc[T]((arena_alloc(a, view.len * size_of(T)) can Global{Read,Write}))
         assert view.data != null
         arena_memcpy(collections_mutable_void_from_items[T](items), view.data, view.len * size_of(T))
 
@@ -745,14 +745,14 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
             new_size: usize = new_capacity * size_of(T)
 
             if da.items == null:
-                da.items as & <- collections_items_from_alloc[T](arena_alloc(a, new_size))
+                da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}))
             else:
-                resized: heap void& = arena_realloc(
+                resized: heap void& = (arena_realloc(
                     a,
                     collections_mutable_void_from_items[T](da.items),
                     old_size,
                     new_size
-                )
+                ) can Global{Read,Write})
                 da.items as & <- collections_items_from_alloc[T](resized)
 
             da.capacity <- new_capacity
@@ -769,11 +769,11 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
         return da
 
 def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&:
-    return arena_da_append_many(a, sb, buf, n) can Memory.Allocate, Abort.Panic
+    return (arena_da_append_many(a, sb, buf, n) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
 
 def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]&:
     n: usize = arena_strlen(cstr)
-    return arena_da_append_many(a, sb, cstr, n) can Memory.Allocate, Abort.Panic
+    return (arena_da_append_many(a, sb, cstr, n) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
 
 def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&:
     can Memory.Allocate, Abort.Panic:
@@ -914,7 +914,7 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
 
         # The table lives on a stack of its own (collection_stack_acquire in arena.elisa),
         # not in the arena's bump chain, so growing it never strands the old table.
-        table_stack: mutable heap Region& = collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(DictBucket[K, T])))
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(DictBucket[K, T]))) can Global{Read,Write})
         items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(items, capacity)
 
@@ -944,7 +944,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         # Ping-pong: the spare stack (or a pooled/fresh one) takes the new table; the old
         # table's stack becomes the spare. Reused storage still holds the dead table, so
         # the buckets are zeroed here as before.
-        table_stack: mutable heap Region& = collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(DictBucket[K, T])))
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(DictBucket[K, T]))) can Global{Read,Write})
         new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(new_items, target_capacity)
 
@@ -961,7 +961,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
                 arena_dict_place_fresh(rehash, old_items[i].key, old_items[i].value) if old_items[i].state == 1
 
         m.items as & <- rehash.items
-        collection_stack_profile_release(owner, live_table)
+        (collection_stack_profile_release(owner, live_table) can Global{Read,Write})
         m.capacity <- rehash.capacity
         m.count <- rehash.count
         m.used <- rehash.used
@@ -1021,7 +1021,7 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
         # always terminates at an empty slot. Growing rehashes and clears tombstones.
         if m.capacity == 0 or (m.used + 1.usize()) * 4.usize() > m.capacity * 3.usize():
             target_capacity: usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
-            try arena_dict_reserve(owner, m, target_capacity)
+            try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write})
 
         assert m.items != null
         assert m.capacity > 0
@@ -1044,7 +1044,7 @@ def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, ke
     can Memory.Allocate, Abort.Panic:
 		existing: mutable T&? = arena_dict_get_mut(m, key)
         existing return if existing != null
-        return try arena_dict_put(a, m, key, value)
+        return try (arena_dict_put(a, m, key, value) can Global{Read,Write})
 
 # Non-error wrappers used by the dict-entry codegen ABI (`d.entry(k).insert(v)`
 # / `.get_or_insert(v)`). The entry ops run under `can Abort.Panic`, so a growth
@@ -1053,15 +1053,15 @@ def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, ke
 # value ref (`mutable T&?` -> nullable ptr), no sret/error-tag ABI.
 def arena_dict_put_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
     can Memory.Allocate, Abort.Panic:
-        return try arena_dict_put(a, m, key, value) else null
+        return try (arena_dict_put(a, m, key, value) can Global{Read,Write}) else null
 
 def arena_dict_get_or_insert_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
     can Memory.Allocate, Abort.Panic:
-        return try arena_dict_get_or_insert(a, m, key, value) else null
+        return try (arena_dict_get_or_insert(a, m, key, value) can Global{Read,Write}) else null
 
 def arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
     can Memory.Allocate, Abort.Panic:
-        catch arena_dict_reserve(a, m, min_capacity):
+        catch (arena_dict_reserve(a, m, min_capacity) can Global{Read,Write}):
             ok:
                 return
             error e:
@@ -1077,7 +1077,7 @@ def arena_dict_reserve_checked[K, T](a: mutable Arena&, m: mutable dict[K, T]&, 
 # OOM use the error-returning arena_dict_put directly.
 def arena_dict_put_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
     can Memory.Allocate, Abort.Panic:
-        catch arena_dict_put(a, m, key, value):
+        catch (arena_dict_put(a, m, key, value) can Global{Read,Write}):
             slot:
                 return slot
             error e:
@@ -1085,7 +1085,7 @@ def arena_dict_put_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key
 
 def arena_dict_get_or_insert_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> T&?:
     can Memory.Allocate, Abort.Panic:
-        catch arena_dict_get_or_insert(a, m, key, value):
+        catch (arena_dict_get_or_insert(a, m, key, value) can Global{Read,Write}):
             slot:
                 return slot
             error e:
@@ -1093,7 +1093,7 @@ def arena_dict_get_or_insert_or_panic[K, T](a: mutable Arena&, m: mutable dict[K
 
 def arena_dict_reserve_or_panic[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
     can Memory.Allocate, Abort.Panic:
-        catch arena_dict_reserve(a, m, min_capacity):
+        catch (arena_dict_reserve(a, m, min_capacity) can Global{Read,Write}):
             ok:
                 return
             error e:
@@ -1132,11 +1132,11 @@ def arena_dict_clear[K, T](m: mutable dict[K, T]&):
     m.used <- 0
 
 def arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[cstr[key_shape], i64]:
-    return arena_dict_new[cstr[key_shape], i64](a, initial_capacity) can Memory.Allocate, Abort.Panic
+    return (arena_dict_new[cstr[key_shape], i64](a, initial_capacity) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
 
 def arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
-        try arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity)
+        try (arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity) can Global{Read,Write})
 
 def arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64&?:
 	return arena_dict_get[cstr[key_shape], i64](m, key)
@@ -1146,11 +1146,11 @@ def arena_dict_get_mut__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[ke
 
 def arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
-        return try arena_dict_put[cstr[key_shape], i64](a, m, key, value)
+        return try (arena_dict_put[cstr[key_shape], i64](a, m, key, value) can Global{Read,Write})
 
 def arena_dict_get_or_insert__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
-        return try arena_dict_get_or_insert[cstr[key_shape], i64](a, m, key, value)
+        return try (arena_dict_get_or_insert[cstr[key_shape], i64](a, m, key, value) can Global{Read,Write})
 
 def arena_dict_contains__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> bool:
     return arena_dict_contains[cstr[key_shape], i64](m, key)
@@ -1212,7 +1212,7 @@ def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
         out return if capacity == 0
 
         # Same as arena_dict_new: the table is on a collection stack of its own.
-        table_stack: mutable heap Region& = collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(SetBucket[T])))
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(SetBucket[T]))) can Global{Read,Write})
         items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(items, capacity)
 
@@ -1237,7 +1237,7 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
         old_capacity: usize = s.capacity
 
         live_table: void&? = collections_void_from_items_opt[SetBucket[T]](old_items_opt) if had_stack else null
-        table_stack: mutable heap Region& = collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(SetBucket[T])))
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(SetBucket[T]))) can Global{Read,Write})
         new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(new_items, target_capacity)
 
@@ -1255,7 +1255,7 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
                 arena_set_place_fresh(rehash, old_items[i].key) if old_items[i].state == 1
 
         s.items as & <- rehash.items
-        collection_stack_profile_release(owner, live_table)
+        (collection_stack_profile_release(owner, live_table) can Global{Read,Write})
         s.capacity <- rehash.capacity
         s.count <- rehash.count
         s.used <- rehash.used
@@ -1268,7 +1268,7 @@ def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool erro
 
         if s.capacity == 0 or (s.used + 1.usize()) * 4.usize() > s.capacity * 3.usize():
             target_capacity: usize = DICT_INIT_CAP if s.capacity == 0 else s.capacity * 2
-            try arena_set_reserve(owner, s, target_capacity)
+            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write})
 
         assert s.items != null
         assert s.capacity > 0
@@ -1286,7 +1286,7 @@ def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool erro
 
 def arena_set_add_or_panic[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool:
     can Memory.Allocate, Abort.Panic:
-        catch arena_set_add(a, s, key):
+        catch (arena_set_add(a, s, key) can Global{Read,Write}):
             inserted:
                 return inserted
             error e:
@@ -1294,7 +1294,7 @@ def arena_set_add_or_panic[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> 
 
 def arena_set_reserve_or_panic[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: usize) -> void:
     can Memory.Allocate, Abort.Panic:
-        catch arena_set_reserve(a, s, min_capacity):
+        catch (arena_set_reserve(a, s, min_capacity) can Global{Read,Write}):
             ok:
                 return
             error e:
@@ -1353,7 +1353,7 @@ def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[
     can Memory.Allocate, Abort.Panic:
         map: mutable IndexMap[K, T] = zeroed
         map.owner as & <- owner
-        map.by_key <- arena_dict_new[K, usize](owner, initial_capacity)
+        map.by_key <- (arena_dict_new[K, usize](owner, initial_capacity) can Global{Read,Write})
         in owner:
             _ = map.entries.reserve(initial_capacity)
         return map
@@ -1361,24 +1361,24 @@ def index_map[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[
 
 def index_map_new[K, T](owner: mutable Arena&) -> IndexMap[K, T]:
     can Memory.Allocate, Abort.Panic:
-        return index_map[K, T](owner, 32)
+        return (index_map[K, T](owner, 32) can Global{Read,Write})
 
 
 def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
     can Memory.Allocate, Abort.Panic:
         _ = api
-        return index_map_new[K, T](owner)
+        return (index_map_new[K, T](owner) can Global{Read,Write})
 
 
 def index_map_with_capacity[K, T](owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
     can Memory.Allocate, Abort.Panic:
-        return index_map[K, T](owner, initial_capacity)
+        return (index_map[K, T](owner, initial_capacity) can Global{Read,Write})
 
 
 def with_capacity[K, T](api: IndexMapNamespace, owner: mutable Arena&, initial_capacity: usize) -> IndexMap[K, T]:
     can Memory.Allocate, Abort.Panic:
         _ = api
-        return index_map_with_capacity[K, T](owner, initial_capacity)
+        return (index_map_with_capacity[K, T](owner, initial_capacity) can Global{Read,Write})
 
 
 def index_map_count[K, T](map: IndexMap[K, T]&) -> usize:
@@ -1444,23 +1444,23 @@ def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
         index: usize = map.entries.count
         in owner:
             map.entries.push(IndexMapEntry[K, T]{key: key, value: value})
-        _ = try arena_dict_put[K, usize](owner, map.by_key, key, index) else null
+        _ = try (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}) else null
         return index
 
 
 def put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
     can Memory.Allocate, Abort.Panic:
-        return index_map_put[K, T](map, key, value)
+        return (index_map_put[K, T](map, key, value) can Global{Read,Write})
 
 
 def index_map_set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
     can Memory.Allocate, Abort.Panic:
-        return index_map_put[K, T](map, key, value)
+        return (index_map_put[K, T](map, key, value) can Global{Read,Write})
 
 
 def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
     can Memory.Allocate, Abort.Panic:
-        return index_map_set[K, T](map, key, value)
+        return (index_map_set[K, T](map, key, value) can Global{Read,Write})
 
 
 def index_map_get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
@@ -1515,7 +1515,8 @@ def symbol_table_id_from_index(index: usize) -> SymbolTableId:
 protocol Store:
     type Elem
     type Handle
-    def store_get(s: Self&, h: Handle) -> Elem&
+    # A total handle lookup can reject an out-of-range handle by panicking.
+    def store_get(s: Self&, h: Handle) -> Elem& can[Abort.Panic]
     def store_count(s: Self&) -> usize
 
 impl[T] Store for darray[T]:

@@ -90,14 +90,14 @@ def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: muta
                 assert offset_words < state.alloc_region.capacity
 
                 data_base: heap u8& = packed_store_region_data(state.alloc_region)
-                return (data_base + offset_words * size_of(uintptr)).cast[mutable void&]
+                return ((data_base + offset_words * size_of(uintptr)).cast[mutable void&] can Unsafe.PointerCast)
 
             if state.decode_region != null and state.decode_region_index == region_index:
                 offset_words: usize = offset_words_plus_one - 1
                 assert offset_words < state.decode_region.capacity
 
                 data_base: heap u8& = packed_store_region_data(state.decode_region)
-                return (data_base + offset_words * size_of(uintptr)).cast[mutable void&]
+                return ((data_base + offset_words * size_of(uintptr)).cast[mutable void&] can Unsafe.PointerCast)
 
             indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
             if indexed_region != null:
@@ -108,7 +108,7 @@ def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: muta
                 state.decode_region_index <- region_index
 
                 data_base: heap u8& = packed_store_region_data(indexed_region)
-                return (data_base + offset_words * size_of(uintptr)).cast[mutable void&]
+                return ((data_base + offset_words * size_of(uintptr)).cast[mutable void&] can Unsafe.PointerCast)
 
         r: mutable heap Region&? = a.begin
         i: mutable usize = 0
@@ -153,7 +153,7 @@ def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: muta
                     state.decode_region_index <- region_index
 
                     data_base: heap u8& = packed_store_region_data(owner_cursor)
-                    return (data_base + offset_words * size_of(uintptr)).cast[mutable void&]
+                    return ((data_base + offset_words * size_of(uintptr)).cast[mutable void&] can Unsafe.PointerCast)
 
         trusted Unsafe.AssumeProgress:
             while i < region_index and r != null:
@@ -170,7 +170,7 @@ def ctx_packed_store_decode(a: mutable Arena&, handle: uintptr, state_bits: muta
             state.decode_region_index <- region_index
 
         data_base: heap u8& = packed_store_region_data(r)
-        return (data_base + offset_words * size_of(uintptr)).cast[mutable void&]
+        return ((data_base + offset_words * size_of(uintptr)).cast[mutable void&] can Unsafe.PointerCast)
 def ctx_packed_store_encode_index(a: mutable Arena&, ptr: void&, state_bits: mutable void&) -> u32:
     can Abort.Panic:
         if state_bits == null:

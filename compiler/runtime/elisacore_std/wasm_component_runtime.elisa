@@ -102,7 +102,7 @@ def wasm_component_ensure_capacity(end: u32):
             wasm_trap()
 
 def wasm_component_chunk_take(required_bytes: u32) -> u32:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         requested: mutable u32 = required_bytes if required_bytes > WASM_COMPONENT_CHUNK_DEFAULT_BYTES else WASM_COMPONENT_CHUNK_DEFAULT_BYTES
         requested <- wasm_component_align_up(requested, 8)
 
@@ -175,7 +175,7 @@ def arena_realloc(
     return newptr
 
 def arena_free(a: mutable void&) -> void:
-    trusted Global.Read, Global.Write:
+    can Global{Read,Write}:
         state: mutable WasmComponentArenaState& = wasm_component_arena_state(a)
         current: mutable u32 = state.begin
         while current != 0:
@@ -207,10 +207,9 @@ def wasm_component_cabi_realloc(
     alignment: u32,
     new_size: u32
 ) -> u32:
-    trusted Global.Read, Global.Write:
-        effective_alignment: u32 = alignment if alignment > 0 else 1
-
-        old_end: u32 = old_ptr + old_size
+    effective_alignment: u32 = alignment if alignment > 0 else 1
+    old_end: u32 = old_ptr + old_size
+    can Global{Read,Write}:
         old_is_top: bool = old_ptr != 0 and old_end >= old_ptr and old_end == wasm_component_heap_cursor
 
         if new_size == 0:

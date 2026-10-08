@@ -63,7 +63,7 @@ def arena_deque_with_capacity[T](a: mutable Arena&, capacity: usize) -> Deque[T]
             return out0
 
         out: mutable Deque[T] = zeroed
-        out.items as & <- deque_items_from_alloc[T](arena_alloc(a, capacity * size_of(T)))
+        out.items as & <- deque_items_from_alloc[T]((arena_alloc(a, capacity * size_of(T)) can Global{Read,Write}))
         out.head <- 0
         out.count <- 0
         out.capacity <- capacity
@@ -128,7 +128,7 @@ def arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usiz
             while needed > new_capacity:
                 new_capacity <- new_capacity * 2
 
-        new_items: mutable T& = deque_items_from_alloc[T](arena_alloc(a, new_capacity * size_of(T)))
+        new_items: mutable T& = deque_items_from_alloc[T]((arena_alloc(a, new_capacity * size_of(T)) can Global{Read,Write}))
         arena_deque_copy_linearized(d, new_items)
 
         d.items as & <- new_items
@@ -140,7 +140,7 @@ def arena_deque_ensure_unused[T](a: mutable Arena&, d: mutable Deque[T]&, additi
     can Memory.Allocate, Abort.Panic:
         needed: usize = d.count + additional
         assert needed >= d.count
-        return arena_deque_reserve(a, d, needed)
+        return (arena_deque_reserve(a, d, needed) can Global{Read,Write})
 
 def arena_deque_push_front_assume_capacity[T](d: mutable Deque[T]&, item: T):
     can Abort.Panic:
@@ -178,13 +178,13 @@ def arena_deque_push_back_bounded[T](d: mutable Deque[T]&, item: T) -> bool:
 
 def arena_deque_push_front[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&:
     can Memory.Allocate, Abort.Panic:
-        _ = arena_deque_ensure_unused(a, d, 1)
+        _ = (arena_deque_ensure_unused(a, d, 1) can Global{Read,Write})
         arena_deque_push_front_assume_capacity(d, item)
         return d
 
 def arena_deque_push_back[T](a: mutable Arena&, d: mutable Deque[T]&, item: T) -> mutable Deque[T]&:
     can Memory.Allocate, Abort.Panic:
-        _ = arena_deque_ensure_unused(a, d, 1)
+        _ = (arena_deque_ensure_unused(a, d, 1) can Global{Read,Write})
         arena_deque_push_back_assume_capacity(d, item)
         return d
 
