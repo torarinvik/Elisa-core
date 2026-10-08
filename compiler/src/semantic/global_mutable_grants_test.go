@@ -330,3 +330,150 @@ def test() -> i32:
 		})
 	}
 }
+
+func TestMutableGlobalCallbackContainersAndLoopJumps(t *testing.T) {
+ tests := []struct{name, source, want string}{
+		{"optional_factory", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+type Action = fn() -> i32 can[Global.Write]
+def optional_factory(condition: bool) -> Action?:
+    if condition:
+        return writer
+    return null
+def test(condition: bool) -> i32:
+    action = optional_factory(condition)
+    if action is callback:
+        can Global.Read:
+            return callback()
+    return 0
+`, "add can Global.Write"},
+ {"alias_factory", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+type Action = fn() -> i32 can[Global.Write]
+def factory() -> Action:
+    callback = writer
+    return callback
+def test() -> i32:
+    callback = factory()
+    can Global.Read:
+        return callback()
+`, "add can Global.Write"},
+ {"branch", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+def test(condition: bool) -> i32:
+    callback: mutable fn() -> i32 can[Global.Write] = pure
+    if condition:
+        callback <- writer
+    else:
+        callback <- pure
+    can Global.Read:
+        return callback()
+`, "add can Global.Write"},
+ {"field", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+struct Holder:
+    action: fn() -> i32 can[Global.Write]
+def test() -> i32:
+    holder = Holder{action: writer}
+    can Global.Read:
+        return holder.action()
+`, "add can Global.Write"},
+ {"for_break", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+def test(condition: bool) -> i32:
+    callback: mutable fn() -> i32 can[Global.Write] = pure
+    for index in 0..<1:
+        callback <- writer
+        break
+    can Global.Read:
+        return callback()
+`, "add can Global.Write"},
+ {"global", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+global mutable action: fn() -> i32 can[Global.Write] = writer
+def test() -> i32:
+    can Global.Read:
+        return action()
+`, "add can Global.Write"},
+ {"loop", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+def test(condition: bool) -> i32:
+    callback: mutable fn() -> i32 can[Global.Write] = pure
+    while condition:
+        callback <- writer
+        break
+    can Global.Read:
+        return callback()
+`, "add can Global.Write"},
+ {"loop_continue", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+def test(condition: bool) -> i32:
+    callback: mutable fn() -> i32 can[Global.Write] = pure
+    while condition:
+        callback <- writer
+        continue
+    can Global.Read:
+        return callback()
+`, "add can Global.Write"},
+ {"loop_granted", `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 1
+    return 0
+def pure() -> i32:
+    return 0
+def test(condition: bool) -> i32:
+    callback: mutable fn() -> i32 can[Global.Write] = pure
+    while condition:
+        callback <- writer
+        break
+    can Global.Read, Global.Write:
+        return callback()
+`, ""},
+ }
+ for _, tt := range tests { t.Run(tt.name, func(t *testing.T) {
+ result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, tt.name+".elisa", tt.source, AnalyzeOptions{})
+ errors := strings.Join(result.Errors(), "\n")
+ if tt.want == "" { if errors != "" { t.Fatalf("unexpected errors: %s", errors) } } else if !strings.Contains(errors, tt.want) { t.Fatalf("missing %q: %s", tt.want, errors) }
+ }) }
+}

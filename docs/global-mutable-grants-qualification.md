@@ -28,3 +28,11 @@ The follow-up traverses resolved lowered arguments at the caller's grant scope, 
 Factory callback qualification used an explicit `fn() -> i32 can[Global.Read]` return type. Creating the callback without a grant is allowed; invoking it without Read fails, and invoking it inside a Read grant passes. Explicit declared Global rows are mandatory; inferred immutable-global advisory rows remain distinct. Parenthesized and explicitly generic calls already rejected missing grants.
 
 Remote focused regressions passed (0.021s); the complete semantic suite passed again (58.518s). CLI fixtures and logs are retained under `grants-cli-qualification` in the isolated remote checkout. The frontend rebuild passed with an empty build log and complete default runtime admission exited 0. Final CLI branch-callback and factory-invocation negatives exited 1; granted factory invocation exited 0.
+
+## Bounded callback container and loop audit
+
+Valid CLI programs confirmed that a mutable global function slot initialized with a writer, struct-field callbacks, a callback returned through a local/type alias, optional callbacks returned by a writer-or-null factory, and branch callback joins all reject missing Write even when Read is granted. Optional qualification used `type Action = fn() -> i32 can[Global.Write]`, `Action?`, and an `is callback` bind after a factory call; redundant optional binding after a known nonnull initializer is rejected by existing type analysis.
+
+A concrete loop admission gap remained: assigning the writer inside a while body and leaving with `break` discarded the callable state, because loop jump frames retained ownership and specialized types but omitted function values. The fix records and joins function values on break/continue edges for while, range-for, and collection-for loops. CLI while-break, while-continue, and range-for-break negatives now exit 1 with required Write; the corresponding granted call exits 0. No grant is required merely to manufacture the callback.
+
+The new focused callback-container/loop tests passed (0.021s). The complete remote semantic suite passed again (60.508s); the Linux frontend rebuilt cleanly and complete runtime admission exited 0. Raw CLI fixtures and logs persist under `grants-callback-audit` in the private remote checkout.

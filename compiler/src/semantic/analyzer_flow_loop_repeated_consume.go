@@ -26,7 +26,9 @@ type loopAffineFrame struct {
 	storageContinued map[*Symbol]storageViewDependencyState
 	// Jump edges carry current value types as well as ownership states. In
 	// particular, a break skips the body's fall-through snapshot entirely.
-	specializedContinued   map[*Symbol]Type
+	functionContinued map[*Symbol]*FuncType
+    functionBroken map[*Symbol]*FuncType
+    specializedContinued   map[*Symbol]Type
 	specializedBroken      map[*Symbol]Type
 	hasSpecializedContinue bool
 	hasSpecializedBreak    bool
@@ -56,15 +58,19 @@ func (a *Analyzer) noteLoopJumpAffineState(isBreak bool) {
 	frame := &a.loopAffineFrames[n-1]
 	// Keep the edges separate: only continue participates in a future cyclic
 	// loop-head transfer. Both edges conservatively contribute to loop exit.
-	types, seenTypes := &frame.specializedContinued, &frame.hasSpecializedContinue
+	functions := &frame.functionContinued
+    types, seenTypes := &frame.specializedContinued, &frame.hasSpecializedContinue
 	if isBreak {
-		types, seenTypes = &frame.specializedBroken, &frame.hasSpecializedBreak
+		functions = &frame.functionBroken
+        types, seenTypes = &frame.specializedBroken, &frame.hasSpecializedBreak
 	}
 	if !*seenTypes {
-		*types = a.cloneSpecializedValueTypeBindings()
+		*functions = a.cloneFunctionValueBindings()
+        *types = a.cloneSpecializedValueTypeBindings()
 		*seenTypes = true
 	} else {
-		*types = a.mergeSpecializedValueTypeBindings(*types, a.currentSpecializedValueTypes)
+		*functions = a.mergeFunctionValueBindings(*functions, a.currentFunctionValues)
+        *types = a.mergeSpecializedValueTypeBindings(*types, a.currentSpecializedValueTypes)
 	}
 	state := a.cloneAffineValueStates()
 	if state == nil {
@@ -205,4 +211,15 @@ func (a *Analyzer) reportLoopBodyLeaksOnJump() {
 		sym, ok := outer.Lookup(root.Name)
 		return !ok || sym != root
 	})
+}
+
+// Explicit break/continue edges must retain callable authority too; they can
+// skip the body fall-through snapshot used by ordinary function-value merging.
+func (a *Analyzer) mergeLoopJumpFunctionValues(entry map[*Symbol]*FuncType) map[*Symbol]*FuncType {
+    n := len(a.loopAffineFrames)
+    if n == 0 || a.loopAffineFrames[n-1].depth != a.loopDepth+1 { return entry }
+    frame := &a.loopAffineFrames[n-1]
+    if frame.hasSpecializedContinue { entry = a.mergeFunctionValueBindings(entry, frame.functionContinued) }
+    if frame.hasSpecializedBreak { entry = a.mergeFunctionValueBindings(entry, frame.functionBroken) }
+    return entry
 }
