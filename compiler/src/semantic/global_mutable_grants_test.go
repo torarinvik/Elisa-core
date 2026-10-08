@@ -332,7 +332,7 @@ def test() -> i32:
 }
 
 func TestMutableGlobalCallbackContainersAndLoopJumps(t *testing.T) {
- tests := []struct{name, source, want string}{
+	tests := []struct{ name, source, want string }{
 		{"optional_factory", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
@@ -352,7 +352,7 @@ def test(condition: bool) -> i32:
             return callback()
     return 0
 `, "add can Global.Write"},
- {"alias_factory", `global mutable hot: i32 = 0
+		{"alias_factory", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -368,7 +368,7 @@ def test() -> i32:
     can Global.Read:
         return callback()
 `, "add can Global.Write"},
- {"branch", `global mutable hot: i32 = 0
+		{"branch", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -384,7 +384,7 @@ def test(condition: bool) -> i32:
     can Global.Read:
         return callback()
 `, "add can Global.Write"},
- {"field", `global mutable hot: i32 = 0
+		{"field", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -398,7 +398,7 @@ def test() -> i32:
     can Global.Read:
         return holder.action()
 `, "add can Global.Write"},
- {"for_break", `global mutable hot: i32 = 0
+		{"for_break", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -413,7 +413,7 @@ def test(condition: bool) -> i32:
     can Global.Read:
         return callback()
 `, "add can Global.Write"},
- {"global", `global mutable hot: i32 = 0
+		{"global", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -425,7 +425,7 @@ def test() -> i32:
     can Global.Read:
         return action()
 `, "add can Global.Write"},
- {"loop", `global mutable hot: i32 = 0
+		{"loop", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -440,7 +440,7 @@ def test(condition: bool) -> i32:
     can Global.Read:
         return callback()
 `, "add can Global.Write"},
- {"loop_continue", `global mutable hot: i32 = 0
+		{"loop_continue", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -455,7 +455,7 @@ def test(condition: bool) -> i32:
     can Global.Read:
         return callback()
 `, "add can Global.Write"},
- {"loop_granted", `global mutable hot: i32 = 0
+		{"loop_granted", `global mutable hot: i32 = 0
 def writer() -> i32:
     can Global.Write:
         hot <- 1
@@ -470,10 +470,18 @@ def test(condition: bool) -> i32:
     can Global.Read, Global.Write:
         return callback()
 `, ""},
- }
- for _, tt := range tests { t.Run(tt.name, func(t *testing.T) {
- result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, tt.name+".elisa", tt.source, AnalyzeOptions{})
- errors := strings.Join(result.Errors(), "\n")
- if tt.want == "" { if errors != "" { t.Fatalf("unexpected errors: %s", errors) } } else if !strings.Contains(errors, tt.want) { t.Fatalf("missing %q: %s", tt.want, errors) }
- }) }
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, tt.name+".elisa", tt.source, AnalyzeOptions{})
+			errors := strings.Join(result.Errors(), "\n")
+			if tt.want == "" {
+				if errors != "" {
+					t.Fatalf("unexpected errors: %s", errors)
+				}
+			} else if !strings.Contains(errors, tt.want) {
+				t.Fatalf("missing %q: %s", tt.want, errors)
+			}
+		})
+	}
 }
