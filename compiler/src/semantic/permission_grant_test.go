@@ -1630,7 +1630,7 @@ def main() -> i64:
 	}
 
 	on := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_dial_on.elisa", src, AnalyzeOptions{EnforceGlobalPermissions: true})
-	if got := allDiagnostics(on); !strings.Contains(got, `call to "bump" requires can[Global] and has no explicit local effect grant; add can[Global.Read, Global.Write]`) {
+	if got := allDiagnostics(on); !strings.Contains(got, `call to "bump" requires can[Global] and has no explicit local effect grant; add can[Global{Read,Write}]`) {
 		t.Fatalf("expected the write to require Global.Read and Global.Write, got:\n%s", got)
 	}
 }

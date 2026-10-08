@@ -3,7 +3,6 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"sort"
-	"strings"
 )
 
 func permissionMembersMatch(existing *PermissionSet, members []string) bool {
@@ -278,12 +277,9 @@ func permissionGrantHint(refs []ast.PermissionRef, families []string) string {
 	if len(refs) == 1 && refs[0].Member != "" {
 		return "can " + PermissionRefString(refs[0])
 	}
-	// PermissionRefsString carries a LEADING SPACE for its other caller, which builds
-	// "requires" + " can[...]". Here the caller already wrote "; add ", so passing it
-	// through unchanged rendered "add  can[Abort.Panic, Atomics.Load]" with a double
-	// space — while the single-member branch above rendered "add can Abort.Panic" with
-	// one. Same sentence, two spacings, decided by how many effects were missing.
-	return strings.TrimPrefix(PermissionRefsString(refs), " ")
+	// Suggested grants use the canonical source spelling. Internal permission
+	// row serialization remains unchanged for fact consumers.
+	return "can[" + ast.PermissionRefSurfaceList(refs, PermissionRefString) + "]"
 }
 
 func (a *Analyzer) resolvePermissionFamilies(refs []ast.PermissionRef, report bool) []string {

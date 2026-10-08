@@ -38,3 +38,12 @@ Unsafe directory exemption reports1420 missing-grant diagnostics:821 errors and
 165 UncheckedIndex,147 RawExtern,120 Alias and26 PointerArithmetic;351 diagnostics
 have mixed rows. This evidence precedes deliberate operation-level Unsafe boundary
 migration. No blanket trusted runtime grant is introduced.
+
+The separate source-presentation follow-up uses adjacent family-member sugar in
+canonical formatting and user-facing grant suggestions, for example
+`can[Global{Read,Write}, Unsafe.PointerCast]`. Internal permission/fact row
+serialization is unchanged. Whole-family refs, singleton members, nonadjacent
+source order, type specializations and `via` clauses remain distinct; duplicate
+members are preserved. Exact-output and parse/format round-trip regressions pass,
+as do targeted Global diagnostics and the complete parser suite (3.621 s).
+Logs: /tmp/grouped-presentation-tests2.log and /tmp/grouped-parser-full.log on Vast.

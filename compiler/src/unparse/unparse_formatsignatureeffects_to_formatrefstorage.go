@@ -9,11 +9,7 @@ func formatPermissionRefs(refs []ast.PermissionRef) string {
 	if len(refs) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		parts = append(parts, formatPermissionRef(ref))
-	}
-	return " can[" + strings.Join(parts, ", ") + "]"
+	return " can[" + formatPermissionRefSurfaceList(refs) + "]"
 }
 func formatPermissionRef(ref ast.PermissionRef) string {
 	name := ref.Name
@@ -37,14 +33,7 @@ func formatPermissionRef(ref ast.PermissionRef) string {
 	return name
 }
 func formatPermissionRefSurfaceList(refs []ast.PermissionRef) string {
-	if len(refs) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		parts = append(parts, formatPermissionRef(ref))
-	}
-	return strings.Join(parts, ", ")
+	return ast.PermissionRefSurfaceList(refs, formatPermissionRef)
 }
 func formatEnsuresClauses(clauses []ast.EnsuresClause) string {
 	if len(clauses) == 0 {

@@ -253,6 +253,10 @@ func TestGroupedGlobalPermissionFormatterRoundTrip(t *testing.T) {
 		t.Fatalf("grouped permission parse: %v", errs)
 	}
 	formatted := unparse.FormatFile(grouped)
+	want := "def f() -> i32 can[Global{Read,Write}]:\n    return 0 can Global{Read,Write}\n"
+	if formatted != want {
+		t.Fatalf("expected canonical grouped output:\n%s", formatted)
+	}
 	reparsed, errs := parseSourceFile(t, formatted)
 	if len(errs) != 0 {
 		t.Fatalf("formatted permission parse: %v\n%s", errs, formatted)
@@ -269,5 +273,52 @@ func TestGroupedGlobalPermissionFormatterRoundTrip(t *testing.T) {
 	}
 	if got := unparse.FormatFile(expanded); got != formatted {
 		t.Fatalf("grouped and expanded differ:\n%s\n%s", formatted, got)
+	}
+}
+
+func TestCanonicalGroupedMixedPermissionFormatting(t *testing.T) {
+	file, errs := parseSourceFile(t, "def f() -> i32 can[Global.Read, Global.Write, Unsafe.PointerCast]:\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("parse: %v", errs)
+	}
+	want := "def f() -> i32 can[Global{Read,Write}, Unsafe.PointerCast]:\n    return 0\n"
+	if got := unparse.FormatFile(file); got != want {
+		t.Fatalf("mixed output:\n%s", got)
+	}
+	file, errs = parseSourceFile(t, "def f() -> i32 can[Global.Read]:\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("parse: %v", errs)
+	}
+	want = "def f() -> i32 can[Global.Read]:\n    return 0\n"
+	if got := unparse.FormatFile(file); got != want {
+		t.Fatalf("singleton changed:\n%s", got)
+	}
+}
+
+func TestGroupedPermissionFormattingPreservesOrderAndQualifications(t *testing.T) {
+	for _, row := range []struct{ input, want string }{
+		{"Global.Read, Unsafe.PointerCast, Global.Write", "Global.Read, Unsafe.PointerCast, Global.Write"},
+		{"Global.Read, Global.Read", "Global{Read,Read}"},
+		{"Family[i32].Read, Family[i32].Write", "Family[i32]{Read,Write}"},
+		{"Family[i32].Read, Family[i64].Write", "Family[i32].Read, Family[i64].Write"},
+		{"Global.Read via Unsafe.PointerCast, Global.Write", "Global.Read via Unsafe.PointerCast, Global.Write"},
+	} {
+		source := "def f() -> i32 can[" + row.input + "]:\n    return 0\n"
+		file, errs := parseSourceFile(t, source)
+		if len(errs) != 0 {
+			t.Fatalf("parse %s: %v", row.input, errs)
+		}
+		want := "def f() -> i32 can[" + row.want + "]:\n    return 0\n"
+		got := unparse.FormatFile(file)
+		if got != want {
+			t.Errorf("format %s:\n%s\nwant:\n%s", row.input, got, want)
+		}
+		reparsed, errs := parseSourceFile(t, got)
+		if len(errs) != 0 {
+			t.Fatalf("reparse %s: %v", got, errs)
+		}
+		if next := unparse.FormatFile(reparsed); next != got {
+			t.Fatalf("unstable formatting %s", got)
+		}
 	}
 }
