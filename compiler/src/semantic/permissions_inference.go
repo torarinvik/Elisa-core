@@ -235,9 +235,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		// nothing ever REQUIRES them, so they must not join the function's inferred
 		// effect row (they would otherwise cascade `can[ComplexFlow]` obligations up
 		// every caller chain — see registerBuiltinPermission's contract for both).
-		if !c.mutableGlobalsOnly {
-			c.addRefs(withoutAcknowledgmentRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)))
-		}
+		c.addRefs(withoutAcknowledgmentRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)))
 		c.collectStmts(n.Body)
 	case *ast.SignalStmt:
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
@@ -533,9 +531,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			})
 			break
 		}
-		if !c.mutableGlobalsOnly {
-			c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
-		}
+		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
 		c.collectExpr(n.Expr)
 	case *ast.MatchExpr:
 		c.collectExpr(n.Value)

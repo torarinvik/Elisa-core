@@ -47,3 +47,15 @@ source order, type specializations and `via` clauses remain distinct; duplicate
 members are preserved. Exact-output and parse/format round-trip regressions pass,
 as do targeted Global diagnostics and the complete parser suite (3.621 s).
 Logs: /tmp/grouped-presentation-tests2.log and /tmp/grouped-parser-full.log on Vast.
+
+Explicit local `can Global` members now also enter the mandatory Global collector
+when the granted operation is unused. This preserves the user's rule that local
+grants contribute tracked caller contracts, without making implicit immutable
+global reads mandatory. Focused tests cover block/inline/grouped/whole-family
+grants, matching and unrelated trusted suppression, transitive calls and inferred
+function values. An actual CLI unused inline Read grant passes before this fix
+and correctly rejects its ungranted caller afterward. The full semantic suite
+with the exact corrective sources and committed runtime snapshot passes (61.330
+s; /tmp/tracked-global-exactsource-suite.log). The evolving runtime migration is
+excluded from this checkpoint: its arena callers still require additional honest
+local grants and are not qualified for installation.

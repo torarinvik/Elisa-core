@@ -43,10 +43,14 @@ func TestMutableGlobalGrantsDefault(t *testing.T) {
 func TestMutableGlobalGrantsTransitiveAndTrusted(t *testing.T) {
 	for _, trusted := range []bool{false, true} {
 		grant := "can Global.Read"
+		relayBody := "    can Global.Read:\n        return reader()"
 		if trusted {
 			grant = "trusted Global.Read"
+			// No effect remains to authorize here. An explicit can would itself
+			// contribute a tracked caller contract even around this pure call.
+			relayBody = "    return reader()"
 		}
-		src := "global mutable hot: i32 = 0\ndef reader() -> i32:\n    " + grant + ":\n        return hot\ndef relay() -> i32:\n    can Global.Read:\n        return reader()\ndef main() -> i32:\n    return relay()\n"
+		src := "global mutable hot: i32 = 0\ndef reader() -> i32:\n    " + grant + ":\n        return hot\ndef relay() -> i32:\n" + relayBody + "\ndef main() -> i32:\n    return relay()\n"
 		result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "transitive.elisa", src, AnalyzeOptions{})
 		errors := strings.Join(result.Errors(), "\n")
 		if trusted {
