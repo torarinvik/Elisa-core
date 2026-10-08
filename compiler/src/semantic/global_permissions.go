@@ -10,7 +10,7 @@ func (a *Analyzer) permissionRefsRequiringLocalGrant(fnType *FuncType) []ast.Per
 	if fnType == nil {
 		return nil
 	}
-	refs := functionPermissionRefs(fnType)
+	refs := a.effectiveFunctionPermissionRefs(fnType)
 	if len(refs) == 0 {
 		return nil
 	}
@@ -238,6 +238,29 @@ func (a *Analyzer) mutableGlobalCallbackRefs(call *ast.CallExpr) []ast.Permissio
 	for _, arg := range call.LoweredArgs() {
 		if callback, ok := a.exprTypes[arg].(*FuncType); ok {
 			refs = append(refs, a.mandatoryGlobalPermissionRefs(callback)...)
+		}
+	}
+	return canonicalizePermissionRefs(refs)
+}
+
+// Returned callback capabilities are separate from execution effects: producing
+// a callback is pure, but invoking it must retain its concrete member row.
+func (a *Analyzer) effectiveFunctionPermissionRefs(fn *FuncType) []ast.PermissionRef {
+	if fn == nil {
+		return nil
+	}
+	refs := append([]ast.PermissionRef(nil), functionPermissionRefs(fn)...)
+	for _, name := range fn.MutableGlobalSourceNames {
+		if source := a.functionTypes[name]; source != nil {
+			refs = append(refs, functionPermissionRefs(source)...)
+		}
+	}
+	if source := a.functionTypes[fn.Name]; source != nil {
+		refs = append(refs, functionPermissionRefs(source)...)
+	}
+	for _, name := range fn.FunctionReturnSourceNames {
+		if factory := a.functionTypes[name]; factory != nil {
+			refs = append(refs, factory.ReturnedFunctionPermissionRefs...)
 		}
 	}
 	return canonicalizePermissionRefs(refs)

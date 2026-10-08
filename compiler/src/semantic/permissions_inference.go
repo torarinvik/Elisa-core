@@ -47,9 +47,14 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 				mutableCollector := permissionEffectCollector{analyzer: a, mutableGlobalsOnly: true, returnType: fnType.Return}
 				mutableCollector.collectStmts(fn.Body)
 				mutableRefs := mutableCollector.refs()
+				returnedGlobalRefs := canonicalizePermissionRefs(mutableCollector.returnedFunctionGlobalRefs)
+				if !samePermissionRefs(fnType.ReturnedFunctionGlobalPermissionRefs, returnedGlobalRefs) {
+					fnType.ReturnedFunctionGlobalPermissionRefs = returnedGlobalRefs
+					changed = true
+				}
 				returnedRefs := canonicalizePermissionRefs(mutableCollector.returnedFunctionRefs)
-				if !samePermissionRefs(fnType.ReturnedFunctionGlobalPermissionRefs, returnedRefs) {
-					fnType.ReturnedFunctionGlobalPermissionRefs = returnedRefs
+				if !samePermissionRefs(fnType.ReturnedFunctionPermissionRefs, returnedRefs) {
+					fnType.ReturnedFunctionPermissionRefs = returnedRefs
 					changed = true
 				}
 				if !samePermissionRefs(fnType.MutableGlobalPermissionRefs, mutableRefs) {
@@ -92,11 +97,12 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 }
 
 type permissionEffectCollector struct {
-	returnedFunctionRefs []ast.PermissionRef
-	analyzer             *Analyzer
-	seen                 []ast.PermissionRef
-	mutableGlobalsOnly   bool
-	returnType           Type
+	returnedFunctionRefs       []ast.PermissionRef
+	returnedFunctionGlobalRefs []ast.PermissionRef
+	analyzer                   *Analyzer
+	seen                       []ast.PermissionRef
+	mutableGlobalsOnly         bool
+	returnType                 Type
 }
 
 func (c *permissionEffectCollector) refs() []ast.PermissionRef {
@@ -199,7 +205,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.ReturnStmt:
 		if _, returnsCallback := c.returnType.(*FuncType); returnsCallback {
 			if callback, ok := c.analyzer.exprTypes[n.Value].(*FuncType); ok {
-				c.returnedFunctionRefs = append(c.returnedFunctionRefs, c.analyzer.mandatoryGlobalPermissionRefs(callback)...)
+				c.returnedFunctionRefs = append(c.returnedFunctionRefs, c.analyzer.effectiveFunctionPermissionRefs(callback)...)
+				c.returnedFunctionGlobalRefs = append(c.returnedFunctionGlobalRefs, c.analyzer.mandatoryGlobalPermissionRefs(callback)...)
 			}
 		}
 		c.addRefs(c.analyzer.mutableGlobalReturnedRefRefs(n.Value, c.returnType))
@@ -377,7 +384,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			if c.mutableGlobalsOnly {
 				c.addRefs(c.analyzer.mandatoryGlobalPermissionRefs(fnType))
 			} else {
-				c.addRefs(functionPermissionRefs(fnType))
+				c.addRefs(c.analyzer.effectiveFunctionPermissionRefs(fnType))
 			}
 			if c.analyzer.enforceUnsafePermissions {
 				if (fnType.Name == "spawn1" || fnType.Name == "spawn_daemon") && len(n.Args) > 1 {
@@ -434,7 +441,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 				if c.mutableGlobalsOnly {
 					c.addRefs(c.analyzer.mandatoryGlobalPermissionRefs(fnType))
 				} else {
-					c.addRefs(functionPermissionRefs(fnType))
+					c.addRefs(c.analyzer.effectiveFunctionPermissionRefs(fnType))
 				}
 			}
 		}

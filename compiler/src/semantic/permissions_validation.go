@@ -691,9 +691,6 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	}
 	mandatoryRefs := a.mandatoryGlobalPermissionRefs(fnType)
 	a.errorOnMissingLocalGrant(pos, "call to "+quoteFactTarget(fnType.Name), mandatoryRefs, granted)
-	if len(fnType.Permissions) == 0 {
-		return
-	}
 	requiredRefs := missingGrantedPermissionRefs(a.permissionRefsRequiringLocalGrant(fnType), a.grantedPermissionRefs(mandatoryRefs))
 	missingRefs := missingGrantedPermissionRefs(requiredRefs, granted)
 	for _, ref := range missingRefs {

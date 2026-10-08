@@ -638,6 +638,7 @@ type FuncType struct {
 	// Retain declaration identities when function-value joins precede the effect fixpoint.
 	MutableGlobalSourceNames []string
 	// Effects of a callback returned by this function, separate from construction effects.
+	ReturnedFunctionPermissionRefs       []ast.PermissionRef
 	ReturnedFunctionGlobalPermissionRefs []ast.PermissionRef
 	// Declaration identities of factories that supplied this function value.
 	FunctionReturnSourceNames []string
