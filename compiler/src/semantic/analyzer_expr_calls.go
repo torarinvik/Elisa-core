@@ -950,7 +950,14 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		return a.namedTypes["void"]
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
-	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+	resultType := a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+	if callback, ok := resultType.(*FuncType); ok {
+		callback = a.cloneFunctionValueType(callback)
+		callback.FunctionReturnSourceNames = mergePermissionFamilies(callback.FunctionReturnSourceNames, []string{ft.Name})
+		callback.FunctionReturnSourceNames = mergePermissionFamilies(callback.FunctionReturnSourceNames, ft.MutableGlobalSourceNames)
+		resultType = callback
+	}
+	return resultType
 }
 
 func (a *Analyzer) safeChainReceiverType(receiverType Type) (Type, bool) {

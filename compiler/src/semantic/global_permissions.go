@@ -193,6 +193,11 @@ func (a *Analyzer) mandatoryGlobalPermissionRefs(fn *FuncType) []ast.PermissionR
 		return nil
 	}
 	refs := append([]ast.PermissionRef(nil), fn.MutableGlobalPermissionRefs...)
+	for _, name := range fn.FunctionReturnSourceNames {
+		if factory := a.functionTypes[name]; factory != nil {
+			refs = append(refs, factory.ReturnedFunctionGlobalPermissionRefs...)
+		}
+	}
 	for _, name := range fn.MutableGlobalSourceNames {
 		if source := a.functionTypes[name]; source != nil {
 			refs = append(refs, source.MutableGlobalPermissionRefs...)
