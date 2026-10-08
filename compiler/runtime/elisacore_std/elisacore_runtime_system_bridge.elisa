@@ -57,7 +57,7 @@ def elisacore_bridge_user_name_byte(slot: int, index: usize) -> u32:
         return '1'.u32()
     return 0.u32()
 
-def elisacore_bridge_userservice_get_initial_user(out_user_id: mutable int&?) -> int:
+def elisacore_bridge_userservice_get_initial_user(out_user_id: mutable int&?) -> int can[Global.Read]:
     ELISACORE_BRIDGE_USER_INVALID_ARGUMENT return if out_user_id == null
     can Global.Read:
         out_user_id <- elisacore_bridge_user_ids[0]
@@ -66,7 +66,7 @@ def elisacore_bridge_userservice_get_initial_user(out_user_id: mutable int&?) ->
 def elisacore_bridge_userservice_get_initial_user_value() -> int:
     return elisacore_bridge_user_ids[0] can Global.Read
 
-def elisacore_bridge_userservice_get_login_user_id_at(index: int) -> int:
+def elisacore_bridge_userservice_get_login_user_id_at(index: int) -> int can[Global.Read]:
     -1 return if index < 0 or index >= ELISACORE_BRIDGE_USER_CAP
     return elisacore_bridge_user_ids[index.usize()] can Global.Read
 
@@ -129,7 +129,7 @@ def elisacore_bridge_userservice_test_push_event(event_kind: u32, user_id: int) 
         elisacore_bridge_user_event_count <- elisacore_bridge_user_event_count + 1
     return ELISACORE_BRIDGE_ORBIS_OK
 
-def elisacore_bridge_systemservice_load_exec(path: mutable u8&?, argv: mutable void&?) -> int:
+def elisacore_bridge_systemservice_load_exec(path: mutable u8&?, argv: mutable void&?) -> int can[Global.Read, Global.Write]:
     _ = argv
     can Global{Read,Write}:
         elisacore_bridge_system_load_exec_calls <- elisacore_bridge_system_load_exec_calls + 1
@@ -137,7 +137,7 @@ def elisacore_bridge_systemservice_load_exec(path: mutable u8&?, argv: mutable v
     ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path[0] == 0.u8()
     return ELISACORE_BRIDGE_ORBIS_OK
 
-def elisacore_bridge_systemservice_receive_event(out_event_type: mutable int&?) -> int:
+def elisacore_bridge_systemservice_receive_event(out_event_type: mutable int&?) -> int can[Global.Read, Global.Write]:
     ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_event_type == null
     can Global{Read,Write}:
         ELISACORE_BRIDGE_SYSTEM_NO_EVENT return if elisacore_bridge_system_event_count == 0
@@ -159,7 +159,7 @@ def elisacore_bridge_systemservice_receive_event_status() -> int:
 def elisacore_bridge_systemservice_receive_event_type_value() -> int:
     return elisacore_bridge_system_last_event_type can Global.Read
 
-def elisacore_bridge_systemservice_get_status_event_count(out_count: mutable int&?) -> int:
+def elisacore_bridge_systemservice_get_status_event_count(out_count: mutable int&?) -> int can[Global.Read]:
     ELISACORE_BRIDGE_SYSTEM_PARAMETER return if out_count == null
     can Global.Read:
         out_count <- elisacore_bridge_system_event_count

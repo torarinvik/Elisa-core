@@ -6,7 +6,7 @@
 # String concatenation
 # ------------------------------------------------------------
 
-def concat2(lhs: cstr?, rhs: cstr?) -> cstr:
+def concat2(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         left: cstr = lhs if lhs != null else ""
         right: cstr = rhs if rhs != null else ""
@@ -37,7 +37,7 @@ def concat2(lhs: cstr?, rhs: cstr?) -> cstr:
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
-def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr:
+def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         left: cstr = lhs if lhs != null else ""
         right: cstr = rhs if rhs != null else ""
@@ -77,7 +77,7 @@ def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr:
 # (count == capacity), so growth-by-push in the caller goes through the
 # caller's own region machinery (arena_realloc copies out of perm).
 
-def ctx_fstr_alloc(total: usize) -> dstr:
+def ctx_fstr_alloc(total: usize) -> dstr can[Global.Read]:
     can Memory.Allocate, Abort.Panic:
         out: mutable dstr = zeroed
         out return if total == 0
@@ -112,7 +112,7 @@ def string_slice_eq(value: cstr?, start: i64, end: i64, other: cstr?) -> int:
 def string_slices_eq(lhs: cstr?, lhs_start: i64, lhs_end: i64, rhs: cstr?, rhs_start: i64, rhs_end: i64) -> int:
     return string_views_eq(sview(lhs, lhs_start, lhs_end), sview(rhs, rhs_start, rhs_end))
 
-def string_slice(value: cstr?, start: i64, end: i64) -> cstr:
+def string_slice(value: cstr?, start: i64, end: i64) -> cstr can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         src: cstr = value if value != null else ""
         len: usize = runtime_strlen(src)
@@ -264,7 +264,7 @@ def string_views_eq(lhs: sview, rhs: sview) -> int:
     
     return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs_len) == 0 else 0
 
-def string_view_copy(view: sview) -> cstr:
+def string_view_copy(view: sview) -> cstr can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         if view.len <= 0:
             can Global{Read,Write}:

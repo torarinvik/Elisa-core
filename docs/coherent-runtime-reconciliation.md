@@ -1,0 +1,11 @@
+# Coherent runtime reconciliation
+
+The compiler runtime and bootstrap-core runtime now share the same eighteen reconciled sources. The merge combines qualified tracked local Global grants from core92190b56 with compiler2694b1dc runtime functionality. Concrete function headers remain optional/inferred; the bodyless Str protocol retains its explicit effect bound.
+
+Preserved functionality includes the sized PackedAoSStore data_cursor/data_end fields and sized allocation/lookup APIs (96-byte layout), ThreadReadiness and poll_ready, completed Release publication/Acquire polling, Atomics.Store capability aliases, and 64 MiB pool-worker stack requests. The two reviewed perm_arena Unsafe.Alias wrappers remain intact. The completion release call retains its tracked PointerCast grant. Five new sized-store allocation calls receive immediate grouped Global grants.
+
+Qualification used private core source3a5e7e3b and CLI /root/work/elisacore-coherent-runtime (SHA25696e1e079d306828170e3ea35479d9c234cb2c5526e9eb5ae6f10a4233215baed). Whole runtime default semantic admission passed, durable /root/work/coherent-runtime-default2.log. Full semantic suite passed59.315s, /root/work/coherent-runtime-semantic-full.log, including bounds, pointer-cast, exact trusted suppression, runtime identity, and ownership regressions. Actual public print caller without Global authority rejected (exit1); matching grouped Read/Write authority passed(exit0), /root/work/coherent-runtime-controls/.
+
+Static byte comparison confirms all eighteen copies identical. ABI markers and readiness/stack changes were checked against the preserved compiler source. This establishes source/default-runtime qualification; no native performance or installation claim is made. Strict Unsafe runtime closure remains unfinished and is deliberately separate from default admission. Full compiler consumer admission was also checked separately; remaining operation-local compiler grants belong to the integration follow-up.
+
+Full compiler269 consumer admission ended with1770 Global grant errors, all in compiler sources; zero runtime, region, cast, or protocol errors remained. Durable log /root/work/coherent-compiler-source2.log. This is an explicit remaining consumer migration gate, not a compiler admission PASS.

@@ -38,7 +38,7 @@ def ctx_packed_store_state_new_variant_sparse_with_side_words(a: mutable Arena&,
         state: mutable heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
         state.side_words <- side_words
         return state_bits
-def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
+def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read]:
     can Memory.Allocate, Abort.Panic:
         store_rows_note() can Global{Read,Write}
         if state_bits == null:
@@ -68,7 +68,7 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
             state.variant_slots.push(slot)
 
         return PackedStoreIndexAllocResult{row: row, index: global_index}
-def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
+def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read]:
     can Memory.Allocate, Abort.Panic:
         store_rows_note() can Global{Read,Write}
         if state_bits == null:

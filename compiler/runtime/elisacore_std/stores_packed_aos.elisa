@@ -24,8 +24,19 @@ struct PackedAoSStore:
     chunk_records: mutable usize
     side_chunks: mutable darray[uintptr]
     side_words: mutable usize
+    # SIZED mode (record_bytes == 0): every record is allocated at its own variant's size
+    # from bump blocks [data_cursor, data_end), and `chunks` holds ADDRESS chunks -- 256
+    # record addresses each -- so a handle resolves through one more load. Used for the
+    # compiler's AST, whose widest variant is ~3x its typical one (stage1 codegen,
+    # packed_ast_sized_records). Fixed-size stores never set these.
+    data_cursor: mutable uintptr = 0
+    data_end: mutable uintptr = 0
 
 const PACKED_AOS_CHUNK_RECORDS: usize = 256
+# Bytes per sized-mode data block, and the slack past its end: a full-row read of a short
+# record near the block's end must stay inside mapped memory.
+const PACKED_AOS_SIZED_BLOCK_BYTES: usize = 65536
+const PACKED_AOS_SIZED_BLOCK_SLACK: usize = 256
 
 def ctx_aos_store_new(a: mutable Arena&, record_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
@@ -36,6 +47,8 @@ def ctx_aos_store_new(a: mutable Arena&, record_bytes: usize) -> mutable heap vo
         state.chunk_records <- PACKED_AOS_CHUNK_RECORDS
         state.side_chunks <- zeroed
         state.side_words <- 0
+        state.data_cursor <- 0
+        state.data_end <- 0
         return state.cast[heap void&]
 
 def ctx_aos_store_new_with_side_words(a: mutable Arena&, record_bytes: usize, side_words: usize) -> mutable heap void&:
@@ -48,7 +61,7 @@ def ctx_aos_store_new_with_side_words(a: mutable Arena&, record_bytes: usize, si
 # Allocate one node record. Returns its (stable) address and its dense index handle. Allocates a new
 # chunk from arena `a` when the current one is full; existing chunks/records never move. The side
 # chunk (cold commons) grows in lockstep so the same handle indexes both arrays.
-def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
+def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult can[Global.Read]:
     can Memory.Allocate, Abort.Panic:
         store_rows_note() can Global{Read,Write}
         state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
@@ -75,9 +88,54 @@ def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedS
 def ctx_aos_store_record(state_bits: mutable void&, index: usize) -> mutable heap void&:
     state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
     chunk_index: usize = index / PACKED_AOS_CHUNK_RECORDS
+    if state.record_bytes == 0:
+        return ctx_aos_store_sized_record(state_bits, index)
     offset_in_chunk: usize = (index - chunk_index * PACKED_AOS_CHUNK_RECORDS) * state.record_bytes
     chunk_base: uintptr = state.chunks[chunk_index]
     return ((chunk_base + offset_in_chunk).cast[mutable heap void&] can Unsafe.PointerCast)
+
+# A SIZED-mode store (record_bytes == 0, see PackedAoSStore).
+def ctx_aos_store_new_sized(a: mutable Arena&) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        return ctx_aos_store_new(a, 0) can Global{Read,Write}
+
+# Resolve a sized-mode handle: its address chunk slot holds the record's address.
+def ctx_aos_store_sized_record(state_bits: mutable void&, index: usize) -> mutable heap void&:
+    can Abort.Panic, Unsafe.PointerCast:
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        chunk_index: usize = index / PACKED_AOS_CHUNK_RECORDS
+        slots: uintptr& = state.chunks[chunk_index].cast[mutable heap u8&].cast[uintptr&]
+        return slots[index - chunk_index * PACKED_AOS_CHUNK_RECORDS].cast[mutable heap void&]
+
+# Allocate one sized-mode record of `record_bytes` (rounded up to 8) and its handle.
+def ctx_aos_store_alloc_sized(a: mutable Arena&, state_bits: mutable void&, record_bytes: usize) -> PackedStoreIndexAllocResult can[Global.Read]:
+    can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+        store_rows_note() can Global{Read,Write}
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        size: usize = (record_bytes + 7) / 8 * 8
+        if state.data_cursor == 0 or state.data_cursor + size > state.data_end:
+            block_bytes: usize = PACKED_AOS_SIZED_BLOCK_BYTES if size <= PACKED_AOS_SIZED_BLOCK_BYTES else size
+            block: heap u8& = (arena_alloc(a, block_bytes + PACKED_AOS_SIZED_BLOCK_SLACK).cast[heap u8&] can Global{Read,Write})
+            state.data_cursor <- block.uintptr()
+            state.data_end <- block.uintptr() + block_bytes
+        row_address: uintptr = state.data_cursor
+        state.data_cursor <- row_address + size
+        chunk_index: usize = state.count / PACKED_AOS_CHUNK_RECORDS
+        if chunk_index >= state.chunks.count:
+            new_chunk: heap u8& = (arena_alloc(a, PACKED_AOS_CHUNK_RECORDS * size_of(uintptr)).cast[heap u8&] can Global{Read,Write})
+            in a:
+                state.chunks.push(new_chunk.uintptr())
+            # The side slots (cold commons, and the AST's cold Pos span) grow in lockstep,
+            # exactly as in ctx_aos_store_alloc.
+            if state.side_words > 0:
+                new_side_chunk: heap u8& = (arena_alloc(a, PACKED_AOS_CHUNK_RECORDS * state.side_words * size_of(uintptr)).cast[heap u8&] can Global{Read,Write})
+                in a:
+                    state.side_chunks.push(new_side_chunk.uintptr())
+        slots: mutable uintptr& = state.chunks[chunk_index].cast[mutable heap u8&].cast[mutable uintptr&]
+        slots[state.count - chunk_index * PACKED_AOS_CHUNK_RECORDS] <- row_address
+        index: usize = state.count
+        state.count <- index + 1
+        return PackedStoreIndexAllocResult{row: row_address.cast[mutable heap void&], index: index.u32()}
 
 # Record the side-tabled common words for the record at `index`. The write is addressed by the
 # node's OWN handle, not "last allocated": a parent's record is allocated before its payload args
@@ -96,6 +154,16 @@ def ctx_aos_store_record_side_words_at(a: mutable Arena&, words: void&, state_bi
         src: uintptr& = words.cast[uintptr&]
         for w in 0..<state.side_words:
             dst[offset_in_chunk + w] <- src[w]
+
+# The address of a record's side slot (`side_words` uintptr words), by its dense index handle.
+# Sized AST stores keep each node's `Pos` span there instead of in the record (stage1 codegen,
+# packed_cold_pos_variant), so a walk that never reads a position never touches it.
+def ctx_aos_store_side_slot(state_bits: mutable void&, index: usize) -> mutable heap void&:
+    can Abort.Panic, Unsafe.PointerCast:
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        chunk_index: usize = index / PACKED_AOS_CHUNK_RECORDS
+        offset: usize = (index - chunk_index * PACKED_AOS_CHUNK_RECORDS) * state.side_words * size_of(uintptr)
+        return (state.side_chunks[chunk_index] + offset).cast[mutable heap void&]
 
 # Read one side-table word for a record by its dense index handle.
 def ctx_aos_store_read_side_word(state_bits: mutable void&, index: u32, word_offset: usize) -> uintptr:

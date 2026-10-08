@@ -203,7 +203,7 @@ def elisa_trace_count() -> u64:
 # SA_SIGINFO handler: (int sig, siginfo_t *info, void *uctx). Reads si_addr from info,
 # prints the faulting address + signal, dumps the recent trace, then restores the default
 # disposition and re-raises so the original crash still happens.
-def elisa_trace_fault_handler(sig: i32, info: uintptr, uctx: uintptr) -> void:
+def elisa_trace_fault_handler(sig: i32, info: uintptr, uctx: uintptr) -> void can[Global.Read]:
     si_addr: mutable uintptr = 0
     if info != 0:
         p: uintptr = info + ELISA_SIGINFO_ADDR_OFFSET_DARWIN.uintptr()
@@ -460,15 +460,15 @@ def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintpt
             debug_trace_overflowed <- true if not (debug_trace_event_count < DEBUG_TRACE_TAPE_CAP)
             debug_trace_event_count <- debug_trace_event_count + 1
 
-def debug_trace_checkpoint(label: cstr) can[Debug.Trace]:
+def debug_trace_checkpoint(label: cstr) can[Debug.Trace, Global.Read, Global.Write]:
     can Debug.Trace:
         debug_trace_record(DEBUG_TRACE_KIND_CHECKPOINT, label, 0, 0, 0) can Global{Read,Write}
 
-def debug_trace_value(label: cstr, value: uintptr) can[Debug.Trace]:
+def debug_trace_value(label: cstr, value: uintptr) can[Debug.Trace, Global.Read, Global.Write]:
     can Debug.Trace:
         debug_trace_record(DEBUG_TRACE_KIND_VALUE, label, value, 0, 0) can Global{Read,Write}
 
-def debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]:
+def debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace, Global.Read, Global.Write]:
     can Debug.Trace:
         debug_trace_record(DEBUG_TRACE_KIND_BOUNDARY, label, a, b, c) can Global{Read,Write}
 

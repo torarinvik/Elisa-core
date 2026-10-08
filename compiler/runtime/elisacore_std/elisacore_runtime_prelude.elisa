@@ -231,7 +231,7 @@ def runtime_strlen(value: cstr?) -> usize:
 # Small string interning
 # ------------------------------------------------------------
 
-def intern_small_string(src: u8&, len: usize) -> heap u8&:
+def intern_small_string(src: u8&, len: usize) -> heap u8& can[Global.Read, Global.Write]:
 	can Memory.Allocate, Abort.Panic:
 		# Conservative baseline after short-string crash investigations:
 		# always allocate+copy and avoid cache-backed return aliases.
@@ -281,7 +281,7 @@ def bool_to_string_into(arena: Arena&, value: int) -> cstr:
 	_ = arena
 	return "True" if value != 0 else "False"
 
-def char_to_string_into(arena: Arena&, value: i64) -> cstr:
+def char_to_string_into(arena: Arena&, value: i64) -> cstr can[Global.Read, Global.Write]:
 	can Memory.Allocate, Abort.Panic:
 		_ = arena
 		text: u8[2]

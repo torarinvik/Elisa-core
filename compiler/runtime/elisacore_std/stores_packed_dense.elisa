@@ -107,7 +107,7 @@ def ctx_packed_store_state_new_with_prefix_and_side_words(a: mutable Arena&, row
         state: mutable heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
         state.side_words <- side_words
         return state_bits
-def ctx_packed_store_alloc_fixed_tagged_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreAllocResult:
+def ctx_packed_store_alloc_fixed_tagged_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreAllocResult can[Global.Read]:
     can Memory.Allocate, Abort.Panic:
         store_rows_note() can Global{Read,Write}
         result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits) can Global{Read,Write}
@@ -120,7 +120,7 @@ def ctx_packed_store_alloc_fixed_tagged_result(a: mutable Arena&, state_bits: mu
         in a:
             state.tags.push(tag)
         return result
-def ctx_packed_store_alloc_fixed_tagged_index_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
+def ctx_packed_store_alloc_fixed_tagged_index_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult can[Global.Read]:
     can Memory.Allocate, Abort.Panic:
         store_rows_note() can Global{Read,Write}
         result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_tagged_result(a, state_bits, tag) can Global{Read,Write}

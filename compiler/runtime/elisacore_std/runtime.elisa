@@ -6,8 +6,12 @@
 # Type-to-string public API
 # ------------------------------------------------------------
 
+# perm_arena is lent while the callee's small-string path allocates from it by name
+# (intern_small_string -> alloc_perm): a deliberate alias the arena API is built around
+# (int_to_string_into compares `arena == &perm_arena`), so the exclusivity check is waived.
 def int_to_string(value: i64) -> cstr:
-    return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
+    trusted Unsafe.Alias:
+        return int_to_string_into(&perm_arena, value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
 
 def int_to_string_scratch(value: i64) -> cstr:
     return int_to_string_into(&scratch_arena, value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
@@ -18,13 +22,15 @@ def bool_to_string(value: int) -> cstr:
 def bool_to_string_scratch(value: int) -> cstr:
     return bool_to_string_into(&scratch_arena, value) can Global.Read
 
+# The same deliberate perm_arena alias as int_to_string (char_to_string_into ignores ARENA).
 def char_to_string(value: i64) -> cstr:
-    return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
+    trusted Unsafe.Alias:
+        return char_to_string_into(&perm_arena, value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
 def char_to_string_scratch(value: i64) -> cstr:
     return char_to_string_into(&scratch_arena, value) can Memory.Allocate, Abort.Panic, Global{Read,Write}
 
-def uint_to_string_scratch(value: u64) -> cstr:
+def uint_to_string_scratch(value: u64) -> cstr can[Global.Read]:
     can Memory.Allocate, Console.Format, Abort.Panic:
         len: int = snprintf(null, 0, "%llu", value)
         panic("uint_to_string_scratch: snprintf failed") if len < 0
@@ -35,7 +41,7 @@ def uint_to_string_scratch(value: u64) -> cstr:
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
-def float_to_string_scratch(value: f64) -> cstr:
+def float_to_string_scratch(value: f64) -> cstr can[Global.Read]:
     can Memory.Allocate, Console.Format, Abort.Panic:
         len: int = snprintf(null, 0, "%g", value)
         panic("float_to_string_scratch: snprintf failed") if len < 0
@@ -197,6 +203,8 @@ protocol Index:
     type Elem
     def __index__(self: Self&, key: Key) -> Elem&
 
+# Primitive formatting implementations use retained runtime scratch buffers.
+# Expose that state authority in the protocol instead of hiding the access.
 protocol Str:
     def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}]
 
