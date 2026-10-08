@@ -118,7 +118,7 @@ func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []a
 	// explicitly grants the corresponding Unsafe permission (the "guaranteed
 	// memory safety unless you explicitly opt out" contract, docs/26). Effect
 	// authority (Abort/Memory/...) stays a warning.
-	if a.enforceUnsafePermissions && allUnsafeFamilies(missing) {
+	if a.enforceUnsafePermissions && containsUnsafeFamily(missing) {
 		a.errorf(pos, "%s", msg)
 		return
 	}
@@ -153,18 +153,15 @@ var runtimeStdBaseNames = map[string]bool{
 	"test.elisa": true,
 }
 
-// allUnsafeFamilies reports whether every missing permission family is the
-// Unsafe family, i.e. the missing grants are all memory-safety opt-outs.
-func allUnsafeFamilies(families []string) bool {
-	if len(families) == 0 {
-		return false
-	}
+// containsUnsafeFamily keeps strict Unsafe enforcement independent of other
+// advisory effect families present in the same operation or call.
+func containsUnsafeFamily(families []string) bool {
 	for _, family := range families {
-		if family != "Unsafe" {
-			return false
+		if family == "Unsafe" {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func (a *Analyzer) warnOnRedundantLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
@@ -697,9 +694,6 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if len(fnType.Permissions) == 0 {
 		return
 	}
-	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
-		return
-	}
 	requiredRefs := missingGrantedPermissionRefs(a.permissionRefsRequiringLocalGrant(fnType), a.grantedPermissionRefs(mandatoryRefs))
 	missingRefs := missingGrantedPermissionRefs(requiredRefs, granted)
 	for _, ref := range missingRefs {
@@ -718,6 +712,13 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	}
 	missing := missingGrantedPermissionFamilies(requiredRefs, granted)
 	if len(missing) == 0 {
+		return
+	}
+	if a.enforceUnsafePermissions && containsUnsafeFamily(missing) {
+		a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(requiredRefs, missing)))
+		return
+	}
+	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
 	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(requiredRefs, missing)))
