@@ -603,7 +603,16 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				expectedType = specializedType
 				specializedParamTypes[i] = specializedType
 			}
-			if !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) && !a.assignableArenaRegionParam(ft.Params[i], argType, orderedArgs[i], regionParams) {
+			// A worker that reads a packed store submitted to a pool captures the submitting
+			// scope's store (analyzer_submit_store_capture.go): check it by its explicit signature.
+			storeCapture := false
+			if stripped, ok := a.acceptStoreCapturingSubmit(ft.Name, i, expectedType, argType); ok {
+				expectedType = stripped
+				specializedParamTypes[i] = stripped
+				storeCapture = true
+				a.checkStoreCapturingSubmitWorker(orderedArgs[i], argType.(*FuncType))
+			}
+			if !storeCapture && !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) && !a.assignableArenaRegionParam(ft.Params[i], argType, orderedArgs[i], regionParams) {
 				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
 				if !writableRefAssignableIgnoringMutability(expectedType, argType) || !a.reportRebindableReadOnlyRefNote(orderedArgs[i].Pos(), orderedArgs[i]) {
 					a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
