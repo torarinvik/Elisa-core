@@ -689,6 +689,13 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 	implicit := len(decl.LmutThreadSlots) != 0 || (returnsValue && !storeFlowEndsInReturn(decl.Body))
 	// A scalar result carries no reference: nothing a parameter holds reaches the caller through it.
 	scalarResult := len(decl.LmutThreadSlots) == 0 && decl.ReturnType != nil && storeFlowScalarTypeExpr(decl.ReturnType)
+	if len(decl.LmutThreadSlots) == 0 {
+		if sym := a.funcDeclSymbols[decl]; sym != nil {
+			if ft, ok := sym.Type.(*FuncType); ok && ft != nil && ft.Return != nil {
+				scalarResult = storeFlowPointerFreeReturn(ft.Return, map[Type]bool{})
+			}
+		}
+	}
 	for i, pi := range decl.Params {
 		reach[i] = make([]bool, n)
 		iPure := c.isPure(pi.Name)

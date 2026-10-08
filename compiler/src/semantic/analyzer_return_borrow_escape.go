@@ -279,6 +279,8 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return a.returnBorrowFlowForExpr(n.Inner, aliases, active, localBindings)
+	case *ast.CanExpr:
+		return a.returnBorrowFlowForExpr(n.Expr, aliases, active, localBindings)
 	case *ast.MoveExpr:
 		return a.returnBorrowFlowForExpr(n.Operand, aliases, active, localBindings)
 	case *ast.CastExpr:
