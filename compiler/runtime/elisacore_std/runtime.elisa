@@ -206,7 +206,7 @@ protocol Index:
 # Primitive formatting implementations use retained runtime scratch buffers.
 # Expose that state authority in the protocol instead of hiding the access.
 protocol Str:
-    def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}]
+    def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]
 
 impl Str for cstr:
     def __cast__(self: cstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
@@ -217,68 +217,84 @@ impl Str for bool:
         return "true" if self else "false"
 
 impl Str for sview:
-    def __cast__(self: sview) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return string_view_copy(self) can Global{Read,Write}
+    def __cast__(self: sview) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Memory.Allocate, Atomics{Exchange,Store}:
+            return string_view_copy(self) can Global{Read,Write}
 
 impl Str for dstr:
-    def __cast__(self: dstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return string_view_copy(bytes_view(self)) can Global{Read,Write}
+    def __cast__(self: dstr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Memory.Allocate, Atomics{Exchange,Store}:
+            return string_view_copy(bytes_view(self)) can Global{Read,Write}
 
 impl Str for char:
-    def __cast__(self: char) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return char_to_string_scratch(self.i64()) can Global{Read,Write}
+    def __cast__(self: char) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Memory.Allocate, Atomics{Exchange,Store}:
+            return char_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for int:
-    def __cast__(self: int) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64()) can Global{Read,Write}
+    def __cast__(self: int) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for i64:
-    def __cast__(self: i64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self) can Global{Read,Write}
+    def __cast__(self: i64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return int_to_string_scratch(self) can Global{Read,Write}
 
 impl Str for i32:
-    def __cast__(self: i32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64()) can Global{Read,Write}
+    def __cast__(self: i32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for i16:
-    def __cast__(self: i16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64()) can Global{Read,Write}
+    def __cast__(self: i16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for i8:
-    def __cast__(self: i8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return int_to_string_scratch(self.i64()) can Global{Read,Write}
+    def __cast__(self: i8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return int_to_string_scratch(self.i64()) can Global{Read,Write}
 
 impl Str for u32:
-    def __cast__(self: u32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
+    def __cast__(self: u32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for u16:
-    def __cast__(self: u16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
+    def __cast__(self: u16) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for u8:
-    def __cast__(self: u8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
+    def __cast__(self: u8) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for u64:
-    def __cast__(self: u64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self) can Global{Read,Write}
+    def __cast__(self: u64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return uint_to_string_scratch(self) can Global{Read,Write}
 
 impl Str for usize:
-    def __cast__(self: usize) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
+    def __cast__(self: usize) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for uintptr:
-    def __cast__(self: uintptr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return uint_to_string_scratch(self.u64()) can Global{Read,Write}
+    def __cast__(self: uintptr) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return uint_to_string_scratch(self.u64()) can Global{Read,Write}
 
 impl Str for f64:
-    def __cast__(self: f64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return float_to_string_scratch(self) can Global{Read,Write}
+    def __cast__(self: f64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return float_to_string_scratch(self) can Global{Read,Write}
 
 impl Str for f32:
-    def __cast__(self: f32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
-        return float_to_string_scratch(self.f64()) can Global{Read,Write}
+    def __cast__(self: f32) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}]:
+        can Abort.Panic, Console.Format, Memory.Allocate, Atomics{Exchange,Store}:
+            return float_to_string_scratch(self.f64()) can Global{Read,Write}
 
 def printr(value: cstr) -> void can[Console.Write]:
     length: usize = runtime_strlen(value)
@@ -289,12 +305,12 @@ def print(value: cstr) -> void can[Console.Write]:
     printr(value) can Console.Write
     _ = runtime_write(FileDescriptor.Output, "\n".cast[void&], 1.usize()) can Console.Write
 
-def printr[T: Str](value: T) -> void can[Memory.Allocate, Console{Format,Write}, Abort.Panic]:
-    converted: cstr = T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
+def printr[T: Str](value: T) -> void can[Memory.Allocate, Console{Format,Write}, Abort.Panic, Atomics{Exchange,Store}]:
+    converted: cstr = value.cstr() can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     printr(converted) can Console.Write
 
-def print[T: Str](value: T) -> void can[Memory.Allocate, Console{Format,Write}, Abort.Panic]:
-    converted: cstr = T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}
+def print[T: Str](value: T) -> void can[Memory.Allocate, Console{Format,Write}, Abort.Panic, Atomics{Exchange,Store}]:
+    converted: cstr = value.cstr() can Memory.Allocate, Console.Format, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(converted) can Console.Write
 
 def printr(value: dstr) -> void can[Console.Write]:

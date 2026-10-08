@@ -17,7 +17,6 @@ def reader() -> i32:
 	cases := []struct{ name, factory, invoke, missing string }{
 		{"factory_alias", "def factory() -> fn() -> i32 can[Global.Read]:\n    return writer\n", "make = factory\n    f = make()\n    return f() can Global.Read", "Global.Write"},
 		{"type_alias", "type Action = fn() -> i32 can[Global.Read]\ndef factory() -> Action:\n    return writer\n", "f = factory()\n    return f() can Global.Read", "Global.Write"},
-		{"trusted_creation", "def factory() -> fn() -> i32 can[Global.Read]:\n    trusted Global.Write:\n        return writer\n", "f = factory()\n    return f() can Global.Read", "Global.Write"},
 		{"direct", "def factory() -> fn() -> i32 can[Global.Read]:\n    return writer\n", "f = factory()\n    return f() can Global.Read", "Global.Write"},
 		{"nested", "def factory() -> fn() -> i32 can[Global.Read]:\n    return writer\ndef relay() -> fn() -> i32 can[Global.Read]:\n    return factory()\n", "f = relay()\n    return f() can Global.Read", "Global.Write"},
 		{"branch", "def factory(flag: bool) -> fn() -> i32 can[Global.Read]:\n    if flag:\n        return writer\n    return reader\n", "f = factory(true)\n    return f() can Global.Read", "Global.Write"},
@@ -42,5 +41,35 @@ def reader() -> i32:
 				t.Fatalf("Both invocation must pass with pure construction: %s", errors)
 			}
 		})
+	}
+}
+
+func TestTrustedGlobalEffectOnReturnedFunctionRemainsVisibleAtInvocation(t *testing.T) {
+	src := `global mutable hot: i32 = 0
+def writer() -> i32:
+    can Global.Write:
+        hot <- 3
+    return 0
+def factory() -> fn() -> i32 can[Global.Read]:
+    trusted Global.Write:
+        return writer
+def main() -> i32:
+    f = factory()
+    return f() can Global.Read
+`
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "trusted_returned_global.elisa", src, AnalyzeOptions{})
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, `call to "func" requires can[Global]`) {
+		t.Fatalf("trusted Global.Write must not hide a returned function's effect at invocation, got:\n%s", errors)
+	}
+	positive := strings.Replace(src, `def main() -> i32:
+    f = factory()
+    return f() can Global.Read`, `def main() -> i32:
+    can Global{Read,Write}:
+        f = factory()
+        return f()`, 1)
+	result = analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "trusted_returned_global_granted.elisa", positive, AnalyzeOptions{})
+	if errors = strings.Join(result.Errors(), "\n"); errors != "" {
+		t.Fatalf("explicit Global grants should authorize factory and callback effects, got:\n%s", errors)
 	}
 }

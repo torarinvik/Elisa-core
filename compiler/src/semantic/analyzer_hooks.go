@@ -206,6 +206,44 @@ func (a *Analyzer) lookupVisibleCastHook(source Type, target Type) (*Symbol, boo
 	return nil, false
 }
 
+// boundTypeParamCastCall resolves a target-named postfix cast such as
+// `value.cstr()` through the protocol bound on a generic source type. The
+// requested target remains authoritative: a bound `__cast__` method is used
+// only when its return type matches the named target. The returned static
+// protocol call is analyzed and lowered by the ordinary protocol dispatch
+// path, which preserves its permission row and monomorphizes the impl method.
+func (a *Analyzer) boundTypeParamCastCall(cast *ast.CastExpr, source, target Type) (*ast.CallExpr, bool) {
+	if a == nil || cast == nil || cast.Operand == nil {
+		return nil, false
+	}
+	typeParam, ok := StripAggregateStateType(source).(*TypeParamType)
+	if !ok || typeParam == nil || typeParam.Name == "" {
+		return nil, false
+	}
+	iface, ok := a.lookupTypeParamInterface(typeParam.Name)
+	if !ok || iface == nil {
+		return nil, false
+	}
+	method, ok := iface.Methods["__cast__"]
+	if !ok || method == nil || method.Signature == nil || len(method.Signature.Params) != 1 {
+		return nil, false
+	}
+	signature := a.specializeInterfaceMethodSignature(method.Signature, source)
+	if signature == nil || signature.Return == nil || !SameType(signature.Return, target) {
+		return nil, false
+	}
+	call := &ast.CallExpr{
+		Position: cast.Position,
+		Func: &ast.FieldExpr{
+			Position: cast.Position,
+			Object:   &ast.Ident{Position: cast.Position, Name: typeParam.Name},
+			Field:    "__cast__",
+		},
+		Args: []ast.Expr{cast.Operand},
+	}
+	return call, true
+}
+
 // isSelfCastHook reports whether hookSym is the `__cast__` hook currently being
 // analyzed. Inside its own body, a value conversion that would resolve back to the
 // hook (e.g. `op.i64()` in `__cast__(op: LuaBinaryOp) -> i64`) must fall through to

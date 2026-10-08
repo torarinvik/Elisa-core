@@ -19,7 +19,7 @@ func TestMutableGlobalGrantsDefault(t *testing.T) {
 		{"write_granted", "can Global.Write:\n    hot <- 1\nreturn 0", ""},
 		{"compound_wrong", "can Global.Write:\n    hot += 1\nreturn 0", "mutable global read"},
 		{"grant_scope_ends", "can Global{Read, Write}:\n    hot += 1\nreturn hot", "mutable global read"},
-		{"trusted_read", "trusted Global.Read:\n    return hot", ""},
+		{"trusted_read", "trusted Global.Read:\n    return hot", "mutable global read"},
 		{"trusted_member", "trusted Global.Read:\n    hot += 1\nreturn 0", "mutable global write"},
 		{"shadow", "hot: mutable i32 = 2\nhot <- 3\nreturn hot", ""},
 		{"read_before_shadow", "saved = hot\nhot: mutable i32 = 2\nreturn saved + hot", "mutable global read"},
@@ -53,12 +53,11 @@ func TestMutableGlobalGrantsTransitiveAndTrusted(t *testing.T) {
 		src := "global mutable hot: i32 = 0\ndef reader() -> i32:\n    " + grant + ":\n        return hot\ndef relay() -> i32:\n" + relayBody + "\ndef main() -> i32:\n    return relay()\n"
 		result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "transitive.elisa", src, AnalyzeOptions{})
 		errors := strings.Join(result.Errors(), "\n")
-		if trusted {
-			if errors != "" {
-				t.Fatalf("trusted reader must discharge mutable global propagation:\n%s", errors)
-			}
-		} else if !strings.Contains(errors, `call to "relay"`) {
+		if !strings.Contains(errors, `call to "relay"`) {
 			t.Fatalf("missing transitive grant error:\n%s", errors)
+		}
+		if trusted && !strings.Contains(errors, "mutable global read requires") {
+			t.Fatalf("trusted Global.Read must not satisfy the reader's local grant:\n%s", errors)
 		}
 	}
 }
@@ -101,7 +100,7 @@ def borrow() -> mutable i32&:
 def borrow() -> i32&:
     trusted Global.Read:
         return &hot
-`, ""},
+`, "mutable global read"},
 		{"generic_transitive", `global mutable hot: i32 = 0
 def reader[T](value: T) -> i32:
     can Global.Read:
@@ -160,7 +159,7 @@ def set(value: mutable i32&):
 def store():
     trusted Global{Read, Write}:
         set(&hot)
-`, ""},
+`, "mutable global write"},
 		{"nested_shadow", `global mutable hot: i32 = 0
 def reader() -> i32:
     if true:

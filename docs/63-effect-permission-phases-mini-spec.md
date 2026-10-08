@@ -2,17 +2,21 @@
 
 This specifies the remaining effect-system work agreed with the design discussion:
 member-granular permission sets with a **subsumption lattice**, **checked `as` casts**
-(plus the existing `trusted` drop), and **set-polymorphism** for higher-order functions.
+(plus the existing `trusted Unsafe.*` drop), and **set-polymorphism** for higher-order functions.
 It is the effect-side counterpart to the error-union work (`docs/62`), and deliberately
 reuses one set lattice for both.
+
+Current rule: `trusted` drops only `Unsafe.*` tracking. All non-Unsafe effects must use
+`can` and remain visible in inferred caller effects. This supersedes older broad descriptions
+of `trusted` as a general effect drop.
 
 ## Implementation status
 
 - ✅ **Phase 3a** — member-brace sugar (`can[Disk{Read,Write}]`, `error[E{A,B}]`).
 - ✅ **Phase 3b** — subsumption-declaring families (`permission IO: includes Disk`),
   transitive grant expansion + unknown/cycle validation.
-- ✅ **Phase 4** — checked `can X as Y:` cast (sound iff `Y ≥ X`); `trusted X:` drop
-  was already implemented.
+- ✅ **Phase 4** — checked `can X as Y:` cast (sound iff `Y ≥ X`); `trusted Unsafe.X:` drops
+  only `Unsafe.*` tracking and cannot erase other effect families.
 - 🔬 **Phase 5** — set-polymorphism. **Measured 2026-06-02: ~80% already implemented.**
   Permission generic params (`def f[permission E](...)`), function types with `can[E]` /
   `error[R]` annotations (`func(T) -> U can[E] error[R]`), call-site inference/binding of
@@ -21,7 +25,7 @@ reuses one set lattice for both.
   earlier "fails to parse" note used the wrong syntax (`(T) -> U` / `[perm E]` instead of
   `func(T) -> U` / `[permission E]`). Two genuine deltas remained:
     - ✅ **Phase 5a — `any`/⊤ escape** (`can[any]`): a `can[any]` grant satisfies every
-      requirement; a `can[any]` requirement is satisfied only by `any` (or `trusted`); `any`
+      requirement; a `can[any]` requirement is satisfied only by `any`; `any`
       is reserved (cannot be declared, no member access). Implemented + tested.
     - ✅ **Phase 5b — generic *error*-set param** (`[errorset R]`): DONE. A combinator
       `def f[errorset R](g: func() -> T error[R]) -> T error[R]` propagates the callback's
@@ -39,10 +43,9 @@ Probed via `elisacore -emit semantic`:
 
 - ✅ **Dotted member granularity** — `can[Disk.Read, Disk.Write]` parses + analyzes.
   Member-level effects already exist via the dotted form (`Perm.Member`).
-- ✅ **`trusted X:` drop** — `trusted Disk.Write:` analyzes and drops the effect from the
-  signature. **Phase-4 "drop" is already implemented** (it is the existing `trusted` block,
-  e.g. `trusted Unsafe.UncheckedIndex:`). No work needed beyond making it the canonical
-  drop spelling.
+- ✅ **`trusted Unsafe.X:` drop** — `trusted Unsafe.UncheckedIndex:` drops only the matching
+  Unsafe tracking from the inferred signature. A non-Unsafe effect such as `Disk.Write` must
+  use `can` and remains visible to callers.
 - ✅ `permission Name:` families with members; `can X:` grant blocks.
 
 So Phases 3–5 are deltas on a partially-built system, not a from-scratch build.
@@ -55,7 +58,7 @@ Effects and errors use the **same set lattice**, mirror variance:
 |---|---|---|
 | Direction | **required** (contravariant) | **produced** (covariant) |
 | Sound `as` direction | widen to a **superset** capability (Y ⊇ X) | (errors don't use `as`; map via `try/match`) |
-| Drop | `trusted X:` | n/a (affine — must consume) |
+| Drop | `trusted Unsafe.X:` (Unsafe tracking only) | n/a (affine — must consume) |
 | Handle/discharge | grant block / propagate | `try` / `match` / `catch` |
 
 A capability/error set is a set of `(Family, Member)` pairs; `Family` bare = all members.
@@ -81,7 +84,7 @@ permission IO:
     Spawn                            # ...and may add its own members
 
 permission Opaque:
-    pass                             # opaque: subsumes nothing; every `as Opaque` is trusted
+    pass                             # opaque: subsumes nothing; non-empty `as Opaque` casts fail
 ```
 - Grammar: a family body may contain `includes <Family> (, <Family>)*` lines in addition
   to member declarations.
@@ -99,16 +102,17 @@ can Disk{Read, Write} as IO:    # CHECKED: legal iff IO ≥ Disk{Read,Write}; su
     ...
 can Disk{Read, Write} as Disk:  # CHECKED: a family subsumes its members (always legal)
     ...
-trusted Disk.Write:             # DROP: not surfaced; the trust marker (already implemented)
+trusted Unsafe.PointerCast:     # DROP: Unsafe tracking only; non-Unsafe effects still propagate
     ...
 ```
 
 **The one rule:** `X as Y` is sound iff `Y ≥ X` in the lattice (Phase 3b). Then it needs no
 trust and the compiler verifies it. If `Y ⊉ X`, it is **not expressible** — there is no
 `trusted … as`; to expose `X` as an unrelated `Y` you must declare `Y: includes X`, which
-makes the cast checked. `trusted X:` (drop) is the only trust operation. So:
+makes the cast checked. `trusted Unsafe.X:` is the only trust operation and drops only Unsafe
+tracking; non-Unsafe capabilities cannot be dropped this way. So:
 - `as` = checked-subsumption ONLY.
-- `trusted` = drop ONLY.
+- `trusted Unsafe.X:` = drop ONLY that Unsafe tracking; all other effects remain tracked.
 - No `as _`, no trusted-casts.
 
 Grammar: extend the `can <set>` grant-block header with an optional `as <Family>`.
@@ -169,8 +173,8 @@ where a rushed change risks unsound subsumption or inference loops.
 
 - Parser: brace sugar expands to dotted (both `can`/`error`); `permission … includes …`
   parses; grant-block `as Y` parses; function-type `(T)->U can[E] error[R]` parses.
-- Semantic: `as Y` accepted iff `Y ≥ X`, rejected otherwise (suggest `includes` or `trusted`);
-  `includes` cycles rejected; `trusted X:` drops X from the inferred set; `∀E` instantiation
+- Semantic: `as Y` accepted iff `Y ≥ X`, rejected otherwise (declare a valid `includes` relation);
+  `includes` cycles rejected; `trusted Unsafe.X:` drops only Unsafe tracking; `∀E` instantiation
   unifies to the callee's concrete set; `any` erases.
 - Blast radius: re-analyze the emulator codebase after each phase (expect 0 new errors for
   sugar; the lattice may surface real over-/under-declared `can[…]` — audit those).

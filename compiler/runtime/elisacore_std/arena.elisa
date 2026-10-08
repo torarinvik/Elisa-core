@@ -361,7 +361,7 @@ global mutable __elisa_free_hint: ArenaFreeHint = ArenaFreeHint{owner: 0.uintptr
 @internal
 def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
     result: mutable heap Region&? = null
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache can Global{Read,Write}
         reuse_previous: mutable heap Region&? = null
@@ -387,59 +387,59 @@ def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap
                 break
             reuse_previous <- reuse_cursor
             reuse_cursor <- reuse_cursor.next
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
 @internal
 def arena_free_hint_get(owner: uintptr) -> mutable heap Region&?:
     result: mutable heap Region&? = null
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: ArenaFreeHint& = &__elisa_free_hint can Global.Read
         result <- hint.region if hint.owner == owner
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
 @internal
 def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?):
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
         hint.owner <- owner
         hint.region <- region
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?):
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
         hint.region <- region if hint.owner == owner
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_free_hint_clear(owner: uintptr):
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
         if hint.owner == owner:
             hint.owner <- 0.uintptr()
             hint.region <- null
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: mutable heap Region&?):
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
         if hint.owner == child and child_region != null:
             hint.owner <- parent
             hint.region <- child_region
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         # A reclaimed span stays inside its own arena's region and is released with
         # that arena, so it must not consume the parked-region budget: charging it
@@ -448,7 +448,7 @@ def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
         hint.owner <- owner
         hint.region <- region
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_region_cache_try_park(r: heap Region&) -> bool:
@@ -458,11 +458,11 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
             panic("arena cursor exceeds region capacity")
 
         room: mutable bool = false
-        __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
         trusted Unsafe.MutableGlobal:
             cache: ArenaRegionCache& = &__elisa_region_cache can Global.Read
             room <- cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES
-        __elisa_arena_cache_lock_release() can Global{Read,Write}
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
         false return if not room
 
         # Zero before publishing the block in the shared list. The region is still
@@ -474,7 +474,7 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
                 _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
 
         parked_ok: mutable bool = false
-        __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
         trusted Unsafe.MutableGlobal:
             cache: mutable ArenaRegionCache& = &__elisa_region_cache can Global{Read,Write}
             if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
@@ -484,7 +484,7 @@ def arena_region_cache_try_park(r: heap Region&) -> bool:
                     cache.slot <- parked
                 cache.reclaimed_spans <- cache.reclaimed_spans + 1
                 parked_ok <- true
-        __elisa_arena_cache_lock_release() can Global{Read,Write}
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
         return parked_ok
 
 # Largest region the cache will park, in SLOTS (uintptr-sized): 128Ki slots = 1 MiB of
@@ -513,7 +513,7 @@ global mutable __elisa_reserve_region_cache: ArenaRegionCache = ArenaRegionCache
 @internal
 def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
     result: mutable heap Region&? = null
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         reuse_cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache can Global{Read,Write}
         reuse_previous: mutable heap Region&? = null
@@ -539,7 +539,7 @@ def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable hea
                 break
             reuse_previous <- reuse_cursor
             reuse_cursor <- reuse_cursor.next
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
 @internal
@@ -551,11 +551,11 @@ def arena_reserve_cache_try_park(r: heap Region&) -> bool:
         false return if r.count > RESERVE_CACHE_MAX_USED_SLOTS
 
         room: mutable bool = false
-        __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
         trusted Unsafe.MutableGlobal:
             cache: ArenaRegionCache& = &__elisa_reserve_region_cache can Global.Read
             room <- cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES
-        __elisa_arena_cache_lock_release() can Global{Read,Write}
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
         false return if not room
 
         # Same zeroing contract as the small list: a fresh anonymous mmap is kernel-zeroed.
@@ -565,7 +565,7 @@ def arena_reserve_cache_try_park(r: heap Region&) -> bool:
                 _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
 
         parked_ok: mutable bool = false
-        __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+        __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
         trusted Unsafe.MutableGlobal:
             cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache can Global{Read,Write}
             if cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES:
@@ -575,7 +575,7 @@ def arena_reserve_cache_try_park(r: heap Region&) -> bool:
                     cache.slot <- parked
                 cache.reclaimed_spans <- cache.reclaimed_spans + 1
                 parked_ok <- true
-        __elisa_arena_cache_lock_release() can Global{Read,Write}
+        __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
         return parked_ok
 
 @internal
@@ -1663,14 +1663,14 @@ def collection_stack_memo_put(a: Arena&, r: mutable heap Region&):
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
     slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot] can Global{Read,Write}
         entry.table <- key
         entry.region <- r
         entry.arena <- arena_key
         entry.begin <- begin_key
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 # The memoised stack whose data base is `key` in arena `a`, or null.
 @internal
@@ -1681,12 +1681,12 @@ def collection_stack_memo_get(a: Arena&, key: uintptr) -> mutable heap Region&?:
     begin_key: uintptr = collection_arena_begin_addr(a)
     return result if begin_key == 0.uintptr()
     slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot] can Global.Read
         if entry.table == key and entry.arena == arena_key and entry.begin == begin_key:
             result <- entry.region
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
 # Drop `r` from the stack memo. Called for every collection-tagged region before it is
@@ -1696,7 +1696,7 @@ def collection_stack_memo_forget(r: heap Region&):
     key: uintptr = collection_region_table_addr(r)
     region_key: uintptr = collection_region_addr(r)
     slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot] can Global{Read,Write}
         held: heap Region&? = entry.region
@@ -1705,7 +1705,7 @@ def collection_stack_memo_forget(r: heap Region&):
             entry.region <- null
             entry.arena <- 0.uintptr()
             entry.begin <- 0.uintptr()
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def collection_arena_memo_last_table(a: Arena&) -> uintptr:
@@ -1713,12 +1713,12 @@ def collection_arena_memo_last_table(a: Arena&) -> uintptr:
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global.Read
         if entry.arena == arena_key and entry.begin == begin_key:
             result <- entry.last_table
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
 @internal
@@ -1727,12 +1727,12 @@ def collection_arena_memo_no_pooled(a: Arena&) -> bool:
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global.Read
         if entry.arena == arena_key and entry.begin == begin_key:
             result <- entry.no_pooled
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
 # Update `a`'s arena memo: `last_table` when non-zero, and the no-pooled hint.
@@ -1742,7 +1742,7 @@ def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool):
     begin_key: uintptr = collection_arena_begin_addr(a)
     return if begin_key == 0.uintptr()
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global{Read,Write}
         if entry.arena != arena_key or entry.begin != begin_key:
@@ -1751,18 +1751,18 @@ def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool):
             entry.last_table <- 0.uintptr()
         entry.last_table <- last_table if last_table != 0.uintptr()
         entry.no_pooled <- no_pooled
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 # Reset/rewind pool every stack of `a`: the no-pooled hint no longer holds.
 @internal
 def collection_arena_memo_pooled(a: Arena&):
     arena_key: uintptr = collection_arena_addr(a)
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
-    __elisa_arena_cache_lock_acquire() can Global{Read,Write}
+    __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global{Read,Write}
         entry.no_pooled <- false if entry.arena == arena_key
-    __elisa_arena_cache_lock_release() can Global{Read,Write}
+    __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 # The table a stack holds: its data base.
 def collection_stack_table(r: heap Region&) -> mutable heap void&:

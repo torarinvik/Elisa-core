@@ -158,9 +158,11 @@ extern raw_pointer_cast() -> i64 can[Unsafe.PointerCast]
 def build() -> i64:
     can Unsafe.PointerCast:
         return raw_pointer_cast()
+def caller() -> i64:
+    return build()
 `)
 	all := allDiagnostics(result)
-	if strings.Contains(all, `raw_pointer_cast`) || strings.Contains(all, `explicit local effect grant`) {
+	if strings.Contains(all, `call to "raw_pointer_cast"`) {
 		t.Fatalf("expected explicit unsafe API grant to satisfy local call, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("build")
@@ -173,6 +175,9 @@ def build() -> i64:
 	}
 	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Unsafe.PointerCast]" {
 		t.Fatalf("expected ordinary can block to infer unsafe caller permission, got %q", got)
+	}
+	if !strings.Contains(all, `call to "build" requires can[Unsafe]`) {
+		t.Fatalf("expected caller to need the propagated Unsafe grant, got:\n%s", all)
 	}
 }
 
@@ -578,17 +583,19 @@ def read_counter() -> int:
 	}
 }
 
-func TestTrustedGlobalReadDoesNotInferCallerPermission(t *testing.T) {
+func TestTrustedGlobalReadStillRequiresAndPropagatesCallerPermission(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_mutable_global.elisa", `
 global mutable counter: int = 0
 
 def read_counter() -> int:
     trusted Global.Read, Unsafe.MutableGlobal:
         return counter
+def caller() -> int:
+    return read_counter()
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
-	if strings.Contains(all, `global read requires`) || strings.Contains(all, `mutable global access requires`) || strings.Contains(all, `explicit local effect grant`) {
-		t.Fatalf("expected trusted global read grant to satisfy access, got:\n%s", all)
+	if !strings.Contains(all, `mutable global read requires`) {
+		t.Fatalf("trusted Global.Read must not satisfy the local mutable-global read, got:\n%s", all)
 	}
 	sym, ok := result.GlobalScope.Lookup("read_counter")
 	if !ok {
@@ -598,8 +605,128 @@ def read_counter() -> int:
 	if !ok {
 		t.Fatalf("expected read_counter function type, got %T", sym.Type)
 	}
-	if got := PermissionRefsString(fnType.PermissionRefs); got != "" {
-		t.Fatalf("expected trusted global read not to infer caller permission, got %q", got)
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Global.Read]" {
+		t.Fatalf("expected Global.Read to remain visible in the function row, got %q", got)
+	}
+	if !strings.Contains(all, `call to "read_counter" requires can[Global]`) {
+		t.Fatalf("expected caller to need the propagated Global.Read grant, got:\n%s", all)
+	}
+}
+
+func TestTrustedGlobalWriteStillRequiresAndPropagatesCallerPermission(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_mutable_global_write.elisa", `
+global mutable counter: int = 0
+
+def set_counter(value: int) -> void:
+    trusted Global.Write, Unsafe.MutableGlobal:
+        counter <- value
+def caller() -> void:
+    set_counter(1)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `mutable global write requires`) {
+		t.Fatalf("trusted Global.Write must not satisfy the local mutable-global write, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("set_counter")
+	if !ok {
+		t.Fatal("expected set_counter symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected set_counter function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Global.Write]" {
+		t.Fatalf("expected Global.Write to remain visible in the function row, got %q", got)
+	}
+	if !strings.Contains(all, `call to "set_counter" requires can[Global]`) {
+		t.Fatalf("expected caller to need the propagated Global.Write grant, got:\n%s", all)
+	}
+}
+
+func TestTrustedNonUnsafeEffectsDoNotSuppressCallerTracking(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "trusted_sync_is_tracked.elisa", `
+extern platform_lock() -> void can[Sync.Lock]
+
+def wrapper() -> void:
+    trusted Sync.Lock:
+        platform_lock()
+def caller() -> void:
+    wrapper()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	sym, ok := result.GlobalScope.Lookup("wrapper")
+	if !ok {
+		t.Fatal("expected wrapper symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected wrapper function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Sync.Lock]" {
+		t.Fatalf("trusted non-Unsafe effect must remain in the inferred row, got %q", got)
+	}
+	if !strings.Contains(all, `call to "wrapper" requires can[Sync]`) {
+		t.Fatalf("expected caller to need the propagated Sync grant, got:\n%s", all)
+	}
+	if !strings.Contains(all, `call to "platform_lock" requires can[Sync]`) {
+		t.Fatalf("trusted Sync.Lock must not satisfy the operation's local grant, got:\n%s", all)
+	}
+}
+
+func TestCanSyncEffectGrantsLocallyAndPropagates(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "can_sync_is_tracked.elisa", `
+extern platform_lock() -> void can[Sync.Lock]
+
+def wrapper() -> void:
+    can Sync.Lock:
+        platform_lock()
+def caller() -> void:
+    wrapper()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if strings.Contains(all, `call to "platform_lock" requires can[Sync]`) {
+		t.Fatalf("can Sync.Lock should satisfy the operation's local grant, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("wrapper")
+	if !ok {
+		t.Fatal("expected wrapper symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected wrapper function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Sync.Lock]" {
+		t.Fatalf("can Sync.Lock must remain in the inferred row, got %q", got)
+	}
+	if !strings.Contains(all, `call to "wrapper" requires can[Sync]`) {
+		t.Fatalf("expected caller to need the propagated Sync grant, got:\n%s", all)
+	}
+}
+
+func TestLocalGlobalGrantInfersCallerRowWithoutSignature(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "local_global_grant_infers_row.elisa", `
+global mutable counter: int = 0
+
+def set_counter(value: int) -> void:
+    can Global.Write:
+        counter <- value
+def caller() -> void:
+    set_counter(1)
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	sym, ok := result.GlobalScope.Lookup("set_counter")
+	if !ok {
+		t.Fatal("expected set_counter symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected set_counter function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Global.Write]" {
+		t.Fatalf("local Global.Write grant should infer the caller row without a signature, got %q", got)
+	}
+	if !strings.Contains(all, `call to "set_counter" requires can[Global]`) {
+		t.Fatalf("expected caller to need the inferred Global.Write grant, got:\n%s", all)
 	}
 }
 

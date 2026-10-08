@@ -121,27 +121,33 @@ def atomic_store_release[T](cell: mutable AtomicCell[T]&, value: T):
 static if ELISA_TARGET_OS_POSIX:
     @internal
     def __elisa_arena_cache_lock_acquire():
-        trusted [Unsafe.MutableGlobal, Atomics.Exchange]:
+        trusted Unsafe.MutableGlobal:
             can Global{Read,Write}:
-                while atomic_exchange_acqrel(&__elisa_arena_cache_lock_cell, 1) != 0:
-                    pass
+                can Atomics.Exchange:
+                    while atomic_exchange_acqrel(&__elisa_arena_cache_lock_cell, 1) != 0:
+                        pass
 
     @internal
     def __elisa_arena_cache_lock_release():
-        trusted [Unsafe.MutableGlobal, Atomics.Store]:
-            atomic_store_release(&__elisa_arena_cache_lock_cell, 0) can Global{Read,Write}
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                can Atomics.Store:
+                    atomic_store_release(&__elisa_arena_cache_lock_cell, 0)
 static elif ELISA_TARGET_OS_WINDOWS:
     @internal
     def __elisa_arena_cache_lock_acquire():
-        trusted [Unsafe.MutableGlobal, Atomics.Exchange]:
+        trusted Unsafe.MutableGlobal:
             can Global{Read,Write}:
-                while atomic_exchange_acqrel(&__elisa_arena_cache_lock_cell, 1) != 0:
-                    pass
+                can Atomics.Exchange:
+                    while atomic_exchange_acqrel(&__elisa_arena_cache_lock_cell, 1) != 0:
+                        pass
 
     @internal
     def __elisa_arena_cache_lock_release():
-        trusted [Unsafe.MutableGlobal, Atomics.Store]:
-            atomic_store_release(&__elisa_arena_cache_lock_cell, 0) can Global{Read,Write}
+        trusted Unsafe.MutableGlobal:
+            can Global{Read,Write}:
+                can Atomics.Store:
+                    atomic_store_release(&__elisa_arena_cache_lock_cell, 0)
 static else:
     @internal
     def __elisa_arena_cache_lock_acquire():

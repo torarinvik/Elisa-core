@@ -244,7 +244,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 			break
 		}
 		if n.SuppressPermissionInference {
-			c.collectWithGrantedRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false), func() {
+			c.collectWithGrantedRefs(trustedUnsafePermissionRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)), func() {
 				c.collectStmts(n.Body)
 			})
 			break
@@ -544,7 +544,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Value)
 	case *ast.CanExpr:
 		if n.SuppressPermissionInference {
-			c.collectWithGrantedRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false), func() {
+			c.collectWithGrantedRefs(trustedUnsafePermissionRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)), func() {
 				c.collectExpr(n.Expr)
 			})
 			break

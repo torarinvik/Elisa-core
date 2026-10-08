@@ -116,6 +116,22 @@ func (a *Analyzer) grantedPermissionRefs(refs []ast.PermissionRef) map[string]bo
 	return granted
 }
 
+// trustedUnsafePermissionRefs returns the effect rows a `trusted` block is
+// allowed to acknowledge. Trusted scopes are an explicit boundary for
+// suppressing Unsafe tracking; other effect rows still need a local `can`
+// grant and remain visible to callers. Independent lint acknowledgements such
+// as `trusted Perf.HotLoop` are consumed by their own analyzers from the AST,
+// not through this effect-grant set.
+func trustedUnsafePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	unsafe := make([]ast.PermissionRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Name == "Unsafe" {
+			unsafe = append(unsafe, ref)
+		}
+	}
+	return canonicalizePermissionRefs(unsafe)
+}
+
 // markSubsumedFamilies adds, into granted, every family transitively reachable
 // from `family` through `includes` declarations. A whole-family grant of `Y`
 // where `Y: includes X` therefore also grants `X` (and all of X's members). The

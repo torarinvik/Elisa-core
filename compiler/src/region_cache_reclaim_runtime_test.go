@@ -42,12 +42,14 @@ def region_cache_survives_reclaims_test() -> void:
         # new_region may itself reuse a parked region, so sample the count after it.
         r: mutable heap Region& = new_region(64)
         before: mutable usize = 0
-        trusted [Unsafe.MutableGlobal, Global.Read]:
-            before <- __elisa_region_cache.reclaimed_spans
+        trusted Unsafe.MutableGlobal:
+            can Global.Read:
+                before <- __elisa_region_cache.reclaimed_spans
         free_region(r)
         after: mutable usize = 0
-        trusted [Unsafe.MutableGlobal, Global.Read]:
-            after <- __elisa_region_cache.reclaimed_spans
+        trusted Unsafe.MutableGlobal:
+            can Global.Read:
+                after <- __elisa_region_cache.reclaimed_spans
         if before >= 128:
             panic("region cache budget exhausted by reclaimed spans")
         if after != before + 1:

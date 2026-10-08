@@ -263,6 +263,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.CanStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
 		refs = a.addHandlerConcretePermissionRefs(n, refs)
+		if n.SuppressPermissionInference {
+			refs = trustedUnsafePermissionRefs(refs)
+		}
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "can block", refs, granted)
 		}
@@ -619,6 +622,9 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.CanExpr:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
+		if n.SuppressPermissionInference {
+			refs = trustedUnsafePermissionRefs(refs)
+		}
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "inline can", refs, granted)
 		}

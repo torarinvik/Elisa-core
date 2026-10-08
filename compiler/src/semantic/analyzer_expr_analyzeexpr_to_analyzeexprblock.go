@@ -571,6 +571,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				result = dst
 				return
 			}
+			if call, ok := a.boundTypeParamCastCall(n, src, dst); ok {
+				// A target-named cast on a constrained type param is a protocol
+				// dispatch to that protocol's matching __cast__ method. Reuse the
+				// synthetic-call lowering used for non-type postfix names so effect
+				// inference, local grant checks, and backend monomorphization all
+				// follow the ordinary static-interface call path.
+				a.postfixShorthandCalls[n] = call
+				result = a.analyzeExpr(call)
+				return
+			}
 		}
 		if a.rejectForeignEnumReinterpret(n.Pos(), src, dst) {
 			result = dst

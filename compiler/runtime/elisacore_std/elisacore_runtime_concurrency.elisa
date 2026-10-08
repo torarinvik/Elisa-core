@@ -610,30 +610,27 @@ def ctx_sync_handle(p: void&?) -> void&:
 		panic("null sync handle") if p == null
 		return p
 
-# Pool-internal lock/notify helpers. These DROP the Sync.* effect via `trusted`: the
-# persistent pool's synchronization is an encapsulated implementation detail (verified
-# race-free under TSan), so `each` / `parallel for` / `nursery` / pool callers need only
-# the Pool.* effects -- the Sync family never leaks into user effect signatures. (Raw
-# Mutex/CondVar use stays Sync-visible for strict-mode steering; only the trusted pool
-# runtime discharges it.)
+# Pool-internal lock/notify helpers keep Sync effects visible through their callers.
+# The pool's synchronization is verified race-free under TSan, but remains an effect
+# so callers can see where locking and waiting occur.
 def ctx_pool_lock(m: void&):
-	trusted Sync.Lock:
+	can Sync.Lock:
 		_ = ctx_platform_mutex_lock(m)
 
 def ctx_pool_unlock(m: void&):
-	trusted Sync.Unlock:
+	can Sync.Unlock:
 		_ = ctx_platform_mutex_unlock(m)
 
 def ctx_pool_wait(c: void&, m: void&):
-	trusted Sync.Wait:
+	can Sync.Wait:
 		_ = ctx_platform_cond_wait(c, m)
 
 def ctx_pool_signal(c: void&):
-	trusted Sync.Notify:
+	can Sync.Notify:
 		_ = ctx_platform_cond_signal(c)
 
 def ctx_pool_broadcast(c: void&):
-	trusted Sync.Notify:
+	can Sync.Notify:
 		_ = ctx_platform_cond_broadcast(c)
 
 # The worker loop. Runs on a spawned OS thread; `arg` is the ConcurrencyPoolState. It
@@ -650,28 +647,35 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 		running: mutable bool = true
 		trusted Unsafe.AssumeProgress:
 			while running:
-				ctx_pool_lock(mu)
+				can Sync.Lock:
+					ctx_pool_lock(mu)
 				while state.qhead == null and state.shutdown == 0:
-					ctx_pool_wait(wc, mu)
+					can Sync.Wait:
+						ctx_pool_wait(wc, mu)
 				head: mutable heap PoolTaskRecord&? = state.qhead
 				if head != null:
 					# pop the head (narrowed non-null in this branch)
 					state.qhead <- head.next
 					state.qtail <- null if state.qhead == null
-					ctx_pool_unlock(mu)
+					can Sync.Unlock:
+						ctx_pool_unlock(mu)
 					# run the type-erased work entry outside the lock
 					entry_bits: void& = head.entry
 					arg_bits: mutable void& = head.arg
 					trusted Unsafe.IndirectCall:
 						_ = entry_bits.call_as[fn(mutable void&) -> void&](arg_bits)
 					# publish completion and wake any awaiter
-					ctx_pool_lock(mu)
+					can Sync.Lock:
+						ctx_pool_lock(mu)
 					head.done <- 1
-					ctx_pool_broadcast(dc)
-					ctx_pool_unlock(mu)
+					can Sync.Notify:
+						ctx_pool_broadcast(dc)
+					can Sync.Unlock:
+						ctx_pool_unlock(mu)
 				else:
 					# shutdown requested and queue drained
-					ctx_pool_unlock(mu)
+					can Sync.Unlock:
+						ctx_pool_unlock(mu)
 					running <- false
 		return null
 
@@ -746,10 +750,13 @@ def pool_shutdown(pool: mutable ThreadPool&):
 		state: mutable heap ConcurrencyPoolState& = pool.handle.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
-		ctx_pool_lock(mu)
+		can Sync.Lock:
+			ctx_pool_lock(mu)
 		state.shutdown <- 1
-		ctx_pool_broadcast(wc)
-		ctx_pool_unlock(mu)
+		can Sync.Notify:
+			ctx_pool_broadcast(wc)
+		can Sync.Unlock:
+			ctx_pool_unlock(mu)
 		# join every worker, freeing its handle node
 		current: mutable heap ConcurrencyRawTaskNode&? = state.workers.cast[heap ConcurrencyRawTaskNode&?]
 		state.workers <- null
@@ -810,7 +817,8 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		rec.done <- 0
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
-		ctx_pool_lock(mu)
+		can Sync.Lock:
+			ctx_pool_lock(mu)
 		tail_node: mutable heap PoolTaskRecord&? = state.qtail
 		if tail_node != null:
 			tail_node.next <- rec
@@ -818,8 +826,10 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		else:
 			state.qhead <- rec
 			state.qtail <- rec
-		ctx_pool_signal(wc)
-		ctx_pool_unlock(mu)
+		can Sync.Notify:
+			ctx_pool_signal(wc)
+		can Sync.Unlock:
+			ctx_pool_unlock(mu)
 		out: Task[void&?, Pending] = zeroed
 		out.handle <- rec.cast[uintptr]
 		return move out
@@ -833,11 +843,14 @@ def ctx_pool_wait_record(handle: uintptr):
 		state: mutable heap ConcurrencyPoolState& = rec.pool.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
 		dc: void& = ctx_sync_handle(state.done_cond)
-		ctx_pool_lock(mu)
+		can Sync.Lock:
+			ctx_pool_lock(mu)
 		trusted Unsafe.AssumeProgress:
 			while rec.done == 0:
-				ctx_pool_wait(dc, mu)
-		ctx_pool_unlock(mu)
+				can Sync.Wait:
+					ctx_pool_wait(dc, mu)
+		can Sync.Unlock:
+			ctx_pool_unlock(mu)
 		free(rec.cast[heap void&])
 
 def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
@@ -845,7 +858,8 @@ def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
 		handle: uintptr = task.handle
 		state_bits: void&? = task.state
 		_ = move task
-		ctx_pool_wait_record(handle)
+		can Sync{Lock,Wait,Unlock}:
+			ctx_pool_wait_record(handle)
 		return state_bits
 
 def task_group_new_raw() -> TaskGroup:
@@ -869,7 +883,8 @@ def task_group_wait_all_raw(group: mutable TaskGroup&):
 		trusted Unsafe.AssumeProgress:
 			while current != null:
 				next: mutable heap ConcurrencyRawTaskNode&? = current.next
-				ctx_pool_wait_record(current.handle)
+				can Sync{Lock,Wait,Unlock}:
+					ctx_pool_wait_record(current.handle)
 				free(current.cast[heap void&])
 				current <- next
 
@@ -1049,20 +1064,22 @@ def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R c
 	can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic, Atomics.Store:
 		from_raw: fn(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
 		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
-		raw: Task[void&?, Pending] = pool_submit_raw(
-			pool,
-			ctx_concurrency_work1_entry[A, R].cast[void&],
-			state.cast[void&]
-		)
-		raw.state <- state.cast[void&]
-		return from_raw(move raw)
+		can Sync{Lock,Notify,Unlock}:
+			raw: Task[void&?, Pending] = pool_submit_raw(
+				pool,
+				ctx_concurrency_work1_entry[A, R].cast[void&],
+				state.cast[void&]
+			)
+			raw.state <- state.cast[void&]
+			return from_raw(move raw)
 
 def pool_await[R](task: Task[R, Pending]) -> R:
 	can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		take_result = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = task.state
 		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
-		_ = pool_await_raw(move raw)
+		can Sync{Lock,Wait,Unlock}:
+			_ = pool_await_raw(move raw)
 		result: R = take_result(state_bits) can Unsafe.PointerCast
 		return result
 
@@ -1075,7 +1092,8 @@ def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
 
 def task_group_wait_all(group: mutable TaskGroup&):
 	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		task_group_wait_all_raw(group)
+		can Sync{Lock,Wait,Unlock}:
+			task_group_wait_all_raw(group)
 		ctx_task_group_release_all(group)
 
 # ------------------------------------------------------------

@@ -63,12 +63,13 @@ func TestForwardedRefReturnAccepted(t *testing.T) {
 // `trusted Unsafe.StaleRef:` is the explicit escape hatch for the trusted base
 // (e.g. the concurrency runtime caching a caller pointer in an async task record):
 // the author takes responsibility for a pointee lifetime the type system cannot
-// verify, and the store is no longer flagged.
+// verify. Global.Write remains an ordinary effect and has its own local can grant.
 func TestForwardedRefTrustedStaleRefAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "fwdref_trusted_ok.elisa", `global mutable g: mutable u8&? = null
 def f(x: mutable u8&) -> void:
-    trusted Unsafe.StaleRef, Global.Write:
-        g <- x
+    trusted Unsafe.StaleRef:
+        can Global.Write:
+            g <- x
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("expected a trusted Unsafe.StaleRef-wrapped store to be accepted, got:\n%s", strings.Join(errs, "\n"))
@@ -92,7 +93,8 @@ def f(x: mutable u8&) -> void:
 
 // The tracking half of the contract: a `can Unsafe.StaleRef:` store surfaces the
 // capability, so a caller that neither grants nor trusts it is flagged for the
-// missing Unsafe.StaleRef effect (a `trusted` store, being local, would not).
+// missing Unsafe.StaleRef effect (a trusted Unsafe.StaleRef store, being local,
+// would not; any Global.Write effect remains separately tracked).
 func TestForwardedRefCanStaleRefPropagatesToCaller(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "fwdref_can_propagate.elisa", `global mutable g: mutable u8&? = null
 def store(x: mutable u8&) -> void:

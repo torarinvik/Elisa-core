@@ -1757,7 +1757,7 @@ Style guidance:
 
 ### Trusted implementation grants and unsafe capabilities
 
-Use `trusted ...:` when a function uses a permission internally but does not expose that permission to callers. This is the surface for safe wrappers around low-level operations: the trusted block is still locally checked, but the granted permissions are not inferred into the enclosing function type.
+Use `trusted ...:` only for `Unsafe.*` capabilities. It satisfies the local unsafe check and drops that Unsafe tracking from the enclosing function's inferred effect row. It cannot grant or hide effects such as `Global.Read`, `Global.Write`, `Sync.Wait`, or `Atomics.Store`; use a local `can ...:` grant for those, and they remain visible to callers.
 
 ```elisa
 extern raw_pointer_cast(value: uintptr) -> heap u8& can[Unsafe.PointerCast]
@@ -1775,24 +1775,29 @@ def as_byte_ptr_unchecked(value: uintptr) -> heap u8&:
         return raw_pointer_cast(value)
 ```
 
-`trusted` accepts the same comma-separated permission list surface as `can`.
-This is especially relevant around globals, where plain reads use
-`Global.Read`, writes use `Global.Write`, and mutable globals additionally need
-`Unsafe.MutableGlobal`:
+The parser accepts the same comma-separated list form as `can`, but only `Unsafe.*`
+capabilities have trusted semantics: a non-Unsafe effect inside such a block still needs a
+local `can` grant and still propagates. Around globals, plain reads use `Global.Read`, writes
+use `Global.Write`, and mutable globals additionally need `Unsafe.MutableGlobal`:
 
 ```elisa
 global mutable counter: int = 0
 
 def read_counter() -> int:
-    trusted Global.Read, Unsafe.MutableGlobal:
-        return counter
+    can Global.Read:
+        trusted Unsafe.MutableGlobal:
+            return counter
 
 def set_counter(value: int) -> void:
-    can Global.Write, Unsafe.MutableGlobal:
-        counter <- value
+    can Global.Write:
+        trusted Unsafe.MutableGlobal:
+            counter <- value
 ```
 
-The same distinction applies to FFI, indexing, globals, and thread sharing. A safe wrapper should check or establish the invariant nearby, then use a narrow `trusted` block only around the operation that needs authority:
+Non-Unsafe effects such as allocation, global access, and synchronization stay tracked
+even when they occur beside an unsafe operation. A safe wrapper should check or establish
+the invariant nearby, use `can` for its ordinary effects, and use a narrow `trusted Unsafe.*`
+block only around the operation whose unsafe invariant it establishes:
 
 ```elisa
 extern malloc(bytes: usize) -> heap void&? can[Memory.Allocate]
@@ -1808,7 +1813,8 @@ Unchecked APIs expose the invariant to their caller instead:
 
 ```elisa
 def get_unchecked[T](items: T&, index: usize) -> T can[Unsafe.UncheckedIndex]:
-    return items[index]
+    can Unsafe.UncheckedIndex:
+        return items[index]
 ```
 
 Current builtin unsafe capabilities are:
@@ -1856,7 +1862,7 @@ Current notes:
 - wider reinterpret casts from byte-buffer interior elements, such as `self.data[off].ref[u8&].cast[Header&]`, are gated by `Unsafe.BufferReinterpret` in strict mode
 - `leak region_name` satisfies the region-consumption obligation but is an explicit unsafe opt-out; in strict mode it is gated by `Unsafe.Leak`
 
-Keep trusted blocks narrow. The preferred style is to wrap only the operation whose invariant has been checked nearby, not a whole function body. This keeps low-level code inspectable without pushing every trusted implementation detail into caller-facing permissions.
+Keep trusted blocks narrow. The preferred style is to wrap only the operation whose invariant has been checked nearby, not a whole function body. Only the enclosed `Unsafe.*` tracking is dropped; ordinary effects still propagate to callers.
 
 The strict unsafe-permission analysis path currently gates:
 
@@ -1894,11 +1900,11 @@ Use the unsafe report to keep the public unsafe surface countable:
 go run ./src -emit unsafe path/to/file.elisa
 ```
 
-The report runs strict unsafe analysis and lists caller-visible `Unsafe.*` requirements by capability and function. Trusted implementation blocks are intentionally not counted as caller-facing API; keep those blocks narrow so a code review can still inspect the exact unsafe operation and the nearby invariant that justifies it.
+The report runs strict unsafe analysis and lists caller-visible `Unsafe.*` requirements by capability and function. Trusted implementation blocks drop their enclosed `Unsafe.*` tracking; non-Unsafe effects remain part of the caller-facing API. Keep trusted blocks narrow so a code review can inspect the exact unsafe operation and nearby invariant.
 
 Future proof sources should include enumerate-derived facts and a deliberate `assume` form. `assert` is the runtime-checked proof path; `assume` should require a separate unsafe capability rather than silently manufacturing facts.
 
-The default compiler path remains compatibility-oriented while runtime and generated sources migrate into trusted wrappers. Strict mode is the audit surface: it turns low-level footguns into named, searchable permissions without adding runtime branches or Rust-style lifetime analysis.
+The default compiler path remains compatibility-oriented while runtime and generated sources migrate to explicit local grants and narrow trusted Unsafe wrappers. Strict mode is the audit surface: it turns low-level footguns into named, searchable permissions without adding runtime branches or Rust-style lifetime analysis.
 
 ### Member-set brace sugar
 
@@ -1945,7 +1951,7 @@ Current rules:
 
 ### Checked `can X as Y:` cast
 
-`can X as Y:` discharges the member uses `X` inside the block and surfaces the declared superset `Y` as the function's inferred capability instead. It is sound only when `Y` subsumes `X` (via `includes`); otherwise it is rejected and you must declare the `includes` relation or use `trusted`.
+`can X as Y:` discharges the member uses `X` inside the block and surfaces the declared superset `Y` as the function's inferred capability instead. It is sound only when `Y` subsumes `X` (via `includes`); otherwise it is rejected and you must declare the `includes` relation. `trusted` applies only to Unsafe tracking and cannot re-attribute an unrelated effect.
 
 ```elisa
 def via_io() -> i64 can[IO]:
@@ -1957,13 +1963,13 @@ Current rules:
 
 - `as` is the checked, non-trusted re-attribution path: legal iff `Y ≥ X` in the lattice
 - the block surfaces `Y` (not the concrete members used) as the inferred `can[...]`
-- an unsound cast is rejected with a suggestion to declare `includes` or use `trusted`
-- `trusted X:` remains the only drop (it removes the effect from the surface entirely); `as` never drops
+- an unsound cast is rejected; declare a valid `includes` relation to make the re-attribution checked
+- `trusted Unsafe.X:` drops only Unsafe tracking; other effects remain visible, and `as` never drops
 - effects are erased, so the cast has no backend cost
 
 ### The `any` top permission
 
-`can[any]` is the explicit erasure escape (for FFI, stored heterogeneous closures, and dynamic dispatch). A `can[any]` grant satisfies every concrete requirement; a `can[any]` *requirement* is satisfied only by another `any` grant (or a `trusted` block), never by a concrete grant.
+`can[any]` is the explicit erasure escape (for FFI, stored heterogeneous closures, and dynamic dispatch). A `can[any]` grant satisfies every concrete requirement; a `can[any]` *requirement* is satisfied only by another `any` grant, never by a concrete grant or a trusted Unsafe block.
 
 ```elisa
 def build() -> i64:
@@ -1975,7 +1981,7 @@ Current rules:
 
 - `any` is reserved: it cannot be declared as a family and has no member access (`any.Read` is rejected)
 - a `can[any]` grant discharges every concrete member/family requirement
-- a `can[any]` requirement falls out of no concrete grant — only `any`/`trusted` discharge it
+- a `can[any]` requirement falls out of no concrete grant — only `can[any]` discharges it
 
 ### Capability-set aliases (`alias`)
 
@@ -2994,10 +3000,10 @@ Strict-concurrency migration notes:
   `atomic_exchange_acqrel`, `atomic_compare_exchange_acqrel`, and the i64
   `atomic_fetch_add_acqrel` / `atomic_fetch_sub_acqrel` helpers instead of
   choosing raw memory orders at every call site
-- strict-mode direction is to keep those raw calls available for trusted
-  wrappers while nudging user code toward structured task scopes, linear
-  escaped handles, typed predicate waits, bounded queues, and domain-protected
-  state
+- strict-mode direction is to keep those raw calls available behind named
+  runtime wrappers, using narrow trusted Unsafe blocks only where needed, while
+  nudging user code toward structured task scopes, linear escaped handles, typed
+  predicate waits, bounded queues, and domain-protected state
 - current semantic analysis reports the legacy raw concurrency calls as
   deprecations so projects can start auditing them before promotion to hard
   strict-mode errors; the diagnostics name the preferred wrappers such as

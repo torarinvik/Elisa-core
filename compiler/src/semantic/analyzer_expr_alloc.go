@@ -13,6 +13,9 @@ func (a *Analyzer) analyzeCanExprWithExpected(expr *ast.CanExpr, expected Type) 
 		return invalidType
 	}
 	refs := a.resolvePermissionRefs(expr.Permissions, true)
+	if expr.SuppressPermissionInference {
+		refs = trustedUnsafePermissionRefs(refs)
+	}
 	if permissionRefsContain(refs, "Unsafe", "PointerCast") {
 		a.currentUnsafePointerCastGrantDepth++
 		defer func() { a.currentUnsafePointerCastGrantDepth-- }()

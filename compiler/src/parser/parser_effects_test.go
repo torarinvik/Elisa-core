@@ -297,7 +297,7 @@ func TestCanonicalGroupedMixedPermissionFormatting(t *testing.T) {
 
 func TestGroupedPermissionFormattingPreservesOrderAndQualifications(t *testing.T) {
 	for _, row := range []struct{ input, want string }{
-		{"Global.Read, Unsafe.PointerCast, Global.Write", "Global.Read, Unsafe.PointerCast, Global.Write"},
+		{"Global.Read, Unsafe.PointerCast, Global.Write", "Global{Read,Write}, Unsafe.PointerCast"},
 		{"Global.Read, Global.Read", "Global{Read,Read}"},
 		{"Family[i32].Read, Family[i32].Write", "Family[i32]{Read,Write}"},
 		{"Family[i32].Read, Family[i64].Write", "Family[i32].Read, Family[i64].Write"},

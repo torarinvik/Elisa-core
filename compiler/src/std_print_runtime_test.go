@@ -30,22 +30,31 @@ impl Str for Label:
 	def __cast__(self: Label) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
 		return self.text
 
+# Label has a second, unrelated target conversion. Generic string formatting
+# must still select the Str protocol's cstr conversion from the requested target.
+def __cast__(value: Label) -> i64:
+	return 73
+
 def main() -> int can[Console.Write]:
 	printr("raw") can Console.Write
 	print(" line") can Console.Write
-	print(true) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	printr(false) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(true) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	printr(false) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
 	print(" bool") can Console.Write
-	print(Label{text: "tagged"}) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print('Z') can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(42) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(-9) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(7) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(99) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(5.usize()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(3.5) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(2.25) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(sview("view", 0, -1)) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	label: Label = Label{text: "tagged"}
+	print(label) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	printr(label) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(" after") can Console.Write
+	print(label.i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print('Z') can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(42) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(-9) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(7) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(99) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(5.usize()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(3.5) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(2.25) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
+	print(sview("view", 0, -1)) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
 	region scratch:
 		in scratch:
 			d: mutable dstr = ['d'.u8(), 'y'.u8(), 'n'.u8()]
@@ -83,6 +92,8 @@ def main() -> int can[Console.Write]:
 		"true\n",
 		"false bool\n",
 		"tagged\n",
+		"tagged after\n",
+		"73\n",
 		"Z\n",
 		"42\n",
 		"-9\n",

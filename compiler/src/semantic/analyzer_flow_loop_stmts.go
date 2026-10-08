@@ -17,6 +17,13 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	if handler != nil {
 		refs = mergePermissionRefs(refs, handlerConcretePermissionRefs(handler))
 	}
+	if stmt.SuppressPermissionInference {
+		// `trusted` is only an Unsafe tracking boundary. Global and other
+		// effect rows still require a local `can` and must remain in caller rows.
+		// Perf acknowledgements remain visible to their separate lint pass via
+		// stmt.Permissions.
+		refs = trustedUnsafePermissionRefs(refs)
+	}
 	if stmt.As != "" {
 		a.analyzeCanCastStmt(stmt, refs)
 		return

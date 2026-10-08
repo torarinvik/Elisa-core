@@ -11,7 +11,7 @@ func TestTrackedLocalGlobalGrantRequiresCallerAuthority(t *testing.T) {
 		{"inline", "return 0 can Global.Read", "add can Global.Read"},
 		{"grouped", "can Global{Read,Write}:\n    return 0", "add can[Global{Read,Write}]"},
 		{"whole_family", "can Global:\n    return 0", "add can[Global]"},
-		{"trusted_same_member", "trusted Global.Read:\n    can Global.Read:\n        return 0", ""},
+		{"trusted_same_member", "trusted Global.Read:\n    can Global.Read:\n        return 0", "add can Global.Read"},
 		{"trusted_other_member", "trusted Global.Write:\n    can Global.Read:\n        return 0", "add can Global.Read"},
 	}
 	for _, tc := range cases {

@@ -206,6 +206,38 @@ def read[T: Str](value: T) -> cstr can[Memory.Allocate, Console.Format, Abort.Pa
 	}
 }
 
+func TestTargetNamedProtocolCastPreservesLocalGrantAndCallerRow(t *testing.T) {
+	for _, granted := range []bool{false, true} {
+		body := "return value.cstr()"
+		if granted {
+			body += " can Console.Format"
+		}
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "target_named_protocol_cast.elisa", `
+protocol Str:
+    def __cast__(self: Self) -> cstr can[Console.Format]
+
+def format[T: Str](value: T) -> cstr:
+    `+body+`
+`, AnalyzeOptions{})
+		all := allDiagnostics(result)
+		missing := strings.Contains(all, "explicit local effect grant")
+		if missing == granted {
+			t.Fatalf("granted=%v: unexpected local cast grant diagnostics:\n%s", granted, all)
+		}
+		sym, ok := result.GlobalScope.Lookup("format")
+		if !ok {
+			t.Fatal("expected format symbol")
+		}
+		fn, ok := sym.Type.(*FuncType)
+		if !ok {
+			t.Fatalf("expected format function type, got %T", sym.Type)
+		}
+		if got := PermissionRefsString(fn.PermissionRefs); got != " can[Console.Format]" {
+			t.Fatalf("target-named protocol cast must retain its caller effect, got %q", got)
+		}
+	}
+}
+
 // TestAnalyzeAssociatedTypeBindingConformsAndResolves covers the canonical
 // associated-type story: a protocol declares `type Elem`, its method signatures
 // reference Elem, and a conforming impl binds Elem to a concrete type. The impl
