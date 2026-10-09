@@ -58,7 +58,9 @@ type StaticImpl struct {
 	// TypeParams names the impl's own type parameters (from `impl[T] ... for Box[T]`).
 	// When non-empty the impl is parametric: its Receiver pattern carries these as free
 	// TypeParamType leaves, and a concrete receiver is matched by unifying against them.
-	TypeParams []string
+	TypeParams               []string
+	TypeParamInterfaceBounds map[string]string
+	InvalidTypeParamBounds   bool
 }
 
 // implTypeParamNames returns the impl's type-parameter names, for use as the free-variable
@@ -77,6 +79,19 @@ func (impl *StaticImpl) implTypeParamNames() map[string]bool {
 type InterfaceMethodRef struct {
 	InterfaceName string
 	MethodName    string
+	// ImplKey pins a concrete receiver call to the impl selected by semantic analysis.
+	// This keeps backend dispatch aligned with bound checks and ambiguity resolution.
+	ImplKey string
+	// Receiver is populated when a concrete receiver method call is rewritten
+	// through a parametric impl. Unlike a qualified `Type.method(...)` call, the
+	// original receiver expression is retained as the field object's expression;
+	// this carries the concrete type to both semantic dispatch and code generation
+	// without trying to reverse-render a generic type path such as darray[i32].
+	Receiver Type
+	// ExplicitTypeArgs carries method-level arguments from `value.method[T](...)`.
+	// The field expression remains the callee so it can resolve through this ref;
+	// SpecializeExpr only supports named global functions.
+	ExplicitTypeArgs []ast.TypeExpr
 }
 
 func (*AssociatedTypeProjection) isType() {}
@@ -446,6 +461,104 @@ func (a *Analyzer) staticImplMethodForReceiver(receiver Type, methodName string,
 	return matched, true
 }
 
+// staticImplMethodMatchForReceiver resolves a method on either an exact receiver
+// impl or a parametric impl whose receiver pattern unifies with the concrete type.
+// It is used by concrete receiver-call rewriting; unlike the older exact-only
+// helper, it preserves the substitution for the analyzer/backend's shared static
+// interface dispatch path. Multiple protocols exposing the same method remain
+// ambiguous, even when one match is parametric and another is exact.
+func (a *Analyzer) staticImplMethodMatchForReceiver(receiver Type, methodName string, pos ast.Node) (*StaticImpl, map[string]Type, bool, string) {
+	if a == nil || receiver == nil || methodName == "" || len(a.staticImpls) == 0 {
+		return nil, nil, false, ""
+	}
+	receiver = unwrapReceiverRef(receiver)
+	var matched *StaticImpl
+	var matchedSubst map[string]Type
+	boundFailure := ""
+	for _, key := range slices.Sorted(maps.Keys(a.staticImpls)) {
+		impl := a.staticImpls[key]
+		if impl == nil || impl.Receiver == nil || impl.Methods[methodName] == nil {
+			continue
+		}
+		var subst map[string]Type
+		if len(impl.TypeParams) != 0 {
+			var ok bool
+			subst, ok = UnifyTypePattern(impl.Receiver, receiver, impl.implTypeParamNames())
+			if !ok {
+				continue
+			}
+			if ok, reason := a.staticImplTypeParamBoundsSatisfied(impl, subst); !ok {
+				if boundFailure == "" {
+					boundFailure = reason
+				}
+				continue
+			}
+		} else if !SameType(impl.Receiver, receiver) {
+			continue
+		}
+		if matched != nil {
+			if pos != nil {
+				a.errorf(pos.Pos(), "method %q on %s is ambiguous across multiple protocol impls", methodName, receiver.String())
+			}
+			return nil, nil, false, ""
+		}
+		matched = impl
+		matchedSubst = subst
+	}
+	if matched == nil {
+		return nil, nil, false, boundFailure
+	}
+	return matched, matchedSubst, true, ""
+}
+
+func (a *Analyzer) staticImplTypeParamBoundsSatisfied(impl *StaticImpl, subst map[string]Type) (bool, string) {
+	if impl == nil {
+		return false, "invalid static impl"
+	}
+	if impl.InvalidTypeParamBounds {
+		return false, "an impl type-parameter interface bound could not be resolved"
+	}
+	for _, paramName := range slices.Sorted(maps.Keys(impl.TypeParamInterfaceBounds)) {
+		boundName := impl.TypeParamInterfaceBounds[paramName]
+		actual, ok := subst[paramName]
+		if !ok || actual == nil {
+			return false, "cannot infer impl type parameter " + paramName + " for bound " + boundName
+		}
+		if typeParam, ok := actual.(*TypeParamType); ok && typeParam != nil {
+			bound, boundOK := a.lookupTypeParamInterface(typeParam.Name)
+			if !boundOK || bound == nil || bound.Name != boundName {
+				return false, "type parameter " + typeParam.Name + " does not satisfy impl bound " + boundName
+			}
+			continue
+		}
+		bound := a.staticInterfaces[boundName]
+		if bound == nil {
+			return false, "unknown impl type-parameter interface bound " + boundName
+		}
+		if !a.typeSatisfiesStaticInterface(actual, bound) {
+			return false, "type " + actual.String() + " does not satisfy impl bound " + boundName
+		}
+	}
+	return true, ""
+}
+
+func (a *Analyzer) staticImplTypeParamInterfaceBounds(params []ast.GenericParam) (map[string]string, bool) {
+	bounds := make(map[string]string)
+	invalid := false
+	for _, param := range params {
+		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
+			continue
+		}
+		_, name, ok := a.lookupVisibleStaticInterface(param.InterfaceBound)
+		if !ok || name == "" {
+			invalid = true
+			continue
+		}
+		bounds[param.Name] = name
+	}
+	return bounds, invalid
+}
+
 func (a *Analyzer) staticImplsForReceiver(receiver Type) []*StaticImpl {
 	if a == nil || receiver == nil || len(a.staticImpls) == 0 {
 		return nil
@@ -515,6 +628,69 @@ func (a *Analyzer) resolveProjectedAssociatedType(named *ast.NamedType) (Type, b
 func (a *Analyzer) resolveInterfaceMethodExprType(expr *ast.FieldExpr) (Type, bool) {
 	if a == nil || expr == nil {
 		return nil, false
+	}
+	// Concrete calls through parametric impls retain their receiver expression
+	// instead of spelling a static type path. Resolve that pre-recorded reference
+	// from the receiver type and specialize the impl signature with the same
+	// substitution used later by LLVM lowering.
+	if ref := a.interfaceMethodRefs[expr]; ref != nil && ref.Receiver != nil {
+		var impl *StaticImpl
+		var subst map[string]Type
+		var ok bool
+		if ref.ImplKey != "" {
+			impl = a.staticImpls[ref.ImplKey]
+			ok = impl != nil
+			if ok && len(impl.TypeParams) != 0 {
+				subst, ok = UnifyTypePattern(impl.Receiver, ref.Receiver, impl.implTypeParamNames())
+				if !ok {
+					impl = nil
+				}
+			}
+		} else {
+			impl, subst, ok = LookupStaticImplUnifying(a.staticImpls, ref.InterfaceName, ref.Receiver)
+		}
+		if !ok || impl == nil {
+			a.errorf(expr.Pos(), "type %s does not implement protocol %s", ref.Receiver, ref.InterfaceName)
+			return invalidType, true
+		}
+		sym := impl.Methods[ref.MethodName]
+		if sym == nil {
+			a.errorf(expr.Pos(), "impl of protocol %s for %s is missing method %s", ref.InterfaceName, ref.Receiver, ref.MethodName)
+			return invalidType, true
+		}
+		signature, ok := sym.Type.(*FuncType)
+		if !ok || signature == nil {
+			return invalidType, true
+		}
+		specialized, ok := a.substituteType(signature, subst, nil, nil, nil).(*FuncType)
+		if !ok || specialized == nil {
+			return invalidType, true
+		}
+		if len(ref.ExplicitTypeArgs) != 0 {
+			params := genericParamsForFuncType(specialized)
+			if len(params) == 0 {
+				a.errorf(expr.Pos(), "method %q on %s is not generic", ref.MethodName, ref.Receiver)
+				return invalidType, true
+			}
+			if len(ref.ExplicitTypeArgs) != len(params) {
+				a.errorf(expr.Pos(), "method %q expects %d %s, got %d", ref.MethodName, len(params), genericArgLabel(params), len(ref.ExplicitTypeArgs))
+			}
+			bindings := make(map[string]Type, len(params))
+			limit := len(ref.ExplicitTypeArgs)
+			if len(params) < limit {
+				limit = len(params)
+			}
+			for i := 0; i < limit; i++ {
+				bindings[params[i].Name] = a.resolveGenericArgForParam(ref.ExplicitTypeArgs[i], params[i])
+			}
+			specialized, ok = a.substituteType(specialized, bindings, nil, nil, nil).(*FuncType)
+			if !ok || specialized == nil {
+				return invalidType, true
+			}
+			specialized.TypeParams = nil
+			specialized.GenericParams = nil
+		}
+		return specialized, true
 	}
 	ownerName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok || ownerName == "" {
@@ -675,10 +851,13 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					a.errorf(decl.Pos(), "duplicate impl of interface %q for %s", interfaceName, receiver.String())
 					return
 				}
+				typeParamBounds, invalidTypeParamBounds := a.staticImplTypeParamInterfaceBounds(decl.GenericParams)
 				impl := &StaticImpl{
 					InterfaceName:             interfaceName,
 					Receiver:                  receiver,
 					TypeParams:                implTypeParamNamesFromDecl(decl.GenericParams),
+					TypeParamInterfaceBounds:  typeParamBounds,
+					InvalidTypeParamBounds:    invalidTypeParamBounds,
 					AssociatedTypes:           map[string]Type{},
 					AssociatedTypeRefinements: map[string][]ast.RefinementPredExpr{},
 					Methods:                   map[string]*Symbol{},

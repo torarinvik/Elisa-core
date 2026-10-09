@@ -23,6 +23,132 @@ def same(a: Point, b: Point) -> bool:
 `)
 }
 
+// A concrete receiver must select an impl[T] protocol method and specialize its
+// associated-type result, just as the already-supported [R: Read] path does.
+func TestUFCSParametricImplMethodDispatchOnConcreteReceiver(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "ufcs_parametric_impl_concrete.elisa", `
+struct Box[T]:
+    item: T
+
+protocol Read:
+    type Elem
+    def read(s: Self&) -> Elem
+
+impl[T] Read for Box[T]:
+    type Elem = T
+    def read(s: Box[T]&) -> T:
+        return s.item
+
+def direct(b: Box[i64]) -> i64:
+    return b.read()
+
+def through_bound[R: Read](r: R&) -> R.Elem:
+    return r.read()
+`)
+}
+
+func TestUFCSParametricImplMethodExplicitTypeArgsLabelsAndMutableReceiver(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "ufcs_parametric_impl_explicit_method_args.elisa", `
+struct Box[T]:
+    item: T
+
+protocol Chooser:
+    def choose[U](s: mutable Self&, value: U, first: bool) -> U
+
+impl[T] Chooser for Box[T]:
+    def choose[U](s: mutable Box[T]&, value: U, first: bool) -> U:
+        if first:
+            return value
+        return value
+
+def direct(b: mutable Box[i64]&) -> i32:
+    return b.choose[i32](first: true, value: 7)
+`)
+}
+
+func TestUFCSParametricImplMethodRejectsReadOnlyReceiver(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ufcs_parametric_impl_mutable_receiver.elisa", `
+struct Box[T]:
+    item: T
+
+protocol Touch:
+    def touch(s: mutable Self&) -> void
+
+impl[T] Touch for Box[T]:
+    def touch(s: mutable Box[T]&) -> void:
+        return
+
+def readonly(b: Box[i64]&) -> void:
+    b.touch()
+`, AnalyzeOptions{})
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "expects mutable Box[i64]&") {
+		t.Fatalf("expected concrete parametric impl dispatch to preserve the mutable receiver requirement, got:\n%s", joined)
+	}
+}
+
+func TestUFCSParametricImplMethodEnforcesImplTypeParamBound(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ufcs_parametric_impl_bound.elisa", `
+protocol IsMarked:
+    def mark(s: Self) -> void
+
+struct Marked:
+    value: i64
+
+impl IsMarked for Marked:
+    def mark(s: Marked) -> void:
+        return
+
+struct Box[T]:
+    item: T
+
+protocol ReadValue:
+    def read(s: Self&) -> i64
+
+impl[T: IsMarked] ReadValue for Box[T]:
+    def read(s: Box[T]&) -> i64:
+        return 1
+
+def allowed(b: Box[Marked]&) -> i64:
+    return b.read()
+
+def rejected(b: Box[i64]&) -> i64:
+    return b.read()
+`, AnalyzeOptions{})
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "does not satisfy impl bound IsMarked") {
+		t.Fatalf("expected a concrete receiver that violates the impl type-param bound to be rejected, got:\n%s", joined)
+	}
+}
+
+func TestUFCSParametricImplMethodRemainsAmbiguousAcrossProtocols(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ufcs_parametric_impl_ambiguous.elisa", `
+struct Box[T]:
+    item: T
+
+protocol First:
+    def ping(s: Self) -> i64
+
+protocol Second:
+    def ping(s: Self) -> i64
+
+impl[T] First for Box[T]:
+    def ping(s: Box[T]) -> i64:
+        return 1
+
+impl[T] Second for Box[T]:
+    def ping(s: Box[T]) -> i64:
+        return 2
+
+def ambiguous(b: Box[i64]) -> i64:
+    return b.ping()
+`, AnalyzeOptions{})
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, `method "ping" on Box[i64] is ambiguous across multiple protocol impls`) {
+		t.Fatalf("expected a concrete parametric-impl call to remain ambiguous, got:\n%s", joined)
+	}
+}
+
 // UFCS: `value.method(args)` resolves to a protocol DEFAULT method when the impl omits it.
 func TestUFCSProtocolDefaultMethodDispatch(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "ufcs_default_method.elisa", `

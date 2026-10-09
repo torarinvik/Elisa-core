@@ -581,6 +581,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				result = a.analyzeExpr(call)
 				return
 			}
+			if call, handled := a.concreteImplCastCall(n, src, dst); handled {
+				if call == nil {
+					result = invalidType
+					return
+				}
+				a.postfixShorthandCalls[n] = call
+				result = a.analyzeExpr(call)
+				return
+			}
 		}
 		if a.rejectForeignEnumReinterpret(n.Pos(), src, dst) {
 			result = dst

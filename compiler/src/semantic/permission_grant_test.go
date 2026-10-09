@@ -22,6 +22,66 @@ func analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t *testing.T, fil
 	return AnalyzeWithOptions(file, options)
 }
 
+func TestConcreteParametricImplCallKeepsLocalPermissionRequirement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "parametric_impl_permission.elisa", `
+struct Box[T]:
+    item: T
+
+protocol Read:
+    type Elem
+    def read(s: Self&, fail: bool) -> Elem can[Abort.Panic]
+
+impl[T] Read for Box[T]:
+    type Elem = T
+    def read(s: Box[T]&, fail: bool) -> T:
+        can Abort.Panic:
+            if fail:
+                panic("requested failure")
+        return s.item
+
+def missing_grant(b: Box[i64]&) -> i64:
+    return b.read(false)
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "requires can[Abort] and has no explicit local effect grant") {
+		t.Fatalf("expected concrete dispatch to preserve the impl's Abort.Panic requirement, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("missing_grant")
+	if !ok {
+		t.Fatal("expected missing_grant symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || !strings.Contains(PermissionRefsString(fnType.PermissionRefs), "Abort.Panic") {
+		t.Fatalf("expected Abort.Panic to propagate into missing_grant, got %v", sym.Type)
+	}
+}
+
+func TestParametricImplSignatureDoesNotGrantItsBody(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "parametric_impl_signature_is_not_body_grant.elisa", `
+struct Box[T]:
+    item: T
+
+protocol Read:
+    type Elem
+    def read(s: Self&, fail: bool) -> Elem can[Abort.Panic]
+
+impl[T] Read for Box[T]:
+    type Elem = T
+    def read(s: Box[T]&, fail: bool) -> T can[Abort.Panic]:
+        if fail:
+            panic("requested failure")
+        return s.item
+
+def caller(b: Box[i64]&) -> i64:
+    can Abort.Panic:
+        return b.read(false)
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `panic requires can[Abort] and has no explicit local effect grant; add can Abort.Panic or a surrounding can ...: block`) {
+		t.Fatalf("expected an impl signature effect to remain a caller contract rather than authorize panic in its body, got:\n%s", all)
+	}
+}
+
 func TestDeclaredCallPermissionRequiresTopLevelGrant(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "declared_call_permission_local_grant.elisa", `
 extern alloc_value() -> i64 can[Abort.Panic, Atomics.Load]

@@ -30,7 +30,8 @@ func TestRunCLIStoreSurfaceOverDArray(t *testing.T) {
 		rel("test.elisa"), rel("elisacore_runtime.elisa"))
 	src := preamble + `
 def get_at[S: Store](s: S&, h: S.Handle) -> S.Elem&:
-    return S.store_get(s, h)
+    can Abort.Panic:
+        return S.store_get(s, h)
 
 def how_many[S: Store](s: S&) -> usize:
     return S.store_count(s)
@@ -48,6 +49,10 @@ def store_over_darray() -> void:
             panic("Store.store_get[0] over darray wrong")
         if get_at[darray[i64]](xs, 2) != 33:
             panic("Store.store_get[2] over darray wrong")
+        if xs.store_get(1) != 22:
+            panic("concrete darray.store_get wrong")
+        if xs.store_count() != 3:
+            panic("concrete darray.store_count wrong")
 `
 	fixturePath := filepath.Join(fixtureDir, "store_over_darray.elisa")
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -85,19 +90,25 @@ func TestRunCLIStoreSurfaceOverDequeInline(t *testing.T) {
 		rel("test.elisa"), rel("elisacore_runtime.elisa"), rel("deque.elisa"))
 	src := preamble + `
 def get_at[S: Store](s: S&, h: S.Handle) -> S.Elem&:
-    return S.store_get(s, h)
+    can Abort.Panic:
+        return S.store_get(s, h)
 
 @test
 def store_over_deque_inline() -> void:
     can Memory.Allocate, Abort.Panic:
         region r:
             a: mutable Arena& = &r
-            dq: mutable Deque[i64] = arena_deque_with_capacity[i64](a, 8)
-            _ = arena_deque_push_back[i64](a, dq, 100)
-            _ = arena_deque_push_back[i64](a, dq, 200)
-            _ = arena_deque_push_back[i64](a, dq, 300)
-            if get_at[Deque[i64]](dq, 2) != 300:
-                panic("Store.store_get[2] over deque (inline) wrong")
+            can Global{Read,Write}, Atomics{Exchange,Store}:
+                dq: mutable Deque[i64] = arena_deque_with_capacity[i64](a, 8)
+                _ = arena_deque_push_back[i64](a, dq, 100)
+                _ = arena_deque_push_back[i64](a, dq, 200)
+                _ = arena_deque_push_back[i64](a, dq, 300)
+                if get_at[Deque[i64]](dq, 2) != 300:
+                    panic("Store.store_get[2] over deque (inline) wrong")
+                if dq.store_get(1) != 200:
+                    panic("concrete Deque.store_get wrong")
+                if dq.store_count() != 3:
+                    panic("concrete Deque.store_count wrong")
 `
 	fixturePath := filepath.Join(fixtureDir, "store_over_deque_inline.elisa")
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -132,7 +143,8 @@ func TestRunCLIStoreSurfaceOverDeque(t *testing.T) {
 		rel("test.elisa"), rel("elisacore_runtime.elisa"), rel("deque.elisa"))
 	src := preamble + `
 def get_at[S: Store](s: S&, h: S.Handle) -> S.Elem&:
-    return S.store_get(s, h)
+    can Abort.Panic:
+        return S.store_get(s, h)
 
 def how_many[S: Store](s: S&) -> usize:
     return S.store_count(s)
@@ -142,19 +154,20 @@ def store_over_deque() -> void:
     can Memory.Allocate, Abort.Panic:
         region r:
             a: mutable Arena& = &r
-            dq: mutable Deque[i64] = arena_deque_with_capacity[i64](a, 8)
-            _ = arena_deque_push_back[i64](a, dq, 100)
-            _ = arena_deque_push_back[i64](a, dq, 200)
-            _ = arena_deque_push_back[i64](a, dq, 300)
-            n: usize = how_many[Deque[i64]](dq)
-            v0: i64 = get_at[Deque[i64]](dq, 0)
-            v2: i64 = get_at[Deque[i64]](dq, 2)
-            if n != 3:
-                panic("Store.store_count over deque wrong")
-            if v0 != 100:
-                panic("Store.store_get[0] over deque wrong")
-            if v2 != 300:
-                panic("Store.store_get[2] over deque wrong")
+            can Global{Read,Write}, Atomics{Exchange,Store}:
+                dq: mutable Deque[i64] = arena_deque_with_capacity[i64](a, 8)
+                _ = arena_deque_push_back[i64](a, dq, 100)
+                _ = arena_deque_push_back[i64](a, dq, 200)
+                _ = arena_deque_push_back[i64](a, dq, 300)
+                n: usize = how_many[Deque[i64]](dq)
+                v0: i64 = get_at[Deque[i64]](dq, 0)
+                v2: i64 = get_at[Deque[i64]](dq, 2)
+                if n != 3:
+                    panic("Store.store_count over deque wrong")
+                if v0 != 100:
+                    panic("Store.store_get[0] over deque wrong")
+                if v2 != 300:
+                    panic("Store.store_get[2] over deque wrong")
 `
 	fixturePath := filepath.Join(fixtureDir, "store_over_deque.elisa")
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

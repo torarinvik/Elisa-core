@@ -28,7 +28,10 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 	if !ok || ref == nil {
 		return nil, nil, false, nil
 	}
-	receiver := s.exprType(expr.Object)
+	receiver := ref.Receiver
+	if receiver == nil {
+		receiver = s.exprType(expr.Object)
+	}
 	if receiver == nil {
 		if ownerName, ok := backendQualifiedTypePath(expr.Object); ok && ownerName != "" {
 			if bound, ok := s.typeMap[ownerName]; ok && bound != nil {
@@ -41,8 +44,26 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 	if receiver == nil {
 		return nil, nil, true, fmt.Errorf("missing receiver type for protocol method %s.%s", ref.InterfaceName, ref.MethodName)
 	}
-	impl, subst, ok := semantic.LookupStaticImplUnifying(s.g.result.StaticImpls, ref.InterfaceName, receiver)
-	if !ok || impl == nil {
+	var impl *semantic.StaticImpl
+	var subst map[string]semantic.Type
+	var implFound bool
+	if ref.ImplKey != "" {
+		impl = s.g.result.StaticImpls[ref.ImplKey]
+		implFound = impl != nil
+		if implFound && len(impl.TypeParams) != 0 {
+			freeVars := make(map[string]bool, len(impl.TypeParams))
+			for _, name := range impl.TypeParams {
+				freeVars[name] = true
+			}
+			subst, implFound = semantic.UnifyTypePattern(impl.Receiver, receiver, freeVars)
+			if !implFound {
+				impl = nil
+			}
+		}
+	} else {
+		impl, subst, implFound = semantic.LookupStaticImplUnifying(s.g.result.StaticImpls, ref.InterfaceName, receiver)
+	}
+	if !implFound || impl == nil {
 		return nil, nil, true, fmt.Errorf("type %s does not implement protocol %s", receiver.String(), ref.InterfaceName)
 	}
 	sym, ok := impl.Methods[ref.MethodName]

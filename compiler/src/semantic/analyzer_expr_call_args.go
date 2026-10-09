@@ -1,8 +1,8 @@
 package semantic
 
 import (
-	"strings"
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -379,19 +379,77 @@ func (a *Analyzer) rewriteBoundTypeParamMethodCall(expr *ast.CallExpr, fieldExpr
 // rewriteConcreteImplMethodCall handles `value.method(args...)` where `value` has a concrete
 // type that conforms to a protocol (via `impl Proto for T`) declaring `method` — including
 // protocol default methods, which are synthesized into impls as ordinary `__impl__…` symbols.
-// It rewrites the call in place to the qualified static interface-method form
-// `T.method(value, args...)`, prepending the receiver value as the first argument and pointing
-// the callee at a FieldExpr whose object is the receiver's type-path name (which
-// resolveInterfaceMethodExprType resolves and records as an InterfaceMethodRef for dispatch).
+// Concrete impls keep the qualified static-call rewrite. Parametric impls retain the receiver
+// field expression and attach its resolved type to the InterfaceMethodRef, because a generic
+// receiver such as darray[i32] has no namedTypes path to reconstruct.
 // Returns extensionMethodCallRewriteNone when the receiver type has no conforming impl method,
 // leaving normal resolution (extension methods / UFCS free functions) untouched.
 func (a *Analyzer) rewriteConcreteImplMethodCall(expr *ast.CallExpr, fieldExpr *ast.FieldExpr, receiverType Type, callTypeArgs []ast.TypeExpr) extensionMethodCallRewriteStatus {
 	if receiverType == nil || IsInvalidType(receiverType) {
 		return extensionMethodCallRewriteNone
 	}
-	impl, ok := a.staticImplMethodForReceiver(receiverType, fieldExpr.Field, expr)
+	impl, subst, ok, boundFailure := a.staticImplMethodMatchForReceiver(receiverType, fieldExpr.Field, expr)
 	if !ok || impl == nil {
+		if boundFailure != "" {
+			a.errorf(expr.Pos(), "cannot call %s on %s: %s", fieldExpr.Field, receiverType.String(), boundFailure)
+			return extensionMethodCallRewriteInvalid
+		}
 		return extensionMethodCallRewriteNone
+	}
+	if len(impl.TypeParams) != 0 {
+		methodSym := impl.Methods[fieldExpr.Field]
+		methodType, ok := methodSym.Type.(*FuncType)
+		if !ok || methodType == nil {
+			return extensionMethodCallRewriteNone
+		}
+		specialized, ok := a.substituteType(methodType, subst, nil, nil, nil).(*FuncType)
+		if !ok || specialized == nil {
+			return extensionMethodCallRewriteNone
+		}
+		receiverArg := fieldExpr.Object
+		if len(specialized.Params) != 0 {
+			receiverArg = a.prepareUFCSReceiverArg(fieldExpr.Object, receiverType, specialized.Params[0])
+		}
+		methodRef := &InterfaceMethodRef{
+			InterfaceName: impl.InterfaceName,
+			MethodName:    fieldExpr.Field,
+			ImplKey:       StaticImplLookupKey(impl.InterfaceName, impl.Receiver),
+			Receiver:      unwrapReceiverRef(receiverType),
+		}
+		if len(callTypeArgs) != 0 {
+			methodRef.ExplicitTypeArgs = append([]ast.TypeExpr(nil), callTypeArgs...)
+		}
+		a.interfaceMethodRefs[fieldExpr] = methodRef
+		// Keep the callee as the field expression. Generic method arguments are
+		// applied to the impl-resolved signature by resolveInterfaceMethodExprType;
+		// a SpecializeExpr around a field is not a named global function.
+		expr.Func = fieldExpr
+		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
+		prependedArgs = append(prependedArgs, receiverArg)
+		prependedArgs = append(prependedArgs, expr.Args...)
+		expr.Args = prependedArgs
+		if len(expr.ArgNames) != 0 {
+			prependedNames := make([]string, 0, len(expr.ArgNames)+1)
+			prependedNames = append(prependedNames, "")
+			prependedNames = append(prependedNames, expr.ArgNames...)
+			expr.ArgNames = prependedNames
+		}
+		if len(expr.ArgShorthand) != 0 {
+			prependedShorthand := make([]bool, 0, len(expr.ArgShorthand)+1)
+			prependedShorthand = append(prependedShorthand, false)
+			prependedShorthand = append(prependedShorthand, expr.ArgShorthand...)
+			expr.ArgShorthand = prependedShorthand
+		}
+		if len(expr.ArgItemOrder) != 0 {
+			prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
+			prependedItems = append(prependedItems, ast.CallArgItem{Position: receiverArg.Pos(), ArgIndex: 0})
+			for _, item := range expr.ArgItemOrder {
+				item.ArgIndex++
+				prependedItems = append(prependedItems, item)
+			}
+			expr.ArgItemOrder = prependedItems
+		}
+		return extensionMethodCallRewriteApplied
 	}
 	typeName, ok := a.typePathNameForReceiver(receiverType)
 	if !ok || typeName == "" {
@@ -458,6 +516,12 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 			return fn
 		}
 		return &ast.SpecializeExpr{Position: fieldExpr.Position, Operand: fn, TypeArgs: callTypeArgs}
+	}
+	if ref := a.interfaceMethodRefs[fieldExpr]; ref != nil && ref.ImplKey != "" && ref.Receiver != nil {
+		// Target-typed concrete protocol casts install their selected impl before
+		// ordinary call analysis. Keep that target-filtered selection pinned rather
+		// than re-running the unfiltered member-name ambiguity search.
+		return extensionMethodCallRewriteNone
 	}
 	if a.rewriteTypestateConstructorCall(expr, fieldExpr) {
 		return extensionMethodCallRewriteApplied
@@ -738,7 +802,6 @@ func (a *Analyzer) funcParamAllowsImplicitSink(funcExpr ast.Expr, fnType *FuncTy
 	}
 	return fnType.SinkParamsKnown && index < len(fnType.SinkParams) && fnType.SinkParams[index]
 }
-
 
 // boundsLengthHint completes an arity message for a `@bounds` extern (docs/127 D6): the
 // caller most likely still passes the length the annotation now supplies.
