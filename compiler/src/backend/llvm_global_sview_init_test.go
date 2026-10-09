@@ -13,7 +13,7 @@ func TestGenerateLLVMIRGlobalSViewLiteralInitializer(t *testing.T) {
 global gc: sview = "abcd"
 
 def main() -> i64:
-    can Unsafe.MutableGlobal:
+    can Unsafe.MutableGlobal, Global{Read,Write}:
         gk <- "xyz"
         return gk.len.i64() + gc.len.i64()
 `

@@ -11,23 +11,26 @@ func TestGenerateLLVMIREvaluatesOrMatchScrutineeOnce(t *testing.T) {
 	src := `global mutable match_calls: i64 = 0
 
 def next_code() -> i64:
-    match_calls <- match_calls + 1
-    return 2
+    can Global{Read,Write}:
+        match_calls <- match_calls + 1
+        return 2
 
 def next_label() -> cstr:
-    match_calls <- match_calls + 1
-    return "beta"
+    can Global{Read,Write}:
+        match_calls <- match_calls + 1
+        return "beta"
 
 def main() -> i64:
-    result: i64 = match next_code():
-        1 or 2: 7
-        _: 0
-    match next_label():
-        "alpha" or "beta":
-            match_calls <- match_calls + 10
-        _:
-            match_calls <- match_calls + 100
-    return result + match_calls
+    can Global{Read,Write}:
+        result: i64 = match next_code():
+            1 or 2: 7
+            _: 0
+        match next_label():
+            "alpha" or "beta":
+                match_calls <- match_calls + 10
+            _:
+                match_calls <- match_calls + 100
+        return result + match_calls
 `
 	result := parseAndAnalyzeBackendTest(t, "or_match_scrutinee_once.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
