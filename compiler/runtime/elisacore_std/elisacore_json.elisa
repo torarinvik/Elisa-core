@@ -500,7 +500,7 @@ module Json:
         # on return. A NUL byte is always appended (not counted in `len`), so the result
         # doubles as a C string whenever the value itself contains no NUL byte.
         def json_parse_string_ref(a: mutable Arena&, p: mutable JsonParser&) -> JsonStringRef:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
                 if json_peek(p) != JSON_CH_DQUOTE:
                     return json_fail_string(p, JsonErrorCode.UNEXPECTED_CHAR, p.pos)
                 open_pos: i64 = p.pos
@@ -618,7 +618,7 @@ module Json:
         # stack. On failure the parser's error code is set and the return value is a
         # meaningless `JsonValue.Null` - always check `json_failed(p)` first.
         def json_parse_value(a: mutable Arena&, p: mutable JsonParser&) -> JsonValue:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
                 json_skip_ws(p)
                 ch: i64 = json_peek(p)
                 if ch < 0:
@@ -737,7 +737,7 @@ module Json:
         # `TRAILING_DATA`, so a truncated or doubled document cannot slip through.
     public:
         def json_parse_checked[@r](a: mutable Arena& @r, text: sview) -> JsonParseResult[r]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
                 p: mutable JsonParser = JsonParser{text: text, pos: 0, depth: 0, error_code: JsonErrorCode.OK, error_pos: 0}
                 value: JsonValue = json_parse_value(a, &p)
                 if p.error_code == JsonErrorCode.OK:
@@ -1251,7 +1251,7 @@ module Json:
         # Checked parsing with variant-style errors. The returned handle keeps the
         # backing arena's region in its type, including all decoded strings and children.
         def json_parse[@r](a: mutable Arena& @r, text: sview) -> JsonValueHandle[r] error[JsonError]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
                 outcome: JsonParseResult[r] = json_parse_checked(a, text)
                 code: JsonErrorCode = outcome.code
                 pos: i64 = outcome.pos
@@ -1278,7 +1278,7 @@ module Json:
                 return outcome.value
 
         def json_parse_cstr[@r](a: mutable Arena& @r, text: cstr) -> JsonValueHandle[r] error[JsonError]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast, Global{Read,Write}:
                 return try json_parse(a, sview(text, 0, -1))
 
         # The writer borrows the JSON tree only for this call and copies output bytes
