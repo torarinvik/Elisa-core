@@ -1162,9 +1162,10 @@ func nativeCallbackReturnSuffix(cType string) (string, bool) {
 
 func generatedNativeCallbackRuntimeShimSource(result *semantic.Result) string {
 	bindings := collectNativeCallbackRuntimeBindings(result)
-	if len(bindings) == 0 {
-		return ""
-	}
+	// The runtime module declares and emits calls to this bridge even when the
+	// current source has no callconv callbacks. Always provide the bridge symbols;
+	// an empty binding set naturally keeps lookup fail-closed (nil pointer/fallback
+	// result) while allowing unrelated native test programs to link.
 	var b strings.Builder
 	b.WriteString("#include <stddef.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n\n")
 	b.WriteString("#if defined(_WIN32)\n")
