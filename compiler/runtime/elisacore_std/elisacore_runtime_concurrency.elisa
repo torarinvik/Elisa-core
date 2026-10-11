@@ -986,7 +986,7 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 def spawn1[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Abort.Panic, Atomics.Store:
 		from_raw: fn(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw[R, Joinable]
-		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg) can P
 		raw: Thread[void&?, Joinable] = spawn_raw(
 			ctx_concurrency_work1_entry[A, R].cast[void&],
 			state.cast[void&]
@@ -1054,7 +1054,7 @@ def spawn_daemon[A, permission P](fn: fn(A) -> void can[P], arg: A):
 
 def task[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Abort.Panic, Atomics.Store:
-		return spawn1(fn, arg)
+		return spawn1(fn, arg) can P
 
 def future_get[R](handle: Thread[R, Joinable]) -> R:
 	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
@@ -1063,7 +1063,7 @@ def future_get[R](handle: Thread[R, Joinable]) -> R:
 def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R can[P], arg: A) -> Task[R, Pending]:
 	can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic, Atomics.Store:
 		from_raw: fn(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
-		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg) can P
 		can Sync{Lock,Notify,Unlock}:
 			raw: Task[void&?, Pending] = pool_submit_raw(
 				pool,

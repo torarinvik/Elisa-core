@@ -28,18 +28,20 @@ func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 			a.currentFuncType = fnType
 		}
 	}
-	a.validateSegmentEntryAnnotations(fn)
-	// docs/126 §3: a moved-in drop-typed parameter is released by THIS frame, at the
-	// function's own grant level.
-	a.validateImplicitDropGrants(fn, granted)
-	a.validatePermissionStmts(fn.Body, granted)
-	a.validateSegmentFlow(fn)
-	if funcHasAnnotation(fn, "segment_agnostic") {
-		a.validateSegmentAgnosticStmts(fn.Body)
-	}
-	if funcHasAnnotation(fn, "reentrant_safe") {
-		a.validateReentrantSafeStmts(fn.Body)
-	}
+	a.withPermissionParams(fn.PermissionParams, func() {
+		a.validateSegmentEntryAnnotations(fn)
+		// docs/126 §3: a moved-in drop-typed parameter is released by THIS frame, at the
+		// function's own grant level.
+		a.validateImplicitDropGrants(fn, granted)
+		a.validatePermissionStmts(fn.Body, granted)
+		a.validateSegmentFlow(fn)
+		if funcHasAnnotation(fn, "segment_agnostic") {
+			a.validateSegmentAgnosticStmts(fn.Body)
+		}
+		if funcHasAnnotation(fn, "reentrant_safe") {
+			a.validateReentrantSafeStmts(fn.Body)
+		}
+	})
 }
 
 func (a *Analyzer) validateSegmentEntryAnnotations(fn *ast.FuncDecl) {
@@ -437,6 +439,11 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.CallExpr:
 		a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", a.mutableGlobalCallWriteRefs(n), granted)
 		a.errorOnMissingLocalGrant(n.Pos(), "callback argument", a.mutableGlobalCallbackRefs(n), granted)
+		for _, arg := range n.LoweredArgs() {
+			if callback, ok := a.exprTypes[arg].(*FuncType); ok {
+				a.validateLocalPermissionRowGrant(n.Pos(), "callback argument", functionPermissionRefs(callback), granted)
+			}
+		}
 		a.validatePermissionExpr(n.Func, granted)
 		a.validatePermissionExpr(n.SafeReceiver, granted)
 		for _, arg := range n.LoweredArgs() {
@@ -699,6 +706,7 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	a.errorOnMissingLocalGrant(pos, "call to "+quoteFactTarget(fnType.Name), mandatoryRefs, granted)
 	requiredRefs := missingGrantedPermissionRefs(a.permissionRefsRequiringLocalGrant(fnType), a.grantedPermissionRefs(mandatoryRefs))
 	missingRefs := missingGrantedPermissionRefs(requiredRefs, granted)
+	a.validateLocalPermissionRowGrant(pos, "call to "+quoteFactTarget(fnType.Name), requiredRefs, granted)
 	for _, ref := range missingRefs {
 		if ref.Name == "Unsafe" && ref.Member == "SegmentMutation" {
 			a.errorf(pos, "%s", effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), []string{"Unsafe"}, "can Unsafe.SegmentMutation"))
@@ -725,4 +733,14 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 		return
 	}
 	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(requiredRefs, missing)))
+}
+
+// A symbolic row remains a local authority requirement even in a generic body.
+// Its declaration in a signature describes the caller contract, not a body grant.
+func (a *Analyzer) validateLocalPermissionRowGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
+	for _, ref := range missingGrantedPermissionRefs(refs, granted) {
+		if ref.Member == "" && a.lookupPermissionParam(ref.Name) {
+			a.errorOnMissingLocalGrant(pos, label, []ast.PermissionRef{ref}, granted)
+		}
+	}
 }

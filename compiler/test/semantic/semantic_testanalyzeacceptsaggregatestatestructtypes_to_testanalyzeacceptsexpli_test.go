@@ -516,10 +516,12 @@ func TestAnalyzeAcceptsPermissionPolymorphicFunctionWrappers(t *testing.T) {
 	src := `extern puts(text: u8&) -> int can[Console.Write]
 
 def invoke_writer[permission P](fn: fn(u8&) -> int can[P], text: u8&) -> int can[P]:
-    return fn(text)
+    can P:
+        return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello".cast[u8&])
+    can Console.Write:
+        return invoke_writer(puts, "hello".cast[u8&])
 `
 	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.elisa", src)
 	requireNoErrors(t, errs)

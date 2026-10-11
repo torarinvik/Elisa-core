@@ -143,3 +143,25 @@ func funcTypeParamBindings(fn *ast.FuncDecl, typeArgs []Type) map[string]Type {
 	}
 	return bindings
 }
+
+// preserveFunctionExprTypes scopes speculative annotations to one function body.
+func (a *Analyzer) preserveFunctionExprTypes(fn *ast.FuncDecl) func() {
+	exprs := map[ast.Expr]struct{}{}
+	collectSpecializedFunctionExprs(fn, exprs)
+	saved := make(map[ast.Expr]Type, len(exprs))
+	for expr := range exprs {
+		if typ, ok := a.exprTypes[expr]; ok {
+			saved[expr] = typ
+		}
+	}
+	return func() {
+		collectSpecializedFunctionExprs(fn, exprs)
+		for expr := range exprs {
+			if typ, ok := saved[expr]; ok {
+				a.exprTypes[expr] = typ
+			} else {
+				delete(a.exprTypes, expr)
+			}
+		}
+	}
+}

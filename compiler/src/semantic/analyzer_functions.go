@@ -561,6 +561,12 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.returnBorrowedOwnerRefInProgress[fn] = true
 	defer delete(a.returnBorrowedOwnerRefInProgress, fn)
 
+	// This pass can use a call's concrete callback types. Its summary belongs to
+	// that call, but its expression annotations must not replace the template's
+	// permission rows or change later code generation/authority validation.
+	restoreExprTypes := a.preserveFunctionExprTypes(fn)
+	defer restoreExprTypes()
+
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl
