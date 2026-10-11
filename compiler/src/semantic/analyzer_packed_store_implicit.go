@@ -22,6 +22,7 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 			out[et.Root().Name] = true // docs/77: region-backed by hierarchy root
 		}
 	}
+	var seen map[any]struct{}
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -32,6 +33,11 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 			if v.IsNil() {
 				return
 			}
+			node := v.Interface()
+			if _, visited := seen[node]; visited {
+				return
+			}
+			seen[node] = struct{}{}
 			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && alloc.AutoRegion {
 				if enumType, _, ok := a.packedAllocConstructorInfo(alloc.Value); ok && enumType != nil && enumType.Packed {
 					out[enumType.Root().Name] = true
@@ -55,6 +61,7 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 	}
 	for _, fn := range funcs {
 		if fn != nil {
+			seen = make(map[any]struct{})
 			rec(reflect.ValueOf(fn.Body))
 		}
 	}
@@ -126,6 +133,8 @@ func (a *Analyzer) funcConstructsPackedEnumRoots(fn *ast.FuncDecl) map[string]*E
 	if fn == nil {
 		return out
 	}
+	// Resolved call arguments can share source nodes; each node contributes once.
+	seen := make(map[any]struct{})
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -136,6 +145,11 @@ func (a *Analyzer) funcConstructsPackedEnumRoots(fn *ast.FuncDecl) map[string]*E
 			if v.IsNil() {
 				return
 			}
+			node := v.Interface()
+			if _, visited := seen[node]; visited {
+				return
+			}
+			seen[node] = struct{}{}
 			switch n := v.Interface().(type) {
 			case *ast.AllocExpr:
 				if n != nil {
@@ -262,6 +276,8 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 // plain-identifier calls to their visible global). Used to build the call-graph edges for the
 // transitive store-need fixpoint.
 func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]bool) {
+	// Resolved call arguments can share source nodes; each node contributes once.
+	seen := make(map[any]struct{})
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -272,6 +288,11 @@ func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]boo
 			if v.IsNil() {
 				return
 			}
+			node := v.Interface()
+			if _, visited := seen[node]; visited {
+				return
+			}
+			seen[node] = struct{}{}
 			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
 				if ft := a.regionPolyCalleeFuncType(call); ft != nil {
 					out[ft] = true
@@ -352,6 +373,7 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 		return false
 	}
 	found := false
+	seen := make(map[any]struct{})
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if found || !v.IsValid() || !v.CanInterface() {
@@ -362,6 +384,11 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 			if v.IsNil() {
 				return
 			}
+			node := v.Interface()
+			if _, visited := seen[node]; visited {
+				return
+			}
+			seen[node] = struct{}{}
 			if _, ok := v.Interface().(*ast.RegionStmt); ok {
 				found = true
 				return

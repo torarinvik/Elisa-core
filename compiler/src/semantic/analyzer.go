@@ -88,10 +88,12 @@ const (
 )
 
 type Analyzer struct {
-	deferredImplEffectChecks []func()
-	file                     *ast.File
-	diagnostics              []Diagnostic
-	namedTypes               map[string]Type
+	shortCircuitAnalysisDepth int
+	shortCircuitStability     map[shortCircuitStabilityKey]bool
+	deferredImplEffectChecks  []func()
+	file                      *ast.File
+	diagnostics               []Diagnostic
+	namedTypes                map[string]Type
 	// refineAliases registers named refinement aliases (`refine Name(..) = Base where Pred`,
 	// docs/85 "Level 2") by qualified name. They are pure desugaring sugar: a binder-position use
 	// expands to the equivalent anonymous WhereRefinementTypeExpr (see

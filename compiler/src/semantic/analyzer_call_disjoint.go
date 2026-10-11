@@ -36,6 +36,17 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 	if len(paramTypes) < limit {
 		limit = len(paramTypes)
 	}
+	// No pairwise evidence is possible with fewer than two container refs.
+	// Avoid a whole-function provenance scan for scalar and single-ref calls.
+	containers := 0
+	for _, typ := range paramTypes[:limit] {
+		if isContainerRefType(typ) {
+			containers++
+		}
+	}
+	if containers < 2 {
+		return
+	}
 	private := a.privateFreshDArrayLocals()
 
 	var containerParams []int

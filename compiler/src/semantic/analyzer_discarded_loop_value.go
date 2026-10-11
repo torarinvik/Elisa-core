@@ -39,6 +39,9 @@ func (a *Analyzer) checkDiscardedLoopValues(fn *ast.FuncDecl) {
 			}
 		}
 	}
+	// Resolved call arguments share source AST nodes. Visit each node once,
+	// preserving block-local discard checks without expanding metadata DAGs.
+	seen := make(map[any]struct{})
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -48,6 +51,13 @@ func (a *Analyzer) checkDiscardedLoopValues(fn *ast.FuncDecl) {
 		case reflect.Pointer, reflect.Interface:
 			if v.IsNil() {
 				return
+			}
+			if v.Kind() == reflect.Pointer {
+				node := v.Interface()
+				if _, visited := seen[node]; visited {
+					return
+				}
+				seen[node] = struct{}{}
 			}
 			if block, ok := v.Interface().(*ast.ExprBlock); ok {
 				checkList(block.Stmts, block.Value != nil)

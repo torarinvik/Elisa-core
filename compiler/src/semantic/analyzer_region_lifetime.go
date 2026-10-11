@@ -558,6 +558,8 @@ func isLoopStmtNode(n ast.Node) bool {
 // the given statements, including nested ones.
 func collectSynthesizedRegions(root []ast.Stmt) []*ast.RegionStmt {
 	var out []*ast.RegionStmt
+	// Resolved arguments share source AST pointers; process each region once.
+	seen := make(map[any]struct{})
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -568,6 +570,11 @@ func collectSynthesizedRegions(root []ast.Stmt) []*ast.RegionStmt {
 			if v.IsNil() {
 				return
 			}
+			node := v.Interface()
+			if _, visited := seen[node]; visited {
+				return
+			}
+			seen[node] = struct{}{}
 			if rs, ok := v.Interface().(*ast.RegionStmt); ok && rs.Lazy && isSynthesizedAutoRegion(rs.Name) {
 				out = append(out, rs)
 			}

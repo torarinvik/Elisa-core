@@ -6,6 +6,9 @@ import (
 )
 
 func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
+	if a.suppressDiagnostics {
+		a.shortCircuitStability = nil
+	}
 	defer func() {
 		if expr != nil {
 			// A suppressed-diagnostics speculative pass (return-provenance /

@@ -3,6 +3,7 @@
 package semantic
 
 import (
+	"elisacore/src/ast"
 	"fmt"
 	"strings"
 	"testing"
@@ -379,5 +380,101 @@ func TestRecursiveAffineOverflowBoundRejected(t *testing.T) {
 `)
 	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "postcondition") {
 		t.Fatalf("unbounded affine recurrence hid overflow: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitParenthesizedGuardChain(t *testing.T) {
+	guard := "n >= 0"
+	for i := 0; i < 256; i++ {
+		guard = "(" + guard + " and n >= 0)"
+	}
+	source := shortCircuitRequiresHelper + "def caller(n: i64) -> bool:\n    return " + guard + " and needs_nonnegative(n)\n"
+	result := analyzeContractStrict(t, "parenthesized_guard_chain.elisa", source)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("parenthesized guard rejected: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitParenthesizedMutationInvalidatesFacts(t *testing.T) {
+	result := analyzeContractStrict(t, "parenthesized_mutation.elisa", shortCircuitRequiresHelper+`def mutate(value: mutable i64&) -> bool:
+    value <- -1
+    return true
+def caller(n: mutable i64) -> bool:
+    return ((n >= 0 and n >= 0) and mutate(&n)) and needs_nonnegative(n)
+`)
+	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "precondition of") {
+		t.Fatalf("cached stability retained a stale value fact: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitStabilityMemoSeparatesScopes(t *testing.T) {
+	ident := &ast.Ident{Name: "value"}
+	first, second := NewScope(nil), NewScope(nil)
+	first.Define(&Symbol{Name: "value", Kind: SymbolLocal})
+	second.Define(&Symbol{Name: "value", Kind: SymbolLocal})
+	analyzer := &Analyzer{
+		currentScope:          first,
+		exprTypes:             map[ast.Expr]Type{ident: &RefType{Storage: RefStorageStatic}},
+		shortCircuitStability: map[shortCircuitStabilityKey]bool{},
+	}
+	if analyzer.shortCircuitStablePredicate(ident) {
+		t.Fatal("shared reference became stable")
+	}
+	analyzer.currentScope = second
+	analyzer.exprTypes[ident] = &BuiltinType{Name: "bool"}
+	if !analyzer.shortCircuitStablePredicate(ident) {
+		t.Fatal("classification leaked across lexical scopes")
+	}
+	analyzer.suppressDiagnostics = true
+	analyzer.exprTypes[ident] = &RefType{Storage: RefStorageStatic}
+	if analyzer.shortCircuitStablePredicate(ident) {
+		t.Fatal("speculative analysis reused a cached classification")
+	}
+	if len(analyzer.shortCircuitStability) != 0 {
+		t.Fatal("speculative reanalysis retained earlier classifications")
+	}
+}
+
+func TestShortCircuitUnaryWrappedGuardChain(t *testing.T) {
+	guard := "n >= 0"
+	for i := 0; i < 128; i++ {
+		guard = "not not (" + guard + " and n >= 0)"
+	}
+	source := shortCircuitRequiresHelper + "def caller(n: i64) -> bool:\n    return " + guard + " and needs_nonnegative(n)\n"
+	result := analyzeContractStrict(t, "unary_wrapped_guard_chain.elisa", source)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unary-wrapped guard rejected: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitPureCallWrappedGuardChain(t *testing.T) {
+	guard := "n >= 0"
+	for i := 0; i < 128; i++ {
+		guard = "ident((" + guard + " and n >= 0))"
+	}
+	source := shortCircuitRequiresHelper + "def ident(value: bool) -> bool:\n    return value\ndef caller(n: i64) -> bool:\n    return " + guard + " and needs_nonnegative(n)\n"
+	result := analyzeContractStrict(t, "pure_call_wrapped_guard_chain.elisa", source)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("pure-call-wrapped guard rejected: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitStabilityMemoBindingGeneration(t *testing.T) {
+	ident := &ast.Ident{Name: "value"}
+	global := NewScope(nil)
+	global.Define(&Symbol{Name: "value", Kind: SymbolGlobal, Mutable: true})
+	local := NewScope(global)
+	analyzer := &Analyzer{globalScope: global, currentScope: local, exprTypes: map[ast.Expr]Type{ident: &BuiltinType{Name: "bool"}}, shortCircuitStability: map[shortCircuitStabilityKey]bool{}}
+	if analyzer.shortCircuitStablePredicate(ident) {
+		t.Fatal("mutable global became stable")
+	}
+	local.Define(&Symbol{Name: "value", Kind: SymbolLocal})
+	if !analyzer.shortCircuitStablePredicate(ident) {
+		t.Fatal("same-scope definition reused old classification")
+	}
+	analyzer.exprTypes[ident] = &RefType{Storage: RefStorageStatic}
+	analyzer.symbolTypeEpoch++
+	if analyzer.shortCircuitStablePredicate(ident) {
+		t.Fatal("type generation reused old classification")
 	}
 }

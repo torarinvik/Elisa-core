@@ -225,6 +225,18 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 // own fact, so mutations can invalidate preceding facts without reconstructing
 // stale prefix expressions. The child scope ends with this expression.
 func (a *Analyzer) analyzeShortCircuitChain(expr *ast.BinaryExpr) Type {
+	// Nested logical analyses share one classification session, regardless of
+	// whether the subtree is behind parens, unary operators or a pure call.
+	if a.shortCircuitAnalysisDepth > 0 && !a.suppressDiagnostics && a.shortCircuitStability == nil {
+		a.shortCircuitStability = make(map[shortCircuitStabilityKey]bool)
+	}
+	a.shortCircuitAnalysisDepth++
+	defer func() {
+		a.shortCircuitAnalysisDepth--
+		if a.shortCircuitAnalysisDepth == 0 {
+			a.shortCircuitStability = nil
+		}
+	}()
 	chain := []*ast.BinaryExpr{expr}
 	first := expr.Left
 	for {
@@ -260,7 +272,44 @@ func (a *Analyzer) analyzeShortCircuitChain(expr *ast.BinaryExpr) Type {
 // These expressions read current values without mutating them. A helper must
 // have a closed, primitive return expression; its return type alone is not
 // evidence of purity.
+// Share classifications across nested parenthesized chains, but never across
+// separate analyses or lexical scopes. Speculative analysis does not cache.
+type shortCircuitStabilityKey struct {
+	scopeVersion  uint64
+	globalVersion uint64
+	typeEpoch     uint64
+	expr          ast.Expr
+	scope         *Scope
+}
+
 func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
+	if a.suppressDiagnostics {
+		a.shortCircuitStability = nil
+	}
+	_, typed := a.exprTypes[expr]
+	if a.shortCircuitStability == nil || a.suppressDiagnostics || !typed {
+		return a.shortCircuitStablePredicateUncached(expr)
+	}
+	// RHS bindings live in child scopes; intermediate lexical parents stay
+	// unchanged during this session. Stamp mutable local/global binding tables
+	// and inferred symbol types without walking the parent chain per AST node.
+	var scopeVersion, globalVersion uint64
+	if a.currentScope != nil {
+		scopeVersion = a.currentScope.symbolsVersion
+	}
+	if a.globalScope != nil {
+		globalVersion = a.globalScope.symbolsVersion
+	}
+	key := shortCircuitStabilityKey{expr: expr, scope: a.currentScope, scopeVersion: scopeVersion, globalVersion: globalVersion, typeEpoch: a.symbolTypeEpoch}
+	if stable, found := a.shortCircuitStability[key]; found {
+		return stable
+	}
+	stable := a.shortCircuitStablePredicateUncached(expr)
+	a.shortCircuitStability[key] = stable
+	return stable
+}
+
+func (a *Analyzer) shortCircuitStablePredicateUncached(expr ast.Expr) bool {
 	if ident, ok := expr.(*ast.Ident); ok {
 		if _, constant := a.resolvedPrimitiveConstant(ident); constant {
 			return true
