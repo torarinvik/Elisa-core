@@ -64,7 +64,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		if !a.reserveBoundResolvableHere(bound) {
 			continue
 		}
-		preReserves = append(preReserves, semanticMakeReserveStmt(stmt.Position, name, bound))
+		preReserves = append(preReserves, a.semanticMakeReserveStmt(stmt.Position, name, bound))
 	}
 	if len(preReserves) == 0 {
 		a.lintUninferredAutoReserveIterFill(stmt, sourceName)
@@ -134,7 +134,7 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 		if !a.reserveBoundResolvableHere(bound) {
 			continue
 		}
-		preReserves = append(preReserves, semanticMakeReserveStmt(stmt.Position, name, bound))
+		preReserves = append(preReserves, a.semanticMakeReserveStmt(stmt.Position, name, bound))
 	}
 	if len(preReserves) == 0 {
 		return
@@ -197,12 +197,14 @@ func (a *Analyzer) reserveBoundResolvableHere(bound ast.Expr) bool {
 	return resolvable
 }
 
-func semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr) ast.Stmt {
-	return &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
+func (a *Analyzer) semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr) ast.Stmt {
+	call := &ast.CallExpr{
 		Position: pos,
 		Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: target}, Field: "reserve"},
 		Args:     []ast.Expr{bound},
-	}}
+	}
+	a.recordCompilerBuiltinHelperCall(call, "darray.reserve")
+	return &ast.ExprStmt{Position: pos, Expr: call}
 }
 
 func (a *Analyzer) lintUninferredAutoReserveIterFill(stmt *ast.IterForStmt, srcName string) {

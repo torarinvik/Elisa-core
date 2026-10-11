@@ -28,6 +28,10 @@ func TestCallDisjointScansOnlyWhenContainerPairIsPossible(t *testing.T) {
 				args[i] = &ast.BoolLit{Value: true}
 			}
 			analyzer.recordCallArgDisjoint(&ast.CallExpr{}, tc.params, args)
+			if analyzer.privateFreshDArrayCache != nil {
+				t.Fatal("provenance scanned before finalization")
+			}
+			analyzer.finalizeCallArgDisjoint()
 			if (analyzer.privateFreshDArrayCache != nil) != tc.scan {
 				t.Fatalf("provenance scan=%v, want %v", analyzer.privateFreshDArrayCache != nil, tc.scan)
 			}

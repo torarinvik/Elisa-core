@@ -269,3 +269,25 @@ func TestDisjointParamScopesElideO3RuntimeMemcheck(t *testing.T) {
 		}
 	})
 }
+
+func TestDisjointParamScopesAbsentAfterHelperHeaderRebind(t *testing.T) {
+	t.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
+	source := strings.Split(disjointAxpyKernelSrc, "def driver()")[0] + `
+def replace(p: mutable darray[f64]&, q: darray[f64]) -> void:
+    p <- q
+
+def driver() -> void:
+    a: mutable darray[f64] = [1.0]
+    b: mutable darray[f64] = [2.0]
+    replace(&a, b)
+    axpy(&a, &b)
+`
+	result := parseAndAnalyzeBackendTest(t, "header_rebind_noalias.elisa", source)
+	ir, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ir, "elisa.disjoint.axpy.aa") {
+		t.Fatal("aliased headers received function-wide disjoint metadata")
+	}
+}

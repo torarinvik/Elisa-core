@@ -28,7 +28,8 @@ import (
 //
 // `args` is the param-aligned argument list (receiver + reordered named args + implicits) that
 // validateCallArgAliasAccess also consumes, so parameter indices map correctly.
-func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, args []ast.Expr) {
+func (a *Analyzer) computeCallArgDisjoint(request pendingDisjointCall) {
+	call, paramTypes, args := request.call, request.params, request.args
 	if call == nil || a.callArgDisjoint == nil {
 		return
 	}
@@ -56,7 +57,7 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 			continue
 		}
 		containerParams = append(containerParams, i)
-		roots := a.aliasRootsForExpr(args[i])
+		roots := request.roots[i]
 		if len(roots) == 0 {
 			// Unidentifiable buffer (opaque expression / unresolved provenance): no roots, so we
 			// can neither confirm freshness nor non-overlap. Absence of evidence, never aliasing.
@@ -64,7 +65,7 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 		}
 		argInfoByIdx[i] = disjointArgRoots{
 			roots: roots,
-			fresh: rootsAllPrivateFresh(roots, private),
+			fresh: request.localDecls[i] != nil && wholePrivateDArrayBorrow(args[i], private) && rootsAllPrivateFresh(roots, private),
 		}
 	}
 	if len(containerParams) < 2 {
@@ -114,7 +115,9 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 	// (direct fresh-anchor `base`, or a `depend` on the enclosing function's own params). Done for
 	// every candidate-kernel call — even one with no distinct pair, since a site that contributes
 	// nothing must keep the pair out of the callee's fact.
-	a.registerCallDisjointObservation(call, containerParams, a.buildPairEvidence(containerParams, distinct, args))
+	if request.callee != nil && a.disjointCallSites != nil {
+		a.disjointCallSites[request.callee] = append(a.disjointCallSites[request.callee], callDisjointObservation{enclosing: request.fn, containerParams: containerParams, evidence: buildCapturedPairEvidence(containerParams, distinct, request.forwarded)})
+	}
 
 	if len(distinct) == 0 {
 		return
@@ -183,6 +186,10 @@ func (a *Analyzer) privateFreshDArrayLocals() map[string]bool {
 		declCount: map[string]int{},
 		fresh:     map[string]bool{},
 		escaped:   map[string]bool{},
+		shadowed:  headerLocalBindingNames(fn),
+	}
+	for _, param := range fn.Params {
+		scan.declCount[param.Name]++
 	}
 	for _, stmt := range fn.Body {
 		scan.scanValue(reflect.ValueOf(stmt))
@@ -203,10 +210,17 @@ func (a *Analyzer) privateFreshDArrayLocals() map[string]bool {
 // This fail-safe default is what makes the scan sound against AST shapes it does not special-case:
 // an unrecognized container can over-mark (lose optimization) but can never under-mark an escape.
 type privateFreshScan struct {
-	analyzer  *Analyzer
-	declCount map[string]int
-	fresh     map[string]bool
-	escaped   map[string]bool
+	analyzer            *Analyzer
+	declCount           map[string]int
+	fresh               map[string]bool
+	escaped             map[string]bool
+	valueSeen           map[any]struct{}
+	escapeSeen          map[any]struct{}
+	storedBorrowSeen    map[any]bool
+	headerStable        map[*ast.FuncDecl]bool
+	shadowed            map[string]bool
+	discardedCalls      map[*ast.CallExpr]bool
+	directDiscardedCall *ast.CallExpr
 }
 
 func (s *privateFreshScan) scanValue(v reflect.Value) {
@@ -222,14 +236,58 @@ func (s *privateFreshScan) scanValue(v reflect.Value) {
 			s.scanValue(v.Elem())
 			return
 		}
+		// Place identifiers bypass scanValue, so a later whole-value use still
+		// marks them escaped. This set only deduplicates value traversal.
+		node := v.Interface()
+		if call, ok := node.(*ast.CallExpr); ok {
+			// Use context is an occurrence property, so inspect it before the
+			// pointer-visited guard. A value use revokes freshness even when the
+			// same call was already visited as a discarded statement.
+			if s.directDiscardedCall != call && s.isPrivateReceiverBuiltin(call) {
+				if field, ok := stripOptimizationParens(call.Func).(*ast.FieldExpr); ok {
+					s.markAllNamesEscaped(reflect.ValueOf(field.Object))
+				}
+			}
+			saved := s.directDiscardedCall
+			s.directDiscardedCall = nil
+			defer func() { s.directDiscardedCall = saved }()
+		}
+		if _, visited := s.valueSeen[node]; visited {
+			return
+		}
+		if s.valueSeen == nil {
+			s.valueSeen = make(map[any]struct{})
+		}
+		s.valueSeen[node] = struct{}{}
 		switch n := v.Interface().(type) {
+		case *ast.ExprStmt:
+			saved := s.directDiscardedCall
+			if call, ok := stripOptimizationParens(n.Expr).(*ast.CallExpr); ok {
+				s.directDiscardedCall = call
+				if s.discardedCalls == nil {
+					s.discardedCalls = make(map[*ast.CallExpr]bool)
+				}
+				s.discardedCalls[call] = true
+			} else {
+				s.directDiscardedCall = nil
+			}
+			s.scanExpr(n.Expr)
+			s.directDiscardedCall = saved
+			return
 		case *ast.Ident:
 			s.escaped[n.Name] = true
 			return
+		case *ast.CastExpr:
+			if _, reference := n.Target.(*ast.RefType); reference {
+				s.markAllNamesEscaped(reflect.ValueOf(n.Operand))
+			}
 		case *ast.AddrOfExpr:
 			s.scanPlace(n.Operand)
 			return
 		case *ast.FieldExpr:
+			if n.Field == "items" {
+				s.markAllNamesEscaped(reflect.ValueOf(n.Object))
+			}
 			s.scanPlace(n.Object)
 			return
 		case *ast.IndexExpr:
@@ -238,15 +296,74 @@ func (s *privateFreshScan) scanValue(v reflect.Value) {
 			s.scanExpr(n.Fallback)
 			return
 		case *ast.SliceExpr:
-			s.scanPlace(n.Object)
+			// A view retains the backing buffer rather than copying its elements.
+			s.markAllNamesEscaped(reflect.ValueOf(n.Object))
 			s.scanExpr(n.Start)
 			s.scanExpr(n.End)
 			return
+		case *ast.AssignStmt:
+			if _, field := stripOptimizationParens(n.Target).(*ast.FieldExpr); field && containerHeaderRoot(n.Target) != "" {
+				s.markAllNamesEscaped(reflect.ValueOf(n.Target))
+			}
+			s.markStoredBorrowRoots(reflect.ValueOf(n.Value))
+		case *ast.ReturnStmt:
+			s.markStoredBorrowRoots(reflect.ValueOf(n.Value))
 		case *ast.VarDeclStmt:
+			s.markStoredBorrowRoots(reflect.ValueOf(n.Value))
 			s.recordDecl(n)
 			// Fall through to generic recursion so the initializer (and any nested
 			// statements) are scanned for escapes of OTHER names.
 		case *ast.CallExpr:
+			// A UFCS/method receiver is also an exposed header. Unresolved
+			// methods have no header-preservation proof.
+			if field, ok := stripOptimizationParens(n.Func).(*ast.FieldExpr); ok && (s.analyzer == nil || !s.isPrivateReceiverBuiltin(n) || !s.discardedCalls[n]) {
+				s.markAllNamesEscaped(reflect.ValueOf(field.Object))
+			}
+			// Aggregate arguments have no preservation summary for their nested
+			// references. Only a direct container borrow may use the exemption.
+			actualArgs := n.Args
+			if n.ResolvedArgsValid {
+				actualArgs = n.ResolvedArgs
+			}
+			for _, args := range [2][]ast.Expr{actualArgs, n.ResolvedImplicitArgs} {
+				for _, arg := range args {
+					if !aliasExprIsExplicitBorrow(arg) {
+						s.markStoredBorrowRoots(reflect.ValueOf(arg))
+					}
+				}
+			}
+			if s.analyzer != nil && s.isPrivateReceiverBuiltin(n) {
+				for _, arg := range n.Args {
+					s.markStoredBorrowRoots(reflect.ValueOf(arg))
+				}
+			}
+			borrowed := false
+			for _, args := range [2][]ast.Expr{actualArgs, n.ResolvedImplicitArgs} {
+				for _, arg := range args {
+					borrowed = borrowed || aliasExprIsExplicitBorrow(arg)
+				}
+			}
+			if borrowed && s.analyzer != nil && !s.isCloneCallExpr(n) && !(s.discardedCalls[n] && s.isPrivateReceiverBuiltin(n)) {
+				decl, resolved := s.analyzer.uniqueHeaderCallTarget(n, s.shadowed)
+				stable, known := s.headerStable[decl]
+				if resolved && !known {
+					// Bodies and resolution remain unchanged during this provenance scan.
+					stable = s.analyzer.containerHeadersStable(decl)
+					if s.headerStable == nil {
+						s.headerStable = make(map[*ast.FuncDecl]bool)
+					}
+					s.headerStable[decl] = stable
+				}
+				if !resolved || !stable {
+					for _, args := range [2][]ast.Expr{actualArgs, n.ResolvedImplicitArgs} {
+						for _, arg := range args {
+							if aliasExprIsExplicitBorrow(arg) {
+								s.markAllNamesEscaped(reflect.ValueOf(arg))
+							}
+						}
+					}
+				}
+			}
 			if s.isCloneCallExpr(n) {
 				// clone[darray[T]](x) deep-copies elements into a fresh destination. Reading
 				// the source container to copy its elements does not header-copy or share its
@@ -316,6 +433,18 @@ func (s *privateFreshScan) markAllNamesEscaped(v reflect.Value) {
 		if v.IsNil() {
 			return
 		}
+		// This mode has broader escape semantics than scanValue; never share
+		// its visited set with the place-aware traversal.
+		if v.Kind() == reflect.Pointer {
+			node := v.Interface()
+			if _, visited := s.escapeSeen[node]; visited {
+				return
+			}
+			if s.escapeSeen == nil {
+				s.escapeSeen = make(map[any]struct{})
+			}
+			s.escapeSeen[node] = struct{}{}
+		}
 		if ident, ok := v.Interface().(*ast.Ident); ok {
 			s.escaped[ident.Name] = true
 			return
@@ -364,38 +493,6 @@ func (s *privateFreshScan) isCloneCallExpr(call *ast.CallExpr) bool {
 		return false
 	}
 	return s.analyzer.isCompilerBuiltinHelperCall(call, "clone")
-}
-
-// buildPairEvidence records, per container-param pair of the callee, WHY it could be distinct at
-// this call site (consumed by the whole-program fixpoint in finalizeFuncDisjointParams):
-//   - base:   the per-call fresh-anchor predicate proved it here (unconditional).
-//   - depend: both args are the ENCLOSING function's own parameters p≠q, so the pair is distinct
-//     here exactly when the enclosing function's (p,q) is itself proven disjoint — the
-//     interprocedural forwarding edge.
-//
-// A pair with neither gets no entry, which keeps it out of the callee's fact (fail closed).
-func (a *Analyzer) buildPairEvidence(containerParams []int, distinct map[[2]int]bool, args []ast.Expr) map[[2]int]pairDisjointEvidence {
-	evidence := map[[2]int]pairDisjointEvidence{}
-	for x := 0; x < len(containerParams); x++ {
-		for y := x + 1; y < len(containerParams); y++ {
-			i, j := containerParams[x], containerParams[y]
-			pair := [2]int{i, j} // containerParams is ascending, so i<j
-			if distinct[pair] {
-				evidence[pair] = pairDisjointEvidence{base: true}
-				continue
-			}
-			pi, oki := a.enclosingParamIndexForArg(args[i])
-			pj, okj := a.enclosingParamIndexForArg(args[j])
-			if oki && okj && pi != pj {
-				p, q := pi, pj
-				if p > q {
-					p, q = q, p
-				}
-				evidence[pair] = pairDisjointEvidence{depend: true, depP: p, depQ: q}
-			}
-		}
-	}
-	return evidence
 }
 
 // enclosingParamIndexForArg resolves a call argument to the index of the enclosing function's
@@ -495,4 +592,150 @@ func recordReassignTarget(target ast.Expr, set map[string]bool) {
 	if ident, ok := stripOptimizationParens(target).(*ast.Ident); ok && ident != nil {
 		set[ident.Name] = true
 	}
+}
+
+// Stored branch/block results can retain a header reference even when the RHS
+// is not itself an AddrOfExpr. Calls are handled separately by callee summaries.
+func (s *privateFreshScan) markStoredBorrowRoots(root reflect.Value) {
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
+			if v.IsNil() || s.storedBorrowSeen[v.Interface()] {
+				return
+			}
+			if s.storedBorrowSeen == nil {
+				s.storedBorrowSeen = make(map[any]bool)
+			}
+			s.storedBorrowSeen[v.Interface()] = true
+			switch n := v.Interface().(type) {
+			case *ast.CallExpr:
+				if field, ok := stripOptimizationParens(n.Func).(*ast.FieldExpr); ok {
+					s.markAllNamesEscaped(reflect.ValueOf(field.Object))
+				}
+				return
+			case *ast.AddrOfExpr:
+				s.markAllNamesEscaped(reflect.ValueOf(n.Operand))
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(root)
+}
+
+// These compiler-identified mutators preserve private buffer ownership when
+// their returned header reference is discarded. Unknown methods fail closed.
+func (s *privateFreshScan) isPrivateReceiverBuiltin(call *ast.CallExpr) bool {
+	return s.analyzer != nil && (s.analyzer.isCompilerBuiltinHelperCall(call, "darray.push") || s.analyzer.isCompilerBuiltinHelperCall(call, "darray.reserve"))
+}
+
+// An outer array allocation proves nothing about buffers of its elements.
+// Freshness applies only to the exact whole local whose allocation was scanned.
+func wholePrivateDArrayBorrow(expr ast.Expr, private map[string]bool) bool {
+	addr, ok := stripOptimizationParens(expr).(*ast.AddrOfExpr)
+	if !ok {
+		return false
+	}
+	id, ok := stripOptimizationParens(addr.Operand).(*ast.Ident)
+	return ok && private[id.Name]
+}
+
+// Resolve provenance only after all bodies have acquired compiler-owned call
+// identities. Retain the call's lexical context for forwarding/name resolution.
+type pendingDisjointCall struct {
+	call       *ast.CallExpr
+	params     []Type
+	args       []ast.Expr
+	fn         *ast.FuncDecl
+	roots      [][]string
+	localDecls map[int]*ast.VarDeclStmt
+	forwarded  map[int]int
+	callee     *ast.FuncDecl
+}
+
+func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, params []Type, args []ast.Expr) {
+	if call == nil || a.callArgDisjoint == nil {
+		return
+	}
+	limit := len(params)
+	if len(args) < limit {
+		limit = len(args)
+	}
+	count := 0
+	for _, t := range params[:limit] {
+		if isContainerRefType(t) {
+			count++
+		}
+	}
+	if count < 2 {
+		return
+	}
+	request := pendingDisjointCall{call: call, params: append([]Type(nil), params...), args: append([]ast.Expr(nil), args...), fn: a.currentFuncDecl, roots: make([][]string, limit), forwarded: map[int]int{}, localDecls: map[int]*ast.VarDeclStmt{}}
+	request.callee, _ = a.resolveDirectCallFuncDecl(call)
+	for i, t := range params[:limit] {
+		if !isContainerRefType(t) {
+			continue
+		}
+		request.roots[i] = append([]string(nil), a.aliasRootsForExpr(args[i])...)
+		if addr, ok := stripOptimizationParens(args[i]).(*ast.AddrOfExpr); ok && a.currentScope != nil {
+			if id, ok := stripOptimizationParens(addr.Operand).(*ast.Ident); ok {
+				if symbol, ok := a.currentScope.Lookup(id.Name); ok && symbol.Kind == SymbolLocal {
+					request.localDecls[i], _ = symbol.Node.(*ast.VarDeclStmt)
+				}
+			}
+		}
+		if index, ok := a.enclosingParamIndexForArg(args[i]); ok {
+			request.forwarded[i] = index
+		}
+	}
+	a.pendingDisjointCalls = append(a.pendingDisjointCalls, request)
+}
+func (a *Analyzer) finalizeCallArgDisjoint() {
+	savedFn := a.currentFuncDecl
+	defer func() { a.currentFuncDecl = savedFn }()
+	a.privateFreshDArrayCache = nil
+	pending := a.pendingDisjointCalls
+	a.pendingDisjointCalls = nil
+	for _, request := range pending {
+		a.currentFuncDecl = request.fn
+		a.computeCallArgDisjoint(request)
+	}
+}
+
+func buildCapturedPairEvidence(params []int, distinct map[[2]int]bool, forwarded map[int]int) map[[2]int]pairDisjointEvidence {
+	evidence := map[[2]int]pairDisjointEvidence{}
+	for x, i := range params {
+		for _, j := range params[x+1:] {
+			pair := [2]int{i, j}
+			if distinct[pair] {
+				evidence[pair] = pairDisjointEvidence{base: true}
+				continue
+			}
+			p, okp := forwarded[i]
+			q, okq := forwarded[j]
+			if okp && okq && p != q {
+				if p > q {
+					p, q = q, p
+				}
+				evidence[pair] = pairDisjointEvidence{depend: true, depP: p, depQ: q}
+			}
+		}
+	}
+	return evidence
 }

@@ -88,6 +88,7 @@ const (
 )
 
 type Analyzer struct {
+	headerFunctionNames       headerFunctionNameIndex
 	shortCircuitAnalysisDepth int
 	shortCircuitStability     map[shortCircuitStabilityKey]bool
 	deferredImplEffectChecks  []func()
@@ -758,6 +759,7 @@ type Analyzer struct {
 	returnRefinementChecks      map[*ast.ReturnStmt][]*ast.CallExpr
 	hotDisjointKernelCandidates []hotDisjointKernelCandidate
 	privateFreshDArrayCache     map[*ast.FuncDecl]map[string]bool
+	pendingDisjointCalls        []pendingDisjointCall
 	reassignedParamCache        map[*ast.FuncDecl]map[string]bool
 	functionAnalyses            map[*ast.FuncDecl]*FunctionAnalysis
 	currentNamespace            string
@@ -1295,6 +1297,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	}
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
+	a.finalizeCallArgDisjoint()
 	a.finalizeFuncDisjointParams(activeDecls)
 	a.lintHotKernelsForDisjointness()
 	// docs/91 G0: death-time cohort + interprocedural arg-retention analysis. Runs AFTER body

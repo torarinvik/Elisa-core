@@ -28,28 +28,6 @@ type callDisjointObservation struct {
 	evidence        map[[2]int]pairDisjointEvidence
 }
 
-// registerCallDisjointObservation records one call site against its resolved callee declaration,
-// for the per-callee fixpoint in finalizeFuncDisjointParams. It runs for every analyzed call whose
-// callee resolves to a direct, by-name free function with >=2 container-ref params — including
-// calls where no pair is distinct, since those must still keep a pair OUT of the callee's fact.
-// Calls whose callee cannot be resolved by name are simply not recorded; finalize separately
-// disqualifies any callee reachable through an unobserved path (address-taken / overloaded), so an
-// unrecorded call can never leave a stale over-broad fact.
-func (a *Analyzer) registerCallDisjointObservation(call *ast.CallExpr, containerParams []int, evidence map[[2]int]pairDisjointEvidence) {
-	if a == nil || a.disjointCallSites == nil || len(containerParams) < 2 {
-		return
-	}
-	decl, ok := a.resolveDirectCallFuncDecl(call)
-	if !ok {
-		return
-	}
-	a.disjointCallSites[decl] = append(a.disjointCallSites[decl], callDisjointObservation{
-		enclosing:       a.currentFuncDecl,
-		containerParams: append([]int(nil), containerParams...),
-		evidence:        evidence,
-	})
-}
-
 // orderedPair returns {i,j} with i<j, the canonical key used throughout the disjointness maps.
 func orderedPair(i, j int) [2]int {
 	if i > j {
@@ -104,9 +82,13 @@ func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 		return
 	}
 	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
-	eligible := func(fn *ast.FuncDecl) bool {
-		return fn != nil && nameCounts[fn.Name] == 1 && !valueUsedNames[fn.Name]
+	headerStable := map[*ast.FuncDecl]bool{}
+	for fn := range a.disjointCallSites {
+		if fn != nil && nameCounts[fn.Name] == 1 && !valueUsedNames[fn.Name] {
+			headerStable[fn] = a.containerHeadersStable(fn)
+		}
 	}
+	eligible := func(fn *ast.FuncDecl) bool { return headerStable[fn] }
 
 	// proven[f] = the param pairs proven distinct so far. Only ever populated for eligible f, so a
 	// `depend` on f's fact (queried below) implicitly requires f eligible.

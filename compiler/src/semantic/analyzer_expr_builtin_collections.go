@@ -345,6 +345,8 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	if !ok || darrayType == nil {
 		return nil, false
 	}
+	// Preserve identity for provenance checks; spelling alone is not authority.
+	a.recordCompilerBuiltinHelperCall(expr, "darray.push")
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
@@ -645,6 +647,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	if !ok || darrayType == nil {
 		return nil, false
 	}
+	a.recordCompilerBuiltinHelperCall(expr, "darray.reserve")
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
