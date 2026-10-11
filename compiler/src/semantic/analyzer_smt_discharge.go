@@ -890,6 +890,19 @@ func (a *Analyzer) smtEnvForCallSubstEnv(tr *smtTranslator, subst map[string]ast
 }
 
 func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name string, argExpr ast.Expr, argEnv map[string]string, requireBinding bool) bool {
+	if constantStringResult(argExpr, 0) {
+		if tr.stringBindings == nil {
+			tr.stringBindings = map[string]smtConstantStringBinding{}
+		}
+		token := fmt.Sprintf("string_binding_%d", len(tr.stringBindings))
+		capturedEnv := map[string]string{}
+		for key, value := range argEnv {
+			capturedEnv[key] = value
+		}
+		tr.stringBindings[token] = smtConstantStringBinding{expr: argExpr, env: capturedEnv}
+		env["\x00string:"+name] = token
+		return true
+	}
 	// A literal-null substitution (e.g. `result` on a `return null` path) has no scalar SMT term. It is
 	// consumed structurally by the null-compare lowering (which keys an `isnull_<name>` predicate), so
 	// leave the env entry unbound rather than failing the whole env build.
@@ -1670,9 +1683,10 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 // smtTranslator lowers the integer/bool expression fragment to SMT-LIB2, collecting the free
 // variables it declares so their flow facts can be asserted as hypotheses.
 type smtTranslator struct {
-	a          *Analyzer
-	decls      map[string]bool // Elisa ident -> declared as an SMT Int const
-	arrayDecls map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	stringBindings map[string]smtConstantStringBinding // immutable bindings selected by each substitution environment
+	a              *Analyzer
+	decls          map[string]bool // Elisa ident -> declared as an SMT Int const
+	arrayDecls     map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	// setDecls / dictDecls model set[T] / dict[K,V] containers. A set is an (Array <KSort> Bool)
 	// membership function (`p in s` = `(select s p)`). A dict is modeled as TWO arrays keyed by the
 	// same KSort: a `<sym>_keys` (Array <KSort> Bool) membership predicate plus a `<sym>_vals`
@@ -3190,6 +3204,12 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			}
 			return smtCompare(n.Op, l, r), true
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+			if eq, ok := tr.constantStringEquality(n.Left, n.Right, env, 0); ok {
+				if n.Op == lexer.TOKEN_BANGEQ {
+					return "(not " + eq + ")", true
+				}
+				return eq, true
+			}
 			// Pointer-null test (`p == null` / `p != null`). Model null-ness as a Bool predicate keyed by
 			// the pointer's syntactic path, so the same pointer's null-ness is consistent between a branch
 			// guard and the obligation. This lets `ensure (p != null) or (result == false)` discharge: the
