@@ -117,8 +117,12 @@ def collections_void_from_items_opt[T](items: T&?) -> void&?:
 # uintptr slots covering `bytes`, rounded the way the arena counts them; never 0.
 @internal
 def collections_table_slots(bytes: usize) -> usize:
-    slots: usize = (bytes + size_of(uintptr) - 1) / size_of(uintptr)
-    return slots if slots > 0 else 1
+    word_bytes: usize = size_of(uintptr)
+    slots: mutable usize = bytes / word_bytes
+    if bytes % word_bytes != 0:
+        slots <- slots + 1
+    slots <- 1 if slots == 0
+    return slots
 
 @internal
 def collections_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
@@ -188,10 +192,15 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
 
         trusted Unsafe.AssumeProgress:
             while needed > new_capacity:
-                new_capacity <- new_capacity * 2
+                doubled_capacity: usize = new_capacity * 2
+                if doubled_capacity < new_capacity:
+                    # `needed` was checked before growth; use it if geometric growth wraps.
+                    new_capacity <- needed
+                    break
+                new_capacity <- doubled_capacity
 
-        old_size: usize = da.capacity * size_of(T)
-        new_size: usize = new_capacity * size_of(T)
+        old_size: usize = arena_checked_mul_usize(da.capacity, size_of(T)) can Abort.Panic
+        new_size: usize = arena_checked_mul_usize(new_capacity, size_of(T)) can Abort.Panic
 
         if da.items == null:
             da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}))
@@ -558,13 +567,14 @@ def flags_difference[T](left: Flags[T]&, right: Flags[T]&) -> Flags[T]:
 
 def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
+        needed: usize = arena_checked_add_usize(da.count, 1) can Abort.Panic
         in a:
-            _ = da.reserve(da.count + 1)
+            _ = da.reserve(needed)
 
         assert da.items != null
 
         da.items[da.count] <- item
-        da.count <- da.count + 1
+        da.count <- needed
         return da
 
 def darray_pop[T](da: mutable darray[T]&) -> T:
@@ -731,7 +741,8 @@ def binary_search[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> bool:
 
 def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&:
     can Memory.Allocate, Abort.Panic:
-        needed: usize = da.count + new_items_count
+        needed: usize = arena_checked_add_usize(da.count, new_items_count) can Abort.Panic
+        copy_bytes: usize = arena_checked_mul_usize(new_items_count, size_of(T)) can Abort.Panic
 
         if needed > da.capacity:
             new_capacity: mutable usize = da.capacity
@@ -739,10 +750,15 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
 
             trusted Unsafe.AssumeProgress:
                 while needed > new_capacity:
-                    new_capacity <- new_capacity * 2
+                    doubled_capacity: usize = new_capacity * 2
+                    if doubled_capacity < new_capacity:
+                        # `needed` was checked before growth; use it if geometric growth wraps.
+                        new_capacity <- needed
+                        break
+                    new_capacity <- doubled_capacity
 
-            old_size: usize = da.capacity * size_of(T)
-            new_size: usize = new_capacity * size_of(T)
+            old_size: usize = arena_checked_mul_usize(da.capacity, size_of(T)) can Abort.Panic
+            new_size: usize = arena_checked_mul_usize(new_capacity, size_of(T)) can Abort.Panic
 
             if da.items == null:
                 da.items as & <- collections_items_from_alloc[T]((arena_alloc(a, new_size) can Global{Read,Write}))
@@ -762,10 +778,10 @@ def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&,
         arena_memcpy(
             collections_mutable_void_from_items_at[T](da.items, da.count),
             collections_void_from_items[T](new_items),
-            new_items_count * size_of(T)
+            copy_bytes
         )
 
-        da.count <- da.count + new_items_count
+        da.count <- needed
         return da
 
 def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]&:
@@ -785,13 +801,14 @@ def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -
 # ------------------------------------------------------------
 
 def arena_dict_next_capacity(min_capacity: usize) -> usize:
-    0 return if min_capacity == 0
+    can Abort.Panic:
+        0 return if min_capacity == 0
 
-    cap: mutable usize = DICT_INIT_CAP
-    trusted Unsafe.AssumeProgress:
-        while cap < min_capacity:
-            cap <- cap * 2
-    return cap
+        cap: mutable usize = DICT_INIT_CAP
+        trusted Unsafe.AssumeProgress:
+            while cap < min_capacity:
+                cap <- arena_checked_mul_usize(cap, 2) can Abort.Panic
+        return cap
 
 # Key hashing for the open-addressing dict. The `ctx_hash_value` builtin (compiler-emitted)
 # dispatches on the concrete key type after monomorphization: a cstr hashes its CONTENT via
@@ -914,7 +931,8 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
 
         # The table lives on a stack of its own (collection_stack_acquire in arena.elisa),
         # not in the arena's bump chain, so growing it never strands the old table.
-        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(DictBucket[K, T]))) can Global{Read,Write})
+        table_bytes: usize = arena_checked_mul_usize(capacity, size_of(DictBucket[K, T])) can Abort.Panic
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write})
         items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(items, capacity)
 
@@ -944,7 +962,8 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         # Ping-pong: the spare stack (or a pooled/fresh one) takes the new table; the old
         # table's stack becomes the spare. Reused storage still holds the dead table, so
         # the buckets are zeroed here as before.
-        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(DictBucket[K, T]))) can Global{Read,Write})
+        table_bytes: usize = arena_checked_mul_usize(target_capacity, size_of(DictBucket[K, T])) can Abort.Panic
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write})
         new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(new_items, target_capacity)
 
@@ -1017,10 +1036,20 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
         owner: mutable Arena& = m.arena if m.arena != null else a
         m.arena as & <- owner if m.arena == null
 
-        # Grow before probing when the load (occupied + tombstones) would exceed 3/4, so a probe
-        # always terminates at an empty slot. Growing rehashes and clears tombstones.
-        if m.capacity == 0 or (m.used + 1.usize()) * 4.usize() > m.capacity * 3.usize():
-            target_capacity: usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
+        # When the next used slot (including tombstones) would cross 3/4 load, probe first:
+        # update an existing key in place, or grow and clear tombstones before inserting a
+        # missing key. Non-growth inserts pay only for the ordinary probe below.
+        if m.capacity == 0:
+            target_capacity: usize = DICT_INIT_CAP
+            try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write})
+        elif m.used >= m.capacity - m.capacity / 4.usize():
+            growth_probe: DictProbeResult = arena_dict_find_index(m, key)
+            if growth_probe.found:
+                assert m.items != null
+                growth_items: mutable DictBucket[K, T]& = m.items
+                growth_items[growth_probe.index].value <- value
+                return &growth_items[growth_probe.index].value
+            target_capacity: usize = arena_checked_mul_usize(m.capacity, 2) can Abort.Panic
             try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write})
 
         assert m.items != null
@@ -1212,7 +1241,8 @@ def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
         out return if capacity == 0
 
         # Same as arena_dict_new: the table is on a collection stack of its own.
-        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(SetBucket[T]))) can Global{Read,Write})
+        table_bytes: usize = arena_checked_mul_usize(capacity, size_of(SetBucket[T])) can Abort.Panic
+        table_stack: mutable heap Region& = (collection_stack_acquire(a, null, collections_table_slots(table_bytes)) can Global{Read,Write})
         items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(items, capacity)
 
@@ -1237,7 +1267,8 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
         old_capacity: usize = s.capacity
 
         live_table: void&? = collections_void_from_items_opt[SetBucket[T]](old_items_opt) if had_stack else null
-        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(SetBucket[T]))) can Global{Read,Write})
+        table_bytes: usize = arena_checked_mul_usize(target_capacity, size_of(SetBucket[T])) can Abort.Panic
+        table_stack: mutable heap Region& = (collection_stack_acquire(owner, live_table, collections_table_slots(table_bytes)) can Global{Read,Write})
         new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(new_items, target_capacity)
 
@@ -1266,8 +1297,16 @@ def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool erro
         owner: mutable Arena& = s.arena if s.arena != null else a
         s.arena as & <- owner if s.arena == null
 
-        if s.capacity == 0 or (s.used + 1.usize()) * 4.usize() > s.capacity * 3.usize():
-            target_capacity: usize = DICT_INIT_CAP if s.capacity == 0 else s.capacity * 2
+        # When the next used slot (including tombstones) would cross 3/4 load, probe first:
+        # return false for an existing key, or grow and clear tombstones before inserting a
+        # missing key. Non-growth adds pay only for the ordinary probe below.
+        if s.capacity == 0:
+            target_capacity: usize = DICT_INIT_CAP
+            try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write})
+        elif s.used >= s.capacity - s.capacity / 4.usize():
+            growth_probe: DictProbeResult = arena_set_find_index(s, key)
+            false return if growth_probe.found
+            target_capacity: usize = arena_checked_mul_usize(s.capacity, 2) can Abort.Panic
             try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write})
 
         assert s.items != null
@@ -1444,7 +1483,12 @@ def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
         index: usize = map.entries.count
         in owner:
             map.entries.push(IndexMapEntry[K, T]{key: key, value: value})
-        _ = try (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}) else null
+        catch (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}):
+            inserted:
+                pass
+            error e:
+                map.entries.count <- index
+                panic("index map put: allocation failed")
         return index
 
 

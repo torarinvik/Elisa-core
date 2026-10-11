@@ -595,7 +595,7 @@ extern arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&
 
 extern arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]&
 
-extern arena_dict_next_capacity(min_capacity: usize) -> usize
+extern arena_dict_next_capacity(min_capacity: usize) -> usize can[Abort.Panic]
 
 extern ctx_hash_cstr(s: cstr) -> u64
 
