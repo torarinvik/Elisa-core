@@ -393,6 +393,8 @@ type Analyzer struct {
 	// is such a local — the locally-constructed analogue of threading a struct param's
 	// region. Consumed by attachStructLocalArgRegion at call sites.
 	currentStructLocalAllocRegion map[*Symbol]string
+	// Concrete declared return-region bindings belong to each call, not the shared callee type.
+	declaredCallReturnRegions map[*ast.CallExpr]string
 	// currentElementReads / currentElementStates track the element provenance of eligible
 	// function-local containers (see region_local_container_elements.go).
 	currentElementReads  map[*ast.IndexExpr]bool

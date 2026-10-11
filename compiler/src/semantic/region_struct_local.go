@@ -103,6 +103,12 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 	if !ok || !structHasRegionlessContainerField(st) {
 		return
 	}
+	if call, ok := unwrapParenForRegionPoly(value).(*ast.CallExpr); ok {
+		if owner := a.declaredCallReturnRegions[call]; owner != "" && a.structLocalRegionIsLive(owner) {
+			a.currentStructLocalAllocRegion[sym] = owner
+			return
+		}
+	}
 	if _, isLit := unwrapParenForRegionPoly(value).(*ast.StructLitExpr); isLit {
 		a.currentStructLocalAllocRegion[sym] = region
 		return

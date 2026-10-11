@@ -322,6 +322,11 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return cloneRegionRefState(right), true
 	case *ast.CallExpr:
+		if region := a.declaredCallReturnRegions[n]; region != "" {
+			if owner, state := a.lookupRegionState(region); owner != nil && !state.Destroyed {
+				return regionRefStateFromDependency(owner, state.Generation), true
+			}
+		}
 		// `old(expr)` in an `ensure` clause is a pseudo-call (the entry-time value of expr), not a real
 		// callee — its provenance is that of the captured expression. Resolve it directly so we never
 		// analyze the `old` identifier as a function (which has no binding → "undefined identifier old").

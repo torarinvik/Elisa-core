@@ -520,6 +520,9 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 }
 
 func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *FuncType, orderedArgs []ast.Expr, expectedReturn Type) Type {
+	if a.declaredCallReturnRegions != nil {
+		delete(a.declaredCallReturnRegions, expr)
+	}
 	if expr == nil || ft == nil {
 		return invalidType
 	}
@@ -948,6 +951,14 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.recordFunctionPermissionRefs(functionPermissionRefs(appliedType))
 	if ft.Return == nil {
 		return a.namedTypes["void"]
+	}
+	if appliedType.ReturnRegion != "" {
+		if region := regionBindings[appliedType.ReturnRegion]; region != "" {
+			if a.declaredCallReturnRegions == nil {
+				a.declaredCallReturnRegions = map[*ast.CallExpr]string{}
+			}
+			a.declaredCallReturnRegions[expr] = region
+		}
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	resultType := a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
