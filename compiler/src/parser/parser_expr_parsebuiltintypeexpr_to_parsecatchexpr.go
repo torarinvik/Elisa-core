@@ -910,6 +910,9 @@ func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
 	return target
 }
 func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
+	if p.peek() == lexer.TOKEN_NULL {
+		return p.parsePrimary()
+	}
 	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
 	}

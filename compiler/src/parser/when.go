@@ -206,7 +206,7 @@ func (p *Parser) parseWhenRow(ncols int, exprForm bool) whenRow {
 		}
 		value = &ast.TupleExpr{Position: value.Pos(), Elems: elems}
 	}
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(value)
 	row.body = []ast.Stmt{&ast.ExprStmt{Position: value.Pos(), Expr: value}}
 	return row
 }
