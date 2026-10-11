@@ -15,18 +15,7 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		return a.analyzeMembershipExpr(expr)
 	}
 	if expr.Op == lexer.TOKEN_AND || expr.Op == lexer.TOKEN_OR {
-		left := valueContextOperandType(a.analyzeExpr(expr.Left))
-		scope := NewScope(a.currentScope)
-		// Only replay predicates whose evaluation cannot mutate an earlier
-		// operand. Replaying an effectful prefix could resurrect a stale fact.
-		if a.shortCircuitStablePredicate(expr.Left) {
-			a.recordSMTAssertFactInScope(scope, smtFactExprForCondition(expr.Left, expr.Op == lexer.TOKEN_AND))
-		}
-		right := valueContextOperandType(a.analyzeExprInScope(expr.Right, scope))
-		if !IsBoolType(left) || !IsBoolType(right) {
-			a.errorf(expr.Pos(), "logical operator requires bool operands")
-		}
-		return a.namedTypes["bool"]
+		return a.analyzeShortCircuitChain(expr)
 	}
 	leftShorthand, leftIsShorthand := contextualShorthandExpr(expr.Left)
 	rightShorthand, rightIsShorthand := contextualShorthandExpr(expr.Right)
@@ -232,10 +221,51 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	}
 }
 
+// Walk the left-associated spine once. Each evaluated operand contributes its
+// own fact, so mutations can invalidate preceding facts without reconstructing
+// stale prefix expressions. The child scope ends with this expression.
+func (a *Analyzer) analyzeShortCircuitChain(expr *ast.BinaryExpr) Type {
+	chain := []*ast.BinaryExpr{expr}
+	first := expr.Left
+	for {
+		nested, ok := first.(*ast.BinaryExpr)
+		if !ok || nested.Op != expr.Op {
+			break
+		}
+		chain = append(chain, nested)
+		first = nested.Left
+	}
+	left := valueContextOperandType(a.analyzeExpr(first))
+	scope := NewScope(a.currentScope)
+	previous := first
+	for i := len(chain) - 1; i >= 0; i-- {
+		node := chain[i]
+		if a.shortCircuitStablePredicate(previous) {
+			a.recordSMTAssertFactInScope(scope, smtFactExprForCondition(previous, expr.Op == lexer.TOKEN_AND))
+		}
+		right := valueContextOperandType(a.analyzeExprInScope(node.Right, scope))
+		if !IsBoolType(left) || !IsBoolType(right) {
+			a.errorf(node.Pos(), "logical operator requires bool operands")
+		}
+		left = a.namedTypes["bool"]
+		if node != expr {
+			a.exprTypes[node] = left
+			a.recordExprOptimizationFacts(node, left)
+		}
+		previous = node.Right
+	}
+	return left
+}
+
 // These expressions read current values without mutating them. A helper must
 // have a closed, primitive return expression; its return type alone is not
 // evidence of purity.
 func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
+	// Shared global storage is not an evaluated value snapshot. Another task
+	// may change it before the RHS, so do not turn that read into a hypothesis.
+	if root, global := a.globalStorageRoot(expr); global && (root.Mutable || root.Kind == SymbolExternVar) {
+		return false
+	}
 	switch n := expr.(type) {
 	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
 		return true
@@ -244,11 +274,11 @@ func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
 	case *ast.FieldExpr:
 		return n != nil && a.shortCircuitStablePredicate(n.Object)
 	case *ast.UnaryExpr:
-		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.shortCircuitStablePredicate(n.Operand)
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && n.Op != lexer.TOKEN_STAR && shortCircuitPrimitiveType(a.exprTypes[n.Operand]) && a.shortCircuitStablePredicate(n.Operand)
 	case *ast.BinaryExpr:
 		return n != nil && shortCircuitPrimitiveType(a.exprTypes[n.Left]) && shortCircuitPrimitiveType(a.exprTypes[n.Right]) && a.shortCircuitStablePredicate(n.Left) && a.shortCircuitStablePredicate(n.Right)
 	case *ast.CastExpr:
-		return n != nil && a.shortCircuitStablePredicate(n.Operand)
+		return n != nil && shortCircuitPrimitiveType(a.exprTypes[n.Operand]) && shortCircuitPrimitiveType(a.exprTypes[n]) && a.shortCircuitStablePredicate(n.Operand)
 	case *ast.CallExpr:
 		decl, ok := a.resolveDirectCallFuncDecl(n)
 		if !ok || decl == nil || !a.functionDefiningEquationEligible(decl) {

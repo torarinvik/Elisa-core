@@ -61,6 +61,14 @@ def caller(n: i64) -> bool:
 	}
 }
 
+func TestShortCircuitLongGuardChain(t *testing.T) {
+	guards := strings.Repeat("n >= 0 and ", 128)
+	result := analyzeContractStrict(t, "short_circuit_long_chain.elisa", shortCircuitRequiresHelper+"def caller(n: i64) -> bool:\n    return "+guards+"needs_nonnegative(n)\n")
+	if len(result.Errors()) != 0 {
+		t.Fatalf("long guard chain rejected: %s", allDiagnostics(result))
+	}
+}
+
 func TestShortCircuitImpurePrefixDoesNotRetainOldValue(t *testing.T) {
 	result := analyzeContractStrict(t, "short_circuit_mutating_prefix.elisa", shortCircuitRequiresHelper+`def mutate(value: mutable i64&) -> bool:
     value <- -1
@@ -70,5 +78,16 @@ def caller(n: mutable i64) -> bool:
 `)
 	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "precondition of") {
 		t.Fatalf("mutation retained a stale guard: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitMutableGlobalIsNotValueSnapshot(t *testing.T) {
+	result := analyzeContractStrict(t, "short_circuit_shared_global.elisa", shortCircuitRequiresHelper+`global mutable counter: i64 = 0
+def caller() -> bool:
+    can Global.Read:
+        return counter >= 0 and needs_nonnegative(counter)
+`)
+	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "precondition of") {
+		t.Fatalf("shared storage read treated as a value snapshot: %s", allDiagnostics(result))
 	}
 }
