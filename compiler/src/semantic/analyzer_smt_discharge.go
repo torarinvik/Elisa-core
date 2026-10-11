@@ -1641,6 +1641,9 @@ func postfixCastTargetWidthSign(n *ast.CastExpr) (bool, int, bool) {
 
 func smtNumericValueType(t Type) (Type, bool) {
 	t = stripRefForBounds(t)
+	if enumeration, ok := t.(*ConstEnumType); ok {
+		t = enumeration.Storage
+	}
 	if t == nil || !IsNumericType(t) || IsFloatType(t) {
 		return nil, false
 	}
@@ -2213,6 +2216,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.FieldExpr:
+		// Constant enum members retain their exact backing value, not an unconstrained projection.
+		if c, ok := tr.a.constIntValue(n); ok {
+			return smtInt(c), true
+		}
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
 				return bound, true

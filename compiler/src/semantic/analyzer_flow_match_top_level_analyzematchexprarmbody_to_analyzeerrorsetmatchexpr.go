@@ -298,8 +298,13 @@ func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type
 		if a.analyzeTopLevelConstEnumMatchPattern(arm.Pattern, constEnumType, scope, i, len(stmt.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		condition := a.immutableConstEnumPatternCondition(stmt.Value, arm.Pattern, constEnumType)
+		a.recordSMTAssertFactInScope(scope, condition)
 		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
+		if condition != nil && arm.Guard == nil && blockDefinitelyExits(arm.Body) {
+			a.recordSMTAssertFactInScope(a.currentScope, smtFactExprForCondition(condition, false))
+		}
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine
