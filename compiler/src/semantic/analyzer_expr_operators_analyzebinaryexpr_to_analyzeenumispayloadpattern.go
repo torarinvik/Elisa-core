@@ -14,6 +14,20 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	if expr.Op == lexer.TOKEN_IN {
 		return a.analyzeMembershipExpr(expr)
 	}
+	if expr.Op == lexer.TOKEN_AND || expr.Op == lexer.TOKEN_OR {
+		left := valueContextOperandType(a.analyzeExpr(expr.Left))
+		scope := NewScope(a.currentScope)
+		// Only replay predicates whose evaluation cannot mutate an earlier
+		// operand. Replaying an effectful prefix could resurrect a stale fact.
+		if a.shortCircuitStablePredicate(expr.Left) {
+			a.recordSMTAssertFactInScope(scope, smtFactExprForCondition(expr.Left, expr.Op == lexer.TOKEN_AND))
+		}
+		right := valueContextOperandType(a.analyzeExprInScope(expr.Right, scope))
+		if !IsBoolType(left) || !IsBoolType(right) {
+			a.errorf(expr.Pos(), "logical operator requires bool operands")
+		}
+		return a.namedTypes["bool"]
+	}
 	leftShorthand, leftIsShorthand := contextualShorthandExpr(expr.Left)
 	rightShorthand, rightIsShorthand := contextualShorthandExpr(expr.Right)
 	leftIntegerLiteral := isUnsuffixedIntegerValueExpr(expr.Left)
@@ -215,6 +229,59 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		return CommonNumericType(left, right)
 	default:
 		return invalidType
+	}
+}
+
+// These expressions read current values without mutating them. A helper must
+// have a closed, primitive return expression; its return type alone is not
+// evidence of purity.
+func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && a.shortCircuitStablePredicate(n.Inner)
+	case *ast.FieldExpr:
+		return n != nil && a.shortCircuitStablePredicate(n.Object)
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.shortCircuitStablePredicate(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && shortCircuitPrimitiveType(a.exprTypes[n.Left]) && shortCircuitPrimitiveType(a.exprTypes[n.Right]) && a.shortCircuitStablePredicate(n.Left) && a.shortCircuitStablePredicate(n.Right)
+	case *ast.CastExpr:
+		return n != nil && a.shortCircuitStablePredicate(n.Operand)
+	case *ast.CallExpr:
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil || !a.functionDefiningEquationEligible(decl) {
+			return false
+		}
+		body, ok := pureReturnExpr(decl)
+		if !ok {
+			return false
+		}
+		parameters := make(map[string]bool, len(decl.Params))
+		for _, parameter := range decl.Params {
+			parameters[parameter.Name] = true
+		}
+		// Exclude free state and nested calls, including recursive helpers.
+		if a.walkStaticExpr(body, func(child ast.Expr) bool {
+			switch child := child.(type) {
+			case *ast.Ident:
+				return !parameters[child.Name]
+			case *ast.CallExpr, *ast.FieldExpr, *ast.IndexExpr:
+				return true
+			}
+			return false
+		}) || !a.shortCircuitStablePredicate(body) {
+			return false
+		}
+		for _, argument := range n.Args {
+			if !a.shortCircuitStablePredicate(argument) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1092,4 +1159,9 @@ func (a *Analyzer) comparesNarrowedOptionalAgainstNull(expr *ast.BinaryExpr, lef
 	}
 	_, narrowed := a.currentScope.LookupNarrowedOptional(key)
 	return narrowed
+}
+
+func shortCircuitPrimitiveType(t Type) bool {
+	t = valueContextOperandType(t)
+	return t != nil && (IsNumericType(t) || IsBoolType(t))
 }
