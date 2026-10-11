@@ -3115,6 +3115,20 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "", false
 	case *ast.FieldExpr:
+		// A constructor projection is its field argument, including after result
+		// substitution has replaced the result identifier with the literal.
+		if literal, ok := stripOptimizationParens(n.Object).(*ast.StructLitExpr); ok {
+			if value, found := tr.a.structLitFieldMap(literal)[n.Field]; found {
+				return tr.boolTerm(value, env)
+			}
+		}
+		if tr.resultFields != nil {
+			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && id.Name == "result" {
+				if value, found := tr.resultFields[n.Field]; found {
+					return tr.boolTerm(value, env)
+				}
+			}
+		}
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
 				return bound, true
