@@ -1485,7 +1485,7 @@ def index_map_put[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize
             map.entries.push(IndexMapEntry[K, T]{key: key, value: value})
         catch (arena_dict_put[K, usize](owner, map.by_key, key, index) can Global{Read,Write}):
             inserted:
-                pass
+                return index
             error e:
                 map.entries.count <- index
                 panic("index map put: allocation failed")
