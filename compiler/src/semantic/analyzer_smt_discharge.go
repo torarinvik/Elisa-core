@@ -124,7 +124,7 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 		}
 		pname := decl.Params[i+1].Name
 		if c, ok := a.constIntValue(arg); ok {
-			tr.paramConsts[pname] = c
+			varParamEnv[pname] = smtInt(c)
 			continue
 		}
 		term, ok := tr.term(arg)
@@ -1743,6 +1743,8 @@ type smtTranslator struct {
 	// (still sound: a missing equation only weakens the hypothesis set; the recursive IH already carries
 	// the inductive content).
 	callEqDeclDepth map[*ast.FuncDecl]int
+	calleeBodyDepth int
+	calleeBodyDecl  *ast.FuncDecl
 	// callEqMaxDeclDepth bounds callEqDeclDepth.
 	callEqMaxDeclDepth int
 	// requiresHypMode is set ONLY while emitting an entry `requires` clause as a hypothesis. In that mode
@@ -2167,10 +2169,16 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.Ident:
+		if value, constant := tr.a.resolvedPrimitiveConstant(n); constant && value.Kind == ConstInt {
+			return smtInt(value.Int), true
+		}
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
 				return bound, true
 			}
+		}
+		if tr.calleeBodyDepth > 0 {
+			return "", false
 		}
 		if c, ok := tr.paramConsts[n.Name]; ok {
 			return smtInt(c), true
@@ -3080,10 +3088,16 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "false", true
 	case *ast.Ident:
+		if value, constant := tr.a.resolvedPrimitiveConstant(n); constant && value.Kind == ConstBool {
+			return strconv.FormatBool(value.Bool), true
+		}
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
 				return bound, true
 			}
+		}
+		if tr.calleeBodyDepth > 0 {
+			return "", false
 		}
 		if c, ok := tr.a.evalConstBoolExpr(n); ok {
 			if c {
@@ -3730,13 +3744,12 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if !ok {
 		return ret, true
 	}
-	env["result"] = ret
 	guard := "true"
 	for _, req := range decl.Requires {
 		if req == nil {
 			continue
 		}
-		h, ok := tr.boolTerm(req, env)
+		h, ok := tr.calleeBoolTerm(decl, req, env)
 		if !ok {
 			return ret, true
 		}
@@ -3765,6 +3778,11 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if recursiveProofCall && !tr.a.recursiveCallHasVerifiedDecrease(decl, call) {
 		recursiveProofCall = false
 	}
+	ensureEnv := make(map[string]string, len(env)+1)
+	for name, term := range env {
+		ensureEnv[name] = term
+	}
+	ensureEnv["result"] = ret
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
@@ -3772,7 +3790,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 		if tr.a.isRecursiveProofCall(decl) && !recursiveProofCall {
 			continue
 		}
-		if h, ok := tr.boolTerm(ensure, env); ok {
+		if h, ok := tr.calleeBoolTerm(decl, ensure, ensureEnv); ok {
 			if guard == "true" {
 				tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
 			} else {
@@ -3960,13 +3978,12 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	if !ok {
 		return ret, true
 	}
-	env["result"] = ret
 	guard := "true"
 	for _, req := range decl.Requires {
 		if req == nil {
 			continue
 		}
-		h, ok := tr.boolTerm(req, env)
+		h, ok := tr.calleeBoolTerm(decl, req, env)
 		if !ok {
 			return ret, true
 		}
@@ -3987,18 +4004,10 @@ func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (stri
 	return tr.callCanonKeyEnv(decl, args, nil)
 }
 
-// canonKeyEnv chooses the env used to CANONICALIZE a call (not to lower its body). For a recursive
-// self-call the key MUST be syntactic (nil env): the function's own defining-equation body is
-// translated under a substitution env, and we need the body's recursive sub-call to canonicalize to
-// the SAME symbol as the outer call so the equation becomes the self-referential fixpoint
-// `aux == body(aux)` that, together with the `ensure` IH, lets z3 perform the induction. Threading the
-// substitution env here would give the sub-call a distinct key, mint a fresh symbol every level, and
-// both lose the fixpoint AND defeat the bounded-unroll guard (unbounded recursion). Non-recursive
-// calls keep the env so struct/bool/forwarded args lower precisely.
+// canonKeyEnv keeps source self-call keys in the enclosing proof frame. During
+// callee-body expansion, preserve actual substitutions: f(n-1)'s recursive call
+// is f(n-2), never the same symbol. Per-declaration depth bounds unfolding.
 func (tr *smtTranslator) canonKeyEnv(decl *ast.FuncDecl, argEnv map[string]string) map[string]string {
-	if tr != nil && tr.a != nil && tr.a.isRecursiveProofCall(decl) {
-		return nil
-	}
 	return argEnv
 }
 
@@ -4126,6 +4135,28 @@ func sanitizeSMTFragment(s string) string {
 }
 
 func (tr *smtTranslator) callCanonKeyEnv(decl *ast.FuncDecl, args []ast.Expr, env map[string]string) (string, bool) {
+	// Verified self-recursion canonicalizes source arguments in its own lexical
+	// frame, rather than the unfolded substitution frame (the IH uses that key).
+	if env == nil && decl == tr.a.currentFuncDecl && tr.calleeBodyDecl == decl && tr.a.isRecursiveProofCall(decl) {
+		env = make(map[string]string, len(decl.Params))
+		for index, param := range decl.Params {
+			sym, ok := tr.a.currentScope.Lookup(param.Name)
+			if !ok || sym == nil || sym.Kind != SymbolParam || sym.Node != decl || sym.ParamIndex != index {
+				return "", false
+			}
+			if IsBoolType(sym.Type) {
+				tr.boolDecls[param.Name] = true
+				env[param.Name] = smtBoolVar(param.Name)
+			} else if _, numeric := smtNumericValueType(sym.Type); numeric {
+				tr.decls[param.Name] = true
+				tr.markIntVar(param.Name, sym.Type)
+				env[param.Name] = smtVar(param.Name)
+			} else {
+				env[param.Name] = dtToken(param.Name)
+			}
+		}
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "%p|", decl)
 	for _, arg := range args {
@@ -4237,6 +4268,11 @@ func (tr *smtTranslator) emitDefiningEquationWithEnv(call *ast.CallExpr, decl *a
 			return
 		}
 	}
+	priorDecl := tr.calleeBodyDecl
+	tr.calleeBodyDecl = decl
+	tr.calleeBodyDepth++
+	defer func() { tr.calleeBodyDepth-- }()
+	defer func() { tr.calleeBodyDecl = priorDecl }()
 	tr.callEqInFlight[canonKey]++
 	defer func() { tr.callEqInFlight[canonKey]-- }()
 	tr.callEqDeclDepth[decl]++
@@ -4714,4 +4750,13 @@ func smtSanitize(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// Callee clauses cannot capture ambient caller bindings by spelling.
+func (tr *smtTranslator) calleeBoolTerm(decl *ast.FuncDecl, expr ast.Expr, env map[string]string) (string, bool) {
+	priorDecl := tr.calleeBodyDecl
+	tr.calleeBodyDecl = decl
+	tr.calleeBodyDepth++
+	defer func() { tr.calleeBodyDecl = priorDecl; tr.calleeBodyDepth-- }()
+	return tr.boolTerm(expr, env)
 }

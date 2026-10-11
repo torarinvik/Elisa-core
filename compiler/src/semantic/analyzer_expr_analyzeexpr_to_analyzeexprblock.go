@@ -28,6 +28,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// accessed from outside its owning module. Locals/params are never
 			// Private, so this only affects qualified globals.
 			if sym, ok := a.currentScope.Lookup(n.Name); ok && a.globalNameIsVisible(sym, n.Name) {
+				a.recordResolvedPrimitiveConstantName(n, sym)
 				if len(a.storageViewLoopUseFrames) != 0 || len(a.loopAffineFrames) != 0 {
 					if base, named := trackedNamedStateStructBase(sym.Type); named && base != nil && !base.ProtocolStates {
 						if a.derivedLoopBindings == nil {
@@ -130,9 +131,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// Record the resolved canonical (namespace/using/import-qualified) name so
 			// the interpreter can resolve namespaced value/function references instead
 			// of re-deriving from the bare name without namespace context.
-			if a.resolvedValueNames != nil && canonical != "" && canonical != n.Name {
+			if a.resolvedValueNames != nil && canonical != "" && canonical != n.Name && sym.Kind != SymbolConst {
 				a.resolvedValueNames[n] = canonical
 			}
+			a.recordResolvedPrimitiveConstantName(n, sym)
 			a.recordResolvedGlobalStorage(n, sym)
 			result = promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 			if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {

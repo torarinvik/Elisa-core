@@ -48,6 +48,7 @@ func TestModuleLocalSelfRecursionUsesResolvedDeclaration(t *testing.T) {
 module Counts:
     def sum_to(n: i64) -> i64:
         requires n >= 0
+        ensure result == n
         ensure result >= 0
         decreases n
         if n == 0:
@@ -72,6 +73,7 @@ func TestRecursiveAffineBoundsThroughInduction(t *testing.T) {
 	src := `
 def add_const(n: i64) -> i64:
     requires n >= 0
+    requires n <= 9223372036854775803
     ensure result == n + 4
     ensure result >= 4
     decreases n
@@ -81,6 +83,7 @@ def add_const(n: i64) -> i64:
 
 def caller(n: i64) -> i64:
     requires n >= 0
+    requires n <= 9223372036854775803
     ensure result == n + 4
     ensure result >= 4
     return add_const(n)
@@ -420,6 +423,7 @@ func TestEmulatorStyleRecursiveDecodeProofFixture(t *testing.T) {
 	src := `
 def decode_prefix_slots(remaining: i64) -> i64:
     requires remaining >= 0
+    ensure result == remaining
     ensure result >= 0
     decreases remaining
     if remaining == 0:

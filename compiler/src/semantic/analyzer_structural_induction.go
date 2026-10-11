@@ -189,6 +189,11 @@ func (tr *smtTranslator) emitStructuralPredicateEquation(call *ast.CallExpr, dec
 // that is a single `match <param>:` over a recursive enum, or any pure-return tree boolTerm already
 // handles. Returns ok=false for shapes we do not model.
 func (tr *smtTranslator) lowerPredicateBody(decl *ast.FuncDecl, penv map[string]string) (string, bool) {
+	priorDecl := tr.calleeBodyDecl
+	tr.calleeBodyDecl = decl
+	tr.calleeBodyDepth++
+	defer func() { tr.calleeBodyDepth-- }()
+	defer func() { tr.calleeBodyDecl = priorDecl }()
 	// Pure-return tree (if/elif/else of bool returns, or a single bool return) — reuse boolTerm.
 	if body, ok := pureReturnExpr(decl); ok && body != nil {
 		return tr.boolTerm(body, tr.predicateEnvIntBool(penv))

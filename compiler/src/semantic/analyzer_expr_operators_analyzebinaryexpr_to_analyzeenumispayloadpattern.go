@@ -261,6 +261,11 @@ func (a *Analyzer) analyzeShortCircuitChain(expr *ast.BinaryExpr) Type {
 // have a closed, primitive return expression; its return type alone is not
 // evidence of purity.
 func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
+	if ident, ok := expr.(*ast.Ident); ok {
+		if _, constant := a.resolvedPrimitiveConstant(ident); constant {
+			return true
+		}
+	}
 	// Shared global storage is not an evaluated value snapshot. Another task
 	// may change it before the RHS, so do not turn that read into a hypothesis.
 	if root, global := a.globalStorageRoot(expr); global && (root.Mutable || root.Kind == SymbolExternVar) {
@@ -299,7 +304,8 @@ func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
 		if a.walkStaticExpr(body, func(child ast.Expr) bool {
 			switch child := child.(type) {
 			case *ast.Ident:
-				return !parameters[child.Name]
+				_, constant := a.resolvedPrimitiveConstant(child)
+				return !parameters[child.Name] && !constant
 			case *ast.CallExpr, *ast.FieldExpr, *ast.IndexExpr:
 				return true
 			}
@@ -316,6 +322,23 @@ func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+// Use the declaration's recorded binding, never the caller's lexical spelling.
+func (a *Analyzer) resolvedPrimitiveConstant(ident *ast.Ident) (ConstValue, bool) {
+	if a == nil || ident == nil || a.globalScope == nil {
+		return ConstValue{}, false
+	}
+	name, resolved := a.resolvedValueNames[ident]
+	if !resolved {
+		return ConstValue{}, false
+	}
+	symbol, ok := a.globalScope.Lookup(name)
+	if !ok || symbol.Kind != SymbolConst || symbol.Mutable || !shortCircuitPrimitiveType(symbol.Type) {
+		return ConstValue{}, false
+	}
+	value, ok := a.constValues[name]
+	return value, ok && (value.Kind == ConstInt || value.Kind == ConstBool)
 }
 
 func isNumericComparisonOperator(op lexer.TokenKind) bool {
@@ -1197,4 +1220,23 @@ func (a *Analyzer) comparesNarrowedOptionalAgainstNull(expr *ast.BinaryExpr, lef
 func shortCircuitPrimitiveType(t Type) bool {
 	t = valueContextOperandType(t)
 	return t != nil && (IsNumericType(t) || IsBoolType(t))
+}
+
+// Speculative return inference must not rebind a declaration's constant reads
+// through caller locals. Ordinary reanalysis removes an obsolete annotation.
+func (a *Analyzer) recordResolvedPrimitiveConstantName(ident *ast.Ident, symbol *Symbol) {
+	if a == nil || a.suppressDiagnostics || a.resolvedValueNames == nil || a.globalScope == nil {
+		return
+	}
+	if symbol != nil && symbol.Kind == SymbolConst {
+		if global, known := a.globalScope.Lookup(symbol.Name); known && global == symbol {
+			a.resolvedValueNames[ident] = symbol.Name
+			return
+		}
+	}
+	if name, annotated := a.resolvedValueNames[ident]; annotated {
+		if prior, known := a.globalScope.Lookup(name); known && prior.Kind == SymbolConst {
+			delete(a.resolvedValueNames, ident)
+		}
+	}
 }
