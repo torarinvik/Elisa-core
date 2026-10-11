@@ -127,6 +127,9 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 		if _, bound := s.lookupBinding(name); !bound {
 			ident = &ast.Ident{Position: pos, Name: semantic.PackedStoreImplicitUsePrefix + strings.TrimPrefix(name, "__packed_store_")}
 		}
+		// Preserve the worker's exact store identity on this synthetic expression.
+		// Its generated name is sanitized and cannot recover a qualified enum name.
+		s.g.result.ExprTypes[ident] = storeType
 		storeValue, _, err := s.emitExpr(ident, storeType)
 		if err != nil {
 			return nil, nil, true, err
