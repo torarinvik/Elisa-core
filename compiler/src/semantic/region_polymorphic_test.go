@@ -157,3 +157,23 @@ def append_row[@r](rows: mutable darray[darray[i64]]& @r, width: usize) -> void:
 		t.Fatalf("an explicit region-param caller must be able to call a region-polymorphic builder, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+func TestRegionPolymorphicParamWithoutPackedStores(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "region_no_packed.elisa", `struct Box:
+    value: i64
+def make() -> Box&:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        b: Box& = new[auto] Box(7)
+        return b
+def scalar() -> i64:
+    return 7
+`, AnalyzeOptions{})
+	fn := regionPolymorphicFuncType(t, result, "make")
+	if !fn.RegionPolymorphic || len(fn.ImplicitParamNames) != 1 || fn.ImplicitParamNames[0] != RegionPolymorphicImplicitParamName {
+		t.Fatalf("ordinary region parameter lost or packed store added: %+v", fn.ImplicitParamNames)
+	}
+	scalar := regionPolymorphicFuncType(t, result, "scalar")
+	if len(scalar.ImplicitParamNames) != 0 {
+		t.Fatalf("scalar function acquired implicit params: %+v", scalar.ImplicitParamNames)
+	}
+}

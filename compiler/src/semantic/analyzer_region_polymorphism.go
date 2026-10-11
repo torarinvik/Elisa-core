@@ -161,7 +161,14 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	// docs/76: compute each function's TRANSITIVE region-backed store needs (signature ∪ what its
 	// callees need) so mutually-recursive enum groups thread every required store across the call
 	// graph, not just the one in each function's own signature.
-	storeNeeds := a.computeTransitiveStoreNeeds(funcs, regionBackedPacked)
+	var storeNeeds map[*FuncType]map[string]*EnumType
+	if len(regionBackedPacked) != 0 {
+		storeNeeds = a.computeTransitiveStoreNeeds(funcs, regionBackedPacked)
+	} else {
+		// No hierarchy can need a threaded store. Clear prior classification
+		// state while retaining ordinary region-polymorphic parameter injection.
+		a.packedStoreBuilders = map[*FuncType]map[string]string{}
+	}
 	// An export target must have NO implicit parameters (exports.go), so it can never receive a
 	// threaded store — it owns a region and creates stores on demand. The generated test runner turns
 	// each @test body into an export target (e.g. ctx_test_case_impl_0), so detect them structurally.
@@ -174,6 +181,12 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	for _, fn := range funcs {
 		fnType := a.funcTypeForRegionPoly(fn)
 		if fnType == nil {
+			continue
+		}
+		if len(regionBackedPacked) == 0 {
+			if !exportTargets[fn.Name] && fnType.RegionPolymorphic {
+				a.injectRegionPolymorphicParam(fnType)
+			}
 			continue
 		}
 		// Entry points (@test/@bench/main) and export targets own a region and create stores on demand
