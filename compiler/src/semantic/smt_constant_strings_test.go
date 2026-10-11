@@ -115,3 +115,31 @@ def claim() -> bool:
 		t.Fatalf("false nested equality claim was not rejected: %v", result.Errors())
 	}
 }
+
+func TestSMTConstantStringNarrowSelectorPatterns(t *testing.T) {
+	for _, tc := range []struct {
+		name, width, pattern, output, diagnostic string
+	}{
+		{"u8_overflow", "u8", "256", "wrong", "does not fit in u8"},
+		{"u16_overflow", "u16", "65536", "wrong", "does not fit in u16"},
+		{"u8_range_overflow", "u8", "256..<257", "wrong", "does not fit in u8"},
+		{"u16_range_overflow", "u16", "65536..<65537", "wrong", "does not fit in u16"},
+		{"u8_wrong_result", "u8", "0", "wrong", "could not be proven"},
+		{"u16_wrong_result", "u16", "0", "wrong", "could not be proven"},
+		{"u8_valid", "u8", "0", "right", ""},
+		{"u16_valid", "u16", "0", "right", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := "def name(code: " + tc.width + ") -> sview:\n    ensure code == 0 implies result == \"right\"\n    return match code:\n        " + tc.pattern + ": \"" + tc.output + "\"\n        _: \"right\"\n"
+			result := analyzeContractStrict(t, tc.name+".elisa", source)
+			diagnostics := allDiagnostics(result)
+			if tc.diagnostic != "" {
+				if !strings.Contains(diagnostics, tc.diagnostic) {
+					t.Fatalf("missing %q: %s", tc.diagnostic, diagnostics)
+				}
+			} else if len(result.Errors()) != 0 {
+				t.Fatalf("valid narrow pattern rejected: %s", diagnostics)
+			}
+		})
+	}
+}
