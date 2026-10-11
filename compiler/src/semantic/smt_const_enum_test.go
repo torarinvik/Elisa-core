@@ -83,3 +83,66 @@ def check(initial: Kind) -> bool:
 		t.Fatalf("mutable subject retained stale match fact: %v", result.Errors())
 	}
 }
+
+func TestSMTConstEnumAliasMemberIdentity(t *testing.T) {
+	result := analyzeContractStrict(t, "enum_alias.elisa", `
+module Tokens:
+    public:
+        const enum Kind of u8:
+            First = 17
+            Second = 23
+type Kind = Tokens::Kind
+def code(kind: Kind) -> i64:
+    ensure kind == Kind.First implies result == 110
+    ensure kind == Kind.Second implies result == 114
+    match kind:
+        Kind.First:
+            return 110
+        Kind.Second:
+            return 114
+    return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("aliased enum members must keep identity: %v", errs)
+	}
+}
+
+func TestSMTConstEnumAliasRuntimeShadowDoesNotFold(t *testing.T) {
+	result := analyzeContractStrict(t, "enum_alias_shadow.elisa", `
+module Tokens:
+    public:
+        const enum Kind of u8:
+            First = 17
+            Second = 23
+type Kind = Tokens::Kind
+struct Holder:
+    First: i64
+def check(Kind: Holder) -> bool:
+    ensure result == true
+    return Kind.First == 17
+`)
+	if !strings.Contains(allDiagnostics(result), "could not be proven") {
+		t.Fatalf("runtime field incorrectly folded as enum alias: %v", result.Errors())
+	}
+}
+
+func TestSMTConstEnumAliasGlobalValueShadowDoesNotFold(t *testing.T) {
+	result := analyzeContractStrict(t, "enum_alias_global_shadow.elisa", `
+module Tokens:
+    public:
+        const enum Kind of u8:
+            First = 17
+            Second = 23
+type Kind = Tokens::Kind
+struct Holder:
+    First: mutable i64
+global mutable Kind: Holder = zeroed
+def check() -> bool:
+    ensure result == true
+    can Global.Read:
+        return Kind.First == 17
+`)
+	if !strings.Contains(allDiagnostics(result), "could not be proven") {
+		t.Fatalf("global value field incorrectly folded as enum alias: %v", result.Errors())
+	}
+}

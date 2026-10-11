@@ -185,6 +185,17 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 				return value, true
 			}
 		}
+		// Type aliases do not add duplicate entries to constValues. Resolve the
+		// visible enum identity before reading its exact member value.
+		if !a.identNameResolvesAsValue(ident.Name) {
+			if base, _, ok := a.lookupVisibleType(ident.Name); ok {
+				if enum, ok := base.(*ConstEnumType); ok {
+					if member, ok := enum.Member(n.Field); ok {
+						return ConstValue{Kind: ConstInt, Int: member.Value}, true
+					}
+				}
+			}
+		}
 		return ConstValue{}, false
 	case *ast.ShorthandMemberExpr:
 		constEnumType, ok := a.exprTypes[n].(*ConstEnumType)
