@@ -23,6 +23,11 @@ func TestShortCircuitCallRequires(t *testing.T) {
 		{"or_wrong_path", "return n >= 0 or needs_nonnegative(n)", true},
 		{"no_guard_leak", "selected: bool = n >= 0 and needs_nonnegative(n)\n    return needs_nonnegative(n)", true},
 		{"statement_guard", "if n >= 0:\n        return needs_nonnegative(n)\n    return false", false},
+		{"or_chain_false_path", "return n < 0 or n > 10 or needs_nonnegative(n)", false},
+		{"mixed_outer_and", "return (n >= 0 or n >= 10) and needs_nonnegative(n)", false},
+		{"mixed_inner_or", "return n >= 0 and (n <= 10 or needs_nonnegative(n))", false},
+		{"mixed_insufficient_guard", "return (n <= 10 or n >= 10) and needs_nonnegative(n)", true},
+		{"or_guard_no_leak", "selected: bool = n < 0 or needs_nonnegative(n)\n    return needs_nonnegative(n)", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := analyzeContractStrict(t, "short_circuit_"+tc.name+".elisa", shortCircuitRequiresHelper+"def caller(n: i64) -> bool:\n    "+tc.body+"\n")
@@ -89,5 +94,24 @@ def caller() -> bool:
 `)
 	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "precondition of") {
 		t.Fatalf("shared storage read treated as a value snapshot: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitStaticReferenceIsNotValueSnapshot(t *testing.T) {
+	result := analyzeContractStrict(t, "short_circuit_static_reference.elisa", shortCircuitRequiresHelper+`def caller(value: static i64&) -> bool:
+    return value >= 0 and needs_nonnegative(value)
+`)
+	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "precondition of") {
+		t.Fatalf("shared static reference treated as a value snapshot: %s", allDiagnostics(result))
+	}
+}
+
+func TestShortCircuitImmutableAliasOfMutableStaticReferenceIsNotValueSnapshot(t *testing.T) {
+	result := analyzeContractStrict(t, "short_circuit_static_reference_alias.elisa", shortCircuitRequiresHelper+`def caller(value: mutable static i64&) -> bool:
+    alias: mutable static i64& = value
+    return alias >= 0 and needs_nonnegative(alias)
+`)
+	if len(result.Errors()) == 0 || !strings.Contains(allDiagnostics(result), "precondition of") {
+		t.Fatalf("immutable alias of shared mutable referent treated as a value snapshot: %s", allDiagnostics(result))
 	}
 }

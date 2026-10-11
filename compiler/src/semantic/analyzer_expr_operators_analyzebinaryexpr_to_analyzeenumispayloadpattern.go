@@ -266,6 +266,9 @@ func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
 	if root, global := a.globalStorageRoot(expr); global && (root.Mutable || root.Kind == SymbolExternVar) {
 		return false
 	}
+	if ref, borrowed := a.exprTypes[expr].(*RefType); borrowed && ref.Storage == RefStorageStatic {
+		return false
+	}
 	switch n := expr.(type) {
 	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
 		return true
