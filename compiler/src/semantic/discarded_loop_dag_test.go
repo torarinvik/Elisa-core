@@ -62,3 +62,22 @@ func TestSynthesizedRegionWalkHandlesSharedResolvedArguments(t *testing.T) {
 		t.Fatalf("synthesized regions=%v, want two distinct lazy auto regions in source order", got)
 	}
 }
+
+func TestBarePackedVariantWalkHandlesSharedResolvedArguments(t *testing.T) {
+	for _, payload := range []bool{false, true} {
+		variant := &EnumVariant{Name: "Leaf"}
+		if payload {
+			variant.Payload = []Type{&BuiltinType{Name: "i64"}}
+		}
+		enum := &EnumType{Name: "Tree", Packed: true, VariantMap: map[string]*EnumVariant{"Leaf": variant}}
+		analyzer := &Analyzer{namedTypes: map[string]Type{"Tree": enum}}
+		var expr ast.Expr = &ast.FieldExpr{Object: &ast.Ident{Name: "Tree"}, Field: "Leaf"}
+		for i := 0; i < 128; i++ {
+			expr = &ast.CallExpr{Func: &ast.Ident{Name: "ident"}, Args: []ast.Expr{expr}, ResolvedArgsValid: true, ResolvedArgs: []ast.Expr{expr}}
+		}
+		got := analyzer.funcBarePackedVariantRoots(&ast.FuncDecl{Body: []ast.Stmt{&ast.ExprStmt{Expr: expr}}})
+		if got["Tree"] != !payload || len(got) != map[bool]int{false: 1, true: 0}[payload] {
+			t.Fatalf("payload=%v roots=%v", payload, got)
+		}
+	}
+}

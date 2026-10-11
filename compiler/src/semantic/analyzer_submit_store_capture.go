@@ -127,6 +127,8 @@ func (a *Analyzer) funcBarePackedVariantRoots(fn *ast.FuncDecl) map[string]bool 
 	if fn == nil {
 		return out
 	}
+	// Resolved call arguments can revisit the same source variant node.
+	seen := make(map[any]struct{})
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -137,6 +139,11 @@ func (a *Analyzer) funcBarePackedVariantRoots(fn *ast.FuncDecl) map[string]bool 
 			if v.IsNil() {
 				return
 			}
+			node := v.Interface()
+			if _, visited := seen[node]; visited {
+				return
+			}
+			seen[node] = struct{}{}
 			if field, ok := v.Interface().(*ast.FieldExpr); ok && field != nil {
 				if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(field); ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
 					out[enumType.Root().Name] = true
