@@ -13,6 +13,9 @@ func (a *Analyzer) containerHeadersStable(root *ast.FuncDecl) bool {
 	checked := map[*ast.FuncDecl]bool{}
 	var check func(*ast.FuncDecl) bool
 	check = func(fn *ast.FuncDecl) bool {
+		if stable, known := a.headerStabilityCompleted[fn]; known {
+			return stable
+		}
 		if fn == nil || len(fn.Body) == 0 || len(fn.TypeParams) != 0 {
 			return false
 		}
@@ -187,7 +190,19 @@ func (a *Analyzer) containerHeadersStable(root *ast.FuncDecl) bool {
 		}
 		return walk(reflect.ValueOf(fn.Body))
 	}
-	return check(root)
+	stable := check(root)
+	if a.headerStabilityCompleted != nil {
+		if stable {
+			// A complete safe closure proves every visited member safe, including
+			// recursive components. Never publish a provisional nested result.
+			for fn := range checked {
+				a.headerStabilityCompleted[fn] = true
+			}
+		} else {
+			a.headerStabilityCompleted[root] = false
+		}
+	}
+	return stable
 }
 
 type headerFunctionNameIndex struct {

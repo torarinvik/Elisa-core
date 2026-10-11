@@ -710,6 +710,8 @@ func (a *Analyzer) finalizeCallArgDisjoint() {
 	savedFn := a.currentFuncDecl
 	defer func() { a.currentFuncDecl = savedFn }()
 	a.privateFreshDArrayCache = nil
+	// Bodies and call identities are now fixed for this analysis.
+	a.headerStabilityCompleted = make(map[*ast.FuncDecl]bool)
 	pending := a.pendingDisjointCalls
 	a.pendingDisjointCalls = nil
 	for _, request := range pending {

@@ -89,6 +89,7 @@ const (
 
 type Analyzer struct {
 	headerFunctionNames       headerFunctionNameIndex
+	headerStabilityCompleted  map[*ast.FuncDecl]bool
 	shortCircuitAnalysisDepth int
 	shortCircuitStability     map[shortCircuitStabilityKey]bool
 	deferredImplEffectChecks  []func()

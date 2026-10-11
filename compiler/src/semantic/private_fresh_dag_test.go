@@ -424,3 +424,37 @@ func TestPrivateFreshSharedBuiltinValueOccurrence(t *testing.T) {
 		}
 	}
 }
+
+func TestHeaderStabilityCompletedCacheRecursiveClosure(t *testing.T) {
+	for _, unsafe := range []bool{false, true} {
+		aDecl := &ast.FuncDecl{Name: "left", Params: []ast.ParamDecl{{Name: "p"}}}
+		bDecl := &ast.FuncDecl{Name: "right", Params: []ast.ParamDecl{{Name: "p"}}}
+		call := func(name string) ast.Stmt {
+			return &ast.ExprStmt{Expr: &ast.CallExpr{Func: &ast.Ident{Name: name}, Args: []ast.Expr{&ast.Ident{Name: "p"}}}}
+		}
+		aDecl.Body = []ast.Stmt{call("right")}
+		bDecl.Body = []ast.Stmt{call("left")}
+		if unsafe {
+			aDecl.Body = append(aDecl.Body, &ast.AssignStmt{Target: &ast.Ident{Name: "p"}, Value: &ast.Ident{Name: "p"}})
+		}
+		a := &Analyzer{globalScope: NewScope(nil), funcDeclSymbols: map[*ast.FuncDecl]*Symbol{}, headerStabilityCompleted: map[*ast.FuncDecl]bool{}}
+		for _, fn := range []*ast.FuncDecl{aDecl, bDecl} {
+			sym := &Symbol{Name: fn.Name, Node: fn, Type: &FuncType{Params: []Type{&RefType{Elem: &DArrayType{}}}, Return: &BuiltinType{Name: "void"}}}
+			a.funcDeclSymbols[fn] = sym
+			a.globalScope.Define(sym)
+		}
+		if stable := a.containerHeadersStable(aDecl); stable == unsafe {
+			t.Fatalf("unsafe=%v root stable=%v", unsafe, stable)
+		}
+		if unsafe {
+			if a.headerStabilityCompleted[bDecl] {
+				t.Fatal("provisional cycle member cached safe")
+			}
+		} else if !a.headerStabilityCompleted[bDecl] {
+			t.Fatal("completed safe closure not shared")
+		}
+		if stable := a.containerHeadersStable(bDecl); stable == unsafe {
+			t.Fatalf("unsafe=%v second root stable=%v", unsafe, stable)
+		}
+	}
+}
