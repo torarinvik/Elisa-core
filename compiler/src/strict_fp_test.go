@@ -14,6 +14,7 @@ import (
 // `-fstrict-fp` / ELISACORE_STRICT_FP is the opt-out: no contraction, no reciprocal, no fast-math.
 func TestStrictFPDropsContraction(t *testing.T) {
 	t.Run("default contracts", func(t *testing.T) {
+		t.Setenv("ELISACORE_STRICT_FP", "")
 		out := emitFoldProbeIR(t, "strict_fp_probe.elisa", "-O0")
 		if !strings.Contains(out, "fmul contract") || !strings.Contains(out, "fadd contract") {
 			t.Fatalf("expected the default build to allow contraction:\n%s", out)

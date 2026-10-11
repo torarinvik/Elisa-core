@@ -7,6 +7,7 @@ import (
 )
 
 func TestGenerateLLVMIRLowersFloatArithmeticComparisonsAndCasts(t *testing.T) {
+	t.Setenv("ELISACORE_STRICT_FP", "")
 	src := `global tau: f64 = 6.25
 
 def mix(left: f32, right: f64) -> f64:
@@ -213,6 +214,7 @@ global g_f32: f32 = F32_FROM_U64
 	}
 }
 func TestGenerateLLVMIRLowersContextualFloatLiteralSitesAndGlobals(t *testing.T) {
+	t.Setenv("ELISACORE_STRICT_FP", "")
 	src := `extern passthrough(value: f32) -> f32
 
 struct FloatPair:
@@ -270,6 +272,7 @@ def local_and_call() -> f32:
 	}
 }
 func TestGenerateLLVMIRLowersContextualFloatLiteralArithmeticSites(t *testing.T) {
+	t.Setenv("ELISACORE_STRICT_FP", "")
 	src := `extern passthrough(value: f32) -> f32
 
 def choose(flag: bool) -> f32:
@@ -312,6 +315,7 @@ def local_and_call() -> f32:
 	}
 }
 func TestGenerateLLVMIRLowersContextualFloatLiteralArithmeticTopLevelSites(t *testing.T) {
+	t.Setenv("ELISACORE_STRICT_FP", "")
 	src := `struct FloatPair:
 	left: f32
 	right: f32

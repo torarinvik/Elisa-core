@@ -1149,7 +1149,7 @@ enum Color layout(handle: ptr):
 
 def main() -> i64:
     return 0
-`, "requires a recursive region-backed enum")
+`, "requires a plain store-backed enum")
 }
 
 // docs/82: pointer handles are not position-independent → freeze is a compile error naming the fix.
