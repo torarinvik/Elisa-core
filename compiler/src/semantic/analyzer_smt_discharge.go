@@ -2240,6 +2240,11 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
+			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
+				return tr.termEnv(value, env)
+			}
+		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
 				return tr.termEnv(value, env)
@@ -3124,6 +3129,11 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
+			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
+				return tr.boolTerm(value, env)
+			}
+		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
 				return tr.boolTerm(value, env)
