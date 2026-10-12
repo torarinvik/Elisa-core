@@ -118,6 +118,9 @@ func (s *functionState) emitVerifiedTaskGroupSubmit(expr *ast.CallExpr, info sem
 	if !ok || task == nil || taskName != "Task" || len(task.Args) != 2 {
 		return nil, nil, fmt.Errorf("verified submit did not produce a Task[R, Pending] value")
 	}
+	if info.AlreadyAdded {
+		return taskValue, taskType, nil
+	}
 	groupAdd, groupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": task.Args[0]})
 	if err != nil {
 		return nil, nil, err

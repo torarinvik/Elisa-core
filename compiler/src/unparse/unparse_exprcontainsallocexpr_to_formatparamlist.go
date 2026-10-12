@@ -318,9 +318,33 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.PoolStmt:
-		f.writeLine(level, "pool "+n.Name+"("+formatExpr(n.Workers)+"):")
-		for _, stmt := range n.Body {
-			f.writeStmt(level+1, stmt)
+		if n.Nursery {
+			header := "nursery"
+			if n.BorrowedPool != "" {
+				header += " on(" + n.BorrowedPool + ")"
+			} else if !n.DefaultWorkers {
+				header += " workers(" + formatExpr(n.Workers) + ")"
+			}
+			f.writeLine(level, header+":")
+			body := n.Body
+			if len(body) >= 2 {
+				if group, ok := body[0].(*ast.VarDeclStmt); ok && group != nil {
+					newCall, isNewCall := group.Value.(*ast.CallExpr)
+					if wait, ok := body[len(body)-1].(*ast.ExprStmt); ok && wait != nil {
+						if call, isWaitCall := wait.Expr.(*ast.CallExpr); isNewCall && isWaitCall && unparseCallName(newCall) == "task_group_new" && unparseCallName(call) == "task_group_wait_all" {
+							body = body[1 : len(body)-1]
+						}
+					}
+				}
+			}
+			for _, stmt := range body {
+				f.writeStmt(level+1, stmt)
+			}
+		} else {
+			f.writeLine(level, "pool "+n.Name+"("+formatExpr(n.Workers)+"):")
+			for _, stmt := range n.Body {
+				f.writeStmt(level+1, stmt)
+			}
 		}
 	case *ast.LockStmt:
 		f.writeLine(level, "lock "+formatExpr(n.Mutex)+" as "+n.GuardName+":")
@@ -448,6 +472,17 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	case *ast.ResetStmt:
 		f.writeLine(level, "reset "+n.Name)
 	}
+}
+
+func unparseCallName(call *ast.CallExpr) string {
+	if call == nil {
+		return ""
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident == nil {
+		return ""
+	}
+	return ident.Name
 }
 
 func iterForWhereSource(expr ast.Expr) (ast.Expr, ast.Expr, bool) {

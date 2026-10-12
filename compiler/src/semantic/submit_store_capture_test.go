@@ -15,7 +15,7 @@ def perf_cores() -> usize:
 def task_group_new() -> TaskGroup:
     return zeroed
 def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
-    pass
+    _ = move task
 def task_group_wait_all(group: mutable TaskGroup&):
     pass
 def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R can[P], arg: A) -> Task[R, Pending]:

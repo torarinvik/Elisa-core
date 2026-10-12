@@ -77,6 +77,60 @@ def main() -> i32:
 	}
 }
 
+// A callee may inspect a local view-bearing value while mutating an unrelated longer-lived
+// object. Its summary must not treat every argument as flowing into each writable parameter.
+func TestLocalBorrowReadOnlyValueBesideWritableStateAllowed(t *testing.T) {
+	src := `struct Node:
+    text: sview
+
+struct State:
+    retained: mutable darray[sview]
+    visited: mutable bool
+
+def inspect(node: Node, state: mutable State&) -> void:
+    state.visited <- node.text != ""
+
+def walk(nodes: darray[Node]&, state: mutable State&) -> void can[Abort.Panic]:
+    can Abort.Panic:
+        for node in nodes:
+            inspect(node, state)
+
+def outer(state: mutable State&) -> void can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[Node] = []
+        walk(local, state)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSource(t, "read_only_value_beside_writable_state.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("must be allowed, got: %s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestReturnBorrowDeclaredValueFlowDropsOnlyBorrowFreeTypes(t *testing.T) {
+	a := &Analyzer{}
+	flow := returnBorrowFlow{Local: true, Params: map[int]bool{2: true}, Contents: map[int]bool{3: true}}
+	valueType := &StructType{Name: "ValueType", Fields: map[string]Field{
+		"kind": {Name: "kind", Type: &BuiltinType{Name: "u32"}},
+		"bits": {Name: "bits", Type: &BuiltinType{Name: "u32"}},
+	}}
+	if got := a.returnBorrowDeclaredValueFlow(flow, valueType); !got.empty() {
+		t.Fatalf("a pointer-free by-value local must not retain initializer provenance: %+v", got)
+	}
+
+	viewType := &StructType{Name: "BorrowingValue", Fields: map[string]Field{
+		"name": {Name: "name", Type: &SViewType{}},
+	}}
+	if got := a.returnBorrowDeclaredValueFlow(flow, viewType); got.empty() || !got.Local || !got.Params[2] || !got.Contents[3] {
+		t.Fatalf("a borrow-carrying local must preserve all initializer provenance: %+v", got)
+	}
+	if got := a.returnBorrowDeclaredValueFlow(flow, invalidType); got.empty() || !got.Local || !got.Params[2] || !got.Contents[3] {
+		t.Fatalf("an unresolved declared type must remain conservative: %+v", got)
+	}
+}
+
 // The binder shared by the alternatives of `e is A(items) or e is B(items)` is a payload of the
 // parameter `e`, not a fresh frame local: iterating it and passing the elements beside a
 // writable parameter stores nothing local.

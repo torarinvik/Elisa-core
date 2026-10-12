@@ -3,15 +3,15 @@ package semantic
 import (
 	"path/filepath"
 	"reflect"
-	"strings"
 
 	"elisacore/src/ast"
 )
 
 // recordVerifiedTaskGroupSubmits proves the deliberately small manual TaskGroup
 // window understood by Stage0: a local TaskGroup initialized by the canonical
-// constructor, one matching wait later in the same statement list, and bare safe
-// submits nested only in ordinary counted loops and `can` blocks between them.
+// constructor, one matching wait later in the same statement list, and matching
+// task_group_add(group, safe_submit(...)) calls nested only in ordinary counted
+// loops and `can` blocks between them.
 // Anything more complex keeps the existing conservative lifetime diagnostic.
 func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 || taskGroupFunctionShadowsAPI(fn.Body) || !a.taskGroupRuntimeAPIsTrusted() {
@@ -54,7 +54,7 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
 			return
 		}
 
-		var submits []*ast.CallExpr
+		var submits []taskGroupSubmitCandidate
 		for _, stmt := range body[declRow+1 : waitRow] {
 			if !taskGroupWindowStmtSafe(stmt, groupName, &submits) {
 				return
@@ -63,10 +63,62 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
 		if len(submits) == 0 {
 			return
 		}
+		added := false
 		for _, submit := range submits {
-			a.taskGroupSubmits[submit] = TaskGroupSubmitInfo{GroupName: groupName}
+			if _, exists := a.taskGroupSubmits[submit.call]; !exists {
+				added = true
+			}
+			a.taskGroupSubmits[submit.call] = TaskGroupSubmitInfo{GroupName: groupName, AlreadyAdded: submit.alreadyAdded}
+		}
+		if added {
+			a.invalidateStoreFlowSummaries()
 		}
 	})
+}
+
+// recordVerifiedTaskGroupSubmitsInDecls runs before body analysis so interprocedural
+// store-flow summaries see every proved join, regardless of declaration order. The
+// proof only needs the lexical value names visible at function entry; body-local
+// shadowing is checked directly from the AST.
+func (a *Analyzer) recordVerifiedTaskGroupSubmitsInDecls(decls []scopedDecl) {
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			savedFuncType := a.currentFuncType
+			a.currentFuncType = nil
+			defer func() { a.currentFuncType = savedFuncType }()
+			record := func(fn *ast.FuncDecl) {
+				if fn == nil {
+					return
+				}
+				savedScope := a.currentScope
+				a.currentScope = NewScope(a.globalScope)
+				defer func() { a.currentScope = savedScope }()
+				for _, param := range fn.Params {
+					if param.Name != "" {
+						a.currentScope.Symbols[param.Name] = &Symbol{Name: param.Name}
+					}
+				}
+				for _, name := range fn.RegionParams {
+					if name != "" {
+						if _, exists := a.currentScope.Symbols[name]; !exists {
+							a.currentScope.Symbols[name] = &Symbol{Name: name}
+						}
+					}
+				}
+				a.recordVerifiedTaskGroupSubmits(fn)
+			}
+			switch decl := scoped.Decl.(type) {
+			case *ast.FuncDecl:
+				record(decl)
+			case *ast.ImplDecl:
+				for _, member := range decl.Members {
+					if fn, ok := member.(*ast.FuncDecl); ok {
+						record(fn)
+					}
+				}
+			}
+		})
+	}
 }
 
 func (a *Analyzer) taskGroupRuntimeAPIsTrusted() bool {
@@ -87,19 +139,19 @@ func (a *Analyzer) taskGroupRuntimeAPIsTrusted() bool {
 		return decl, fnType, declOK && typeOK && decl != nil && fnType != nil && decl.Name == name
 	}
 	newDecl, newType, ok := lookup("task_group_new")
-	if !ok || !taskGroupRuntimeSourceDecl(newDecl) || len(newDecl.Params) != 0 || len(newType.Params) != 0 || len(newType.TypeParams) != 0 || len(newType.PermissionParams) != 0 || newType.Variadic || !isBuiltinProtocolOwnerType(newType.Return, "TaskGroup") {
+	if !ok || !a.taskGroupRuntimeSourceDecl(newDecl) || len(newDecl.Params) != 0 || len(newType.Params) != 0 || len(newType.TypeParams) != 0 || len(newType.PermissionParams) != 0 || newType.Variadic || !isBuiltinProtocolOwnerType(newType.Return, "TaskGroup") {
 		return false
 	}
 	waitDecl, waitType, ok := lookup("task_group_wait_all")
-	if !ok || !taskGroupRuntimeSourceDecl(waitDecl) || len(waitDecl.Params) != 1 || len(waitType.Params) != 1 || len(waitType.TypeParams) != 0 || len(waitType.PermissionParams) != 0 || waitType.Variadic || !isTaskGroupMutableRef(waitType.Params[0]) || !SameType(waitType.Return, a.namedTypes["void"]) {
+	if !ok || !a.taskGroupRuntimeSourceDecl(waitDecl) || len(waitDecl.Params) != 1 || len(waitType.Params) != 1 || len(waitType.TypeParams) != 0 || len(waitType.PermissionParams) != 0 || waitType.Variadic || !isTaskGroupMutableRef(waitType.Params[0]) || !SameType(waitType.Return, a.namedTypes["void"]) {
 		return false
 	}
 	addDecl, addType, ok := lookup("task_group_add")
-	if !ok || !taskGroupRuntimeSourceDecl(addDecl) || len(addDecl.Params) != 2 || len(addType.Params) != 2 || len(addType.TypeParams) != 1 || addType.TypeParams[0] != "R" || len(addType.PermissionParams) != 0 || addType.Variadic || !isTaskGroupMutableRef(addType.Params[0]) || !isPendingTaskGeneric(addType.Params[1], "R") || !SameType(addType.Return, a.namedTypes["void"]) {
+	if !ok || !a.taskGroupRuntimeSourceDecl(addDecl) || len(addDecl.Params) != 2 || len(addType.Params) != 2 || len(addType.TypeParams) != 1 || addType.TypeParams[0] != "R" || len(addType.PermissionParams) != 0 || addType.Variadic || !isTaskGroupMutableRef(addType.Params[0]) || !isPendingTaskGeneric(addType.Params[1], "R") || !SameType(addType.Return, a.namedTypes["void"]) {
 		return false
 	}
 	submitDecl, submitType, ok := lookup("pool_submit1")
-	if !ok || !taskGroupRuntimeSourceDecl(submitDecl) || len(submitDecl.Params) != 3 || len(submitType.Params) != 3 || len(submitType.TypeParams) != 2 || submitType.TypeParams[0] != "A" || submitType.TypeParams[1] != "R" || len(submitType.PermissionParams) != 1 || submitType.PermissionParams[0] != "P" || submitType.Variadic || !isThreadPoolMutableRef(submitType.Params[0]) || !isPendingTaskGeneric(submitType.Return, "R") || !isTypeParameterNamed(submitType.Params[2], "A") {
+	if !ok || !a.taskGroupRuntimeSourceDecl(submitDecl) || len(submitDecl.Params) != 3 || len(submitType.Params) != 3 || len(submitType.TypeParams) != 2 || submitType.TypeParams[0] != "A" || submitType.TypeParams[1] != "R" || len(submitType.PermissionParams) != 1 || submitType.PermissionParams[0] != "P" || submitType.Variadic || !isThreadPoolMutableRef(submitType.Params[0]) || !isPendingTaskGeneric(submitType.Return, "R") || !isTypeParameterNamed(submitType.Params[2], "A") {
 		return false
 	}
 	callback, ok := submitType.Params[1].(*FuncType)
@@ -111,13 +163,25 @@ func (a *Analyzer) taskGroupRuntimeAPIsTrusted() bool {
 
 // Runtime implementation identity matters here: a source-level stub with the
 // same spelling and signature cannot certify that a wait joins submitted work.
-func taskGroupRuntimeSourceDecl(decl *ast.FuncDecl) bool {
-	if decl == nil || decl.Position.File == "" {
+func trustedRuntimeSourceFileSet(paths []string) map[string]bool {
+	if len(paths) == 0 {
+		return nil
+	}
+	trusted := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		trusted[filepath.Clean(path)] = true
+	}
+	return trusted
+}
+
+func (a *Analyzer) taskGroupRuntimeSourceDecl(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || decl.Position.File == "" {
 		return false
 	}
-	file := filepath.ToSlash(filepath.Clean(decl.Position.File))
-	const runtimeFile = "runtime/elisacore_std/elisacore_runtime_concurrency.elisa"
-	return file == runtimeFile || strings.HasSuffix(file, "/"+runtimeFile)
+	return a.trustedRuntimeSourceFiles[filepath.Clean(decl.Position.File)]
 }
 
 func isTaskGroupMutableRef(t Type) bool {
@@ -208,7 +272,19 @@ func taskGroupWaitMatches(stmt ast.Stmt, groupName string) bool {
 	if !ok || call == nil || callIdentName(call) != "task_group_wait_all" || len(call.Args) != 1 {
 		return false
 	}
-	address, ok := call.Args[0].(*ast.AddrOfExpr)
+	arg := call.Args[0]
+	for {
+		switch n := arg.(type) {
+		case *ast.ParenExpr:
+			arg = n.Inner
+		case *ast.CastExpr:
+			arg = n.Operand
+		default:
+			goto unwrapped
+		}
+	}
+unwrapped:
+	address, ok := arg.(*ast.AddrOfExpr)
 	if !ok || address == nil {
 		return false
 	}
@@ -224,6 +300,11 @@ type taskGroupNodeFacts struct {
 	earlyExit       bool
 	groupShadow     bool
 	apiShadow       bool
+}
+
+type taskGroupSubmitCandidate struct {
+	call         *ast.CallExpr
+	alreadyAdded bool
 }
 
 func taskGroupFacts(node any, groupName string) taskGroupNodeFacts {
@@ -314,7 +395,7 @@ func taskGroupFacts(node any, groupName string) taskGroupNodeFacts {
 	return facts
 }
 
-func taskGroupWindowStmtSafe(stmt ast.Stmt, groupName string, submits *[]*ast.CallExpr) bool {
+func taskGroupWindowStmtSafe(stmt ast.Stmt, groupName string, submits *[]taskGroupSubmitCandidate) bool {
 	switch n := stmt.(type) {
 	case *ast.ForStmt:
 		if n == nil || n.Name == groupName || taskGroupAPIName(n.Name) || n.Name == "pool_submit1" || n.PreReserve != nil || len(n.PreReserves) != 0 {
@@ -351,12 +432,16 @@ func taskGroupWindowStmtSafe(stmt ast.Stmt, groupName string, submits *[]*ast.Ca
 			return false
 		}
 		call, ok := n.Expr.(*ast.CallExpr)
-		if ok && call != nil && call.SafeConcurrencySugar && callIdentName(call) == "pool_submit1" && len(call.Args) == 3 {
-			facts := taskGroupFacts(call.Args, groupName)
+		if ok && call != nil && callIdentName(call) == "task_group_add" && len(call.Args) == 2 && taskGroupGroupRefMatches(call.Args[0], groupName) {
+			submit, isSubmit := call.Args[1].(*ast.CallExpr)
+			if !isSubmit || submit == nil || !submit.SafeConcurrencySugar || callIdentName(submit) != "pool_submit1" || len(submit.Args) != 3 {
+				return false
+			}
+			facts := taskGroupFacts(submit.Args, groupName)
 			if facts.groupRef || facts.groupAPI || facts.untrustedCall || facts.safeSubmitCount != 0 || facts.earlyExit || facts.groupShadow || facts.apiShadow {
 				return false
 			}
-			*submits = append(*submits, call)
+			*submits = append(*submits, taskGroupSubmitCandidate{call: submit, alreadyAdded: true})
 			return true
 		}
 		facts := taskGroupFacts(stmt, groupName)
@@ -365,6 +450,23 @@ func taskGroupWindowStmtSafe(stmt ast.Stmt, groupName string, submits *[]*ast.Ca
 		facts := taskGroupFacts(stmt, groupName)
 		return !facts.groupRef && !facts.groupAPI && !facts.untrustedCall && facts.safeSubmitCount == 0 && !facts.earlyExit && !facts.groupShadow && !facts.apiShadow
 	}
+}
+
+func taskGroupGroupRefMatches(expr ast.Expr, groupName string) bool {
+	for expr != nil {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.AddrOfExpr:
+			ident, ok := n.Operand.(*ast.Ident)
+			return ok && ident != nil && ident.Name == groupName
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func taskGroupRangeMentionsName(stmts []ast.Stmt, name string) bool {

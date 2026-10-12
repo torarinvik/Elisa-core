@@ -518,6 +518,14 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 	return a.storeFlowSummaries[decl]
 }
 
+// invalidateStoreFlowSummaries drops results that predate newly recorded task-group
+// proofs. The call-graph SCC cache is independent of those proof facts and remains valid.
+func (a *Analyzer) invalidateStoreFlowSummaries() {
+	a.storeFlowSummaries = nil
+	a.storeFlowInProgress = nil
+	a.storeFlowActive = nil
+}
+
 func storeFlowSummarizable(decl *ast.FuncDecl) bool {
 	return decl != nil && decl.Body != nil && len(decl.TypeParams) == 0 && len(decl.GenericParams) == 0
 }
@@ -1297,6 +1305,14 @@ func (a *Analyzer) storeFlowCallee(call *ast.CallExpr) *ast.FuncDecl {
 // applyCallStoreFlow links the argument groups of a call the callee's summary connects and
 // reports whether the call was fully handled (a resolvable, summarized, non-variadic callee).
 func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handled map[*ast.CallExpr][]string) ([]string, bool) {
+	if _, joined := a.taskGroupSubmits[call]; joined {
+		// The verified TaskGroup window discards this Task and joins it before the
+		// enclosing function can return. Treating pool_submit1's temporary capture
+		// as persistent store flow would falsely make worker payload borrows escape
+		// through the pool. Argument thread-transfer and worker-capture checks run
+		// during ordinary call analysis; this only removes the post-join store edge.
+		return nil, true
+	}
 	callee := a.storeFlowCallee(call)
 	if callee == nil {
 		if !a.storeFlowOpaqueExternCall(call) {

@@ -9,6 +9,10 @@ import (
 )
 
 func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
+	// TaskGroup join proofs affect interprocedural store-flow summaries. Record
+	// them for the whole declaration set before source-order body analysis can ask
+	// for a summary of a later-declared function.
+	a.recordVerifiedTaskGroupSubmitsInDecls(decls)
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			switch n := scoped.Decl.(type) {

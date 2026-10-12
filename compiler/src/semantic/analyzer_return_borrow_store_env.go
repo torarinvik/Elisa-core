@@ -372,6 +372,18 @@ func returnBorrowFlowGrew(before, after returnBorrowFlow) bool {
 	return (after.Local && !before.Local) || len(after.Params) > len(before.Params) || len(after.Contents) > len(before.Contents)
 }
 
+// returnBorrowDeclaredValueFlow removes expression provenance that cannot be stored in a
+// binding's declared type. The expression walk can run before exprTypes is complete (notably while
+// solving a callee summary), so a reference-free by-value result such as ValueType must not inherit
+// every argument's borrow merely because its call is still opaque. Calls' independent store effects
+// are recorded before this filter is applied.
+func (a *Analyzer) returnBorrowDeclaredValueFlow(flow returnBorrowFlow, declared Type) returnBorrowFlow {
+	if declared == nil || IsInvalidType(declared) || !a.typeIsBorrowFree(declared, map[Type]bool{}) {
+		return flow
+	}
+	return returnBorrowFlow{}
+}
+
 // setReturnBorrowAlias writes a walker alias and, while recording, merges the flow into the store
 // union of the binding the name currently resolves to.
 func (a *Analyzer) setReturnBorrowAlias(aliases map[string]returnBorrowFlow, name string, flow returnBorrowFlow, merge bool) {

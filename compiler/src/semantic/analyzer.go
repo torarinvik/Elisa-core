@@ -88,6 +88,7 @@ const (
 )
 
 type Analyzer struct {
+	trustedRuntimeSourceFiles map[string]bool
 	headerFunctionNames       headerFunctionNameIndex
 	headerStabilityCompleted  map[*ast.FuncDecl]bool
 	shortCircuitAnalysisDepth int
@@ -986,7 +987,11 @@ type poolJoinedRegionDependency struct {
 }
 
 type AnalyzeOptions struct {
-	EnforceUnsafePermissions bool
+	// TrustedRuntimeSourceFiles is populated by the source loader with canonical
+	// paths of runtime files it actually expanded. Do not derive this from a
+	// declaration's Position.File alone; source-written #line markers can spoof it.
+	TrustedRuntimeSourceFiles []string
+	EnforceUnsafePermissions  bool
 	// EnforceGlobalPermissions additionally checks inferred immutable-global/extern
 	// effects. Mutable globals always require explicit Global.Read/Write grants.
 	EnforceGlobalPermissions bool
@@ -1090,6 +1095,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		parallelForCapacity = 4
 	}
 	a := &Analyzer{
+		trustedRuntimeSourceFiles:         trustedRuntimeSourceFileSet(options.TrustedRuntimeSourceFiles),
 		file:                              file,
 		namedTypes:                        map[string]Type{},
 		staticInterfaces:                  map[string]*StaticInterface{},

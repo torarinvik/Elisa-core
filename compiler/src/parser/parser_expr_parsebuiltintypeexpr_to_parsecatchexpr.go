@@ -1127,7 +1127,7 @@ func (p *Parser) parseUnary() ast.Expr {
 		if !hasExplicitPool {
 			activePool := p.activePoolName()
 			if activePool == "" {
-				p.errorf("submit requires an active pool scope like \"pool workers(...):\" or an explicit pool like \"submit[pool] work(arg)\"")
+			p.errorf("submit requires a concurrency scope like \"nursery:\", \"nursery on(pool):\", \"pool workers(...):\", or an explicit pool like \"submit[pool] work(arg)\"")
 				return callExpr
 			}
 			poolPos := call.Func.Pos()

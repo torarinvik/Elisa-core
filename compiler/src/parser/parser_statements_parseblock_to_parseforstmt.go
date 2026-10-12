@@ -884,7 +884,17 @@ func (p *Parser) looksLikeNurseryStmt() bool {
 	if next.Kind == lexer.TOKEN_COLON {
 		return true
 	}
-	return next.Kind == lexer.TOKEN_IDENT && next.Text == "workers"
+	if next.Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	if next.Text == "workers" {
+		return true
+	}
+	return next.Text == "on" && p.pos+5 < len(p.tokens) &&
+		p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN &&
+		p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT &&
+		p.tokens[p.pos+4].Kind == lexer.TOKEN_RPAREN &&
+		p.tokens[p.pos+5].Kind == lexer.TOKEN_COLON
 }
 
 // parseNurseryStmt desugars a structured nursery to the existing pool machinery:
@@ -904,12 +914,20 @@ func (p *Parser) parseNurseryStmt() *ast.PoolStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("nursery")
 	var workers ast.Expr
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "workers" {
+	borrowedPool := ""
+	defaultWorkers := false
+	if p.peekIdentText("on") {
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		borrowedPool = p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_RPAREN)
+	} else if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "workers" {
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)
 		workers = p.parseExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 	} else {
+		defaultWorkers = true
 		// Default: query at runtime so Apple-Silicon P-cores, Linux logical CPUs, etc.
 		// are automatically picked up rather than a hardcoded fallback.
 		workers = &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "perf_cores"}}
@@ -917,12 +935,19 @@ func (p *Parser) parseNurseryStmt() *ast.PoolStmt {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.nurseryCounter++
-	poolName := fmt.Sprintf("__nursery_pool_%d", p.nurseryCounter)
-	grpName := fmt.Sprintf("__nursery_grp_%d", p.nurseryCounter)
+	// NUL is not accepted in source identifiers, so generated names cannot be
+	// shadowed by a declaration inside the nursery body.
+	poolName := fmt.Sprintf("__nursery_pool_%d\x00", p.nurseryCounter)
+	grpName := fmt.Sprintf("__nursery_grp_%d\x00", p.nurseryCounter)
 	p.poolScopes = append(p.poolScopes, poolName)
+	previousGroup, hadPreviousGroup := p.nurseryGroupByPool[poolName]
 	p.nurseryGroupByPool[poolName] = grpName
 	body := p.parseBlock()
-	delete(p.nurseryGroupByPool, poolName)
+	if hadPreviousGroup {
+		p.nurseryGroupByPool[poolName] = previousGroup
+	} else {
+		delete(p.nurseryGroupByPool, poolName)
+	}
 	p.poolScopes = p.poolScopes[:len(p.poolScopes)-1]
 
 	grpDecl := &ast.VarDeclStmt{
@@ -941,7 +966,7 @@ func (p *Parser) parseNurseryStmt() *ast.PoolStmt {
 	fullBody = append(fullBody, grpDecl)
 	fullBody = append(fullBody, body...)
 	fullBody = append(fullBody, waitAll)
-	return &ast.PoolStmt{Position: pos, Name: poolName, Workers: workers, Body: fullBody}
+	return &ast.PoolStmt{Position: pos, Name: poolName, Workers: workers, Body: fullBody, Nursery: true, BorrowedPool: borrowedPool, DefaultWorkers: defaultWorkers}
 }
 
 // nurseryGroupRef builds `(&grpName).cast[mutable TaskGroup&]` for task_group_* calls.

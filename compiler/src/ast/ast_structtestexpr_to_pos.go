@@ -592,6 +592,13 @@ type PoolStmt struct {
 	Name     string
 	Workers  Expr
 	Body     []Stmt
+	// Nursery identifies parser-generated structured-concurrency scopes. Borrowed
+	// nurseries bind a compiler-generated Name alias to BorrowedPool and must not
+	// create or shut down that existing pool.
+	Nursery      bool
+	BorrowedPool string
+	// DefaultWorkers distinguishes `nursery:` from an explicit worker count.
+	DefaultWorkers bool
 }
 type LockStmt struct {
 	Position  lexer.Pos

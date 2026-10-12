@@ -370,6 +370,8 @@ type scopedCleanupKind int
 const (
 	scopedCleanupLockGuard scopedCleanupKind = iota
 	scopedCleanupThreadPool
+	// A nursery joins its workers before cleanup of any value they may have captured.
+	scopedCleanupTaskGroupWait
 	scopedCleanupDeferBody
 	scopedCleanupValue
 	// scopedCleanupRegion frees a scoped region's arena at block exit (every exit path), so a
@@ -964,12 +966,20 @@ func (s *functionState) emitScopedCleanupsFrom(floor int) error {
 	defer func() {
 		s.cleanupDepth--
 	}()
-	for i := len(s.scopedCleanups) - 1; i >= floor; i-- {
-		if s.currentBlockTerminated() {
-			break
-		}
-		if err := s.emitScopedCleanup(s.scopedCleanups[i]); err != nil {
-			return err
+	// A nursery joins before locals, defers, regions, and pools are cleaned up.
+	// Keep reverse registration order within both passes.
+	for pass := 0; pass < 2; pass++ {
+		for i := len(s.scopedCleanups) - 1; i >= floor; i-- {
+			if s.currentBlockTerminated() {
+				break
+			}
+			isJoin := s.scopedCleanups[i].kind == scopedCleanupTaskGroupWait
+			if isJoin != (pass == 0) {
+				continue
+			}
+			if err := s.emitScopedCleanup(s.scopedCleanups[i]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -990,6 +1000,18 @@ func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 	if binding.kind == scopedCleanupDrop {
 		// docs/126 D1: run the user's `__drop__` unless the value was moved away.
 		return s.emitConditionalDrop(binding)
+	}
+	if binding.kind == scopedCleanupTaskGroupWait {
+		wait, waitType, err := s.ensureRuntimeFunction("task_group_wait_all", nil)
+		if err != nil {
+			return err
+		}
+		waitLLVMType, err := s.g.lowerFunctionType(waitType)
+		if err != nil {
+			return err
+		}
+		s.buildCall(waitLLVMType, wait, []C.LLVMValueRef{binding.ptr}, "")
+		return nil
 	}
 	ops := semantic.CreateTypeBoundOps(binding.typ)
 	if len(ops) == 0 {

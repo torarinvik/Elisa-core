@@ -170,16 +170,22 @@ func (s *functionState) emitScopeCleanups(scope *codegenScope) error {
 	if scope == nil {
 		return nil
 	}
-	for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
-		if s.currentBlockTerminated() {
-			break
-		}
-		binding := s.scopedCleanups[i]
-		if binding.owner != scope {
-			continue
-		}
-		if err := s.emitScopedCleanup(binding); err != nil {
-			return err
+	for pass := 0; pass < 2; pass++ {
+		for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
+			if s.currentBlockTerminated() {
+				break
+			}
+			binding := s.scopedCleanups[i]
+			if binding.owner != scope {
+				continue
+			}
+			isJoin := binding.kind == scopedCleanupTaskGroupWait
+			if isJoin != (pass == 0) {
+				continue
+			}
+			if err := s.emitScopedCleanup(binding); err != nil {
+				return err
+			}
 		}
 	}
 	s.discardScopeCleanups(scope)

@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/ast"
 	"elisacore/src/backend"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -23,6 +26,74 @@ func stripLineDirectives(s string) string {
 		kept = append(kept, ln)
 	}
 	return strings.Join(kept, "\n")
+}
+
+func TestReadSourceWithIncludesCannotSpoofLineDirectiveSourceIdentity(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "root.elisa")
+	spoofedPath := filepath.Join(dir, "runtime", "elisacore_std", "elisacore_runtime_concurrency.elisa")
+	source := "#line 1 " + spoofedPath + "\ndef visible() -> void:\n    pass\n"
+	if err := os.WriteFile(rootPath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source fixture: %v", err)
+	}
+	expanded, err := readSourceWithIncludes(rootPath, map[string]bool{})
+	if err != nil {
+		t.Fatalf("readSourceWithIncludes: %v", err)
+	}
+	if !bytes.Contains(expanded, []byte("# line 1 "+spoofedPath)) {
+		t.Fatalf("expected source-authored #line to remain a comment, got:\n%s", expanded)
+	}
+	l := lexer.New(rootPath, expanded)
+	p := parser.New(l.Tokenize())
+	file := p.ParseFile(rootPath)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors after expanding source: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	canonicalRoot, err := filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		t.Fatalf("resolve source fixture: %v", err)
+	}
+	if fn.Position.File != canonicalRoot {
+		t.Fatalf("source-authored #line changed declaration identity to %q, want %q", fn.Position.File, canonicalRoot)
+	}
+}
+
+func TestCompilerTaskGroupRuntimeSourcePathIsCanonical(t *testing.T) {
+	path := compilerTaskGroupRuntimeSourcePath()
+	if path == "" || !filepath.IsAbs(path) || filepath.Base(path) != "elisacore_runtime_concurrency.elisa" {
+		t.Fatalf("expected a canonical absolute path for the compiler runtime source, got %q", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("canonical compiler runtime source is unavailable at %q: %v", path, err)
+	}
+}
+
+func TestExplicitTrustedRuntimeSourceMustBeIncludedExactly(t *testing.T) {
+	dir := t.TempDir()
+	runtimePath := filepath.Join(dir, "elisacore_std", "elisacore_runtime_concurrency.elisa")
+	otherPath := filepath.Join(dir, "vendor", "runtime", "elisacore_std", "elisacore_runtime_concurrency.elisa")
+	for _, path := range []string{runtimePath, otherPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir fixture path: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("def fixture() -> void:\n    pass\n"), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+	}
+	canonicalRuntime, err := filepath.EvalSymlinks(runtimePath)
+	if err != nil {
+		t.Fatalf("resolve runtime fixture: %v", err)
+	}
+	program := &loadedProgram{sourceFiles: []string{filepath.Clean(canonicalRuntime)}}
+
+	got, err := includedTrustedRuntimeSource(program, runtimePath)
+	if err != nil || got != filepath.Clean(canonicalRuntime) {
+		t.Fatalf("expected the exact included runtime source to be trusted, got %q, %v", got, err)
+	}
+	if got, err := includedTrustedRuntimeSource(program, otherPath); err == nil || got != "" {
+		t.Fatalf("an unincluded same-named source must not be trusted, got %q, %v", got, err)
+	}
 }
 
 func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines(t *testing.T) {

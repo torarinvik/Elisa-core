@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"elisacore/src/ast"
@@ -26,10 +27,11 @@ func isSurfaceSourcePath(path string) bool {
 }
 
 type loadedProgram struct {
-	filename string
-	source   []byte
-	file     *ast.File
-	easm     []*easm.Module
+	filename    string
+	source      []byte
+	file        *ast.File
+	easm        []*easm.Module
+	sourceFiles []string
 }
 
 func loadProgramInput(filename string, stderr io.Writer) (*loadedProgram, bool) {
@@ -54,12 +56,21 @@ func loadProgramInput(filename string, stderr io.Writer) (*loadedProgram, bool) 
 			file:     bundle.File,
 		}, true
 	}
-	src, err := readSourceWithIncludes(filename, map[string]bool{})
+	seen := map[string]bool{}
+	src, err := readSourceWithIncludes(filename, seen)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		return nil, false
 	}
-	return &loadedProgram{filename: filename, source: src}, true
+	sourceFiles := make([]string, 0, len(seen))
+	for path := range seen {
+		if canonical, err := filepath.EvalSymlinks(path); err == nil {
+			sourceFiles = append(sourceFiles, filepath.Clean(canonical))
+		} else {
+			sourceFiles = append(sourceFiles, filepath.Clean(path))
+		}
+	}
+	return &loadedProgram{filename: filename, source: src, sourceFiles: sourceFiles}, true
 }
 
 func parseLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, bool) {
@@ -83,6 +94,9 @@ func analyzeLoadedProgramWithOptions(program *loadedProgram, stderr io.Writer, o
 		return nil, nil, false
 	}
 	if program.file != nil {
+		// A decoded frontend-IR AST does not carry the include loader's source
+		// provenance, so it cannot authorize source-sensitive TaskGroup proofs.
+		options.TrustedRuntimeSourceFiles = nil
 		result := semantic.AnalyzeWithOptions(program.file, options)
 		result.EASMModules = append([]*easm.Module(nil), program.easm...)
 		if warns := result.Notices(); len(warns) > 0 {
@@ -101,11 +115,84 @@ func analyzeLoadedProgramWithOptions(program *loadedProgram, stderr io.Writer, o
 		}
 		return program.file, result, true
 	}
+	if runtimeSource := compilerTaskGroupRuntimeSourcePath(); runtimeSource != "" {
+		for _, sourceFile := range program.sourceFiles {
+			if sourceFile == runtimeSource {
+				options.TrustedRuntimeSourceFiles = append(options.TrustedRuntimeSourceFiles, runtimeSource)
+				break
+			}
+		}
+	}
+	if requested := os.Getenv("ELISACORE_TRUSTED_RUNTIME_SOURCE"); requested != "" {
+		runtimeSource, err := includedTrustedRuntimeSource(program, requested)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return nil, nil, false
+		}
+		options.TrustedRuntimeSourceFiles = append(options.TrustedRuntimeSourceFiles, runtimeSource)
+	}
 	file, result, ok := analyzeProgramWithOptions(program.filename, program.source, stderr, options)
 	if ok && result != nil {
 		result.EASMModules = append([]*easm.Module(nil), program.easm...)
 	}
 	return file, result, ok
+}
+
+// includedTrustedRuntimeSource resolves an explicitly trusted runtime path only when the
+// include loader expanded that exact file. The Stage1 seed uses this to authorize its vendored
+// standard-library copy; a declaration's filename or a same-named file elsewhere is insufficient.
+func includedTrustedRuntimeSource(program *loadedProgram, requested string) (string, error) {
+	if program == nil || strings.TrimSpace(requested) == "" {
+		return "", fmt.Errorf("trusted runtime source must name an included source file")
+	}
+	canonical, err := filepath.Abs(filepath.Clean(requested))
+	if err != nil {
+		return "", fmt.Errorf("resolve trusted runtime source %q: %w", requested, err)
+	}
+	if resolved, err := filepath.EvalSymlinks(canonical); err == nil {
+		canonical = filepath.Clean(resolved)
+	}
+	for _, sourceFile := range program.sourceFiles {
+		if sourceFile == canonical {
+			return canonical, nil
+		}
+	}
+	return "", fmt.Errorf("trusted runtime source %q was not among the expanded includes", canonical)
+}
+
+func compilerTaskGroupRuntimeSourcePath() string {
+	const relative = "runtime/elisacore_std/elisacore_runtime_concurrency.elisa"
+	starts := make([]string, 0, 3)
+	if _, sourceFile, _, ok := runtime.Caller(0); ok {
+		starts = append(starts, filepath.Dir(sourceFile))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		starts = append(starts, cwd)
+	}
+	if executable, err := os.Executable(); err == nil {
+		starts = append(starts, filepath.Dir(executable))
+	}
+	for _, start := range starts {
+		if !filepath.IsAbs(start) {
+			if absolute, err := filepath.Abs(start); err == nil {
+				start = absolute
+			}
+		}
+		for dir := start; dir != ""; dir = filepath.Dir(dir) {
+			module, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+			if err == nil && strings.HasPrefix(strings.TrimSpace(string(module)), "module elisacore") {
+				candidate := filepath.Join(dir, filepath.FromSlash(relative))
+				if canonical, err := filepath.EvalSymlinks(candidate); err == nil {
+					return filepath.Clean(canonical)
+				}
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+	return ""
 }
 
 func buildFrontendIRBundle(program *loadedProgram, file *ast.File) *frontendir.Bundle {

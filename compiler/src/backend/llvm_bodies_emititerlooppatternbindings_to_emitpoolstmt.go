@@ -677,6 +677,38 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 }
 func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	poolType := s.g.result.NamedTypes["ThreadPool"]
+	if stmt.BorrowedPool != "" {
+		binding, local := s.lookupBinding(stmt.BorrowedPool)
+		poolPtr := C.LLVMValueRef(nil)
+		boundType := semantic.Type(nil)
+		if local {
+			poolPtr, boundType = binding.ptr, binding.typ
+		} else {
+			var err error
+			poolPtr, boundType, err = s.emitAddress(&ast.Ident{Position: stmt.Position, Name: stmt.BorrowedPool})
+			if err != nil {
+				return fmt.Errorf("missing borrowed ThreadPool binding %q: %w", stmt.BorrowedPool, err)
+			}
+		}
+		if ref, isRef := boundType.(*semantic.RefType); isRef {
+			if ref == nil || !ref.Mutable || !semantic.SameType(ref.Elem, poolType) {
+				return fmt.Errorf("borrowed nursery binding %q is not a mutable ThreadPool reference", stmt.BorrowedPool)
+			}
+			var err error
+			poolPtr, err = s.loadValue(poolPtr, boundType, stmt.BorrowedPool+".ref")
+			if err != nil {
+				return err
+			}
+		} else if (local && !binding.mutable) || !semantic.SameType(boundType, poolType) {
+			return fmt.Errorf("borrowed nursery binding %q is not a mutable ThreadPool value", stmt.BorrowedPool)
+		}
+		s.pushScope()
+		defer s.popScope()
+		s.defineBinding(stmt.Name, valueBinding{ptr: poolPtr, typ: poolType, mutable: true})
+		s.poolScopes = append(s.poolScopes, activePoolBinding{name: stmt.Name, ptr: poolPtr, typ: poolType})
+		defer func() { s.poolScopes = s.poolScopes[:len(s.poolScopes)-1] }()
+		return s.emitPoolBodyInCurrentScope(stmt)
+	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	workersValue, _, err := s.emitExpr(stmt.Workers, usizeType)
 	if err != nil {
@@ -706,5 +738,51 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	defer func() {
 		s.poolScopes = s.poolScopes[:len(s.poolScopes)-1]
 	}()
-	return s.emitBlockInCurrentScope(stmt.Body)
+	return s.emitPoolBodyInCurrentScope(stmt)
+}
+
+// emitPoolBodyInCurrentScope gives parser-generated nursery joins the same
+// all-exit cleanup semantics as other scope-owned resources. The final wait in
+// the desugared body is consumed here: the registered cleanup performs the one
+// join on normal exit, return, break, or continue.
+func (s *functionState) emitPoolBodyInCurrentScope(stmt *ast.PoolStmt) error {
+	if stmt == nil || !stmt.Nursery {
+		if stmt == nil {
+			return nil
+		}
+		return s.emitBlockInCurrentScope(stmt.Body)
+	}
+	if len(stmt.Body) < 2 {
+		return fmt.Errorf("malformed nursery body: missing generated task group or wait")
+	}
+	groupDecl, ok := stmt.Body[0].(*ast.VarDeclStmt)
+	if !ok || groupDecl == nil || groupDecl.Name == "" {
+		return fmt.Errorf("malformed nursery body: missing generated task group")
+	}
+	newCall, ok := groupDecl.Value.(*ast.CallExpr)
+	if !ok || newCall == nil || callIdentName(newCall) != "task_group_new" || len(newCall.Args) != 0 {
+		return fmt.Errorf("malformed nursery body: invalid generated task group initializer")
+	}
+	waitStmt, ok := stmt.Body[len(stmt.Body)-1].(*ast.ExprStmt)
+	if !ok || waitStmt == nil {
+		return fmt.Errorf("malformed nursery body: missing generated task group wait")
+	}
+	waitCall, ok := waitStmt.Expr.(*ast.CallExpr)
+	if !ok || waitCall == nil || callIdentName(waitCall) != "task_group_wait_all" || len(waitCall.Args) != 1 {
+		return fmt.Errorf("malformed nursery body: invalid generated task group wait")
+	}
+	if err := s.emitStmt(groupDecl); err != nil {
+		return err
+	}
+	groupBinding, found := s.lookupBinding(groupDecl.Name)
+	if !found || !semantic.SameType(groupBinding.typ, s.g.result.NamedTypes["TaskGroup"]) {
+		return fmt.Errorf("generated nursery task group %q is unavailable after initialization", groupDecl.Name)
+	}
+	s.registerScopedCleanup(scopedCleanupBinding{
+		kind: scopedCleanupTaskGroupWait,
+		name: groupDecl.Name,
+		ptr:  groupBinding.ptr,
+		typ:  groupBinding.typ,
+	})
+	return s.emitBlockInCurrentScope(stmt.Body[1 : len(stmt.Body)-1])
 }

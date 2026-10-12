@@ -1383,6 +1383,7 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 				typ := a.exprTypes[n.Value]
 				if typ == nil && n.Type != nil {
 					typ = a.returnBorrowDeclaredType(n.Type)
+					value = a.returnBorrowDeclaredValueFlow(value, typ)
 				}
 				a.defineReturnBorrowBinding(aliases, n.Name, n, typ, value)
 				continue
@@ -1390,10 +1391,13 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			a.noteReturnBorrowCallArgumentStores(n.Value, aliases, active, localBindings)
 			flow := a.returnBorrowFlowForExpr(n.Value, aliases, active, localBindings)
 			typ := a.exprTypes[n.Value]
+			declaredType := typ
 			if typ == nil && n.Type != nil {
-				typ = a.returnBorrowDeclaredType(n.Type)
+				declaredType = a.returnBorrowDeclaredType(n.Type)
+				typ = declaredType
+				flow = a.returnBorrowDeclaredValueFlow(flow, declaredType)
 			}
-			if n.Type != nil && a.returnBorrowRefParamPlace(returnBorrowStripParens(n.Value)) && returnBorrowOwnedValueType(a.returnBorrowDeclaredType(n.Type), map[Type]bool{}) && returnBorrowOwnedValueType(typ, map[Type]bool{}) {
+			if n.Type != nil && a.returnBorrowRefParamPlace(returnBorrowStripParens(n.Value)) && returnBorrowOwnedValueType(declaredType, map[Type]bool{}) && returnBorrowOwnedValueType(typ, map[Type]bool{}) {
 				// `pat: P = arm.payloads[i]` copies a value out of the reference parameter's pointee:
 				// it holds what the pointee holds, not the pointee's address.
 				flow = a.returnBorrowReferentContentsFlow(n.Value, aliases, active, localBindings)

@@ -163,12 +163,30 @@ func (a *Analyzer) castTargetCoverage(target string) map[string]bool {
 }
 
 func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
-	poolCall := &ast.CallExpr{
-		Position: stmt.Position,
-		Func:     &ast.Ident{Position: stmt.Position, Name: "pool_new"},
-		Args:     []ast.Expr{stmt.Workers},
+	var poolType Type
+	if stmt.BorrowedPool != "" {
+		sym, ok := a.currentScope.Lookup(stmt.BorrowedPool)
+		if !ok || sym == nil || (sym.Kind != SymbolLocal && sym.Kind != SymbolParam && sym.Kind != SymbolGlobal) {
+			a.errorf(stmt.Position, "borrowed nursery requires a mutable ThreadPool binding %q", stmt.BorrowedPool)
+		} else if ref, isRef := sym.Type.(*RefType); isRef {
+			if ref == nil || !ref.Mutable || !isBuiltinProtocolOwnerType(ref.Elem, "ThreadPool") {
+				a.errorf(stmt.Position, "borrowed nursery requires %q to be a mutable ThreadPool reference", stmt.BorrowedPool)
+			} else {
+				poolType = ref.Elem
+			}
+		} else if !sym.Mutable || !isBuiltinProtocolOwnerType(sym.Type, "ThreadPool") {
+			a.errorf(stmt.Position, "borrowed nursery requires %q to be a mutable ThreadPool value or reference", stmt.BorrowedPool)
+		} else {
+			poolType = sym.Type
+		}
+	} else {
+		poolCall := &ast.CallExpr{
+			Position: stmt.Position,
+			Func:     &ast.Ident{Position: stmt.Position, Name: "pool_new"},
+			Args:     []ast.Expr{stmt.Workers},
+		}
+		poolType = a.analyzeExpr(poolCall)
 	}
-	poolType := a.analyzeExpr(poolCall)
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks

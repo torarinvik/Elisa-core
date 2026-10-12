@@ -12,8 +12,13 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"strings"
 	"unsafe"
 )
+
+func llvmLocalName(name string) string {
+	return strings.ReplaceAll(name, "\x00", "$internal")
+}
 
 func (s *functionState) createEntryAllocaRaw(name string, t semantic.Type) (C.LLVMValueRef, error) {
 	llvmType, err := s.g.lowerType(t)
@@ -29,7 +34,7 @@ func (s *functionState) createEntryAllocaRaw(name string, t semantic.Type) (C.LL
 	} else {
 		C.LLVMPositionBuilderAtEnd(builder, entry)
 	}
-	nameC := cString(name)
+	nameC := cString(llvmLocalName(name))
 	defer C.free(unsafe.Pointer(nameC))
 	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
 	s.g.applyTypeAlignment(alloca, t)
@@ -82,7 +87,7 @@ func (s *functionState) createTempStorage(name string, t semantic.Type) (C.LLVMV
 		C.LLVMPositionBuilderAtEnd(builder, entry)
 	}
 	sizeValue := C.LLVMConstInt(llvmSizeType, C.ulonglong(sizeBytes), 0)
-	nameC := cString(name + ".heap")
+	nameC := cString(llvmLocalName(name) + ".heap")
 	defer C.free(unsafe.Pointer(nameC))
 	ptr := C.LLVMBuildCall2(builder, llvmMallocType, callee, llvmValueSlicePtr([]C.LLVMValueRef{sizeValue}), 1, nameC)
 	s.heapTemps = append(s.heapTemps, ptr)
@@ -136,7 +141,7 @@ func (s *functionState) createEntryAllocaZeroed(name string, t semantic.Type) (C
 	} else {
 		C.LLVMPositionBuilderAtEnd(builder, entry)
 	}
-	nameC := cString(name)
+	nameC := cString(llvmLocalName(name))
 	defer C.free(unsafe.Pointer(nameC))
 	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
 	s.g.applyTypeAlignment(alloca, t)

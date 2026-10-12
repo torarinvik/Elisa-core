@@ -484,7 +484,11 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 	}
 	included[abs] = true
 	out.Grow(len(raw))
-	writeLineDirective(out, 1, abs)
+	sourceLabel := abs
+	if canonical, err := filepath.EvalSymlinks(abs); err == nil {
+		sourceLabel = filepath.Clean(canonical)
+	}
+	writeLineDirective(out, 1, sourceLabel)
 	start := 0
 	curLine := 1
 	for start <= len(raw) {
@@ -512,9 +516,20 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 				out.WriteByte('\n')
 			}
 			// Resume attribution to the parent file after the spliced include.
-			writeLineDirective(out, curLine+1, abs)
+			writeLineDirective(out, curLine+1, sourceLabel)
 		} else {
-			out.Write(line)
+			// #line is an internal source-map directive. Keep source-authored
+			// spellings as ordinary comments so they cannot forge declaration
+			// provenance for trusted-runtime compiler proofs.
+			trimmed := bytes.TrimLeft(line, " \t")
+			if bytes.HasPrefix(trimmed, []byte("#line ")) || bytes.HasPrefix(trimmed, []byte("#line\t")) {
+				indent := len(line) - len(trimmed)
+				out.Write(line[:indent])
+				out.WriteString("# line")
+				out.Write(trimmed[len("#line"):])
+			} else {
+				out.Write(line)
+			}
 			if hasNewline {
 				out.WriteByte('\n')
 			}

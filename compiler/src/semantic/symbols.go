@@ -159,7 +159,8 @@ type Result struct {
 // expression. GroupName identifies the same-scope TaskGroup local whose matching
 // wait post-dominates the submission window.
 type TaskGroupSubmitInfo struct {
-	GroupName string
+	GroupName    string
+	AlreadyAdded bool
 }
 
 func (r *Result) ActiveFile() *ast.File {
