@@ -659,6 +659,8 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 		var fieldMap map[string]ast.Expr
 		if sl, ok := res.(*ast.StructLitExpr); ok {
 			fieldMap = a.structLitFieldMap(sl)
+		} else if tuple, ok := res.(*ast.TupleExpr); ok {
+			fieldMap = a.tupleLiteralFieldMap(tuple)
 		} else if id, ok := res.(*ast.Ident); ok {
 			fieldMap = a.zeroedStructLocalFieldMap(id)
 		}
@@ -2238,6 +2240,11 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
+			if value, found := tr.a.tupleLiteralFieldMap(tuple)[n.Field]; found {
+				return tr.termEnv(value, env)
+			}
+		}
 		// Constant enum members retain their exact backing value, not an unconstrained projection.
 		if c, ok := tr.a.constIntValue(n); ok {
 			return smtInt(c), true
@@ -3115,6 +3122,11 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
+			if value, found := tr.a.tupleLiteralFieldMap(tuple)[n.Field]; found {
+				return tr.boolTerm(value, env)
+			}
+		}
 		// A constructor projection is its field argument, including after result
 		// substitution has replaced the result identifier with the literal.
 		if literal, ok := stripOptimizationParens(n.Object).(*ast.StructLitExpr); ok {
@@ -4634,6 +4646,30 @@ func smtVar(name string) string {
 // integer `v_` consts so an int and a bool of the same Elisa name never collide.
 func smtBoolVar(name string) string {
 	return "b_" + name
+}
+
+// tupleLiteralFieldMap resolves only fields of an already typed tuple literal.
+// Contextual analysis records named return fields; never guess names from the
+// current function, which could belong to a different tuple expression.
+func (a *Analyzer) tupleLiteralFieldMap(tuple *ast.TupleExpr) map[string]ast.Expr {
+	if tuple == nil {
+		return nil
+	}
+	typ, ok := contextualTupleType(a.exprTypes[tuple])
+	if !ok || len(typ.Fields) != len(tuple.Elems) {
+		return nil
+	}
+	fields := make(map[string]ast.Expr, len(typ.Fields))
+	for i, field := range typ.Fields {
+		if field.Name == "" || tuple.Elems[i] == nil {
+			continue
+		}
+		if _, duplicate := fields[field.Name]; duplicate {
+			return nil
+		}
+		fields[field.Name] = tuple.Elems[i]
+	}
+	return fields
 }
 
 // structLitFieldMap maps each field name of a struct literal to its construction argument, handling
