@@ -771,9 +771,9 @@ func normalizeBoolLiteralEnsure(clause ast.Expr) ast.Expr {
 
 // ensureHoldsByReturnReflexivity reports whether the postcondition `clause` is `result == E` (in
 // either operand order) where `E` is structurally identical to the returned expression `retVal` and
-// is a pure place read. Such a clause holds by definition: at the return point `result` is exactly the
+// is a pure expression (see pureLeafEqual). Such a clause holds by definition: at the return point `result` is exactly the
 // value of `retVal`, and re-reading the same side-effect-free places yields the same value. Sound
-// because exprsSyntacticallyEqual admits only ident/field/paren projections — never calls or arithmetic.
+// because the ensure side passed the contract purity check, so equal pure expressions denote one value.
 func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
 	if retVal == nil {
 		return false
@@ -791,7 +791,7 @@ func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
 	if rightIsResult {
 		other = bin.Left
 	}
-	return exprsSyntacticallyEqual(other, retVal)
+	return pureLeafEqual(other, retVal)
 }
 
 // ensureHoldsByWrittenField discharges a void-exit postcondition `LHS == RHS` by resolving each

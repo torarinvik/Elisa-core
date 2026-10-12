@@ -1483,7 +1483,9 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	}
 	if p.peek() == lexer.TOKEN_CARET {
 		p.advance()
-		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseExpr(), Pinned: true}
+		// A pin names an existing value; parse it as a unary operand so `|` keeps its
+		// pattern meaning (`^A | ^B:` is two alternatives, not `^(A | ^B)`).
+		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseUnary(), Pinned: true}
 	}
 	if p.peek() == lexer.TOKEN_STRING_LIT {
 		return &ast.MatchStringLiteralPattern{Position: pos, Value: p.advance().Text}
