@@ -11,9 +11,10 @@ func TestExternResourceRuntime(t *testing.T) {
 
 global mutable releases: i64 = 0
 
-def __drop__(self: CFile) -> void:
-    releases <- releases + 1
-    _ = fclose(move self)
+def __drop__(self: CFile) -> void can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        releases <- releases + 1
+        _ = fclose(move self)
 
 @callconv(c)
 extern fopen(path: cstr, mode: cstr) -> CFile?
@@ -22,22 +23,24 @@ extern fclose(file: CFile) -> i32
 @callconv(c)
 extern fgetc(file: CFile&) -> i32
 
-def first_byte(path: cstr) -> i64:
-    file: CFile = get fopen(path, "r") else return -1
-    return fgetc(file).i64()
+def first_byte(path: cstr) -> i64 can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        file: CFile = get fopen(path, "r") else return -1
+        return fgetc(file).i64()
 
-def check_resource() -> i64:
-    first: i64 = first_byte("/etc/hosts")
-    return 1 if first < 0
-    return 2 if releases != 1
-    missing: i64 = first_byte("/nonexistent/x")
-    return 3 if missing != -1
-    return 4 if releases != 1
-    return 0
+def check_resource() -> i64 can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        first: i64 = first_byte("/etc/hosts")
+        return 1 if first < 0
+        return 2 if releases != 1
+        missing: i64 = first_byte("/nonexistent/x")
+        return 3 if missing != -1
+        return 4 if releases != 1
+        return 0
 
 @test
 def extern_resource() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Global.Read, Global.Write:
         assert check_resource() == 0
 `)
 	if exit != 0 {
