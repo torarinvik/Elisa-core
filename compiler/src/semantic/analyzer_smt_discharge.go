@@ -2972,6 +2972,8 @@ func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
 // `env` maps an Elisa identifier (notably the law's `self`) to a pre-built SMT term.
 func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string, bool) {
 	switch n := expr.(type) {
+	case *ast.MatchExpr:
+		return tr.booleanMatchTerm(n, env)
 	case *ast.ParenExpr:
 		return tr.boolTerm(n.Inner, env)
 	case *ast.QuantifierExpr:

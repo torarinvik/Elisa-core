@@ -99,6 +99,9 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 		}
 		return "false", true
 	}
+	if atom, ok := tr.classifierStringEquality(left, right, env); ok {
+		return atom, true
+	}
 	match, ok := left.(*ast.MatchExpr)
 	if !ok || !constantStringResult(match, depth) {
 		return "", false
