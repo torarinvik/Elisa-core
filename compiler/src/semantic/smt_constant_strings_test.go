@@ -56,6 +56,63 @@ func TestSMTStringSelectorClassifierResultContracts(t *testing.T) {
 	}
 }
 
+func TestSMTStringSelectorClassifierMultipleReturns(t *testing.T) {
+	for _, tc := range []struct {
+		name, selected, capability string
+		reject                     bool
+	}{
+		{name: "matching", selected: "yes", capability: "Abort.Panic"},
+		{name: "wrong_selector", selected: "no", capability: "Abort.Panic", reject: true},
+		{name: "write_capability", selected: "yes", capability: "Memory.Write", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := `def classify(text: sview) -> bool can[` + tc.capability + `]:
+    ensure result == (text == "yes")
+    can Abort.Panic:
+        return true if text == "` + tc.selected + `"
+        return false
+`
+			result := analyzeContractStrict(t, tc.name+".elisa", source)
+			rejected := strings.Contains(allDiagnostics(result), "could not be proven")
+			if rejected != tc.reject {
+				t.Fatalf("rejected %v want %v: %v", rejected, tc.reject, result.Errors())
+			}
+		})
+	}
+}
+
+func TestClassifierStringFrameStableRejectsInferredWrite(t *testing.T) {
+	decl := &ast.FuncDecl{Permissions: []ast.PermissionRef{{Name: "Abort", Member: "Panic"}}}
+	a := &Analyzer{currentFunctionUsedPermissionRefs: []ast.PermissionRef{{Name: "Memory", Member: "Write"}}}
+	if classifierStringFrameStable(a, decl) {
+		t.Fatal("classifier string read should be rejected after an inferred memory write")
+	}
+}
+
+func TestSMTConstantStringNamedTupleResultFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, binding, wasmType string
+		reject                  bool
+	}{
+		{name: "exact", binding: "string", wasmType: "i32"},
+		{name: "wrong_binding", binding: "pointer", wasmType: "i32", reject: true},
+		{name: "wrong_wasm_type", binding: "string", wasmType: "i64", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := `def classify() -> (binding: sview, wasm_type: sview):
+    ensure result.binding == "string"
+    ensure result.wasm_type == "i32"
+    return ("` + tc.binding + `", "` + tc.wasmType + `")
+`
+			result := analyzeContractStrict(t, tc.name+".elisa", source)
+			rejected := strings.Contains(allDiagnostics(result), "could not be proven")
+			if rejected != tc.reject {
+				t.Fatalf("rejected %v want %v: %v", rejected, tc.reject, result.Errors())
+			}
+		})
+	}
+}
+
 func TestSMTConstantStringSelectorMatchUsesDistinctLiteralIDs(t *testing.T) {
 	selector := &ast.Ident{Name: "type_text"}
 	match := &ast.MatchExpr{Value: selector, Arms: []ast.MatchArm{

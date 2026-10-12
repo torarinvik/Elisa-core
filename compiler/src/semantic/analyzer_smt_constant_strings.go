@@ -82,6 +82,11 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 	}
 	left = stripOptimizationParens(left)
 	right = stripOptimizationParens(right)
+	if field, ok := left.(*ast.FieldExpr); ok {
+		if value, found := tr.constantStringProjection(field); found {
+			return tr.constantStringEquality(value, right, env, depth+1)
+		}
+	}
 	// Keep the literal comparator independent of the substituted operand's scope.
 	// Comparing two symbolic strings needs two environments and is outside this fragment.
 	if _, ok := right.(*ast.StringLit); !ok {
@@ -167,4 +172,37 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 		result = "(ite " + guard + " " + branch + " " + result + ")"
 	}
 	return result, true
+}
+
+// constantStringProjection resolves only a literal string captured in a constructor
+// expression already selected for this return proof. Nonliteral fields may have been
+// captured before a later tuple/struct field mutates their source, so they stay opaque.
+// This lets string-valued tuple/struct results use literal equality without rereading
+// mutable storage or assuming a local's current value was its construction-time value.
+func (tr *smtTranslator) constantStringProjection(field *ast.FieldExpr) (ast.Expr, bool) {
+	if tr == nil || tr.a == nil || field == nil {
+		return nil, false
+	}
+	var value ast.Expr
+	var found bool
+	if tr.resultFields != nil {
+		if id, ok := stripOptimizationParens(field.Object).(*ast.Ident); ok && id.Name == "result" {
+			value, found = tr.resultFields[field.Field]
+		}
+	}
+	if !found {
+		if tuple, ok := stripOptimizationParens(field.Object).(*ast.TupleExpr); ok {
+			value, found = tr.a.tupleLiteralFieldValue(tuple, field.Field)
+		}
+	}
+	if !found {
+		if _, nested := stripOptimizationParens(field.Object).(*ast.FieldExpr); nested {
+			value, found = tr.a.nestedLiteralFieldValue(field, 0)
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	_, literal := stripOptimizationParens(value).(*ast.StringLit)
+	return value, literal
 }

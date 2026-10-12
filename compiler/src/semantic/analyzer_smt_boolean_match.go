@@ -73,12 +73,75 @@ func pureClassifierBody(body []ast.Stmt) bool {
 	return false
 }
 
+func classifierStringControlFlowBody(body []ast.Stmt, allowEmpty bool) bool {
+	if len(body) == 0 {
+		return allowEmpty
+	}
+	for _, stmt := range body {
+		switch n := stmt.(type) {
+		case *ast.ReturnStmt:
+			if _, ok := stripOptimizationParens(n.Value).(*ast.BoolLit); !ok {
+				return false
+			}
+		case *ast.IfStmt:
+			if !pureClassifierExpr(n.Cond) || !classifierStringControlFlowBody(n.Then, false) || !classifierStringControlFlowBody(n.Else, true) {
+				return false
+			}
+			for _, clause := range n.Elifs {
+				if !pureClassifierExpr(clause.Cond) || !classifierStringControlFlowBody(clause.Body, false) {
+					return false
+				}
+			}
+		case *ast.CanStmt:
+			if n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.SuppressPermissionInference || n.As != "" || len(n.Permissions) == 0 || !classifierStringControlFlowBody(n.Body, false) {
+				return false
+			}
+			for _, permission := range n.Permissions {
+				if permission.Name != "Abort" || permission.Member != "Panic" || len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// classifierStringFrameStable permits literal string facts to cross multiple
+// return paths when the function cannot mutate the borrowed string's backing
+// storage. The fallback accepts only Abort.Panic: functions with any other
+// capability may write through aliases or mutate shared state between reads.
+func classifierStringFrameStable(a *Analyzer, decl *ast.FuncDecl) bool {
+	if decl == nil {
+		return false
+	}
+	if pureClassifierBody(decl.Body) {
+		return true
+	}
+	if !classifierStringControlFlowBody(decl.Body, false) {
+		return false
+	}
+	isPanicOnly := func(permissions []ast.PermissionRef) bool {
+		for _, permission := range permissions {
+			if permission.Name != "Abort" || permission.Member != "Panic" || len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
+				return false
+			}
+		}
+		return true
+	}
+	if !isPanicOnly(decl.Permissions) {
+		return false
+	}
+	return a == nil || isPanicOnly(a.currentFunctionUsedPermissionRefs)
+}
+
 func (tr *smtTranslator) classifierStringParameter(expr ast.Expr, env map[string]string) (*ast.Ident, smtStringParameterKey, bool) {
 	id, ok := stripOptimizationParens(expr).(*ast.Ident)
 	if !ok || tr.a == nil || tr.a.currentScope == nil || tr.a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 {
 		return nil, smtStringParameterKey{}, false
 	}
-	if !pureClassifierBody(tr.a.currentFuncDecl.Body) {
+	if !classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) {
 		return nil, smtStringParameterKey{}, false
 	}
 	if _, bound := env[id.Name]; bound {
