@@ -178,7 +178,9 @@ func (p *Parser) parseExpr() ast.Expr {
 		p.errorAt(pos, "implicit `else` unwrap has been removed; write `get <expr> else ...` to make the absence check explicit")
 		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: fallback, Recovery: recovery, LegacyImplicitElse: true}
 	}
-	if p.matchIdentText("can") {
+	// A dedent closes a block-valued expression. A following can block is a
+	// sibling statement, not a postfix grant on that expression.
+	if !p.prevTokenIsDedent() && p.matchIdentText("can") {
 		permissions := p.parsePermissionRefs(false)
 		canExpr := &ast.CanExpr{Position: expr.Pos(), Expr: expr, Permissions: permissions}
 		// docs/125 §6b: a can-annotated call statement still admits a postfix guard —
