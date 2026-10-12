@@ -2242,7 +2242,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 	case *ast.FieldExpr:
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
-				return tr.termEnv(value, env)
+				if _, constant := stripOptimizationParens(value).(*ast.IntLit); constant {
+					return tr.termEnv(value, env)
+				}
 			}
 		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
@@ -3131,7 +3133,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 	case *ast.FieldExpr:
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
-				return tr.boolTerm(value, env)
+				if _, constant := stripOptimizationParens(value).(*ast.BoolLit); constant {
+					return tr.boolTerm(value, env)
+				}
 			}
 		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
@@ -4714,7 +4718,29 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 	if sl == nil {
 		return nil
 	}
-	args := sl.LoweredArgs()
+	if sl.ResolvedArgsValid {
+		typ, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType)
+		if !ok || typ == nil || typ.Decl == nil || len(sl.ResolvedArgs) != len(typ.Decl.Fields) {
+			return nil
+		}
+		out := make(map[string]ast.Expr, len(typ.Decl.Fields))
+		for index, field := range typ.Decl.Fields {
+			if field.Name == "" || sl.ResolvedArgs[index] == nil {
+				return nil
+			}
+			if _, duplicate := out[field.Name]; duplicate {
+				return nil
+			}
+			if a.constructorProjectionStable(sl.ResolvedArgs[index]) {
+				out[field.Name] = sl.ResolvedArgs[index]
+			}
+		}
+		return out
+	}
+	if sl.CopyBase != nil || len(sl.Spreads) != 0 {
+		return nil
+	}
+	args := sl.Args
 	var ordered []string
 	if st, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType); ok && st != nil && st.Decl != nil {
 		for _, fd := range st.Decl.Fields {
@@ -4730,7 +4756,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			}
 			name = ordered[i]
 		}
-		if name != "" && arg != nil {
+		if name != "" && arg != nil && a.constructorProjectionStable(arg) {
 			out[name] = arg
 		}
 	}

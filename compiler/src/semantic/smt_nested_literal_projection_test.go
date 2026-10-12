@@ -58,3 +58,87 @@ func TestSMTNestedLiteralProjectionDoesNotAllocate(t *testing.T) {
 		t.Fatal("ambiguous field accepted")
 	}
 }
+
+func TestSMTNestedProjectionDoesNotRereadCapturedVariable(t *testing.T) {
+	source := `struct Owner:
+    value: u32
+struct Binding:
+    owner: Owner
+    serial: u32
+
+def change(value: mutable u32&) -> u32:
+    value <- 41
+    return 0
+
+def wrong(value: mutable u32) -> (known: bool, binding: Binding):
+    ensure result.binding.owner.value == value
+    return (false, Binding{owner: Owner{value: value}, serial: change(&value)})
+`
+	result := analyzeContractStrict(t, "captured_variable.elisa", source)
+	if !strings.Contains(allDiagnostics(result), "could not be proven") {
+		t.Fatalf("captured value was reread: %v", result.Errors())
+	}
+}
+
+func TestSMTNestedProjectionUsesCanonicalNamedFieldOrder(t *testing.T) {
+	for _, value := range []string{"42", "41"} {
+		source := "struct Owner:\n    decoy: u32\n    value: u32\nstruct Binding:\n    owner: Owner\n\ndef present() -> (known: bool, binding: Binding):\n    ensure result.binding.owner.value == 42\n    return (true, Binding{owner: Owner{value: " + value + ", decoy: 42}})\n"
+		result := analyzeContractStrict(t, value+"_reordered.elisa", source)
+		rejected := strings.Contains(allDiagnostics(result), "could not be proven")
+		if rejected != (value == "41") {
+			t.Fatalf("value %s rejected %v: %v", value, rejected, result.Errors())
+		}
+	}
+}
+
+func TestSMTDirectProjectionUsesCanonicalNamedFieldOrder(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		source := "struct Owner:\n    decoy: bool\n    value: bool\n\ndef present() -> bool:\n    ensure result == true\n    return Owner{value: " + value + ", decoy: true}.value\n"
+		result := analyzeContractStrict(t, value+"_direct.elisa", source)
+		rejected := strings.Contains(allDiagnostics(result), "could not be proven")
+		if rejected != (value == "false") {
+			t.Fatalf("value %s rejected %v: %v", value, rejected, result.Errors())
+		}
+	}
+}
+
+func TestSMTStructResultDoesNotRereadCapturedVariable(t *testing.T) {
+	source := `struct Owner:
+    value: u32
+    serial: u32
+
+def change(value: mutable u32&) -> u32:
+    value <- 41
+    return 0
+
+def wrong(value: mutable u32) -> Owner:
+    ensure result.value == value
+    return Owner{value: value, serial: change(&value)}
+`
+	result := analyzeContractStrict(t, "captured_struct_result.elisa", source)
+	if !strings.Contains(allDiagnostics(result), "could not be proven") {
+		t.Fatalf("captured struct result was reread: %v", result.Errors())
+	}
+}
+
+func TestSMTStructResultDoesNotConfuseShadowedMutableBinding(t *testing.T) {
+	source := `struct Owner:
+    value: u32
+    serial: u32
+
+def change(value: mutable u32&) -> u32:
+    value <- 41
+    return 0
+
+def wrong(value: u32) -> Owner:
+    ensure result.value == value
+    if true:
+        value: mutable u32 = value + 1
+        return Owner{value: value, serial: change(&value)}
+    return Owner{value: value, serial: 0}
+`
+	result := analyzeContractStrict(t, "shadowed_struct_result.elisa", source)
+	if !strings.Contains(allDiagnostics(result), "could not be proven") {
+		t.Fatalf("shadowed mutable binding accepted: %v", result.Errors())
+	}
+}
