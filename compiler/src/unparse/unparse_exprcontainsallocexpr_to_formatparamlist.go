@@ -185,6 +185,9 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	case *ast.ContinueStmt:
 		f.writeLine(level, "continue")
 	case *ast.IfStmt:
+		if f.writeControlGuard(level, n) {
+			return
+		}
 		f.writeLine(level, formatIfHeader("if", n.Hint, n.Cond))
 		for _, stmt := range n.Then {
 			f.writeStmt(level+1, stmt)

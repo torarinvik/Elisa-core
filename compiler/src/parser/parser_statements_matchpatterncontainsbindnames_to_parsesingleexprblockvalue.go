@@ -677,7 +677,8 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			p.expectNewlineAfterValueExpr(expr)
 			return &ast.ReturnStmt{Position: returnPos, Value: expr}
 		}
-		cond := p.parseExpr()
+		p.noticeAt(returnPos, "prefer `return value if condition` to `value return if condition`")
+		cond := p.parseGuardCondition()
 		p.expectNewlineAfterValueExpr(cond)
 		return &ast.IfStmt{
 			Position: pos,

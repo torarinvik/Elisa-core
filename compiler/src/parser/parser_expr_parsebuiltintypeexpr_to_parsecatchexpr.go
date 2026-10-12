@@ -139,6 +139,12 @@ func (p *Parser) parseExpr() ast.Expr {
 	if p.allowTernary && p.peek() == lexer.TOKEN_IF && !p.prevTokenIsDedent() {
 		pos := p.cur().Pos
 		p.advance()
+		if p.stmtGuardArmed && p.peek() == lexer.TOKEN_COLON {
+			cond := p.parseGuardCondition()
+			p.stmtGuardArmed = false
+			p.stmtGuardCond = cond
+			return expr
+		}
 		cond := p.parseOr()
 		// Generalized postfix statement guard (docs/125 §6b): while the statement parser has
 		// armed the guard window, `EXPR if COND` ending at a statement terminator is a
@@ -188,6 +194,12 @@ func (p *Parser) parseExpr() ast.Expr {
 		// `can` could attach, so re-check the guard here while the window is still armed.
 		if p.allowTernary && p.peek() == lexer.TOKEN_IF && !p.prevTokenIsDedent() {
 			p.advance()
+			if p.stmtGuardArmed && p.peek() == lexer.TOKEN_COLON {
+				cond := p.parseGuardCondition()
+				p.stmtGuardArmed = false
+				p.stmtGuardCond = cond
+				return canExpr
+			}
 			cond := p.parseOr()
 			if p.stmtGuardArmed && p.peek() != lexer.TOKEN_ELSE && p.stmtEndAhead() {
 				p.stmtGuardArmed = false

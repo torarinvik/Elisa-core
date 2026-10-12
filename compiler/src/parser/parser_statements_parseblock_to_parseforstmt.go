@@ -333,7 +333,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 		// Postfix guard: `break if <cond>` desugars to `if <cond>: break` (mirrors the
 		// postfix `return if` form). No new AST node — the loop lowering is unchanged.
 		if p.match(lexer.TOKEN_IF) {
-			cond := p.parseExpr()
+			cond := p.parseGuardCondition()
 			p.expectNewlineAfterValueExpr(cond)
 			return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{&ast.BreakStmt{Position: pos}}}
 		}
@@ -344,7 +344,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 		p.advance()
 		// Postfix guard: `continue if <cond>` desugars to `if <cond>: continue`.
 		if p.match(lexer.TOKEN_IF) {
-			cond := p.parseExpr()
+			cond := p.parseGuardCondition()
 			p.expectNewlineAfterValueExpr(cond)
 			return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{&ast.ContinueStmt{Position: pos}}}
 		}

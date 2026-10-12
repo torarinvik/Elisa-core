@@ -248,7 +248,7 @@ func (p *Parser) parseReturn() ast.Stmt {
 	//     (docs/120 §10 / docs/119 §4). Branches may carry statements before their tail, so a
 	//     `rebind` claim can thread an lmut value inside a branch before yielding the tuple.
 	if p.peek() == lexer.TOKEN_IF {
-		if p.returnIfIsValueForm() {
+		if p.peekAt(1) != lexer.TOKEN_COLON && p.returnIfIsValueForm() {
 			// The branches are value blocks: their tail may be a bare `a, b` tuple (the
 			// threaded slots), so parse them in expression-block context (docs/119 §2).
 			p.exprBlockDepth++
@@ -261,7 +261,7 @@ func (p *Parser) parseReturn() ast.Stmt {
 			return &ast.ReturnStmt{Position: pos, Value: value}
 		}
 		p.advance()
-		cond := p.parseExpr()
+		cond := p.parseGuardCondition()
 		p.expectNewlineAfterValueExpr(cond)
 		return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{&ast.ReturnStmt{Position: pos}}}
 	}
@@ -490,7 +490,7 @@ func (p *Parser) parsePanic() ast.Stmt {
 	p.expect(lexer.TOKEN_RPAREN)
 	panicStmt := &ast.PanicStmt{Position: pos, Message: msg}
 	if p.match(lexer.TOKEN_IF) {
-		cond := p.parseExpr()
+		cond := p.parseGuardCondition()
 		p.expectNewlineAfterValueExpr(cond)
 		return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{panicStmt}}
 	}

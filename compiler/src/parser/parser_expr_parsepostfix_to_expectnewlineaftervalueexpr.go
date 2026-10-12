@@ -954,6 +954,10 @@ func (p *Parser) expectNewline() {
 	}
 }
 func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
+	if p.stmtGuardBlockEnd {
+		p.stmtGuardBlockEnd = false
+		return
+	}
 	if _, ok := expr.(*ast.ExprBlock); ok {
 		return
 	}

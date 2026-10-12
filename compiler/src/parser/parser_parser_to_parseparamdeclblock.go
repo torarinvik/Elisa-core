@@ -63,6 +63,8 @@ type Parser struct {
 	// stmtGuardCond holds the recorded guard condition until the statement parser wraps the
 	// finished statement in `if COND: <stmt>` (parse-time desugar, like break/continue/return-if).
 	stmtGuardCond ast.Expr
+	// A condition-list block already consumed the statement-ending dedent.
+	stmtGuardBlockEnd bool
 	// Innermost loop's simple yielded accumulator, or "" for a statement loop.
 	loopBreakTargets []string
 }
