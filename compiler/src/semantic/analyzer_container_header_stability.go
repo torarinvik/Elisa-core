@@ -139,7 +139,6 @@ func (a *Analyzer) containerHeadersStable(root *ast.FuncDecl) bool {
 					if n.ResolvedArgsValid {
 						args = n.ResolvedArgs
 					}
-					args = append(append([]ast.Expr(nil), args...), n.ResolvedImplicitArgs...)
 					if field, ok := n.Func.(*ast.FieldExpr); ok && !walk(reflect.ValueOf(field.Object)) {
 						return false
 					}
@@ -147,16 +146,24 @@ func (a *Analyzer) containerHeadersStable(root *ast.FuncDecl) bool {
 						return false
 					}
 					forwarded := false
-					for _, arg := range args {
+					checkArg := func(arg ast.Expr) bool {
 						e := stripOptimizationParens(arg)
 						if addr, ok := e.(*ast.AddrOfExpr); ok {
 							e = stripOptimizationParens(addr.Operand)
 						}
 						if id, ok := e.(*ast.Ident); ok && params[id.Name] {
 							forwarded = true
-							continue
+							return true
 						}
-						if !walk(reflect.ValueOf(arg)) {
+						return walk(reflect.ValueOf(arg))
+					}
+					for _, arg := range args {
+						if !checkArg(arg) {
+							return false
+						}
+					}
+					for _, arg := range n.ResolvedImplicitArgs {
+						if !checkArg(arg) {
 							return false
 						}
 					}
