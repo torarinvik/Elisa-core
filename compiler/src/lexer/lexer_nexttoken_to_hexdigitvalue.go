@@ -8,6 +8,9 @@ import (
 
 // NextToken returns the next token from the source.
 func (l *Lexer) NextToken() Token {
+	for len(l.pendingPatternBlocks) > 0 && l.pendingPatternBlocks[len(l.pendingPatternBlocks)-1].ParenDepth > l.parenDepth {
+		l.pendingPatternBlocks = l.pendingPatternBlocks[:len(l.pendingPatternBlocks)-1]
+	}
 	// Drain pending tokens first (INDENT/DEDENT)
 	if len(l.pendingToks) > 0 {
 		tok := l.pendingToks[0]
@@ -251,10 +254,25 @@ func (l *Lexer) NextToken() Token {
 			l.pendingGroupedBlock = false
 			return l.finishToken(Token{Kind: TOKEN_SCOPE, Text: "::", Pos: p})
 		}
-		if l.pendingGroupedBlock && l.parenDepth > 0 {
+		patternBlock := false
+		if len(l.pendingPatternBlocks) > 0 && l.pendingPatternBlocks[len(l.pendingPatternBlocks)-1].ParenDepth == l.parenDepth {
+			header := l.pendingPatternBlocks[len(l.pendingPatternBlocks)-1]
+			l.pendingPatternBlocks = l.pendingPatternBlocks[:len(l.pendingPatternBlocks)-1]
+			// `when` is also a legal named field/argument. A block header has
+			// a scrutinee between its introducer and the terminating colon.
+			for index := header.HeadStart; index < l.pos-1; index++ {
+				switch l.src[index] {
+				case ' ', '\t', '\r', '\n':
+				default:
+					patternBlock = true
+				}
+			}
+		}
+		if (l.pendingGroupedBlock || patternBlock) && l.parenDepth > 0 {
 			l.groupedBlockContexts = append(l.groupedBlockContexts, groupedBlockContext{
-				ParenDepth: l.parenDepth,
-				BaseIndent: l.indentStack[len(l.indentStack)-1],
+				ParenDepth:   l.parenDepth,
+				BaseIndent:   l.indentStack[len(l.indentStack)-1],
+				HeaderIndent: l.currentLineIndent(),
 			})
 		}
 		l.pendingGroupedBlock = false

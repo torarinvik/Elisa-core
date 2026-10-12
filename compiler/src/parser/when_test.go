@@ -229,3 +229,109 @@ func TestWhenRemainsAnIdentifier(t *testing.T) {
 		t.Fatalf("`when` as identifier must still parse, got %v", errs)
 	}
 }
+
+func TestWhenExpressionInsideParenthesizedContract(t *testing.T) {
+	source := `def classify(value: u32) -> bool:
+    ensure result == (
+        when value:
+            1 | 2 -> true
+            _ -> false
+    )
+    return when value:
+        1 | 2 -> true
+        _ -> false
+`
+	file, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("grouped when parse errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	if len(fn.EnsureValues) != 1 {
+		t.Fatalf("ensures = %d", len(fn.EnsureValues))
+	}
+	if len(fn.Body) != 1 {
+		t.Fatalf("body = %d", len(fn.Body))
+	}
+}
+
+func TestGroupedPatternExpressionHeaders(t *testing.T) {
+	for _, header := range []string{"when value", "when choose(value)", "when M::choose(value)", "match value"} {
+		t.Run(header, func(t *testing.T) {
+			separator := " -> "
+			if header == "match value" {
+				separator = ": "
+			}
+			source := "def classify(value: u32) -> bool:\n    ensure result == (\n        " + header + ":\n            1" + separator + "true\n            _" + separator + "false\n    )\n    return (\n        true\n    )\n"
+			file, errs := parseSourceFile(t, source)
+			if len(errs) != 0 {
+				t.Fatalf("grouped header parse errors: %v", errs)
+			}
+			fn := file.Decls[0].(*ast.FuncDecl)
+			if len(fn.EnsureValues) != 1 || len(fn.Body) != 1 {
+				t.Fatalf("lost contract or return: %#v", fn)
+			}
+		})
+	}
+}
+
+func TestGroupedWhenArmNestedOrdinaryParentheses(t *testing.T) {
+	source := `def classify(value: u32) -> bool:
+    ensure result == (
+        when value:
+            1 -> (
+                true
+            )
+            _ -> false
+    )
+    return false
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("nested arm parentheses parse errors: %v", errs)
+	}
+}
+
+func TestGroupedWhenNestedScrutinee(t *testing.T) {
+	source := `def classify(value: u32) -> bool:
+    ensure result == (
+        when choose(
+            when value:
+                1 -> true
+                _ -> false
+        ):
+            true -> true
+            _ -> false
+    )
+    return false
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("nested scrutinee parse errors: %v", errs)
+	}
+}
+
+func TestGroupedWhenNamedParameterRemainsOrdinaryGrouping(t *testing.T) {
+	source := `def g(
+    when: i64,
+    value: i64
+) -> i64:
+    return value
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("when parameter parse errors: %v", errs)
+	}
+}
+
+func TestGroupedWhenIdentifierCallAndRecordArgument(t *testing.T) {
+	source := `def g(when: i64) -> i64:
+    return choose(
+        when,
+        Record{value: 1}
+    )
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("when value/record parse errors: %v", errs)
+	}
+}

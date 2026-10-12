@@ -20,12 +20,19 @@ type Lexer struct {
 	// Track paren/bracket depth to suppress INDENT/DEDENT inside groupings
 	parenDepth           int
 	pendingGroupedBlock  bool
+	pendingPatternBlocks []groupedPatternHeader
 	groupedBlockContexts []groupedBlockContext
 	errors               []string
 }
-type groupedBlockContext struct {
+type groupedPatternHeader struct {
 	ParenDepth int
-	BaseIndent int
+	HeadStart  int
+}
+
+type groupedBlockContext struct {
+	ParenDepth   int
+	BaseIndent   int
+	HeaderIndent int
 }
 
 func New(filename string, src []byte) *Lexer {
@@ -52,7 +59,9 @@ func (l *Lexer) activeGroupedBlockContext() bool {
 	if len(l.groupedBlockContexts) == 0 {
 		return false
 	}
-	return l.parenDepth >= l.groupedBlockContexts[len(l.groupedBlockContexts)-1].ParenDepth
+	// Nested ordinary parentheses still suppress layout; an explicit nested
+	// block installs its own context at that deeper delimiter depth.
+	return l.parenDepth == l.groupedBlockContexts[len(l.groupedBlockContexts)-1].ParenDepth
 }
 func (l *Lexer) trimFinishedGroupedBlockContexts() {
 	for len(l.groupedBlockContexts) > 0 {
@@ -305,6 +314,15 @@ func (l *Lexer) handleIndentation() {
 	// See note above: clear any atLineStart set by a consumed `#line` directive.
 	l.atLineStart = false
 
+	// Closing a grouped block may align with a header line whose indentation
+	// was suppressed by the surrounding parentheses. Do not invent an INDENT
+	// for that closing delimiter after emitting the block's DEDENT.
+	if l.activeGroupedBlockContext() {
+		context := l.groupedBlockContexts[len(l.groupedBlockContexts)-1]
+		if indent <= context.HeaderIndent && indent > context.BaseIndent {
+			indent = context.BaseIndent
+		}
+	}
 	current := l.indentStack[len(l.indentStack)-1]
 
 	if indent > current {
@@ -680,6 +698,9 @@ func (l *Lexer) readIdent() Token {
 	text := bytesToStringView(l.src[start:l.pos])
 	kind := LookupKeyword(text)
 	l.pendingGroupedBlock = kind == TOKEN_IDENT && isImmediateGroupedBlockIntroducer(text)
+	if l.parenDepth > 0 && (kind == TOKEN_MATCH || (kind == TOKEN_IDENT && text == "when" && l.patternScrutineeFollows())) {
+		l.pendingPatternBlocks = append(l.pendingPatternBlocks, groupedPatternHeader{ParenDepth: l.parenDepth, HeadStart: l.pos})
+	}
 	return l.finishToken(Token{Kind: kind, Text: text, Pos: p})
 }
 
@@ -749,4 +770,65 @@ func (l *Lexer) readFString() Token {
 	}
 	l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated f-string literal")
 	return l.finishToken(Token{Kind: TOKEN_FSTRING_LIT, Text: bytesToStringView(l.src[start:l.pos]), Pos: p})
+}
+
+func (l *Lexer) currentLineIndent() int {
+	start := l.pos
+	for start > 0 && l.src[start-1] != '\n' {
+		start--
+	}
+	indent := 0
+	for start < len(l.src) {
+		switch l.src[start] {
+		case ' ':
+			indent++
+		case '\t':
+			indent += 4
+		default:
+			return indent
+		}
+		start++
+	}
+	return indent
+}
+
+// Mirror the parser's contextual `when` recognition. Postfix calls, indexing,
+// fields and named arguments keep `when` as an ordinary identifier.
+func (l *Lexer) patternScrutineeFollows() bool {
+	index := l.pos
+	for index < len(l.src) {
+		switch l.src[index] {
+		case ' ', '\t', '\r', '\n':
+			index++
+			continue
+		case '#':
+			for index < len(l.src) && l.src[index] != '\n' {
+				index++
+			}
+			continue
+		}
+		break
+	}
+	if index >= len(l.src) {
+		return false
+	}
+	ch := l.src[index]
+	if ch == '-' || ch == '\'' || ch == '"' || (ch >= '0' && ch <= '9') {
+		return true
+	}
+	r, size := utf8.DecodeRune(l.src[index:])
+	if !isIdentStartRune(r) {
+		return false
+	}
+	start := index
+	index += size
+	for index < len(l.src) {
+		r, size = utf8.DecodeRune(l.src[index:])
+		if !isIdentCharRune(r) {
+			break
+		}
+		index += size
+	}
+	kind := LookupKeyword(bytesToStringView(l.src[start:index]))
+	return kind == TOKEN_IDENT || kind == TOKEN_TRUE || kind == TOKEN_FALSE
 }
