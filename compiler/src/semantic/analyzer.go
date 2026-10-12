@@ -727,14 +727,19 @@ type Analyzer struct {
 	projectedFieldResolveInProgress map[*Symbol]bool
 	sinkParamInferenceInProgress    map[*ast.FuncDecl]bool
 	parallelForInfo                 map[*ast.ParallelForStmt]*ParallelForInfo
-	callArgDisjoint                 map[*ast.CallExpr]*CallArgDisjointInfo
-	disjointCallSites               map[*ast.FuncDecl][]callDisjointObservation
-	funcDisjointParams              map[*ast.FuncDecl]*FuncDisjointParamInfo
-	lawIsCalls                      map[*ast.BinaryExpr]*ast.CallExpr
-	builtinModularLaws              map[string]*ast.FuncDecl
-	lemmaCalls                      map[*ast.CallExpr]bool
-	ghostDecls                      map[*ast.VarDeclStmt]bool
-	ghostContracts                  map[ast.Expr]bool
+	// taskGroupSubmits records the bare `submit[pool] worker(arg)` call sites in a
+	// structurally verified TaskGroup window. Both codegen and the local-borrow
+	// checker consume this same proof; a submit is never treated as joined unless
+	// codegen also registers its returned handle in the matching group.
+	taskGroupSubmits   map[*ast.CallExpr]TaskGroupSubmitInfo
+	callArgDisjoint    map[*ast.CallExpr]*CallArgDisjointInfo
+	disjointCallSites  map[*ast.FuncDecl][]callDisjointObservation
+	funcDisjointParams map[*ast.FuncDecl]*FuncDisjointParamInfo
+	lawIsCalls         map[*ast.BinaryExpr]*ast.CallExpr
+	builtinModularLaws map[string]*ast.FuncDecl
+	lemmaCalls         map[*ast.CallExpr]bool
+	ghostDecls         map[*ast.VarDeclStmt]bool
+	ghostContracts     map[ast.Expr]bool
 	// ghostReadAllowed, when > 0, permits reading a `ghost` variable (the analyzer is inside a
 	// contract clause or another ghost initializer). Outside these contexts a ghost read is a hard
 	// error — that is the ghost-to-real flow barrier that keeps erasure sound.
@@ -1141,6 +1146,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		foldInfo:                          map[*ast.FoldExpr]*FoldInfo{},
 		lambdaInfo:                        map[*ast.LambdaExpr]*LambdaInfo{},
 		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
+		taskGroupSubmits:                  map[*ast.CallExpr]TaskGroupSubmitInfo{},
 		callArgDisjoint:                   map[*ast.CallExpr]*CallArgDisjointInfo{},
 		disjointCallSites:                 map[*ast.FuncDecl][]callDisjointObservation{},
 		lawIsCalls:                        map[*ast.BinaryExpr]*ast.CallExpr{},
@@ -1351,6 +1357,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		DenseNodeKeys:           a.exprDenseNodeKeys,
 		NodeTables:              a.exprNodeTables,
 		ParallelFor:             a.parallelForInfo,
+		TaskGroupSubmits:        a.taskGroupSubmits,
 		CallArgDisjoint:         a.callArgDisjoint,
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,

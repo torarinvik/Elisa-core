@@ -73,8 +73,13 @@ type Result struct {
 	NodeTables             map[ast.Expr]NodeTableInfo
 	PackedLowering         PackedLoweringMetadata
 	ParallelFor            map[*ast.ParallelForStmt]*ParallelForInfo
-	CallArgDisjoint        map[*ast.CallExpr]*CallArgDisjointInfo
-	FuncDisjointParams     map[*ast.FuncDecl]*FuncDisjointParamInfo
+	// TaskGroupSubmits contains only safe-concurrency `submit` calls that the
+	// analyzer proved are registered in a local TaskGroup and followed by its
+	// matching wait on every normal path. The backend uses the group binding to
+	// register each handle; lifetime analysis uses the same call identity.
+	TaskGroupSubmits   map[*ast.CallExpr]TaskGroupSubmitInfo
+	CallArgDisjoint    map[*ast.CallExpr]*CallArgDisjointInfo
+	FuncDisjointParams map[*ast.FuncDecl]*FuncDisjointParamInfo
 	// LawIsCalls desugars a `subject is Law` predicate application (docs/85 §2: `is` = UFCS
 	// first-arg binding) into the synthetic call `Law(subject)`. Analysis type-checks the call and
 	// records it here; codegen emits the call for the `is` expression. Bare-law (no bracket args)
@@ -148,6 +153,13 @@ type Result struct {
 	// analyzer is retained so a generic body can be RE-ANALYZED per instantiation
 	// (SpecializedExprTypes). Unexported: nothing outside this package may drive it.
 	analyzer *Analyzer
+}
+
+// TaskGroupSubmitInfo is a positive proof attached to one discarded safe submit
+// expression. GroupName identifies the same-scope TaskGroup local whose matching
+// wait post-dominates the submission window.
+type TaskGroupSubmitInfo struct {
+	GroupName string
 }
 
 func (r *Result) ActiveFile() *ast.File {

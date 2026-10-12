@@ -81,6 +81,56 @@ import (
 )
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if s != nil && s.g != nil && s.g.result != nil {
+		if info, ok := s.g.result.TaskGroupSubmits[expr]; ok {
+			return s.emitVerifiedTaskGroupSubmit(expr, info)
+		}
+	}
+	return s.emitCallExprUnwrapped(expr)
+}
+
+// emitVerifiedTaskGroupSubmit lowers one submit proved by semantic analysis as
+// part of a joined TaskGroup window. The same annotation relaxes the lifetime
+// check and adds the returned handle here, so the two stages cannot disagree
+// about whether the pool still owns the capture at function return.
+func (s *functionState) emitVerifiedTaskGroupSubmit(expr *ast.CallExpr, info semantic.TaskGroupSubmitInfo) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || info.GroupName == "" {
+		return nil, nil, fmt.Errorf("invalid verified TaskGroup submission")
+	}
+	group, ok := s.lookupBinding(info.GroupName)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing TaskGroup binding %q during verified submit lowering", info.GroupName)
+	}
+	taskValue, taskType, err := s.emitCallExprUnwrapped(expr)
+	if err != nil {
+		return nil, nil, err
+	}
+	task, ok := taskType.(*semantic.GenericInstanceType)
+	taskName := ""
+	if ok && task != nil {
+		taskName = task.Name
+		if taskName == "" {
+			if base, isStruct := task.Base.(*semantic.StructType); isStruct && base != nil {
+				taskName = base.Name
+			}
+		}
+	}
+	if !ok || task == nil || taskName != "Task" || len(task.Args) != 2 {
+		return nil, nil, fmt.Errorf("verified submit did not produce a Task[R, Pending] value")
+	}
+	groupAdd, groupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": task.Args[0]})
+	if err != nil {
+		return nil, nil, err
+	}
+	groupAddLLVMType, err := s.g.lowerFunctionType(groupAddType)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.buildCall(groupAddLLVMType, groupAdd, []C.LLVMValueRef{group.ptr, taskValue}, "")
+	return nil, s.g.result.NamedTypes["void"], nil
+}
+
+func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if err := s.emitCallArgRefinementChecks(expr); err != nil {
 		return nil, nil, err
 	}

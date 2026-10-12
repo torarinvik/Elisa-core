@@ -1226,6 +1226,15 @@ func (a *Analyzer) queueCallArgumentStoreChecks(call *ast.CallExpr) {
 		if !a.returnBorrowWritableParam(paramType) {
 			continue
 		}
+		// A verified TaskGroup window registers this exact pool_submit1 handle
+		// and joins it before the enclosing function can return. That discharges
+		// the pool's retention of the submitted capture; it does not change the
+		// flow-insensitive store summary or any other writable argument.
+		if index == 0 {
+			if _, joined := a.taskGroupSubmits[call]; joined {
+				continue
+			}
+		}
 		place := returnBorrowStripAddr(args[index])
 		if place == nil || !a.lvalueStorageOutlivesFunction(place) {
 			continue

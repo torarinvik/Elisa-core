@@ -6,11 +6,11 @@ func TestCollectionAppend(t *testing.T) {
 	exit, stdout, stderr := runStressProgram(t, "collection_append", `# += appends one element; with yields the receiver without copying the record.
 global mutable trace: i64 = 0
 
-def note(digit: i64) -> i64:
+def note(digit: i64) -> i64 can[Global.Read, Global.Write]:
     trace <- trace * 10 + digit
     return digit
 
-def choose() -> usize:
+def choose() -> usize can[Global.Read, Global.Write]:
     _ = note(9)
     return 0
 
@@ -34,7 +34,7 @@ def update(state: mutable State&, value: i64) -> void can[Abort.Panic, Memory.Al
 def append_scalar(values: mutable darray[i64]&, value: i64) -> void can[Abort.Panic, Memory.Allocate]:
     values += value
 
-def check_collection_append() -> i64 can[Abort.Panic, Memory.Allocate]:
+def check_collection_append() -> i64 can[Abort.Panic, Memory.Allocate, Global.Read, Global.Write]:
     state: mutable State = State{padding: zeroed, depth: 1, names: [], flags: []}
     update(&state, 42)
     return 1 if state.names.count != 1 or state.names[0] != 42
@@ -64,7 +64,7 @@ def check_collection_append() -> i64 can[Abort.Panic, Memory.Allocate]:
 
 @test
 def collection_append() -> void:
-    can Abort.Panic, Memory.Allocate:
+    can Abort.Panic, Memory.Allocate, Global.Read, Global.Write:
         assert check_collection_append() == 0
 `)
 	assertAllPassed(t, exit, stdout, stderr, "collection_append")
