@@ -86,3 +86,90 @@ func TestSMTClassifierStringEqualityDeclinesUnsupportedBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestSMTClassifierStringEqualityDeclinesEffectfulContexts(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		body            []ast.Stmt
+		calleeBodyDepth int
+	}{
+		{
+			name: "call_in_body",
+			body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "mutate"}}}},
+		},
+		{
+			name: "can_handler",
+			body: []ast.Stmt{&ast.CanStmt{
+				HandlerName: "Recover",
+				Body:        []ast.Stmt{&ast.ReturnStmt{Value: &ast.BoolLit{Value: true}}},
+			}},
+		},
+		{
+			name:            "callee_body",
+			body:            []ast.Stmt{&ast.ReturnStmt{Value: &ast.BoolLit{Value: true}}},
+			calleeBodyDepth: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			function := &ast.FuncDecl{
+				Name:   "classified",
+				Params: []ast.ParamDecl{{Name: "name"}},
+				Body:   tc.body,
+			}
+			analyzer := &Analyzer{currentFuncDecl: function, currentScope: NewScope(nil)}
+			analyzer.currentScope.Define(&Symbol{Name: "name", Kind: SymbolParam, Type: &SViewType{}, Node: function, ParamIndex: 0})
+			translator := &smtTranslator{a: analyzer, boolDecls: map[string]bool{}, calleeBodyDepth: tc.calleeBodyDepth}
+			if term, ok := translator.classifierStringEquality(&ast.Ident{Name: "name"}, &ast.StringLit{Value: "load"}, nil); ok {
+				t.Fatalf("effectful context translated as %q", term)
+			}
+			if len(translator.boolDecls) != 0 {
+				t.Fatalf("declined comparison left SMT declarations: %v", translator.boolDecls)
+			}
+		})
+	}
+}
+
+func TestSMTBooleanStringMatchDeclinesGuardsAndNonliteralArms(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		arm  ast.MatchArm
+	}{
+		{
+			name: "guarded_arm",
+			arm: ast.MatchArm{
+				Pattern: &ast.MatchStringLiteralPattern{Value: "load"},
+				Guard:   &ast.BoolLit{Value: true},
+				Body:    []ast.Stmt{&ast.ExprStmt{Expr: &ast.BoolLit{Value: true}}},
+			},
+		},
+		{
+			name: "call_arm_value",
+			arm: ast.MatchArm{
+				Pattern: &ast.MatchStringLiteralPattern{Value: "load"},
+				Body:    []ast.Stmt{&ast.ExprStmt{Expr: &ast.CallExpr{Func: &ast.Ident{Name: "classify"}}}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selector := &ast.Ident{Name: "name"}
+			match := &ast.MatchExpr{Value: selector, Arms: []ast.MatchArm{
+				tc.arm,
+				{Pattern: &ast.MatchWildcardPattern{}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.BoolLit{Value: false}}}},
+			}}
+			function := &ast.FuncDecl{
+				Name:   "classified",
+				Params: []ast.ParamDecl{{Name: "name"}},
+				Body:   []ast.Stmt{&ast.ReturnStmt{Value: &ast.BoolLit{Value: true}}},
+			}
+			analyzer := &Analyzer{currentFuncDecl: function, currentScope: NewScope(nil)}
+			analyzer.currentScope.Define(&Symbol{Name: "name", Kind: SymbolParam, Type: &SViewType{}, Node: function, ParamIndex: 0})
+			translator := &smtTranslator{a: analyzer, boolDecls: map[string]bool{}}
+			if term, ok := translator.booleanMatchTerm(match, nil); ok {
+				t.Fatalf("unsupported match translated as %q", term)
+			}
+			if len(translator.boolDecls) != 0 {
+				t.Fatalf("declined match left SMT declarations: %v", translator.boolDecls)
+			}
+		})
+	}
+}
