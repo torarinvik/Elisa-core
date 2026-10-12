@@ -92,15 +92,22 @@ func TestClassifierStringFrameStableRejectsInferredWrite(t *testing.T) {
 func TestSMTConstantStringNamedTupleResultFields(t *testing.T) {
 	for _, tc := range []struct {
 		name, binding, wasmType string
+		reverse                 bool
 		reject                  bool
 	}{
 		{name: "exact", binding: "string", wasmType: "i32"},
+		{name: "reversed_exact", binding: "string", wasmType: "i32", reverse: true},
 		{name: "wrong_binding", binding: "pointer", wasmType: "i32", reject: true},
+		{name: "reversed_wrong_binding", binding: "pointer", wasmType: "i32", reverse: true, reject: true},
 		{name: "wrong_wasm_type", binding: "string", wasmType: "i64", reject: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			bindingCheck := `result.binding == "string"`
+			if tc.reverse {
+				bindingCheck = `"string" == result.binding`
+			}
 			source := `def classify() -> (binding: sview, wasm_type: sview):
-    ensure result.binding == "string"
+    ensure ` + bindingCheck + `
     ensure result.wasm_type == "i32"
     return ("` + tc.binding + `", "` + tc.wasmType + `")
 `

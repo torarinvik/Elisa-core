@@ -87,6 +87,11 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 			return tr.constantStringEquality(value, right, env, depth+1)
 		}
 	}
+	if field, ok := right.(*ast.FieldExpr); ok {
+		if value, found := tr.constantStringProjection(field); found {
+			return tr.constantStringEquality(left, value, env, depth+1)
+		}
+	}
 	// Keep the literal comparator independent of the substituted operand's scope.
 	// Comparing two symbolic strings needs two environments and is outside this fragment.
 	if _, ok := right.(*ast.StringLit); !ok {
