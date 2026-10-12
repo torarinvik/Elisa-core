@@ -83,7 +83,7 @@ def emit_string_dump(out: mutable darray[u8]&, body: sview):
         emit_hex_bytes(out, body)
 
 def dump_value[@r](out: mutable darray[u8]&, value: JsonValueHandle[r]):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         kind: JsonKind = json_handle_kind(value)
         if kind == JsonKind.NULL:
             out.push(78)
@@ -129,14 +129,14 @@ def dump_value[@r](out: mutable darray[u8]&, value: JsonValueHandle[r]):
 # ------------------------------------------------------------
 
 def parse_or_fail[@r](a: mutable Arena& @r, text: cstr) -> JsonValueHandle[r]:
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         outcome: JsonParseResult[r] = json_parse_checked(a, sview(text, 0, -1))
         fail("expected a valid document") if outcome.code != JsonErrorCode.OK
         return json_handle_from_result(outcome)
 
 # Parse `text`, dump it canonically and compare against CPython's dump.
 def check_parity[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         value: JsonValueHandle[r] = parse_or_fail(a, text)
         in a:
             actual: mutable darray[u8] = []
@@ -145,7 +145,7 @@ def check_parity[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
 
 # Parse, serialise, and check the serialisation parses back to the same dump.
 def check_roundtrip[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         value: JsonValueHandle[r] = parse_or_fail(a, text)
         written: darray[u8] = json_handle_write(a, value)
         reparsed: JsonParseResult[r] = json_parse_checked(a, bytes_view(written))
@@ -156,7 +156,7 @@ def check_roundtrip[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
             assert_true(sview_eq(bytes_view(again), sview(expected, 0, -1)))
 
 def check_rejected[@r](a: mutable Arena& @r, text: cstr, code: i64, pos: i64):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         outcome: JsonParseResult[r] = json_parse_checked(a, sview(text, 0, -1))
         assert_eq(outcome.code.i64(), code)
         assert_eq(outcome.pos, pos)
@@ -170,20 +170,20 @@ def check_rejected[@r](a: mutable Arena& @r, text: cstr, code: i64, pos: i64):
                 assert_true(true)
 
 def check_number[@r](a: mutable Arena& @r, text: cstr, expected: f64):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         value: JsonValueHandle[r] = parse_or_fail(a, text)
         assert_true(json_handle_is_number(value))
         assert_eq(try json_handle_as_number(value) else -1.0, expected)
 
 def check_string[@r](a: mutable Arena& @r, text: cstr, expected: sview):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         value: JsonValueHandle[r] = parse_or_fail(a, text)
         assert_true(json_handle_is_string(value))
         decoded: sview = try json_handle_as_string(value) else sview("", 0, 0)
         assert_true(sview_eq(decoded, expected))
 
 def check_serialises_to[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         value: JsonValueHandle[r] = parse_or_fail(a, text)
         assert_true(sview_eq(sview(json_handle_to_cstr(a, value), 0, -1), sview(expected, 0, -1)))
 
@@ -209,7 +209,7 @@ def bytes3(a: mutable Arena&, prefix: cstr, byte: u8, suffix: cstr) -> sview:
 # ------------------------------------------------------------
 
 def scalar_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         null_value: JsonValueHandle[r] = parse_or_fail(a, "null")
         assert_true(json_handle_is_null(null_value))
         assert_true(json_handle_kind(null_value) == JsonKind.NULL)
@@ -240,7 +240,7 @@ def scalar_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def number_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         check_number(a, "0", 0.0)
         check_number(a, "1", 1.0)
         check_number(a, "-1", -1.0)
@@ -271,7 +271,7 @@ def number_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def string_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         check_string(a, "\"\"", sview("", 0, 0))
         check_string(a, "\"hello\"", sview("hello", 0, -1))
         check_string(a, "\"a b c\"", sview("a b c", 0, -1))
@@ -304,7 +304,7 @@ def string_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def unicode_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # \u escapes decode to UTF-8: 1, 2 and 3 byte forms.
         check_string(a, "\"\\u0041\"", sview("A", 0, -1))
         check_string(a, "\"\\u00e9\"", sview("é", 0, -1))
@@ -325,7 +325,7 @@ def unicode_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def array_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         empty: JsonValueHandle[r] = parse_or_fail(a, "[]")
         assert_true(json_handle_is_array(empty))
         assert_eq(json_handle_array_len(empty), 0)
@@ -363,7 +363,7 @@ def array_tests[@r](a: mutable Arena& @r):
         assert_true(json_handle_is_object(try json_handle_at(mixed, 6) else json_handle_null(mixed)))
 
 def object_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         empty: JsonValueHandle[r] = parse_or_fail(a, "{}")
         assert_true(json_handle_is_object(empty))
         assert_eq(json_handle_object_len(empty), 0)
@@ -418,7 +418,7 @@ def object_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def whitespace_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # Space, tab, CR and LF are the only whitespace JSON allows, and they
         # are allowed anywhere between tokens.
         spaced: JsonValueHandle[r] = parse_or_fail(a, " \t\r\n{ \"a\" : [ 1 , 2 ] , \"b\" : null } \t\r\n")
@@ -440,7 +440,7 @@ def whitespace_tests[@r](a: mutable Arena& @r):
 # constructors stay module-private until a handle-typed builder exists.
 
 def builder_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         anchor: JsonValueHandle[r] = json_handle_number(a, 0.0)
         assert_true(json_handle_is_null(json_handle_null(anchor)))
         assert_true(json_handle_to_cstr(a, json_handle_null(anchor)) == "null")
@@ -460,7 +460,7 @@ def builder_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def non_finite_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # JSON has no NaN or Infinity, so a hand-built one serialises as `null`
         # (JavaScript's JSON.stringify rule). Parsing them back is rejected in
         # malformed_tests.
@@ -484,7 +484,7 @@ def nested_arrays(a: mutable Arena&, depth: i64) -> sview:
             return bytes_view(out)
 
 def depth_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # JSON_MAX_DEPTH is 256: 256 levels parse, 257 do not. The documents are
         # built at run time -- a `const cstr` global passed as a call argument
         # declines under stage1's backend.
@@ -510,7 +510,7 @@ def long_fraction(a: mutable Arena&, digit: u8, count: i64) -> sview:
             return bytes_view(out)
 
 def long_number_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # 600 fraction digits is past JSON_NUMBER_SCRATCH (512), so this takes
         # the arena copy path in json_lexeme_to_f64. The expected doubles come
         # from CPython: float("1." + "3"*600) and float("1." + "9"*600).
@@ -548,7 +548,7 @@ def grid_document(a: mutable Arena&, outer: i64, inner: i64) -> sview:
             return bytes_view(out)
 
 def check_grid[@r](a: mutable Arena& @r, outer: i64, inner: i64):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         text: sview = grid_document(a, outer, inner)
         parsed: JsonParseResult[r] = json_parse_checked(a, text)
         assert_eq(parsed.code.i64(), 0)
@@ -566,7 +566,7 @@ def check_grid[@r](a: mutable Arena& @r, outer: i64, inner: i64):
         assert_true(sview_eq(bytes_view(written), text))
 
 def large_document_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         check_grid(a, 50, 50)
         check_grid(a, 300, 3)
         check_grid(a, 3, 700)
@@ -576,7 +576,7 @@ def large_document_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def cstr_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         fallback: JsonValueHandle[r] = json_handle_bool(a, false)
         # json_parse_cstr is json_parse over a NUL-terminated string.
         doc: JsonValueHandle[r] = try json_parse_cstr(a, "{\"a\":[1,2]}") else fallback
@@ -611,7 +611,7 @@ def cstr_tests[@r](a: mutable Arena& @r):
 # and re-parsing must reproduce that same dump.
 
 def parity_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # null
         check_parity(a, "null", "N")
         check_roundtrip(a, "null", "N")
@@ -787,7 +787,7 @@ def parity_tests[@r](a: mutable Arena& @r):
 # is listed alongside. All ten JsonError variants are covered.
 
 def malformed_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # empty_input -> UNEXPECTED_END
         check_rejected(a, "", 1, 0)
         # only_ws -> UNEXPECTED_END
@@ -874,7 +874,7 @@ def malformed_tests[@r](a: mutable Arena& @r):
 # stores decoded bytes, so they have nowhere to go.
 
 def stricter_than_python_tests[@r](a: mutable Arena& @r):
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # lone_high_surrogate -> INVALID_ESCAPE
         check_rejected(a, "\"\\ud83d\"", 6, 1)
         # lone_low_surrogate -> INVALID_ESCAPE
@@ -889,7 +889,7 @@ def stricter_than_python_tests[@r](a: mutable Arena& @r):
 # ------------------------------------------------------------
 
 def main() -> i64:
-    can Memory.Allocate, Memory.Release, Abort.Panic, Console.Format, Unsafe.PointerCast:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Console.Format, Unsafe.PointerCast, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write:
         # A plain Arena rather than a `region` binding: the handle API is indexed
         # by the arena's region, and a `region` name does not bind a
         # `mutable Arena& @r` parameter. The arena grows in chunks as needed.
