@@ -813,7 +813,7 @@ func (l *Lexer) patternScrutineeFollows() bool {
 		return false
 	}
 	ch := l.src[index]
-	if ch == '-' || ch == '\'' || ch == '"' || (ch >= '0' && ch <= '9') {
+	if ch == '-' || ch == '\'' || ch == '"' || (ch >= '0' && ch <= '9') || (ch == '.' && index+1 < len(l.src) && isDigit(l.src[index+1])) {
 		return true
 	}
 	r, size := utf8.DecodeRune(l.src[index:])

@@ -335,3 +335,49 @@ func TestGroupedWhenIdentifierCallAndRecordArgument(t *testing.T) {
 		t.Fatalf("when value/record parse errors: %v", errs)
 	}
 }
+
+func TestGroupedWhenLeadingDotFloatScrutinee(t *testing.T) {
+	source := `def classify() -> bool:
+    ensure result == (
+        when .5:
+            .5 -> true
+            _ -> false
+    )
+    return true
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("leading-dot scrutinee parse errors: %v", errs)
+	}
+}
+
+func TestGroupedWhenRecordScrutinee(t *testing.T) {
+	source := `def classify() -> bool:
+    ensure result == (
+        when Pair{left: 1}:
+            _ -> true
+    )
+    return true
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("record scrutinee parse errors: %v", errs)
+	}
+}
+
+func TestGroupedWhenNestedExplicitDoBlock(t *testing.T) {
+	source := `def classify(value: u32) -> bool:
+    ensure result == (
+        when value:
+            1 -> (do:
+                true
+            )
+            _ -> false
+    )
+    return false
+`
+	_, errs := parseSourceFile(t, source)
+	if len(errs) != 0 {
+		t.Fatalf("nested do block parse errors: %v", errs)
+	}
+}
