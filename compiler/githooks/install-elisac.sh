@@ -17,8 +17,22 @@ if [ "$(git rev-parse --absolute-git-dir 2>/dev/null)" != "$(cd "$(git rev-parse
 fi
 COMPILER_DIR="$(git rev-parse --show-toplevel)/compiler"
 [ -d "$COMPILER_DIR" ] || exit 0
+# Shared defaults must come from committed inputs, not another agent's experiment.
+SOURCE_ROOT="$(git rev-parse --show-toplevel)"
+SOURCE_REV="$(git rev-parse HEAD)"
+if [ -n "$(git -C "$SOURCE_ROOT" status --porcelain -- compiler)" ]; then
+    echo "[hook] compiler checkout has uncommitted changes; installed compiler retained" >&2
+    exit 0
+fi
 mkdir -p "${HOME}/.elisac"
-if go build -C "$COMPILER_DIR" -o "${HOME}/.elisac/elisac-stage0" ./src 2>/tmp/elisac-autoinstall.log; then
+INSTALL_TEMP="$(mktemp "${HOME}/.elisac/elisac-stage0.build.XXXXXX")" || exit 0
+trap 'rm -f "$INSTALL_TEMP"' EXIT HUP INT TERM
+if go build -C "$COMPILER_DIR" -o "$INSTALL_TEMP" ./src 2>/tmp/elisac-autoinstall.log; then
+    if [ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" != "$SOURCE_REV" ] || [ -n "$(git -C "$SOURCE_ROOT" status --porcelain -- compiler)" ]; then
+        echo "[hook] compiler source changed during build; installed compiler retained" >&2
+        exit 0
+    fi
+    mv -f "$INSTALL_TEMP" "${HOME}/.elisac/elisac-stage0" || exit 0
     rm -f "${HOME}/.elisac/elisac"
     # Scripts that read stage0 from the checkout (ELISACORE_BIN defaults, the stage1 seed) use
     # compiler/bin/elisac; a stale copy there rejected current sources. Refresh it atomically.
