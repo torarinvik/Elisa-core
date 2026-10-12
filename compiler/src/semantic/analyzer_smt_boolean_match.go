@@ -1,11 +1,36 @@
 package semantic
 
 import (
-	"encoding/hex"
 	"strings"
 
 	"elisacore/src/ast"
 )
+
+type smtStringParameterKey struct {
+	function   *ast.FuncDecl
+	paramIndex int
+}
+
+func pureClassifierPattern(pattern ast.MatchPattern) bool {
+	if pattern == nil {
+		return false
+	}
+	switch n := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return n != nil
+	case *ast.MatchStringLiteralPattern:
+		return n != nil && !strings.ContainsRune(n.Value, 0)
+	case *ast.MatchLiteralPattern:
+		if n == nil || n.Pinned {
+			return false
+		}
+		switch stripOptimizationParens(n.Value).(type) {
+		case *ast.StringLit, *ast.BoolLit, *ast.IntLit:
+			return true
+		}
+	}
+	return false
+}
 
 // Only expression-only classifiers qualify: an immutable view binding does
 // not by itself guarantee that its backing bytes survive mutations or calls.
@@ -16,13 +41,13 @@ func pureClassifierExpr(e ast.Expr) bool {
 	case *ast.ParenExpr:
 		return pureClassifierExpr(n.Inner)
 	case *ast.BinaryExpr:
-		return pureClassifierExpr(n.Left) && pureClassifierExpr(n.Right)
+		return n.LoweredCall == nil && pureClassifierExpr(n.Left) && pureClassifierExpr(n.Right)
 	case *ast.MatchExpr:
 		if n.Store != nil || !pureClassifierExpr(n.Value) {
 			return false
 		}
 		for _, arm := range n.Arms {
-			if arm.Guard != nil || len(arm.Body) != 1 {
+			if arm.Guard != nil || !pureClassifierPattern(arm.Pattern) || len(arm.Body) != 1 {
 				return false
 			}
 			tail, ok := arm.Body[0].(*ast.ExprStmt)
@@ -48,43 +73,69 @@ func pureClassifierBody(body []ast.Stmt) bool {
 	return false
 }
 
-func (tr *smtTranslator) classifierStringParameter(expr ast.Expr, env map[string]string) (*ast.Ident, bool) {
+func (tr *smtTranslator) classifierStringParameter(expr ast.Expr, env map[string]string) (*ast.Ident, smtStringParameterKey, bool) {
 	id, ok := stripOptimizationParens(expr).(*ast.Ident)
 	if !ok || tr.a == nil || tr.a.currentScope == nil || tr.a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 {
-		return nil, false
+		return nil, smtStringParameterKey{}, false
 	}
 	if !pureClassifierBody(tr.a.currentFuncDecl.Body) {
-		return nil, false
+		return nil, smtStringParameterKey{}, false
 	}
 	if _, bound := env[id.Name]; bound {
-		return nil, false
+		return nil, smtStringParameterKey{}, false
 	}
 	if _, bound := env["\x00string:"+id.Name]; bound {
-		return nil, false
+		return nil, smtStringParameterKey{}, false
 	}
 	paramIndex := -1
 	for index, param := range tr.a.currentFuncDecl.Params {
 		if param.Name == id.Name {
 			if tr.a.paramIsMutable(param) {
-				return nil, false
+				return nil, smtStringParameterKey{}, false
 			}
 			paramIndex = index
 			break
 		}
 	}
 	if paramIndex < 0 {
-		return nil, false
+		return nil, smtStringParameterKey{}, false
 	}
 	sym, found := tr.a.currentScope.Lookup(id.Name)
 	if !found || sym == nil || sym.Mutable || sym.Kind != SymbolParam || sym.Node != tr.a.currentFuncDecl || sym.ParamIndex != paramIndex || !isStringViewType(sym.Type) {
-		return nil, false
+		return nil, smtStringParameterKey{}, false
 	}
-	return id, true
+	return id, smtStringParameterKey{function: tr.a.currentFuncDecl, paramIndex: paramIndex}, true
 }
 
-// Independent atoms overapproximate string equality. No exclusivity or
-// equality between different literals is assumed, so this can miss proofs
-// but cannot establish them by inventing string relationships.
+func (tr *smtTranslator) classifierStringParameterInt(key smtStringParameterKey) string {
+	if tr.stringParamInts == nil {
+		tr.stringParamInts = map[smtStringParameterKey]string{}
+	}
+	if term, ok := tr.stringParamInts[key]; ok {
+		return term
+	}
+	term := tr.freshAux(false)
+	tr.stringParamInts[key] = term
+	return term
+}
+
+func (tr *smtTranslator) classifierStringLiteralInt(value string) int64 {
+	if tr.stringLiteralInts == nil {
+		tr.stringLiteralInts = map[string]int64{}
+	}
+	if id, ok := tr.stringLiteralInts[value]; ok {
+		return id
+	}
+	tr.nextStringLiteralInt++
+	id := tr.nextStringLiteralInt
+	tr.stringLiteralInts[value] = id
+	return id
+}
+
+// String equality against a literal uses an injective query-local integer ID.
+// The parameter's free Int overapproximates all possible string values: every
+// known literal has its own ID, while unknown strings may use any other value.
+// This preserves exact known-literal exclusivity without pairwise constraints.
 func (tr *smtTranslator) classifierStringEquality(left, right ast.Expr, env map[string]string) (string, bool) {
 	left = stripOptimizationParens(left)
 	right = stripOptimizationParens(right)
@@ -99,23 +150,20 @@ func (tr *smtTranslator) classifierStringEquality(left, right ast.Expr, env map[
 	if !ok || strings.ContainsRune(lit.Value, 0) {
 		return "", false
 	}
-	id, ok := tr.classifierStringParameter(left, env)
+	_, key, ok := tr.classifierStringParameter(left, env)
 	if !ok {
 		return "", false
 	}
-	name := "str_eq_" + hex.EncodeToString([]byte(id.Name)) + "_" + hex.EncodeToString([]byte(lit.Value))
-	if tr.boolDecls == nil {
-		tr.boolDecls = map[string]bool{}
-	}
-	tr.boolDecls[name] = true
-	return name, true
+	param := tr.classifierStringParameterInt(key)
+	literal := tr.classifierStringLiteralInt(lit.Value)
+	return "(= " + param + " " + smtInt(literal) + ")", true
 }
 
 func (tr *smtTranslator) booleanMatchTerm(n *ast.MatchExpr, env map[string]string) (string, bool) {
 	if n == nil || n.Store != nil || len(n.Arms) == 0 {
 		return "", false
 	}
-	if _, ok := tr.classifierStringParameter(n.Value, env); !ok {
+	if _, _, ok := tr.classifierStringParameter(n.Value, env); !ok {
 		return "", false
 	}
 	if _, ok := n.Arms[len(n.Arms)-1].Pattern.(*ast.MatchWildcardPattern); !ok {

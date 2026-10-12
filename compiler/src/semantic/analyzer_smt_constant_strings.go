@@ -30,21 +30,41 @@ func constantStringResult(expr ast.Expr, depth int) bool {
 		if n.Store != nil || len(n.Arms) == 0 {
 			return false
 		}
-		if _, ok := n.Arms[len(n.Arms)-1].Pattern.(*ast.MatchWildcardPattern); !ok {
+		wildcard, ok := n.Arms[len(n.Arms)-1].Pattern.(*ast.MatchWildcardPattern)
+		if !ok || wildcard == nil {
 			return false
 		}
+		patternKind := 0
 		for i, arm := range n.Arms {
-			if arm.Guard != nil || len(arm.Body) != 1 {
+			if arm.Pattern == nil || arm.Guard != nil || len(arm.Body) != 1 {
 				return false
 			}
 			if i < len(n.Arms)-1 {
-				pattern, ok := arm.Pattern.(*ast.MatchLiteralPattern)
-				if !ok || pattern.Pinned {
+				kind := 0
+				switch pattern := arm.Pattern.(type) {
+				case *ast.MatchLiteralPattern:
+					if pattern.Pinned {
+						return false
+					}
+					if _, ok := stripOptimizationParens(pattern.Value).(*ast.IntLit); !ok {
+						return false
+					}
+					kind = 1
+				case *ast.MatchStringLiteralPattern:
+					if strings.ContainsRune(pattern.Value, 0) {
+						return false
+					}
+					if _, ok := stripOptimizationParens(n.Value).(*ast.Ident); !ok {
+						return false
+					}
+					kind = 2
+				default:
 					return false
 				}
-				if _, ok := stripOptimizationParens(pattern.Value).(*ast.IntLit); !ok {
+				if patternKind != 0 && patternKind != kind {
 					return false
 				}
+				patternKind = kind
 			}
 			body, ok := arm.Body[0].(*ast.ExprStmt)
 			if !ok || !constantStringResult(body.Expr, depth+1) {
@@ -106,6 +126,18 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 	if !ok || !constantStringResult(match, depth) {
 		return "", false
 	}
+	stringPattern := false
+	for _, arm := range match.Arms[:len(match.Arms)-1] {
+		if _, ok := arm.Pattern.(*ast.MatchStringLiteralPattern); ok {
+			stringPattern = true
+			break
+		}
+	}
+	if stringPattern {
+		if _, _, ok := tr.classifierStringParameter(match.Value, env); !ok {
+			return "", false
+		}
+	}
 	last := match.Arms[len(match.Arms)-1].Body[0].(*ast.ExprStmt)
 	result, ok := tr.constantStringEquality(last.Expr, wanted, env, depth+1)
 	if !ok {
@@ -113,8 +145,16 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 	}
 	for i := len(match.Arms) - 2; i >= 0; i-- {
 		arm := match.Arms[i]
-		pattern := arm.Pattern.(*ast.MatchLiteralPattern)
-		condition := &ast.BinaryExpr{Position: arm.Position, Op: lexer.TOKEN_EQEQ, Left: match.Value, Right: pattern.Value}
+		var selector ast.Expr
+		switch pattern := arm.Pattern.(type) {
+		case *ast.MatchLiteralPattern:
+			selector = pattern.Value
+		case *ast.MatchStringLiteralPattern:
+			selector = &ast.StringLit{Value: pattern.Value}
+		default:
+			return "", false
+		}
+		condition := &ast.BinaryExpr{Position: arm.Position, Op: lexer.TOKEN_EQEQ, Left: match.Value, Right: selector}
 		guard, ok := tr.boolTerm(condition, env)
 		if !ok {
 			return "", false

@@ -1686,9 +1686,15 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 // variables it declares so their flow facts can be asserted as hypotheses.
 type smtTranslator struct {
 	stringBindings map[string]smtConstantStringBinding // immutable bindings selected by each substitution environment
-	a              *Analyzer
-	decls          map[string]bool // Elisa ident -> declared as an SMT Int const
-	arrayDecls     map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	// String-view classifier params are represented by fresh, unconstrained Ints. Each
+	// literal observed in this query gets a distinct integer ID, preserving exact equality
+	// and exclusivity against known literals without modeling arbitrary string contents.
+	stringParamInts      map[smtStringParameterKey]string
+	stringLiteralInts    map[string]int64
+	nextStringLiteralInt int64
+	a                    *Analyzer
+	decls                map[string]bool // Elisa ident -> declared as an SMT Int const
+	arrayDecls           map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	// setDecls / dictDecls model set[T] / dict[K,V] containers. A set is an (Array <KSort> Bool)
 	// membership function (`p in s` = `(select s p)`). A dict is modeled as TWO arrays keyed by the
 	// same KSort: a `<sym>_keys` (Array <KSort> Bool) membership predicate plus a `<sym>_vals`
@@ -1766,6 +1772,8 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 	}
 	return &smtTranslator{
 		a:                  a,
+		stringParamInts:    map[smtStringParameterKey]string{},
+		stringLiteralInts:  map[string]int64{},
 		decls:              map[string]bool{},
 		arrayDecls:         map[string]bool{},
 		setDecls:           map[string]string{},

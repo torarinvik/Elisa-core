@@ -28,6 +28,111 @@ func TestSMTConstantStringContracts(t *testing.T) {
 	}
 }
 
+func TestSMTStringSelectorClassifierResultContracts(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		outputForI8 string
+		reject      bool
+	}{
+		{name: "distinct_groups", outputForI8: "i32"},
+		{name: "wrong_cross_group", outputForI8: "i64", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := `def wasm_scalar_kind(type_text: sview) -> sview:
+    ensure (result == "i32") == (type_text == "i8" or type_text == "u8")
+    ensure (result == "i64") == (type_text == "i64")
+    ensure (result == "") == (type_text != "i8" and type_text != "u8" and type_text != "i64")
+    return when type_text:
+        "i8" | "u8" -> "` + tc.outputForI8 + `"
+        "i64" -> "i64"
+        _ -> ""
+`
+			result := analyzeContractStrict(t, tc.name+".elisa", source)
+			rejected := strings.Contains(allDiagnostics(result), "could not be proven")
+			if rejected != tc.reject {
+				t.Fatalf("rejected %v want %v: %v", rejected, tc.reject, result.Errors())
+			}
+		})
+	}
+}
+
+func TestSMTConstantStringSelectorMatchUsesDistinctLiteralIDs(t *testing.T) {
+	selector := &ast.Ident{Name: "type_text"}
+	match := &ast.MatchExpr{Value: selector, Arms: []ast.MatchArm{
+		{Pattern: &ast.MatchStringLiteralPattern{Value: "i8"}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: "i32"}}}},
+		{Pattern: &ast.MatchStringLiteralPattern{Value: "i64"}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: "i64"}}}},
+		{Pattern: &ast.MatchWildcardPattern{}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: ""}}}},
+	}}
+	function := &ast.FuncDecl{
+		Name:   "wasm_scalar_kind",
+		Params: []ast.ParamDecl{{Name: "type_text"}},
+		Body:   []ast.Stmt{&ast.ReturnStmt{Value: match}},
+	}
+	analyzer := &Analyzer{currentFuncDecl: function, currentScope: NewScope(nil)}
+	analyzer.currentScope.Define(&Symbol{Name: "type_text", Kind: SymbolParam, Type: &SViewType{}, Node: function, ParamIndex: 0})
+	translator := &smtTranslator{a: analyzer}
+
+	term, ok := translator.constantStringEquality(match, &ast.StringLit{Value: "i64"}, nil, 0)
+	want := "(ite (= aux_1 2) false (ite (= aux_1 1) true false))"
+	if !ok || term != want {
+		t.Fatalf("string classifier term = %q, %v; want %q", term, ok, want)
+	}
+	if len(translator.auxVars) != 1 || len(translator.auxDecls) != 1 || translator.auxVars[0] != "aux_1" {
+		t.Fatalf("string parameter encoding declarations = vars %v, decls %v", translator.auxVars, translator.auxDecls)
+	}
+}
+
+func TestSMTConstantStringSelectorMatchDeclinesUnsupportedParams(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		mutable         bool
+		param           bool
+		calleeBodyDepth int
+		env             map[string]string
+	}{
+		{name: "mutable", mutable: true, param: true},
+		{name: "local"},
+		{name: "substituted", param: true, env: map[string]string{"type_text": "v_type_text"}},
+		{name: "callee_body", param: true, calleeBodyDepth: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selector := &ast.Ident{Name: "type_text"}
+			match := &ast.MatchExpr{Value: selector, Arms: []ast.MatchArm{
+				{Pattern: &ast.MatchStringLiteralPattern{Value: "i8"}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: "i32"}}}},
+				{Pattern: &ast.MatchWildcardPattern{}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: ""}}}},
+			}}
+			function := &ast.FuncDecl{
+				Name: "wasm_scalar_kind",
+				Body: []ast.Stmt{&ast.ReturnStmt{Value: match}},
+			}
+			analyzer := &Analyzer{currentFuncDecl: function, currentScope: NewScope(nil)}
+			if tc.param {
+				function.Params = []ast.ParamDecl{{Name: "type_text", Mutable: tc.mutable}}
+				analyzer.currentScope.Define(&Symbol{Name: "type_text", Kind: SymbolParam, Type: &SViewType{}, Node: function, ParamIndex: 0, Mutable: tc.mutable})
+			} else {
+				analyzer.currentScope.Define(&Symbol{Name: "type_text", Kind: SymbolLocal, Type: &SViewType{}})
+			}
+			translator := &smtTranslator{a: analyzer, calleeBodyDepth: tc.calleeBodyDepth}
+			if term, ok := translator.constantStringEquality(match, &ast.StringLit{Value: "i32"}, tc.env, 0); ok {
+				t.Fatalf("unsupported string match translated as %q", term)
+			}
+			if len(translator.auxDecls) != 0 {
+				t.Fatalf("declined string match left SMT declarations: %v", translator.auxDecls)
+			}
+		})
+	}
+}
+
+func TestSMTConstantStringSelectorMatchDeclinesEmbeddedNUL(t *testing.T) {
+	match := &ast.MatchExpr{Value: &ast.Ident{Name: "type_text"}, Arms: []ast.MatchArm{
+		{Pattern: &ast.MatchStringLiteralPattern{Value: "i8\x00tail"}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: "i32"}}}},
+		{Pattern: &ast.MatchWildcardPattern{}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.StringLit{Value: ""}}}},
+	}}
+	if constantStringResult(match, 0) {
+		t.Fatal("NUL string selector pattern accepted")
+	}
+}
+
 func TestSMTConstantStringBindingsAreEnvironmentScoped(t *testing.T) {
 	a := &Analyzer{}
 	tr := &smtTranslator{a: a}

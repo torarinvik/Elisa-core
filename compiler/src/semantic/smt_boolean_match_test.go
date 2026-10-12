@@ -46,9 +46,12 @@ func TestSMTBooleanStringMatchPreservesArmPriority(t *testing.T) {
 	translator := &smtTranslator{a: analyzer, boolDecls: map[string]bool{}}
 
 	term, ok := translator.booleanMatchTerm(match, nil)
-	want := "(ite str_eq_6e616d65_6c6f6164 false (ite str_eq_6e616d65_6c6f6164 true false))"
+	want := "(ite (= aux_1 1) false (ite (= aux_1 1) true false))"
 	if !ok || term != want {
 		t.Fatalf("match term = %q, %v; want %q", term, ok, want)
+	}
+	if len(translator.auxVars) != 1 || len(translator.auxDecls) != 1 {
+		t.Fatalf("string selector should have one shared integer encoding: vars %v, decls %v", translator.auxVars, translator.auxDecls)
 	}
 }
 
@@ -96,6 +99,24 @@ func TestSMTClassifierStringEqualityDeclinesEffectfulContexts(t *testing.T) {
 		{
 			name: "call_in_body",
 			body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "mutate"}}}},
+		},
+		{
+			name: "overloaded_binary_call_in_body",
+			body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.BinaryExpr{
+				Left:        &ast.BoolLit{Value: true},
+				Right:       &ast.BoolLit{Value: true},
+				LoweredCall: &ast.CallExpr{Func: &ast.Ident{Name: "mutate"}},
+			}}},
+		},
+		{
+			name: "pinned_match_pattern_in_body",
+			body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.MatchExpr{
+				Value: &ast.IntLit{Value: "1"},
+				Arms: []ast.MatchArm{
+					{Pattern: &ast.MatchLiteralPattern{Value: &ast.IntLit{Value: "1"}, Pinned: true}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.BoolLit{Value: true}}}},
+					{Pattern: &ast.MatchWildcardPattern{}, Body: []ast.Stmt{&ast.ExprStmt{Expr: &ast.BoolLit{Value: false}}}},
+				},
+			}}},
 		},
 		{
 			name: "can_handler",
@@ -170,6 +191,44 @@ func TestSMTBooleanStringMatchDeclinesGuardsAndNonliteralArms(t *testing.T) {
 			if len(translator.boolDecls) != 0 {
 				t.Fatalf("declined match left SMT declarations: %v", translator.boolDecls)
 			}
+			if len(translator.auxDecls) != 0 {
+				t.Fatalf("declined match left SMT declarations: %v", translator.auxDecls)
+			}
 		})
+	}
+}
+
+func TestSMTClassifierStringLiteralIDsAreExactAndStable(t *testing.T) {
+	function := &ast.FuncDecl{
+		Name:   "classified",
+		Params: []ast.ParamDecl{{Name: "name"}, {Name: "other"}},
+		Body:   []ast.Stmt{&ast.ReturnStmt{Value: &ast.BoolLit{Value: true}}},
+	}
+	analyzer := &Analyzer{currentFuncDecl: function, currentScope: NewScope(nil)}
+	for index, name := range []string{"name", "other"} {
+		analyzer.currentScope.Define(&Symbol{Name: name, Kind: SymbolParam, Type: &SViewType{}, Node: function, ParamIndex: index})
+	}
+	translator := &smtTranslator{a: analyzer}
+	for _, tc := range []struct {
+		param, literal, want string
+	}{
+		{"name", "load", "(= aux_1 1)"},
+		{"name", "load", "(= aux_1 1)"},
+		{"name", "store", "(= aux_1 2)"},
+		{"other", "load", "(= aux_2 1)"},
+	} {
+		term, ok := translator.classifierStringEquality(&ast.Ident{Name: tc.param}, &ast.StringLit{Value: tc.literal}, nil)
+		if !ok || term != tc.want {
+			t.Fatalf("%s == %q = %q, %v; want %q", tc.param, tc.literal, term, ok, tc.want)
+		}
+	}
+	if len(translator.auxVars) != 2 || len(translator.stringLiteralInts) != 2 {
+		t.Fatalf("unexpected interned strings: vars %v, literals %v", translator.auxVars, translator.stringLiteralInts)
+	}
+
+	otherQuery := &smtTranslator{a: analyzer}
+	term, ok := otherQuery.classifierStringEquality(&ast.Ident{Name: "name"}, &ast.StringLit{Value: "load"}, nil)
+	if !ok || term != "(= aux_1 1)" {
+		t.Fatalf("query-local string IDs = %q, %v; want a fresh query mapping", term, ok)
 	}
 }
