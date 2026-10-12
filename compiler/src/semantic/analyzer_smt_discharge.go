@@ -1817,7 +1817,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 				t = sym.Type
 			}
 		}
-		if tr.isArrayLike(t) {
+		if tr.isArrayLike(t) || tr.immutableSviewArrayParameter(n, env) {
 			tr.arrayDecls[n.Name] = true
 			arr := smtVar(n.Name)
 			tr.recordFixedArrayLen(arr, t)
