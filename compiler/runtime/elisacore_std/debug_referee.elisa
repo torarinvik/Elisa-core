@@ -300,17 +300,17 @@ def debug_referee_trace_count() -> usize:
 
 def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
     can Global.Read:
-        DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null} return if index >= DEBUG_REFEREE_TRACE_CAP
+        return DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null} if index >= DEBUG_REFEREE_TRACE_CAP
         return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
     # Compare at a width that can represent the x86-64 sentinels. On a 32-bit
     # target the widened pointer cannot equal any of them, as intended.
-    true return if value.u64() == DEBUG_REFEREE_POISON_GENERIC
-    true return if value.u64() == DEBUG_REFEREE_POISON_GOT
-    true return if value.u64() == DEBUG_REFEREE_POISON_TLS
-    true return if value.u64() == DEBUG_REFEREE_POISON_TCB
-    true return if value.u64() == DEBUG_REFEREE_POISON_DTV
+    return true if value.u64() == DEBUG_REFEREE_POISON_GENERIC
+    return true if value.u64() == DEBUG_REFEREE_POISON_GOT
+    return true if value.u64() == DEBUG_REFEREE_POISON_TLS
+    return true if value.u64() == DEBUG_REFEREE_POISON_TCB
+    return true if value.u64() == DEBUG_REFEREE_POISON_DTV
     return false
 
 def debug_referee_is_near_null(value: uintptr) -> bool:
@@ -322,13 +322,13 @@ def debug_referee_is_noncanonical_x86_64(value: uintptr) -> bool:
     wide: u64 = value.u64()
     high: u64 = wide >> 48
     sign: u64 = (wide >> 47) & 1
-    high != 0 return if sign == 0
+    return high != 0 if sign == 0
     return high != 0xffff
 
 def debug_referee_pointer_reason(value: uintptr) -> int:
-    DEBUG_REFEREE_REASON_POISON return if debug_referee_is_poison(value)
-    DEBUG_REFEREE_REASON_NEAR_NULL return if debug_referee_is_near_null(value)
-    DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64 return if debug_referee_is_noncanonical_x86_64(value)
+    return DEBUG_REFEREE_REASON_POISON if debug_referee_is_poison(value)
+    return DEBUG_REFEREE_REASON_NEAR_NULL if debug_referee_is_near_null(value)
+    return DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64 if debug_referee_is_noncanonical_x86_64(value)
     return DEBUG_REFEREE_REASON_OK
 
 def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr) can[Debug.Referee]:
@@ -411,27 +411,27 @@ def debug_trace_did_overflow() -> bool:
 
 def debug_trace_event_at(index: usize) -> DebugTraceEvent:
     can Global.Read:
-        DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null} return if index >= DEBUG_TRACE_TAPE_CAP
+        return DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null} if index >= DEBUG_TRACE_TAPE_CAP
         return debug_trace_events[index]
 
 def debug_trace_event_kind_at(index: usize) -> int:
     can Global.Read:
-        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return 0 if index >= DEBUG_TRACE_TAPE_CAP
         return debug_trace_events[index].kind
 
 def debug_trace_event_a_at(index: usize) -> uintptr:
     can Global.Read:
-        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return 0 if index >= DEBUG_TRACE_TAPE_CAP
         return debug_trace_events[index].a
 
 def debug_trace_event_b_at(index: usize) -> uintptr:
     can Global.Read:
-        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return 0 if index >= DEBUG_TRACE_TAPE_CAP
         return debug_trace_events[index].b
 
 def debug_trace_event_c_at(index: usize) -> uintptr:
     can Global.Read:
-        0 return if index >= DEBUG_TRACE_TAPE_CAP
+        return 0 if index >= DEBUG_TRACE_TAPE_CAP
         return debug_trace_events[index].c
 
 def debug_trace_last_kind() -> int:

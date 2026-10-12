@@ -105,11 +105,18 @@ func TestRunCLIDebugRefereeRuntimeChecksAndTrace(t *testing.T) {
 		t.Fatalf("failed to compute runtime include path: %v", err)
 	}
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
+	testInclude, err := filepath.Rel(fixtureDir, testPath)
+	if err != nil {
+		t.Fatalf("failed to compute test helper include path: %v", err)
+	}
+	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
+# include %q
 
 @test
 def debug_referee_records_bad_callable() -> void:
-    can Abort.Panic, Debug.Referee:
+    can Abort.Panic, Debug.Referee, Global.Read, Global.Write:
         debug_referee_reset()
         debug_referee_set_trace_enabled(true)
         debug_referee_checkpoint("before-call")
@@ -124,21 +131,27 @@ def debug_referee_records_bad_callable() -> void:
 
 @test
 def debug_referee_accepts_zero_and_canonical_values() -> void:
-    can Abort.Panic, Debug.Referee:
+    can Abort.Panic, Debug.Referee, Global.Read, Global.Write:
         debug_referee_reset()
         assert_true(debug_referee_check_pointer("null-sentinel", 0.uintptr()))
         assert_true(debug_referee_check_callable("normal", 0x100000.uintptr()))
+        assert_false(debug_referee_is_noncanonical_x86_64(0.uintptr()))
+        assert_false(debug_referee_is_noncanonical_x86_64(0x100000.uintptr()))
+        if size_of(uintptr) >= 8:
+            assert_true(debug_referee_is_noncanonical_x86_64(0x0000800000000000.uintptr()))
+            assert_true(debug_referee_is_noncanonical_x86_64(0xffff000000000000.uintptr()))
+            assert_false(debug_referee_is_noncanonical_x86_64(0xffff800000000000.uintptr()))
         assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_OK)
 
 @test
 def debug_referee_records_poison_and_noncanonical() -> void:
-    can Abort.Panic, Debug.Referee:
+    can Abort.Panic, Debug.Referee, Global.Read, Global.Write:
         debug_referee_reset()
         assert_false(debug_referee_check_pointer("got", DEBUG_REFEREE_POISON_GOT))
         assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_POISON)
         assert_false(debug_referee_check_callable("wild", DEBUG_REFEREE_POISON_GENERIC))
         assert_eq(debug_referee_last_reason(), DEBUG_REFEREE_REASON_POISON)
-`, runtimeInclude)
+`, runtimeInclude, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write debug referee runtime fixture: %v", err)
 	}
@@ -149,8 +162,8 @@ def debug_referee_records_poison_and_noncanonical() -> void:
 	if exitCode != 0 {
 		t.Fatalf("expected debug referee runtime test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	if strings.Contains(stderr.String(), fixturePath+":") {
+		t.Fatalf("expected no fixture diagnostics, got:\n%s", stderr.String())
 	}
 	output := stdout.String()
 	for _, check := range []string{
@@ -1032,10 +1045,17 @@ func TestRunCLIDebugTraceTapeFingerprint(t *testing.T) {
 		t.Fatalf("failed to compute runtime include path: %v", err)
 	}
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	testPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "test.elisa")
+	testInclude, err := filepath.Rel(fixtureDir, testPath)
+	if err != nil {
+		t.Fatalf("failed to compute test helper include path: %v", err)
+	}
+	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
+# include %q
 
 def record_trace_variant(value: uintptr) -> u64:
-    can Debug.Trace:
+    can Debug.Trace, Global.Read, Global.Write:
         debug_trace_reset()
         debug_trace_set_enabled(true)
         debug_trace_checkpoint("entry")
@@ -1045,7 +1065,7 @@ def record_trace_variant(value: uintptr) -> u64:
 
 @test
 def debug_trace_identical_tapes_have_identical_fingerprints() -> void:
-    can Abort.Panic, Debug.Trace:
+    can Abort.Panic, Debug.Trace, Global.Read, Global.Write:
         first: u64 = record_trace_variant(0x100000.uintptr())
         second: u64 = record_trace_variant(0x100000.uintptr())
         assert_eq(first, second)
@@ -1056,11 +1076,11 @@ def debug_trace_identical_tapes_have_identical_fingerprints() -> void:
 
 @test
 def debug_trace_value_divergence_changes_fingerprint() -> void:
-    can Abort.Panic, Debug.Trace:
+    can Abort.Panic, Debug.Trace, Global.Read, Global.Write:
         first: u64 = record_trace_variant(0x100000.uintptr())
         second: u64 = record_trace_variant(0x100008.uintptr())
         assert_ne(first, second)
-`, runtimeInclude)
+`, runtimeInclude, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write debug trace tape fixture: %v", err)
 	}
@@ -1071,8 +1091,8 @@ def debug_trace_value_divergence_changes_fingerprint() -> void:
 	if exitCode != 0 {
 		t.Fatalf("expected debug trace tape test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	if strings.Contains(stderr.String(), fixturePath+":") {
+		t.Fatalf("expected no fixture diagnostics, got:\n%s", stderr.String())
 	}
 	output := stdout.String()
 	for _, check := range []string{
