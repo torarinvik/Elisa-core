@@ -566,6 +566,30 @@ func (a *Analyzer) reportUnconsumedProtocolValuesOnExit() {
 	a.reportUnconsumedProtocolValuesWhere(func(*Symbol) bool { return true })
 }
 
+// A nursery's parser-generated group is joined by the backend's scoped cleanup
+// before an early exit leaves the nursery. The trailing wait in the desugared
+// body handles ordinary fallthrough, but it is unreachable after return or a
+// loop jump. Match the generated declaration in an active nursery so a user
+// TaskGroup in the same body still has to be consumed explicitly.
+func (a *Analyzer) nurseryGroupJoinedOnEarlyExit(sym *Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	decl, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok {
+		return false
+	}
+	for _, pool := range a.currentPoolScopes {
+		if pool.Node == nil || !pool.Node.Nursery || len(pool.Node.Body) < 2 {
+			continue
+		}
+		if generated, ok := pool.Node.Body[0].(*ast.VarDeclStmt); ok && generated == decl {
+			return true
+		}
+	}
+	return false
+}
+
 // reportUnconsumedProtocolValuesWhere reports the live must-consume values of
 // the current affine state whose root satisfies leaving (every root when nil).
 // Each root is reported once per analysis: an early exit and the function end
@@ -589,6 +613,9 @@ func (a *Analyzer) reportUnconsumedProtocolValuesWhere(leaving func(*Symbol) boo
 	for _, key := range keys {
 		state := a.currentAffineValues[key]
 		if key.Root == nil || (state.LiveProtocolType == nil && state.LiveProtocolDescription == "") {
+			continue
+		}
+		if leaving != nil && a.nurseryGroupJoinedOnEarlyExit(key.Root) {
 			continue
 		}
 		// Region owners are discharged by the region machinery at the end of

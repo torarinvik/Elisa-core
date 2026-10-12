@@ -41,6 +41,31 @@ def run() -> void:
 	}
 }
 
+func TestBorrowedNurseryJoinsSubmittedTaskBeforeEarlyReturn(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_return.elisa", borrowedNurseryPrelude+`
+def run(pool: mutable ThreadPool&) -> i64:
+	nursery on(pool):
+		submit work(1)
+		return 7
+`)
+	if got := strings.Join(result.Errors(), "\n"); got != "" {
+		t.Fatalf("early return should join the nursery's generated TaskGroup, got:\n%s", got)
+	}
+}
+
+func TestBorrowedNurseryDoesNotConsumeUserTaskGroupOnEarlyReturn(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_user_group_return.elisa", borrowedNurseryPrelude+`
+def run(pool: mutable ThreadPool&) -> i64:
+	nursery on(pool):
+		group: mutable TaskGroup = task_group_new()
+		task_group_add(&group, submit[pool] work(1))
+		return 7
+`)
+	if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, `task group with pending tasks "group" must be consumed before scope exit`) {
+		t.Fatalf("early return must still reject a pending user TaskGroup, got:\n%s", got)
+	}
+}
+
 func TestBorrowedNurseryRejectsImmutablePool(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_immutable.elisa", `def run(pool: ThreadPool&):
 	nursery on(pool):

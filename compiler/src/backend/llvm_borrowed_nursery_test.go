@@ -49,3 +49,34 @@ def return_from_owned() -> i64:
 		t.Fatalf("borrowed nursery must not shut down its caller-owned pool:\n%s", output)
 	}
 }
+
+func TestBorrowedNurseryReusesLexicalPoolBeforeEarlyReturn(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_borrowed_lexical_pool.elisa", parallelForConcurrencyPrelude+`
+def work(value: i64) -> i64:
+	return value + 1
+
+def reuse_lexical_pool() -> i64:
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Abort.Panic:
+		pool workers(1):
+			nursery on(workers):
+				submit work(41)
+				return 17
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	body := functionBodyForDeferTest(t, output, "reuse_lexical_pool")
+	newIndex := strings.Index(body, "call %ThreadPool @pool_new")
+	submitIndex := strings.Index(body, "@pool_submit1__i64__i64(ptr %workers")
+	waitIndex := strings.Index(body, "call void @task_group_wait_all")
+	shutdownIndex := strings.Index(body, "call void @pool_shutdown")
+	returnIndex := strings.Index(body, "ret i64 17")
+	if newIndex < 0 || submitIndex < 0 || waitIndex < 0 || shutdownIndex < 0 || returnIndex < 0 ||
+		!(newIndex < submitIndex && submitIndex < waitIndex && waitIndex < shutdownIndex && shutdownIndex < returnIndex) {
+		t.Fatalf("borrowed nursery must submit on the lexical pool and join before its owner shuts down on return:\n%s", body)
+	}
+	if count := strings.Count(body, "call %ThreadPool @pool_new"); count != 1 {
+		t.Fatalf("borrowed nursery created %d pools, want one owned by the outer pool scope:\n%s", count, body)
+	}
+}

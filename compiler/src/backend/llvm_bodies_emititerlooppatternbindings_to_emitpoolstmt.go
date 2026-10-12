@@ -730,7 +730,7 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	}
 	s.pushScope()
 	defer s.popScope()
-	s.defineBinding(stmt.Name, valueBinding{ptr: poolAlloca, typ: poolType})
+	s.defineBinding(stmt.Name, valueBinding{ptr: poolAlloca, typ: poolType, mutable: true})
 	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
 	pool := scopedCleanupBinding{kind: scopedCleanupThreadPool, name: stmt.Name, ptr: poolAlloca, typ: poolType}
 	s.registerScopedCleanup(pool)
