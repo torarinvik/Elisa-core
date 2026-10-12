@@ -2241,7 +2241,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		return "", false
 	case *ast.FieldExpr:
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
-			if value, found := tr.a.tupleLiteralFieldMap(tuple)[n.Field]; found {
+			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
 				return tr.termEnv(value, env)
 			}
 		}
@@ -3123,7 +3123,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		return "", false
 	case *ast.FieldExpr:
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
-			if value, found := tr.a.tupleLiteralFieldMap(tuple)[n.Field]; found {
+			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
 				return tr.boolTerm(value, env)
 			}
 		}
@@ -4646,6 +4646,29 @@ func smtVar(name string) string {
 // integer `v_` consts so an int and a bool of the same Elisa name never collide.
 func smtBoolVar(name string) string {
 	return "b_" + name
+}
+
+// tupleLiteralFieldValue projects one named field without allocating a map.
+// An ambiguous or untyped projection is left to the existing solver decline.
+func (a *Analyzer) tupleLiteralFieldValue(tuple *ast.TupleExpr, name string) (ast.Expr, bool) {
+	if tuple == nil || name == "" {
+		return nil, false
+	}
+	typ, ok := contextualTupleType(a.exprTypes[tuple])
+	if !ok || len(typ.Fields) != len(tuple.Elems) {
+		return nil, false
+	}
+	var value ast.Expr
+	for i, field := range typ.Fields {
+		if field.Name != name {
+			continue
+		}
+		if value != nil || tuple.Elems[i] == nil {
+			return nil, false
+		}
+		value = tuple.Elems[i]
+	}
+	return value, value != nil
 }
 
 // tupleLiteralFieldMap resolves only fields of an already typed tuple literal.
