@@ -63,6 +63,13 @@ const ARENA_STRATEGY_SCRATCH: int = 4
 #
 # 33554432 slots on 64-bit; 2097152 (8 MiB) on 32-bit. See arena_default_reserve_slots below.
 const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
+# Demand-paged 64-bit backends (mmap / VirtualAlloc reserve) reserve 8 GiB instead: address space
+# only, and 256 MiB was a hard ceiling real programs hit -- reading a 254 MB stdin into one
+# darray (Benchmarks Game reverse-complement at a quarter of its official size) panicked with
+# "region overflow: reservation exhausted". 8 GiB still leaves room for ~16k live regions in
+# a 47-bit user address space. The mmap is MAP_NORESERVE on Linux so heuristic overcommit
+# does not refuse a reservation larger than RAM + swap.
+const ARENA_DEMAND_PAGED_RESERVE_COMMIT_SLOTS: usize = 1073741824
 const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
 
 # Owner tag of a COLLECTION STACK (see "Collection stacks" below). Non-zero is what keeps
@@ -145,8 +152,11 @@ static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     # MAP_ANON differs by OS: 0x20 on Linux, 0x1000 on macOS/BSD.
     static if ELISA_TARGET_OS_LINUX:
         const ELISA_ARENA_MAP_ANONYMOUS = 0x20
+        const ELISA_ARENA_MAP_NORESERVE = 0x4000
     static else:
         const ELISA_ARENA_MAP_ANONYMOUS = 0x1000
+        # Darwin/BSD reserve lazily anyway (their MAP_NORESERVE is a no-op or absent).
+        const ELISA_ARENA_MAP_NORESERVE = 0x0
 
     # uintptr-typed to exactly match the declaration the emulator (guest_exec/tls) uses,
     # so the two declarations dedup to one instead of conflicting as "duplicate mmap".
@@ -214,7 +224,9 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
 # earlier version of this used `static if ELISA_TARGET_ARCH_WASM` and broke every tool still
 # pinned to an older stage0, which is a bad trade for a constant.
 def arena_default_reserve_slots() -> usize:
-    return ARENA_DEFAULT_RESERVE_COMMIT_SLOTS if size_of(uintptr) >= 8 else ARENA_NARROW_RESERVE_COMMIT_SLOTS
+    return ARENA_NARROW_RESERVE_COMMIT_SLOTS if size_of(uintptr) < 8
+    return ARENA_DEMAND_PAGED_RESERVE_COMMIT_SLOTS if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP or ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC
+    return ARENA_DEFAULT_RESERVE_COMMIT_SLOTS
 
 def max(a: usize, b: usize) -> usize:
     ensure result >= a
@@ -642,7 +654,7 @@ static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
                 0.uintptr(),
                 size_bytes,
                 ELISA_ARENA_PROT_READ | ELISA_ARENA_PROT_WRITE,
-                ELISA_ARENA_MAP_ANONYMOUS | ELISA_ARENA_MAP_PRIVATE,
+                ELISA_ARENA_MAP_ANONYMOUS | ELISA_ARENA_MAP_PRIVATE | ELISA_ARENA_MAP_NORESERVE,
                 -1,
                 0
             ) can Memory.Allocate)

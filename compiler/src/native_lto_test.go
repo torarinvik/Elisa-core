@@ -251,3 +251,44 @@ func TestPanicPrintfCoexistsWithUserPrintfDeclaration(t *testing.T) {
 		}
 	}
 }
+
+// The default reserve_commit region used to be a hard 256 MiB of address space on 64-bit, so a
+// program growing one darray past that panicked ("region overflow: reservation exhausted") --
+// e.g. reverse-complement reading a 254 MB stdin. Demand-paged backends now reserve 8 GiB.
+func TestDefaultRegionGrowsPast256MiB(t *testing.T) {
+	if testing.Short() {
+		t.Skip("allocates ~300 MB")
+	}
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	dir := t.TempDir()
+	src := `extern printf(format: cstr, ...) -> i32 can[Console, Unsafe.RawExtern]
+
+def fill(n: usize) -> darray[u8] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[u8] = []
+    for i in 0..<n |xs|:
+        xs.push((i % 251).u8())
+    return xs
+
+def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern]:
+    xs: darray[u8] = fill(300000000)
+    printf("%lld\n", xs.count.i64() + xs[299999999].i64())
+    return 0
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.elisa"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"targets": {"default": {"entry": "main.elisa", "emit": "obj", "output": "prog", "opt": "O2"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "project.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"build", "--project", dir}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed:\n%s%s", stdout.String(), stderr.String())
+	}
+	out, err := exec.Command(filepath.Join(dir, "prog")).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "300000030" {
+		t.Fatalf("300 MB darray in the default region: err=%v output=%q", err, out)
+	}
+}
