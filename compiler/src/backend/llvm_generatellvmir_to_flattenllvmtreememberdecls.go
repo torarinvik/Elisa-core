@@ -180,6 +180,8 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 }
 
 type llvmGenerator struct {
+	// panicReportFn is the module's outlined panic reporter (llvm_panic_report.go), created lazily.
+	panicReportFn C.LLVMValueRef
 	sameNameWrapperDecisions  map[*semantic.ExportedFunc]bool
 	result                    *semantic.Result
 	optLevel                  OptimizationLevel

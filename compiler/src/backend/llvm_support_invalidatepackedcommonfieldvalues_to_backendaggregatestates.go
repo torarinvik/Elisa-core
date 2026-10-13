@@ -336,15 +336,6 @@ func (s *functionState) emitPanicWithBacktrace(pos lexer.Pos, message ast.Expr) 
 		}
 	}
 
-	printfFn, printfType, err := s.ensurePrintfFunction()
-	if err != nil {
-		return err
-	}
-	printfLLVMType, err := s.g.lowerFunctionType(printfType)
-	if err != nil {
-		return err
-	}
-	formatPtr := s.emitGlobalCStringLiteral("panic at %s:%d:%d: %s\n", "panic.format")
 	filePtr := s.emitGlobalCStringLiteral(fileName, "panic.file")
 	intLLVMType, err := s.g.lowerType(s.g.result.NamedTypes["int"])
 	if err != nil {
@@ -352,45 +343,11 @@ func (s *functionState) emitPanicWithBacktrace(pos lexer.Pos, message ast.Expr) 
 	}
 	lineValue := C.LLVMConstInt(intLLVMType, C.ulonglong(pos.Line), 0)
 	colValue := C.LLVMConstInt(intLLVMType, C.ulonglong(pos.Col), 0)
-	s.buildCall(printfLLVMType, printfFn, []C.LLVMValueRef{formatPtr, filePtr, lineValue, colValue, messagePtr}, "")
-
-	backtraceFn, backtraceType, err := s.ensureBacktraceFunction()
+	reportFn, reportType, err := s.ensurePanicReportFunction()
 	if err != nil {
 		return err
 	}
-	backtraceLLVMType, err := s.g.lowerFunctionType(backtraceType)
-	if err != nil {
-		return err
-	}
-	bufferType := C.LLVMArrayType2(C.LLVMPointerTypeInContext(s.g.context, 0), 64)
-	buffer := C.LLVMBuildAlloca(s.builder, bufferType, cStringFree("panic.backtrace.buffer"))
-	bufferPtr := C.LLVMBuildBitCast(s.builder, buffer, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree("panic.backtrace.ptr"))
-	frameLimit := C.LLVMConstInt(intLLVMType, 64, 0)
-	frameCount := s.buildCall(backtraceLLVMType, backtraceFn, []C.LLVMValueRef{bufferPtr, frameLimit}, "panic.backtrace.count")
-
-	backtraceHeader := s.emitGlobalCStringLiteral("backtrace:\n", "panic.backtrace.header")
-	s.buildCall(printfLLVMType, printfFn, []C.LLVMValueRef{backtraceHeader}, "")
-
-	backtraceSymbolsFn, backtraceSymbolsType, err := s.ensureBacktraceSymbolsFDFunction()
-	if err != nil {
-		return err
-	}
-	backtraceSymbolsLLVMType, err := s.g.lowerFunctionType(backtraceSymbolsType)
-	if err != nil {
-		return err
-	}
-	stderrFD := C.LLVMConstInt(intLLVMType, 2, 0)
-	s.buildCall(backtraceSymbolsLLVMType, backtraceSymbolsFn, []C.LLVMValueRef{bufferPtr, frameCount, stderrFD}, "")
-
-	abortFn, abortType, err := s.ensureAbortFunction()
-	if err != nil {
-		return err
-	}
-	abortLLVMType, err := s.g.lowerFunctionType(abortType)
-	if err != nil {
-		return err
-	}
-	s.buildCall(abortLLVMType, abortFn, nil, "")
+	s.buildCall(reportType, reportFn, []C.LLVMValueRef{filePtr, lineValue, colValue, messagePtr}, "")
 	C.LLVMBuildUnreachable(s.builder)
 	return nil
 }
