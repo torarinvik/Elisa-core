@@ -328,7 +328,7 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 	}
 	indices := []C.LLVMValueRef{indexValue}
 	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
-	if isNumericType(elemType) {
+	if isAliasSafeScalarElemType(elemType) {
 		// Scalar element buffer can never contain a darray header, so the data-pointer load (header
 		// memory) provably never aliases the element stores (buffer memory). Tag both so LLVM hoists
 		// the base-pointer load out of hot loops. See aliasSafeElementPtrs.
@@ -346,6 +346,69 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 		}
 	}
 	return ptr, elemType, nil
+}
+
+// isAliasSafeScalarElemType reports element types whose buffer memory can never hold a darray/view
+// header: numeric scalars, bool, const enums, and (recursively) plain structs and non-packed enums
+// built only from those. Such element memory and header memory are disjoint by construction, so
+// element accesses ("elt") and header loads ("hdr") may be tagged as not aliasing each other.
+func isAliasSafeScalarElemType(t semantic.Type) bool {
+	return aliasSafeElemType(t, 0)
+}
+
+func aliasSafeElemType(t semantic.Type, depth int) bool {
+	if t == nil || depth > 8 {
+		return false
+	}
+	if isNumericType(t) || semantic.IsBoolType(t) {
+		return true
+	}
+	switch tt := t.(type) {
+	case *semantic.ConstEnumType:
+		return true
+	case *semantic.StructType:
+		if tt == nil || len(tt.TypeParams) > 0 || len(tt.RegionParams) > 0 || tt.Fields == nil {
+			return false
+		}
+		for _, field := range tt.Fields {
+			if !aliasSafeElemType(field.Type, depth+1) {
+				return false
+			}
+		}
+		return true
+	case *semantic.EnumType:
+		if tt == nil || tt.Packed || tt.StoreBackedPlain || tt.StoreType != nil {
+			return false
+		}
+		for _, field := range tt.Common {
+			if !aliasSafeElemType(field.Type, depth+1) {
+				return false
+			}
+		}
+		for _, variant := range tt.Variants {
+			if variant == nil {
+				return false
+			}
+			for _, payload := range variant.Payload {
+				if !aliasSafeElemType(payload, depth+1) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// propagateAliasSafeFieldPtr marks a field address derived from an alias-safe element address as
+// alias-safe too (it addresses the same element buffer).
+func (s *functionState) propagateAliasSafeFieldPtr(objPtr, fieldPtr C.LLVMValueRef, pointerLike bool) {
+	if s == nil || pointerLike || objPtr == nil || fieldPtr == nil || s.aliasSafeElementPtrs == nil {
+		return
+	}
+	if s.aliasSafeElementPtrs[objPtr] {
+		s.aliasSafeElementPtrs[fieldPtr] = true
+	}
 }
 
 const (

@@ -44,7 +44,8 @@ static LLVMTargetMachineRef elisacoreCreateTargetMachineDefault(
 static char *elisacoreRunOptimizationPipeline(
 	LLVMModuleRef Module,
 	LLVMTargetMachineRef TargetMachine,
-	char *PassPipeline) {
+	char *PassPipeline,
+	char *AAPipeline) {
 	LLVMPassBuilderOptionsRef Options = LLVMCreatePassBuilderOptions();
 	if (Options == NULL) {
 		return LLVMGetErrorMessage(LLVMCreateStringError("failed to create LLVM pass builder options"));
@@ -53,6 +54,7 @@ static char *elisacoreRunOptimizationPipeline(
 	LLVMPassBuilderOptionsSetLoopVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetSLPVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetLoopUnrolling(Options, 1);
+	LLVMPassBuilderOptionsSetAAPipeline(Options, AAPipeline);
 	LLVMErrorRef Err = LLVMRunPasses(Module, PassPipeline, TargetMachine, Options);
 	LLVMDisposePassBuilderOptions(Options);
 	if (Err == NULL) {
@@ -77,6 +79,13 @@ import (
 
 	"elisacore/src/semantic"
 )
+
+// optimizationAAPipeline is LLVM's default alias-analysis stack plus scev-aa. scev-aa proves
+// `a[i]` and `a[j]` disjoint from their index recurrences (j in i+1..<n with known trip counts),
+// so the a[i] fields of a pairwise loop are promoted to registers instead of being reloaded and
+// re-stored on every j iteration (AWFY NBody: -20% cycles). Measured cost: +1.8% user time on
+// the stage1 self-compile. part_optimize in parallel_emit.c must use the same string.
+const optimizationAAPipeline = "scoped-noalias-aa,tbaa,basic-aa,globals-aa,scev-aa"
 
 func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMBitcodeFileWithOpt(result, outputPath, OptimizationLevel3)
@@ -200,7 +209,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 
 	passPipeline := cString(fmt.Sprintf("default<O%d>", int(optLevel)))
 	defer C.free(unsafe.Pointer(passPipeline))
-	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline)
+	aaPipeline := cString(optimizationAAPipeline)
+	defer C.free(unsafe.Pointer(aaPipeline))
+	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline, aaPipeline)
 	if errMessage != nil {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}

@@ -202,6 +202,7 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 		return nil, nil, err
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
+	s.propagateAliasSafeFieldPtr(objPtr, fieldPtr, pointerLike)
 	return fieldPtr, fieldType, nil
 }
 func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -267,6 +268,7 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 		return nil, nil, err
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
+	s.propagateAliasSafeFieldPtr(objPtr, fieldPtr, pointerLike)
 	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
 }
 func backendSafeChainReceiverType(receiverType semantic.Type) (semantic.Type, bool) {

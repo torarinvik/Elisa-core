@@ -210,6 +210,8 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	LLVMPassBuilderOptionsSetLoopVectorization(options, 1);
 	LLVMPassBuilderOptionsSetSLPVectorization(options, 1);
 	LLVMPassBuilderOptionsSetLoopUnrolling(options, 1);
+	// Same alias-analysis stack as optimizationAAPipeline in llvm_target.go (a test checks this).
+	LLVMPassBuilderOptionsSetAAPipeline(options, "scoped-noalias-aa,tbaa,basic-aa,globals-aa,scev-aa");
 	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
 	LLVMDisposePassBuilderOptions(options);
 	if (err == NULL) {

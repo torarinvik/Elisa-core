@@ -226,7 +226,17 @@ func (s *functionState) emitContainerCountValue(containerPtr C.LLVMValueRef, con
 	}
 	countPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 1, cStringFree(name+".ptr"))
 	usizeType := s.g.result.NamedTypes["usize"]
-	return s.loadValue(countPtr, usizeType, name)
+	count, err := s.loadValue(countPtr, usizeType, name)
+	if err != nil {
+		return nil, err
+	}
+	switch containerType.(type) {
+	case *semantic.DArrayType, *semantic.ViewType:
+		// The count lives in header memory, exactly like the data pointer: tag it "hdr" so a
+		// scalar element store ("elt") never forces a reload of the bound inside a hot loop.
+		s.tagDarrayHeaderLoad(count)
+	}
+	return count, nil
 }
 func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	chunkType, ok := semantic.ChunksExactViewItemType(s.exprType(expr.Object))
