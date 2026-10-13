@@ -66,7 +66,7 @@ func TestPortBugsRuntime(t *testing.T) {
 
 // docs/78/99: a plain `assert` is debug-gated and erased above -O0, so a condition that writes
 // through a `mutable` reference (or performs an observable effect) would only run in debug builds.
-func TestAssertSideEffectRejected(t *testing.T) {
+func TestAssertSideEffectWarned(t *testing.T) {
 	t.Parallel()
 	body := `
 def bump(x: mutable i64&) -> bool:
@@ -78,9 +78,10 @@ def assert_effect() -> void:
     v: mutable i64 = 41
     assert bump(&v)
 `
+	// Warning tier: asserts are erased above -O0, so the hazard is named, but the program builds.
 	exit, stdout, stderr := compileStressProgram(t, "assert_effect", body)
-	if exit == 0 || !strings.Contains(stdout+stderr, "assert condition must be pure but calls \"bump\"") {
-		t.Fatalf("expected assert purity rejection, exit=%d\n%s%s", exit, stdout, stderr)
+	if exit != 0 || !strings.Contains(stdout+stderr, "warning: assert condition must be pure but calls \"bump\"") {
+		t.Fatalf("expected assert purity warning, exit=%d\n%s%s", exit, stdout, stderr)
 	}
 	pure := `
 def is_pos(x: i64) -> bool:

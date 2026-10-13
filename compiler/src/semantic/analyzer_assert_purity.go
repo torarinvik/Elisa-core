@@ -15,16 +15,20 @@ import (
 // same way contract clauses are rejected ("ensure clause must be pure"): any call that writes
 // through a `mutable` reference parameter, and any effect that is not benign under erasure
 // (assertBenignEffect: aborts, temporary allocation, global reads, Unsafe grants).
+// Tier: WARNING (not an error, not even under the strict defaults). The tree relies on the idiom
+// today — std smokes (`assert s.remove(3)`, `assert d.get(k) != null` with a `mutable` receiver),
+// deque_ports/allocator_ports, and runtime tests whose whole body is `assert check() == 0` — and
+// making it an error is a language-policy call for the owner. The warning names the release hazard.
 func (a *Analyzer) checkAssertConditionPurity(pos lexer.Pos, cond ast.Expr, introduced []ast.PermissionRef) {
 	for _, ref := range introduced {
 		if assertBenignEffect(ref) {
 			continue
 		}
-		a.errorf(pos, "assert condition must be pure but uses the `%s` effect; asserts are erased in optimized builds, so the effect would only happen in debug builds — bind the result first (`ok: bool = f(...)`, then `assert ok`)", lawEffectName(ref))
+		a.warnf(pos, "assert condition must be pure but uses the `%s` effect; asserts are erased in optimized builds, so the effect would only happen in debug builds — bind the result first (`ok: bool = f(...)`, then `assert ok`)", lawEffectName(ref))
 		return
 	}
 	if name, ok := a.assertCondMutatingCall(cond); ok {
-		a.errorf(pos, "%s", fmt.Sprintf("assert condition must be pure but calls %q, which writes through a `mutable` reference parameter; asserts are erased in optimized builds, so the call would only run in debug builds — bind the result first (`ok: bool = %s(...)`, then `assert ok`)", name, name))
+		a.warnf(pos, "%s", fmt.Sprintf("assert condition must be pure but calls %q, which writes through a `mutable` reference parameter; asserts are erased in optimized builds, so the call would only run in debug builds — bind the result first (`ok: bool = %s(...)`, then `assert ok`)", name, name))
 	}
 }
 
