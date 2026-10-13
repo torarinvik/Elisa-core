@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
