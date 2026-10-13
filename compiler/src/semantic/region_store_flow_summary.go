@@ -25,6 +25,8 @@ type storeFlowSummary struct {
 	reach   [][]bool // reach[i][j]: contents of parameter i may reach parameter j (directed conn)
 }
 
+var storeFlowDebugUnresolvedCount int
+
 // reaches reports whether the contents of parameter i may reach parameter j; unknown means so.
 func (s *storeFlowSummary) reaches(i, j int) bool {
 	if s == nil || i < 0 || j < 0 || i >= len(s.reach) || j >= len(s.reach) {
@@ -881,6 +883,28 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 			handled[calls[k]] = retNames
 		}
 	}
+	debugStoreFlowFunction := ""
+	if a.storeFlowParams["recovery_return_type"] && a.storeFlowParams["owner_hint"] {
+		debugStoreFlowFunction = "emit_propagating_try_value"
+	} else if a.storeFlowParams["arguments"] && a.storeFlowParams["owner_hint"] && a.storeFlowParams["local_scope"] && a.storeFlowParams["fns"] && a.storeFlowParams["structs"] && a.storeFlowParams["generics"] {
+		debugStoreFlowFunction = "error_callee_value_type"
+	}
+	if debugStoreFlowFunction != "" && storeFlowDebugUnresolvedCount < 150 {
+		for _, call := range calls {
+			if _, ok := handled[call]; ok {
+				continue
+			}
+			calleeName := "<indirect>"
+			switch fn := call.Func.(type) {
+			case *ast.Ident:
+				calleeName = fn.Name
+			case *ast.FieldExpr:
+				calleeName = fn.Field
+			}
+			fmt.Printf("STORE_FLOW_UNHANDLED fn=%s pos=%s callee=%s\n", debugStoreFlowFunction, call.Pos(), calleeName)
+			storeFlowDebugUnresolvedCount++
+		}
+	}
 	if binding := a.storeFlowViewTarget(stmt); binding != "" && !binds && len(handled) == len(calls) {
 		// A view local (`v: sview = …` / `v <- …`) is never stored through: whatever the
 		// initializer mentions may reach v, but nothing flows back into those names, and they
@@ -1715,6 +1739,9 @@ func (a *Analyzer) callArgNeverReaches(call *ast.CallExpr, other, index int) boo
 		return false
 	}
 	summary := a.storeFlowSummaryFor(decl)
+	if decl.Name == "emit_propagating_try_value" || decl.Name == "emit_error_union_call_value" || decl.Name == "error_callee_value_type" {
+		fmt.Printf("STORE_FLOW_DEBUG callee=%s other=%d destination=%d summary=%+v\n", decl.Name, other, index, summary)
+	}
 	return summary != nil && !summary.reaches(other, index)
 }
 

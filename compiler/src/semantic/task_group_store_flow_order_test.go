@@ -79,6 +79,53 @@ def run(pool: mutable ThreadPool&) -> i64:
 	}
 }
 
+func TestJoinedNurseryPoolDoesNotRetainHelperPayloadAfterReturn(t *testing.T) {
+	const runtimeSource = "runtime/elisacore_std/elisacore_runtime_concurrency.elisa"
+	source := submitStoreCapturePrelude + `
+def worker(e: Expr) -> i64:
+    can Abort.Panic:
+        return eval(e)
+
+def par_pass_run(e: Expr, flags: bool, first: u32, count: u32, pool: mutable ThreadPool&) -> void:
+    can Memory.Allocate, Parallel, Abort.Panic:
+        nursery on(pool):
+            submit worker(e)
+
+def run(pool: mutable ThreadPool&) -> i64:
+    can Memory.Allocate, Parallel, Abort.Panic:
+        e: Expr = build(10)
+        par_pass_run(e, true, 0, 1, pool)
+        return eval(e)
+`
+	l := lexer.New(runtimeSource, []byte(source))
+	p := parser.New(l.Tokenize())
+	file := p.ParseFile(runtimeSource)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	result := AnalyzeWithOptions(file, AnalyzeOptions{TrustedRuntimeSourceFiles: []string{runtimeSource}, RecordDeathTimeCohorts: true})
+	if len(result.TaskGroupSubmits) != 1 {
+		t.Fatalf("helper nursery must pre-record its joined submit, got %d proofs", len(result.TaskGroupSubmits))
+	}
+	var helperRetention []bool
+	for helper, retention := range result.analyzer.paramRetained {
+		if helper.Name == "par_pass_run" {
+			helperRetention = retention
+			break
+		}
+	}
+	if len(helperRetention) != 5 {
+		t.Fatalf("expected a five-parameter retention summary for par_pass_run, got %v", helperRetention)
+	}
+	if helperRetention[4] {
+		t.Fatalf("a pool used only by a verified joined nursery must not be retained after par_pass_run returns, got %v", helperRetention)
+	}
+	got := strings.Join(result.Errors(), "\n")
+	if strings.Contains(got, "through argument 5") || strings.Contains(got, "call may store a reference to function-local storage") {
+		t.Fatalf("the helper's joined worker must not retain its payload through pool argument 5 after return, got:\n%s", got)
+	}
+}
+
 func TestTaskGroupStoreFlowProofRejectsUntrustedRuntimeLookingPath(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "vendor/runtime/elisacore_std/elisacore_runtime_concurrency.elisa", submitStoreCapturePrelude+`
 def main(pool: mutable ThreadPool&) -> i64:
