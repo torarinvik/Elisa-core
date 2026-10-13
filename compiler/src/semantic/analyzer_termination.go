@@ -223,6 +223,14 @@ func appendDecreaseMeasureComponents(out *[]ast.Expr, measure ast.Expr) {
 // unchanged. The deciding component must also be bounded below by 0 — otherwise an ever-decreasing
 // measure would never bottom out.
 func (a *Analyzer) proveMeasureDecreases(measures []ast.Expr, subst map[string]ast.Expr) bool {
+	_, proven := a.proveMeasureDecreasesOutcome(measures, subst)
+	return proven
+}
+
+// proveMeasureDecreasesOutcome returns the strongest proof tier used for a valid
+// lexicographic decrease. The affine arithmetic is the fast path; SMT may additionally
+// establish the lower bound from relational preconditions such as `index <= text.len`.
+func (a *Analyzer) proveMeasureDecreasesOutcome(measures []ast.Expr, subst map[string]ast.Expr) (ProofOutcome, bool) {
 	measures = decreaseMeasureComponents(measures)
 	for k, measure := range measures {
 		earlierUnchanged := true
@@ -235,11 +243,18 @@ func (a *Analyzer) proveMeasureDecreases(measures []ast.Expr, subst map[string]a
 		if !earlierUnchanged {
 			continue
 		}
-		if a.measureStrictlyDecreases(measure, subst) && a.measureBoundedBelow(measure) {
-			return true
+		if !a.measureStrictlyDecreases(measure, subst) {
+			continue
+		}
+		bounded, viaSMT := a.measureBoundedBelowWithTier(measure)
+		if bounded {
+			if viaSMT {
+				return ProofProvenSMT, true
+			}
+			return ProofProvenLinear, true
 		}
 	}
-	return false
+	return ProofRefuted, false
 }
 
 // measureDiff returns the affine form of `measure(params) - measure(args)` — the amount the measure
@@ -791,13 +806,33 @@ func (a *Analyzer) smtEquationStructType(t Type) bool {
 // Otherwise the measure's affine form must bound to a non-negative lower value under the current
 // facts. Without a provable floor, a strictly-decreasing measure could run forever, so we decline.
 func (a *Analyzer) measureBoundedBelow(measure ast.Expr) bool {
+	bounded, _ := a.measureBoundedBelowWithTier(measure)
+	return bounded
+}
+
+func (a *Analyzer) measureBoundedBelowWithTier(measure ast.Expr) (bool, bool) {
 	if t := a.exprTypes[measure]; t != nil && indexTypeGuaranteedNonNegative(t) {
-		return true
+		return true, false
 	}
 	form, ok := a.affineOf(measure, a.currentScope)
-	if !ok {
-		return false
+	if ok {
+		r := a.boundAffine(form, a.currentScope)
+		if r.loKnown && r.lo >= 0 {
+			return true, false
+		}
 	}
-	r := a.boundAffine(form, a.currentScope)
-	return r.loKnown && r.lo >= 0
+	// Relational preconditions can establish a lower bound that interval arithmetic
+	// cannot represent (for example, `index <= text.len` proves `text.len-index >= 0`).
+	// The goal is checked against the function's actual requires/assert facts; a declined
+	// or unavailable solver keeps the termination proof conservative.
+	bounded := &ast.BinaryExpr{
+		Position: measure.Pos(),
+		Op:       lexer.TOKEN_GTEQ,
+		Left:     measure,
+		Right:    &ast.IntLit{Position: measure.Pos(), Value: "0"},
+	}
+	if proven, _ := a.trySMTProveRequires(bounded, nil); proven {
+		return true, true
+	}
+	return false, false
 }

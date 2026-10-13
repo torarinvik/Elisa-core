@@ -601,6 +601,7 @@ func (a *Analyzer) substitutedAffine(expr ast.Expr, subst map[string]ast.Expr) (
 			return affineForm{}, false
 		}
 		argName := base.Name
+		fieldExpr := ast.Expr(n)
 		if arg, ok := subst[base.Name]; ok {
 			argIdent, ok2 := unwrapParen(arg).(*ast.Ident)
 			if !ok2 || argIdent == nil {
@@ -614,6 +615,15 @@ func (a *Analyzer) substitutedAffine(expr ast.Expr, subst map[string]ast.Expr) (
 				return affineForm{}, false
 			}
 			argName = argIdent.Name
+			fieldExpr = &ast.FieldExpr{Position: n.Position, Object: argIdent, Field: n.Field}
+		}
+		// `sview.len` is a stable numeric projection. Resolve the callee-side
+		// parameter to the caller's view binding before constructing the symbolic
+		// affine term, so an unchanged view cancels in recursive measures.
+		if n.Field == "len" {
+			if key, ok := immutableSViewLengthProjection(a, a.currentScope, fieldExpr); ok {
+				return affineForm{terms: map[string]int64{key: 1}}, true
+			}
 		}
 		// `xs.count` where `xs` is an immutable darray local initialised from a list literal.
 		if n.Field == "count" {

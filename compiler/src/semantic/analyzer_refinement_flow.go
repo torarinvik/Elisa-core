@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"fmt"
 	"maps"
 	"slices"
 )
@@ -2097,6 +2098,12 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 		}
 		return inner, true
 	case *ast.FieldExpr:
+		// An sview's length is immutable even when the bytes it views are not. Keep
+		// that projection as a symbolic affine variable so recursive measures such
+		// as `text.len - index` can cancel the unchanged length at a recursive call.
+		if key, ok := immutableSViewLengthProjection(a, scope, n); ok {
+			return affineForm{terms: map[string]int64{key: 1}}, true
+		}
 		// `v.size` where `v` is a local known to hold a struct literal with a constant `size` field.
 		base, ok := n.Object.(*ast.Ident)
 		if !ok || base == nil {
@@ -2129,6 +2136,44 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 	default:
 		return affineForm{}, false
 	}
+}
+
+// immutableSViewLengthProjection identifies the stable length of an immutable sview binding.
+// Other containers are deliberately excluded: a darray's count can change through an alias or
+// a call, while an sview's length metadata is fixed for the lifetime of the view.
+func immutableSViewLengthProjection(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
+	field, ok := expr.(*ast.FieldExpr)
+	if !ok || field == nil || field.Field != "len" {
+		return "", false
+	}
+	base, ok := field.Object.(*ast.Ident)
+	if !ok || base == nil || scope == nil {
+		return "", false
+	}
+	sym, ok := scope.Lookup(base.Name)
+	if !ok || sym == nil || sym.Mutable {
+		return "", false
+	}
+	typ := sym.Type
+	if ref, ok := typ.(*RefType); ok {
+		// A mutable reference can replace the view binding while a recursive
+		// call is in progress, so its length is not a stable affine variable.
+		if ref == nil || ref.Mutable || ref.State != RefStateNonNull {
+			return "", false
+		}
+		typ = ref.Elem
+	}
+	if _, ok := typ.(*SViewType); !ok {
+		return "", false
+	}
+	if sym.Node == nil {
+		return "", false
+	}
+	// Scope lookup can resolve two same-named sviews in different lexical scopes. Key
+	// the projection by the binding declaration, not just its spelling, so shadowing
+	// cannot equate unrelated lengths in affine or SMT proofs.
+	pos := sym.Node.Pos()
+	return fmt.Sprintf("\x00sview-len:%s:%d:%d:%s:%d", pos.File, pos.Line, pos.Offset, sym.Kind, sym.ParamIndex), true
 }
 
 func (a *Analyzer) affineOfBinary(n *ast.BinaryExpr, scope *Scope) (affineForm, bool) {

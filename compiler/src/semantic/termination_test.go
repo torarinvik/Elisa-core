@@ -30,6 +30,83 @@ def countdown(n: usize) -> usize:
 	}
 }
 
+// The length of an immutable view is a stable symbolic integer across recursive calls.
+// This is the common structural recursion shape used to scan text: increasing the
+// position by one decreases `text.len - position` by exactly one.
+func TestTerminationProvenRemainingViewLength(t *testing.T) {
+	src := `
+def scan(text: sview, position: usize) -> usize:
+    requires position <= text.len
+    decreases text.len - position
+    if position < text.len:
+        return scan(text, position + 1)
+    return position
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "term_remaining_view_length.elisa", src, AnalyzeOptions{EnableSMT: true},
+	)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected the remaining view length to prove termination, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && strings.Contains(f.Subject, "termination of scan") {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected scan termination to be proven, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+func TestTerminationRejectsUnboundedRemainingViewLength(t *testing.T) {
+	src := `
+def scan(text: sview, position: usize) -> usize:
+    decreases text.len - position
+    return scan(text, position + 1)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "term_unbounded_remaining_view_length.elisa", src, AnalyzeOptions{EnableSMT: true},
+	)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "cannot prove the `decreases` measure strictly decreases") {
+		t.Fatalf("without a lower-bound fact the remaining-length measure must stay unproved, got: %v", result.Errors())
+	}
+}
+
+func TestTerminationRejectsMutableReferenceViewLength(t *testing.T) {
+	src := `
+def scan(text: mutable sview&, position: usize) -> usize:
+    requires position <= text.len
+    decreases text.len - position
+    if position < text.len:
+        return scan(text, position + 1)
+    return position
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "term_mutable_view_length.elisa", src, AnalyzeOptions{EnableSMT: true},
+	)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "cannot prove the `decreases` measure strictly decreases") {
+		t.Fatalf("a mutable reference must not provide a stable view-length measure, got: %v", result.Errors())
+	}
+}
+
+func TestTerminationViewLengthRelationalBoundRequiresSMT(t *testing.T) {
+	src := `
+def scan(text: sview, position: usize) -> usize:
+    requires position <= text.len
+    decreases text.len - position
+    if position < text.len:
+        return scan(text, position + 1)
+    return position
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "term_view_length_smt_disabled.elisa", src, AnalyzeOptions{EnableSMT: false},
+	)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "cannot prove the `decreases` measure strictly decreases") {
+		t.Fatalf("without SMT the relational lower bound must remain unproved, got: %v", result.Errors())
+	}
+}
+
 // A recursive call that does NOT decrease the measure (`f(n+1)`) is refuted — a non-termination error.
 func TestTerminationRefutedIncreasing(t *testing.T) {
 	src := `

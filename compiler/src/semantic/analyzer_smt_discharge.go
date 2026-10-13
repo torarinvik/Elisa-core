@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"math/big"
@@ -2063,6 +2064,13 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 	return "", false
 }
 
+// smtSViewLengthSymbol creates a stable SMT symbol for an immutable view's length.
+// Quoted, hex-encoded names keep these metadata symbols disjoint from Elisa variables
+// and from the ordinary array-length symbols emitted by smtVar.
+func smtSViewLengthSymbol(projection string) string {
+	return "|sview_length_" + hex.EncodeToString([]byte(projection)) + "|"
+}
+
 // isAnyArrayLike reports whether t is an array or darray of ANY element type (unlike
 // smtTranslator.isArrayLike, which restricts to integer elements for the element-select theory). A
 // length read needs only that the value is a sized container, so the element type is irrelevant.
@@ -2449,6 +2457,13 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if n.Field == "count" || n.Field == "len" {
 			if c, ok := tr.a.constIntValue(n); ok {
 				return smtInt(c), true
+			}
+			if n.Field == "len" {
+				if key, ok := immutableSViewLengthProjection(tr.a, tr.a.currentScope, n); ok {
+					lenSym := smtSViewLengthSymbol(key)
+					tr.lenDecls[lenSym] = true
+					return lenSym, true
+				}
 			}
 			arr, ok := tr.arrayTermEnv(n.Object, env)
 			if !ok {
