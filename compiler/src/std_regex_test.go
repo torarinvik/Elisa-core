@@ -13,11 +13,17 @@ import (
 )
 
 func regexTestPattern(rng *rand.Rand, depth int) string {
-	atoms := []string{"a", "b", "c", ".", "[ab]", "[^a]", "[a-c]", `\n`, `[^\n]`, `\|`}
+	atoms := []string{"a", "b", "c", "A", ".", "[ab]", "[^a]", "[a-c]", "[^B]", `\n`, `[^\n]`, `\|`, "a{2}", "b{0,1}"}
 	if depth <= 0 || rng.Intn(3) == 0 {
 		return atoms[rng.Intn(len(atoms))]
 	}
-	switch rng.Intn(6) {
+	switch rng.Intn(9) {
+	case 6:
+		return "(" + regexTestPattern(rng, depth-1) + "){1,2}"
+	case 7:
+		return "(" + regexTestPattern(rng, depth-1) + "){2,}"
+	case 8:
+		return "((?i)" + regexTestPattern(rng, depth-1) + ")"
 	case 0:
 		return regexTestPattern(rng, depth-1) + "|" + regexTestPattern(rng, depth-1)
 	case 1:
@@ -83,10 +89,10 @@ def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern, U
 	for _, p := range redux {
 		cases = append(cases, regexCase{p, reduxText})
 	}
-	for _, p := range []string{"a{2}", "(a", "a)", "[ab", "*a", "a|*", `a\`} {
+	for _, p := range []string{"(a", "a)", "[ab", "*a", "a|*", `a\`, "a{2", "a{3,1}", "(?s)a"} {
 		cases = append(cases, regexCase{p, "aa"})
 	}
-	alphabet := "abc\n|"
+	alphabet := "abcAB\n|"
 	for i := 0; i < 300; i++ {
 		var text strings.Builder
 		for n := rng.Intn(24); n > 0; n-- {
@@ -97,7 +103,8 @@ def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern, U
 	for _, c := range cases {
 		fmt.Fprintf(&program, "    check(&out, %q, %q)\n", c.pattern, c.text)
 		re, err := regexp.Compile(c.pattern)
-		if err != nil || strings.Contains(c.pattern, "{") {
+		// Go accepts an unclosed `{` as a literal; this engine (like Rust's regex) rejects it.
+		if err != nil || strings.Contains(c.pattern, "(?s)") || c.pattern == "a{2" {
 			expected.WriteString("!\n")
 			continue
 		}

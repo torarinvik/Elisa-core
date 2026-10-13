@@ -5,8 +5,9 @@
 # Syntax (bytes, no flags):
 #   literals, `.` (any byte but '\n'), `[...]` / `[^...]` classes with ranges,
 #   `\d \D \w \W \s \S \n \r \t` and `\` + any other byte (that byte literally),
-#   grouping `( )`, alternation `|`, postfix `*`, `+`, `?`.
-# Unsupported syntax (`{m,n}`, anchors, backreferences, unbalanced brackets) makes
+#   grouping `( )`, alternation `|`, postfix `*`, `+`, `?`, counted `{m}` `{m,}` `{m,n}`,
+#   and `(?i)` (ASCII case-insensitive to the end of the enclosing group).
+# Unsupported syntax (anchors, backreferences, other group flags, unbalanced brackets) makes
 # regex_compile return false.
 #
 # Semantics: leftmost-longest (POSIX). A search returns the match that starts
@@ -88,6 +89,7 @@ struct Regex:
 struct RegexParser:
     position: mutable usize
     ok: mutable bool
+    ignore_case: mutable bool   # set by `(?i)`, scoped to the enclosing group
 
 def regex_automaton_new() -> RegexAutomaton:
     return RegexAutomaton{sets: [], nfa_kind: [], nfa_out1: [], nfa_out2: [], nfa_set: [], nfa_start: 0, dfa_offset: [], dfa_members: [], dfa_accept: [], dfa_next: [], dfa_hash: [], dfa_chain: [], dfa_index: {}, dfa_start: REGEX_DEAD, dfa_flushes: 0, mark: [], mark_generation: 0, pending: [], work: []}
@@ -145,6 +147,15 @@ def regex_set_add_escape_class(re: mutable Regex&, set: u32, letter: u8) -> bool
         target: usize = set.usize() * 4 + word
         re.sets[target] <- re.sets[target] | re.sets[class_set.usize() * 4 + word]
     return true
+
+# Adds the other ASCII case of every letter in the set.
+def regex_set_fold_case(re: mutable Regex&, set: u32) -> void can[Abort.Panic]:
+    for offset in 0..<26 |re, set|:
+        lower: u8 = 'a'.u8() + offset.u8()
+        upper: u8 = 'A'.u8() + offset.u8()
+        if regex_set_has(re.sets, set, lower) or regex_set_has(re.sets, set, upper):
+            regex_set_add(re, set, lower)
+            regex_set_add(re, set, upper)
 
 def regex_escape_byte(letter: u8) -> u8:
     return 10 if letter == 'n'.u8()
@@ -205,6 +216,7 @@ def regex_parse_class(re: mutable Regex&, parser: mutable RegexParser&, pattern:
         else:
             regex_set_add(re, set, low)
     parser.ok <- false if not closed
+    regex_set_fold_case(re, set) if parser.ignore_case
     regex_set_invert(re, set) if negate
     return regex_ast_node(re, REGEX_AST_BYTES, set, 0)
 
@@ -213,7 +225,17 @@ def regex_parse_atom(re: mutable Regex&, parser: mutable RegexParser&, pattern: 
     byte: u8 = pattern[parser.position].u8()
     parser.position <- parser.position + 1
     if byte == '('.u8():
+        # `(?i)`: case-insensitive from here to the end of the enclosing group.
+        if parser.position + 2 < length and pattern[parser.position].u8() == '?'.u8() and pattern[parser.position + 1].u8() == 'i'.u8() and pattern[parser.position + 2].u8() == ')'.u8():
+            parser.position <- parser.position + 3
+            parser.ignore_case <- true
+            return regex_ast_node(re, REGEX_AST_EMPTY, 0, 0)
+        if parser.position < length and pattern[parser.position].u8() == '?'.u8():
+            parser.ok <- false   # other group flags / non-capturing syntax: unsupported
+            return regex_ast_node(re, REGEX_AST_EMPTY, 0, 0)
+        saved_ignore_case: bool = parser.ignore_case
         inner: u32 = regex_parse_either(re, parser, pattern)
+        parser.ignore_case <- saved_ignore_case
         if parser.position >= length or pattern[parser.position].u8() != ')'.u8():
             parser.ok <- false
             return inner
@@ -236,13 +258,60 @@ def regex_parse_atom(re: mutable Regex&, parser: mutable RegexParser&, pattern: 
         parser.ok <- false
     else:
         regex_set_add(re, set, byte)
+    regex_set_fold_case(re, set) if parser.ignore_case
     return regex_ast_node(re, REGEX_AST_BYTES, set, 0)
+
+const REGEX_MAX_COUNT: usize = 1000
+
+def regex_parse_count(parser: mutable RegexParser&, pattern: sview) -> usize can[Abort.Panic]:
+    length: usize = pattern.len.usize()
+    value: mutable usize = 0
+    digits: mutable usize = 0
+    while parser.position < length |parser, pattern, value, digits|:
+        byte: u8 = pattern[parser.position].u8()
+        break if byte < '0'.u8() or byte > '9'.u8()
+        value <- value * 10 + (byte - '0'.u8()).usize() if value <= REGEX_MAX_COUNT
+        digits <- digits + 1
+        parser.position <- parser.position + 1
+    parser.ok <- false if digits == 0 or value > REGEX_MAX_COUNT
+    return value
+
+# `{m}`, `{m,}` and `{m,n}` (counts up to REGEX_MAX_COUNT), expanded on the AST: m
+# required copies, then either a star (unbounded) or n - m optional copies.
+def regex_parse_counted(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview, node: u32) -> u32 can[Abort.Panic, Memory.Allocate]:
+    length: usize = pattern.len.usize()
+    parser.position <- parser.position + 1   # '{'
+    minimum: usize = regex_parse_count(parser, pattern)
+    maximum: mutable usize = minimum
+    unbounded: mutable bool = false
+    if parser.position < length and pattern[parser.position].u8() == ','.u8():
+        parser.position <- parser.position + 1
+        if parser.position < length and pattern[parser.position].u8() == '}'.u8():
+            unbounded <- true
+        else:
+            maximum <- regex_parse_count(parser, pattern)
+    if parser.position >= length or pattern[parser.position].u8() != '}'.u8() or maximum < minimum:
+        parser.ok <- false
+        return node
+    parser.position <- parser.position + 1
+    return node if not parser.ok
+    result: mutable u32 = regex_ast_node(re, REGEX_AST_EMPTY, 0, 0)
+    for _ in 0..<minimum |result, re, node|:
+        result <- regex_ast_node(re, REGEX_AST_CONCAT, result, node)
+    if unbounded:
+        return regex_ast_node(re, REGEX_AST_CONCAT, result, regex_ast_node(re, REGEX_AST_STAR, node, 0))
+    for _ in minimum..<maximum |result, re, node|:
+        result <- regex_ast_node(re, REGEX_AST_CONCAT, result, regex_ast_node(re, REGEX_AST_OPTIONAL, node, 0))
+    return result
 
 def regex_parse_repeat(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview) -> u32 can[Abort.Panic, Memory.Allocate]:
     length: usize = pattern.len.usize()
     node: mutable u32 = regex_parse_atom(re, parser, pattern)
     while parser.position < length |re, parser, pattern, length, node|:
         byte: u8 = pattern[parser.position].u8()
+        if byte == '{'.u8():
+            node <- regex_parse_counted(re, parser, pattern, node)
+            continue
         kind: u8 = REGEX_AST_STAR if byte == '*'.u8() else (REGEX_AST_PLUS if byte == '+'.u8() else (REGEX_AST_OPTIONAL if byte == '?'.u8() else REGEX_AST_EMPTY))
         break if kind == REGEX_AST_EMPTY
         parser.position <- parser.position + 1
@@ -522,7 +591,7 @@ def regex_compile(re: mutable Regex&, pattern: sview) -> bool can[Abort.Panic, M
     re.ast_kind.clear()
     re.ast_left.clear()
     re.ast_right.clear()
-    parser: mutable RegexParser = RegexParser{position: 0, ok: true}
+    parser: mutable RegexParser = RegexParser{position: 0, ok: true, ignore_case: false}
     root: u32 = regex_parse_either(re, &parser, pattern)
     return false if not parser.ok or parser.position != pattern.len.usize()
 
