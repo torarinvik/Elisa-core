@@ -255,6 +255,10 @@ type Analyzer struct {
 	// storeTargetRegion is the container region of the place a checked store writes into,
 	// set only for the duration of checkStoredRegionContainerEscapeInto.
 	storeTargetRegion string
+	// storeScanCache memoizes calleeStoreModeInto per (callee, source param, target param);
+	// storeScanCycleHit marks a search that consulted an in-progress frame (not cacheable).
+	storeScanCache    map[storeScanKey]storeMode
+	storeScanCycleHit bool
 	// regionParamCalleeParamIndex maps each function name to explicit parameter positions whose
 	// types carry one of that function's region parameters. Forwarding a fresh region container to
 	// any such position shares its allocation region with the callee, which may allocate between
