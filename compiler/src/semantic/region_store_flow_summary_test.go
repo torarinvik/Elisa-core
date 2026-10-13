@@ -83,6 +83,33 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 	}
 }
 
+func TestStoreFlowCallFitsBorrowingDefaultArguments(t *testing.T) {
+	src := `def reader(name: sview, owner_hint: sview = "") -> u32:
+    return name.len.u32() + owner_hint.len.u32()
+
+def caller(name: sview) -> u32:
+    return reader(name)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_borrowing_default.elisa", src, AnalyzeOptions{})
+	var reader *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if candidate, ok := decl.(*ast.FuncDecl); ok && candidate.Name == "reader" {
+			reader = candidate
+			break
+		}
+	}
+	if reader == nil {
+		t.Fatal("reader was not parsed")
+	}
+	call := &ast.CallExpr{Func: &ast.Ident{Name: "reader"}, Args: []ast.Expr{&ast.Ident{Name: "name"}}}
+	if !storeFlowCallFitsParams(reader, call) {
+		t.Fatal("a declaration-owned borrowed default must not make a call unresolved for StoreFlow")
+	}
+}
+
 func TestStoreFlowBuiltinDarrayTruncateDoesNotStoreItsCount(t *testing.T) {
 	call := &ast.CallExpr{
 		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "bindings"}, Field: "truncate"},
@@ -320,6 +347,46 @@ def main() -> i32:
 	}
 	if summary.reaches(0, 1) {
 		t.Fatalf("AST argument storage must not flow into the pointer-free compiler table: reaches(0,1), conn=%v reach=%v ret=%v written=%v", summary.conn, summary.reach, summary.retConn, summary.written)
+	}
+}
+
+func TestStoreFlowSummaryDoesNotTreatMutableReadOnlyParamsAsWrites(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct Metadata:
+    count: u32
+
+def inspect(expressions: darray[Expr]&, metadata: mutable Metadata&) -> u32:
+    return expressions[0].text.len.u32() + metadata.count
+
+def caller(expressions: darray[Expr]&, metadata: mutable Metadata&) -> u32:
+    return inspect(expressions, metadata)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_mutable_read_only_params.elisa", src, AnalyzeOptions{})
+	for _, name := range []string{"inspect", "caller"} {
+		var fn *ast.FuncDecl
+		for _, decl := range result.File.Decls {
+			if candidate, ok := decl.(*ast.FuncDecl); ok && candidate.Name == name {
+				fn = candidate
+				break
+			}
+		}
+		if fn == nil {
+			t.Fatalf("function %q was not parsed", name)
+		}
+		summary := result.analyzer.storeFlowSummaryFor(fn)
+		if summary == nil {
+			t.Fatalf("read-only mutable-parameter function %q should have a settled summary", name)
+		}
+		if summary.writtenParam(0) || summary.writtenParam(1) {
+			t.Fatalf("read-only mutable parameters in %q must not be treated as writes: %v", name, summary.written)
+		}
+		if summary.reaches(0, 1) || summary.reaches(1, 0) {
+			t.Fatalf("reading a borrowed value and metadata must not imply storage between them in %q: reach=%v", name, summary.reach)
+		}
 	}
 }
 

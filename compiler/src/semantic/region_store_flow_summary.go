@@ -640,7 +640,19 @@ func (a *Analyzer) invalidateStoreFlowSummaries() {
 }
 
 func storeFlowSummarizable(decl *ast.FuncDecl) bool {
-	return decl != nil && decl.Body != nil && len(decl.TypeParams) == 0 && len(decl.GenericParams) == 0
+	if decl == nil || decl.Body == nil || len(decl.TypeParams) != 0 {
+		return false
+	}
+	// Region parameters affect only the lifetime names on references and containers; they do
+	// not specialize the function's value-level flow. The body can therefore share one summary
+	// across every region instantiation. Type/state/permission/error/value parameters can change
+	// the body or stored representation and remain conservative until summaries are specialized.
+	for _, param := range decl.GenericParams {
+		if param.Kind != ast.GenericParamRegion {
+			return false
+		}
+	}
+	return true
 }
 
 // storeFlowComponent returns the summarizable members of decl's strongly connected component
@@ -1626,11 +1638,30 @@ func storeFlowCallFitsParams(decl *ast.FuncDecl, call *ast.CallExpr) bool {
 		return false
 	}
 	for _, param := range decl.Params[len(args):] {
-		if param.DefaultValue == nil || !storeFlowScalarTypeExpr(param.Type) {
+		if !storeFlowDefaultCallArgIsIndependent(param) {
 			return false
 		}
 	}
 	return true
+}
+
+// storeFlowDefaultCallArgIsIndependent reports defaults that cannot introduce a borrow from
+// this call's arguments. Scalar defaults are always independent. A string literal used for an
+// unregioned sview is also independent: it refers to static literal storage, while an explicitly
+// region-bound view remains conservative.
+func storeFlowDefaultCallArgIsIndependent(param ast.ParamDecl) bool {
+	if param.DefaultValue == nil {
+		return false
+	}
+	if storeFlowScalarTypeExpr(param.Type) {
+		return true
+	}
+	typ, ok := param.Type.(*ast.NamedType)
+	if !ok || typ == nil || typ.Name != "sview" || typ.Region != "" {
+		return false
+	}
+	_, ok = param.DefaultValue.(*ast.StringLit)
+	return ok
 }
 
 func (a *Analyzer) storeFlowCallee(call *ast.CallExpr) *ast.FuncDecl {
@@ -1805,9 +1836,10 @@ func storeFlowChainRoots(expr ast.Expr) ([]string, bool) {
 	return nil, false
 }
 
-// storeFlowWritten computes the names of decl that may be written: writable parameters,
-// assignment targets, mutated receivers, arguments bound to writable (or unknown) parameters,
-// and everything that aliases one of those. Every other name is a pure source.
+// storeFlowWritten computes the names of decl that may be written: assignment targets, mutated
+// receivers, arguments to callees whose summaries show a write (or unresolved callees), and
+// everything that aliases one of those. Parameter mutability is only a capability; a settled
+// body summary determines whether the capability is exercised. Every other name is a pure source.
 func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 	written := map[string]bool{}
 	var ft *FuncType
@@ -1816,8 +1848,8 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 	}
 	// Hidden trailing parameters (an implicit packed-enum store) follow the declared ones.
 	allWritable := len(decl.LmutThreadSlots) != 0 || ft == nil || funcTypeExplicitParamCount(ft) != len(decl.Params)
-	for i, param := range decl.Params {
-		if allWritable || param.Mutable || a.returnBorrowWritableParam(ft.Params[i]) {
+	for _, param := range decl.Params {
+		if allWritable {
 			written[param.Name] = true
 		}
 	}
@@ -1971,8 +2003,16 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 				ft, _ = sym.Type.(*FuncType)
 			}
 			if ft != nil && funcTypeExplicitParamCount(ft) == len(callee.Params) && len(callee.LmutThreadSlots) == 0 {
+				if summary := a.storeFlowSummaryFor(callee); summary != nil {
+					for j, arg := range args {
+						if summary.writtenParam(j) {
+							mark(arg)
+						}
+					}
+					return
+				}
 				for j, arg := range args {
-					if callee.Params[j].Mutable || a.returnBorrowWritableParam(ft.Params[j]) {
+					if j >= len(callee.Params) || callee.Params[j].Mutable || a.returnBorrowWritableParam(ft.Params[j]) {
 						mark(arg)
 					}
 				}
