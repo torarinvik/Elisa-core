@@ -35,6 +35,7 @@
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/Support.h>
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
@@ -203,6 +204,18 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 	return 1;
 }
 
+void elisacoreEnsureO3UnrollThreshold(int threshold) {
+	static int done = 0;
+	if (done || threshold <= 0) {
+		return;
+	}
+	done = 1;
+	char flag[64];
+	snprintf(flag, sizeof flag, "-unroll-threshold-aggressive=%d", threshold);
+	const char *argv[2] = {"elisac", flag};
+	LLVMParseCommandLineOptions(2, argv, NULL);
+}
+
 // Same options as elisacoreRunOptimizationPipeline in llvm_target.go.
 static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *pipeline, char **error) {
 	LLVMPassBuilderOptionsRef options = LLVMCreatePassBuilderOptions();
@@ -215,6 +228,8 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	// Same -O3 inliner threshold as optimizationInlinerThresholdO3 in llvm_target.go.
 	if (strstr(pipeline, "O3") != NULL) {
 		LLVMPassBuilderOptionsSetInlinerThreshold(options, 400);
+		// Same -O3 full-unroll budget as optimizationUnrollThresholdO3 in llvm_target.go.
+		elisacoreEnsureO3UnrollThreshold(600);
 	}
 	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
 	LLVMDisposePassBuilderOptions(options);

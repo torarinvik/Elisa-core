@@ -10,6 +10,7 @@ package backend
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
+#include "parallel_emit.h"
 
 static LLVMBool elisacoreInitializeNativeTarget(void) {
 	return LLVMInitializeNativeTarget();
@@ -77,6 +78,7 @@ import "C"
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"elisacore/src/semantic"
@@ -97,6 +99,25 @@ const optimizationAAPipeline = "scoped-noalias-aa,tbaa,basic-aa,globals-aa,scev-
 // time within noise (+0..4% user time over all 14 ports). part_optimize in parallel_emit.c uses
 // the same value. -O1/-O2 keep LLVM's defaults.
 const optimizationInlinerThresholdO3 = 400
+
+// optimizationUnrollThresholdO3 raises LLVM's -O3 full-unroll budget (-unroll-threshold-aggressive,
+// default 300) to 600. Small constant-trip loops whose bodies carry bounds checks (AWFY NBody's
+// pairwise 5-body loop, Queens' 8-row loop) cost just over 300 and stayed rolled; Rust/Zig unroll
+// them. Measured on AWFY: NBody -22% instructions / -33% cycles, Queens -28% / -33%, all other
+// ports within +-1M instructions; compile time within noise. The option is process-global, but
+// LoopUnroll reads it only when OptLevel > 2, so -O1/-O2 output is unchanged (a test checks this).
+// It is installed lazily, the first time this process optimises at -O3. part_optimize in
+// parallel_emit.c installs the same value in worker processes.
+const optimizationUnrollThresholdO3 = 600
+
+var o3UnrollThresholdOnce sync.Once
+
+func ensureO3UnrollThreshold(optLevel OptimizationLevel) {
+	if optLevel < OptimizationLevel3 {
+		return
+	}
+	o3UnrollThresholdOnce.Do(func() { C.elisacoreEnsureO3UnrollThreshold(C.int(optimizationUnrollThresholdO3)) })
+}
 
 func optimizationInlinerThreshold(optLevel OptimizationLevel) int {
 	if optLevel >= OptimizationLevel3 {
@@ -225,6 +246,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		return err
 	}
 
+	ensureO3UnrollThreshold(optLevel)
 	passPipeline := cString(fmt.Sprintf("default<O%d>", int(optLevel)))
 	defer C.free(unsafe.Pointer(passPipeline))
 	aaPipeline := cString(optimizationAAPipeline)
