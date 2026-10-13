@@ -511,3 +511,44 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "TestStructFieldReplacedByFreshLocalSurvivesCall", src, "bt")
 }
+
+// The sound forms next to the rejected stash-into-struct-ref UAF (see
+// TestCallStoringLocalDarrayIntoStructRefFieldRejected): a read-only callee and a same-region
+// target still compile and run correctly.
+func TestStructRefCallStoreSafeFormsRun(t *testing.T) {
+	src := `
+struct Holder:
+    xs: mutable darray[i64] = []
+    count: mutable usize = 0
+
+def note(h: mutable Holder&, xs: darray[i64]) -> void:
+    h.count <- xs.count
+
+def stash(h: mutable Holder&, xs: darray[i64]) -> void:
+    h.xs <- xs
+
+def fill(h: mutable Holder&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        for i in 0..<50 |local|:
+            local.push(i.i64())
+        note(h, local)
+
+def same_scope() -> usize:
+    can Memory.Allocate, Abort.Panic:
+        g: mutable Holder = Holder{}
+        local: mutable darray[i64] = []
+        local.push(3)
+        stash(g, local)
+        return g.xs.count
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        h: mutable Holder = Holder{}
+        fill(&h)
+        if h.count != 50 or same_scope() != 1:
+            panic("bad")
+`
+	buildAndRunSoATest(t, "struct_ref_call_store_safe", src, "bt")
+}

@@ -2047,7 +2047,19 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		return *argPointees[other]
 	}
 	for index, paramType := range fnType.Params {
-		if index >= len(args) || !a.returnBorrowWritableParam(paramType) {
+		if index >= len(args) {
+			continue
+		}
+		// A mutable reference to a struct holding region storage (owned containers included,
+		// which returnBorrowWritableParam does not count): the callee may replace a field with
+		// another argument's storage.
+		if ref, isRef := paramType.(*RefType); isRef && ref != nil && ref.Mutable {
+			if st, isStruct := peelToStructType(ref.Elem); isStruct && typeCarriesRegionStorage(st) {
+				a.checkCallArgumentStructTargetStoreEscape(call, args, index)
+				continue
+			}
+		}
+		if !a.returnBorrowWritableParam(paramType) {
 			continue
 		}
 		containerType := stripRefForBounds(a.exprTypes[args[index]])
@@ -2093,6 +2105,57 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 					a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived region %q through argument %d; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before the call", regionDisplayName(region), regionDisplayName(targetRegion), index+1, regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 					break
 				}
+			}
+		}
+	}
+}
+
+// checkCallArgumentStructTargetStoreEscape: a writable STRUCT reference argument (`stash(h, xs)`
+// with `def stash(h: mutable Holder&, xs: darray[i64]): h.xs <- xs`) may receive another
+// argument's region storage -- a by-value darray HEADER whose backing lives in a local region,
+// or anything reachable from it. If that region dies before the struct's storage, the struct is
+// left holding a dangling backing (a silent use-after-free). The struct's storage region is the
+// region recorded for the argument (struct local / region-carrying ref); a region-less target
+// (a parameter, a global, a caller-owned struct) outlives every local region.
+func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, args []ast.Expr, index int) {
+	targetArg := args[index]
+	targetRegion := a.structLocalArgRegion(targetArg)
+	if targetRegion == "" {
+		if state, ok := a.regionRefStateForExpr(targetArg); ok {
+			if names := liveLocalRegionDependencyNames(state); len(names) == 1 {
+				targetRegion = names[0]
+			}
+		}
+	}
+	for other, arg := range args {
+		if other == index || !typeCarriesRegionStorage(a.exprTypes[arg]) {
+			continue
+		}
+		if a.callArgNeverReaches(call, other, index) || a.callArgsKeptApart(call, index, other) {
+			continue
+		}
+		// The store-flow summary is undirected between written params; refine it with the
+		// directed scan when the callee's body is visible.
+		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) && !a.calleeMayStoreParamInto(decl, other, index) {
+			continue
+		}
+		regions := []string{}
+		if state, ok := a.regionRefStateForExpr(arg); ok {
+			regions = liveLocalRegionDependencyNames(state)
+		}
+		if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) {
+			regions = append(regions, own)
+		}
+		for _, region := range regions {
+			if region == targetRegion || a.lookupRegionParam(region) {
+				continue
+			}
+			if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+				continue
+			}
+			if targetRegion == "" || a.regionStoreEscapes(targetRegion, region) {
+				a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived storage through argument %d; region %q is freed first, leaving a dangling reference. Copy it into the target's region (or a region that outlives it) before the call", regionDisplayName(region), index+1, regionDisplayName(region))
+				break
 			}
 		}
 	}
