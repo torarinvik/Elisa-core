@@ -171,3 +171,43 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "factory_nested_literal_local", src, "bt")
 }
+
+// A by-value copy of a container ELEMENT (last = xs[i]) whose container field is grown by a callee threads the container's region.
+func TestElementCopyFieldForwardedToGrower(t *testing.T) {
+	src := `
+struct Path:
+    names: mutable darray[sview] = []
+
+struct Exits:
+    paths: mutable darray[Path] = []
+
+def grow(names: mutable darray[sview]&, v: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        names.push(v)
+
+def update(exits: mutable Exits&, v: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        exits.paths.push(Path{})
+        last: mutable Path = exits.paths[exits.paths.count - 1]
+        grow(last.names, v)
+        exits.paths[exits.paths.count - 1] <- last
+
+def churn() -> usize:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[usize] = []
+        for i in 0..<1000 |junk|:
+            junk.push(i * 7)
+        return junk[999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        e: mutable Exits = Exits{}
+        update(e, "a")
+        update(e, "b")
+        c: usize = churn()
+        if e.paths.count != 2 or e.paths[1].names[0] != "b" or c != 6993:
+            panic("element copy growth corrupted")
+`
+	buildAndRunSoATest(t, "element_copy_field_grower", src, "bt")
+}

@@ -95,12 +95,22 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 	if a == nil || sym == nil || value == nil || a.currentStructLocalAllocRegion == nil {
 		return
 	}
-	region := a.activeContainerRegionName()
-	if region == "" {
-		return
-	}
 	st, ok := peelToStructType(bindingType)
 	if !ok || !structHasRegionlessContainerField(st) {
+		return
+	}
+	// A by-value copy of an ELEMENT of a region-carrying container (`last: T = xs[i]`) shares that
+	// element's field backings, which live in (or, by the container's store-escape checks,
+	// outlive) the container's own region. Growth through the copy therefore belongs in that
+	// region — the same place `xs[i].f.push(..)` grows — and the copy is usually written back.
+	if index, isIndex := unwrapParenForRegionPoly(value).(*ast.IndexExpr); isIndex && index.Index2 == nil {
+		if owner := a.containerRegionOf(stripRefForBounds(a.exprTypes[index.Object])); owner != "" && a.structLocalRegionIsLive(owner) {
+			a.currentStructLocalAllocRegion[sym] = owner
+			return
+		}
+	}
+	region := a.activeContainerRegionName()
+	if region == "" {
 		return
 	}
 	if call, ok := unwrapParenForRegionPoly(value).(*ast.CallExpr); ok {
@@ -233,6 +243,30 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 		return arg, argType
 	}
 	pr, ok := paramType.(*RefType)
+	if ok && pr != nil && pr.Region == "" {
+		// A container-ref param (`names: mutable darray[T]& @r`, the region rides the container)
+		// receiving a CONTAINER FIELD of a recorded struct local (`last.names`): that field's
+		// backing lives in the local's recorded region, exactly as for `&local` to a struct param.
+		if pc := containerRegion(pr.Elem); pc != "" && regionParams[pc] {
+			if field, isField := stripParenExpr(stripAddrAndParens(arg)).(*ast.FieldExpr); isField && field != nil {
+				if region := a.structLocalArgRegion(field); region != "" && a.structLocalRegionIsLive(region) {
+					switch at := argType.(type) {
+					case *RefType:
+						if stamped, applied := stampContainerRegion(at.Elem, region); applied {
+							cp := cloneRefType(at)
+							cp.Elem = stamped
+							return arg, cp
+						}
+					default:
+						if stamped, applied := stampContainerRegion(argType, region); applied {
+							return arg, stamped
+						}
+					}
+				}
+			}
+		}
+		return arg, argType
+	}
 	if !ok || pr == nil || pr.Region == "" || !regionParams[pr.Region] {
 		return arg, argType
 	}
