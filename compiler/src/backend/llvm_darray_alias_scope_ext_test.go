@@ -5,6 +5,7 @@ package backend
 import (
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,19 @@ func TestOptimizationAAPipelineIncludesScevAAInBothPaths(t *testing.T) {
 	}
 	if !strings.Contains(string(src), `LLVMPassBuilderOptionsSetAAPipeline(options, "`+optimizationAAPipeline+`")`) {
 		t.Fatalf("parallel_emit.c part_optimize must use the same AA pipeline %q", optimizationAAPipeline)
+	}
+}
+
+func TestOptimizationInlinerThresholdO3InBothPaths(t *testing.T) {
+	if optimizationInlinerThreshold(OptimizationLevel3) != optimizationInlinerThresholdO3 || optimizationInlinerThreshold(OptimizationLevel2) != 0 {
+		t.Fatalf("inliner threshold must apply at -O3 only")
+	}
+	src, err := os.ReadFile("parallel_emit.c")
+	if err != nil {
+		t.Fatalf("read parallel_emit.c: %v", err)
+	}
+	want := "LLVMPassBuilderOptionsSetInlinerThreshold(options, " + strconv.Itoa(optimizationInlinerThresholdO3) + ")"
+	if !strings.Contains(string(src), want) {
+		t.Fatalf("parallel_emit.c part_optimize must use the same -O3 inliner threshold (%s)", want)
 	}
 }

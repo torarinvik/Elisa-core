@@ -45,7 +45,8 @@ static char *elisacoreRunOptimizationPipeline(
 	LLVMModuleRef Module,
 	LLVMTargetMachineRef TargetMachine,
 	char *PassPipeline,
-	char *AAPipeline) {
+	char *AAPipeline,
+	int InlinerThreshold) {
 	LLVMPassBuilderOptionsRef Options = LLVMCreatePassBuilderOptions();
 	if (Options == NULL) {
 		return LLVMGetErrorMessage(LLVMCreateStringError("failed to create LLVM pass builder options"));
@@ -55,6 +56,7 @@ static char *elisacoreRunOptimizationPipeline(
 	LLVMPassBuilderOptionsSetSLPVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetLoopUnrolling(Options, 1);
 	LLVMPassBuilderOptionsSetAAPipeline(Options, AAPipeline);
+	if (InlinerThreshold > 0) LLVMPassBuilderOptionsSetInlinerThreshold(Options, InlinerThreshold);
 	LLVMErrorRef Err = LLVMRunPasses(Module, PassPipeline, TargetMachine, Options);
 	LLVMDisposePassBuilderOptions(Options);
 	if (Err == NULL) {
@@ -86,6 +88,22 @@ import (
 // re-stored on every j iteration (AWFY NBody: -20% cycles). Measured cost: +1.8% user time on
 // the stage1 self-compile. part_optimize in parallel_emit.c must use the same string.
 const optimizationAAPipeline = "scoped-noalias-aa,tbaa,basic-aa,globals-aa,scev-aa"
+
+// optimizationInlinerThresholdO3 raises LLVM's -O3 inline threshold (default 250) to 400.
+// Elisa code is dominated by small checked helpers (index/field accessors, view constructors,
+// `cur_is(p, "x")`-style leaf predicates) whose bounds/validity checks push them just past the
+// default budget; once inlined their checks fold against the caller's facts. Measured on AWFY:
+// Richards -21%, Towers -12%, Json -4% instructions, others flat; +7% object size; compile
+// time within noise (+0..4% user time over all 14 ports). part_optimize in parallel_emit.c uses
+// the same value. -O1/-O2 keep LLVM's defaults.
+const optimizationInlinerThresholdO3 = 400
+
+func optimizationInlinerThreshold(optLevel OptimizationLevel) int {
+	if optLevel >= OptimizationLevel3 {
+		return optimizationInlinerThresholdO3
+	}
+	return 0
+}
 
 func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMBitcodeFileWithOpt(result, outputPath, OptimizationLevel3)
@@ -211,7 +229,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	defer C.free(unsafe.Pointer(passPipeline))
 	aaPipeline := cString(optimizationAAPipeline)
 	defer C.free(unsafe.Pointer(aaPipeline))
-	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline, aaPipeline)
+	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)))
 	if errMessage != nil {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}

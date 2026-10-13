@@ -212,6 +212,10 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 	LLVMPassBuilderOptionsSetLoopUnrolling(options, 1);
 	// Same alias-analysis stack as optimizationAAPipeline in llvm_target.go (a test checks this).
 	LLVMPassBuilderOptionsSetAAPipeline(options, "scoped-noalias-aa,tbaa,basic-aa,globals-aa,scev-aa");
+	// Same -O3 inliner threshold as optimizationInlinerThresholdO3 in llvm_target.go.
+	if (strstr(pipeline, "O3") != NULL) {
+		LLVMPassBuilderOptionsSetInlinerThreshold(options, 400);
+	}
 	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
 	LLVMDisposePassBuilderOptions(options);
 	if (err == NULL) {
