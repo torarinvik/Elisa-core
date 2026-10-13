@@ -1371,6 +1371,9 @@ F PoolStmt 1 Body
 F PoolStmt 2 Name
 F PoolStmt 3 Position
 F PoolStmt 4 Workers
+F PoolStmt 5 BorrowedPool
+F PoolStmt 6 DefaultWorkers
+F PoolStmt 7 Nursery
 
 T 210 PromoteStmt
 F PromoteStmt 1 Position

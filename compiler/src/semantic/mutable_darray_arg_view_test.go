@@ -108,7 +108,7 @@ func TestMutableStructArgSparesUnwrittenFieldViews(t *testing.T) {
 def run(p: mutable P&) -> i64:
     v: sview = name_at(p, 0, 1)
     `+callee+`(p)
-    return sview_len(v).i64()
+    return v.len.i64()
 `)
 		if got := strings.Join(result.Errors(), "\n"); strings.Contains(got, "cannot be used") {
 			t.Fatalf("%s: a callee that cannot write p.storage must not end its view, got:\n%s", name, got)
@@ -125,7 +125,7 @@ def run(p: mutable P&) -> i64:
 def run(p: mutable P&) -> i64:
     v: sview = name_at(p, 0, 1)
     `+call+`
-    return sview_len(v).i64()
+    return v.len.i64()
 `)
 		if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, "cannot be used") {
 			t.Fatalf("%s: a callee that may grow p.storage must end its view, got:\n%s", name, got)

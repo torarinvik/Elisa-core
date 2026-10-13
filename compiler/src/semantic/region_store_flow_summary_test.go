@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -313,6 +314,129 @@ def main() -> i32:
 	}
 	if summary.reaches(0, 1) {
 		t.Fatalf("AST argument storage must not flow into an indexed pointer-free table: reaches(0,1), conn=%v reach=%v ret=%v written=%v", summary.conn, summary.reach, summary.retConn, summary.written)
+	}
+}
+
+func TestStoreFlowSummaryUsesColdBinderTypeForIndexedPointerFreeMutation(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct ValueType:
+    length: u32
+
+def store_value(arguments: darray[Expr]&, values: mutable darray[ValueType]&, slot: usize, depth: u32) -> void:
+    if depth > 0:
+        store_value(arguments, values, slot, depth - 1)
+    values[slot] <- ValueType{length: arguments[0].text.len.u32()}
+
+def store_flag(arguments: darray[Expr]&, values: mutable darray[bool]&, slot: usize, depth: u32) -> void:
+    if depth > 0:
+        store_flag(arguments, values, slot, depth - 1)
+    values[slot] <- arguments[0].text.len > 0
+
+def store_view(arguments: darray[Expr]&, values: mutable darray[sview]&, slot: usize, depth: u32) -> void:
+    if depth > 0:
+        store_view(arguments, values, slot, depth - 1)
+    values[slot] <- arguments[0].text
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_cold_index_type.elisa", src, AnalyzeOptions{})
+	find := func(name string) *ast.FuncDecl {
+		for _, decl := range result.File.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == name {
+				return fn
+			}
+		}
+		return nil
+	}
+	value := find("store_value")
+	flag := find("store_flag")
+	view := find("store_view")
+	if value == nil || flag == nil || view == nil {
+		t.Fatal("test helpers were not parsed")
+	}
+	findIndexedTarget := func(fn *ast.FuncDecl) ast.Expr {
+		var target ast.Expr
+		var walk func(reflect.Value)
+		walk = func(value reflect.Value) {
+			if !value.IsValid() || target != nil {
+				return
+			}
+			switch value.Kind() {
+			case reflect.Interface, reflect.Pointer:
+				if !value.IsNil() {
+					walk(value.Elem())
+				}
+			case reflect.Struct:
+				if value.CanInterface() {
+					if assign, ok := value.Addr().Interface().(*ast.AssignStmt); ok {
+						if index, ok := assign.Target.(*ast.IndexExpr); ok {
+							if base, ok := index.Object.(*ast.Ident); ok && base.Name == "values" {
+								target = index
+								return
+							}
+						}
+					}
+				}
+				for i := 0; i < value.NumField(); i++ {
+					walk(value.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < value.Len(); i++ {
+					walk(value.Index(i))
+				}
+			}
+		}
+		walk(reflect.ValueOf(fn.Body))
+		return target
+	}
+	forceColdIndexTarget := func(fn *ast.FuncDecl) {
+		target := findIndexedTarget(fn)
+		if target == nil {
+			t.Fatalf("%s indexed mutation target was not found", fn.Name)
+		}
+		delete(result.analyzer.exprTypes, target)
+		if index, ok := target.(*ast.IndexExpr); ok {
+			delete(result.analyzer.exprTypes, index.Object)
+		}
+		result.analyzer.storeFlowSummaries = nil
+		result.analyzer.storeFlowInProgress = nil
+		result.analyzer.storeFlowActive = nil
+		return
+	}
+	valueTarget := findIndexedTarget(value)
+	forceColdIndexTarget(value)
+	result.analyzer.storeFlowCurrentDecl = value
+	if !result.analyzer.storeFlowPointerFreePlace(valueTarget) {
+		t.Fatal("the cold darray[ValueType] indexed place must prove pointer-free without cached place types")
+	}
+	valueSummary := result.analyzer.storeFlowSummaryFor(value)
+	if valueSummary == nil {
+		t.Fatal("pointer-free indexed StoreFlow should have a settled recursive summary")
+	}
+	if valueSummary.reaches(0, 1) {
+		t.Fatalf("a cold darray[ValueType] index target must not retain the AST argument; reach=%v", valueSummary.reach)
+	}
+	flagTarget := findIndexedTarget(flag)
+	forceColdIndexTarget(flag)
+	result.analyzer.storeFlowCurrentDecl = flag
+	if !result.analyzer.storeFlowPointerFreePlace(flagTarget) {
+		t.Fatal("the cold darray[bool] indexed place must prove pointer-free without cached place types")
+	}
+	flagSummary := result.analyzer.storeFlowSummaryFor(flag)
+	if flagSummary == nil || flagSummary.reaches(0, 1) {
+		t.Fatalf("a cold darray[bool] index target must not retain the AST argument; summary=%#v", flagSummary)
+	}
+	viewTarget := findIndexedTarget(view)
+	forceColdIndexTarget(view)
+	result.analyzer.storeFlowCurrentDecl = view
+	if result.analyzer.storeFlowPointerFreePlace(viewTarget) {
+		t.Fatal("the cold darray[sview] indexed place must remain pointerful without cached place types")
+	}
+	viewSummary := result.analyzer.storeFlowSummaryFor(view)
+	if viewSummary == nil || !viewSummary.reaches(0, 1) {
+		t.Fatalf("a cold darray[sview] index target must retain the real borrow flow; summary=%#v", viewSummary)
 	}
 }
 

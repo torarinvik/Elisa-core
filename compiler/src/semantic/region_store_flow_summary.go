@@ -1076,7 +1076,71 @@ func (a *Analyzer) storeFlowPointerFreePlace(expr ast.Expr) bool {
 	if typ == nil {
 		typ = a.storeFlowPlaceType(expr)
 	}
-	return storeFlowPointerFreeReturn(typ, map[Type]bool{})
+	if typ != nil {
+		return storeFlowPointerFreeReturn(typ, map[Type]bool{})
+	}
+	// During summary convergence, assignment targets are visited before their
+	// index-base expression has necessarily been type-checked. Recover the
+	// element type from every same-named typed binder rather than treating a
+	// cold `values: darray[u32]` base as unknown and linking its scalar store to
+	// every name in the assignment. Shadowing and untyped/generic bindings fail
+	// closed below.
+	index, ok := returnBorrowStripParens(expr).(*ast.IndexExpr)
+	return ok && a.storeFlowPointerFreeIndexedElement(index.Object)
+}
+
+func (a *Analyzer) storeFlowPointerFreeIndexedElement(base ast.Expr) bool {
+	base = returnBorrowStripParens(base)
+	id, ok := base.(*ast.Ident)
+	if !ok || id == nil || id.Name == "" || a.storeFlowCurrentDecl == nil {
+		return false
+	}
+	idx := a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl)
+	if idx.untyped[id.Name] {
+		return false
+	}
+	for _, name := range idx.rangeNames {
+		if name == id.Name {
+			return false
+		}
+	}
+	found := false
+	for _, binder := range idx.typed {
+		if binder.name != id.Name {
+			continue
+		}
+		elem, isDarray := storeFlowDarrayElementTypeExpr(binder.t)
+		if !isDarray || !a.storeFlowPointerFreeTypeExpr(elem, map[Type]bool{}) {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
+func storeFlowDarrayElementTypeExpr(t ast.TypeExpr) (ast.TypeExpr, bool) {
+	for t != nil {
+		switch tt := t.(type) {
+		case *ast.MutableType:
+			if tt == nil {
+				return nil, false
+			}
+			t = tt.Elem
+		case *ast.RefType:
+			if tt == nil {
+				return nil, false
+			}
+			t = tt.Elem
+		case *ast.BuiltinTypeExpr:
+			if tt != nil && tt.Name == "darray" && len(tt.TypeArgs) == 1 && len(tt.ValueArgs) == 0 {
+				return tt.TypeArgs[0], true
+			}
+			return nil, false
+		default:
+			return nil, false
+		}
+	}
+	return nil, false
 }
 
 // storeFlowPointerFreeAccessRoots counts roots named only by pointer-free field or
