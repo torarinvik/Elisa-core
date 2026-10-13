@@ -361,6 +361,9 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	if fn != nil && strings.TrimSpace(fn.IntrinsicName) != "" {
 		lookupName = strings.TrimSpace(fn.IntrinsicName)
 	}
+	if builtin, ok := g.elisaBuiltinIntrinsicFunction(lookupName); ok {
+		return builtin, nil
+	}
 	if intrinsicID, overloadedParamTypes, ok, err := g.lookupIntrinsic(lookupName, fn); err != nil {
 		return nil, err
 	} else if ok {
@@ -725,6 +728,11 @@ func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.u
 	// fully specialized in their @intrinsic spelling.
 	overloadParams := []semantic.Type(nil)
 	if C.LLVMIntrinsicIsOverloaded(intrinsicID) != 0 {
+		if resolved, ok, err := g.resolveIntrinsicOverloadTypes(intrinsicID, fn); err != nil {
+			return 0, nil, false, err
+		} else if ok {
+			return intrinsicID, resolved, true, nil
+		}
 		overloadParams = intrinsicOverloadParams(name, fn)
 	}
 	paramTypes := make([]C.LLVMTypeRef, 0, len(overloadParams))

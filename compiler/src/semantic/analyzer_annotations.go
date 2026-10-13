@@ -555,8 +555,8 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 				continue
 			}
 			intrinsicName := strings.TrimSpace(annotation.Args[0])
-			if !strings.HasPrefix(intrinsicName, "llvm.") {
-				a.errorf(annotation.Position, "@intrinsic on extern function %q expects an LLVM intrinsic name starting with \"llvm.\"", fn.Name)
+			if !strings.HasPrefix(intrinsicName, "llvm.") && !IsElisaBuiltinIntrinsic(intrinsicName) {
+				a.errorf(annotation.Position, "@intrinsic on extern function %q expects an LLVM intrinsic name starting with \"llvm.\" or a builtin (elisa.mul_hi.u64)", fn.Name)
 				continue
 			}
 			fnType.IntrinsicName = intrinsicName

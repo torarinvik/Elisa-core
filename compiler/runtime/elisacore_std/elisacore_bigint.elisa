@@ -2,15 +2,17 @@
 # Elisa core Runtime - arbitrary-precision signed integers
 # ============================================================
 #
-# BigInt is sign + magnitude. The magnitude is little-endian base-2^32 limbs held in
-# a darray[u32]; every limb product and carry is computed in u64, so the module needs
-# no wide-multiply intrinsic and no Unsafe. Invariant ("normalized"): the top limb is
-# non-zero, and zero is the empty magnitude with `negative == false`.
+# BigInt is sign + magnitude. The magnitude is little-endian base-2^64 limbs held in
+# a darray[u64]. Limb products use the compiler builtins `elisa.mul_hi.u64` (high
+# half of the 128-bit product; the low half is the wrapping `a * b`) and
+# `elisa.div_wide.u64` (128-by-64 quotient), both lowered to LLVM i128 arithmetic
+# and inlined. Invariant ("normalized"): the top limb is non-zero, and zero is the
+# empty magnitude with `negative == false`.
 #
 # Operations mutate a destination in place (GMP style) so hot loops reuse limb storage:
 #   bigint_assign / bigint_set_u64 / bigint_set_i64 / bigint_set_decimal
 #   bigint_add_assign / bigint_sub_assign         dst += src / dst -= src
-#   bigint_addmul_small / bigint_submul_small     dst += src*k / dst -= src*k   (k: u32)
+#   bigint_addmul_small / bigint_submul_small     dst += src*k / dst -= src*k   (k: u64)
 #   bigint_mul_small_assign                       dst *= k
 #   bigint_mul                                    dst = a*b (schoolbook)
 #   bigint_divmod                                 truncated q, r (Knuth algorithm D)
@@ -21,29 +23,32 @@
 # Division truncates toward zero (C/Rust/GMP tdiv): q = trunc(a/b), r = a - q*b, so r
 # takes the sign of a. Dividing by zero panics.
 
-const BIGINT_LIMB_MASK: u64 = 0xFFFFFFFF
-const BIGINT_DECIMAL_CHUNK: u32 = 1000000000
+const BIGINT_DECIMAL_CHUNK: u64 = 1000000000000000000   # 10^18
+const BIGINT_DECIMAL_CHUNK_DIGITS: usize = 18
+
+@intrinsic("elisa.mul_hi.u64")
+extern bigint_mul_hi(a: u64, b: u64) -> u64
+
+@intrinsic("elisa.div_wide.u64")
+extern bigint_div_wide(high: u64, low: u64, divisor: u64) -> u64
 
 struct BigInt:
     negative: mutable bool
-    limbs: mutable darray[u32]
+    limbs: mutable darray[u64]
 
 def bigint_zero() -> BigInt:
     return BigInt{negative: false, limbs: []}
 
 def bigint_from_u64(value: u64) -> BigInt can[Abort.Panic, Memory.Allocate]:
-    limbs: mutable darray[u32] = []
-    limbs.push((value & BIGINT_LIMB_MASK).u32()) if value != 0
-    limbs.push((value >> 32).u32()) if (value >> 32) != 0
+    limbs: mutable darray[u64] = []
+    limbs.push(value) if value != 0
     return BigInt{negative: false, limbs: limbs}
 
 def bigint_from_i64(value: i64) -> BigInt can[Abort.Panic, Memory.Allocate]:
     return bigint_from_u64(value.u64()) if value >= 0
     # -(value + 1) cannot overflow, even for the i64 minimum.
-    magnitude: u64 = (0 - (value + 1)).u64() + 1
-    limbs: mutable darray[u32] = []
-    limbs.push((magnitude & BIGINT_LIMB_MASK).u32())
-    limbs.push((magnitude >> 32).u32()) if (magnitude >> 32) != 0
+    limbs: mutable darray[u64] = []
+    limbs.push((0 - (value + 1)).u64() + 1)
     return BigInt{negative: true, limbs: limbs}
 
 def bigint_is_zero(value: BigInt&) -> bool:
@@ -57,16 +62,12 @@ def bigint_sign(value: BigInt&) -> i32:
 def bigint_set_u64(value: mutable BigInt&, x: u64) -> void can[Abort.Panic, Memory.Allocate]:
     value.limbs.clear()
     value.negative <- false
-    return if x == 0
-    value.limbs.push((x & BIGINT_LIMB_MASK).u32())
-    high: u64 = x >> 32
-    value.limbs.push(high.u32()) if high != 0
+    value.limbs.push(x) if x != 0
 
 def bigint_set_i64(value: mutable BigInt&, x: i64) -> void can[Abort.Panic, Memory.Allocate]:
     if x >= 0:
         bigint_set_u64(value, x.u64())
         return
-    # -(x + 1) cannot overflow, even for i64 minimum.
     bigint_set_u64(value, (0 - (x + 1)).u64() + 1)
     value.negative <- true
 
@@ -79,9 +80,7 @@ def bigint_assign(destination: mutable BigInt&, source: BigInt&) -> void can[Abo
 # Low 64 bits of the magnitude (the exact value when it fits in a u64).
 def bigint_low_u64(value: BigInt&) -> u64:
     return 0 if value.limbs.count == 0
-    low: u64 = value.limbs[0].u64()
-    return low if value.limbs.count == 1
-    return low | (value.limbs[1].u64() << 32)
+    return value.limbs[0]
 
 def bigint_normalize(value: mutable BigInt&) -> void can[Abort.Panic]:
     count: mutable usize = value.limbs.count
@@ -91,11 +90,15 @@ def bigint_normalize(value: mutable BigInt&) -> void can[Abort.Panic]:
     value.limbs.resize(count) if count < value.limbs.count
     value.negative <- false if count == 0
 
+def bigint_bit(condition: bool) -> u64:
+    return 1 if condition
+    return 0
+
 # ------------------------------------------------------------
 # Magnitude helpers (limbs only, sign ignored)
 # ------------------------------------------------------------
 
-def bigint_mag_compare(left: darray[u32]&, right: darray[u32]&) -> i32:
+def bigint_mag_compare(left: darray[u64]&, right: darray[u64]&) -> i32:
     return 1 if left.count > right.count
     return -1 if left.count < right.count
     index: mutable usize = left.count
@@ -122,57 +125,59 @@ def bigint_grow_to(value: mutable BigInt&, count: usize) -> void can[Abort.Panic
         value.limbs.push(0)
 
 # |dst| += |src| * k
-def bigint_mag_addmul(destination: mutable BigInt&, source: BigInt&, factor: u32) -> void can[Abort.Panic, Memory.Allocate]:
+def bigint_mag_addmul(destination: mutable BigInt&, source: BigInt&, factor: u64) -> void can[Abort.Panic, Memory.Allocate]:
     source_count: usize = source.limbs.count
     bigint_grow_to(destination, source_count)
-    k: u64 = factor.u64()
     carry: mutable u64 = 0
     index: mutable usize = 0
-    while index < source_count |index, carry, destination, source, k|:
-        sum: u64 = destination.limbs[index].u64() + source.limbs[index].u64() * k + carry
-        destination.limbs[index] <- (sum & BIGINT_LIMB_MASK).u32()
-        carry <- sum >> 32
+    while index < source_count |index, carry, destination, source, factor|:
+        term: u64 = source.limbs[index]
+        low: u64 = term * factor
+        high: u64 = bigint_mul_hi(term, factor)
+        sum: u64 = destination.limbs[index] + low
+        total: u64 = sum + carry
+        destination.limbs[index] <- total
+        carry <- high + bigint_bit(sum < low) + bigint_bit(total < sum)
         index <- index + 1
     while carry != 0 and index < destination.limbs.count |index, carry, destination|:
-        sum: u64 = destination.limbs[index].u64() + carry
-        destination.limbs[index] <- (sum & BIGINT_LIMB_MASK).u32()
-        carry <- sum >> 32
+        total: u64 = destination.limbs[index] + carry
+        destination.limbs[index] <- total
+        carry <- bigint_bit(total < carry)
         index <- index + 1
-    destination.limbs.push(carry.u32()) if carry != 0
+    destination.limbs.push(carry) if carry != 0
 
 # |dst| -= |src| * k. When the product exceeds |dst| the limbs are negated in place
 # (two's complement over the extended width) and the function returns true: the
 # magnitude is then |src|*k - |dst| and the caller flips the sign.
-def bigint_mag_submul(destination: mutable BigInt&, source: BigInt&, factor: u32) -> bool can[Abort.Panic, Memory.Allocate]:
+def bigint_mag_submul(destination: mutable BigInt&, source: BigInt&, factor: u64) -> bool can[Abort.Panic, Memory.Allocate]:
     source_count: usize = source.limbs.count
     bigint_grow_to(destination, source_count + 1)
-    k: u64 = factor.u64()
     carry: mutable u64 = 0
-    borrow: mutable u64 = 0
     index: mutable usize = 0
     count: usize = destination.limbs.count
-    while index < count |index, carry, borrow, destination, source, k, source_count, count|:
-        term: u64 = source.limbs[index].u64() if index < source_count else 0
-        product: u64 = term * k + carry
-        carry <- product >> 32
-        difference: u64 = destination.limbs[index].u64() - (product & BIGINT_LIMB_MASK) - borrow
-        destination.limbs[index] <- (difference & BIGINT_LIMB_MASK).u32()
-        borrow <- difference >> 63
+    while index < count |index, carry, destination, source, factor, source_count, count|:
+        term: u64 = source.limbs[index] if index < source_count else 0
+        low: u64 = term * factor
+        high: u64 = bigint_mul_hi(term, factor)
+        subtrahend: u64 = low + carry
+        current: u64 = destination.limbs[index]
+        destination.limbs[index] <- current - subtrahend
+        carry <- high + bigint_bit(subtrahend < low) + bigint_bit(current < subtrahend)
         index <- index + 1
-        break if index >= source_count + 1 and carry == 0 and borrow == 0
-    flipped: bool = borrow != 0
+        break if index >= source_count + 1 and carry == 0
+    flipped: bool = carry != 0
     if flipped:
         negate_carry: mutable u64 = 1
         position: mutable usize = 0
         while position < count |position, negate_carry, destination|:
-            inverted: u64 = (destination.limbs[position].u64() ^ BIGINT_LIMB_MASK) + negate_carry
-            destination.limbs[position] <- (inverted & BIGINT_LIMB_MASK).u32()
-            negate_carry <- inverted >> 32
+            inverted: u64 = (destination.limbs[position] ^ 0xFFFFFFFFFFFFFFFF) + negate_carry
+            negate_carry <- bigint_bit(negate_carry != 0 and inverted == 0)
+            destination.limbs[position] <- inverted
             position <- position + 1
     return flipped
 
 # dst += sign * src * k, where sign is -1 when `subtract` is set.
-def bigint_signed_addmul(destination: mutable BigInt&, source: BigInt&, factor: u32, subtract: bool) -> void can[Abort.Panic, Memory.Allocate]:
+def bigint_signed_addmul(destination: mutable BigInt&, source: BigInt&, factor: u64, subtract: bool) -> void can[Abort.Panic, Memory.Allocate]:
     return if factor == 0 or source.limbs.count == 0
     term_negative: bool = source.negative != subtract
     if destination.limbs.count == 0:
@@ -197,25 +202,26 @@ def bigint_add_assign(destination: mutable BigInt&, source: BigInt&) -> void can
 def bigint_sub_assign(destination: mutable BigInt&, source: BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
     bigint_signed_addmul(destination, source, 1, true)
 
-def bigint_addmul_small(destination: mutable BigInt&, source: BigInt&, factor: u32) -> void can[Abort.Panic, Memory.Allocate]:
+def bigint_addmul_small(destination: mutable BigInt&, source: BigInt&, factor: u64) -> void can[Abort.Panic, Memory.Allocate]:
     bigint_signed_addmul(destination, source, factor, false)
 
-def bigint_submul_small(destination: mutable BigInt&, source: BigInt&, factor: u32) -> void can[Abort.Panic, Memory.Allocate]:
+def bigint_submul_small(destination: mutable BigInt&, source: BigInt&, factor: u64) -> void can[Abort.Panic, Memory.Allocate]:
     bigint_signed_addmul(destination, source, factor, true)
 
-def bigint_mul_small_assign(value: mutable BigInt&, factor: u32) -> void can[Abort.Panic, Memory.Allocate]:
+def bigint_mul_small_assign(value: mutable BigInt&, factor: u64) -> void can[Abort.Panic, Memory.Allocate]:
     if factor == 0:
         value.limbs.clear()
         value.negative <- false
         return
-    k: u64 = factor.u64()
     carry: mutable u64 = 0
     count: usize = value.limbs.count
-    for index in 0..<count |value, carry, k|:
-        product: u64 = value.limbs[index].u64() * k + carry
-        value.limbs[index] <- (product & BIGINT_LIMB_MASK).u32()
-        carry <- product >> 32
-    value.limbs.push(carry.u32()) if carry != 0
+    for index in 0..<count |value, carry, factor|:
+        limb: u64 = value.limbs[index]
+        low: u64 = limb * factor
+        total: u64 = low + carry
+        carry <- bigint_mul_hi(limb, factor) + bigint_bit(total < low)
+        value.limbs[index] <- total
+    value.limbs.push(carry) if carry != 0
 
 # destination = left * right (schoolbook). The destination must not be an operand.
 def bigint_mul(destination: mutable BigInt&, left: BigInt&, right: BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
@@ -226,97 +232,121 @@ def bigint_mul(destination: mutable BigInt&, left: BigInt&, right: BigInt&) -> v
     right_count: usize = right.limbs.count
     bigint_grow_to(destination, left_count + right_count)
     for i in 0..<left_count |destination, left, right, right_count|:
-        multiplier: u64 = left.limbs[i].u64()
+        multiplier: u64 = left.limbs[i]
         carry: mutable u64 = 0
         for j in 0..<right_count |destination, right, multiplier, carry, i|:
-            total: u64 = multiplier * right.limbs[j].u64() + destination.limbs[i + j].u64() + carry
-            destination.limbs[i + j] <- (total & BIGINT_LIMB_MASK).u32()
-            carry <- total >> 32
-        destination.limbs[i + right_count] <- carry.u32()
+            term: u64 = right.limbs[j]
+            low: u64 = multiplier * term
+            high: u64 = bigint_mul_hi(multiplier, term)
+            sum: u64 = low + destination.limbs[i + j]
+            total: u64 = sum + carry
+            destination.limbs[i + j] <- total
+            carry <- high + bigint_bit(sum < low) + bigint_bit(total < sum)
+        destination.limbs[i + right_count] <- carry
     destination.negative <- left.negative != right.negative
     bigint_normalize(destination)
 
 # |value| /= divisor; returns |value| mod divisor. The sign is kept (truncation).
-def bigint_divmod_small_assign(value: mutable BigInt&, divisor: u32) -> u32 can[Abort.Panic]:
+def bigint_divmod_small_assign(value: mutable BigInt&, divisor: u64) -> u64 can[Abort.Panic]:
     if divisor == 0:
         panic("bigint: division by zero")
-    d: u64 = divisor.u64()
     remainder: mutable u64 = 0
     index: mutable usize = value.limbs.count
-    while index > 0 |index, remainder, value, d|:
+    while index > 0 |index, remainder, value, divisor|:
         index <- index - 1
-        current: u64 = (remainder << 32) | value.limbs[index].u64()
-        value.limbs[index] <- (current / d).u32()
-        remainder <- current % d
+        limb: u64 = value.limbs[index]
+        # remainder < divisor, so the 128-by-64 quotient fits in 64 bits.
+        quotient: u64 = bigint_div_wide(remainder, limb, divisor)
+        value.limbs[index] <- quotient
+        remainder <- limb - quotient * divisor
     bigint_normalize(value)
-    return remainder.u32()
+    return remainder
 
-def bigint_leading_zero_bits(limb: u32) -> u64:
+def bigint_leading_zero_bits(limb: u64) -> u64:
+    return 64 if limb == 0
     bits: mutable u64 = 0
-    probe: mutable u64 = limb.u64()
-    return 32 if probe == 0
-    while (probe & 0x80000000) == 0 |probe, bits|:
+    probe: mutable u64 = limb
+    while (probe & 0x8000000000000000) == 0 |probe, bits|:
         probe <- probe << 1
         bits <- bits + 1
     return bits
 
-# Knuth TAOCP vol. 2, 4.3.1 algorithm D (Hacker's Delight `divmnu` shape) on
-# base-2^32 limbs; |numerator| >= |divisor| and the divisor has at least 2 limbs.
+# (limb << shift) | (lower >> (64 - shift)), with shift in [0, 63].
+def bigint_shift_pair(limb: u64, lower: u64, shift: u64) -> u64:
+    return limb if shift == 0
+    return (limb << shift) | (lower >> (64 - shift))
+
+# Knuth TAOCP vol. 2, 4.3.1 algorithm D on base-2^64 limbs;
+# |numerator| >= |divisor| and the divisor has at least 2 limbs.
 def bigint_mag_divmod_long(quotient: mutable BigInt&, remainder: mutable BigInt&, numerator: BigInt&, divisor: BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
     n: usize = divisor.limbs.count
     m: usize = numerator.limbs.count
     shift: u64 = bigint_leading_zero_bits(divisor.limbs[n - 1])
-    back: u64 = 32 - shift
-    vn: mutable darray[u32] = []
-    for i in 0..<n |vn, divisor, shift, back|:
-        lower: u64 = divisor.limbs[i - 1].u64() >> back if i > 0 else 0
-        vn.push((((divisor.limbs[i].u64() << shift) | lower) & BIGINT_LIMB_MASK).u32())
-    un: mutable darray[u32] = []
-    for i in 0..<m |un, numerator, shift, back|:
-        lower: u64 = numerator.limbs[i - 1].u64() >> back if i > 0 else 0
-        un.push((((numerator.limbs[i].u64() << shift) | lower) & BIGINT_LIMB_MASK).u32())
-    un.push((numerator.limbs[m - 1].u64() >> back).u32())
+    vn: mutable darray[u64] = []
+    for i in 0..<n |vn, divisor, shift|:
+        lower: u64 = divisor.limbs[i - 1] if i > 0 else 0
+        vn.push(bigint_shift_pair(divisor.limbs[i], lower, shift))
+    un: mutable darray[u64] = []
+    for i in 0..<m |un, numerator, shift|:
+        lower: u64 = numerator.limbs[i - 1] if i > 0 else 0
+        un.push(bigint_shift_pair(numerator.limbs[i], lower, shift))
+    un.push(bigint_shift_pair(0, numerator.limbs[m - 1], shift))
 
     quotient.limbs.clear()
     bigint_grow_to(quotient, m - n + 1)
-    top: u64 = vn[n - 1].u64()
-    second: u64 = vn[n - 2].u64()
+    top: u64 = vn[n - 1]
+    second: u64 = vn[n - 2]
     j: mutable usize = m - n + 1
     while j > 0 |j, un, vn, quotient, n, top, second|:
         j <- j - 1
-        estimate: u64 = (un[j + n].u64() << 32) | un[j + n - 1].u64()
-        qhat: mutable u64 = estimate / top
-        rhat: mutable u64 = estimate - qhat * top
-        while qhat > BIGINT_LIMB_MASK or qhat * second > ((rhat << 32) | un[j + n - 2].u64()) |qhat, rhat, top, second, un, j, n|:
+        high: u64 = un[j + n]
+        low: u64 = un[j + n - 1]
+        qhat: mutable u64 = 0
+        rhat: mutable u64 = 0
+        rhat_overflow: mutable bool = false
+        if high >= top:
+            # high == top: the estimate saturates at B - 1 and rhat = low + top.
+            qhat <- 0xFFFFFFFFFFFFFFFF
+            rhat <- low + top
+            rhat_overflow <- rhat < low
+        else:
+            qhat <- bigint_div_wide(high, low, top)
+            rhat <- low - qhat * top
+        next: u64 = un[j + n - 2]
+        while not rhat_overflow |qhat, rhat, rhat_overflow, top, second, next|:
+            product_high: u64 = bigint_mul_hi(qhat, second)
+            product_low: u64 = qhat * second
+            break if product_high < rhat or (product_high == rhat and product_low <= next)
             qhat <- qhat - 1
             rhat <- rhat + top
-            break if rhat > BIGINT_LIMB_MASK
+            rhat_overflow <- rhat < top
         # Multiply and subtract qhat * vn from un[j .. j+n].
         carry: mutable u64 = 0
         for i in 0..<n |un, vn, qhat, carry, j|:
-            product: u64 = qhat * vn[i].u64()
-            difference: u64 = un[i + j].u64() - carry - (product & BIGINT_LIMB_MASK)
-            un[i + j] <- (difference & BIGINT_LIMB_MASK).u32()
-            # Arithmetic shift of the 64-bit difference: borrow is 0, 1 or 2.
-            borrow: u64 = 0 - ((difference >> 32) | 0xFFFFFFFF00000000) if (difference >> 63) != 0 else 0
-            carry <- (product >> 32) + borrow
-        top_difference: u64 = un[j + n].u64() - carry
-        un[j + n] <- (top_difference & BIGINT_LIMB_MASK).u32()
-        if (top_difference >> 63) != 0:
+            term: u64 = vn[i]
+            product_low: u64 = qhat * term
+            subtrahend: u64 = product_low + carry
+            current: u64 = un[i + j]
+            un[i + j] <- current - subtrahend
+            carry <- bigint_mul_hi(qhat, term) + bigint_bit(subtrahend < product_low) + bigint_bit(current < subtrahend)
+        top_limb: u64 = un[j + n]
+        un[j + n] <- top_limb - carry
+        if top_limb < carry:
             # Estimate was one too large: add the divisor back.
             qhat <- qhat - 1
             add_carry: mutable u64 = 0
             for i in 0..<n |un, vn, add_carry, j|:
-                total: u64 = un[i + j].u64() + vn[i].u64() + add_carry
-                un[i + j] <- (total & BIGINT_LIMB_MASK).u32()
-                add_carry <- total >> 32
-            un[j + n] <- ((un[j + n].u64() + add_carry) & BIGINT_LIMB_MASK).u32()
-        quotient.limbs[j] <- qhat.u32()
+                sum: u64 = un[i + j] + vn[i]
+                total: u64 = sum + add_carry
+                add_carry <- bigint_bit(sum < vn[i]) + bigint_bit(total < sum)
+                un[i + j] <- total
+            un[j + n] <- un[j + n] + add_carry
+        quotient.limbs[j] <- qhat
 
     remainder.limbs.clear()
-    for i in 0..<n |remainder, un, shift, back, n|:
-        upper: u64 = (un[i + 1].u64() << back) & BIGINT_LIMB_MASK if shift != 0 else 0
-        remainder.limbs.push(((un[i].u64() >> shift) | upper).u32())
+    for i in 0..<n |remainder, un, shift|:
+        upper: u64 = un[i + 1] << (64 - shift) if shift != 0 else 0
+        remainder.limbs.push((un[i] >> shift) | upper)
     bigint_normalize(quotient)
     bigint_normalize(remainder)
 
@@ -333,8 +363,8 @@ def bigint_divmod(quotient: mutable BigInt&, remainder: mutable BigInt&, numerat
     if divisor.limbs.count == 1:
         bigint_assign(quotient, numerator)
         quotient.negative <- false
-        rest: u32 = bigint_divmod_small_assign(quotient, divisor.limbs[0])
-        bigint_set_u64(remainder, rest.u64())
+        rest: u64 = bigint_divmod_small_assign(quotient, divisor.limbs[0])
+        bigint_set_u64(remainder, rest)
     else:
         bigint_mag_divmod_long(quotient, remainder, numerator, divisor)
     quotient.negative <- numerator.negative != divisor.negative
@@ -353,23 +383,22 @@ def bigint_append_decimal(output: mutable darray[u8]&, value: BigInt&) -> void c
     output.push('-'.u8()) if value.negative
     work: mutable BigInt = bigint_zero()
     bigint_assign(&work, value)
-    chunks: mutable darray[u32] = []
+    chunks: mutable darray[u64] = []
     while work.limbs.count > 0 |work, chunks|:
         chunks.push(bigint_divmod_small_assign(&work, BIGINT_DECIMAL_CHUNK))
     index: mutable usize = chunks.count
     first: mutable bool = true
     while index > 0 |index, chunks, first, output|:
         index <- index - 1
-        chunk: u32 = chunks[index]
-        digits: mutable u8[10] = zeroed
+        digits: mutable u8[20] = zeroed
         length: mutable usize = 0
-        rest: mutable u32 = chunk
+        rest: mutable u64 = chunks[index]
         while rest > 0 |rest, digits, length|:
             digits[length] <- '0'.u8() + (rest % 10).u8()
             rest <- rest / 10
             length <- length + 1
         if not first:
-            while length < 9 |digits, length|:
+            while length < BIGINT_DECIMAL_CHUNK_DIGITS |digits, length|:
                 digits[length] <- '0'.u8()
                 length <- length + 1
         while length > 0 |length, digits, output|:

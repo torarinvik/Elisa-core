@@ -50,7 +50,7 @@ func TestStdBigintMatchesMathBig(t *testing.T) {
 	fmt.Fprintf(&program, "include %q\ninclude %q\n", filepath.Join(runtimeDir, "elisacore_runtime.elisa"), filepath.Join(runtimeDir, "elisacore_bigint.elisa"))
 	program.WriteString(`extern printf(format: cstr, ...) -> i32 can[Console, Unsafe.RawExtern]
 
-def check(out: mutable darray[u8]&, left_text: sview, right_text: sview, factor: u32) -> void can[Abort.Panic, Memory.Allocate]:
+def check(out: mutable darray[u8]&, left_text: sview, right_text: sview, factor: u64) -> void can[Abort.Panic, Memory.Allocate]:
     a: mutable BigInt = bigint_zero()
     b: mutable BigInt = bigint_zero()
     work: mutable BigInt = bigint_zero()
@@ -86,7 +86,7 @@ def check(out: mutable darray[u8]&, left_text: sview, right_text: sview, factor:
     bigint_append_decimal(out, work)
     out.push(' '.u8())
     bigint_assign(&work, a)
-    rest: mutable u32 = bigint_divmod_small_assign(&work, factor)
+    rest: mutable u64 = bigint_divmod_small_assign(&work, factor)
     bigint_append_decimal(out, work)
     out.push(' '.u8())
     out.push('0'.u8()) if rest == 0
@@ -111,10 +111,13 @@ def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern, U
 				b.Rsh(b, 32)
 			}
 		}
-		factor := uint32(rng.Uint32()>>uint(rng.Intn(32))) | 1
+		factor := uint64(rng.Uint32()>>uint(rng.Intn(32))) | 1
+		if rng.Intn(3) == 0 {
+			factor = rng.Uint64()>>uint(rng.Intn(64)) | 1
+		}
 		fmt.Fprintf(&program, "    check(&out, %q, %q, %d)\n", a.String(), b.String(), factor)
 
-		k := new(big.Int).SetUint64(uint64(factor))
+		k := new(big.Int).SetUint64(factor)
 		fields := []string{a.String(), new(big.Int).Add(a, b).String(), new(big.Int).Sub(a, b).String(), new(big.Int).Mul(a, b).String()}
 		if b.Sign() != 0 {
 			q, r := new(big.Int).QuoRem(a, b, new(big.Int))
