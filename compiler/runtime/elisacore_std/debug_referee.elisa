@@ -306,11 +306,12 @@ def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
 def debug_referee_is_poison(value: uintptr) -> bool:
     # Compare at a width that can represent the x86-64 sentinels. On a 32-bit
     # target the widened pointer cannot equal any of them, as intended.
-    return true if value.u64() == DEBUG_REFEREE_POISON_GENERIC
-    return true if value.u64() == DEBUG_REFEREE_POISON_GOT
-    return true if value.u64() == DEBUG_REFEREE_POISON_TLS
-    return true if value.u64() == DEBUG_REFEREE_POISON_TCB
-    return true if value.u64() == DEBUG_REFEREE_POISON_DTV
+    return true if:
+        value.u64() == DEBUG_REFEREE_POISON_GENERIC
+        value.u64() == DEBUG_REFEREE_POISON_GOT
+        value.u64() == DEBUG_REFEREE_POISON_TLS
+        value.u64() == DEBUG_REFEREE_POISON_TCB
+        value.u64() == DEBUG_REFEREE_POISON_DTV
     return false
 
 def debug_referee_is_near_null(value: uintptr) -> bool:

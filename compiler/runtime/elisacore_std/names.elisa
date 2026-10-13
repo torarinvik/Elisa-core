@@ -75,8 +75,9 @@ def name_text_hash(text: sview, policy: NameCasePolicy) -> u64:
 
 
 def name_text_eq(left: sview, right: sview, policy: NameCasePolicy) -> bool:
-    false return if left.len != right.len
-    false return if left.len < 0 or right.len < 0
+    return false if:
+        left.len != right.len
+        left.len < 0 or right.len < 0
     index: mutable i64 = 0
     while index < left.len:
         left_ch: mutable char = left.data[index.usize()].char()

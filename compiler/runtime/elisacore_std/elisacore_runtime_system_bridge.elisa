@@ -133,8 +133,9 @@ def elisacore_bridge_systemservice_load_exec(path: mutable u8&?, argv: mutable v
     _ = argv
     can Global{Read,Write}:
         elisacore_bridge_system_load_exec_calls <- elisacore_bridge_system_load_exec_calls + 1
-    ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path == null
-    ELISACORE_BRIDGE_SYSTEM_PARAMETER return if path[0] == 0.u8()
+    return ELISACORE_BRIDGE_SYSTEM_PARAMETER if:
+        path == null
+        path[0] == 0.u8()
     return ELISACORE_BRIDGE_ORBIS_OK
 
 def elisacore_bridge_systemservice_receive_event(out_event_type: mutable int&?) -> int can[Global.Read, Global.Write]:

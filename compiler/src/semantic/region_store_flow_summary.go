@@ -1018,6 +1018,17 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 			handled[calls[k]] = retNames
 		}
 	}
+	if assign, ok := stmt.Interface().(*ast.AssignStmt); ok && assign != nil && a.storeFlowPointerFreePlace(assign.Target) {
+		// A borrow-bearing expression can be used to compute a scalar or another
+		// pointer-free field, but that assignment does not retain the expression's
+		// storage. Keep any call effects on the RHS, while excluding scalar field
+		// reads that would otherwise connect their container roots to the target.
+		var ignoreNested []reflect.Value
+		var ignoreCalls []*ast.CallExpr
+		rhsNames := a.storeFlowMentions(reflect.ValueOf(assign.Value), 0, handled, &ignoreNested, &ignoreCalls, false)
+		c.link(storeFlowRemoveNames(rhsNames, a.storeFlowPointerFreeAccessRoots(assign.Value)))
+		return nested
+	}
 	if binding := a.storeFlowViewTarget(stmt); binding != "" && !binds && len(handled) == len(calls) {
 		// A view local (`v: sview = …` / `v <- …`) is never stored through: whatever the
 		// initializer mentions may reach v, but nothing flows back into those names, and they
@@ -1055,6 +1066,82 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 		c.link(outside)
 	}
 	return nested
+}
+
+// storeFlowPointerFreePlace reports an assignment place whose resolved value cannot
+// contain Elisa region storage. A write to such a field/index may mutate its owning
+// aggregate, but it cannot store a borrow there.
+func (a *Analyzer) storeFlowPointerFreePlace(expr ast.Expr) bool {
+	typ := a.exprTypes[expr]
+	if typ == nil {
+		typ = a.storeFlowPlaceType(expr)
+	}
+	return storeFlowPointerFreeReturn(typ, map[Type]bool{})
+}
+
+// storeFlowPointerFreeAccessRoots counts roots named only by pointer-free field or
+// index reads. Those reads produce scalar/POD values and must not make their aggregate
+// appear to exchange a borrow with another expression in the same assignment.
+func (a *Analyzer) storeFlowPointerFreeAccessRoots(expr ast.Expr) map[string]int {
+	roots := map[string]int{}
+	var walk func(reflect.Value)
+	walk = func(value reflect.Value) {
+		if !value.IsValid() {
+			return
+		}
+		switch value.Kind() {
+		case reflect.Interface:
+			if !value.IsNil() {
+				walk(value.Elem())
+			}
+		case reflect.Pointer:
+			if value.IsNil() || !value.CanInterface() {
+				return
+			}
+			var place ast.Expr
+			switch node := value.Interface().(type) {
+			case *ast.FieldExpr:
+				place = node
+			case *ast.IndexExpr:
+				place = node
+			}
+			if place != nil && a.storeFlowPointerFreePlace(place) {
+				if names, ok := storeFlowChainRoots(place); ok {
+					for _, name := range names {
+						roots[name]++
+					}
+					return
+				}
+			}
+			walk(value.Elem())
+		case reflect.Struct:
+			for _, index := range storeFlowTypeInfoOf(value.Type()).fields {
+				walk(value.Field(index))
+			}
+		case reflect.Slice, reflect.Array:
+			for index := 0; index < value.Len(); index++ {
+				walk(value.Index(index))
+			}
+		}
+	}
+	walk(reflect.ValueOf(expr))
+	return roots
+}
+
+func storeFlowRemoveNames(names []string, removed map[string]int) []string {
+	if len(removed) == 0 {
+		return names
+	}
+	kept := make([]string, 0, len(names))
+	for _, name := range names {
+		base := storeFlowBaseName(name)
+		if removed[base] > 0 {
+			removed[base]--
+			continue
+		}
+		kept = append(kept, name)
+	}
+	return kept
 }
 
 // storeFlowViewBinding returns the call and binding name of a `name: sview = call(...)`

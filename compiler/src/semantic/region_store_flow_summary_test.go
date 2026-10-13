@@ -221,6 +221,96 @@ def main() -> i32:
 	}
 }
 
+// Compiler helpers may read region-bearing AST buffers while mutating a pointer-free
+// compiler table. The table mutation alone must not make the AST buffer look retained.
+// This models the `Expr[]` -> `ValueType` inference path used by Stage1's try lowering.
+func TestStoreFlowSummaryDoesNotRetainASTArgsThroughPointerFreeTableMutation(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct ValueType:
+    kind: u32
+struct StructTable:
+    visits: u32
+
+def infer_value(arguments: darray[Expr]&, structs: mutable StructTable&) -> ValueType:
+    item: Expr = arguments[0]
+    structs.visits <- structs.visits + item.text.len.u32()
+    return ValueType{kind: item.text.len.u32()}
+
+def infer_value_through_helper(arguments: darray[Expr]&, structs: mutable StructTable&) -> ValueType:
+    return infer_value(arguments, structs)
+
+def caller(structs: mutable StructTable&) -> void can[Abort.Panic, Memory.Allocate]:
+    can Abort.Panic, Memory.Allocate:
+        region short(4096):
+            bytes: mutable darray[u8] @short = [65]
+            arguments: mutable darray[Expr] = [Expr{text: bytes.as_sview()}]
+            _ = infer_value_through_helper(arguments, structs)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_ast_args_pointer_free_table.elisa", src, AnalyzeOptions{})
+	for _, diagnostic := range result.Errors() {
+		if strings.Contains(diagnostic, "call may store a reference to function-local storage") {
+			t.Fatalf("reading AST args to update a pointer-free table must not retain them, got: %s", diagnostic)
+		}
+	}
+
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "infer_value" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("pointer-free table mutation should have a settled StoreFlow summary")
+	}
+	if !summary.writtenParam(1) {
+		t.Fatal("test must model mutation through the compiler table parameter")
+	}
+	if summary.reaches(0, 1) {
+		t.Fatalf("AST argument storage must not flow into the pointer-free compiler table: reaches(0,1), conn=%v reach=%v ret=%v written=%v", summary.conn, summary.reach, summary.retConn, summary.written)
+	}
+}
+
+func TestStoreFlowSummaryStillTracksBorrowWrittenIntoPointerfulField(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct StructTable:
+    last_text: sview
+
+def store_text(arguments: darray[Expr]&, structs: mutable StructTable&) -> void:
+    structs.last_text <- arguments[0].text
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSource(t, "store_flow_pointerful_field.elisa", src)
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "store_text" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("pointerful field write should have a settled StoreFlow summary")
+	}
+	if !summary.reaches(0, 1) {
+		t.Fatal("view stored into the table field must remain a source-to-container flow")
+	}
+}
+
 func TestStoreFlowNamedPointerFreeTypesRejectAmbiguousLeafNames(t *testing.T) {
 	a := &Analyzer{namedTypes: map[string]Type{
 		"Numeric.Position":  &BuiltinType{Name: "u32"},

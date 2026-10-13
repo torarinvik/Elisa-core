@@ -1906,8 +1906,9 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
 # remains pooled for reuse, but the profiler must see the logical retirement so
 # allocation pressure and retained table capacity are not understated.
 def collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void:
-    return if table == null
-    return if elisa_profile_allocation_negotiate(ELISA_PROFILE_ALLOCATION_ABI_V1) != 1.u32()
+    return if:
+        table == null
+        elisa_profile_allocation_negotiate(ELISA_PROFILE_ALLOCATION_ABI_V1) != 1.u32()
     old_table: void& = table
     old_backing: mutable heap Region&? = (collection_stack_of_table(a, old_table) can Global{Read,Write})
     if old_backing != null:

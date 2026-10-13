@@ -87,8 +87,9 @@ def fixed_buffer_reset(a: mutable FixedBufferAllocator&):
 
 def fixed_buffer_alloc_align(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void&?:
     can Abort.Panic:
-        null return if a.data == null
-        null return if a.end_index > a.capacity
+        return null if:
+            a.data == null
+            a.end_index > a.capacity
 
         trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
             base: u8& = a.data.cast[u8&]
@@ -96,8 +97,9 @@ def fixed_buffer_alloc_align(a: mutable FixedBufferAllocator&, size_bytes: usize
             current_address: usize = fixed_buffer_checked_add_usize(base_address, a.end_index)
             adjusted_address: usize = fixed_buffer_align_forward(current_address, alignment)
             adjusted_index: usize = adjusted_address - base_address
-            null return if adjusted_index > a.capacity
-            null return if size_bytes > a.capacity - adjusted_index
+            return null if:
+                adjusted_index > a.capacity
+                size_bytes > a.capacity - adjusted_index
 
             result: mutable void& = (base + adjusted_index).cast[void&]
             a.end_index <- fixed_buffer_checked_add_usize(adjusted_index, size_bytes)
@@ -124,9 +126,10 @@ def fixed_buffer_alloc_or_panic(a: mutable FixedBufferAllocator&, size_bytes: us
             return raw.cast[void&]
 
 def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: usize, new_size: usize) -> bool:
-    false return if not fixed_buffer_owns_range(a, ptr, old_size)
-    false return if not fixed_buffer_is_last_allocation(a, ptr, old_size)
-    false return if a.data == null
+    return false if:
+        not fixed_buffer_owns_range(a, ptr, old_size)
+        not fixed_buffer_is_last_allocation(a, ptr, old_size)
+        a.data == null
 
     if new_size <= old_size:
         a.end_index <- a.end_index - (old_size - new_size)
@@ -137,8 +140,9 @@ def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: 
         raw: uintptr = ptr.cast[u8&].uintptr()
         false return if raw < base
         start_index: usize = (raw - base).usize()
-        false return if start_index > a.capacity
-        false return if new_size > a.capacity - start_index
+        return false if:
+            start_index > a.capacity
+            new_size > a.capacity - start_index
 
         a.end_index <- start_index + new_size
         return true

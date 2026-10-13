@@ -89,8 +89,9 @@ def ctx_fstr_alloc(total: usize) -> dstr can[Global.Read]:
 
 def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
     can Memory.Allocate, Abort.Panic:
-        return if ptr == null or len == 0
-        return if out.items == null
+        return if:
+            ptr == null or len == 0
+            out.items == null
         new_count: usize = runtime_checked_add_usize(out.count, len)
         if new_count > out.capacity:
             panic("f-string append exceeds allocation")
@@ -205,8 +206,9 @@ def string_view_len(view: sview) -> i64:
 
 def string_view_slice(view: sview, start: i64, end: i64) -> sview:
     empty: sview = sview("", 0, 0)
-    return empty if view.len < 0
-    return empty if view.len == 0
+    return empty if:
+        view.len < 0
+        view.len == 0
     view_len: usize = view.len.usize()
     return empty if view_len.i64() != view.len
 
@@ -229,8 +231,9 @@ def string_view_suffix(view: sview, start: i64) -> sview:
 def string_view_index(view: sview, index: i64) -> i64:
     0 return if view.len < 0
     view_len: usize = view.len.usize()
-    0 return if view_len.i64() != view.len
-    0 return if index < 0 or index >= view.len
+    return 0 if:
+        view_len.i64() != view.len
+        index < 0 or index >= view.len
 
     index_usize: usize = index.usize()
     0 return if index_usize.i64() != index
@@ -285,38 +288,28 @@ def string_view_copy(view: sview) -> cstr can[Global.Read, Global.Write]:
             return out.cast[cstr]
 
 # ------------------------------------------------------------
-# Ergonomic, bounds-safe string-view helpers
+# Ergonomic string-view queries.
 #
-# These compose the bounds-checked primitives above (string_view_index /
-# _prefix / _suffix / _eq), so they read no byte outside the view's length and
-# require NO Unsafe permission. They are the safe surface path/string code
-# should reach for instead of raw `static u8&` scanning with unchecked indexing.
+# Length is available directly as `.len`, and bounded byte reads use `view[index]`.
+# Higher-level helpers below compose the checked slice/equality operations.
 # ------------------------------------------------------------
-
-def sview_len(view: sview) -> usize:
-    0.usize() return if view.len <= 0
-    view_len: usize = view.len.usize()
-    return 0.usize() if view_len.i64() != view.len
-    return view_len
 
 def sview_is_empty(view: sview) -> bool:
     return view.len <= 0
-
-# Bounds-safe byte read; returns 0 for an out-of-range index.
-def sview_at(view: sview, index: usize) -> u8:
-    return string_view_index(view, index.i64()).u8()
 
 def sview_eq(lhs: sview, rhs: sview) -> bool:
     return string_views_eq(lhs, rhs) == 1
 
 def sview_starts_with(view: sview, prefix: sview) -> bool:
-    false return if view.len < 0 or prefix.len < 0
-    false return if prefix.len > view.len
+    return false if:
+        view.len < 0 or prefix.len < 0
+        prefix.len > view.len
     return string_views_eq(string_view_prefix(view, prefix.len), prefix) == 1
 
 def sview_ends_with(view: sview, suffix: sview) -> bool:
-    false return if view.len < 0 or suffix.len < 0
-    false return if suffix.len > view.len
+    return false if:
+        view.len < 0 or suffix.len < 0
+        suffix.len > view.len
     return string_views_eq(string_view_suffix(view, view.len - suffix.len), suffix) == 1
 
 # Index of the first occurrence of `byte`, or -1 if absent.
@@ -335,7 +328,7 @@ def sview_contains_byte(view: sview, byte: u8) -> bool:
 
 # Drop a trailing byte (e.g. a path separator) without copying.
 def sview_trim_trailing(view: sview, byte: u8) -> sview:
-    return string_view_slice(view, 0, 0) if sview_len(view).i64() != view.len
+    return string_view_slice(view, 0, 0) if view.len < 0 or view.len.usize().i64() != view.len
     hi: mutable i64 = view.len
     while hi > 0 and string_view_index(view, hi - 1) == byte.i64():
         hi <- hi - 1
@@ -343,7 +336,7 @@ def sview_trim_trailing(view: sview, byte: u8) -> sview:
 
 # The basename: the slice after the last `sep`, or the whole view if none.
 def sview_basename(view: sview, sep: u8) -> sview:
-    return string_view_slice(view, 0, 0) if sview_len(view).i64() != view.len
+    return string_view_slice(view, 0, 0) if view.len < 0 or view.len.usize().i64() != view.len
     i: mutable i64 = view.len
     while i > 0:
         string_view_suffix(view, i) return if string_view_index(view, i - 1) == sep.i64()
@@ -352,7 +345,7 @@ def sview_basename(view: sview, sep: u8) -> sview:
 
 # The dirname: the slice before the last `sep` (empty if none).
 def sview_dirname(view: sview, sep: u8) -> sview:
-    return string_view_slice(view, 0, 0) if sview_len(view).i64() != view.len
+    return string_view_slice(view, 0, 0) if view.len < 0 or view.len.usize().i64() != view.len
     i: mutable i64 = view.len
     while i > 0:
         string_view_prefix(view, i - 1) return if string_view_index(view, i - 1) == sep.i64()
@@ -370,8 +363,9 @@ def sview_dirname(view: sview, sep: u8) -> sview:
 # tracks this for interior darray borrows).
 def bytes_view(buf: darray[u8]) -> sview:
     n: usize = buf.count
-    sview("", 0, 0) return if n == 0
-    return sview("", 0, 0) if buf.items == null or n > buf.capacity
+    return sview("", 0, 0) if:
+        n == 0
+        buf.items == null or n > buf.capacity
     signed_len: i64 = n.i64()
     if signed_len < 0 or signed_len.usize() != n:
         return sview("", 0, 0)
@@ -400,12 +394,14 @@ def bytes_view_range_ref(buf: darray[u8]&, start: usize, count: usize) -> sview:
     n: usize = buf.count
     return empty if n == 0 or buf.items == null or n > buf.capacity
     signed_n: i64 = n.i64()
-    return empty if signed_n < 0 or signed_n.usize() != n
-    return empty if start > n or count > n - start
+    return empty if:
+        signed_n < 0 or signed_n.usize() != n
+        start > n or count > n - start
     start_signed: i64 = start.i64()
     count_signed: i64 = count.i64()
-    return empty if start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
-    return empty if count == 0
+    return empty if:
+        start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
+        count == 0
     trusted Unsafe.UncheckedIndex:
         trusted Unsafe.PointerCast:
             return StringView{data: &buf[start], len: count_signed}
@@ -428,11 +424,12 @@ def hash_sview(value: sview) -> u64:
 # Last index of `byte` in `view`, or -1 if absent (the rfind companion to
 # sview_find_byte). Used by the Fs path helpers below.
 def sview_find_last_byte(view: sview, byte: u8) -> i64:
-    i: mutable i64 = sview_len(view).i64()
+    return -1 if view.len <= 0 or view.len.usize().i64() != view.len
+    i: mutable i64 = view.len
     trusted Unsafe.AssumeProgress:
         while i > 0:
             i <- i - 1
-            i return if sview_at(view, i.usize()) == byte
+            i return if view[i.usize()] == byte.i64()
     return -1
 
 # `Fs`: pure (allocation-free, OS-free) std::filesystem::path string decomposition.
@@ -475,7 +472,7 @@ module Fs:
                     return out
                 for cb in base:
                     _ = out.push(cb)
-                out.push(47) if sview_len(base) > 0 and not sview_ends_with(base, sep)
+                out.push(47) if base.len > 0 and base.len.usize().i64() == base.len and not sview_ends_with(base, sep)
                 for cl in leaf:
                     _ = out.push(cl)
             return out
