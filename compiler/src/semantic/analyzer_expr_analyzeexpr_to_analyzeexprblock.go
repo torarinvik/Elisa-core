@@ -576,6 +576,19 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			src = a.analyzeExpr(n.Operand)
 		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
+			// `"lit".sview()`: a bare string literal has no hook of its own (`static u8&`), but it is a
+			// NUL-terminated C string, so it takes the `cstr` cast hooks — the literal is re-typed as
+			// `cstr`, exactly as `c: cstr = "lit"` contextually types it.
+			if lit, ok := n.Operand.(*ast.StringLit); ok && lit != nil {
+				if _, exact := a.lookupVisibleCastHook(src, dst); !exact {
+					if cstrType := a.resolveType(&ast.NamedType{Position: lit.Position, Name: "cstr"}); cstrType != nil && !IsInvalidType(cstrType) {
+						if _, ok := a.lookupVisibleCastHook(cstrType, dst); ok {
+							a.analyzeContextualStringValueExpr(n.Operand, cstrType)
+							src = cstrType
+						}
+					}
+				}
+			}
 			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok && !a.isSelfCastHook(hookSym) {
 				a.resolvedCastHooks[n] = hookSym
 				if fnType, ok := hookSym.Type.(*FuncType); ok {

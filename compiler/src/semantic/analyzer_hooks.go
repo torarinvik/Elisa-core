@@ -203,6 +203,37 @@ func (a *Analyzer) lookupVisibleCastHook(source Type, target Type) (*Symbol, boo
 			return sym, true
 		}
 	}
+	// No exact match: a hook taking an OPTIONAL source (`__cast__(value: cstr?) -> sview`) also
+	// accepts a non-optional operand that is assignable to that param — a `cstr`, or a string
+	// literal (`"lit".sview()`), exactly as an ordinary call to the hook would accept it. Only
+	// the optional-widening case is admitted, so overload selection stays exact otherwise.
+	if _, optional := source.(*OptionalType); optional || IsInvalidType(source) {
+		return nil, false
+	}
+	targetKey := exactTypeKey(target)
+	for _, candidate := range a.visibleNameCandidates("__cast__") {
+		var found *Symbol
+		for sig, sym := range a.castHooksByName[candidate] {
+			if sig.Target != targetKey || sym == nil {
+				continue
+			}
+			fnType, ok := sym.Type.(*FuncType)
+			if !ok || fnType == nil || len(fnType.Params) == 0 {
+				continue
+			}
+			param, ok := fnType.Params[0].(*OptionalType)
+			if !ok || !AssignableTo(param, source) {
+				continue
+			}
+			if found != nil && found != sym {
+				return nil, false // ambiguous: decline rather than pick by map order
+			}
+			found = sym
+		}
+		if found != nil {
+			return found, true
+		}
+	}
 	return nil, false
 }
 
