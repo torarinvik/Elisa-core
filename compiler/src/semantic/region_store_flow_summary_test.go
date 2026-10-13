@@ -20,7 +20,16 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "target"}, Field: "push"},
 		Args: []ast.Expr{&ast.Ident{Name: "source"}},
 	}
-	a := &Analyzer{storeFlowDarrays: map[string]bool{"target": true}}
+	a := &Analyzer{
+		storeFlowDarrays: map[string]bool{"target": true},
+		ufcsFunctionsByName: map[string][]*Symbol{
+			// This overload cannot receive a DArray; it must not force the builtin
+			// call onto the unknown-call fallback path.
+			"Numbers.push": {{Name: "Numbers.push", Type: &FuncType{Params: []Type{
+				&BuiltinType{Name: "i64"}, &BuiltinType{Name: "u32"},
+			}}}},
+		},
+	}
 	c := &storeFlowCtx{written: map[string]bool{"target": true}, scalars: map[string]bool{}}
 	retNames, handled := a.applyCallStoreFlow(call, c, map[*ast.CallExpr][]string{})
 	if !handled {
@@ -31,6 +40,40 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 	}
 	if len(retNames) != 2 || retNames[0] != "target" || retNames[1] != "source" {
 		t.Fatalf("push result must depend on receiver and inserted element, got %v", retNames)
+	}
+
+	// An applicable generic UFCS receiver could shadow the builtin, so keep it
+	// conservative even when the receiver is known to be a DArray.
+	generic := &Analyzer{
+		storeFlowDarrays: map[string]bool{"target": true},
+		ufcsFunctionsByName: map[string][]*Symbol{
+			"Generic.push": {{Name: "Generic.push", Type: &FuncType{Params: []Type{
+				&RefType{Elem: &TypeParamType{Name: "T"}, Mutable: true}, &TypeParamType{Name: "U"},
+			}}}},
+		},
+	}
+	if generic.storeFlowBuiltinDarrayGrowth(call.Func.(*ast.FieldExpr)) {
+		t.Fatal("a generic UFCS receiver can accept a DArray and must stay unresolved")
+	}
+	darrayUFCS := &Analyzer{
+		storeFlowDarrays: map[string]bool{"target": true},
+		ufcsFunctionsByName: map[string][]*Symbol{
+			"DArray.push": {{Name: "DArray.push", Type: &FuncType{Params: []Type{
+				&RefType{Elem: &DArrayType{Elem: &BuiltinType{Name: "u32"}}, Mutable: true}, &BuiltinType{Name: "u32"},
+			}}}},
+		},
+	}
+	if _, handled := darrayUFCS.applyCallStoreFlow(call, &storeFlowCtx{}, map[*ast.CallExpr][]string{}); handled {
+		t.Fatal("a DArray-compatible UFCS receiver must keep the call conservative")
+	}
+	for _, receiver := range []Type{
+		&ViewType{Elem: &BuiltinType{Name: "u32"}},
+		&GenericInstanceType{Name: "DynArray", Args: []Type{&BuiltinType{Name: "u32"}}},
+		&StructType{Name: "Container"},
+	} {
+		if !storeFlowUFCSMayAcceptDarrayReceiver(receiver) {
+			t.Fatalf("receiver representation %T may accept a DArray and must remain conservative", receiver)
+		}
 	}
 
 	// A same-spelled method on an unverified receiver stays on the conservative path.

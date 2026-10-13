@@ -611,7 +611,24 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 		}
 		a.storeFlowSummaries[m] = s // nil when it did not settle
 	}
-	return a.storeFlowSummaries[decl]
+	summary := a.storeFlowSummaries[decl]
+	if storeFlowTraceSummaryName(decl.Name) {
+		params := make([]string, len(decl.Params))
+		for i, param := range decl.Params {
+			params[i] = param.Name
+		}
+		if summary == nil {
+			fmt.Printf("[storeflow-summary-nil] fn=%s params=%v typeParams=%d genericParams=%d\n", decl.Name, params, len(decl.TypeParams), len(decl.GenericParams))
+		} else {
+			fmt.Printf("[storeflow-summary] fn=%s params=%v reach=%v written=%v ret=%v\n", decl.Name, params, summary.reach, summary.written, summary.retConn)
+		}
+	}
+	return summary
+}
+
+func storeFlowTraceSummaryName(name string) bool {
+	return strings.HasPrefix(name, "emit_expression") || strings.HasPrefix(name, "expression_type") ||
+		strings.HasPrefix(name, "infer_generic_args") || name == "infer_generic_error_family" || name == "lookup_type"
 }
 
 // invalidateStoreFlowSummaries drops results that predate newly recorded task-group
@@ -786,6 +803,19 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		c.pu.find(param.Name)
 	}
 	a.storeFlowNodes(reflect.ValueOf(decl.Body), c, map[uintptr]bool{})
+	if storeFlowTraceSummaryName(decl.Name) {
+		paramIndex := map[string]int{}
+		for i, param := range decl.Params {
+			paramIndex[param.Name] = i
+		}
+		for _, edge := range c.edges {
+			src, srcOK := paramIndex[storeFlowBaseName(edge[0])]
+			dst, dstOK := paramIndex[storeFlowBaseName(edge[1])]
+			if srcOK || dstOK {
+				fmt.Printf("[storeflow-param-edge] fn=%s src=%d:%s dst=%d:%s\n", decl.Name, src, edge[0], dst, edge[1])
+			}
+		}
+	}
 	anchors := map[string][]string{}
 	for _, e := range c.edges {
 		root := c.storeFlowKey(e[0])
@@ -1016,6 +1046,20 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 	for k := len(calls) - 1; k >= 0; k-- {
 		if retNames, ok := a.applyCallStoreFlow(calls[k], c, handled); ok {
 			handled[calls[k]] = retNames
+		}
+	}
+	traceOwner := ""
+	if a.storeFlowCurrentDecl != nil && storeFlowTraceSummaryName(a.storeFlowCurrentDecl.Name) {
+		traceOwner = a.storeFlowCurrentDecl.Name
+	}
+	if traceOwner != "" {
+		for _, call := range calls {
+			if _, ok := handled[call]; !ok {
+				fmt.Printf("[storeflow-unhandled-call] owner=%s stmt=%T pos=%s func=%T args=%d\n", traceOwner, stmt.Interface(), call.Pos(), call.Func, len(returnBorrowCallArgs(call)))
+			}
+		}
+		if len(handled) == 0 && len(names) > 1 {
+			fmt.Printf("[storeflow-fallback-link] owner=%s stmt=%T pos=%s names=%v calls=%d\n", traceOwner, stmt.Interface(), stmt.Interface().(ast.Stmt).Pos(), names, len(calls))
 		}
 	}
 	if assign, ok := stmt.Interface().(*ast.AssignStmt); ok && assign != nil && a.storeFlowPointerFreePlace(assign.Target) {
@@ -1701,6 +1745,18 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 			// that pair instead.
 			ij := summary.writtenParam(j) && summary.reaches(i, j)
 			ji := summary.writtenParam(i) && summary.reaches(j, i)
+			traceOwner := ""
+			if a.storeFlowCurrentDecl != nil {
+				for _, name := range []string{"emit_propagating_try_value", "error_callee_value_type", "emit_error_union_call_value"} {
+					if strings.HasSuffix(a.storeFlowCurrentDecl.Name, name) {
+						traceOwner = name
+						break
+					}
+				}
+			}
+			if traceOwner != "" && (ij || ji) {
+				fmt.Printf("[storeflow-inner-edge] owner=%s pos=%s callee=%s %d:%v->%d:%v ij=%t ji=%t\n", traceOwner, call.Pos(), callee.Name, i, groupNames[i], j, groupNames[j], ij, ji)
+			}
 			switch {
 			case ij && ji:
 				c.link(append(append([]string{}, groupNames[i]...), groupNames[j]...))
@@ -2025,20 +2081,33 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowthReceiver(fn *ast.FieldExpr) bool 
 			return false
 		}
 		ft, ok := sym.Type.(*FuncType)
-		if !ok || ft == nil || len(ft.Params) == 0 {
+		if !ok || ft == nil {
 			return false
 		}
-		recv := ft.Params[0]
-		if ref, isRef := recv.(*RefType); isRef && ref != nil {
-			recv = ref.Elem
+		if len(ft.Params) == 0 {
+			continue
 		}
-		switch recv.(type) {
-		case *StructType, *GenericInstanceType:
-		default:
+		if storeFlowUFCSMayAcceptDarrayReceiver(ft.Params[0]) {
 			return false
 		}
 	}
 	return true
+}
+
+// storeFlowUFCSMayAcceptDarrayReceiver reports whether a visible UFCS receiver could match a
+// builtin DArray. An unrelated scalar or nominal receiver must not make `.push` unresolved;
+// receiver type parameters and DArray formals remain conservative because they can accept it.
+func storeFlowUFCSMayAcceptDarrayReceiver(t Type) bool {
+	switch receiver := t.(type) {
+	case *RefType:
+		return receiver != nil && storeFlowUFCSMayAcceptDarrayReceiver(receiver.Elem)
+	case *AggregateStateType:
+		return receiver != nil && storeFlowUFCSMayAcceptDarrayReceiver(receiver.Base)
+	case *DArrayType, *ViewType, *TypeParamType, *StructType, *GenericInstanceType:
+		return true
+	default:
+		return false
+	}
 }
 
 // storeFlowBuiltinDarrayGrowth reports a call of a builtin darray growth method on a local or
@@ -2179,28 +2248,6 @@ func (a *Analyzer) callArgsKeptApart(call *ast.CallExpr, index, other int) bool 
 // callArgNeverReaches reports that the callee is summarized and the contents of argument other
 // never reach parameter index (directed: other is never stored into index).
 func (a *Analyzer) callArgNeverReaches(call *ast.CallExpr, other, index int) bool {
-	pos := call.Pos()
-	probe := strings.Contains(pos.File, "codegen_stmt_assign_place.elisa") && (pos.Line == 260 || pos.Line == 261 || pos.Line == 581 || pos.Line == 586 || pos.Line == 587)
-	if probe {
-		decl, resolved := a.resolveReadOnlyScanCallee(call)
-		fits, arena := false, false
-		var summary *storeFlowSummary
-		if resolved && decl != nil {
-			fits = storeFlowCallFitsParams(decl, call)
-			arena = funcHasArenaParam(decl)
-			if fits && !arena {
-				summary = a.storeFlowSummaryFor(decl)
-			}
-		}
-		calleeName := "<nil>"
-		if decl != nil {
-			calleeName = decl.Name
-		}
-		fmt.Printf("[storeflow-probe] %s callee=%s resolved=%t fits=%t arena=%t summaryNil=%t pair=%d->%d\n", pos, calleeName, resolved, fits, arena, summary == nil, other, index)
-		if summary != nil {
-			fmt.Printf("[storeflow-probe] reaches=%v written=%v ret=%v\n", summary.reach, summary.written, summary.retConn)
-		}
-	}
 	decl, ok := a.resolveReadOnlyScanCallee(call)
 	if !ok || decl == nil || !storeFlowCallFitsParams(decl, call) || funcHasArenaParam(decl) {
 		return false
