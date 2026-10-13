@@ -653,26 +653,131 @@ def darray_sift_down[T](da: mutable darray[T]&, less: fn(T, T) -> bool, start: u
                 da[largest] <- tmp
                 root <- largest
 
-# In-place sort ascending by `less` (std::sort). O(n log n) heapsort, no allocation.
-def sort[T](da: mutable darray[T]&, less: fn(T, T) -> bool):
+# Internal: heapsort of da[lo..hi), the introsort fallback when partitioning degenerates.
+def darray_sift_down_at[T](da: mutable darray[T]&, less: fn(T, T) -> bool, base: usize, start: usize, end: usize):
     can Abort.Panic:
-        n: usize = da.count
+        root: mutable usize = start
+        trusted Unsafe.AssumeProgress:
+            while true:
+                child: usize = root * 2 + 1
+                return if child >= end
+                largest: mutable usize = root
+                largest <- child if less(da[base + largest], da[base + child])
+                largest <- child + 1 if child + 1 < end and less(da[base + largest], da[base + child + 1])
+                return if largest == root
+                tmp: T = da[base + root]
+                da[base + root] <- da[base + largest]
+                da[base + largest] <- tmp
+                root <- largest
+
+def darray_heapsort_range[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo: usize, hi: usize):
+    can Abort.Panic:
+        n: usize = hi - lo
         return if n < 2
         i: mutable usize = n / 2
         trusted Unsafe.AssumeProgress:
             while i > 0:
                 i <- i - 1
-                trusted Unsafe.UncheckedIndex:
-                    darray_sift_down[T](da, less, i, n)
+                darray_sift_down_at[T](da, less, lo, i, n)
         e: mutable usize = n
         trusted Unsafe.AssumeProgress:
             while e > 1:
                 e <- e - 1
-                tmp: T = da[0]
-                da[0] <- da[e]
-                da[e] <- tmp
-                trusted Unsafe.UncheckedIndex:
-                    darray_sift_down[T](da, less, 0, e)
+                tmp: T = da[lo]
+                da[lo] <- da[lo + e]
+                da[lo + e] <- tmp
+                darray_sift_down_at[T](da, less, lo, 0, e)
+
+# Internal: introsort of da[lo..hi) down to runs of at most 16 elements, which the final
+# insertion pass in `sort` finishes. Median-of-three pivot; branchless Lomuto partition;
+# recursion on the smaller side only, so the stack is O(log n); heapsort once `depth` runs
+# out, so the worst case stays O(n log n).
+def darray_introsort[T](da: mutable darray[T]&, less: fn(T, T) -> bool, lo0: usize, hi0: usize, depth0: u32):
+    can Abort.Panic:
+        lo: mutable usize = lo0
+        hi: mutable usize = hi0
+        depth: mutable u32 = depth0
+        trusted Unsafe.AssumeProgress:
+            while hi - lo > 16:
+                if depth == 0:
+                    darray_heapsort_range[T](da, less, lo, hi)
+                    return
+                depth <- depth - 1
+                mid: usize = lo + (hi - lo) / 2
+                last: usize = hi - 1
+                if less(da[mid], da[lo]):
+                    t0: T = da[mid]
+                    da[mid] <- da[lo]
+                    da[lo] <- t0
+                if less(da[last], da[mid]):
+                    t1: T = da[mid]
+                    da[mid] <- da[last]
+                    da[last] <- t1
+                    if less(da[mid], da[lo]):
+                        t2: T = da[mid]
+                        da[mid] <- da[lo]
+                        da[lo] <- t2
+                # Branchless Lomuto partition (pdqsort/ipnsort style): the pivot sits at lo,
+                # every element is swapped with the store slot and the store index advances by
+                # the comparison result, so there is no data-dependent branch to mispredict.
+                pivot: T = da[mid]
+                da[mid] <- da[lo]
+                da[lo] <- pivot
+                store: mutable usize = lo + 1
+                k: mutable usize = lo + 1
+                while k < hi:
+                    v: T = da[k]
+                    da[k] <- da[store]
+                    da[store] <- v
+                    store <- store + (1 if less(v, pivot) else 0)
+                    k <- k + 1
+                split: usize = store - 1
+                da[lo] <- da[split]
+                da[split] <- pivot
+                # [lo, split) < pivot, da[split] == pivot, [split + 1, hi) >= pivot.
+                right: mutable usize = split + 1
+                if split == lo:
+                    # Nothing was less than the pivot: gather the pivot's duplicates right after
+                    # it and skip them, so runs of equal keys cannot degrade the partition.
+                    k <- split + 1
+                    while k < hi:
+                        w: T = da[k]
+                        da[k] <- da[right]
+                        da[right] <- w
+                        right <- right + (0 if less(pivot, w) else 1)
+                        k <- k + 1
+                if split - lo < hi - right:
+                    darray_introsort[T](da, less, lo, split, depth)
+                    lo <- right
+                else:
+                    darray_introsort[T](da, less, right, hi, depth)
+                    hi <- split
+
+# In-place sort ascending by `less` (std::sort): introsort -- quicksort with median-of-three
+# pivots, heapsort past 2*log2(n) partition levels, insertion sort for the final short runs.
+# O(n log n) worst case, no allocation, not stable. Measured on LangArena Sort::Self (400k i32):
+# the previous plain heapsort was 6x Rust's slice::sort, cache misses in the sift-down.
+def sort[T](da: mutable darray[T]&, less: fn(T, T) -> bool):
+    can Abort.Panic:
+        n: usize = da.count
+        return if n < 2
+        depth: mutable u32 = 0
+        m: mutable usize = n
+        trusted Unsafe.AssumeProgress:
+            while m > 1:
+                m <- m / 2
+                depth <- depth + 2
+        darray_introsort[T](da, less, 0, n, depth)
+        i: mutable usize = 1
+        trusted Unsafe.AssumeProgress:
+            while i < n:
+                x: T = da[i]
+                j: mutable usize = i
+                while j > 0 and less(x, da[j - 1]):
+                    da[j] <- da[j - 1]
+                    j <- j - 1
+                da[j] <- x
+                i <- i + 1
 
 # Reverse the elements in place (std::reverse).
 def reverse[T](da: mutable darray[T]&):
