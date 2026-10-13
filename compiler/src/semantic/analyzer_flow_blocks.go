@@ -854,7 +854,7 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 			out[name] = typ
 		}
 	case *ast.MatchVariantPattern:
-		switch variantBase := expected.(type) {
+		switch variantBase := conditionVariantPatternBase(expected).(type) {
 		case *EnumType:
 			variant, ok := variantBase.Variant(p.Variant)
 			if !ok {
@@ -1222,6 +1222,19 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 	a.bindConditionStructPatternLocals(scope, pattern, valueType, valueExpr)
 }
 
+// conditionVariantPatternBase is the enum a variant `is` pattern destructures against.
+// Inside a packed enum's match arm the scrutinee is narrowed to that arm's variant view
+// (packedview[E.Pair]); a nested `e is E.Two(x, _)` still names E's variants, so its
+// payload binders resolve against the view's enum instead of silently binding nothing
+// ("undefined identifier" at every use of x). The backend lowers the view to its enum
+// handle before the tag test.
+func conditionVariantPatternBase(expected Type) Type {
+	if view, ok := expected.(*PackedVariantViewType); ok && view != nil && view.Enum != nil {
+		return view.Enum
+	}
+	return expected
+}
+
 func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.MatchPattern, expected Type, valueExpr ast.Expr) {
 	if a == nil || scope == nil || pattern == nil || expected == nil {
 		return
@@ -1289,7 +1302,7 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 		}
 		a.bindConditionStructPatternLocals(scope, p.Options[0], expected, valueExpr)
 	case *ast.MatchVariantPattern:
-		switch variantBase := expected.(type) {
+		switch variantBase := conditionVariantPatternBase(expected).(type) {
 		case *EnumType:
 			variant, ok := variantBase.Variant(p.Variant)
 			if !ok {

@@ -484,6 +484,23 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchVariantPattern:
+		// A scrutinee narrowed to one variant's packed view (inside a packed enum's match
+		// arm) is still a value of that enum: `if e is E.Other(x, _)` tests the handle's
+		// tag like any enum value, so lower the view back to its enum handle first.
+		if viewType, ok := actualType.(*semantic.PackedVariantViewType); ok && viewType != nil && viewType.Enum != nil {
+			// The view carries its own store; prefer it over any enclosing lookup so the tag
+			// and payload decode against the store the handle belongs to.
+			view, err := s.unpackPackedVariantViewValue(actualValue, viewType)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			if view.store.value != nil {
+				viewStore := view.store
+				store = &viewStore
+			}
+			actualValue, decodedActualValue, actualType = view.handle, nil, viewType.Enum
+			precomputedTagValue = nil
+		}
 		// docs/122 §5.4: bind the whole matched value alongside the destructure.
 		if err := s.emitPatternAsBinding(p.As, actualValue, actualType, originExpr); err != nil {
 			return nil, packedPayloadValueCache{}, err
