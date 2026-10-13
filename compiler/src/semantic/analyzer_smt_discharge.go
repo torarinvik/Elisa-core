@@ -2883,7 +2883,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			}
 		}
 		if c, ok := tr.a.constIntValue(n); ok {
-			return smtInt(c), true
+			return tr.constIntTerm(n, c), true
 		}
 		// A u64-range literal (e.g. 0xFFFFFFFFFFFFFFFF) does not fit int64 so constIntValue declines; emit
 		// its exact non-negative value as an SMT Int so unsigned upper-bound preconditions translate.
@@ -2893,7 +2893,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		return "", false
 	case *ast.Ident:
 		if value, constant := tr.a.resolvedPrimitiveConstant(n); constant && value.Kind == ConstInt {
-			return smtInt(value.Int), true
+			return tr.constIntTerm(n, value.Int), true
 		}
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
@@ -2907,7 +2907,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			return smtInt(c), true
 		}
 		if c, ok := tr.a.constIntValue(n); ok {
-			return smtInt(c), true
+			return tr.constIntTerm(n, c), true
 		}
 		if _, ok := immutableIntIdentName(tr.a, tr.a.currentScope, n); ok {
 			name := smtVar(n.Name)
@@ -2985,7 +2985,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		// Constant enum members retain their exact backing value, not an unconstrained projection.
 		if c, ok := tr.a.constIntValue(n); ok {
-			return smtInt(c), true
+			return tr.constIntTerm(n, c), true
 		}
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
@@ -3011,7 +3011,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// rather than introducing an opaque length symbol.
 		if n.Field == "count" || n.Field == "len" {
 			if c, ok := tr.a.constIntValue(n); ok {
-				return smtInt(c), true
+				return tr.constIntTerm(n, c), true
 			}
 			// The scope-keyed view length names the CURRENT function's binding; a name the env binds
 			// (a substituted callee formal) must resolve through the env instead, or a callee's
@@ -5469,15 +5469,12 @@ func (tr *smtTranslator) factPreamble() string {
 	for _, name := range names {
 		v := smtVar(name)
 		if r, ok := tr.a.lookupRangeFact(name); ok {
-			if r.loKnown {
-				b.WriteString("(assert (>= " + v + " " + smtInt(r.lo) + "))\n")
-			}
-			if r.hiKnown {
-				b.WriteString("(assert (<= " + v + " " + smtInt(r.hi) + "))\n")
-			}
+			b.WriteString(strings.Join(tr.rangeBoundHypotheses(name, r), ""))
 		}
 		if c, ok := tr.a.writtenConstInt(name); ok {
-			b.WriteString("(assert (= " + v + " " + smtInt(c) + "))\n")
+			if term, ok := tr.varConstTerm(name, c); ok {
+				b.WriteString("(assert (= " + v + " " + term + "))\n")
+			}
 		}
 		if tr.nonNegDecls[name] {
 			b.WriteString("(assert (>= " + v + " 0))\n")
@@ -5970,4 +5967,94 @@ func (tr *smtTranslator) calleeFreeProjection(expr ast.Expr, env map[string]stri
 			return false
 		}
 	}
+}
+
+// constIntTerm renders a folded integer constant at its mathematical value. The constant folder
+// stores values as int64 bit patterns, so an unsigned constant at or above 2^63 (a u64 FNV offset)
+// arrives negative; emitting it as-is contradicts the unsigned range facts and lets any obligation
+// "prove" vacuously. Reinterpret negative values of an unsigned-typed expression modulo 2^width.
+func (tr *smtTranslator) constIntTerm(expr ast.Expr, c int64) string {
+	if c >= 0 || tr == nil || tr.a == nil {
+		return smtInt(c)
+	}
+	t := tr.a.exprTypes[expr]
+	if t == nil {
+		if id, ok := expr.(*ast.Ident); ok {
+			if name, resolved := tr.a.resolvedValueNames[id]; resolved && tr.a.globalScope != nil {
+				if sym, found := tr.a.globalScope.Lookup(name); found && sym != nil {
+					t = sym.Type
+				}
+			} else if tr.a.currentScope != nil {
+				if sym, found := tr.a.currentScope.Lookup(id.Name); found && sym != nil {
+					t = sym.Type
+				}
+			}
+		}
+	}
+	signed, bits, ok := smtIntWidthSign(t)
+	if !ok || signed {
+		return smtInt(c)
+	}
+	v := new(big.Int).SetInt64(c)
+	v.Add(v, new(big.Int).Lsh(big.NewInt(1), uint(bits)))
+	return v.String()
+}
+
+// unsignedVarBits reports the width of an in-scope unsigned integer variable.
+func (tr *smtTranslator) unsignedVarBits(name string) (int, bool) {
+	if tr == nil || tr.a == nil || tr.a.currentScope == nil {
+		return 0, false
+	}
+	sym, ok := tr.a.currentScope.Lookup(name)
+	if !ok || sym == nil {
+		return 0, false
+	}
+	signed, bits, ok := smtIntWidthSign(sym.Type)
+	return bits, ok && !signed
+}
+
+// varConstTerm renders an int64-folded constant known for variable `name` at its mathematical value.
+// The folder keeps int64 bit patterns, so a u64 value >= 2^63 arrives negative; asserting it verbatim
+// contradicts the variable's unsigned range and makes every query vacuously provable.
+func (tr *smtTranslator) varConstTerm(name string, c int64) (string, bool) {
+	if c >= 0 {
+		return smtInt(c), true
+	}
+	bits, unsigned := tr.unsignedVarBits(name)
+	if !unsigned {
+		return smtInt(c), true
+	}
+	if bits < 64 {
+		return "", false // a negative pattern for a narrower unsigned value is not a value we can trust
+	}
+	v := new(big.Int).SetInt64(c)
+	v.Add(v, new(big.Int).Lsh(big.NewInt(1), uint(bits)))
+	return v.String(), true
+}
+
+// rangeBoundHypotheses emits a range fact's bounds in the variable's mathematical domain. For an
+// unsigned variable an int64 interval with negative ends is a bit-pattern interval: both ends negative
+// maps to [lo+2^64, hi+2^64]; an interval straddling zero wraps and only its non-negative part's
+// complement is known, so that fact is dropped (sound: fewer hypotheses).
+func (tr *smtTranslator) rangeBoundHypotheses(name string, r numRange) []string {
+	v := smtVar(name)
+	var out []string
+	if _, unsigned := tr.unsignedVarBits(name); unsigned && ((r.loKnown && r.lo < 0) || (r.hiKnown && r.hi < 0)) {
+		if !(r.loKnown && r.hiKnown && r.lo < 0 && r.hi < 0) {
+			return nil
+		}
+		lo, okLo := tr.varConstTerm(name, r.lo)
+		hi, okHi := tr.varConstTerm(name, r.hi)
+		if !okLo || !okHi {
+			return nil
+		}
+		return []string{"(assert (>= " + v + " " + lo + "))\n", "(assert (<= " + v + " " + hi + "))\n"}
+	}
+	if r.loKnown {
+		out = append(out, "(assert (>= "+v+" "+smtInt(r.lo)+"))\n")
+	}
+	if r.hiKnown {
+		out = append(out, "(assert (<= "+v+" "+smtInt(r.hi)+"))\n")
+	}
+	return out
 }

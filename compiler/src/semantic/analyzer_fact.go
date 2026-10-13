@@ -45,16 +45,8 @@ func (f rangeHypothesisFact) hypotheses(tr *smtTranslator) []string {
 	if tr == nil || (!f.r.loKnown && !f.r.hiKnown) {
 		return nil
 	}
-	v := smtVar(f.name)
 	tr.decls[f.name] = true
-	var out []string
-	if f.r.loKnown {
-		out = append(out, "(assert (>= "+v+" "+smtInt(f.r.lo)+"))\n")
-	}
-	if f.r.hiKnown {
-		out = append(out, "(assert (<= "+v+" "+smtInt(f.r.hi)+"))\n")
-	}
-	return out
+	return tr.rangeBoundHypotheses(f.name, f.r)
 }
 
 func (f rangeHypothesisFact) deps() map[string]bool {
