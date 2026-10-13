@@ -129,9 +129,13 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 		}
 		return true
 	}
-	// An extend source is modelled only when no loop enclosing the extend grows it again:
-	// otherwise a later iteration copies elements the state at the call has not seen yet.
+	// An extend source is modelled directly when no loop enclosing the extend grows it again.
+	// When one does, a later iteration copies elements the state at the call has not seen yet,
+	// so its state at the call is only an ASSUMPTION that every later growth of the source in
+	// that loop must preserve (checked like an in-loop element read; see
+	// region_local_container_loop_reads.go).
 	extendSources := map[ast.Expr]bool{}
+	var loopExtendSources []localContainerExtendSource
 	for _, src := range scan.extendSources {
 		ok := !scan.ineligible[src.name]
 		for _, loop := range src.loops {
@@ -142,8 +146,8 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 		}
 		if ok {
 			extendSources[src.call.Args[0]] = true
-		} else {
-			scan.ineligible[src.name] = true
+		} else if !scan.ineligible[src.name] {
+			loopExtendSources = append(loopExtendSources, src)
 		}
 	}
 	a.currentElementExtendSources = extendSources
@@ -166,9 +170,21 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 					break
 				}
 				if loop == nil {
-					loop = &elementLoopInfo{reads: map[*ast.IndexExpr]ast.Node{}, modLoops: scan.modLoops}
+					loop = &elementLoopInfo{reads: map[ast.Node]ast.Node{}, modLoops: scan.modLoops}
 				}
 				loop.reads[read.node] = l
+				break
+			}
+		}
+	}
+	for _, src := range loopExtendSources {
+		for _, l := range src.loops {
+			if scan.pushedIn[l][src.name] {
+				if loop == nil {
+					loop = &elementLoopInfo{reads: map[ast.Node]ast.Node{}, modLoops: scan.modLoops}
+				}
+				loop.reads[src.call.Args[0]] = l
+				extendSources[src.call.Args[0]] = true
 				break
 			}
 		}
@@ -773,6 +789,9 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 			// buffer, which is never retained. An untracked local source keeps the
 			// conservative fallback below.
 			if sourceState, tracked := a.currentElementStates[sourceSym]; tracked {
+				if a.currentElementLoop != nil && a.currentElementLoop.reads[arg] != nil {
+					a.currentElementLoop.assume(sourceSym, sourceState, arg)
+				}
 				merged, _ := mergeRegionRefStates(existing, sourceState)
 				a.checkElementLoopAssumptions(sym, arg, merged, true)
 				a.currentElementStates[sym] = merged

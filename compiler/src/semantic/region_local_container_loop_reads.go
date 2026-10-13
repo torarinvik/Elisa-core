@@ -19,7 +19,7 @@ import (
 type elementLoopInfo struct {
 	// reads maps an in-loop read to the outermost enclosing loop that also pushes into its
 	// container; modLoops maps each element-adding site to the loops enclosing it.
-	reads       map[*ast.IndexExpr]ast.Node
+	reads       map[ast.Node]ast.Node
 	modLoops    map[ast.Node][]ast.Node
 	assumptions []elementLoopAssumption
 }
@@ -27,12 +27,12 @@ type elementLoopInfo struct {
 type elementLoopAssumption struct {
 	sym      *Symbol
 	state    regionRefState
-	read     *ast.IndexExpr
+	read     ast.Node
 	loop     ast.Node
 	reported bool
 }
 
-func (info *elementLoopInfo) assume(sym *Symbol, state regionRefState, read *ast.IndexExpr) {
+func (info *elementLoopInfo) assume(sym *Symbol, state regionRefState, read ast.Node) {
 	info.assumptions = append(info.assumptions, elementLoopAssumption{sym: sym, state: cloneRegionRefState(state), read: read, loop: info.reads[read]})
 }
 

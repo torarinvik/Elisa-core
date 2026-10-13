@@ -46,7 +46,7 @@ def main() -> i32:
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, name, src, AnalyzeOptions{})
 	for _, e := range result.Errors() {
-		if strings.Contains(e, "into longer-lived region") {
+		if strings.Contains(e, "into longer-lived region") || strings.Contains(e, "inside a loop may be read") {
 			return
 		}
 	}
