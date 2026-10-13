@@ -110,7 +110,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 		return result
 	}
-	indexCheckType := indexType
+	// A proven non-null scalar reference (`cursor: mutable usize&`) reads as its referent in index
+	// position, exactly as it does as an arithmetic/comparison operand (valueContextOperandType).
+	indexCheckType := valueContextOperandType(indexType)
 	// P2: an associated-type-typed index (`D.Field` from a generic protocol call) is checked against
 	// the concrete base its impls bind, so an integral associated type indexes normally.
 	if proj, ok := indexCheckType.(*AssociatedTypeProjection); ok {
