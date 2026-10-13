@@ -814,10 +814,13 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 	free := map[string]bool{}
 	bound := map[string]int{}
 	supported := true
+	patternSupported := true
 	var walk func(ast.Expr)
 	var walkPattern func(ast.MatchPattern)
 	walkPattern = func(pattern ast.MatchPattern) {
 		switch p := pattern.(type) {
+		case *ast.MatchWildcardPattern, *ast.MatchBindPattern, *ast.MatchStringLiteralPattern, *ast.MatchRestPattern:
+			// These patterns contain no expression reads; binders are scoped by the arm below.
 		case *ast.MatchLiteralPattern:
 			walk(p.Value)
 		case *ast.MatchRangePattern:
@@ -843,6 +846,8 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 			for _, arg := range p.Args {
 				walkPattern(arg.Pattern)
 			}
+		default:
+			patternSupported = false
 		}
 	}
 	walk = func(e ast.Expr) {
@@ -907,11 +912,24 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 			walk(n.Store)
 			for _, arm := range n.Arms {
 				walkPattern(arm.Pattern)
+				binders := map[string]bool{}
+				collectSMTMatchBinders(arm.Pattern, binders, map[string]bool{})
+				for name := range binders {
+					bound[name]++
+				}
 				walk(arm.Guard)
-				// Scalar match lowering accepts exactly one expression statement per arm.
-				for _, stmt := range arm.Body {
-					if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
-						walk(exprStmt.Expr)
+				// Scalar SMT match lowering accepts exactly one expression statement per arm.
+				if len(arm.Body) != 1 {
+					supported = false
+				} else if exprStmt, ok := arm.Body[0].(*ast.ExprStmt); ok {
+					walk(exprStmt.Expr)
+				} else {
+					supported = false
+				}
+				for name := range binders {
+					bound[name]--
+					if bound[name] == 0 {
+						delete(bound, name)
 					}
 				}
 			}
@@ -954,7 +972,7 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 		}
 	}
 	walk(expr)
-	return free, supported
+	return free, supported && patternSupported
 }
 
 // trRegisterSubstCEExprs registers env entries whose SMT value is a compound expression (not a plain
