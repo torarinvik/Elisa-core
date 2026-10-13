@@ -1234,7 +1234,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.ghostReadAllowed++
 			a.ghostReadSeen = false
 			defer func() { a.ghostReadAllowed-- }()
+			effectStart := len(a.currentFunctionUsedPermissionRefs)
 			condType := a.analyzeCondExpr(cond)
+			if effectStart <= len(a.currentFunctionUsedPermissionRefs) {
+				a.checkAssertConditionPurity(n.Pos(), cond, a.currentFunctionUsedPermissionRefs[effectStart:])
+			}
 			if a.ghostReadSeen {
 				a.markGhostContract(n.Expr)
 			}
