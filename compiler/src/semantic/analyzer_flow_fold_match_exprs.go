@@ -267,8 +267,72 @@ func (a *Analyzer) analyzeContextualMatchExpr(expr *ast.MatchExpr, expected Type
 			return contextualExpected
 		}
 	}
+	if adapted, ok := a.adaptStringLiteralTupleArms(expr, result, expected); ok {
+		a.recordAnalyzedExprType(expr, adapted)
+		return adapted
+	}
 	a.recordAnalyzedExprType(expr, result)
 	return result
+}
+
+// adaptStringLiteralTupleArms is the tuple-yielding form of the all-literal adaptation:
+// `conversion: (prefix: sview, suffix: sview) = when t: "a" -> ("x", "y"); _ -> ("", "")`.
+// Every arm yields a TupleExpr, so each `static u8&` field is a column of literal trees
+// with no view arm for mergeMatchExprArmTypes to adapt toward; the expected tuple's
+// string-carrier field supplies the target. A field is adapted only when EVERY arm's
+// element at that position is a literal tree; other fields keep their merged type.
+func (a *Analyzer) adaptStringLiteralTupleArms(expr *ast.MatchExpr, result Type, expected Type) (Type, bool) {
+	resultTuple, ok := result.(*TupleType)
+	if !ok || resultTuple == nil || expected == nil || len(expr.Arms) == 0 {
+		return nil, false
+	}
+	expectedTuple, ok := StripAggregateStateType(expected).(*TupleType)
+	if !ok || expectedTuple == nil || len(expectedTuple.Fields) != len(resultTuple.Fields) {
+		return nil, false
+	}
+	tails := make([]*ast.TupleExpr, len(expr.Arms))
+	for i, arm := range expr.Arms {
+		tuple, ok := matchArmTailExpr(arm.Body).(*ast.TupleExpr)
+		if !ok || tuple == nil || len(tuple.Elems) != len(resultTuple.Fields) {
+			return nil, false
+		}
+		tails[i] = tuple
+	}
+	fields := make([]TupleField, len(resultTuple.Fields))
+	changed := false
+	for i, field := range resultTuple.Fields {
+		fields[i] = field
+		if !isStaticStringLiteralRefType(field.Type) {
+			continue
+		}
+		target, ok := contextualStringLiteralType(expectedTuple.Fields[i].Type)
+		if !ok {
+			continue
+		}
+		allLiteral := true
+		for _, tuple := range tails {
+			if !isStringLiteralTree(tuple.Elems[i]) {
+				allLiteral = false
+				break
+			}
+		}
+		if !allLiteral {
+			continue
+		}
+		for _, tuple := range tails {
+			a.recordStringLiteralTreeType(tuple.Elems[i], target)
+		}
+		fields[i] = TupleField{Name: field.Name, Type: target}
+		changed = true
+	}
+	if !changed {
+		return nil, false
+	}
+	adapted := &TupleType{Fields: fields}
+	for _, tuple := range tails {
+		a.recordAnalyzedExprType(tuple, adapted)
+	}
+	return adapted, true
 }
 
 // matchArmTailExpr returns an arm body's tail value expression, or nil.

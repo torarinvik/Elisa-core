@@ -34,10 +34,30 @@ def typed_binding_leaves() -> void:
             _ -> "s"
         if k != "q":
             panic("typed binding wrong")
+
+def wrap_of(t: sview) -> (prefix: sview, suffix: sview) can[Abort.Panic]:
+    conversion: (prefix: sview, suffix: sview) = when t:
+        "bool" -> ("!!(", ")")
+        "i8" -> ("((", " << 24) >> 24)")
+        _ -> ("", "")
+    return conversion
+
+@test
+def tuple_literal_columns() -> void:
+    can Abort.Panic:
+        b: (prefix: sview, suffix: sview) = wrap_of("bool")
+        if b.prefix != "!!(" or b.suffix != ")":
+            panic("bool row wrong")
+        i: (prefix: sview, suffix: sview) = wrap_of("i8")
+        if i.prefix.len != 2 or i.suffix != " << 24) >> 24)":
+            panic("i8 row wrong")
+        d: (prefix: sview, suffix: sview) = wrap_of("x")
+        if d.prefix.len != 0 or d.suffix.len != 0:
+            panic("default row wrong")
 `
 
 func TestWhenTernaryStringLiteralArms(t *testing.T) {
 	t.Parallel()
 	exit, stdout, stderr := runStressProgram(t, "when_ternary_string_literal", whenTernaryStringLiteralBody)
-	assertAllPassed(t, exit, stdout, stderr, "return_position_leaves", "typed_binding_leaves")
+	assertAllPassed(t, exit, stdout, stderr, "return_position_leaves", "typed_binding_leaves", "tuple_literal_columns")
 }
