@@ -276,6 +276,8 @@ type cliOptions struct {
 	progressStrict      bool
 	requiresReport      bool
 	flowLintMode        semantic.FlowLintMode
+	lto                 backend.LTOMode
+	targetCPU           string
 }
 
 // loadOptimizationProfile reads the intentionally small, compiler-facing profile contract.
@@ -399,6 +401,37 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Force the debug index-bounds watchdog on regardless of optimization level.
 			// The watchdog gate reads this env var at codegen time (build is in-process).
 			_ = os.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
+		case arg == "-flto" || strings.HasPrefix(arg, "-flto=") || arg == "-fno-lto":
+			// Link-time optimization. `-flto` = `-flto=full` (whole-program, one codegen
+			// unit at link: Rust's `lto = "fat"`); `-flto=thin` uses ThinLTO. Applies to
+			// linked native executables and makes `-emit obj` write an LTO bitcode object.
+			mode, ok := backend.LTOOff, true
+			if arg == "-flto" {
+				mode = backend.LTOFull
+			} else if arg != "-fno-lto" {
+				mode, ok = backend.ParseLTOMode(strings.TrimPrefix(arg, "-flto="))
+			}
+			if !ok {
+				return cliOptions{}, fmt.Errorf("unsupported %s (expected -flto, -flto=full or -flto=thin)", arg)
+			}
+			options.lto = mode
+		case strings.HasPrefix(arg, "-mcpu=") || arg == "-mcpu":
+			// Target CPU for code generation: `native` (the default for a host build),
+			// `generic` (portable), or an LLVM CPU name. Read at codegen time (in-process).
+			value := strings.TrimPrefix(arg, "-mcpu=")
+			if arg == "-mcpu" {
+				i++
+				if i >= len(args) {
+					return cliOptions{}, fmt.Errorf("missing value after -mcpu")
+				}
+				value = args[i]
+			}
+			value = backend.NormalizeTargetCPU(value)
+			if value == "" {
+				return cliOptions{}, fmt.Errorf("missing value after -mcpu")
+			}
+			options.targetCPU = value
+			_ = os.Setenv(backend.TargetCPUEnv, value)
 		case arg == "-ffast-math":
 			// Opt the whole program into full fast-math FP (reassociation etc.), unlocking the
 			// reassociated tree reduction for FP folds. Read at codegen time (in-process build).

@@ -519,7 +519,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			if options.runNative {
 				exeOutputPath = ""
 			}
-			exePath, cleanup, err := buildNativeExecutable(result, options.foreignFiles, options.linkFlags, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stderr)
+			exePath, cleanup, err := buildNativeExecutableWithLinkOptions(result, options.foreignFiles, options.linkFlags, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, nativeLinkOptions{LTO: options.lto}, stderr)
 			if err != nil {
 				cleanup()
 				fmt.Fprintf(stderr, "error: %s\n", err)
@@ -537,6 +537,16 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if err := ensureOutputParentExists(outputPathForEmit(program.filename, options.output, ".o")); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
+		}
+		if options.lto != backend.LTOOff {
+			// `-emit obj -flto`: an LTO object (LLVM bitcode), as `clang -flto -c` writes.
+			// Link it with an LLVM-LTO-capable linker driver of the same LLVM version
+			// (e.g. Homebrew `clang -flto -O3 prog.o ...`).
+			if err := writeLTOObjectFile(result, outputPathForEmit(program.filename, options.output, ".o"), effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, options.lto, stderr); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+			return 0
 		}
 		if err := backend.WriteLLVMObjectFileWithOptions(result, outputPathForEmit(program.filename, options.output, ".o"), backend.LLVMObjectEmitOptions{
 			OptLevel:      effectiveOptimizationLevel(options),

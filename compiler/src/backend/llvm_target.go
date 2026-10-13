@@ -253,13 +253,23 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	// exactly what clang does by default (e.g. `-target-cpu apple-m1` on Apple Silicon). A generic
 	// target leaves the scheduler model and post-baseline ISA features on the table. Cross builds keep
 	// the generic target so the output stays portable.
+	//
+	// `-mcpu=<name>` (ELISACORE_TARGET_CPU, see RequestedTargetCPU) overrides both defaults:
+	// `native` selects the host CPU and its features even for an explicit triple, `generic`
+	// gives a portable baseline for a native build, and any other value names an LLVM CPU
+	// (its default feature set is implied by the CPU name).
 	hostTuned := false
 	var cpu, features *C.char
-	if strings.TrimSpace(g.requestedTargetTriple) == "" {
+	requestedCPU := RequestedTargetCPU()
+	switch {
+	case requestedCPU == "native" || (requestedCPU == "" && strings.TrimSpace(g.requestedTargetTriple) == ""):
 		cpu = C.LLVMGetHostCPUName()
 		features = C.LLVMGetHostCPUFeatures()
 		hostTuned = true
-	} else {
+	case requestedCPU != "":
+		cpu = cString(requestedCPU)
+		features = cString("")
+	default:
 		cpu = cString("")
 		features = cString("")
 	}

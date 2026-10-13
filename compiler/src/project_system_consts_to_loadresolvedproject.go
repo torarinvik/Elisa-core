@@ -85,6 +85,8 @@ type projectCLIOptions struct {
 	progressStrict    bool
 	proofStrict       bool
 	enableSMT         bool
+	lto               backend.LTOMode
+	targetCPU         string
 }
 type projectDefinition struct {
 	Version               string                             `json:"version,omitempty"`
@@ -112,6 +114,8 @@ type projectTargetDefinition struct {
 	Opt                  string                 `json:"opt,omitempty"`
 	TargetTriple         string                 `json:"target-triple,omitempty"`
 	PackedABI            string                 `json:"packed-abi,omitempty"`
+	LTO                  string                 `json:"lto,omitempty"`
+	TargetCPU            string                 `json:"target-cpu,omitempty"`
 	Warnings             *projectTargetWarnings `json:"warnings,omitempty"`
 	Platforms            map[string]projectPlatformOverride `json:"platforms,omitempty"`
 }
@@ -183,6 +187,8 @@ type resolvedProjectTarget struct {
 	progressStrict        bool
 	proofStrict           bool
 	enableSMT             bool
+	lto                   backend.LTOMode
+	targetCPU             string
 }
 type projectResolver struct {
 	searchPaths []string
@@ -277,6 +283,11 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		progressStrict:    target.progressStrict,
 		proofStrict:       target.proofStrict,
 		enableSMT:         target.enableSMT,
+		lto:               target.lto,
+		targetCPU:         target.targetCPU,
+	}
+	if target.targetCPU != "" {
+		_ = os.Setenv(backend.TargetCPUEnv, target.targetCPU)
 	}
 
 	switch options.command {
@@ -442,6 +453,37 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			// Force the debug index-bounds watchdog on regardless of optimization level.
 			// The watchdog gate reads this env var at codegen time (build is in-process).
 			_ = os.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
+		case arg == "-flto" || strings.HasPrefix(arg, "-flto=") || arg == "-fno-lto":
+			// Link-time optimization. `-flto` = `-flto=full` (whole-program, one codegen
+			// unit at link: Rust's `lto = "fat"`); `-flto=thin` uses ThinLTO. Applies to
+			// linked native executables and makes `-emit obj` write an LTO bitcode object.
+			mode, ok := backend.LTOOff, true
+			if arg == "-flto" {
+				mode = backend.LTOFull
+			} else if arg != "-fno-lto" {
+				mode, ok = backend.ParseLTOMode(strings.TrimPrefix(arg, "-flto="))
+			}
+			if !ok {
+				return projectCLIOptions{}, fmt.Errorf("unsupported %s (expected -flto, -flto=full or -flto=thin)", arg)
+			}
+			options.lto = mode
+		case strings.HasPrefix(arg, "-mcpu=") || arg == "-mcpu":
+			// Target CPU for code generation: `native` (the default for a host build),
+			// `generic` (portable), or an LLVM CPU name. Read at codegen time (in-process).
+			value := strings.TrimPrefix(arg, "-mcpu=")
+			if arg == "-mcpu" {
+				i++
+				if i >= len(args) {
+					return projectCLIOptions{}, fmt.Errorf("missing value after -mcpu")
+				}
+				value = args[i]
+			}
+			value = backend.NormalizeTargetCPU(value)
+			if value == "" {
+				return projectCLIOptions{}, fmt.Errorf("missing value after -mcpu")
+			}
+			options.targetCPU = value
+			_ = os.Setenv(backend.TargetCPUEnv, value)
 		case arg == "-ffast-math":
 			// Opt the whole program into full fast-math FP (reassociation etc.), unlocking the
 			// reassociated tree reduction for FP folds. Read at codegen time (in-process build).

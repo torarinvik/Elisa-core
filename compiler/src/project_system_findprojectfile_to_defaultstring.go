@@ -175,6 +175,17 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	if err != nil {
 		return nil, fmt.Errorf("project target %q: %w", targetName, err)
 	}
+	lto, ok := backend.ParseLTOMode(definition.LTO)
+	if !ok {
+		return nil, fmt.Errorf("project target %q: unsupported lto %q (expected \"full\", \"thin\" or \"off\")", targetName, definition.LTO)
+	}
+	if options.lto != backend.LTOOff {
+		lto = options.lto
+	}
+	targetCPU := backend.NormalizeTargetCPU(definition.TargetCPU)
+	if options.targetCPU != "" {
+		targetCPU = options.targetCPU
+	}
 	warnings := projectTargetWarningsFor(definition)
 	return &resolvedProjectTarget{
 		project:               project,
@@ -202,6 +213,8 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		progressStrict:        warnings.Strict || warnings.Progress || options.progressStrict,
 		proofStrict:           options.proofStrict,
 		enableSMT:             options.enableSMT,
+		lto:                   lto,
+		targetCPU:             targetCPU,
 	}, nil
 }
 func projectTargetWarningsFor(definition projectTargetDefinition) projectTargetWarnings {
@@ -596,6 +609,12 @@ func runProjectView(project *resolvedProject, options projectCLIOptions, stdout 
 	}
 	if selected.hasOptLevel {
 		fmt.Fprintf(stdout, "Optimization: O%d\n", int(selected.optLevel))
+	}
+	if selected.lto != backend.LTOOff {
+		fmt.Fprintf(stdout, "LTO: %s\n", selected.lto)
+	}
+	if selected.targetCPU != "" {
+		fmt.Fprintf(stdout, "Target CPU: %s\n", selected.targetCPU)
 	}
 	fmt.Fprintf(stdout, "Warning policy: strict=%s perf=%s concurrency=%s\n", onOffString(selected.strictPolicy), enabledString(selected.perfStrict), enabledString(selected.concurrencyStrict))
 	fmt.Fprintf(stdout, "Include dirs:\n")

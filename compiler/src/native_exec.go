@@ -234,6 +234,11 @@ func exportedTypeNames(result *semantic.Result) []string {
 }
 
 func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
+	return buildNativeExecutableWithClangOptions(clangPath, result, foreignFiles, linkFlags, outputPath, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, nativeLinkOptions{}, stderr)
+}
+
+func buildNativeExecutableWithClangOptions(clangPath string, result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, link nativeLinkOptions, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
+	lto := link.LTO != backend.LTOOff
 	if result == nil {
 		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
@@ -266,7 +271,13 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	objectStart := time.Now()
 	easmModules := append([]*easm.Module(nil), result.EASMModules...)
 	result.EASMModules = nil
-	if err := writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr); err != nil {
+	var objectErr error
+	if lto {
+		objectErr = writeLTOObjectFile(result, objectPath, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, link.LTO, stderr)
+	} else {
+		objectErr = writeNativeObjectViaClangIR(clangPath, result, objectPath, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr)
+	}
+	if err := objectErr; err != nil {
 		result.EASMModules = easmModules
 		cleanup()
 		return "", func() {}, timing, err
@@ -279,7 +290,18 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	selfProvidesRuntime := resultDefinesDefaultElisaCoreRuntime(result)
 	if !selfProvidesRuntime {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
-		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
+		if lto {
+			// Bitcode runtime + bitcode weak profiler hooks (linked separately below).
+			if err := writeDefaultElisaCoreRuntimeLTOObject(runtimeObjectPath, packedProfile, targetTriple, link.LTO, stderr); err != nil {
+				cleanup()
+				return "", func() {}, timing, err
+			}
+			profilerFallbackObjectPath = filepath.Join(tempDir, "elisacore_profiler_fallback.o")
+			if err := writeProfilerFallbackLTOObject(clangPath, profilerFallbackObjectPath, optLevel, link.LTO, targetTriple, stderr); err != nil {
+				cleanup()
+				return "", func() {}, timing, err
+			}
+		} else if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -313,7 +335,15 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		// optional hook fallback; otherwise macOS's dynamic lookup leaves the negotiation
 		// function at NULL and the first arena allocation jumps through address zero.
 		profilerFallbackObjectPath = filepath.Join(tempDir, "elisacore_profiler_fallback.o")
-		if err := writeElisaCoreProfilerFallbackObject(clangPath, profilerFallbackObjectPath, targetTriple, stderr); err != nil {
+		writeFallback := func() error {
+			return writeElisaCoreProfilerFallbackObject(clangPath, profilerFallbackObjectPath, targetTriple, stderr)
+		}
+		if lto {
+			writeFallback = func() error {
+				return writeProfilerFallbackLTOObject(clangPath, profilerFallbackObjectPath, optLevel, link.LTO, targetTriple, stderr)
+			}
+		}
+		if err := writeFallback(); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -377,6 +407,11 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	linkArgs := make([]string, 0, 7+len(foreignFiles))
 	linkArgs = append(linkArgs, targetClangArgs(targetTriple)...)
 	linkArgs = append(linkArgs, targetLinkerArgs(targetTriple)...)
+	if lto {
+		// Foreign .c files on this command line are compiled by this same clang invocation,
+		// so they become bitcode too and take part in the LTO unit.
+		linkArgs = append(linkArgs, ltoLinkArgs(link.LTO, optLevel, targetTriple, linkFlags)...)
+	}
 	linkArgs = append(linkArgs, "-I", tempDir)
 	if nativeExecutableNeedsPThread(foreignFiles) && runtime.GOOS != "windows" {
 		linkArgs = append(linkArgs, "-pthread")
@@ -825,6 +860,12 @@ func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple stri
 	if strings.TrimSpace(targetTriple) != "" {
 		args = append(args, "-mtriple="+strings.TrimSpace(targetTriple))
 	}
+	// The IR was optimized by a target machine tuned for this CPU (host CPU for a native
+	// build, or `-mcpu`); select the same CPU for instruction selection. The textual IR
+	// carries no per-function "target-cpu", so without this llc fell back to the generic CPU.
+	if cpu := resolvedNativeTargetCPU(targetTriple); cpu != "" {
+		args = append(args, "-mcpu="+cpu)
+	}
 	args = append(args, irPath, "-o", objectPath)
 	cmd := exec.Command(llcPath, args...)
 	cmd.Stdout = stderr
@@ -875,6 +916,8 @@ func llcObjectCacheKey(irPath string, targetTriple string, llcPath string) (stri
 	h.Write(irBytes)
 	h.Write([]byte("\x00llc\x00"))
 	h.Write([]byte(strings.TrimSpace(targetTriple)))
+	h.Write([]byte{0})
+	h.Write([]byte("cpu=" + resolvedNativeTargetCPU(targetTriple)))
 	h.Write([]byte{0})
 	h.Write([]byte(llcPath))
 	// Hash the tool contents rather than relying on size+mtime: an in-place toolchain
@@ -1692,14 +1735,16 @@ func addDefaultElisaCoreProfilerFallback(clangPath string, runtimeObjectPath str
 	return nil
 }
 
-func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+// analyzeDefaultElisaCoreRuntime parses and analyzes the include-expanded default runtime
+// support module (shared by the native and the LTO runtime objects).
+func analyzeDefaultElisaCoreRuntime(stderr io.Writer) (*semantic.Result, error) {
 	runtimePath, err := defaultElisaCoreRuntimeSupportPath()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	src, err := readSourceWithIncludes(runtimePath, map[string]bool{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var parseStderr bytes.Buffer
 	file, ok := parseProgram(runtimePath, src, &parseStderr)
@@ -1707,7 +1752,7 @@ func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backe
 		if parseStderr.Len() != 0 && stderr != nil {
 			_, _ = io.Copy(stderr, &parseStderr)
 		}
-		return fmt.Errorf("failed to parse default elisacore runtime support")
+		return nil, fmt.Errorf("failed to parse default elisacore runtime support")
 	}
 	runtimeResult := semantic.Analyze(file)
 	if errs := runtimeResult.Errors(); len(errs) != 0 {
@@ -1716,7 +1761,7 @@ func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backe
 				fmt.Fprintf(stderr, "%s\n", e)
 			}
 		}
-		return fmt.Errorf("failed to analyze default elisacore runtime support")
+		return nil, fmt.Errorf("failed to analyze default elisacore runtime support")
 	}
 	if warns := runtimeResult.Notices(); len(warns) != 0 && stderr != nil {
 		for _, w := range warns {
@@ -1725,6 +1770,14 @@ func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backe
 			}
 			fmt.Fprintf(stderr, "%s\n", w)
 		}
+	}
+	return runtimeResult, nil
+}
+
+func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+	runtimeResult, err := analyzeDefaultElisaCoreRuntime(stderr)
+	if err != nil {
+		return err
 	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		// The fallback source is an embedded constant here, not a file located

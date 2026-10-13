@@ -89,3 +89,18 @@ func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, 
 	_ = options
 	return fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
+
+type LLVMLTOBitcodeEmitOptions struct {
+	OptLevel      OptimizationLevel
+	PackedProfile PackedLoweringProfile
+	TargetTriple  string
+	DebugInfo     bool
+	Trace         bool
+}
+
+func WriteLLVMLTOBitcodeFile(result *semantic.Result, outputPath string, options LLVMLTOBitcodeEmitOptions) ([]string, error) {
+	_ = result
+	_ = outputPath
+	_ = options
+	return nil, fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
+}
