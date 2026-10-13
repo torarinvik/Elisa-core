@@ -225,9 +225,6 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					if fnType != nil {
 						a.defineImplicitPackedStoreParamSymbols(fn, fnType)
 					}
-					if len(typeArgs) == 0 {
-						a.recordVerifiedTaskGroupSubmits(fn)
-					}
 					savedBodyImplicitScopes := a.currentImplicitScopes
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)

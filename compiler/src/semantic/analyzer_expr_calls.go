@@ -928,6 +928,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	// and position-aligned arguments, so facts about places this call provably does not write survive.
 	a.cacheCallFrameContext(expr, appliedType, loweredArgs)
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
+	a.rejectBorrowedNurseryPoolShutdown(expr, ft, appliedType, loweredArgs, permissionBindings)
 	switch ft.Name {
 	case "pool_shutdown":
 		if len(expr.Args) >= 1 {

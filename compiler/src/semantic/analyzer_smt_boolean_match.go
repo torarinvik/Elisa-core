@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 type smtStringParameterKey struct {
@@ -223,6 +224,10 @@ func (tr *smtTranslator) classifierStringEquality(left, right ast.Expr, env map[
 }
 
 func (tr *smtTranslator) booleanMatchTerm(n *ast.MatchExpr, env map[string]string) (string, bool) {
+	if term, ok := tr.scalarMatchTerm(n, env, tr.boolTerm); ok {
+		return term, true
+	}
+
 	if n == nil || n.Store != nil || len(n.Arms) == 0 {
 		return "", false
 	}
@@ -273,4 +278,111 @@ func (tr *smtTranslator) booleanMatchTerm(n *ast.MatchExpr, env map[string]strin
 		result = "(ite " + guard + " " + branch + " " + result + ")"
 	}
 	return result, true
+}
+
+// scalarMatchTerm preserves ordered dispatch by folding arms into nested ite terms.
+// Require an explicit default so an untranslated/missing case can never become a proof.
+// Pure scalar matches share the translator's complete preflight, so equation
+// eligibility cannot admit branch calls or side effects the SMT lowering declines.
+func pureScalarMatchEquation(n *ast.MatchExpr) bool {
+	if n == nil || n.Store != nil || len(n.Arms) == 0 {
+		return false
+	}
+	if _, ok := n.Arms[len(n.Arms)-1].Pattern.(*ast.MatchWildcardPattern); !ok {
+		return false
+	}
+	// Preflight the whole expression before lowering any branch. In particular,
+	// callee contract axioms cannot be asserted outside their dispatch guard.
+	if !scalarMatchProofExpr(n.Value) {
+		return false
+	}
+	for i, arm := range n.Arms {
+		if arm.Guard != nil || len(arm.Body) != 1 {
+			return false
+		}
+		tail, ok := arm.Body[0].(*ast.ExprStmt)
+		if !ok || !scalarMatchProofExpr(tail.Expr) {
+			return false
+		}
+		if i != len(n.Arms)-1 && !lemmaScalarMatchPattern(arm.Pattern) {
+			return false
+		}
+	}
+	return true
+}
+
+func (tr *smtTranslator) scalarMatchTerm(n *ast.MatchExpr, env map[string]string, lower func(ast.Expr, map[string]string) (string, bool)) (string, bool) {
+	if !pureScalarMatchEquation(n) {
+		return "", false
+	}
+	result := ""
+	for i := len(n.Arms) - 1; i >= 0; i-- {
+		arm := n.Arms[i]
+		if arm.Guard != nil || len(arm.Body) != 1 {
+			return "", false
+		}
+		tail, ok := arm.Body[0].(*ast.ExprStmt)
+		if !ok {
+			return "", false
+		}
+		branch, ok := lower(tail.Expr, env)
+		if !ok {
+			return "", false
+		}
+		if i == len(n.Arms)-1 {
+			result = branch
+			continue
+		}
+		guard, ok := tr.scalarMatchGuard(n.Value, arm.Pattern, env)
+		if !ok {
+			return "", false
+		}
+		result = "(ite " + guard + " " + branch + " " + result + ")"
+	}
+	return result, true
+}
+
+func (tr *smtTranslator) scalarMatchGuard(value ast.Expr, pattern ast.MatchPattern, env map[string]string) (string, bool) {
+	switch p := pattern.(type) {
+	case *ast.MatchLiteralPattern:
+		if p.Pinned {
+			return "", false
+		}
+		if !lemmaScalarMatchPattern(p) {
+			return "", false
+		}
+		return tr.boolTerm(&ast.BinaryExpr{Position: value.Pos(), Op: lexer.TOKEN_EQEQ, Left: value, Right: p.Value}, env)
+	case *ast.MatchStringLiteralPattern:
+		return tr.classifierStringEquality(value, &ast.StringLit{Value: p.Value}, env)
+	case *ast.MatchOrPattern:
+		var guards []string
+		for _, option := range p.Options {
+			guard, ok := tr.scalarMatchGuard(value, option, env)
+			if !ok {
+				return "", false
+			}
+			guards = append(guards, guard)
+		}
+		if len(guards) == 0 {
+			return "", false
+		}
+		return "(or " + strings.Join(guards, " ") + ")", true
+	}
+	return "", false
+}
+
+func scalarMatchProofExpr(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.StringLit:
+		return true
+	case *ast.ParenExpr:
+		return scalarMatchProofExpr(n.Inner)
+	case *ast.UnaryExpr:
+		return scalarMatchProofExpr(n.Operand)
+	case *ast.BinaryExpr:
+		return n.LoweredCall == nil && scalarMatchProofExpr(n.Left) && scalarMatchProofExpr(n.Right)
+	case *ast.TernaryExpr:
+		return scalarMatchProofExpr(n.Cond) && scalarMatchProofExpr(n.Value) && scalarMatchProofExpr(n.Alt)
+	}
+	return false
 }

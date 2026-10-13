@@ -88,15 +88,16 @@ const (
 )
 
 type Analyzer struct {
-	trustedRuntimeSourceFiles map[string]bool
-	headerFunctionNames       headerFunctionNameIndex
-	headerStabilityCompleted  map[*ast.FuncDecl]bool
-	shortCircuitAnalysisDepth int
-	shortCircuitStability     map[shortCircuitStabilityKey]bool
-	deferredImplEffectChecks  []func()
-	file                      *ast.File
-	diagnostics               []Diagnostic
-	namedTypes                map[string]Type
+	trustedRuntimeSourceFiles            map[string]bool
+	headerFunctionNames                  headerFunctionNameIndex
+	headerStabilityCompleted             map[*ast.FuncDecl]bool
+	shortCircuitAnalysisDepth            int
+	shortCircuitStability                map[shortCircuitStabilityKey]bool
+	deferredImplEffectChecks             []func()
+	deferredBorrowedNurseryShutdownCalls []borrowedNurseryShutdownCall
+	file                                 *ast.File
+	diagnostics                          []Diagnostic
+	namedTypes                           map[string]Type
 	// refineAliases registers named refinement aliases (`refine Name(..) = Base where Pred`,
 	// docs/85 "Level 2") by qualified name. They are pure desugaring sugar: a binder-position use
 	// expands to the equivalent anonymous WhereRefinementTypeExpr (see
@@ -957,6 +958,13 @@ type poolScopeState struct {
 	Name string
 	// Node is the pool statement; a submit's pool argument must resolve to it.
 	Node *ast.PoolStmt
+	// BorrowedPool and BorrowedAlias identify the caller-owned pool and the
+	// nursery's private handle. Shutting either down before cleanup waits would
+	// free runtime state while submitted task records still refer to it.
+	BorrowedPool       *Symbol
+	BorrowedPoolKey    affineValueKey
+	HasBorrowedPoolKey bool
+	BorrowedAlias      *Symbol
 	// OuterRegions are the regions live when the pool statement began. The pool
 	// joins its workers at scope exit, before any of them is released, so a task
 	// may depend on them. Regions declared inside the body die before the join.
@@ -1302,6 +1310,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
 	a.checkProtocolDefaultMethodContracts(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
+	a.validateDeferredBorrowedNurseryShutdownCalls()
 	for _, check := range a.deferredImplEffectChecks {
 		check()
 	}

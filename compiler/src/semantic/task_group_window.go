@@ -14,12 +14,14 @@ import (
 // loops and `can` blocks between them.
 // Anything more complex keeps the existing conservative lifetime diagnostic.
 func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
-	if a == nil || fn == nil || len(fn.Body) == 0 || taskGroupFunctionShadowsAPI(fn.Body) || !a.taskGroupRuntimeAPIsTrusted() {
+	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	if a.taskGroupSubmits == nil {
-		a.taskGroupSubmits = map[*ast.CallExpr]TaskGroupSubmitInfo{}
+	type verifiedSubmit struct {
+		call *ast.CallExpr
+		info TaskGroupSubmitInfo
 	}
+	var verified []verifiedSubmit
 
 	walkTaskGroupStmtLists(fn.Body, func(body []ast.Stmt) {
 		var declRow int = -1
@@ -47,7 +49,10 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
 		if waitCount != 1 || waitRow <= declRow {
 			return
 		}
-		if a.taskGroupAPIShadowedInCurrentScope() || taskGroupRangeShadowsAPI(body[:waitRow]) {
+		// The constructor is the first API use in this list. Check only the prefix
+		// that can shadow that declaration; the candidate window is checked while
+		// it is already traversed below.
+		if taskGroupRangeShadowsAPI(body[:declRow+1]) {
 			return
 		}
 		if taskGroupRangeMentionsName(body[waitRow+1:], groupName) {
@@ -63,17 +68,32 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
 		if len(submits) == 0 {
 			return
 		}
-		added := false
 		for _, submit := range submits {
-			if _, exists := a.taskGroupSubmits[submit.call]; !exists {
-				added = true
-			}
-			a.taskGroupSubmits[submit.call] = TaskGroupSubmitInfo{GroupName: groupName, AlreadyAdded: submit.alreadyAdded}
-		}
-		if added {
-			a.invalidateStoreFlowSummaries()
+			verified = append(verified, verifiedSubmit{
+				call: submit.call,
+				info: TaskGroupSubmitInfo{GroupName: groupName, AlreadyAdded: submit.alreadyAdded},
+			})
 		}
 	})
+	// The vast majority of functions have no candidate window. Defer the trusted
+	// runtime's four signature/source checks until syntax has found at least one
+	// otherwise-safe submit, avoiding that work for ordinary functions.
+	if len(verified) == 0 || taskGroupFunctionShadowsAPI(fn) || !a.taskGroupRuntimeAPIsTrusted() {
+		return
+	}
+	if a.taskGroupSubmits == nil {
+		a.taskGroupSubmits = map[*ast.CallExpr]TaskGroupSubmitInfo{}
+	}
+	added := false
+	for _, proof := range verified {
+		if _, exists := a.taskGroupSubmits[proof.call]; !exists {
+			added = true
+		}
+		a.taskGroupSubmits[proof.call] = proof.info
+	}
+	if added {
+		a.invalidateStoreFlowSummaries()
+	}
 }
 
 // recordVerifiedTaskGroupSubmitsInDecls runs before body analysis so interprocedural
@@ -86,34 +106,13 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmitsInDecls(decls []scopedDecl) {
 			savedFuncType := a.currentFuncType
 			a.currentFuncType = nil
 			defer func() { a.currentFuncType = savedFuncType }()
-			record := func(fn *ast.FuncDecl) {
-				if fn == nil {
-					return
-				}
-				savedScope := a.currentScope
-				a.currentScope = NewScope(a.globalScope)
-				defer func() { a.currentScope = savedScope }()
-				for _, param := range fn.Params {
-					if param.Name != "" {
-						a.currentScope.Symbols[param.Name] = &Symbol{Name: param.Name}
-					}
-				}
-				for _, name := range fn.RegionParams {
-					if name != "" {
-						if _, exists := a.currentScope.Symbols[name]; !exists {
-							a.currentScope.Symbols[name] = &Symbol{Name: name}
-						}
-					}
-				}
-				a.recordVerifiedTaskGroupSubmits(fn)
-			}
 			switch decl := scoped.Decl.(type) {
 			case *ast.FuncDecl:
-				record(decl)
+				a.recordVerifiedTaskGroupSubmits(decl)
 			case *ast.ImplDecl:
 				for _, member := range decl.Members {
 					if fn, ok := member.(*ast.FuncDecl); ok {
-						record(fn)
+						a.recordVerifiedTaskGroupSubmits(fn)
 					}
 				}
 			}
@@ -122,7 +121,7 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmitsInDecls(decls []scopedDecl) {
 }
 
 func (a *Analyzer) taskGroupRuntimeAPIsTrusted() bool {
-	if a == nil || a.globalScope == nil || a.currentScope == nil || a.taskGroupAPIShadowedInCurrentScope() {
+	if a == nil || a.globalScope == nil {
 		return false
 	}
 	lookup := func(name string) (*ast.FuncDecl, *FuncType, bool) {
@@ -159,6 +158,32 @@ func (a *Analyzer) taskGroupRuntimeAPIsTrusted() bool {
 		return false
 	}
 	return true
+}
+
+func taskGroupFunctionShadowsAPI(fn *ast.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	for _, param := range fn.Params {
+		if taskGroupAPIName(param.Name) {
+			return true
+		}
+	}
+	for _, name := range fn.RegionParams {
+		if taskGroupAPIName(name) {
+			return true
+		}
+	}
+	// Most functions have no TaskGroup candidate and avoid this reflective walk.
+	// For candidate functions, scan the whole body once so binders introduced by
+	// enclosing match/iteration scopes cannot shadow the runtime APIs outside the
+	// candidate's immediate statement list.
+	for _, stmt := range fn.Body {
+		if taskGroupFacts(stmt, "").apiShadow {
+			return true
+		}
+	}
+	return false
 }
 
 // Runtime implementation identity matters here: a source-level stub with the
@@ -227,18 +252,6 @@ func taskGroupAPIName(name string) bool {
 	default:
 		return false
 	}
-}
-
-func (a *Analyzer) taskGroupAPIShadowedInCurrentScope() bool {
-	if a == nil || a.currentScope == nil {
-		return true
-	}
-	for _, name := range []string{"task_group_new", "task_group_add", "task_group_wait_all", "pool_submit1"} {
-		if _, shadowed := a.currentScope.Symbols[name]; shadowed {
-			return true
-		}
-	}
-	return false
 }
 
 func taskGroupConstructorDecl(stmt *ast.VarDeclStmt) bool {
@@ -334,12 +347,12 @@ func taskGroupFacts(node any, groupName string) taskGroupNodeFacts {
 			facts.earlyExit = true
 		case *ast.VarDeclStmt:
 			if n != nil {
-				facts.groupShadow = facts.groupShadow || n.Name == groupName
+				facts.groupShadow = facts.groupShadow || groupName != "" && n.Name == groupName
 				facts.apiShadow = facts.apiShadow || taskGroupAPIName(n.Name) || n.Name == "pool_submit1"
 			}
 		case *ast.ForStmt:
 			if n != nil {
-				facts.groupShadow = facts.groupShadow || n.Name == groupName
+				facts.groupShadow = facts.groupShadow || groupName != "" && n.Name == groupName
 				facts.apiShadow = facts.apiShadow || taskGroupAPIName(n.Name) || n.Name == "pool_submit1"
 			}
 		case *ast.PoolStmt:
@@ -351,6 +364,7 @@ func taskGroupFacts(node any, groupName string) taskGroupNodeFacts {
 		case *ast.TupleBindStmt:
 			if n != nil {
 				for _, name := range n.Names {
+					facts.groupShadow = facts.groupShadow || groupName != "" && name.Name == groupName
 					facts.apiShadow = facts.apiShadow || taskGroupAPIName(name.Name)
 				}
 			}
@@ -367,25 +381,48 @@ func taskGroupFacts(node any, groupName string) taskGroupNodeFacts {
 				}
 			}
 		case *ast.MatchBindPattern:
-			facts.apiShadow = facts.apiShadow || n != nil && taskGroupAPIName(n.Name)
+			if n != nil {
+				facts.groupShadow = facts.groupShadow || groupName != "" && (n.Name == groupName || n.Binder == groupName)
+				facts.apiShadow = facts.apiShadow || taskGroupAPIName(n.Name) || taskGroupAPIName(n.Binder)
+			}
 		case *ast.MatchRestPattern:
-			facts.apiShadow = facts.apiShadow || n != nil && taskGroupAPIName(n.Name)
+			if n != nil {
+				facts.groupShadow = facts.groupShadow || groupName != "" && n.Name == groupName
+				facts.apiShadow = facts.apiShadow || taskGroupAPIName(n.Name)
+			}
 		case *ast.MatchStructPattern:
 			if n != nil {
+				facts.groupShadow = facts.groupShadow || groupName != "" && n.As == groupName
 				facts.apiShadow = facts.apiShadow || taskGroupAPIName(n.As)
 				for _, arg := range n.Args {
-					facts.apiShadow = facts.apiShadow || taskGroupAPIName(arg.Name)
+					facts.apiShadow = facts.apiShadow || taskGroupMatchPatternShadowsAPI(arg.Pattern)
 				}
 			}
 		case *ast.MatchVariantPattern:
 			if n != nil {
+				facts.groupShadow = facts.groupShadow || groupName != "" && n.As == groupName
 				facts.apiShadow = facts.apiShadow || taskGroupAPIName(n.As)
 				for _, arg := range n.Args {
-					facts.apiShadow = facts.apiShadow || taskGroupAPIName(arg.Name)
+					facts.apiShadow = facts.apiShadow || taskGroupMatchPatternShadowsAPI(arg.Pattern)
 				}
 			}
 		case *ast.MoveBindNamePattern:
+			facts.groupShadow = facts.groupShadow || groupName != "" && n != nil && n.Name == groupName
 			facts.apiShadow = facts.apiShadow || n != nil && taskGroupAPIName(n.Name)
+		case *ast.MoveBindStructPattern:
+			if n != nil {
+				for _, arg := range n.Args {
+					facts.groupShadow = facts.groupShadow || groupName != "" && arg.Name == groupName
+				}
+			}
+		case *ast.MoveBindTuplePattern:
+			if n != nil {
+				for _, arg := range n.Args {
+					facts.groupShadow = facts.groupShadow || groupName != "" && arg.Name == groupName
+				}
+			}
+		case *ast.MoveBindArg:
+			facts.groupShadow = facts.groupShadow || groupName != "" && n != nil && n.Name == groupName
 		case *ast.LambdaExpr:
 			// A closure can retain a reference or hide a submission from this flat
 			// window proof. Keep such windows on the conservative path.
@@ -489,16 +526,6 @@ func taskGroupRangeShadowsAPI(stmts []ast.Stmt) bool {
 	return false
 }
 
-func taskGroupFunctionShadowsAPI(stmts []ast.Stmt) bool {
-	for _, stmt := range stmts {
-		facts := taskGroupFacts(stmt, "")
-		if facts.apiShadow {
-			return true
-		}
-	}
-	return false
-}
-
 func taskGroupMovePatternShadowsAPI(pattern ast.MoveBindPattern) bool {
 	switch n := pattern.(type) {
 	case *ast.MoveBindNamePattern:
@@ -526,7 +553,7 @@ func taskGroupMovePatternShadowsAPI(pattern ast.MoveBindPattern) bool {
 			return false
 		}
 		for _, arg := range n.Args {
-			if taskGroupAPIName(arg.Name) || taskGroupMatchPatternShadowsAPI(arg.Pattern) {
+			if taskGroupMatchPatternShadowsAPI(arg.Pattern) {
 				return true
 			}
 		}
@@ -575,7 +602,7 @@ func taskGroupMatchPatternShadowsAPI(pattern ast.MatchPattern) bool {
 			return true
 		}
 		for _, arg := range n.Args {
-			if taskGroupAPIName(arg.Name) || taskGroupMatchPatternShadowsAPI(arg.Pattern) {
+			if taskGroupMatchPatternShadowsAPI(arg.Pattern) {
 				return true
 			}
 		}
@@ -587,7 +614,7 @@ func taskGroupMatchPatternShadowsAPI(pattern ast.MatchPattern) bool {
 			return true
 		}
 		for _, arg := range n.Args {
-			if taskGroupAPIName(arg.Name) || taskGroupMatchPatternShadowsAPI(arg.Pattern) {
+			if taskGroupMatchPatternShadowsAPI(arg.Pattern) {
 				return true
 			}
 		}

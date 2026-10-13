@@ -795,7 +795,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	if ident, ok := expr.(*ast.Ident); ok && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
 		arg := p.parseExpr()
-		p.expectNewline()
+		p.expectNewlineAfterValueExpr(arg)
 		return &ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{
 			Position: pos,
 			Func:     ident,

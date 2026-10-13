@@ -19,7 +19,19 @@ func borrowableOwnerRefElemType(t Type) (Type, bool) {
 	return ref.Elem, true
 }
 
-func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) bool {
+func (a *Analyzer) containsBorrowedOwnerRefValues(t Type) bool {
+	// Most local bindings have scalar or reference types that cannot contain a
+	// borrowed owner by value. Skip the memo table and traversal-map setup for
+	// those types; keep the leaf and container cases aligned with the recursive
+	// walker below.
+	switch value := t.(type) {
+	case *RefType:
+		return value != nil && isBorrowableAffineOwnerType(value.Elem)
+	case *ArrayType, *DArrayType, *OptionalType, *ViewType, *DictType, *SetType,
+		*PackedVariantViewType, *EnumType, *StructType, *GenericInstanceType:
+	default:
+		return false
+	}
 	return a.memoTypePredicate(&a.borrowedOwnerRefMemo, t, func() bool {
 		return a.containsBorrowedOwnerRefValuesWithSeen(t, map[Type]bool{}, 0)
 	})
@@ -257,7 +269,7 @@ func (a *Analyzer) recordBorrowedOwnerRefBinding(sym *Symbol, value ast.Expr) {
 		a.currentBorrowedOwnerRefs[sym] = cloneBorrowedOwnerRefState(valueState)
 		return
 	}
-	if !a.containsBorrowedOwnerRefValues(sym.Type, map[string]bool{}) {
+	if !a.containsBorrowedOwnerRefValues(sym.Type) {
 		delete(a.currentBorrowedOwnerRefs, sym)
 		return
 	}
@@ -284,12 +296,12 @@ func (a *Analyzer) recordBorrowedOwnerRefTarget(target ast.Expr, expected Type, 
 		a.recordBorrowedOwnerRefBinding(root, value)
 		return
 	}
-	if !a.containsBorrowedOwnerRefValues(root.Type, map[string]bool{}) {
+	if !a.containsBorrowedOwnerRefValues(root.Type) {
 		delete(a.currentBorrowedOwnerRefs, root)
 		return
 	}
 	current := a.currentBorrowedOwnerRefs[root]
-	if a.containsBorrowedOwnerRefValues(expected, map[string]bool{}) {
+	if a.containsBorrowedOwnerRefValues(expected) {
 		if state, ok := a.borrowedOwnerRefStateForExpr(value); ok {
 			current = assignBorrowedOwnerRefStateAtPath(current, steps, state)
 		} else {

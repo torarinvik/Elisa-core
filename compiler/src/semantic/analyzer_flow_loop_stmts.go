@@ -164,6 +164,9 @@ func (a *Analyzer) castTargetCoverage(target string) map[string]bool {
 
 func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	var poolType Type
+	var borrowedPoolSym *Symbol
+	var borrowedPoolKey affineValueKey
+	var hasBorrowedPoolKey bool
 	if stmt.BorrowedPool != "" {
 		sym, ok := a.currentScope.Lookup(stmt.BorrowedPool)
 		if !ok || sym == nil || (sym.Kind != SymbolLocal && sym.Kind != SymbolParam && sym.Kind != SymbolGlobal) {
@@ -173,11 +176,16 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 				a.errorf(stmt.Position, "borrowed nursery requires %q to be a mutable ThreadPool reference", stmt.BorrowedPool)
 			} else {
 				poolType = ref.Elem
+				borrowedPoolSym = sym
 			}
 		} else if !sym.Mutable || !isBuiltinProtocolOwnerType(sym.Type, "ThreadPool") {
 			a.errorf(stmt.Position, "borrowed nursery requires %q to be a mutable ThreadPool value or reference", stmt.BorrowedPool)
 		} else {
 			poolType = sym.Type
+			borrowedPoolSym = sym
+		}
+		if borrowedPoolSym != nil {
+			borrowedPoolKey, hasBorrowedPoolKey = a.lookupProtocolTargetKey(&ast.Ident{Position: stmt.Position, Name: stmt.BorrowedPool})
 		}
 	} else {
 		poolCall := &ast.CallExpr{
@@ -212,8 +220,9 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	}
 	joined := []poolJoinedRegionDependency{}
 	joinedViews := []poolJoinedView{}
-	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name, Node: stmt, OuterRegions: outerRegions, Joined: &joined, JoinedViews: &joinedViews})
-	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: true}, stmt.Pos())
+	borrowedAlias := &Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: true}
+	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name, Node: stmt, BorrowedPool: borrowedPoolSym, BorrowedPoolKey: borrowedPoolKey, HasBorrowedPoolKey: hasBorrowedPoolKey, BorrowedAlias: borrowedAlias, OuterRegions: outerRegions, Joined: &joined, JoinedViews: &joinedViews})
+	a.defineLocal(borrowedAlias, stmt.Pos())
 	for _, inner := range stmt.Body {
 		a.analyzeStmt(inner)
 	}

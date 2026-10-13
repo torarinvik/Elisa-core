@@ -652,6 +652,8 @@ func (a *Analyzer) functionPureEquationShape(decl *ast.FuncDecl) bool {
 
 func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 	switch n := expr.(type) {
+	case *ast.MatchExpr:
+		return pureScalarMatchEquation(n)
 	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
 		return true
 	case *ast.FieldExpr:
@@ -704,6 +706,8 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 // an address-of, a field/index into mutable state, an unknown call — makes the body impure ⇒ decline.
 func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 	switch n := expr.(type) {
+	case *ast.MatchExpr:
+		return pureScalarMatchEquation(n)
 	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
 		return true
 	case *ast.FieldExpr:

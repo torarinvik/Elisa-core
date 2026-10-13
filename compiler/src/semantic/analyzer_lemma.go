@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // Ghost code & lemma functions.
@@ -286,6 +287,46 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 			return nil, false
 		}
 		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: left, Right: right}, true
+	case *ast.TernaryExpr:
+		cond, ok := substituteLemmaEnsure(n.Cond, subst)
+		if !ok {
+			return nil, false
+		}
+		value, ok := substituteLemmaEnsure(n.Value, subst)
+		if !ok {
+			return nil, false
+		}
+		alt, ok := substituteLemmaEnsure(n.Alt, subst)
+		if !ok {
+			return nil, false
+		}
+		return &ast.TernaryExpr{Position: n.Position, Cond: cond, Value: value, Alt: alt}, true
+	case *ast.MatchExpr:
+		if n.Store != nil {
+			return nil, false
+		}
+		value, ok := substituteLemmaEnsure(n.Value, subst)
+		if !ok {
+			return nil, false
+		}
+		arms := make([]ast.MatchArm, len(n.Arms))
+		for i, arm := range n.Arms {
+			// Payload binders need capture-avoiding substitution; decline until supported.
+			if !lemmaScalarMatchPattern(arm.Pattern) || arm.Guard != nil || len(arm.Body) != 1 {
+				return nil, false
+			}
+			tail, ok := arm.Body[0].(*ast.ExprStmt)
+			if !ok {
+				return nil, false
+			}
+			body, ok := substituteLemmaEnsure(tail.Expr, subst)
+			if !ok {
+				return nil, false
+			}
+			arms[i] = arm
+			arms[i].Body = []ast.Stmt{&ast.ExprStmt{Position: tail.Position, Expr: body}}
+		}
+		return &ast.MatchExpr{Position: n.Position, Value: value, Arms: arms}, true
 	case *ast.FieldExpr:
 		object, ok := substituteLemmaEnsure(n.Object, subst)
 		if !ok {
@@ -340,4 +381,31 @@ func (a *Analyzer) callTargetsLemma(expr ast.Expr) bool {
 	}
 	decl, ok := a.resolveDirectCallFuncDecl(call)
 	return ok && decl != nil && decl.IsLemma
+}
+
+func lemmaScalarMatchPattern(pattern ast.MatchPattern) bool {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern:
+		return true
+	case *ast.MatchLiteralPattern:
+		if p.Pinned {
+			return false
+		}
+		switch stripOptimizationParens(p.Value).(type) {
+		case *ast.IntLit, *ast.BoolLit:
+			return true
+		case *ast.UnaryExpr:
+			unary := stripOptimizationParens(p.Value).(*ast.UnaryExpr)
+			_, integer := stripOptimizationParens(unary.Operand).(*ast.IntLit)
+			return unary.Op == lexer.TOKEN_MINUS && integer
+		}
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			if !lemmaScalarMatchPattern(option) {
+				return false
+			}
+		}
+		return len(p.Options) > 0
+	}
+	return false
 }

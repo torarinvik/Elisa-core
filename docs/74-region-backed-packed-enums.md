@@ -12,14 +12,21 @@
 >
 > Status: design + staged implementation. Builds on the orthogonality law (docs/10), store/handle
 > unification (docs/69), the region memory model (docs/68), multi-stack regions (docs/71), default
-> stack backing (docs/73), and `new[auto]` (inferred-region struct allocation).
+> stack backing (docs/73), and inferred-region allocation.
+>
+> **Current spelling:** bare `new` uses inferred-region allocation. `new[auto]` is a deprecated
+> compatibility spelling, and user-written `in auto:` scopes are also deprecated; rely on region
+> inference or write an explicit `region NAME(size):` when the named bounded scope is part of the
+> design. Examples below that retain `new[auto]` describe the historical spelling of the same
+> inferred allocation.
 
 ## The decision
 
 A `packed enum` is **layout only**. Its storage and lifetime come from the **region** system, not
 from a self-owned `Store`. The region annotation is **not** part of the enum type and **not** part
-of the handle type — it is supplied at the allocation site (`new[auto]` / `new[r]`) and rides on the
-handle's value, exactly like `darray` backings and `new[auto] Box`.
+of the handle type — it is supplied at the allocation site (bare `new` for an inferred region or
+`new[r]` for a named region) and rides on the handle's value, exactly like `darray` backings and
+`new Box` (historically `new[auto] Box`).
 
 ```elisa
 packed enum Expr:                       # PURE LAYOUT — no [@r], no @r anywhere
@@ -28,7 +35,7 @@ packed enum Expr:                       # PURE LAYOUT — no [@r], no @r anywher
     Int(value: int)
     Add(left: Expr, right: Expr)        # children are bare handles, same store
 
-root: Expr = new[auto] Expr.Add(span: 3, left: l, right: r)   # inferred region; or new[r] ... in `region r(...):`
+root: Expr = new Expr.Add(span: 3, left: l, right: r)         # inferred region; or new[r] ... in `region r(...):`
 
 def eval(node: Expr) -> int:
     match node:                         # no `in store:`, no threaded store — store recovered from the handle
@@ -73,7 +80,7 @@ valid across growth; loop-reset reuse gives a per-iteration tree zero churn.
 
 Orthogonality stays physical, not just nominal:
 - **Layout** = the `packed enum` body (region-free, declared once; one ABI serves all regions).
-- **Provenance** = the erased region bound at `new[r]`/`new[auto]`, tracked as a `deps(v)` set per
+- **Provenance** = the erased region bound at `new[r]`/bare `new`, tracked as a `deps(v)` set per
   allocation — never in the type.
 - **Usage** = `freeze`/affine, on the value; the handle representation is invariant across
   `Local`/`Frozen` (docs/69), so freezing rewrites nothing.
@@ -113,7 +120,7 @@ Two ways to honor that:
   `PackedStoreState`, but make it *implicit* — created once at the region scope, its columns backed
   by the region arena — and *auto-thread* it across region-polymorphic calls (the same mechanism
   `tree` uses for its hidden store param, and docs/75 uses for the region). The store object lives
-  under the hood; the source surface stays ceremony-free: `new[auto] Expr.V(...)` and `match node:`
+  under the hood; the source surface stays ceremony-free: `new Expr.V(...)` and `match node:`
   with no `Store`, no `in store:`, no threaded param written by hand.
 
 So "region-backed packed enum" means: **the store is implicit and region-backed (lifetime = the
@@ -143,5 +150,6 @@ deleted from every recursive signature). Step 5 is the multi-arena/forest tail.
 ## Non-goals
 
 - No region parameter on the enum type or handle; no `@r` on variants. Ever.
-- No new vocabulary: `@r` provenance, `new[r]`/`new[auto]`, and field-level `@other` all already exist.
+- No new vocabulary: `@r` provenance, bare `new`/`new[r]`, and field-level `@other` all already
+  exist; `new[auto]` remains only as a deprecated compatibility spelling.
 - The legacy explicit `Store` path is retained during migration, not removed in step 1.

@@ -84,12 +84,12 @@ inside it without adding a permission requirement to the enclosing function.
 |--------|----------------|-----------------|--------------------|
 | `spawn1` / `spawn_raw` in a loop | Creates a fresh OS thread per item | Use `nursery:`, a pool, or a fixed worker set | A small fixed loop whose branches are intentionally long-lived |
 | `pool_new` or `pool ...:` in a loop | Recreates worker infrastructure per item | Create the pool around the batch and submit inside the loop | A deliberately isolated benchmark or one-shot setup loop |
-| `task_group_new` in a loop | Creates coordination objects per item | Create one task group around the batch, add inside the loop, wait once | A named helper implementing an explicit batching/window policy |
+| `task_group_new` in a loop | Creates coordination objects per item | Use one `nursery:` for work joined at the block boundary; use `nursery on(pool):` to reuse a caller-owned pool across batches | A named helper implementing an explicit batching/window policy |
 | `mutex_lock` or `lock ... as` in a loop | Serializes the loop on a contended boundary | Batch locked work, shard state, or use local reduction | Iterations are coarse-grained and the lock is the intended protocol boundary |
 | Atomic RMW/CAS in a loop | Can serialize on one cache line | Use per-worker locals, sharded counters, batching, or reduction | A named low-level wrapper that owns the protocol invariant |
-| `pool_await` / `await task` in a loop | Often turns parallel work into submit-one/wait-one serial execution | Use a task group, collect handles, or wait at the boundary | A named bounded in-flight/streaming policy |
+| `pool_await` / `await task` in a loop | Often turns parallel work into submit-one/wait-one serial execution | Use `nursery:` when results are not needed; otherwise collect handles or use `each`/`reduce`, then consume results after the batch | A named bounded in-flight/streaming policy |
 | `join` / `join_raw` in a loop | Often joins each thread before spawning enough parallel work | Collect thread handles and join after the batch, or use a nursery/pool | A named bounded in-flight/streaming policy |
-| `task_group_wait_all` / `wait all` in a loop | Waits a whole group at the per-item boundary | Add tasks to one group and wait once at the batch boundary | A named batching/window policy |
+| `task_group_wait_all` / `wait all` in a loop | Waits a whole group at the per-item boundary | Use one `nursery:` and let it join at the block boundary; keep `TaskGroup` for an explicitly managed wait point | A named batching/window policy |
 
 ### How To Satisfy `-Wperf`
 
@@ -121,13 +121,17 @@ for job in jobs:
     pool workers(4):
         submit work(job)
 
-# preferred: create coordination once around the batch
-pool workers(4):
-    group: mutable TaskGroup = task_group_new()
+# preferred: let the nursery own and join the batch
+nursery workers(4):
     for job in jobs:
-        task: Task[void, Pending] = submit work(job)
-        task_group_add(&group, move task)
-    wait all group
+        submit work(job)
+
+# when several batches should reuse one caller-owned pool
+pool workers(4):
+    for batch in batches:
+        nursery on(workers):
+            for job in batch:
+                submit work(job)
 ```
 
 #### Lock Loop
@@ -188,12 +192,18 @@ for job in jobs:
     task_group_add(&group, submit work(job))
     wait all group
 
-# preferred: one group owns the batch
-group: mutable TaskGroup = task_group_new()
-for job in jobs:
-    task_group_add(&group, submit work(job))
-wait all group
+# preferred: the nursery joins every submission at the boundary
+nursery:
+    for job in jobs:
+        submit work(job)
 ```
+
+Use `TaskGroup` when results are discarded and the caller needs to choose a wait point inside
+the surrounding scope. `task_group_add` consumes each task handle, and `wait all` discards its
+result. To use individual results, retain the `Task[R, Pending]` handles and explicitly `await`
+them after the submission batch. For ordinary fan-out without results, `nursery:` owns the
+group automatically; `nursery on(pool):` joins each batch while leaving the caller-owned pool
+alive.
 
 ## The half that already exists (the frictionless-fast default)
 

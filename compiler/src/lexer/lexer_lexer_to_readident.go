@@ -13,9 +13,10 @@ type Lexer struct {
 	col      int
 
 	// Indentation tracking
-	indentStack []int
-	atLineStart bool
-	pendingToks []Token
+	indentStack   []int
+	atLineStart   bool
+	pendingToks   []Token
+	lastTokenKind TokenKind
 
 	// Track paren/bracket depth to suppress INDENT/DEDENT inside groupings
 	parenDepth           int

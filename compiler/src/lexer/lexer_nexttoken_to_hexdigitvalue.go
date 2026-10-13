@@ -7,7 +7,8 @@ import (
 )
 
 // NextToken returns the next token from the source.
-func (l *Lexer) NextToken() Token {
+func (l *Lexer) NextToken() (result Token) {
+	defer func() { l.lastTokenKind = result.Kind }()
 	for len(l.pendingPatternBlocks) > 0 && l.pendingPatternBlocks[len(l.pendingPatternBlocks)-1].ParenDepth > l.parenDepth {
 		l.pendingPatternBlocks = l.pendingPatternBlocks[:len(l.pendingPatternBlocks)-1]
 	}
@@ -66,6 +67,15 @@ func (l *Lexer) NextToken() Token {
 		p := l.curPos()
 		l.advance()
 		l.atLineStart = true
+		// An indented leading boolean operator continues the previous expression.
+		// Consume its whitespace without changing the enclosing layout stack.
+		if l.booleanContinuation() || l.lastTokenKind == TOKEN_AND || l.lastTokenKind == TOKEN_OR {
+			for l.peek() == ' ' || l.peek() == '\t' {
+				l.advance()
+			}
+			l.atLineStart = false
+			return l.NextToken()
+		}
 		// Skip consecutive blank lines
 		for l.pos < len(l.src) && l.peek() == '\n' {
 			l.advance()
@@ -410,4 +420,25 @@ func hexDigitValue(ch byte) int {
 	default:
 		return 0
 	}
+}
+
+func (l *Lexer) booleanContinuation() bool {
+	i, indent := l.pos, 0
+	for i < len(l.src) && (l.src[i] == ' ' || l.src[i] == '\t') {
+		if l.src[i] == '\t' {
+			indent += 4
+		} else {
+			indent++
+		}
+		i++
+	}
+	if indent == 0 || indent < l.indentStack[len(l.indentStack)-1] {
+		return false
+	}
+	for _, op := range []string{"and", "or", "==", "!=", "<=", ">=", "<", ">"} {
+		if i+len(op) < len(l.src) && string(l.src[i:i+len(op)]) == op && (l.src[i+len(op)] == ' ' || l.src[i+len(op)] == '\t') {
+			return true
+		}
+	}
+	return false
 }

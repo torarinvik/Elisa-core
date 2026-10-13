@@ -514,6 +514,14 @@ func indexInRange(value Value, index int64) (bool, error) {
 }
 func indexValueAt(value Value, index int64) (Value, error) {
 	value = derefValue(value)
+	// String indexing is total, like ctx_string_index/ctx_string_view_index
+	// in compiled programs. Keep list indexing's bounds error below.
+	if value.kind == valueString {
+		if index < 0 || index >= int64(len(value.strVal)) {
+			return IntValue(0), nil
+		}
+		return IntValue(int64(value.strVal[index])), nil
+	}
 	if index < 0 {
 		return VoidValue(), fmt.Errorf("index %d out of range", index)
 	}
@@ -523,11 +531,6 @@ func indexValueAt(value Value, index int64) (Value, error) {
 			return VoidValue(), fmt.Errorf("index %d out of range", index)
 		}
 		return value.listVal[index].Clone(), nil
-	case valueString:
-		if int(index) >= len(value.strVal) {
-			return VoidValue(), fmt.Errorf("index %d out of range", index)
-		}
-		return IntValue(int64(value.strVal[index])), nil
 	default:
 		return VoidValue(), fmt.Errorf("indexing requires list or string, got %s", value.String())
 	}

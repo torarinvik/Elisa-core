@@ -861,7 +861,7 @@ func (p *Parser) parseContractDecl() ast.Decl {
 			p.allowQuantifiers = true
 			cond := p.parseExpr()
 			p.allowQuantifiers = saved
-			proof, scoped := p.parseOptionalContractScopedProof()
+			proof, scoped := p.parseOptionalContractScopedProof(cond)
 			requires = append(requires, cond)
 			if scoped {
 				requireProofs = append(requireProofs, &ast.ProofBlockStmt{Position: cond.Pos(), Goal: cond, Proof: proof})
@@ -874,7 +874,7 @@ func (p *Parser) parseContractDecl() ast.Decl {
 			p.allowQuantifiers = true
 			cond := p.parseExpr()
 			p.allowQuantifiers = saved
-			proof, scoped := p.parseOptionalContractScopedProof()
+			proof, scoped := p.parseOptionalContractScopedProof(cond)
 			ensures = append(ensures, cond)
 			if scoped {
 				ensureProofs = append(ensureProofs, &ast.ProofBlockStmt{Position: cond.Pos(), Goal: cond, Proof: proof})

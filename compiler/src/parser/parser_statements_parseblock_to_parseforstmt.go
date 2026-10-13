@@ -136,7 +136,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.allowQuantifiers = true // docs/90 brick 90-6: quantified preconditions
 				cond := p.parseExpr()
 				p.allowQuantifiers = saved
-				proof, scoped := p.parseOptionalContractScopedProof()
+				proof, scoped := p.parseOptionalContractScopedProof(cond)
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond, Proof: proof, ScopedProof: scoped}
 			}
 		case "uses":
@@ -181,7 +181,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.allowQuantifiers = true // docs/90 brick 90-6: quantified postconditions
 				cond := p.parseExpr()
 				p.allowQuantifiers = saved
-				proof, scoped := p.parseOptionalContractScopedProof()
+				proof, scoped := p.parseOptionalContractScopedProof(cond)
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond, Proof: proof, ScopedProof: scoped}
 			}
 		case "invariant":
@@ -195,7 +195,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.allowQuantifiers = true
 				cond := p.parseExpr()
 				p.allowQuantifiers = saved
-				p.expectNewline()
+				p.expectNewlineAfterValueExpr(cond)
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractInvariant, Cond: cond}
 			}
 		case "decreases":
@@ -633,7 +633,7 @@ func (p *Parser) parseProofBlockStmt() ast.Stmt {
 	return &ast.ProofBlockStmt{Position: pos, Goal: goal, Proof: p.parseBlock()}
 }
 
-func (p *Parser) parseOptionalContractScopedProof() ([]ast.Stmt, bool) {
+func (p *Parser) parseOptionalContractScopedProof(cond ast.Expr) ([]ast.Stmt, bool) {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
 		p.advance()
 		if !(p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "scoped") {
@@ -646,7 +646,7 @@ func (p *Parser) parseOptionalContractScopedProof() ([]ast.Stmt, bool) {
 		p.expectNewline()
 		return p.parseBlock(), true
 	}
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(cond)
 	return nil, false
 }
 

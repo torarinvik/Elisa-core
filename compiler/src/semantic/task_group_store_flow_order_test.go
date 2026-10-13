@@ -47,6 +47,38 @@ def worker(e: Expr) -> i64:
 	}
 }
 
+func TestBorrowedNurseryStoreFlowProofCoversJoinedUseAfterExit(t *testing.T) {
+	const runtimeSource = "runtime/elisacore_std/elisacore_runtime_concurrency.elisa"
+	source := submitStoreCapturePrelude + `
+def worker(e: Expr) -> i64:
+    can Abort.Panic:
+        return eval(e)
+
+def run(pool: mutable ThreadPool&) -> i64:
+    can Memory.Allocate, Parallel, Abort.Panic:
+        e: Expr = build(10)
+        nursery on(pool):
+            submit worker(e)
+        return eval(e)
+`
+	l := lexer.New(runtimeSource, []byte(source))
+	p := parser.New(l.Tokenize())
+	file := p.ParseFile(runtimeSource)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	// Use the loader's explicit trusted-path setting so this covers the
+	// generated TaskGroup shape used by `nursery on(pool)`.
+	result := AnalyzeWithOptions(file, AnalyzeOptions{TrustedRuntimeSourceFiles: []string{runtimeSource}})
+	if len(result.TaskGroupSubmits) != 1 {
+		t.Fatalf("borrowed nursery must pre-record its joined submit, got %d proofs", len(result.TaskGroupSubmits))
+	}
+	got := strings.Join(result.Errors(), "\n")
+	if strings.Contains(got, "call may store a reference to function-local storage") || strings.Contains(got, "shares the submitting scope's Node store") {
+		t.Fatalf("a joined store-reading worker must not escape through the borrowed pool, got:\n%s", got)
+	}
+}
+
 func TestTaskGroupStoreFlowProofRejectsUntrustedRuntimeLookingPath(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "vendor/runtime/elisacore_std/elisacore_runtime_concurrency.elisa", submitStoreCapturePrelude+`
 def main(pool: mutable ThreadPool&) -> i64:

@@ -954,6 +954,10 @@ func (p *Parser) expectNewline() {
 	}
 }
 func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
+	if _, ok := expr.(*ast.QuantifierExpr); ok && p.pos > 0 && p.tokens[p.pos-1].Kind == lexer.TOKEN_DEDENT {
+		return
+	}
+
 	if p.stmtGuardBlockEnd {
 		p.stmtGuardBlockEnd = false
 		return

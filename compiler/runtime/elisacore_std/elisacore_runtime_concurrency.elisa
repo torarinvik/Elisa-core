@@ -64,11 +64,6 @@ struct ConcurrencyWorkStart1:
 	refs: mutable AtomicSlot[i64]
 
 @intrusive
-struct ConcurrencyTaskGroupNode:
-	next: mutable heap ConcurrencyTaskGroupNode&?
-	state_bits: mutable void&
-
-@intrusive
 struct ConcurrencyRawTaskNode:
 	next: mutable heap ConcurrencyRawTaskNode&?
 	handle: mutable uintptr
@@ -79,9 +74,11 @@ struct ConcurrencyRawTaskNode:
 @intrusive
 struct PoolTaskRecord:
 	next: mutable heap PoolTaskRecord&?
+	group_next: mutable heap PoolTaskRecord&?
 	pool: mutable void&
 	entry: mutable void&
 	arg: mutable void&
+	group_state_bits: mutable void&?
 	done: mutable i64
 
 struct ConcurrencyPoolState:
@@ -679,9 +676,8 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 					running <- false
 		return null
 
-# Push a spawned worker handle onto the pool's worker list (straight-line, mirrors
-# ctx_task_group_push_state). The list head is stored as void& so the intrusive node is
-# transferred by pointer rather than by an owning typed-field assignment.
+# Push a spawned worker handle onto the pool's worker list. The list head is stored as
+# void& so the intrusive node is transferred by pointer rather than an owning assignment.
 def ctx_pool_push_worker(state: mutable heap ConcurrencyPoolState&, whandle: uintptr):
 	can Memory.Allocate, Abort.Panic:
 		nraw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
@@ -807,6 +803,7 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		raw: heap void& = ctx_concurrency_alloc(size_of(PoolTaskRecord))
 		rec: mutable heap PoolTaskRecord& = raw.cast[heap PoolTaskRecord&]
 		rec.next <- null
+		rec.group_next <- null
 		rec.pool <- state.cast[void&]
 		# entry/arg are caller-provided pointers stored into a heap task record the
 		# pool runs asynchronously; their pointee lifetime is the caller's contract,
@@ -814,6 +811,7 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		trusted Unsafe.StaleRef:
 			rec.entry <- entry
 			rec.arg <- arg
+			rec.group_state_bits <- null
 		rec.done <- 0
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
@@ -834,10 +832,10 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		out.handle <- rec.cast[uintptr]
 		return move out
 
-# Block until the completion record (passed as a uintptr handle) is marked done by a
-# worker, then free it.
-def ctx_pool_wait_record(handle: uintptr):
-	can Memory.Release, Abort.Panic:
+# Block until a completion record is done, leaving it alive so a TaskGroup can follow
+# its separate group link after the wait.
+def ctx_pool_wait_record_done(handle: uintptr):
+	can Abort.Panic:
 		return if handle == 0
 		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
 		state: mutable heap ConcurrencyPoolState& = rec.pool.cast[mutable heap ConcurrencyPoolState&]
@@ -851,6 +849,14 @@ def ctx_pool_wait_record(handle: uintptr):
 					ctx_pool_wait(dc, mu)
 		can Sync.Unlock:
 			ctx_pool_unlock(mu)
+
+# Standalone awaits consume their record immediately. TaskGroups use the retaining
+# helper above and free records only after every task in the batch has joined.
+def ctx_pool_wait_record(handle: uintptr):
+	can Memory.Release, Abort.Panic:
+		return if handle == 0
+		ctx_pool_wait_record_done(handle)
+		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
 		free(rec.cast[heap void&])
 
 def pool_await_raw(task: Task[void&?, Pending]) -> void&?:
@@ -866,27 +872,39 @@ def task_group_new_raw() -> TaskGroup:
 	out: TaskGroup = zeroed
 	return move out
 
-def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
-	can Memory.Allocate, Abort.Panic:
+def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending], state_bits: void&?):
+	can Abort.Panic:
 		handle: uintptr = task.handle
 		_ = move task
-		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
-		node: mutable heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
-		node.handle <- handle
-		node.next <- null if group.handle == null else group.handle.cast[heap ConcurrencyRawTaskNode&]
+		panic("task_group_add on invalid task") if handle == 0
+		node: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&] can Unsafe.PointerCast
+		node.group_next <- null if group.handle == null else group.handle.cast[heap PoolTaskRecord&]
+		# state_bits is held by the group until every task in this batch has joined; its
+		# lifetime is the caller's contract, unverifiable by the type system.
+		trusted Unsafe.StaleRef:
+			node.group_state_bits <- state_bits
 		group.handle <- node.cast[void&]
 
 def task_group_wait_all_raw(group: mutable TaskGroup&):
-	can Pool.WaitAll, Memory.Release, Abort.Panic:
-		current: mutable heap ConcurrencyRawTaskNode&? = group.handle.cast[heap ConcurrencyRawTaskNode&?]
-		group.handle <- null
+	can Pool.WaitAll, Abort.Panic:
+		current: mutable heap PoolTaskRecord&? = group.handle.cast[heap PoolTaskRecord&?]
+		last_waited: mutable heap PoolTaskRecord&? = null
 		trusted Unsafe.AssumeProgress:
 			while current != null:
-				next: mutable heap ConcurrencyRawTaskNode&? = current.next
+				next: mutable heap PoolTaskRecord&? = current.group_next
+				handle: uintptr = current.cast[uintptr]
 				can Sync{Lock,Wait,Unlock}:
-					ctx_pool_wait_record(current.handle)
-				free(current.cast[heap void&])
+					ctx_pool_wait_record_done(handle)
+				last_waited <- current
 				current <- next
+		# Retain completed records until every wait in the batch has finished, so their result
+		# states are released only after all workers have stopped using their arguments.
+		if group.handle != null:
+			trusted Unsafe.StaleRef:
+				if last_waited is last_node:
+					last_node.group_next <- group.cleanup.cast[heap PoolTaskRecord&] if group.cleanup != null
+				group.cleanup <- group.handle
+		group.handle <- null
 
 def ctx_concurrency_ref_release(slot: mutable AtomicSlot[i64]&) -> i64:
 	trusted Unsafe.AssumeProgress:
@@ -959,27 +977,15 @@ def task_group_new() -> TaskGroup:
 	group.cleanup <- null
 	return move group
 
-def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
-	can Memory.Allocate, Abort.Panic:
-		return if state_bits == null
-		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyTaskGroupNode))
-		node: mutable heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
-		node.next <- null if group.cleanup == null else group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
-		# state_bits is a caller-provided pointer recorded in a heap cleanup node;
-		# its lifetime is the caller's contract, unverifiable by the type system.
-		trusted Unsafe.StaleRef:
-			node.state_bits <- state_bits
-		group.cleanup <- node.cast[void&]
-
 def ctx_task_group_release_all(group: mutable TaskGroup&):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		return if group.cleanup == null
-		current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]
+		current: mutable heap PoolTaskRecord&? = group.cleanup.cast[heap PoolTaskRecord&?]
 		group.cleanup <- null
 		trusted Unsafe.AssumeProgress:
 			while current != null:
-				next: mutable heap ConcurrencyTaskGroupNode&? = current.next
-				ctx_concurrency_work1_release(current.state_bits)
+				next: mutable heap PoolTaskRecord&? = current.group_next
+				ctx_concurrency_work1_release(current.group_state_bits)
 				free(current.cast[heap void&])
 				current <- next
 
@@ -1084,11 +1090,10 @@ def pool_await[R](task: Task[R, Pending]) -> R:
 		return result
 
 def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
-	can Memory.Allocate, Abort.Panic:
+	can Abort.Panic:
 		state_bits: void&? = task.state
 		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
-		task_group_add_raw(group, move raw)
-		ctx_task_group_push_state(group, state_bits)
+		task_group_add_raw(group, move raw, state_bits)
 
 def task_group_wait_all(group: mutable TaskGroup&):
 	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:

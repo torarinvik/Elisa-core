@@ -35,3 +35,43 @@ def std_nursery_default_workers_smoke():
 			for k in 0..<16:
 				submit nursery_bump(cb)
 		assert counter[0.usize()] == 16
+
+# A caller-owned pool can serve multiple nursery batches. Each block joins its own
+# submissions while leaving the shared pool alive for the next batch.
+@test
+def std_nursery_shared_pool_smoke():
+	can Parallel, Unsafe.PointerCast:
+		counter: mutable darray[i64] = []
+		_ = counter.resize(1.usize())
+		counter[0.usize()] <- 0
+		cb: uintptr = (&counter[0.usize()]).cast[uintptr]
+		pool workers(4):
+			nursery on(workers):
+				for k in 0..<24:
+					submit nursery_bump(cb)
+			assert counter[0.usize()] == 24
+			nursery on(workers):
+				for k in 0..<24:
+					submit nursery_bump(cb)
+			assert counter[0.usize()] == 48
+		assert counter[0.usize()] == 48
+
+# A TaskGroup can be reused after wait_all drains its current batch. This exercises
+# the wait/add lifetime boundary and retained result-state cleanup in the runtime.
+@test
+def std_task_group_reuse_smoke():
+	can Parallel, Unsafe.PointerCast:
+		counter: mutable darray[i64] = []
+		_ = counter.resize(1.usize())
+		counter[0.usize()] <- 0
+		cb: uintptr = (&counter[0.usize()]).cast[uintptr]
+		pool workers(4):
+			group: mutable TaskGroup = task_group_new()
+			for k in 0..<32:
+				task_group_add(&group, submit nursery_bump(cb))
+			task_group_wait_all(&group)
+			assert counter[0.usize()] == 32
+			for k in 0..<32:
+				task_group_add(&group, submit nursery_bump(cb))
+			task_group_wait_all(&group)
+		assert counter[0.usize()] == 64

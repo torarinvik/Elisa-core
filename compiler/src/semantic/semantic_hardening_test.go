@@ -136,7 +136,7 @@ func TestContainsAffineHandleValuesReportsRecursionLimit(t *testing.T) {
 
 func TestContainsBorrowedOwnerRefValuesReportsRecursionLimit(t *testing.T) {
 	analyzer := newSemanticHardeningTestAnalyzer()
-	if analyzer.containsBorrowedOwnerRefValues(nestedOptionalType(semanticTraversalDepthLimit+2), map[string]bool{}) {
+	if analyzer.containsBorrowedOwnerRefValues(nestedOptionalType(semanticTraversalDepthLimit + 2)) {
 		t.Fatal("expected borrowed-owner traversal hardening to return false on deeply nested type")
 	}
 	requireSemanticHardeningError(t, analyzer, "borrowed-owner traversal recursion limit")

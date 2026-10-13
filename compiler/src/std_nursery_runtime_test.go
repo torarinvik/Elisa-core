@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// The nursery desugars to a pool scope with an implicit task group auto-waited at exit, so a
-// `submit` inside it is fire-into-nursery and every task is joined before the block returns.
-// This compiles + runs the fixture natively and confirms the join guarantee (the assert that
-// the shared counter equals the number of submitted tasks holds right after the nursery).
+// Nurseries auto-join their submissions at block exit. This compiles + runs the fixture
+// natively and checks bare nurseries, shared-pool reuse across batches, and TaskGroup reuse.
 func TestRunCLIStdNurseryRuntimeSmoke(t *testing.T) {
 	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
@@ -24,5 +22,11 @@ func TestRunCLIStdNurseryRuntimeSmoke(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "[       OK ] std_nursery_native_smoke") {
 		t.Fatalf("expected std nursery smoke test to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] std_nursery_shared_pool_smoke") {
+		t.Fatalf("expected shared-pool nursery smoke test to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] std_task_group_reuse_smoke") {
+		t.Fatalf("expected TaskGroup reuse smoke test to pass, got stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 }

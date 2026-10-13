@@ -657,8 +657,9 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 // param — `ensure p >= old(p)` on a body that does `p -= 1` — was never checked under -strict and
 // silently relied on the debug runtime check, so a FALSE postcondition slipped through static checking.
 //
-// Clauses that reference `result` are skipped: `result` has no meaning at a void exit. The discharge is
-// SOUND: `old(p)` lowers to a distinct entry symbol, so an undischargeable clause is reported, never
+// At a non-void synthetic exit, result-dependent clauses belong to explicit return checks. Actual
+// void functions check every clause: a local binder named `result` must not suppress an obligation.
+// The discharge is SOUND: `old(p)` lowers to a distinct entry symbol, so an undischargeable clause is reported, never
 // falsely proven. Like the explicit-return path, a mutated-param `old()` postcondition the prover cannot
 // relate to the exit value is reported under -strict (drop -strict / use -permissive for the runtime check).
 func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
@@ -669,7 +670,14 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 	defer func(prev ProofObligationCategory) { a.currentProofCategory = prev }(a.currentProofCategory)
 	a.currentProofCategory = ProofCatContractEnsures
 	for i, clause := range a.currentFuncDecl.EnsureValues {
-		if clause == nil || exprReferencesResult(clause) {
+		if clause == nil {
+			continue
+		}
+		// This hook also runs at a value function's synthetic exit. Only there
+		// is a result-dependent clause handled exclusively by explicit returns.
+		// A true void function must never skip an obligation based on a name
+		// scan: an arm/block-local binder may legitimately be named result.
+		if exprReferencesResult(clause) && !SameType(a.currentReturn, a.namedTypes["void"]) {
 			continue
 		}
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
@@ -677,7 +685,7 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		}
 		// Refutation gate (always on): a void-exit postcondition over params PROVABLY FALSE here is a
 		// hard error, like the refuted-`requires`/`where` gate. No `result` subst exists at a void exit
-		// (result-referencing clauses are already skipped above). Only a provably-false verdict escalates.
+		// (local bindings named `result` retain their ordinary lexical meaning). Only a provably-false verdict escalates.
 		if a.ensureClauseRefuted(clause, nil) {
 			a.reportRefutedEnsure(pos, clause, nil)
 			continue

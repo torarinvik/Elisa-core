@@ -233,7 +233,12 @@ Legacy raw calls include:
 
 Migration direction:
 
-- use `nursery:` / pool scopes / task groups for ordinary fan-out
+- use `nursery:` for ordinary fan-out that joins at the block boundary
+- use `nursery on(pool):` when a caller-owned pool should be reused across batches; each
+  nursery joins its own work and leaves pool shutdown to the owner
+- use `TaskGroup` directly when results are discarded and work needs a manually chosen wait
+  point; retain `Task[R, Pending]` handles and explicitly `await` them after the batch when
+  individual results are needed
 - keep escaped tasks as linear `Thread[T, Joinable]` or `Task[T, Pending]`
 - use predicate waits instead of raw condition variables
 - use bounded channels/queues with capacity tokens
@@ -1098,6 +1103,11 @@ which desugars to:
 t: Task[i64, Pending] = pool_submit1(&pool, work, arg)
 ```
 
+Inside a nursery, only unqualified `submit work(arg)` is collected into the nursery's task group.
+An explicit `submit[pool] work(arg)` returns a `Task` that remains the caller's responsibility to
+await or move into a `TaskGroup`; it does not join automatically at the nursery boundary. In
+`nursery on(pool):`, use unqualified `submit` to reuse the named pool and keep the automatic join.
+
 ### Await
 
 ```elisa
@@ -1116,8 +1126,10 @@ not be used again.
 
 Under `-Wperf`, awaiting inside the same loop that produces tasks is rejected by
 default because it often collapses pool parallelism into submit-one/wait-one
-serial execution. Prefer a task group, a small explicit window of in-flight
-tasks, or collect task handles and await at the batch boundary.
+serial execution. Prefer a nursery when results are not needed, a small explicit
+window when backpressure is needed, or collect task handles and await them at the
+batch boundary when results are needed. Use a TaskGroup for a manually chosen wait
+point when results can be discarded.
 
 The same strict-performance rule applies to `join(move thread)` in a loop:
 collect joinable thread handles and join after spawning the batch, or use a
@@ -1224,6 +1236,12 @@ def parallel_sum(data: static i32&, mid: usize, len: usize) -> i64 can[Pool.Subm
 ```
 
 ### 4. Task Groups
+
+For ordinary fan-out where results are not needed, prefer a nursery so submissions are joined
+automatically. `task_group_add` consumes each task handle, and `wait all` discards its result;
+use a TaskGroup when results can be discarded but the caller needs to choose the wait point.
+When individual results are needed, retain the `Task[R, Pending]` handles and explicitly
+`await` them after the submission batch.
 
 ```elisa
 def build_index(paths: static PathJob&, count: usize) -> void can[Pool.Submit, Pool.WaitAll]:

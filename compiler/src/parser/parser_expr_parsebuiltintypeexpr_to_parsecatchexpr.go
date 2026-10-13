@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"fmt"
 	"strings"
 )
 
@@ -96,9 +97,9 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 func (p *Parser) parseExpr() ast.Expr {
 	p.enterNesting()
 	defer p.leaveNesting()
-	// Quantifier prefix (docs/90 brick 90-4), only in law/spec bodies: `forall i: <body>` /
-	// `exists i: <body>`. Gated on allowQuantifiers so ordinary code can name a variable `forall`.
-	if p.allowQuantifiers && p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "forall" || p.cur().Text == "exists") && p.quantifierStartsHere() {
+	// Quantifier prefix. Specifications retain quantified formulas; finite runtime
+	// ranges lower to a short-circuiting loop. Bare identifiers keep their meaning.
+	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "forall" || p.cur().Text == "exists") && p.quantifierStartsHere() && (p.allowQuantifiers || p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT) {
 		return p.parseQuantifier()
 	}
 	expr := p.parseOr()
@@ -258,11 +259,19 @@ func (p *Parser) parseQuantifier() ast.Expr {
 		p.advance() // in
 		source, lo, hi, isIndexRange := p.parseQuantifierInSource()
 		p.expect(lexer.TOKEN_COLON)
-		body := p.parseExpr()
+		body := p.parseQuantifierBody()
 		if !isIndexRange {
+			if !p.allowQuantifiers {
+				p.errorAt(pos, "runtime quantifiers require an explicit finite range")
+				return &ast.BoolLit{Position: pos}
+			}
 			return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, In: source, Body: body}
 		} else if len(vars) != 1 {
 			p.errorAt(pos, "`forall i in <range>:` binds exactly one index variable")
+			return &ast.BoolLit{Position: pos}
+		}
+		if !p.allowQuantifiers {
+			return p.runtimeRangeQuantifier(pos, exists, vars[0], lo, hi, body)
 		}
 		ident := &ast.Ident{Position: pos, Name: vars[0]}
 		guard := &ast.BinaryExpr{
@@ -292,8 +301,25 @@ func (p *Parser) parseQuantifier() ast.Expr {
 	}
 
 	p.expect(lexer.TOKEN_COLON)
-	body := p.parseExpr()
+	body := p.parseQuantifierBody()
+	if !p.allowQuantifiers {
+		p.errorAt(pos, "unbounded quantifiers are specification-only; use a finite range at runtime")
+		return &ast.BoolLit{Position: pos}
+	}
 	return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, Body: body}
+}
+
+// parseQuantifierBody accepts a predicate on the header line or in an indented block.
+func (p *Parser) parseQuantifierBody() ast.Expr {
+	if p.peek() != lexer.TOKEN_NEWLINE {
+		return p.parseExpr()
+	}
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	body := p.parseExpr()
+	p.expectNewlineAfterValueExpr(body)
+	p.expect(lexer.TOKEN_DEDENT)
+	return body
 }
 
 // parseQuantifierInSource parses the source of a `forall i in <source>:` binder. Range forms return
@@ -1127,7 +1153,7 @@ func (p *Parser) parseUnary() ast.Expr {
 		if !hasExplicitPool {
 			activePool := p.activePoolName()
 			if activePool == "" {
-			p.errorf("submit requires a concurrency scope like \"nursery:\", \"nursery on(pool):\", \"pool workers(...):\", or an explicit pool like \"submit[pool] work(arg)\"")
+				p.errorf("submit requires a concurrency scope like \"nursery:\", \"nursery on(pool):\", \"pool workers(...):\", or an explicit pool like \"submit[pool] work(arg)\"")
 				return callExpr
 			}
 			poolPos := call.Func.Pos()
@@ -1285,4 +1311,24 @@ func (p *Parser) parseNestedNot() ast.Expr {
 	p.enterNesting()
 	defer p.leaveNesting()
 	return p.parseNot()
+}
+
+// A runtime range evaluates its endpoints once and exits at the first witness
+// (exists) or counterexample (forall). Empty ranges have the logical identity.
+func (p *Parser) runtimeRangeQuantifier(pos lexer.Pos, exists bool, binder string, lo, hi, predicate ast.Expr) ast.Expr {
+	name := fmt.Sprintf("__quantifier_%d", pos.Offset)
+	result := &ast.Ident{Position: pos, Name: name}
+	condition := predicate
+	if !exists {
+		condition = &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: predicate}
+	}
+	loop := &ast.ForStmt{Position: pos, Name: binder, Start: lo, End: hi, Op: lexer.TOKEN_RANGE_LT, Body: []ast.Stmt{
+		&ast.IfStmt{Position: pos, Cond: condition, Then: []ast.Stmt{
+			&ast.AssignStmt{Position: pos, Target: result, Value: &ast.BoolLit{Position: pos, Value: exists}},
+			&ast.BreakStmt{Position: pos},
+		}},
+	}}
+	return &ast.ExprBlock{Position: pos, Stmts: []ast.Stmt{
+		&ast.VarDeclStmt{Position: pos, Name: name, Mutable: true, Value: &ast.BoolLit{Position: pos, Value: !exists}}, loop,
+	}, Value: result}
 }

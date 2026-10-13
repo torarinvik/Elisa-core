@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"fmt"
 	"strconv"
 )
 
@@ -279,4 +280,75 @@ func (a *Analyzer) bindPackedVariantViewAliasForBody(pattern ast.MatchPattern, e
 	if a.currentPackedVariantViews != nil {
 		a.currentPackedVariantViews[sym] = viewType
 	}
+}
+
+// Resolve scalar constant selectors through the lexical/global symbol table before
+// replacing them with typed literals. Local shadows, enum variants and mutable
+// storage are never treated as named integer constants.
+func (a *Analyzer) resolveIntegerConstantPattern(pattern ast.MatchPattern) ast.MatchPattern {
+	var name string
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		if p.Binder != "" {
+			return pattern
+		}
+		name = p.Name
+	case *ast.MatchVariantPattern:
+		if len(p.Args) != 0 || p.As != "" || p.Rest {
+			return pattern
+		}
+		name = p.EnumName + "." + p.Variant
+	case *ast.MatchLiteralPattern:
+		if !p.Pinned {
+			return pattern
+		}
+		id, ok := stripOptimizationParens(p.Value).(*ast.Ident)
+		if !ok {
+			return pattern
+		}
+		name = id.Name
+	case *ast.MatchOrPattern:
+		options := make([]ast.MatchPattern, len(p.Options))
+		for i, option := range p.Options {
+			options[i] = a.resolveIntegerConstantPattern(option)
+		}
+		copy := *p
+		copy.Options = options
+		return &copy
+	default:
+		return pattern
+	}
+	if a.currentScope != nil {
+		if local, ok := a.currentScope.Lookup(name); ok && local.Kind != SymbolConst {
+			return pattern
+		}
+	}
+	symbol, _, ok := a.lookupVisibleGlobal(name)
+	if !ok || symbol == nil || symbol.Kind != SymbolConst || symbol.Mutable {
+		return pattern
+	}
+	signed, width, ok := BitIntInfo(symbol.Type)
+	if !ok {
+		return pattern
+	}
+	id := &ast.Ident{Position: pattern.Pos(), Name: name}
+	a.analyzeExpr(id)
+	value, ok := a.resolvedPrimitiveConstant(id)
+	if !ok || value.Kind != ConstInt {
+		return pattern
+	}
+	suffix := fmt.Sprintf("u%d", width)
+	spelling := strconv.FormatUint(uint64(value.Int), 10)
+	var literal ast.Expr
+	if signed {
+		suffix = fmt.Sprintf("i%d", width)
+		spelling = strconv.FormatInt(value.Int, 10)
+		if value.Int < 0 {
+			literal = &ast.UnaryExpr{Position: pattern.Pos(), Op: lexer.TOKEN_MINUS, Operand: &ast.IntLit{Position: pattern.Pos(), Value: spelling[1:], Suffix: suffix}}
+		}
+	}
+	if literal == nil {
+		literal = &ast.IntLit{Position: pattern.Pos(), Value: spelling, Suffix: suffix}
+	}
+	return &ast.MatchLiteralPattern{Position: pattern.Pos(), Value: literal}
 }

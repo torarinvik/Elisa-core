@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -1462,6 +1463,34 @@ func collectSMTFactDeps(expr ast.Expr, out map[string]bool) {
 			collectSMTFactDeps(n.Left, out)
 			collectSMTFactDeps(n.Right, out)
 		}
+	case *ast.ExprBlock:
+		bound := collectSMTBlockDeps(n.Stmts, out)
+		tail := map[string]bool{}
+		collectSMTFactDeps(n.Value, tail)
+		for name := range tail {
+			if !bound[name] {
+				out[name] = true
+			}
+		}
+	case *ast.TernaryExpr:
+		collectSMTFactDeps(n.Cond, out)
+		collectSMTFactDeps(n.Value, out)
+		collectSMTFactDeps(n.Alt, out)
+	case *ast.MatchExpr:
+		collectSMTFactDeps(n.Value, out)
+		collectSMTFactDeps(n.Store, out)
+		for _, arm := range n.Arms {
+			armDeps := map[string]bool{}
+			collectSMTFactDeps(arm.Guard, armDeps)
+			collectSMTStatementDeps(reflect.ValueOf(arm.Body), armDeps)
+			binders := map[string]bool{}
+			collectSMTMatchBinders(arm.Pattern, binders, out)
+			for name := range armDeps {
+				if !binders[name] {
+					out[name] = true
+				}
+			}
+		}
 	case *ast.FieldExpr:
 		if n != nil {
 			collectSMTFactDeps(n.Object, out)
@@ -1492,12 +1521,142 @@ func collectSMTFactDeps(expr ast.Expr, out map[string]bool) {
 		// reference inside a quantified body (e.g. `ensure forall k: result[k] == 0` references `result`)
 		// and skips the clause at void-exit where `result` is unbound.
 		if n != nil {
-			collectSMTFactDeps(n.Body, out)
+			bodyDeps := map[string]bool{}
+			collectSMTFactDeps(n.Body, bodyDeps)
 			for _, v := range n.Vars {
-				delete(out, v)
+				delete(bodyDeps, v)
+			}
+			for name := range bodyDeps {
+				out[name] = true
+			}
+			collectSMTFactDeps(n.In, out)
+		}
+	}
+}
+
+// Separate pattern reads from binders so shadowing cannot hide a free dependency.
+func collectSMTMatchBinders(pattern ast.MatchPattern, binders, reads map[string]bool) {
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		if p.Binder != "" {
+			binders[p.Binder] = true
+		} else {
+			binders[p.Name] = true
+		}
+	case *ast.MatchRestPattern:
+		binders[p.Name] = true
+	case *ast.MatchTuplePattern:
+		for _, item := range p.Elems {
+			collectSMTMatchBinders(item, binders, reads)
+		}
+	case *ast.MatchListPattern:
+		for _, item := range p.Elems {
+			collectSMTMatchBinders(item, binders, reads)
+		}
+	case *ast.MatchOrPattern:
+		for _, item := range p.Options {
+			collectSMTMatchBinders(item, binders, reads)
+		}
+	case *ast.MatchStructPattern:
+		binders[p.As] = true
+		for _, arg := range p.Args {
+			collectSMTMatchBinders(arg.Pattern, binders, reads)
+		}
+	case *ast.MatchVariantPattern:
+		binders[p.As] = true
+		for _, arg := range p.Args {
+			collectSMTMatchBinders(arg.Pattern, binders, reads)
+		}
+	case *ast.MatchLiteralPattern:
+		collectSMTFactDeps(p.Value, reads)
+	case *ast.MatchRangePattern:
+		collectSMTFactDeps(p.Lo, reads)
+		collectSMTFactDeps(p.Hi, reads)
+	}
+}
+
+// Walk statement structure, handing expression nodes to the dependency visitor.
+// String-valued metadata, literals and declaration names are not identifier reads.
+func collectSMTStatementDeps(v reflect.Value, out map[string]bool) {
+	if !v.IsValid() {
+		return
+	}
+	if v.CanInterface() {
+		switch node := v.Interface().(type) {
+		case []ast.Stmt:
+			collectSMTBlockDeps(node, out)
+			return
+		case *ast.MatchStmt:
+			collectSMTFactDeps(&ast.MatchExpr{Value: node.Value, Store: node.Store, Arms: node.Arms}, out)
+			return
+		case *ast.ForStmt:
+			collectSMTFactDeps(node.Start, out)
+			collectSMTFactDeps(node.End, out)
+			collectSMTFactDeps(node.Step, out)
+			body := map[string]bool{}
+			collectSMTBlockDeps(node.Body, body)
+			delete(body, node.Name)
+			for name := range body {
+				out[name] = true
+			}
+			return
+		case *ast.IterForStmt:
+			collectSMTFactDeps(node.Source, out)
+			body := map[string]bool{}
+			collectSMTBlockDeps(node.Body, body)
+			for _, name := range returnBorrowIterPatternNames(node.Pattern) {
+				delete(body, name)
+			}
+			for name := range body {
+				out[name] = true
+			}
+			return
+		}
+		if expr, ok := v.Interface().(ast.Expr); ok {
+			collectSMTFactDeps(expr, out)
+			return
+		}
+	}
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if !v.IsNil() {
+			collectSMTStatementDeps(v.Elem(), out)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			collectSMTStatementDeps(v.Field(i), out)
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			collectSMTStatementDeps(v.Index(i), out)
+		}
+	}
+}
+
+// A declaration's initializer sees the enclosing scope; its name shadows only
+// subsequent statements in the same block.
+func collectSMTBlockDeps(stmts []ast.Stmt, out map[string]bool) map[string]bool {
+	bound := map[string]bool{}
+	for _, stmt := range stmts {
+		deps := map[string]bool{}
+		collectSMTStatementDeps(reflect.ValueOf(stmt), deps)
+		for name := range deps {
+			if !bound[name] {
+				out[name] = true
+			}
+		}
+		switch n := stmt.(type) {
+		case *ast.VarDeclStmt:
+			bound[n.Name] = true
+		case *ast.TupleBindStmt:
+			if n.Declare {
+				for _, binding := range n.Names {
+					bound[binding.Name] = true
+				}
 			}
 		}
 	}
+	return bound
 }
 
 func (a *Analyzer) canAssumeContractFact(expr ast.Expr) bool {
@@ -2154,6 +2313,10 @@ func (tr *smtTranslator) term(expr ast.Expr) (string, bool) {
 }
 
 func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, bool) {
+	if n, ok := expr.(*ast.MatchExpr); ok {
+		return tr.scalarMatchTerm(n, env, tr.termEnv)
+	}
+
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return tr.termEnv(n.Inner, env)

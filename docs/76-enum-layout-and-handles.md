@@ -26,14 +26,15 @@ does not disappear — it becomes an opt-in layout for the workloads it genuinel
 
 | Form | binary-trees | repeat-traverse | note |
 |---|---|---|---|
-| struct + `new[auto]` + inferred region (AoS, contiguous bump) | **0.40 s / 22 MB** | **0.49 s / 85 MB** | beats hand-written C++/Rust arenas |
+| struct + inferred-region construction (the benchmark used legacy `new[auto]`) | **0.40 s / 22 MB** | **0.49 s / 85 MB** | beats hand-written C++/Rust arenas |
 | region-backed **packed columnar** enum | 2.07 s / 88 MB | 0.68 s / 183 MB | loses on memory (~2×, intrinsic) and pure traversal (~1.4×) |
 | idiomatic safe C++ `unique_ptr` / Rust `Box` | ~1.4 s | — | the pointer-forest baseline |
 
 Two findings drove the model:
 
-1. **The struct + `new[auto]` form *is* the unified Array-of-Structs layout** (contiguous,
-   bump-allocated nodes) — and it won not by layout cleverness but because it rides the
+1. **The struct + inferred-region construction form *is* the unified Array-of-Structs layout**
+   (contiguous, bump-allocated nodes) — the benchmark used the legacy `new[auto]` spelling. It won
+   not by layout cleverness but because it rides the
    inferred-region allocator (loop-reset, exact bump, no syscalls, no manual free, region-poly
    threading, docs/75). A hand-written `darray`-of-tagged-nodes hit 1.0 s — **0.44 s of it pure
    mmap/munmap** — because a manually-managed container can't ride that inference. *Layout and
@@ -84,9 +85,9 @@ def eval(node: Expr) -> int:
 ```
 
 **Hidden until an expert asks:** AoS-vs-SoA (default AoS); inline-vs-AoS (compiler picks inline for
-non-recursive enums); the region/arena/loop-reset/exact-bump provenance; the index width and null
-sentinel; and `new[auto]` itself (a bare `new`/constructor with an inferred region is the ceiling —
-the `[auto]`/`[scratch]`/`[store]` bracket never appears in intro code).
+non-recursive enums); the region/arena/loop-reset/exact-bump provenance; and the index width and null
+sentinel. New code uses a bare constructor; legacy `new[auto]` remains only as a compatibility
+spelling.
 
 **The node type is an opaque handle from day one — compiler-enforced.** A beginner can never extract
 a raw `Expr&` from a handle (no `&`, no borrow-returning accessor, no field-on-handle that yields a
@@ -322,8 +323,9 @@ Instead:
 ## The gating prerequisite (the real wall)
 
 The AoS default is frictionless only if region-poly threading is total for functions that return or
-build nodes. That gating work has since landed for the beginner-facing paths: `new[auto]` builders,
-plain recursive enum constructors/matches, build-local-return containers (`darray`/`dict`/`set`/`dstr`),
+build nodes. That gating work has since landed for the beginner-facing paths: inferred-region
+builders (including the legacy `new[auto]` spelling), plain recursive enum constructors/matches,
+build-local-return containers (`darray`/`dict`/`set`/`dstr`),
 and by-ref container growth/reassignment all thread or adopt the caller's region instead of producing a
 bare `requires an active in <arena>: scope` helper error. Recursive builders are exactly where
 beginners live; keeping that path ceremony-free is the reason the AoS default is viable.
@@ -332,7 +334,7 @@ beginners live; keeping that path ceremony-free is the reason the AoS default is
 
 | Phase | Delivers | Depends on |
 |------|----------|-----------|
-| 0 | **DONE** — region-poly threading/adoption for the no-ceremony builder paths: container build-local-return (`darray`/`dict`/`set`/`dstr`), by-ref container growth/reassignment, `new[auto]`, and plain recursive enum constructor/match helpers. Helpers now thread or adopt the caller's region instead of requiring a manual `in <arena>:` scope. | docs/75 |
+| 0 | **DONE** — region-poly threading/adoption for the no-ceremony builder paths: container build-local-return (`darray`/`dict`/`set`/`dstr`), by-ref container growth/reassignment, inferred-region allocation, and plain recursive enum constructor/match helpers. Helpers now thread or adopt the caller's region instead of requiring a manual `in <arena>:` scope. | docs/75 |
 | 1 | **DONE** — `layout` on enum declarations: parses `enum … layout soa\|aos(sparse, index: uN)`, carries Layout/LayoutSet/LayoutSparse/IndexWidth onto EnumDecl + EnumType; bad index widths rejected at parse. `common(...)` canonical shared-field form also DONE. | struct `layout` grammar |
 | 2 | **Opaque index handle ABI**: index width `u8…u64` (default `u32`, node-index), free null sentinel at each width, loud overflow panic; opaque-handle check (no raw `&` leak). **Semantic foundation DONE** (`ResolvedIndexWidthBits`/`NullSentinelValue`/`MaxNodeCount` + layout-option validation). **Codegen DEFERRED into Phase 3**: the current handle is hard-coded `u32` across ~dozens of backend sites + the runtime `PackedStoreState`, so the width is built fresh in the AoS handle, not retrofitted onto the demoted SoA store. | 1 |
 | 3 | **DONE** — Plain recursive `enum` ⇒ region-backed AoS default. Slice 0+0b: promotion (syntactic self-reference at declare-time → `Packed`+`RecursivePlain`) + the full zero-ceremony surface (plain enum + `common(...)` + bare constructors + storeless match). **Slice 2: AoS storage** (`packedEnumABIAoS` — one contiguous `{tag, common, payload}` record per node, dense index handle, stable-address chunk store) is the default for recursive plain enums (`enum X layout soa` opts back to columnar). **Verified at scale: binary-trees N=18 = 0.38s/22MB — ~5.5× faster + 4× lighter than SoA, beating the struct form and hand-written C++/Rust arenas.** | 0, 1 |
@@ -364,6 +366,8 @@ Both directly-recursive enums (tree, list, single-enum AST) and **mutually-recur
   it reaches through its callees and threads them all in. Entry points and export targets (which own a
   region) create the stores on demand and thread them down; everyone else receives them.
 
-Note: a *bare* constructor (no `new[auto]`) must appear inside a region-polymorphic builder function
-or an `in auto:`/store-threaded context — a bare constructor written directly in a plain entry
-function still needs explicit `new[auto] E.V(...)`.
+Region inference now covers ordinary recursive enum construction. Entry points and export targets
+own the inferred region, create the stores they need, and thread those stores through recursive
+calls. Prefer a bare constructor such as `E.V(...)`; `new[auto]` and user-written `in auto:` are
+deprecated compatibility spellings. Use an explicit `region NAME(size):` only when a named,
+bounded scope is part of the design.

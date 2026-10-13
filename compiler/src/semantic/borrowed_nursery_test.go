@@ -41,6 +41,79 @@ def run() -> void:
 	}
 }
 
+func TestBorrowedNurseryCannotShutdownPoolBeforeJoin(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_shutdown.elisa", borrowedNurseryPrelude+`
+extern pool_shutdown(pool: mutable ThreadPool&)
+def run(pool: mutable ThreadPool&) -> void:
+	nursery on(pool):
+		pool_shutdown(pool)
+`)
+	got := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(got, "cannot shut down a borrowed nursery pool before its tasks have joined") {
+		t.Fatalf("shutting down a caller-owned pool inside its nursery must be rejected, got:\n%s", got)
+	}
+}
+
+func TestBorrowedNurseryCannotShutdownUnderlyingPoolThroughReferenceAlias(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_shutdown_alias.elisa", borrowedNurseryPrelude+`
+extern pool_shutdown(pool: mutable ThreadPool&)
+def run() -> void:
+	pool: mutable ThreadPool = zeroed
+	pool_ref: mutable ThreadPool& = &pool
+	nursery on(pool_ref):
+		pool_shutdown(&pool)
+`)
+	got := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(got, "cannot shut down a borrowed nursery pool before its tasks have joined") {
+		t.Fatalf("shutting down the aliased pool inside its nursery must be rejected, got:\n%s", got)
+	}
+}
+
+func TestBorrowedNurseryCannotShutdownUsingBorrowedReferenceAlias(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_shutdown_alias_arg.elisa", borrowedNurseryPrelude+`
+extern pool_shutdown(pool: mutable ThreadPool&)
+def run() -> void:
+	pool: mutable ThreadPool = zeroed
+	pool_ref: mutable ThreadPool& = &pool
+	nursery on(pool_ref):
+		pool_shutdown(pool_ref)
+`)
+	got := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(got, "cannot shut down a borrowed nursery pool before its tasks have joined") {
+		t.Fatalf("shutting down through the borrowed alias must be rejected, got:\n%s", got)
+	}
+}
+
+func TestBorrowedNurseryCannotCallShutdownHelperBeforeJoin(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_shutdown_helper.elisa", borrowedNurseryPrelude+`
+extern pool_shutdown(pool: mutable ThreadPool&) can[Pool.Shutdown, Thread.Join, Memory.Release, Abort.Panic]
+def close_pool(pool: mutable ThreadPool&) -> void:
+	pool_shutdown(pool)
+def run(pool: mutable ThreadPool&) -> void:
+	nursery on(pool):
+		can Pool.Shutdown, Thread.Join, Memory.Release, Abort.Panic:
+			close_pool(pool)
+`)
+	got := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(got, "cannot call code that may shut down a pool while a borrowed nursery is active") {
+		t.Fatalf("calling a pool-shutdown helper before the nursery join must be rejected, got:\n%s", got)
+	}
+}
+
+func TestBorrowedNurseryShutdownOfSameNameShadowDoesNotMatchOuterPool(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_shutdown_shadow.elisa", borrowedNurseryPrelude+`
+extern pool_shutdown(pool: mutable ThreadPool&)
+def run(pool: mutable ThreadPool&) -> void:
+	nursery on(pool):
+		pool: mutable ThreadPool = zeroed
+		pool_shutdown(pool)
+`)
+	got := strings.Join(result.Errors(), "\n")
+	if strings.Contains(got, "cannot shut down a borrowed nursery pool before its tasks have joined") {
+		t.Fatalf("a same-name local pool is a distinct binding, got:\n%s", got)
+	}
+}
+
 func TestBorrowedNurseryJoinsSubmittedTaskBeforeEarlyReturn(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "borrowed_nursery_return.elisa", borrowedNurseryPrelude+`
 def run(pool: mutable ThreadPool&) -> i64:

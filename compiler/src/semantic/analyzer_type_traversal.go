@@ -386,7 +386,7 @@ func (a *Analyzer) typeMayOwnArenaStorage(t Type, seen map[string]bool) bool {
 }
 
 func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValueKey, seen map[string]bool) (borrowedOwnerRefState, bool) {
-	if t == nil || !a.containsBorrowedOwnerRefValues(t, map[string]bool{}) {
+	if t == nil || !a.containsBorrowedOwnerRefValues(t) {
 		return borrowedOwnerRefState{}, false
 	}
 	if _, ok := borrowableOwnerRefElemType(t); ok {

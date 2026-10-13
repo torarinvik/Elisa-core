@@ -229,6 +229,8 @@ func (a *Analyzer) analyzeIntegerMatchStmt(stmt *ast.MatchStmt, valueType Type) 
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	hasWildcard := false
 	for i, arm := range stmt.Arms {
+		arm.Pattern = a.resolveIntegerConstantPattern(arm.Pattern)
+		stmt.Arms[i].Pattern = arm.Pattern
 		if a.stringMatchPatternShadowedByPrevious(arm.Pattern, priorPatterns) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
@@ -322,6 +324,8 @@ func (a *Analyzer) analyzeIntegerMatchExpr(expr *ast.MatchExpr, valueType Type) 
 	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
 	hasWildcard := false
 	for i, arm := range expr.Arms {
+		arm.Pattern = a.resolveIntegerConstantPattern(arm.Pattern)
+		expr.Arms[i].Pattern = arm.Pattern
 		if a.stringMatchPatternShadowedByPrevious(arm.Pattern, priorPatterns) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
