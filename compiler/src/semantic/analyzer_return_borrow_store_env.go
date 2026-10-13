@@ -1238,6 +1238,16 @@ func (a *Analyzer) queueCallArgumentStoreChecks(call *ast.CallExpr) {
 		if !a.returnBorrowWritableParam(paramType) {
 			continue
 		}
+		// Writability describes what the argument permits, not what this callee actually does.
+		// A settled body summary can rule out retention through a read-only parameter. Keep the
+		// check conservative for unresolved/ambiguous calls, arena-polymorphic functions, and
+		// unsettled summaries; those cases may still write through the argument.
+		if callee, ok := a.resolveDirectCallFuncDecl(call); ok && callee != nil &&
+			storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
+			if summary := a.storeFlowSummaryFor(callee); summary != nil && !summary.writtenParam(index) {
+				continue
+			}
+		}
 		// A verified TaskGroup window registers this exact pool_submit1 handle
 		// and joins it before the enclosing function can return. That discharges
 		// the pool's retention of the submitted capture; it does not change the

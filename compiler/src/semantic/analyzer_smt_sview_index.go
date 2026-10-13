@@ -20,12 +20,15 @@ func (tr *smtTranslator) immutableSviewArrayParameter(id *ast.Ident, env map[str
 	if !tr.a.immutableSviewParameter(id) {
 		return false
 	}
-	body := tr.a.currentFuncDecl.Body
-	if len(body) != 1 {
-		return false
+	if tr.a.currentFuncDecl.IsGhost {
+		// Ghost functions are verification-only and their declaration validator rejects mutable
+		// statements/effects. Their return-tree projection can therefore be treated as a stable
+		// logical byte sequence even when it uses immutable local aliases or recursive calls.
+		_, ok := pureReturnExpr(tr.a.currentFuncDecl)
+		return ok
 	}
-	ret, ok := body[0].(*ast.ReturnStmt)
-	return ok && tr.a.pureSviewIndexExpression(ret.Value, 0)
+	body, ok := pureReturnExpr(tr.a.currentFuncDecl)
+	return ok && tr.a.pureSviewIndexExpression(body, 0)
 }
 
 func (a *Analyzer) immutableSviewParameter(id *ast.Ident) bool {
@@ -54,6 +57,12 @@ func (a *Analyzer) pureSviewIndexExpression(expr ast.Expr, depth int) bool {
 	case *ast.ParenExpr:
 		return a.pureSviewIndexExpression(n.Inner, depth+1)
 	case *ast.Ident:
+		if _, ok := a.constIntValue(n); ok {
+			return true
+		}
+		if _, ok := a.resolvedPrimitiveConstant(n); ok {
+			return true
+		}
 		sym, found := a.currentScope.Lookup(n.Name)
 		if !found || sym == nil || sym.Kind != SymbolParam || sym.Node != a.currentFuncDecl || symbolRootMutable(sym) {
 			return false
@@ -64,7 +73,7 @@ func (a *Analyzer) pureSviewIndexExpression(expr ast.Expr, depth int) bool {
 		_, _, integer := smtIntWidthSign(sym.Type)
 		return integer
 	case *ast.UnaryExpr:
-		if n.LoweredCall != nil {
+		if n == nil || n.LoweredCall != nil {
 			return false
 		}
 		switch n.Op {
@@ -72,10 +81,29 @@ func (a *Analyzer) pureSviewIndexExpression(expr ast.Expr, depth int) bool {
 			return a.pureSviewIndexExpression(n.Operand, depth+1)
 		}
 	case *ast.BinaryExpr:
-		return n.LoweredCall == nil && a.pureSviewIndexExpression(n.Left, depth+1) && a.pureSviewIndexExpression(n.Right, depth+1)
+		return n != nil && n.LoweredCall == nil && a.pureSviewIndexExpression(n.Left, depth+1) && a.pureSviewIndexExpression(n.Right, depth+1)
 	case *ast.FieldExpr:
 		id, ok := stripOptimizationParens(n.Object).(*ast.Ident)
 		return ok && (n.Field == "len" || n.Field == "count") && a.immutableSviewParameter(id)
+	case *ast.CastExpr:
+		return n != nil && a.pureSviewIndexExpression(n.Operand, depth+1)
+	case *ast.TernaryExpr:
+		return n != nil && a.pureSviewIndexExpression(n.Cond, depth+1) &&
+			a.pureSviewIndexExpression(n.Value, depth+1) && a.pureSviewIndexExpression(n.Alt, depth+1)
+	case *ast.CallExpr:
+		if n == nil {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil || !decl.IsGhost {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.pureSviewIndexExpression(arg, depth+1) {
+				return false
+			}
+		}
+		return true
 	case *ast.IndexExpr:
 		id, ok := stripOptimizationParens(n.Object).(*ast.Ident)
 		return ok && n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback && n.AsBuiltinDictGet == nil && n.AsSpecialize == nil && n.AsOverlayCall == nil && a.immutableSviewParameter(id) && a.pureSviewIndexExpression(n.Index, depth+1)

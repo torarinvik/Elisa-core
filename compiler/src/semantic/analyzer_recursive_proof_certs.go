@@ -49,11 +49,15 @@ func (c recursiveProofCertificate) pos() lexer.Pos {
 }
 
 func (a *Analyzer) directNumericTerminationCertificate(fn *ast.FuncDecl, call *ast.CallExpr) (recursiveProofCertificate, bool) {
+	return a.directNumericTerminationCertificateUnderPath(fn, call, nil)
+}
+
+func (a *Analyzer) directNumericTerminationCertificateUnderPath(fn *ast.FuncDecl, call *ast.CallExpr, path ast.Expr) (recursiveProofCertificate, bool) {
 	if a == nil || fn == nil || call == nil || len(fn.Decreases) == 0 {
 		return recursiveProofCertificate{}, false
 	}
 	subst := a.substForSelfCall(fn, call)
-	measureOutcome, measureProven := a.proveMeasureDecreasesOutcome(fn.Decreases, subst)
+	measureOutcome, measureProven := a.proveMeasureDecreasesOutcomeUnderPath(fn.Decreases, subst, path)
 	if !measureProven {
 		// docs/118 (118-2/118-4): argument substitution reports the measure unchanged when the recursive
 		// call re-passes the same `mutable T&` param — the decrease lives in a callee's side effect. Try

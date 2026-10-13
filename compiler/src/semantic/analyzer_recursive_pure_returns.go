@@ -29,36 +29,65 @@ func pureReturnCases(decl *ast.FuncDecl) ([]pureReturnCase, bool) {
 	if decl == nil || len(decl.Body) == 0 {
 		return nil, false
 	}
-	return pureReturnCasesFromStmts(decl.Body, nil)
+	return pureReturnCasesFromStmts(decl.Body, nil, nil)
 }
 
-func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr) ([]pureReturnCase, bool) {
+// pureReturnCasesFromStmts lowers the return-tree subset to an expression. Immutable, owner-free
+// locals with syntactically side-effect-free initializers are inlined into later guards and return
+// expressions. Calls in local initializers are declined because purity cannot be decided here;
+// callers that reason about the resulting expression still apply their own purity and totality gates.
+// All other statements remain a conservative decline.
+func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]ast.Expr) ([]pureReturnCase, bool) {
 	if len(stmts) == 0 {
 		return nil, false
+	}
+	if local, ok := stmts[0].(*ast.VarDeclStmt); ok {
+		if local == nil || local.Name == "" || local.Mutable || local.Owner != nil || local.Value == nil ||
+			len(stmts) == 1 || !wherePredicateIsSideEffectFree(local.Value) {
+			return nil, false
+		}
+		value, ok := substituteLemmaEnsure(local.Value, subst)
+		if !ok {
+			return nil, false
+		}
+		nextSubst := make(map[string]ast.Expr, len(subst)+1)
+		for name, expr := range subst {
+			nextSubst[name] = expr
+		}
+		nextSubst[local.Name] = value
+		return pureReturnCasesFromStmts(stmts[1:], path, nextSubst)
 	}
 	if len(stmts) > 1 {
 		first, ok := stmts[0].(*ast.IfStmt)
 		if !ok || first == nil || len(first.Else) != 0 {
 			return nil, false
 		}
-		thenCond := combinePathCond(path, first.Cond)
-		thenCases, ok := pureReturnCasesFromStmts(first.Then, thenCond)
+		cond, ok := substituteLemmaEnsure(first.Cond, subst)
 		if !ok {
 			return nil, false
 		}
-		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: first.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: first.Cond})
+		thenCond := combinePathCond(path, cond)
+		thenCases, ok := pureReturnCasesFromStmts(first.Then, thenCond, subst)
+		if !ok {
+			return nil, false
+		}
+		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: cond.Pos(), Op: lexer.TOKEN_NOT, Operand: cond})
 		var out []pureReturnCase
 		out = append(out, thenCases...)
 		for _, elif := range first.Elifs {
-			cond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elif.Cond})
-			cases, ok := pureReturnCasesFromStmts(elif.Body, cond)
+			elifCond, ok := substituteLemmaEnsure(elif.Cond, subst)
+			if !ok {
+				return nil, false
+			}
+			branchCond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elifCond})
+			cases, ok := pureReturnCasesFromStmts(elif.Body, branchCond, subst)
 			if !ok {
 				return nil, false
 			}
 			out = append(out, cases...)
-			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elif.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: elif.Cond}}
+			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elifCond.Pos(), Op: lexer.TOKEN_NOT, Operand: elifCond}}
 		}
-		fallthroughCases, ok := pureReturnCasesFromStmts(stmts[1:], combinePathCond(path, negatedPrior))
+		fallthroughCases, ok := pureReturnCasesFromStmts(stmts[1:], combinePathCond(path, negatedPrior), subst)
 		if !ok {
 			return nil, false
 		}
@@ -70,33 +99,45 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr) ([]pureReturnCase
 		if n == nil || n.Value == nil {
 			return nil, false
 		}
-		return []pureReturnCase{{Cond: path, Expr: n.Value}}, true
+		value, ok := substituteLemmaEnsure(n.Value, subst)
+		if !ok {
+			return nil, false
+		}
+		return []pureReturnCase{{Cond: path, Expr: value}}, true
 	case *ast.IfStmt:
 		if n == nil || n.Cond == nil {
 			return nil, false
 		}
+		cond, ok := substituteLemmaEnsure(n.Cond, subst)
+		if !ok {
+			return nil, false
+		}
 		var out []pureReturnCase
-		thenCond := combinePathCond(path, n.Cond)
-		thenCases, ok := pureReturnCasesFromStmts(n.Then, thenCond)
+		thenCond := combinePathCond(path, cond)
+		thenCases, ok := pureReturnCasesFromStmts(n.Then, thenCond, subst)
 		if !ok {
 			return nil, false
 		}
 		out = append(out, thenCases...)
-		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: n.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: n.Cond})
+		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: cond.Pos(), Op: lexer.TOKEN_NOT, Operand: cond})
 		for _, elif := range n.Elifs {
 			if elif.Cond == nil {
 				return nil, false
 			}
-			cond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elif.Cond})
-			cases, ok := pureReturnCasesFromStmts(elif.Body, cond)
+			elifCond, ok := substituteLemmaEnsure(elif.Cond, subst)
+			if !ok {
+				return nil, false
+			}
+			branchCond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elifCond})
+			cases, ok := pureReturnCasesFromStmts(elif.Body, branchCond, subst)
 			if !ok {
 				return nil, false
 			}
 			out = append(out, cases...)
-			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elif.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: elif.Cond}}
+			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elifCond.Pos(), Op: lexer.TOKEN_NOT, Operand: elifCond}}
 		}
 		elseCond := combinePathCond(path, negatedPrior)
-		elseCases, ok := pureReturnCasesFromStmts(n.Else, elseCond)
+		elseCases, ok := pureReturnCasesFromStmts(n.Else, elseCond, subst)
 		if !ok {
 			return nil, false
 		}

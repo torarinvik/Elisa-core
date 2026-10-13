@@ -643,11 +643,19 @@ func (a *Analyzer) cacheSMTQuery(query string, result smtQueryResult) {
 // term (populating the caller's free variables), and the clause obligation is checked against the
 // caller's facts. Returns true only on `unsat` of the negation (a sound proof).
 func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Expr) (bool, string) {
+	return a.trySMTProveRequiresWithPath(clause, subst, nil)
+}
+
+// trySMTProveRequiresWithPath proves a clause under the enclosing function contract plus an optional
+// pure control-flow path. The extra path is used for recursive termination calls collected before
+// ordinary body analysis has seeded branch facts into the live scope.
+func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr) (bool, string) {
 	solver := a.openSMT()
 	if solver == nil || clause == nil {
 		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
+	a.typePureTerminationExprsForSMT(clause, path)
 	// When `result` is bound to a struct literal (`return Pair(1, 2)`), it has no scalar SMT term, so
 	// drop it from the env subst (which would otherwise decline) and instead resolve each `result.field`
 	// read to that field's construction argument — so `ensure result.a == 1` discharges.
@@ -693,6 +701,13 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// is substitution-specific: on a literal-null return `isnull_result` is true, on a T& (non-optional
 	// ref) return it is false. The standard set does not know which return site is active.
 	extra := a.smtResultNullnessHypothesis(tr, substForEnv)
+	if path != nil {
+		pathTerm, ok := tr.boolTerm(path, nil)
+		if !ok {
+			return false, ""
+		}
+		extra += "(assert " + pathTerm + ")\n"
+	}
 	// Lower the clause to the VC IR and discharge against the standard hypothesis set (the enclosing
 	// function's `requires` — docs/90 brick 90-13 — its immutable-local defining equalities, flow
 	// assert-facts, and range facts). On sat the returned model is an input permitted by the caller's
@@ -930,6 +945,24 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		return true
 	}
 	if tr.isArrayLike(a.exprTypes[argExpr]) {
+		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
+		if !ok {
+			return false
+		}
+		env[name] = arr
+		return true
+	}
+	argType := a.exprTypes[argExpr]
+	if argType == nil {
+		if id, isIdent := stripOptimizationParens(argExpr).(*ast.Ident); isIdent && id != nil && a.currentScope != nil {
+			if sym, found := a.currentScope.Lookup(id.Name); found && sym != nil {
+				argType = sym.Type
+			}
+		}
+	}
+	if _, ok := stripRefForBounds(argType).(*SViewType); ok {
+		// An immutable sview formal can be bound as an SMT byte array only when the enclosing
+		// expression context passes immutableSviewArrayParameter's read-only-function gate.
 		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
 		if !ok {
 			return false
@@ -4567,6 +4600,7 @@ func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.C
 		}
 		subst[param.Name] = args[i]
 	}
+	callPath := a.contractCallPath(call)
 	for _, req := range callee.Requires {
 		if req == nil {
 			continue
@@ -4577,7 +4611,7 @@ func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.C
 		case requiresRefuted:
 			return false
 		default:
-			proven, _ := a.trySMTProveRequires(req, subst)
+			proven, _ := a.trySMTProveRequiresWithPath(req, subst, callPath)
 			if !proven {
 				return false
 			}

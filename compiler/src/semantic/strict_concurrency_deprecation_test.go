@@ -20,7 +20,9 @@ func TestLegacyRawConcurrencyCallsAreRejected(t *testing.T) {
 		"nursery workers(N)",
 		"raw concurrency surface removed: `detach` is a detached-task escape hatch",
 		"raw concurrency surface removed: `pool_submit1` is low-level pool submission surface",
-		"task-group structure",
+		"`nursery on(pool):` for joined batches on a reusable caller-owned pool",
+		"Use `TaskGroup` when you need a caller-chosen wait point",
+		"`wait all` discards results, so keep task handles and `await` them when results matter",
 	} {
 		if !strings.Contains(errors, check) {
 			t.Fatalf("expected error %q, got:\n%s", check, errors)
@@ -40,6 +42,8 @@ func TestStrictConcurrencyFlagStillRejectsLegacyRawConcurrencyCalls(t *testing.T
 		"raw concurrency surface removed: `cond_wait` is legacy raw condition-variable surface",
 		"raw concurrency surface removed: `spawn1` is low-level escaped-task surface",
 		"raw concurrency surface removed: `pool_submit1` is low-level pool submission surface",
+		"`nursery on(pool):` for joined batches on a reusable caller-owned pool",
+		"Use `TaskGroup` when you need a caller-chosen wait point",
 	} {
 		if !strings.Contains(errors, check) {
 			t.Fatalf("expected error %q, got:\n%s", check, errors)

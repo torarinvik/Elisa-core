@@ -77,7 +77,7 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 			a.errorf(m.Pos(), "decreases measure must be an integer, got %s", t)
 		}
 	}
-	calls := a.collectSelfRecursiveCalls(fn)
+	calls := a.collectSelfRecursiveCallSites(fn)
 	if len(calls) == 0 {
 		edges := a.collectRecursiveSCCEdges(fn)
 		if len(edges) > 0 {
@@ -94,8 +94,8 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		a.warnf(measures[0].Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
 		return
 	}
-	for _, call := range calls {
-		cert, ok := a.directNumericTerminationCertificate(fn, call)
+	for _, site := range calls {
+		cert, ok := a.directNumericTerminationCertificateUnderPath(fn, site.Call, site.Path)
 		if ok {
 			a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", cert.Outcome)
 			continue
@@ -105,7 +105,7 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		if cert.Witness != "" {
 			witness = " — " + cert.Witness
 		}
-		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate%s", fn.Name, witness)
+		a.errorf(site.Call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate%s", fn.Name, witness)
 	}
 	if a.definingEquationCache != nil {
 		delete(a.definingEquationCache, fn)
@@ -174,6 +174,76 @@ func (a *Analyzer) collectSelfRecursiveCalls(fn *ast.FuncDecl) []*ast.CallExpr {
 	return calls
 }
 
+type recursiveCallSite struct {
+	Call *ast.CallExpr
+	Path ast.Expr
+}
+
+// collectSelfRecursiveCallSites preserves simple if/elif path guards for the termination SMT tier.
+// Calls in a branch receive that branch's condition; statements after an early-return guard receive
+// the negated guard. Other statement forms retain the existing conservative path context.
+func (a *Analyzer) collectSelfRecursiveCallSites(fn *ast.FuncDecl) []recursiveCallSite {
+	if a == nil || fn == nil {
+		return nil
+	}
+	var sites []recursiveCallSite
+	visit := func(path ast.Expr) func(ast.Expr) bool {
+		return func(expr ast.Expr) bool {
+			call, ok := expr.(*ast.CallExpr)
+			if !ok || call == nil {
+				return false
+			}
+			if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl == fn {
+				sites = append(sites, recursiveCallSite{Call: call, Path: path})
+			}
+			return false
+		}
+	}
+	var walk func([]ast.Stmt, ast.Expr)
+	walk = func(stmts []ast.Stmt, path ast.Expr) {
+		activePath := path
+		for _, stmt := range stmts {
+			if stmt == nil {
+				continue
+			}
+			if branch, ok := stmt.(*ast.IfStmt); ok && branch != nil && branch.Cond != nil {
+				a.walkStaticExpr(branch.Cond, visit(activePath))
+				thenPath := combinePathCond(activePath, branch.Cond)
+				walk(branch.Then, thenPath)
+				negatedPrior := ast.Expr(&ast.UnaryExpr{Position: branch.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: branch.Cond})
+				allArmsExit := blockDefinitelyExits(branch.Then)
+				for _, elif := range branch.Elifs {
+					if elif.Cond == nil {
+						allArmsExit = false
+						continue
+					}
+					a.walkStaticExpr(elif.Cond, visit(activePath))
+					elifPath := combinePathCond(activePath, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elif.Cond})
+					walk(elif.Body, elifPath)
+					allArmsExit = allArmsExit && blockDefinitelyExits(elif.Body)
+					negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elif.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: elif.Cond}}
+				}
+				if len(branch.Else) != 0 {
+					walk(branch.Else, combinePathCond(activePath, negatedPrior))
+					allArmsExit = allArmsExit && blockDefinitelyExits(branch.Else)
+					if allArmsExit {
+						break
+					}
+				} else if allArmsExit {
+					activePath = combinePathCond(activePath, negatedPrior)
+				}
+				continue
+			}
+			a.walkStaticStmt(stmt, visit(activePath))
+			if blockDefinitelyExits([]ast.Stmt{stmt}) {
+				break
+			}
+		}
+	}
+	walk(fn.Body, nil)
+	return sites
+}
+
 // substForSelfCall maps each parameter name to the corresponding argument expression of a recursive
 // call. A parameter without a positional argument is absent — a measure mentioning it then leaves the
 // fragment and the decrease cannot be proven (sound: the call is reported as non-decreasing).
@@ -231,6 +301,10 @@ func (a *Analyzer) proveMeasureDecreases(measures []ast.Expr, subst map[string]a
 // lexicographic decrease. The affine arithmetic is the fast path; SMT may additionally
 // establish the lower bound from relational preconditions such as `index <= text.len`.
 func (a *Analyzer) proveMeasureDecreasesOutcome(measures []ast.Expr, subst map[string]ast.Expr) (ProofOutcome, bool) {
+	return a.proveMeasureDecreasesOutcomeUnderPath(measures, subst, nil)
+}
+
+func (a *Analyzer) proveMeasureDecreasesOutcomeUnderPath(measures []ast.Expr, subst map[string]ast.Expr, path ast.Expr) (ProofOutcome, bool) {
 	measures = decreaseMeasureComponents(measures)
 	for k, measure := range measures {
 		earlierUnchanged := true
@@ -243,12 +317,13 @@ func (a *Analyzer) proveMeasureDecreasesOutcome(measures []ast.Expr, subst map[s
 		if !earlierUnchanged {
 			continue
 		}
-		if !a.measureStrictlyDecreases(measure, subst) {
+		strictly, strictViaSMT := a.measureStrictlyDecreasesUnderPath(measure, subst, path)
+		if !strictly {
 			continue
 		}
 		bounded, viaSMT := a.measureBoundedBelowWithTier(measure)
 		if bounded {
-			if viaSMT {
+			if viaSMT || strictViaSMT {
 				return ProofProvenSMT, true
 			}
 			return ProofProvenLinear, true
@@ -276,12 +351,50 @@ func (a *Analyzer) measureDiff(measure ast.Expr, subst map[string]ast.Expr) (aff
 // difference `entry - call` has a provably-positive lower bound. A constant positive difference
 // (the `decreases n` + `f(n-1)` case → +1) is the common, always-sound result.
 func (a *Analyzer) measureStrictlyDecreases(measure ast.Expr, subst map[string]ast.Expr) bool {
+	proven, _ := a.measureStrictlyDecreasesUnderPath(measure, subst, nil)
+	return proven
+}
+
+func (a *Analyzer) measureStrictlyDecreasesUnderPath(measure ast.Expr, subst map[string]ast.Expr, path ast.Expr) (bool, bool) {
 	diff, ok := a.measureDiff(measure, subst)
-	if !ok {
-		return false
+	if ok {
+		r := a.boundAffine(diff, a.currentScope)
+		if r.loKnown && r.lo > 0 {
+			return true, false
+		}
 	}
-	r := a.boundAffine(diff, a.currentScope)
-	return r.loKnown && r.lo > 0
+	post, ok := substituteLemmaEnsure(measure, subst)
+	if !ok {
+		return false, false
+	}
+	goal := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GT, Left: measure, Right: post}
+	a.typePureTerminationExprsForSMT(goal, path)
+	if proven, _ := a.trySMTProveRequiresWithPath(goal, nil, path); proven {
+		return true, true
+	}
+	return false, false
+}
+
+// typePureTerminationExprsForSMT records widths for a pure measure and its branch path before
+// translating machine arithmetic. It deliberately declines to type arbitrary call expressions here;
+// the ordinary body pass remains responsible for their full analysis.
+func (a *Analyzer) typePureTerminationExprsForSMT(exprs ...ast.Expr) {
+	if a == nil {
+		return
+	}
+	savedDiagnostics, savedFacts := a.suppressDiagnostics, a.suppressOptimizationFacts
+	a.suppressDiagnostics = true
+	a.suppressOptimizationFacts = true
+	defer func() {
+		a.suppressDiagnostics, a.suppressOptimizationFacts = savedDiagnostics, savedFacts
+	}()
+	for _, expr := range exprs {
+		if expr == nil || !wherePredicateIsSideEffectFree(expr) {
+			continue
+		}
+		a.typeCastNodesInExpr(expr)
+		a.analyzeExpr(expr)
+	}
 }
 
 // measureDiffIsZero reports whether an (earlier, lexicographic) measure component is provably
@@ -581,13 +694,13 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	if !ok {
 		return false
 	}
-	if !a.exprIsPureForEquation(body) {
+	if !a.exprIsPureForEquation(body, decl) {
 		return false
 	}
 	// TOTAL: a function that makes ANY direct self-recursive call must have a VERIFIED `decreases`
 	// measure — otherwise its "equation" may be inconsistent (non-termination ⇒ no fixed point). A
 	// non-recursive pure function is trivially total.
-	selfCalls := a.collectSelfRecursiveCalls(decl)
+	selfCalls := a.collectSelfRecursiveCallSites(decl)
 	if len(selfCalls) > 0 {
 		return a.measureVerifiedForCalls(decl, selfCalls)
 	}
@@ -600,7 +713,7 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 
 // measureVerifiedForCalls proves (read-only, no diagnostics) that decl's `decreases` measure strictly
 // decreases at every supplied self-recursive call. Shared by lemma-IH and function-equation gating.
-func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.CallExpr) bool {
+func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []recursiveCallSite) bool {
 	// A `decreases *` wildcard suppresses the termination proof obligation — but it does NOT make
 	// the function verifiedTerminating. Axiom/defining-equation eligibility requires a PROVEN
 	// termination measure; a mere opt-out cannot grant it (soundness-critical).
@@ -625,8 +738,8 @@ func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.Call
 		return false
 	}
 	for _, c := range calls {
-		subst := a.substForSelfCall(decl, c)
-		if !a.proveMeasureDecreases(decl.Decreases, subst) && !a.directNumericSyntacticDecrease(decl, c) {
+		subst := a.substForSelfCall(decl, c.Call)
+		if _, ok := a.proveMeasureDecreasesOutcomeUnderPath(decl.Decreases, subst, c.Path); !ok && !a.directNumericSyntacticDecrease(decl, c.Call) {
 			return false
 		}
 	}
@@ -662,27 +775,31 @@ func (a *Analyzer) functionPureEquationShape(decl *ast.FuncDecl) bool {
 		}
 	}
 	body, ok := pureReturnExpr(decl)
-	return ok && a.exprIsPureShapeForEquation(body)
+	return ok && a.exprIsPureShapeForEquation(body, decl)
 }
 
-func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
+func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr, owner *ast.FuncDecl) bool {
 	switch n := expr.(type) {
 	case *ast.MatchExpr:
 		return pureScalarMatchEquation(n)
-	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
+	case *ast.IntLit, *ast.BoolLit:
 		return true
+	case *ast.Ident:
+		return a.equationIdentifierIsStable(n, owner)
 	case *ast.FieldExpr:
-		return n != nil && a.exprIsPureShapeForEquation(n.Object)
+		return n != nil && a.exprIsPureShapeForEquation(n.Object, owner)
+	case *ast.IndexExpr:
+		return a.pureEquationSViewIndex(n, owner) && a.exprIsPureShapeForEquation(n.Index, owner)
 	case *ast.ParenExpr:
-		return n != nil && a.exprIsPureShapeForEquation(n.Inner)
+		return n != nil && a.exprIsPureShapeForEquation(n.Inner, owner)
 	case *ast.UnaryExpr:
-		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureShapeForEquation(n.Operand)
+		return n != nil && n.LoweredCall == nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureShapeForEquation(n.Operand, owner)
 	case *ast.BinaryExpr:
-		return n != nil && a.exprIsPureShapeForEquation(n.Left) && a.exprIsPureShapeForEquation(n.Right)
+		return n != nil && n.LoweredCall == nil && a.exprIsPureShapeForEquation(n.Left, owner) && a.exprIsPureShapeForEquation(n.Right, owner)
 	case *ast.CastExpr:
-		return n != nil && a.exprIsPureShapeForEquation(n.Operand)
+		return n != nil && a.exprIsPureShapeForEquation(n.Operand, owner)
 	case *ast.TernaryExpr:
-		return n != nil && a.exprIsPureShapeForEquation(n.Cond) && a.exprIsPureShapeForEquation(n.Value) && a.exprIsPureShapeForEquation(n.Alt)
+		return n != nil && a.exprIsPureShapeForEquation(n.Cond, owner) && a.exprIsPureShapeForEquation(n.Value, owner) && a.exprIsPureShapeForEquation(n.Alt, owner)
 	case *ast.CallExpr:
 		if n == nil {
 			return false
@@ -693,7 +810,7 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 				for inProgress := range a.definingEquationInProgress {
 					if inProgress != nil && inProgress.Name == ident.Name {
 						for _, arg := range n.Args {
-							if !a.exprIsPureShapeForEquation(arg) {
+							if !a.exprIsPureShapeForEquation(arg, owner) {
 								return false
 							}
 						}
@@ -704,7 +821,7 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 			return false
 		}
 		for _, arg := range n.Args {
-			if !a.exprIsPureShapeForEquation(arg) {
+			if !a.exprIsPureShapeForEquation(arg, owner) {
 				return false
 			}
 		}
@@ -714,29 +831,94 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 	}
 }
 
+// equationIdentifierIsStable limits equation variables to immutable parameters and compile-time
+// constants. In particular, mutable module state must never become a free variable in a recursive
+// equation: its value can change between evaluations.
+func (a *Analyzer) equationIdentifierIsStable(id *ast.Ident, owner *ast.FuncDecl) bool {
+	if id == nil || a == nil {
+		return false
+	}
+	if _, ok := a.constIntValue(id); ok {
+		return true
+	}
+	if _, ok := a.resolvedPrimitiveConstant(id); ok {
+		return true
+	}
+	if owner == nil {
+		return false
+	}
+	for _, param := range owner.Params {
+		if param.Name == id.Name {
+			return !param.Mutable && !a.paramIsMutable(param)
+		}
+	}
+	return false
+}
+
+// pureEquationSViewIndex admits only ordinary single-byte reads from an immutable sview formal.
+// This is the indexed-read fragment supported by the SMT array model; rewritten dict/overlay and
+// fallback indexing can perform different operations and are deliberately excluded.
+func (a *Analyzer) pureEquationSViewIndex(index *ast.IndexExpr, owner *ast.FuncDecl) bool {
+	if a == nil || index == nil || owner == nil || index.Index2 != nil || index.Fallback != nil ||
+		index.LegacyElseFallback || index.AsSpecialize != nil || index.AsOverlayCall != nil || index.AsBuiltinDictGet != nil {
+		return false
+	}
+	object, ok := stripOptimizationParens(index.Object).(*ast.Ident)
+	if !ok || object == nil || !a.equationIdentifierIsStable(object, owner) {
+		return false
+	}
+	paramIndex := -1
+	for i, param := range owner.Params {
+		if param.Name == object.Name {
+			if param.Mutable || a.paramIsMutable(param) {
+				return false
+			}
+			paramIndex = i
+			break
+		}
+	}
+	if paramIndex < 0 {
+		return false
+	}
+	sym, ok := a.symbolForFuncDecl(owner)
+	if !ok || sym == nil {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil || paramIndex >= len(fn.Params) {
+		return false
+	}
+	_, ok = stripRefForBounds(fn.Params[paramIndex]).(*SViewType)
+	return ok
+}
+
 // exprIsPureForEquation reports whether an expression is a PURE integer expression we may put on the
 // RHS of a defining equation: literals, parameter/immutable identifiers, arithmetic, comparisons,
 // parens, value-preserving casts, and calls to OTHER functions that are THEMSELVES equation-eligible
 // (so purity is transitive and a mutating/effectful helper poisons the whole body). Anything else —
 // an address-of, a field/index into mutable state, an unknown call — makes the body impure ⇒ decline.
-func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
+func (a *Analyzer) exprIsPureForEquation(expr ast.Expr, owner *ast.FuncDecl) bool {
 	switch n := expr.(type) {
 	case *ast.MatchExpr:
 		return pureScalarMatchEquation(n)
-	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
+	case *ast.IntLit, *ast.BoolLit:
 		return true
+	case *ast.Ident:
+		return a.equationIdentifierIsStable(n, owner)
 	case *ast.FieldExpr:
-		return n != nil && a.exprIsPureForEquation(n.Object)
+		return n != nil && a.exprIsPureForEquation(n.Object, owner)
+	case *ast.IndexExpr:
+		return a.pureEquationSViewIndex(n, owner) && a.exprIsPureForEquation(n.Index, owner)
 	case *ast.ParenExpr:
-		return n != nil && a.exprIsPureForEquation(n.Inner)
+		return n != nil && a.exprIsPureForEquation(n.Inner, owner)
 	case *ast.UnaryExpr:
-		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureForEquation(n.Operand)
+		return n != nil && n.LoweredCall == nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureForEquation(n.Operand, owner)
 	case *ast.BinaryExpr:
-		return n != nil && a.exprIsPureForEquation(n.Left) && a.exprIsPureForEquation(n.Right)
+		return n != nil && n.LoweredCall == nil && a.exprIsPureForEquation(n.Left, owner) && a.exprIsPureForEquation(n.Right, owner)
 	case *ast.CastExpr:
-		return n != nil && a.exprIsPureForEquation(n.Operand)
+		return n != nil && a.exprIsPureForEquation(n.Operand, owner)
 	case *ast.TernaryExpr:
-		return n != nil && a.exprIsPureForEquation(n.Cond) && a.exprIsPureForEquation(n.Value) && a.exprIsPureForEquation(n.Alt)
+		return n != nil && a.exprIsPureForEquation(n.Cond, owner) && a.exprIsPureForEquation(n.Value, owner) && a.exprIsPureForEquation(n.Alt, owner)
 	case *ast.CallExpr:
 		if n == nil {
 			return false
@@ -747,7 +929,7 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 				for inProgress := range a.definingEquationInProgress {
 					if inProgress != nil && inProgress.Name == ident.Name {
 						for _, arg := range n.Args {
-							if !a.exprIsPureForEquation(arg) {
+							if !a.exprIsPureForEquation(arg, owner) {
 								return false
 							}
 						}
@@ -758,7 +940,7 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 			return false
 		}
 		for _, arg := range n.Args {
-			if !a.exprIsPureForEquation(arg) {
+			if !a.exprIsPureForEquation(arg, owner) {
 				return false
 			}
 		}
@@ -782,6 +964,12 @@ func (a *Analyzer) smtEquationParamType(t Type) bool {
 		return false
 	}
 	if (IsNumericType(t) && !IsFloatType(t)) || IsBoolType(t) || a.smtEquationStructType(t) {
+		return true
+	}
+	// The SMT array theory models sview[u8] as a read-only integer array. The parameter itself is
+	// accepted only when its indexed reads pass pureEquationSViewIndex and the surrounding function
+	// is an immutable pure-return tree.
+	if _, ok := t.(*SViewType); ok {
 		return true
 	}
 	return false

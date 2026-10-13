@@ -145,6 +145,10 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 		subst[param.Name] = args[i]
 	}
 	a.qualifyCalleeClauseConsts(call, requires, subst)
+	// Calls inside a guarded specification only need their contract on paths where the
+	// expression is evaluated. Preserve that logical path for the SMT fallback (for example,
+	// `ensure i < n implies result == recursive(i + 1)`).
+	callPath := a.contractCallPath(call)
 	subject := "precondition of " + declName
 	for _, req := range requires {
 		if req == nil {
@@ -162,7 +166,7 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			// SMT fallback (docs/90 brick 3): the linear clause prover declined, but the solver may
 			// still discharge a non-linear precondition (e.g. `requires lo * 2 <= cap`) under the
 			// caller's facts. Only `unsat` of the negation concludes — sound, off unless -smt.
-			proven, counterexample := a.trySMTProveRequires(req, subst)
+			proven, counterexample := a.trySMTProveRequiresWithPath(req, subst, callPath)
 			if proven {
 				a.recordProof(call.Pos(), subject, clauseName, ProofProvenSMT)
 				a.recordRequiresReport(declName, req, call.Pos(), true)
@@ -179,6 +183,162 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			a.proofLint(call.Pos(), "%s", diag.Format(declName))
 		}
 	}
+}
+
+// contractCallPath finds a pure guard that is required for a call expression inside a contract.
+// Implication is represented in the AST as `not guard or consequent`, so its consequent inherits
+// the guard. Short-circuit conjunction/disjunction and ternary branches contribute their normal
+// evaluation conditions as well. The path is used only as an SMT hypothesis for this specific call.
+func (a *Analyzer) contractCallPath(call *ast.CallExpr) ast.Expr {
+	if a == nil || a.currentFuncDecl == nil || call == nil {
+		return nil
+	}
+	clauses := append([]ast.Expr{}, a.currentFuncDecl.Requires...)
+	clauses = append(clauses, a.currentFuncDecl.EnsureValues...)
+	for _, clause := range clauses {
+		if path, found := a.findContractCallPath(clause, call, nil); found {
+			return path
+		}
+	}
+	return nil
+}
+
+func (a *Analyzer) findContractCallPath(expr ast.Expr, target *ast.CallExpr, path ast.Expr) (ast.Expr, bool) {
+	if expr == nil || target == nil {
+		return nil, false
+	}
+	if call, ok := expr.(*ast.CallExpr); ok && call == target {
+		return path, true
+	}
+	search := func(child ast.Expr, childPath ast.Expr) (ast.Expr, bool) {
+		return a.findContractCallPath(child, target, childPath)
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		if found, ok := search(n.Left, path); ok {
+			return found, true
+		}
+		rightPath := path
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			rightPath = contractPathAnd(path, n.Left)
+		case lexer.TOKEN_OR:
+			// `guard implies body` desugars to `not guard or body`.
+			if not, ok := stripOptimizationParens(n.Left).(*ast.UnaryExpr); ok && not.Op == lexer.TOKEN_NOT {
+				rightPath = contractPathAnd(path, not.Operand)
+			} else {
+				rightPath = contractPathAnd(path, &ast.UnaryExpr{Position: n.Left.Pos(), Op: lexer.TOKEN_NOT, Operand: n.Left})
+			}
+		}
+		return search(n.Right, rightPath)
+	case *ast.UnaryExpr:
+		return search(n.Operand, path)
+	case *ast.MoveExpr:
+		return search(n.Operand, path)
+	case *ast.ParenExpr:
+		return search(n.Inner, path)
+	case *ast.CastExpr:
+		return search(n.Operand, path)
+	case *ast.TernaryExpr:
+		if found, ok := search(n.Cond, path); ok {
+			return found, true
+		}
+		if found, ok := search(n.Value, contractPathAnd(path, n.Cond)); ok {
+			return found, true
+		}
+		return search(n.Alt, contractPathAnd(path, &ast.UnaryExpr{Position: n.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: n.Cond}))
+	case *ast.FieldExpr:
+		return search(n.Object, path)
+	case *ast.IndexExpr:
+		for _, child := range []ast.Expr{n.Object, n.Index, n.Index2, n.Fallback} {
+			if found, ok := search(child, path); ok {
+				return found, true
+			}
+		}
+	case *ast.SliceExpr:
+		for _, child := range []ast.Expr{n.Object, n.Start, n.End} {
+			if found, ok := search(child, path); ok {
+				return found, true
+			}
+		}
+	case *ast.TupleExpr:
+		for _, child := range n.Elems {
+			if found, ok := search(child, path); ok {
+				return found, true
+			}
+		}
+	case *ast.CallExpr:
+		if found, ok := search(n.Func, path); ok {
+			return found, true
+		}
+		if found, ok := search(n.SafeReceiver, path); ok {
+			return found, true
+		}
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, child := range args {
+			if found, ok := search(child, path); ok {
+				return found, true
+			}
+		}
+	case *ast.ListLitExpr:
+		for _, children := range [][]ast.Expr{n.Elems, n.Keys} {
+			for _, child := range children {
+				if found, ok := search(child, path); ok {
+					return found, true
+				}
+			}
+		}
+		return search(n.Owner, path)
+	case *ast.StructLitExpr:
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		}
+		for _, child := range args {
+			if found, ok := search(child, path); ok {
+				return found, true
+			}
+		}
+		for _, child := range n.Spreads {
+			if found, ok := search(child, path); ok {
+				return found, true
+			}
+		}
+	case *ast.MembershipRangeExpr:
+		if found, ok := search(n.Start, path); ok {
+			return found, true
+		}
+		return search(n.End, path)
+	case *ast.QuantifierExpr:
+		if found, ok := search(n.In, path); ok {
+			return found, true
+		}
+		return search(n.Body, path)
+	}
+	// Less common expression containers still need termination checking, but they do not add a
+	// Boolean evaluation guard. Search them with the nearest known path using the shared AST walker.
+	foundCall := false
+	a.walkStaticExpr(expr, func(node ast.Expr) bool {
+		if candidate, ok := node.(*ast.CallExpr); ok && candidate == target {
+			foundCall = true
+			return true
+		}
+		return false
+	})
+	return path, foundCall
+}
+
+func contractPathAnd(path ast.Expr, guard ast.Expr) ast.Expr {
+	if guard == nil {
+		return path
+	}
+	if path == nil {
+		return guard
+	}
+	return &ast.BinaryExpr{Position: guard.Pos(), Op: lexer.TOKEN_AND, Left: path, Right: guard}
 }
 
 // requiresVerdict is the tri-state result of proving one precondition clause under the caller facts.

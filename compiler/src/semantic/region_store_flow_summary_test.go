@@ -372,6 +372,119 @@ def main() -> i32:
 	}
 }
 
+func TestStoreFlowSummaryDoesNotRetainASTArgsThroughTypeInferenceState(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct ValueType:
+    kind: u32
+    bits: u32
+struct Scope:
+    visits: u32
+struct FnTable:
+    visits: u32
+struct StructTable:
+    visits: mutable darray[u32]
+struct GenericTable:
+    visits: mutable darray[u32]
+
+def infer_generic_args(arguments: darray[Expr]&, local_scope: mutable Scope&, fns: FnTable&, structs: mutable StructTable&, generics: mutable GenericTable&) -> ValueType:
+    kind: u32 = arguments[0].text.len.u32()
+    local_scope.visits <- local_scope.visits + kind
+    structs.visits[0] <- structs.visits[0] + kind
+    generics.visits[0] <- generics.visits[0] + kind
+    return ValueType{kind: kind, bits: fns.visits}
+
+def generic_return_type_at(inferred: darray[ValueType]&, structs: mutable StructTable&, generics: mutable GenericTable&) -> ValueType:
+    structs.visits[0] <- structs.visits[0] + inferred[0].kind
+    generics.visits[0] <- generics.visits[0] + inferred[0].bits
+    return inferred[0]
+
+def error_callee_value_type(arguments: darray[Expr]&, local_scope: mutable Scope&, fns: FnTable&, structs: mutable StructTable&, generics: mutable GenericTable&) -> ValueType:
+    inferred: mutable darray[ValueType] = [infer_generic_args(arguments, local_scope, fns, structs, generics)]
+    return generic_return_type_at(inferred, structs, generics)
+
+def caller(arguments: darray[Expr]&, local_scope: mutable Scope&, fns: FnTable&, structs: mutable StructTable&, generics: mutable GenericTable&) -> ValueType:
+    return error_callee_value_type(arguments, local_scope, fns, structs, generics)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_generic_type_inference_state.elisa", src, AnalyzeOptions{})
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "error_callee_value_type" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("generic type-inference helper should have a settled StoreFlow summary")
+	}
+	if !summary.writtenParam(1) || !summary.writtenParam(3) || !summary.writtenParam(4) {
+		t.Fatalf("test must model mutation through Scope, StructTable and GenericTable: %v", summary.written)
+	}
+	for _, state := range []int{1, 3, 4} {
+		if summary.reaches(0, state) {
+			t.Fatalf("type inference from AST arguments must not retain their storage in state parameter %d: reach=%v conn=%v ret=%v written=%v", state, summary.reach, summary.conn, summary.retConn, summary.written)
+		}
+	}
+	for _, diagnostic := range result.Errors() {
+		if strings.Contains(diagnostic, "call may store a reference to function-local storage") {
+			t.Fatalf("pointer-free inferred type metadata must not retain AST argument storage: %s", diagnostic)
+		}
+	}
+}
+
+func TestStoreFlowSummaryRejectsASTBorrowStoredByTypeInference(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct ValueType:
+    name: sview
+struct Metadata:
+    last_name: mutable sview
+
+def infer_generic_args(arguments: darray[Expr]&) -> ValueType:
+    return ValueType{name: arguments[0].text}
+
+def generic_return_type_at(inferred: darray[ValueType]&, metadata: mutable Metadata&) -> ValueType:
+    metadata.last_name <- inferred[0].name
+    return inferred[0]
+
+def error_callee_value_type(arguments: darray[Expr]&, metadata: mutable Metadata&) -> ValueType:
+    inferred: mutable darray[ValueType] = [infer_generic_args(arguments)]
+    return generic_return_type_at(inferred, metadata)
+
+def caller(metadata: mutable Metadata&) -> void can[Abort.Panic, Memory.Allocate]:
+    can Abort.Panic, Memory.Allocate:
+        region short(4096):
+            bytes: mutable darray[u8] @short = [65]
+            arguments: mutable darray[Expr] = [Expr{text: bytes.as_sview()}]
+            _ = error_callee_value_type(arguments, metadata)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_type_inference_real_borrow.elisa", src, AnalyzeOptions{})
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "error_callee_value_type" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil || !summary.reaches(0, 1) {
+		t.Fatalf("a source view stored through generic type inference must reach Metadata: summary=%#v", summary)
+	}
+}
+
 func TestStoreFlowSummaryDoesNotTreatMutableReadOnlyParamsAsWrites(t *testing.T) {
 	src := `struct Expr:
     text: sview

@@ -237,7 +237,7 @@ func (a *Analyzer) lemmaTerminationVerified(decl *ast.FuncDecl) bool {
 	if v, ok := a.lemmaTerminationCache[decl]; ok {
 		return v
 	}
-	calls := a.collectSelfRecursiveCalls(decl)
+	calls := a.collectSelfRecursiveCallSites(decl)
 	if len(calls) == 0 {
 		// No self-call ⇒ nothing to induct over; the IH path is irrelevant.
 		a.lemmaTerminationCache[decl] = false
