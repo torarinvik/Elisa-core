@@ -244,19 +244,6 @@ func matchArmTailsAllStringLiterals(arms []ast.MatchArm) bool {
 	return len(arms) > 0
 }
 
-// matchArmTailStringLit returns an arm body's tail string-literal expression, or nil.
-func matchArmTailStringLit(body []ast.Stmt) *ast.StringLit {
-	if len(body) == 0 {
-		return nil
-	}
-	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
-	if !ok || exprStmt == nil {
-		return nil
-	}
-	lit, _ := exprStmt.Expr.(*ast.StringLit)
-	return lit
-}
-
 // analyzeContextualMatchExpr analyzes a match/when expression in a position that supplies
 // an expected type (a return, a typed binding). It runs the normal bottom-up analysis,
 // then adapts the ALL-STRING-LITERAL case: when every arm yields a bare literal, the join
@@ -271,12 +258,10 @@ func (a *Analyzer) analyzeContextualMatchExpr(expr *ast.MatchExpr, expected Type
 	// exprTypes recording is bypassed — every return below must record the expr type
 	// itself, or the backend's match-expr phi is left untyped.
 	result := a.analyzeMatchExpr(expr)
-	if isStaticStringLiteralRefType(result) && matchArmTailsAllStringLiterals(expr.Arms) {
+	if isStaticStringLiteralRefType(result) && matchArmTailsAllStringLiteralTrees(expr.Arms) {
 		if contextualExpected, ok := contextualStringLiteralType(expected); ok {
 			for _, arm := range expr.Arms {
-				if lit := matchArmTailStringLit(arm.Body); lit != nil {
-					a.recordAnalyzedExprType(lit, contextualExpected)
-				}
+				a.recordStringLiteralTreeType(matchArmTailExpr(arm.Body), contextualExpected)
 			}
 			a.recordAnalyzedExprType(expr, contextualExpected)
 			return contextualExpected
@@ -284,6 +269,57 @@ func (a *Analyzer) analyzeContextualMatchExpr(expr *ast.MatchExpr, expected Type
 	}
 	a.recordAnalyzedExprType(expr, result)
 	return result
+}
+
+// matchArmTailExpr returns an arm body's tail value expression, or nil.
+func matchArmTailExpr(body []ast.Stmt) ast.Expr {
+	if len(body) == 0 {
+		return nil
+	}
+	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || exprStmt == nil {
+		return nil
+	}
+	return exprStmt.Expr
+}
+
+// isStringLiteralTree reports whether expr is a bare string literal, or a value-if
+// (`"a" if c else "b"`, nested) whose every leaf is one. Such a tree has no view-typed
+// leaf, so its bottom-up type is `static u8&` exactly like a bare literal, and an
+// expected string-carrier type adapts every leaf the same way.
+func isStringLiteralTree(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.StringLit:
+		return n != nil
+	case *ast.TernaryExpr:
+		return n != nil && isStringLiteralTree(n.Value) && isStringLiteralTree(n.Alt)
+	}
+	return false
+}
+
+// matchArmTailsAllStringLiteralTrees is matchArmTailsAllStringLiterals widened to
+// value-if trees of literals (`1 -> "a" if e else "b"`).
+func matchArmTailsAllStringLiteralTrees(arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if !isStringLiteralTree(matchArmTailExpr(arm.Body)) {
+			return false
+		}
+	}
+	return len(arms) > 0
+}
+
+// recordStringLiteralTreeType re-records every node of a string-literal tree at the
+// contextual type, so the backend lowers each leaf literal (and each value-if join) to
+// the view exactly as a typed declaration would.
+func (a *Analyzer) recordStringLiteralTreeType(expr ast.Expr, t Type) {
+	switch n := expr.(type) {
+	case *ast.StringLit:
+		a.recordAnalyzedExprType(n, t)
+	case *ast.TernaryExpr:
+		a.recordStringLiteralTreeType(n.Value, t)
+		a.recordStringLiteralTreeType(n.Alt, t)
+		a.recordAnalyzedExprType(n, t)
+	}
 }
 
 // mergeTernaryBranchTypes is the ternary's literal-aware fallback when MergeTypes
