@@ -857,7 +857,7 @@ def ctx_hash_u64(value: u64) -> u64:
 
 # Open-addressing probe (linear probing over a power-of-2 table). Returns found=true with the
 # slot of the matching occupied entry, or found=false with the slot to insert at: the first
-# tombstone seen (slot reuse), else the terminating empty slot. O(1) expected with load < 3/4.
+# tombstone seen (slot reuse), else the terminating empty slot. O(1) expected with load < 1/2.
 def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
     DictProbeResult{index: 0, found: false} return if m.capacity == 0 or m.items == null
 
@@ -1036,13 +1036,13 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
         owner: mutable Arena& = m.arena if m.arena != null else a
         m.arena as & <- owner if m.arena == null
 
-        # When the next used slot (including tombstones) would cross 3/4 load, probe first:
+        # When the next used slot (including tombstones) would cross 1/2 load (speed over memory: short linear-probe chains), probe first:
         # update an existing key in place, or grow and clear tombstones before inserting a
         # missing key. Non-growth inserts pay only for the ordinary probe below.
         if m.capacity == 0:
             target_capacity: usize = DICT_INIT_CAP
             try (arena_dict_reserve(owner, m, target_capacity) can Global{Read,Write})
-        elif m.used >= m.capacity - m.capacity / 4.usize():
+        elif m.used >= m.capacity / 2.usize():
             growth_probe: DictProbeResult = arena_dict_find_index(m, key)
             if growth_probe.found:
                 assert m.items != null
@@ -1297,13 +1297,13 @@ def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool erro
         owner: mutable Arena& = s.arena if s.arena != null else a
         s.arena as & <- owner if s.arena == null
 
-        # When the next used slot (including tombstones) would cross 3/4 load, probe first:
+        # When the next used slot (including tombstones) would cross 1/2 load (speed over memory: short linear-probe chains), probe first:
         # return false for an existing key, or grow and clear tombstones before inserting a
         # missing key. Non-growth adds pay only for the ordinary probe below.
         if s.capacity == 0:
             target_capacity: usize = DICT_INIT_CAP
             try (arena_set_reserve(owner, s, target_capacity) can Global{Read,Write})
-        elif s.used >= s.capacity - s.capacity / 4.usize():
+        elif s.used >= s.capacity / 2.usize():
             growth_probe: DictProbeResult = arena_set_find_index(s, key)
             false return if growth_probe.found
             target_capacity: usize = arena_checked_mul_usize(s.capacity, 2) can Abort.Panic

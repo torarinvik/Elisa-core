@@ -292,3 +292,54 @@ def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern]:
 		t.Fatalf("300 MB darray in the default region: err=%v output=%q", err, out)
 	}
 }
+
+// The dict grows at 1/2 load (short linear-probe chains). Exercise many growths
+// through the get_or_insert/put/get surface and check every count survives rehash.
+func TestDictHalfLoadGrowthKeepsEntries(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	dir := t.TempDir()
+	runtimeEntry, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := "include \"" + runtimeEntry + "\"\n" + `extern printf(format: cstr, ...) -> i32 can[Console, Unsafe.RawExtern]
+
+def tally(n: u64) -> dict[u64, usize] can[Abort.Panic, Memory.Allocate, Global{Read,Write}]:
+    counts: mutable dict[u64, usize] = {}
+    for i in 0..<n |counts, n|:
+        key: u64 = (i * 2654435761) % 100003
+        can Global{Read,Write}:
+            slot: mutable usize& = get counts.get_or_insert(key, 0) else return counts
+            slot[0] <- slot[0] + 1
+    return counts
+
+def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern, Global{Read,Write}]:
+    counts: dict[u64, usize] = tally(400009) can Global{Read,Write}
+    total: mutable usize = 0
+    present: mutable usize = 0
+    for key in 0..<200006.u64() |counts, total, present|:
+        if counts.get(key) is c:
+            total <- total + c
+            present <- present + 1
+    printf("%lld %lld\n", total.i64(), present.i64())
+    return 0
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.elisa"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"targets": {"default": {"entry": "main.elisa", "emit": "obj", "output": "prog", "opt": "O2"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "project.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"build", "--project", dir}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed:\n%s%s", stdout.String(), stderr.String())
+	}
+	out, err := exec.Command(filepath.Join(dir, "prog")).CombinedOutput()
+	// 400009 = 4*100003 - 3: keys hit 100003 residues, 3 of them one time fewer.
+	if err != nil || strings.TrimSpace(string(out)) != "400009 100003" {
+		t.Fatalf("dict growth lost entries: err=%v output=%q", err, out)
+	}
+}
