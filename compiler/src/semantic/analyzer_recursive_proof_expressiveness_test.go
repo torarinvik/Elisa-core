@@ -62,7 +62,7 @@ def main() -> i32:
 		t.Fatal("recursive ensure call must inherit its implication guard")
 	}
 	if len(result.Errors()) != 0 {
-		t.Fatalf("unexpected errors: %s", strings.Join(result.Errors(), "\n"))
+		t.Fatalf("unexpected errors (call path %s): %s", optimizationExprString(path), strings.Join(result.Errors(), "\n"))
 	}
 	if result.SMTProfile.Proven == 0 {
 		t.Fatal("expected the recursive measure to be discharged by SMT")

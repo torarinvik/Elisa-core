@@ -655,7 +655,9 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
-	a.typePureTerminationExprsForSMT(clause, path)
+	if path != nil {
+		a.typePureTerminationExprsForSMT(clause, path)
+	}
 	// When `result` is bound to a struct literal (`return Pair(1, 2)`), it has no scalar SMT term, so
 	// drop it from the env subst (which would otherwise decline) and instead resolve each `result.field`
 	// read to that field's construction argument — so `ensure result.a == 1` discharges.
@@ -684,7 +686,7 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 			}
 		}
 	}
-	env, ok := a.smtEnvForSubst(tr, substForEnv)
+	env, ok := a.smtEnvForRelevantSubst(tr, substForEnv, clause)
 	if !ok {
 		return false, ""
 	}
@@ -702,7 +704,30 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 	// ref) return it is false. The standard set does not know which return site is active.
 	extra := a.smtResultNullnessHypothesis(tr, substForEnv)
 	if path != nil {
-		pathTerm, ok := tr.boolTerm(path, nil)
+		// The path is expressed in the caller's names. Build caller-identity bindings separately:
+		// reusing env would substitute a recursive formal such as `index` with the call argument
+		// `index + 1`, strengthening the guard and making the proof unsound. These identity bindings
+		// also let a guarded sview length resolve through its authorized array symbol.
+		pathEnv := make(map[string]string, len(env)+1)
+		if a.currentFuncDecl != nil {
+			pathEnv = make(map[string]string, len(env)+len(a.currentFuncDecl.Params)+1)
+		}
+		for name, term := range env {
+			pathEnv[name] = term
+		}
+		if a.currentFuncDecl != nil {
+			for _, param := range a.currentFuncDecl.Params {
+				ident := &ast.Ident{Position: param.Position, Name: param.Name}
+				a.bindSMTEnvArg(tr, pathEnv, param.Name, ident, nil, false)
+			}
+			if a.currentScope != nil {
+				if sym, found := a.currentScope.Lookup("result"); found && sym != nil {
+					ident := &ast.Ident{Position: a.currentFuncDecl.Position, Name: "result"}
+					a.bindSMTEnvArg(tr, pathEnv, "result", ident, nil, false)
+				}
+			}
+		}
+		pathTerm, ok := tr.boolTerm(path, pathEnv)
 		if !ok {
 			return false, ""
 		}
@@ -717,6 +742,29 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		return false, ""
 	}
 	return proven, counterexample
+}
+
+// smtEnvForRelevantSubst binds only callee parameters that occur in this obligation. A recursive
+// call may pass a rich expression for an unrelated parameter (for example, a wrapped u64 update in
+// `state`) that lies outside the current SMT fragment. Requiring that unused argument to translate
+// would discard a valid proof of a requirement over the other parameters. Every referenced formal
+// still must bind successfully; otherwise the solver declines rather than treating it as a caller
+// variable.
+func (a *Analyzer) smtEnvForRelevantSubst(tr *smtTranslator, subst map[string]ast.Expr, obligation ast.Expr) (map[string]string, bool) {
+	used := make(map[string]bool)
+	for _, name := range exprIdentNames(obligation) {
+		used[name] = true
+	}
+	env := map[string]string{}
+	for name, argExpr := range subst {
+		if !used[name] {
+			continue
+		}
+		if !a.bindSMTEnvArg(tr, env, name, argExpr, nil, true) {
+			return nil, false
+		}
+	}
+	return env, true
 }
 
 // trRegisterSubstCEExprs registers env entries whose SMT value is a compound expression (not a plain

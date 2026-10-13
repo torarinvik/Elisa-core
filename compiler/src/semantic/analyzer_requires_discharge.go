@@ -207,7 +207,7 @@ func (a *Analyzer) findContractCallPath(expr ast.Expr, target *ast.CallExpr, pat
 	if expr == nil || target == nil {
 		return nil, false
 	}
-	if call, ok := expr.(*ast.CallExpr); ok && call == target {
+	if call, ok := expr.(*ast.CallExpr); ok && contractCallsMatch(call, target) {
 		return path, true
 	}
 	search := func(child ast.Expr, childPath ast.Expr) (ast.Expr, bool) {
@@ -322,13 +322,25 @@ func (a *Analyzer) findContractCallPath(expr ast.Expr, target *ast.CallExpr, pat
 	// Boolean evaluation guard. Search them with the nearest known path using the shared AST walker.
 	foundCall := false
 	a.walkStaticExpr(expr, func(node ast.Expr) bool {
-		if candidate, ok := node.(*ast.CallExpr); ok && candidate == target {
+		if candidate, ok := node.(*ast.CallExpr); ok && contractCallsMatch(candidate, target) {
 			foundCall = true
 			return true
 		}
 		return false
 	})
 	return path, foundCall
+}
+
+func contractCallsMatch(left, right *ast.CallExpr) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	// Contract analysis may rewrite or clone call nodes while preserving source positions. Match
+	// those copies by their original source site and callee syntax so their inherited guard is kept.
+	return left.Pos() == right.Pos() && optimizationExprString(left.Func) == optimizationExprString(right.Func)
 }
 
 func contractPathAnd(path ast.Expr, guard ast.Expr) ast.Expr {
