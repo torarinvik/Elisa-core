@@ -81,3 +81,51 @@ func TestBuildObjectCacheDisabled(t *testing.T) {
 		t.Fatalf("cache must be inert when disabled; stderr:\n%s\n%s", s1, s2)
 	}
 }
+
+// Every codegen flag that reaches the backend through the environment must change the
+// `-emit obj` cache key; otherwise e.g. a -fstrict-fp build is served a relaxed-FP object.
+func TestBuildObjectCacheKeysEveryCodegenFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	t.Setenv("ELISACORE_TEST_CACHE_DEBUG", "1")
+	flagEnvs := []string{"ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_TARGET_CPU"}
+	for _, name := range flagEnvs {
+		t.Setenv(name, "") // restored after the test; the CLI sets these process-wide
+	}
+	reset := func() {
+		for _, name := range flagEnvs {
+			_ = os.Unsetenv(name)
+		}
+	}
+	src := filepath.Join(dir, "prog.elisa")
+	if err := os.WriteFile(src, []byte("def scale(a: f64, b: f64, c: f64) -> f64:\n    return a * b + c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := func(flag string) string {
+		t.Helper()
+		args := []string{"-emit", "obj", "-o", filepath.Join(dir, "out.o")}
+		if flag != "" {
+			args = append(args, flag)
+		}
+		var stdout, stderr bytes.Buffer
+		if rc := runCLI(append(args, src), &stdout, &stderr); rc != 0 {
+			t.Fatalf("emit obj %s failed: %s", flag, stderr.String())
+		}
+		return stderr.String()
+	}
+	reset()
+	if s := build(""); !strings.Contains(s, "build-object miss-store") {
+		t.Fatalf("baseline should miss-store:\n%s", s)
+	}
+	for _, flag := range []string{"-ffast-math", "-fstrict-fp", "-fnoalias", "-fbounds-check", "-mcpu=generic", "-flto"} {
+		reset()
+		if s := build(flag); !strings.Contains(s, "build-object miss-store") {
+			t.Fatalf("%s was served the cached object of a build without it:\n%s", flag, s)
+		}
+		reset()
+		if s := build(""); !strings.Contains(s, "build-object hit") {
+			t.Fatalf("after %s, the flag-less build should hit again:\n%s", flag, s)
+		}
+	}
+}

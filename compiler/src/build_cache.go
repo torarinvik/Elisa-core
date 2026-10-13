@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -77,6 +78,9 @@ func buildCacheObjectArtifactFor(options cliOptions) (buildCacheArtifact, bool) 
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
 	testRunnerCacheWriteString(hash, fmt.Sprintf("options=%+v", buildCacheKeyOptions(options)))
+	for _, entry := range buildCacheEnvKey() {
+		testRunnerCacheWriteString(hash, "env="+entry)
+	}
 
 	source, err := readSourceWithIncludes(options.filename, map[string]bool{})
 	if err != nil {
@@ -189,4 +193,54 @@ func tryBuildObjectCache(options cliOptions, stdout io.Writer, stderr io.Writer)
 		}
 	}
 	return rc, true
+}
+
+// buildCacheEnvIgnored lists ELISA*/ELISACORE_* variables that provably do not change the
+// emitted object: cache control, timing/profiling/debug output, and test-harness knobs.
+// Everything else with those prefixes is folded into the object-cache key.
+var buildCacheEnvIgnored = map[string]bool{
+	"ELISACORE_BUILD_CACHE":                   true,
+	"ELISAC_BUILD_CACHE_DIR":                  true,
+	"ELISACORE_BUILD_TIMING":                  true,
+	"ELISACORE_CACHE_DEBUG":                   true,
+	"ELISACORE_CPUPROFILE":                    true,
+	"ELISACORE_MEMPROFILE":                    true,
+	"ELISACORE_KEEP_TEST_TEMP":                true,
+	"ELISACORE_TEST_CACHE":                    true,
+	"ELISACORE_TEST_CACHE_DEBUG":              true,
+	"ELISACORE_TEST_PHASE_DEBUG":              true,
+	"ELISACORE_TEST_TIMING":                   true,
+	"ELISACORE_SUPPRESS_DEPRECATED_WARNINGS":  true,
+	"ELISACORE_NO_LINK_BINDING_CHECK":         true,
+	"ELISACORE_NO_OBJCACHE":                   true,
+	"ELISACORE_RUNTIME_OBJECT_CACHE":          true,
+	"ELISACORE_EMIT_LL":                       true,
+	"ELISACORE_DUMP_MODULE_ON_VERIFY_FAILURE": true,
+	"ELISA_KEEP_TEST_BINARY":                  true,
+	"ELISA_BACKEND_PARITY_OUT":                true,
+	"ELISA_SEMANTIC_INTERNAL_PARITY_OUT":      true,
+	"ELISA_DUMP_DEATHTIME":                    true,
+	"ELISA_DUMP_REGION_STACKS":                true,
+	"ELISA_REGION_DEBUG":                      true,
+}
+
+// buildCacheEnvKey returns the sorted NAME=VALUE pairs of every ELISA_/ELISACORE_ variable
+// that can influence code generation. Most codegen flags (-ffast-math, -fstrict-fp,
+// -fnoalias, -fbounds-check, -mcpu, ...) reach the backend ONLY through the environment, so
+// a key built from cliOptions alone served e.g. a non-strict-FP object to a -fstrict-fp
+// build. A deny-list (not an allow-list) keeps any future env-driven flag keyed by default.
+func buildCacheEnvKey() []string {
+	var entries []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, "ELISACORE_") && !strings.HasPrefix(name, "ELISA_") {
+			continue
+		}
+		if buildCacheEnvIgnored[name] {
+			continue
+		}
+		entries = append(entries, kv)
+	}
+	sort.Strings(entries)
+	return entries
 }
