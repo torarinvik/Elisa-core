@@ -1,0 +1,640 @@
+# ============================================================
+# Elisa core Runtime - byte regular expressions (Thompson NFA + lazy DFA)
+# ============================================================
+#
+# Syntax (bytes, no flags):
+#   literals, `.` (any byte but '\n'), `[...]` / `[^...]` classes with ranges,
+#   `\d \D \w \W \s \S \n \r \t` and `\` + any other byte (that byte literally),
+#   grouping `( )`, alternation `|`, postfix `*`, `+`, `?`.
+# Unsupported syntax (`{m,n}`, anchors, backreferences, unbalanced brackets) makes
+# regex_compile return false.
+#
+# Semantics: leftmost-longest (POSIX). A search returns the match that starts
+# earliest and, among those, ends latest. For patterns whose alternatives do not
+# overlap (e.g. `agggtaaa|tttaccct`) this equals Perl/RE2 leftmost-first.
+#
+# Engine: the pattern is parsed to a small AST and compiled twice into Thompson
+# NFAs: forward, and reversed behind an unanchored any-byte loop. Each NFA runs as
+# a lazily built DFA whose states are canonical (sorted) sets of NFA states; every
+# transition is computed once and cached in a 256-wide table, so a scan costs one
+# table load per byte. Whole-text operations (count, replace_all) first run the
+# reverse DFA once from the end of the text to the start, which marks every
+# position where some match begins; each match is then the longest forward
+# anchored run from the next marked position at or after the scan point. Work is
+# linear in the text plus the matched spans. regex_find_at (a single search) tries
+# start positions in order behind a first-byte prefilter instead. Each DFA cache is
+# bounded (REGEX_DFA_STATE_LIMIT); when it fills it is flushed and the scan
+# restarts once, with growth allowed on the retry so every scan terminates.
+
+const REGEX_DFA_STATE_LIMIT: usize = 4096
+const REGEX_UNKNOWN: i32 = -2
+const REGEX_DEAD: i32 = -1
+const REGEX_NO_STATE: u32 = 0xFFFFFFFF
+
+# AST node kinds.
+const REGEX_AST_BYTES: u8 = 0
+const REGEX_AST_CONCAT: u8 = 1
+const REGEX_AST_EITHER: u8 = 2
+const REGEX_AST_STAR: u8 = 3
+const REGEX_AST_PLUS: u8 = 4
+const REGEX_AST_OPTIONAL: u8 = 5
+const REGEX_AST_EMPTY: u8 = 6
+
+# NFA state kinds.
+const REGEX_NFA_BYTES: u8 = 0
+const REGEX_NFA_SPLIT: u8 = 1
+const REGEX_NFA_ACCEPT: u8 = 2
+
+struct RegexMatch:
+    found: bool
+    first: usize
+    last: usize   # exclusive end
+
+struct RegexAutomaton:
+    sets: mutable darray[u64]           # copy of the pattern's 256-bit byte sets
+    nfa_kind: mutable darray[u8]
+    nfa_out1: mutable darray[u32]
+    nfa_out2: mutable darray[u32]
+    nfa_set: mutable darray[u32]
+    nfa_start: mutable u32
+    dfa_offset: mutable darray[u32]    # members of state i: dfa_members[offset[i] ..< offset[i+1]]
+    dfa_members: mutable darray[u32]
+    dfa_accept: mutable darray[bool]
+    dfa_next: mutable darray[i32]      # state * 256 + byte -> target * 2 + accepting(target), REGEX_UNKNOWN or REGEX_DEAD
+    dfa_hash: mutable darray[u64]
+    dfa_chain: mutable darray[u32]     # next state with the same hash
+    dfa_index: mutable dict[u64, u32]  # hash -> newest state with that hash
+    dfa_start: mutable i32
+    dfa_flushes: mutable usize
+    mark: mutable darray[u32]
+    mark_generation: mutable u32
+    pending: mutable darray[u32]
+    work: mutable darray[u32]
+
+struct Regex:
+    valid: mutable bool
+    # 256-bit byte sets, four u64 words each (built by the parser).
+    sets: mutable darray[u64]
+    # AST (built by the parser, consumed by the NFA compiler).
+    ast_kind: mutable darray[u8]
+    ast_left: mutable darray[u32]
+    ast_right: mutable darray[u32]
+    forward: mutable RegexAutomaton
+    backward: mutable RegexAutomaton   # reversed pattern behind an unanchored loop
+    first_bytes: mutable darray[u64]   # 4 words; bytes that can begin a match
+    use_prefilter: mutable bool
+    starts: mutable darray[u64]        # bitmap: positions where a match begins
+
+struct RegexParser:
+    position: mutable usize
+    ok: mutable bool
+
+def regex_automaton_new() -> RegexAutomaton:
+    return RegexAutomaton{sets: [], nfa_kind: [], nfa_out1: [], nfa_out2: [], nfa_set: [], nfa_start: 0, dfa_offset: [], dfa_members: [], dfa_accept: [], dfa_next: [], dfa_hash: [], dfa_chain: [], dfa_index: {}, dfa_start: REGEX_DEAD, dfa_flushes: 0, mark: [], mark_generation: 0, pending: [], work: []}
+
+def regex_new() -> Regex:
+    return Regex{valid: false, sets: [], ast_kind: [], ast_left: [], ast_right: [], forward: regex_automaton_new(), backward: regex_automaton_new(), first_bytes: [], use_prefilter: false, starts: []}
+
+# ------------------------------------------------------------
+# Byte sets
+# ------------------------------------------------------------
+
+def regex_new_set(re: mutable Regex&) -> u32 can[Abort.Panic, Memory.Allocate]:
+    index: u32 = (re.sets.count / 4).u32()
+    for word in 0..<4 |re|:
+        re.sets.push(0)
+    return index
+
+def regex_set_add(re: mutable Regex&, set: u32, byte: u8) -> void can[Abort.Panic]:
+    word: usize = set.usize() * 4 + (byte >> 6).usize()
+    re.sets[word] <- re.sets[word] | (1.u64() << (byte & 63).u64())
+
+def regex_set_add_range(re: mutable Regex&, set: u32, low: u8, high: u8) -> void can[Abort.Panic]:
+    value: mutable u64 = low.u64()
+    while value <= high.u64() |value, re, set, high|:
+        regex_set_add(re, set, value.u8())
+        value <- value + 1
+
+def regex_set_has(sets: darray[u64]&, set: u32, byte: u8) -> bool can[Abort.Panic]:
+    word: u64 = sets[set.usize() * 4 + (byte >> 6).usize()]
+    return ((word >> (byte & 63).u64()) & 1) != 0
+
+def regex_set_invert(re: mutable Regex&, set: u32) -> void can[Abort.Panic]:
+    for word in 0..<4 |re, set|:
+        index: usize = set.usize() * 4 + word
+        re.sets[index] <- re.sets[index] ^ 0xFFFFFFFFFFFFFFFF
+
+# Adds the class named by an escape letter (d, w, s and negations); returns false
+# when the letter is not a class.
+def regex_set_add_escape_class(re: mutable Regex&, set: u32, letter: u8) -> bool can[Abort.Panic, Memory.Allocate]:
+    lower: u8 = letter | 0x20
+    return false if lower != 'd'.u8() and lower != 'w'.u8() and lower != 's'.u8()
+    class_set: u32 = regex_new_set(re)
+    if lower == 'd'.u8():
+        regex_set_add_range(re, class_set, '0'.u8(), '9'.u8())
+    elif lower == 'w'.u8():
+        regex_set_add_range(re, class_set, '0'.u8(), '9'.u8())
+        regex_set_add_range(re, class_set, 'a'.u8(), 'z'.u8())
+        regex_set_add_range(re, class_set, 'A'.u8(), 'Z'.u8())
+        regex_set_add(re, class_set, '_'.u8())
+    else:
+        regex_set_add(re, class_set, ' '.u8())
+        regex_set_add_range(re, class_set, 9, 13)
+    regex_set_invert(re, class_set) if letter != lower
+    for word in 0..<4 |re, set, class_set|:
+        target: usize = set.usize() * 4 + word
+        re.sets[target] <- re.sets[target] | re.sets[class_set.usize() * 4 + word]
+    return true
+
+def regex_escape_byte(letter: u8) -> u8:
+    return 10 if letter == 'n'.u8()
+    return 13 if letter == 'r'.u8()
+    return 9 if letter == 't'.u8()
+    return letter
+
+# ------------------------------------------------------------
+# Parser (recursive descent to the AST)
+# ------------------------------------------------------------
+
+def regex_ast_node(re: mutable Regex&, kind: u8, left: u32, right: u32) -> u32 can[Abort.Panic, Memory.Allocate]:
+    re.ast_kind.push(kind)
+    re.ast_left.push(left)
+    re.ast_right.push(right)
+    return (re.ast_kind.count - 1).u32()
+
+def regex_parse_class(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview) -> u32 can[Abort.Panic, Memory.Allocate]:
+    length: usize = pattern.len.usize()
+    set: u32 = regex_new_set(re)
+    negate: mutable bool = false
+    if parser.position < length and pattern[parser.position].u8() == '^'.u8():
+        negate <- true
+        parser.position <- parser.position + 1
+    first_item: mutable bool = true
+    closed: mutable bool = false
+    while parser.position < length |re, parser, pattern, length, set, first_item, closed|:
+        byte: u8 = pattern[parser.position].u8()
+        if byte == ']'.u8() and not first_item:
+            parser.position <- parser.position + 1
+            closed <- true
+            break
+        first_item <- false
+        parser.position <- parser.position + 1
+        low: mutable u8 = byte
+        if byte == '\\'.u8():
+            if parser.position >= length:
+                parser.ok <- false
+                return set
+            letter: u8 = pattern[parser.position].u8()
+            parser.position <- parser.position + 1
+            continue if regex_set_add_escape_class(re, set, letter)
+            low <- regex_escape_byte(letter)
+        # Range `low-high` unless the '-' is last before ']'.
+        if parser.position + 1 < length and pattern[parser.position].u8() == '-'.u8() and pattern[parser.position + 1].u8() != ']'.u8():
+            high: mutable u8 = pattern[parser.position + 1].u8()
+            parser.position <- parser.position + 2
+            if high == '\\'.u8():
+                if parser.position >= length:
+                    parser.ok <- false
+                    return set
+                high <- regex_escape_byte(pattern[parser.position].u8())
+                parser.position <- parser.position + 1
+            if high < low:
+                parser.ok <- false
+                return set
+            regex_set_add_range(re, set, low, high)
+        else:
+            regex_set_add(re, set, low)
+    parser.ok <- false if not closed
+    regex_set_invert(re, set) if negate
+    return regex_ast_node(re, REGEX_AST_BYTES, set, 0)
+
+def regex_parse_atom(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview) -> u32 can[Abort.Panic, Memory.Allocate]:
+    length: usize = pattern.len.usize()
+    byte: u8 = pattern[parser.position].u8()
+    parser.position <- parser.position + 1
+    if byte == '('.u8():
+        inner: u32 = regex_parse_either(re, parser, pattern)
+        if parser.position >= length or pattern[parser.position].u8() != ')'.u8():
+            parser.ok <- false
+            return inner
+        parser.position <- parser.position + 1
+        return inner
+    return regex_parse_class(re, parser, pattern) if byte == '['.u8()
+    set: u32 = regex_new_set(re)
+    if byte == '.'.u8():
+        regex_set_add(re, set, 10)
+        regex_set_invert(re, set)
+    elif byte == '\\'.u8():
+        if parser.position >= length:
+            parser.ok <- false
+            return regex_ast_node(re, REGEX_AST_BYTES, set, 0)
+        letter: u8 = pattern[parser.position].u8()
+        parser.position <- parser.position + 1
+        if not regex_set_add_escape_class(re, set, letter):
+            regex_set_add(re, set, regex_escape_byte(letter))
+    elif byte == ')'.u8() or byte == '*'.u8() or byte == '+'.u8() or byte == '?'.u8() or byte == '{'.u8() or byte == '^'.u8() or byte == '$'.u8():
+        parser.ok <- false
+    else:
+        regex_set_add(re, set, byte)
+    return regex_ast_node(re, REGEX_AST_BYTES, set, 0)
+
+def regex_parse_repeat(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview) -> u32 can[Abort.Panic, Memory.Allocate]:
+    length: usize = pattern.len.usize()
+    node: mutable u32 = regex_parse_atom(re, parser, pattern)
+    while parser.position < length |re, parser, pattern, length, node|:
+        byte: u8 = pattern[parser.position].u8()
+        kind: u8 = REGEX_AST_STAR if byte == '*'.u8() else (REGEX_AST_PLUS if byte == '+'.u8() else (REGEX_AST_OPTIONAL if byte == '?'.u8() else REGEX_AST_EMPTY))
+        break if kind == REGEX_AST_EMPTY
+        parser.position <- parser.position + 1
+        node <- regex_ast_node(re, kind, node, 0)
+    return node
+
+def regex_parse_concat(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview) -> u32 can[Abort.Panic, Memory.Allocate]:
+    length: usize = pattern.len.usize()
+    node: mutable u32 = regex_ast_node(re, REGEX_AST_EMPTY, 0, 0)
+    while parser.position < length and parser.ok |re, parser, pattern, length, node|:
+        byte: u8 = pattern[parser.position].u8()
+        break if byte == '|'.u8() or byte == ')'.u8()
+        piece: u32 = regex_parse_repeat(re, parser, pattern)
+        node <- regex_ast_node(re, REGEX_AST_CONCAT, node, piece)
+    return node
+
+def regex_parse_either(re: mutable Regex&, parser: mutable RegexParser&, pattern: sview) -> u32 can[Abort.Panic, Memory.Allocate]:
+    length: usize = pattern.len.usize()
+    node: mutable u32 = regex_parse_concat(re, parser, pattern)
+    while parser.position < length and parser.ok |re, parser, pattern, length, node|:
+        break if pattern[parser.position].u8() != '|'.u8()
+        parser.position <- parser.position + 1
+        other: u32 = regex_parse_concat(re, parser, pattern)
+        node <- regex_ast_node(re, REGEX_AST_EITHER, node, other)
+    return node
+
+# ------------------------------------------------------------
+# NFA construction (continuation style: compile(node, follow) -> entry state)
+# ------------------------------------------------------------
+
+def regex_nfa_state(au: mutable RegexAutomaton&, kind: u8, out1: u32, out2: u32, set: u32) -> u32 can[Abort.Panic, Memory.Allocate]:
+    au.nfa_kind.push(kind)
+    au.nfa_out1.push(out1)
+    au.nfa_out2.push(out2)
+    au.nfa_set.push(set)
+    return (au.nfa_kind.count - 1).u32()
+
+# `reversed` builds the NFA of the reversed language (concatenations swapped).
+def regex_compile_node(kinds: darray[u8]&, lefts: darray[u32]&, rights: darray[u32]&, au: mutable RegexAutomaton&, node: u32, follow: u32, reversed: bool) -> u32 can[Abort.Panic, Memory.Allocate]:
+    kind: u8 = kinds[node.usize()]
+    left: u32 = lefts[node.usize()]
+    right: u32 = rights[node.usize()]
+    return regex_nfa_state(au, REGEX_NFA_BYTES, follow, REGEX_NO_STATE, left) if kind == REGEX_AST_BYTES
+    return follow if kind == REGEX_AST_EMPTY
+    if kind == REGEX_AST_CONCAT:
+        later: u32 = left if reversed else right
+        earlier: u32 = right if reversed else left
+        rest_entry: u32 = regex_compile_node(kinds, lefts, rights, au, later, follow, reversed)
+        return regex_compile_node(kinds, lefts, rights, au, earlier, rest_entry, reversed)
+    if kind == REGEX_AST_EITHER:
+        left_entry: u32 = regex_compile_node(kinds, lefts, rights, au, left, follow, reversed)
+        right_entry: u32 = regex_compile_node(kinds, lefts, rights, au, right, follow, reversed)
+        return regex_nfa_state(au, REGEX_NFA_SPLIT, left_entry, right_entry, 0)
+    if kind == REGEX_AST_OPTIONAL:
+        body_entry: u32 = regex_compile_node(kinds, lefts, rights, au, left, follow, reversed)
+        return regex_nfa_state(au, REGEX_NFA_SPLIT, body_entry, follow, 0)
+    # STAR and PLUS share a loop split whose first edge is patched after the body.
+    loop_split: u32 = regex_nfa_state(au, REGEX_NFA_SPLIT, REGEX_NO_STATE, follow, 0)
+    body_entry: u32 = regex_compile_node(kinds, lefts, rights, au, left, loop_split, reversed)
+    au.nfa_out1[loop_split.usize()] <- body_entry
+    return loop_split if kind == REGEX_AST_STAR
+    return body_entry
+
+# ------------------------------------------------------------
+# Lazy DFA
+# ------------------------------------------------------------
+
+# Epsilon closure of the seeds in au.work, replaced by the sorted set of BYTES and
+# ACCEPT states reachable through SPLIT edges.
+def regex_closure(au: mutable RegexAutomaton&) -> void can[Abort.Panic, Memory.Allocate]:
+    au.mark_generation <- au.mark_generation + 1
+    if au.mark_generation == 0:
+        for index in 0..<au.mark.count |au|:
+            au.mark[index] <- 0
+        au.mark_generation <- 1
+    generation: u32 = au.mark_generation
+    au.pending.clear()
+    for seed in au.work |au|:
+        au.pending.push(seed)
+    au.work.clear()
+    while au.pending.count > 0 |au, generation|:
+        top: usize = au.pending.count - 1
+        id: u32 = au.pending[top]
+        au.pending.resize(top)
+        continue if au.mark[id.usize()] == generation
+        au.mark[id.usize()] <- generation
+        if au.nfa_kind[id.usize()] == REGEX_NFA_SPLIT:
+            au.pending.push(au.nfa_out2[id.usize()])
+            au.pending.push(au.nfa_out1[id.usize()])
+        else:
+            au.work.push(id)
+    # Insertion sort: closures are small, and canonical order makes states comparable.
+    for i in 1..<au.work.count |au|:
+        value: u32 = au.work[i]
+        j: mutable usize = i
+        while j > 0 |j, au, value|:
+            break if au.work[j - 1] <= value
+            au.work[j] <- au.work[j - 1]
+            j <- j - 1
+        au.work[j] <- value
+
+# Interns the closure in au.work as a DFA state and returns its id.
+def regex_dfa_intern(au: mutable RegexAutomaton&) -> i32 can[Abort.Panic, Memory.Allocate]:
+    hash: mutable u64 = 0x9E3779B97F4A7C15 ^ au.work.count.u64()
+    for id in au.work |hash|:
+        hash <- ctx_hash_u64(hash ^ id.u64())
+    candidate: mutable u32 = REGEX_NO_STATE
+    if au.dfa_index.get(hash) is newest:
+        candidate <- newest
+    while candidate != REGEX_NO_STATE |candidate, au, hash|:
+        state: usize = candidate.usize()
+        first: usize = au.dfa_offset[state].usize()
+        count: usize = au.dfa_offset[state + 1].usize() - first
+        if au.dfa_hash[state] == hash and count == au.work.count:
+            same: mutable bool = true
+            for k in 0..<count |same, au, first|:
+                if au.dfa_members[first + k] != au.work[k]:
+                    same <- false
+                    break
+            return candidate.i32() if same
+        candidate <- au.dfa_chain[state]
+    state_id: u32 = au.dfa_accept.count.u32()
+    accepting: mutable bool = false
+    for id in au.work |au, accepting|:
+        au.dfa_members.push(id)
+        accepting <- true if au.nfa_kind[id.usize()] == REGEX_NFA_ACCEPT
+    au.dfa_offset.push(au.dfa_members.count.u32())
+    au.dfa_accept.push(accepting)
+    au.dfa_hash.push(hash)
+    previous: mutable u32 = REGEX_NO_STATE
+    if au.dfa_index.get(hash) is newest:
+        previous <- newest
+    au.dfa_chain.push(previous)
+    au.dfa_index.put(hash, state_id)
+    for b in 0..<256 |au|:
+        au.dfa_next.push(REGEX_UNKNOWN)
+    return state_id.i32()
+
+def regex_dfa_reset(au: mutable RegexAutomaton&) -> void can[Abort.Panic, Memory.Allocate]:
+    au.dfa_offset.clear()
+    au.dfa_offset.push(0)
+    au.dfa_members.clear()
+    au.dfa_accept.clear()
+    au.dfa_next.clear()
+    au.dfa_hash.clear()
+    au.dfa_chain.clear()
+    au.dfa_index.clear()
+    au.work.clear()
+    au.work.push(au.nfa_start)
+    regex_closure(au)
+    au.dfa_start <- regex_dfa_intern(au)
+
+def regex_automaton_clear(au: mutable RegexAutomaton&) -> void can[Abort.Panic, Memory.Allocate]:
+    au.sets.clear()
+    au.nfa_kind.clear()
+    au.nfa_out1.clear()
+    au.nfa_out2.clear()
+    au.nfa_set.clear()
+    au.nfa_start <- 0
+    au.dfa_flushes <- 0
+
+def regex_automaton_ready(au: mutable RegexAutomaton&) -> void can[Abort.Panic, Memory.Allocate]:
+    au.mark.clear()
+    for id in 0..<au.nfa_kind.count |au|:
+        au.mark.push(0)
+    au.mark_generation <- 0
+    regex_dfa_reset(au)
+
+# Computes and caches the transition of `state` on `byte`, returning the encoded
+# entry (target * 2 + accepting). Returns REGEX_UNKNOWN when the cache was full and
+# has been flushed (the caller restarts its scan).
+def regex_dfa_compute(au: mutable RegexAutomaton&, state: i32, byte: u8, allow_flush: bool) -> i32 can[Abort.Panic, Memory.Allocate]:
+    au.work.clear()
+    first: usize = au.dfa_offset[state.usize()].usize()
+    last: usize = au.dfa_offset[state.usize() + 1].usize()
+    for k in first..<last |au, byte|:
+        id: usize = au.dfa_members[k].usize()
+        if au.nfa_kind[id] == REGEX_NFA_BYTES and regex_set_has(au.sets, au.nfa_set[id], byte):
+            au.work.push(au.nfa_out1[id])
+    target: mutable i32 = REGEX_DEAD
+    if au.work.count > 0:
+        if allow_flush and au.dfa_accept.count >= REGEX_DFA_STATE_LIMIT:
+            regex_dfa_reset(au)
+            au.dfa_flushes <- au.dfa_flushes + 1
+            return REGEX_UNKNOWN
+        regex_closure(au)
+        interned: i32 = regex_dfa_intern(au)
+        accepting: bool = au.dfa_accept[interned.usize()]
+        target <- interned * 2 + (1 if accepting else 0)
+    au.dfa_next[state.usize() * 256 + byte.usize()] <- target
+    return target
+
+# Longest forward match anchored at `first`: the exclusive end, or -1.
+def regex_longest_at(au: mutable RegexAutomaton&, text: darray[u8]&, first: usize) -> i64 can[Abort.Panic, Memory.Allocate]:
+    allow_flush: mutable bool = true
+    while true |au, text, first, allow_flush|:
+        state: mutable i32 = au.dfa_start
+        best: mutable i64 = -1
+        best <- first.i64() if au.dfa_accept[state.usize()]
+        position: mutable usize = first
+        restarted: mutable bool = false
+        count: usize = text.count
+        while position < count |au, text, state, best, position, restarted, allow_flush, count|:
+            byte: u8 = text[position]
+            follow: mutable i32 = au.dfa_next[state.usize() * 256 + byte.usize()]
+            if follow == REGEX_UNKNOWN:
+                follow <- regex_dfa_compute(au, state, byte, allow_flush)
+                if follow == REGEX_UNKNOWN:
+                    restarted <- true
+                    allow_flush <- false
+                    break
+            break if follow == REGEX_DEAD
+            state <- follow >> 1
+            position <- position + 1
+            best <- position.i64() if (follow & 1) != 0
+        return best if not restarted
+    return -1
+
+# One backward pass of the unanchored reversed automaton: bit p of re.starts is set
+# exactly when some match of the pattern begins at text position p.
+def regex_mark_starts(re: mutable Regex&, text: darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
+    words: usize = text.count / 64 + 1
+    re.starts.clear()
+    for word in 0..<words |re|:
+        re.starts.push(0)
+    allow_flush: mutable bool = true
+    while true |re, text, allow_flush, words|:
+        state: mutable i32 = re.backward.dfa_start
+        if re.backward.dfa_accept[state.usize()]:
+            re.starts[text.count / 64] <- re.starts[text.count / 64] | (1.u64() << (text.count % 64).u64())
+        position: mutable usize = text.count
+        restarted: mutable bool = false
+        while position > 0 |re, text, state, position, restarted, allow_flush|:
+            byte: u8 = text[position - 1]
+            follow: mutable i32 = re.backward.dfa_next[state.usize() * 256 + byte.usize()]
+            if follow == REGEX_UNKNOWN:
+                follow <- regex_dfa_compute(&re.backward, state, byte, allow_flush)
+                if follow == REGEX_UNKNOWN:
+                    restarted <- true
+                    allow_flush <- false
+                    break
+            position <- position - 1
+            break if follow == REGEX_DEAD
+            state <- follow >> 1
+            if (follow & 1) != 0:
+                re.starts[position / 64] <- re.starts[position / 64] | (1.u64() << (position % 64).u64())
+        return if not restarted
+        for word in 0..<words |re|:
+            re.starts[word] <- 0
+
+# The first marked start position >= from, or limit + 1 when there is none.
+def regex_next_start(re: Regex&, from: usize, limit: usize) -> usize can[Abort.Panic]:
+    return limit + 1 if from > limit
+    word: mutable usize = from / 64
+    bits: mutable u64 = re.starts[word] & (0xFFFFFFFFFFFFFFFF << (from % 64).u64())
+    while bits == 0 |word, bits, re|:
+        word <- word + 1
+        return limit + 1 if word >= re.starts.count
+        bits <- re.starts[word]
+    low: mutable u64 = 0
+    while (bits & 1) == 0 |bits, low|:
+        bits <- bits >> 1
+        low <- low + 1
+    found: usize = word * 64 + low.usize()
+    return limit + 1 if found > limit
+    return found
+
+# ------------------------------------------------------------
+# Public API
+# ------------------------------------------------------------
+
+# Compiles `pattern` into `re`; returns false (and leaves `re` invalid) on syntax
+# the engine does not support.
+def regex_compile(re: mutable Regex&, pattern: sview) -> bool can[Abort.Panic, Memory.Allocate]:
+    re.valid <- false
+    re.sets.clear()
+    re.ast_kind.clear()
+    re.ast_left.clear()
+    re.ast_right.clear()
+    parser: mutable RegexParser = RegexParser{position: 0, ok: true}
+    root: u32 = regex_parse_either(re, &parser, pattern)
+    return false if not parser.ok or parser.position != pattern.len.usize()
+
+    regex_automaton_clear(&re.forward)
+    for word in re.sets |re|:
+        re.forward.sets.push(word)
+    forward_accept: u32 = regex_nfa_state(&re.forward, REGEX_NFA_ACCEPT, REGEX_NO_STATE, REGEX_NO_STATE, 0)
+    re.forward.nfa_start <- regex_compile_node(re.ast_kind, re.ast_left, re.ast_right, &re.forward, root, forward_accept, false)
+    regex_automaton_ready(&re.forward)
+
+    regex_automaton_clear(&re.backward)
+    for word in re.sets |re|:
+        re.backward.sets.push(word)
+    any_byte: u32 = (re.backward.sets.count / 4).u32()
+    for word in 0..<4 |re|:
+        re.backward.sets.push(0xFFFFFFFFFFFFFFFF)
+    backward_accept: u32 = regex_nfa_state(&re.backward, REGEX_NFA_ACCEPT, REGEX_NO_STATE, REGEX_NO_STATE, 0)
+    reversed_entry: u32 = regex_compile_node(re.ast_kind, re.ast_left, re.ast_right, &re.backward, root, backward_accept, true)
+    # Unanchored: a loop over any byte in front of the reversed pattern.
+    scan_loop: u32 = regex_nfa_state(&re.backward, REGEX_NFA_SPLIT, REGEX_NO_STATE, reversed_entry, 0)
+    skip_byte: u32 = regex_nfa_state(&re.backward, REGEX_NFA_BYTES, scan_loop, REGEX_NO_STATE, any_byte)
+    re.backward.nfa_out1[scan_loop.usize()] <- skip_byte
+    re.backward.nfa_start <- scan_loop
+    regex_automaton_ready(&re.backward)
+
+    # Prefilter: the bytes on which the start state survives. Disabled when the
+    # pattern can match the empty string (every position then matches).
+    re.first_bytes.clear()
+    for word in 0..<4 |re|:
+        re.first_bytes.push(0)
+    start: i32 = re.forward.dfa_start
+    re.use_prefilter <- not re.forward.dfa_accept[start.usize()]
+    for value in 0..<256 |re, start|:
+        follow: mutable i32 = re.forward.dfa_next[start.usize() * 256 + value]
+        follow <- regex_dfa_compute(&re.forward, start, value.u8(), false) if follow == REGEX_UNKNOWN
+        if follow != REGEX_DEAD:
+            re.first_bytes[value / 64] <- re.first_bytes[value / 64] | (1.u64() << (value % 64).u64())
+    re.valid <- true
+    return true
+
+# Leftmost-longest match starting at or after `from`.
+def regex_find_at(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMatch can[Abort.Panic, Memory.Allocate]:
+    if not re.valid:
+        panic("regex: search with a pattern that did not compile")
+    position: mutable usize = from
+    while position <= text.count |re, text, position|:
+        if re.use_prefilter:
+            while position < text.count |position, re, text|:
+                byte: u8 = text[position]
+                break if ((re.first_bytes[(byte >> 6).usize()] >> (byte & 63).u64()) & 1) != 0
+                position <- position + 1
+            break if position >= text.count
+        found_end: i64 = regex_longest_at(&re.forward, text, position)
+        return RegexMatch{found: true, first: position, last: found_end.usize()} if found_end >= 0
+        position <- position + 1
+    return RegexMatch{found: false, first: text.count, last: text.count}
+
+def regex_is_match(re: mutable Regex&, text: darray[u8]&) -> bool can[Abort.Panic, Memory.Allocate]:
+    return regex_find_at(re, text, 0).found
+
+# Next non-overlapping match for the whole-text scans, using the start bitmap.
+def regex_scan_next(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMatch can[Abort.Panic, Memory.Allocate]:
+    position: mutable usize = from
+    while true |re, text, position|:
+        first: usize = regex_next_start(re, position, text.count)
+        break if first > text.count
+        found_end: i64 = regex_longest_at(&re.forward, text, first)
+        return RegexMatch{found: true, first: first, last: found_end.usize()} if found_end >= 0
+        position <- first + 1   # unreachable when the two automata agree
+    return RegexMatch{found: false, first: text.count, last: text.count}
+
+# Number of non-overlapping matches, scanning left to right. Like Go, Rust and
+# Perl, an empty match that abuts the previous match is not reported, and an empty
+# match advances the scan by one byte.
+def regex_count(re: mutable Regex&, text: darray[u8]&) -> usize can[Abort.Panic, Memory.Allocate]:
+    if not re.valid:
+        panic("regex: search with a pattern that did not compile")
+    regex_mark_starts(re, text)
+    count: mutable usize = 0
+    position: mutable usize = 0
+    previous_end: mutable i64 = -1
+    while position <= text.count |re, text, count, position, previous_end|:
+        found: RegexMatch = regex_scan_next(re, text, position)
+        break if not found.found
+        empty: bool = found.last == found.first
+        position <- found.last + 1 if empty else found.last
+        continue if empty and found.first.i64() == previous_end
+        count <- count + 1
+        previous_end <- found.last.i64()
+    return count
+
+# Appends `text` to `output` with every non-overlapping match (as counted by
+# regex_count) replaced by the literal bytes of `replacement`.
+def regex_replace_all(re: mutable Regex&, text: darray[u8]&, replacement: sview, output: mutable darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
+    if not re.valid:
+        panic("regex: search with a pattern that did not compile")
+    regex_mark_starts(re, text)
+    copied: mutable usize = 0
+    position: mutable usize = 0
+    previous_end: mutable i64 = -1
+    replacement_length: usize = replacement.len.usize()
+    while position <= text.count |re, text, output, copied, position, previous_end, replacement, replacement_length|:
+        found: RegexMatch = regex_scan_next(re, text, position)
+        break if not found.found
+        empty: bool = found.last == found.first
+        position <- found.last + 1 if empty else found.last
+        continue if empty and found.first.i64() == previous_end
+        previous_end <- found.last.i64()
+        for index in copied..<found.first |output, text|:
+            output.push(text[index])
+        for index in 0..<replacement_length |output, replacement|:
+            output.push(replacement[index].u8())
+        copied <- found.last
+    for index in copied..<text.count |output, text|:
+        output.push(text[index])
