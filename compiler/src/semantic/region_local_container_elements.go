@@ -1230,6 +1230,11 @@ func isNonByteScalarContainerType(t Type) bool {
 	if elem == nil {
 		return false
 	}
+	if enum, ok := StripAggregateStateType(elem).(*EnumType); ok && enum != nil && enum.Packed {
+		// A packed (handle) enum element is an index into its tree store: the container's own
+		// buffer holds only those indices, never bytes an sview could view.
+		return true
+	}
 	components, opaque := []Type{}, false
 	collectReturnBorrowComponents(StripAggregateStateType(elem), false, &components, &opaque, map[Type]bool{})
 	if opaque {

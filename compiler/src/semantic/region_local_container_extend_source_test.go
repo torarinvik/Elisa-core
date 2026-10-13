@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+// A darray of packed (handle) enum values stores only indices into the enum's tree store, so a
+// callee filling a `darray[sview]` cannot hand it views of that darray's own buffer.
+func TestPackedHandleDarrayStorageHoldsNoViewableBytes(t *testing.T) {
+	if !isNonByteScalarContainerType(&DArrayType{Elem: &EnumType{Name: "Node", Packed: true}}) {
+		t.Fatalf("darray[packed enum] must count as a container of non-byte scalars")
+	}
+}
+
 const extendSourcePrelude = `def push_one(dst: mutable darray[sview]&, v: sview) -> void:
     can Memory.Allocate, Abort.Panic:
         dst.push(v)
