@@ -67,13 +67,35 @@ func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T)
 		t.Fatal("a DArray-compatible UFCS receiver must keep the call conservative")
 	}
 	for _, receiver := range []Type{
-		&ViewType{Elem: &BuiltinType{Name: "u32"}},
-		&GenericInstanceType{Name: "DynArray", Args: []Type{&BuiltinType{Name: "u32"}}},
-		&StructType{Name: "Container"},
+		&TypeParamType{Name: "T"},
+		&DArrayType{Elem: &BuiltinType{Name: "u32"}},
+		&GenericInstanceType{Name: "DynArray", Base: &StructType{Name: "DynArray"}, Args: []Type{&BuiltinType{Name: "u32"}}},
+		&RefType{Elem: &TypeParamType{Name: "T"}, Mutable: true},
 	} {
 		if !storeFlowUFCSMayAcceptDarrayReceiver(receiver) {
 			t.Fatalf("receiver representation %T may accept a DArray and must remain conservative", receiver)
 		}
+	}
+	for _, receiver := range []Type{
+		&ViewType{Elem: &BuiltinType{Name: "u32"}},
+		&GenericInstanceType{Name: "InlineVec", Base: &StructType{Name: "InlineVec"}, Args: []Type{&BuiltinType{Name: "u32"}}},
+		&StructType{Name: "Container"},
+	} {
+		if storeFlowUFCSMayAcceptDarrayReceiver(receiver) {
+			t.Fatalf("concrete nominal receiver %T cannot accept a builtin DArray", receiver)
+		}
+	}
+	inlineVecUFCS := &Analyzer{
+		storeFlowDarrays: map[string]bool{"target": true},
+		ufcsFunctionsByName: map[string][]*Symbol{
+			"InlineVec.push": {{Name: "InlineVec.push", Type: &FuncType{Params: []Type{
+				&RefType{Elem: &GenericInstanceType{Name: "InlineVec", Base: &StructType{Name: "InlineVec"}, Args: []Type{&TypeParamType{Name: "T"}}}, Mutable: true},
+				&TypeParamType{Name: "T"},
+			}}}},
+		},
+	}
+	if !inlineVecUFCS.storeFlowBuiltinDarrayGrowth(call.Func.(*ast.FieldExpr)) {
+		t.Fatal("an unrelated generic-struct UFCS push must not make builtin DArray push unresolved")
 	}
 
 	// A same-spelled method on an unverified receiver stays on the conservative path.
