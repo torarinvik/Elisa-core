@@ -119,7 +119,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		} else if storeScanMentions(value, content) {
 			changed = add(content, name) || changed
 		}
-		if storeScanMentions(value, targets) {
+		if storeScanMayAliasPlace(value, targets) {
 			changed = add(targets, name) || changed
 		}
 		return changed
@@ -262,8 +262,10 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				return
 			}
 			for _, ti := range targetArgs {
-				if !a.declParamCarriesStorage(callee, ti) {
-					continue // the target-side parameter cannot hold region storage
+				if !a.declParamCarriesStorage(callee, ti) || !a.declParamIsWritableRef(callee, ti) {
+					// The target-side parameter cannot hold region storage, or is passed by
+					// value: the callee's writes land in its own copy, never the caller's place.
+					continue
 				}
 				for _, s := range taintedArgs {
 					if s.index != ti && !a.declParamCarriesStorage(callee, s.index) {
@@ -578,6 +580,108 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 		return true
 	}
 	return typeCarriesRegionStorage(param) || a.typeCanContainRegionRefs(stripRefForBounds(param), map[string]bool{})
+}
+
+// declParamIsWritableRef reports whether a declared parameter is a mutable reference (including
+// `lmut`), the only way a callee can write into caller-visible storage. Unknown means it is.
+func (a *Analyzer) declParamIsWritableRef(decl *ast.FuncDecl, index int) bool {
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return true
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || index < 0 || index >= len(fnType.Params) {
+		return true
+	}
+	switch p := fnType.Params[index].(type) {
+	case *RefType:
+		return p == nil || p.Mutable
+	case *ViewType:
+		return p == nil || p.Mutable
+	case *TypeParamType:
+		return true
+	}
+	// A by-value parameter is a copy, but a copied darray/dict/set header (or a struct, tuple,
+	// enum payload holding one, or a reference) SHARES its indirect storage with the caller:
+	// `p[i] <- x` / `p.items[0] <- x` writes caller-visible memory. Only a by-value type that
+	// reaches no shared indirect storage is exempt.
+	return containsTypeParam(fnType.Params[index]) || typeSharesIndirectStorage(fnType.Params[index], map[Type]bool{})
+}
+
+// typeSharesIndirectStorage reports whether a by-value copy of t can still reach storage it
+// shares with the original (container buffers, references, mutable views). Read-only views
+// (sview, cstr) cannot be written through. Unknown types are assumed to share.
+func typeSharesIndirectStorage(t Type, seen map[Type]bool) bool {
+	if t == nil {
+		return true
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch tt := StripAggregateStateType(t).(type) {
+	case *BuiltinType, *BitIntType, *SViewType, *CStrType, *ConstEnumType:
+		return false
+	case *DArrayType, *DictType, *SetType, *RefType, *ViewType:
+		return true
+	case *StructType:
+		if tt == nil {
+			return true
+		}
+		for _, field := range tt.Fields {
+			if typeSharesIndirectStorage(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if typeSharesIndirectStorage(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *ArrayType:
+		return typeSharesIndirectStorage(tt.Elem, seen)
+	case *OptionalType:
+		return typeSharesIndirectStorage(tt.Value, seen)
+	case *EnumType:
+		if tt == nil {
+			return true
+		}
+		for _, variant := range tt.Variants {
+			if variant == nil {
+				continue
+			}
+			for _, payload := range variant.Payload {
+				if typeSharesIndirectStorage(payload, seen) {
+					return true
+				}
+			}
+		}
+		for _, field := range tt.Common {
+			if typeSharesIndirectStorage(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// storeScanMayAliasPlace reports whether binding a local to value may make it a REFERENCE into
+// target storage: a place rooted at a target (`t`, `t.f`, `t.xs[i]`, `&t.f`), a conditional
+// choosing one, or a call that may return one. A fresh literal or comprehension that merely
+// reads the target (`Scope{names: [n for n in t.names]}`) owns new storage and is no alias.
+func storeScanMayAliasPlace(value ast.Expr, targets map[string]bool) bool {
+	if value == nil || !storeScanMentions(value, targets) {
+		return false
+	}
+	switch stripParenExpr(value).(type) {
+	case *ast.StructLitExpr, *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.TupleExpr, *ast.StringLit, *ast.BinaryExpr:
+		return false
+	}
+	return true
 }
 
 // storeScanProjectingStmt reports statements whose binders are projections of their subject

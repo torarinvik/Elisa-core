@@ -95,6 +95,56 @@ def same_scope() -> usize:
 	}
 }
 
+// A by-value darray parameter is a header copy that SHARES its element buffer with the caller:
+// `put0(h.rows, xs)` with `rows[0] <- xs` writes into h's buffer, so a local-region xs must be
+// rejected exactly like a store through a reference (runtime-verified UAF when exempted).
+// A by-value parameter with no shared indirect storage (a plain scalar struct) stays exempt.
+func TestCallStoringThroughByValueSharedBufferRejected(t *testing.T) {
+	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_byvalue_shared.elisa", `struct Rows:
+    rows: mutable darray[darray[i64]] = []
+
+def put0(rows: darray[darray[i64]], xs: darray[i64]) -> void:
+    can Abort.Panic:
+        rows[0] <- xs
+
+def stash2(h: mutable Rows&, xs: darray[i64]) -> void:
+    can Abort.Panic:
+        put0(h.rows, xs)
+
+def fill(h: mutable Rows&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        stash2(h, local)
+`)
+	if joined := strings.Join(bad.Errors(), "\n"); !strings.Contains(joined, "call may store a value in region") {
+		t.Fatalf("an element write through a by-value darray that shares the target's buffer must be rejected, got:\n%s", joined)
+	}
+	ok := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_byvalue_scalar.elisa", `struct Pt:
+    x: i64
+    y: i64
+
+struct Holder:
+    xs: mutable darray[i64] = []
+    at: mutable Pt = Pt{x: 0, y: 0}
+
+def bump(p: Pt, xs: darray[i64]) -> i64:
+    return p.x + xs.count.i64()
+
+def note(h: mutable Holder&, xs: darray[i64]) -> void:
+    h.at <- Pt{x: bump(h.at, xs), y: 0}
+
+def fill(h: mutable Holder&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        note(h, local)
+`)
+	if errs := ok.Errors(); len(errs) != 0 {
+		t.Fatalf("a by-value scalar struct parameter shares nothing with the caller; expected acceptance, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // Element-mode stores: copying scalar elements out of a local darray into the target retains no
 // local storage (accepted); copying an element that is itself a local-region container header
 // (`h.rows.push(rows[0])` with `rows: darray[darray[i64]]` built locally) does (rejected).
