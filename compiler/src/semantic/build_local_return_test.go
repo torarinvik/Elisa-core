@@ -63,13 +63,15 @@ func TestGenericBuildLocalReturnAccepted(t *testing.T) {
 
 // SOUNDNESS FLOOR: the build-local-return relaxation must NOT leak to the
 // store-into-longer-lived-storage path. Building in the inferred region and
-// storing into a caller field is still a use-after-free (only `return` threads
-// the region; a stored value has no caller region to live in).
+// storing into a caller field is a use-after-free unless the function's
+// ambient region is bound to that field's caller region. With a second
+// reference parameter there is no unique target to bind it to, so the store
+// stays rejected.
 func TestBuildLocalStoreIntoFieldStillRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "build_local_store_field.elisa", `struct Cache:
     items: mutable darray[i64]
 
-def fill(self: mutable Cache&, n: usize) -> void:
+def fill(self: mutable Cache&, other: mutable Cache&, n: usize) -> void:
     out: mutable darray[i64] = []
     i: mutable usize = 0
     while i < n:
@@ -80,6 +82,31 @@ def fill(self: mutable Cache&, n: usize) -> void:
 	joined := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(joined, "escapes") || !strings.Contains(joined, "store into longer-lived storage") {
 		t.Fatalf("expected escape error for storing an inferred-region collection into a caller field, got:\n%s", joined)
+	}
+}
+
+// The single-target rehash shape (`self.items <- out` with `self` the only reference param)
+// is accepted because the store is made sound: `self` gets an inferred region and the
+// function's ambient allocation region is bound to it, so `out` is built directly in the
+// caller's arena (runtime-verified by TestStructFieldReplacedByFreshLocalSurvivesCall).
+func TestBuildLocalStoreIntoSoleRefParamFieldThreadsRegion(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "build_local_store_sole_field.elisa", `struct Cache:
+    items: mutable darray[i64]
+
+def fill(self: mutable Cache&, n: usize) -> void:
+    out: mutable darray[i64] = []
+    i: mutable usize = 0
+    while i < n:
+        out.push(i.i64())
+        i <- i + 1
+    self.items <- out
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected the sole-target field replacement to be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "fill")
+	if fn.AmbientGrownContainerRegion != "__rg_self" {
+		t.Fatalf("expected fill's ambient region to be bound to __rg_self, got %q", fn.AmbientGrownContainerRegion)
 	}
 }
 

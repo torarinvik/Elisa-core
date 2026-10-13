@@ -212,8 +212,16 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// field-region propagation pushes it onto the resolved field container, and the same
 			// return-escape checks that guard the explicit `[@r]` form cover every borrow-out vector
 			// regardless of how the region param was introduced — no new lifetime power.
-			if paramFieldContainerIsGrown(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
+			assignedFresh := paramFieldAssignedFreshContainer(fn.Body, p.Name)
+			if assignedFresh || paramFieldContainerIsGrown(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
 				stamp = sstamp
+			}
+			// The fresh backing stored into the field is allocated by this body, so the
+			// function's ambient region must be the caller's (the field's) region. Same
+			// single-target restriction as the container grower: with any other region-less
+			// container param, a value could be routed into a different-lifetime target.
+			if assignedFresh && ambientGrownParam == "" && containerParamCount == 0 && !a.hasOtherFreshFieldTarget(fn, p.Name) {
+				ambientGrownParam = p.Name
 			}
 		}
 		if stamp == nil {
@@ -829,6 +837,111 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// hasOtherFreshFieldTarget reports whether fn has a by-reference parameter other than name.
+// Binding the ambient region to one struct param is only sound when it is the single store
+// target reachable through a reference; any other reference param could receive a value
+// allocated in the adopted region, so the binding is withheld (conservative).
+func (a *Analyzer) hasOtherFreshFieldTarget(fn *ast.FuncDecl, name string) bool {
+	for i := range fn.Params {
+		if fn.Params[i].Name == name {
+			continue
+		}
+		typ := fn.Params[i].Type
+		for {
+			switch t := typ.(type) {
+			case *ast.MutableType:
+				typ = t.Elem
+				continue
+			case *ast.OwnedType:
+				typ = t.Elem
+				continue
+			case *ast.RefType:
+				return true
+			}
+			break
+		}
+	}
+	return false
+}
+
+// paramFieldAssignedFreshContainer reports whether the body replaces a field of the named struct
+// param with a container allocated in this body: `p.f <- []`, `p.f <- [x for ...]`, or
+// `p.f <- fresh` where `fresh` is a body local initialised from such a literal (the rehash
+// shape). The fresh backing must live in the caller's region, not the per-call auto region, so
+// the param needs a threaded region that the function's ambient allocations adopt. Purely
+// syntactic and deliberately narrow: a scalar field assignment never matches.
+func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
+	freshLocals := map[string]bool{}
+	var assigns []*ast.AssignStmt
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.InStoreStmt:
+				return
+			case *ast.RegionStmt:
+				if !isSynthesizedAutoRegion(n.Name) {
+					return
+				}
+			case *ast.VarDeclStmt:
+				if _, isStr := n.Value.(*ast.StringLit); n != nil && n.Name != "" && !isStr && reassignmentAllocatesFreshBacking(n.Value) {
+					freshLocals[n.Name] = true
+				}
+			case *ast.AssignStmt:
+				if n != nil && !n.Optional {
+					assigns = append(assigns, n)
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	for _, asn := range assigns {
+		field, ok := asn.Target.(*ast.FieldExpr)
+		if !ok || field == nil {
+			continue
+		}
+		if root := rootIdentExpr(field); root == nil || root.Name != name {
+			continue
+		}
+		value := asn.Value
+		for {
+			paren, ok := value.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			value = paren.Inner
+		}
+		if id, ok := value.(*ast.Ident); ok && id != nil && freshLocals[id.Name] {
+			return true
+		}
+		if _, isStr := value.(*ast.StringLit); !isStr && reassignmentAllocatesFreshBacking(value) {
+			return true
+		}
+	}
+	return false
 }
 
 // paramContainerIsGrown reports whether the body contains a growth-method call (push/extend/…)

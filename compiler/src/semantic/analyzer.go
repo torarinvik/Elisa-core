@@ -252,6 +252,9 @@ type Analyzer struct {
 	// stack to chained — the callee interleaves adopted payload allocations into the container's
 	// arena, so tail-only growth would panic at the first non-tail realloc.
 	ambientGrownCalleeParamIndex map[string]int
+	// storeTargetRegion is the container region of the place a checked store writes into,
+	// set only for the duration of checkStoredRegionContainerEscapeInto.
+	storeTargetRegion string
 	// regionParamCalleeParamIndex maps each function name to explicit parameter positions whose
 	// types carry one of that function's region parameters. Forwarding a fresh region container to
 	// any such position shares its allocation region with the callee, which may allocate between

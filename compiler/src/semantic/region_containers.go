@@ -742,6 +742,17 @@ func (a *Analyzer) checkStoredRegionContainerEscape(valueExpr ast.Expr, valueTyp
 	a.checkRegionContainerEscape(valueExpr, valueType, "store into longer-lived storage")
 }
 
+// checkStoredRegionContainerEscapeInto is checkStoredRegionContainerEscape for a store whose
+// target place carries a known container region. When that region is the function's ambient
+// grown-container region, the synthesized auto region adopts the caller's arena (the backend's
+// ambientGrownContainerRegion binding), so a value allocated there lives in the target's region.
+func (a *Analyzer) checkStoredRegionContainerEscapeInto(valueExpr ast.Expr, valueType Type, targetRegion string) {
+	saved := a.storeTargetRegion
+	a.storeTargetRegion = targetRegion
+	defer func() { a.storeTargetRegion = saved }()
+	a.checkStoredRegionContainerEscape(valueExpr, valueType)
+}
+
 // exprIsRegionPolyResultCarryingRegionData reports whether an expression is a call to a
 // region-polymorphic function whose result transitively holds region-allocated data. Such a
 // result lives in the ambient (threaded) region even though its type is region-less, so a store
@@ -802,6 +813,13 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 			// because there is no caller region for the stored value to live in.
 			if via == "return" && a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic &&
 				funcTypeHasImplicitParam(a.currentFuncType, regionPolymorphicImplicitParamName) {
+				return
+			}
+			// A store into the place whose region the ambient allocation region is bound to
+			// (the struct-field rehash shape `p.slots <- fresh`): the auto region allocates
+			// into the caller's arena for exactly that target, so nothing dangles.
+			if a.storeTargetRegion != "" && a.currentFuncDecl != nil && a.currentFuncDecl.AmbientGrownContainerRegion == a.storeTargetRegion {
+				a.noteAmbientFillFresh()
 				return
 			}
 			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[@r] ... -> ... @r) or a longer-lived region", via)

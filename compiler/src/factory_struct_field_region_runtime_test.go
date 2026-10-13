@@ -471,3 +471,43 @@ def bt() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
 `
 	buildAndRunSoATest(t, "TestGenericStructLiteralLocalForwardedToGrower", src, "bt")
 }
+
+// The rehash shape `map.slots <- fresh` through the sole `mutable T&` param: the fresh backing is built in the caller's region (ambient region bound to __rg_map) and survives the call and heap churn.
+func TestStructFieldReplacedByFreshLocalSurvivesCall(t *testing.T) {
+	src := `
+struct IntMap:
+    slots: mutable darray[i64] = []
+
+def rehash(map: mutable IntMap&, n: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        fresh: mutable darray[i64] = []
+        for i in 0..<n |fresh|:
+            fresh.push(i.i64() * 7)
+        map.slots <- fresh
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        total: mutable i64 = 0
+        for k in 0..<200 |total|:
+            junk: mutable darray[i64] = []
+            for j in 0..<64 |junk|:
+                junk.push(-1)
+            total <- total + junk[3]
+        return total
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        m: mutable IntMap = IntMap{}
+        rehash(&m, 40)
+        c: i64 = churn()
+        rehash(&m, 100)
+        d: i64 = churn()
+        total: mutable i64 = 0
+        for i in 0..<m.slots.count |total|:
+            total <- total + m.slots[i]
+        if total != 34650 or c + d != -400:
+            panic("rehash backing corrupted")
+`
+	buildAndRunSoATest(t, "TestStructFieldReplacedByFreshLocalSurvivesCall", src, "bt")
+}

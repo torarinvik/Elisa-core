@@ -622,7 +622,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if a.lvalueStorageOutlivesFunction(n.Target) {
 			a.checkLocalArenaEscape(n.Value, valueType, "store")
-			a.checkStoredRegionContainerEscape(n.Value, valueType)
+			targetRegion := containerRegion(stripRefForBounds(targetType))
+			if targetRegion == "" {
+				// A container field reached through a region-carrying struct reference
+				// (`map.slots` with `map: StrMap& @r`) lives in that reference's region.
+				if field, ok := stripParenExpr(n.Target).(*ast.FieldExpr); ok && field != nil {
+					targetRegion = a.fieldObjectExprRegion(field.Object, a.exprTypes[field.Object])
+				}
+			}
+			a.checkStoredRegionContainerEscapeInto(n.Value, valueType, targetRegion)
 		}
 		// Nested-region escape: storing an inner-@r value into an outer-region
 		// slot dangles once the inner region is freed. Decided by the region
