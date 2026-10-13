@@ -34,6 +34,11 @@ def nudge(bodies: mutable darray[Body]&, i: usize) -> void:
 def bump(hs: mutable darray[Holder]&, i: usize) -> void:
     hs[i].n <- hs[i].n + 1
 
+@inline(never)
+def inner_count(xss: darray[darray[i64]]&, i: usize) -> i64 can[Abort.Panic]:
+    row: darray[i64]& = &xss[i]
+    return row[0]
+
 def driver() -> void:
     flags: mutable darray[bool] = []
     flags.push(true)
@@ -74,10 +79,18 @@ func TestDarrayAliasScopeCoversCountBoolAndScalarStructs(t *testing.T) {
 	if !regexp.MustCompile(`store double[^\n]*!alias\.scope[^\n]*!noalias`).MatchString(nudge) {
 		t.Fatalf("scalar-struct field store must carry elt scope + hdr noalias:\n%s", nudge)
 	}
+	// A struct holding a darray is not alias-safe as a whole, but its scalar leaf `n` is: struct
+	// fields never overlap, so that slot can never be header memory.
 	bump := functionBody(t, ir, "bump")
-	for _, line := range strings.Split(bump, "\n") {
-		if strings.Contains(line, "store i64") && strings.Contains(line, "!alias.scope") {
-			t.Fatalf("a struct holding a darray must not be tagged elt (its buffer holds headers):\n%s", line)
+	if !regexp.MustCompile(`store i64[^\n]*!alias\.scope[^\n]*!noalias`).MatchString(bump) {
+		t.Fatalf("scalar leaf of a header-holding struct element must carry elt scope + hdr noalias:\n%s", bump)
+	}
+	// Nested darrays: the outer element IS a header, so loading it (or anything through the outer
+	// element type as a whole) must never be tagged elt.
+	nested := functionBody(t, ir, "inner_count")
+	for _, line := range strings.Split(nested, "\n") {
+		if strings.Contains(line, "load %") && strings.Contains(line, "!alias.scope !") && strings.Contains(line, "darray") {
+			t.Fatalf("whole darray-element access must not be tagged:\n%s", line)
 		}
 	}
 }

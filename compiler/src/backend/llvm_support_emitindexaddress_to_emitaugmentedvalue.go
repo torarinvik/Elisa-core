@@ -344,11 +344,18 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 	}
 	indices := []C.LLVMValueRef{indexValue}
 	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+	// The data-pointer load reads header memory; every "elt"-tagged access is a scalar leaf
+	// that can never be header memory, so the hdr tag is sound for any element type.
+	s.tagDarrayHeaderLoad(dataPtr)
+	if _, ok := elemType.(*semantic.StructType); ok {
+		// A struct element that is not alias-safe as a whole (it holds a header somewhere) still
+		// has scalar leaf fields; propagateAliasSafeFieldPtr tags those.
+		s.markElementDerivedPtr(ptr)
+	}
 	if isAliasSafeScalarElemType(elemType) {
 		// Scalar element buffer can never contain a darray header, so the data-pointer load (header
 		// memory) provably never aliases the element stores (buffer memory). Tag both so LLVM hoists
 		// the base-pointer load out of hot loops. See aliasSafeElementPtrs.
-		s.tagDarrayHeaderLoad(dataPtr)
 		s.markAliasSafeElementPtr(ptr)
 		// docs/84 Increment 4: register this element address under its proven-distinct
 		// parameter's scope. tagDarrayElementAccess combines the shared darray hdr/elt
@@ -416,14 +423,44 @@ func aliasSafeElemType(t semantic.Type, depth int) bool {
 	return false
 }
 
-// propagateAliasSafeFieldPtr marks a field address derived from an alias-safe element address as
-// alias-safe too (it addresses the same element buffer).
-func (s *functionState) propagateAliasSafeFieldPtr(objPtr, fieldPtr C.LLVMValueRef, pointerLike bool) {
-	if s == nil || pointerLike || objPtr == nil || fieldPtr == nil || s.aliasSafeElementPtrs == nil {
+// markElementDerivedPtr records an address inside a darray/view element buffer whose type is a
+// plain struct that is not alias-safe as a whole (it contains a header somewhere).
+func (s *functionState) markElementDerivedPtr(ptr C.LLVMValueRef) {
+	if s == nil || ptr == nil {
 		return
 	}
-	if s.aliasSafeElementPtrs[objPtr] {
+	if s.elementDerivedPtrs == nil {
+		s.elementDerivedPtrs = map[C.LLVMValueRef]bool{}
+	}
+	s.elementDerivedPtrs[ptr] = true
+}
+
+// propagateAliasSafeFieldPtr marks a field address derived from an element address. A field of
+// an alias-safe element is alias-safe. A field of an element-derived plain struct is alias-safe
+// when its own type is (struct fields never overlap, so a scalar leaf is never header memory even
+// when a sibling field is a darray), and a nested plain struct field stays element-derived.
+// Enum payloads are excluded: variants overlap, so a scalar slot of one variant may be a header
+// slot of another.
+func (s *functionState) propagateAliasSafeFieldPtr(objPtr, fieldPtr C.LLVMValueRef, containerType, fieldType semantic.Type, pointerLike bool) {
+	if s == nil || pointerLike || objPtr == nil || fieldPtr == nil {
+		return
+	}
+	if s.aliasSafeElementPtrs != nil && s.aliasSafeElementPtrs[objPtr] {
 		s.aliasSafeElementPtrs[fieldPtr] = true
+		return
+	}
+	if s.elementDerivedPtrs == nil || !s.elementDerivedPtrs[objPtr] {
+		return
+	}
+	if _, ok := containerType.(*semantic.StructType); !ok {
+		return
+	}
+	if isAliasSafeScalarElemType(fieldType) {
+		s.markAliasSafeElementPtr(fieldPtr)
+		return
+	}
+	if _, ok := fieldType.(*semantic.StructType); ok {
+		s.markElementDerivedPtr(fieldPtr)
 	}
 }
 

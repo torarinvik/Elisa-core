@@ -89,6 +89,9 @@ type functionState struct {
 	// header, so hdr != elt is always true (nested darray[darray[...]] is left untagged). All element
 	// accesses share ONE "elt" scope, so they remain may-alias to each other (no spurious vectorization).
 	aliasSafeElementPtrs map[C.LLVMValueRef]bool
+	// elementDerivedPtrs: addresses inside a darray/view element buffer whose plain-struct type is not
+	// alias-safe as a whole; only their scalar leaf fields get the elt tag (propagateAliasSafeFieldPtr).
+	elementDerivedPtrs map[C.LLVMValueRef]bool
 	// A compiler-generated fresh-result comprehension can prove that its source and
 	// destination darrays are distinct. Keep that fact scoped to the loop; self-extend
 	// and user-written loops remain conservative.
