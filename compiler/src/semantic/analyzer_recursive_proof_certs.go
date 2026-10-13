@@ -173,6 +173,13 @@ func (a *Analyzer) structuralTerminationCertificate(fn *ast.FuncDecl, call *ast.
 }
 
 func (a *Analyzer) recursiveCallCertificate(caller, callee *ast.FuncDecl, call *ast.CallExpr) (recursiveProofCertificate, bool) {
+	return a.recursiveCallCertificateUnderPath(caller, callee, call, nil)
+}
+
+// recursiveCallCertificateUnderPath uses a contract call's proven evaluation guard when checking
+// its direct numeric decrease. Body calls have no contract path and continue through the wrapper
+// above; only specification calls may rely on their guard to establish a decrease.
+func (a *Analyzer) recursiveCallCertificateUnderPath(caller, callee *ast.FuncDecl, call *ast.CallExpr, path ast.Expr) (recursiveProofCertificate, bool) {
 	if a == nil || caller == nil || callee == nil || call == nil {
 		return recursiveProofCertificate{}, false
 	}
@@ -181,7 +188,7 @@ func (a *Analyzer) recursiveCallCertificate(caller, callee *ast.FuncDecl, call *
 		if len(measures) == 1 && a.isStructuralDecreaseMeasure(caller, measures[0]) {
 			return a.structuralTerminationCertificate(caller, call)
 		}
-		return a.directNumericTerminationCertificate(caller, call)
+		return a.directNumericTerminationCertificateUnderPath(caller, call, path)
 	}
 	cert := recursiveProofCertificate{
 		Kind:    recursiveProofMutualNumeric,

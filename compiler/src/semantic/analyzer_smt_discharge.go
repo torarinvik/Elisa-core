@@ -4256,8 +4256,9 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
 	var recursiveCert recursiveProofCertificate
 	if recursiveProofCall {
+		callPath := tr.a.contractCallPath(call)
 		var ok bool
-		recursiveCert, ok = tr.a.recursiveCallCertificate(tr.a.currentFuncDecl, decl, call)
+		recursiveCert, ok = tr.a.recursiveCallCertificateUnderPath(tr.a.currentFuncDecl, decl, call, callPath)
 		if !ok {
 			recursiveProofCall = false
 		}
@@ -4265,9 +4266,6 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
 		tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
 		tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
-		recursiveProofCall = false
-	}
-	if recursiveProofCall && !tr.a.recursiveCallHasVerifiedDecrease(decl, call) {
 		recursiveProofCall = false
 	}
 	ensureEnv := make(map[string]string, len(env)+1)
@@ -4805,15 +4803,6 @@ func (a *Analyzer) isRecursiveProofCall(decl *ast.FuncDecl) bool {
 		}
 	}
 	return false
-}
-
-func (a *Analyzer) recursiveCallHasVerifiedDecrease(callee *ast.FuncDecl, call *ast.CallExpr) bool {
-	if a == nil || a.currentFuncDecl == nil || callee == nil || call == nil {
-		return false
-	}
-	caller := a.currentFuncDecl
-	_, ok := a.recursiveCallCertificate(caller, callee, call)
-	return ok
 }
 
 func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.CallExpr) bool {
