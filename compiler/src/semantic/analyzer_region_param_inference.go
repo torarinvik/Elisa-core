@@ -896,6 +896,12 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 				if _, isStr := n.Value.(*ast.StringLit); n != nil && n.Name != "" && !isStr && reassignmentAllocatesFreshBacking(n.Value) {
 					freshLocals[n.Name] = true
 				}
+				// A struct-literal local (`local: Inner = Inner{xs: []}`) owns fresh container
+				// fields that the body then grows; storing it (or one of its fields) into the
+				// param must build those fields in the caller's region too.
+				if _, isLit := stripParenExpr(n.Value).(*ast.StructLitExpr); n != nil && n.Name != "" && isLit {
+					freshLocals[n.Name] = true
+				}
 			case *ast.AssignStmt:
 				if n != nil && !n.Optional {
 					assigns = append(assigns, n)
@@ -935,6 +941,15 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 			value = paren.Inner
 		}
 		if id, ok := value.(*ast.Ident); ok && id != nil && freshLocals[id.Name] {
+			return true
+		}
+		// `o.inner.xs <- local.xs`: a field path of a fresh local carries its fresh backing.
+		if field, ok := value.(*ast.FieldExpr); ok && field != nil {
+			if root := rootIdentExpr(field); root != nil && freshLocals[root.Name] {
+				return true
+			}
+		}
+		if _, isStruct := value.(*ast.StructLitExpr); isStruct {
 			return true
 		}
 		if _, isStr := value.(*ast.StringLit); !isStr && reassignmentAllocatesFreshBacking(value) {

@@ -796,6 +796,12 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 			region = a.activeContainerRegionName()
 		}
 	}
+	if region == "" && via == "store into longer-lived storage" && typeCarriesRegionStorage(valueType) {
+		// A struct local (or a field path of one) whose container fields were allocated in a
+		// recorded local region: storing it copies headers that still point into that region
+		// (`o.inner <- local`, `o.inner.xs <- local.xs`).
+		region = a.structLocalArgRegion(valueExpr)
+	}
 	if region == "" {
 		return
 	}

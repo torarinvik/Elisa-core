@@ -145,6 +145,25 @@ def fill(h: mutable Holder&) -> void:
 	}
 }
 
+// The struct-local store into a ref-param field is only made sound when the ambient region can
+// be bound to that single target; with a second reference param it must stay rejected.
+func TestStructLocalStoredIntoRefFieldWithTwoRefParamsRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_local_two_refs.elisa", `struct Inner:
+    xs: mutable darray[u64]
+
+struct Outer:
+    inner: mutable Inner
+
+def fill(o: mutable Outer&, other: mutable Outer&) -> void can[Abort.Panic, Memory.Allocate]:
+    local: mutable Inner = Inner{xs: []}
+    local.xs.push(1)
+    o.inner <- local
+`)
+	if joined := strings.Join(result.Errors(), "\n"); !strings.Contains(joined, "escapes") {
+		t.Fatalf("storing a struct local into one of two ref params must be rejected, got:\n%s", joined)
+	}
+}
+
 // Element-mode stores: copying scalar elements out of a local darray into the target retains no
 // local storage (accepted); copying an element that is itself a local-region container header
 // (`h.rows.push(rows[0])` with `rows: darray[darray[i64]]` built locally) does (rejected).

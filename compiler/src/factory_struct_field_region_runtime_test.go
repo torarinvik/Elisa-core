@@ -552,3 +552,53 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "struct_ref_call_store_safe", src, "bt")
 }
+
+// SOUNDNESS (silent UAF before): a struct-literal local whose darray field is grown, then stored
+// whole (`o.inner <- local`) or by field (`o.inner.xs <- local.xs`) into the sole by-ref param,
+// printed 0 instead of 499500 -- the backing lived in the callee's auto region. The local is now
+// built in the caller's region (ambient region bound to __rg_o, as for the rehash shape).
+func TestStructLocalStoredIntoRefParamFieldSurvivesCall(t *testing.T) {
+	src := `
+struct Inner:
+    xs: mutable darray[u64]
+
+struct Outer:
+    inner: mutable Inner
+
+def fill(o: mutable Outer&) -> void can[Abort.Panic, Memory.Allocate]:
+    local: mutable Inner = Inner{xs: []}
+    for i in 0..<1000 |local|:
+        local.xs.push(i.u64())
+    o.inner <- local
+
+def fill_field(o: mutable Outer&) -> void can[Abort.Panic, Memory.Allocate]:
+    local: mutable Inner = Inner{xs: []}
+    for i in 0..<1000 |local|:
+        local.xs.push(i.u64())
+    o.inner.xs <- local.xs
+
+def churn() -> u64 can[Abort.Panic, Memory.Allocate]:
+    ys: mutable darray[u64] = []
+    for i in 0..<5000 |ys|:
+        ys.push(7)
+    return ys[10]
+
+def sum(o: Outer&) -> u64:
+    total: mutable u64 = 0
+    for x in o.inner.xs |total|:
+        total <- total + x
+    return total
+
+@test
+def bt() -> void can[Abort.Panic, Memory.Allocate, Memory.Release]:
+    o: mutable Outer = Outer{inner: Inner{xs: []}}
+    fill(&o)
+    c: u64 = churn()
+    p: mutable Outer = Outer{inner: Inner{xs: []}}
+    fill_field(&p)
+    d: u64 = churn()
+    if sum(&o) != 499500 or sum(&p) != 499500 or c + d != 14:
+        panic("struct-local field store UAF")
+`
+	buildAndRunSoATest(t, "struct_local_into_ref_param_field", src, "bt")
+}
