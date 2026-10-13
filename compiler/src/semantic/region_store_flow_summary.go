@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // A store-flow summary answers, for a declared function, which parameters may exchange contents:
@@ -128,7 +129,24 @@ func storeFlowBinderNode(typeName string) bool {
 // declared type (a parameter or local of bool/integer/float type) and that no pattern, loop,
 // lambda or other binder rebinds. Such a name can carry no region reference, so it links nothing.
 func (a *Analyzer) storeFlowScalarNames(decl *ast.FuncDecl) map[string]bool {
-	return a.storeFlowBinderIndexFor(decl).typedNames(storeFlowScalarTypeExpr)
+	idx := a.storeFlowBinderIndexFor(decl)
+	scalars := idx.typedNames(storeFlowScalarTypeExpr)
+	if decl == nil {
+		return scalars
+	}
+	total, pointerFree := map[string]int{}, map[string]int{}
+	for _, binder := range idx.typed {
+		total[binder.name]++
+		if storeFlowScalarTypeExpr(binder.t) || a.storeFlowPointerFreeTypeExpr(binder.t, map[Type]bool{}) {
+			pointerFree[binder.name]++
+		}
+	}
+	for name, count := range total {
+		if count > 0 && pointerFree[name] == count && !idx.untyped[name] {
+			scalars[name] = true
+		}
+	}
+	return scalars
 }
 
 // storeFlowDarrayTypeExpr reports a builtin darray type, possibly behind a reference.
@@ -141,6 +159,69 @@ func storeFlowDarrayTypeExpr(t ast.TypeExpr) bool {
 	}
 	bt, ok := t.(*ast.BuiltinTypeExpr)
 	return ok && bt != nil && bt.Name == "darray"
+}
+
+// storeFlowPointerFreeTypeExpr resolves the narrowly-supported by-value forms
+// whose representation cannot contain an Elisa borrow. It intentionally rejects
+// containers: their headers may alias backing storage even when their elements
+// are pointer-free.
+func (a *Analyzer) storeFlowPointerFreeTypeExpr(t ast.TypeExpr, active map[Type]bool) bool {
+	if storeFlowScalarTypeExpr(t) {
+		return true
+	}
+	switch tt := t.(type) {
+	case *ast.MutableType:
+		return tt != nil && a.storeFlowPointerFreeTypeExpr(tt.Elem, active)
+	case *ast.OptionalTypeExpr:
+		return tt != nil && a.storeFlowPointerFreeTypeExpr(tt.Value, active)
+	case *ast.TupleTypeExpr:
+		if tt == nil || tt.Region != "" || len(tt.Fields) == 0 {
+			return false
+		}
+		for _, field := range tt.Fields {
+			if !a.storeFlowPointerFreeTypeExpr(field.Type, active) {
+				return false
+			}
+		}
+		return true
+	case *ast.NamedType:
+		if tt == nil || tt.Region != "" {
+			return false
+		}
+		name := tt.Name
+		if canonical := a.resolvedTypeNames[tt]; canonical != "" {
+			name = canonical
+		}
+		return storeFlowPointerFreeReturn(a.storeFlowNamedType(name), active)
+	default:
+		return false
+	}
+}
+
+// storeFlowNamedType resolves a name using the same namespace/import context as
+// semantic analysis. A suffix match against the global type table would let an
+// unrelated module change a StoreFlow result, so unresolved names stay unknown.
+func (a *Analyzer) storeFlowNamedType(name string) Type {
+	if a == nil {
+		return nil
+	}
+	if a.storeFlowCurrentDecl != nil {
+		for _, param := range a.storeFlowCurrentDecl.TypeParams {
+			if param == name {
+				return nil
+			}
+		}
+		for _, param := range a.storeFlowCurrentDecl.GenericParams {
+			if param.Kind == ast.GenericParamType && param.Name == name {
+				return nil
+			}
+		}
+	}
+	typ, _, ok := a.lookupVisibleType(name)
+	if !ok {
+		return nil
+	}
+	return typ
 }
 
 // storeFlowSingleNamedTypes maps each name whose every declaration in decl (parameters and
@@ -230,6 +311,7 @@ type storeFlowBinderIndex struct {
 	rangeNames []string
 	rangeOther []string
 	other      []string
+	untyped    map[string]bool
 }
 
 type storeFlowTypedBinder struct {
@@ -279,7 +361,7 @@ func (idx *storeFlowBinderIndex) binderNames() map[string]bool {
 
 // buildStoreFlowBinderIndex walks decl once, collecting its binding sites.
 func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
-	idx := &storeFlowBinderIndex{}
+	idx := &storeFlowBinderIndex{untyped: map[string]bool{}}
 	for _, param := range decl.Params {
 		idx.typed = append(idx.typed, storeFlowTypedBinder{name: param.Name, t: param.Type})
 	}
@@ -310,10 +392,20 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 			}
 			switch {
 			case f.Kind() == reflect.String:
-				*out = append(*out, f.String())
+				name := f.String()
+				*out = append(*out, name)
+				if name != "" {
+					if _, isRange := v.(*ast.ForStmt); !isRange || elem.Type().Field(i).Name != "Name" {
+						idx.untyped[name] = true
+					}
+				}
 			case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String:
 				for j := 0; j < f.Len(); j++ {
-					*out = append(*out, f.Index(j).String())
+					name := f.Index(j).String()
+					*out = append(*out, name)
+					if name != "" {
+						idx.untyped[name] = true
+					}
 				}
 			case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.Struct:
 				// value-typed binder records (e.g. []ParamDecl): their string fields bind too
@@ -321,7 +413,11 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 					item := f.Index(j)
 					for k := 0; k < item.NumField(); k++ {
 						if item.Field(k).Kind() == reflect.String {
-							*out = append(*out, item.Field(k).String())
+							name := item.Field(k).String()
+							*out = append(*out, name)
+							if name != "" {
+								idx.untyped[name] = true
+							}
 						}
 					}
 				}
@@ -651,6 +747,19 @@ func storeFlowSummaryJoin(x, y *storeFlowSummary) *storeFlowSummary {
 }
 
 func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
+	savedFlowDecl := a.storeFlowCurrentDecl
+	a.storeFlowCurrentDecl = decl
+	defer func() { a.storeFlowCurrentDecl = savedFlowDecl }()
+	savedNamespace, savedUsings := a.currentNamespace, a.currentUsings
+	if sym := a.funcDeclSymbols[decl]; sym != nil {
+		if index := lastDotIndex(sym.Name); index >= 0 {
+			a.currentNamespace = sym.Name[:index]
+		} else {
+			a.currentNamespace = ""
+		}
+	}
+	a.currentUsings = append([]string(nil), a.funcDeclUsings[decl]...)
+	defer func() { a.currentNamespace, a.currentUsings = savedNamespace, savedUsings }()
 	savedParams := a.storeFlowParams
 	a.storeFlowParams = map[string]bool{}
 	for _, param := range decl.Params {
@@ -751,8 +860,36 @@ func storeFlowEndsInReturn(body []ast.Stmt) bool {
 	if len(body) == 0 {
 		return false
 	}
-	_, ok := body[len(body)-1].(*ast.ReturnStmt)
-	return ok
+	switch tail := body[len(body)-1].(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.RegionStmt:
+		// Function-body inference wraps allocation-bearing bodies in a
+		// synthesized lazy region. The region is transparent to control flow;
+		// inspect its tail so an explicit return is not mistaken for an
+		// implicit result derived from every parameter.
+		return tail != nil && storeFlowEndsInReturn(tail.Body)
+	case *ast.CanStmt:
+		// A plain permission block executes its body directly. Handler forms can
+		// redirect control, so keep those conservative.
+		return tail != nil && tail.As == "" && tail.HandlerName == "" && len(tail.HandlerArgs) == 0 && storeFlowEndsInReturn(tail.Body)
+	case *ast.ScopeStmt:
+		return tail != nil && storeFlowEndsInReturn(tail.Body)
+	case *ast.InStoreStmt:
+		return tail != nil && storeFlowEndsInReturn(tail.Body)
+	case *ast.IfStmt:
+		if tail == nil || len(tail.Else) == 0 || !storeFlowEndsInReturn(tail.Then) || !storeFlowEndsInReturn(tail.Else) {
+			return false
+		}
+		for _, clause := range tail.Elifs {
+			if !storeFlowEndsInReturn(clause.Body) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 var astStmtType = reflect.TypeOf((*ast.Stmt)(nil)).Elem()
@@ -856,7 +993,7 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 	binds := a.storeFlowBinds
 	// A scalar local's initializer carries nothing into it: only calls inside can connect
 	// their arguments, and names an expression binds there are scoped to that expression.
-	scalarDecl := storeFlowScalarDecl(stmt)
+	scalarDecl := a.storeFlowScalarDecl(stmt)
 	if scalarDecl && !callsOnly {
 		callsOnly = true
 		nested, calls = nil, nil
@@ -975,9 +1112,12 @@ func storeFlowViewTypeExpr(t ast.TypeExpr) bool {
 
 // storeFlowCondOnly reports whether only the calls in a statement's header can move values: an
 // if/while condition merely tests, so the names it reads must not be linked.
-func storeFlowScalarDecl(stmt reflect.Value) bool {
+func (a *Analyzer) storeFlowScalarDecl(stmt reflect.Value) bool {
 	vd, ok := stmt.Interface().(*ast.VarDeclStmt)
-	return ok && vd != nil && vd.Owner == nil && storeFlowScalarTypeExpr(vd.Type)
+	if !ok || vd == nil || vd.Owner != nil {
+		return false
+	}
+	return storeFlowScalarTypeExpr(vd.Type) || a.storeFlowPointerFreeTypeExpr(vd.Type, map[Type]bool{})
 }
 
 func (a *Analyzer) storeFlowCondOnly(stmt reflect.Value) bool {
@@ -1337,6 +1477,20 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		// during ordinary call analysis; this only removes the post-join store edge.
 		return nil, true
 	}
+	if a.storeFlowEnumVariantConstructor(call) {
+		// `Enum.Variant(payload...)` creates a fresh value containing exactly its
+		// payloads. The payloads reach the expression result, but the constructor
+		// does not store them into unrelated state or mutate the enum type.
+		var retNames []string
+		for _, arg := range returnBorrowCallArgs(call) {
+			for _, name := range a.storeFlowArgNames(arg, handled) {
+				if !c.scalars[storeFlowBaseName(name)] {
+					retNames = append(retNames, name)
+				}
+			}
+		}
+		return retNames, true
+	}
 	if fn, ok := call.Func.(*ast.FieldExpr); ok && fn != nil && fn.Field == "push" && call.SafeReceiver == nil && call.NamedArgCount() == 0 && len(call.Args) == 1 && (a.isCompilerBuiltinHelperCall(call, "darray.push") || a.storeFlowBuiltinDarrayGrowth(fn)) {
 		// Builtin DArray growth stores each element argument into the receiver. Preserve that
 		// direction (source element -> destination container) instead of falling back to a
@@ -1351,6 +1505,13 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		c.flow(group, receiver)
 		retNames = append(retNames, group...)
 		return retNames, true
+	}
+	if a.storeFlowBuiltinDarrayTruncate(call) {
+		// truncate changes only the receiver's visible length. Its integer count is
+		// not stored in the array, and the returned array is the same receiver.
+		// Keep the receiver -> result dependency while avoiding a false count ->
+		// receiver borrow edge.
+		return a.storeFlowArgNames(call.Func.(*ast.FieldExpr).Object, handled), true
 	}
 	callee := a.storeFlowCallee(call)
 	if callee == nil {
@@ -1508,7 +1669,7 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 				written[n] = true
 			}
 		}
-		if binds && !storeFlowScalarDecl(stmt) {
+		if binds && !a.storeFlowScalarDecl(stmt) {
 			groups = append(groups, names)
 		}
 		return nested
@@ -1564,10 +1725,17 @@ func (a *Analyzer) storeFlowNodes2(decl *ast.FuncDecl, unit func(stmt reflect.Va
 // writable parameters of the callee (all of them when the callee is not a resolvable declared
 // function, except for builtin methods, whose arguments are only read into the receiver).
 func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool, mark func(ast.Expr)) {
+	if a.storeFlowEnumVariantConstructor(call) {
+		return
+	}
 	args := returnBorrowCallArgs(call)
 	switch fn := call.Func.(type) {
 	case *ast.FieldExpr:
 		if fn == nil {
+			return
+		}
+		if a.storeFlowBuiltinDarrayTruncate(call) {
+			mark(fn.Object)
 			return
 		}
 		if a.storeFlowBuiltinDarrayGrowth(fn) {
@@ -1619,14 +1787,86 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 // receiver without writing through them.
 var storeFlowDarrayGrowthMethods = map[string]bool{"push": true, "insert": true, "extend": true}
 
-// storeFlowBuiltinDarrayGrowth reports a call of a builtin darray growth method on a local or
-// parameter whose every declaration is a darray, where no visible UFCS function of that name
-// could accept a darray receiver instead.
-func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
-	if !storeFlowDarrayGrowthMethods[fn.Field] {
+// storeFlowBuiltinDarrayTruncate recognizes the builtin DArray truncate operation
+// only for a proven DArray receiver and an integer count. In particular, arbitrary
+// UFCS methods named truncate stay on the conservative call path.
+func (a *Analyzer) storeFlowBuiltinDarrayTruncate(call *ast.CallExpr) bool {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok || field == nil || field.Field != "truncate" || call.SafeReceiver != nil || call.NamedArgCount() != 0 || len(call.Args) != 1 {
 		return false
 	}
-	if !a.storeFlowDarrayPlace(fn.Object) {
+	if !a.storeFlowBuiltinDarrayGrowthReceiver(field) {
+		return false
+	}
+	return a.storeFlowIntegerExpr(call.Args[0])
+}
+
+func (a *Analyzer) storeFlowEnumVariantConstructor(call *ast.CallExpr) bool {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok || field == nil || field.Object == nil {
+		return false
+	}
+	if ident, isIdent := field.Object.(*ast.Ident); isIdent && ident != nil {
+		if a.storeFlowCurrentDecl != nil && a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).binderNames()[ident.Name] {
+			return false
+		}
+		if a.storeFlowCurrentDecl != nil {
+			for _, param := range a.storeFlowCurrentDecl.TypeParams {
+				if param == ident.Name {
+					return false
+				}
+			}
+			for _, param := range a.storeFlowCurrentDecl.GenericParams {
+				if param.Kind == ast.GenericParamType && param.Name == ident.Name {
+					return false
+				}
+			}
+		}
+		if a.globalScope != nil {
+			if sym, found := a.globalScope.Lookup(ident.Name); found && sym != nil && sym.Kind == SymbolGlobal {
+				return false
+			}
+		}
+	}
+	return a.isEnumVariantConstructorCall(call)
+}
+
+func (a *Analyzer) storeFlowIntegerExpr(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return e != nil
+	case *ast.ParenExpr:
+		return e != nil && a.storeFlowIntegerExpr(e.Inner)
+	case *ast.UnaryExpr:
+		return e != nil && (e.Op == lexer.TOKEN_MINUS || e.Op == lexer.TOKEN_PLUS) && a.storeFlowIntegerExpr(e.Operand)
+	case *ast.Ident:
+		if e == nil || a.storeFlowCurrentDecl == nil {
+			return false
+		}
+		return a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).typedNames(storeFlowIntegerTypeExpr)[e.Name]
+	default:
+		return false
+	}
+}
+
+func storeFlowIntegerTypeExpr(t ast.TypeExpr) bool {
+	switch tt := t.(type) {
+	case *ast.NamedType:
+		return tt != nil && tt.Region == "" && storeFlowIntegerTypeNames[tt.Name]
+	case *ast.BuiltinTypeExpr:
+		return tt != nil && len(tt.TypeArgs) == 0 && len(tt.ValueArgs) == 0 && storeFlowIntegerTypeNames[tt.Name]
+	default:
+		return false
+	}
+}
+
+var storeFlowIntegerTypeNames = map[string]bool{
+	"u8": true, "u16": true, "u32": true, "u64": true, "i8": true, "i16": true,
+	"i32": true, "i64": true, "usize": true, "isize": true,
+}
+
+func (a *Analyzer) storeFlowBuiltinDarrayGrowthReceiver(fn *ast.FieldExpr) bool {
+	if fn == nil || !a.storeFlowDarrayPlace(fn.Object) {
 		return false
 	}
 	for _, sym := range a.ufcsFunctionsWithLastSegment(fn.Field) {
@@ -1648,6 +1888,16 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
 		}
 	}
 	return true
+}
+
+// storeFlowBuiltinDarrayGrowth reports a call of a builtin darray growth method on a local or
+// parameter whose every declaration is a darray, where no visible UFCS function of that name
+// could accept a darray receiver instead.
+func (a *Analyzer) storeFlowBuiltinDarrayGrowth(fn *ast.FieldExpr) bool {
+	if !storeFlowDarrayGrowthMethods[fn.Field] {
+		return false
+	}
+	return a.storeFlowBuiltinDarrayGrowthReceiver(fn)
 }
 
 // ufcsFunctionsWithLastSegment lists every UFCS function whose registered name ends in segment

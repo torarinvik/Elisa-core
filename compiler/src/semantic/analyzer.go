@@ -425,10 +425,11 @@ type Analyzer struct {
 	funcAnalysisActive   map[*ast.FuncDecl]bool
 	provisionalSummaryFn *ast.FuncDecl
 	// summary convergence state (region_summary_convergence.go)
-	convergeDepth       int
-	storeFlowSummaries  map[*ast.FuncDecl]*storeFlowSummary
-	storeFlowInProgress map[*ast.FuncDecl]*storeFlowSummary
-	storeFlowActive     map[*ast.FuncDecl]bool
+	convergeDepth        int
+	storeFlowSummaries   map[*ast.FuncDecl]*storeFlowSummary
+	storeFlowInProgress  map[*ast.FuncDecl]*storeFlowSummary
+	storeFlowActive      map[*ast.FuncDecl]bool
+	storeFlowCurrentDecl *ast.FuncDecl // declaration context for type and binder resolution
 	// storeFlowSCC caches each function's call-graph component (region_store_flow_summary.go).
 	storeFlowSCC                map[*ast.FuncDecl][]*ast.FuncDecl
 	storeFlowBinds              bool
