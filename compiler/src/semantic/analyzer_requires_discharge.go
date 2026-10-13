@@ -4,6 +4,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/unparse"
+	"reflect"
 	"strings"
 )
 
@@ -338,9 +339,11 @@ func contractCallsMatch(left, right *ast.CallExpr) bool {
 	if left == right {
 		return true
 	}
-	// Contract analysis may rewrite or clone call nodes while preserving source positions. Match
-	// those copies by their original source site and callee syntax so their inherited guard is kept.
-	return left.Pos() == right.Pos() && optimizationExprString(left) == optimizationExprString(right)
+	// Contract analysis may clone call nodes while preserving source positions. This match controls
+	// which branch guard can justify a proof, so compare the complete AST node: the optimization
+	// printer is intentionally lossy for some expressions and omits call metadata such as safe-call
+	// receivers. Deep equality fails closed for unsupported or newly added AST fields.
+	return left.Pos() == right.Pos() && reflect.DeepEqual(left, right)
 }
 
 func contractPathAnd(path ast.Expr, guard ast.Expr) ast.Expr {
