@@ -334,7 +334,7 @@ func LoopBodyGrowsOuterContainerWithIterationData(body []Stmt) bool {
 				return
 			}
 			if call, ok := v.Interface().(*CallExpr); ok {
-				if fe, ok := call.Func.(*FieldExpr); ok && containerGrowthMethod(fe.Field) {
+				if fe, ok := call.Func.(*FieldExpr); ok && (containerGrowthMethod(fe.Field) || containerStoreMethod(fe.Field)) {
 					id, isIdent := fe.Object.(*Ident)
 					if !isIdent {
 						found = true // growth through a field chain / call result: give up
@@ -368,6 +368,17 @@ func LoopBodyGrowsOuterContainerWithIterationData(body []Stmt) bool {
 	}
 	rec(reflect.ValueOf(body))
 	return found
+}
+
+// containerStoreMethod lists further container methods that store an argument into the receiver.
+// They are not growth for LoopBodyGrowsOuterContainer, but a stored value must not point into
+// iteration storage either, so LoopBodyGrowsOuterContainerWithIterationData checks their args too.
+func containerStoreMethod(name string) bool {
+	switch name {
+	case "insert", "resize", "append", "put", "add", "set", "push_front", "push_back", "fill":
+		return true
+	}
+	return false
 }
 
 func scalarTypeName(name string) bool {

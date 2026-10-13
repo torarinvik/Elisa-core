@@ -460,7 +460,8 @@ func loopBodyIsReclaimable(body []ast.Stmt) bool {
 	// region. Only growth with a value that may point into the iteration's storage blocks the
 	// wrap (a 2M-iteration `local = [..]; out.push(local[3])` loop otherwise kept every
 	// iteration's literal alive until function exit).
-	if ast.LoopBodyGrowsOuterContainerWithIterationData(body) {
+	// (Bodies the old outer-growth test already accepted keep their behavior unchanged.)
+	if ast.LoopBodyGrowsOuterContainer(body) && ast.LoopBodyGrowsOuterContainerWithIterationData(body) {
 		return false
 	}
 	found := false
