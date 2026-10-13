@@ -932,7 +932,7 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 			walk(n.End)
 		case *ast.RecordUpdateExpr:
 			walk(n.Base)
-			for _, arg := range n.Args {
+			for _, arg := range n.LoweredArgs() {
 				walk(arg)
 			}
 		case *ast.StructLitExpr:
