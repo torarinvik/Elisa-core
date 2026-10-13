@@ -190,6 +190,9 @@ func (a *Analyzer) recursiveCallCertificateUnderPath(caller, callee *ast.FuncDec
 		}
 		return a.directNumericTerminationCertificateUnderPath(caller, call, path)
 	}
+	// Mutual SCC termination is certified over the complete cycle by crossFunctionMeasureDecreases;
+	// that analysis does not consume a per-call contract guard. Keep `path` scoped to direct
+	// self-recursive numeric calls until the SCC proof can incorporate path assumptions soundly.
 	cert := recursiveProofCertificate{
 		Kind:    recursiveProofMutualNumeric,
 		Caller:  caller,
