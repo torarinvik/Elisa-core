@@ -4,10 +4,12 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 struct Pair:
 	left: i64
 	right: i64
+	tags: darray[i64]
 
 # A no-filter map over a darray whose body is call-free and simple, so the comprehension is lowered
-# to the vectorizable indexed-store shape and marked AutovecExpected — yet copying an aggregate
-# element does not auto-vectorize. `copy_pairs` is the only loop in its function and gets inlined
+# to the vectorizable indexed-store shape and marked AutovecExpected — yet copying an aggregate that
+# holds a darray header (so its accesses carry no hdr/elt alias scopes)
+# does not auto-vectorize. `copy_pairs` is the only loop in its function and gets inlined
 # into the export wrapper, which is exactly the case the loop-metadata marker (vs a held function
 # reference) is designed to survive.
 def copy_pairs(a: mutable darray[Pair]&) -> usize:
