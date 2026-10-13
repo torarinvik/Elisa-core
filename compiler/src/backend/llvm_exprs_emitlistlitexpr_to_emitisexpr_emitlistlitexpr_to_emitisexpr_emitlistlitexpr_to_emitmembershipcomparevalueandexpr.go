@@ -274,9 +274,13 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 		return nil, nil, err
 	}
 	literalCount := len(expr.Elems)
+	// Small headroom so a literal-then-push builder does not realloc on its first push, but
+	// never a fixed large floor: a 256-element floor made every `[a, b, c, d]` reserve
+	// 256*sizeof(elem) bytes (2 KiB for usize), which dominated memory for loop-local literals.
+	// Later growth doubles (emitSafeDoubledCapacity), so this only affects the first realloc.
 	literalCapacity := literalCount
-	if literalCapacity < 256 {
-		literalCapacity = 256
+	if literalCapacity < darrayLiteralMinCapacity {
+		literalCapacity = darrayLiteralMinCapacity
 	}
 	byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(literalCapacity)*elemSize), 0)
 	arenaType := s.g.result.NamedTypes["Arena"]
@@ -330,6 +334,9 @@ func (s *functionState) attachDarrayAndComprehensionScope(inst C.LLVMValueRef, d
 	defer C.free(unsafe.Pointer(noAliasC))
 	C.elisa_coreAttachDarrayAndComprehensionScope(inst, s.g.context, domainC, aliasC, noAliasC)
 }
+// darrayLiteralMinCapacity is the minimum element capacity reserved for a darray literal.
+const darrayLiteralMinCapacity = 8
+
 func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
 	resultName := s.g.nextSyntheticName("list.spread.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position}

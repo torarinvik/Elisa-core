@@ -440,7 +440,8 @@ func tightenLoopBody(body []ast.Stmt) []ast.Stmt {
 
 // loopBodyIsReclaimable reports whether wrapping the loop body in `in auto:` is safe and useful:
 // it has at least one top-level fresh region allocation, every such allocation is iteration-local,
-// it does not grow an outer container, and it is not already region/store-scoped.
+// any growth of an outer container pushes only values that cannot reference iteration storage,
+// and it is not already region/store-scoped.
 func loopBodyIsReclaimable(body []ast.Stmt) bool {
 	if len(body) == 0 {
 		return false
@@ -455,7 +456,11 @@ func loopBodyIsReclaimable(body []ast.Stmt) bool {
 			return false
 		}
 	}
-	if ast.LoopBodyGrowsOuterContainer(body) {
+	// Growing an OUTER container is fine: it grows in its own arena, not the per-iteration
+	// region. Only growth with a value that may point into the iteration's storage blocks the
+	// wrap (a 2M-iteration `local = [..]; out.push(local[3])` loop otherwise kept every
+	// iteration's literal alive until function exit).
+	if ast.LoopBodyGrowsOuterContainerWithIterationData(body) {
 		return false
 	}
 	found := false
