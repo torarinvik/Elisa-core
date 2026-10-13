@@ -2179,6 +2179,28 @@ func (a *Analyzer) callArgsKeptApart(call *ast.CallExpr, index, other int) bool 
 // callArgNeverReaches reports that the callee is summarized and the contents of argument other
 // never reach parameter index (directed: other is never stored into index).
 func (a *Analyzer) callArgNeverReaches(call *ast.CallExpr, other, index int) bool {
+	pos := call.Pos()
+	probe := strings.Contains(pos.File, "codegen_stmt_assign_place.elisa") && (pos.Line == 260 || pos.Line == 261 || pos.Line == 581 || pos.Line == 586 || pos.Line == 587)
+	if probe {
+		decl, resolved := a.resolveReadOnlyScanCallee(call)
+		fits, arena := false, false
+		var summary *storeFlowSummary
+		if resolved && decl != nil {
+			fits = storeFlowCallFitsParams(decl, call)
+			arena = funcHasArenaParam(decl)
+			if fits && !arena {
+				summary = a.storeFlowSummaryFor(decl)
+			}
+		}
+		calleeName := "<nil>"
+		if decl != nil {
+			calleeName = decl.Name
+		}
+		fmt.Printf("[storeflow-probe] %s callee=%s resolved=%t fits=%t arena=%t summaryNil=%t pair=%d->%d\n", pos, calleeName, resolved, fits, arena, summary == nil, other, index)
+		if summary != nil {
+			fmt.Printf("[storeflow-probe] reaches=%v written=%v ret=%v\n", summary.reach, summary.written, summary.retConn)
+		}
+	}
 	decl, ok := a.resolveReadOnlyScanCallee(call)
 	if !ok || decl == nil || !storeFlowCallFitsParams(decl, call) || funcHasArenaParam(decl) {
 		return false
