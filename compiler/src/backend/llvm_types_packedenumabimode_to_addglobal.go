@@ -396,6 +396,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 		g.addFunctionStringAttribute(value, "wasm-import-module", module)
 	}
 	g.applyAggregateAbiAttrs(value, fn)
+	g.applyLibcNoreturnAttr(value, name, symbolName, fnType)
 	return value, nil
 }
 
