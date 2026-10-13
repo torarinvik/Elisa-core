@@ -1,6 +1,6 @@
 package semantic
 
-// A copied scalar aggregate cannot carry argument storage through a call's result.
+// A value with no Elisa borrow storage cannot carry argument storage through a call's result.
 // Use resolved types so qualified names and aliases have the same meaning. This
 // is deliberately narrower than borrow-free contents: containers and packed enum
 // handles can still refer to backing storage even when their elements are scalar.
@@ -13,6 +13,9 @@ func storeFlowPointerFreeReturn(t Type, active map[Type]bool) bool {
 	switch tt := t.(type) {
 	case *BuiltinType:
 		return tt != nil && storeFlowScalarTypeNames[tt.Name]
+	case *OpaqueType:
+		// Opaque foreign handles are not Elisa references and cannot retain an Elisa region.
+		return tt != nil
 	case *BitIntType:
 		return tt != nil
 	case *ConstEnumType:

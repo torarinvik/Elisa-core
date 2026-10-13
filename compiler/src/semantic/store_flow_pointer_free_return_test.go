@@ -3,6 +3,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 const storeFlowPositionCopyBody = `
@@ -87,6 +89,38 @@ func TestStoreFlowPointerFreeReturnConservativeBoundaries(t *testing.T) {
 		if storeFlowPointerFreeReturn(typ, map[Type]bool{}) {
 			t.Errorf("%s must conservatively retain return flow", name)
 		}
+	}
+}
+
+func TestStoreFlowPointerFreeOpaqueForeignHandle(t *testing.T) {
+	if !storeFlowPointerFreeReturn(&OpaqueType{Name: "LLVMValueRef"}, map[Type]bool{}) {
+		t.Fatal("opaque foreign handles cannot carry Elisa borrows and should not retain call arguments")
+	}
+}
+
+func TestStoreFlowCallFitsTrailingScalarDefaults(t *testing.T) {
+	decl := &ast.FuncDecl{Params: []ast.ParamDecl{
+		{Name: "source", Type: &ast.NamedType{Name: "sview"}},
+		{Name: "enabled", Type: &ast.NamedType{Name: "bool"}, DefaultValue: &ast.BoolLit{Value: false}},
+	}}
+	call := &ast.CallExpr{Args: []ast.Expr{&ast.Ident{Name: "text"}}}
+	if !storeFlowCallFitsParams(decl, call) {
+		t.Fatal("a call that omits a trailing scalar default should use the callee store-flow summary")
+	}
+
+	unsafeDecl := &ast.FuncDecl{Params: []ast.ParamDecl{
+		{Name: "source", Type: &ast.NamedType{Name: "sview"}},
+		{Name: "borrow", Type: &ast.NamedType{Name: "sview", Region: "r"}, DefaultValue: &ast.StringLit{Value: ""}},
+	}}
+	if storeFlowCallFitsParams(unsafeDecl, call) {
+		t.Fatal("an omitted non-scalar default must not be ignored by a store-flow summary")
+	}
+
+	if storeFlowCallFitsParams(decl, &ast.CallExpr{Args: call.Args, ArgNames: []string{"source"}}) {
+		t.Fatal("an unresolved named-argument call must not assume positional parameter alignment")
+	}
+	if storeFlowCallFitsParams(decl, &ast.CallExpr{Args: call.Args, ResolvedArgsValid: true}) {
+		t.Fatal("a resolved call must include every default-expanded parameter")
 	}
 }
 
