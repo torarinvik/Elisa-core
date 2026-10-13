@@ -32,6 +32,16 @@ func pureReturnCases(decl *ast.FuncDecl) ([]pureReturnCase, bool) {
 	return pureReturnCasesFromStmts(decl.Body, nil, nil)
 }
 
+// Preserve analyzed AST identity when no local alias needs substitution. The analyzer's type table
+// is keyed by node identity; cloning an otherwise unchanged expression drops fixed-width types and
+// can turn wrapping arithmetic into unbounded integer arithmetic in SMT equations.
+func substitutePureReturnExpr(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, bool) {
+	if len(subst) == 0 {
+		return expr, expr != nil
+	}
+	return substituteLemmaEnsure(expr, subst)
+}
+
 // pureReturnCasesFromStmts lowers the return-tree subset to an expression. Immutable, owner-free
 // locals with syntactically side-effect-free initializers are inlined into later guards and return
 // expressions. Calls in local initializers are declined because purity cannot be decided here;
@@ -46,7 +56,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 			len(stmts) == 1 || !wherePredicateIsSideEffectFree(local.Value) {
 			return nil, false
 		}
-		value, ok := substituteLemmaEnsure(local.Value, subst)
+		value, ok := substitutePureReturnExpr(local.Value, subst)
 		if !ok {
 			return nil, false
 		}
@@ -62,7 +72,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 		if !ok || first == nil || len(first.Else) != 0 {
 			return nil, false
 		}
-		cond, ok := substituteLemmaEnsure(first.Cond, subst)
+		cond, ok := substitutePureReturnExpr(first.Cond, subst)
 		if !ok {
 			return nil, false
 		}
@@ -75,7 +85,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 		var out []pureReturnCase
 		out = append(out, thenCases...)
 		for _, elif := range first.Elifs {
-			elifCond, ok := substituteLemmaEnsure(elif.Cond, subst)
+			elifCond, ok := substitutePureReturnExpr(elif.Cond, subst)
 			if !ok {
 				return nil, false
 			}
@@ -99,7 +109,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 		if n == nil || n.Value == nil {
 			return nil, false
 		}
-		value, ok := substituteLemmaEnsure(n.Value, subst)
+		value, ok := substitutePureReturnExpr(n.Value, subst)
 		if !ok {
 			return nil, false
 		}
@@ -108,7 +118,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 		if n == nil || n.Cond == nil {
 			return nil, false
 		}
-		cond, ok := substituteLemmaEnsure(n.Cond, subst)
+		cond, ok := substitutePureReturnExpr(n.Cond, subst)
 		if !ok {
 			return nil, false
 		}
@@ -124,7 +134,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 			if elif.Cond == nil {
 				return nil, false
 			}
-			elifCond, ok := substituteLemmaEnsure(elif.Cond, subst)
+			elifCond, ok := substitutePureReturnExpr(elif.Cond, subst)
 			if !ok {
 				return nil, false
 			}
