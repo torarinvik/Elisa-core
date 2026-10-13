@@ -103,7 +103,7 @@ def build() -> i64:
 // Threading a builder-call local's region (making this program COMPILE and run) is a real
 // remaining feature; the inline-literal form (`bag: mutable Bag = Bag{items: []}`) already works
 // and is pinned by TestRegionLocalStructFieldReturnedNoUAF in the runtime tests.
-func TestRegionStructLocalFromBuilderCallIsThreaded(t *testing.T) {
+func TestRegionStructLocalFromBuilderCallIsRefusedNotMiscompiled(t *testing.T) {
 	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_builder.elisa", `struct Bag:
     items: mutable darray[i64]
 
@@ -124,12 +124,8 @@ def build() -> darray[i64]:
 	if strings.Contains(all, "positional construction") || strings.Contains(all, "empty list literal requires") {
 		t.Fatalf("fixture is not valid in the current spelling, so it does not exercise region inference: %s", all)
 	}
-	// The call-produced local now opens the function's auto region and `make_bag` is
-	// region-polymorphic (its result's container field is fresh), so the local is recorded in the
-	// ambient region and threads it to `bag_push`; TestBuilderCallStructLocalThreadedRuntime pins
-	// that the program then RUNS correctly (no use-after-free).
-	if strings.Contains(all, "cannot infer region parameter") || len(res.Errors()) != 0 {
-		t.Fatalf("a fresh builder-call local must thread the ambient region, got: %s", all)
+	if !strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("a builder-call local whose grown field is returned must be REFUSED (its region is not inferable); accepting it silently miscompiles to a use-after-free. errors: %s", all)
 	}
 }
 

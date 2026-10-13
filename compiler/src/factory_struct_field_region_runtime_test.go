@@ -124,39 +124,3 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "factory_call_struct_local", src, "bt")
 }
-
-// The builder-call fixture of TestRegionStructLocalFromBuilderCallIsThreaded, run: the bag's
-// grown items must survive build() returning them.
-func TestBuilderCallStructLocalThreadedRuntime(t *testing.T) {
-	src := `
-struct Bag:
-    items: mutable darray[i64]
-
-def make_bag() -> Bag:
-    return Bag{items: []}
-
-def bag_push(b: mutable Bag&, v: i64) -> void:
-    b.items.push(v)
-
-def build() -> darray[i64]:
-    bag: mutable Bag = make_bag()
-    bag_push(bag, 1)
-    bag_push(bag, 2)
-    return bag.items
-
-def churn() -> i64:
-    junk: mutable darray[i64] = []
-    for i in 0..<1000 |junk|:
-        junk.push(i * 7)
-    return junk[999]
-
-@test
-def bt() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
-        x: darray[i64] = build()
-        c: i64 = churn()
-        if x.count != 2 or x[0] != 1 or x[1] != 2 or c != 6993:
-            panic("builder bag corrupted")
-`
-	buildAndRunSoATest(t, "builder_call_struct_local", src, "bt")
-}

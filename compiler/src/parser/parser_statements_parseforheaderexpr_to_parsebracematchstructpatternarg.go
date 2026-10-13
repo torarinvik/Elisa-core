@@ -686,6 +686,7 @@ func typeExprIsNamedAggregate(typ ast.TypeExpr) bool {
 
 func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 	constructed := map[string]bool{}
+	callConstructed := map[string]bool{}
 	var declarations []*ast.VarDeclStmt
 	var collect func(v reflect.Value)
 	collect = func(v reflect.Value) {
@@ -703,8 +704,11 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 					constructed[vd.Name] = true
 				} else if _, isCall := unwrapParenExprAST(vd.Value).(*ast.CallExpr); isCall && typeExprIsNamedAggregate(vd.Type) {
 					// `t: mutable T = make_t(..)`: a by-value aggregate produced by a call owns
-					// its container fields exactly like a literal-constructed one.
+					// its container fields exactly like a literal-constructed one. Only an
+					// explicit `&t` forwarding counts for it (see argForwardsConstructed): a
+					// by-value pass of a call result (a handle, a generic `B.Node`) grows nothing.
 					constructed[vd.Name] = true
+					callConstructed[vd.Name] = true
 				}
 			}
 			collect(v.Elem())
@@ -748,10 +752,12 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 	argForwardsConstructed := func(args []ast.Expr) bool {
 		for _, arg := range args {
 			inner := unwrapParenExprAST(arg)
+			isAddr := false
 			if addr, ok := inner.(*ast.AddrOfExpr); ok && addr != nil {
 				inner = unwrapParenExprAST(addr.Operand)
+				isAddr = true
 			}
-			if id, ok := inner.(*ast.Ident); ok && id != nil && constructed[id.Name] {
+			if id, ok := inner.(*ast.Ident); ok && id != nil && constructed[id.Name] && (isAddr || !callConstructed[id.Name]) {
 				return true
 			}
 		}
