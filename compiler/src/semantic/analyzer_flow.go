@@ -159,6 +159,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
+		if n.Value != nil {
+			a.noteImplicitIntConversion(n.Value, a.exprTypes[n.Value], bindingType)
+		}
 		a.defineLocal(sym, n.Pos())
 		if len(a.loopAffineFrames) != 0 {
 			if base, named := trackedNamedStateStructBase(sym.Type); named && base != nil && !base.ProtocolStates {
@@ -846,6 +849,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
+		a.noteImplicitIntConversion(n.Value, valueType, a.currentReturn)
 		a.dischargeReturnRefinements(n)
 		a.dischargeReturnWhereRefinement(n)
 		a.dischargeEnsureBooleans(n)

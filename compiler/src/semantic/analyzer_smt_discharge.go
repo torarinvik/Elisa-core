@@ -1843,6 +1843,7 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 			return
 		}
 	}
+	value = a.implicitIntConversion(value, valueType, targetType)
 	a.recordSMTAssertFact(&ast.BinaryExpr{
 		Position: target.Pos(),
 		Left:     target,
@@ -2139,7 +2140,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			if !a.immutableLocalDefinitionCurrent(sc, sym, vd.Value) {
 				continue
 			}
-			eterm, ok := tr.termEnv(vd.Value, nil)
+			eterm, ok := tr.termEnv(a.implicitIntConversion(vd.Value, a.exprTypes[vd.Value], sym.Type), nil)
 			if ok {
 				tr.decls[name] = true
 				b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
@@ -3012,6 +3013,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if n.Field == "count" || n.Field == "len" {
 			if c, ok := tr.a.constIntValue(n); ok {
 				return tr.constIntTerm(n, c), true
+			}
+			// An sview slice's `.len` is modeled exactly (string_view_slice clamps).
+			if term, ok := tr.sliceLengthTerm(n.Object, env); ok {
+				return term, true
 			}
 			// The scope-keyed view length names the CURRENT function's binding; a name the env binds
 			// (a substituted callee formal) must resolve through the env instead, or a callee's
@@ -5560,6 +5565,12 @@ func (tr *smtTranslator) factPreamble() string {
 	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
 	// mint order — deterministic because the counter is monotonic over a single translation.
 	for _, line := range tr.auxDecls {
+		// An auxiliary ASSUMPTION minted while translating a quantifier body (a callee's defining
+		// equation or ensure over the binder) is hoisted to top level, where the `q_` binder is
+		// unbound and z3 would reject the whole query. Dropping an assumption only weakens it.
+		if strings.HasPrefix(line, "(assert ") && smtTermMentionsQuantifierBinder(line) {
+			continue
+		}
 		b.WriteString(line)
 	}
 	return b.String()

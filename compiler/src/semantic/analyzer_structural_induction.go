@@ -199,7 +199,7 @@ func (tr *smtTranslator) lowerPredicateBody(decl *ast.FuncDecl, penv map[string]
 	defer func() { tr.calleeBodyDepth-- }()
 	defer func() { tr.calleeBodyDecl = priorDecl }()
 	// Pure-return tree (if/elif/else of bool returns, or a single bool return) — reuse boolTerm.
-	if body, ok := pureReturnExpr(decl); ok && body != nil {
+	if body, ok := tr.a.typedPureReturnExpr(decl); ok && body != nil {
 		return tr.boolTerm(body, tr.predicateEnvIntBool(penv))
 	}
 	// Single top-level `match <param>:` returning bool from each arm.
@@ -341,7 +341,7 @@ func (a *Analyzer) boolPredicateEligible(decl *ast.FuncDecl) bool {
 	if _, _, ok := singleMatchReturnBody(decl); ok {
 		return true
 	}
-	if body, ok := pureReturnExpr(decl); ok && body != nil {
+	if body, ok := a.typedPureReturnExpr(decl); ok && body != nil {
 		return true
 	}
 	return false

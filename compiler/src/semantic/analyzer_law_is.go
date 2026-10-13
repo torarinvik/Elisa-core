@@ -956,7 +956,12 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	// All proof records in this function are contract-ensures obligations (elision telemetry).
 	defer func(prev ProofObligationCategory) { a.currentProofCategory = prev }(a.currentProofCategory)
 	a.currentProofCategory = ProofCatContractEnsures
-	subst := map[string]ast.Expr{"result": n.Value}
+	// An implicit non-value-preserving integer conversion at the return (an i64 `view.len` returned
+	// as usize) is made explicit for `result`; the tiers below that re-read the return expression or
+	// the body's return statements themselves would see the unconverted value, so they are skipped.
+	retValue := a.implicitIntConversion(n.Value, a.exprTypes[n.Value], a.currentReturn)
+	converted := retValue != n.Value
+	subst := map[string]ast.Expr{"result": retValue}
 	for i, clause := range a.currentFuncDecl.EnsureValues {
 		if clause == nil {
 			continue
@@ -993,7 +998,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// place read (ident / field projection) holds definitionally — result IS the value of E at this
 		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a
 		// reference field (`self.base`) are modeled as distinct opaque terms (shadPS4 memory-06 finding).
-		if ensureHoldsByReturnReflexivity(clause, n.Value) {
+		if !converted && ensureHoldsByReturnReflexivity(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
 			continue
 		}
@@ -1004,7 +1009,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "written field", ProofProvenSMT)
 			continue
 		}
-		if a.tryProveEnsureByDisjunctiveResultRange(clause, n.Value) {
+		if !converted && a.tryProveEnsureByDisjunctiveResultRange(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "range disjunction", ProofProvenSMT)
 			continue
 		}
@@ -1013,7 +1018,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenSMT)
 			continue
 		}
-		if call, ok := a.proofCallExpr(n.Value); ok {
+		if call, ok := a.proofCallExpr(n.Value); ok && !converted {
 			if a.tryProveEnsureByReturnCallRange(clause, call) {
 				a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenSMT)
 				continue
@@ -1032,11 +1037,11 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// Weakest-precondition transport: a straight-line scalar body with mutable reassignments has no
 		// immutable-local equality for the prover, so thread the postcondition backward through the
 		// assignments (VC IR brick 3) and discharge the result over the parameters.
-		if a.tryProveEnsureByWP(clause, n) {
+		if !converted && a.tryProveEnsureByWP(clause, n) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "wp", ProofProvenSMT)
 			continue
 		}
-		if a.trySMTProveEnsureFromPureReturnPaths(clause) {
+		if !converted && a.trySMTProveEnsureFromPureReturnPaths(clause) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "return paths", ProofProvenSMT)
 			continue
 		}
@@ -1253,7 +1258,7 @@ func (a *Analyzer) trySMTProveEnsureFromPureReturnPaths(clause ast.Expr) bool {
 	if a == nil || a.currentFuncDecl == nil || clause == nil || a.shadowingActive() {
 		return false
 	}
-	body, ok := pureReturnExpr(a.currentFuncDecl)
+	body, ok := a.typedPureReturnExpr(a.currentFuncDecl)
 	if !ok || body == nil {
 		return false
 	}

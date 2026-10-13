@@ -81,7 +81,13 @@ func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		if n.Value == nil || !exprIsPureArithOrRead(n.Value) {
 			return wpAssign{}, false
 		}
-		return wpAssign{name: n.Name, rhs: n.Value}, true
+		rhs := n.Value
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok && sym != nil {
+				rhs = a.implicitIntConversion(rhs, a.exprTypes[rhs], sym.Type)
+			}
+		}
+		return wpAssign{name: n.Name, rhs: rhs}, true
 	case *ast.AssignStmt:
 		if n.Optional || !exprIsPureArithOrRead(n.Value) {
 			return wpAssign{}, false
@@ -90,13 +96,20 @@ func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		if !ok {
 			return wpAssign{}, false
 		}
-		return wpAssign{name: key, rhs: n.Value}, true
+		// A non-value-preserving implicit integer conversion is a bit copy / truncation in codegen;
+		// substitute the converted value, not the source (see implicitIntConversion).
+		return wpAssign{name: key, rhs: a.implicitIntConversion(n.Value, a.exprTypes[n.Value], a.wpAssignTargetType(n.Target))}, true
 	case *ast.AugAssignStmt:
 		if !exprIsPureArithOrRead(n.Value) {
 			return wpAssign{}, false
 		}
 		key, ok := a.wpPlaceKey(n.Target)
 		if !ok {
+			return wpAssign{}, false
+		}
+		// The synthesized `place OP e` below carries no conversion; decline when the operand would
+		// need a non-value-preserving one.
+		if a.implicitIntConversion(n.Value, a.exprTypes[n.Value], a.wpAssignTargetType(n.Target)) != n.Value {
 			return wpAssign{}, false
 		}
 		baseOp, ok := augAssignBaseOp(n.Op)
@@ -535,4 +548,18 @@ func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool
 	// independent conjuncts over the shared `requires` hypotheses.
 	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr)+a.wpCallHyps(tr, steps))
 	return proven
+}
+
+// wpAssignTargetType is the declared type of an assignment target: its recorded expression type, or
+// for a bare local the binding's type (assignment targets are not always typed as expressions).
+func (a *Analyzer) wpAssignTargetType(target ast.Expr) Type {
+	if t := a.exprTypes[target]; t != nil {
+		return t
+	}
+	if id, ok := stripOptimizationParens(target).(*ast.Ident); ok && id != nil && a.currentScope != nil {
+		if sym, found := a.currentScope.Lookup(id.Name); found && sym != nil {
+			return sym.Type
+		}
+	}
+	return nil
 }

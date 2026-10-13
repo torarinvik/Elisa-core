@@ -623,6 +623,7 @@ type Analyzer struct {
 	// variables are disjoint from the inner loop's assigned variables (conservative: if the inner loop
 	// mutates ANY variable the outer invariant depends on, the outer invariant is NOT admitted).
 	activeOuterLoopInvariants         []*ast.ContractStmt
+	implicitIntConvFuncs              map[*ast.FuncDecl]bool
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int

@@ -690,7 +690,7 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	body, ok := pureReturnExpr(decl)
+	body, ok := a.typedPureReturnExpr(decl)
 	if !ok {
 		return false
 	}
@@ -774,7 +774,7 @@ func (a *Analyzer) functionPureEquationShape(decl *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	body, ok := pureReturnExpr(decl)
+	body, ok := a.typedPureReturnExpr(decl)
 	return ok && a.exprIsPureShapeForEquation(body, decl)
 }
 

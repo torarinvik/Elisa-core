@@ -341,7 +341,7 @@ func (a *Analyzer) shortCircuitStablePredicateUncached(expr ast.Expr) bool {
 		if !ok || decl == nil || !a.functionDefiningEquationEligible(decl) {
 			return false
 		}
-		body, ok := pureReturnExpr(decl)
+		body, ok := a.typedPureReturnExpr(decl)
 		if !ok {
 			return false
 		}
