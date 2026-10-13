@@ -15,7 +15,8 @@
 #   bigint_addmul_small / bigint_submul_small     dst += src*k / dst -= src*k   (k: u64)
 #   bigint_mul_small_assign                       dst *= k
 #   bigint_mul                                    dst = a*b (schoolbook)
-#   bigint_divmod                                 truncated q, r (Knuth algorithm D)
+#   bigint_divmod / bigint_divmod_with            truncated q, r (Knuth algorithm D)
+#   bigint_div_with                               truncated q only, reusable scratch
 #   bigint_divmod_small_assign                    dst /= k, returns |remainder|
 #   bigint_compare / bigint_compare_abs / bigint_sign / bigint_is_zero
 #   bigint_low_u64 / bigint_append_decimal
@@ -35,6 +36,15 @@ extern bigint_div_wide(high: u64, low: u64, divisor: u64) -> u64
 struct BigInt:
     negative: mutable bool
     limbs: mutable darray[u64]
+
+# Reusable working storage for long division (the normalized divisor and numerator).
+# Passing one to bigint_divmod_with keeps repeated divisions allocation-free.
+struct BigIntDivScratch:
+    divisor: mutable darray[u64]
+    numerator: mutable darray[u64]
+
+def bigint_div_scratch() -> BigIntDivScratch:
+    return BigIntDivScratch{divisor: [], numerator: []}
 
 def bigint_zero() -> BigInt:
     return BigInt{negative: false, limbs: []}
@@ -72,9 +82,10 @@ def bigint_set_i64(value: mutable BigInt&, x: i64) -> void can[Abort.Panic, Memo
     value.negative <- true
 
 def bigint_assign(destination: mutable BigInt&, source: BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
-    destination.limbs.clear()
-    for limb in source.limbs |destination|:
-        destination.limbs.push(limb)
+    count: usize = source.limbs.count
+    destination.limbs.resize(count)
+    for index in 0..<count |destination, source|:
+        destination.limbs[index] <- source.limbs[index]
     destination.negative <- source.negative
 
 # Low 64 bits of the magnitude (the exact value when it fits in a u64).
@@ -120,9 +131,14 @@ def bigint_compare(left: BigInt&, right: BigInt&) -> i32:
     return 0 - magnitude if left_sign < 0
     return magnitude
 
+# Extends with zero limbs: one resize, then the new limbs are cleared explicitly
+# (resize does not promise zeroed storage when it reuses a previous allocation).
 def bigint_grow_to(value: mutable BigInt&, count: usize) -> void can[Abort.Panic, Memory.Allocate]:
-    while value.limbs.count < count |value|:
-        value.limbs.push(0)
+    old_count: usize = value.limbs.count
+    return if old_count >= count
+    value.limbs.resize(count)
+    for index in old_count..<count |value|:
+        value.limbs[index] <- 0
 
 # |dst| += |src| * k
 def bigint_mag_addmul(destination: mutable BigInt&, source: BigInt&, factor: u64) -> void can[Abort.Panic, Memory.Allocate]:
@@ -278,29 +294,29 @@ def bigint_shift_pair(limb: u64, lower: u64, shift: u64) -> u64:
 
 # Knuth TAOCP vol. 2, 4.3.1 algorithm D on base-2^64 limbs;
 # |numerator| >= |divisor| and the divisor has at least 2 limbs.
-def bigint_mag_divmod_long(quotient: mutable BigInt&, remainder: mutable BigInt&, numerator: BigInt&, divisor: BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
+def bigint_mag_divmod_long(quotient: mutable BigInt&, remainder: mutable BigInt&, numerator: BigInt&, divisor: BigInt&, scratch: mutable BigIntDivScratch&, want_remainder: bool) -> void can[Abort.Panic, Memory.Allocate]:
     n: usize = divisor.limbs.count
     m: usize = numerator.limbs.count
     shift: u64 = bigint_leading_zero_bits(divisor.limbs[n - 1])
-    vn: mutable darray[u64] = []
-    for i in 0..<n |vn, divisor, shift|:
-        lower: u64 = divisor.limbs[i - 1] if i > 0 else 0
-        vn.push(bigint_shift_pair(divisor.limbs[i], lower, shift))
-    un: mutable darray[u64] = []
-    for i in 0..<m |un, numerator, shift|:
-        lower: u64 = numerator.limbs[i - 1] if i > 0 else 0
-        un.push(bigint_shift_pair(numerator.limbs[i], lower, shift))
-    un.push(bigint_shift_pair(0, numerator.limbs[m - 1], shift))
+    scratch.divisor.resize(n)
+    scratch.numerator.resize(m + 1)
+    scratch.divisor[0] <- bigint_shift_pair(divisor.limbs[0], 0, shift)
+    for i in 1..<n |scratch, divisor, shift|:
+        scratch.divisor[i] <- bigint_shift_pair(divisor.limbs[i], divisor.limbs[i - 1], shift)
+    scratch.numerator[0] <- bigint_shift_pair(numerator.limbs[0], 0, shift)
+    for i in 1..<m |scratch, numerator, shift|:
+        scratch.numerator[i] <- bigint_shift_pair(numerator.limbs[i], numerator.limbs[i - 1], shift)
+    scratch.numerator[m] <- bigint_shift_pair(0, numerator.limbs[m - 1], shift)
 
     quotient.limbs.clear()
     bigint_grow_to(quotient, m - n + 1)
-    top: u64 = vn[n - 1]
-    second: u64 = vn[n - 2]
+    top: u64 = scratch.divisor[n - 1]
+    second: u64 = scratch.divisor[n - 2]
     j: mutable usize = m - n + 1
-    while j > 0 |j, un, vn, quotient, n, top, second|:
+    while j > 0 |j, scratch, quotient, n, top, second|:
         j <- j - 1
-        high: u64 = un[j + n]
-        low: u64 = un[j + n - 1]
+        high: u64 = scratch.numerator[j + n]
+        low: u64 = scratch.numerator[j + n - 1]
         qhat: mutable u64 = 0
         rhat: mutable u64 = 0
         rhat_overflow: mutable bool = false
@@ -312,7 +328,7 @@ def bigint_mag_divmod_long(quotient: mutable BigInt&, remainder: mutable BigInt&
         else:
             qhat <- bigint_div_wide(high, low, top)
             rhat <- low - qhat * top
-        next: u64 = un[j + n - 2]
+        next: u64 = scratch.numerator[j + n - 2]
         while not rhat_overflow |qhat, rhat, rhat_overflow, top, second, next|:
             product_high: u64 = bigint_mul_hi(qhat, second)
             product_low: u64 = qhat * second
@@ -320,57 +336,72 @@ def bigint_mag_divmod_long(quotient: mutable BigInt&, remainder: mutable BigInt&
             qhat <- qhat - 1
             rhat <- rhat + top
             rhat_overflow <- rhat < top
-        # Multiply and subtract qhat * vn from un[j .. j+n].
+        # Multiply and subtract qhat * scratch.divisor from scratch.numerator[j .. j+n].
         carry: mutable u64 = 0
-        for i in 0..<n |un, vn, qhat, carry, j|:
-            term: u64 = vn[i]
+        for i in 0..<n |scratch, qhat, carry, j|:
+            term: u64 = scratch.divisor[i]
             product_low: u64 = qhat * term
             subtrahend: u64 = product_low + carry
-            current: u64 = un[i + j]
-            un[i + j] <- current - subtrahend
+            current: u64 = scratch.numerator[i + j]
+            scratch.numerator[i + j] <- current - subtrahend
             carry <- bigint_mul_hi(qhat, term) + bigint_bit(subtrahend < product_low) + bigint_bit(current < subtrahend)
-        top_limb: u64 = un[j + n]
-        un[j + n] <- top_limb - carry
+        top_limb: u64 = scratch.numerator[j + n]
+        scratch.numerator[j + n] <- top_limb - carry
         if top_limb < carry:
             # Estimate was one too large: add the divisor back.
             qhat <- qhat - 1
             add_carry: mutable u64 = 0
-            for i in 0..<n |un, vn, add_carry, j|:
-                sum: u64 = un[i + j] + vn[i]
+            for i in 0..<n |scratch, add_carry, j|:
+                sum: u64 = scratch.numerator[i + j] + scratch.divisor[i]
                 total: u64 = sum + add_carry
-                add_carry <- bigint_bit(sum < vn[i]) + bigint_bit(total < sum)
-                un[i + j] <- total
-            un[j + n] <- un[j + n] + add_carry
+                add_carry <- bigint_bit(sum < scratch.divisor[i]) + bigint_bit(total < sum)
+                scratch.numerator[i + j] <- total
+            scratch.numerator[j + n] <- scratch.numerator[j + n] + add_carry
         quotient.limbs[j] <- qhat
 
-    remainder.limbs.clear()
-    for i in 0..<n |remainder, un, shift|:
-        upper: u64 = un[i + 1] << (64 - shift) if shift != 0 else 0
-        remainder.limbs.push((un[i] >> shift) | upper)
     bigint_normalize(quotient)
+    return if not want_remainder
+    remainder.limbs.resize(n)
+    for i in 0..<n |remainder, scratch, shift|:
+        upper: u64 = scratch.numerator[i + 1] << (64 - shift) if shift != 0 else 0
+        remainder.limbs[i] <- (scratch.numerator[i] >> shift) | upper
     bigint_normalize(remainder)
 
 # Truncated division: quotient = trunc(numerator / divisor), remainder takes the
 # numerator's sign. quotient and remainder must be distinct from the operands.
 def bigint_divmod(quotient: mutable BigInt&, remainder: mutable BigInt&, numerator: BigInt&, divisor: BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
+    scratch: mutable BigIntDivScratch = bigint_div_scratch()
+    bigint_divmod_with(quotient, remainder, numerator, divisor, &scratch)
+
+# bigint_divmod with caller-provided working storage (no allocation once warm).
+def bigint_divmod_with(quotient: mutable BigInt&, remainder: mutable BigInt&, numerator: BigInt&, divisor: BigInt&, scratch: mutable BigIntDivScratch&) -> void can[Abort.Panic, Memory.Allocate]:
+    bigint_div_core(quotient, remainder, numerator, divisor, scratch, true)
+
+# Quotient only (truncated); skips building the remainder. `unused` receives nothing
+# meaningful and exists so the core can share one signature.
+def bigint_div_with(quotient: mutable BigInt&, numerator: BigInt&, divisor: BigInt&, scratch: mutable BigIntDivScratch&, unused: mutable BigInt&) -> void can[Abort.Panic, Memory.Allocate]:
+    bigint_div_core(quotient, unused, numerator, divisor, scratch, false)
+
+def bigint_div_core(quotient: mutable BigInt&, remainder: mutable BigInt&, numerator: BigInt&, divisor: BigInt&, scratch: mutable BigIntDivScratch&, want_remainder: bool) -> void can[Abort.Panic, Memory.Allocate]:
     if divisor.limbs.count == 0:
         panic("bigint: division by zero")
     if bigint_mag_compare(numerator.limbs, divisor.limbs) < 0:
         quotient.limbs.clear()
         quotient.negative <- false
-        bigint_assign(remainder, numerator)
+        bigint_assign(remainder, numerator) if want_remainder
         return
     if divisor.limbs.count == 1:
         bigint_assign(quotient, numerator)
         quotient.negative <- false
         rest: u64 = bigint_divmod_small_assign(quotient, divisor.limbs[0])
-        bigint_set_u64(remainder, rest)
+        bigint_set_u64(remainder, rest) if want_remainder
     else:
-        bigint_mag_divmod_long(quotient, remainder, numerator, divisor)
+        bigint_mag_divmod_long(quotient, remainder, numerator, divisor, scratch, want_remainder)
     quotient.negative <- numerator.negative != divisor.negative
-    remainder.negative <- numerator.negative
     bigint_normalize(quotient)
-    bigint_normalize(remainder)
+    if want_remainder:
+        remainder.negative <- numerator.negative
+        bigint_normalize(remainder)
 
 # ------------------------------------------------------------
 # Decimal conversion
