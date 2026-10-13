@@ -650,6 +650,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.expect(lexer.TOKEN_RPAREN)
 		return &ast.ParenExpr{Position: pos, Inner: inner}
 	default:
+		if isReservedWordToken(p.cur()) {
+			tok := p.advance()
+			p.reportReservedWordAsName(tok)
+			return &ast.Ident{Position: tok.Pos, Name: tok.Text}
+		}
 		p.errorf("unexpected token %s in expression", p.cur())
 		tok := p.advance()
 		return &ast.Ident{Position: tok.Pos, Name: "<error>"}

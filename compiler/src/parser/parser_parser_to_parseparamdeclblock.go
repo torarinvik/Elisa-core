@@ -144,6 +144,12 @@ func (p *Parser) advance() lexer.Token {
 func (p *Parser) expect(kind lexer.TokenKind) lexer.Token {
 	tok := p.cur()
 	if tok.Kind != kind {
+		if kind == lexer.TOKEN_IDENT && isReservedWordToken(tok) {
+			p.reportReservedWordAsName(tok)
+			p.advance()
+			tok.Kind = lexer.TOKEN_IDENT
+			return tok
+		}
 		p.errorf("expected %s, got %s", lexer.TokenName(kind), tok)
 	}
 	return p.advance()

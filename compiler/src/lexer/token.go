@@ -414,3 +414,10 @@ func TokenName(kind TokenKind) string {
 	}
 	return fmt.Sprintf("TokenKind(%d)", kind)
 }
+
+// IsReservedWord reports whether ident is a reserved keyword (lexed as a non-IDENT token), so it
+// cannot be used as a variable, parameter, field, or function name.
+func IsReservedWord(ident string) bool {
+	_, ok := keywords[ident]
+	return ok
+}

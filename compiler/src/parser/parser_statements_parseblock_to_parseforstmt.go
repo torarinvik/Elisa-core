@@ -62,6 +62,7 @@ func (p *Parser) parseContextualStmt() ast.Stmt {
 	return p.parseStmt()
 }
 func (p *Parser) parseStmt() ast.Stmt {
+	p.recoverReservedWordStatementName()
 	if p.peek() == lexer.TOKEN_IDENT {
 		switch p.cur().Text {
 		case "assert":
@@ -230,6 +231,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parseDeferStmt()
 			}
 		case "for":
+			p.recoverReservedWordLoopBinder(p.pos + 1)
 			if p.looksLikeForStmt() {
 				return p.parseForStmt()
 			}
