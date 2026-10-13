@@ -81,3 +81,82 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "static_if_auto_region", src, "bt")
 }
+
+// A struct local produced by a CALL to a fresh-literal factory and then forwarded to a growing
+// callee (`t = new_table(); register(&t, x); return t`) gets the caller's ambient region: the
+// factory is region-polymorphic because its region-carrying fields stay at their fresh defaults.
+func TestCallProducedStructLocalForwardedToGrower(t *testing.T) {
+	src := `
+struct Table:
+    names: mutable darray[sview] = []
+    count: mutable usize = 0
+
+def new_table(n: usize) -> Table:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable Table = Table{}
+        t.count <- n
+        return t
+
+def register(t: mutable Table&, name: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        t.names.push(name)
+
+def build(name: sview) -> Table:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable Table = new_table(4)
+        register(&t, name)
+        return t
+
+def churn() -> usize:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[usize] = []
+        for i in 0..<1000 |junk|:
+            junk.push(i * 7)
+        return junk[999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        x: Table = build("hello")
+        c: usize = churn()
+        if x.names.count != 1 or x.names[0] != "hello" or c != 6993:
+            panic("factory call-result struct corrupted")
+`
+	buildAndRunSoATest(t, "factory_call_struct_local", src, "bt")
+}
+
+// The builder-call fixture of TestRegionStructLocalFromBuilderCallIsThreaded, run: the bag's
+// grown items must survive build() returning them.
+func TestBuilderCallStructLocalThreadedRuntime(t *testing.T) {
+	src := `
+struct Bag:
+    items: mutable darray[i64]
+
+def make_bag() -> Bag:
+    return Bag{items: []}
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> darray[i64]:
+    bag: mutable Bag = make_bag()
+    bag_push(bag, 1)
+    bag_push(bag, 2)
+    return bag.items
+
+def churn() -> i64:
+    junk: mutable darray[i64] = []
+    for i in 0..<1000 |junk|:
+        junk.push(i * 7)
+    return junk[999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        x: darray[i64] = build()
+        c: i64 = churn()
+        if x.count != 2 or x[0] != 1 or x[1] != 2 or c != 6993:
+            panic("builder bag corrupted")
+`
+	buildAndRunSoATest(t, "builder_call_struct_local", src, "bt")
+}

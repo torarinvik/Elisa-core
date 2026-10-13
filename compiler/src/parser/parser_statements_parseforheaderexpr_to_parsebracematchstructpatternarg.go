@@ -663,6 +663,27 @@ var constructedFieldGrowthMethods = map[string]bool{
 	"append": true, "put": true, "add": true,
 }
 
+// typeExprIsNamedAggregate reports whether a declared local type is a by-value named type
+// (modulo `mutable`) — not a reference, view, or builtin container.
+func typeExprIsNamedAggregate(typ ast.TypeExpr) bool {
+	for {
+		mt, ok := typ.(*ast.MutableType)
+		if !ok {
+			break
+		}
+		typ = mt.Elem
+	}
+	nt, ok := typ.(*ast.NamedType)
+	if !ok || nt == nil {
+		return false
+	}
+	switch nt.Name {
+	case "dstr", "sview", "cstr", "astr", "Arena":
+		return false
+	}
+	return true
+}
+
 func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 	constructed := map[string]bool{}
 	var declarations []*ast.VarDeclStmt
@@ -679,6 +700,10 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 			if vd, ok := v.Interface().(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
 				declarations = append(declarations, vd)
 				if _, isLit := unwrapParenExprAST(vd.Value).(*ast.StructLitExpr); isLit {
+					constructed[vd.Name] = true
+				} else if _, isCall := unwrapParenExprAST(vd.Value).(*ast.CallExpr); isCall && typeExprIsNamedAggregate(vd.Type) {
+					// `t: mutable T = make_t(..)`: a by-value aggregate produced by a call owns
+					// its container fields exactly like a literal-constructed one.
 					constructed[vd.Name] = true
 				}
 			}

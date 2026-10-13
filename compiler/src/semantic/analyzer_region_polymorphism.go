@@ -998,7 +998,21 @@ func functionBuildsAndReturnsLocalStruct(fn *ast.FuncDecl, fnType *FuncType) boo
 		}
 	}
 	collect(fn.Body, false)
-	if !hasAuto || len(constructed) == 0 {
+	if !hasAuto {
+		// No synthesized region: the body neither grows nor forwards the literal (either would
+		// have opened one), so its container fields can only hold what the literal and direct
+		// field assignments put there. When every region-carrying field is left at its fresh
+		// default, the result owns no storage from any other region, and classifying the factory
+		// region-polymorphic lets its call sites record the caller's ambient region as the
+		// result's home instead of rejecting the local with "cannot infer region parameter"
+		// when it is forwarded to a growing callee.
+		st, _ := fnType.Return.(*StructType)
+		collect(fn.Body, true)
+		if !structFactoryLeavesRegionFieldsFresh(fn.Body, constructed, st) {
+			return false
+		}
+	}
+	if len(constructed) == 0 {
 		return false
 	}
 	found := false
@@ -1042,6 +1056,96 @@ func functionBuildsAndReturnsLocalStruct(fn *ast.FuncDecl, fnType *FuncType) boo
 	}
 	walk(fn.Body)
 	return found
+}
+
+// structFactoryLeavesRegionFieldsFresh reports whether every struct literal bound to a constructed
+// local, and every assignment through one, leaves the region-carrying fields of st at their fresh
+// defaults (or an explicit empty `[]`). Anything it cannot classify returns false.
+func structFactoryLeavesRegionFieldsFresh(body []ast.Stmt, constructed map[string]bool, st *StructType) bool {
+	if st == nil {
+		return false
+	}
+	fieldCarries := func(name string) bool {
+		f, ok := st.Fields[name]
+		return !ok || typeCarriesRegionStorage(f.Type)
+	}
+	ok := true
+	var visit func(v reflect.Value)
+	visit = func(v reflect.Value) {
+		if !ok || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.VarDeclStmt:
+				if constructed[n.Name] {
+					if lit, isLit := unwrapParenForRegionPoly(n.Value).(*ast.StructLitExpr); isLit {
+						if lit.CopyBase != nil || len(lit.Spreads) != 0 {
+							ok = false
+							return
+						}
+						for i, arg := range lit.Args {
+							name := ""
+							if i < len(lit.ArgNames) && lit.ArgNames[i] != "" {
+								name = lit.ArgNames[i]
+							} else if st.Decl != nil && i < len(st.Decl.Fields) {
+								name = st.Decl.Fields[i].Name
+							}
+							if name == "" {
+								ok = false
+								return
+							}
+							if fieldCarries(name) {
+								if empty, isList := unwrapParenForRegionPoly(arg).(*ast.ListLitExpr); !isList || len(empty.Elems) != 0 || empty.Owner != nil {
+									ok = false
+									return
+								}
+							}
+						}
+					}
+				}
+			case *ast.AssignStmt:
+				target := unwrapParenForRegionPoly(n.Target)
+				first := ""
+				for {
+					switch t := target.(type) {
+					case *ast.FieldExpr:
+						first = t.Field
+						target = unwrapParenForRegionPoly(t.Object)
+						continue
+					case *ast.IndexExpr:
+						first = ""
+						target = unwrapParenForRegionPoly(t.Object)
+						continue
+					}
+					break
+				}
+				if id, isIdent := target.(*ast.Ident); isIdent && constructed[id.Name] && (first == "" || fieldCarries(first)) {
+					ok = false
+					return
+				}
+			}
+			visit(v.Elem())
+		case reflect.Interface:
+			if !v.IsNil() {
+				visit(v.Elem())
+			}
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				visit(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				visit(v.Index(i))
+			}
+		}
+	}
+	visit(reflect.ValueOf(body))
+	return ok
 }
 
 // funcHasArenaParam reports whether any explicit parameter is an `Arena` (modulo `mutable`/`&`
