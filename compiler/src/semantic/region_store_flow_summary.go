@@ -2047,6 +2047,35 @@ func (a *Analyzer) storeFlowPlaceType(expr ast.Expr) Type {
 			return nil
 		}
 		return field.Type
+	case *ast.IndexExpr:
+		if e == nil {
+			return nil
+		}
+		// Assignment targets are analyzed through analyzeIndexExpr directly, so the
+		// target itself may not have an exprTypes entry even though its base does.
+		// Recover the element type from that resolved base to distinguish scalar or
+		// pointer-free indexed writes from stores that can retain a borrow.
+		base := a.exprTypes[e.Object]
+		if base == nil {
+			base = a.storeFlowPlaceType(e.Object)
+		}
+		if ref, ok := base.(*RefType); ok && ref != nil {
+			base = ref.Elem
+		}
+		switch indexed := base.(type) {
+		case *DArrayType:
+			if indexed != nil {
+				return indexed.Elem
+			}
+		case *ArrayType:
+			if indexed != nil {
+				return indexed.Elem
+			}
+		case *ViewType:
+			if indexed != nil {
+				return indexed.Elem
+			}
+		}
 	}
 	return nil
 }

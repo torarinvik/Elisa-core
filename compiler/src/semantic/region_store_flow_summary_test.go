@@ -279,11 +279,80 @@ def main() -> i32:
 	}
 }
 
+func TestStoreFlowSummaryDoesNotRetainASTArgsThroughIndexedPointerFreeMutation(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct StructTable:
+    visits: mutable darray[u32]
+
+def infer_value(arguments: darray[Expr]&, structs: mutable StructTable&, slot: usize) -> u32:
+    item: Expr = arguments[0]
+    structs.visits[slot] <- item.text.len.u32()
+    return item.text.len.u32()
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_indexed_pointer_free_table.elisa", src, AnalyzeOptions{})
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "infer_value" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("indexed pointer-free table mutation should have a settled StoreFlow summary")
+	}
+	if !summary.writtenParam(1) {
+		t.Fatal("test must model mutation through the compiler table parameter")
+	}
+	if summary.reaches(0, 1) {
+		t.Fatalf("AST argument storage must not flow into an indexed pointer-free table: reaches(0,1), conn=%v reach=%v ret=%v written=%v", summary.conn, summary.reach, summary.retConn, summary.written)
+	}
+}
+
+func TestStoreFlowSummaryStillTracksBorrowWrittenIntoIndexedPointerfulField(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct StructTable:
+    texts: mutable darray[sview]
+
+def store_text(arguments: darray[Expr]&, structs: mutable StructTable&, slot: usize) -> void:
+    structs.texts[slot] <- arguments[0].text
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_indexed_pointerful_table.elisa", src, AnalyzeOptions{})
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "store_text" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("indexed pointerful field write should have a settled StoreFlow summary")
+	}
+	if !summary.reaches(0, 1) {
+		t.Fatal("view stored into an indexed table element must remain a source-to-container flow")
+	}
+}
+
 func TestStoreFlowSummaryStillTracksBorrowWrittenIntoPointerfulField(t *testing.T) {
 	src := `struct Expr:
     text: sview
 struct StructTable:
-    last_text: sview
+    last_text: mutable sview
 
 def store_text(arguments: darray[Expr]&, structs: mutable StructTable&) -> void:
     structs.last_text <- arguments[0].text
