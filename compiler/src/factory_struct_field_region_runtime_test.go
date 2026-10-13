@@ -124,3 +124,50 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "factory_call_struct_local", src, "bt")
 }
+
+// Nested literal arguments and scalar leaf-field assignments keep a factory fresh (new_struct_table shape).
+func TestNestedLiteralFactoryLocalForwardedToGrower(t *testing.T) {
+	src := `
+struct Target:
+    bits: u32
+    debug: mutable bool = false
+    names: mutable darray[sview] = []
+
+struct Table:
+    target: Target
+    names: mutable darray[sview] = []
+
+def new_table(bits: u32) -> Table:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable Table = Table{target: Target{bits: bits}}
+        t.target.debug <- true if bits > 64
+        return t
+
+def register(t: mutable Table&, name: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        t.names.push(name)
+        t.target.names.push(name)
+
+def build(name: sview) -> Table:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable Table = new_table(64)
+        register(&t, name)
+        return t
+
+def churn() -> usize:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[usize] = []
+        for i in 0..<1000 |junk|:
+            junk.push(i * 7)
+        return junk[999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        x: Table = build("hello")
+        c: usize = churn()
+        if x.names.count != 1 or x.target.names[0] != "hello" or c != 6993:
+            panic("nested factory struct corrupted")
+`
+	buildAndRunSoATest(t, "factory_nested_literal_local", src, "bt")
+}

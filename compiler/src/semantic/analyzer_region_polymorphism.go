@@ -1065,10 +1065,6 @@ func structFactoryLeavesRegionFieldsFresh(body []ast.Stmt, constructed map[strin
 	if st == nil {
 		return false
 	}
-	fieldCarries := func(name string) bool {
-		f, ok := st.Fields[name]
-		return !ok || typeCarriesRegionStorage(f.Type)
-	}
 	ok := true
 	var visit func(v reflect.Value)
 	visit = func(v reflect.Value) {
@@ -1083,48 +1079,13 @@ func structFactoryLeavesRegionFieldsFresh(body []ast.Stmt, constructed map[strin
 			switch n := v.Interface().(type) {
 			case *ast.VarDeclStmt:
 				if constructed[n.Name] {
-					if lit, isLit := unwrapParenForRegionPoly(n.Value).(*ast.StructLitExpr); isLit {
-						if lit.CopyBase != nil || len(lit.Spreads) != 0 {
-							ok = false
-							return
-						}
-						for i, arg := range lit.Args {
-							name := ""
-							if i < len(lit.ArgNames) && lit.ArgNames[i] != "" {
-								name = lit.ArgNames[i]
-							} else if st.Decl != nil && i < len(st.Decl.Fields) {
-								name = st.Decl.Fields[i].Name
-							}
-							if name == "" {
-								ok = false
-								return
-							}
-							if fieldCarries(name) {
-								if empty, isList := unwrapParenForRegionPoly(arg).(*ast.ListLitExpr); !isList || len(empty.Elems) != 0 || empty.Owner != nil {
-									ok = false
-									return
-								}
-							}
-						}
+					if lit, isLit := unwrapParenForRegionPoly(n.Value).(*ast.StructLitExpr); isLit && !structLiteralLeavesRegionFieldsFresh(lit, st) {
+						ok = false
+						return
 					}
 				}
 			case *ast.AssignStmt:
-				target := unwrapParenForRegionPoly(n.Target)
-				first := ""
-				for {
-					switch t := target.(type) {
-					case *ast.FieldExpr:
-						first = t.Field
-						target = unwrapParenForRegionPoly(t.Object)
-						continue
-					case *ast.IndexExpr:
-						first = ""
-						target = unwrapParenForRegionPoly(t.Object)
-						continue
-					}
-					break
-				}
-				if id, isIdent := target.(*ast.Ident); isIdent && constructed[id.Name] && (first == "" || fieldCarries(first)) {
+				if !assignmentLeavesRegionFieldsFresh(n.Target, constructed, st) {
 					ok = false
 					return
 				}
@@ -1146,6 +1107,83 @@ func structFactoryLeavesRegionFieldsFresh(body []ast.Stmt, constructed map[strin
 	}
 	visit(reflect.ValueOf(body))
 	return ok
+}
+
+// structLiteralLeavesRegionFieldsFresh: every argument for a region-carrying field of st is an
+// empty `[]` or (for a struct-typed field) a nested literal that itself leaves its fields fresh.
+func structLiteralLeavesRegionFieldsFresh(lit *ast.StructLitExpr, st *StructType) bool {
+	if lit == nil || st == nil || lit.CopyBase != nil || len(lit.Spreads) != 0 {
+		return false
+	}
+	for i, arg := range lit.Args {
+		name := ""
+		if i < len(lit.ArgNames) && lit.ArgNames[i] != "" {
+			name = lit.ArgNames[i]
+		} else if st.Decl != nil && i < len(st.Decl.Fields) {
+			name = st.Decl.Fields[i].Name
+		}
+		f, found := st.Fields[name]
+		if name == "" || !found {
+			return false
+		}
+		if !typeCarriesRegionStorage(f.Type) {
+			continue
+		}
+		switch a := unwrapParenForRegionPoly(arg).(type) {
+		case *ast.ListLitExpr:
+			if len(a.Elems) != 0 || a.Owner != nil {
+				return false
+			}
+		case *ast.StructLitExpr:
+			inner, isStruct := f.Type.(*StructType)
+			if !isStruct || !structLiteralLeavesRegionFieldsFresh(a, inner) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// assignmentLeavesRegionFieldsFresh: an assignment whose target is rooted at a constructed local
+// must write a field path whose LEAF type carries no region storage (`t.a.flag <- true`).
+func assignmentLeavesRegionFieldsFresh(target ast.Expr, constructed map[string]bool, st *StructType) bool {
+	var path []string
+	cur := unwrapParenForRegionPoly(target)
+	for {
+		switch t := cur.(type) {
+		case *ast.FieldExpr:
+			path = append([]string{t.Field}, path...)
+			cur = unwrapParenForRegionPoly(t.Object)
+			continue
+		case *ast.IndexExpr:
+			path = append([]string{""}, path...)
+			cur = unwrapParenForRegionPoly(t.Object)
+			continue
+		}
+		break
+	}
+	id, isIdent := cur.(*ast.Ident)
+	if !isIdent || !constructed[id.Name] {
+		return true
+	}
+	if len(path) == 0 {
+		return false
+	}
+	var t Type = st
+	for _, seg := range path {
+		s, isStruct := t.(*StructType)
+		if seg == "" || !isStruct {
+			return false
+		}
+		f, found := s.Fields[seg]
+		if !found {
+			return false
+		}
+		t = f.Type
+	}
+	return !typeCarriesRegionStorage(t)
 }
 
 // funcHasArenaParam reports whether any explicit parameter is an `Arena` (modulo `mutable`/`&`
