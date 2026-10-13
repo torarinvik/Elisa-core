@@ -205,3 +205,27 @@ func TestEmitObjectFLTOWritesBitcode(t *testing.T) {
 		}
 	}
 }
+
+func TestLLCCodegenLevelFollowsOptimizationLevel(t *testing.T) {
+	if got := llcCodegenOptArg(backend.OptimizationLevel0); got != "-O0" {
+		t.Fatalf("-O0 build: llc %s, want -O0", got)
+	}
+	for _, level := range []backend.OptimizationLevel{backend.OptimizationLevel1, backend.OptimizationLevel2, backend.OptimizationLevel3} {
+		if got := llcCodegenOptArg(level); got != "-O2" {
+			t.Fatalf("-O%d build: llc %s, want -O2 (LLVMCodeGenLevelDefault, as -emit obj)", int(level), got)
+		}
+	}
+	if _, err := findLLC(); err != nil {
+		t.Skip("llc not available")
+	}
+	ir := filepath.Join(t.TempDir(), "m.ll")
+	if err := os.WriteFile(ir, []byte("define i32 @f() {\n  ret i32 1\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	llc, _ := findLLC()
+	k0, ok0 := llcObjectCacheKey(ir, "-O0", "", llc)
+	k2, ok2 := llcObjectCacheKey(ir, "-O2", "", llc)
+	if !ok0 || !ok2 || k0 == k2 {
+		t.Fatalf("llc object cache must key on the codegen level (ok=%v/%v)", ok0, ok2)
+	}
+}

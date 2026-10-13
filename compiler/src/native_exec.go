@@ -820,7 +820,7 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 		return err
 	}
 	llcStart := time.Now()
-	llcErr := writeLLVMIRObjectViaLLC(irPath, objectPath, targetTriple, stderr)
+	llcErr := writeLLVMIRObjectViaLLC(irPath, objectPath, optLevel, targetTriple, stderr)
 	if buildTiming {
 		fmt.Fprintf(stderr, "[build-timing] llc(+cache): %v err=%v\n", time.Since(llcStart).Round(time.Millisecond), llcErr)
 	}
@@ -839,7 +839,19 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 	})
 }
 
-func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple string, stderr io.Writer) error {
+// llcCodegenOptArg is llc's CODEGEN level for IR the in-process pipeline already optimized at
+// optLevel. It matches `-emit obj`, whose target machine uses LLVMCodeGenLevelDefault (= llc
+// -O2): instruction selection, register allocation and scheduling were otherwise run at
+// -O0 (FastISel + the fast register allocator) for every optimized project build/run and for
+// the -O3 default runtime object. -O0 builds keep llc -O0 for compile speed.
+func llcCodegenOptArg(optLevel backend.OptimizationLevel) string {
+	if optLevel == backend.OptimizationLevel0 {
+		return "-O0"
+	}
+	return "-O2"
+}
+
+func writeLLVMIRObjectViaLLC(irPath string, objectPath string, optLevel backend.OptimizationLevel, targetTriple string, stderr io.Writer) error {
 	llcPath, err := findLLC()
 	if err != nil {
 		return err
@@ -848,7 +860,7 @@ func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple stri
 	// llc -O0 dominates native build time. If an object compiled from byte-for-byte
 	// identical IR (and target/llc) already exists in the cache, reuse it and skip
 	// llc entirely. Disable with ELISACORE_NO_OBJCACHE.
-	cacheKey, cacheOK := llcObjectCacheKey(irPath, targetTriple, llcPath)
+	cacheKey, cacheOK := llcObjectCacheKey(irPath, llcCodegenOptArg(optLevel), targetTriple, llcPath)
 	if cacheOK {
 		if cachedPath, hit := lookupCachedObject(cacheKey); hit {
 			if copyErr := copyFileContents(cachedPath, objectPath); copyErr == nil {
@@ -856,7 +868,7 @@ func writeLLVMIRObjectViaLLC(irPath string, objectPath string, targetTriple stri
 			}
 		}
 	}
-	args := []string{"-filetype=obj", "-O0"}
+	args := []string{"-filetype=obj", llcCodegenOptArg(optLevel)}
 	if strings.TrimSpace(targetTriple) != "" {
 		args = append(args, "-mtriple="+strings.TrimSpace(targetTriple))
 	}
@@ -904,7 +916,7 @@ var objCacheTempRunRE = regexp.MustCompile(`elisacore-(test|native)-run-[0-9]+`)
 // llcObjectCacheKey hashes the IR content (with the per-run temp path
 // normalized) plus the target triple and llc binary so cached objects are
 // invalidated when any of those change.
-func llcObjectCacheKey(irPath string, targetTriple string, llcPath string) (string, bool) {
+func llcObjectCacheKey(irPath string, codegenOpt string, targetTriple string, llcPath string) (string, bool) {
 	irBytes, err := os.ReadFile(irPath)
 	if err != nil {
 		return "", false
@@ -917,7 +929,7 @@ func llcObjectCacheKey(irPath string, targetTriple string, llcPath string) (stri
 	h.Write([]byte("\x00llc\x00"))
 	h.Write([]byte(strings.TrimSpace(targetTriple)))
 	h.Write([]byte{0})
-	h.Write([]byte("cpu=" + resolvedNativeTargetCPU(targetTriple)))
+	h.Write([]byte("cpu=" + resolvedNativeTargetCPU(targetTriple) + " codegen=" + codegenOpt))
 	h.Write([]byte{0})
 	h.Write([]byte(llcPath))
 	// Hash the tool contents rather than relying on size+mtime: an in-place toolchain
