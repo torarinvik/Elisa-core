@@ -164,6 +164,47 @@ def fill(o: mutable Outer&, other: mutable Outer&) -> void can[Abort.Panic, Memo
 	}
 }
 
+// A call result stored into the target is judged by what the callee RETURNS from each argument:
+// returning the darray itself (`keep(xs)`) carries its local backing (rejected); returning a
+// fresh copy of its scalar elements (`copy_of(xs)`) carries nothing local (accepted).
+func TestCallStoringCallResultJudgedByReturn(t *testing.T) {
+	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_ret_header.elisa", `struct Holder:
+    xs: mutable darray[i64] = []
+
+def keep(xs: darray[i64]) -> darray[i64]:
+    return xs
+
+def stash3(h: mutable Holder&, xs: darray[i64]) -> void:
+    h.xs <- keep(xs)
+
+def fill(h: mutable Holder&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        stash3(h, local)
+`)
+	if joined := strings.Join(bad.Errors(), "\n"); !strings.Contains(joined, "call may store a value in region") {
+		t.Fatalf("a callee storing an identity-returned local darray must be rejected, got:\n%s", joined)
+	}
+	ok := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_ret_copy.elisa", `struct Holder:
+    xs: mutable darray[i64] = []
+
+def copy_of(h: mutable Holder&, xs: darray[i64]) -> void:
+    can Memory.Allocate, Abort.Panic:
+        for x in xs |h|:
+            h.xs.push(x)
+
+def fill(h: mutable Holder&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        copy_of(h, local)
+`)
+	if errs := ok.Errors(); len(errs) != 0 {
+		t.Fatalf("copying scalar elements must be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // Element-mode stores: copying scalar elements out of a local darray into the target retains no
 // local storage (accepted); copying an element that is itself a local-region container header
 // (`h.rows.push(rows[0])` with `rows: darray[darray[i64]]` built locally) does (rejected).

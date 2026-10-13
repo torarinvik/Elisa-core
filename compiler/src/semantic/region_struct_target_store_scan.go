@@ -97,73 +97,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	}
 	key := storeScanKey{decl, other, index}
 	seen[key] = true
-	params := map[string]bool{}
-	for _, p := range decl.Params {
-		params[p.Name] = true
-	}
-	header := map[string]bool{decl.Params[other].Name: true}
-	content := map[string]bool{decl.Params[other].Name: true}
-	targets := map[string]bool{decl.Params[index].Name: true}
-	add := func(set map[string]bool, name string) bool {
-		if name == "" || params[name] || set[name] {
-			return false
-		}
-		set[name] = true
-		return true
-	}
-	bind := func(name string, value ast.Expr) bool {
-		changed := false
-		if storeScanMentionsHeader(value, header) {
-			changed = add(header, name) || changed
-			changed = add(content, name) || changed
-		} else if storeScanMentions(value, content) {
-			changed = add(content, name) || changed
-		}
-		if storeScanMayAliasPlace(value, targets) {
-			changed = add(targets, name) || changed
-		}
-		return changed
-	}
-	for changed := true; changed; {
-		changed = false
-		walkStoreScanNodes(decl.Body, func(node any) {
-			switch n := node.(type) {
-			case *ast.VarDeclStmt:
-				if n != nil && bind(n.Name, n.Value) {
-					changed = true
-				}
-			case *ast.AssignStmt:
-				if id, ok := n.Target.(*ast.Ident); ok && id != nil && bind(id.Name, n.Value) {
-					changed = true
-				}
-			case *ast.IterForStmt:
-				// Loop binders over a tainted source are element values.
-				if n != nil && storeScanMentions(n.Source, content) {
-					for _, name := range stmtBoundNames(n) {
-						if add(content, name) {
-							changed = true
-						}
-					}
-				}
-			case ast.Stmt:
-				// Any other binding construct: its binders may hold the whole source.
-				if !stmtHeaderMentionsAny(n, content) {
-					return
-				}
-				// Pattern binders of a match / `is` test project fields or payloads (content);
-				// only other binders (a rebind of a call result, a destructure) may be the whole.
-				whole := stmtHeaderMentionsAny(n, header) && !storeScanProjectingStmt(n)
-				for _, name := range stmtBoundNames(n) {
-					if add(content, name) {
-						changed = true
-					}
-					if whole && add(header, name) {
-						changed = true
-					}
-				}
-			}
-		})
-	}
+	params, header, content, targets := storeScanTaint(decl, other, decl.Params[index].Name)
 	valueMode := func(value ast.Expr) storeMode {
 		if storeScanMentionsHeader(value, header) {
 			return storeHeader
@@ -196,14 +130,25 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			// only when the callee's summary connects that argument to its return.
 			if call, isCall := stripParenExpr(n.Value).(*ast.CallExpr); isCall && call != nil {
 				if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
-					if summary := a.storeFlowSummaryFor(callee); summary != nil && len(summary.retConn) == len(callee.Params) {
-						for i, arg := range returnBorrowCallArgs(call) {
-							if summary.retConn[i] {
-								mode = storeScanRaise(decl, 160, n, mode, valueMode(arg))
-							}
-						}
+					if a.declReturnsVoid(callee) {
+						// The lmut manifest `t <- f(.., t, ..)` of a void callee: the result IS
+						// the threaded argument; the call's own stores are scanned at the call.
 						return
 					}
+					// A non-void call result carries what the callee may RETURN from each tainted
+					// argument (a directed scan of its return statements).
+					for i, arg := range returnBorrowCallArgs(call) {
+						argMode := valueMode(arg)
+						if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
+							continue
+						}
+						inner := a.calleeReturnModeOf(callee, i, seen)
+						if inner != storeNone && argMode == storeElements {
+							inner = storeElements
+						}
+						mode = storeScanRaise(decl, 160, n, mode, inner)
+					}
+					return
 				}
 			}
 			mode = storeScanRaise(decl, 167, n, mode, valueMode(n.Value))
@@ -580,6 +525,194 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 		return true
 	}
 	return typeCarriesRegionStorage(param) || a.typeCanContainRegionRefs(stripRefForBounds(param), map[string]bool{})
+}
+
+// storeScanTaint computes, to a fixpoint over the body, which names may hold the WHOLE source
+// parameter (header) or something read out of it (content), and which names may alias the
+// target place (targetName; "" for none). Locals become tainted by binding (decl/assign of the
+// local itself) and by receiving a tainted store (`local.f <- v`, `local.xs.push(v)`).
+func storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, header, content, targets map[string]bool) {
+	params = map[string]bool{}
+	for _, p := range decl.Params {
+		params[p.Name] = true
+	}
+	header = map[string]bool{decl.Params[other].Name: true}
+	content = map[string]bool{decl.Params[other].Name: true}
+	targets = map[string]bool{}
+	if targetName != "" {
+		targets[targetName] = true
+	}
+	add := func(set map[string]bool, name string) bool {
+		if name == "" || params[name] || set[name] {
+			return false
+		}
+		set[name] = true
+		return true
+	}
+	taint := func(name string, value ast.Expr) bool {
+		changed := false
+		if storeScanMentionsHeader(value, header) {
+			changed = add(header, name) || changed
+			changed = add(content, name) || changed
+		} else if storeScanMentions(value, content) {
+			changed = add(content, name) || changed
+		}
+		return changed
+	}
+	bind := func(name string, value ast.Expr) bool {
+		changed := taint(name, value)
+		if storeScanMayAliasPlace(value, targets) {
+			changed = add(targets, name) || changed
+		}
+		return changed
+	}
+	for changed := true; changed; {
+		changed = false
+		walkStoreScanNodes(decl.Body, func(node any) {
+			switch n := node.(type) {
+			case *ast.VarDeclStmt:
+				if n != nil && bind(n.Name, n.Value) {
+					changed = true
+				}
+			case *ast.AssignStmt:
+				if n == nil {
+					return
+				}
+				if id, ok := n.Target.(*ast.Ident); ok && id != nil {
+					if bind(id.Name, n.Value) {
+						changed = true
+					}
+					return
+				}
+				// A store into part of a local taints the local.
+				if root := rootIdentExpr(n.Target); root != nil && !params[root.Name] && taint(root.Name, n.Value) {
+					changed = true
+				}
+			case *ast.CallExpr:
+				// A method call on a local receiver may store its arguments into it.
+				if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
+					if root := rootIdentExpr(field.Object); root != nil && !params[root.Name] {
+						for _, arg := range n.Args {
+							if taint(root.Name, arg) {
+								changed = true
+							}
+						}
+					}
+				}
+			case *ast.IterForStmt:
+				// Loop binders over a tainted source are element values.
+				if n != nil && storeScanMentions(n.Source, content) {
+					for _, name := range stmtBoundNames(n) {
+						if add(content, name) {
+							changed = true
+						}
+					}
+				}
+			case ast.Stmt:
+				// Any other binding construct: its binders may hold the whole source.
+				if !stmtHeaderMentionsAny(n, content) {
+					return
+				}
+				// Pattern binders of a match / `is` test project fields or payloads (content);
+				// only other binders (a rebind of a call result, a destructure) may be the whole.
+				whole := stmtHeaderMentionsAny(n, header) && !storeScanProjectingStmt(n)
+				for _, name := range stmtBoundNames(n) {
+					if add(content, name) {
+						changed = true
+					}
+					if whole && add(header, name) {
+						changed = true
+					}
+				}
+			}
+		})
+	}
+	return params, header, content, targets
+}
+
+// calleeReturnModeOf: what may the callee RETURN from parameter `other` -- nothing, values read
+// out of it, or the value itself? Judged on its return statements (and an expression-bodied
+// tail), with calls in a returned expression recursed into. Unknown means the value itself.
+func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[storeScanKey]bool) storeMode {
+	if decl == nil || other < 0 || other >= len(decl.Params) || len(decl.Body) == 0 {
+		return storeHeader
+	}
+	key := storeScanKey{decl, other, -1}
+	if mode, ok := a.storeScanCache[key]; ok {
+		return mode
+	}
+	if seen[key] {
+		a.storeScanCycleHit = true
+		return storeNone
+	}
+	seen[key] = true
+	saved := a.storeScanCycleHit
+	a.storeScanCycleHit = false
+	_, header, content, _ := storeScanTaint(decl, other, "")
+	mode := storeNone
+	sawReturn := false
+	walkStoreScanNodes(decl.Body, func(node any) {
+		if _, isRet := node.(*ast.ReturnStmt); isRet {
+			sawReturn = true
+		}
+	})
+	if !sawReturn && !a.declReturnsVoid(decl) {
+		// A value produced without a `return` (an expression tail) is not modelled.
+		mode = storeHeader
+	}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || ret == nil || ret.Value == nil || mode == storeHeader {
+			return
+		}
+		value := stripParenExpr(ret.Value)
+		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
+			if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
+				for i, arg := range returnBorrowCallArgs(call) {
+					argMode := storeNone
+					if storeScanMentionsHeader(arg, header) {
+						argMode = storeHeader
+					} else if storeScanMentions(arg, content) {
+						argMode = storeElements
+					}
+					if argMode == storeNone {
+						continue
+					}
+					inner := a.calleeReturnModeOf(callee, i, seen)
+					if inner != storeNone && argMode == storeElements {
+						inner = storeElements
+					}
+					mode = maxStoreMode(mode, inner)
+				}
+				return
+			}
+		}
+		if storeScanMentionsHeader(value, header) {
+			mode = storeHeader
+		} else if storeScanMentions(value, content) {
+			mode = maxStoreMode(mode, storeElements)
+		}
+	})
+	hit := a.storeScanCycleHit
+	if !hit {
+		a.cacheStoreScan(key, mode)
+	}
+	a.storeScanCycleHit = saved || hit
+	return mode
+}
+
+// declReturnsVoid reports whether a declared function's resolved return type is void.
+func (a *Analyzer) declReturnsVoid(decl *ast.FuncDecl) bool {
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return false
+	}
+	builtin, ok := fnType.Return.(*BuiltinType)
+	return fnType.Return == nil || ok && builtin != nil && builtin.Name == "void"
 }
 
 // declParamIsWritableRef reports whether a declared parameter is a mutable reference (including
