@@ -401,6 +401,10 @@ type Analyzer struct {
 	// function-local containers (see region_local_container_elements.go).
 	currentElementReads  map[*ast.IndexExpr]bool
 	currentElementStates map[*Symbol]regionRefState
+	// currentElementExtendSources are the statement `ys.extend(xs)` calls whose local source xs
+	// is not grown again in any loop enclosing the call, so xs's tracked element state at the
+	// call is the exact provenance the copied elements carry.
+	currentElementExtendSources map[ast.Expr]bool
 	// storeFlowBinderIndexes caches each function's binding sites for the store-flow summaries.
 	storeFlowBinderIndexes map[*ast.FuncDecl]*storeFlowBinderIndex
 	// currentElementBinderLoops are the by-value `for x in xs` loops over an eligible local

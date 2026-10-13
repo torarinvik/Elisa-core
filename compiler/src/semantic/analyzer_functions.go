@@ -17,10 +17,12 @@ import (
 func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
 	savedSizeGuards := len(a.overlaySizeGuards)
 	savedElementReads, savedElementStates, savedBinderLoops, savedLoop := a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops, a.currentElementLoop
+	savedExtendSources := a.currentElementExtendSources
 	a.currentElementReads, a.currentElementBinderLoops, a.currentElementLoop = a.scanLocalContainerElementReads(body)
 	a.currentElementStates = map[*Symbol]regionRefState{}
 	defer func() {
 		a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops, a.currentElementLoop = savedElementReads, savedElementStates, savedBinderLoops, savedLoop
+		a.currentElementExtendSources = savedExtendSources
 	}()
 	for _, stmt := range body {
 		a.analyzeStmt(stmt)

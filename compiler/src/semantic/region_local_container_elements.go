@@ -48,6 +48,8 @@ type localContainerElementScan struct {
 	// scalarUse are reads whose copy is only compared: they need no in-loop assumption.
 	scalarUse map[*ast.IndexExpr]bool
 	extendIn  map[ast.Node]map[string]bool
+	// extendSources are local sources of statement `ys.extend(xs)` calls with their loops.
+	extendSources []localContainerExtendSource
 	// declLoops are the loops enclosing a name's only declaration; a name declared more than
 	// once, or mentioned before its declaration, is in multiDecl.
 	declLoops map[string][]ast.Node
@@ -72,6 +74,12 @@ type localContainerElementScan struct {
 	argByValue func(call *ast.CallExpr, index int) bool
 	// ufcsCall predicts the direct call a receiver-form call is rewritten to, or nil.
 	ufcsCall func(call *ast.CallExpr) *ast.CallExpr
+}
+
+type localContainerExtendSource struct {
+	call  *ast.CallExpr
+	name  string
+	loops []ast.Node
 }
 
 type localContainerElementRead struct {
@@ -121,6 +129,24 @@ func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.Ind
 		}
 		return true
 	}
+	// An extend source is modelled only when no loop enclosing the extend grows it again:
+	// otherwise a later iteration copies elements the state at the call has not seen yet.
+	extendSources := map[ast.Expr]bool{}
+	for _, src := range scan.extendSources {
+		ok := !scan.ineligible[src.name]
+		for _, loop := range src.loops {
+			if scan.pushedIn[loop][src.name] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			extendSources[src.call.Args[0]] = true
+		} else {
+			scan.ineligible[src.name] = true
+		}
+	}
+	a.currentElementExtendSources = extendSources
 	out := map[*ast.IndexExpr]bool{}
 	var loop *elementLoopInfo
 	for _, read := range scan.reads {
@@ -469,6 +495,12 @@ func (s *localContainerElementScan) classifyIdent(ident *ast.Ident, parent ast.N
 			return
 		}
 	case *ast.CallExpr:
+		// The source of an accepted statement `ys.extend(xs)` is only read: extend copies xs's
+		// elements by value into ys (recordLocalContainerElementPush merges xs's tracked state).
+		if callee, ok := p.Func.(*ast.FieldExpr); ok && field == "Args" && callee.Field == "extend" && s.acceptedReceivers[callee] && len(p.Args) == 1 && p.Args[0] == ast.Expr(ident) {
+			s.extendSources = append(s.extendSources, localContainerExtendSource{call: p, name: name, loops: append([]ast.Node(nil), s.loops...)})
+			return
+		}
 		if field == "Args" && len(p.ArgNames) == 0 && !p.HasArgForward && s.argReadOnly != nil {
 			// A receiver-form call `recv.f(xs)` is rewritten to `f(recv, xs)` only during the
 			// body's analysis; judge it as that call here. A prediction the rewrite does not
@@ -735,6 +767,18 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 			return
 		}
 		sourceSym, found := a.currentScope.Lookup(source.Name)
+		if found && sourceSym != nil && sourceSym.Kind != SymbolParam && a.currentElementExtendSources[arg] {
+			// `xs.extend(ys)` from a TRACKED local copies ys's elements by value, so xs's
+			// elements gain exactly ys's tracked element provenance — not ys's backing
+			// buffer, which is never retained. An untracked local source keeps the
+			// conservative fallback below.
+			if sourceState, tracked := a.currentElementStates[sourceSym]; tracked {
+				merged, _ := mergeRegionRefStates(existing, sourceState)
+				a.checkElementLoopAssumptions(sym, arg, merged, true)
+				a.currentElementStates[sym] = merged
+				return
+			}
+		}
 		if !found || sourceSym == nil || sourceSym.Kind != SymbolParam {
 			a.checkElementLoopAssumptions(sym, arg, regionRefState{}, false)
 			delete(a.currentElementStates, sym)
@@ -928,6 +972,11 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 	if a.currentElementStates == nil || a.currentScope == nil || call == nil || len(call.ArgNames) != 0 || call.HasArgForward {
 		return
 	}
+	if a.isBuiltinDarrayCopyInCall(call) && a.currentElementExtendSources[call.Args[0]] {
+		// `ys.extend(xs)` / `ys.push(xs)` only READ xs (its elements are copied by value into
+		// ys, whose state recordLocalContainerElementPush already updated): xs keeps its state.
+		return
+	}
 	for index, arg := range call.Args {
 		ident, ok := stripAddrAndParens(arg).(*ast.Ident)
 		if !ok {
@@ -1000,6 +1049,20 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 		a.checkElementLoopAssumptions(sym, call, merged, true)
 		a.currentElementStates[sym] = merged
 	}
+}
+
+// isBuiltinDarrayCopyInCall reports whether call is the builtin `recv.extend(src)` or
+// `recv.push(src)` on a darray receiver: a call whose single argument is only read.
+// Callers additionally require the source to be a modelled extend source.
+func (a *Analyzer) isBuiltinDarrayCopyInCall(call *ast.CallExpr) bool {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok || field == nil || len(call.Args) != 1 || (field.Field != "extend" && field.Field != "push") {
+		return false
+	}
+	if _, isDArray := stripRefForBounds(a.exprTypes[field.Object]).(*DArrayType); !isDArray {
+		return false
+	}
+	return a.returnBorrowBuiltinMethodCall(call)
 }
 
 // noteAmbientFillFresh records that the current void grower used its adoption sanction: data
