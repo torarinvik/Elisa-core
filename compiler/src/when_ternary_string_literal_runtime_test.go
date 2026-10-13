@@ -12,6 +12,7 @@ const whenTernaryStringLiteralBody = `
 def pick(c: u8, e: bool) -> sview can[Abort.Panic]:
     return when c:
         1 -> "aa" if e else "bbb"
+        2 -> ("c" if e else "dddd")
         _ -> "c" if e else "dddd" if c == 7 else "eeeee"
 
 @test
@@ -21,6 +22,8 @@ def return_position_leaves() -> void:
             panic("arm 1 wrong")
         if pick(2, true) != "c" or pick(7, false) != "dddd" or pick(8, false) != "eeeee":
             panic("default arm wrong")
+        if pick(2, false) != "dddd":
+            panic("paren arm wrong")
         if pick(8, false).len != 5:
             panic("view length wrong")
 

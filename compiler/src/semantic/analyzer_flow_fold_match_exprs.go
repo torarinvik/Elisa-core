@@ -357,6 +357,8 @@ func isStringLiteralTree(expr ast.Expr) bool {
 		return n != nil
 	case *ast.TernaryExpr:
 		return n != nil && isStringLiteralTree(n.Value) && isStringLiteralTree(n.Alt)
+	case *ast.ParenExpr:
+		return n != nil && isStringLiteralTree(n.Inner)
 	}
 	return false
 }
@@ -382,6 +384,9 @@ func (a *Analyzer) recordStringLiteralTreeType(expr ast.Expr, t Type) {
 	case *ast.TernaryExpr:
 		a.recordStringLiteralTreeType(n.Value, t)
 		a.recordStringLiteralTreeType(n.Alt, t)
+		a.recordAnalyzedExprType(n, t)
+	case *ast.ParenExpr:
+		a.recordStringLiteralTreeType(n.Inner, t)
 		a.recordAnalyzedExprType(n, t)
 	}
 }
