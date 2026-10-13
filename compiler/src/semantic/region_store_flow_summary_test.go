@@ -3,6 +3,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 const storeFlowPrelude = `enum Expr:
@@ -11,6 +13,31 @@ const storeFlowPrelude = `enum Expr:
     Absent
 
 `
+
+func TestStoreFlowBuiltinDarrayPushKeepsOneWayStorageAndResultFlow(t *testing.T) {
+	call := &ast.CallExpr{
+		Func: &ast.FieldExpr{Object: &ast.Ident{Name: "target"}, Field: "push"},
+		Args: []ast.Expr{&ast.Ident{Name: "source"}},
+	}
+	a := &Analyzer{storeFlowDarrays: map[string]bool{"target": true}}
+	c := &storeFlowCtx{written: map[string]bool{"target": true}, scalars: map[string]bool{}}
+	retNames, handled := a.applyCallStoreFlow(call, c, map[*ast.CallExpr][]string{})
+	if !handled {
+		t.Fatal("a proven builtin DArray push should have a precise store-flow summary")
+	}
+	if len(c.edges) != 1 || c.edges[0] != [2]string{"source", "target"} {
+		t.Fatalf("push must flow element contents into the receiver only, got edges %v", c.edges)
+	}
+	if len(retNames) != 2 || retNames[0] != "target" || retNames[1] != "source" {
+		t.Fatalf("push result must depend on receiver and inserted element, got %v", retNames)
+	}
+
+	// A same-spelled method on an unverified receiver stays on the conservative path.
+	unknown := &Analyzer{}
+	if _, handled := unknown.applyCallStoreFlow(call, &storeFlowCtx{}, map[*ast.CallExpr][]string{}); handled {
+		t.Fatal("an unverified .push method must remain conservative")
+	}
+}
 
 // A self-recursive walker whose recursive call passes comprehension-built view containers next to a
 // writable Expr container it never stores them into is accepted.

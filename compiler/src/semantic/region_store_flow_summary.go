@@ -1337,6 +1337,21 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		// during ordinary call analysis; this only removes the post-join store edge.
 		return nil, true
 	}
+	if fn, ok := call.Func.(*ast.FieldExpr); ok && fn != nil && fn.Field == "push" && call.SafeReceiver == nil && call.NamedArgCount() == 0 && len(call.Args) == 1 && (a.isCompilerBuiltinHelperCall(call, "darray.push") || a.storeFlowBuiltinDarrayGrowth(fn)) {
+		// Builtin DArray growth stores each element argument into the receiver. Preserve that
+		// direction (source element -> destination container) instead of falling back to a
+		// symmetric statement join. The returned DArray contains both the previous receiver
+		// contents and the newly inserted elements, so callers must also see both as result
+		// dependencies for fluent forms such as `target <- target.push(value)`.
+		receiver := a.storeFlowArgNames(fn.Object, handled)
+		c.link(receiver)
+		retNames := append([]string(nil), receiver...)
+		group := a.storeFlowArgNames(call.Args[0], handled)
+		c.link(group)
+		c.flow(group, receiver)
+		retNames = append(retNames, group...)
+		return retNames, true
+	}
 	callee := a.storeFlowCallee(call)
 	if callee == nil {
 		if !a.storeFlowOpaqueExternCall(call) {
