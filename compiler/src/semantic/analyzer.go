@@ -257,7 +257,7 @@ type Analyzer struct {
 	storeTargetRegion string
 	// storeScanCache memoizes calleeStoreModeInto per (callee, source param, target param);
 	// storeScanCycleHit marks a search that consulted an in-progress frame (not cacheable).
-	storeScanCache    map[storeScanKey]storeMode
+	storeScanCache    map[storeScanKey]storeResult
 	storeScanCycleHit bool
 	// regionParamCalleeParamIndex maps each function name to explicit parameter positions whose
 	// types carry one of that function's region parameters. Forwarding a fresh region container to

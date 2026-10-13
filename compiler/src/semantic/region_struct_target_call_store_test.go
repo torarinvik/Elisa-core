@@ -222,6 +222,48 @@ def capture(paths: mutable darray[Path]&, other: mutable darray[Path]&, src: dar
 	}
 }
 
+// Field-scoped stores: a callee storing ONE field of a struct argument retains only that field's
+// storage. Copying `src.name` (a view of caller-provided bytes) is accepted although the local
+// struct's darray field lives in a local region; copying `src.items` retains that region.
+func TestCallStoringStructFieldIsFieldScoped(t *testing.T) {
+	const prelude = `struct Spec:
+    name: sview
+    items: mutable darray[i64] = []
+
+struct Table:
+    names: mutable darray[sview] = []
+    rows: mutable darray[darray[i64]] = []
+
+def note_name(table: mutable Table&, spec: Spec) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.names.push(spec.name)
+
+def note_items(table: mutable Table&, spec: Spec) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.rows.push(spec.items)
+`
+	ok := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "field_scoped_ok.elisa", prelude+`
+def fill(table: mutable Table&, label: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        spec: mutable Spec = Spec{name: label}
+        spec.items.push(1)
+        note_name(table, spec)
+`)
+	if errs := ok.Errors(); len(errs) != 0 {
+		t.Fatalf("storing only a view field of caller bytes must be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "field_scoped_bad.elisa", prelude+`
+def fill(table: mutable Table&, label: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        spec: mutable Spec = Spec{name: label}
+        spec.items.push(1)
+        note_items(table, spec)
+`)
+	if joined := strings.Join(bad.Errors(), "\n"); !strings.Contains(joined, "call may store a value in region") {
+		t.Fatalf("storing the locally grown darray field must be rejected, got:\n%s", joined)
+	}
+}
+
 // Element-mode stores: copying scalar elements out of a local darray into the target retains no
 // local storage (accepted); copying an element that is itself a local-region container header
 // (`h.rows.push(rows[0])` with `rows: darray[darray[i64]]` built locally) does (rejected).
