@@ -563,6 +563,11 @@ func typeCarriesRegionStorageRec(t Type, seen map[Type]bool) bool {
 				return true
 			}
 		}
+		// The generic struct's own fields (`items: darray[T]` in `Vector[T]`) carry storage
+		// regardless of the type arguments.
+		if base, ok := tt.Base.(*StructType); ok {
+			return typeCarriesRegionStorageRec(base, seen)
+		}
 		return false
 	case *AggregateStateType:
 		if tt == nil {

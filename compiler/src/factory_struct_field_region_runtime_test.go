@@ -284,3 +284,190 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "TestLocalStructFieldForwardedToGrower", src, "bt")
 }
+
+// A generic struct ref (`v: mutable Vector[T]&`) whose darray field is grown threads the caller's region, for both a literal and a generic-factory local.
+func TestGenericStructFieldGrowthThroughRef(t *testing.T) {
+	src := `
+
+struct Vector[T]:
+    items: mutable darray[T]
+    first: mutable usize
+
+def vec_new[T]() -> Vector[T]:
+    return Vector[T]{items: [], first: 0}
+
+def vec_append[T](v: mutable Vector[T]&, x: T) can[Memory.Allocate]:
+    v.items.push(x)
+
+def vec_size[T](v: Vector[T]&) -> usize:
+    return v.items.count - v.first
+
+def vec_at[T](v: Vector[T]&, i: usize) -> T can[Abort.Panic]:
+    return v.items[v.first + i]
+
+def vec_remove_first[T](v: mutable Vector[T]&) -> T can[Abort.Panic]:
+    v.first <- v.first + 1
+    return v.items[v.first - 1]
+
+enum Shape:
+    Circle(r: i64)
+    Rect(w: i64, h: i64)
+
+def area(s: Shape) -> i64:
+    return match s:
+        Shape.Circle(r): r * 3
+        Shape.Rect(w, h): w * h
+
+@test
+def bt() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    v: mutable Vector[i64] = vec_new[i64]()
+    for i in 0..<20 |v|:
+        vec_append(&v, i)
+    x: i64 = vec_remove_first(&v)
+    shapes: mutable Vector[Shape] = vec_new[Shape]()
+    vec_append(&shapes, Shape.Circle(2))
+    vec_append(&shapes, Shape.Rect(3, 4))
+    got: i64 = vec_size(&v).i64() + x + vec_at(&v, 3) + area(vec_at(&shapes, 1))
+    if got != 35:
+        panic("generic container growth wrong")
+`
+	buildAndRunSoATest(t, "TestGenericStructFieldGrowthThroughRef", src, "bt")
+}
+
+// A generic struct's field forwarded to a generic darray[T]& grower threads the region through both generic functions.
+func TestGenericStructFieldForwardedToGenericGrower(t *testing.T) {
+	src := `
+
+def da_append[T](v: mutable darray[T]&, x: T) can[Memory.Allocate]:
+    v.push(x)
+
+struct Vector[T]:
+    items: mutable darray[T]
+    first: mutable usize
+
+def vec_new[T]() -> Vector[T]:
+    return Vector[T]{items: [], first: 0}
+
+def vec_append[T](v: mutable Vector[T]&, x: T) can[Memory.Allocate]:
+    da_append(&v.items, x)
+
+def vec_size[T](v: Vector[T]&) -> usize:
+    return v.items.count - v.first
+
+def vec_at[T](v: Vector[T]&, i: usize) -> T can[Abort.Panic]:
+    return v.items[v.first + i]
+
+def vec_remove_first[T](v: mutable Vector[T]&) -> T can[Abort.Panic]:
+    v.first <- v.first + 1
+    return v.items[v.first - 1]
+
+enum Shape:
+    Circle(r: i64)
+    Rect(w: i64, h: i64)
+
+def area(s: Shape) -> i64:
+    return match s:
+        Shape.Circle(r): r * 3
+        Shape.Rect(w, h): w * h
+
+@test
+def bt() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    v: mutable Vector[i64] = vec_new[i64]()
+    for i in 0..<20 |v|:
+        vec_append(&v, i)
+    x: i64 = vec_remove_first(&v)
+    shapes: mutable Vector[Shape] = vec_new[Shape]()
+    vec_append(&shapes, Shape.Circle(2))
+    vec_append(&shapes, Shape.Rect(3, 4))
+    got: i64 = vec_size(&v).i64() + x + vec_at(&v, 3) + area(vec_at(&shapes, 1))
+    if got != 35:
+        panic("generic container growth wrong")
+`
+	buildAndRunSoATest(t, "TestGenericStructFieldForwardedToGenericGrower", src, "bt")
+}
+
+// A generic grower over darray[RbNode[K, V]]& works on a local and on a struct field (&t.nodes).
+func TestGenericGrowerOnStructFieldContainer(t *testing.T) {
+	src := `
+
+struct CallSign:
+    value: i32
+
+struct Vec2:
+    x: f64
+    y: f64
+
+def compare_to(a: CallSign, b: CallSign) -> i32:
+    if a.value == b.value:
+        return 0
+    if a.value < b.value:
+        return -1
+    return 1
+
+def compare_to(a: Vec2, b: Vec2) -> i32:
+    if a.x < b.x:
+        return -1
+    if a.x > b.x:
+        return 1
+    return 0
+
+struct RbNode[K, V]:
+    key: K
+    value: mutable V
+    left: mutable i32
+
+def rb_put[K, V](nodes: mutable darray[RbNode[K, V]]&, key: K, value: V) -> i32 can[Memory.Allocate, Abort.Panic]:
+    for i in 0..<nodes.count |nodes|:
+        if compare_to(key, nodes[i].key) == 0:
+            nodes[i].value <- value
+            return i.i32()
+    nodes.push(RbNode[K, V]{key: key, value: value, left: -1})
+    return (nodes.count - 1).i32()
+
+struct Tree:
+    nodes: mutable darray[RbNode[Vec2, i32]]
+    root: mutable i32
+
+@test
+def bt() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    a: mutable darray[RbNode[CallSign, f64]] = []
+    _ = rb_put(&a, CallSign{value: 3}, 1.5)
+    _ = rb_put(&a, CallSign{value: 4}, 1.5)
+    _ = rb_put(&a, CallSign{value: 3}, 2.5)
+    t: mutable Tree = Tree{nodes: [], root: -1}
+    _ = rb_put(&t.nodes, Vec2{x: 1.0, y: 2.0}, 7)
+    got: i64 = a.count.i64() * 100 + t.nodes[0].value.i64()
+    if got != 207:
+        panic("generic container growth wrong")
+`
+	buildAndRunSoATest(t, "TestGenericGrowerOnStructFieldContainer", src, "bt")
+}
+
+// A generic struct literal local forwarded by ref to a field grower, alongside the concrete form.
+func TestGenericStructLiteralLocalForwardedToGrower(t *testing.T) {
+	src := `
+struct Vector[T]:
+    items: mutable darray[T]
+    first: mutable usize
+
+struct IVec:
+    items: mutable darray[i64]
+    first: mutable usize
+
+def vec_append[T](v: mutable Vector[T]&, x: T) can[Memory.Allocate]:
+    v.items.push(x)
+
+def ivec_append(v: mutable IVec&, x: i64) can[Memory.Allocate]:
+    v.items.push(x)
+
+@test
+def bt() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    w: mutable IVec = IVec{items: [], first: 0}
+    ivec_append(&w, 3)
+    v: mutable Vector[i64] = Vector[i64]{items: [], first: 0}
+    vec_append(&v, 3)
+    if v.items.count + w.items.count != 2:
+        panic("bad")
+`
+	buildAndRunSoATest(t, "TestGenericStructLiteralLocalForwardedToGrower", src, "bt")
+}

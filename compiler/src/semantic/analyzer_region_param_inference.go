@@ -696,6 +696,14 @@ func regionlessRefStruct(typ ast.TypeExpr) (func(region string), bool) {
 			}
 			r := ref
 			return func(region string) { r.Region = region }, true
+		case *ast.GenericType:
+			// A by-ref generic struct instantiation (`v: mutable Vector[T]&`) whose container
+			// field is grown needs the same caller-threaded region as a concrete struct ref.
+			if ref == nil || t.Region != "" {
+				return nil, false
+			}
+			r := ref
+			return func(region string) { r.Region = region }, true
 		default:
 			return nil, false
 		}

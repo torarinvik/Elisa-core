@@ -22,6 +22,12 @@ func peelToStructType(t Type) (*StructType, bool) {
 			t = rt.Elem
 			continue
 		}
+		// A generic struct instantiation (`Vector[i64]`) has the generic struct's field shape:
+		// substituting type arguments never adds or removes a region-less container field.
+		if gi, ok := t.(*GenericInstanceType); ok && gi != nil {
+			t = gi.Base
+			continue
+		}
 		st, ok := t.(*StructType)
 		return st, ok
 	}
@@ -282,7 +288,7 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 	if !ok || pr == nil || pr.Region == "" || !regionParams[pr.Region] {
 		return arg, argType
 	}
-	if _, ok := pr.Elem.(*StructType); !ok {
+	if _, ok := peelToStructType(pr.Elem); !ok {
 		return arg, argType
 	}
 	region := a.structLocalArgRegion(arg)
