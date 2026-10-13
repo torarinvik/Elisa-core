@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"maps"
 	"reflect"
 
 	"elisacore/src/ast"
@@ -16,10 +17,11 @@ import (
 const summaryConvergenceRounds = 4
 
 type summarySnapshot struct {
-	hasReturn bool
-	ret       regionRefState
-	analyzed  bool
-	fresh     bool
+	hasReturn   bool
+	ret         regionRefState
+	analyzed    bool
+	fresh       bool
+	freshParams map[int]bool
 }
 
 // funcIsCyclic reports whether fn lies on a call cycle (by callee name, over every overload). Call
@@ -124,11 +126,11 @@ func (a *Analyzer) assumeSummaryForActive(decl *ast.FuncDecl) {
 
 func (a *Analyzer) snapshotSummary(decl *ast.FuncDecl) summarySnapshot {
 	ret, has := a.returnElementSummaries[decl]
-	return summarySnapshot{hasReturn: has, ret: ret, analyzed: a.ambientFillAnalyzed[decl], fresh: a.ambientFillFresh[decl]}
+	return summarySnapshot{hasReturn: has, ret: ret, analyzed: a.ambientFillAnalyzed[decl], fresh: a.ambientFillFresh[decl], freshParams: maps.Clone(a.ambientFillFreshParams[decl])}
 }
 
 func (s summarySnapshot) equal(other summarySnapshot) bool {
-	return s.hasReturn == other.hasReturn && s.analyzed == other.analyzed && s.fresh == other.fresh &&
+	return s.hasReturn == other.hasReturn && s.analyzed == other.analyzed && s.fresh == other.fresh && maps.Equal(s.freshParams, other.freshParams) &&
 		(!s.hasReturn || reflect.DeepEqual(s.ret, other.ret))
 }
 
@@ -150,6 +152,7 @@ func (a *Analyzer) convergeSummaries(root *ast.FuncDecl) {
 			// stays in place as the assumption until the member's new one replaces it.
 			a.ambientFillAnalyzed[member] = false
 			delete(a.ambientFillFresh, member)
+			delete(a.ambientFillFreshParams, member)
 		}
 		a.analyzeQuietly(root)
 		converged = true
@@ -170,6 +173,7 @@ func (a *Analyzer) convergeSummaries(root *ast.FuncDecl) {
 			delete(a.returnElementSummaries, member)
 			delete(a.ambientFillAnalyzed, member)
 			delete(a.ambientFillFresh, member)
+			delete(a.ambientFillFreshParams, member)
 		}
 	}
 }

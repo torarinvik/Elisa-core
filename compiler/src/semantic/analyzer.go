@@ -421,6 +421,10 @@ type Analyzer struct {
 	// was forwarded to a callee not known to fill it only from its arguments).
 	ambientFillAnalyzed map[*ast.FuncDecl]bool
 	ambientFillFresh    map[*ast.FuncDecl]bool
+	// ambientFillFreshParams narrows freshness to the parameters (by index) that a function
+	// forwarded to a callee not known to fill them only from its arguments: only those
+	// parameter containers may receive caller-arena data through that call.
+	ambientFillFreshParams map[*ast.FuncDecl]map[int]bool
 	// fillMayAdoptSet is the lazily built syntactic over-approximation of ambientFillFresh
 	// (see fillMayAdopt).
 	fillMayAdoptSet map[*ast.FuncDecl]bool

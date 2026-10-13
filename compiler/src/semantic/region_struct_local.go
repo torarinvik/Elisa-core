@@ -248,8 +248,20 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 		// receiving a CONTAINER FIELD of a recorded struct local (`last.names`): that field's
 		// backing lives in the local's recorded region, exactly as for `&local` to a struct param.
 		if pc := containerRegion(pr.Elem); pc != "" && regionParams[pc] {
-			if field, isField := stripParenExpr(stripAddrAndParens(arg)).(*ast.FieldExpr); isField && field != nil {
-				if region := a.structLocalArgRegion(field); region != "" && a.structLocalRegionIsLive(region) {
+			place := stripParenExpr(stripAddrAndParens(arg))
+			region := ""
+			switch p := place.(type) {
+			case *ast.FieldExpr:
+				region = a.structLocalArgRegion(p)
+			case *ast.IndexExpr:
+				// `&rows[i]` of a container of containers: the element container's backing
+				// grows in the outer container's region, exactly as `rows[i].push(v)` does.
+				if p.Index2 == nil {
+					region = containerRegion(stripRefForBounds(a.exprTypes[p.Object]))
+				}
+			}
+			{
+				if region != "" && a.structLocalRegionIsLive(region) {
 					switch at := argType.(type) {
 					case *RefType:
 						if stamped, applied := stampContainerRegion(at.Elem, region); applied {

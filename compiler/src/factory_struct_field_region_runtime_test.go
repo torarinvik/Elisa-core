@@ -211,3 +211,76 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "element_copy_field_grower", src, "bt")
 }
+
+// An element of a local darray[darray[T]] (&adj[u]) forwarded to a container-growing helper grows in the outer container's region.
+func TestNestedDarrayElementForwardedToGrower(t *testing.T) {
+	src := `
+def f(row: mutable darray[i32]&, v: i32) -> void:
+    can Memory.Allocate, Abort.Panic:
+        row.push(v)
+
+def direct() -> i32:
+    can Memory.Allocate, Abort.Panic:
+        adj: mutable darray[darray[i32]] = []
+        adj.push([])
+        adj[0].push(1)
+        return adj[0][0]
+
+def via_helper() -> i32:
+    can Memory.Allocate, Abort.Panic:
+        adj: mutable darray[darray[i32]] = []
+        adj.push([])
+        f(&adj[0], 5)
+        return adj[0][0]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if direct() != 1 or via_helper() != 5:
+            panic("nested darray growth wrong")
+`
+	buildAndRunSoATest(t, "TestNestedDarrayElementForwardedToGrower", src, "bt")
+}
+
+// A field of a local struct (&t.text, &board.free_rows) forwarded to a container-growing helper grows in the struct's region.
+func TestLocalStructFieldForwardedToGrower(t *testing.T) {
+	src := `
+struct Template:
+    text: mutable darray[u8] = []
+    count: mutable usize = 0
+
+struct StrMap:
+    slots: mutable darray[sview] = []
+
+struct Board:
+    free_rows: mutable darray[bool] = []
+
+def la_append_text(out: mutable darray[u8]&, s: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        for i in 0..<s.len |out, s|:
+            out.push(s[i])
+
+def q2() -> usize:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable Template = Template{text: [], count: 0}
+        la_append_text(&t.text, "x")
+        return t.text.count
+
+def setn(arr: mutable darray[bool]&, n: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        arr.resize(n)
+
+def q4() -> usize:
+    can Memory.Allocate, Abort.Panic:
+        board: mutable Board = Board{}
+        setn(&board.free_rows, 8)
+        return board.free_rows.count
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if q2() != 1 or q4() != 8:
+            panic("field container growth wrong")
+`
+	buildAndRunSoATest(t, "TestLocalStructFieldForwardedToGrower", src, "bt")
+}

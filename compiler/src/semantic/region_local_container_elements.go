@@ -967,7 +967,7 @@ func (a *Analyzer) callArgFillsWritableParam(call *ast.CallExpr, index int) bool
 	}
 	a.ensureProvisionalSummaries(decl)
 	if a.ambientFillAnalyzed[decl] {
-		if a.ambientFillFresh[decl] {
+		if a.ambientFillFresh[decl] || a.ambientFillFreshParams[decl][index] {
 			return false
 		}
 	} else if a.fillMayAdopt(decl) {
@@ -1096,6 +1096,21 @@ func (a *Analyzer) noteAmbientFillFresh() {
 	a.ambientFillFresh[a.currentFuncDecl] = true
 }
 
+// noteAmbientFillFreshParam records that one parameter container of the current function may
+// receive data allocated in a caller's arena (see ambientFillFreshParams).
+func (a *Analyzer) noteAmbientFillFreshParam(index int) {
+	if a.currentFuncDecl == nil || a.summariesOff() {
+		return
+	}
+	if a.ambientFillFreshParams == nil {
+		a.ambientFillFreshParams = map[*ast.FuncDecl]map[int]bool{}
+	}
+	if a.ambientFillFreshParams[a.currentFuncDecl] == nil {
+		a.ambientFillFreshParams[a.currentFuncDecl] = map[int]bool{}
+	}
+	a.ambientFillFreshParams[a.currentFuncDecl][index] = true
+}
+
 // noteAmbientCallFill marks the current function fresh at a call that may allocate in a
 // caller's arena: in a void grower, a region-polymorphic callee (its threaded region is the
 // adopted one); in any function, a parameter (or a reference that may alias one) passed to a
@@ -1140,7 +1155,19 @@ func (a *Analyzer) noteAmbientCallFill(call *ast.CallExpr) {
 		if !a.returnBorrowWritableParam(fnType.Params[index]) {
 			continue
 		}
-		if len(call.ArgNames) != 0 || call.HasArgForward || index >= len(call.Args) || call.Args[index] != arg || !a.callArgFillsWritableParam(call, index) {
+		if len(call.ArgNames) != 0 || call.HasArgForward || index >= len(call.Args) || call.Args[index] != arg {
+			a.noteAmbientFillFresh()
+			return
+		}
+		if !a.callArgFillsWritableParam(call, index) {
+			// The callee may put caller-arena data into THIS writable argument (and its other
+			// writable arguments). When it is one of our own parameters, only that parameter
+			// container becomes fresh; a reference local that may alias one keeps the
+			// whole-function verdict.
+			if sym.Kind == SymbolParam && sym.ParamIndex >= 0 {
+				a.noteAmbientFillFreshParam(sym.ParamIndex)
+				continue
+			}
 			a.noteAmbientFillFresh()
 			return
 		}
