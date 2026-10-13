@@ -289,10 +289,11 @@ def read_sgpr(idx: GcnScalarRegisterIndex, sgprs: array[u32, 128]&) -> u32:
 	}
 }
 
-// IR-level inbounds GEP negative: an unproven index (loop bound unrelated to xs.count)
-// must NOT emit `getelementptr inbounds` — claiming inbounds without a proof is unsound.
-func TestUnprovenIndexDoesNotEmitInboundsGEP(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "unproven_no_inbounds_gep.elisa", `def sum(xs: darray[i32]&, n: usize) -> i32:
+// IR-level inbounds GEP after a dominating guard: an unproven index (loop bound unrelated to
+// xs.count) gets the trapping watchdog, and the element GEP is only reached on the wd.ok edge
+// where 0 <= i < count holds -- so it carries `inbounds` exactly like a proven index.
+func TestGuardedIndexEmitsInboundsGEPAfterWatchdog(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "guarded_inbounds_gep.elisa", `def sum(xs: darray[i32]&, n: usize) -> i32:
     total: mutable i32 = 0
     for i in 0..<n:
         total <- total + xs[i]
@@ -302,14 +303,43 @@ func TestUnprovenIndexDoesNotEmitInboundsGEP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	// Verify the element GEP (idx.ptr line) is plain getelementptr, not inbounds.
+	if !strings.Contains(output, "wd.in_bounds") || !strings.Contains(output, "wd.trap") && !strings.Contains(output, "llvm.trap") {
+		t.Fatalf("unproven index must keep the trapping watchdog, got:\n%s", output)
+	}
+	found := false
 	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "idx.ptr") && strings.Contains(line, "inbounds") {
-			t.Fatalf("unproven index must NOT emit getelementptr inbounds, got line:\n%s\nfull IR:\n%s", line, output)
+		if strings.Contains(line, "%idx.ptr") && strings.Contains(line, "getelementptr") {
+			if !strings.Contains(line, "inbounds") {
+				t.Fatalf("element GEP dominated by the watchdog must be inbounds, got line:\n%s\nfull IR:\n%s", line, output)
+			}
+			found = true
 		}
 	}
-	// Also confirm the watchdog IS present (regression guard: unproven → guarded).
-	if !strings.Contains(output, "wd.in_bounds") {
-		t.Fatalf("unproven index must keep debug watchdog, got:\n%s", output)
+	if !found {
+		t.Fatalf("expected an element GEP, got:\n%s", output)
+	}
+}
+
+// IR-level inbounds GEP negative: raw pointer indexing has no count, so neither a proof nor a
+// dominating guard bounds the index -- claiming inbounds there would be unsound.
+func TestUnguaranteedIndexDoesNotEmitInboundsGEP(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "unproven_no_inbounds_gep.elisa", `def get(p: u8&, i: usize) -> u8:
+    return p[i]
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	found := false
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "%idx.ptr") && strings.Contains(line, "getelementptr") {
+			found = true
+			if strings.Contains(line, "inbounds") {
+				t.Fatalf("unguaranteed index must NOT emit getelementptr inbounds, got line:\n%s\nfull IR:\n%s", line, output)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected an element GEP, got:\n%s", output)
 	}
 }
