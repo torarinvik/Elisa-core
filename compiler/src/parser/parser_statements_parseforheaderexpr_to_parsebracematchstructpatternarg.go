@@ -572,6 +572,22 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 					return true
 				}
 			}
+		case *ast.StaticIfStmt:
+			// `static if`/`static else` branches are selected after parsing, so a container
+			// built in any branch needs the function-body region exactly like a runtime `if`.
+			// Over-wrapping a branch that is later discarded is a harmless lazy no-op region.
+			if functionBodyNeedsAutoRegion(s.Then) || functionBodyNeedsAutoRegion(s.Else) {
+				return true
+			}
+			for _, elif := range s.Elifs {
+				if functionBodyNeedsAutoRegion(elif.Body) {
+					return true
+				}
+			}
+		case *ast.StaticBlockStmt:
+			if functionBodyNeedsAutoRegion(s.Body) {
+				return true
+			}
 		case *ast.VarDeclStmt:
 			// Only an allocating literal initializer (`= []`, `= [a, b]`, `= {}`, a
 			// comprehension) actually allocates and needs a region. A container local
@@ -638,6 +654,13 @@ func unwrapParenExprAST(e ast.Expr) ast.Expr {
 		}
 		e = paren.Inner
 	}
+}
+
+// constructedFieldGrowthMethods are the container methods that may allocate backing storage
+// for a struct-local field receiver (see bodyForwardsConstructedStructLocal).
+var constructedFieldGrowthMethods = map[string]bool{
+	"push": true, "extend": true, "insert": true, "resize": true, "reserve": true,
+	"append": true, "put": true, "add": true,
 }
 
 func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
@@ -757,6 +780,34 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 				if call, ok := expr.(*ast.CallExpr); ok && call != nil && fieldArgForwardsConstructed(call.Args) {
 					found = true
 					return
+				}
+				// Direct growth of a constructed local's container FIELD (`x.items.push(v)`,
+				// `x.a.b.reserve(n)`, `x.rows[i].push(v)`): the field's default `[]` backing is
+				// region-less and needs the same ambient region as a bare container local.
+				// Without it the backend reports "has no region to grow into" for an ordinary
+				// struct-builder function unless some unrelated bare local happens to allocate.
+				if call, ok := expr.(*ast.CallExpr); ok && call != nil {
+					if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && constructedFieldGrowthMethods[growth.Field] {
+						obj := unwrapParenExprAST(growth.Object)
+						isPath := false
+						for {
+							switch o := obj.(type) {
+							case *ast.FieldExpr:
+								isPath = true
+								obj = unwrapParenExprAST(o.Object)
+								continue
+							case *ast.IndexExpr:
+								isPath = true
+								obj = unwrapParenExprAST(o.Object)
+								continue
+							}
+							break
+						}
+						if id, ok := obj.(*ast.Ident); ok && id != nil && isPath && constructed[id.Name] {
+							found = true
+							return
+						}
+					}
 				}
 			}
 			scan(v.Elem())

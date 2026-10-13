@@ -95,6 +95,7 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 				// Over-triggering is sound: a handle built in the caller ignores the threaded region.
 				isPoly = (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) ||
 					functionBuildsAndReturnsLocalContainer(fn) ||
+					functionBuildsAndReturnsLocalStruct(fn, fnType) ||
 					(!funcHasArenaParam(fn) && a.functionWritesHandleToScalarOutParam(fn))
 			})
 			if isPoly {
@@ -926,6 +927,116 @@ func functionBuildsAndReturnsLocalContainer(fn *ast.FuncDecl) bool {
 				walk(s.Body)
 			case *ast.InStoreStmt:
 				walk(s.Body)
+			}
+		}
+	}
+	walk(fn.Body)
+	return found
+}
+
+// functionBuildsAndReturnsLocalStruct is the aggregate analogue of
+// functionBuildsAndReturnsLocalContainer: a function whose body the parser wrapped in a synthesized
+// `__auto_*` region and which RETURNS a local constructed by a struct literal (`s: T = T{}`, then
+// `s.items.push(..)`, `return s`). The literal's region-less container fields grow into that auto
+// region, so without adoption the returned struct carries backings freed at function exit — a
+// silent use-after-free (the header copy survives, the elements do not). Classifying it
+// region-polymorphic makes the auto region adopt the caller's arena, exactly as for a returned
+// container local. Only aggregates that can carry region storage qualify; a false match only
+// threads an unused arena.
+func functionBuildsAndReturnsLocalStruct(fn *ast.FuncDecl, fnType *FuncType) bool {
+	if fn == nil || fnType == nil || funcHasArenaParam(fn) || !typeCarriesRegionStorage(fnType.Return) {
+		return false
+	}
+	if _, isStruct := fnType.Return.(*StructType); !isStruct {
+		return false
+	}
+	hasAuto := false
+	constructed := map[string]bool{}
+	var collect func(stmts []ast.Stmt, inAuto bool)
+	collect = func(stmts []ast.Stmt, inAuto bool) {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.VarDeclStmt:
+				if !inAuto {
+					continue
+				}
+				switch v := unwrapParenForRegionPoly(s.Value).(type) {
+				case *ast.StructLitExpr:
+					constructed[s.Name] = true
+				case *ast.Ident:
+					if constructed[v.Name] {
+						constructed[s.Name] = true
+					}
+				}
+			case *ast.IfStmt:
+				collect(s.Then, inAuto)
+				for _, elif := range s.Elifs {
+					collect(elif.Body, inAuto)
+				}
+				collect(s.Else, inAuto)
+			case *ast.WhileStmt:
+				collect(s.Body, inAuto)
+			case *ast.ForStmt:
+				collect(s.Body, inAuto)
+			case *ast.IterForStmt:
+				collect(s.Body, inAuto)
+			case *ast.ScopeStmt:
+				collect(s.Body, inAuto)
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					collect(arm.Body, inAuto)
+				}
+			case *ast.CanStmt:
+				collect(s.Body, inAuto)
+			case *ast.RegionStmt:
+				// Only a synthesized auto region threads+adopts; an explicit `region NAME:` does not.
+				if isSynthesizedAutoRegion(s.Name) {
+					hasAuto = true
+					collect(s.Body, true)
+				}
+			}
+		}
+	}
+	collect(fn.Body, false)
+	if !hasAuto || len(constructed) == 0 {
+		return false
+	}
+	found := false
+	var walk func(stmts []ast.Stmt)
+	walk = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			if found {
+				return
+			}
+			switch s := stmt.(type) {
+			case *ast.ReturnStmt:
+				if id, ok := unwrapParenForRegionPoly(s.Value).(*ast.Ident); ok && constructed[id.Name] {
+					found = true
+				}
+			case *ast.IfStmt:
+				walk(s.Then)
+				for _, elif := range s.Elifs {
+					walk(elif.Body)
+				}
+				walk(s.Else)
+			case *ast.WhileStmt:
+				walk(s.Body)
+			case *ast.ForStmt:
+				walk(s.Body)
+			case *ast.IterForStmt:
+				walk(s.Body)
+			case *ast.ScopeStmt:
+				walk(s.Body)
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					walk(arm.Body)
+				}
+			case *ast.CanStmt:
+				walk(s.Body)
+			case *ast.RegionStmt:
+				if isSynthesizedAutoRegion(s.Name) {
+					walk(s.Body)
+				}
 			}
 		}
 	}
