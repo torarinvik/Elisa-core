@@ -98,7 +98,27 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	key := storeScanKey{decl, other, index}
 	seen[key] = true
 	params, header, content, targets := storeScanTaint(decl, other, decl.Params[index].Name)
-	valueMode := func(value ast.Expr) storeMode {
+	var valueMode func(value ast.Expr) storeMode
+	valueMode = func(value ast.Expr) storeMode {
+		inner := storeScanUnwrap(value)
+		// A value whose (already analyzed) type cannot hold region storage carries none.
+		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && !typeCarriesRegionStorage(t) && !a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) {
+			return storeNone
+		}
+		// A struct literal stores each field value: judge them one by one.
+		if lit, isLit := inner.(*ast.StructLitExpr); isLit && lit != nil {
+			mode := storeNone
+			for _, arg := range lit.Args {
+				mode = maxStoreMode(mode, valueMode(arg))
+			}
+			for _, spread := range lit.Spreads {
+				mode = maxStoreMode(mode, valueMode(spread))
+			}
+			if lit.CopyBase != nil {
+				mode = maxStoreMode(mode, valueMode(lit.CopyBase))
+			}
+			return mode
+		}
 		if storeScanMentionsHeader(value, header) {
 			return storeHeader
 		}
@@ -128,7 +148,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			// `table <- f(table, scope)`: the stored value is the call's RESULT. The call's own
 			// stores are scanned when the walk reaches it; its result carries a tainted argument
 			// only when the callee's summary connects that argument to its return.
-			if call, isCall := stripParenExpr(n.Value).(*ast.CallExpr); isCall && call != nil {
+			if call, isCall := storeScanUnwrap(n.Value).(*ast.CallExpr); isCall && call != nil {
 				if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
 					if a.declReturnsVoid(callee) {
 						// The lmut manifest `t <- f(.., t, ..)` of a void callee: the result IS
@@ -665,7 +685,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		if !ok || ret == nil || ret.Value == nil || mode == storeHeader {
 			return
 		}
-		value := stripParenExpr(ret.Value)
+		value := storeScanUnwrap(ret.Value)
 		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
 			if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
 				for i, arg := range returnBorrowCallArgs(call) {
@@ -699,6 +719,29 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	}
 	a.storeScanCycleHit = saved || hit
 	return mode
+}
+
+// storeScanUnwrap strips value-preserving wrappers (parens, an inline `can ...` grant, `move`)
+// so a wrapped call is still judged as a call.
+func storeScanUnwrap(expr ast.Expr) ast.Expr {
+	for {
+		switch e := expr.(type) {
+		case *ast.ParenExpr:
+			expr = e.Inner
+		case *ast.CanExpr:
+			if e == nil {
+				return expr
+			}
+			expr = e.Expr
+		case *ast.MoveExpr:
+			if e == nil {
+				return expr
+			}
+			expr = e.Operand
+		default:
+			return expr
+		}
+	}
 }
 
 // declReturnsVoid reports whether a declared function's resolved return type is void.
