@@ -33,7 +33,6 @@ def concat2(lhs: cstr?, rhs: cstr?) -> cstr can[Global.Read, Global.Write]:
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
         out[result_len] <- 0
-        register_perm_string_len(out, result_len) can Global{Read,Write}
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
@@ -145,7 +144,6 @@ def string_slice(value: cstr?, start: i64, end: i64) -> cstr can[Global.Read, Gl
         out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&] can Global{Read,Write}
         memcpy(out.cast[mutable void&], (src.cast[u8&] + lo).cast[void&], out_len)
         out[out_len] <- 0
-        register_perm_string_len(out, out_len) can Global{Read,Write}
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
@@ -283,7 +281,6 @@ def string_view_copy(view: sview) -> cstr can[Global.Read, Global.Write]:
         out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&] can Global{Read,Write}
         memcpy(out.cast[mutable void&], view.data.cast[void&], view_len)
         out[view_len] <- 0
-        register_perm_string_len(out.cast[u8&], view_len) can Global{Read,Write}
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 

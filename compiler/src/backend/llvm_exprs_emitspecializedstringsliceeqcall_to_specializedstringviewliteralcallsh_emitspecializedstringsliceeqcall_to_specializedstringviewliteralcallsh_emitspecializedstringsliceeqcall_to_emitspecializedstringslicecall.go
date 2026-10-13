@@ -386,9 +386,7 @@ func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, v
 	i64Type := s.g.result.NamedTypes["i64"]
 	usizeType := s.g.result.NamedTypes["usize"]
 	voidType := s.g.result.NamedTypes["void"]
-	u8Type := s.g.result.NamedTypes["u8"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	nullableU8RefType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	heapVoidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
 	allocType := &semantic.FuncType{Name: "alloc_perm", Params: []semantic.Type{i64Type}, Return: heapVoidRefType}
 	allocCallee, err := s.g.ensureFunctionDeclared("alloc_perm", allocType)
@@ -426,16 +424,6 @@ func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, v
 	zeroByte := C.LLVMConstInt(i8LLVMType, 0, 0)
 	C.LLVMBuildStore(s.builder, zeroByte, bytePtr)
 
-	registerType := &semantic.FuncType{Name: "register_perm_string_len", Params: []semantic.Type{nullableU8RefType, usizeType}, Return: voidType}
-	registerCallee, err := s.g.ensureFunctionDeclared("register_perm_string_len", registerType)
-	if err != nil {
-		return nil, err
-	}
-	registerLLVMType, err := s.g.lowerFunctionType(registerType)
-	if err != nil {
-		return nil, err
-	}
-	_ = s.buildCall(registerLLVMType, registerCallee, []C.LLVMValueRef{allocPtr, lenUsize}, "")
 	return allocPtr, nil
 }
 func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

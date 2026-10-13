@@ -28,7 +28,6 @@ extern stderr: void&
 # ------------------------------------------------------------
 
 const CTX_SMALL_STRING_CACHE_BUCKETS: usize = 1024
-const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
 const CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT: bool = false
 
 # ------------------------------------------------------------
@@ -49,12 +48,6 @@ struct SmallStringCacheEntry:
 	len: mutable usize
 	text: mutable tail u8
 
-@intrusive
-struct StringLenCacheEntry:
-	next: mutable heap StringLenCacheEntry&?
-	ptr: mutable u8&
-	len: mutable usize
-
 struct StringView:
 	# Every view, including an empty one, has immutable valid backing and extent.
 	data: u8&
@@ -71,7 +64,6 @@ struct ProgressBudget:
 # ------------------------------------------------------------
 
 global mutable small_string_cache: heap SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
-global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
 
 # ------------------------------------------------------------
 # Cooperative progress budget
@@ -157,62 +149,17 @@ def reset_scratch():
 	arena_reset(&scratch_arena) can Global{Read,Write}
 
 # ------------------------------------------------------------
-# String length cache (pointer-keyed hash table)
+# String length registration (retired)
 # ------------------------------------------------------------
 
-def string_len_bucket(ptr: u8&) -> usize:
-	bits: mutable uintptr = ptr.uintptr()
-	bits ^= (bits >> 33)
-	bits *= 0xff51afd7ed558ccd.uintptr()
-	bits ^= (bits >> 33)
-	return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
-
+# The old pointer-keyed length cache was write-only: runtime_strlen stopped
+# consulting it because arena addresses are reused across lifetimes, so a
+# lookup could return a stale length. Every string copy still paid a bucket
+# walk plus a never-freed perm entry (O(n) chains, unbounded growth). This
+# shim is kept only so previously compiled objects that call it still link.
 def register_perm_string_len(ptr: u8&?, len: usize):
-	can Global{Read,Write}:
-		can Memory.Allocate, Abort.Panic:
-			return if ptr == null or len == 0
-
-			bucket: usize = string_len_bucket(ptr)
-
-			entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
-			trusted Unsafe.AssumeProgress:
-				while entry != null:
-					if entry.ptr.cast[uintptr] == ptr.cast[uintptr]:
-						entry.len <- len
-						return
-					entry <- entry.next
-
-			new_entry: mutable heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
-			new_entry.next <- string_len_cache[bucket]
-			# ptr is the caller's string pointer cached in a program-long table; callers
-			# pass stable (static/interned) string data, a contract the type system can't
-			# see on a bare `u8&`. The trusted runtime takes responsibility for it.
-			trusted Unsafe.StaleRef:
-				new_entry.ptr <- ptr
-			new_entry.len <- len
-			string_len_cache[bucket] <- new_entry
-
-def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
-	0 return if ptr == null
-	bucket: usize = string_len_bucket(ptr)
-	can Global{Read,Write}:
-		prev: mutable heap StringLenCacheEntry&? = null
-		entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
-
-		trusted Unsafe.AssumeProgress:
-			while entry != null:
-				if entry.ptr.cast[uintptr] == ptr.cast[uintptr]:
-					# Move-to-front heuristic
-					if prev != null:
-						prev.next <- entry.next
-						entry.next <- string_len_cache[bucket]
-						string_len_cache[bucket] <- entry
-					len_out <- entry.len
-					return 1
-				prev <- entry
-				entry <- entry.next
-
-		return 0
+	_ = ptr
+	_ = len
 
 # ------------------------------------------------------------
 # Runtime strlen (cache-aware)
@@ -248,7 +195,6 @@ def intern_small_string(src: u8&, len: usize) -> heap u8& can[Global.Read, Globa
 		out: mutable heap u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&] can Global{Read,Write}
 		memcpy(out.cast[mutable void&], src.cast[void&], len) if len > 0
 		out[len] <- 0
-		register_perm_string_len(out.cast[u8&], len) can Global{Read,Write}
 		return out
 
 # ------------------------------------------------------------
@@ -271,8 +217,6 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> cstr:
 
 			out: mutable heap u8& = (arena_alloc(arena, allocation_bytes) can Global{Read,Write}).cast[heap u8&]
 			snprintf(out.cast[mutable u8&?], allocation_bytes, "%lld", value)
-
-			register_perm_string_len(out.cast[u8&], string_len) can Global{Read,Write} if arena == &perm_arena
 
 			trusted Unsafe.PointerCast:
 				return out.cast[cstr]
