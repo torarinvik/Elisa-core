@@ -525,7 +525,7 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 		// putting it into a dict whose storage outlives the function dangles once that region
 		// frees (same hole as assignment/push). Gate on the receiver dict outliving the function.
 		if a.lvalueStorageOutlivesFunction(fieldExpr.Object) {
-			a.checkStoredRegionContainerEscape(expr.Args[1], valueType)
+			a.checkStoredRegionContainerEscapeInto(expr.Args[1], valueType, containerRegion(dictType))
 		}
 		a.consumeAffineValueExpr(expr.Args[1], dictType.Value, "move into dict "+method)
 	}

@@ -186,10 +186,14 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 	// container — an escape the handle-level checker does not yet catch. Restricting to a single
 	// container param removes that second target entirely (and covers every parser grower, all single
 	// `out`). Other escape vectors (explicit inner regions, returns) remain covered by existing checks.
+	// Only a MUTABLE container reference can receive a stored value; a read-only `darray[T]&`
+	// is never a second target, so it does not count against the single-target restriction.
 	containerParamCount := 0
 	for i := range fn.Params {
 		if _, ok := regionlessRefContainer(fn.Params[i].Type); ok {
-			containerParamCount++
+			if _, mutable := fn.Params[i].Type.(*ast.MutableType); mutable {
+				containerParamCount++
+			}
 		}
 	}
 	for i := range fn.Params {
@@ -1024,7 +1028,23 @@ func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name str
 	if fn == nil {
 		return false
 	}
-	argIsRegionValued := a.regionValueTester(fn, funcByName, funcScopes)
+	baseRegionValued := a.regionValueTester(fn, funcByName, funcScopes)
+	// A body local built from a struct literal (`path: Path = Path{}` whose container fields the
+	// body then grows) is region-valued too: inserting it hands its fresh backings to the target.
+	structLitLocals := map[string]bool{}
+	walkStoreScanNodes(fn.Body, func(node any) {
+		if vd, ok := node.(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
+			if _, isLit := stripParenExpr(vd.Value).(*ast.StructLitExpr); isLit {
+				structLitLocals[vd.Name] = true
+			}
+		}
+	})
+	argIsRegionValued := func(arg ast.Expr) bool {
+		if id, ok := stripParenExpr(arg).(*ast.Ident); ok && id != nil && structLitLocals[id.Name] {
+			return true
+		}
+		return baseRegionValued(arg)
+	}
 
 	// Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
 	found := false

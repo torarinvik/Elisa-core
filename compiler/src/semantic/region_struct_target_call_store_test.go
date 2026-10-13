@@ -205,6 +205,23 @@ def fill(h: mutable Holder&) -> void:
 	}
 }
 
+// With two MUTABLE container params the ambient region cannot be bound to a single target, so
+// pushing a grown struct local stays rejected (it would dangle in the callee's region).
+func TestVoidGrowerStructLocalTwoMutableTargetsRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "void_grower_two_targets.elisa", `struct Path:
+    names: mutable darray[i64] = []
+
+def capture(paths: mutable darray[Path]&, other: mutable darray[Path]&, src: darray[i64]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        path: mutable Path = Path{}
+        path.names.extend(src)
+        paths.push(path)
+`)
+	if joined := strings.Join(result.Errors(), "\n"); !strings.Contains(joined, "escapes") {
+		t.Fatalf("pushing a grown struct local with two mutable targets must be rejected, got:\n%s", joined)
+	}
+}
+
 // Element-mode stores: copying scalar elements out of a local darray into the target retains no
 // local storage (accepted); copying an element that is itself a local-region container header
 // (`h.rows.push(rows[0])` with `rows: darray[darray[i64]]` built locally) does (rejected).

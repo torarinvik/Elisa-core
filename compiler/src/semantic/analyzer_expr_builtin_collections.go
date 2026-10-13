@@ -427,7 +427,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// once that region is freed (same hole as the assignment path). Mirror the assignment
 		// gate: only when the receiver container outlives the function.
 		if a.lvalueStorageOutlivesFunction(fieldExpr.Object) {
-			a.checkStoredRegionContainerEscape(expr.Args[0], argType)
+			a.checkStoredRegionContainerEscapeInto(expr.Args[0], argType, containerRegion(darrayType))
 		}
 		a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
 	}

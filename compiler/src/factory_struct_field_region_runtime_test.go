@@ -602,3 +602,92 @@ def bt() -> void can[Abort.Panic, Memory.Allocate, Memory.Release]:
 `
 	buildAndRunSoATest(t, "struct_local_into_ref_param_field", src, "bt")
 }
+
+// SOUNDNESS (silent UAF before, also present in stage1's bam_capture_loop_exit_path): a void
+// grower that builds a struct-literal local, grows its container field, and pushes it into its
+// only mutable container param left the pushed fields in the callee's auto region. The
+// ambient region is now bound to the target container's region (a read-only container param
+// does not count as a second target), so the local is built in the caller's arena.
+func TestVoidGrowerPushesGrownStructLocalSurvivesCall(t *testing.T) {
+	src := `
+struct Path:
+    names: mutable darray[i64] = []
+
+def capture(paths: mutable darray[Path]&, src: darray[i64]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        path: mutable Path = Path{}
+        path.names.extend(src)
+        paths.push(path)
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable i64 = 0
+        for k in 0..<200 |t|:
+            junk: mutable darray[i64] = []
+            for j in 0..<64 |junk|:
+                junk.push(-1)
+            t <- t + junk[1]
+        return t
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        src: mutable darray[i64] = []
+        for i in 0..<50 |src|:
+            src.push(i.i64())
+        paths: mutable darray[Path] = []
+        capture(paths, src)
+        capture(paths, src)
+        c: i64 = churn()
+        total: mutable i64 = 0
+        for p in paths |total|:
+            for x in p.names |total|:
+                total <- total + x
+        if total != 2450 or c != -200:
+            panic("void grower struct local UAF")
+`
+	buildAndRunSoATest(t, "void_grower_struct_local_push", src, "bt")
+}
+
+// A single-container void grower pushing a region-poly result (`dst.push(make_item(0))`): the
+// ambient region is bound to dst's region, so make_item receives the caller's arena and the
+// pushed backing survives the call and heap churn.
+func TestVoidGrowerRegionPolyResultPushRuns(t *testing.T) {
+	src := `
+def make_item(n: i64) -> darray[i64]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable darray[i64] = []
+        for i in 0..<50 |out|:
+            out.push(n + i.i64())
+        return out
+
+def fill(dst: mutable darray[darray[i64]]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        dst.push(make_item(0))
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        t: mutable i64 = 0
+        for k in 0..<200 |t|:
+            junk: mutable darray[i64] = []
+            for j in 0..<64 |junk|:
+                junk.push(-1)
+            t <- t + junk[1]
+        return t
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        rows: mutable darray[darray[i64]] = []
+        fill(rows)
+        fill(rows)
+        c: i64 = churn()
+        total: mutable i64 = 0
+        for r in rows |total|:
+            for x in r |total|:
+                total <- total + x
+        if total != 2450 or c != -200:
+            panic("region-poly result push UAF")
+`
+	buildAndRunSoATest(t, "void_grower_region_poly_push", src, "bt")
+}
