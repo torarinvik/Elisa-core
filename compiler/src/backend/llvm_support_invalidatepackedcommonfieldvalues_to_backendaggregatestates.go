@@ -264,12 +264,26 @@ func (s *functionState) ensurePrintfFunction() (C.LLVMValueRef, *semantic.FuncTy
 	intType := s.g.result.NamedTypes["int"]
 	u8RefType := &semantic.RefType{Elem: s.g.result.NamedTypes["u8"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	_ = voidType
-	fnType := &semantic.FuncType{Name: "printf", Params: []semantic.Type{u8RefType}, Return: intType, Variadic: true}
-	value, err := s.g.ensureFunctionDeclared("printf", fnType)
-	if err != nil {
-		return nil, nil, err
+	// Programs declare printf as C does (`extern printf(format: cstr, ...) -> i32`) or as
+	// `-> int`. The panic path used to insist on `int` (i64), so an `-> i32` program that could
+	// panic failed to compile with "conflicting LLVM function declaration for printf". Reuse
+	// whichever width the module already declared (the panic path ignores the result). A
+	// fresh declaration stays `int`, which is also what stage1's panic path declares.
+	var firstErr error
+	for _, ret := range []semantic.Type{intType, s.g.result.NamedTypes["i32"]} {
+		if ret == nil {
+			continue
+		}
+		fnType := &semantic.FuncType{Name: "printf", Params: []semantic.Type{u8RefType}, Return: ret, Variadic: true}
+		value, err := s.g.ensureFunctionDeclared("printf", fnType)
+		if err == nil {
+			return value, fnType, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
-	return value, fnType, nil
+	return nil, nil, firstErr
 }
 func (s *functionState) ensureBacktraceFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
 	intType := s.g.result.NamedTypes["int"]

@@ -229,3 +229,25 @@ func TestLLCCodegenLevelFollowsOptimizationLevel(t *testing.T) {
 		t.Fatalf("llc object cache must key on the codegen level (ok=%v/%v)", ok0, ok2)
 	}
 }
+
+// The panic path declares printf for its message. C's printf returns a 32-bit int, which is how
+// programs declare it; the panic path insisted on `int` (i64), so a program declaring
+// `extern printf(...) -> i32` that could panic failed with "conflicting LLVM function
+// declaration for printf". Both declared widths must coexist with the panic path.
+func TestPanicPrintfCoexistsWithUserPrintfDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	for _, ret := range []string{"i32", "int"} {
+		src := filepath.Join(dir, "printf_"+ret+".elisa")
+		program := "extern printf(format: cstr, ...) -> " + ret + " can[Console, Unsafe.RawExtern]\n\n" +
+			"def main(argc: i64, argv: mutable void&) -> i64 can[Console, Unsafe.RawExtern, Abort.Panic]:\n" +
+			"    if argc > 5:\n        panic(\"too many\")\n" +
+			"    _ = printf(\"%lld\\n\", argc)\n    return 0\n"
+		if err := os.WriteFile(src, []byte(program), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runCLI([]string{"-emit", "obj", "-O2", "-o", filepath.Join(dir, ret+".o"), src}, &stdout, &stderr); code != 0 {
+			t.Fatalf("printf -> %s with a panic path failed to compile:\n%s", ret, stderr.String())
+		}
+	}
+}
