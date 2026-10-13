@@ -652,6 +652,11 @@ func (tr *smtTranslator) lowerVCFormula(expr ast.Expr, env map[string]string) (v
 	if bin, ok := expr.(*ast.BinaryExpr); ok {
 		switch bin.Op {
 		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
+			// A mixed-sign/width comparison is not a plain-value comparison at runtime; it falls
+			// through to the atom path, whose boolTerm guards it (mixedSignGuard).
+			if _, mixed := tr.mixedSignFitGuard(bin, ""); mixed {
+				break
+			}
 			if l, ok := tr.lowerVCTerm(bin.Left, env); ok {
 				if r, ok := tr.lowerVCTerm(bin.Right, env); ok {
 					return vcMkCompare(bin.Op, l, r), true

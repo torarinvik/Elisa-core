@@ -4064,7 +4064,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			if cmp, ok := tr.bitvectorCompare(n, l, r, env); ok {
 				return cmp, true
 			}
-			return smtCompare(n.Op, l, r), true
+			return tr.mixedSignCompare(n, l, r), true
 		case lexer.TOKEN_IS:
 			return tr.enumIsTerm(n, env, false)
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
@@ -4124,7 +4124,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 						}
 						return "false", true
 					}
-					return smtCompare(n.Op, l, r), true
+					return tr.mixedSignCompare(n, l, r), true
 				}
 			}
 			// Boolean equality: both sides are bool-valued (e.g. `result == ((x % m) == 0)`). SMT `=`

@@ -13,7 +13,10 @@ import (
 // counting loop. The bound is now i64.max.
 
 func TestLoopDecreasesSViewLenMinusUnsignedIndexProves(t *testing.T) {
+	// `i < v.len` compares unsigned (codegen converts to the left type), so a view length of -1
+	// would keep the loop running while `v.len - i` is negative: the measure needs v.len >= 0.
 	src := `def scan(v: sview, w: sview) -> bool:
+    requires v.len >= 0
     i: mutable usize = 0
     while i < v.len:
         decreases v.len - i
