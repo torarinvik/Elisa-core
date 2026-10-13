@@ -239,17 +239,21 @@ def string_view_index(view: sview, index: i64) -> i64:
 
 def string_view_eq(view: sview, other: cstr?) -> int:
     rhs: cstr = other if other != null else ""
-    rhs_len: usize = runtime_strlen(rhs)
-
     0 return if view.len < 0
     view_len: usize = view.len.usize()
-    0 return if view_len.i64() != view.len or view_len != rhs_len
-    #1 return if view.len == 0
-    #1 return if view.data == rhs
-
-    1 return if view.len == 0 or view.data.cast[uintptr] == rhs.cast[uintptr]
-
-    return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view_len) == 0 else 0
+    0 return if view_len.i64() != view.len
+    # No strlen: walk the view and the C string together and stop at the first difference or
+    # at the C string's terminator, which never reads past it. Equal iff every byte matched
+    # and the terminator sits exactly at view_len. A one-byte view against a literal costs two
+    # loads and two compares, and the body is small enough to inline into callers.
+    trusted Unsafe.PointerCast:
+        rhs_bytes: u8& = rhs.cast[u8&]
+        i: mutable usize = 0
+        while i < view_len |i|:
+            c: u8 = rhs_bytes[i]
+            0 return if c == 0 or c != view.data[i]
+            i <- i + 1
+        return 1 if rhs_bytes[view_len] == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
     0 return if lhs.len < 0 or rhs.len < 0
