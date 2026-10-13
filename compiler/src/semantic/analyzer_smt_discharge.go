@@ -5549,6 +5549,14 @@ func (tr *smtTranslator) factPreamble() string {
 		// `bvult` over `(int2bv 64 …)` — bridge back to Int reasoning: without `arr.count < 2^64` the
 		// `int2bv` of an unbounded length could wrap, so z3 cannot conclude the Int relation the
 		// termination/preservation goal needs. Sound: it only ever asserts a fact the type guarantees.
+		if strings.HasPrefix(sym, "|sview_length_") {
+			// A string view's `.len` is an `i64`, not a `usize`: it can never exceed i64.max. The
+			// looser usize bound let a measure such as `v.len - i` (i64 arithmetic, modeled with
+			// two's-complement wrap) appear to wrap negative for an unreachable length >= 2^63,
+			// so `decreases v.len - i` over an immutable view could not be proven.
+			b.WriteString("(assert (< " + sym + " 9223372036854775808))\n")
+			continue
+		}
 		b.WriteString("(assert (< " + sym + " 18446744073709551616))\n")
 	}
 	b.WriteString(tr.enumPreamble())
