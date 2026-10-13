@@ -94,3 +94,44 @@ def same_scope() -> usize:
 		t.Fatalf("expected read-only and same-region forms to be accepted, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// Element-mode stores: copying scalar elements out of a local darray into the target retains no
+// local storage (accepted); copying an element that is itself a local-region container header
+// (`h.rows.push(rows[0])` with `rows: darray[darray[i64]]` built locally) does (rejected).
+func TestCallStoringElementsIntoStructRefField(t *testing.T) {
+	ok := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_elem_ok.elisa", `struct Holder:
+    xs: mutable darray[i64] = []
+
+def copy_in(h: mutable Holder&, xs: darray[i64]) -> void:
+    can Memory.Allocate, Abort.Panic:
+        for x in xs |h|:
+            h.xs.push(x)
+
+def fill(h: mutable Holder&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        copy_in(h, local)
+`)
+	if errs := ok.Errors(); len(errs) != 0 {
+		t.Fatalf("copying scalar elements into a struct ref must be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_elem_bad.elisa", `struct Rows:
+    rows: mutable darray[darray[i64]] = []
+
+def take_first(h: mutable Rows&, rows: darray[darray[i64]]) -> void:
+    can Memory.Allocate, Abort.Panic:
+        h.rows.push(rows[0])
+
+def fill(h: mutable Rows&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[darray[i64]] = []
+        inner: mutable darray[i64] = []
+        inner.push(1)
+        local.push(inner)
+        take_first(h, local)
+`)
+	if joined := strings.Join(bad.Errors(), "\n"); !strings.Contains(joined, "call may store a value in region") {
+		t.Fatalf("copying a local-region container element into a struct ref must be rejected, got:\n%s", joined)
+	}
+}

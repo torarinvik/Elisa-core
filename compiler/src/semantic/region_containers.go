@@ -2136,15 +2136,28 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		}
 		// The store-flow summary is undirected between written params; refine it with the
 		// directed scan when the callee's body is visible.
-		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) && !a.calleeMayStoreParamInto(decl, other, index) {
+		mode := storeHeader
+		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
+			mode = a.calleeStoreModeInto(decl, other, index)
+		}
+		if mode == storeNone {
 			continue
 		}
 		regions := []string{}
-		if state, ok := a.regionRefStateForExpr(arg); ok {
-			regions = liveLocalRegionDependencyNames(state)
-		}
-		if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) {
-			regions = append(regions, own)
+		if elemState, tracked := a.trackedElementStateOfLocal(arg); mode == storeElements && tracked {
+			// Only element values read out of the argument can be stored: the argument's own
+			// backing region is not retained, only what its elements depend on.
+			regions = liveLocalRegionDependencyNames(elemState)
+		} else if mode == storeElements && !a.containerMayHoldRegionRefs(stripRefForBounds(a.exprTypes[arg])) {
+			// Elements that cannot hold a region reference (scalars, packed handles) carry none.
+			continue
+		} else {
+			if state, ok := a.regionRefStateForExpr(arg); ok {
+				regions = liveLocalRegionDependencyNames(state)
+			}
+			if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) {
+				regions = append(regions, own)
+			}
 		}
 		for _, region := range regions {
 			if region == targetRegion || a.lookupRegionParam(region) {
@@ -2159,6 +2172,33 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			}
 		}
 	}
+}
+
+// trackedElementStateOfLocal returns the tracked element provenance of a local darray argument
+// (`xs`, `&xs`), when element tracking models it.
+func (a *Analyzer) trackedElementStateOfLocal(arg ast.Expr) (regionRefState, bool) {
+	ident, ok := stripAddrAndParens(arg).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil || a.currentElementStates == nil {
+		return regionRefState{}, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return regionRefState{}, false
+	}
+	sourceElem, ok := darrayElemType(sym.Type)
+	if !ok || sourceElem == nil {
+		return regionRefState{}, false
+	}
+	elems, tracked := a.currentElementStates[sym]
+	if !tracked {
+		return regionRefState{}, false
+	}
+	if inlineContainerElementValue(sourceElem) {
+		if sourceRegion := containerRegion(sym.Type); sourceRegion != "" {
+			elems = withoutRootRegionDependency(elems, sourceRegion)
+		}
+	}
+	return elems, true
 }
 
 // liveLocalRegionDependencyNames lists every live region a region-ref state depends on, including
