@@ -73,11 +73,26 @@ def f(n: i64) -> i64:
 	}
 }
 
-// SOUNDNESS (purity gate): an IMPURE helper (multi-statement body — here a local binding, so not a
-// single pure `return <expr>`) is NOT eligible, so NO defining equation is emitted. The caller's
-// `ensure result == n + n` then has no way to prove and MUST fail. This is the control that shows the
-// equation — not some other path — is doing the work, and that the purity gate is enforced.
+// SOUNDNESS (purity gate): a helper that mutates a local is not eligible for a defining equation.
+// Its caller cannot use an equation to prove an exact result the body does not guarantee.
 func TestImpureHelperNotAxiomatized(t *testing.T) {
+	src := `
+def dbl(x: i64) -> i64:
+    y: mutable i64 = x + x
+    y += 1
+    return y
+
+def f(n: i64) -> i64:
+    ensure result == n + n
+    return dbl(n)
+`
+	r := analyzeContractStrict(t, "eqn_impure.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("a mutating helper must NOT be axiomatized, so the ensure must not prove")
+	}
+}
+
+func TestPureImmutableLocalHelperHasDefiningEquation(t *testing.T) {
 	src := `
 def dbl(x: i64) -> i64:
     y: i64 = x + x
@@ -87,9 +102,8 @@ def f(n: i64) -> i64:
     ensure result == n + n
     return dbl(n)
 `
-	r := analyzeContractStrict(t, "eqn_impure.elisa", src)
-	if len(r.Errors()) == 0 {
-		t.Fatalf("an impure (non single-pure-return) helper must NOT be axiomatized, so the ensure must not prove")
+	if r := analyzeContractStrict(t, "eqn_pure_local.elisa", src); len(r.Errors()) != 0 {
+		t.Fatalf("an immutable local in a pure helper should retain its defining equation, got: %v", r.Errors())
 	}
 }
 

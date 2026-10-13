@@ -68,3 +68,29 @@ def main() -> i32:
 		t.Fatal("expected the recursive measure to be discharged by SMT")
 	}
 }
+
+func TestContractCallPathMatchRequiresEquivalentCallArguments(t *testing.T) {
+	left := &ast.CallExpr{Position: pos(), Func: identExpr("f"), Args: []ast.Expr{identExpr("x")}}
+	clone := &ast.CallExpr{Position: pos(), Func: identExpr("f"), Args: []ast.Expr{identExpr("x")}}
+	if !contractCallsMatch(left, clone) {
+		t.Fatal("cloned call with the same source expression should match")
+	}
+	rewritten := &ast.CallExpr{Position: pos(), Func: identExpr("f"), Args: []ast.Expr{identExpr("y")}}
+	if contractCallsMatch(left, rewritten) {
+		t.Fatal("same-position call with different arguments must not inherit the original call path")
+	}
+}
+
+func TestSMTRelevantSubstDeclinesMissingReferencedFormal(t *testing.T) {
+	analyzer := &Analyzer{}
+	translator := analyzer.newSMTTranslator(nil)
+	_, ok := analyzer.smtEnvForRelevantSubst(
+		translator,
+		map[string]ast.Expr{},
+		identExpr("index"),
+		[]ast.ParamDecl{{Name: "index"}},
+	)
+	if ok {
+		t.Fatal("missing actual for a referenced formal must not leave it free in the caller's namespace")
+	}
+}

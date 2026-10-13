@@ -649,14 +649,25 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 // trySMTProveRequiresWithPath proves a clause under the enclosing function contract plus an optional
 // pure control-flow path. The extra path is used for recursive termination calls collected before
 // ordinary body analysis has seeded branch facts into the live scope.
-func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr) (bool, string) {
+func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, formalParamSets ...[]ast.ParamDecl) (bool, string) {
 	solver := a.openSMT()
 	if solver == nil || clause == nil {
 		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
-	if path != nil {
-		a.typePureTerminationExprsForSMT(clause, path)
+	// Substitution values may be expressions that have not yet reached ordinary body analysis (notably
+	// a pure return expression while checking its `ensure`). Type them before translating so arithmetic
+	// keeps its machine width and is modeled with wrapping semantics when necessary.
+	// `clause` belongs to the callee's formal namespace. Re-analyzing it with the caller's current
+	// scope can overwrite its recorded types with same-named caller locals and silently change the
+	// width/signedness used by its SMT terms. Its declaration analysis already assigned those types;
+	// only the caller-side path and substituted actual expressions need this prepass.
+	typedExprs := []ast.Expr{path}
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		typedExprs = append(typedExprs, subst[name])
+	}
+	if path != nil || len(formalParamSets) != 0 {
+		a.typePureTerminationExprsForSMT(typedExprs...)
 	}
 	// When `result` is bound to a struct literal (`return Pair(1, 2)`), it has no scalar SMT term, so
 	// drop it from the env subst (which would otherwise decline) and instead resolve each `result.field`
@@ -686,7 +697,20 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 			}
 		}
 	}
-	env, ok := a.smtEnvForRelevantSubst(tr, substForEnv, clause)
+	var formalParams []ast.ParamDecl
+	if len(formalParamSets) != 0 {
+		formalParams = formalParamSets[0]
+	}
+	var env map[string]string
+	var ok bool
+	if len(formalParamSets) != 0 {
+		env, ok = a.smtEnvForRelevantSubst(tr, substForEnv, clause, formalParams)
+	} else {
+		// Preserve the established all-arguments translation for ordinary call and contract proofs.
+		// Selective binding is reserved for recursive proof obligations that may pass an unrelated
+		// machine expression outside the SMT fragment.
+		env, ok = a.smtEnvForSubst(tr, substForEnv)
+	}
 	if !ok {
 		return false, ""
 	}
@@ -750,14 +774,28 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 // would discard a valid proof of a requirement over the other parameters. Every referenced formal
 // still must bind successfully; otherwise the solver declines rather than treating it as a caller
 // variable.
-func (a *Analyzer) smtEnvForRelevantSubst(tr *smtTranslator, subst map[string]ast.Expr, obligation ast.Expr) (map[string]string, bool) {
-	used := make(map[string]bool)
-	for _, name := range exprIdentNames(obligation) {
-		used[name] = true
+func (a *Analyzer) smtEnvForRelevantSubst(tr *smtTranslator, subst map[string]ast.Expr, obligation ast.Expr, formalParams []ast.ParamDecl) (map[string]string, bool) {
+	used, supported := smtFreeIdentifierSet(obligation)
+	if !supported {
+		// Selective binding depends on complete identifier collection. Decline unsupported AST
+		// forms rather than risk leaving a callee formal free in the caller's namespace.
+		return nil, false
 	}
 	env := map[string]string{}
+	for _, param := range formalParams {
+		if !used[param.Name] {
+			continue
+		}
+		argExpr, ok := subst[param.Name]
+		if !ok || argExpr == nil {
+			return nil, false
+		}
+		if !a.bindSMTEnvArg(tr, env, param.Name, argExpr, nil, true) {
+			return nil, false
+		}
+	}
 	for name, argExpr := range subst {
-		if !used[name] {
+		if !used[name] || env[name] != "" {
 			continue
 		}
 		if !a.bindSMTEnvArg(tr, env, name, argExpr, nil, true) {
@@ -765,6 +803,151 @@ func (a *Analyzer) smtEnvForRelevantSubst(tr *smtTranslator, subst map[string]as
 		}
 	}
 	return env, true
+}
+
+// smtFreeIdentifierSet reports free identifiers in a contract obligation. Quantifier ranges
+// are evaluated outside the binder scope, while quantifier bodies inherit the declared binders.
+// The ordinary exprIdentNames helper intentionally reports every spelling for scope validation;
+// using it here would try to substitute a shadowed callee parameter and can decline a proof just
+// because that unused argument lies outside the SMT fragment.
+func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
+	free := map[string]bool{}
+	bound := map[string]int{}
+	supported := true
+	var walk func(ast.Expr)
+	var walkPattern func(ast.MatchPattern)
+	walkPattern = func(pattern ast.MatchPattern) {
+		switch p := pattern.(type) {
+		case *ast.MatchLiteralPattern:
+			walk(p.Value)
+		case *ast.MatchRangePattern:
+			walk(p.Lo)
+			walk(p.Hi)
+		case *ast.MatchTuplePattern:
+			for _, elem := range p.Elems {
+				walkPattern(elem)
+			}
+		case *ast.MatchListPattern:
+			for _, elem := range p.Elems {
+				walkPattern(elem)
+			}
+		case *ast.MatchOrPattern:
+			for _, option := range p.Options {
+				walkPattern(option)
+			}
+		case *ast.MatchStructPattern:
+			for _, arg := range p.Args {
+				walkPattern(arg.Pattern)
+			}
+		case *ast.MatchVariantPattern:
+			for _, arg := range p.Args {
+				walkPattern(arg.Pattern)
+			}
+		}
+	}
+	walk = func(e ast.Expr) {
+		switch n := e.(type) {
+		case nil:
+		case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+			// Literal leaves contain no identifiers and are part of the SMT fragment.
+		case *ast.Ident:
+			if bound[n.Name] == 0 {
+				free[n.Name] = true
+			}
+		case *ast.ParenExpr:
+			walk(n.Inner)
+		case *ast.UnaryExpr:
+			walk(n.Operand)
+		case *ast.BinaryExpr:
+			walk(n.Left)
+			walk(n.Right)
+		case *ast.FieldExpr:
+			walk(n.Object)
+		case *ast.IndexExpr:
+			walk(n.Object)
+			walk(n.Index)
+			walk(n.Index2)
+			walk(n.Fallback)
+		case *ast.SliceExpr:
+			walk(n.Object)
+			walk(n.Start)
+			walk(n.End)
+		case *ast.CallExpr:
+			walk(n.Func)
+			for _, arg := range n.Args {
+				walk(arg)
+			}
+		case *ast.TernaryExpr:
+			walk(n.Cond)
+			walk(n.Value)
+			walk(n.Alt)
+		case *ast.TupleExpr:
+			for _, elem := range n.Elems {
+				walk(elem)
+			}
+		case *ast.ListLitExpr:
+			for _, elem := range n.Elems {
+				walk(elem)
+			}
+			for _, key := range n.Keys {
+				walk(key)
+			}
+			walk(n.Owner)
+		case *ast.CastExpr:
+			walk(n.Operand)
+		case *ast.AddrOfExpr:
+			walk(n.Operand)
+		case *ast.SpecializeExpr:
+			walk(n.Operand)
+		case *ast.MatchExpr:
+			walk(n.Value)
+			walk(n.Store)
+			for _, arm := range n.Arms {
+				walkPattern(arm.Pattern)
+				walk(arm.Guard)
+				// Scalar match lowering accepts exactly one expression statement per arm.
+				for _, stmt := range arm.Body {
+					if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
+						walk(exprStmt.Expr)
+					}
+				}
+			}
+		case *ast.QuantifierExpr:
+			walk(n.In)
+			for _, name := range n.Vars {
+				bound[name]++
+			}
+			walk(n.Body)
+			for _, name := range n.Vars {
+				bound[name]--
+				if bound[name] == 0 {
+					delete(bound, name)
+				}
+			}
+		case *ast.MembershipRangeExpr:
+			walk(n.Start)
+			walk(n.End)
+		case *ast.RecordUpdateExpr:
+			walk(n.Base)
+			for _, arg := range n.Args {
+				walk(arg)
+			}
+		case *ast.StructLitExpr:
+			for _, arg := range n.Args {
+				walk(arg)
+			}
+		case *ast.UnwrapElseExpr:
+			walk(n.Value)
+			walk(n.Fallback)
+		case *ast.GetExpr:
+			walk(n.Value)
+			walk(n.Fallback)
+		default:
+			supported = false
+		}
+	}
+	walk(expr)
+	return free, supported
 }
 
 // trRegisterSubstCEExprs registers env entries whose SMT value is a compound expression (not a plain
@@ -4659,7 +4842,7 @@ func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.C
 		case requiresRefuted:
 			return false
 		default:
-			proven, _ := a.trySMTProveRequiresWithPath(req, subst, callPath)
+			proven, _ := a.trySMTProveRequiresWithPath(req, subst, callPath, callee.Params)
 			if !proven {
 				return false
 			}

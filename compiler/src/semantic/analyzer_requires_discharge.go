@@ -340,7 +340,7 @@ func contractCallsMatch(left, right *ast.CallExpr) bool {
 	}
 	// Contract analysis may rewrite or clone call nodes while preserving source positions. Match
 	// those copies by their original source site and callee syntax so their inherited guard is kept.
-	return left.Pos() == right.Pos() && optimizationExprString(left.Func) == optimizationExprString(right.Func)
+	return left.Pos() == right.Pos() && optimizationExprString(left) == optimizationExprString(right)
 }
 
 func contractPathAnd(path ast.Expr, guard ast.Expr) ast.Expr {
