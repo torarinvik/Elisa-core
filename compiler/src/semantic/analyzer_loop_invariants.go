@@ -700,7 +700,7 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 					return nil, nil, false
 				}
 				if forTermination && len(focus) != 0 && !focus[target.Name] {
-					if !exprIsSideEffectFreeForTermination(n.Value) {
+					if !exprIsSideEffectFreeForTermination(n.Value) && !a.loopTerminationCallAdmissible(n.Value, focus) {
 						return nil, nil, false
 					}
 					ignoredAssigned[target.Name] = true
@@ -770,6 +770,18 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 			default:
 				return nil, nil, false
 			}
+		case *ast.VarDeclStmt:
+			// TERMINATION path only: a body-local declaration (`d: i64 = digit(text[i])`) cannot
+			// change a measure variable unless it shadows one or its initializer could write one.
+			// Its name joins ignoredAssigned so a measure update that READS it is still declined
+			// (the disjoint-RHS rule below) — the local's value is not modeled.
+			if !forTermination || len(focus) == 0 || n == nil || n.Name == "" || focus[n.Name] {
+				return nil, nil, false
+			}
+			if n.Value != nil && !exprIsSideEffectFreeForTermination(n.Value) && !a.loopTerminationCallAdmissible(n.Value, focus) {
+				return nil, nil, false
+			}
+			ignoredAssigned[n.Name] = true
 		default:
 			return nil, nil, false // any other statement form
 		}
@@ -1067,4 +1079,138 @@ func outerLoopInvariantsDisjointFrom(outers []*ast.ContractStmt, innerSubst map[
 		}
 	}
 	return out
+}
+
+// loopTerminationCallAdmissible admits, on the loop-TERMINATION capture path only, a value that
+// calls functions, when no call can write a measure variable:
+//
+//   - every measure root (focus) is a local or parameter whose type is not a reference, so it has
+//     no alias and a callee can reach it only through an argument; and
+//   - every call is a direct call of a named function, no argument passes a measure root as a
+//     place to a mutable/linear reference parameter, and every argument satisfies this predicate.
+//
+// The value itself is never modeled (its target is ignored or a body local), so this only claims
+// "the measure variables are untouched by this statement" — never anything about its result.
+func (a *Analyzer) loopTerminationCallAdmissible(expr ast.Expr, focus map[string]bool) bool {
+	if a == nil || len(focus) == 0 || !a.loopTerminationFocusUnaliasable(focus) {
+		return false
+	}
+	return a.loopTerminationValueAdmissible(expr, focus)
+}
+
+func (a *Analyzer) loopTerminationFocusUnaliasable(focus map[string]bool) bool {
+	if a.currentScope == nil {
+		return false
+	}
+	for name := range focus {
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || sym == nil {
+			return false
+		}
+		if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
+			return false
+		}
+		if sym.Type == nil {
+			return false
+		}
+		if _, isRef := StripAggregateStateType(sym.Type).(*RefType); isRef {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) loopTerminationValueAdmissible(expr ast.Expr, focus map[string]bool) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && a.loopTerminationValueAdmissible(n.Inner, focus)
+	case *ast.FieldExpr:
+		return n != nil && !n.Safe && a.loopTerminationValueAdmissible(n.Object, focus)
+	case *ast.IndexExpr:
+		return n != nil &&
+			n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback &&
+			n.AsSpecialize == nil && n.AsOverlayCall == nil &&
+			a.loopTerminationValueAdmissible(n.Object, focus) && a.loopTerminationValueAdmissible(n.Index, focus)
+	case *ast.SliceExpr:
+		return n != nil &&
+			a.loopTerminationValueAdmissible(n.Object, focus) &&
+			(n.Start == nil || a.loopTerminationValueAdmissible(n.Start, focus)) &&
+			(n.End == nil || a.loopTerminationValueAdmissible(n.End, focus))
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.loopTerminationValueAdmissible(n.Operand, focus)
+	case *ast.BinaryExpr:
+		return n != nil && a.loopTerminationValueAdmissible(n.Left, focus) && a.loopTerminationValueAdmissible(n.Right, focus)
+	case *ast.CastExpr:
+		return n != nil && a.loopTerminationValueAdmissible(n.Operand, focus)
+	case *ast.TernaryExpr:
+		return n != nil &&
+			a.loopTerminationValueAdmissible(n.Cond, focus) &&
+			a.loopTerminationValueAdmissible(n.Value, focus) &&
+			a.loopTerminationValueAdmissible(n.Alt, focus)
+	case *ast.CallExpr:
+		if n == nil || n.Func == nil {
+			return false
+		}
+		if _, ok := n.Func.(*ast.Ident); !ok {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil {
+			return false
+		}
+		sym, ok := a.symbolForFuncDecl(decl)
+		if !ok || sym == nil {
+			return false
+		}
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok || fnType == nil || len(fnType.Params) != len(n.Args) {
+			return false
+		}
+		for i, arg := range n.Args {
+			if !a.loopTerminationValueAdmissible(arg, focus) {
+				return false
+			}
+			// A measure root passed as a PLACE to a mutable/linear reference parameter could be
+			// written by the callee. Reading it by value (or through an immutable reference, or
+			// inside a computed rvalue such as `text[i]`) cannot change it.
+			if root, isPlace := loopTerminationPlaceRoot(arg); isPlace && focus[root] {
+				if ref, isRef := StripAggregateStateType(fnType.Params[i]).(*RefType); isRef && (ref.Mutable || ref.Linear) {
+					return false
+				}
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// loopTerminationPlaceRoot returns the root identifier of a place expression (`x`, `x.f`, `x[i]`).
+func loopTerminationPlaceRoot(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n == nil {
+			return "", false
+		}
+		return n.Name, true
+	case *ast.ParenExpr:
+		if n == nil {
+			return "", false
+		}
+		return loopTerminationPlaceRoot(n.Inner)
+	case *ast.FieldExpr:
+		if n == nil {
+			return "", false
+		}
+		return loopTerminationPlaceRoot(n.Object)
+	case *ast.IndexExpr:
+		if n == nil {
+			return "", false
+		}
+		return loopTerminationPlaceRoot(n.Object)
+	default:
+		return "", false
+	}
 }

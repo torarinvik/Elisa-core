@@ -47,3 +47,48 @@ func TestLoopDecreasesSViewLenMinusSignedUnboundedIndexStillDeclines(t *testing.
 		t.Fatalf("an i64 index unbounded below can overflow `v.len - i`; the measure must not prove, got %d proofs", got)
 	}
 }
+
+// A body-local whose initializer calls a pure helper on a computed rvalue cannot touch the
+// measure (`digits - index`, both non-reference locals/params), so it no longer blocks the proof.
+func TestLoopDecreasesAdmitsCallInitializedBodyLocal(t *testing.T) {
+	src := `def hv(b: u8) -> i64:
+    return b.i64()
+
+def sum(text: sview, digits: usize) -> i64:
+    value: mutable i64 = 0
+    index: mutable usize = 0
+    while index < digits:
+        decreases digits - index
+        d: i64 = hv(text[index])
+        return -1 if d < 0
+        value <- value + d
+        index <- index + 1
+    return value
+`
+	result := analyzeContractStrict(t, "call_local_measure.elisa", src)
+	for _, e := range result.Errors() {
+		if strings.Contains(e, "decreases") {
+			t.Fatalf("a call-initialized body local must not block the measure proof, got: %v", e)
+		}
+	}
+}
+
+// SOUNDNESS: passing the measure variable to a mutable reference parameter can rewind it.
+func TestLoopDecreasesRejectsMeasurePassedToMutableRef(t *testing.T) {
+	src := `def bump(x: mutable usize&) -> i64:
+    x <- x - 1
+    return 0
+
+def spin(digits: usize) -> i64:
+    index: mutable usize = 0
+    while index < digits:
+        decreases digits - index
+        d: i64 = bump(index)
+        index <- index + 1
+    return 0
+`
+	result := analyzeContractStrict(t, "mutref_measure.elisa", src)
+	if got := countLoopTerminationProof(result, ProofProvenSMT); got != 0 {
+		t.Fatalf("a measure variable passed to a mutable reference must not prove, got %d proofs", got)
+	}
+}
