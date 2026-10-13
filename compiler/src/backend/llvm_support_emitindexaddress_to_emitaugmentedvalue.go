@@ -347,7 +347,7 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 	// The data-pointer load reads header memory; every "elt"-tagged access is a scalar leaf
 	// that can never be header memory, so the hdr tag is sound for any element type.
 	s.tagDarrayHeaderLoad(dataPtr)
-	if _, ok := elemType.(*semantic.StructType); ok {
+	if st, ok := elemType.(*semantic.StructType); ok && !isRuntimeContainerCarrierStruct(st) {
 		// A struct element that is not alias-safe as a whole (it holds a header somewhere) still
 		// has scalar leaf fields; propagateAliasSafeFieldPtr tags those.
 		s.markElementDerivedPtr(ptr)
@@ -390,7 +390,7 @@ func aliasSafeElemType(t semantic.Type, depth int) bool {
 	case *semantic.ConstEnumType:
 		return true
 	case *semantic.StructType:
-		if tt == nil || len(tt.TypeParams) > 0 || len(tt.RegionParams) > 0 || tt.Fields == nil {
+		if tt == nil || len(tt.TypeParams) > 0 || len(tt.RegionParams) > 0 || tt.Fields == nil || isRuntimeContainerCarrierStruct(tt) {
 			return false
 		}
 		for _, field := range tt.Fields {
@@ -452,16 +452,28 @@ func (s *functionState) propagateAliasSafeFieldPtr(objPtr, fieldPtr C.LLVMValueR
 	if s.elementDerivedPtrs == nil || !s.elementDerivedPtrs[objPtr] {
 		return
 	}
-	if _, ok := containerType.(*semantic.StructType); !ok {
+	containerStruct, ok := containerType.(*semantic.StructType)
+	if !ok || containerStruct == nil || isRuntimeContainerCarrierStruct(containerStruct) {
 		return
 	}
 	if isAliasSafeScalarElemType(fieldType) {
 		s.markAliasSafeElementPtr(fieldPtr)
 		return
 	}
-	if _, ok := fieldType.(*semantic.StructType); ok {
+	if fieldStruct, ok := fieldType.(*semantic.StructType); ok && !isRuntimeContainerCarrierStruct(fieldStruct) {
 		s.markElementDerivedPtr(fieldPtr)
 	}
+}
+
+// isRuntimeContainerCarrierStruct reports the std structs that share memory layout with
+// darray/view headers (the runtime reads headers through them), so their scalar fields ARE
+// header memory and must never be elt-tagged.
+func isRuntimeContainerCarrierStruct(t *semantic.StructType) bool {
+	switch t.Name {
+	case "DynArray", "DynArrayView", "DynDict":
+		return true
+	}
+	return false
 }
 
 const (
