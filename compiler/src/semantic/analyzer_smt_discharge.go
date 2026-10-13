@@ -874,7 +874,10 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 			walk(n.End)
 		case *ast.CallExpr:
 			walk(n.Func)
-			for _, arg := range n.Args {
+			walk(n.SafeReceiver)
+			// Match the SMT call translator's argument selection so synthesized defaults and
+			// reordered named arguments cannot hide a referenced callee formal.
+			for _, arg := range proofCallArgs(n) {
 				walk(arg)
 			}
 		case *ast.TernaryExpr:
@@ -933,7 +936,11 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 				walk(arg)
 			}
 		case *ast.StructLitExpr:
-			for _, arg := range n.Args {
+			args := n.Args
+			if n.ResolvedArgsValid {
+				args = n.ResolvedArgs
+			}
+			for _, arg := range args {
 				walk(arg)
 			}
 		case *ast.UnwrapElseExpr:
