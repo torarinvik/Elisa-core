@@ -127,19 +127,21 @@ def churn() -> i64:
             junk.push(i.i64() * 7)
         return junk[3999]
 
-def add_round(flow: mutable Flow&, k: i64) -> void:
+def fill_alt(alt: mutable Snap&, k: i64) -> void:
     can Memory.Allocate, Abort.Panic:
-        alt: mutable Snap = Snap{}
         for i in 0..<10 |alt|:
             alt.names.push(k * 100 + i.i64())
-        merge_normal(flow, &alt)
 
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         flow: mutable Flow = Flow{}
-        add_round(&flow, 1)
-        add_round(&flow, 2)
+        alt1: mutable Snap = Snap{}
+        fill_alt(&alt1, 1)
+        merge_normal(&flow, &alt1)
+        alt2: mutable Snap = Snap{}
+        fill_alt(&alt2, 2)
+        merge_normal(&flow, &alt2)
         c: i64 = churn()
         if flow.normal.names.count != 20 or flow.normal.names[0] != 100 or flow.normal.names[19] != 209 or c != 27993:
             panic("merged snapshot freed with merge_normal's region")
@@ -180,20 +182,22 @@ def churn() -> i64:
             junk.push(i.i64() * 7)
         return junk[3999]
 
-def add_round(flow: mutable Flow&, other: mutable Flow&, k: i64) -> void:
+def fill_alt(alt: mutable Snap&, k: i64) -> void:
     can Memory.Allocate, Abort.Panic:
-        alt: mutable Snap = Snap{}
         for i in 0..<10 |alt|:
             alt.names.push(k * 100 + i.i64())
-        merge_normal(flow, other, &alt)
 
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         flow: mutable Flow = Flow{}
         other: mutable Flow = Flow{}
-        add_round(&flow, &other, 1)
-        add_round(&flow, &other, 2)
+        alt1: mutable Snap = Snap{}
+        fill_alt(&alt1, 1)
+        merge_normal(&flow, &other, &alt1)
+        alt2: mutable Snap = Snap{}
+        fill_alt(&alt2, 2)
+        merge_normal(&flow, &other, &alt2)
         c: i64 = churn()
         if flow.normal.names.count != 20 or flow.normal.names[0] != 100 or flow.normal.names[19] != 209 or other.normal.names.count != 2 or c != 27993:
             panic("destination-allocated result freed with the call's region")

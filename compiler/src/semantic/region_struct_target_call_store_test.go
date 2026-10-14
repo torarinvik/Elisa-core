@@ -608,3 +608,32 @@ def run(table: mutable Table&, src: sview) -> void:
 		t.Fatalf("expected only the note_owned call (line 37) rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// SOUNDNESS: an element-mode store out of a STRUCT argument was never checked: the call site asked
+// containerMayHoldRegionRefs(Wrap), which only answers for containers (false for a struct), and
+// skipped the argument. A view into a local dstr carried in an immutable struct local was stored
+// into the caller's table and read freed bytes at runtime (two writable targets, so no adoption).
+func TestElementStoreOutOfStructArgumentIsChecked(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "element_store_struct_arg.elisa", `struct Wrap:
+    names: darray[sview]
+    n: i64
+
+struct Table:
+    names: mutable darray[sview] = []
+
+def keep_first(table: mutable Table&, w: Wrap&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.names.push(w.names[0])
+
+def run(table: mutable Table&, other: mutable Table&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        text: mutable dstr = []
+        text.push(65)
+        bad: Wrap = Wrap{names: [text.as_sview()], n: 1}
+        keep_first(table, &bad)
+`)
+	errs := result.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0], ":17:") || !strings.Contains(errs[0], "longer-lived storage") {
+		t.Fatalf("storing a view of a local dstr carried in a struct argument must be rejected (line 17), got:\n%s", strings.Join(errs, "\n"))
+	}
+}

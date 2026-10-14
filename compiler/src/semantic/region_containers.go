@@ -2161,8 +2161,9 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// Only element values read out of the argument can be stored: the argument's own
 			// backing region is not retained, only what its elements depend on.
 			regions = liveLocalRegionDependencyNames(elemState)
-		} else if elementLike && !a.containerMayHoldRegionRefs(stripRefForBounds(a.exprTypes[arg])) {
-			// Elements that cannot hold a region reference (scalars, packed handles) carry none.
+		} else if elementLike && !a.storedPartsMayHoldRegionRefs(stripRefForBounds(a.exprTypes[arg])) {
+			// Values read out of it that cannot hold a region reference (scalars, packed handles)
+			// carry none.
 			continue
 		} else {
 			if state, ok := a.regionRefStateForExpr(arg); ok {
@@ -2376,6 +2377,25 @@ func liveLocalRegionDependencyNames(state regionRefState) []string {
 
 // containerMayHoldRegionRefs reports whether a container's elements (dict keys or values) can
 // hold a region reference.
+// storedPartsMayHoldRegionRefs: can a value READ OUT OF an argument of type t (an element of a
+// container; a field or payload of anything else) hold a region reference? For a container this
+// is containerMayHoldRegionRefs (its element types); for any other type -- a struct, tuple or
+// enum whose fields are what gets read out -- it is whether the type itself can carry region
+// storage or references. (Asking containerMayHoldRegionRefs of a struct answered false, so an
+// element-mode store out of a struct argument was never checked.)
+func (a *Analyzer) storedPartsMayHoldRegionRefs(t Type) bool {
+	switch t.(type) {
+	case *DArrayType, *DictType, *SetType:
+		return a.containerMayHoldRegionRefs(t)
+	case *SViewType, *CStrType:
+		return false // what is read out of a view is its bytes
+	}
+	if t == nil || containsTypeParam(t) {
+		return true
+	}
+	return typeCarriesRegionStorage(t) || a.typeCanContainRegionRefs(t, map[string]bool{})
+}
+
 func (a *Analyzer) containerMayHoldRegionRefs(t Type) bool {
 	can := func(elem Type) bool { return elem != nil && a.typeCanContainRegionRefs(elem, map[string]bool{}) }
 	switch tt := t.(type) {
