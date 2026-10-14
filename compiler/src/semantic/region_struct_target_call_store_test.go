@@ -166,6 +166,48 @@ def fill(o: mutable Outer&, other: mutable Outer&) -> void can[Abort.Panic, Memo
 	}
 }
 
+// SOUNDNESS: a grown local STRUCT passed by value to a callee that stores it through a struct
+// ref param (`flow.normal <- alt`) keeps the struct's darray backing, which lives in the caller's
+// inferred region. The struct's type carries no region, so the call site saw no dependency and
+// the program read freed memory at runtime. The call must be rejected; passing the same local
+// to a non-storing callee, or an element read out of it, stays accepted.
+func TestCallStoringGrownStructLocalIntoStructRefFieldRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_local_call_store.elisa", `struct Snapshot:
+    names: mutable darray[i64] = []
+
+struct Flow:
+    normal: mutable Snapshot = Snapshot{}
+    total: mutable i64 = 0
+
+def merge_into(flow: mutable Flow&, alt: Snapshot) -> void:
+    flow.normal <- alt
+
+def take_names(flow: mutable Flow&, alt: Snapshot) -> void:
+    flow.normal.names <- alt.names
+
+def tally(flow: mutable Flow&, alt: Snapshot) -> void:
+    can Abort.Panic:
+        flow.total <- alt.names.count.i64()
+
+def add_one(flow: mutable Flow&, v: i64) -> void:
+    flow.total <- flow.total + v
+
+def fill(flow: mutable Flow&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        tmp: mutable Snapshot = Snapshot{}
+        for i in 0..<40 |tmp|:
+            tmp.names.push(i.i64())
+        tally(flow, tmp)
+        add_one(flow, tmp.names[0])
+        merge_into(flow, tmp)
+        take_names(flow, tmp)
+`)
+	errs := result.Errors()
+	if len(errs) != 2 || !strings.Contains(errs[0], ":28:") || !strings.Contains(errs[1], ":29:") || !strings.Contains(errs[0], "longer-lived storage") {
+		t.Fatalf("expected exactly the merge_into and take_names calls (lines 28, 29) rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // A call result stored into the target is judged by what the callee RETURNS from each argument:
 // returning the darray itself (`keep(xs)`) carries its local backing (rejected); returning a
 // fresh copy of its scalar elements (`copy_of(xs)`) carries nothing local (accepted).

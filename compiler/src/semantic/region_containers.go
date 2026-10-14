@@ -2165,6 +2165,14 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) {
 				regions = append(regions, own)
 			}
+			// A struct local's region-less container fields live in the region it was built in
+			// (recorded at construction / growth); its type carries no region, so without this
+			// a grown local struct passed by value looked region-free. Only an argument that
+			// carries that backing (the struct or a region-less container in it) can retain it;
+			// a scalar/view element read out of it carries its own tracked provenance.
+			if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprTypes[arg], mode) {
+				regions = append(regions, own)
+			}
 		}
 		for _, region := range regions {
 			if region == targetRegion || a.lookupRegionParam(region) {
@@ -2183,6 +2191,35 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			}
 		}
 	}
+}
+
+// argCarriesRegionlessBacking reports whether a value of type t (refs peeled) holds a
+// region-less container's backing: a region-less darray/dict itself, or a struct with such a field.
+func argCarriesRegionlessBacking(t Type) bool {
+	t = stripRefForBounds(t)
+	switch t.(type) {
+	case *DArrayType, *DictType:
+		return containerRegion(t) == ""
+	}
+	if st, ok := peelToStructType(t); ok {
+		return structHasRegionlessContainerField(st)
+	}
+	return false
+}
+
+// storedValuesCarryRegionlessBacking: under storeHeader the argument value itself is retained, so
+// its own backing matters; under storeElements only values read out of it are retained -- a
+// struct's field values (whose container headers point into the struct's backing region) or a
+// darray's elements (which carry backing only when they are themselves region-less containers).
+func storedValuesCarryRegionlessBacking(t Type, mode storeMode) bool {
+	if mode == storeHeader {
+		return argCarriesRegionlessBacking(t)
+	}
+	t = stripRefForBounds(t)
+	if elem, ok := darrayElemType(t); ok {
+		return argCarriesRegionlessBacking(elem)
+	}
+	return argCarriesRegionlessBacking(t)
 }
 
 // trackedElementStateOfLocal returns the tracked element provenance of a local darray argument
