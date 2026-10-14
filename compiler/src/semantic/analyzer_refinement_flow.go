@@ -1243,11 +1243,9 @@ func (a *Analyzer) mergePostIfRangeFacts(entry map[string]numRange, branches []m
 		for _, br := range branches {
 			r, ok := br[name]
 			if !ok {
-				if !hadBase {
-					changed = true
-					break
-				}
-				r = base
+				// Absent from a branch's full visible fact set: that branch invalidated it.
+				changed = true
+				break
 			}
 			if !hadBase || !sameNumRange(r, base) {
 				changed = true
@@ -1262,15 +1260,14 @@ func (a *Analyzer) mergePostIfRangeFacts(entry map[string]numRange, branches []m
 		for _, br := range branches {
 			r, ok := br[name]
 			if !ok {
-				if hadBase {
-					r = base
-				} else if sym, found := a.currentScope.Lookup(name); found && sym != nil {
+				// Invalidated on this path (or unknown there): only the declared type's range holds.
+				if sym, found := a.currentScope.Lookup(name); found && sym != nil {
 					if tr, found := declaredTypeRange(sym.Type); found {
 						r = tr
 					}
 				}
 			}
-			if !ok && !hadBase {
+			if !ok {
 				if sym, found := a.currentScope.Lookup(name); found && sym != nil {
 					if tr, found := declaredTypeRange(sym.Type); found {
 						r = tr
