@@ -2169,7 +2169,12 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			if state, ok := a.regionRefStateForExpr(arg); ok {
 				regions = liveLocalRegionDependencyNames(state)
 			}
-			if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) {
+			// storeViews: only view-only values are stored and the source holds no bytes, so its
+			// own storage is never referenced -- what they point at is exactly what the tracked
+			// state records, when that state is complete (storeViewsProvenanceComplete). Every
+			// dependency the state has is still judged; only the storage-region proxy is dropped.
+			ownStorageIrrelevant := mode == storeViews && a.storeViewsProvenanceComplete(arg)
+			if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) && !ownStorageIrrelevant {
 				regions = append(regions, own)
 			}
 			// A struct local's region-less container fields live in the region it was built in
@@ -2177,7 +2182,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// a grown local struct passed by value looked region-free. Only an argument that
 			// carries that backing (the struct or a region-less container in it) can retain it;
 			// a scalar/view element read out of it carries its own tracked provenance.
-			if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprTypes[arg], mode) {
+			if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprTypes[arg], mode) && !ownStorageIrrelevant {
 				regions = append(regions, own)
 			}
 		}
@@ -2307,6 +2312,76 @@ func ownsRegionlessContainerRec(t Type, seen map[Type]bool) bool {
 		}
 	}
 	return false
+}
+
+// storeViewsProvenanceComplete: the argument's tracked region-ref state is a complete account of
+// where the views inside it point -- a parameter (its views come from the caller; storing a local
+// view into it is rejected where that store happens), or an immutable, non-reference local (its
+// state is recorded once, at its declaration, and nothing can change the value afterwards).
+// Mutable locals are not complete until their field writes are tracked.
+func (a *Analyzer) storeViewsProvenanceComplete(arg ast.Expr) bool {
+	ident, ok := stripAddrAndParens(arg).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil {
+		return false
+	}
+	sym, found := a.currentScope.Lookup(ident.Name)
+	if !found || sym == nil {
+		return false
+	}
+	switch sym.Kind {
+	case SymbolParam:
+		return true
+	case SymbolLocal:
+		if sym.Mutable {
+			return false
+		}
+		if _, isRef := sym.Type.(*RefType); isRef {
+			return false
+		}
+		decl, isDecl := sym.Node.(*ast.VarDeclStmt)
+		if !isDecl || decl == nil || decl.Name != sym.Name || decl.Value == nil {
+			return false
+		}
+		if _, mutableType := decl.Type.(*ast.MutableType); mutableType {
+			return false
+		}
+		// The recorded state is derived from the initializer; a mutable local's state may lack
+		// views pushed into its fields (not yet tracked), so an initializer reading one is not
+		// a complete account.
+		if storeScanMentions(decl.Value, a.currentFunctionMutableLocals()) {
+			return false
+		}
+		_, recorded := a.regionRefStateForExpr(ident)
+		return recorded
+	}
+	return false
+}
+
+// currentFunctionMutableLocals: names declared mutable (binding or type) anywhere in the current
+// function body, memoized per function.
+func (a *Analyzer) currentFunctionMutableLocals() map[string]bool {
+	fn := a.currentFuncDecl
+	if fn == nil {
+		return map[string]bool{}
+	}
+	if cached, ok := a.mutableLocalsCache[fn]; ok {
+		return cached
+	}
+	out := map[string]bool{}
+	walkStoreScanNodes(fn.Body, func(node any) {
+		v, ok := node.(*ast.VarDeclStmt)
+		if !ok || v == nil {
+			return
+		}
+		if _, mutableType := v.Type.(*ast.MutableType); v.Mutable || mutableType {
+			out[v.Name] = true
+		}
+	})
+	if a.mutableLocalsCache == nil {
+		a.mutableLocalsCache = map[*ast.FuncDecl]map[string]bool{}
+	}
+	a.mutableLocalsCache[fn] = out
+	return out
 }
 
 // storedValuesCarryRegionlessBacking: under storeHeader the argument value itself is retained, so

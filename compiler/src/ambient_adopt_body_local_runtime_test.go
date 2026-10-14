@@ -251,3 +251,53 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "stored_element_view", src, "bt")
 }
+
+// storeViews at the call site: views stored out of an immutable byte-free struct local (two
+// writable targets, so nothing is adopted) point at the caller's bytes, which outlive the call.
+func TestStoreViewsFromImmutableStructLocalRun(t *testing.T) {
+	src := `
+struct Wrap:
+    names: darray[sview]
+    n: i64
+
+struct Table:
+    names: mutable darray[sview] = []
+
+def keep_first(table: mutable Table&, w: Wrap&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.names.push(w.names[0])
+
+def make_wrap(src: sview) -> Wrap:
+    can Memory.Allocate:
+        return Wrap{names: [src, "lit"], n: 2}
+
+def run(table: mutable Table&, other: mutable Table&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        w: Wrap = Wrap{names: [src, "lit"], n: 2}
+        keep_first(table, &w)
+        w2: Wrap = make_wrap(src)
+        keep_first(table, &w2)
+        other.names.push("x")
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        owner: mutable dstr = []
+        for i in 0..<5 |owner|:
+            owner.push(72 + i.u8())
+        table: mutable Table = Table{}
+        other: mutable Table = Table{}
+        run(&table, &other, owner.as_sview())
+        c: i64 = churn()
+        if table.names.count != 2 or table.names[0].len != 5 or table.names[1][4] != 76 or c != 27993:
+            panic("stored views lost")
+`
+	buildAndRunSoATest(t, "store_views_immutable_struct", src, "bt")
+}
