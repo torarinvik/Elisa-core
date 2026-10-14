@@ -319,6 +319,10 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		}
 	}
 
+	if value, valueType, handled, err := s.emitExprWithMergedIndexChecks(expr, expected); handled {
+		return value, valueType, err
+	}
+
 	var (
 		value C.LLVMValueRef
 		err   error

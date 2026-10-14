@@ -264,6 +264,11 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 	if expr != nil && s.g.result != nil && s.g.result.IndexBoundsProven[expr] {
 		return true, nil
 	}
+	// A dominating merged guard (consecutive-index check merging) already established
+	// index < count for this access on the current path.
+	if expr != nil && s.mergedIndexGuarded[expr] {
+		return true, nil
+	}
 	var countValue C.LLVMValueRef
 	switch t := containerType.(type) {
 	case *semantic.DArrayType, *semantic.ViewType:

@@ -56,15 +56,19 @@ type codegenScope struct {
 	packedViewPtrs           map[string]packedVariantViewBinding
 }
 type functionState struct {
-	g               *llvmGenerator
-	decl            *ast.FuncDecl
-	fnValue         C.LLVMValueRef
-	fnType          *semantic.FuncType
-	builder         C.LLVMBuilderRef
-	scope           *codegenScope
-	diScope         C.LLVMMetadataRef
-	traceNameGlobal C.LLVMValueRef
-	typeMap         map[string]semantic.Type
+	// Consecutive-index check merging (llvm_index_check_merge.go): accesses whose bounds check a
+	// dominating merged guard has discharged, and the nesting depth of merged emission.
+	mergedIndexGuarded map[*ast.IndexExpr]bool
+	indexMergeDepth    int
+	g                  *llvmGenerator
+	decl               *ast.FuncDecl
+	fnValue            C.LLVMValueRef
+	fnType             *semantic.FuncType
+	builder            C.LLVMBuilderRef
+	scope              *codegenScope
+	diScope            C.LLVMMetadataRef
+	traceNameGlobal    C.LLVMValueRef
+	typeMap            map[string]semantic.Type
 	// specializedExprTypes overlays the expression types recorded by the TEMPLATE
 	// analysis with the ones a re-analysis produced for THIS instantiation. Empty for
 	// a non-generic body. See semantic.Result.SpecializedExprTypes.
