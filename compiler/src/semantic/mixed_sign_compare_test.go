@@ -29,6 +29,9 @@ func TestMixedSignComparisonDeclines(t *testing.T) {
 		"guarded":   "def k(t: sview) -> bool:\n    requires t.len >= 0\n    ensure result\n    x: usize = 0\n    return x <= t.len\n",
 		"same_type": "def m(a: i64, b: i64) -> bool:\n    requires a < b\n    ensure result\n    return a <= b\n",
 	}
+	// The same mixed comparison must translate to the same term everywhere: a precondition passed on
+	// unchanged at a recursive call proves itself (it used to mint a fresh Bool per occurrence).
+	ok["recursive_same_args"] = "ghost def walk(values: sview, base: usize, source_end: usize, cursor: usize) -> i64:\n    requires base <= source_end and values.len >= 0 and values.len == source_end - base\n    requires cursor <= values.len\n    decreases values.len - cursor\n    if cursor < values.len and values[cursor] != 44:\n        return walk(values, base, source_end, cursor + 1)\n    return 0\n"
 	for name, src := range ok {
 		if errs := strictSMTErrors(t, "mixed_ok_"+name+".elisa", src); len(errs) != 0 {
 			t.Fatalf("%s: should prove, got:\n%s", name, strings.Join(errs, "\n"))

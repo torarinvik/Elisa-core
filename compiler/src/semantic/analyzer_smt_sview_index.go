@@ -415,11 +415,39 @@ func (tr *smtTranslator) mixedSignCompare(n *ast.BinaryExpr, l, r string) string
 	if !mixed {
 		return cmp
 	}
-	other := tr.freshBoolAux()
+	var other string
 	if wrap := tr.mixedSignWrapModulus(n); wrap != "" {
 		other = smtCompare(n.Op, l, "(+ "+r+" "+wrap+")")
+	} else if conv, ok := tr.mixedSignConvertedRight(n, r); ok {
+		other = smtCompare(n.Op, l, conv)
+	} else {
+		other = tr.freshBoolAux()
 	}
 	return "(ite " + guard + " " + cmp + " " + other + ")"
+}
+
+// mixedSignConvertedRight is the right operand exactly as codegen converts it to the left type
+// (truncate, or sign/zero-extend, then reinterpret): m = r mod 2^bits, read as m - 2^bits when the
+// left type is signed and m >= 2^(bits-1). A deterministic term, so equal comparisons translate equal.
+func (tr *smtTranslator) mixedSignConvertedRight(n *ast.BinaryExpr, r string) (string, bool) {
+	a := tr.a
+	var leftType Type
+	if tr.calleeBodyDepth != 0 {
+		leftType = a.exprTypes[n.Left]
+	} else {
+		leftType = a.smtOperandType(n.Left)
+	}
+	lsign, lbits, ok := smtIntWidthSign(leftType)
+	if !ok || lbits <= 0 || lbits > 128 {
+		return "", false
+	}
+	mod := new(big.Int).Lsh(big.NewInt(1), uint(lbits)).String()
+	m := "(mod " + r + " " + mod + ")"
+	if !lsign {
+		return m, true
+	}
+	half := new(big.Int).Lsh(big.NewInt(1), uint(lbits-1)).String()
+	return "(ite (>= " + m + " " + half + ") (- " + m + " " + mod + ") " + m + ")", true
 }
 
 // mixedSignWrapModulus returns 2^bits when the left operand is unsigned with at least the right
