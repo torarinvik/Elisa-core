@@ -68,8 +68,22 @@ func (a *Analyzer) markRawExternFuncType(fn *ast.ExternFuncDecl, fnType *FuncTyp
 	if a == nil || fn == nil || fnType == nil || !a.enforceUnsafePermissions {
 		return
 	}
+	// Elisa builtin intrinsics are compiler-synthesized pure arithmetic (no foreign code,
+	// no memory access), so calling one is not a raw extern call.
+	if isElisaBuiltinIntrinsicExtern(fn) {
+		return
+	}
 	fnType.PermissionRefs = mergePermissionRefs(fnType.PermissionRefs, unsafeRawExternRefs(fn.Pos()))
 	fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
+}
+
+func isElisaBuiltinIntrinsicExtern(fn *ast.ExternFuncDecl) bool {
+	for _, annotation := range fn.Annotations {
+		if annotation.Name == "intrinsic" && len(annotation.Args) == 1 && IsElisaBuiltinIntrinsic(annotation.Args[0]) {
+			return true
+		}
+	}
+	return false
 }
 
 func externLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) {
@@ -556,7 +570,7 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			}
 			intrinsicName := strings.TrimSpace(annotation.Args[0])
 			if !strings.HasPrefix(intrinsicName, "llvm.") && !IsElisaBuiltinIntrinsic(intrinsicName) {
-				a.errorf(annotation.Position, "@intrinsic on extern function %q expects an LLVM intrinsic name starting with \"llvm.\" or a builtin (elisa.mul_hi.u64)", fn.Name)
+				a.errorf(annotation.Position, "@intrinsic on extern function %q expects an LLVM intrinsic name starting with \"llvm.\" or a builtin (elisa.mul_hi.u64, elisa.div_wide.u64, elisa.f64_to_bits, elisa.f64_from_bits)", fn.Name)
 				continue
 			}
 			fnType.IntrinsicName = intrinsicName

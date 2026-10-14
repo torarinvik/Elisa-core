@@ -13,6 +13,13 @@
 @intrinsic("elisa.mul_hi.u64")
 extern f64_fmt_mul_hi(a: u64, b: u64) -> u64
 
+# IEEE-754 bit pattern of an f64 and back (LLVM bitcast; no Unsafe permission).
+@intrinsic("elisa.f64_to_bits")
+extern f64_to_bits(value: f64) -> u64
+
+@intrinsic("elisa.f64_from_bits")
+extern f64_from_bits(bits: u64) -> f64
+
 struct F64Decimal:
     digits: u64        # 0 only for +-0, inf and NaN
     exponent: i32      # value = digits * 10^exponent
@@ -336,14 +343,6 @@ const ELISA_F64_SHORTEST_G: u64[1234] = [
     0x7FBBD8FE5F5E6E27, 0x497A3A2704EEC3DF
 ]
 
-def f64_to_bits(value: f64) -> u64:
-    copy: f64 = value
-    return (&copy).cast[u64&] can Unsafe.PointerCast
-
-def f64_from_bits(bits: u64) -> f64:
-    copy: u64 = bits
-    return (&copy).cast[f64&] can Unsafe.PointerCast
-
 # floor(e * log10(2)), floor(e * log10(3/4 * 2)), floor(e * log2(10)) for the exponent
 # ranges Schubfach needs (exact there; Giulietti section 9).
 def f64_fmt_flog10_pow2(e: i64) -> i64:
@@ -378,8 +377,9 @@ def f64_fmt_to_decimal(q: i64, c: u64, dk: i64, negative: bool) -> F64Decimal ca
         k <- f64_fmt_flog10_three_quarters_pow2(q)
     h: i64 = q + f64_fmt_flog2_pow10(0 - k) + 2
     index: usize = (k - F64_FMT_K_MIN).usize() * 2   # g(k) approximates 10^-k
-    g1: u64 = ELISA_F64_SHORTEST_G[index]
-    g0: u64 = ELISA_F64_SHORTEST_G[index + 1]
+    # index < 1234 for every k this is reached with (flog10pow2 over finite exponents).
+    g1: u64 = get ELISA_F64_SHORTEST_G[index] else 0
+    g0: u64 = get ELISA_F64_SHORTEST_G[index + 1] else 0
     vb: u64 = f64_fmt_rop(g1, g0, cb << h.u64())
     vbl: u64 = f64_fmt_rop(g1, g0, cbl << h.u64())
     vbr: u64 = f64_fmt_rop(g1, g0, cbr << h.u64())
@@ -438,25 +438,35 @@ def f64_shortest(value: f64) -> F64Decimal can[Abort.Panic]:
         return F64Decimal{digits: 1, exponent: -323, negative: negative, kind: 0}
     return f64_fmt_normalize(f64_fmt_to_decimal(F64_FMT_Q_MIN, t, 0, negative))
 
-# Writes the decimal digits of `digits` into `buffer` back to front; returns the count.
-def f64_fmt_digits(buffer: mutable u8[20]&, digits: u64) -> usize can[Abort.Panic]:
-    count: mutable usize = 0
-    rest: mutable u64 = digits
-    while true |count, rest, buffer|:
+def f64_fmt_digit_count(digits: u64) -> usize:
+    count: mutable usize = 1
+    rest: mutable u64 = digits / 10
+    while rest != 0 |count, rest|:
         count <- count + 1
-        buffer[20 - count] <- ('0'.u64() + rest % 10).u8()
         rest <- rest / 10
-        break if rest == 0
     return count
+
+def f64_fmt_pow10(n: usize) -> u64:
+    value: mutable u64 = 1
+    for _ in 0..<n |value|:
+        value <- value * 10
+    return value
+
+# Pushes digits first..<last of the nd-digit number `digits` (0 = most significant),
+# with '.' in front of digit `dot_at` (never when dot_at is outside the run).
+def f64_fmt_push_digit_run(out: mutable darray[u8]&, digits: u64, nd: usize, first: usize, last: usize, dot_at: usize) -> void can[Memory.Allocate, Abort.Panic]:
+    divisor: mutable u64 = f64_fmt_pow10(nd - 1 - first)
+    for i in first..<last |out, divisor, digits, dot_at|:
+        out.push('.') if i == dot_at
+        out.push(('0'.u64() + (digits / divisor) % 10).u8())
+        divisor <- divisor / 10
 
 def f64_fmt_push_exponent(out: mutable darray[u8]&, exponent: i64, min_digits: usize) -> void can[Memory.Allocate, Abort.Panic]:
     magnitude: u64 = (0 - exponent).u64() if exponent < 0 else exponent.u64()
-    digits: mutable u8[20] = zeroed
-    count: usize = f64_fmt_digits(&digits, magnitude)
+    count: usize = f64_fmt_digit_count(magnitude)
     for _ in count..<min_digits |out|:
         out.push('0')
-    for i in (20 - count)..<20 |out, digits|:
-        out.push(digits[i])
+    f64_fmt_push_digit_run(out, magnitude, count, 0, count, count)
 
 def f64_push_shortest_g(out: mutable darray[u8]&, value: f64) -> void can[Memory.Allocate, Abort.Panic]:
     d: F64Decimal = f64_shortest(value)
@@ -476,18 +486,12 @@ def f64_push_shortest_g(out: mutable darray[u8]&, value: f64) -> void can[Memory
     if d.digits == 0:
         out.push('0')
         return
-    buffer: mutable u8[20] = zeroed
-    nd: usize = f64_fmt_digits(&buffer, d.digits)
-    first: usize = 20 - nd
+    nd: usize = f64_fmt_digit_count(d.digits)
     # decimal point position: value = 0.d1d2... * 10^dp
     dp: i64 = nd.i64() + d.exponent.i64()
     exp: i64 = dp - 1
     if exp < -4 or exp >= 6:
-        out.push(buffer[first])
-        if nd > 1:
-            out.push('.')
-            for i in (first + 1)..<20 |out, buffer|:
-                out.push(buffer[i])
+        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, 1)
         out.push('e')
         out.push('-' if exp < 0 else '+')
         f64_fmt_push_exponent(out, exp, 2)
@@ -497,12 +501,9 @@ def f64_push_shortest_g(out: mutable darray[u8]&, value: f64) -> void can[Memory
         out.push('.')
         for _ in 0..<(0 - dp) |out|:
             out.push('0')
-        for i in first..<20 |out, buffer|:
-            out.push(buffer[i])
+        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, nd)
         return
-    for i in 0..<nd |out, buffer|:
-        out.push('.') if i.i64() == dp
-        out.push(buffer[first + i])
+    f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, dp.usize())
     for _ in nd.i64()..<dp |out|:
         out.push('0')
 
@@ -521,35 +522,25 @@ def f64_push_shortest_json(out: mutable darray[u8]&, value: f64) -> void can[Mem
         out.push('.')
         out.push('0')
         return
-    buffer: mutable u8[20] = zeroed
-    nd: usize = f64_fmt_digits(&buffer, d.digits)
-    first: usize = 20 - nd
+    nd: usize = f64_fmt_digit_count(d.digits)
     k: i64 = d.exponent.i64()
     kk: i64 = nd.i64() + k
     if k >= 0 and kk <= 16:
-        for i in first..<20 |out, buffer|:
-            out.push(buffer[i])
+        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, nd)
         for _ in 0..<k |out|:
             out.push('0')
         out.push('.')
         out.push('0')
     elif kk > 0 and kk <= 16:
-        for i in 0..<nd |out, buffer|:
-            out.push('.') if i.i64() == kk
-            out.push(buffer[first + i])
+        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, kk.usize())
     elif kk > -5 and kk <= 0:
         out.push('0')
         out.push('.')
         for _ in 0..<(0 - kk) |out|:
             out.push('0')
-        for i in first..<20 |out, buffer|:
-            out.push(buffer[i])
+        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, nd)
     else:
-        out.push(buffer[first])
-        if nd > 1:
-            out.push('.')
-            for i in (first + 1)..<20 |out, buffer|:
-                out.push(buffer[i])
+        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, 1)
         out.push('e')
         out.push('-') if kk - 1 < 0
         f64_fmt_push_exponent(out, kk - 1, 1)

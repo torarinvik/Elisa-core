@@ -131,6 +131,27 @@ func (g *llvmGenerator) elisaBuiltinIntrinsicFunction(name string) (C.LLVMValueR
 		quotient := C.LLVMBuildUDiv(builder, joined, divisor, cStringFree("q"))
 		C.LLVMBuildRet(builder, C.LLVMBuildTrunc(builder, quotient, i64, cStringFree("r")))
 		return fn, true
+	case "elisa.f64_to_bits", "elisa.f64_from_bits":
+		i64 := C.LLVMInt64TypeInContext(g.context)
+		f64 := C.LLVMDoubleTypeInContext(g.context)
+		from, to := f64, i64
+		if name == "elisa.f64_from_bits" {
+			from, to = i64, f64
+		}
+		params := []C.LLVMTypeRef{from}
+		fnType := C.LLVMFunctionType(to, llvmTypeSlicePtr(params), 1, 0)
+		fn := C.LLVMAddFunction(g.module, nameC, fnType)
+		C.LLVMSetLinkage(fn, C.LLVMInternalLinkage)
+		attr := "alwaysinline"
+		attrC := C.CString(attr)
+		C.elisacoreAddAlwaysInlineAttrExt(g.context, fn, attrC, C.size_t(len(attr)))
+		C.free(unsafe.Pointer(attrC))
+		builder := C.LLVMCreateBuilderInContext(g.context)
+		defer C.LLVMDisposeBuilder(builder)
+		entry := C.LLVMAppendBasicBlockInContext(g.context, fn, cStringFree("entry"))
+		C.LLVMPositionBuilderAtEnd(builder, entry)
+		C.LLVMBuildRet(builder, C.LLVMBuildBitCast(builder, C.LLVMGetParam(fn, 0), to, cStringFree("bits")))
+		return fn, true
 	}
 	return nil, false
 }

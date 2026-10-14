@@ -22,9 +22,15 @@ extern mul_hi_u64(a: u64, b: u64) -> u64
 @intrinsic("elisa.div_wide.u64")
 extern div_wide_u64(hi: u64, lo: u64, d: u64) -> u64
 
+@intrinsic("elisa.f64_to_bits")
+extern f64_bits(v: f64) -> u64
+
+@intrinsic("elisa.f64_from_bits")
+extern f64_of_bits(b: u64) -> f64
+
 @inline(never)
 def probe(a: u64, b: u64, c: u32) -> u64:
-    return umax_u64(a, b) + umax_u64_mangled(b, a) + popcount_u32(c).u64() + mul_hi_u64(a, b) + div_wide_u64(1, a, b + 2)
+    return umax_u64(a, b) + umax_u64_mangled(b, a) + popcount_u32(c).u64() + mul_hi_u64(a, b) + div_wide_u64(1, a, b + 2) + f64_bits(f64_of_bits(a))
 
 def main() -> int:
     return (probe(3, 4, 7) & 1).int()
@@ -41,7 +47,7 @@ func TestIntrinsicOverloadsAndMulHiBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt error: %v", err)
 	}
-	for _, want := range []string{"declare i64 @llvm.umax.i64(", "declare i32 @llvm.ctpop.i32(", "@elisa.mul_hi.u64(i64", "mul nuw i128", "lshr i128", "udiv i128", "alwaysinline"} {
+	for _, want := range []string{"declare i64 @llvm.umax.i64(", "declare i32 @llvm.ctpop.i32(", "@elisa.mul_hi.u64(i64", "mul nuw i128", "lshr i128", "udiv i128", "alwaysinline", "bitcast double", "bitcast i64"} {
 		if !strings.Contains(ir, want) {
 			t.Fatalf("IR missing %q:\n%s", want, ir)
 		}
@@ -53,7 +59,7 @@ func TestIntrinsicOverloadsAndMulHiBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt O3 error: %v", err)
 	}
-	if strings.Contains(optimized, "@elisa.mul_hi.u64(") || strings.Contains(optimized, "@elisa.div_wide.u64(") {
+	if strings.Contains(optimized, "@elisa.mul_hi.u64(") || strings.Contains(optimized, "@elisa.div_wide.u64(") || strings.Contains(optimized, "@elisa.f64_to_bits(") {
 		t.Fatalf("mul_hi builtin was not inlined away at O3:\n%s", optimized)
 	}
 }

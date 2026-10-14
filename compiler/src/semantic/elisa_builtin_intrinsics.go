@@ -10,6 +10,10 @@ var elisaBuiltinIntrinsics = map[string]bool{
 	// Quotient of the 128-bit value (hi:lo) by d, truncated to 64 bits; exact when hi < d.
 	// d must be non-zero (the caller checks).
 	"elisa.div_wide.u64": true,
+	// IEEE-754 bit pattern of an f64 and back (LLVM bitcast; no memory is touched, so
+	// unlike a pointer cast these carry no Unsafe permission).
+	"elisa.f64_to_bits": true,
+	"elisa.f64_from_bits": true,
 }
 
 // IsElisaBuiltinIntrinsic reports whether name is a builtin the backend synthesizes.
