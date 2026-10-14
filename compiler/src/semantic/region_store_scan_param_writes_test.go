@@ -226,3 +226,38 @@ def labels_at(line: u32, table: mutable Table&) -> darray[sview]:
 		t.Fatalf("captured locals became aliases of the table: %v", alias)
 	}
 }
+
+// A struct-literal holder contains the parameter only under the fields it was built from:
+// pushing onto another field of it (`entry.names`) writes the fresh struct, not the parameter,
+// and a holder handed to a callee (`entries`) is written by that callee only through its parts.
+// Pushing through the field that holds the part (`entry.target`) still writes the parameter.
+func TestStoreScanHolderFieldsAndDeepMode(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_holder_fields.elisa", `struct Entry:
+    target: mutable darray[sview] = []
+    names: mutable darray[sview] = []
+
+def pair(target: darray[sview], name: sview, entries: mutable darray[Entry]&, n: i64) -> void:
+    can Memory.Allocate, Abort.Panic:
+        entry: mutable Entry = Entry{target: target}
+        entry.names.push(name)
+        entries.push(entry)
+        pair(target, name, entries, n - 1) if n > 0
+
+def pair_bad(target: darray[sview], name: sview, entries: mutable darray[Entry]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        entry: mutable Entry = Entry{target: target}
+        entry.target.push(name)
+        entries.push(entry)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	a := result.analyzer
+	a.currentScope = a.globalScope
+	if a.storeScanParamMayBeWritten(storeScanFindFunc(t, result, "pair"), 0) {
+		t.Fatalf("pair never writes its target parameter")
+	}
+	if !a.storeScanParamMayBeWritten(storeScanFindFunc(t, result, "pair_bad"), 0) {
+		t.Fatalf("pair_bad pushes through entry.target, which is the target parameter's storage")
+	}
+}

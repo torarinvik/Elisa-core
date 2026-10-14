@@ -31,6 +31,11 @@ import (
 const (
 	storeScanModeWrite = 0
 	storeScanModeShare = 1
+	// Mode deep, (g, i): g may write storage reachable from the PARTS of its parameter i (what
+	// its elements / fields point to), not i's own buffer. A holder argument (`entries`, holding
+	// entries that contain a part) reaches the caller's storage only this way: the callee
+	// pushing onto its own `entries` buffer writes nothing the holder's parts point to.
+	storeScanModeDeep = 2
 )
 
 type storeScanParamKey struct {
@@ -59,6 +64,7 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 		a.storeScanParamWriteCache = map[storeScanParamKey]bool{}
 	}
 	visited := map[storeScanParamKey]bool{start: true}
+	parent := map[storeScanParamKey]storeScanParamKey{}
 	queue := []storeScanParamKey{start}
 	result := false
 	for len(queue) > 0 && !result {
@@ -79,7 +85,11 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 					pos = n.Pos().String()
 				}
 				storeScanParamWriterOf[start] = fmt.Sprintf("%s/%d/%d %s %s", key.decl.Name, key.index, key.mode, facts.why, pos)
-				fmt.Fprintf(os.Stderr, "PARAMW start=%s/%d/%d writer=%s/%d/%d why=%s at %s\n", start.decl.Name, start.index, start.mode, key.decl.Name, key.index, key.mode, facts.why, pos)
+				path := ""
+				for k := key; k != start; k = parent[k] {
+					path = fmt.Sprintf(" <- %s/%d/%d", k.decl.Name, k.index, k.mode) + path
+				}
+				fmt.Fprintf(os.Stderr, "PARAMW start=%s/%d/%d writer=%s/%d/%d why=%s at %s path=%s\n", start.decl.Name, start.index, start.mode, key.decl.Name, key.index, key.mode, facts.why, pos, path)
 			}
 			result = true
 			break
@@ -87,6 +97,7 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 		for _, next := range facts.reach {
 			if !visited[next] {
 				visited[next] = true
+				parent[next] = key
 				queue = append(queue, next)
 			}
 		}
@@ -175,7 +186,11 @@ func (a *Analyzer) storeScanCallReturnType(call *ast.CallExpr) Type {
 
 // storeScanParamAliases: the names that ARE the parameter's storage (alias) and the locals that
 // CONTAIN parts of it (holds).
-func (a *Analyzer) storeScanParamAliases(decl *ast.FuncDecl, idx *storeScanDeclIndex, index int) (map[string]bool, map[string]bool) {
+func (a *Analyzer) storeScanParamAliases(decl *ast.FuncDecl, idx *storeScanDeclIndex, index, mode int) (map[string]bool, storeScanHolds) {
+	if mode == storeScanModeDeep {
+		// The parameter itself is only a holder: its parts are the storage.
+		return a.storeScanAliasClosureFrom(decl, idx, map[string]bool{}, map[string]bool{decl.Params[index].Name: true})
+	}
 	return a.storeScanAliasClosure(decl, idx, map[string]bool{decl.Params[index].Name: true})
 }
 
@@ -186,8 +201,21 @@ func (a *Analyzer) storeScanParamAliases(decl *ast.FuncDecl, idx *storeScanDeclI
 //   - holds: locals whose own buffer is fresh but CONTAINS parts (`h = [p]`, `h.push(p.items)`):
 //     writing the holder itself (`h.push(v)`, `h[0] <- v`) writes nothing of the storage; writing
 //     through a part (`h[0][0] <- v`, `h[0].push(v)`) does.
-func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclIndex, alias map[string]bool) (map[string]bool, map[string]bool) {
+func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclIndex, alias map[string]bool) (map[string]bool, storeScanHolds) {
+	return a.storeScanAliasClosureFrom(decl, idx, alias, nil)
+}
+
+// storeScanAliasClosureFrom: storeScanAliasClosure starting from alias names and holder names
+// (holding parts under any projection).
+func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanDeclIndex, alias, startHolds map[string]bool) (map[string]bool, storeScanHolds) {
 	holds := map[string]bool{}
+	// fields: per holder, the first projections that lead to a part (`entry = E{target: p}`
+	// holds a part under `.target` only; "*" = any projection).
+	fields := map[string]map[string]bool{}
+	for name := range startHolds {
+		holds[name] = true
+		fields[name] = map[string]bool{"*": true}
+	}
 	// Locals declared with a scalar / opaque type, and integer range binders, hold no storage
 	// whatever their value mentions (`slot: usize = p.bits.usize()`).
 	scalars := a.storeScanScalarLocals(decl)
@@ -202,6 +230,21 @@ func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclI
 				changed = true
 			}
 		}
+		// hold: name contains a part under the first projection proj ("*" = any).
+		hold := func(name, proj string) {
+			if name == "" || alias[name] || scalars[name] {
+				return
+			}
+			add(holds, name)
+			if fields[name] == nil {
+				fields[name] = map[string]bool{}
+			}
+			if !fields[name][proj] {
+				fields[name][proj] = true
+				changed = true
+			}
+		}
+		h := storeScanHolds{names: holds, fields: fields}
 		bindValue := func(name string, value ast.Expr) {
 			if value == nil || !a.storeScanMayShare(decl, value) {
 				return
@@ -211,12 +254,24 @@ func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclI
 				add(alias, name)
 			case len(holds) > 0 && storeScanMayAliasPlace(idx, value, holds):
 				if storeScanPlaceDepth(value) >= 1 {
-					add(alias, name) // `x = holder[0]`: a part
+					if h.through(value, 1) {
+						add(alias, name) // `x = holder[0]`: a part
+					} else if carries(value) {
+						hold(name, "*") // `x = entry.other`: may still contain parts
+					}
 				} else {
-					add(holds, name) // `x = holder`: another holder
+					hold(name, "*") // `x = holder`: another holder
 				}
 			case carries(value):
-				add(holds, name) // a fresh literal / result containing parts
+				if lit, isLit := stripParenExpr(value).(*ast.StructLitExpr); isLit && lit != nil && len(lit.Spreads) == 0 && lit.CopyBase == nil && len(lit.ArgNames) == len(lit.Args) {
+					for k, arg := range lit.Args {
+						if carries(arg) {
+							hold(name, lit.ArgNames[k]) // `E{target: p}`: a part under .target
+						}
+					}
+				} else {
+					hold(name, "*") // a fresh literal / result containing parts
+				}
 			}
 		}
 		for _, node := range idx.flat {
@@ -234,7 +289,7 @@ func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclI
 				} else if carries(n.Value) {
 					// `local.f <- p` / `local[i] <- p`: the local now contains a part.
 					if root := rootIdentExpr(stripAddrAndParens(n.Target)); root != nil && !alias[root.Name] {
-						add(holds, root.Name)
+						hold(root.Name, storeScanFirstProjection(n.Target))
 					}
 				}
 			case *ast.CallExpr:
@@ -246,7 +301,7 @@ func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclI
 					for _, arg := range n.Args {
 						if carries(arg) {
 							if root := rootIdentExpr(stripAddrAndParens(field.Object)); root != nil && !alias[root.Name] {
-								add(holds, root.Name)
+								hold(root.Name, storeScanFirstProjection(field.Object))
 							}
 							break
 						}
@@ -263,7 +318,7 @@ func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclI
 			}
 		}
 	}
-	return alias, holds
+	return alias, storeScanHolds{names: holds, fields: fields}
 }
 
 func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanParamFacts {
@@ -272,16 +327,14 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 		return storeScanParamFacts{writes: true} // no body to inspect (extern, unknown)
 	}
 	idx := a.storeScanIndex(decl)
-	alias, holds := a.storeScanParamAliases(decl, idx, index)
+	alias, hs := a.storeScanParamAliases(decl, idx, index, mode)
+	holds := hs.names
 	// reaches: an expression that mentions the storage or a holder of its parts.
 	reachesStorage := func(expr ast.Expr) bool {
 		return idx.mentions(expr, alias) || (len(holds) > 0 && idx.mentions(expr, holds))
 	}
 	// throughHolder: a place / receiver at least depth deep under a holder (`h[0][0]`, `h[0]`).
-	throughHolder := func(expr ast.Expr, depth int) bool {
-		root := rootIdentExpr(stripAddrAndParens(expr))
-		return root != nil && holds[root.Name] && storeScanPlaceDepth(expr) >= depth
-	}
+	throughHolder := hs.through
 	facts := storeScanParamFacts{}
 	seenReach := map[storeScanParamKey]bool{}
 	reach := func(next storeScanParamKey) {
@@ -292,7 +345,7 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 	}
 	// Locals of decl that are written or handed to a call (holders, write mode only).
 	var touched map[string]bool
-	if mode == storeScanModeWrite {
+	if mode != storeScanModeShare {
 		touched = storeScanTouchedLocals(idx)
 	}
 	// Share mode asks whether ANOTHER parameter's storage may be stored into this one: a stored
@@ -307,8 +360,9 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 				start[p.Name] = true
 			}
 		}
-		var outsideHolds map[string]bool
-		outside, outsideHolds = a.storeScanAliasClosure(decl, idx, start)
+		var outsideHS storeScanHolds
+		outside, outsideHS = a.storeScanAliasClosure(decl, idx, start)
+		outsideHolds := outsideHS.names
 		fromOutside = func(value ast.Expr) bool {
 			return a.storeScanFlowsFrom(decl, idx, value, outside) || (len(outsideHolds) > 0 && a.storeScanFlowsFrom(decl, idx, value, outsideHolds))
 		}
@@ -318,7 +372,7 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			if id, bare := stripParenExpr(assign.Target).(*ast.Ident); bare && id != nil && !storeScanNameIsRefParam(decl, id.Name, idx) {
 				continue // rebinding a local / by-value copy writes no shared storage
 			}
-			if (idx.mentions(assign.Target, alias) || throughHolder(assign.Target, 2)) && (mode == storeScanModeWrite || (a.storeScanAssignMayStoreShared(decl, assign) && fromOutside(assign.Value))) {
+			if (idx.mentions(assign.Target, alias) || throughHolder(assign.Target, 2)) && (mode != storeScanModeShare || (a.storeScanAssignMayStoreShared(decl, assign) && fromOutside(assign.Value))) {
 				facts.writes = true
 				facts.why = "assign"
 				if storeScanTrace && mode == storeScanModeShare {
@@ -343,7 +397,7 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 		args := returnBorrowCallArgs(call)
 		if field, isMethod := call.Func.(*ast.FieldExpr); isMethod && field != nil && len(args) == len(call.Args) {
 			if (idx.mentions(field.Object, alias) || throughHolder(field.Object, 1)) && !storeScanReadOnlyMethods[field.Field] {
-				if mode == storeScanModeWrite {
+				if mode != storeScanModeShare {
 					facts.writes = true
 					facts.why = "method-write"
 					facts.at = node
@@ -391,9 +445,14 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			if !a.declParamIsWritableRef(callee, k) || a.declParamIsViewOrScalar(callee, k) {
 				continue
 			}
-			reach(storeScanParamKey{callee, k, mode})
+			next := mode
+			if mode != storeScanModeShare && !idx.mentions(args[k], alias) {
+				// Only a holder of parts is handed over: the callee must write through its parts.
+				next = storeScanModeDeep
+			}
+			reach(storeScanParamKey{callee, k, next})
 		}
-		if mode != storeScanModeWrite {
+		if mode == storeScanModeShare {
 			continue
 		}
 		// The callee may store the parameter's storage into a holder argument f then writes.
@@ -599,6 +658,24 @@ func (a *Analyzer) storeScanFlowsFrom(decl *ast.FuncDecl, idx *storeScanDeclInde
 			if field, isMethod := e.Func.(*ast.FieldExpr); isMethod && field != nil && flows(field.Object) {
 				return true
 			}
+			if callee, ok := a.resolveReadOnlyScanCallee(e); ok && callee != nil && storeFlowCallFitsParams(callee, e) {
+				// A resolved callee's result carries only the parameters its (completed) store-flow
+				// summary connects to the result.
+				a.storeFlowSummaryFor(callee)
+				if sum := a.storeFlowSummaries[callee]; sum != nil && a.storeFlowInProgress[callee] == nil {
+					args := returnBorrowCallArgs(e)
+					if len(sum.retConn) == len(callee.Params) {
+						for i, arg := range args {
+							if i >= len(sum.retConn) || sum.retConn[i] {
+								if flows(arg) {
+									return true
+								}
+							}
+						}
+						return false
+					}
+				}
+			}
 			for _, arg := range e.Args {
 				if flows(arg) {
 					return true
@@ -654,4 +731,45 @@ func (a *Analyzer) storeScanIsEnumConstructor(decl *ast.FuncDecl, call *ast.Call
 	a.storeFlowCurrentDecl = decl
 	defer func() { a.storeFlowCurrentDecl = saved }()
 	return a.storeFlowEnumVariantConstructor(call)
+}
+
+// storeScanHolds: locals that contain parts of some storage, and under which first projection.
+type storeScanHolds struct {
+	names  map[string]bool
+	fields map[string]map[string]bool
+}
+
+// through: expr is a place at least depth projections under a holder, entered through a
+// projection that leads to a part.
+func (h storeScanHolds) through(expr ast.Expr, depth int) bool {
+	root := rootIdentExpr(stripAddrAndParens(expr))
+	if root == nil || !h.names[root.Name] || storeScanPlaceDepth(expr) < depth {
+		return false
+	}
+	f := h.fields[root.Name]
+	return f == nil || f["*"] || f[storeScanFirstProjection(expr)]
+}
+
+// storeScanFirstProjection: the field name of the projection applied directly to the root of a
+// place (`e.target.x` -> "target"); "*" for an index or a bare root.
+func storeScanFirstProjection(expr ast.Expr) string {
+	proj := "*"
+	for {
+		switch e := stripAddrAndParens(expr).(type) {
+		case *ast.FieldExpr:
+			if e == nil {
+				return proj
+			}
+			proj = e.Field
+			expr = e.Object
+		case *ast.IndexExpr:
+			if e == nil {
+				return proj
+			}
+			proj = "*"
+			expr = e.Object
+		default:
+			return proj
+		}
+	}
 }

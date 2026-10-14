@@ -1135,7 +1135,7 @@ func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallEx
 		if w.callee != nil && !a.storeScanParamMayBeWritten(w.callee, w.into) {
 			continue // the resolved callee never writes through that parameter
 		}
-		if w.callee != nil && !a.storeScanContainerElemsMayShare(decl, &ast.Ident{Name: w.local}) &&
+		if w.callee != nil && (!a.storeScanContainerElemsMayShare(decl, &ast.Ident{Name: w.local}) || (w.arg != nil && !a.storeScanContainerElemsMayShare(decl, w.arg))) &&
 			!a.storeScanParamReaches(storeScanParamKey{w.callee, w.into, storeScanModeShare}) {
 			// A container of non-sharing elements (`darray[sview]`) whose header the callee never
 			// replaces with another parameter's storage receives element values only: at most
@@ -1159,6 +1159,8 @@ func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallEx
 type storeScanCallWrite struct {
 	local string
 	value ast.Expr
+	// arg is the argument place the callee writes through (`local`, `local.items`).
+	arg ast.Expr
 	// callee (nil when unresolved) writes its parameter `from` (value) into `into` (local).
 	callee     *ast.FuncDecl
 	from, into int
@@ -1200,7 +1202,7 @@ func (a *Analyzer) storeScanCallWritePlan(decl *ast.FuncDecl, call *ast.CallExpr
 			if j == i || (resolved && !a.declParamCarriesStorage(callee, j)) {
 				continue
 			}
-			w := storeScanCallWrite{local: root.Name, value: other}
+			w := storeScanCallWrite{local: root.Name, value: other, arg: stripAddrAndParens(arg)}
 			if resolved {
 				w.callee, w.from, w.into = callee, j, i
 			}
