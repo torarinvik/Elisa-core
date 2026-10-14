@@ -1,5 +1,7 @@
 package semantic
 
+import "elisacore/src/ast"
+
 // Store-scan DFS frames. calleeStoreModeIntoSeen / calleeReturnModeOf search callee summaries
 // depth first; a key already on the search STACK is a recursive cycle and answers `none` (a
 // cycle adds no store the rest of the body does not already show, which makes the cycle head's
@@ -120,4 +122,14 @@ func (a *Analyzer) storeScanSettled(query func() storeMode) storeMode {
 		return storeHeader
 	}
 	return mode
+}
+
+// storeScanSummaryNeverReaches: decl's completed store-flow summary has no edge from parameter
+// other into parameter index. A summary still being solved (an assumption) proves nothing.
+func (a *Analyzer) storeScanSummaryNeverReaches(decl *ast.FuncDecl, other, index int) bool {
+	if decl == nil || funcHasArenaParam(decl) || a.storeFlowInProgress[decl] != nil || a.storeFlowActive[decl] {
+		return false
+	}
+	summary := a.storeFlowSummaryFor(decl)
+	return summary != nil && a.storeFlowSummaries[decl] == summary && !summary.reaches(other, index)
 }

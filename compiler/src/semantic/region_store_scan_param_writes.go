@@ -30,13 +30,22 @@ import (
 
 const (
 	storeScanModeWrite = 0
-	storeScanModeShare = 1
 	// Mode deep, (g, i): g may write storage reachable from the PARTS of its parameter i (what
 	// its elements / fields point to), not i's own buffer. A holder argument (`entries`, holding
 	// entries that contain a part) reaches the caller's storage only this way: the callee
 	// pushing onto its own `entries` buffer writes nothing the holder's parts point to.
 	storeScanModeDeep = 2
+	// Mode share-from, (g, m, k): mode storeScanModeShareFrom+k. g may store a value sharing the
+	// storage of its parameter k into the storage of its parameter m. Per (into, from) pair: a
+	// callee pushing an AST handle it was given into `entries` does not thereby store some other
+	// argument's darray header there.
+	storeScanModeShareFrom = 16
 )
+
+// storeScanShareKey: the share-from node for (callee, into, from).
+func storeScanShareKey(callee *ast.FuncDecl, into, from int) storeScanParamKey {
+	return storeScanParamKey{callee, into, storeScanModeShareFrom + from}
+}
 
 type storeScanParamKey struct {
 	decl  *ast.FuncDecl
@@ -298,6 +307,11 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 					continue
 				}
 				if field, isMethod := n.Func.(*ast.FieldExpr); isMethod && field != nil {
+					if containerGrowthMethods[field.Field] && a.storeScanReceiverIsBuiltinDArray(decl, field.Object) && !a.storeScanContainerElemsMayShare(decl, field.Object) {
+						// `path.names.extend(xs)` into a `darray[sview]`: element copies that share
+						// no storage -- the receiver holds nothing of xs.
+						continue
+					}
 					for _, arg := range n.Args {
 						if carries(arg) {
 							if root := rootIdentExpr(stripAddrAndParens(field.Object)); root != nil && !alias[root.Name] {
@@ -323,6 +337,8 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 
 func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanParamFacts {
 	decl, index, mode := key.decl, key.index, key.mode
+	share := mode >= storeScanModeShareFrom
+	from := mode - storeScanModeShareFrom
 	if decl == nil || index < 0 || index >= len(decl.Params) || len(decl.Body) == 0 {
 		return storeScanParamFacts{writes: true} // no body to inspect (extern, unknown)
 	}
@@ -345,18 +361,19 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 	}
 	// Locals of decl that are written or handed to a call (holders, write mode only).
 	var touched map[string]bool
-	if mode != storeScanModeShare {
+	if !share {
 		touched = storeScanTouchedLocals(idx)
 	}
-	// Share mode asks whether ANOTHER parameter's storage may be stored into this one: a stored
-	// value must flow from an alias of some other parameter (a fresh literal, a foreign handle or
-	// a scalar result stores none).
+	// Share mode asks whether parameter from's storage may be stored into this one: a stored
+	// value must flow from an alias of that parameter (a fresh literal, a foreign handle, a
+	// scalar result or another parameter's storage stores none of it). An unknown source index
+	// conservatively stands for every other parameter.
 	var outside map[string]bool
 	fromOutside := func(value ast.Expr) bool { return true }
-	if mode == storeScanModeShare {
+	if share {
 		start := map[string]bool{}
 		for k, p := range decl.Params {
-			if k != index {
+			if k != index && (from < 0 || from >= len(decl.Params) || k == from) {
 				start[p.Name] = true
 			}
 		}
@@ -372,10 +389,10 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			if id, bare := stripParenExpr(assign.Target).(*ast.Ident); bare && id != nil && !storeScanNameIsRefParam(decl, id.Name, idx) {
 				continue // rebinding a local / by-value copy writes no shared storage
 			}
-			if (idx.mentions(assign.Target, alias) || throughHolder(assign.Target, 2)) && (mode != storeScanModeShare || (a.storeScanAssignMayStoreShared(decl, assign) && fromOutside(assign.Value))) {
+			if (idx.mentions(assign.Target, alias) || throughHolder(assign.Target, 2)) && (!share || (a.storeScanAssignMayStoreShared(decl, assign) && fromOutside(assign.Value))) {
 				facts.writes = true
 				facts.why = "assign"
-				if storeScanTrace && mode == storeScanModeShare {
+				if storeScanTrace && share {
 					facts.why = fmt.Sprintf("assign outside=%v", outside)
 				}
 				facts.at = node
@@ -397,7 +414,7 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 		args := returnBorrowCallArgs(call)
 		if field, isMethod := call.Func.(*ast.FieldExpr); isMethod && field != nil && len(args) == len(call.Args) {
 			if (idx.mentions(field.Object, alias) || throughHolder(field.Object, 1)) && !storeScanReadOnlyMethods[field.Field] {
-				if mode != storeScanModeShare {
+				if !share {
 					facts.writes = true
 					facts.why = "method-write"
 					facts.at = node
@@ -427,7 +444,7 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 		}
 		callee, resolved := a.resolveReadOnlyScanCallee(call)
 		if !resolved || callee == nil || !storeFlowCallFitsParams(callee, call) {
-			if mode == storeScanModeShare {
+			if share {
 				given := false
 				for _, arg := range args {
 					given = given || fromOutside(arg)
@@ -445,14 +462,23 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			if !a.declParamIsWritableRef(callee, k) || a.declParamIsViewOrScalar(callee, k) {
 				continue
 			}
+			if share {
+				// The callee may store into k what any argument carrying from's storage gives it.
+				for j, arg := range args {
+					if j != k && fromOutside(arg) {
+						reach(storeScanShareKey(callee, k, j))
+					}
+				}
+				continue
+			}
 			next := mode
-			if mode != storeScanModeShare && !idx.mentions(args[k], alias) {
+			if !idx.mentions(args[k], alias) {
 				// Only a holder of parts is handed over: the callee must write through its parts.
 				next = storeScanModeDeep
 			}
 			reach(storeScanParamKey{callee, k, next})
 		}
-		if mode == storeScanModeShare {
+		if share {
 			continue
 		}
 		// The callee may store the parameter's storage into a holder argument f then writes.
@@ -471,7 +497,12 @@ func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanPa
 			if !a.declParamIsWritableRef(callee, m) || a.declParamIsViewOrScalar(callee, m) {
 				continue
 			}
-			reach(storeScanParamKey{callee, m, storeScanModeShare})
+			// The callee may store the storage it receives at k into m.
+			for _, k := range mentioned {
+				if k != m && a.storeScanMayShare(decl, args[k]) {
+					reach(storeScanShareKey(callee, m, k))
+				}
+			}
 		}
 	}
 	return facts

@@ -100,6 +100,12 @@ func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int,
 	if mode, ok := a.storeScanReuseProvisional(key); ok {
 		return mode
 	}
+	if a.storeScanSummaryNeverReaches(decl, other, index) {
+		// The (completed, least-fixpoint) store-flow summary proves no flow from other into
+		// index at all -- the same proof the call-site gate accepts. Final.
+		a.cacheStoreScan(key, storeNone)
+		return storeNone
+	}
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
 	mark := a.storeScanPushFrame(key)
@@ -1138,20 +1144,19 @@ func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallEx
 		// A holder: the callee may store (part of) the target place it is given into the local
 		// (`stash(holder, table.deep.lists)`), whose stores then reach the target.
 		if !targets[w.local] && !holders[w.local] && (storeScanMayAliasPlace(idx, w.value, targets) || storeScanMayAliasPlace(idx, w.value, holders)) && a.storeScanHolderMayAlias(decl, w) &&
-			(w.callee == nil || a.storeScanParamReaches(storeScanParamKey{w.callee, w.into, storeScanModeShare})) && addHolder(w.local) {
+			(w.callee == nil || a.storeScanParamReaches(storeScanShareKey(w.callee, w.into, w.from))) && addHolder(w.local) {
 			changed = true
 			if storeScanTrace {
-				fmt.Fprintf(os.Stderr, "TGTHOLD %s src=%s local=%s at %s writer=%s\n", decl.Name, storeScanTraceOther, w.local, call.Pos(), storeScanParamWriterOf[storeScanParamKey{w.callee, w.into, storeScanModeShare}])
+				fmt.Fprintf(os.Stderr, "TGTHOLD %s src=%s local=%s at %s writer=%s\n", decl.Name, storeScanTraceOther, w.local, call.Pos(), storeScanParamWriterOf[storeScanShareKey(w.callee, w.into, w.from)])
 			}
 		}
 		if w.callee != nil && !a.storeScanParamMayBeWritten(w.callee, w.into) {
 			continue // the resolved callee never writes through that parameter
 		}
-		if w.callee != nil && (!a.storeScanContainerElemsMayShare(decl, &ast.Ident{Name: w.local}) || (w.arg != nil && !a.storeScanContainerElemsMayShare(decl, w.arg))) &&
-			!a.storeScanParamReaches(storeScanParamKey{w.callee, w.into, storeScanModeShare}) {
-			// A container of non-sharing elements (`darray[sview]`) whose header the callee never
-			// replaces with another parameter's storage receives element values only: at most
-			// what they read (content), never the source's header.
+		if w.callee != nil && !a.storeScanParamReaches(storeScanShareKey(w.callee, w.into, w.from)) {
+			// The callee never stores a value sharing parameter from's storage into into's: the
+			// local receives at most what the callee reads out of the source (content), never
+			// its header. (Share facts are per (into, from) pair.)
 			if idx.mentions(w.value, content) && addContent(w.local) {
 				changed = true
 			}
