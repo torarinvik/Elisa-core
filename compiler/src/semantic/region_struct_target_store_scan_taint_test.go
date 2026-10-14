@@ -61,7 +61,7 @@ func TestStoreScanMatchArmBodyIsNotTheHeader(t *testing.T) {
 	walk := storeScanFindFunc(t, result, "walk")
 	// Source: tracked_loop_vars (1). Its content is the tracked list and nothing matched out of
 	// `statements`.
-	_, _, content, _ := result.analyzer.storeScanTaint(walk, 1, "table")
+	_, _, content, _, _ := result.analyzer.storeScanTaint(walk, 1, "table")
 	for _, name := range []string{"target", "name", "then_body", "cond", "line"} {
 		if content[name] {
 			t.Errorf("binder %q of a match over an untainted scrutinee was tainted: %v", name, content)
@@ -71,7 +71,7 @@ func TestStoreScanMatchArmBodyIsNotTheHeader(t *testing.T) {
 		t.Errorf("the local bound from the source must stay tainted: %v", content)
 	}
 	// Source: statements (0). Now the scrutinee is tainted, so the binders are content.
-	_, _, content, _ = result.analyzer.storeScanTaint(walk, 0, "table")
+	_, _, content, _, _ = result.analyzer.storeScanTaint(walk, 0, "table")
 	for _, name := range []string{"statement", "target", "name", "then_body"} {
 		if !content[name] {
 			t.Errorf("binder %q of a match over a tainted scrutinee must be content: %v", name, content)

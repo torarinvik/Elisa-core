@@ -263,6 +263,7 @@ type Analyzer struct {
 	// lives in a caller-owned region param R, the region-polymorphic call f receives R (not the
 	// ambient region) as its hidden allocation region. destinationAllocated records the calls that
 	// did, so the escape check knows their result lives in R.
+	storeScanViewCache   map[*ast.FuncDecl]map[string]bool
 	destinationCall      *ast.CallExpr
 	destinationRegion    string
 	destinationAllocated map[*ast.CallExpr]string

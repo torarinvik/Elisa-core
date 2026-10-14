@@ -200,3 +200,50 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "destination_region_merge", src, "bt")
 }
+
+// A view picked out of a local darray[sview] and stored by the callee is an element value: when the
+// local's elements view caller-owned bytes, the stored views stay valid after the local's region
+// is freed (accepted by the store scan's non-byte-darray view rule).
+func TestStoredElementViewOfLocalDArrayOutlivesIt(t *testing.T) {
+	src := `
+struct Table:
+    names: mutable darray[sview] = []
+
+def pick(names: darray[sview]&) -> sview:
+    can Abort.Panic:
+        return names[1] if names.count > 1 else ""
+
+def note(table: mutable Table&, names: darray[sview]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        n: sview = pick(names)
+        table.names.push(n)
+
+def run(table: mutable Table&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[sview] = []
+        for i in 0..<50 |local|:
+            local.push("pad")
+        local[1] <- src
+        note(table, &local)
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        owner: mutable dstr = []
+        for i in 0..<5 |owner|:
+            owner.push(72 + i.u8())
+        table: mutable Table = Table{}
+        run(&table, owner.as_sview())
+        c: i64 = churn()
+        if table.names.count != 1 or table.names[0].len != 5 or table.names[0][0] != 72 or table.names[0][4] != 76 or c != 27993:
+            panic("stored element view lost")
+`
+	buildAndRunSoATest(t, "stored_element_view", src, "bt")
+}

@@ -97,7 +97,12 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	}
 	key := storeScanKey{decl, other, index}
 	seen[key] = true
-	params, header, content, targets := a.storeScanTaint(decl, other, decl.Params[index].Name)
+	if storeScanTrace {
+		savedOther := storeScanTraceOther
+		storeScanTraceOther = decl.Params[other].Name
+		defer func() { storeScanTraceOther = savedOther }()
+	}
+	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name)
 	var valueMode func(value ast.Expr) storeMode
 	valueMode = func(value ast.Expr) storeMode {
 		inner := storeScanUnwrap(value)
@@ -120,6 +125,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			return mode
 		}
 		if storeScanMentionsHeader(value, header) {
+			if views != nil && a.storeScanValueIsView(inner, views) {
+				return storeElements
+			}
 			return storeHeader
 		}
 		if storeScanMentions(value, content) {
@@ -573,9 +581,12 @@ func stmtHeaderMentionsAny(stmt ast.Stmt, names map[string]bool) bool {
 
 var storeScanTrace = os.Getenv("ELISA_STORESCAN_TRACE") != ""
 
+// storeScanTraceOther names the source parameter of the body scan in progress (trace only).
+var storeScanTraceOther string
+
 func storeScanRaise(decl *ast.FuncDecl, rule int, node ast.Node, mode, next storeMode) storeMode {
 	if next > mode && storeScanTrace && node != nil {
-		fmt.Fprintf(os.Stderr, "STORESCAN %s rule=%d mode=%d at %s\n", decl.Name, rule, next, node.Pos())
+		fmt.Fprintf(os.Stderr, "STORESCAN %s rule=%d mode=%d src=%s at %s\n", decl.Name, rule, next, storeScanTraceOther, node.Pos())
 	}
 	return maxStoreMode(mode, next)
 }
@@ -675,7 +686,7 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 // parameter (header) or something read out of it (content), and which names may alias the
 // target place (targetName; "" for none). Locals become tainted by binding (decl/assign of the
 // local itself) and by receiving a tainted store (`local.f <- v`, `local.xs.push(v)`).
-func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, header, content, targets map[string]bool) {
+func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, header, content, targets, views map[string]bool) {
 	params = map[string]bool{}
 	for _, p := range decl.Params {
 		params[p.Name] = true
@@ -693,9 +704,14 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 		set[name] = true
 		return true
 	}
+	views = a.storeScanViewLocalsCached(decl, other)
 	taint := func(name string, value ast.Expr) bool {
 		changed := false
-		if storeScanMentionsHeader(value, header) {
+		if views[name] && storeScanMentions(value, content) {
+			// A view-typed local derived from a non-byte darray source holds (part of) an element
+			// value, never the source's header (storeScanViewLocals).
+			changed = add(content, name) || changed
+		} else if storeScanMentionsHeader(value, header) {
 			changed = add(header, name) || changed
 			changed = add(content, name) || changed
 		} else if storeScanMentions(value, content) {
@@ -794,7 +810,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 			}
 		})
 	}
-	return params, header, content, targets
+	return params, header, content, targets, views
 }
 
 // calleeReturnModeOf: what may the callee RETURN from parameter `other` -- nothing, values read
@@ -815,7 +831,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	seen[key] = true
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
-	_, header, content, _ := a.storeScanTaint(decl, other, "")
+	_, header, content, _, views := a.storeScanTaint(decl, other, "")
 	mode := storeNone
 	sawReturn := false
 	walkStoreScanNodes(decl.Body, func(node any) {
@@ -854,7 +870,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 				return
 			}
 		}
-		if storeScanMentionsHeader(value, header) {
+		if storeScanMentionsHeader(value, header) && !(views != nil && a.storeScanValueIsView(value, views)) {
 			mode = storeHeader
 		} else if storeScanMentions(value, content) {
 			mode = maxStoreMode(mode, storeElements)
@@ -1110,6 +1126,120 @@ func storeScanTypeExprIsDArray(t ast.TypeExpr) bool {
 			return tt != nil && (tt.Name == "darray" || tt.Name == "dstr")
 		case *ast.NamedType:
 			return tt != nil && tt.Name == "dstr"
+		}
+		return false
+	}
+}
+
+// storeScanViewLocals: when the scan's source parameter is a NON-BYTE darray (`darray[sview]`,
+// `darray[ValueType]`, ...), no `sview`/`cstr` value can be or view the source's own backing --
+// only a byte darray yields a view into its storage (`as_sview`) -- so a view derived from the
+// source is (part of) an element value: content, never the header. Returns the locals whose every
+// declaration is spelled `sview`/`cstr` and that no other construct binds, or nil when the source
+// is not a non-byte darray (the caller then keeps its conservative header taint).
+func storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
+	if decl == nil || other < 0 || other >= len(decl.Params) || !storeScanTypeExprIsNonByteDArray(decl.Params[other].Type) {
+		return nil
+	}
+	views, poisoned := map[string]bool{}, map[string]bool{}
+	for _, p := range decl.Params {
+		poisoned[p.Name] = true
+	}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		switch n := node.(type) {
+		case *ast.VarDeclStmt:
+			if n == nil {
+				return
+			}
+			if storeScanTypeExprIsView(n.Type) {
+				views[n.Name] = true
+			} else {
+				poisoned[n.Name] = true
+			}
+		case ast.Stmt:
+			for _, name := range stmtBoundNames(n) {
+				poisoned[name] = true
+			}
+		}
+	})
+	for name := range poisoned {
+		delete(views, name)
+	}
+	return views
+}
+
+// storeScanViewLocalsCached memoizes the per-function view-local set (it depends on the source
+// parameter only through the non-byte-darray gate).
+func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[string]bool {
+	if decl == nil || other < 0 || other >= len(decl.Params) || !storeScanTypeExprIsNonByteDArray(decl.Params[other].Type) {
+		return nil
+	}
+	if views, ok := a.storeScanViewCache[decl]; ok {
+		return views
+	}
+	views := storeScanViewLocals(decl, other)
+	if a.storeScanViewCache == nil {
+		a.storeScanViewCache = map[*ast.FuncDecl]map[string]bool{}
+	}
+	a.storeScanViewCache[decl] = views
+	return views
+}
+
+// storeScanValueIsView reports whether a value is a plain `sview`/`cstr` (by analyzed type, or as a
+// view local from storeScanViewLocals). References and `view[T]` slices are not.
+func (a *Analyzer) storeScanValueIsView(value ast.Expr, views map[string]bool) bool {
+	inner := storeScanUnwrap(value)
+	if t, known := a.exprTypes[inner]; known && t != nil {
+		switch StripAggregateStateType(t).(type) {
+		case *SViewType, *CStrType:
+			return true
+		}
+		return false
+	}
+	if id, ok := inner.(*ast.Ident); ok && id != nil {
+		return views[id.Name]
+	}
+	return false
+}
+
+// storeScanTypeExprIsView: a declared `sview` / `cstr` (no reference wrapper).
+func storeScanTypeExprIsView(t ast.TypeExpr) bool {
+	switch tt := t.(type) {
+	case *ast.NamedType:
+		return tt != nil && (tt.Name == "sview" || tt.Name == "cstr")
+	case *ast.BuiltinTypeExpr:
+		return tt != nil && (tt.Name == "sview" || tt.Name == "cstr")
+	}
+	return false
+}
+
+// storeScanTypeExprIsNonByteDArray: `darray[E]` (through ref/mutable wrappers) with E not a byte.
+func storeScanTypeExprIsNonByteDArray(t ast.TypeExpr) bool {
+	for {
+		switch tt := t.(type) {
+		case *ast.MutableType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+			continue
+		case *ast.RefType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+			continue
+		case *ast.BuiltinTypeExpr:
+			if tt == nil || tt.Name != "darray" || len(tt.TypeArgs) != 1 {
+				return false
+			}
+			switch e := tt.TypeArgs[0].(type) {
+			case *ast.NamedType:
+				return e != nil && e.Name != "u8" && e.Name != "i8" && e.Name != "char" && e.Name != "byte"
+			case *ast.BuiltinTypeExpr:
+				return e != nil && e.Name != "u8" && e.Name != "i8"
+			}
+			return true
 		}
 		return false
 	}

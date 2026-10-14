@@ -478,3 +478,48 @@ def add_round(flow: mutable Flow&) -> void:
 		t.Fatalf("passing a local into a merge that may return it must be rejected at line 17, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// A view-typed value derived from a NON-BYTE darray source (`n: sview = pick(names)`) cannot be or
+// view that darray's backing, so a callee storing it stores an element value, not the header: the
+// caller then judges the argument by its tracked element provenance. Elements that view the
+// caller's own bytes still escape (line 30), and a BYTE darray source viewed with as_sview is the
+// header (line 31).
+func TestStoreScanViewFromNonByteDArrayIsElement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_view_element.elisa", `struct Table:
+    names: mutable darray[sview] = []
+
+def pick(names: darray[sview]&) -> sview:
+    can Abort.Panic:
+        return names[0] if names.count > 0 else ""
+
+def note(table: mutable Table&, names: darray[sview]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        n: sview = pick(names)
+        table.names.push(n)
+
+def note_bytes(table: mutable Table&, bytes: darray[u8]&) -> void:
+    can Memory.Allocate:
+        n: sview = bytes.as_sview()
+        table.names.push(n)
+
+def run(table: mutable Table&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        safe: mutable darray[sview] = []
+        safe.push(src)
+        safe.push("lit")
+        note(table, &safe)
+        text: mutable dstr = []
+        text.push(65)
+        unsafe_names: mutable darray[sview] = []
+        unsafe_names.push(text.as_sview())
+        bytes: mutable darray[u8] = []
+        bytes.push(66)
+        note(table, &unsafe_names)
+        note_bytes(table, &bytes)
+`)
+	errs := result.Errors()
+	joined := strings.Join(errs, "\n")
+	if len(errs) != 2 || !strings.Contains(errs[0], ":30:") || !strings.Contains(errs[1], ":31:") {
+		t.Fatalf("expected exactly lines 30 and 31 rejected, got:\n%s", joined)
+	}
+}
