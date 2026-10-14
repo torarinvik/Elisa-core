@@ -219,6 +219,12 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			assignedFresh := paramFieldAssignedFreshContainer(fn.Body, p.Name)
 			if assignedFresh || paramFieldContainerIsGrown(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
 				stamp = sstamp
+				// A body-built value stored into the sole writable struct target adopts the same
+				// way -- but only onto a region this param already threads (never a new region
+				// param just for adoption: that would change the signature callers must infer).
+				if !assignedFresh && containerParamCount == 0 && paramIsWritableStructRef(p) && paramStoresBodyLocal(fn, p.Name) && !a.hasOtherFreshFieldTarget(fn, p.Name) {
+					assignedFresh = true
+				}
 			}
 			// The fresh backing stored into the field is allocated by this body, so the
 			// function's ambient region must be the caller's (the field's) region. Same
@@ -841,6 +847,129 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// paramStoresBodyLocal reports whether the body may store a value built by this body (a value
+// mentioning a body-declared local) into storage reached through the struct param `name`: a
+// field assignment `p.f <- local`, a method call on a p-rooted receiver taking a local
+// (`p.items.push(local)`), or a call passing both p and a local (the callee may store one into the
+// other). Such a value is allocated in the function's ambient region, so the param's region must
+// be the ambient one. Over-approximating is safe (adoption only lengthens lifetimes); it is
+// restricted so read-only bodies keep their own scratch region.
+func paramStoresBodyLocal(fn *ast.FuncDecl, name string) bool {
+	locals := map[string]bool{}
+	walkStoreScanNodes(fn.Body, func(node any) {
+		if v, ok := node.(*ast.VarDeclStmt); ok && v != nil && v.Name != name && localMayOwnContainer(v) {
+			locals[v.Name] = true
+		}
+	})
+	if len(locals) == 0 {
+		return false
+	}
+	target := map[string]bool{name: true}
+	found := false
+	walkStoreScanNodes(fn.Body, func(node any) {
+		if found {
+			return
+		}
+		switch n := node.(type) {
+		case *ast.AssignStmt:
+			if n == nil {
+				return
+			}
+			if _, bare := n.Target.(*ast.Ident); bare {
+				return
+			}
+			if root := rootIdentExpr(n.Target); root != nil && root.Name == name && storeScanMentions(n.Value, locals) {
+				found = true
+			}
+		case *ast.CallExpr:
+			if n == nil {
+				return
+			}
+			mentionsLocal := false
+			for _, arg := range n.Args {
+				if storeScanMentions(arg, locals) {
+					mentionsLocal = true
+				}
+			}
+			if !mentionsLocal {
+				return
+			}
+			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
+				if root := rootIdentExpr(field.Object); root != nil && root.Name == name {
+					found = true
+					return
+				}
+			}
+			for _, arg := range n.Args {
+				if storeScanMentions(arg, target) {
+					found = true
+					return
+				}
+			}
+		}
+	})
+	return found
+}
+
+// localMayOwnContainer: a body local whose declared type (or, untyped, whose initializer) may own
+// ambient-allocated container storage -- a container, a named/generic aggregate, or a literal /
+// call-built value. Scalars, pointers and references allocate nothing in the ambient region.
+func localMayOwnContainer(v *ast.VarDeclStmt) bool {
+	typ := v.Type
+	for {
+		if m, ok := typ.(*ast.MutableType); ok && m != nil {
+			typ = m.Elem
+			continue
+		}
+		break
+	}
+	switch t := typ.(type) {
+	case *ast.BuiltinTypeExpr:
+		return t != nil && (t.Name == "darray" || t.Name == "dstr" || t.Name == "dict" || t.Name == "set")
+	case *ast.NamedType:
+		if t == nil {
+			return false
+		}
+		switch t.Name {
+		case "dstr":
+			return true
+		case "bool", "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize", "f32", "f64", "char", "sview", "cstr", "uintptr", "void":
+			return false
+		}
+		return true
+	case *ast.GenericType, *ast.TupleTypeExpr:
+		return true
+	case nil:
+		switch storeScanUnwrap(v.Value).(type) {
+		case *ast.StructLitExpr, *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.CallExpr:
+			return true
+		}
+	}
+	return false
+}
+
+// paramIsWritableStructRef: a `mutable T&` / `lmut T` / `T mutable&` parameter (a place the body
+// can store into).
+func paramIsWritableStructRef(p *ast.ParamDecl) bool {
+	typ := p.Type
+	writable := p.Mutable
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			writable = true
+			typ = t.Elem
+			continue
+		case *ast.OwnedType:
+			typ = t.Elem
+			continue
+		case *ast.RefType:
+			_, mutableElem := t.Elem.(*ast.MutableType)
+			return writable || mutableElem
+		}
+		return false
+	}
 }
 
 // hasOtherFreshFieldTarget reports whether fn has a by-reference parameter other than name.

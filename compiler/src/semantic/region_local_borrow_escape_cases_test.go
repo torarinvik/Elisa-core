@@ -247,7 +247,7 @@ def parse_named(parser: lmut P, items: mutable darray[Prm]&, name: sview) -> boo
         parser.position <- parser.position + 1
         return parser.position < 3
 
-def handler(parser: lmut P) -> void:
+def handler(parser: lmut P, other: mutable P&) -> void:
     can Memory.Allocate, Abort.Panic:
         buf: darray[u8] = [65, 66]
         captures: mutable darray[Prm] = []
@@ -275,7 +275,7 @@ def fill[@r](parser: lmut P, items: mutable darray[Prm]& @r, bytes: mutable darr
         parser.position <- parser.position + 1
         return true
 
-def handler(parser: lmut P) -> void:
+def handler(parser: lmut P, other: mutable P&) -> void:
     can Memory.Allocate, Abort.Panic:
         buf: mutable darray[u8] = []
         captures: mutable darray[Prm] = []

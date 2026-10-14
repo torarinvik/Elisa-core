@@ -416,11 +416,11 @@ def fill(path: mutable Path&, log: mutable Log&) -> void:
         keep(path, local)
 `)
 	errs := result.Errors()
-	// Line 20: record's own local `p` is built in record's inferred region and pushed into the
-	// caller's log (the void-grower adoption gap, tracked separately). The record CALL (line 28)
-	// must not add a store of `local`'s header: extend copied only its elements.
-	if len(errs) != 2 || !strings.Contains(errs[0], ":20:") || !strings.Contains(errs[1], ":29:") {
-		t.Fatalf("expected only lines 20 and 29 rejected, got:\n%s", strings.Join(errs, "\n"))
+	// record's own local `p` (line 20) is built in record's ambient region, adopted into `log`'s
+	// (its sole writable target). The record CALL (line 28) must not add a store of `local`'s
+	// header: extend copied only its elements.
+	if len(errs) != 1 || !strings.Contains(errs[0], ":29:") {
+		t.Fatalf("expected only line 29 rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
