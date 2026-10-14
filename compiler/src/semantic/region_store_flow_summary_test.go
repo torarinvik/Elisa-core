@@ -503,6 +503,41 @@ def main() -> i32:
 	}
 }
 
+func TestStoreFlowSummaryDoesNotRetainSViewExtendedIntoByteDarray(t *testing.T) {
+	src := `struct ValueType:
+    text: sview
+
+def copy_text(text: sview, bytes: mutable darray[u8]&) -> void:
+    bytes.extend(text)
+
+def copy_values(source: darray[ValueType]&, target: mutable darray[ValueType]&) -> void:
+    target.extend(source)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_sview_extend.elisa", src, AnalyzeOptions{})
+	findSummary := func(name string) *storeFlowSummary {
+		for _, decl := range result.File.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == name {
+				return result.analyzer.storeFlowSummaryFor(fn)
+			}
+		}
+		return nil
+	}
+	copyText := findSummary("copy_text")
+	if copyText == nil {
+		t.Fatal("sview-to-byte copy helper should have a settled StoreFlow summary")
+	}
+	if copyText.reaches(0, 1) {
+		t.Fatalf("byte extension copies data and must not retain the source sview: reach=%v conn=%v written=%v", copyText.reach, copyText.conn, copyText.written)
+	}
+	copyValues := findSummary("copy_values")
+	if copyValues == nil || !copyValues.reaches(0, 1) {
+		t.Fatalf("extension of borrow-bearing elements must preserve source flow, summary=%+v", copyValues)
+	}
+}
+
 func TestStoreFlowSummaryRejectsASTBorrowStoredByTypeInference(t *testing.T) {
 	src := `struct Expr:
     text: sview
