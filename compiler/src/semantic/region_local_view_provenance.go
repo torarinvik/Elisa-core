@@ -71,7 +71,18 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 		regions = append(regions, deps...)
 	}
 	declCount := 0
-	walkStoreScanNodes(fn.Body, func(node any) {
+	scopeIdents := []*ast.Ident{}
+	// Per declaration: only the nodes where name refers to decl. A name declared once needs no
+	// scope tracking (the plain walk, every mention).
+	walk := walkStoreScanNodes
+	shadowed := len(a.storeScanIndex(fn).decls[name]) > 1
+	if shadowed {
+		walk = func(body []ast.Stmt, visit func(any)) { walkDeclScope(body, decl, visit) }
+	}
+	walk(fn.Body, func(node any) {
+		if id, isIdent := node.(*ast.Ident); shadowed && isIdent && id != nil && (id.Name == name || rootNameOfDotted(id.Name) == name) {
+			scopeIdents = append(scopeIdents, id)
+		}
 		if !complete {
 			return
 		}
@@ -81,12 +92,10 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 				return
 			}
 			if n.Name == name {
-				declCount++
 				if n != decl {
-					complete = false // redeclared: name-based facts would merge two locals
-					viewProvWhy = "c54"
-					return
+					return // a shadowing declaration: another local (its initializer is still visited)
 				}
+				declCount++
 				addDeps(n.Value)
 			}
 		case *ast.AssignStmt:
@@ -182,7 +191,10 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 		}
 		return nil, false
 	}
-	for _, id := range storeScanIdentsNamed(fn.Body, name) {
+	if !shadowed {
+		scopeIdents = storeScanIdentsNamed(fn.Body, name)
+	}
+	for _, id := range scopeIdents {
 		if !explained[id] {
 			if storeScanTrace {
 				fmt.Fprintf(os.Stderr, "VIEWPROV %s local=%s unexplained at %s\n", fn.Name, name, id.Pos())
@@ -294,6 +306,9 @@ func (a *Analyzer) localViewValueDeps(value ast.Expr, self string) ([]string, bo
 		if !recorded {
 			if typeCarriesRegionStorage(sym.Type) || a.typeCanContainRegionRefs(stripRefForBounds(sym.Type), map[string]bool{}) {
 				ok = false
+				if storeScanTrace {
+					fmt.Fprintf(os.Stderr, "VIEWDEP %s unrecorded=%s type=%s at %s\n", self, id.Name, typeString(sym.Type), id.Pos())
+				}
 			}
 			return
 		}
@@ -473,3 +488,84 @@ func storeScanContainsUserCall(value ast.Expr) bool {
 
 // viewProvWhy: trace only -- the last reason localViewProvenance gave up.
 var viewProvWhy string
+
+// walkDeclScope visits the nodes of body in which name refers to decl: from decl to the end of
+// its statement list (nested lists included), until another declaration of the same name in
+// that list or a nested one shadows it. Declarations are lexically scoped by statement list, so
+// the same name declared in two match arms is two locals. The shadowing declaration itself is
+// visited while decl is still in scope (its initializer may read decl).
+func walkDeclScope(body []ast.Stmt, decl *ast.VarDeclStmt, visit func(any)) {
+	name := decl.Name
+	seen := map[[2]uintptr]bool{}
+	var rec func(v reflect.Value, active bool)
+	var list func(v reflect.Value, active bool)
+	list = func(v reflect.Value, active bool) {
+		for i := 0; i < v.Len(); i++ {
+			elem := v.Index(i)
+			var stmt any
+			if elem.Kind() == reflect.Interface && !elem.IsNil() {
+				stmt = elem.Interface()
+			}
+			if vd, ok := stmt.(*ast.VarDeclStmt); ok && vd != nil && vd.Name == name {
+				if vd == decl {
+					rec(elem, true)
+					active = true
+				} else {
+					rec(elem, active)
+					active = false
+				}
+				continue
+			}
+			rec(elem, active)
+		}
+	}
+	rec = func(v reflect.Value, active bool) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			key := [2]uintptr{v.Pointer(), 0}
+			if active {
+				key[1] = 1
+			}
+			if seen[key] {
+				return
+			}
+			seen[key] = true
+			if active {
+				visit(v.Interface())
+			}
+			rec(v.Elem(), active)
+		case reflect.Interface:
+			if !v.IsNil() {
+				rec(v.Elem(), active)
+			}
+		case reflect.Struct:
+			if v.Type() == storeScanPosType {
+				return
+			}
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i), active)
+			}
+		case reflect.Slice:
+			if v.Type() == storeScanStmtListType {
+				list(v, active)
+				return
+			}
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i), active)
+			}
+		case reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i), active)
+			}
+		}
+	}
+	list(reflect.ValueOf(body), false)
+}
+
+var storeScanStmtListType = reflect.TypeOf([]ast.Stmt(nil))
