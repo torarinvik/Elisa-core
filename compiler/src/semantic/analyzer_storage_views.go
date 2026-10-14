@@ -164,6 +164,11 @@ func (a *Analyzer) recordStorageViewPlaceStore(target ast.Expr, value ast.Expr) 
 	if !ok || sym == nil || storageViewScalarBindingType(sym.Type) {
 		return
 	}
+	// A holder of scalar-only type (`buffer: mutable darray[u8]&`) owns no pointer but its own
+	// buffer: storing into it copies bytes, so it can never carry another value's view.
+	if scalarOnlyType(peelRefType(sym.Type), map[Type]bool{}) {
+		return
+	}
 	dep, ok := a.storageViewDependencyForExpr(value)
 	if !ok || len(dep.Sources) == 0 {
 		return
