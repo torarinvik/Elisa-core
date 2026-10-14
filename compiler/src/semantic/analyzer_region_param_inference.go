@@ -1097,7 +1097,7 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 		// free-function FACTORY qualifies: a call that reads the param (`p.f <- p.f.push(v)`,
 		// `p.f <- grow(p.f)`) rebinds existing storage and builds nothing fresh.
 		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
-			if _, isFree := call.Func.(*ast.Ident); isFree && !storeScanMentions(call, map[string]bool{name: true}) {
+			if _, isFree := call.Func.(*ast.Ident); isFree {
 				return true
 			}
 		}

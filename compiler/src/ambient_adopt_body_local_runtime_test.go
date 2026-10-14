@@ -92,3 +92,57 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "ambient_adopt_struct_push", src, "bt")
 }
+
+// `flow.normal <- merge(flow.normal, alternate.normal)`: the call mentions the target, but its
+// FRESH result is built in the ambient region, adopted into flow's (the sole writable target).
+// A merge that may return an argument instead is judged at its callers by what it returns
+// (TestMergeReturningArgumentFromLocalRejected); this one allocates fresh.
+func TestAmbientAdoptsMergeResultMentioningTarget(t *testing.T) {
+	src := `
+struct Snap:
+    names: mutable darray[i64] = []
+
+struct Flow:
+    normal: mutable Snap = Snap{}
+    seen: mutable bool = false
+
+def merge(a: Snap&, b: Snap&) -> Snap:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable Snap = Snap{}
+        for v in a.names |out|:
+            out.names.push(v)
+        for v in b.names |out|:
+            out.names.push(v)
+        return out
+
+def merge_normal(flow: mutable Flow&, alternate: Snap&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        flow.normal <- merge(flow.normal, alternate)
+        flow.seen <- true
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+def add_round(flow: mutable Flow&, k: i64) -> void:
+    can Memory.Allocate, Abort.Panic:
+        alt: mutable Snap = Snap{}
+        for i in 0..<10 |alt|:
+            alt.names.push(k * 100 + i.i64())
+        merge_normal(flow, &alt)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        flow: mutable Flow = Flow{}
+        add_round(&flow, 1)
+        add_round(&flow, 2)
+        c: i64 = churn()
+        if flow.normal.names.count != 20 or flow.normal.names[0] != 100 or flow.normal.names[19] != 209 or c != 27993:
+            panic("merged snapshot freed with merge_normal's region")
+`
+	buildAndRunSoATest(t, "ambient_adopt_merge", src, "bt")
+}

@@ -450,3 +450,31 @@ def parent_text(text: sview, table: mutable Table&) -> void:
 		}
 	}
 }
+
+// Adoption covers only what the function allocates: a merge that may RETURN one of its arguments
+// stores that argument's storage into the target, so a caller passing a local alternate (built in
+// its own region) must still be rejected.
+func TestMergeReturningArgumentFromLocalRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "merge_returns_argument.elisa", `struct Snap:
+    names: mutable darray[i64] = []
+
+struct Flow:
+    normal: mutable Snap = Snap{}
+
+def pick(a: Snap, b: Snap) -> Snap:
+    return b
+
+def merge_normal(flow: mutable Flow&, alternate: Snap) -> void:
+    flow.normal <- pick(flow.normal, alternate)
+
+def add_round(flow: mutable Flow&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        alt: mutable Snap = Snap{}
+        alt.names.push(1)
+        merge_normal(flow, alt)
+`)
+	errs := result.Errors()
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), ":17:") {
+		t.Fatalf("passing a local into a merge that may return it must be rejected at line 17, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
