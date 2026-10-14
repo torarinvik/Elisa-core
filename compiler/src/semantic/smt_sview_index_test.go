@@ -19,6 +19,28 @@ func TestSMTImmutableSviewSuffixIndex(t *testing.T) {
 	}
 }
 
+func TestSMTSviewIndexWPSubstitutesImmutableLocalIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name, returned string
+		wantError      bool
+	}{
+		{"matching", "text[local] > 0", false},
+		{"wrong-index", "text[other] > 0", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := ""
+			if tc.name == "wrong-index" {
+				extra = ", other: usize"
+			}
+			source := "def positive(text: sview, index: usize" + extra + ") -> bool:\n    requires index < text.len\n    requires text[index] > 0\n    ensure result\n    local: usize = index\n    return " + tc.returned + "\n"
+			result := analyzeContractStrict(t, "sview_index_wp.elisa", source)
+			if (len(result.Errors()) != 0) != tc.wantError {
+				t.Fatalf("want error=%v, got:\n%s", tc.wantError, allDiagnostics(result))
+			}
+		})
+	}
+}
+
 func TestSMTSviewIndexDeclinesMutableAndLocalBindings(t *testing.T) {
 	sources := []string{
 		"def f(text: mutable sview) -> bool:\n    ensure result == (text.len > 0 and text[0] == 65)\n    return text.len > 0 and text[0] == 65\n",

@@ -1673,19 +1673,30 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		}
 		return retNames, true
 	}
-	if fn, ok := call.Func.(*ast.FieldExpr); ok && fn != nil && fn.Field == "push" && call.SafeReceiver == nil && call.NamedArgCount() == 0 && len(call.Args) == 1 && (a.isCompilerBuiltinHelperCall(call, "darray.push") || a.storeFlowBuiltinDarrayGrowth(fn)) {
-		// Builtin DArray growth stores each element argument into the receiver. Preserve that
-		// direction (source element -> destination container) instead of falling back to a
-		// symmetric statement join. The returned DArray contains both the previous receiver
-		// contents and the newly inserted elements, so callers must also see both as result
-		// dependencies for fluent forms such as `target <- target.push(value)`.
+	if fn, ok := call.Func.(*ast.FieldExpr); ok && fn != nil && call.SafeReceiver == nil && call.NamedArgCount() == 0 && (a.isCompilerBuiltinHelperCall(call, "darray.push") || a.storeFlowBuiltinDarrayGrowth(fn)) {
+		// Builtin DArray growth copies element values into the receiver. Preserve only
+		// element-to-container flow for borrow-bearing element types; pushing or extending
+		// pointer-free values cannot retain the source container or view. The returned
+		// DArray still depends on its prior receiver contents for fluent forms.
+		argumentIndex := -1
+		switch fn.Field {
+		case "push", "extend":
+			if len(call.Args) == 1 {
+				argumentIndex = 0
+			}
+		}
+		if argumentIndex < 0 {
+			return nil, false
+		}
 		receiver := a.storeFlowArgNames(fn.Object, handled)
 		c.link(receiver)
 		retNames := append([]string(nil), receiver...)
-		group := a.storeFlowArgNames(call.Args[0], handled)
-		c.link(group)
-		c.flow(group, receiver)
-		retNames = append(retNames, group...)
+		if !a.storeFlowDarrayElementPointerFree(fn.Object) {
+			group := a.storeFlowArgNames(call.Args[argumentIndex], handled)
+			c.link(group)
+			c.flow(group, receiver)
+			retNames = append(retNames, group...)
+		}
 		return retNames, true
 	}
 	if a.storeFlowBuiltinDarrayTruncate(call) {
@@ -2139,6 +2150,40 @@ func (a *Analyzer) storeFlowDarrayPlace(expr ast.Expr) bool {
 	}
 	_, isDarray := t.(*DArrayType)
 	return isDarray
+}
+
+// storeFlowDarrayElementPointerFree proves that a builtin DArray receiver stores
+// values whose representation cannot contain an Elisa borrow. A view-bearing or
+// unresolved element type stays conservative, since push must propagate its
+// source storage into the destination in those cases.
+func (a *Analyzer) storeFlowDarrayElementPointerFree(expr ast.Expr) bool {
+	if !a.storeFlowDarrayPlace(expr) {
+		return false
+	}
+	if typ := a.storeFlowPlaceType(expr); typ != nil {
+		if ref, ok := typ.(*RefType); ok && ref != nil {
+			typ = ref.Elem
+		}
+		if array, ok := typ.(*DArrayType); ok && array != nil {
+			return storeFlowPointerFreeReturn(array.Elem, map[Type]bool{})
+		}
+	}
+	id, ok := expr.(*ast.Ident)
+	if !ok || id == nil || a.storeFlowCurrentDecl == nil {
+		return false
+	}
+	found := false
+	for _, binding := range a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).typed {
+		if binding.name != id.Name {
+			continue
+		}
+		found = true
+		elem, isDarray := storeFlowDarrayElementTypeExpr(binding.t)
+		if !isDarray || !a.storeFlowPointerFreeTypeExpr(elem, map[Type]bool{}) {
+			return false
+		}
+	}
+	return found
 }
 
 // storeFlowPlaceType returns the type of a field-chain place, or nil when it is not certain.
