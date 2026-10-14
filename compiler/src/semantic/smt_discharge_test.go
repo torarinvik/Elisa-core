@@ -782,6 +782,50 @@ def widen(x: i64) -> i64:
 	}
 }
 
+// `char` is physically stored as i64, but converting it to u8 uses LLVM truncation. The exact
+// SMT model is unsigned modulo 256: this proves the byte range while preserving wrapping for
+// out-of-range and negative char values.
+func TestSMTModelsCharToU8Truncation(t *testing.T) {
+	src := `
+def byte_value(c: char) -> u8:
+    ensure result >= 0
+    ensure result <= 255
+    return c.u8()
+`
+	r := analyzeContractStrict(t, "char_to_u8_truncation.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("char-to-u8 truncation should prove the u8 range, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestSMTProvesSViewIndexCharToU8Range(t *testing.T) {
+	src := `
+def byte_at(view: sview, index: usize) -> u8:
+    requires index < view.len.usize()
+    ensure result >= 0
+    ensure result <= 255
+    return view[index].u8()
+`
+	r := analyzeContractStrict(t, "sview_index_char_to_u8.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("sview[index].u8() should prove the byte range, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// Soundness control: char is a 64-bit numeric type, not globally an 8-bit type. Narrowing to u8
+// and widening back loses information for values outside 0..255 and must not prove identity.
+func TestSMTDoesNotTreatCharAsGloballyByteSized(t *testing.T) {
+	src := `
+def roundtrip(c: char) -> i64:
+    ensure result == c
+    return c.u8().i64()
+`
+	r := analyzeContractStrict(t, "char_u8_wrapping_control.elisa", src)
+	if !strings.Contains(strings.Join(r.Errors(), "\n"), "could not be proven statically") {
+		t.Fatalf("char-to-u8-to-i64 loses high bits and must not prove identity, got: %v", r.Errors())
+	}
+}
+
 // docs/85 gap #3: a fall-through after an early-return guard establishes the negated condition as a
 // flow fact for the static provers (`if x < 0: return 0` ⟹ `x >= 0` afterwards; `if a == 0: return`
 // ⟹ `a != 0` for unsigned). Combined with local-definition facts (#2) and SMT modulo reasoning, the

@@ -2814,7 +2814,8 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// model, so the prover sees THROUGH the conversion and refinement bounds survive it
 		// (docs/85 gap #2). A narrowing or a sign change can wrap, so those are NOT identity
 		// and decline here (sound: a declined term only forgoes a proof).
-		ssign, sbits, sok := smtIntWidthSign(tr.a.castOperandResolvedType(n))
+		sourceType := tr.a.castOperandResolvedType(n)
+		ssign, sbits, sok := smtIntWidthSign(sourceType)
 		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
 		if !dok {
 			// The result type is unset for a synthetic/cloned cast node (e.g. the loop-termination
@@ -2823,6 +2824,18 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// information the analyzer would have recorded — so a field-read cast in the measure cancels
 			// against its analyzed twin. Declines for any non-integer / compound target (sound).
 			dsign, dbits, dok = postfixCastTargetWidthSign(n)
+		}
+		// `char` is represented as an i64 value, while string indexing produces a
+		// byte-sized code unit. Its conversion to u8 is LLVM truncation, exactly
+		// unsigned modulo 256 for every possible char value. Model that conversion
+		// explicitly instead of treating char as an 8-bit integer globally: char
+		// has other i64-producing sources and may carry values outside the byte range.
+		if source, ok := stripRefForBounds(sourceType).(*BuiltinType); ok && source != nil && source.Name == "char" && dok && !dsign && dbits == 8 {
+			inner, ok := tr.termEnv(n.Operand, env)
+			if !ok {
+				return "", false
+			}
+			return "(mod " + inner + " 256)", true
 		}
 		if !sok || !dok {
 			return "", false
