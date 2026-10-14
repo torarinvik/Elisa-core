@@ -747,3 +747,49 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "call_built_struct_factory", src, "bt")
 }
+
+// `flow.normal <- snapshot(names)`: a factory's result stored into a field of a `mutable T&`
+// param is built in the param's (caller's) region. Before, the factory allocated into the
+// setter's auto region, so the store was rejected as an `in auto:` escape.
+func TestFactoryResultStoredIntoRefParamFieldLivesInCallerRegion(t *testing.T) {
+	src := `
+struct Snapshot:
+    names: mutable darray[i64] = []
+
+struct Flow:
+    normal: mutable Snapshot = Snapshot{}
+    seen: mutable bool = false
+
+def snapshot(source: darray[i64]&) -> Snapshot:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable Snapshot = Snapshot{}
+        for v in source |out|:
+            out.names.push(v * 2)
+        return out
+
+def set_normal(flow: mutable Flow&, source: darray[i64]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        flow.normal <- snapshot(source)
+        flow.seen <- true
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<1000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        source: mutable darray[i64] = []
+        for i in 0..<40 |source|:
+            source.push(i.i64())
+        flow: mutable Flow = Flow{}
+        set_normal(&flow, &source)
+        c: i64 = churn()
+        if not flow.seen or flow.normal.names.count != 40 or flow.normal.names[39] != 78 or c != 6993:
+            panic("snapshot stored into the flow was freed with the setter's region")
+`
+	buildAndRunSoATest(t, "factory_into_ref_param_field", src, "bt")
+}

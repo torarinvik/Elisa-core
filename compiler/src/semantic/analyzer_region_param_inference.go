@@ -852,17 +852,23 @@ func (a *Analyzer) hasOtherFreshFieldTarget(fn *ast.FuncDecl, name string) bool 
 		if fn.Params[i].Name == name {
 			continue
 		}
+		// Only a MUTABLE reference can receive a stored value; a read-only `darray[T]&` is never a
+		// second target (same rule as containerParamCount).
 		typ := fn.Params[i].Type
+		writable := fn.Params[i].Mutable
 		for {
 			switch t := typ.(type) {
 			case *ast.MutableType:
+				writable = true
 				typ = t.Elem
 				continue
 			case *ast.OwnedType:
 				typ = t.Elem
 				continue
 			case *ast.RefType:
-				return true
+				if _, mutableElem := t.Elem.(*ast.MutableType); writable || mutableElem {
+					return true
+				}
 			}
 			break
 		}
@@ -955,6 +961,16 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 		}
 		if _, isStruct := value.(*ast.StructLitExpr); isStruct {
 			return true
+		}
+		// `flow.normal <- snapshot(names)`: a region-polymorphic factory builds its result in
+		// the ambient region, which must then be the param's (caller's) region, not this
+		// body's auto region freed at return. A non-polymorphic callee is unaffected. Only a
+		// free-function FACTORY qualifies: a call that reads the param (`p.f <- p.f.push(v)`,
+		// `p.f <- grow(p.f)`) rebinds existing storage and builds nothing fresh.
+		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
+			if _, isFree := call.Func.(*ast.Ident); isFree && !storeScanMentions(call, map[string]bool{name: true}) {
+				return true
+			}
 		}
 		if _, isStr := value.(*ast.StringLit); !isStr && reassignmentAllocatesFreshBacking(value) {
 			return true

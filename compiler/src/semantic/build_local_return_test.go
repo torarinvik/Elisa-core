@@ -115,6 +115,9 @@ def fill(self: mutable Cache&, n: usize) -> void:
 // such a result — a darray, OR a struct that transitively holds region-allocated data — is stored
 // through a mutable ref parameter (or any storage that outlives the function's region), it dangles
 // once that region is freed. This was a silent use-after-free; it must now be rejected.
+// With a SINGLE mutable target the factory result is built in that target's region (the ambient
+// region adopts it); a second mutable target makes that binding unsound, so the store must still
+// be rejected.
 func TestRegionPolyResultStoredThroughRefParamRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rp_store_escape.elisa", `struct Holder:
     items: mutable darray[i64]
@@ -122,7 +125,7 @@ def make_items() -> darray[i64]:
     out: mutable darray[i64] = []
     out.push(7)
     return out
-def store_into(dst: mutable Holder&) -> void:
+def store_into(dst: mutable Holder&, other: mutable Holder&) -> void:
     dst.items <- make_items()
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
@@ -139,7 +142,7 @@ struct Mgr:
     users: mutable Users
 def make_users() -> Users:
     return Users{user: [1, 2, 3]}
-def bad_store(dst: mutable Mgr&) -> void:
+def bad_store(dst: mutable Mgr&, other: mutable Mgr&) -> void:
     dst.users <- make_users()
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
