@@ -1684,7 +1684,14 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		retNames := append([]string(nil), receiver...)
 		group := a.storeFlowArgNames(call.Args[0], handled)
 		c.link(group)
-		c.flow(group, receiver)
+		if a.storeFlowPushedElemMayShare(fn.Object, call.Args[0]) {
+			// An element that SHARES indirect storage (a container header, a reference) makes
+			// the receiver an alias of the source's storage: writes through the receiver's
+			// elements (`holder[0][0] <- v` after `holder.push(t.lists)`) land in the source.
+			c.link(append(append([]string(nil), group...), receiver...))
+		} else {
+			c.flow(group, receiver)
+		}
 		retNames = append(retNames, group...)
 		return retNames, true
 	}
@@ -1822,6 +1829,13 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 		binds := a.storeFlowBinds
 		for _, call := range calls {
 			a.storeFlowMarkCall(call, written, markExpr)
+			// A pushed element that shares indirect storage aliases the receiver to it: a write
+			// through either is a write of both (applyCallStoreFlow links them the same way).
+			if fn, ok := call.Func.(*ast.FieldExpr); ok && fn != nil && fn.Field == "push" && len(call.Args) == 1 {
+				if a.storeFlowPushedElemMayShare(fn.Object, call.Args[0]) {
+					groups = append(groups, append(a.storeFlowExprNames(fn.Object), a.storeFlowExprNames(call.Args[0])...))
+				}
+			}
 		}
 		switch st := stmt.Interface().(type) {
 		case *ast.AssignStmt:
@@ -2274,4 +2288,17 @@ func (a *Analyzer) storeFlowOpaqueExternCall(call *ast.CallExpr) bool {
 		}
 	}
 	return true
+}
+
+// storeFlowPushedElemMayShare: an element pushed into receiver may share indirect storage. The
+// element is stored as the receiver's element type: a receiver whose element type shares none
+// (`darray[u8]`) stores no alias, whatever (untyped literal) expression produced it.
+func (a *Analyzer) storeFlowPushedElemMayShare(receiver, elem ast.Expr) bool {
+	if rt := a.exprTypes[receiver]; rt != nil && !containsTypeParam(rt) {
+		if d, ok := StripAggregateStateType(stripRefForBounds(rt)).(*DArrayType); ok && d != nil && d.Elem != nil && !containsTypeParam(d.Elem) && !a.storeScanSharesCached(d.Elem) {
+			return false
+		}
+	}
+	t := a.exprTypes[elem]
+	return t == nil || containsTypeParam(t) || a.storeScanSharesCached(t)
 }

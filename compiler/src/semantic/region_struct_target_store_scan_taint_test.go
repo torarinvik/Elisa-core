@@ -64,13 +64,10 @@ func TestStoreScanMatchArmBodyIsNotTheHeader(t *testing.T) {
 	// Source: tracked_loop_vars (1). Its content is the tracked list and nothing matched out of
 	// `statements`.
 	_, _, content, _, _ := result.analyzer.storeScanTaint(walk, 1, "table")
-	// then_body is passed to walk next to current_tracked: walk's by-value darray parameter
-	// shares then_body's storage and may be written with it, so then_body IS tainted (the
-	// taint pass models callee writes into locals). No other binder is.
-	if !content["then_body"] {
-		t.Errorf("then_body is passed with the tracked list to a callee that may write it: %v", content)
-	}
-	for _, name := range []string{"target", "name", "cond", "line"} {
+	// then_body is passed to walk next to current_tracked. walk's by-value darray parameter
+	// shares then_body's storage, but walk's own summary stores nothing into `statements`, so
+	// the callee-write taint leaves then_body clean.
+	for _, name := range []string{"target", "name", "then_body", "cond", "line"} {
 		if content[name] {
 			t.Errorf("binder %q of a match over an untainted scrutinee was tainted: %v", name, content)
 		}

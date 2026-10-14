@@ -104,13 +104,15 @@ type storeScanDeclIndex struct {
 	// memoized mention tokens (see mentions / headerMentions)
 	exprTokens   map[ast.Expr][]string
 	headerTokens map[ast.Stmt][]string
+	bound        map[ast.Stmt][]string
+	bundleCache  map[ast.Expr]bool
 }
 
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
-	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nodes: map[string][]any{}, locals: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}}
+	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nodes: map[string][]any{}, locals: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
 	// Each name's list is in walk order (one append per node), whatever the map order of names.
 	addNode := func(node any, names map[string]bool) {
 		for name := range names {
@@ -342,4 +344,35 @@ func storeScanHeaderTokens(stmt ast.Stmt) []string {
 		rec(v.Field(i))
 	}
 	return tokens
+}
+
+// storeScanEachNode visits decl's body nodes in walkStoreScanNodes order from the cached flat
+// list (one reflective walk per function instead of one per query).
+func (a *Analyzer) storeScanEachNode(decl *ast.FuncDecl, visit func(node any)) {
+	for _, node := range a.storeScanIndex(decl).flat {
+		visit(node)
+	}
+}
+
+// boundNames: stmtBoundNames(stmt), memoized (fixpoints ask it on every iteration).
+func (idx *storeScanDeclIndex) boundNames(stmt ast.Stmt) []string {
+	if names, ok := idx.bound[stmt]; ok {
+		return names
+	}
+	names := stmtBoundNames(stmt)
+	idx.bound[stmt] = names
+	return names
+}
+
+// bundles: storeScanBundles(expr), memoized per expression.
+func (idx *storeScanDeclIndex) bundles(expr ast.Expr) bool {
+	if idx.bundleCache == nil {
+		idx.bundleCache = map[ast.Expr]bool{}
+	}
+	if found, ok := idx.bundleCache[expr]; ok {
+		return found
+	}
+	found := storeScanBundles(expr)
+	idx.bundleCache[expr] = found
+	return found
 }

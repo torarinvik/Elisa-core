@@ -177,7 +177,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 			// A counted loop binds an integer, whatever its bounds mention.
 		case ast.Stmt:
 			// A loop / match binder over X may alias its parts.
-			if a.storeScanIndex(decl).headerMentions(n, map[string]bool{name: true}) && len(stmtBoundNames(n)) > 0 {
+			if a.storeScanIndex(decl).headerMentions(n, map[string]bool{name: true}) && len(a.storeScanIndex(decl).boundNames(n)) > 0 {
 				if _, isVar := node.(*ast.VarDeclStmt); !isVar {
 					ok = false
 				}

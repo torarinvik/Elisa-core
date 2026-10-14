@@ -156,7 +156,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 			}
 		case ast.Expr:
 			// A read whose value is a view or a plain scalar cannot alias X's storage.
-			if t, ok := a.storeScanStaticType(fn, n); ok && (storeScanTypeIsViewOnly(t) || storeScanPlainScalarType(t)) {
+			if t, ok := a.storeScanStaticType(fn, n); ok && (a.storeScanViewOnlyCached(t) || storeScanPlainScalarType(t)) {
 				explain(n)
 			}
 		case ast.Stmt:
@@ -318,7 +318,7 @@ func (a *Analyzer) storeScanMayAllocateInto(decl *ast.FuncDecl, k int, seen map[
 	result := funcHasArenaParam(decl)
 	if !result && len(decl.RegionParams) > 0 {
 		param := decl.Params[k].Name
-		walkStoreScanNodes(decl.Body, func(node any) {
+		a.storeScanEachNode(decl, func(node any) {
 			if result {
 				return
 			}
