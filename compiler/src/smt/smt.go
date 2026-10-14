@@ -115,9 +115,26 @@ func (s *procSolver) SetLogLabel(label string) {
 	s.label = strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(label)
 }
 
+// DefaultBinary is the solver used when Options.Binary is empty and ELISA_Z3 is unset. Builds
+// set it with `-ldflags "-X elisacore/src/smt.DefaultBinary=/path/to/z3"` (the Makefile's Z3
+// variable), so a toolchain built against its own Z3 finds it without PATH changes.
+var DefaultBinary = "z3"
+
+// ResolveBinary picks the solver executable: an explicit binary, else $ELISA_Z3, else
+// DefaultBinary.
+func ResolveBinary(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if env := os.Getenv("ELISA_Z3"); env != "" {
+		return env
+	}
+	return DefaultBinary
+}
+
 // Options configures a solver subprocess.
 type Options struct {
-	// Binary is the solver executable (default "z3"). Any SMT-LIB2 solver works.
+	// Binary is the solver executable (default: ResolveBinary). Any SMT-LIB2 solver works.
 	Binary string
 	// Args are extra flags. Defaults supply incremental stdin mode for z3.
 	Args []string
@@ -133,12 +150,9 @@ type Options struct {
 // Open starts a solver subprocess in incremental mode. A nil error means the process is live and
 // ready for Check calls. The caller owns Close.
 func Open(opts Options) (Solver, error) {
-	binary := opts.Binary
-	if binary == "" {
-		binary = "z3"
-	}
+	binary := ResolveBinary(opts.Binary)
 	args := opts.Args
-	if len(args) == 0 && (binary == "z3" || strings.HasSuffix(binary, "/z3")) {
+	if len(args) == 0 && isZ3(binary) {
 		// z3 incremental mode: read SMT-LIB2 commands from stdin.
 		args = []string{"-in"}
 	}
@@ -461,4 +475,11 @@ func (s *procSolver) Close() error {
 	_, _ = io.WriteString(s.stdin, "(exit)\n")
 	_ = s.stdin.Close()
 	return s.cmd.Wait()
+}
+
+// isZ3 reports whether binary names z3 (by basename, so a custom path still gets `-in`).
+func isZ3(binary string) bool {
+	base := binary[strings.LastIndexAny(binary, `/\`)+1:]
+	base = strings.TrimSuffix(base, ".exe")
+	return base == "z3"
 }
