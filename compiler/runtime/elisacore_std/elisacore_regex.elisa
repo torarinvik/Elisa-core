@@ -641,6 +641,24 @@ def regex_compile(re: mutable Regex&, pattern: sview) -> bool can[Abort.Panic, M
     re.valid <- true
     return true
 
+@link_name("memchr")
+extern regex_libc_memchr(bytes: void&, value: i32, count: usize) -> uintptr
+
+# First index >= from holding `target`, or text.count. libc memchr (vectorized) over the
+# in-bounds range text[from ..< count]; the pointer arithmetic stays inside this function.
+def regex_find_byte(text: darray[u8]&, from: usize, target: u8) -> usize can[Abort.Panic]:
+    return text.count if from >= text.count
+    remaining: usize = text.count - from
+    base: mutable uintptr = 0.uintptr()
+    hit: mutable uintptr = 0.uintptr()
+    trusted Unsafe.PointerCast:
+        base <- (&text[from]).cast[uintptr]
+        start: void& = (&text[from]).cast[void&]
+        trusted Unsafe.RawExtern:
+            hit <- regex_libc_memchr(start, target.i32(), remaining)
+    return text.count if hit == 0.uintptr()
+    return from + (hit - base).usize()
+
 # Leftmost-longest match starting at or after `from`.
 def regex_find_at(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMatch can[Abort.Panic, Memory.Allocate]:
     if not re.valid:
@@ -649,9 +667,7 @@ def regex_find_at(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMa
     while position <= text.count |re, text, position|:
         if re.use_prefilter:
             if re.first_count == 1:
-                target: u8 = re.first_byte
-                while position < text.count and text[position] != target |position, text, target|:
-                    position <- position + 1
+                position <- regex_find_byte(text, position, re.first_byte)
             else:
                 while position < text.count |position, re, text|:
                     byte: u8 = text[position]
@@ -673,7 +689,7 @@ def regex_is_match(re: mutable Regex&, text: darray[u8]&) -> bool can[Abort.Pani
 # it the scan marks every start with one reverse pass and continues from the bitmap,
 # which keeps the whole scan linear. A spread sample of the text decides whether the
 # start bytes are sparse enough (at most 1 in 4) to try forward search at all.
-const REGEX_FORWARD_SCAN_MAX_FIRST_BYTES: u32 = 8
+const REGEX_FORWARD_SCAN_MAX_FIRST_BYTES: u32 = 16
 
 def regex_scan_begin(re: mutable Regex&, text: darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
     re.forward_scan <- re.use_prefilter and re.first_count <= REGEX_FORWARD_SCAN_MAX_FIRST_BYTES

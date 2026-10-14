@@ -347,6 +347,7 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	requireFunctionPermissionRefs(t, result, "arena_trim", "Memory.Release", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
 }
+
 // The std float formatter reads f64 bits through the elisa.f64_to_bits builtin, so no
 // pointer cast (Unsafe) leaks into its public permission contracts.
 func TestAnalyzePinsStdFloatFormatPermissionContracts(t *testing.T) {
@@ -360,6 +361,7 @@ func TestAnalyzePinsStdFloatFormatPermissionContracts(t *testing.T) {
 		requireFunctionPermissionRefs(t, result, "f64_push_shortest_json", "Memory.Allocate", "Abort.Panic")
 	}
 }
+
 func TestAnalyzeStrictUnsafePinsArenaPointerCastsAsTrustedInternals(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
