@@ -138,16 +138,17 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			}
 			return mode
 		}
+		if !storeScanMentions(value, content) {
+			return storeNone
+		}
+		// A view-only value derived from a byte-free source cannot point into the source's storage.
+		if views != nil && a.storeScanValueIsView(inner, views) {
+			return storeViews
+		}
 		if storeScanMentionsHeader(value, header) {
-			if views != nil && a.storeScanValueIsView(inner, views) {
-				return storeElements
-			}
 			return storeHeader
 		}
-		if storeScanMentions(value, content) {
-			return storeElements
-		}
-		return storeNone
+		return storeElements
 	}
 	mode := storeNone
 	walkStoreScanNodes(decl.Body, func(node any) {
@@ -875,9 +876,14 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 				return
 			}
 		}
-		if storeScanMentionsHeader(value, header) && !(views != nil && a.storeScanValueIsView(value, views)) {
+		if !storeScanMentions(value, content) {
+			return
+		}
+		if views != nil && a.storeScanValueIsView(value, views) {
+			mode = maxStoreMode(mode, storeViews)
+		} else if storeScanMentionsHeader(value, header) {
 			mode = storeHeader
-		} else if storeScanMentions(value, content) {
+		} else {
 			mode = maxStoreMode(mode, storeElements)
 		}
 	})
