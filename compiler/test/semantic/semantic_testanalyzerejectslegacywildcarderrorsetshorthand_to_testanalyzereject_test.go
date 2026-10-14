@@ -362,6 +362,21 @@ func TestAnalyzePinsStdFloatFormatPermissionContracts(t *testing.T) {
 	}
 }
 
+// The std float parser (Eisel-Lemire + big-integer fallback) uses only builtin intrinsics:
+// no Unsafe in its public contracts. (Normal analysis, like the arena pins: strict-unsafe
+// analysis counts every darray/sview index as UncheckedIndex, which elisacore_bigint has
+// throughout.)
+func TestAnalyzePinsStdFloatParsePermissionContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_parse_float.elisa"), map[string]bool{})
+	for _, options := range []semantic.AnalyzeOptions{{}} {
+		result, errs := parseAndAnalyzeWithOptions(t, "elisacore_parse_float.elisa", src, options)
+		requireNoErrors(t, errs)
+		requireFunctionPermissionRefs(t, result, "f64_parse", "Memory.Allocate", "Abort.Panic")
+		requireFunctionPermissionRefs(t, result, "f64_parse_prefix", "Memory.Allocate", "Abort.Panic")
+	}
+}
+
 func TestAnalyzeStrictUnsafePinsArenaPointerCastsAsTrustedInternals(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "arena.elisa"), map[string]bool{})
