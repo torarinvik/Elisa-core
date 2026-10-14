@@ -1152,7 +1152,7 @@ func (a *Analyzer) parallelForCaptureTypeAllowed(t Type, seen map[string]bool) b
 		regionBindings := regionBindingsForStructInstance(base, tt.Args)
 		for _, field := range base.Fields {
 			fieldType := field.Type
-			if len(bindings) != 0 {
+			if len(bindings) != 0 || len(regionBindings) != 0 {
 				fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 			}
 			if !a.parallelForCaptureTypeAllowed(fieldType, seen) {

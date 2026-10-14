@@ -76,7 +76,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			continue
 		}
 		fieldType := field.Type
-		if len(bindings) != 0 {
+		if len(bindings) != 0 || len(regionBindings) != 0 {
 			fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 		}
 		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType, Mutable: field.Mutable, Index: i})

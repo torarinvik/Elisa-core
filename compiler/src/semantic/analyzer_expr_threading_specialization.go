@@ -61,7 +61,7 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 			regionBindings := regionBindingsForStructInstance(base, tt.Args)
 			for _, field := range base.Fields {
 				fieldType := field.Type
-				if len(bindings) != 0 {
+				if len(bindings) != 0 || len(regionBindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 				}
 				if !a.typeStructurallyThreadShareable(fieldType, seen) {
@@ -152,7 +152,7 @@ func (a *Analyzer) closureCaptureSharesMutableState(t Type, seen map[string]bool
 			regionBindings := regionBindingsForStructInstance(base, tt.Args)
 			for _, field := range base.Fields {
 				fieldType := field.Type
-				if len(bindings) != 0 {
+				if len(bindings) != 0 || len(regionBindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 				}
 				if a.closureCaptureSharesMutableState(fieldType, seen) {
@@ -687,7 +687,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeWithDepth(expected Type, actual
 		fields := cloneStructFields(baseStruct.Fields)
 		for name, field := range baseStruct.Fields {
 			expectedFieldType := field.Type
-			if len(bindings) != 0 {
+			if len(bindings) != 0 || len(regionBindings) != 0 {
 				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, regionBindings, nil)
 			}
 			actualFieldType, ok := a.lookupResolvedFieldType(actual, name)
@@ -770,7 +770,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 				continue
 			}
 			expectedFieldType := field.Type
-			if len(bindings) != 0 {
+			if len(bindings) != 0 || len(regionBindings) != 0 {
 				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, regionBindings, nil)
 			}
 			nextType, fieldChanged := a.specializeCallbackCarryingTypeFromExpr(expectedFieldType, fieldExpr)
