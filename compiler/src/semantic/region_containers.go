@@ -2193,16 +2193,68 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 	}
 }
 
-// argCarriesRegionlessBacking reports whether a value of type t (refs peeled) holds a
-// region-less container's backing: a region-less darray/dict itself, or a struct with such a field.
+// argCarriesRegionlessBacking reports whether a value of type t (refs peeled) holds an OWNING
+// region-less container's backing -- a darray/dict/set with no region of its own -- directly or
+// through struct fields, inline enum payloads, tuples, optionals and fixed arrays. Views
+// (sview/cstr) own no backing; their provenance is tracked separately.
 func argCarriesRegionlessBacking(t Type) bool {
-	t = stripRefForBounds(t)
-	switch t.(type) {
-	case *DArrayType, *DictType:
-		return containerRegion(t) == ""
+	return ownsRegionlessContainerRec(t, map[Type]bool{})
+}
+
+func ownsRegionlessContainerRec(t Type, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
 	}
-	if st, ok := peelToStructType(t); ok {
-		return structHasRegionlessContainerField(st)
+	seen[t] = true
+	switch tt := t.(type) {
+	case *DArrayType, *DictType, *SetType:
+		return containerRegion(t) == ""
+	case *RefType:
+		return tt != nil && ownsRegionlessContainerRec(tt.Elem, seen)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if ownsRegionlessContainerRec(field.Type, seen) {
+				return true
+			}
+		}
+	case *OptionalType:
+		return ownsRegionlessContainerRec(tt.Value, seen)
+	case *ErrorUnionType:
+		return ownsRegionlessContainerRec(tt.Value, seen)
+	case *ArrayType:
+		return ownsRegionlessContainerRec(tt.Elem, seen)
+	case *GenericInstanceType:
+		for _, argument := range tt.Args {
+			if ownsRegionlessContainerRec(argument, seen) {
+				return true
+			}
+		}
+		return ownsRegionlessContainerRec(tt.Base, seen)
+	case *AggregateStateType:
+		return tt != nil && ownsRegionlessContainerRec(tt.Base, seen)
+	case *StructType:
+		if tt == nil {
+			return false
+		}
+		if tt.Store {
+			return true
+		}
+		for _, f := range tt.Fields {
+			if ownsRegionlessContainerRec(f.Type, seen) {
+				return true
+			}
+		}
+	case *EnumType:
+		if tt == nil || tt.Packed || tt.Root().Packed {
+			return false
+		}
+		for _, v := range tt.Variants {
+			for _, payload := range v.Payload {
+				if ownsRegionlessContainerRec(payload, seen) {
+					return true
+				}
+			}
+		}
 	}
 	return false
 }

@@ -180,7 +180,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			field, isMethod := n.Func.(*ast.FieldExpr)
 			// A builtin darray's `extend(xs)` copies xs's ELEMENTS into the receiver; it never
 			// retains xs's own header.
-			copiesElements := isMethod && field != nil && field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(field.Object)
+			copiesElements := isMethod && field != nil && field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(decl, field.Object)
 			if isMethod && field != nil {
 				if root := rootIdentExpr(field.Object); root != nil && targets[root.Name] {
 					for _, arg := range n.Args {
@@ -752,7 +752,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 					if root := rootIdentExpr(field.Object); root != nil && !params[root.Name] && a.storeScanReceiverIsValue(root.Name, locals) {
 						// A builtin darray `extend(xs)` copies xs's elements: the receiver then
 						// holds values read out of xs (content), never xs's header.
-						copiesElements := field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(field.Object)
+						copiesElements := field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(decl, field.Object)
 						for _, arg := range n.Args {
 							if copiesElements {
 								if storeScanMentions(arg, content) && add(content, root.Name) {
@@ -1050,13 +1050,67 @@ func (a *Analyzer) storeScanLooksLikeTypeName(name string) bool {
 	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
 }
 
-// storeScanReceiverIsBuiltinDArray reports whether a method receiver's analyzed type is a builtin
-// darray (refs peeled). An unknown type answers false (the caller then keeps its conservative mode).
-func (a *Analyzer) storeScanReceiverIsBuiltinDArray(recv ast.Expr) bool {
-	t, known := a.exprTypes[storeScanUnwrap(recv)]
-	if !known || t == nil {
+// storeScanReceiverIsBuiltinDArray reports whether a method receiver is a builtin darray (refs
+// peeled). The analyzed type answers when known; a callee scanned before its body was analyzed
+// falls back to declared syntax: a bare name every one of whose declarations in decl (params and
+// locals) is spelled `darray[..]` / `dstr`. Anything else answers false (the caller then keeps its
+// conservative mode).
+func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast.Expr) bool {
+	inner := storeScanUnwrap(recv)
+	if t, known := a.exprTypes[inner]; known && t != nil {
+		_, ok := stripRefForBounds(t).(*DArrayType)
+		return ok
+	}
+	id, ok := inner.(*ast.Ident)
+	if !ok || id == nil || decl == nil {
 		return false
 	}
-	_, ok := stripRefForBounds(t).(*DArrayType)
-	return ok
+	found, all := false, true
+	for _, p := range decl.Params {
+		if p.Name == id.Name {
+			found = true
+			all = all && storeScanTypeExprIsDArray(p.Type)
+		}
+	}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		if v, isVar := node.(*ast.VarDeclStmt); isVar && v != nil && v.Name == id.Name {
+			found = true
+			all = all && storeScanTypeExprIsDArray(v.Type)
+		}
+		if st, isStmt := node.(ast.Stmt); isStmt {
+			if _, isVar := node.(*ast.VarDeclStmt); !isVar {
+				for _, name := range stmtBoundNames(st) {
+					if name == id.Name {
+						all = false // a pattern / loop binder of unknown type
+					}
+				}
+			}
+		}
+	})
+	return found && all
+}
+
+// storeScanTypeExprIsDArray: `darray[..]` / `dstr`, through ref and mutable wrappers.
+func storeScanTypeExprIsDArray(t ast.TypeExpr) bool {
+	for {
+		switch tt := t.(type) {
+		case *ast.MutableType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+			continue
+		case *ast.RefType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+			continue
+		case *ast.BuiltinTypeExpr:
+			return tt != nil && (tt.Name == "darray" || tt.Name == "dstr")
+		case *ast.NamedType:
+			return tt != nil && tt.Name == "dstr"
+		}
+		return false
+	}
 }

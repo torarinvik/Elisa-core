@@ -423,3 +423,30 @@ def fill(path: mutable Path&, log: mutable Log&) -> void:
 		t.Fatalf("expected only lines 20 and 29 rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// The extend rule must not depend on analysis order: a callee declared AFTER its caller is
+// scanned before its body has types, so the receiver is recognized from its declared
+// `darray[..]` syntax. (A receiver also bound by a pattern/loop binder of the same name stays
+// conservative.)
+func TestStoreScanExtendRecognizedBeforeCalleeAnalyzed(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_extend_order.elisa", `struct Table:
+    texts: mutable darray[darray[u8]] = []
+
+def run(table: mutable Table&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable dstr = []
+        local.push(65)
+        parent_text(local.as_sview(), table)
+
+def parent_text(text: sview, table: mutable Table&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        bytes: mutable darray[u8] = []
+        bytes.extend(text)
+        table.texts.push(bytes)
+`)
+	for _, e := range result.Errors() {
+		if strings.Contains(e, ":8:") {
+			t.Fatalf("the extend-copied view must not be reported as stored at the call, got:\n%s", strings.Join(result.Errors(), "\n"))
+		}
+	}
+}
