@@ -94,3 +94,24 @@ func TestSMTRelevantSubstDeclinesMissingReferencedFormal(t *testing.T) {
 		t.Fatal("missing actual for a referenced formal must not leave it free in the caller's namespace")
 	}
 }
+
+func TestSMTRelevantSubstIgnoresUnreferencedUnsupportedFormal(t *testing.T) {
+	analyzer := &Analyzer{}
+	translator := analyzer.newSMTTranslator(nil)
+	untranslatable := &ast.TupleExpr{Elems: []ast.Expr{identExpr("unsupported")}}
+	env, ok := analyzer.smtEnvForRelevantSubst(
+		translator,
+		map[string]ast.Expr{"index": &ast.IntLit{Value: "7"}, "state": untranslatable},
+		identExpr("index"),
+		[]ast.ParamDecl{{Name: "index"}, {Name: "state"}},
+	)
+	if !ok {
+		t.Fatal("an unsupported actual for an unreferenced formal must not prevent proving the obligation")
+	}
+	if env["index"] != "7" {
+		t.Fatalf("referenced formal bound to %q, want 7", env["index"])
+	}
+	if _, bound := env["state"]; bound {
+		t.Fatal("unreferenced formal must not be added to the SMT environment")
+	}
+}
