@@ -408,9 +408,20 @@ def f64_fmt_to_decimal(q: i64, c: u64, dk: i64, negative: bool) -> F64Decimal ca
 def f64_fmt_normalize(d: F64Decimal) -> F64Decimal:
     digits: mutable u64 = d.digits
     exponent: mutable i32 = d.exponent
-    while digits != 0 and digits % 10 == 0 |digits, exponent|:
-        digits <- digits / 10
-        exponent <- exponent + 1
+    # Strip in 8/4/2/1-digit steps (a 17-digit result may carry up to 16 zeros).
+    if digits != 0:
+        while digits % 100000000 == 0 |digits, exponent|:
+            digits <- digits / 100000000
+            exponent <- exponent + 8
+        if digits % 10000 == 0:
+            digits <- digits / 10000
+            exponent <- exponent + 4
+        if digits % 100 == 0:
+            digits <- digits / 100
+            exponent <- exponent + 2
+        if digits % 10 == 0:
+            digits <- digits / 10
+            exponent <- exponent + 1
     return F64Decimal{digits: digits, exponent: exponent, negative: d.negative, kind: d.kind}
 
 def f64_shortest(value: f64) -> F64Decimal can[Abort.Panic]:
@@ -439,34 +450,42 @@ def f64_shortest(value: f64) -> F64Decimal can[Abort.Panic]:
     return f64_fmt_normalize(f64_fmt_to_decimal(F64_FMT_Q_MIN, t, 0, negative))
 
 def f64_fmt_digit_count(digits: u64) -> usize:
+    # Independent comparisons instead of a chain of divisions.
     count: mutable usize = 1
-    rest: mutable u64 = digits / 10
-    while rest != 0 |count, rest|:
+    threshold: mutable u64 = 10
+    while count < 20 and digits >= threshold |count, threshold, digits|:
         count <- count + 1
-        rest <- rest / 10
+        threshold <- threshold * 10 if count < 20 else threshold
     return count
 
-def f64_fmt_pow10(n: usize) -> u64:
-    value: mutable u64 = 1
-    for _ in 0..<n |value|:
-        value <- value * 10
-    return value
-
-# Pushes digits first..<last of the nd-digit number `digits` (0 = most significant),
-# with '.' in front of digit `dot_at` (never when dot_at is outside the run).
-def f64_fmt_push_digit_run(out: mutable darray[u8]&, digits: u64, nd: usize, first: usize, last: usize, dot_at: usize) -> void can[Memory.Allocate, Abort.Panic]:
-    divisor: mutable u64 = f64_fmt_pow10(nd - 1 - first)
-    for i in first..<last |out, divisor, digits, dot_at|:
-        out.push('.') if i == dot_at
-        out.push(('0'.u64() + (digits / divisor) % 10).u8())
-        divisor <- divisor / 10
+# Pushes the nd decimal digits of `digits` (most significant first), with '.' in front of
+# digit `dot_at` (no dot when dot_at is 0 or >= nd). The digits are first reversed into a
+# second integer so every division is by the constant 10; nd <= 20 digits and the reversal
+# of an nd-digit number is below 10^nd, except that nd = 20 can overflow, so that case
+# (never a float, at most an exponent) peels the top digit first.
+def f64_fmt_push_digit_run(out: mutable darray[u8]&, digits: u64, nd: usize, dot_at: usize) -> void can[Memory.Allocate, Abort.Panic]:
+    rest: mutable u64 = digits
+    count: mutable usize = nd
+    if nd == 20:
+        out.push('1')
+        rest <- digits - 10000000000000000000
+        count <- 19
+    reversed: mutable u64 = 0
+    for _ in 0..<count |reversed, rest|:
+        reversed <- reversed * 10 + rest % 10
+        rest <- rest / 10
+    start: usize = nd - count
+    for i in start..<nd |out, reversed, dot_at|:
+        out.push('.') if i == dot_at and i > 0
+        out.push(('0'.u64() + reversed % 10).u8())
+        reversed <- reversed / 10
 
 def f64_fmt_push_exponent(out: mutable darray[u8]&, exponent: i64, min_digits: usize) -> void can[Memory.Allocate, Abort.Panic]:
     magnitude: u64 = (0 - exponent).u64() if exponent < 0 else exponent.u64()
     count: usize = f64_fmt_digit_count(magnitude)
     for _ in count..<min_digits |out|:
         out.push('0')
-    f64_fmt_push_digit_run(out, magnitude, count, 0, count, count)
+    f64_fmt_push_digit_run(out, magnitude, count, count)
 
 def f64_push_shortest_g(out: mutable darray[u8]&, value: f64) -> void can[Memory.Allocate, Abort.Panic]:
     d: F64Decimal = f64_shortest(value)
@@ -491,7 +510,7 @@ def f64_push_shortest_g(out: mutable darray[u8]&, value: f64) -> void can[Memory
     dp: i64 = nd.i64() + d.exponent.i64()
     exp: i64 = dp - 1
     if exp < -4 or exp >= 6:
-        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, 1)
+        f64_fmt_push_digit_run(out, d.digits, nd, 1)
         out.push('e')
         out.push('-' if exp < 0 else '+')
         f64_fmt_push_exponent(out, exp, 2)
@@ -501,9 +520,9 @@ def f64_push_shortest_g(out: mutable darray[u8]&, value: f64) -> void can[Memory
         out.push('.')
         for _ in 0..<(0 - dp) |out|:
             out.push('0')
-        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, nd)
+        f64_fmt_push_digit_run(out, d.digits, nd, nd)
         return
-    f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, dp.usize())
+    f64_fmt_push_digit_run(out, d.digits, nd, dp.usize())
     for _ in nd.i64()..<dp |out|:
         out.push('0')
 
@@ -526,21 +545,21 @@ def f64_push_shortest_json(out: mutable darray[u8]&, value: f64) -> void can[Mem
     k: i64 = d.exponent.i64()
     kk: i64 = nd.i64() + k
     if k >= 0 and kk <= 16:
-        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, nd)
+        f64_fmt_push_digit_run(out, d.digits, nd, nd)
         for _ in 0..<k |out|:
             out.push('0')
         out.push('.')
         out.push('0')
     elif kk > 0 and kk <= 16:
-        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, kk.usize())
+        f64_fmt_push_digit_run(out, d.digits, nd, kk.usize())
     elif kk > -5 and kk <= 0:
         out.push('0')
         out.push('.')
         for _ in 0..<(0 - kk) |out|:
             out.push('0')
-        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, nd)
+        f64_fmt_push_digit_run(out, d.digits, nd, nd)
     else:
-        f64_fmt_push_digit_run(out, d.digits, nd, 0, nd, 1)
+        f64_fmt_push_digit_run(out, d.digits, nd, 1)
         out.push('e')
         out.push('-') if kk - 1 < 0
         f64_fmt_push_exponent(out, kk - 1, 1)
