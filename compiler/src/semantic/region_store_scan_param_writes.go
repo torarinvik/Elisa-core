@@ -661,12 +661,11 @@ func (a *Analyzer) storeScanFlowsFrom(decl *ast.FuncDecl, idx *storeScanDeclInde
 			if callee, ok := a.resolveReadOnlyScanCallee(e); ok && callee != nil && storeFlowCallFitsParams(callee, e) {
 				// A resolved callee's result carries only the parameters its (completed) store-flow
 				// summary connects to the result.
-				a.storeFlowSummaryFor(callee)
-				if sum := a.storeFlowSummaries[callee]; sum != nil && a.storeFlowInProgress[callee] == nil {
+				if sum := a.storeFlowKindsFor(callee); sum != nil && a.storeFlowInProgress[callee] == nil {
 					args := returnBorrowCallArgs(e)
 					if len(sum.retConn) == len(callee.Params) {
 						for i, arg := range args {
-							if i >= len(sum.retConn) || sum.retConn[i] {
+							if i >= len(sum.retConn) || sum.retKindOf(i) == storeFlowEdgeHeader {
 								if flows(arg) {
 									return true
 								}

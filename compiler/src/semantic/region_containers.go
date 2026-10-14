@@ -2151,6 +2151,13 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		mode := storeHeader
 		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
 			mode = a.calleeStoreModeInto(decl, other, index)
+			// The summary's edge kind bounds it too: an Elements edge stores only element
+			// values copied out of the argument, never its storage.
+			if mode == storeHeader {
+				if sum := a.storeFlowKindsFor(decl); sum != nil && sum.reachKindOf(other, index) == storeFlowEdgeElements {
+					mode = storeElements
+				}
+			}
 		}
 		if mode == storeNone {
 			continue

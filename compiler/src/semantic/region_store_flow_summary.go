@@ -24,6 +24,10 @@ type storeFlowSummary struct {
 	retConn []bool   // parameter i may reach the call's result
 	written []bool   // parameter i may be written by the callee (a store destination)
 	reach   [][]bool // reach[i][j]: contents of parameter i may reach parameter j (directed conn)
+	// Edge kinds of a settled summary (storeFlowSolveKinds): what of parameter i its result /
+	// parameter j may receive. Missing entries read as Header.
+	retKind   []storeFlowEdgeKind
+	reachKind [][]storeFlowEdgeKind
 }
 
 // reaches reports whether the contents of parameter i may reach parameter j; unknown means so.
