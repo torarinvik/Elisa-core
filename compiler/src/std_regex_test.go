@@ -92,6 +92,10 @@ def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern, U
 	for _, p := range []string{"(a", "a)", "[ab", "*a", "a|*", `a\`, "a{2", "a{3,1}", "(?s)a"} {
 		cases = append(cases, regexCase{p, "aa"})
 	}
+	// Long texts where forward search from prefiltered starts re-steps the same bytes
+	// (quadratic without the work budget), forcing the switch to the start bitmap.
+	cases = append(cases, regexCase{"a[^b]*b", strings.Repeat("a", 3000) + "b" + strings.Repeat("ac", 2000)},
+		regexCase{"(a|c)c*b", strings.Repeat("ac", 3000) + "b"})
 	alphabet := "abcAB\n|"
 	for i := 0; i < 300; i++ {
 		var text strings.Builder

@@ -71,6 +71,7 @@ struct RegexAutomaton:
     mark_generation: mutable u32
     pending: mutable darray[u32]
     work: mutable darray[u32]
+    scanned: mutable usize             # bytes stepped by regex_longest_at (work budget)
 
 struct Regex:
     valid: mutable bool
@@ -85,6 +86,9 @@ struct Regex:
     first_bytes: mutable darray[u64]   # 4 words; bytes that can begin a match
     use_prefilter: mutable bool
     starts: mutable darray[u64]        # bitmap: positions where a match begins
+    first_count: mutable u32           # number of bytes in first_bytes
+    first_byte: mutable u8             # the byte, when first_count == 1
+    forward_scan: mutable bool         # current whole-text scan uses forward search, not starts
 
 struct RegexParser:
     position: mutable usize
@@ -92,10 +96,10 @@ struct RegexParser:
     ignore_case: mutable bool   # set by `(?i)`, scoped to the enclosing group
 
 def regex_automaton_new() -> RegexAutomaton:
-    return RegexAutomaton{sets: [], nfa_kind: [], nfa_out1: [], nfa_out2: [], nfa_set: [], nfa_start: 0, dfa_offset: [], dfa_members: [], dfa_accept: [], dfa_next: [], dfa_hash: [], dfa_chain: [], dfa_index: {}, dfa_start: REGEX_DEAD, dfa_flushes: 0, mark: [], mark_generation: 0, pending: [], work: []}
+    return RegexAutomaton{sets: [], nfa_kind: [], nfa_out1: [], nfa_out2: [], nfa_set: [], nfa_start: 0, dfa_offset: [], dfa_members: [], dfa_accept: [], dfa_next: [], dfa_hash: [], dfa_chain: [], dfa_index: {}, dfa_start: REGEX_DEAD, dfa_flushes: 0, mark: [], mark_generation: 0, pending: [], work: [], scanned: 0}
 
 def regex_new() -> Regex:
-    return Regex{valid: false, sets: [], ast_kind: [], ast_left: [], ast_right: [], forward: regex_automaton_new(), backward: regex_automaton_new(), first_bytes: [], use_prefilter: false, starts: []}
+    return Regex{valid: false, sets: [], ast_kind: [], ast_left: [], ast_right: [], forward: regex_automaton_new(), backward: regex_automaton_new(), first_bytes: [], use_prefilter: false, starts: [], first_count: 0, first_byte: 0, forward_scan: false}
 
 # ------------------------------------------------------------
 # Byte sets
@@ -527,6 +531,7 @@ def regex_longest_at(au: mutable RegexAutomaton&, text: darray[u8]&, first: usiz
             state <- follow >> 1
             position <- position + 1
             best <- position.i64() if (follow & 1) != 0
+        au.scanned <- au.scanned + (position - first)
         return best if not restarted
     return -1
 
@@ -624,11 +629,15 @@ def regex_compile(re: mutable Regex&, pattern: sview) -> bool can[Abort.Panic, M
         re.first_bytes.push(0)
     start: i32 = re.forward.dfa_start
     re.use_prefilter <- not re.forward.dfa_accept[start.usize()]
+    re.first_count <- 0
+    re.first_byte <- 0
     for value in 0..<256 |re, start|:
         follow: mutable i32 = re.forward.dfa_next[start.usize() * 256 + value]
         follow <- regex_dfa_compute(&re.forward, start, value.u8(), false) if follow == REGEX_UNKNOWN
         if follow != REGEX_DEAD:
             re.first_bytes[value / 64] <- re.first_bytes[value / 64] | (1.u64() << (value % 64).u64())
+            re.first_count <- re.first_count + 1
+            re.first_byte <- value.u8()
     re.valid <- true
     return true
 
@@ -639,10 +648,15 @@ def regex_find_at(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMa
     position: mutable usize = from
     while position <= text.count |re, text, position|:
         if re.use_prefilter:
-            while position < text.count |position, re, text|:
-                byte: u8 = text[position]
-                break if ((re.first_bytes[(byte >> 6).usize()] >> (byte & 63).u64()) & 1) != 0
-                position <- position + 1
+            if re.first_count == 1:
+                target: u8 = re.first_byte
+                while position < text.count and text[position] != target |position, text, target|:
+                    position <- position + 1
+            else:
+                while position < text.count |position, re, text|:
+                    byte: u8 = text[position]
+                    break if ((re.first_bytes[(byte >> 6).usize()] >> (byte & 63).u64()) & 1) != 0
+                    position <- position + 1
             break if position >= text.count
         found_end: i64 = regex_longest_at(&re.forward, text, position)
         return RegexMatch{found: true, first: position, last: found_end.usize()} if found_end >= 0
@@ -652,8 +666,41 @@ def regex_find_at(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMa
 def regex_is_match(re: mutable Regex&, text: darray[u8]&) -> bool can[Abort.Panic, Memory.Allocate]:
     return regex_find_at(re, text, 0).found
 
-# Next non-overlapping match for the whole-text scans, using the start bitmap.
+# Whole-text scans pick a strategy. When few bytes can begin a match (a rare-byte
+# prefilter, as with Rust's memchr literal prefilter) the scan searches forward from
+# prefiltered positions and never runs the reversed automaton. Forward search can
+# step the same bytes again from nearby candidates, so it carries a work budget; past
+# it the scan marks every start with one reverse pass and continues from the bitmap,
+# which keeps the whole scan linear. A spread sample of the text decides whether the
+# start bytes are sparse enough (at most 1 in 4) to try forward search at all.
+const REGEX_FORWARD_SCAN_MAX_FIRST_BYTES: u32 = 8
+
+def regex_scan_begin(re: mutable Regex&, text: darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
+    re.forward_scan <- re.use_prefilter and re.first_count <= REGEX_FORWARD_SCAN_MAX_FIRST_BYTES
+    if re.forward_scan:
+        # The prefilter only pays when start bytes are not dense: sample 8 windows of
+        # 256 bytes spread over the text (inputs often change character by region).
+        sampled: mutable usize = 0
+        hits: mutable usize = 0
+        stride: usize = text.count / 8
+        for window in 0..<8 |re, text, hits, sampled, stride|:
+            begin: usize = window * stride
+            end: usize = text.count if begin + 256 > text.count else begin + 256
+            for position in begin..<end |re, text, hits|:
+                byte: u8 = text[position]
+                hits <- hits + ((re.first_bytes[(byte >> 6).usize()] >> (byte & 63).u64()) & 1).usize()
+            sampled <- sampled + (end - begin)
+        re.forward_scan <- hits * 4 <= sampled
+    re.forward.scanned <- 0
+    regex_mark_starts(re, text) if not re.forward_scan
+
+# Next non-overlapping match for the whole-text scans (after regex_scan_begin).
 def regex_scan_next(re: mutable Regex&, text: darray[u8]&, from: usize) -> RegexMatch can[Abort.Panic, Memory.Allocate]:
+    if re.forward_scan:
+        if re.forward.scanned <= text.count / 8 + 4096:
+            return regex_find_at(re, text, from)
+        re.forward_scan <- false
+        regex_mark_starts(re, text)
     position: mutable usize = from
     while true |re, text, position|:
         first: usize = regex_next_start(re, position, text.count)
@@ -669,7 +716,7 @@ def regex_scan_next(re: mutable Regex&, text: darray[u8]&, from: usize) -> Regex
 def regex_count(re: mutable Regex&, text: darray[u8]&) -> usize can[Abort.Panic, Memory.Allocate]:
     if not re.valid:
         panic("regex: search with a pattern that did not compile")
-    regex_mark_starts(re, text)
+    regex_scan_begin(re, text)
     count: mutable usize = 0
     position: mutable usize = 0
     previous_end: mutable i64 = -1
@@ -688,7 +735,7 @@ def regex_count(re: mutable Regex&, text: darray[u8]&) -> usize can[Abort.Panic,
 def regex_replace_all(re: mutable Regex&, text: darray[u8]&, replacement: sview, output: mutable darray[u8]&) -> void can[Abort.Panic, Memory.Allocate]:
     if not re.valid:
         panic("regex: search with a pattern that did not compile")
-    regex_mark_starts(re, text)
+    regex_scan_begin(re, text)
     copied: mutable usize = 0
     position: mutable usize = 0
     previous_end: mutable i64 = -1
