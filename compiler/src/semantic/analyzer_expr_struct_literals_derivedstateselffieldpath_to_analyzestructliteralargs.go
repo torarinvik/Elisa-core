@@ -149,7 +149,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 				continue
 			}
 			expected := field.Type
-			if len(bindings) > 0 {
+			if len(bindings) > 0 || len(regionBindings) > 0 {
 				expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
 			}
 			arg, actual := a.analyzeCallLikeValueExpr(expr.Args[i], expected)
@@ -158,6 +158,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 				a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected, actual)
 			}
 			a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
+			a.checkStructLiteralFieldRegion(base, expr.Args[i], expected, actual)
 			a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
 			if prev, exists := seen[index]; exists {
 				a.errorf(expr.Args[i].Pos(), "struct literal %q field %q is specified more than once (first at %s:%d:%d)", expr.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
@@ -181,7 +182,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 				continue
 			}
 			expected := field.Type
-			if len(bindings) > 0 {
+			if len(bindings) > 0 || len(regionBindings) > 0 {
 				expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
 			}
 			defaultExpr, defaultOK := a.analyzeStructFieldDefaultExpr(base, fieldDecl, expected)
@@ -230,7 +231,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 				continue
 			}
 			expected := field.Type
-			if len(bindings) > 0 {
+			if len(bindings) > 0 || len(regionBindings) > 0 {
 				expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
 			}
 			defaultExpr, defaultOK := a.analyzeStructFieldDefaultExpr(base, fieldDecl, expected)
@@ -261,7 +262,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			continue
 		}
 		expected := field.Type
-		if len(bindings) > 0 {
+		if len(bindings) > 0 || len(regionBindings) > 0 {
 			expected = a.substituteType(expected, bindings, nil, regionBindings, nil)
 		}
 		var actual Type
@@ -270,6 +271,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected, actual)
 		}
 		a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
+		a.checkStructLiteralFieldRegion(base, expr.Args[i], expected, actual)
 		a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
 		// For the positional path, args are in field-declaration order so expr.Args[0..i]
 		// provides all earlier-field initializers needed for cross-field where substitutions.
@@ -362,4 +364,23 @@ func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, fiel
 	}
 	// Route through the shared proof ladder with the expanded substitution map.
 	a.dischargeWherePredicate(wt.Predicate, subst, arg.Pos(), subject)
+}
+
+// checkStructLiteralFieldRegion: a field whose declared type carries one of the struct's region
+// parameters (`name: sview @source`), instantiated at this literal (`Node[a]{...}`), is a store
+// into that region: the field value must outlive it, exactly as `n.name <- v` is checked.
+func (a *Analyzer) checkStructLiteralFieldRegion(base *StructType, arg ast.Expr, expected, actual Type) {
+	if base == nil || base.Decl == nil || len(base.Decl.RegionParams) == 0 {
+		return
+	}
+	target := containerOrEntryRegion(expected)
+	if target == "" {
+		return
+	}
+	for _, param := range base.Decl.RegionParams {
+		if param == target {
+			return // not instantiated here: the literal's region is decided where it is stored
+		}
+	}
+	a.checkNestedRegionStoreEscape(arg, arg, expected, actual)
 }
