@@ -138,6 +138,21 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			}
 			return mode
 		}
+		// `t.f.push(v)` on a builtin darray yields the receiver with v appended: it stores what
+		// the receiver and the arguments store (rule 177's per-argument view of the same call).
+		if call, isCall := inner.(*ast.CallExpr); isCall && call != nil && len(returnBorrowCallArgs(call)) == len(call.Args) {
+			if field, isMethod := call.Func.(*ast.FieldExpr); isMethod && field != nil && containerGrowthMethods[field.Field] && a.storeScanReceiverIsBuiltinDArray(decl, field.Object) {
+				mode := valueMode(field.Object)
+				for _, arg := range call.Args {
+					argMode := valueMode(arg)
+					if field.Field == "extend" && argMode == storeHeader {
+						argMode = storeElements
+					}
+					mode = maxStoreMode(mode, argMode)
+				}
+				return mode
+			}
+		}
 		if !storeScanMentions(value, content) {
 			return storeNone
 		}
@@ -707,8 +722,9 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 	if targetName != "" {
 		targets[targetName] = true
 	}
+	scalars := a.storeScanScalarLocals(decl)
 	add := func(set map[string]bool, name string) bool {
-		if name == "" || params[name] || set[name] {
+		if name == "" || params[name] || set[name] || scalars[name] {
 			return false
 		}
 		set[name] = true
@@ -801,26 +817,118 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 						}
 					}
 				}
+			case *ast.ForStmt:
+				// A counted range loop binds an integer (analyzeForStmt rejects non-integral
+				// bounds), which carries nothing, however its header mentions the source
+				// (`for i in 0..<src.count |src|`).
 			case ast.Stmt:
 				// Any other binding construct: its binders may hold the whole source.
 				if !stmtHeaderMentionsAny(n, content) {
 					return
 				}
-				// Pattern binders of a match / `is` test project fields or payloads (content);
-				// only other binders (a rebind of a call result, a destructure) may be the whole.
-				whole := stmtHeaderMentionsAny(n, header) && !storeScanProjectingStmt(n)
-				for _, name := range stmtBoundNames(n) {
-					if add(content, name) {
-						changed = true
-					}
-					if whole && add(header, name) {
-						changed = true
-					}
-				}
+				a.storeScanTaintBinders(n, header, content, add, &changed)
 			}
 		})
 	}
 	return params, header, content, targets, views
+}
+
+// storeScanScalarLocals: body locals that only ever hold a plain numeric or bool value -- every
+// declaration of the name is initialized with such a value (analyzed type) and no other construct
+// binds it. Such a local can never carry a reference into a source, whatever it is computed from
+// (`index: int = bound_last_index(bound, name)`). uintptr is excluded: it may encode an address.
+func (a *Analyzer) storeScanScalarLocals(decl *ast.FuncDecl) map[string]bool {
+	if cached, ok := a.storeScanScalarCache[decl]; ok {
+		return cached
+	}
+	scalars, other := map[string]bool{}, map[string]bool{}
+	defer func() {
+		if a.storeScanScalarCache == nil {
+			a.storeScanScalarCache = map[*ast.FuncDecl]map[string]bool{}
+		}
+		a.storeScanScalarCache[decl] = scalars
+	}()
+	walkStoreScanNodes(decl.Body, func(node any) {
+		if v, isVar := node.(*ast.VarDeclStmt); isVar {
+			if v == nil {
+				return
+			}
+			if storeScanTypeExprIsPlainScalar(v.Type) || (v.Type == nil && v.Value != nil && storeScanPlainScalarType(a.exprTypes[v.Value])) {
+				if !other[v.Name] {
+					scalars[v.Name] = true
+				}
+				return
+			}
+			other[v.Name] = true
+			delete(scalars, v.Name)
+			return
+		}
+		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
+			for _, name := range stmtBoundNames(st) {
+				other[name] = true
+				delete(scalars, name)
+			}
+		}
+	})
+	return scalars
+}
+
+// storeScanTypeExprIsPlainScalar: a declared `int`/`u32`/`bool`/... annotation (through `mutable`,
+// never through a reference). Builtin scalar names are reserved, so the spelling is the type.
+func storeScanTypeExprIsPlainScalar(t ast.TypeExpr) bool {
+	for {
+		switch tt := t.(type) {
+		case *ast.MutableType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+			continue
+		case *ast.BuiltinTypeExpr:
+			return tt != nil && len(tt.TypeArgs) == 0 && len(tt.ValueArgs) == 0 && storeScanPlainScalarNames[tt.Name]
+		case *ast.NamedType:
+			return tt != nil && tt.Region == "" && storeScanPlainScalarNames[tt.Name]
+		}
+		return false
+	}
+}
+
+var storeScanPlainScalarNames = map[string]bool{
+	"bool": true, "char": true, "int": true, "i8": true, "i16": true, "i32": true, "i64": true, "isize": true,
+	"u8": true, "u16": true, "u32": true, "u64": true, "usize": true, "f32": true, "f64": true,
+}
+
+func storeScanPlainScalarType(t Type) bool {
+	if t == nil || containsTypeParam(t) {
+		return false
+	}
+	if b, ok := t.(*BuiltinType); ok && b != nil {
+		switch b.Name {
+		case "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64":
+			return true
+		}
+		return false
+	}
+	_, _, ok := BitIntInfo(t)
+	return ok
+}
+
+// storeScanTaintBinders: a binding construct whose header mentions a tainted name taints its
+// binders. Pattern binders of a match / `is` test project fields or payloads (content); only
+// other binders (a rebind of a call result, a destructure) may be the whole.
+func (a *Analyzer) storeScanTaintBinders(n ast.Stmt, header, content map[string]bool, add func(map[string]bool, string) bool, changed *bool) {
+	if n == nil || !stmtHeaderMentionsAny(n, content) {
+		return
+	}
+	whole := stmtHeaderMentionsAny(n, header) && !storeScanProjectingStmt(n)
+	for _, name := range stmtBoundNames(n) {
+		if add(content, name) {
+			*changed = true
+		}
+		if whole && add(header, name) {
+			*changed = true
+		}
+	}
 }
 
 // calleeReturnModeOf: what may the callee RETURN from parameter `other` -- nothing, values read
@@ -1041,7 +1149,6 @@ func storeScanProjectingStmt(stmt ast.Stmt) bool {
 	return strings.Contains(name, "Match") || strings.Contains(name, "If") || strings.Contains(name, "While") || strings.Contains(name, "Guard")
 }
 
-
 // storeScanQualifierFields are pattern string fields that name a type, variant or struct field,
 // never a bound value.
 var storeScanQualifierFields = map[string]bool{"EnumName": true, "Variant": true, "TypeName": true, "Field": true, "Value": true}
@@ -1088,6 +1195,13 @@ func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast
 		_, ok := stripRefForBounds(t).(*DArrayType)
 		return ok
 	}
+	if _, isField := inner.(*ast.FieldExpr); isField && decl != nil {
+		if t, ok := a.storeScanParamFieldChainType(decl, inner); ok {
+			_, isDArray := stripRefForBounds(t).(*DArrayType)
+			return isDArray
+		}
+		return false
+	}
 	id, ok := inner.(*ast.Ident)
 	if !ok || id == nil || decl == nil {
 		return false
@@ -1115,6 +1229,82 @@ func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast
 		}
 	})
 	return found && all
+}
+
+// storeScanParamFieldChainType types `p.f.g` where p is a parameter of decl that no body
+// construct rebinds or shadows, from the callee's resolved signature and the struct field
+// types -- usable before the callee's body has been analyzed.
+func (a *Analyzer) storeScanParamFieldChainType(decl *ast.FuncDecl, expr ast.Expr) (Type, bool) {
+	fields := []string{}
+	cur := expr
+	for {
+		f, ok := cur.(*ast.FieldExpr)
+		if !ok || f == nil {
+			break
+		}
+		fields = append([]string{f.Field}, fields...)
+		cur = storeScanUnwrap(f.Object)
+	}
+	root, ok := cur.(*ast.Ident)
+	if !ok || root == nil || len(fields) == 0 {
+		return nil, false
+	}
+	index := -1
+	for i, p := range decl.Params {
+		if p.Name == root.Name {
+			index = i
+		}
+	}
+	if index < 0 {
+		return nil, false
+	}
+	if a.storeScanBoundNames(decl)[root.Name] {
+		return nil, false
+	}
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return nil, false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || fnType.Variadic || index >= len(fnType.Params) {
+		return nil, false
+	}
+	t := fnType.Params[index]
+	for _, name := range fields {
+		st, ok := peelToStructType(t)
+		if !ok || st == nil || st.Fields == nil {
+			return nil, false
+		}
+		field, ok := st.Fields[name]
+		if !ok || field.Type == nil || containsTypeParam(field.Type) {
+			return nil, false
+		}
+		t = field.Type
+	}
+	return t, true
+}
+
+// storeScanBoundNames: every name a body construct of decl binds, memoized per function.
+func (a *Analyzer) storeScanBoundNames(decl *ast.FuncDecl) map[string]bool {
+	if cached, ok := a.storeScanBoundCache[decl]; ok {
+		return cached
+	}
+	names := map[string]bool{}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		if v, isVar := node.(*ast.VarDeclStmt); isVar && v != nil {
+			names[v.Name] = true
+		}
+		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
+			for _, name := range stmtBoundNames(st) {
+				names[name] = true
+			}
+		}
+	})
+	if a.storeScanBoundCache == nil {
+		a.storeScanBoundCache = map[*ast.FuncDecl]map[string]bool{}
+	}
+	a.storeScanBoundCache[decl] = names
+	return names
 }
 
 // storeScanTypeExprIsDArray: `darray[..]` / `dstr`, through ref and mutable wrappers.

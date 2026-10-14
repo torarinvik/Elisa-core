@@ -301,3 +301,55 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "store_views_immutable_struct", src, "bt")
 }
+
+// Store-scan scalar locals and range binders: views of the caller's bytes stored through an
+// index computed from the source, and through a counted loop, outlive the call intact.
+func TestStoreScanScalarIndexStoresRun(t *testing.T) {
+	src := `
+struct Table:
+    names: mutable darray[sview] = []
+
+def run(table: mutable Table&, bytes: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        bound: mutable darray[sview] = [bytes, "x"]
+        keep_one(bound, table)
+        keep_looped(bound, table)
+
+def last_index(bound: darray[sview]&, name: sview) -> int:
+    can Abort.Panic:
+        for i in 0..<bound.count |bound|:
+            return i.int() if bound[i] == name
+        return -1
+
+def keep_one(bound: darray[sview]&, table: mutable Table&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        index: int = last_index(bound, "x")
+        if index >= 0:
+            table.names <- table.names.push(bound[index.usize() - 1])
+
+def keep_looped(src: darray[sview]&, table: mutable Table&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        for i in 0..<src.count |table, src|:
+            table.names <- table.names.push(src[i])
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        owner: mutable dstr = []
+        for i in 0..<5 |owner|:
+            owner.push(72 + i.u8())
+        table: mutable Table = Table{}
+        run(&table, owner.as_sview())
+        c: i64 = churn()
+        if table.names.count != 3 or table.names[0].len != 5 or table.names[0][4] != 76 or table.names[1][0] != 72 or table.names[2][0] != 120 or c != 27993:
+            panic("stored views lost")
+`
+	buildAndRunSoATest(t, "store_scan_scalar_index", src, "bt")
+}

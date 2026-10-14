@@ -265,6 +265,8 @@ type Analyzer struct {
 	// did, so the escape check knows their result lives in R.
 	storeScanViewCache   map[*ast.FuncDecl]map[string]bool
 	mutableLocalsCache   map[*ast.FuncDecl]map[string]bool
+	storeScanScalarCache map[*ast.FuncDecl]map[string]bool
+	storeScanBoundCache  map[*ast.FuncDecl]map[string]bool
 	destinationCall      *ast.CallExpr
 	destinationRegion    string
 	destinationAllocated map[*ast.CallExpr]string
