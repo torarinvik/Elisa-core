@@ -259,6 +259,12 @@ type Analyzer struct {
 	// storeScanCycleHit marks a search that consulted an in-progress frame (not cacheable).
 	storeScanCache    map[storeScanKey]storeMode
 	storeScanCycleHit bool
+	storeFlowKindsOff bool // tests: read every store-flow edge kind as Header
+	// The store-scan DFS stack and provisional results (region_store_scan_frames.go).
+	storeScanFrames          []storeScanFrame
+	storeScanFrameAt         map[storeScanKey]int
+	storeScanFrameSeq        uint64
+	storeScanProvisionalMemo map[storeScanKey]storeScanProvisional
 	// destinationCall / destinationRegion: while analyzing the value of `place <- f(..)` whose place
 	// lives in a caller-owned region param R, the region-polymorphic call f receives R (not the
 	// ambient region) as its hidden allocation region. destinationAllocated records the calls that

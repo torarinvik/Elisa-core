@@ -2154,7 +2154,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// The summary's edge kind bounds it too: an Elements edge stores only element
 			// values copied out of the argument, never its storage.
 			if mode == storeHeader {
-				if sum := a.storeFlowKindsFor(decl); sum != nil && sum.reachKindOf(other, index) == storeFlowEdgeElements {
+				if sum := a.storeFlowKindsFor(decl); sum != nil && a.storeFlowReachKind(sum, other, index) == storeFlowEdgeElements {
 					mode = storeElements
 				}
 			}

@@ -62,7 +62,9 @@ func (a *Analyzer) calleeStoreModeInto(decl *ast.FuncDecl, other, index int) sto
 	}
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
+	restore := a.storeScanBeginSearch()
 	mode := a.calleeStoreModeIntoSeen(decl, other, index, map[storeScanKey]bool{})
+	restore()
 	a.storeScanCycleHit = saved
 	// The top-level result of one DFS is the complete least fixpoint for its own key: every
 	// body on any cycle through it was scanned within this search.
@@ -82,8 +84,9 @@ func (a *Analyzer) cacheStoreScan(key storeScanKey, mode storeMode) {
 	a.storeScanCache[key] = mode
 }
 
-// calleeStoreModeIntoSeen memoizes an inner frame only when its search hit no in-progress
-// frame: a provisional `none` for an open cycle member is not final for the frames inside it.
+// calleeStoreModeIntoSeen memoizes an inner frame only when its search consulted no frame
+// above it (region_store_scan_frames.go): a provisional `none` for an open cycle member is not
+// final for the frames inside it.
 func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
 	key := storeScanKey{decl, other, index}
 	if mode, ok := a.storeScanCache[key]; ok {
@@ -91,17 +94,21 @@ func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int,
 	}
 	if seen[key] {
 		// A recursive cycle adds no store the rest of the body does not already show.
-		a.storeScanCycleHit = true
+		a.storeScanOpenCycle(key)
 		return storeNone
+	}
+	if mode, ok := a.storeScanReuseProvisional(key); ok {
+		return mode
 	}
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
+	mark := a.storeScanPushFrame(key)
 	mode := a.calleeStoreModeIntoBody(decl, other, index, seen)
-	hit := a.storeScanCycleHit
-	if !hit {
+	final := a.storeScanPopFrame(key, mark, mode)
+	if final {
 		a.cacheStoreScan(key, mode)
 	}
-	a.storeScanCycleHit = saved || hit
+	a.storeScanCycleHit = saved || (a.storeScanCycleHit && !final)
 	return mode
 }
 
@@ -110,7 +117,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		return storeHeader
 	}
 	key := storeScanKey{decl, other, index}
+	// seen is the DFS STACK, not a visited set: a key finished on another path (left uncached
+	// because its own subtree met a cycle) is no cycle of a later query and must be rescanned,
+	// never read as "stores nothing".
 	seen[key] = true
+	defer delete(seen, key)
 	if storeScanTrace {
 		savedOther := storeScanTraceOther
 		storeScanTraceOther = decl.Params[other].Name
@@ -684,7 +695,8 @@ func (a *Analyzer) storeScanCallResultDropsTarget(arg ast.Expr, targets map[stri
 		if !storeScanMentions(inner, targets) || !a.declParamCarriesStorage(callee, i) {
 			continue
 		}
-		if a.calleeReturnModeOf(callee, i, seen) > storeViews && !a.calleeReturnsNothingWritableFrom(callee, i) {
+		// A provisional (open-cycle) answer proves nothing dropped: settled counts it as header.
+		if a.storeScanSettled(func() storeMode { return a.calleeReturnModeOf(callee, i, seen) }) > storeViews && !a.calleeReturnsNothingWritableFrom(callee, i) {
 			return false
 		}
 	}
@@ -1281,12 +1293,17 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		return mode
 	}
 	if seen[key] {
-		a.storeScanCycleHit = true
+		a.storeScanOpenCycle(key)
 		return storeNone
 	}
+	if mode, ok := a.storeScanReuseProvisional(key); ok {
+		return mode
+	}
 	seen[key] = true
+	defer delete(seen, key) // the DFS stack (see calleeStoreModeIntoBody)
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
+	mark := a.storeScanPushFrame(key)
 	_, header, content, _, views := a.storeScanTaint(decl, other, "")
 	filled := a.lazyFilledLocals(decl, other, content, views, seen)
 	mode := storeNone
@@ -1334,11 +1351,11 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 			mode = maxStoreMode(mode, storeElements)
 		}
 	})
-	hit := a.storeScanCycleHit
-	if !hit {
+	final := a.storeScanPopFrame(key, mark, mode)
+	if final {
 		a.cacheStoreScan(key, mode)
 	}
-	a.storeScanCycleHit = saved || hit
+	a.storeScanCycleHit = saved || (a.storeScanCycleHit && !final)
 	return mode
 }
 

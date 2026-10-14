@@ -165,7 +165,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 					continue // already rejected, nothing writable, or at most views reach X anyway
 				}
 				for _, xi := range writableX {
-					stored := a.calleeStoreModeIntoSeen(callee, j, xi, seen)
+					stored := a.storeScanSettled(func() storeMode { return a.calleeStoreModeIntoSeen(callee, j, xi, seen) })
 					if stored == storeNone || stored == storeViews {
 						continue
 					}
@@ -256,7 +256,7 @@ func (a *Analyzer) storeScanAtMostViews(decl *ast.FuncDecl, value ast.Expr, cont
 			if a.storeScanAtMostViews(decl, arg, content, views, filled, seen) {
 				continue
 			}
-			if a.calleeReturnModeOf(callee, i, seen) > storeViews {
+			if a.storeScanSettled(func() storeMode { return a.calleeReturnModeOf(callee, i, seen) }) > storeViews {
 				return false
 			}
 		}

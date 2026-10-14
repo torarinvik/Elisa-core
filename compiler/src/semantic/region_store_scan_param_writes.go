@@ -665,7 +665,7 @@ func (a *Analyzer) storeScanFlowsFrom(decl *ast.FuncDecl, idx *storeScanDeclInde
 					args := returnBorrowCallArgs(e)
 					if len(sum.retConn) == len(callee.Params) {
 						for i, arg := range args {
-							if i >= len(sum.retConn) || sum.retKindOf(i) == storeFlowEdgeHeader {
+							if i >= len(sum.retConn) || a.storeFlowRetKind(sum, i) == storeFlowEdgeHeader {
 								if flows(arg) {
 									return true
 								}
