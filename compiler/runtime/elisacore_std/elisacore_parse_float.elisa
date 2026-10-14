@@ -37,6 +37,9 @@ struct F64Scan:
     end: usize
     special: u8          # 0 number, 1 inf, 2 nan
 
+# 10^0 .. 10^22, all exact in binary64 (Clinger's fast path).
+const ELISA_F64_PARSE_EXACT_POW10: f64[23] = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22]
+
 const F64_PARSE_MIN_EXP10: i64 = -348
 const F64_PARSE_MAX_EXP10: i64 = 347
 
@@ -584,11 +587,13 @@ def f64_parse_scan(text: sview, start: usize) -> F64Scan can[Abort.Panic]:
     if i < text.len and (text[i].u8() == '+' or text[i].u8() == '-'):
         negative <- text[i].u8() == '-'
         i <- i + 1
-    if f64_parse_word_at(text, i, "infinity"):
+    first: u8 = text[i].u8() if i < text.len else 0
+    special_start: bool = first == 'i' or first == 'I' or first == 'n' or first == 'N'
+    if special_start and f64_parse_word_at(text, i, "infinity"):
         return F64Scan{ok: true, negative: negative, mantissa: 0, exp10: 0, truncated: false, digits_start: i, digits_end: i, point: 0, end: i + 8, special: 1}
-    if f64_parse_word_at(text, i, "inf"):
+    if special_start and f64_parse_word_at(text, i, "inf"):
         return F64Scan{ok: true, negative: negative, mantissa: 0, exp10: 0, truncated: false, digits_start: i, digits_end: i, point: 0, end: i + 3, special: 1}
-    if f64_parse_word_at(text, i, "nan") and i == start:   # Go: no sign on NaN
+    if special_start and f64_parse_word_at(text, i, "nan") and i == start:   # Go: no sign on NaN
         return F64Scan{ok: true, negative: negative, mantissa: 0, exp10: 0, truncated: false, digits_start: i, digits_end: i, point: 0, end: i + 3, special: 2}
     digits_start: usize = i
     mantissa: mutable u64 = 0
@@ -814,9 +819,7 @@ def f64_parse_prefix(text: sview, start: usize) -> F64Parse can[Memory.Allocate,
         return F64Parse{ok: true, value: f64_parse_signed(0x7FF0000000000000, scan.negative), end: scan.end}
     if not scan.truncated and scan.mantissa <= (1.u64() << 53) and scan.exp10 >= -22 and scan.exp10 <= 22:
         base: f64 = scan.mantissa.f64()
-        power: mutable f64 = 1.0
-        for _ in 0..<(scan.exp10 if scan.exp10 >= 0 else 0 - scan.exp10) |power|:
-            power <- power * 10.0
+        power: f64 = get ELISA_F64_PARSE_EXACT_POW10[(scan.exp10 if scan.exp10 >= 0 else 0 - scan.exp10).usize()] else 1.0
         value: f64 = base * power if scan.exp10 >= 0 else base / power
         return F64Parse{ok: true, value: -value if scan.negative else value, end: scan.end}
     bits: mutable u64 = f64_parse_eisel_lemire(scan.mantissa, scan.exp10)
