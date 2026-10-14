@@ -3,6 +3,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 // SOUNDNESS: a callee that stores a by-value darray parameter into a field reached through a
@@ -260,5 +262,79 @@ def fill(h: mutable Rows&) -> void:
 `)
 	if joined := strings.Join(bad.Errors(), "\n"); !strings.Contains(joined, "call may store a value in region") {
 		t.Fatalf("copying a local-region container element into a struct ref must be rejected, got:\n%s", joined)
+	}
+}
+
+// The store scan's binder collection must return a pattern's bound NAMES only: the qualifying
+// enum/struct type and variant (`Expr.Index(a, b)`) are not values. Treating "Expr" as a tainted
+// binder made every later `Expr.Field(..)` constructor look like a method on a tainted receiver.
+func TestStoreScanBinderNamesSkipPatternQualifiers(t *testing.T) {
+	stmt := &ast.MatchStmt{Arms: []ast.MatchArm{{
+		Pattern: &ast.MatchVariantPattern{EnumName: "Expr", Variant: "Index", Args: []ast.MatchPatternArg{
+			{Pattern: &ast.MatchBindPattern{Name: "head"}},
+			{Pattern: &ast.MatchStructPattern{TypeName: "Pair", As: "whole"}},
+		}},
+	}}}
+	got := map[string]bool{}
+	for _, name := range stmtBoundNames(stmt) {
+		got[name] = true
+	}
+	for _, qualifier := range []string{"Expr", "Index", "Pair"} {
+		if got[qualifier] {
+			t.Errorf("pattern qualifier %q collected as a bound name: %v", qualifier, got)
+		}
+	}
+	for _, binder := range []string{"head", "whole"} {
+		if !got[binder] {
+			t.Errorf("binder %q missing: %v", binder, got)
+		}
+	}
+}
+
+// A callee that receives ONE fresh aggregate bundling a target-side component with a source-side
+// one can split it and store the source into the target (rule 225). That only matters when the
+// target-side component can be written through: a container, reference or aggregate holding one.
+// A target-derived string or view next to the source is read-only and moves nothing.
+func TestCallStoringBundledTargetComponentNeedsWritableStorage(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_bundle.elisa", `struct Holder:
+    rows: mutable darray[darray[i64]] = []
+    name: sview = ""
+
+struct Pair:
+    a: darray[darray[i64]]
+    b: darray[i64]
+
+struct Named:
+    name: sview
+    b: darray[i64]
+
+def splice(p: Pair) -> void:
+    if p.a.count > 0:
+        p.a[0] <- p.b
+
+def label(n: Named) -> usize:
+    return n.name.len + n.b.count
+
+def stash(h: mutable Holder&, xs: darray[i64]) -> void:
+    splice(Pair{a: h.rows, b: xs})
+
+def note(h: mutable Holder&, xs: darray[i64]) -> usize:
+    return label(Named{name: h.name, b: xs})
+
+def fill(h: mutable Holder&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        stash(h, local)
+
+def read(h: mutable Holder&) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        return note(h, local)
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if got := strings.Count(joined, "call may store a value in region"); got != 1 || !strings.Contains(joined, "struct_target_bundle.elisa:30:") {
+		t.Fatalf("expected only the writable bundle (line 30) to be rejected, got %d:\n%s", got, joined)
 	}
 }

@@ -97,7 +97,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	}
 	key := storeScanKey{decl, other, index}
 	seen[key] = true
-	params, header, content, targets := storeScanTaint(decl, other, decl.Params[index].Name)
+	params, header, content, targets := a.storeScanTaint(decl, other, decl.Params[index].Name)
 	var valueMode func(value ast.Expr) storeMode
 	valueMode = func(value ast.Expr) storeMode {
 		inner := storeScanUnwrap(value)
@@ -240,7 +240,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						// One argument derived from both sides (`f(table.types[id])`) is not a
 						// store between them, unless it BUNDLES both into a fresh aggregate the
 						// callee could then split and store.
-						if storeScanBundles(args[ti]) {
+						if storeScanBundles(args[ti]) && a.storeScanBundleHasWritableTarget(args[ti], targets) {
 							mode = storeScanRaise(decl, 225, n, mode, s.mode)
 						}
 						continue
@@ -442,9 +442,9 @@ func stmtBoundNames(stmt ast.Stmt) []string {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	var rec func(v reflect.Value, depth int)
-	rec = func(v reflect.Value, depth int) {
-		if !v.IsValid() || depth > 8 {
+	var rec func(v reflect.Value, depth int, field string)
+	rec = func(v reflect.Value, depth int, field string) {
+		if !v.IsValid() || depth > 64 {
 			return
 		}
 		switch v.Kind() {
@@ -458,26 +458,37 @@ func stmtBoundNames(stmt ast.Stmt) []string {
 			if _, isExpr := v.Interface().(ast.Expr); isExpr {
 				return // expressions use names; binders live in patterns and binder fields
 			}
-			rec(v.Elem(), depth+1)
+			rec(v.Elem(), depth+1, field)
 		case reflect.Struct:
 			if v.Type() == storeScanPosType {
 				return
 			}
+			t := v.Type()
 			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i), depth+1)
+				name := t.Field(i).Name
+				if t == storeScanPatternArgType && name == "Name" {
+					continue // `Key(key: k)`: the field label; the binder is the nested pattern
+				}
+				rec(v.Field(i), depth+1, name)
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i), depth+1)
+				rec(v.Index(i), depth+1, field)
 			}
 		case reflect.String:
+			// A pattern's qualifying type / variant (`Expr.Index(a, b)` records "Expr" and
+			// "Index") and a destructured field's name are not binders.
+			if storeScanQualifierFields[field] {
+				return
+			}
 			if s := v.String(); s != "" {
 				out = append(out, s)
 			}
 		}
 	}
+	top := v.Type()
 	for i := 0; i < v.NumField(); i++ {
-		rec(v.Field(i), 1)
+		rec(v.Field(i), 1, top.Field(i).Name)
 	}
 	return out
 }
@@ -535,6 +546,65 @@ func storeScanBundles(arg ast.Expr) bool {
 	return found
 }
 
+// storeScanBundleHasWritableTarget reports whether a bundled argument carries a target-side
+// component the callee could WRITE source storage into: a target-aliasing name whose type shares
+// indirect storage (a container, reference or aggregate holding one). A target-derived string or
+// view (`sview`, `cstr`) is read-only, so bundling it next to a source component moves nothing
+// into the target. An untyped mention is assumed writable.
+func (a *Analyzer) storeScanBundleHasWritableTarget(arg ast.Expr, targets map[string]bool) bool {
+	// A typed sub-expression that cannot share storage (`h.name: sview`, `h.count`) is read-only
+	// whatever it mentions, so the walk does not descend into it.
+	found := false
+	seen := map[uintptr]bool{}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() || seen[v.Pointer()] {
+				return
+			}
+			seen[v.Pointer()] = true
+			if expr, isExpr := v.Interface().(ast.Expr); isExpr && expr != nil {
+				if t, typed := a.exprTypes[expr]; typed && t != nil && !typeSharesIndirectStorage(t, map[Type]bool{}) {
+					return
+				}
+				if id, isIdent := expr.(*ast.Ident); isIdent {
+					if targets[id.Name] || targets[rootNameOfDotted(id.Name)] {
+						found = true
+					}
+					return
+				}
+				if fe, isField := expr.(*ast.FieldExpr); isField {
+					rec(reflect.ValueOf(fe.Object))
+					return
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			if v.Type() == storeScanPosType {
+				return
+			}
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(arg))
+	return found
+}
+
 // declParamCarriesStorage reports whether a declared function's parameter type can carry region
 // storage (a container, view, reference or aggregate holding one). Unknown means it can.
 func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
@@ -557,7 +627,7 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 // parameter (header) or something read out of it (content), and which names may alias the
 // target place (targetName; "" for none). Locals become tainted by binding (decl/assign of the
 // local itself) and by receiving a tainted store (`local.f <- v`, `local.xs.push(v)`).
-func storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, header, content, targets map[string]bool) {
+func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, header, content, targets map[string]bool) {
 	params = map[string]bool{}
 	for _, p := range decl.Params {
 		params[p.Name] = true
@@ -592,6 +662,19 @@ func storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, h
 		}
 		return changed
 	}
+	locals := map[string]bool{}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		switch n := node.(type) {
+		case *ast.VarDeclStmt:
+			if n != nil {
+				locals[n.Name] = true
+			}
+		case ast.Stmt:
+			for _, name := range stmtBoundNames(n) {
+				locals[name] = true
+			}
+		}
+	})
 	for changed := true; changed; {
 		changed = false
 		walkStoreScanNodes(decl.Body, func(node any) {
@@ -615,9 +698,10 @@ func storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, h
 					changed = true
 				}
 			case *ast.CallExpr:
-				// A method call on a local receiver may store its arguments into it.
+				// A method call on a local receiver may store its arguments into it. A receiver
+				// that names no value (an enum constructor `Expr.Field(..)`) is not a receiver.
 				if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
-					if root := rootIdentExpr(field.Object); root != nil && !params[root.Name] {
+					if root := rootIdentExpr(field.Object); root != nil && !params[root.Name] && a.storeScanReceiverIsValue(root.Name, locals) {
 						for _, arg := range n.Args {
 							if taint(root.Name, arg) {
 								changed = true
@@ -674,7 +758,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	seen[key] = true
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
-	_, header, content, _ := storeScanTaint(decl, other, "")
+	_, header, content, _ := a.storeScanTaint(decl, other, "")
 	mode := storeNone
 	sawReturn := false
 	walkStoreScanNodes(decl.Body, func(node any) {
@@ -871,4 +955,40 @@ func storeScanMayAliasPlace(value ast.Expr, targets map[string]bool) bool {
 func storeScanProjectingStmt(stmt ast.Stmt) bool {
 	name := reflect.TypeOf(stmt).String()
 	return strings.Contains(name, "Match") || strings.Contains(name, "If") || strings.Contains(name, "While") || strings.Contains(name, "Guard")
+}
+
+
+// storeScanQualifierFields are pattern string fields that name a type, variant or struct field,
+// never a bound value.
+var storeScanQualifierFields = map[string]bool{"EnumName": true, "Variant": true, "TypeName": true, "Field": true, "Value": true}
+
+var storeScanPatternArgType = reflect.TypeOf(ast.MatchPatternArg{})
+
+// storeScanReceiverIsValue reports whether a method-call receiver root names a value that could
+// hold what the call stores: a local or binder of the function, or a global variable. A type or
+// enum name qualifying a constructor (`Expr.Field(..)`, `Pattern.Struct(..)`) names none.
+func (a *Analyzer) storeScanReceiverIsValue(name string, locals map[string]bool) bool {
+	if locals[name] {
+		return true
+	}
+	if a.globalScope == nil {
+		return true
+	}
+	sym, ok := a.globalScope.Lookup(name)
+	if !ok || sym == nil {
+		_, isType := a.namedTypes[name]
+		return !isType && !a.storeScanLooksLikeTypeName(name)
+	}
+	switch sym.Kind {
+	case SymbolStruct, SymbolExternType, SymbolFunc, SymbolExternFunc:
+		return false
+	}
+	return true
+}
+
+// storeScanLooksLikeTypeName: an unresolved capitalized root that is no local, parameter or
+// global symbol is a (module-qualified) type name at a constructor call; values are lowercase or
+// resolve through the global scope.
+func (a *Analyzer) storeScanLooksLikeTypeName(name string) bool {
+	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
 }
