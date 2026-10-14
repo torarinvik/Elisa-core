@@ -269,6 +269,7 @@ type Analyzer struct {
 	storeScanBoundCache    map[*ast.FuncDecl]map[string]bool
 	storeScanReadOnlyCache map[*ast.FuncDecl]map[string]bool
 	storeScanWritableCache map[storeScanKey]bool
+	storeScanStructIndex   map[string]*StructType
 	destinationCall        *ast.CallExpr
 	destinationRegion      string
 	destinationAllocated   map[*ast.CallExpr]string

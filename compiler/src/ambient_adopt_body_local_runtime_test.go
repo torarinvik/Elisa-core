@@ -429,3 +429,59 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "store_scan_call_bundle", src, "bt")
 }
+
+// A snapshot copied out of a short-lived flow into a longer-lived one keeps valid views.
+func TestStoreScanViewFilledCopyRun(t *testing.T) {
+	src := `
+struct Snap:
+    slots: mutable darray[usize] = []
+    names: mutable darray[sview] = []
+
+struct Flow:
+    seen: mutable bool = false
+    returned: mutable Snap = Snap{}
+
+def snap_copy(state: Snap&) -> Snap:
+    can Memory.Allocate:
+        copy: mutable Snap = Snap{}
+        copy.slots.extend(state.slots)
+        copy.names.extend(state.names)
+        return copy
+
+def add_return(flow: mutable Flow&, state: Snap) -> void:
+    can Memory.Allocate:
+        flow.returned <- snap_copy(state)
+        flow.seen <- true
+
+def merge_exits(flow: mutable Flow&, alternate: Flow&) -> void:
+    can Memory.Allocate:
+        add_return(flow, alternate.returned) if alternate.seen
+
+def run(flow: mutable Flow&, other: mutable Flow&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        block_flow: Flow = Flow{seen: true, returned: Snap{slots: [7], names: [src, "lit"]}}
+        merge_exits(flow, &block_flow)
+        other.seen <- true
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        owner: mutable dstr = []
+        for i in 0..<5 |owner|:
+            owner.push(72 + i.u8())
+        flow: mutable Flow = Flow{}
+        other: mutable Flow = Flow{}
+        run(&flow, &other, owner.as_sview())
+        c: i64 = churn()
+        if not flow.seen or flow.returned.names.count != 2 or flow.returned.names[0].len != 5 or flow.returned.names[0][4] != 76 or flow.returned.names[1][0] != 108 or flow.returned.slots[0] != 7 or c != 27993:
+            panic("copied snapshot lost")
+`
+	buildAndRunSoATest(t, "store_scan_view_filled_copy", src, "bt")
+}

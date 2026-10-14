@@ -1366,6 +1366,9 @@ func (a *Analyzer) storeScanParamFieldChainType(decl *ast.FuncDecl, expr ast.Exp
 	if !ok || root == nil || len(fields) == 0 {
 		return nil, false
 	}
+	if t, ok := a.storeScanLocalLiteralType(decl, root.Name); ok {
+		return storeScanWalkFields(t, fields)
+	}
 	index := -1
 	for i, p := range decl.Params {
 		if p.Name == root.Name {
@@ -1386,7 +1389,10 @@ func (a *Analyzer) storeScanParamFieldChainType(decl *ast.FuncDecl, expr ast.Exp
 	if !ok || fnType == nil || fnType.Variadic || index >= len(fnType.Params) {
 		return nil, false
 	}
-	t := fnType.Params[index]
+	return storeScanWalkFields(fnType.Params[index], fields)
+}
+
+func storeScanWalkFields(t Type, fields []string) (Type, bool) {
 	for _, name := range fields {
 		st, ok := peelToStructType(t)
 		if !ok || st == nil || st.Fields == nil {
@@ -1422,6 +1428,77 @@ func (a *Analyzer) storeScanBoundNames(decl *ast.FuncDecl) map[string]bool {
 	}
 	a.storeScanBoundCache[decl] = names
 	return names
+}
+
+// storeScanLocalLiteralType types a body local every declaration of which is initialized by a
+// literal of one non-generic struct `T{..}` (bound by no other construct), when T names exactly
+// one struct type in the program.
+func (a *Analyzer) storeScanLocalLiteralType(decl *ast.FuncDecl, name string) (Type, bool) {
+	for _, p := range decl.Params {
+		if p.Name == name {
+			return nil, false
+		}
+	}
+	litName, ok, other := "", true, false
+	walkStoreScanNodes(decl.Body, func(node any) {
+		if v, isVar := node.(*ast.VarDeclStmt); isVar {
+			if v == nil || v.Name != name {
+				return
+			}
+			lit, isLit := storeScanUnwrap(v.Value).(*ast.StructLitExpr)
+			if !isLit || lit == nil || len(lit.TypeArgs) > 0 || (litName != "" && lit.Name != litName) {
+				ok = false
+				return
+			}
+			litName = lit.Name
+			return
+		}
+		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
+			for _, bound := range stmtBoundNames(st) {
+				if bound == name {
+					other = true
+				}
+			}
+		}
+	})
+	if !ok || other || litName == "" {
+		return nil, false
+	}
+	st := a.storeScanUniqueStruct(litName)
+	return st, st != nil
+}
+
+// storeScanUniqueStruct: the one struct type whose name is name (unqualified, or its last
+// `.`-segment), nil when none or several exist. The index is built once.
+func (a *Analyzer) storeScanUniqueStruct(name string) *StructType {
+	if a.storeScanStructIndex == nil {
+		a.storeScanStructIndex = map[string]*StructType{}
+		ambiguous := map[string]bool{}
+		seen := map[*StructType]bool{}
+		for _, t := range a.namedTypes {
+			st, isStruct := t.(*StructType)
+			if !isStruct || st == nil || seen[st] || len(st.TypeParams) > 0 {
+				continue
+			}
+			seen[st] = true
+			bare := st.Name
+			if i := strings.LastIndex(bare, "."); i >= 0 {
+				bare = bare[i+1:]
+			}
+			if prev, dup := a.storeScanStructIndex[bare]; dup && prev != st {
+				ambiguous[bare] = true
+			}
+			a.storeScanStructIndex[bare] = st
+		}
+		for bare := range ambiguous {
+			a.storeScanStructIndex[bare] = nil
+		}
+	}
+	bare := name
+	if i := strings.LastIndex(bare, "."); i >= 0 {
+		bare = bare[i+1:]
+	}
+	return a.storeScanStructIndex[bare]
 }
 
 // storeScanTypeExprIsDArray: `darray[..]` / `dstr`, through ref and mutable wrappers.
@@ -1485,7 +1562,144 @@ func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string
 	for name := range poisoned {
 		delete(views, name)
 	}
+	for name := range a.storeScanViewFilledLocals(decl) {
+		views[name] = true
+	}
 	return views
+}
+
+// storeScanViewFilledLocals: locals (of any type) that start empty -- every declaration is an
+// argument-less struct literal or an empty list -- and are otherwise mentioned only as the root of
+// a builtin darray `push`/`extend` receiver whose appended values are view-only or scalar, or in a
+// `return`. From a byte-free source such a local can only ever hold views (its own storage is
+// fresh), so it is a view value for the store scan.
+func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool {
+	fresh, poisoned := map[string]bool{}, map[string]bool{}
+	for _, p := range decl.Params {
+		poisoned[p.Name] = true
+	}
+	allowed := map[string]int{}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		switch n := node.(type) {
+		case *ast.VarDeclStmt:
+			if n == nil {
+				return
+			}
+			if storeScanEmptyLiteral(n.Value) {
+				fresh[n.Name] = true
+			} else {
+				poisoned[n.Name] = true
+			}
+		case *ast.ReturnStmt:
+			if n != nil && n.Value != nil {
+				for name := range fresh {
+					allowed[name] += storeScanIdentCount(n.Value, name)
+				}
+			}
+		case *ast.CallExpr:
+			field, isMethod := n.Func.(*ast.FieldExpr)
+			if n == nil || !isMethod || field == nil || (field.Field != "push" && field.Field != "extend") {
+				return
+			}
+			root := rootIdentExpr(field.Object)
+			if root == nil || !a.storeScanReceiverIsBuiltinDArray(decl, field.Object) {
+				return
+			}
+			for _, arg := range n.Args {
+				t, known := a.exprTypes[storeScanUnwrap(arg)]
+				if !known || t == nil {
+					t, known = a.storeScanDeclTypeOf(decl, storeScanUnwrap(arg))
+				}
+				if !known || t == nil {
+					return
+				}
+				if field.Field == "extend" {
+					switch c := stripRefForBounds(t).(type) {
+					case *DArrayType:
+						t = c.Elem
+					case *ArrayType:
+						t = c.Elem
+					default:
+						return
+					}
+				}
+				if t == nil || !(storeScanTypeIsViewOnly(t) || storeScanPlainScalarType(t)) {
+					return
+				}
+			}
+			allowed[root.Name] += storeScanIdentCount(field.Object, root.Name)
+		case ast.Stmt:
+			for _, name := range stmtBoundNames(n) {
+				poisoned[name] = true
+			}
+		}
+	})
+	filled := map[string]bool{}
+	for name := range fresh {
+		if !poisoned[name] && storeScanIdentCount(decl.Body, name) == allowed[name] {
+			filled[name] = true
+		}
+	}
+	return filled
+}
+
+// storeScanEmptyLiteral: `T{}` with no fields, spreads or copy base, or `[]`.
+func storeScanEmptyLiteral(value ast.Expr) bool {
+	switch v := storeScanUnwrap(value).(type) {
+	case *ast.StructLitExpr:
+		return v != nil && len(v.Args) == 0 && len(v.Spreads) == 0 && v.CopyBase == nil
+	case *ast.ListLitExpr:
+		return v != nil && len(v.Elems) == 0
+	}
+	return false
+}
+
+// storeScanIdentCount counts the identifier occurrences of name in node (field selectors are not
+// names).
+func storeScanIdentCount(node any, name string) int {
+	count := 0
+	seen := map[uintptr]bool{}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() || seen[v.Pointer()] {
+				return
+			}
+			seen[v.Pointer()] = true
+			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
+				if id.Name == name || rootNameOfDotted(id.Name) == name {
+					count++
+				}
+				return
+			}
+			if fe, ok := v.Interface().(*ast.FieldExpr); ok && fe != nil {
+				rec(reflect.ValueOf(fe.Object))
+				return
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if !v.IsNil() {
+				rec(v.Elem())
+			}
+		case reflect.Struct:
+			if v.Type() == storeScanPosType {
+				return
+			}
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(node))
+	return count
 }
 
 // storeScanViewLocalsCached memoizes the per-function view-local set (it depends on the source
@@ -1509,6 +1723,9 @@ func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[
 // view local from storeScanViewLocals). References and `view[T]` slices are not.
 func (a *Analyzer) storeScanValueIsView(decl *ast.FuncDecl, value ast.Expr, views map[string]bool) bool {
 	inner := storeScanUnwrap(value)
+	if id, ok := inner.(*ast.Ident); ok && id != nil && views[id.Name] {
+		return true
+	}
 	t, known := a.exprTypes[inner]
 	if !known || t == nil {
 		// Before the body is analyzed: `p.f[i]` / `p.f` typed from the signature.
