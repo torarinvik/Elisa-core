@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"fmt"
+	"os"
 	"sort"
 )
 
@@ -40,6 +42,9 @@ func (a *Analyzer) storeScanFilledLocals(decl *ast.FuncDecl, content, views map[
 				continue
 			}
 			if !a.storeScanLocalIsFilled(decl, name, content, views, candidates, seen) {
+				if storeScanTrace {
+					fmt.Fprintf(os.Stderr, "FILLDROP %s local=%s why=%s\n", decl.Name, name, storeScanFillWhy)
+				}
 				delete(candidates, name)
 				changed = true
 			}
@@ -65,12 +70,14 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 			if n.Name == name {
 				if n.Value != nil && !atMost(n.Value) {
 					ok = false
+					storeScanFillWhy = "L72"
 				}
 				continue
 			}
 			// Another local bound to part of this one aliases its storage: it must be filled too.
 			if n.Value != nil && storeScanRootedAt(n.Value, name) && !a.storeScanValueIsView(decl, n.Value, views) && !filled[n.Name] {
 				ok = false
+				storeScanFillWhy = "L78"
 			}
 		case *ast.AssignStmt:
 			if n == nil {
@@ -79,12 +86,14 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 			if root := rootIdentExpr(n.Target); root != nil && root.Name == name {
 				if !atMost(n.Value) {
 					ok = false
+					storeScanFillWhy = "L86"
 				}
 				continue
 			}
 			if storeScanRootedAt(n.Value, name) && !a.storeScanValueIsView(decl, n.Value, views) {
 				if root := rootIdentExpr(n.Target); root == nil || !filled[root.Name] {
 					ok = false
+					storeScanFillWhy = "L92"
 				}
 			}
 		case *ast.CallExpr:
@@ -100,6 +109,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 						if storeScanRootedAt(arg, name) && !a.storeScanValueIsView(decl, arg, views) {
 							if r := rootIdentExpr(field.Object); r == nil || !filled[r.Name] {
 								ok = false
+								storeScanFillWhy = "L107"
 							}
 						}
 					}
@@ -107,12 +117,14 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 				}
 				if !a.storeScanReceiverIsBuiltinDArray(decl, field.Object) {
 					ok = false // a user method on X: unknown writes
+					storeScanFillWhy = "L114"
 					continue
 				}
 				if containerGrowthMethods[field.Field] {
 					for _, arg := range n.Args {
 						if !atMost(arg) {
 							ok = false
+							storeScanFillWhy = "L120"
 						}
 					}
 				}
@@ -127,6 +139,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 					// X inside a larger argument (a bundle): the callee may keep or write it.
 					if !a.storeScanValueIsView(decl, arg, views) {
 						ok = false
+						storeScanFillWhy = "L134"
 						continue
 					}
 					continue
@@ -139,6 +152,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 			callee, resolved := a.resolveReadOnlyScanCallee(n)
 			if !resolved || callee == nil || !storeFlowCallFitsParams(callee, n) || funcHasArenaParam(callee) {
 				ok = false
+				storeScanFillWhy = "L146"
 				continue
 			}
 			isRooted := map[int]bool{}
@@ -158,6 +172,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 				if a.declParamIsWritableRef(callee, j) {
 					if root := rootIdentExpr(stripAddrAndParens(arg)); root == nil || !filled[root.Name] || !storeScanRootedAt(arg, root.Name) {
 						ok = false
+						storeScanFillWhy = "L165"
 						continue
 					}
 				}
@@ -170,6 +185,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 						continue
 					}
 					ok = false
+					storeScanFillWhy = "L177"
 					break
 				}
 			}
@@ -178,8 +194,9 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 		case ast.Stmt:
 			// A loop / match binder over X may alias its parts.
 			if a.storeScanIndex(decl).headerMentions(n, map[string]bool{name: true}) && len(a.storeScanIndex(decl).boundNames(n)) > 0 {
-				if _, isVar := node.(*ast.VarDeclStmt); !isVar {
+				if _, isVar := node.(*ast.VarDeclStmt); !isVar && !a.storeScanBindsNoStorage(n) {
 					ok = false
+					storeScanFillWhy = "L187"
 				}
 			}
 		}
@@ -331,4 +348,23 @@ func storeScanRootedAtFilled(value ast.Expr, lazy *lazyFilledLocalSet) bool {
 		lazy.done = true
 	}
 	return lazy.set[root.Name]
+}
+
+// storeScanFillWhy: trace only -- the last reason storeScanLocalIsFilled rejected a local.
+var storeScanFillWhy string
+
+// storeScanBindsNoStorage: a destructuring bind whose value's type shares no storage (`slot,
+// found = probe(x.slots, ..)` binds two scalars): its binders alias nothing of the header.
+func (a *Analyzer) storeScanBindsNoStorage(stmt ast.Stmt) bool {
+	tb, ok := stmt.(*ast.TupleBindStmt)
+	if !ok || tb == nil || tb.ArgManifest || tb.Value == nil {
+		return false
+	}
+	t := a.exprTypes[tb.Value]
+	if t == nil {
+		if call, isCall := storeScanUnwrap(tb.Value).(*ast.CallExpr); isCall && call != nil {
+			t = a.storeScanCallReturnType(call)
+		}
+	}
+	return t != nil && !containsTypeParam(t) && !a.storeScanSharesCached(t)
 }

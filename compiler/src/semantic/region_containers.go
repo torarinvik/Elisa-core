@@ -2173,33 +2173,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// carry none.
 			continue
 		} else {
-			if state, ok := a.regionRefStateForExpr(arg); ok {
-				regions = liveLocalRegionDependencyNames(state)
-			}
-			// storeViews: only view-only values are stored and the source holds no bytes, so its
-			// own storage is never referenced -- what they point at is exactly what the tracked
-			// state records, when that state is complete (storeViewsProvenanceComplete). Every
-			// dependency the state has is still judged; only the storage-region proxy is dropped.
-			ownStorageIrrelevant := mode == storeViews && a.storeViewsProvenanceComplete(arg)
-			if mode == storeViews && !ownStorageIrrelevant {
-				// A byte-free local: what its views point at is the union of what was written
-				// into it (localViewProvenance), complete over the function body.
-				if provenance, ok := a.localViewProvenance(arg); ok {
-					regions = provenance
-					ownStorageIrrelevant = true
-				}
-			}
-			if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) && !ownStorageIrrelevant {
-				regions = append(regions, own)
-			}
-			// A struct local's region-less container fields live in the region it was built in
-			// (recorded at construction / growth); its type carries no region, so without this
-			// a grown local struct passed by value looked region-free. Only an argument that
-			// carries that backing (the struct or a region-less container in it) can retain it;
-			// a scalar/view element read out of it carries its own tracked provenance.
-			if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprTypes[arg], mode) && !ownStorageIrrelevant {
-				regions = append(regions, own)
-			}
+			regions = a.storeCallArgRegions(arg, mode)
 		}
 		for _, region := range regions {
 			if region == targetRegion || a.lookupRegionParam(region) {
@@ -2762,4 +2736,38 @@ func withoutRootRegionDependency(state regionRefState, name string) regionRefSta
 		}
 	}
 	return state
+}
+
+// storeCallArgRegions: the live local regions a value stored out of arg (in mode) may depend on,
+// for an argument whose stored parts may hold region references.
+func (a *Analyzer) storeCallArgRegions(arg ast.Expr, mode storeMode) []string {
+	regions := []string{}
+	if state, ok := a.regionRefStateForExpr(arg); ok {
+		regions = liveLocalRegionDependencyNames(state)
+	}
+	// storeViews: only view-only values are stored and the source holds no bytes, so its own
+	// storage is never referenced -- what they point at is exactly what the tracked state
+	// records, when that state is complete (storeViewsProvenanceComplete). Every dependency the
+	// state has is still judged; only the storage-region proxy is dropped.
+	ownStorageIrrelevant := mode == storeViews && a.storeViewsProvenanceComplete(arg)
+	if mode == storeViews && !ownStorageIrrelevant {
+		// A byte-free local: what its views point at is the union of what was written into it
+		// (localViewProvenance), complete over the function body.
+		if provenance, ok := a.localViewProvenance(arg); ok {
+			regions = provenance
+			ownStorageIrrelevant = true
+		}
+	}
+	if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) && !ownStorageIrrelevant {
+		regions = append(regions, own)
+	}
+	// A struct local's region-less container fields live in the region it was built in
+	// (recorded at construction / growth); its type carries no region, so without this a grown
+	// local struct passed by value looked region-free. Only an argument that carries that
+	// backing (the struct or a region-less container in it) can retain it; a scalar/view element
+	// read out of it carries its own tracked provenance.
+	if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprTypes[arg], mode) && !ownStorageIrrelevant {
+		regions = append(regions, own)
+	}
+	return regions
 }

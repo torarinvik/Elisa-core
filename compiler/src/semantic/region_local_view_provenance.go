@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"fmt"
+	"os"
 	"reflect"
 )
 
@@ -63,6 +65,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 		deps, ok := a.localViewValueDeps(value, name)
 		if !ok {
 			complete = false
+			viewProvWhy = "c36"
 			return
 		}
 		regions = append(regions, deps...)
@@ -81,6 +84,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 				declCount++
 				if n != decl {
 					complete = false // redeclared: name-based facts would merge two locals
+					viewProvWhy = "c54"
 					return
 				}
 				addDeps(n.Value)
@@ -122,6 +126,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 				if root := rootIdentExpr(stripAddrAndParens(arg)); root != nil && root.Name == name {
 					if xIndex >= 0 {
 						complete = false // X passed twice
+						viewProvWhy = "c95"
 						return
 					}
 					xIndex = i
@@ -140,6 +145,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 			}
 			if funcHasArenaParam(callee) {
 				complete = false
+				viewProvWhy = "c113"
 				return
 			}
 			if a.storeScanMayAllocateInto(callee, xIndex, map[storeScanKey]bool{}) {
@@ -164,18 +170,28 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 				if bound == name {
 					if _, isVar := node.(*ast.VarDeclStmt); !isVar {
 						complete = false
+						viewProvWhy = "c137"
 					}
 				}
 			}
 		}
 	})
 	if !complete || declCount != 1 {
+		if storeScanTrace {
+			fmt.Fprintf(os.Stderr, "VIEWPROV %s local=%s incomplete why=%s decls=%d\n", fn.Name, name, viewProvWhy, declCount)
+		}
 		return nil, false
 	}
 	for _, id := range storeScanIdentsNamed(fn.Body, name) {
 		if !explained[id] {
+			if storeScanTrace {
+				fmt.Fprintf(os.Stderr, "VIEWPROV %s local=%s unexplained at %s\n", fn.Name, name, id.Pos())
+			}
 			return nil, false
 		}
+	}
+	if storeScanTrace {
+		fmt.Fprintf(os.Stderr, "VIEWPROV %s local=%s ok own=%v regions=%v\n", fn.Name, name, ownRegionMatters, regions)
 	}
 	if ownRegionMatters {
 		if own := a.structLocalArgRegion(arg); own != "" {
@@ -287,6 +303,9 @@ func (a *Analyzer) localViewValueDeps(value ast.Expr, self string) ([]string, bo
 		}
 		if own := a.containerRegionOf(stripRefForBounds(sym.Type)); own != "" {
 			deps = append(deps, own)
+		}
+		if storeScanTrace {
+			fmt.Fprintf(os.Stderr, "VIEWDEP %s via=%s deps=%v\n", self, id.Name, deps)
 		}
 	})
 	return deps, ok
@@ -451,3 +470,6 @@ func storeScanContainsUserCall(value ast.Expr) bool {
 	})
 	return found
 }
+
+// viewProvWhy: trace only -- the last reason localViewProvenance gave up.
+var viewProvWhy string
