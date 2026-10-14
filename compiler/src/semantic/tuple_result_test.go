@@ -42,6 +42,29 @@ func TestNamedTupleResultFieldIdentity(t *testing.T) {
 	}
 }
 
+func TestNamedTupleConditionalReturnEnsures(t *testing.T) {
+	for _, tc := range []struct {
+		name, returned string
+		wantError      bool
+	}{
+		{"matching", `return ("a", "b") if enabled
+    return ("", "")`, false},
+		{"mismatched", `return ("wrong", "wrong") if enabled
+    return ("", "")`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := `def classify(enabled: bool) -> (binding: sview, wasm_type: sview):
+    ensure (result.binding == "a") == enabled
+    ensure (result.wasm_type == "b") == enabled
+    ` + tc.returned + "\n"
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "tuple_conditional_result.elisa", source, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if (len(result.Errors()) != 0) != tc.wantError {
+				t.Fatalf("want error=%v, got:\n%s", tc.wantError, allDiagnostics(result))
+			}
+		})
+	}
+}
+
 func TestTypedTupleProjectionDoesNotAllocate(t *testing.T) {
 	first := &ast.Ident{Name: "flag"}
 	second := &ast.Ident{Name: "value"}

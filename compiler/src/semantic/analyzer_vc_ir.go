@@ -94,6 +94,14 @@ type vcTerm interface{ isVCTerm() }
 type (
 	vcIntLit struct{ Val int64 }
 	vcOpaque struct{ SMT string }
+	// vcSelect is an immutable sview byte read. Its array symbol is fixed by the
+	// immutableSviewArrayParameter gate; keeping only the index structural lets
+	// weakest-precondition substitution rewrite local index aliases without
+	// exposing mutable array state to the WP lane.
+	vcSelect struct {
+		Array string
+		Index vcTerm
+	}
 	// vcOldEntry is a contract `old(expr)` value — the ENTRY-time translation of expr, held as a fixed
 	// SMT term. Unlike vcOpaque it is treated as fully-structural (an entry value is immutable, so it is
 	// substitution-safe) yet WP never rewrites it: a bare `p` in the same clause is the EXIT value and is
@@ -116,6 +124,7 @@ type (
 
 func (vcIntLit) isVCTerm()   {}
 func (vcOpaque) isVCTerm()   {}
+func (vcSelect) isVCTerm()   {}
 func (vcOldEntry) isVCTerm() {}
 func (vcVar) isVCTerm()      {}
 func (vcNeg) isVCTerm()      {}
@@ -400,6 +409,9 @@ func vcTermsIdentical(a, b vcTerm) bool {
 	case vcOpaque:
 		bv, ok := b.(vcOpaque)
 		return ok && av.SMT == bv.SMT
+	case vcSelect:
+		bv, ok := b.(vcSelect)
+		return ok && av.Array == bv.Array && vcTermsIdentical(av.Index, bv.Index)
 	case vcNeg:
 		bv, ok := b.(vcNeg)
 		return ok && vcTermsIdentical(av.Arg, bv.Arg)
@@ -440,6 +452,8 @@ func emitVCTerm(t vcTerm) string {
 		return smtInt(tt.Val)
 	case vcOpaque:
 		return tt.SMT
+	case vcSelect:
+		return "(select " + tt.Array + " " + emitVCTerm(tt.Index) + ")"
 	case vcOldEntry:
 		return tt.SMT
 	case vcVar:
@@ -520,6 +534,16 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 		}
 		return vcOpaque{SMT: s}, true
 	case *ast.FieldExpr:
+		// An immutable sview parameter's length is stable across a pure return tree.
+		// Keep it as a named structural variable so WP can inline a local length
+		// alias into a byte-index select without treating the length term as opaque.
+		if n.Field == "len" {
+			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && tr.immutableSviewArrayParameter(id, env) {
+				if s, ok := tr.termEnv(n, env); ok {
+					return vcVar{Name: "\x00sview-len:" + id.Name, SMT: s}, true
+				}
+			}
+		}
 		// A scalar struct-field place `p.pos` becomes a substitutable place variable keyed by its
 		// syntactic projection, so weakest-precondition transport can thread a `p.pos <- p.pos + 1`
 		// mutation and relate the exit value to `old(p.pos)`. termEnv emits exactly smtVar(projection)
@@ -535,6 +559,18 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 			return vcVar{Name: key, SMT: s}, true
 		}
 		return vcOpaque{SMT: s}, true
+	case *ast.IndexExpr:
+		// Only an immutable sview parameter in an already-pure return tree is safe
+		// to preserve structurally. Mutable views, mutable/local array roots, and
+		// unsupported index forms retain the ordinary opaque translation.
+		id, isIdent := stripOptimizationParens(n.Object).(*ast.Ident)
+		if isIdent && tr.immutableSviewArrayParameter(id, env) {
+			array, arrayOK := tr.arrayTermEnv(n.Object, env)
+			index, indexOK := tr.lowerVCTerm(n.Index, env)
+			if arrayOK && indexOK {
+				return vcSelect{Array: array, Index: index}, true
+			}
+		}
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_MINUS {
 			if inner, ok := tr.lowerVCTerm(n.Operand, env); ok {
@@ -648,6 +684,8 @@ func substVCTerm(t vcTerm, name string, repl vcTerm) vcTerm {
 			return repl
 		}
 		return tt
+	case vcSelect:
+		return vcSelect{Array: tt.Array, Index: substVCTerm(tt.Index, name, repl)}
 	case vcNeg:
 		return vcMkNeg(substVCTerm(tt.Arg, name, repl))
 	case vcArith:
@@ -713,6 +751,8 @@ func vcTermMentionsSym(t vcTerm, sym string) bool {
 	switch tt := t.(type) {
 	case vcVar:
 		return tt.SMT == sym
+	case vcSelect:
+		return tt.Array == sym || vcTermMentionsSym(tt.Index, sym)
 	case vcOpaque:
 		return strings.Contains(tt.SMT, sym)
 	case vcOldEntry:
@@ -741,6 +781,8 @@ func vcTermFullyStructural(t vcTerm) bool {
 	switch tt := t.(type) {
 	case vcIntLit, vcVar, vcOldEntry:
 		return true
+	case vcSelect:
+		return tt.Array != "" && vcTermFullyStructural(tt.Index)
 	case vcNeg:
 		return vcTermFullyStructural(tt.Arg)
 	case vcArith:
