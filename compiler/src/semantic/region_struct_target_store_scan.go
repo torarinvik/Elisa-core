@@ -506,21 +506,58 @@ func stmtHeaderMentionsAny(stmt ast.Stmt, names map[string]bool) bool {
 	if v.Kind() != reflect.Struct {
 		return false
 	}
-	for i := 0; i < v.NumField(); i++ {
-		f := v.Field(i)
-		if !f.CanInterface() {
-			continue
+	// Nested statements (a match arm's body, an if's branches) bind and use names in their own
+	// visit; only this statement's own expressions and patterns are its header. Arms are not a
+	// []ast.Stmt, so the skip has to happen at every depth.
+	found := false
+	seen := map[uintptr]bool{}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
 		}
-		if f.Kind() == reflect.Slice {
-			if _, isBody := f.Interface().([]ast.Stmt); isBody {
-				continue
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() || seen[v.Pointer()] {
+				return
+			}
+			seen[v.Pointer()] = true
+			if _, isStmt := v.Interface().(ast.Stmt); isStmt {
+				return
+			}
+			if expr, isExpr := v.Interface().(ast.Expr); isExpr {
+				if storeScanMentions(expr, names) {
+					found = true
+				}
+				return
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			if v.Type() == storeScanPosType {
+				return
+			}
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		case reflect.String:
+			if names[v.String()] {
+				found = true
 			}
 		}
-		if storeScanMentions(f.Interface(), names) {
-			return true
-		}
 	}
-	return false
+	for i := 0; i < v.NumField() && !found; i++ {
+		rec(v.Field(i))
+	}
+	return found
 }
 
 var storeScanTrace = os.Getenv("ELISA_STORESCAN_TRACE") != ""
