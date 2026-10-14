@@ -116,8 +116,10 @@ def fill(self: mutable Cache&, n: usize) -> void:
 // through a mutable ref parameter (or any storage that outlives the function's region), it dangles
 // once that region is freed. This was a silent use-after-free; it must now be rejected.
 // With a SINGLE mutable target the factory result is built in that target's region (the ambient
-// region adopts it); a second mutable target makes that binding unsound, so the store must still
-// be rejected.
+// region adopts it), and a call stored DIRECTLY into a struct-ref place is built in that place's
+// region (destination-driven allocation). Binding the result to a local first puts it in the
+// ambient region; with a second mutable target that region cannot be adopted, so the store must
+// still be rejected.
 func TestRegionPolyResultStoredThroughRefParamRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rp_store_escape.elisa", `struct Holder:
     items: mutable darray[i64]
@@ -126,7 +128,8 @@ def make_items() -> darray[i64]:
     out.push(7)
     return out
 def store_into(dst: mutable Holder&, other: mutable Holder&) -> void:
-    dst.items <- make_items()
+    items: darray[i64] = make_items()
+    dst.items <- items
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
 		t.Fatalf("storing a region-poly result through a ref param must be rejected as an escape, got:\n%s", all)
@@ -143,7 +146,8 @@ struct Mgr:
 def make_users() -> Users:
     return Users{user: [1, 2, 3]}
 def bad_store(dst: mutable Mgr&, other: mutable Mgr&) -> void:
-    dst.users <- make_users()
+    users: Users = make_users()
+    dst.users <- users
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
 		t.Fatalf("storing a region-poly STRUCT result through a ref param must be rejected, got:\n%s", all)

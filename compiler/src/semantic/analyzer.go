@@ -259,6 +259,13 @@ type Analyzer struct {
 	// storeScanCycleHit marks a search that consulted an in-progress frame (not cacheable).
 	storeScanCache    map[storeScanKey]storeMode
 	storeScanCycleHit bool
+	// destinationCall / destinationRegion: while analyzing the value of `place <- f(..)` whose place
+	// lives in a caller-owned region param R, the region-polymorphic call f receives R (not the
+	// ambient region) as its hidden allocation region. destinationAllocated records the calls that
+	// did, so the escape check knows their result lives in R.
+	destinationCall      *ast.CallExpr
+	destinationRegion    string
+	destinationAllocated map[*ast.CallExpr]string
 	// regionParamCalleeParamIndex maps each function name to explicit parameter positions whose
 	// types carry one of that function's region parameters. Forwarding a fresh region container to
 	// any such position shares its allocation region with the callee, which may allocate between

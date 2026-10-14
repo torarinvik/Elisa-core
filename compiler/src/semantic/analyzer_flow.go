@@ -543,7 +543,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if root, ok := rootIdentName(n.Target); ok && root != "" {
 			a.reassignTargets = map[string]bool{root: true}
 		}
+		savedDestCall, savedDestRegion := a.destinationCall, a.destinationRegion
+		if !isGlobalTarget {
+			if call, isCall := storeScanUnwrap(n.Value).(*ast.CallExpr); isCall && call != nil {
+				if region := a.destinationPlaceRegion(n.Target, targetType); region != "" {
+					a.destinationCall, a.destinationRegion = call, region
+				}
+			}
+		}
 		valueType := a.analyzeValueExpr(n.Value, targetType)
+		a.destinationCall, a.destinationRegion = savedDestCall, savedDestRegion
 		a.reassignTargets = savedReassignTargets
 		a.recordLocalContainerElementAssign(n)
 		if restoreAllocExpr {
@@ -629,6 +638,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				if field, ok := stripParenExpr(n.Target).(*ast.FieldExpr); ok && field != nil {
 					targetRegion = a.fieldObjectExprRegion(field.Object, a.exprTypes[field.Object])
 				}
+			}
+			if targetRegion == "" {
+				targetRegion = a.destinationPlaceRegion(n.Target, targetType)
 			}
 			a.checkStoredRegionContainerEscapeInto(n.Value, valueType, targetRegion)
 		}

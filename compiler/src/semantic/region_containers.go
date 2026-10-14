@@ -829,6 +829,11 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 				a.noteAmbientFillFresh()
 				return
 			}
+			// Destination-driven allocation: the region-poly call's hidden region was bound to
+			// the store target's own caller-owned region, so its result lives there.
+			if a.destinationAllocatedInto(valueExpr, a.storeTargetRegion) {
+				return
+			}
 			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[@r] ... -> ... @r) or a longer-lived region", via)
 		} else {
 			a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[@r] ... -> ... @r) or a longer-lived region first", region, via)
@@ -2191,6 +2196,49 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			}
 		}
 	}
+}
+
+// destinationPlaceRegion returns the caller-owned region a store target place lives in, when the
+// place is rooted at a STRUCT reference param p whose ref carries region R (`p`, `p.f`, `p.f[i]`
+// -- the struct's field containers live in R by field-region propagation) and R is one of the
+// current function's region params (a value-level Arena symbol the hidden region argument can
+// name). Container params are excluded: their arena's stack layout assumes no interleaved foreign
+// allocations (collectAmbientForwardedContainers). "" otherwise.
+func (a *Analyzer) destinationPlaceRegion(target ast.Expr, targetType Type) string {
+	if a == nil || a.currentFuncDecl == nil || target == nil || a.currentScope == nil {
+		return ""
+	}
+	root := rootIdentExpr(target)
+	if root == nil {
+		return ""
+	}
+	sym, ok := a.currentScope.Lookup(root.Name)
+	if !ok || sym == nil || sym.Kind != SymbolParam {
+		return ""
+	}
+	if _, isStruct := peelToStructType(sym.Type); !isStruct {
+		return ""
+	}
+	region := a.fieldObjectRegion(sym.Type)
+	if region == "" || !a.lookupRegionParam(region) {
+		return ""
+	}
+	for _, rp := range a.currentFuncDecl.RegionParams {
+		if rp == region {
+			return region
+		}
+	}
+	return ""
+}
+
+// destinationAllocatedInto reports whether value is a region-polymorphic call whose hidden
+// allocation region was bound to region by the destination rule.
+func (a *Analyzer) destinationAllocatedInto(value ast.Expr, region string) bool {
+	if a == nil || region == "" || a.destinationAllocated == nil {
+		return false
+	}
+	call, ok := storeScanUnwrap(value).(*ast.CallExpr)
+	return ok && call != nil && a.destinationAllocated[call] == region
 }
 
 // argCarriesRegionlessBacking reports whether a value of type t (refs peeled) holds an OWNING

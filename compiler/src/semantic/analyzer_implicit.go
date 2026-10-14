@@ -98,6 +98,18 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 				}
 			}
 		}
+		// Destination-driven allocation: `place <- f(..)` with place in a caller-owned region
+		// param R allocates f's result directly in R (see destinationCall).
+		if name == regionPolymorphicImplicitParamName && a.destinationCall == expr && a.destinationRegion != "" {
+			destExpr := &ast.Ident{Position: expr.Position, Name: a.destinationRegion}
+			a.exprTypes[destExpr] = expectedType
+			resolved = append(resolved, destExpr)
+			if a.destinationAllocated == nil {
+				a.destinationAllocated = map[*ast.CallExpr]string{}
+			}
+			a.destinationAllocated[expr] = a.destinationRegion
+			continue
+		}
 		argExpr, ok := working[name]
 		if !ok || argExpr == nil {
 			if fallback, found := a.lookupSameNameImplicitExpr(name, working); found {

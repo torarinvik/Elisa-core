@@ -146,3 +146,57 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "ambient_adopt_merge", src, "bt")
 }
+
+// Destination-driven allocation: with TWO writable targets the ambient region cannot be adopted,
+// but `flow.normal <- merge(..)` still allocates merge's fresh result directly in flow's own
+// (caller-owned) region -- the hidden region argument names the store target's region -- so the
+// result outlives the call while the other target is untouched.
+func TestDestinationRegionAllocatesCallResultInTargetRegion(t *testing.T) {
+	src := `
+struct Snap:
+    names: mutable darray[i64] = []
+
+struct Flow:
+    normal: mutable Snap = Snap{}
+
+def merge(a: Snap&, b: Snap&) -> Snap:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable Snap = Snap{}
+        for v in a.names |out|:
+            out.names.push(v)
+        for v in b.names |out|:
+            out.names.push(v)
+        return out
+
+def merge_normal(flow: mutable Flow&, other: mutable Flow&, alternate: Snap&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        flow.normal <- merge(flow.normal, alternate)
+        other.normal.names.push(1)
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+def add_round(flow: mutable Flow&, other: mutable Flow&, k: i64) -> void:
+    can Memory.Allocate, Abort.Panic:
+        alt: mutable Snap = Snap{}
+        for i in 0..<10 |alt|:
+            alt.names.push(k * 100 + i.i64())
+        merge_normal(flow, other, &alt)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        flow: mutable Flow = Flow{}
+        other: mutable Flow = Flow{}
+        add_round(&flow, &other, 1)
+        add_round(&flow, &other, 2)
+        c: i64 = churn()
+        if flow.normal.names.count != 20 or flow.normal.names[0] != 100 or flow.normal.names[19] != 209 or other.normal.names.count != 2 or c != 27993:
+            panic("destination-allocated result freed with the call's region")
+`
+	buildAndRunSoATest(t, "destination_region_merge", src, "bt")
+}
