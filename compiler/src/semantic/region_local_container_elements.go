@@ -871,7 +871,18 @@ func (a *Analyzer) resolveReadOnlyScanCallee(call *ast.CallExpr) (*ast.FuncDecl,
 		return nil, false
 	}
 	if _, local := a.currentScope.Lookup(ident.Name); local {
-		return a.resolveDirectCallFuncDecl(call)
+		if decl, ok := a.resolveDirectCallFuncDecl(call); ok {
+			return decl, true
+		}
+		// A module-qualified identifier can be present in the active scope as a
+		// namespace/member symbol rather than a FuncDecl. Give the exact qualified
+		// declaration index a chance before treating it as an indirect call.
+		return a.resolveQualifiedStoreFlowCallee(call, ident.Name)
+	}
+	if strings.Contains(ident.Name, ".") {
+		if decl, ok := a.resolveQualifiedStoreFlowCallee(call, ident.Name); ok {
+			return decl, true
+		}
 	}
 	if a.globalScope == nil {
 		return nil, false
@@ -882,6 +893,21 @@ func (a *Analyzer) resolveReadOnlyScanCallee(call *ast.CallExpr) (*ast.FuncDecl,
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
 	return decl, ok && decl != nil
+}
+
+// resolveQualifiedStoreFlowCallee resolves only an exact module-qualified spelling. The
+// StoreFlow index can find candidates by their final segment, so validate the full symbol name
+// here before using its body summary for a borrow-safety decision.
+func (a *Analyzer) resolveQualifiedStoreFlowCallee(call *ast.CallExpr, name string) (*ast.FuncDecl, bool) {
+	if !strings.Contains(name, ".") {
+		return nil, false
+	}
+	decl := a.storeFlowCallee(call)
+	if decl == nil {
+		return nil, false
+	}
+	symbol := a.funcDeclSymbols[decl]
+	return decl, symbol != nil && symbol.Name == name
 }
 
 // callArgBindsReadOnlyParam reports whether argument index of a direct call to a declared

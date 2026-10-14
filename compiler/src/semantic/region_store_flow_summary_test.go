@@ -250,6 +250,90 @@ def main() -> i32:
 	}
 }
 
+func TestReadOnlyStoreFlowResolverAcceptsExactQualifiedModuleCall(t *testing.T) {
+	callee := &ast.FuncDecl{
+		Name:   "inspect",
+		Params: []ast.ParamDecl{{Name: "value"}},
+		Body:   []ast.Stmt{},
+	}
+	symbol := &Symbol{Name: "Module.inspect", Node: callee}
+	a := &Analyzer{
+		currentScope:    NewScope(nil),
+		globalScope:     NewScope(nil),
+		funcDeclSymbols: map[*ast.FuncDecl]*Symbol{callee: symbol},
+	}
+	call := &ast.CallExpr{
+		Func: &ast.Ident{Name: "Module.inspect"},
+		Args: []ast.Expr{&ast.Ident{Name: "value"}},
+	}
+	resolved, ok := a.resolveReadOnlyScanCallee(call)
+	if !ok || resolved != callee {
+		t.Fatalf("qualified direct call should resolve to its exact module declaration, got %p, %v", resolved, ok)
+	}
+
+	call.Func = &ast.Ident{Name: "Other.inspect"}
+	if resolved, ok := a.resolveReadOnlyScanCallee(call); ok || resolved != nil {
+		t.Fatalf("same-suffix declaration from another module must stay unresolved, got %p, %v", resolved, ok)
+	}
+}
+
+func TestQualifiedCallArgumentStoreCheckUsesExactStoreFlowSummary(t *testing.T) {
+	src := `module Helpers:
+    def inspect_without_retaining(value: sview, sink: mutable darray[sview]&) -> void:
+        sink.truncate(0)
+        _ = value.len
+
+    def retain(value: sview, sink: mutable darray[sview]&) -> void:
+        sink.push(value)
+
+def caller(inspected: mutable darray[sview]&, retained: mutable darray[sview]&) -> void can[Abort.Panic, Memory.Allocate]:
+    can Abort.Panic, Memory.Allocate:
+        region short(4096):
+            bytes: mutable darray[u8] @short = [65]
+            Helpers::inspect_without_retaining(bytes.as_sview(), inspected)
+            Helpers::retain(bytes.as_sview(), retained)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_qualified_call_argument_store.elisa", src, AnalyzeOptions{})
+	var inspect, retain *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		module, ok := decl.(*ast.NamespaceDecl)
+		if !ok || module == nil || module.Name != "Helpers" {
+			continue
+		}
+		for _, member := range module.Decls {
+			if fn, ok := member.(*ast.FuncDecl); ok {
+				switch fn.Name {
+				case "inspect_without_retaining":
+					inspect = fn
+				case "retain":
+					retain = fn
+				}
+			}
+		}
+	}
+	if inspect == nil || retain == nil {
+		t.Fatalf("qualified helper declarations were not parsed: inspect=%v retain=%v", inspect != nil, retain != nil)
+	}
+	inspectSummary := result.analyzer.storeFlowSummaryFor(inspect)
+	if inspectSummary == nil || !inspectSummary.writtenParam(1) || inspectSummary.reaches(0, 1) {
+		t.Fatalf("read-only qualified helper must write its sink without retaining value: summary=%#v", inspectSummary)
+	}
+	retainSummary := result.analyzer.storeFlowSummaryFor(retain)
+	if retainSummary == nil || !retainSummary.writtenParam(1) || !retainSummary.reaches(0, 1) {
+		t.Fatalf("qualified helper that pushes value must retain it in sink: summary=%#v", retainSummary)
+	}
+	diagnostics := strings.Join(result.Errors(), "\n")
+	if strings.Contains(diagnostics, "inspect_without_retaining") || strings.Contains(diagnostics, "through argument 1") {
+		t.Fatalf("a qualified callee's exact summary must suppress the safe borrow warning, got:\n%s", diagnostics)
+	}
+	if !strings.Contains(diagnostics, "through argument 2") {
+		t.Fatalf("a qualified real store must still report the retained borrow, got:\n%s", diagnostics)
+	}
+}
+
 // A callee that really stores a view argument into the writable container stays rejected, also
 // through a recursive hop.
 func TestStoreFlowSummaryStillRejectsRealStore(t *testing.T) {
