@@ -38,14 +38,14 @@ def region_cache_survives_reclaims_test() -> void:
                     a.push(j.i64())
                 if a.count != 17 or b.count != 1:
                     panic("darray growth corrupted")
-        arena_free(&arena)
+        (arena_free(&arena) can Global{Read,Write})
         # new_region may itself reuse a parked region, so sample the count after it.
-        r: mutable heap Region& = new_region(64)
+        r: mutable heap Region& = (new_region(64) can Global{Read,Write})
         before: mutable usize = 0
         trusted Unsafe.MutableGlobal:
             can Global.Read:
                 before <- __elisa_region_cache.reclaimed_spans
-        free_region(r)
+        (free_region(r) can Global{Read,Write})
         after: mutable usize = 0
         trusted Unsafe.MutableGlobal:
             can Global.Read:

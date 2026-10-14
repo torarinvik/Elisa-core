@@ -50,13 +50,13 @@ def region_pool_acquire_reuse_release() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             h.ptr.left <- 11
             h.ptr.right <- 12
             assert_eq(h.ptr.left + h.ptr.right, 23)
             addr1: uintptr = h.ptr.cast[u8&].uintptr()
             pool.release(move h)
-            h2: Pooled[PoolNode] = pool.acquire()
+            h2: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             assert_eq(h2.ptr.cast[u8&].uintptr(), addr1)
             assert_eq(h2.ptr.left, 0)
             pool.release(move h2)
@@ -93,7 +93,7 @@ def use_after_release() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             pool.release(move h)
             h.ptr.left <- 5
 `
@@ -126,7 +126,7 @@ def double_release() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             pool.release(move h)
             pool.release(move h)
 `
@@ -161,7 +161,7 @@ def interior_borrow_uaf(flag: bool) -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
 ` + body + "\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write interior-borrow fixture: %v", err)
@@ -223,7 +223,7 @@ def interior_borrow_valid() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             b: mutable heap PoolNode& = h.ptr
             b.left <- 5
             addr: uintptr = h.ptr.cast[u8&].uintptr()
@@ -263,7 +263,7 @@ def struct_store_uaf() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             holder: mutable Holder = Holder(h.ptr)
             pool.release(move h)
             holder.p.left <- 5
@@ -299,7 +299,7 @@ def struct_store_valid() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             holder: mutable Holder = Holder{p: h.ptr}
             holder.p.left <- 5
             pool.release(move h)
@@ -345,7 +345,7 @@ def xfn_uaf() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             b: mutable heap PoolNode& = ` + tc.bind + `
             pool.release(move h)
             b.left <- 5
@@ -384,7 +384,7 @@ def xfn_valid() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
-            h: Pooled[PoolNode] = pool.acquire()
+            h: Pooled[PoolNode] = (pool.acquire() can Global{Read,Write})
             b: mutable heap PoolNode& = passthrough(h.ptr)
             b.left <- 5
             pool.release(move h)
@@ -424,13 +424,13 @@ def idiomatic_pool() -> void:
         region scratch(64):
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new(owner)
-            h = pool.acquire()
+            h = (pool.acquire() can Global{Read,Write})
             h.ptr.left <- 11
             h.ptr.right <- 12
             assert_eq(h.ptr.left + h.ptr.right, 23)
             addr1: uintptr = h.ptr.cast[u8&].uintptr()
             pool.release(move h)
-            h2 = pool.acquire()
+            h2 = (pool.acquire() can Global{Read,Write})
             assert_eq(h2.ptr.cast[u8&].uintptr(), addr1)
             assert_eq(h2.ptr.left, 0)
             # dropped without release: safe — the region reclaims the slab at teardown
