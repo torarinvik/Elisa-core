@@ -59,10 +59,18 @@ def walk(statements: darray[St], tracked_loop_vars: darray[sview], table: mutabl
 func TestStoreScanMatchArmBodyIsNotTheHeader(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_scan_match_taint.elisa", storeScanMatchTaintSource, AnalyzeOptions{})
 	walk := storeScanFindFunc(t, result, "walk")
+	// Resolve callees as during analysis (the scan runs with a scope in place).
+	result.analyzer.currentScope = result.analyzer.globalScope
 	// Source: tracked_loop_vars (1). Its content is the tracked list and nothing matched out of
 	// `statements`.
 	_, _, content, _, _ := result.analyzer.storeScanTaint(walk, 1, "table")
-	for _, name := range []string{"target", "name", "then_body", "cond", "line"} {
+	// then_body is passed to walk next to current_tracked: walk's by-value darray parameter
+	// shares then_body's storage and may be written with it, so then_body IS tainted (the
+	// taint pass models callee writes into locals). No other binder is.
+	if !content["then_body"] {
+		t.Errorf("then_body is passed with the tracked list to a callee that may write it: %v", content)
+	}
+	for _, name := range []string{"target", "name", "cond", "line"} {
 		if content[name] {
 			t.Errorf("binder %q of a match over an untainted scrutinee was tainted: %v", name, content)
 		}

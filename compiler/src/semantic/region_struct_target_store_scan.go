@@ -117,6 +117,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		defer func() { storeScanTraceOther = savedOther }()
 	}
 	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name)
+	filled := a.lazyFilledLocals(decl, other, content, views, seen)
 	var valueMode func(value ast.Expr) storeMode
 	valueMode = func(value ast.Expr) storeMode {
 		inner := storeScanUnwrap(value)
@@ -172,7 +173,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			}
 		}
 		// A view-only value derived from a byte-free source cannot point into the source's storage.
-		if views != nil && a.storeScanValueIsView(decl, inner, views) {
+		if views != nil && (a.storeScanValueIsView(decl, inner, views) || storeScanRootedAtFilled(inner, filled)) {
 			return storeViews
 		}
 		if storeScanMentionsHeader(value, header) {
@@ -848,43 +849,32 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 		return true
 	}
 	views = a.storeScanViewLocalsCached(decl, other)
+	idx := a.storeScanIndex(decl)
 	taint := func(name string, value ast.Expr) bool {
 		changed := false
-		if views[name] && storeScanMentions(value, content) {
+		if views[name] && idx.mentions(value, content) {
 			// A view-typed local derived from a non-byte darray source holds (part of) an element
 			// value, never the source's header (storeScanViewLocals).
 			changed = add(content, name) || changed
 		} else if storeScanMentionsHeader(value, header) {
 			changed = add(header, name) || changed
 			changed = add(content, name) || changed
-		} else if storeScanMentions(value, content) {
+		} else if idx.mentions(value, content) {
 			changed = add(content, name) || changed
 		}
 		return changed
 	}
 	bind := func(name string, value ast.Expr) bool {
 		changed := taint(name, value)
-		if storeScanMayAliasPlace(value, targets) {
+		if storeScanMayAliasPlace(idx, value, targets) {
 			changed = add(targets, name) || changed
 		}
 		return changed
 	}
-	locals := map[string]bool{}
-	walkStoreScanNodes(decl.Body, func(node any) {
-		switch n := node.(type) {
-		case *ast.VarDeclStmt:
-			if n != nil {
-				locals[n.Name] = true
-			}
-		case ast.Stmt:
-			for _, name := range stmtBoundNames(n) {
-				locals[name] = true
-			}
-		}
-	})
+	locals := idx.locals
 	for changed := true; changed; {
 		changed = false
-		walkStoreScanNodes(decl.Body, func(node any) {
+		for _, node := range idx.flat {
 			switch n := node.(type) {
 			case *ast.VarDeclStmt:
 				if n != nil && bind(n.Name, n.Value) {
@@ -892,13 +882,13 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 				}
 			case *ast.AssignStmt:
 				if n == nil {
-					return
+					continue
 				}
 				if id, ok := n.Target.(*ast.Ident); ok && id != nil {
 					if bind(id.Name, n.Value) {
 						changed = true
 					}
-					return
+					continue
 				}
 				// A store into part of a local taints the local.
 				if root := rootIdentExpr(n.Target); root != nil && !params[root.Name] && taint(root.Name, n.Value) {
@@ -914,7 +904,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 						copiesElements := field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(decl, field.Object)
 						for _, arg := range n.Args {
 							if copiesElements {
-								if storeScanMentions(arg, content) && add(content, root.Name) {
+								if idx.mentions(arg, content) && add(content, root.Name) {
 									changed = true
 								}
 								continue
@@ -925,9 +915,16 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 						}
 					}
 				}
+				// A body local passed to a call may be WRITTEN by the callee with any other
+				// argument (`push_list(merged, right.lists[row])`): taint it with each of them,
+				// unless the callee is resolved and the local's parameter is read-only. A builtin
+				// container method writes only its receiver (handled above).
+				if a.storeScanTaintCallWrites(decl, n, params, locals, taint) {
+					changed = true
+				}
 			case *ast.IterForStmt:
 				// Loop binders over a tainted source are element values.
-				if n != nil && storeScanMentions(n.Source, content) {
+				if n != nil && idx.mentions(n.Source, content) {
 					for _, name := range stmtBoundNames(n) {
 						if add(content, name) {
 							changed = true
@@ -940,12 +937,12 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 				// (`for i in 0..<src.count |src|`).
 			case ast.Stmt:
 				// Any other binding construct: its binders may hold the whole source.
-				if !stmtHeaderMentionsAny(n, content) {
-					return
+				if !idx.headerMentions(n, content) {
+					continue
 				}
-				a.storeScanTaintBinders(n, header, content, add, &changed)
+				a.storeScanTaintBinders(idx, n, header, content, add, &changed)
 			}
-		})
+		}
 	}
 	return params, header, content, targets, views
 }
@@ -1030,15 +1027,109 @@ func storeScanPlainScalarType(t Type) bool {
 	return ok
 }
 
+// storeScanTaintCallWrites taints each body local passed to call with the call's other
+// arguments when the callee may write that local's parameter.
+func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallExpr, params, locals map[string]bool, taint func(string, ast.Expr) bool) bool {
+	changed := false
+	for _, w := range a.storeScanCallWritePlan(decl, call, params, locals) {
+		if taint(w.local, w.value) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// storeScanCallWrite: the callee of a call may write value into the body local.
+type storeScanCallWrite struct {
+	local string
+	value ast.Expr
+}
+
+// storeScanCallWritePlan: the (local, value) writes a call may perform. It depends only on the
+// declaration and the call (params/locals are the declaration's), so it is computed once.
+func (a *Analyzer) storeScanCallWritePlan(decl *ast.FuncDecl, call *ast.CallExpr, params, locals map[string]bool) []storeScanCallWrite {
+	if plan, ok := a.storeScanCallWriteCache[call]; ok {
+		return plan
+	}
+	var plan []storeScanCallWrite
+	defer func() {
+		if a.storeScanCallWriteCache == nil {
+			a.storeScanCallWriteCache = map[*ast.CallExpr][]storeScanCallWrite{}
+		}
+		a.storeScanCallWriteCache[call] = plan
+	}()
+	args := returnBorrowCallArgs(call)
+	if len(args) < 2 {
+		return plan
+	}
+	if field, isMethod := call.Func.(*ast.FieldExpr); isMethod && field != nil && len(args) == len(call.Args) {
+		if a.storeScanReceiverIsBuiltinDArray(decl, field.Object) || storeScanReadOnlyMethods[field.Field] {
+			return plan
+		}
+	}
+	callee, resolved := a.resolveReadOnlyScanCallee(call)
+	resolved = resolved && callee != nil && storeFlowCallFitsParams(callee, call)
+	for i, arg := range args {
+		root := rootIdentExpr(stripAddrAndParens(arg))
+		if root == nil || params[root.Name] || !locals[root.Name] {
+			continue
+		}
+		if resolved && (!a.declParamIsWritableRef(callee, i) || a.declParamIsViewOrScalar(callee, i)) {
+			continue // the callee cannot write through this parameter
+		}
+		for j, other := range args {
+			if j == i || (resolved && !a.declParamCarriesStorage(callee, j)) {
+				continue
+			}
+			plan = append(plan, storeScanCallWrite{local: root.Name, value: other})
+		}
+	}
+	return plan
+}
+
+// declParamIsViewOrScalar: decl's parameter index has a view-only or plain scalar type, which
+// no callee can store into.
+func (a *Analyzer) declParamIsViewOrScalar(decl *ast.FuncDecl, index int) bool {
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || index < 0 || index >= len(fnType.Params) {
+		return false
+	}
+	t := fnType.Params[index]
+	if t == nil || containsTypeParam(t) {
+		return false
+	}
+	if _, isRef := t.(*RefType); isRef {
+		return false
+	}
+	return storeScanTypeIsViewOnly(t) || storeScanPlainScalarType(t)
+}
+
 // storeScanTaintBinders: a binding construct whose header mentions a tainted name taints its
 // binders. Pattern binders of a match / `is` test project fields or payloads (content); only
 // other binders (a rebind of a call result, a destructure) may be the whole.
-func (a *Analyzer) storeScanTaintBinders(n ast.Stmt, header, content map[string]bool, add func(map[string]bool, string) bool, changed *bool) {
-	if n == nil || !stmtHeaderMentionsAny(n, content) {
+func (a *Analyzer) storeScanTaintBinders(idx *storeScanDeclIndex, n ast.Stmt, header, content map[string]bool, add func(map[string]bool, string) bool, changed *bool) {
+	if n == nil {
 		return
 	}
-	whole := stmtHeaderMentionsAny(n, header) && !storeScanProjectingStmt(n)
-	for _, name := range stmtBoundNames(n) {
+	bound := stmtBoundNames(n)
+	readsContent := idx.headerMentions(n, content)
+	readsHeader := idx.headerMentions(n, header)
+	if m, isMatch := n.(*ast.MatchStmt); isMatch && m != nil {
+		// A match's binders receive parts of its scrutinee only; its patterns NAME the binders
+		// (a tainted `then_body` in `St.If(cond, then_body, ..)` is being bound, not read) and
+		// its guards read without flowing into them.
+		readsContent = idx.mentions(m.Value, content) || idx.mentions(m.Store, content)
+		readsHeader = idx.mentions(m.Value, header) || idx.mentions(m.Store, header)
+	}
+	if !readsContent {
+		return
+	}
+	whole := readsHeader && !storeScanProjectingStmt(n)
+	for _, name := range bound {
 		if add(content, name) {
 			*changed = true
 		}
@@ -1067,6 +1158,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
 	_, header, content, _, views := a.storeScanTaint(decl, other, "")
+	filled := a.lazyFilledLocals(decl, other, content, views, seen)
 	mode := storeNone
 	sawReturn := false
 	walkStoreScanNodes(decl.Body, func(node any) {
@@ -1104,7 +1196,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		if !storeScanMentions(value, content) {
 			return
 		}
-		if views != nil && (a.storeScanValueIsView(decl, value, views) || a.storeScanDeclReturnsViewOnly(decl)) {
+		if views != nil && (a.storeScanValueIsView(decl, value, views) || a.storeScanDeclReturnsViewOnly(decl) || storeScanRootedAtFilled(value, filled)) {
 			mode = maxStoreMode(mode, storeViews)
 		} else if storeScanMentionsHeader(value, header) {
 			mode = storeHeader
@@ -1248,8 +1340,8 @@ func typeSharesIndirectStorage(t Type, seen map[Type]bool) bool {
 // target storage: a place rooted at a target (`t`, `t.f`, `t.xs[i]`, `&t.f`), a conditional
 // choosing one, or a call that may return one. A fresh literal or comprehension that merely
 // reads the target (`Scope{names: [n for n in t.names]}`) owns new storage and is no alias.
-func storeScanMayAliasPlace(value ast.Expr, targets map[string]bool) bool {
-	if value == nil || !storeScanMentions(value, targets) {
+func storeScanMayAliasPlace(idx *storeScanDeclIndex, value ast.Expr, targets map[string]bool) bool {
+	if value == nil || !idx.mentions(value, targets) {
 		return false
 	}
 	switch stripParenExpr(value).(type) {
@@ -1330,21 +1422,14 @@ func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast
 			all = all && storeScanTypeExprIsDArray(p.Type)
 		}
 	}
-	walkStoreScanNodes(decl.Body, func(node any) {
-		if v, isVar := node.(*ast.VarDeclStmt); isVar && v != nil && v.Name == id.Name {
-			found = true
-			all = all && storeScanTypeExprIsDArray(v.Type)
-		}
-		if st, isStmt := node.(ast.Stmt); isStmt {
-			if _, isVar := node.(*ast.VarDeclStmt); !isVar {
-				for _, name := range stmtBoundNames(st) {
-					if name == id.Name {
-						all = false // a pattern / loop binder of unknown type
-					}
-				}
-			}
-		}
-	})
+	idx := a.storeScanIndex(decl)
+	for _, v := range idx.decls[id.Name] {
+		found = true
+		all = all && storeScanTypeExprIsDArray(v.Type)
+	}
+	if idx.otherBound[id.Name] {
+		all = false // a pattern / loop binder of unknown type
+	}
 	return found && all
 }
 
@@ -1439,28 +1524,16 @@ func (a *Analyzer) storeScanLocalLiteralType(decl *ast.FuncDecl, name string) (T
 			return nil, false
 		}
 	}
-	litName, ok, other := "", true, false
-	walkStoreScanNodes(decl.Body, func(node any) {
-		if v, isVar := node.(*ast.VarDeclStmt); isVar {
-			if v == nil || v.Name != name {
-				return
-			}
-			lit, isLit := storeScanUnwrap(v.Value).(*ast.StructLitExpr)
-			if !isLit || lit == nil || len(lit.TypeArgs) > 0 || (litName != "" && lit.Name != litName) {
-				ok = false
-				return
-			}
-			litName = lit.Name
-			return
+	idx := a.storeScanIndex(decl)
+	litName, ok, other := "", true, idx.otherBound[name]
+	for _, v := range idx.decls[name] {
+		lit, isLit := storeScanUnwrap(v.Value).(*ast.StructLitExpr)
+		if !isLit || lit == nil || len(lit.TypeArgs) > 0 || (litName != "" && lit.Name != litName) {
+			ok = false
+			break
 		}
-		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
-			for _, bound := range stmtBoundNames(st) {
-				if bound == name {
-					other = true
-				}
-			}
-		}
-	})
+		litName = lit.Name
+	}
 	if !ok || other || litName == "" {
 		return nil, false
 	}

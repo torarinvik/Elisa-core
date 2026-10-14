@@ -2204,7 +2204,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			if targetRegion == "" || a.regionStoreEscapes(targetRegion, region) {
 				if storeScanTrace {
 					_, tracked := a.trackedElementStateOfLocal(arg)
-					fmt.Fprintf(os.Stderr, "STORECALL at %s mode=%d tracked=%v argType=%s region=%s\n", arg.Pos(), mode, tracked, typeString(a.exprTypes[arg]), region)
+					fmt.Fprintf(os.Stderr, "STORECALL at %s mode=%d tracked=%v nobytes=%v argType=%s region=%s\n", arg.Pos(), mode, tracked, typeHoldsNoBytes(stripRefForBounds(a.exprTypes[arg]), map[Type]bool{}), typeString(a.exprTypes[arg]), region)
 				}
 				a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived storage through argument %d; region %q is freed first, leaving a dangling reference. Copy it into the target's region (or a region that outlives it) before the call", regionDisplayName(region), index+1, regionDisplayName(region))
 				break
