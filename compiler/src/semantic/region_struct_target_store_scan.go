@@ -1137,7 +1137,7 @@ func storeScanTypeExprIsDArray(t ast.TypeExpr) bool {
 // source is (part of) an element value: content, never the header. Returns the locals whose every
 // declaration is spelled `sview`/`cstr` and that no other construct binds, or nil when the source
 // is not a non-byte darray (the caller then keeps its conservative header taint).
-func storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
+func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
 	if decl == nil || other < 0 || other >= len(decl.Params) || !storeScanTypeExprIsNonByteDArray(decl.Params[other].Type) {
 		return nil
 	}
@@ -1151,7 +1151,9 @@ func storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
 			if n == nil {
 				return
 			}
-			if storeScanTypeExprIsView(n.Type) {
+			// Declared `sview`/`cstr`, or initialized from a value whose analyzed type is built only
+			// from scalars and plain views (no container, view[T], reference or pointer).
+			if t, known := a.exprTypes[n.Value]; storeScanTypeExprIsView(n.Type) || (n.Value != nil && known && t != nil && typeComponentsViewOnly(t)) {
 				views[n.Name] = true
 			} else {
 				poisoned[n.Name] = true
@@ -1177,7 +1179,7 @@ func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[
 	if views, ok := a.storeScanViewCache[decl]; ok {
 		return views
 	}
-	views := storeScanViewLocals(decl, other)
+	views := a.storeScanViewLocals(decl, other)
 	if a.storeScanViewCache == nil {
 		a.storeScanViewCache = map[*ast.FuncDecl]map[string]bool{}
 	}
@@ -1194,7 +1196,7 @@ func (a *Analyzer) storeScanValueIsView(value ast.Expr, views map[string]bool) b
 		case *SViewType, *CStrType:
 			return true
 		}
-		return false
+		return typeComponentsViewOnly(t)
 	}
 	if id, ok := inner.(*ast.Ident); ok && id != nil {
 		return views[id.Name]

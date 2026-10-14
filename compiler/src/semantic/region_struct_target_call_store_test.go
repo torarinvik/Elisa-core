@@ -523,3 +523,39 @@ def run(table: mutable Table&, src: sview) -> void:
 		t.Fatalf("expected exactly lines 30 and 31 rejected, got:\n%s", joined)
 	}
 }
+
+// The same for a local whose type is built only from scalars and plain views (a struct of sview +
+// i64): it cannot hold a non-byte darray's header either, so storing it stores element values.
+func TestStoreScanViewOnlyStructFromNonByteDArrayIsElement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_viewonly_struct.elisa", `struct Info:
+    name: sview
+    n: i64
+
+struct Table:
+    infos: mutable darray[Info] = []
+
+def describe(names: darray[sview]&) -> Info:
+    can Abort.Panic:
+        return Info{name: names[0] if names.count > 0 else "", n: names.count.i64()}
+
+def note(table: mutable Table&, names: darray[sview]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        info: Info = describe(names)
+        table.infos.push(info)
+
+def run(table: mutable Table&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        safe: mutable darray[sview] = []
+        safe.push(src)
+        note(table, &safe)
+        text: mutable dstr = []
+        text.push(65)
+        unsafe_names: mutable darray[sview] = []
+        unsafe_names.push(text.as_sview())
+        note(table, &unsafe_names)
+`)
+	errs := result.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0], ":26:") {
+		t.Fatalf("expected only the unsafe call (line 26) rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
