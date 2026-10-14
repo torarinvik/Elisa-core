@@ -439,6 +439,70 @@ def main() -> i32:
 	}
 }
 
+func TestStoreFlowSummaryDoesNotFlowIntoPointerFreeDarrayElements(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct ValueType:
+    kind: u32
+
+def infer_and_cache(arguments: darray[Expr]&, cached: mutable darray[ValueType]&) -> ValueType:
+    cached.push(ValueType{kind: arguments[0].text.len.u32()})
+    return ValueType{kind: arguments[0].text.len.u32()}
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_pointer_free_darray_push.elisa", src, AnalyzeOptions{})
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "infer_and_cache" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("pointer-free DArray push should have a settled StoreFlow summary")
+	}
+	if !summary.writtenParam(1) {
+		t.Fatal("test must model mutation of the cached DArray")
+	}
+	if summary.reaches(0, 1) {
+		t.Fatalf("AST argument storage must not flow into pointer-free DArray elements: reach=%v conn=%v written=%v", summary.reach, summary.conn, summary.written)
+	}
+
+	borrowSrc := `struct Expr:
+    text: sview
+struct ValueType:
+    text: sview
+
+def cache_borrowed(arguments: darray[Expr]&, cached: mutable darray[ValueType]&) -> ValueType:
+    cached.push(ValueType{text: arguments[0].text})
+    return ValueType{text: arguments[0].text}
+
+def main() -> i32:
+    return 0
+`
+	borrowResult := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_borrowing_darray_push.elisa", borrowSrc, AnalyzeOptions{})
+	var borrowHelper *ast.FuncDecl
+	for _, decl := range borrowResult.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "cache_borrowed" {
+			borrowHelper = fn
+			break
+		}
+	}
+	if borrowHelper == nil {
+		t.Fatal("borrow-bearing test helper was not parsed")
+	}
+	borrowSummary := borrowResult.analyzer.storeFlowSummaryFor(borrowHelper)
+	if borrowSummary == nil || !borrowSummary.reaches(0, 1) {
+		t.Fatalf("view-bearing DArray elements must retain argument flow into the destination, summary=%+v", borrowSummary)
+	}
+}
+
 func TestStoreFlowSummaryRejectsASTBorrowStoredByTypeInference(t *testing.T) {
 	src := `struct Expr:
     text: sview
