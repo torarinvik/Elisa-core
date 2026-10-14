@@ -485,3 +485,56 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "store_scan_view_filled_copy", src, "bt")
 }
+
+// Views stored out of a mutable local filled directly and by a callee from the caller's bytes
+// outlive the call intact.
+func TestLocalViewProvenanceStoresRun(t *testing.T) {
+	src := `
+struct Bag:
+    names: mutable darray[sview] = []
+    n: mutable i64 = 0
+
+struct Table:
+    names: mutable darray[sview] = []
+
+def keep_first(table: mutable Table&, bag: Bag&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.names.push(bag.names[0])
+
+def fill(bag: mutable Bag&, name: sview) -> void:
+    can Memory.Allocate:
+        bag.names.push(name)
+        bag.n <- bag.n + 1
+
+def run(table: mutable Table&, other: mutable Table&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        direct: mutable Bag = Bag{}
+        direct.names.push(src)
+        keep_first(table, &direct)
+        filled: mutable Bag = Bag{}
+        fill(filled, src)
+        keep_first(table, &filled)
+        other.names.push("x")
+
+def churn() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[i64] = []
+        for i in 0..<4000 |junk|:
+            junk.push(i.i64() * 7)
+        return junk[3999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        owner: mutable dstr = []
+        for i in 0..<5 |owner|:
+            owner.push(72 + i.u8())
+        table: mutable Table = Table{}
+        other: mutable Table = Table{}
+        run(&table, &other, owner.as_sview())
+        c: i64 = churn()
+        if table.names.count != 2 or table.names[0].len != 5 or table.names[1][4] != 76 or c != 27993:
+            panic("stored views lost")
+`
+	buildAndRunSoATest(t, "local_view_provenance", src, "bt")
+}

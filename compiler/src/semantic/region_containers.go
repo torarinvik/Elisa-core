@@ -2174,6 +2174,14 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// state records, when that state is complete (storeViewsProvenanceComplete). Every
 			// dependency the state has is still judged; only the storage-region proxy is dropped.
 			ownStorageIrrelevant := mode == storeViews && a.storeViewsProvenanceComplete(arg)
+			if mode == storeViews && !ownStorageIrrelevant {
+				// A byte-free local: what its views point at is the union of what was written
+				// into it (localViewProvenance), complete over the function body.
+				if provenance, ok := a.localViewProvenance(arg); ok {
+					regions = provenance
+					ownStorageIrrelevant = true
+				}
+			}
 			if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) && !ownStorageIrrelevant {
 				regions = append(regions, own)
 			}

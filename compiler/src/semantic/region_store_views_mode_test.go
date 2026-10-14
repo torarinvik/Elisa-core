@@ -59,8 +59,8 @@ func TestStoreScanProducesViewsMode(t *testing.T) {
 // Call-site precision for storeViews (two writable targets, so no ambient adoption): a byte-free
 // struct argument whose tracked state is complete -- an immutable local initialized without
 // reading a mutable local -- is judged by that state alone, not by its own storage region
-// (lines 19, 21 accepted). A view of a local dstr in it (line 25), a mutable struct local
-// (line 27), and call results carrying a local dstr's view directly or through a copy (second
+// (lines 19, 21 accepted; 27 too, its mutable local holding only a param view). A view of a
+// local dstr in it (line 25), and call results carrying a local dstr's view directly or through a copy (second
 // source, lines 24 and 27) stay rejected.
 func TestStoreViewsCallSiteUsesCompleteProvenance(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_views_call_site.elisa", `struct Wrap:
@@ -92,8 +92,9 @@ def run(table: mutable Table&, other: mutable Table&, src: sview) -> void:
         keep_first(table, &m)
 `)
 	errs := result.Errors()
-	if len(errs) != 2 || !strings.Contains(errs[0], ":25:") || !strings.Contains(errs[1], ":27:") {
-		t.Fatalf("expected exactly lines 25 and 27 rejected, got:\n%s", strings.Join(errs, "\n"))
+	// Line 27's mutable local holds only a view of the param src (localViewProvenance).
+	if len(errs) != 1 || !strings.Contains(errs[0], ":25:") {
+		t.Fatalf("expected exactly line 25 rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 	result = analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_views_call_result.elisa", `struct Wrap:
     names: darray[sview]
