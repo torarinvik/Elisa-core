@@ -17,10 +17,24 @@ var storeScanPosType = reflect.TypeOf(lexer.Pos{})
 type storeMode int
 
 const (
-	storeNone     storeMode = iota // nothing reachable from the source is stored
-	storeElements                  // only element/field VALUES read out of the source are stored
-	storeHeader                    // the source value itself (a container header, a view of it) may be stored
+	storeNone storeMode = iota // nothing reachable from the source is stored
+	// storeViews: only VIEW-ONLY values (built from scalars and plain views) read out of a source
+	// that holds no bytes are stored -- they cannot point into the source's own storage, only
+	// where its views already point.
+	storeViews
+	storeElements // only element/field VALUES read out of the source are stored
+	storeHeader   // the source value itself (a container header, a view of it) may be stored
 )
+
+// narrowStoreMode: a callee storing (part of) its parameter stores at most what the argument
+// passed for it carried from the caller's source -- the smaller of the two, unless the argument
+// is the source itself (header), which the callee's verdict alone describes.
+func narrowStoreMode(argMode, inner storeMode) storeMode {
+	if inner == storeNone || argMode == storeHeader || inner < argMode {
+		return inner
+	}
+	return argMode
+}
 
 func maxStoreMode(x, y storeMode) storeMode {
 	if x > y {
@@ -170,10 +184,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
 							continue
 						}
-						inner := a.calleeReturnModeOf(callee, i, seen)
-						if inner != storeNone && argMode == storeElements {
-							inner = storeElements
-						}
+						inner := narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen))
 						mode = storeScanRaise(decl, 160, n, mode, inner)
 					}
 					return
@@ -264,11 +275,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						}
 						continue
 					}
-					inner := a.calleeStoreModeIntoSeen(callee, s.index, ti, seen)
-					if inner != storeNone && s.mode == storeElements {
-						// The callee stores (part of) an element value, never this source's header.
-						inner = storeElements
-					}
+					// The callee stores at most what this argument carried (an element value of an
+					// element-mode argument is never this source's header).
+					inner := narrowStoreMode(s.mode, a.calleeStoreModeIntoSeen(callee, s.index, ti, seen))
 					mode = storeScanRaise(decl, 233, n, mode, inner)
 				}
 			}
@@ -861,11 +870,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 					if argMode == storeNone {
 						continue
 					}
-					inner := a.calleeReturnModeOf(callee, i, seen)
-					if inner != storeNone && argMode == storeElements {
-						inner = storeElements
-					}
-					mode = maxStoreMode(mode, inner)
+					mode = maxStoreMode(mode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
 				}
 				return
 			}

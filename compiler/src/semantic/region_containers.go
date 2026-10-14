@@ -2156,11 +2156,12 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			continue
 		}
 		regions := []string{}
-		if elemState, tracked := a.trackedElementStateOfLocal(arg); mode == storeElements && tracked {
+		elementLike := mode == storeElements || mode == storeViews
+		if elemState, tracked := a.trackedElementStateOfLocal(arg); elementLike && tracked {
 			// Only element values read out of the argument can be stored: the argument's own
 			// backing region is not retained, only what its elements depend on.
 			regions = liveLocalRegionDependencyNames(elemState)
-		} else if mode == storeElements && !a.containerMayHoldRegionRefs(stripRefForBounds(a.exprTypes[arg])) {
+		} else if elementLike && !a.containerMayHoldRegionRefs(stripRefForBounds(a.exprTypes[arg])) {
 			// Elements that cannot hold a region reference (scalars, packed handles) carry none.
 			continue
 		} else {
