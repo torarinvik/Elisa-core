@@ -2143,19 +2143,15 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		}
 		// The store-flow summary is undirected between written params; refine it with the
 		// directed scan when the callee's body is visible.
-		res := storeResultWhole
+		mode := storeHeader
 		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
-			res = a.calleeStoreModeInto(decl, other, index)
+			mode = a.calleeStoreModeInto(decl, other, index)
 		}
-		mode := res.mode
 		if mode == storeNone {
 			continue
 		}
 		regions := []string{}
-		if fieldRegions, scoped := a.fieldScopedStoreRegions(arg, res); scoped {
-			// Only listed fields of a struct argument can be stored: their own dependencies.
-			regions = fieldRegions
-		} else if elemState, tracked := a.trackedElementStateOfLocal(arg); mode == storeElements && tracked {
+		if elemState, tracked := a.trackedElementStateOfLocal(arg); mode == storeElements && tracked {
 			// Only element values read out of the argument can be stored: the argument's own
 			// backing region is not retained, only what its elements depend on.
 			regions = liveLocalRegionDependencyNames(elemState)
@@ -2187,52 +2183,6 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			}
 		}
 	}
-}
-
-// fieldScopedStoreRegions answers, for a header store limited to some top-level fields of a
-// struct argument, which live local regions those fields may depend on. A field's tracked
-// region-ref state gives its dependencies; a container-typed field additionally lives in the
-// struct local's recorded allocation region. A field with no tracked state that may view storage
-// falls back to the whole argument's dependencies. ok=false when the store is not field-scoped.
-func (a *Analyzer) fieldScopedStoreRegions(arg ast.Expr, res storeResult) ([]string, bool) {
-	if res.mode != storeHeader || res.whole || len(res.fields) == 0 {
-		return nil, false
-	}
-	st, isStruct := peelToStructType(a.exprTypes[arg])
-	if !isStruct || st == nil {
-		return nil, false
-	}
-	state, hasState := a.regionRefStateForExpr(arg)
-	seen := map[string]bool{}
-	var out []string
-	addAll := func(names []string) {
-		for _, n := range names {
-			if !seen[n] {
-				seen[n] = true
-				out = append(out, n)
-			}
-		}
-	}
-	for f := range res.fields {
-		field, known := st.Fields[f]
-		if !known {
-			return nil, false
-		}
-		if fieldState, tracked := state.Fields[f]; hasState && tracked {
-			addAll(liveLocalRegionDependencyNames(fieldState))
-		} else if hasState && (isRegionBorrowedStringOrViewType(field.Type) || isRegionBorrowedAggregateType(field.Type)) {
-			// An untracked view field may point anywhere the struct depends on.
-			addAll(liveLocalRegionDependencyNames(state))
-		}
-		if typeCarriesRegionStorage(field.Type) && !isRegionBorrowedStringOrViewType(field.Type) {
-			if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) {
-				addAll([]string{own})
-			} else if own := a.containerRegionOf(field.Type); own != "" && a.structLocalRegionIsLive(own) {
-				addAll([]string{own})
-			}
-		}
-	}
-	return out, true
 }
 
 // trackedElementStateOfLocal returns the tracked element provenance of a local darray argument

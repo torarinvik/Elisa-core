@@ -29,47 +29,6 @@ func maxStoreMode(x, y storeMode) storeMode {
 	return y
 }
 
-// storeResult is a storeMode plus, for a HEADER store, which part of the source is stored:
-// the whole value (whole), or only the listed top-level fields of a struct source (`src.f`).
-type storeResult struct {
-	mode   storeMode
-	whole  bool
-	fields map[string]bool
-}
-
-var storeResultNone = storeResult{}
-var storeResultWhole = storeResult{mode: storeHeader, whole: true}
-
-func storeResultOf(mode storeMode) storeResult {
-	if mode == storeHeader {
-		return storeResultWhole
-	}
-	return storeResult{mode: mode}
-}
-
-// joinStoreResult unions two results.
-func joinStoreResult(x, y storeResult) storeResult {
-	out := storeResult{mode: maxStoreMode(x.mode, y.mode), whole: x.whole || y.whole}
-	if out.mode != storeHeader || out.whole {
-		if out.mode == storeHeader {
-			out.whole = true
-		}
-		return out
-	}
-	out.fields = map[string]bool{}
-	for f := range x.fields {
-		out.fields[f] = true
-	}
-	for f := range y.fields {
-		out.fields[f] = true
-	}
-	if len(out.fields) == 0 {
-		out.whole = true
-		out.fields = nil
-	}
-	return out
-}
-
 // calleeStoreModeInto is a DIRECTED, syntactic refinement of the store-flow summary for a
 // struct-reference target: what may the callee store from parameter `other` into storage rooted
 // at parameter `index`? The store-flow summary unions every pair of written parameters, so
@@ -81,21 +40,20 @@ func joinStoreResult(x, y storeResult) storeResult {
 // construct this scan does not model whose header mentions a tainted name). A store into the
 // target is any assignment whose target is rooted at a target alias, any method call on a
 // target-rooted receiver, and any call passing both a target-rooted and a tainted argument --
-// recursed into when the callee resolves, assumed a HEADER store otherwise. A header store of
-// a field projection (`src.f`, or a local bound to one) records just that field.
-func (a *Analyzer) calleeStoreModeInto(decl *ast.FuncDecl, other, index int) storeResult {
+// recursed into when the callee resolves, assumed a HEADER store otherwise.
+func (a *Analyzer) calleeStoreModeInto(decl *ast.FuncDecl, other, index int) storeMode {
 	key := storeScanKey{decl, other, index}
-	if res, ok := a.storeScanCache[key]; ok {
-		return res
+	if mode, ok := a.storeScanCache[key]; ok {
+		return mode
 	}
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
-	res := a.calleeStoreModeIntoSeen(decl, other, index, map[storeScanKey]bool{})
+	mode := a.calleeStoreModeIntoSeen(decl, other, index, map[storeScanKey]bool{})
 	a.storeScanCycleHit = saved
 	// The top-level result of one DFS is the complete least fixpoint for its own key: every
 	// body on any cycle through it was scanned within this search.
-	a.cacheStoreScan(key, res)
-	return res
+	a.cacheStoreScan(key, mode)
+	return mode
 }
 
 type storeScanKey struct {
@@ -103,242 +61,75 @@ type storeScanKey struct {
 	other, index int
 }
 
-func (a *Analyzer) cacheStoreScan(key storeScanKey, res storeResult) {
+func (a *Analyzer) cacheStoreScan(key storeScanKey, mode storeMode) {
 	if a.storeScanCache == nil {
-		a.storeScanCache = map[storeScanKey]storeResult{}
+		a.storeScanCache = map[storeScanKey]storeMode{}
 	}
-	a.storeScanCache[key] = res
+	a.storeScanCache[key] = mode
 }
 
 // calleeStoreModeIntoSeen memoizes an inner frame only when its search hit no in-progress
 // frame: a provisional `none` for an open cycle member is not final for the frames inside it.
-func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeResult {
+func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
 	key := storeScanKey{decl, other, index}
-	if res, ok := a.storeScanCache[key]; ok {
-		return res
+	if mode, ok := a.storeScanCache[key]; ok {
+		return mode
 	}
 	if seen[key] {
 		// A recursive cycle adds no store the rest of the body does not already show.
 		a.storeScanCycleHit = true
-		return storeResultNone
+		return storeNone
 	}
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
-	res := a.calleeStoreModeIntoBody(decl, other, index, seen)
+	mode := a.calleeStoreModeIntoBody(decl, other, index, seen)
 	hit := a.storeScanCycleHit
 	if !hit {
-		a.cacheStoreScan(key, res)
+		a.cacheStoreScan(key, mode)
 	}
 	a.storeScanCycleHit = saved || hit
-	return res
+	return mode
 }
 
-// storeScanFieldProvenance maps each HEADER name to the top-level source field it holds, or ""
-// when it may hold the whole source: a local bound only to `src.f...` (or to a local that holds
-// field f) holds field f.
-func storeScanFieldProvenance(decl *ast.FuncDecl, source string, header map[string]bool) map[string]string {
-	prov := map[string]string{}
-	for name := range header {
-		prov[name] = ""
-	}
-	bindings := map[string][]ast.Expr{}
-	walkStoreScanNodes(decl.Body, func(node any) {
-		switch n := node.(type) {
-		case *ast.VarDeclStmt:
-			if n != nil && header[n.Name] {
-				bindings[n.Name] = append(bindings[n.Name], n.Value)
-			}
-		case *ast.AssignStmt:
-			if id, ok := n.Target.(*ast.Ident); ok && id != nil && header[id.Name] {
-				bindings[id.Name] = append(bindings[id.Name], n.Value)
-			}
-		}
-	})
-	fieldOf := func(value ast.Expr) (string, bool) {
-		value = storeScanUnwrap(value)
-		if id, ok := value.(*ast.Ident); ok && id != nil {
-			if f, known := prov[id.Name]; known && f != "" {
-				return f, true
-			}
-			return "", false
-		}
-		// Walk a field chain down to its root; the field right above the root is the top field.
-		chain := value
-		top := ""
-		for {
-			fe, ok := chain.(*ast.FieldExpr)
-			if !ok || fe == nil {
-				break
-			}
-			top = fe.Field
-			chain = storeScanUnwrap(fe.Object)
-		}
-		root, ok := chain.(*ast.Ident)
-		if !ok || root == nil || top == "" {
-			return "", false
-		}
-		if root.Name == source {
-			return top, true
-		}
-		if f, known := prov[root.Name]; known && f != "" {
-			return f, true
-		}
-		return "", false
-	}
-	for changed := true; changed; {
-		changed = false
-		for name, values := range bindings {
-			if name == source || prov[name] != "" {
-				continue
-			}
-			field := ""
-			ok := len(values) > 0
-			for _, v := range values {
-				f, isField := fieldOf(v)
-				if !isField || (field != "" && f != field) {
-					ok = false
-					break
-				}
-				field = f
-			}
-			if ok && field != "" {
-				prov[name] = field
-				changed = true
-			}
-		}
-	}
-	return prov
-}
-
-// storeScanHeaderParts reports which parts of the source a header-mentioning expression may
-// carry: the whole source, or only the listed top-level fields.
-func storeScanHeaderParts(node ast.Expr, header map[string]bool, prov map[string]string, source string) (bool, map[string]bool) {
-	whole := false
-	fields := map[string]bool{}
-	var rec func(e ast.Expr)
-	rec = func(e ast.Expr) {
-		if e == nil || whole {
-			return
-		}
-		e = storeScanUnwrap(e)
-		switch x := e.(type) {
-		case *ast.Ident:
-			if x == nil || !(header[x.Name] || header[rootNameOfDotted(x.Name)]) {
-				return
-			}
-			if f := prov[x.Name]; f != "" {
-				fields[f] = true
-				return
-			}
-			whole = true
-			return
-		case *ast.FieldExpr:
-			if x == nil {
-				return
-			}
-			switch x.Field {
-			case "count", "len", "capacity", "is_empty":
-				return
-			}
-			// `src.f.g` with src the whole source: only top field f is reached.
-			chain := ast.Expr(x)
-			top := ""
-			for {
-				fe, ok := chain.(*ast.FieldExpr)
-				if !ok || fe == nil {
-					break
-				}
-				top = fe.Field
-				chain = storeScanUnwrap(fe.Object)
-			}
-			if root, ok := chain.(*ast.Ident); ok && root != nil && header[root.Name] {
-				if f := prov[root.Name]; f != "" {
-					fields[f] = true
-				} else if root.Name == source && top != "" {
-					fields[top] = true
-				} else {
-					whole = true
-				}
-				return
-			}
-		}
-		if storeScanMentionsHeader(e, header) {
-			// Any other shape (a call over the source, a conditional, an index into a field)
-			// may carry the whole value.
-			whole = true
-		}
-	}
-	rec(node)
-	return whole, fields
-}
-
-func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeResult {
+func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
 	if decl == nil || other < 0 || index < 0 || other >= len(decl.Params) || index >= len(decl.Params) || len(decl.Body) == 0 {
-		return storeResultWhole
+		return storeHeader
 	}
 	key := storeScanKey{decl, other, index}
 	seen[key] = true
-	source := decl.Params[other].Name
 	params, header, content, targets := storeScanTaint(decl, other, decl.Params[index].Name)
-	prov := storeScanFieldProvenance(decl, source, header)
-	var valueResult func(value ast.Expr) storeResult
-	valueResult = func(value ast.Expr) storeResult {
+	var valueMode func(value ast.Expr) storeMode
+	valueMode = func(value ast.Expr) storeMode {
 		inner := storeScanUnwrap(value)
 		// A value whose (already analyzed) type cannot hold region storage carries none.
 		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && !typeCarriesRegionStorage(t) && !a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) {
-			return storeResultNone
+			return storeNone
 		}
 		// A struct literal stores each field value: judge them one by one.
 		if lit, isLit := inner.(*ast.StructLitExpr); isLit && lit != nil {
-			res := storeResultNone
+			mode := storeNone
 			for _, arg := range lit.Args {
-				res = joinStoreResult(res, valueResult(arg))
+				mode = maxStoreMode(mode, valueMode(arg))
 			}
 			for _, spread := range lit.Spreads {
-				res = joinStoreResult(res, valueResult(spread))
+				mode = maxStoreMode(mode, valueMode(spread))
 			}
 			if lit.CopyBase != nil {
-				res = joinStoreResult(res, valueResult(lit.CopyBase))
+				mode = maxStoreMode(mode, valueMode(lit.CopyBase))
 			}
-			return res
+			return mode
 		}
 		if storeScanMentionsHeader(value, header) {
-			whole, fields := storeScanHeaderParts(inner, header, prov, source)
-			if whole || len(fields) == 0 {
-				return storeResultWhole
-			}
-			return storeResult{mode: storeHeader, fields: fields}
+			return storeHeader
 		}
 		if storeScanMentions(value, content) {
-			return storeResult{mode: storeElements}
+			return storeElements
 		}
-		return storeResultNone
+		return storeNone
 	}
-	res := storeResultNone
-	raise := func(rule int, node ast.Node, next storeResult) {
-		before := res.mode
-		res = joinStoreResult(res, next)
-		storeScanRaise(decl, rule, node, before, next.mode)
-	}
-	// mapThrough narrows a callee's result on a parameter to what the passed argument carries:
-	// an element-only argument stores elements; a field-projection argument stores that field.
-	mapThrough := func(argRes, inner storeResult) storeResult {
-		if inner.mode == storeNone {
-			return storeResultNone
-		}
-		if argRes.mode == storeElements {
-			return storeResult{mode: storeElements}
-		}
-		if inner.mode != storeHeader {
-			return inner
-		}
-		if argRes.whole {
-			return inner
-		}
-		return storeResult{mode: storeHeader, fields: argRes.fields}
-	}
+	mode := storeNone
 	walkStoreScanNodes(decl.Body, func(node any) {
-		if res.mode == storeHeader && res.whole {
+		if mode == storeHeader {
 			return
 		}
 		switch n := node.(type) {
@@ -355,7 +146,8 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				return
 			}
 			// `table <- f(table, scope)`: the stored value is the call's RESULT. The call's own
-			// stores are scanned when the walk reaches it.
+			// stores are scanned when the walk reaches it; its result carries a tainted argument
+			// only when the callee's summary connects that argument to its return.
 			if call, isCall := storeScanUnwrap(n.Value).(*ast.CallExpr); isCall && call != nil {
 				if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
 					if a.declReturnsVoid(callee) {
@@ -366,16 +158,20 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					// A non-void call result carries what the callee may RETURN from each tainted
 					// argument (a directed scan of its return statements).
 					for i, arg := range returnBorrowCallArgs(call) {
-						argRes := valueResult(arg)
-						if argRes.mode == storeNone || !a.declParamCarriesStorage(callee, i) {
+						argMode := valueMode(arg)
+						if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
 							continue
 						}
-						raise(160, n, mapThrough(argRes, storeResultOf(a.calleeReturnModeOf(callee, i, seen))))
+						inner := a.calleeReturnModeOf(callee, i, seen)
+						if inner != storeNone && argMode == storeElements {
+							inner = storeElements
+						}
+						mode = storeScanRaise(decl, 160, n, mode, inner)
 					}
 					return
 				}
 			}
-			raise(167, n, valueResult(n.Value))
+			mode = storeScanRaise(decl, 167, n, mode, valueMode(n.Value))
 		case *ast.CallExpr:
 			if n == nil {
 				return
@@ -385,38 +181,38 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			if isMethod && field != nil {
 				if root := rootIdentExpr(field.Object); root != nil && targets[root.Name] {
 					for _, arg := range n.Args {
-						raise(177, n, valueResult(arg))
+						mode = storeScanRaise(decl, 177, n, mode, valueMode(arg))
 					}
 				}
 			}
 			type side struct {
 				index int
-				res   storeResult
+				mode  storeMode
 			}
 			targetArgs, taintedArgs := []int{}, []side{}
 			for i, arg := range args {
 				if storeScanMentions(arg, targets) {
 					targetArgs = append(targetArgs, i)
 				}
-				if r := valueResult(arg); r.mode != storeNone {
-					taintedArgs = append(taintedArgs, side{i, r})
+				if m := valueMode(arg); m != storeNone {
+					taintedArgs = append(taintedArgs, side{i, m})
 				}
 			}
 			if isMethod && field != nil && len(args) == len(n.Args) {
 				// An unrewritten method call: the receiver is an operand too, and the callee is
 				// unresolved. A builtin growth method moves its arguments INTO the receiver only.
 				recvTarget := storeScanMentions(field.Object, targets)
-				recvRes := valueResult(field.Object)
+				recvMode := valueMode(field.Object)
 				if containerGrowthMethods[field.Field] && !recvTarget {
 					return
 				}
 				if recvTarget {
 					for _, s := range taintedArgs {
-						raise(204, n, s.res)
+						mode = storeScanRaise(decl, 204, n, mode, s.mode)
 					}
 				}
-				if recvRes.mode != storeNone && len(targetArgs) > 0 {
-					raise(208, n, recvRes)
+				if recvMode != storeNone && len(targetArgs) > 0 {
+					mode = storeScanRaise(decl, 208, n, mode, recvMode)
 				}
 				return
 			}
@@ -426,7 +222,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			callee, ok := a.resolveReadOnlyScanCallee(n)
 			if !ok || callee == nil || !storeFlowCallFitsParams(callee, n) || funcHasArenaParam(callee) {
 				for _, s := range taintedArgs {
-					raise(218, n, s.res)
+					mode = storeScanRaise(decl, 218, n, mode, s.mode)
 				}
 				return
 			}
@@ -445,16 +241,21 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						// store between them, unless it BUNDLES both into a fresh aggregate the
 						// callee could then split and store.
 						if storeScanBundles(args[ti]) {
-							raise(225, n, s.res)
+							mode = storeScanRaise(decl, 225, n, mode, s.mode)
 						}
 						continue
 					}
-					raise(233, n, mapThrough(s.res, a.calleeStoreModeIntoSeen(callee, s.index, ti, seen)))
+					inner := a.calleeStoreModeIntoSeen(callee, s.index, ti, seen)
+					if inner != storeNone && s.mode == storeElements {
+						// The callee stores (part of) an element value, never this source's header.
+						inner = storeElements
+					}
+					mode = storeScanRaise(decl, 233, n, mode, inner)
 				}
 			}
 		}
 	})
-	return res
+	return mode
 }
 
 // storeScanMentionsHeader reports whether an expression may evaluate to (or view) a HEADER name
@@ -857,8 +658,8 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		return storeHeader
 	}
 	key := storeScanKey{decl, other, -1}
-	if res, ok := a.storeScanCache[key]; ok {
-		return res.mode
+	if mode, ok := a.storeScanCache[key]; ok {
+		return mode
 	}
 	if seen[key] {
 		a.storeScanCycleHit = true
@@ -914,7 +715,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	})
 	hit := a.storeScanCycleHit
 	if !hit {
-		a.cacheStoreScan(key, storeResultOf(mode))
+		a.cacheStoreScan(key, mode)
 	}
 	a.storeScanCycleHit = saved || hit
 	return mode
