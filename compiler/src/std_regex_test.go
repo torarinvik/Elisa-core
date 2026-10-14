@@ -95,7 +95,11 @@ def main() -> i32 can[Memory.Allocate, Abort.Panic, Console, Unsafe.RawExtern, U
 	// Long texts where forward search from prefiltered starts re-steps the same bytes
 	// (quadratic without the work budget), forcing the switch to the start bitmap.
 	cases = append(cases, regexCase{"a[^b]*b", strings.Repeat("a", 3000) + "b" + strings.Repeat("ac", 2000)},
-		regexCase{"(a|c)c*b", strings.Repeat("ac", 3000) + "b"})
+		regexCase{"(a|c)c*b", strings.Repeat("ac", 3000) + "b"},
+		// Required-literal line prefilter: multi-line texts, literals at line edges.
+		regexCase{"[a-z.]+@[a-z]+\\.[a-z]{2,}", "x a.b@cd.ef\n@\nq@w.er@t.yu\nzz@@a.bc\n\nab@c.de"},
+		regexCase{"[0-9]+\\.35", "1.35\n.35\n9.355.35\n12.3\n5.35"},
+		regexCase{"ab+c", "abbc\nabc\nac\nab\nbc\nabbbbc"})
 	alphabet := "abcAB\n|"
 	for i := 0; i < 300; i++ {
 		var text strings.Builder
