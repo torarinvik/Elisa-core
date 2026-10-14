@@ -691,3 +691,59 @@ def bt() -> void:
 `
 	buildAndRunSoATest(t, "void_grower_region_poly_push", src, "bt")
 }
+
+// A factory whose struct local is built by a CALL (`b: mutable T = t_new()`), then grown in place
+// (directly, or through a `mutable T&` grower) and returned must adopt the caller's region like a
+// literal-built one: before, the grower call failed region inference ("cannot infer region
+// parameter") and direct field growth had "no region to grow into".
+func TestCallBuiltStructFactoryGrowsIntoCallerRegion(t *testing.T) {
+	src := `
+struct Big:
+    negative: mutable bool
+    limbs: mutable darray[u64]
+
+def big_from(v: u64) -> Big:
+    can Memory.Allocate, Abort.Panic:
+        b: mutable Big = Big{negative: false, limbs: []}
+        b.limbs.push(v)
+        return b
+
+def big_grow(b: mutable Big&, n: u64) -> bool:
+    can Memory.Allocate, Abort.Panic:
+        for i in 0..<n |b|:
+            b.limbs.push(i + 10)
+        return true
+
+def make_direct(v: u64) -> Big:
+    can Memory.Allocate, Abort.Panic:
+        b: mutable Big = big_from(v)
+        for i in 0..<40 |b|:
+            b.limbs.push(i.u64())
+        return b
+
+def make_via_grower(v: u64) -> Big:
+    can Memory.Allocate, Abort.Panic:
+        b: mutable Big = big_from(v)
+        _ = big_grow(&b, 40)
+        return b
+
+def churn() -> u64:
+    can Memory.Allocate, Abort.Panic:
+        junk: mutable darray[u64] = []
+        for i in 0..<1000 |junk|:
+            junk.push(i.u64() * 7)
+        return junk[999]
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        x: Big = make_direct(5)
+        y: Big = make_via_grower(6)
+        c: u64 = churn()
+        if x.limbs.count != 41 or x.limbs[0] != 5 or x.limbs[40] != 39 or c != 6993:
+            panic("direct call-built factory backing corrupted")
+        if y.limbs.count != 41 or y.limbs[0] != 6 or y.limbs[40] != 49:
+            panic("grower call-built factory backing corrupted")
+`
+	buildAndRunSoATest(t, "call_built_struct_factory", src, "bt")
+}
