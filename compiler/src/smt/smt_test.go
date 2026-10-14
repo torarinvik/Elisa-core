@@ -9,8 +9,8 @@ import (
 // optional by design).
 func z3Available(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("z3"); err != nil {
-		t.Skip("z3 not on PATH; SMT harness test skipped")
+	if _, err := exec.LookPath(ResolveBinary("")); err != nil {
+		t.Skip("configured z3 (ELISA_Z3 / build default) not found; SMT harness test skipped")
 	}
 }
 
