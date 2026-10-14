@@ -156,8 +156,23 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		if !storeScanMentions(value, content) {
 			return storeNone
 		}
+		// A nested call's result carries, from each argument, only what its callee may RETURN
+		// from that parameter (the rule-160 judgement, applied inside a stored value).
+		if call, isCall := inner.(*ast.CallExpr); isCall && call != nil {
+			if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) && !a.declReturnsVoid(callee) {
+				mode := storeNone
+				for i, arg := range returnBorrowCallArgs(call) {
+					argMode := valueMode(arg)
+					if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
+						continue
+					}
+					mode = maxStoreMode(mode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
+				}
+				return mode
+			}
+		}
 		// A view-only value derived from a byte-free source cannot point into the source's storage.
-		if views != nil && a.storeScanValueIsView(inner, views) {
+		if views != nil && a.storeScanValueIsView(decl, inner, views) {
 			return storeViews
 		}
 		if storeScanMentionsHeader(value, header) {
@@ -286,7 +301,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 						// One argument derived from both sides (`f(table.types[id])`) is not a
 						// store between them, unless it BUNDLES both into a fresh aggregate the
 						// callee could then split and store.
-						if storeScanBundles(args[ti]) && a.storeScanBundleHasWritableTarget(args[ti], targets) {
+						if storeScanBundles(args[ti]) && a.storeScanBundleHasWritableTarget(args[ti], targets) && !a.storeScanCallResultDropsTarget(args[ti], targets, seen) {
 							mode = storeScanRaise(decl, 225, n, mode, s.mode)
 						}
 						continue
@@ -630,12 +645,111 @@ func storeScanBundles(arg ast.Expr) bool {
 	return found
 }
 
+// storeScanCallResultDropsTarget: the argument is a resolvable call whose result can carry, from
+// every argument mentioning a target, at most read-only views (the callee's directed return scan
+// for that parameter is none or views). Such a result bundles no writable target component, so
+// a callee receiving it cannot write source storage into the target through it.
+func (a *Analyzer) storeScanCallResultDropsTarget(arg ast.Expr, targets map[string]bool, seen map[storeScanKey]bool) bool {
+	call, ok := storeScanUnwrap(arg).(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	callee, ok := a.resolveReadOnlyScanCallee(call)
+	if !ok || callee == nil || !storeFlowCallFitsParams(callee, call) || funcHasArenaParam(callee) || a.declReturnsVoid(callee) {
+		return false
+	}
+	for i, inner := range returnBorrowCallArgs(call) {
+		if !storeScanMentions(inner, targets) || !a.declParamCarriesStorage(callee, i) {
+			continue
+		}
+		if a.calleeReturnModeOf(callee, i, seen) > storeViews && !a.calleeReturnsNothingWritableFrom(callee, i) {
+			return false
+		}
+	}
+	return true
+}
+
+// calleeReturnsNothingWritableFrom: every value decl returns is explicit (a `return`, no lmut
+// thread slots) and carries from parameter i only read-only parts -- views and scalars, judged by
+// storeScanBundleHasWritableTargetRO over the names derived from that parameter.
+func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int) bool {
+	if decl == nil || i < 0 || i >= len(decl.Params) || len(decl.Body) == 0 || len(decl.LmutThreadSlots) > 0 {
+		return false
+	}
+	key := storeScanKey{decl, i, -2}
+	if cached, ok := a.storeScanWritableCache[key]; ok {
+		return cached
+	}
+	_, _, content, _, _ := a.storeScanTaint(decl, i, "")
+	readOnly := a.storeScanReadOnlyLocals(decl)
+	ok, sawReturn := true, false
+	walkStoreScanNodes(decl.Body, func(node any) {
+		ret, isRet := node.(*ast.ReturnStmt)
+		if !isRet || ret == nil || !ok {
+			return
+		}
+		sawReturn = true
+		if ret.Value != nil && a.storeScanBundleHasWritableTargetRO(ret.Value, content, readOnly) {
+			ok = false
+		}
+	})
+	result := ok && (sawReturn || a.declReturnsVoid(decl))
+	if a.storeScanWritableCache == nil {
+		a.storeScanWritableCache = map[storeScanKey]bool{}
+	}
+	a.storeScanWritableCache[key] = result
+	return result
+}
+
+// storeScanReadOnlyLocals: body locals every declaration of which is annotated as a view
+// (`sview`/`cstr`) or a plain scalar, bound by no other construct. Memoized per function.
+func (a *Analyzer) storeScanReadOnlyLocals(decl *ast.FuncDecl) map[string]bool {
+	if cached, ok := a.storeScanReadOnlyCache[decl]; ok {
+		return cached
+	}
+	readOnly, other := map[string]bool{}, map[string]bool{}
+	walkStoreScanNodes(decl.Body, func(node any) {
+		if v, isVar := node.(*ast.VarDeclStmt); isVar {
+			if v == nil {
+				return
+			}
+			if !other[v.Name] && (storeScanTypeExprIsView(v.Type) || storeScanTypeExprIsPlainScalar(v.Type)) {
+				readOnly[v.Name] = true
+				return
+			}
+			other[v.Name] = true
+			delete(readOnly, v.Name)
+			return
+		}
+		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
+			for _, name := range stmtBoundNames(st) {
+				other[name] = true
+				delete(readOnly, name)
+			}
+		}
+	})
+	for _, p := range decl.Params {
+		delete(readOnly, p.Name)
+	}
+	if a.storeScanReadOnlyCache == nil {
+		a.storeScanReadOnlyCache = map[*ast.FuncDecl]map[string]bool{}
+	}
+	a.storeScanReadOnlyCache[decl] = readOnly
+	return readOnly
+}
+
 // storeScanBundleHasWritableTarget reports whether a bundled argument carries a target-side
 // component the callee could WRITE source storage into: a target-aliasing name whose type shares
 // indirect storage (a container, reference or aggregate holding one). A target-derived string or
 // view (`sview`, `cstr`) is read-only, so bundling it next to a source component moves nothing
 // into the target. An untyped mention is assumed writable.
 func (a *Analyzer) storeScanBundleHasWritableTarget(arg ast.Expr, targets map[string]bool) bool {
+	return a.storeScanBundleHasWritableTargetRO(arg, targets, nil)
+}
+
+// storeScanBundleHasWritableTargetRO: storeScanBundleHasWritableTarget, where a name in readOnly
+// (a local only ever declared as a view or plain scalar) is a read-only mention.
+func (a *Analyzer) storeScanBundleHasWritableTargetRO(arg ast.Expr, targets, readOnly map[string]bool) bool {
 	// A typed sub-expression that cannot share storage (`h.name: sview`, `h.count`) is read-only
 	// whatever it mentions, so the walk does not descend into it.
 	found := false
@@ -656,6 +770,9 @@ func (a *Analyzer) storeScanBundleHasWritableTarget(arg ast.Expr, targets map[st
 					return
 				}
 				if id, isIdent := expr.(*ast.Ident); isIdent {
+					if readOnly[id.Name] {
+						return
+					}
 					if targets[id.Name] || targets[rootNameOfDotted(id.Name)] {
 						found = true
 					}
@@ -987,7 +1104,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		if !storeScanMentions(value, content) {
 			return
 		}
-		if views != nil && a.storeScanValueIsView(value, views) {
+		if views != nil && (a.storeScanValueIsView(decl, value, views) || a.storeScanDeclReturnsViewOnly(decl)) {
 			mode = maxStoreMode(mode, storeViews)
 		} else if storeScanMentionsHeader(value, header) {
 			mode = storeHeader
@@ -1390,19 +1507,80 @@ func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[
 
 // storeScanValueIsView reports whether a value is a plain `sview`/`cstr` (by analyzed type, or as a
 // view local from storeScanViewLocals). References and `view[T]` slices are not.
-func (a *Analyzer) storeScanValueIsView(value ast.Expr, views map[string]bool) bool {
+func (a *Analyzer) storeScanValueIsView(decl *ast.FuncDecl, value ast.Expr, views map[string]bool) bool {
 	inner := storeScanUnwrap(value)
-	if t, known := a.exprTypes[inner]; known && t != nil {
-		switch StripAggregateStateType(t).(type) {
-		case *SViewType, *CStrType:
-			return true
-		}
-		return typeComponentsViewOnly(t)
+	t, known := a.exprTypes[inner]
+	if !known || t == nil {
+		// Before the body is analyzed: `p.f[i]` / `p.f` typed from the signature.
+		t, known = a.storeScanDeclTypeOf(decl, inner)
+	}
+	if known && t != nil {
+		return storeScanTypeIsViewOnly(t)
 	}
 	if id, ok := inner.(*ast.Ident); ok && id != nil {
 		return views[id.Name]
 	}
 	return false
+}
+
+func storeScanTypeIsViewOnly(t Type) bool {
+	switch StripAggregateStateType(t).(type) {
+	case *SViewType, *CStrType:
+		return true
+	}
+	return typeComponentsViewOnly(t)
+}
+
+// storeScanDeclReturnsViewOnly: decl's resolved return type is view-only (and nothing else is
+// returned through lmut thread slots), so whatever it returns is at most a view.
+func (a *Analyzer) storeScanDeclReturnsViewOnly(decl *ast.FuncDecl) bool {
+	if decl == nil || len(decl.LmutThreadSlots) > 0 {
+		return false
+	}
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok || ft == nil || ft.Return == nil || containsTypeParam(ft.Return) {
+		return false
+	}
+	return storeScanTypeIsViewOnly(ft.Return)
+}
+
+// storeScanDeclTypeOf types a param field chain `p.f.g`, or an index into one `p.f[i]`, from
+// decl's resolved signature (storeScanParamFieldChainType).
+func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type, bool) {
+	if decl == nil || expr == nil {
+		return nil, false
+	}
+	switch e := expr.(type) {
+	case *ast.FieldExpr:
+		return a.storeScanParamFieldChainType(decl, e)
+	case *ast.IndexExpr:
+		if e == nil || e.Index2 != nil {
+			return nil, false
+		}
+		object, ok := storeScanUnwrap(e.Object).(*ast.FieldExpr)
+		if !ok {
+			return nil, false
+		}
+		t, ok := a.storeScanParamFieldChainType(decl, object)
+		if !ok {
+			return nil, false
+		}
+		switch c := stripRefForBounds(t).(type) {
+		case *DArrayType:
+			if c != nil && c.Elem != nil {
+				return c.Elem, true
+			}
+		case *ArrayType:
+			if c != nil && c.Elem != nil {
+				return c.Elem, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // storeScanTypeExprIsView: a declared `sview` / `cstr` (no reference wrapper).
