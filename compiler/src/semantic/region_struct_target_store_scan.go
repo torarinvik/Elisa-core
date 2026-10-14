@@ -178,10 +178,17 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			}
 			args := returnBorrowCallArgs(n)
 			field, isMethod := n.Func.(*ast.FieldExpr)
+			// A builtin darray's `extend(xs)` copies xs's ELEMENTS into the receiver; it never
+			// retains xs's own header.
+			copiesElements := isMethod && field != nil && field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(field.Object)
 			if isMethod && field != nil {
 				if root := rootIdentExpr(field.Object); root != nil && targets[root.Name] {
 					for _, arg := range n.Args {
-						mode = storeScanRaise(decl, 177, n, mode, valueMode(arg))
+						argMode := valueMode(arg)
+						if copiesElements && argMode == storeHeader {
+							argMode = storeElements
+						}
+						mode = storeScanRaise(decl, 177, n, mode, argMode)
 					}
 				}
 			}
@@ -208,7 +215,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				}
 				if recvTarget {
 					for _, s := range taintedArgs {
-						mode = storeScanRaise(decl, 204, n, mode, s.mode)
+						argMode := s.mode
+						if copiesElements && argMode == storeHeader {
+							argMode = storeElements
+						}
+						mode = storeScanRaise(decl, 204, n, mode, argMode)
 					}
 				}
 				if recvMode != storeNone && len(targetArgs) > 0 {
@@ -739,7 +750,16 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 				// that names no value (an enum constructor `Expr.Field(..)`) is not a receiver.
 				if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
 					if root := rootIdentExpr(field.Object); root != nil && !params[root.Name] && a.storeScanReceiverIsValue(root.Name, locals) {
+						// A builtin darray `extend(xs)` copies xs's elements: the receiver then
+						// holds values read out of xs (content), never xs's header.
+						copiesElements := field.Field == "extend" && a.storeScanReceiverIsBuiltinDArray(field.Object)
 						for _, arg := range n.Args {
+							if copiesElements {
+								if storeScanMentions(arg, content) && add(content, root.Name) {
+									changed = true
+								}
+								continue
+							}
 							if taint(root.Name, arg) {
 								changed = true
 							}
@@ -1028,4 +1048,15 @@ func (a *Analyzer) storeScanReceiverIsValue(name string, locals map[string]bool)
 // resolve through the global scope.
 func (a *Analyzer) storeScanLooksLikeTypeName(name string) bool {
 	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+// storeScanReceiverIsBuiltinDArray reports whether a method receiver's analyzed type is a builtin
+// darray (refs peeled). An unknown type answers false (the caller then keeps its conservative mode).
+func (a *Analyzer) storeScanReceiverIsBuiltinDArray(recv ast.Expr) bool {
+	t, known := a.exprTypes[storeScanUnwrap(recv)]
+	if !known || t == nil {
+		return false
+	}
+	_, ok := stripRefForBounds(t).(*DArrayType)
+	return ok
 }

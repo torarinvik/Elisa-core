@@ -380,3 +380,46 @@ def read(h: mutable Holder&) -> usize:
 		t.Fatalf("expected only the writable bundle (line 30) to be rejected, got %d:\n%s", got, joined)
 	}
 }
+
+// A builtin darray `extend(xs)` copies xs's elements into the receiver and never retains xs's
+// header, so a callee that extends a target field from a grown local's darray stores no local
+// backing (accepted); pushing the darray itself as an element does retain it (rejected).
+func TestStoreScanExtendCopiesElementsNotHeader(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_extend.elisa", `struct Path:
+    names: mutable darray[i64] = []
+    nested: mutable darray[darray[i64]] = []
+
+struct Log:
+    paths: mutable darray[Path] = []
+
+def absorb(path: mutable Path&, xs: darray[i64]&) -> void:
+    can Memory.Allocate:
+        path.names.extend(xs)
+
+def keep(path: mutable Path&, xs: darray[i64]) -> void:
+    can Memory.Allocate:
+        path.nested.push(xs)
+
+def record(log: mutable Log&, xs: darray[i64]&) -> void:
+    can Memory.Allocate:
+        p: mutable Path = Path{}
+        p.names.extend(xs)
+        log.paths.push(p)
+
+def fill(path: mutable Path&, log: mutable Log&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        for i in 0..<10 |local|:
+            local.push(i.i64())
+        absorb(path, &local)
+        record(log, &local)
+        keep(path, local)
+`)
+	errs := result.Errors()
+	// Line 20: record's own local `p` is built in record's inferred region and pushed into the
+	// caller's log (the void-grower adoption gap, tracked separately). The record CALL (line 28)
+	// must not add a store of `local`'s header: extend copied only its elements.
+	if len(errs) != 2 || !strings.Contains(errs[0], ":20:") || !strings.Contains(errs[1], ":29:") {
+		t.Fatalf("expected only lines 20 and 29 rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
