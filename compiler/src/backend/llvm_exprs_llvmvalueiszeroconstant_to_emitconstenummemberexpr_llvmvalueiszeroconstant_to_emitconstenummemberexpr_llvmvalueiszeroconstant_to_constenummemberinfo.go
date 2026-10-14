@@ -469,6 +469,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitExpr(n.Inner, expected)
 	case *ast.CanExpr:
 		value, actualType, err = s.emitExpr(n.Expr, expected)
+	case *ast.QuantifierExpr:
+		value, err = s.emitQuantifierExpr(n)
 	default:
 		return nil, nil, fmt.Errorf("unsupported expression %T", expr)
 	}
