@@ -1353,6 +1353,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 			a.recordDeathTimeData(fn)
 		}
 	}
+	reassignReclaims := a.computeReassignReclaims(collectRegionPolyCandidateFuncs(activeDecls))
 	a.closeSMT()
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
@@ -1390,6 +1391,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ParallelFor:             a.parallelForInfo,
 		TaskGroupSubmits:        a.taskGroupSubmits,
 		CallArgDisjoint:         a.callArgDisjoint,
+		ReassignReclaims:        reassignReclaims,
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,
 		LemmaCalls:              a.lemmaCalls,

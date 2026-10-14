@@ -79,6 +79,9 @@ type Result struct {
 	// register each handle; lifetime analysis uses the same call identity.
 	TaskGroupSubmits   map[*ast.CallExpr]TaskGroupSubmitInfo
 	CallArgDisjoint    map[*ast.CallExpr]*CallArgDisjointInfo
+	// ReassignReclaims are `x <- f(..)` assignments whose target's previous darray buffer is
+	// provably unreferenced (analyzer_reassign_reclaim.go); the backend returns it to its arena.
+	ReassignReclaims map[*ast.AssignStmt]bool
 	FuncDisjointParams map[*ast.FuncDecl]*FuncDisjointParamInfo
 	// LawIsCalls desugars a `subject is Law` predicate application (docs/85 §2: `is` = UFCS
 	// first-arg binding) into the synthetic call `Law(subject)`. Analysis type-checks the call and

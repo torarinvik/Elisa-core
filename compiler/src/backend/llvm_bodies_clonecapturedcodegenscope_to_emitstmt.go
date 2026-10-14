@@ -1799,6 +1799,11 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
+		if s.g.result != nil && s.g.result.ReassignReclaims[n] {
+			if err := s.emitReassignReclaim(n, ptr, targetType); err != nil {
+				return err
+			}
+		}
 		if err := s.storeValue(ptr, value, targetType, "assign"); err != nil {
 			return err
 		}

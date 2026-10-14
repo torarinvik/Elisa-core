@@ -532,6 +532,7 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		"free_region_backend",
 		"arena_alloc",
 		"arena_realloc",
+		"arena_reclaim_bytes",
 		"arena_memcpy",
 		"arena_memeq",
 		"arena_strdup",

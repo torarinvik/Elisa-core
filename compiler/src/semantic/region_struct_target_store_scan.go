@@ -327,6 +327,9 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 
 // walkStoreScanNodes visits every AST node pointer reachable from stmts.
 func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
+	// Desugaring shares subtrees (a nested guard chain reuses its operands), so an unmemoized
+	// reflective walk is exponential in nesting depth. Each node is visited once.
+	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -334,9 +337,10 @@ func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 		}
 		switch v.Kind() {
 		case reflect.Pointer:
-			if v.IsNil() {
+			if v.IsNil() || seen[v.Pointer()] {
 				return
 			}
+			seen[v.Pointer()] = true
 			visit(v.Interface())
 			rec(v.Elem())
 		case reflect.Interface:
@@ -364,6 +368,7 @@ func storeScanMentions(node any, names map[string]bool) bool {
 		return false
 	}
 	found := false
+	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if found || !v.IsValid() || !v.CanInterface() {
@@ -371,9 +376,10 @@ func storeScanMentions(node any, names map[string]bool) bool {
 		}
 		switch v.Kind() {
 		case reflect.Pointer:
-			if v.IsNil() {
+			if v.IsNil() || seen[v.Pointer()] {
 				return
 			}
+			seen[v.Pointer()] = true
 			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
 				if names[id.Name] || names[rootNameOfDotted(id.Name)] {
 					found = true

@@ -965,6 +965,14 @@ def arena_region_contains_address(r: heap Region&, raw: uintptr) -> bool:
     return false if raw < base
     return (raw - base).usize() < r.capacity * size_of(uintptr)
 
+# Compiler-emitted reclaim of a darray buffer the analyzer proved unreferenced (a reassigned local
+# whose old value has no other header copy or view; analyzer_reassign_reclaim.go). size_bytes is
+# the buffer's capacity in bytes. A pointer outside `a` is ignored by arena_reclaim_allocation.
+def arena_reclaim_bytes(a: mutable Arena&, ptr: mutable void&, size_bytes: usize):
+    can Abort.Panic:
+        return if size_bytes == 0
+        (arena_reclaim_allocation(a, ptr, arena_size_bytes_to_slots(size_bytes), size_bytes) can Global{Read,Write})
+
 @internal
 def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize):
     can Abort.Panic:
