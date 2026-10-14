@@ -261,3 +261,28 @@ def pair_bad(target: darray[sview], name: sview, entries: mutable darray[Entry]&
 		t.Fatalf("pair_bad pushes through entry.target, which is the target parameter's storage")
 	}
 }
+
+// A callee may share a parameter's storage into a local holder that the caller then writes: a
+// shared writable darray header (`box.items <- xs`, then `box.items.push`) is a write of xs.
+func TestStoreScanHolderSharedDarrayIsWritten(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_holder_share.elisa", `struct Box:
+    items: mutable darray[sview] = []
+
+def share_list(box: mutable Box&, xs: darray[sview]) -> void:
+    box.items <- xs
+
+def write_list(xs: darray[sview], name: sview) -> void:
+    can Memory.Allocate:
+        box: mutable Box = Box{}
+        share_list(box, xs)
+        box.items.push(name)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	a := result.analyzer
+	a.currentScope = a.globalScope
+	if !a.storeScanParamMayBeWritten(storeScanFindFunc(t, result, "write_list"), 0) {
+		t.Fatalf("write_list pushes onto xs's own buffer through box.items")
+	}
+}
