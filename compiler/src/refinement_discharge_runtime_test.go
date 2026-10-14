@@ -56,10 +56,10 @@ law Positive(self: i64) = self > 0
 def neg() -> i64:
     return 0 - 3
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     x: i64 is Positive = %s
-    print(x.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+    print(x.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -72,11 +72,11 @@ def needs_pos(x: i64 is Positive) -> i64:
 def neg() -> i64:
     return 0 - 3
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     n: i64 = %s
     r: i64 = needs_pos(n)
-    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -113,9 +113,9 @@ def f(n: i64) -> i64:
         return needs_nat(n)
     return 0
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    print(f(%s).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
+    print(f(%s).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -141,10 +141,10 @@ def passthru(n: i64) -> i64 is Positive:
 def neg() -> i64:
     return 0 - 3
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     r: i64 = passthru(%s)
-    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -216,11 +216,11 @@ def store(p: mutable i64&, v: i64) -> void ensures p is Positive:
     p <- v
     return
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     n: mutable i64 = 5
     store(&n, %s)
-    print(n.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+    print(n.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -255,11 +255,11 @@ def bump(p: mutable i64&) -> void:
     p <- p + %s
     return
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     n: mutable i64 = 5
     bump(&n)
-    print(n.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+    print(n.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -292,9 +292,9 @@ def delta(n: i64) -> i64:
     ensure result == n - old(n)
     return %s
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    print(delta(7).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
+    print(delta(7).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -333,10 +333,10 @@ def countdown(start: i64, count: i64) -> i64 can[Abort.Panic]:
         i <- i + 1
     return x
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     r: i64 = countdown(%s) can Abort.Panic
-    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-    print("\n") can Console.Write
+    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
+    print("\n") can Console.Write, Global.Read, Global.Write
     return 0
 `
 
@@ -362,9 +362,10 @@ func TestInvariantRecheckViolatedTrapsInDebug(t *testing.T) {
 	}
 }
 
-// The standing invariant is debug-only: at -O3 the re-checks are elided, so the same violating run
-// does NOT trap (debug verifies what release assumes).
-func TestInvariantRecheckElidedInRelease(t *testing.T) {
+// `invariant x >= 0` (x = start) is NOT provable, yet its range refinement is used as a fact, so its
+// check and standing re-checks are kept at -O3 too: erasing them would be an unchecked assumption.
+// The same violating run must trap in release.
+func TestInvariantRecheckUnprovenKeptInRelease(t *testing.T) {
 	// Keep this environment-sensitive release assertion out of the parallel test group; the
 	// backend reads these process-wide switches while compiling the child program.
 	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
@@ -374,7 +375,7 @@ func TestInvariantRecheckElidedInRelease(t *testing.T) {
 		}
 	}
 	_, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "1, 3", 1), backend.OptimizationLevel3)
-	if err != nil {
-		t.Fatalf("release build should elide the standing-invariant re-checks (no trap), got: %v", err)
+	if err == nil {
+		t.Fatalf("an unproven invariant used as a fact must keep its re-checks at -O3, but the violating run exited 0")
 	}
 }
