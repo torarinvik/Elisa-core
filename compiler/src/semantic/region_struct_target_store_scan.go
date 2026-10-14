@@ -1138,7 +1138,7 @@ func storeScanTypeExprIsDArray(t ast.TypeExpr) bool {
 // declaration is spelled `sview`/`cstr` and that no other construct binds, or nil when the source
 // is not a non-byte darray (the caller then keeps its conservative header taint).
 func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
-	if decl == nil || other < 0 || other >= len(decl.Params) || !storeScanTypeExprIsNonByteDArray(decl.Params[other].Type) {
+	if !a.storeScanSourceHasNoBytes(decl, other) {
 		return nil
 	}
 	views, poisoned := map[string]bool{}, map[string]bool{}
@@ -1173,7 +1173,7 @@ func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string
 // storeScanViewLocalsCached memoizes the per-function view-local set (it depends on the source
 // parameter only through the non-byte-darray gate).
 func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[string]bool {
-	if decl == nil || other < 0 || other >= len(decl.Params) || !storeScanTypeExprIsNonByteDArray(decl.Params[other].Type) {
+	if !a.storeScanSourceHasNoBytes(decl, other) {
 		return nil
 	}
 	if views, ok := a.storeScanViewCache[decl]; ok {
@@ -1215,7 +1215,9 @@ func storeScanTypeExprIsView(t ast.TypeExpr) bool {
 	return false
 }
 
-// storeScanTypeExprIsNonByteDArray: `darray[E]` (through ref/mutable wrappers) with E not a byte.
+// storeScanTypeExprIsNonByteDArray: `darray[E]` (through ref/mutable wrappers) whose element is
+// spelled as a non-byte scalar or a plain view. Any other element (a named struct or enum, which may
+// hold a dstr) is left to the resolved-type check (typeHoldsNoBytes).
 func storeScanTypeExprIsNonByteDArray(t ast.TypeExpr) bool {
 	for {
 		switch tt := t.(type) {
@@ -1235,14 +1237,120 @@ func storeScanTypeExprIsNonByteDArray(t ast.TypeExpr) bool {
 			if tt == nil || tt.Name != "darray" || len(tt.TypeArgs) != 1 {
 				return false
 			}
+			var elemName string
 			switch e := tt.TypeArgs[0].(type) {
 			case *ast.NamedType:
-				return e != nil && e.Name != "u8" && e.Name != "i8" && e.Name != "char" && e.Name != "byte"
+				if e != nil {
+					elemName = e.Name
+				}
 			case *ast.BuiltinTypeExpr:
-				return e != nil && e.Name != "u8" && e.Name != "i8"
+				if e != nil && len(e.TypeArgs) == 0 {
+					elemName = e.Name
+				}
 			}
-			return true
+			switch elemName {
+			case "sview", "cstr", "u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64", "bool":
+				return true
+			}
+			return false
 		}
 		return false
 	}
+}
+
+// storeScanSourceHasNoBytes: the scan's source parameter holds no byte storage anywhere (no
+// darray[u8]/dstr, no fixed byte array, through fields, payloads and elements), so no view-only
+// value derived from it can view its backing. A syntactic non-byte darray qualifies directly;
+// otherwise the callee's resolved parameter type decides. Type parameters, packed enums and
+// anything unrecognized are treated as possibly holding bytes.
+func (a *Analyzer) storeScanSourceHasNoBytes(decl *ast.FuncDecl, other int) bool {
+	if decl == nil || other < 0 || other >= len(decl.Params) {
+		return false
+	}
+	if storeScanTypeExprIsNonByteDArray(decl.Params[other].Type) {
+		return true
+	}
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || other >= len(fnType.Params) {
+		return false
+	}
+	return typeHoldsNoBytes(fnType.Params[other], map[Type]bool{})
+}
+
+func typeHoldsNoBytes(t Type, seen map[Type]bool) bool {
+	if t == nil {
+		return false
+	}
+	if seen[t] {
+		return true // a cycle adds no new component
+	}
+	seen[t] = true
+	switch tt := StripAggregateStateType(t).(type) {
+	case *BuiltinType:
+		switch tt.Name {
+		case "u8", "i8":
+			return true // a scalar byte by value is not storage a view can point into
+		case "u16", "u32", "u64", "usize", "i16", "i32", "i64", "isize", "f32", "f64", "bool", "char":
+			return true
+		}
+		return false
+	case *SViewType, *CStrType, *BitIntType, *ConstEnumType, *BitGroupType:
+		return true
+	case *RefType:
+		return tt != nil && typeHoldsNoBytes(tt.Elem, seen)
+	case *DArrayType:
+		if tt == nil || tt.Elem == nil {
+			return false
+		}
+		if b, isBuiltin := tt.Elem.(*BuiltinType); isBuiltin && (b.Name == "u8" || b.Name == "i8") {
+			return false
+		}
+		return typeHoldsNoBytes(tt.Elem, seen)
+	case *ArrayType:
+		if tt == nil || tt.Elem == nil {
+			return false
+		}
+		if b, isBuiltin := tt.Elem.(*BuiltinType); isBuiltin && (b.Name == "u8" || b.Name == "i8") {
+			return false
+		}
+		return typeHoldsNoBytes(tt.Elem, seen)
+	case *TupleType:
+		for _, f := range tt.Fields {
+			if !typeHoldsNoBytes(f.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *OptionalType:
+		return typeHoldsNoBytes(tt.Value, seen)
+	case *ErrorUnionType:
+		return typeHoldsNoBytes(tt.Value, seen)
+	case *StructType:
+		if tt == nil || tt.Store {
+			return false
+		}
+		for _, f := range tt.Fields {
+			if !typeHoldsNoBytes(f.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *EnumType:
+		if tt == nil || tt.Packed || tt.Root().Packed {
+			return false
+		}
+		for _, v := range tt.Variants {
+			for _, payload := range v.Payload {
+				if !typeHoldsNoBytes(payload, seen) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
 }

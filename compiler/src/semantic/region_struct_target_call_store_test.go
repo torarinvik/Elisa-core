@@ -559,3 +559,52 @@ def run(table: mutable Table&, src: sview) -> void:
 		t.Fatalf("expected only the unsafe call (line 26) rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// The non-byte rule uses the callee's RESOLVED source type: a darray of byte-free structs
+// (`darray[Entry]`, Entry = sview + i64) qualifies, so a view picked out of it is an element value.
+// An element struct holding a dstr has bytes a view could point into, so the same shape over
+// `darray[Owned]` keeps the header verdict and the call with a local argument is rejected.
+func TestStoreScanByteFreeStructDArraySourceIsElement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_scan_bytefree_struct.elisa", `struct Entry:
+    name: sview
+    n: i64
+
+struct Owned:
+    text: dstr
+    n: i64
+
+struct Table:
+    names: mutable darray[sview] = []
+
+def first_entry(entries: darray[Entry]&) -> sview:
+    can Abort.Panic:
+        return entries[0].name if entries.count > 0 else ""
+
+def first_owned(owned: darray[Owned]&) -> sview:
+    can Abort.Panic:
+        return owned[0].text.as_sview() if owned.count > 0 else ""
+
+def note(table: mutable Table&, entries: darray[Entry]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        n: sview = first_entry(entries)
+        table.names.push(n)
+
+def note_owned(table: mutable Table&, owned: darray[Owned]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        n: sview = first_owned(owned)
+        table.names.push(n)
+
+def run(table: mutable Table&, src: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        entries: mutable darray[Entry] = []
+        entries.push(Entry{name: src, n: 1})
+        note(table, &entries)
+        owned: mutable darray[Owned] = []
+        owned.push(Owned{text: [65], n: 1})
+        note_owned(table, &owned)
+`)
+	errs := result.Errors()
+	if len(errs) != 1 || !strings.Contains(errs[0], ":37:") {
+		t.Fatalf("expected only the note_owned call (line 37) rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
