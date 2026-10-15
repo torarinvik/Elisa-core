@@ -56,7 +56,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 	switch tt := t.(type) {
 	case *StructType:
 		cloned := *tt
-		cloned.Fields = map[string]Field{}
+		cloned.Fields = make(map[string]Field, len(tt.Fields))
 		clonedPtr := &cloned
 		seen[t] = clonedPtr
 		for name, field := range tt.Fields {
@@ -323,7 +323,7 @@ func (a *Analyzer) mergeTrackedNamedStateValueTypes(dst Type, src Type) (Type, b
 }
 
 func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
-	return a.cloneTrackedValueTypeMapWithSeen(a.currentSpecializedValueTypes, map[Type]Type{})
+	return a.cloneTrackedValueTypeMapWithSeen(a.currentSpecializedValueTypes, nil)
 }
 
 func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen map[Type]Type) map[*Symbol]Type {
@@ -331,7 +331,8 @@ func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen m
 		return nil
 	}
 	if seen == nil {
-		seen = map[Type]Type{}
+		// Pre-sized: each root typically contributes several nested types.
+		seen = make(map[Type]Type, 4*len(src))
 	}
 	cloned := make(map[*Symbol]Type, len(src))
 	for sym, typ := range src {

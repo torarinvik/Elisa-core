@@ -19,7 +19,7 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 		mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(state))
 		if len(state.Deps) != 0 {
 			if merged.Deps == nil {
-				merged.Deps = map[*Symbol]regionDependencyState{}
+				merged.Deps = make(map[*Symbol]regionDependencyState, len(state.Deps))
 			}
 			for region, dep := range state.Deps {
 				existing, ok := merged.Deps[region]
@@ -44,7 +44,7 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 		}
 		if len(state.StoreDeps) != 0 {
 			if merged.StoreDeps == nil {
-				merged.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+				merged.StoreDeps = make(map[*Symbol]packedStoreDependencyState, len(state.StoreDeps))
 			}
 			for store, dep := range state.StoreDeps {
 				merged.StoreDeps[store] = dep
@@ -55,7 +55,7 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 		})
 		if len(state.Fields) != 0 {
 			if merged.Fields == nil {
-				merged.Fields = map[string]regionRefState{}
+				merged.Fields = make(map[string]regionRefState, len(state.Fields))
 			}
 			for name, fieldState := range state.Fields {
 				if existing, ok := merged.Fields[name]; ok {
@@ -98,7 +98,7 @@ func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (region
 	mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(right))
 
 	if len(left.Deps) != 0 || len(right.Deps) != 0 {
-		merged.Deps = map[*Symbol]regionDependencyState{}
+		merged.Deps = make(map[*Symbol]regionDependencyState, len(left.Deps)+len(right.Deps))
 		for region, dep := range left.Deps {
 			merged.Deps[region] = dep
 		}
@@ -124,7 +124,7 @@ func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (region
 		}
 	}
 	if len(left.StoreDeps) != 0 || len(right.StoreDeps) != 0 {
-		merged.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+		merged.StoreDeps = make(map[*Symbol]packedStoreDependencyState, len(left.StoreDeps)+len(right.StoreDeps))
 		for store, dep := range left.StoreDeps {
 			merged.StoreDeps[store] = dep
 		}

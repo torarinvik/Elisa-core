@@ -51,7 +51,7 @@ func (a *Analyzer) captureDerivedLoopEntry(scope *Scope) derivedLoopState {
 		}
 		inner = append(inner, cur)
 	}
-	return derivedLoopState(a.cloneTrackedValueTypeMapWithSeen(map[*Symbol]Type(out), map[Type]Type{}))
+	return derivedLoopState(a.cloneTrackedValueTypeMapWithSeen(map[*Symbol]Type(out), nil))
 }
 
 type derivedLoopCandidate struct {
@@ -96,7 +96,7 @@ func (t *derivedLoopTransfer) clone(s derivedLoopState) derivedLoopState {
 	// Share one clone memo across bindings so common declaration/type graphs
 	// are copied once per frontier, not once per variable. Transfers replace
 	// types rather than mutating shared type graphs.
-	return derivedLoopState(t.a.cloneTrackedValueTypeMapWithSeen(map[*Symbol]Type(s), map[Type]Type{}))
+	return derivedLoopState(t.a.cloneTrackedValueTypeMapWithSeen(map[*Symbol]Type(s), nil))
 }
 
 func (t *derivedLoopTransfer) widen(s derivedLoopState) {
