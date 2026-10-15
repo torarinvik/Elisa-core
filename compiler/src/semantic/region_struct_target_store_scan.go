@@ -155,6 +155,22 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
 			return storeNone
 		}
+		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
+		// declared type (`scope.deferred.count` is a usize).
+		if _, known := a.exprTypes[inner]; !known {
+			if t, ok := a.storeScanDeclTypeOf(decl, inner); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
+				return storeNone
+			}
+			// `p.items.count` / `.len` / `.capacity` of a builtin container or view is a scalar.
+			if field, isField := inner.(*ast.FieldExpr); isField && field != nil && (field.Field == "count" || field.Field == "len" || field.Field == "capacity") {
+				if t, ok := a.storeScanDeclTypeOf(decl, field.Object); ok && t != nil {
+					switch stripRefForBounds(t).(type) {
+					case *DArrayType, *SViewType, *CStrType:
+						return storeNone
+					}
+				}
+			}
+		}
 		// docs/128: a value whose declared type is program-lived (a `darray[T] @source` field)
 		// reaches only program-region storage, whatever holds it.
 		if t, known := a.exprTypes[inner]; known && t != nil && len(a.programRegions) != 0 && !containsTypeParam(t) && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
