@@ -32,6 +32,33 @@ def update():
     can Global.Write:
         cell.value <- 1
 	`, "", " can[Global.Write]"},
+		{"reference_valued_field_write", `struct Cell:
+    value: mutable i32
+struct Holder:
+    alias: mutable Cell&
+global mutable cell: Cell = Cell{value: 0}
+global mutable holder: Holder = Holder{alias: &cell}
+def update():
+    can Global.Write:
+        holder.alias.value <- 1
+	`, "mutable global read", " can[Global.Read, Global.Write]"},
+		{"reference_field_rebind", `struct Cell:
+    value: mutable i32
+struct Holder:
+    alias: mutable Cell&
+global mutable cell: Cell = Cell{value: 0}
+global mutable holder: Holder = Holder{alias: &cell}
+def update(value: mutable Cell&):
+    can Unsafe.StaleRef, Global.Write:
+        holder.alias <- value
+	`, "", " can[Global.Write, Unsafe.StaleRef]"},
+		{"immutable_global_reference_to_mutable_global", `struct Cell:
+    value: mutable i32
+global mutable cell: Cell = Cell{value: 0}
+global alias: mutable Cell& = &cell
+def update():
+    alias.value <- 1
+	`, "mutable global read", " can[Global.Read, Global.Write]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

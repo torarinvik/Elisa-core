@@ -118,7 +118,7 @@ func (a *Analyzer) recordResolvedGlobalStorage(expr *ast.Ident, sym *Symbol) {
 
 func (a *Analyzer) mutableGlobalStorageRoot(expr ast.Expr) (*Symbol, bool) {
 	sym, ok := a.globalStorageRoot(expr)
-	return sym, ok && sym.Kind == SymbolGlobal && sym.Mutable
+	return sym, ok && sym.Kind == SymbolGlobal && (sym.Mutable || a.globalPathLoadsReference(expr))
 }
 
 func referenceStorageType(t Type) bool {
@@ -137,22 +137,25 @@ func referenceStorageType(t Type) bool {
 	}
 }
 
-// globalTargetLoadsReference reports whether resolving a projected write target loads a
-// reference value from storage. A direct field/index projection into a global aggregate is
-// address formation, but projecting through a global reference (or a reference-valued field)
-// first reads that reference and therefore also needs Global.Read.
-func (a *Analyzer) globalTargetLoadsReference(expr ast.Expr) bool {
+// globalPathLoadsReference reports whether accessing this global-rooted path loads a reference
+// value from storage. A direct field/index projection into a global aggregate is address
+// formation, but projecting through a reference (including a reference-valued field) loads that
+// reference and reaches mutable state even when the global binding itself is immutable.
+func (a *Analyzer) globalPathLoadsReference(expr ast.Expr) bool {
 	switch n := expr.(type) {
+	case *ast.Ident:
+		sym, ok := a.globalStorageRoot(n)
+		return ok && sym.Kind == SymbolGlobal && !sym.Mutable && referenceStorageType(sym.Type)
 	case *ast.FieldExpr:
-		return referenceStorageType(a.exprTypes[n.Object]) || a.globalTargetLoadsReference(n.Object)
+		return referenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
 	case *ast.IndexExpr:
-		return referenceStorageType(a.exprTypes[n.Object]) || a.globalTargetLoadsReference(n.Object)
+		return referenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
 	case *ast.SliceExpr:
-		return referenceStorageType(a.exprTypes[n.Object]) || a.globalTargetLoadsReference(n.Object)
+		return referenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
 	case *ast.ParenExpr:
-		return a.globalTargetLoadsReference(n.Inner)
+		return a.globalPathLoadsReference(n.Inner)
 	case *ast.CastExpr:
-		return referenceStorageType(a.exprTypes[n.Operand]) || a.globalTargetLoadsReference(n.Operand)
+		return referenceStorageType(a.exprTypes[n.Operand]) || a.globalPathLoadsReference(n.Operand)
 	default:
 		return false
 	}

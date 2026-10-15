@@ -366,7 +366,7 @@ func (a *Analyzer) validatePermissionWriteTarget(expr ast.Expr, alsoRead bool, g
 	}
 	if _, ok := a.mutableGlobalStorageRoot(expr); ok {
 		a.errorOnMissingLocalGrant(expr.Pos(), "mutable global write", globalWriteRefs(expr.Pos()), granted)
-		if a.globalTargetLoadsReference(expr) {
+		if a.globalPathLoadsReference(expr) {
 			a.errorOnMissingLocalGrant(expr.Pos(), "mutable global read", globalReadRefs(expr.Pos()), granted)
 		}
 		if alsoRead {
