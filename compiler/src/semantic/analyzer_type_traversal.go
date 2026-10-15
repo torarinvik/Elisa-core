@@ -219,7 +219,23 @@ func (a *Analyzer) typeStructurallyAtomicSafe(t Type, seen map[string]bool) bool
 	}
 }
 
+// typeCanContainRegionRefs reports whether a value of type t can hold a region reference. A call
+// with an empty `seen` (every caller outside the walk) is memoized per type identity once type
+// shapes are frozen: the walk is a reachability query over t's type graph (`seen` is a visited
+// set that is never released, so the answer does not depend on visit order), and the only
+// analyzer state it reads besides the types themselves is staticImpls (through substituteType's
+// associated-type projection), which collectStaticImpls fills before the freeze. Only the bool
+// is cached. A walk that hit a depth limit is not cached (memoTypePredicate).
 func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
+	if len(seen) != 0 {
+		return a.typeCanContainRegionRefsWalk(t, seen)
+	}
+	return a.memoTypePredicate(&a.regionRefsMemo, t, func() bool {
+		return a.typeCanContainRegionRefsWalk(t, seen)
+	})
+}
+
+func (a *Analyzer) typeCanContainRegionRefsWalk(t Type, seen map[string]bool) bool {
 	if t == nil {
 		return false
 	}
@@ -236,11 +252,11 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	seen[key] = true
 	switch tt := t.(type) {
 	case *ArrayType:
-		return a.typeCanContainRegionRefs(tt.Elem, seen)
+		return a.typeCanContainRegionRefsWalk(tt.Elem, seen)
 	case *DArrayType:
 		return true
 	case *OptionalType:
-		return a.typeCanContainRegionRefs(tt.Value, seen)
+		return a.typeCanContainRegionRefsWalk(tt.Value, seen)
 	case *ViewType:
 		return true
 	case *CStrType:
@@ -248,24 +264,24 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	case *SViewType:
 		return true
 	case *DictType:
-		return a.typeCanContainRegionRefs(tt.Key, seen) || a.typeCanContainRegionRefs(tt.Value, seen)
+		return a.typeCanContainRegionRefsWalk(tt.Key, seen) || a.typeCanContainRegionRefsWalk(tt.Value, seen)
 	case *SetType:
-		return a.typeCanContainRegionRefs(tt.Elem, seen)
+		return a.typeCanContainRegionRefsWalk(tt.Elem, seen)
 	case *PackedVariantViewType:
 		for _, field := range tt.Enum.Common {
-			if a.typeCanContainRegionRefs(field.Type, seen) {
+			if a.typeCanContainRegionRefsWalk(field.Type, seen) {
 				return true
 			}
 		}
 		for _, payloadType := range tt.Variant.Payload {
-			if a.typeCanContainRegionRefs(payloadType, seen) {
+			if a.typeCanContainRegionRefsWalk(payloadType, seen) {
 				return true
 			}
 		}
 		return false
 	case *StructType:
 		for _, field := range tt.Fields {
-			if a.typeCanContainRegionRefs(field.Type, seen) {
+			if a.typeCanContainRegionRefsWalk(field.Type, seen) {
 				return true
 			}
 		}
@@ -276,7 +292,7 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		}
 		for _, variant := range tt.Variants {
 			for _, payload := range variant.Payload {
-				if a.typeCanContainRegionRefs(payload, seen) {
+				if a.typeCanContainRegionRefsWalk(payload, seen) {
 					return true
 				}
 			}
@@ -295,7 +311,7 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				if a.typeCanContainRegionRefs(fieldType, seen) {
+				if a.typeCanContainRegionRefsWalk(fieldType, seen) {
 					return true
 				}
 			}
@@ -305,7 +321,7 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 			for _, variant := range base.Variants {
 				for _, payload := range variant.Payload {
 					payloadType := a.substituteType(payload, nil, nil, nil, nil)
-					if a.typeCanContainRegionRefs(payloadType, seen) {
+					if a.typeCanContainRegionRefsWalk(payloadType, seen) {
 						return true
 					}
 				}
@@ -313,11 +329,11 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 			return false
 		}
 		for _, arg := range tt.Args {
-			if a.typeCanContainRegionRefs(arg, seen) {
+			if a.typeCanContainRegionRefsWalk(arg, seen) {
 				return true
 			}
 		}
-		return a.typeCanContainRegionRefs(tt.Base, seen)
+		return a.typeCanContainRegionRefsWalk(tt.Base, seen)
 	default:
 		return false
 	}

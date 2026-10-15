@@ -863,6 +863,8 @@ type Analyzer struct {
 	affineHandleMemo map[Type]bool
 	// borrowedOwnerRefMemo caches containsBorrowedOwnerRefValues likewise.
 	borrowedOwnerRefMemo map[Type]bool
+	// regionRefsMemo caches typeCanContainRegionRefs likewise.
+	regionRefsMemo map[Type]bool
 	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
 	containerRegionMemo map[Type]string
 	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
