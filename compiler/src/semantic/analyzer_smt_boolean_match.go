@@ -110,6 +110,11 @@ func classifierStringControlFlowBody(body []ast.Stmt, allowEmpty bool, pureCall 
 			if !pureClassifierReturnValue(n.Value, pureCall) {
 				return false
 			}
+		case *ast.VarDeclStmt:
+			// An immutable local bound to a write-free value writes nothing.
+			if n.Mutable || n.Owner != nil || n.Value == nil || !pureClassifierExprCalls(n.Value, pureCall) {
+				return false
+			}
 		case *ast.IfStmt:
 			if !pureClassifierExprCalls(n.Cond, pureCall) || !classifierStringControlFlowBody(n.Then, false, pureCall) || !classifierStringControlFlowBody(n.Else, true, pureCall) {
 				return false
@@ -152,8 +157,8 @@ func classifierStringFrameStable(a *Analyzer, decl *ast.FuncDecl) bool {
 		if a == nil {
 			return false
 		}
-		callee, ok := a.resolveDirectCallFuncDecl(call)
-		if !ok || callee == nil || !a.functionPureEquationShape(callee) {
+		callee, ok := a.classifierFrameCallDecl(call)
+		if !ok || callee == nil || !(a.functionPureEquationShape(callee) || a.classifierCalleeWriteFree(callee)) {
 			return false
 		}
 		for _, arg := range call.Args {
@@ -257,11 +262,10 @@ func (tr *smtTranslator) classifierStringEquality(left, right ast.Expr, env map[
 	if !ok || strings.ContainsRune(lit.Value, 0) {
 		return "", false
 	}
-	_, key, ok := tr.classifierStringParameter(left, env)
+	param, ok := tr.stringIDTerm(left, env)
 	if !ok {
 		return "", false
 	}
-	param := tr.classifierStringParameterInt(key)
 	literal := tr.classifierStringLiteralInt(lit.Value)
 	return "(= " + param + " " + smtInt(literal) + ")", true
 }
@@ -274,7 +278,9 @@ func (tr *smtTranslator) booleanMatchTerm(n *ast.MatchExpr, env map[string]strin
 	if n == nil || n.Store != nil || len(n.Arms) == 0 {
 		return "", false
 	}
-	if _, _, ok := tr.classifierStringParameter(n.Value, env); !ok {
+	// Symbol-free precheck: the subject must be a name. Its identity term (a formal, a bound
+	// callee formal, or a call-bound local) is created only after the arm shape validates.
+	if _, ok := stripOptimizationParens(n.Value).(*ast.Ident); !ok {
 		return "", false
 	}
 	if _, ok := n.Arms[len(n.Arms)-1].Pattern.(*ast.MatchWildcardPattern); !ok {
@@ -428,4 +434,84 @@ func scalarMatchProofExpr(expr ast.Expr) bool {
 		return scalarMatchProofExpr(n.Cond) && scalarMatchProofExpr(n.Value) && scalarMatchProofExpr(n.Alt)
 	}
 	return false
+}
+
+// classifierCalleeWriteFree reports a callee that cannot write anything a caller's
+// borrowed view could observe: its analysis has finished (effect summary final),
+// every formal is an immutable scalar or view value (no mutable binding, no mutable
+// reference, no pointer or function value through which to reach caller memory),
+// it has no type/region/permission parameters, and its declared plus inferred
+// effects are Abort.Panic at most (no Global.Write, Memory.*, Unsafe.*).
+func (a *Analyzer) classifierCalleeWriteFree(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || decl.IsLemma {
+		return false
+	}
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil || !fn.ReturnBorrowedOwnerRefsKnown || len(fn.Params) != len(decl.Params) {
+		return false
+	}
+	if len(fn.TypeParams) != 0 || len(fn.RegionParams) != 0 || len(fn.PermissionParams) != 0 || len(fn.GenericParams) != 0 ||
+		len(fn.MutableGlobalPermissionRefs) != 0 || len(fn.MutableGlobalSourceNames) != 0 {
+		return false
+	}
+	for _, permission := range fn.PermissionRefs {
+		if permission.Name != "Abort" || permission.Member != "Panic" || len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
+			return false
+		}
+	}
+	for i, param := range decl.Params {
+		if param.Mutable || a.paramIsMutable(param) {
+			return false
+		}
+		t := fn.Params[i]
+		if ref, isRef := t.(*RefType); isRef {
+			if ref == nil || ref.Mutable {
+				return false
+			}
+			t = ref.Elem
+		}
+		switch t.(type) {
+		case *SViewType:
+			continue
+		}
+		if !((IsNumericType(t) && !IsFloatType(t)) || IsBoolType(t)) {
+			return false
+		}
+	}
+	return true
+}
+
+// classifierFrameCallDecl resolves a call's direct callee WITHOUT relying on the analyzer having
+// already visited the call: the frame gate inspects the whole body, including statements after the
+// proof point whose qualified (`Mod::f`) or namespace-relative callees are rewritten to canonical
+// identifiers only when analyzed. Read-only: the call node is not modified.
+func (a *Analyzer) classifierFrameCallDecl(call *ast.CallExpr) (*ast.FuncDecl, bool) {
+	if a == nil || call == nil {
+		return nil, false
+	}
+	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil {
+		return decl, true
+	}
+	var sym *Symbol
+	if ident, isIdent := call.Func.(*ast.Ident); isIdent && ident != nil {
+		if member, _, ok := a.enclosingNamespaceMember(ident.Name); ok {
+			sym = member
+		}
+	} else if name, ok := qualifiedTypePathFromExpr(call.Func); ok && name != "" && a.globalScope != nil {
+		if global, _, ok := a.lookupVisibleGlobal(name); ok {
+			sym = global
+		}
+	}
+	if sym == nil {
+		return nil, false
+	}
+	if _, isFunc := sym.Type.(*FuncType); !isFunc {
+		return nil, false
+	}
+	decl, ok := sym.Node.(*ast.FuncDecl)
+	return decl, ok && decl != nil
 }

@@ -1297,14 +1297,26 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 	}
 	if _, ok := stripRefForBounds(argType).(*SViewType); ok {
+		// Carry the argument's string identity to the callee formal by explicit binding (never by
+		// name), so the callee's literal-equality contracts speak about the caller's string.
+		id, idOK := tr.stringIDTerm(argExpr, argEnv)
 		// An immutable sview formal can be bound as an SMT byte array only when the enclosing
 		// expression context passes immutableSviewArrayParameter's read-only-function gate.
 		if arr, ok := tr.arrayTermEnv(argExpr, argEnv); ok {
 			env[name] = arr
+			if idOK {
+				bindSMTStringID(env, name, id)
+			}
 			return true
 		}
 		// Contents unavailable: bind the length only (see bindSMTSViewLengthArg).
-		return tr.bindSMTSViewLengthArg(env, name, argExpr, argEnv)
+		if !tr.bindSMTSViewLengthArg(env, name, argExpr, argEnv) {
+			return false
+		}
+		if idOK {
+			bindSMTStringID(env, name, id)
+		}
+		return true
 	}
 	if a.smtEquationStructType(a.exprTypes[argExpr]) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)

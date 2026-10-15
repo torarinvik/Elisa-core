@@ -144,7 +144,7 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 		}
 	}
 	if stringPattern {
-		if _, _, ok := tr.classifierStringParameter(match.Value, env); !ok {
+		if _, ok := tr.stringIDTerm(match.Value, env); !ok {
 			return "", false
 		}
 	}
