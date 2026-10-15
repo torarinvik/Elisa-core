@@ -129,6 +129,19 @@ func (a *Analyzer) reevaluableLiteralComponent(field *ast.FieldExpr, depth int) 
 			return nil, false
 		}
 		object = stripOptimizationParens(value)
+		if _, tuple := object.(*ast.TupleExpr); !tuple {
+			if _, record := object.(*ast.StructLitExpr); !record {
+				// The selected literal component can itself be a parameter or another
+				// non-literal value. Keep walking the projection path from that value;
+				// the recursive call has already established that substituting it is
+				// safe with respect to evaluation order.
+				projected := &ast.FieldExpr{Position: field.Position, Object: value, Field: field.Field}
+				if t := a.exprTypes[field]; t != nil {
+					a.exprTypes[projected] = t
+				}
+				return projected, true
+			}
+		}
 	}
 	switch literal := object.(type) {
 	case *ast.TupleExpr:

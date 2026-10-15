@@ -37,6 +37,40 @@ func TestSMTNestedBoolLiteralProjectionContracts(t *testing.T) {
 	}
 }
 
+func TestSMTNestedProjectionThroughTupleComponentStruct(t *testing.T) {
+	const declarations = `struct DeclId:
+    value: u32
+struct BindingId:
+    owner: DeclId
+    serial: u64
+struct Fact:
+    binding_id: BindingId
+    reachable: bool
+    known: bool
+`
+	positive := declarations + `
+def keep_fact(fact: Fact) -> (accepted: bool, next: Fact):
+    ensure result.accepted == false
+    ensure result.next.binding_id.owner.value == fact.binding_id.owner.value
+    ensure result.next.binding_id.serial == fact.binding_id.serial
+    return (false, fact)
+`
+	result := analyzeContractStrict(t, "nested_tuple_component_positive.elisa", positive)
+	if failures := ensureFailuresFor(result.Errors(), "keep_fact"); failures != 0 {
+		t.Fatalf("nested tuple-component field projections must prove; got: %v", result.Errors())
+	}
+
+	negative := declarations + `
+def wrong_fact(fact: Fact) -> (accepted: bool, next: Fact):
+    ensure result.next.binding_id.owner.value == fact.binding_id.owner.value + 1
+    return (false, fact)
+`
+	result = analyzeContractStrict(t, "nested_tuple_component_negative.elisa", negative)
+	if ensureFailuresFor(result.Errors(), "wrong_fact") == 0 {
+		t.Fatalf("incorrect nested tuple-component projection must remain unproven; got: %v", result.Errors())
+	}
+}
+
 func TestSMTNestedLiteralProjectionDoesNotAllocate(t *testing.T) {
 	leaf := &ast.IntLit{Value: "42"}
 	owner := &ast.StructLitExpr{Args: []ast.Expr{leaf}, ArgNames: []string{"value"}}
