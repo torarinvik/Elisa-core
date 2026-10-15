@@ -2631,6 +2631,35 @@ func (tr *smtTranslator) term(expr ast.Expr) (string, bool) {
 	return tr.termEnv(expr, nil)
 }
 
+// sameWidthSignRoundTripEnv cancels a pair of postfix integer conversions that preserve
+// the same bits: signed -> unsigned -> signed (or the reverse), with all three types at
+// the same width. The backend lowers each same-width conversion to the original integer
+// value, and the corresponding bit-vector interpretation pair is exactly the identity.
+// Cancelling here avoids asking SMT to rediscover that identity through int2bv/bv2int.
+func (tr *smtTranslator) sameWidthSignRoundTripEnv(outer *ast.CastExpr, env map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || outer == nil || !isPureNumericValueCast(outer) {
+		return "", false
+	}
+	inner, ok := stripOptimizationParens(outer.Operand).(*ast.CastExpr)
+	if !ok || inner == nil || !isPureNumericValueCast(inner) {
+		return "", false
+	}
+	sourceType := tr.a.castOperandResolvedType(inner)
+	sourceSigned, sourceBits, sourceOK := smtIntWidthSign(sourceType)
+	innerSigned, innerBits, innerOK := smtIntWidthSign(tr.a.exprTypes[inner])
+	if !innerOK {
+		innerSigned, innerBits, innerOK = postfixCastTargetWidthSign(inner)
+	}
+	outerSigned, outerBits, outerOK := smtIntWidthSign(tr.a.exprTypes[outer])
+	if !outerOK {
+		outerSigned, outerBits, outerOK = postfixCastTargetWidthSign(outer)
+	}
+	if !sourceOK || !innerOK || !outerOK || sourceBits != innerBits || sourceBits != outerBits || sourceSigned == innerSigned || sourceSigned != outerSigned {
+		return "", false
+	}
+	return tr.termEnv(inner.Operand, env)
+}
+
 func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, bool) {
 	if n, ok := expr.(*ast.MatchExpr); ok {
 		return tr.scalarMatchTerm(n, env, tr.termEnv)
@@ -2831,6 +2860,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "(- " + inner + ")", true
 	case *ast.CastExpr:
+		if term, ok := tr.sameWidthSignRoundTripEnv(n, env); ok {
+			return term, true
+		}
 		// A value-preserving integer conversion — widening or same-width, SAME signedness
 		// (`x.u64()`, `x.usize()`, an i32 used as i64) — is the IDENTITY in the unbounded-Int
 		// model, so the prover sees THROUGH the conversion and refinement bounds survive it

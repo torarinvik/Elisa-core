@@ -767,9 +767,9 @@ def to_slot(rack: u32 is Bounded[0, 31], voice: u32 is Bounded[0, 4095]) -> usiz
 	}
 }
 
-// A SIGN-changing conversion (i64 -> u64) is NOT value-preserving (it wraps for negatives), so it
-// is correctly NOT treated as identity — soundness floor for the conversion-transparency rule.
-func TestSignChangingConversionNotIdentity(t *testing.T) {
+// Same-width signedness conversions preserve the underlying bits. The signed-to-unsigned and
+// unsigned-to-signed pair therefore round-trips exactly, including negative signed inputs.
+func TestSameWidthSignChangingConversionRoundTripIsIdentity(t *testing.T) {
 	src := `
 def widen(x: i64) -> i64:
     ensure result == x
@@ -777,8 +777,23 @@ def widen(x: i64) -> i64:
     return r
 `
 	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signchg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if len(r.Errors()) != 0 {
+		t.Fatalf("same-width sign conversion round-trip should preserve the original value, got:\n%s", allDiagnostics(r))
+	}
+	if !proofReportContains(r.ProofReport, "ensure widen", "ensure", ProofProvenSMT) {
+		t.Fatalf("expected the exact bit-preserving round-trip to prove, got: %+v", r.ProofReport)
+	}
+}
+
+func TestSignedToUnsignedConversionDoesNotPreserveNegativeValue(t *testing.T) {
+	src := `
+def widen(x: i64) -> u64:
+    ensure result <= 9223372036854775807
+    return x.u64()
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signed_to_unsigned.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
 	if !contains(allDiagnostics(r), "could not be proven") {
-		t.Fatalf("a sign-changing i64->u64->i64 round-trip must NOT be assumed identity, got:\n%s", allDiagnostics(r))
+		t.Fatalf("negative i64 values convert to u64 values above i64::MAX, so the postcondition must not be proven; got diagnostics:\n%s\nproof report: %+v", allDiagnostics(r), r.ProofReport)
 	}
 }
 
