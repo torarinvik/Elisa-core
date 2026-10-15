@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -760,7 +761,28 @@ func (a *Analyzer) storeScanIsEnumConstructor(decl *ast.FuncDecl, call *ast.Call
 	saved := a.storeFlowCurrentDecl
 	a.storeFlowCurrentDecl = decl
 	defer func() { a.storeFlowCurrentDecl = saved }()
-	return a.storeFlowEnumVariantConstructor(call)
+	// Resolve the enum name where decl is declared: scanned as a callee, the analyzer's current
+	// namespace/usings are the caller's, and `Expr.Ident(..)` in another module looked unresolved.
+	result := false
+	a.withResolutionContext(a.declNamespace(decl), a.funcDeclUsings[decl], func() {
+		result = a.storeFlowEnumVariantConstructor(call)
+	})
+	return result
+}
+
+// declNamespace: the namespace decl is declared in ("" at top level or when unknown).
+func (a *Analyzer) declNamespace(decl *ast.FuncDecl) string {
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return a.currentNamespace
+	}
+	if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+		if idx := strings.LastIndex(fnType.Name, "."); idx >= 0 {
+			return fnType.Name[:idx]
+		}
+		return ""
+	}
+	return a.currentNamespace
 }
 
 // storeScanHolds: locals that contain parts of some storage, and under which first projection.
