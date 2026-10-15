@@ -209,7 +209,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 					ambientGrownParam = p.Name
 				}
 			}
-		} else if sstamp, ok := regionlessRefStruct(p.Type); ok && !a.paramStructIsProgramLived(p.Type) {
+		} else if sstamp, ok := regionlessRefStruct(p.Type); ok && !a.paramStructIsProgramLivedIn(funcScopes[fn], p.Type) {
 			// docs/91 S4 Stage 1: a region-less by-ref STRUCT param whose CONTAINER FIELD is grown
 			// (`def fill(m: mutable Mod&): m.bits.push(..)`), or which is forwarded to a region-
 			// requiring callee. Stamp the inferred region onto the struct ref (`Mod& @r`): the
@@ -1700,6 +1700,16 @@ func reassignmentAllocatesFreshBacking(value ast.Expr) bool {
 // paramStructIsProgramLived: docs/128 -- a by-ref struct parameter whose every field is
 // program-lived (`@source`) needs no inferred region: its growable fields already allocate in
 // the program region, which outlives any region a caller could thread.
+// paramStructIsProgramLivedIn resolves typ in the function's own namespace (a struct declared
+// in a module is unknown by its bare name outside it).
+func (a *Analyzer) paramStructIsProgramLivedIn(scoped scopedDecl, typ ast.TypeExpr) bool {
+	result := false
+	a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+		result = a.paramStructIsProgramLived(typ)
+	})
+	return result
+}
+
 func (a *Analyzer) paramStructIsProgramLived(typ ast.TypeExpr) bool {
 	if a == nil || len(a.programRegions) == 0 || typ == nil {
 		return false
