@@ -25,6 +25,10 @@ func (a *Analyzer) ownedExtractionRegion(expr ast.Expr) string {
 	if t == nil || (!a.typeMayOwnArenaStorage(t, map[string]bool{}) && !a.isDArrayByteViewCall(expr)) {
 		return ""
 	}
+	// docs/128 §8: a program-lived value owns nothing in the container it was read from.
+	if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(t) {
+		return ""
+	}
 	return a.ownedStorageRootRegion(expr, map[ast.Expr]bool{})
 }
 

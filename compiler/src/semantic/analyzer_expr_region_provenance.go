@@ -345,7 +345,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		// docs/128 §8: a bare constructor of a declared program-lived store builds its node
 		// there; the handle depends on no local region.
 		if fieldExpr, isField := n.Func.(*ast.FieldExpr); isField {
-			if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr); ok && enumType != nil && variant != nil && enumType.DeclaredStoreRegion() != "" {
+			if enumType, _, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr); ok && enumType != nil && enumType.DeclaredStoreRegion() != "" {
 				return regionRefState{}, true
 			}
 		}

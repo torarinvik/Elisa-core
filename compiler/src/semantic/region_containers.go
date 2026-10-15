@@ -1390,6 +1390,13 @@ func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 			return r
 		}
 	}
+	// docs/128 §8: a local declared program-lived holds nothing a local region frees,
+	// whatever taint the value it was initialised from carried.
+	if id, ok := stripParenExpr(expr).(*ast.Ident); ok && len(a.programRegions) != 0 && a.currentScope != nil {
+		if sym, found := a.currentScope.Lookup(id.Name); found && sym != nil && sym.Kind == SymbolLocal && a.typeIsProgramLivedCached(sym.Type) {
+			return ""
+		}
+	}
 	if r := a.innerRegion(a.structInteriorTaintRegion(expr), a.ownedExtractionRegion(expr)); r != "" {
 		return r
 	}
