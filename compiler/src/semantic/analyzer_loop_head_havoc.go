@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // havocLoopWrittenFacts drops, before a loop body is analyzed, every fact about a variable the body
@@ -16,10 +17,14 @@ import (
 //
 // "May write" is syntactic and conservative: the root of every assignment target, every `&x`
 // operand root, and every method-call receiver root (a mutating method or a `&self` callee).
-func (a *Analyzer) havocLoopWrittenFacts(body []ast.Stmt) {
-	roots := map[string]bool{}
-	for _, stmt := range body {
-		collectLoopWrittenRoots(reflect.ValueOf(stmt), roots)
+func (a *Analyzer) havocLoopWrittenFacts(body []ast.Stmt, cond ast.Expr) {
+	roots := loopWrittenRoots(body)
+	counters := monotoneLoopCounters(body, cond)
+	kept := map[string]numRange{}
+	for name := range counters {
+		if r, ok := a.lookupRangeFact(name); ok && r.loKnown {
+			kept[name] = numRange{loKnown: true, lo: r.lo}
+		}
 	}
 	names := make([]string, 0, len(roots))
 	for name := range roots {
@@ -35,6 +40,14 @@ func (a *Analyzer) havocLoopWrittenFacts(body []ast.Stmt) {
 		a.invalidateSMTAssertFactsForTarget(target)
 		a.invalidateIndexBoundsReferencingBase(name)
 		a.invalidateBoundEqualReferencingBase(name)
+	}
+	for _, name := range names {
+		if r, ok := kept[name]; ok && a.currentScope != nil {
+			if a.currentScope.rangeFacts == nil {
+				a.currentScope.rangeFacts = map[string]numRange{}
+			}
+			a.currentScope.rangeFacts[name] = r
+		}
 	}
 }
 
@@ -90,4 +103,180 @@ func (a *Analyzer) isInductiveLoopInvariant(stmt *ast.ContractStmt) bool {
 		}
 	}
 	return false
+}
+
+func loopWrittenRoots(body []ast.Stmt) map[string]bool {
+	roots := map[string]bool{}
+	for _, stmt := range body {
+		collectLoopWrittenRoots(reflect.ValueOf(stmt), roots)
+	}
+	return roots
+}
+
+// exprReadsAnyRoot reports whether expr mentions any identifier in roots (conservatively, any Ident
+// node with that name anywhere in the expression tree).
+func exprReadsAnyRoot(expr ast.Expr, roots map[string]bool) bool {
+	found := false
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if found || !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if id, ok := v.Interface().(*ast.Ident); ok && id != nil && roots[id.Name] {
+				found = true
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(expr))
+	return found
+}
+
+// monotoneLoopCounters returns the counter a `while x < e` loop only steps upward: the guard is a
+// strict `x < e` on a plain identifier, every write to x in the body is `x <- x + 1` (or `x += 1`),
+// nothing borrows x or calls a method on it, and no path through one iteration increments it more
+// than once (branches take the max, sequences add, a nested loop that writes x disqualifies). Each
+// increment then runs with x < e <= max, so it never overflows and x never decreases: its entry
+// LOWER bound holds at every loop head (and after the loop). Its upper bound and value do not.
+func monotoneLoopCounters(body []ast.Stmt, cond ast.Expr) map[string]bool {
+	guard, ok := stripOptimizationParens(cond).(*ast.BinaryExpr)
+	if !ok || guard == nil || guard.Op != lexer.TOKEN_LT {
+		return nil
+	}
+	id, ok := stripOptimizationParens(guard.Left).(*ast.Ident)
+	if !ok || id == nil {
+		return nil
+	}
+	steps, ok := counterPathSteps(body, id.Name)
+	if !ok || steps != 1 {
+		return nil
+	}
+	return map[string]bool{id.Name: true}
+}
+
+// counterPathSteps is the most increments of name along any path through stmts, or ok=false when a
+// statement writes name any other way.
+func counterPathSteps(stmts []ast.Stmt, name string) (int, bool) {
+	total := 0
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.AssignStmt:
+			if loopRootIs(n.Target, name) {
+				if !isIdentNamed(n.Target, name) || !isIncrementByOne(n.Value, name) || stmtTouchesCounter(n.Value, name) {
+					return 0, false
+				}
+				total++
+				continue
+			}
+		case *ast.AugAssignStmt:
+			if loopRootIs(n.Target, name) {
+				if !isIdentNamed(n.Target, name) || n.Op != lexer.TOKEN_PLUSEQ || !isIntLitOne(n.Value) {
+					return 0, false
+				}
+				total++
+				continue
+			}
+		case *ast.IfStmt:
+			if stmtTouchesCounter(n.Cond, name) {
+				return 0, false
+			}
+			best, ok := counterPathSteps(n.Then, name)
+			if !ok {
+				return 0, false
+			}
+			for _, elif := range n.Elifs {
+				if stmtTouchesCounter(elif.Cond, name) {
+					return 0, false
+				}
+				k, ok := counterPathSteps(elif.Body, name)
+				if !ok {
+					return 0, false
+				}
+				best = max(best, k)
+			}
+			k, ok := counterPathSteps(n.Else, name)
+			if !ok {
+				return 0, false
+			}
+			total += max(best, k)
+			continue
+		}
+		if stmtTouchesCounter(stmt, name) {
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+// stmtTouchesCounter reports whether node may write name: an assignment rooted at it, a borrow of
+// it, or a method call on it, anywhere inside (nested loops and lambdas included).
+func stmtTouchesCounter(node any, name string) bool {
+	if node == nil {
+		return false
+	}
+	roots := map[string]bool{}
+	collectLoopWrittenRoots(reflect.ValueOf(node), roots)
+	return roots[name]
+}
+
+func loopRootIs(expr ast.Expr, name string) bool {
+	root, ok := rootIdentName(stripOptimizationParens(expr))
+	return ok && root == name
+}
+
+func isIntLitOne(expr ast.Expr) bool {
+	lit, ok := stripOptimizationParens(expr).(*ast.IntLit)
+	return ok && lit != nil && lit.Value == "1" && !lit.IsHex
+}
+
+func isIncrementByOne(expr ast.Expr, name string) bool {
+	b, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
+	if !ok || b == nil || b.Op != lexer.TOKEN_PLUS {
+		return false
+	}
+	return (isIdentNamed(b.Left, name) && isIntLitOne(b.Right)) || (isIntLitOne(b.Left) && isIdentNamed(b.Right, name))
+}
+
+// collectExprIdentNames adds the name of every identifier inside expr to out.
+func collectExprIdentNames(expr ast.Expr, out map[string]bool) {
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
+				out[id.Name] = true
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(expr))
 }

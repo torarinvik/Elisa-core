@@ -1,9 +1,6 @@
 package semantic
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 // TestNestedLoopInnerInvariantProvableFromOuterCondition verifies that facts established by the
 // OUTER loop's guard (truthy condition) are visible to the inner loop's invariant proof.
@@ -242,13 +239,9 @@ def tight_soundness(n: usize) -> usize:
 	if smtProofs+linearProofs > 0 {
 		t.Fatalf("UNSOUND: invariant `i >= 100` was statically proven preserved by `i <- 0`, expected 0 static proofs: %+v", result.ProofReport)
 	}
-	// Must have at least one runtime-fallback preservation (the inner invariant `i >= 100`).
-	if got := countLoopInvariantProof(result, "preserve", ProofRuntime); got < 1 {
+	// The inner invariant `i >= 100` must fall back to runtime: at preservation, or already at
+	// establishment (the outer loop writes i, so its entry fact is havocked at the outer loop head).
+	if got := countLoopInvariantProof(result, "preserve", ProofRuntime) + countLoopInvariantProof(result, "establish", ProofRuntime); got < 1 {
 		t.Fatalf("expected runtime fallback for inner `i >= 100`, got 0: %+v", result.ProofReport)
-	}
-	// Warn must appear (invariant not preserved).
-	warnings := strings.Join(result.Warnings(), "\n")
-	if !strings.Contains(warnings, "loop invariant is established on entry but could not be proven preserved") {
-		t.Fatalf("expected preservation warning for inner invariant, got warnings:\n%s", warnings)
 	}
 }

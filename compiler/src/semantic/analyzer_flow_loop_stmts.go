@@ -366,7 +366,7 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	// Classify the entry range before checking mutations in the body. Restrict
 	// this exclusion to the built-in ascending, default-step range.
 	_, emptyRange, _ := a.classifyDerivedLiteralRange(stmt)
-	a.havocLoopWrittenFacts(stmt.Body)
+	a.havocLoopWrittenFacts(stmt.Body, nil)
 	a.pushLoopAffineFrame()
 	a.pushStorageViewLoopUseFrame(outerScope, stmt.Body)
 	a.loopDepth++
@@ -772,7 +772,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	}
 	entryAffine := a.cloneAffineValueStates()
 	outerScope := a.currentScope
-	a.havocLoopWrittenFacts(stmt.Body)
+	a.havocLoopWrittenFacts(stmt.Body, nil)
 	a.pushLoopAffineFrame()
 	a.loopDepth++
 	if stmt.Filter != nil {

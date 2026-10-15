@@ -1171,7 +1171,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// The count-up exit fact `i <= bound` is sound only if `i <= bound` at ENTRY; evaluate on the
 		// pristine pre-loop scope, since the body's `i <- i + 1` mutates i's tracked value below.
 		countUpExitSound := a.countUpExitFactSound(n)
-		a.havocLoopWrittenFacts(n.Body)
+		a.havocLoopWrittenFacts(n.Body, n.Cond)
 		entryAffine := a.cloneAffineValueStates()
 		outerScope := a.currentScope
 		a.pushLoopAffineFrame()

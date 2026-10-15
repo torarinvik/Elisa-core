@@ -60,3 +60,44 @@ def hh(n: usize) -> bool:
 		}
 	}
 }
+
+// SOUNDNESS: the body is analyzed once, against the first iteration's facts. A later iteration sees
+// the previous one's writes, so an entry fact about a written variable must not reach the loop head:
+// `invariant h == 5` inside a loop that increments h "proved" and was used as a release fact.
+func TestLoopHeadDropsEntryFactsOfWrittenVariables(t *testing.T) {
+	for name, loop := range map[string]string{
+		"while": "    i: mutable i64 = 0\n    while i < n:\n        invariant h == 5\n        h <- h + 1\n        i <- i + 1\n",
+		"for":   "    for k in 0..<n:\n        invariant h == 5\n        h <- h + 1\n",
+	} {
+		src := "def hh(n: i64) -> u64:\n    h: mutable u64 = 5\n" + loop + "    return h\n"
+		if errs := strictSMTErrors(t, "loop_head_"+name+".elisa", src); !strings.Contains(strings.Join(errs, "\n"), "could not be proven") {
+			t.Fatalf("%s: h changes across iterations; invariant h == 5 must not prove", name)
+		}
+	}
+	// A counter stepped once per iteration under `x < e` keeps its entry lower bound.
+	counter := "def f(n: i64, done: bool):\n    requires n >= 0\n    i: mutable i64 = 0\n    while i < n:\n        assert i >= 0\n        if done:\n            break\n        i <- i + 1\n"
+	if errs := strictSMTErrors(t, "loop_head_counter.elisa", counter); len(errs) != 0 {
+		t.Fatalf("a monotone counter keeps its lower bound, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// SOUNDNESS: invariants are preserved JOINTLY. `a == 0` is preserved by `a <- a + b` only under
+// `b == 0`, which `b <- b + 1` does not preserve; `a == 0` must not be proven by leaning on it.
+func TestLoopInvariantsPreservedJointly(t *testing.T) {
+	src := `def f(n: i64) -> i64:
+    a: mutable i64 = 0
+    b: mutable i64 = 0
+    i: mutable i64 = 0
+    while i < n:
+        invariant b == 0
+        invariant a == 0
+        a <- a + b
+        b <- b + 1
+        i <- i + 1
+    return a
+`
+	r := analyzeLoopInvariantWithSMT(t, "joint.elisa", src, false)
+	if got := countLoopInvariantProof(r, "preserve", ProofProvenSMT) + countLoopInvariantProof(r, "preserve", ProofProvenLinear); got != 0 {
+		t.Fatalf("neither invariant is inductive on its own; got %d preserved: %+v", got, r.ProofReport)
+	}
+}

@@ -74,10 +74,18 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// unavailable (captured=false) or whose preservation falls back to runtime is NOT included.
 	var inductiveInvs []*ast.ContractStmt
 	allProven := true
+	written := loopWrittenRoots(stmt.Body)
+	// Establishment: each invariant from the pre-loop facts (plus the entry-value point ranges). The
+	// body has not been analyzed yet, so these facts are intact.
+	var candidates []*ast.ContractStmt
 	for _, inv := range invs {
-		// Establishment: prove from the pre-loop facts (plus the entry-value point ranges). The body has
-		// not been analyzed yet, so these facts are intact.
 		established, viaSMT := a.proveLoopClause(inv.Cond, nil, establishScope)
+		if !established && !exprReadsAnyRoot(inv.Cond, written) {
+			// A frame invariant (it reads nothing the body may write) keeps the entry facts it reads
+			// at every loop head, so the in-place check decides it; no inductive lint.
+			allProven = false
+			continue
+		}
 		if !established {
 			a.recordProof(inv.Pos(), "loop invariant", "establish", ProofRuntime)
 			a.proofLint(inv.Pos(), "loop invariant could not be established on entry; it is only checked at runtime")
@@ -85,39 +93,86 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 			continue
 		}
 		a.recordProof(inv.Pos(), "loop invariant", "establish", provenTier(viaSMT))
-		if !captured {
-			allProven = false
-			continue
+		candidates = append(candidates, inv)
+	}
+	// A body with `if`/`break`/`return` is modeled path by path (the guard-`if` enumeration the
+	// termination prover uses); preservation must hold on every non-exiting path.
+	var paths []loopBodyPath
+	pathsOK := false
+	if !captured && len(candidates) != 0 {
+		focus := map[string]bool{}
+		for _, inv := range invs {
+			collectExprIdentNames(inv.Cond, focus)
 		}
-		// Preservation: prove `cond ∧ (every invariant) ⊢ inv[body]`.
-		//
-		// Affine fast path (no SMT): seed ONLY the truthy loop-guard's constant range facts about the
-		// loop variables into a scratch scope, then bound the substituted invariant difference over
-		// those ranges. This proves the common constant-bounded inductive step `n < MAX ⊢ n+1 <= MAX`
-		// with no solver — the missing hypothesis was the truthy guard, which the body executes under.
-		// Sound: the scratch scope carries ONLY guard-derived facts (no stale pre-loop entry values),
-		// and the affine difference is bounded conservatively (open/decline on any unknown bound).
-		if a.proveLoopPreservationAffine(stmt.Cond, inv.Cond, subst) {
-			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofProvenLinear)
-			inductiveInvs = append(inductiveInvs, inv)
-			continue
+		if p, ok := a.enumerateLoopBodyPaths(stmt.Body, focus); ok {
+			for _, path := range p {
+				a.typeLoopSubstCastsForSMT(path.subst)
+			}
+			paths, pathsOK = p, true
 		}
-		// SMT fallback (off unless -smt): a dedicated implication where the loop variables are FREE —
-		// constrained only by the loop condition and the invariants, never by their (now stale)
-		// pre-loop values. That isolation is what makes it sound: a child scope cannot mask the outer
-		// loop-variable facts (range-fact lookup intersects the whole chain), so reusing the ambient
-		// fact set would let a false invariant like `i < 5` "prove" preserved off the entry value
-		// `i == 0`.
-		// The outer-loop safe invariants are also passed as additional SMT hypotheses — they are proven
-		// inductive by the outer loop and hold throughout its execution, so they are valid assumptions
-		// for any inner-loop preservation obligation that doesn't mutate the variables they depend on.
-		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst, arrayStores, outerSafeInvs); !preserved {
-			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofRuntime)
-			a.proofLint(inv.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(counterexample))
-			allProven = false
-			continue
+	}
+	if !captured && !pathsOK {
+		return nil, false
+	}
+	// Preservation is proven JOINTLY: each surviving invariant must be preserved under the hypothesis
+	// of the surviving SET. An invariant that fails is removed and the rest are re-proven without it,
+	// to a fixpoint, so no invariant is "preserved" by leaning on one that is not.
+	preserveTier := map[*ast.ContractStmt]ProofOutcome{}
+	failedCE := map[*ast.ContractStmt]string{}
+	for {
+		var failed *ast.ContractStmt
+		for _, inv := range candidates {
+			if _, done := preserveTier[inv]; done {
+				continue
+			}
+			if captured {
+				// Affine fast path (no SMT): ONLY the truthy loop-guard's constant range facts, then the
+				// substituted invariant difference bounded over those ranges.
+				if a.proveLoopPreservationAffine(stmt.Cond, inv.Cond, subst) {
+					preserveTier[inv] = ProofProvenLinear
+					continue
+				}
+				// SMT: the loop variables are FREE, constrained only by the loop condition, the surviving
+				// invariants and the disjoint outer invariants, never by their stale pre-loop values.
+				if preserved, ce := a.proveLoopPreservationSMT(stmt.Cond, candidates, inv.Cond, subst, arrayStores, outerSafeInvs); !preserved {
+					failed, failedCE[inv] = inv, ce
+					break
+				}
+				preserveTier[inv] = ProofProvenSMT
+				continue
+			}
+			for _, path := range paths {
+				if path.exits {
+					continue
+				}
+				if preserved, ce := a.proveLoopPreservationSMT(buildPathCond(stmt.Cond, path.conds), candidates, inv.Cond, path.subst, nil, outerSafeInvs); !preserved {
+					failed, failedCE[inv] = inv, ce
+					break
+				}
+			}
+			if failed != nil {
+				break
+			}
+			preserveTier[inv] = ProofProvenSMT
 		}
-		a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofProvenSMT)
+		if failed == nil {
+			break
+		}
+		kept := candidates[:0:0]
+		for _, inv := range candidates {
+			if inv != failed {
+				kept = append(kept, inv)
+			}
+		}
+		candidates = kept
+		allProven = false
+		// Every proof so far may have used the removed invariant: re-prove the survivors without it.
+		preserveTier = map[*ast.ContractStmt]ProofOutcome{}
+		a.recordProof(failed.Pos(), "loop invariant", "preserve", ProofRuntime)
+		a.proofLint(failed.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(failedCE[failed]))
+	}
+	for _, inv := range candidates {
+		a.recordProof(inv.Pos(), "loop invariant", "preserve", preserveTier[inv])
 		inductiveInvs = append(inductiveInvs, inv)
 	}
 
