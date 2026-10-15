@@ -504,6 +504,13 @@ func (a *Analyzer) returnBorrowConservativeFlow(expr ast.Expr, fallback Type) re
 		t = fallback
 	}
 	if t == nil || a.typeMayHoldFrameBorrow(t, map[Type]bool{}) {
+		if storeScanTrace && expr != nil {
+			fn := ""
+			if a.currentFuncDecl != nil {
+				fn = a.currentFuncDecl.Name
+			}
+			fmt.Fprintf(os.Stderr, "RBCONSERV %s %T at %s type=%s\n", fn, expr, expr.Pos(), typeString(t))
+		}
 		return returnBorrowFlow{Local: true}
 	}
 	return returnBorrowFlow{}
