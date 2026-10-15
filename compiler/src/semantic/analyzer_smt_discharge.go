@@ -773,7 +773,8 @@ func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast
 	if !ok {
 		if smtQueryTrace {
 			fmt.Fprintf(os.Stderr, "=== TRACE env-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
-			for k, v := range substForEnv {
+			for _, k := range slices.Sorted(maps.Keys(substForEnv)) {
+				v := substForEnv[k]
 				fmt.Fprintf(os.Stderr, "    subst %s = %T %s type=%v\n", k, v, optimizationExprString(v), a.exprTypes[v])
 			}
 		}
@@ -862,7 +863,10 @@ func (a *Analyzer) smtEnvForRelevantSubst(tr *smtTranslator, subst map[string]as
 			return nil, false
 		}
 	}
-	for name, argExpr := range subst {
+	// Sorted: binding order names fresh symbols (svarg$N) and decides which binding declines
+	// first, so map order made the emitted query set differ run to run.
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		argExpr := subst[name]
 		if !used[name] || env[name] != "" {
 			continue
 		}
@@ -1208,7 +1212,10 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 
 func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
 	env := map[string]string{}
-	for name, argExpr := range subst {
+	// Sorted: binding order names fresh symbols (svarg$N) and decides which binding declines
+	// first, so map order made the emitted query set differ run to run.
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		argExpr := subst[name]
 		if !a.bindSMTEnvArg(tr, env, name, argExpr, nil, true) {
 			return nil, false
 		}
@@ -1236,7 +1243,10 @@ func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Ex
 
 func (a *Analyzer) smtEnvForCallSubstEnv(tr *smtTranslator, subst map[string]ast.Expr, argEnv map[string]string) (map[string]string, bool) {
 	env := map[string]string{}
-	for name, argExpr := range subst {
+	// Sorted: binding order names fresh symbols (svarg$N) and decides which binding declines
+	// first, so map order made the emitted query set differ run to run.
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		argExpr := subst[name]
 		if !a.bindSMTEnvArg(tr, env, name, argExpr, argEnv, false) {
 			return nil, false
 		}
