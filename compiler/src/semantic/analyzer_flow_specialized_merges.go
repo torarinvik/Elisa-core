@@ -212,7 +212,7 @@ func (a *Analyzer) mergeSpecializedValueTypeBindings(dst map[*Symbol]Type, src m
 }
 
 func (a *Analyzer) cloneSpecializedValueTypeMap(src map[*Symbol]Type) map[*Symbol]Type {
-	return a.cloneTrackedValueTypeMapWithSeen(src, map[Type]Type{})
+	return a.cloneTrackedValueTypeMapWithSeen(src, nil)
 }
 
 func (a *Analyzer) intersectSpecializedValueTypeFlows(flows ...map[*Symbol]Type) (map[*Symbol]Type, bool) {
