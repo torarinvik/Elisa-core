@@ -561,6 +561,18 @@ func (p *Parser) parsePrimary() ast.Expr {
 			return &ast.GetExpr{Position: pos, Value: value}
 		}
 		tok := p.advance()
+		// `atomic[T]` is a lowercase builtin generic struct (registered by the
+		// semantic analyzer). Permit its brace literal even though user-declared
+		// struct constructors follow the capitalized-name convention. Keeping this
+		// exception keyed to the builtin avoids reinterpreting lowercase indexed
+		// values such as `items[index]{field: value}` as type constructors.
+		if tok.Text == "atomic" && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
+			typeArgs := p.parseStructLiteralTypeArgs()
+			p.expect(lexer.TOKEN_LBRACE)
+			args, argNames, spreads, copyBase := p.parseStructLiteralBraceFields()
+			p.expect(lexer.TOKEN_RBRACE)
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads, CopyBase: copyBase}
+		}
 		if p.peek() == lexer.TOKEN_SCOPE {
 			qualified := p.parseQualifiedIdentNameAfterFirst(tok.Text)
 			// A `::`-qualified name whose final segment is capitalized supports the

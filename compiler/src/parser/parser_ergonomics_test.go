@@ -418,6 +418,53 @@ def update(base: Accessors, name: i64) -> Accessors:
 	}
 }
 
+func TestParseLowercaseAtomicGenericBraceLiteralWithoutChangingIndexedUpdates(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Cell:
+    value: i64
+
+def make_atomic[T](value: T) -> atomic[T]:
+    return atomic[T]{value: value}
+
+def update_cell(items: darray[Cell], index: usize, value: i64) -> Cell:
+    return items[index]{value = value}
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+
+	makeDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected make_atomic function, got %T", file.Decls[1])
+	}
+	makeReturn, ok := makeDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected atomic return statement, got %T", makeDecl.Body[0])
+	}
+	atomicLiteral, ok := makeReturn.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected lowercase atomic generic constructor, got %T", makeReturn.Value)
+	}
+	if atomicLiteral.Name != "atomic" || !atomicLiteral.Brace || len(atomicLiteral.TypeArgs) != 1 || atomicLiteral.ArgName(0) != "value" {
+		t.Fatalf("unexpected atomic generic constructor shape: %#v", atomicLiteral)
+	}
+
+	updateDecl, ok := file.Decls[2].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected update_cell function, got %T", file.Decls[2])
+	}
+	updateReturn, ok := updateDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected record-update return statement, got %T", updateDecl.Body[0])
+	}
+	update, ok := updateReturn.Value.(*ast.RecordUpdateExpr)
+	if !ok {
+		t.Fatalf("expected lowercase indexed record update, got %T", updateReturn.Value)
+	}
+	if update.ArgName(0) != "value" {
+		t.Fatalf("expected record-update field value, got %q", update.ArgName(0))
+	}
+}
+
 func TestParseCatchExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, `error FileError:
 	NotFound
