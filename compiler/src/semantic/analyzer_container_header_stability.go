@@ -61,8 +61,9 @@ func (a *Analyzer) containerHeadersStable(root *ast.FuncDecl) bool {
 				}
 				locals(v.Elem())
 			case reflect.Struct:
+				rfs := reflectFields(v.Type())
 				for i := 0; i < v.NumField(); i++ {
-					if (v.Type().Field(i).Name == "Name" || v.Type().Field(i).Name == "Binder") && v.Field(i).Kind() == reflect.String {
+					if (rfs[i].Name == "Name" || rfs[i].Name == "Binder") && v.Field(i).Kind() == reflect.String {
 						shadowed[v.Field(i).String()] = true
 					}
 					locals(v.Field(i))
@@ -273,8 +274,9 @@ func headerLocalBindingNames(fn *ast.FuncDecl) map[string]bool {
 			}
 			walk(v.Elem())
 		case reflect.Struct:
+			rfs := reflectFields(v.Type())
 			for i := 0; i < v.NumField(); i++ {
-				if (v.Type().Field(i).Name == "Name" || v.Type().Field(i).Name == "Binder") && v.Field(i).Kind() == reflect.String {
+				if (rfs[i].Name == "Name" || rfs[i].Name == "Binder") && v.Field(i).Kind() == reflect.String {
 					names[v.Field(i).String()] = true
 				}
 				walk(v.Field(i))

@@ -312,8 +312,9 @@ func (a *Analyzer) storageViewCalleeWriteStmtFields(stmt ast.Stmt, name string, 
 	if v.Kind() != reflect.Struct {
 		return
 	}
+	rfs := reflectFields(v.Type())
 	for i := 0; i < v.NumField(); i++ {
-		fieldInfo := v.Type().Field(i)
+		fieldInfo := &rfs[i]
 		if !fieldInfo.IsExported() {
 			continue
 		}
@@ -374,10 +375,10 @@ func (a *Analyzer) storageViewLmutThreadedStmt(stmt ast.Stmt, name string, local
 		if v.Kind() != reflect.Struct {
 			return false
 		}
-		if _, hasTargets := v.Type().FieldByName("Targets"); !hasTargets {
+		if _, hasTargets := reflectFieldIndex(v.Type(), "Targets"); !hasTargets {
 			return false
 		}
-		field := v.FieldByName("Value")
+		field := reflectFieldByName(v, "Value")
 		if !field.IsValid() || !field.CanInterface() {
 			return false
 		}
@@ -661,8 +662,9 @@ func storageViewDeclLocalNames(decl *ast.FuncDecl, nodes []any) map[string]bool 
 		if v.Kind() != reflect.Struct {
 			continue
 		}
+		rfs := reflectFields(v.Type())
 		for i := 0; i < v.NumField(); i++ {
-			info := v.Type().Field(i)
+			info := &rfs[i]
 			if !info.IsExported() {
 				continue
 			}

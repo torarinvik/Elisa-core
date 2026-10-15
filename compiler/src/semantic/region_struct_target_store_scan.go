@@ -576,8 +576,9 @@ func stmtBoundNames(stmt ast.Stmt) []string {
 				return
 			}
 			t := v.Type()
+			rfs := reflectFields(t)
 			for i := 0; i < v.NumField(); i++ {
-				name := t.Field(i).Name
+				name := rfs[i].Name
 				if t == storeScanPatternArgType && name == "Name" {
 					continue // `Key(key: k)`: the field label; the binder is the nested pattern
 				}
@@ -599,11 +600,12 @@ func stmtBoundNames(stmt ast.Stmt) []string {
 		}
 	}
 	top := v.Type()
+	rfs := reflectFields(top)
 	for i := 0; i < v.NumField(); i++ {
-		if top.Field(i).Name == "Captures" {
+		if rfs[i].Name == "Captures" {
 			continue // `while c |xs, t|:` names existing bindings (a mutation manifest); binds none
 		}
-		rec(v.Field(i), 1, top.Field(i).Name)
+		rec(v.Field(i), 1, rfs[i].Name)
 	}
 	return out
 }
