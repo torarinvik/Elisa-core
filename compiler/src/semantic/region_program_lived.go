@@ -174,6 +174,45 @@ func (a *Analyzer) enumPayloadsProgramLived(root *EnumType, seen map[Type]bool) 
 	return true
 }
 
+// typeViewsProgramLived: every VIEW reachable inside a value of t (sviews, refs, payload views)
+// points at program-lived bytes. Unlike typeIsProgramLived it ignores where t's own container
+// storage lives: it answers what a view-only value read out of t can point at (storeViews).
+func (a *Analyzer) typeViewsProgramLived(t Type, seen map[Type]bool) bool {
+	if t == nil {
+		return false
+	}
+	if seen[t] {
+		return true
+	}
+	switch tt := t.(type) {
+	case *DArrayType:
+		seen[t] = true
+		return a.typeViewsProgramLived(tt.Elem, seen)
+	case *ArrayType:
+		seen[t] = true
+		return a.typeViewsProgramLived(tt.Elem, seen)
+	case *OptionalType:
+		return a.typeViewsProgramLived(tt.Value, seen)
+	case *TupleType:
+		seen[t] = true
+		for _, field := range tt.Fields {
+			if !a.typeViewsProgramLived(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *StructType:
+		seen[t] = true
+		for _, field := range tt.Fields {
+			if !a.typeViewsProgramLived(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return a.typeIsProgramLived(t, map[Type]bool{})
+}
+
 // typeIsProgramLivedCached memoizes typeIsProgramLived per type (types are immutable once
 // declarations are collected).
 func (a *Analyzer) typeIsProgramLivedCached(t Type) bool {

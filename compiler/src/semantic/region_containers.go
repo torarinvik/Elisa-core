@@ -2298,6 +2298,10 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// Values read out of it that cannot hold a region reference (scalars, packed handles)
 			// carry none.
 			continue
+		} else if mode == storeViews && len(a.programRegions) != 0 && a.typeViewsProgramLived(stripRefForBounds(a.exprTypes[arg]), map[Type]bool{}) {
+			// docs/128: view-only values read out of it can point only where its views do,
+			// and every view it holds is program-lived.
+			continue
 		} else {
 			regions = a.storeCallArgRegions(arg, mode)
 		}

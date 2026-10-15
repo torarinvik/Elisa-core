@@ -176,8 +176,8 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				mode := valueMode(field.Object)
 				for _, arg := range call.Args {
 					argMode := valueMode(arg)
-					if field.Field == "extend" && argMode == storeHeader {
-						argMode = storeElements
+					if field.Field == "extend" {
+						argMode = a.storeScanExtendArgMode(arg, argMode)
 					}
 					mode = maxStoreMode(mode, argMode)
 				}
@@ -268,8 +268,8 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				if root := rootIdentExpr(field.Object); root != nil && (targets[root.Name] || (holders[root.Name] && storeScanPlaceDepth(field.Object) >= 1)) {
 					for _, arg := range n.Args {
 						argMode := valueMode(arg)
-						if copiesElements && argMode == storeHeader {
-							argMode = storeElements
+						if copiesElements {
+							argMode = a.storeScanExtendArgMode(arg, argMode)
 						}
 						mode = storeScanRaise(decl, 177, n, mode, argMode)
 					}
@@ -302,8 +302,8 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				if recvTarget {
 					for _, s := range taintedArgs {
 						argMode := s.mode
-						if copiesElements && argMode == storeHeader {
-							argMode = storeElements
+						if copiesElements {
+							argMode = a.storeScanExtendArgMode(n.Args[s.index], argMode)
 						}
 						mode = storeScanRaise(decl, 204, n, mode, argMode)
 					}
@@ -975,6 +975,10 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 								}
 							}
 							if copiesElements {
+								// Scalar elements copied out of xs carry nothing of it.
+								if a.storeScanExtendArgMode(arg, storeElements) == storeNone {
+									continue
+								}
 								if idx.mentions(arg, content) && add(content, root.Name) {
 									changed = true
 								}
@@ -2221,6 +2225,24 @@ func storeScanPlaceDepth(expr ast.Expr) int {
 
 // storeScanHoldsNoRegionStorage: t carries no region storage and can contain no region reference
 // (memoized per type: the scan asks it for every node of every summary query).
+// storeScanExtendArgMode: a builtin darray's `extend(xs)` copies xs's ELEMENTS into the
+// receiver and never retains xs's own header; elements whose type holds no region storage
+// (`darray[u32]`) carry nothing from xs at all.
+func (a *Analyzer) storeScanExtendArgMode(arg ast.Expr, mode storeMode) storeMode {
+	if mode == storeNone {
+		return mode
+	}
+	if t, known := a.exprTypes[storeScanUnwrap(arg)]; known && t != nil && !containsTypeParam(t) {
+		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && a.storeScanHoldsNoRegionStorage(da.Elem) {
+			return storeNone
+		}
+	}
+	if mode == storeHeader {
+		return storeElements
+	}
+	return mode
+}
+
 func (a *Analyzer) storeScanHoldsNoRegionStorage(t Type) bool {
 	cacheable := t != nil && reflect.ValueOf(t).Kind() == reflect.Pointer
 	if cacheable {
