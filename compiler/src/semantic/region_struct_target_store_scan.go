@@ -167,6 +167,12 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			if t, ok := a.storeScanDeclTypeOf(decl, inner); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
 				return storeNone
 			}
+			// A by-value loop binder over a parameter field chain is a copy of one element.
+			if id, isIdent := inner.(*ast.Ident); isIdent {
+				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
+					return storeNone
+				}
+			}
 			// `p.items.count` / `.len` / `.capacity` of a builtin container or view is a scalar.
 			if field, isField := inner.(*ast.FieldExpr); isField && field != nil && (field.Field == "count" || field.Field == "len" || field.Field == "capacity") {
 				if t, ok := a.storeScanDeclTypeOf(decl, field.Object); ok && t != nil {
@@ -2065,6 +2071,59 @@ func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type,
 				return c.Elem, true
 			}
 		}
+	}
+	return nil, false
+}
+
+// storeScanLoopBinderElemType types a by-value loop binder `for x in p.f` (p a parameter) as the
+// element type of p.f. Only when that loop is the name's ONLY binding in decl (no parameter, no
+// declaration, no other pattern or loop binds it), so every use of the name is that copy.
+func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident) (Type, bool) {
+	if decl == nil || id == nil {
+		return nil, false
+	}
+	for _, p := range decl.Params {
+		if p.Name == id.Name {
+			return nil, false
+		}
+	}
+	idx := a.storeScanIndex(decl)
+	if !idx.otherBound[id.Name] || len(idx.decls[id.Name]) != 0 {
+		return nil, false
+	}
+	var loop *ast.IterForStmt
+	for _, node := range idx.flat {
+		stmt, ok := node.(ast.Stmt)
+		if !ok || stmt == nil {
+			continue
+		}
+		for _, name := range stmtBoundNames(stmt) {
+			if name != id.Name {
+				continue
+			}
+			it, isIter := stmt.(*ast.IterForStmt)
+			if !isIter || it == nil || loop != nil {
+				return nil, false
+			}
+			loop = it
+		}
+	}
+	if loop == nil || loop.Mode != ast.IterBindValue {
+		return nil, false
+	}
+	if pat, ok := loop.Pattern.(*ast.MoveBindNamePattern); !ok || pat == nil || pat.Name != id.Name {
+		return nil, false
+	}
+	source, ok := storeScanUnwrap(loop.Source).(*ast.FieldExpr)
+	if !ok || source == nil {
+		return nil, false
+	}
+	t, ok := a.storeScanParamFieldChainType(decl, source)
+	if !ok || t == nil {
+		return nil, false
+	}
+	if c, isDArray := stripRefForBounds(t).(*DArrayType); isDArray && c != nil && c.Elem != nil {
+		return c.Elem, true
 	}
 	return nil, false
 }
