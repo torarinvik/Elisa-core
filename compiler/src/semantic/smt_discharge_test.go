@@ -775,6 +775,10 @@ def widen(x: i64) -> i64:
     ensure result == x
     r: i64 = x.u64().i64()
     return r
+def shrink(x: u64) -> u64:
+    ensure result == x
+    r: u64 = x.i64().u64()
+    return r
 `
 	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signchg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
 	if len(r.Errors()) != 0 {
@@ -782,6 +786,9 @@ def widen(x: i64) -> i64:
 	}
 	if !proofReportContains(r.ProofReport, "ensure widen", "ensure", ProofProvenSMT) {
 		t.Fatalf("expected the exact bit-preserving round-trip to prove, got: %+v", r.ProofReport)
+	}
+	if !proofReportContains(r.ProofReport, "ensure shrink", "ensure", ProofProvenSMT) {
+		t.Fatalf("expected the reverse bit-preserving round-trip to prove, got: %+v", r.ProofReport)
 	}
 }
 
