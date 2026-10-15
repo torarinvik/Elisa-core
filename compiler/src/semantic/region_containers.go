@@ -1137,6 +1137,14 @@ func (a *Analyzer) checkUnannotatedParamViewStore(targetExpr ast.Expr, targetReg
 		if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(paramType) {
 			return
 		}
+		if ref, isRef := paramType.(*RefType); isRef && ref != nil && ref.Region != "" {
+			// A region-annotated reference (declared or inferred): its region states the
+			// lifetime, and the region escape checks judge the store against it.
+			return
+		}
+		if a.containerViewsLiveIn(paramType, targetRegion) {
+			return // `darray[sview @r]&` stored into `r` (or the program region)
+		}
 		name := ""
 		if a.currentFuncDecl != nil && index < len(a.currentFuncDecl.Params) {
 			name = a.currentFuncDecl.Params[index].Name
@@ -1243,6 +1251,11 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 	}
 	if targetRegion == "" {
 		return
+	}
+	// An element pushed into program-region or source-declared region storage must not be a
+	// view borrowed from a region-less parameter (the assignment form's rule, applied to push).
+	if state, ok := a.regionRefStateForExpr(argExpr); ok {
+		a.checkUnannotatedParamViewStore(argExpr, targetRegion, state)
 	}
 	valueRegion := containerOrEntryRegion(valueType)
 	if valueRegion == "" {
@@ -2907,4 +2920,35 @@ func (a *Analyzer) storeCallArgRegions(arg ast.Expr, mode storeMode) []string {
 		regions = append(regions, own)
 	}
 	return regions
+}
+
+// containerViewsLiveIn: every view reachable through t's container elements is annotated with
+// `target` or a program region, so storing those elements into `target` storage cannot dangle.
+// A bare (region-less) view anywhere answers false.
+func (a *Analyzer) containerViewsLiveIn(t Type, target string) bool {
+	found := false
+	var walk func(Type, int) bool
+	walk = func(t Type, depth int) bool {
+		if t == nil || depth > 8 {
+			return false
+		}
+		switch tt := t.(type) {
+		case *RefType:
+			return walk(tt.Elem, depth+1)
+		case *DArrayType:
+			return walk(tt.Elem, depth+1)
+		case *ArrayType:
+			return walk(tt.Elem, depth+1)
+		case *OptionalType:
+			return walk(tt.Value, depth+1)
+		case *SViewType:
+			if tt.Region == "" || !(tt.Region == target || a.isProgramRegion(tt.Region)) {
+				return false
+			}
+			found = true
+			return true
+		}
+		return !a.typeCanContainRegionRefs(t, map[string]bool{})
+	}
+	return walk(t, 0) && found
 }
