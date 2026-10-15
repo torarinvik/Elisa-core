@@ -1083,7 +1083,15 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	tr := a.newSMTTranslator(nil)
 	retSym := "__return_call_result"
 	retTerm := smtVar(retSym)
-	tr.decls[retSym] = true
+	// The result symbol must carry the callee's result SORT. A bool-returning callee's ensures use
+	// `result` as a Bool (`x < 0 implies not result`); declaring it Int made every such query
+	// ill-sorted, so bool callee contracts never reached a call site.
+	if IsBoolType(a.exprTypes[call]) {
+		retTerm = smtBoolVar(retSym)
+		tr.boolDecls[retTerm] = true
+	} else {
+		tr.decls[retSym] = true
+	}
 	callerEnv := map[string]string{"result": retTerm}
 	obligation, ok := tr.boolTerm(clause, callerEnv)
 	if !ok {
