@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -29,8 +30,23 @@ func dedupeQualifiedNames(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
-	seen := make(map[string]bool, len(values))
 	out := make([]string, 0, len(values))
+	if len(values) <= 32 {
+		// Name-resolution candidate lists are short (lexical namespaces + usings): a linear scan
+		// gives the same first-occurrence order without a map allocation per lookup (the q7
+		// profile put this function's map at ~2.7 s of a stage1 build).
+		for _, value := range values {
+			if value == "" || slices.Contains(out, value) {
+				continue
+			}
+			out = append(out, value)
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	seen := make(map[string]bool, len(values))
 	for _, value := range values {
 		if value == "" || seen[value] {
 			continue
