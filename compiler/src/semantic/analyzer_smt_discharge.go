@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"os"
 	"reflect"
 	"slices"
 	"sort"
@@ -592,6 +593,9 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 	}
 	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
 	a.smtStats.Attempts++
+	if smtQueryTrace {
+		fmt.Fprintf(os.Stderr, "=== SMT query (%s)\n%s", a.currentFuncName(), query)
+	}
 	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
 	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
 	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
@@ -712,6 +716,12 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		env, ok = a.smtEnvForSubst(tr, substForEnv)
 	}
 	if !ok {
+		if smtQueryTrace {
+			fmt.Fprintf(os.Stderr, "=== TRACE env-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
+			for k, v := range substForEnv {
+				fmt.Fprintf(os.Stderr, "    subst %s = %T %s type=%v\n", k, v, optimizationExprString(v), a.exprTypes[v])
+			}
+		}
 		return false, ""
 	}
 	// Register compound substituted expressions as counterexample readbacks so a Sat model reports
@@ -763,6 +773,9 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 	// known facts that violates the precondition — a concrete witness for the diagnostic.
 	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, extra)
 	if !ok {
+		if smtQueryTrace {
+			fmt.Fprintf(os.Stderr, "=== TRACE goal-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
+		}
 		return false, ""
 	}
 	return proven, counterexample
@@ -5335,4 +5348,14 @@ func (tr *smtTranslator) calleeBoolTerm(decl *ast.FuncDecl, expr ast.Expr, env m
 	tr.calleeBodyDepth++
 	defer func() { tr.calleeBodyDecl = priorDecl; tr.calleeBodyDepth-- }()
 	return tr.boolTerm(expr, env)
+}
+
+// smtQueryTrace dumps every solver query to stderr (ELISA_SMT_TRACE=1) for prover debugging.
+var smtQueryTrace = os.Getenv("ELISA_SMT_TRACE") != ""
+
+func (a *Analyzer) currentFuncName() string {
+	if a.currentFuncDecl == nil {
+		return "<none>"
+	}
+	return a.currentFuncDecl.Name
 }
