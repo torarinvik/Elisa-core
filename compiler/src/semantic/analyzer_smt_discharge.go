@@ -69,9 +69,10 @@ func (p SMTStats) String() string {
 //
 // Measured over 73 stage1 files (1480 decided queries): p50 0.6k units, p90 25k, p99 1.1M-1.5M;
 // solver time scales with the budget because undecidable queries run to it (6M: 468 s, 2M: 192 s,
-// 1M: 110 s, 0.5M: 64 s, versus 291 s under the old 2 s timeout). 1M keeps 99% of decided queries;
-// the six slower unsat proofs in that corpus are the price of the CPU win (owner: CPU first).
-const smtQueryResourceLimit = 1_000_000
+// 1M: 110 s, 0.5M: 64 s, versus 291 s under the old 2 s timeout). Box sweep over the full stage1
+// probe: 500k 195.6 s user / 1536 errors, 1M 212.7 s / 1535, 2M 256.7 s / 1535, 6M ~390 s / 1534
+// (wall-clock 2 s baseline: 215 s). Owner: CPU first, so 500k.
+const smtQueryResourceLimit = 500_000
 
 // smtResourceLimit returns the budget, overridable by ELISA_SMT_RLIMIT (a positive integer) for
 // calibration sweeps only. A fixed value is still deterministic; production leaves it unset.
