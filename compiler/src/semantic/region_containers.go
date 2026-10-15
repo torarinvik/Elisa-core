@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 
 	"elisacore/src/ast"
 )
@@ -1072,6 +1073,7 @@ func (a *Analyzer) checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr ast
 		// every concrete backing dependency at the store boundary; otherwise a call can
 		// erase the source region and place the view into a longer-lived binding.
 		if state, ok := a.regionRefStateForExpr(valueExpr); ok {
+			a.checkUnannotatedParamViewStore(targetExpr, targetRegion, state)
 			regions := liveRegionDependencyNames(state)
 			sort.Strings(regions)
 			for _, valueRegion := range regions {
@@ -1104,6 +1106,97 @@ func (a *Analyzer) checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr ast
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+	}
+}
+
+// checkUnannotatedParamViewStore rejects storing a value borrowed from a region-less view or
+// reference PARAMETER into storage of a source-declared region parameter or a program-lived
+// region. The parameter's referent is only known to outlive the call, not that region: a caller
+// may pass a view of a local string (`def f[@a](n: mutable Node[a]&, s: sview): n.name <- s`).
+// Annotating the parameter with the target region (`s: sview @a`) makes the caller prove it.
+func (a *Analyzer) checkUnannotatedParamViewStore(targetExpr ast.Expr, targetRegion string, state regionRefState) {
+	if a == nil || targetRegion == "" || a.currentFuncType == nil {
+		return
+	}
+	if !a.isProgramRegion(targetRegion) && !a.isSourceDeclaredRegionParam(targetRegion) {
+		return
+	}
+	params := state.ParamDeps.Clone()
+	if state.HasDirectParamDep {
+		params.Add(state.DirectParamDep)
+	}
+	reported := false
+	params.ForEach(func(index int) {
+		if reported || index < 0 || index >= len(a.currentFuncType.Params) {
+			return
+		}
+		paramType := a.currentFuncType.Params[index]
+		if containerOrEntryRegion(paramType) != "" || !a.typeCanContainRegionRefs(stripRefForBounds(paramType), map[string]bool{}) {
+			return
+		}
+		if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(paramType) {
+			return
+		}
+		name := ""
+		if a.currentFuncDecl != nil && index < len(a.currentFuncDecl.Params) {
+			name = a.currentFuncDecl.Params[index].Name
+		}
+		reported = true
+		a.errorf(targetExpr.Pos(), "parameter %q is borrowed from the caller with no region, so it is not known to outlive region %q; storing it there may leave a dangling reference. Annotate the parameter `@%s`", name, regionDisplayName(targetRegion), targetRegion)
+	})
+}
+
+// checkRegionParamViewArgs: an argument passed to a parameter typed in one of the callee's
+// region parameters (`s: sview @a`) must live at least as long as the caller region bound to
+// it -- the callee may store it in that region's storage. A view of a local string passed where
+// `a` is bound to the caller's own region parameter would dangle once the local is freed.
+func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regionBindings map[string]string) {
+	if a == nil || ft == nil || len(ft.RegionParams) == 0 || a.suppressDiagnostics || a.staticContextDepth != 0 {
+		return
+	}
+	// One region parameter bound to two different caller regions: the callee may store a
+	// value of one into storage of the other, so the shorter one must not be outlived.
+	for _, conflict := range a.callRegionBindingConflicts {
+		first, second := conflict[1], conflict[2]
+		if len(args) > 0 && args[0] != nil && (a.regionStoreEscapes(first, second) || a.regionStoreEscapes(second, first)) {
+			a.errorf(args[0].Pos(), "region parameter %q of %q is bound to both %q and %q; the callee may store a value of one into the other, and they do not share a lifetime. Pass values of the same region", conflict[0], ft.Name, regionDisplayName(first), regionDisplayName(second))
+			break
+		}
+	}
+	for index, paramType := range ft.Params {
+		if index >= len(args) || args[index] == nil {
+			continue
+		}
+		region := containerOrEntryRegion(paramType)
+		if region == "" || stripRefForBounds(paramType) == nil {
+			continue
+		}
+		if _, isView := paramType.(*SViewType); !isView {
+			continue
+		}
+		bound, ok := regionBindings[region]
+		if !ok || bound == "" || bound == region && !a.lookupRegionParam(bound) && !a.isProgramRegion(bound) {
+			continue
+		}
+		// A region parameter or program region outlives this call's frame: a borrow of a
+		// function-local value (a local string's view) cannot be passed into it.
+		if a.lookupRegionParam(bound) || a.isProgramRegion(bound) {
+			a.checkAggregateBorrowEscapesLocal(args[index], "argument for a parameter in region "+strconv.Quote(regionDisplayName(bound))+" borrows function-local storage")
+		}
+		state, ok := a.regionRefStateForExpr(args[index])
+		if !ok {
+			continue
+		}
+		a.checkUnannotatedParamViewStore(args[index], bound, state)
+		for _, valueRegion := range liveLocalRegionDependencyNames(state) {
+			if valueRegion == bound {
+				continue
+			}
+			if a.regionStoreEscapes(bound, valueRegion) {
+				a.errorf(args[index].Pos(), "argument in region %q is passed where region %q is required; region %q is freed first, so the callee may keep a dangling reference. Copy it into region %q first", regionDisplayName(valueRegion), regionDisplayName(bound), regionDisplayName(valueRegion), regionDisplayName(bound))
+				break
+			}
+		}
 	}
 }
 

@@ -201,7 +201,7 @@ def go(p: lmut P, t: Tok) -> void:
     can Memory.Allocate:
         p.scratch <- p.scratch.push("x")
         p.anns <- p.anns.push(Ann{name: text(t, p.src, 1)})
-`, []string{":22:"}},
+`, []string{":22:45", ":22:31"}},
 		// A declared-store constructor whose payload view comes from a program-lived reference.
 		{"declared_ctor_payload_view", `global region source
 

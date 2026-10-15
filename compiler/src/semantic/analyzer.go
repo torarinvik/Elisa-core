@@ -92,6 +92,8 @@ type Analyzer struct {
 	programRegionNameUse                 int
 	programLivedTypes                    map[Type]bool
 	provenanceAddrOfDepth                int
+	callRegionBindings                   map[string]string
+	callRegionBindingConflicts           [][3]string
 	trustedRuntimeSourceFiles            map[string]bool
 	headerFunctionNames                  headerFunctionNameIndex
 	headerStabilityCompleted             map[*ast.FuncDecl]bool

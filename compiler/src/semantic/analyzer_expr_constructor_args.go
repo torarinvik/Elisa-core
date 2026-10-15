@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"reflect"
+
 	"elisacore/src/ast"
 )
 
@@ -198,8 +200,10 @@ func (a *Analyzer) collectRegionBinding(patternRegion, actualRegion string, bind
 	if patternRegion == "" || actualRegion == "" || bindings == nil || regionParams == nil || !regionParams[patternRegion] {
 		return
 	}
-	if _, exists := bindings[patternRegion]; !exists {
+	if existing, exists := bindings[patternRegion]; !exists {
 		bindings[patternRegion] = actualRegion
+	} else if existing != actualRegion && a.callRegionBindings != nil && reflect.ValueOf(bindings).Pointer() == reflect.ValueOf(a.callRegionBindings).Pointer() {
+		a.callRegionBindingConflicts = append(a.callRegionBindingConflicts, [3]string{patternRegion, existing, actualRegion})
 	}
 }
 
@@ -379,6 +383,9 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			if _, exists := bindings[p.Name]; !exists {
 				bindings[p.Name] = act
 			}
+			// Also record it as the region binding so a second argument bound to another
+			// region is seen as a conflict (checkRegionParamViewArgs).
+			a.collectRegionBinding(p.Name, act.Name, regionBindings, regionParams)
 		case *RegionValueType:
 			a.collectRegionBinding(p.Name, act.Name, regionBindings, regionParams)
 		}
@@ -419,6 +426,14 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *EnumType:
 		_, _ = actual.(*EnumType)
+	case *StructType:
+		// A region-parameterized struct instance (`Node[a]`) binds its region arguments too:
+		// the callee may store into that struct, so its region constrains the others.
+		if act, ok := actual.(*StructType); ok && p.Name == act.Name && len(p.RegionParams) == len(act.RegionParams) {
+			for i := range p.RegionParams {
+				a.collectRegionBinding(p.RegionParams[i], act.RegionParams[i], regionBindings, regionParams)
+			}
+		}
 	case *GenericInstanceType:
 		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
 			for i := range p.Args {

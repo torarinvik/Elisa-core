@@ -547,6 +547,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	bindings := map[string]Type{}
 	shapeBindings := map[string]Shape{}
 	regionBindings := map[string]string{}
+	savedCallRegionBindings, savedCallRegionBindingConflicts := a.callRegionBindings, a.callRegionBindingConflicts
+	a.callRegionBindings, a.callRegionBindingConflicts = regionBindings, nil
+	defer func() {
+		a.callRegionBindings, a.callRegionBindingConflicts = savedCallRegionBindings, savedCallRegionBindingConflicts
+	}()
 	permissionBindings := map[string][]ast.PermissionRef{}
 	specializedParamTypes := map[int]Type{}
 	regionParams := regionParamSet(ft.RegionParams)
@@ -725,6 +730,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
 		}
 	}
+	a.checkRegionParamViewArgs(ft, orderedArgs, regionBindings)
 	for _, param := range ft.GenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
 			continue
