@@ -1229,6 +1229,11 @@ func (a *Analyzer) storeScanCallWritePlan(decl *ast.FuncDecl, call *ast.CallExpr
 		if resolved && (!a.declParamIsWritableRef(callee, i) || a.declParamIsViewOrScalar(callee, i)) {
 			continue // the callee cannot write through this parameter
 		}
+		if resolved && a.declParamIsProgramLived(callee, i) {
+			// docs/128: what the callee writes through a program-lived parameter must itself be
+			// program-lived (checked in the callee), so it carries no storage of this body's sources.
+			continue
+		}
 		for j, other := range args {
 			if j == i || (resolved && !a.declParamCarriesStorage(callee, j)) {
 				continue
@@ -2339,4 +2344,26 @@ func (a *Analyzer) storeScanLocalIsProgramView(decl *ast.FuncDecl, name string) 
 		}
 	}
 	return true
+}
+
+// declParamIsProgramLived: decl's parameter index has a resolved type whose every region-carrying
+// part is program-lived.
+func (a *Analyzer) declParamIsProgramLived(decl *ast.FuncDecl, index int) bool {
+	if len(a.programRegions) == 0 {
+		return false
+	}
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || index < 0 || index >= len(fnType.Params) {
+		return false
+	}
+	t := fnType.Params[index]
+	if t == nil || containsTypeParam(t) {
+		return false
+	}
+	elem := stripRefForBounds(t)
+	return a.typeCanContainRegionRefs(elem, map[string]bool{}) && a.typeIsProgramLivedCached(elem)
 }
