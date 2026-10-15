@@ -65,6 +65,9 @@ func (p SMTStats) String() string {
 	)
 }
 
+// smtQueryResourceLimit is the deterministic per-(check-sat) z3 budget (see openSMT).
+const smtQueryResourceLimit = 6_000_000
+
 // openSMT lazily starts the solver on first need. Returns nil if SMT is off or the solver can't be
 // started (latched in smtUnavailable so we don't retry per query).
 func (a *Analyzer) openSMT() smtSolverHandle {
@@ -76,9 +79,15 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 	}
 	solver, err := smt.Open(smt.Options{
 		Binary: a.smtBinary,
-		// A generous per-query ceiling: a single obligation that the solver can't crack quickly is
-		// not worth stalling the compile — it times out to Unknown and we use the runtime check.
-		PerQueryTimeoutMillis: 2000,
+		// The per-query budget is z3 RESOURCE UNITS, not wall time, so a verdict never depends on
+		// machine load (a 2 s timeout made proofs such as fnv1a's `decreases` flicker between runs).
+		// Calibrated with ELISA_SMT_RLIMIT_LOG over 73 stage1 files: the most expensive query decided
+		// under the old 2 s timeout used 3.9M units, so 6M keeps every one of them with 1.5x headroom.
+		// An undecided obligation becomes Unknown and falls back to the runtime check.
+		ResourceLimit: smtQueryResourceLimit,
+		// Hang guard only, far above the time 6M units take even on a loaded machine; it should
+		// never be the limit that decides a verdict.
+		PerQueryTimeoutMillis: 120000,
 	})
 	if err != nil || solver == nil {
 		a.smtUnavailable = true

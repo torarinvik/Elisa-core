@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -88,6 +89,10 @@ type procSolver struct {
 	stats  Stats
 	broken bool // once the pipe breaks, every further Check is Unknown
 	seq    int  // per-batch sentinel counter for exchange framing
+	// rlimitLog, when non-nil (ELISA_SMT_RLIMIT_LOG), receives one "delta elapsed_us verdict" line per
+	// check-sat: the resource units it consumed. Calibration only; off by default.
+	rlimitLog  io.Writer
+	rlimitLast int64
 }
 
 // Options configures a solver subprocess.
@@ -99,6 +104,10 @@ type Options struct {
 	// PerQueryTimeoutMillis bounds a single (check-sat). 0 = solver default. Keeps a pathological
 	// obligation from stalling the compile; a timeout surfaces as Unknown → runtime fallback.
 	PerQueryTimeoutMillis int
+	// ResourceLimit bounds a single (check-sat) in z3 resource units (`:rlimit`). Unlike a wall-clock
+	// timeout it is DETERMINISTIC: the same query gets the same verdict regardless of machine load.
+	// 0 = unlimited. Exhaustion surfaces as Unknown, exactly like a timeout.
+	ResourceLimit int64
 }
 
 // Open starts a solver subprocess in incremental mode. A nil error means the process is live and
@@ -142,6 +151,14 @@ func Open(opts Options) (Solver, error) {
 	preamble += "(set-option :smt.mbqi true)\n"
 	if opts.PerQueryTimeoutMillis > 0 {
 		preamble += fmt.Sprintf("(set-option :timeout %d)\n", opts.PerQueryTimeoutMillis)
+	}
+	if opts.ResourceLimit > 0 {
+		preamble += fmt.Sprintf("(set-option :rlimit %d)\n", opts.ResourceLimit)
+	}
+	if path := os.Getenv("ELISA_SMT_RLIMIT_LOG"); path != "" {
+		if f, ferr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); ferr == nil {
+			s.rlimitLog = f
+		}
 	}
 	if _, err := io.WriteString(stdin, preamble); err != nil {
 		s.broken = true
@@ -208,6 +225,9 @@ func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[
 		b.WriteString("\n")
 	}
 	b.WriteString("(check-sat)\n")
+	if s.rlimitLog != nil {
+		s.rlimitLast = s.readRlimit()
+	}
 	start := time.Now()
 	lines, sawError, err := s.exchange(b.String())
 	if err != nil {
@@ -223,6 +243,16 @@ func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[
 		case "sat":
 			res = Sat
 		}
+	}
+	if s.rlimitLog != nil {
+		checked := time.Since(start)
+		verdict := "unknown"
+		if res == Sat {
+			verdict = "sat"
+		} else if res == Unsat {
+			verdict = "unsat"
+		}
+		fmt.Fprintf(s.rlimitLog, "%d %d %s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict)
 	}
 	values := map[string]string{}
 	if res == Sat && len(vars) > 0 {
@@ -250,6 +280,19 @@ func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[
 		s.stats.Unknown++
 	}
 	return res, values, elapsed
+}
+
+// readRlimit returns z3's cumulative resource counter (calibration logging only); 0 when unavailable.
+func (s *procSolver) readRlimit() int64 {
+	lines, sawError, err := s.exchange("(get-info :rlimit)\n")
+	if err != nil || sawError || len(lines) != 1 {
+		return 0
+	}
+	var n int64
+	if _, perr := fmt.Sscanf(strings.TrimSpace(lines[0]), "(:rlimit %d)", &n); perr != nil {
+		return 0
+	}
+	return n
 }
 
 // readBalancedSExpr reads solver output until parentheses balance — a (get-value ...) reply may span
