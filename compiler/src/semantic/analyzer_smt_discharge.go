@@ -642,6 +642,7 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 		}
 		return hit.proven, hit.ce
 	}
+	a.smtSetLogLabelForQuery(solver, "query", obligation, query)
 	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
@@ -1568,6 +1569,7 @@ func (a *Analyzer) checkRequiresVacuity(fn *ast.FuncDecl) {
 		return // nothing translatable to contradict.
 	}
 	query := tr.factPreamble() + b.String()
+	a.smtSetLogLabel(solver, "requires-vacuity", fn.Name)
 	res, _ := solver.Check(query)
 	if res != smt.Unsat {
 		return // sat / unknown / error → not proven contradictory → do NOT flag.

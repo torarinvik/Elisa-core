@@ -284,6 +284,7 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	}
 	deadPath, cached := a.smtDeadPathCache[dropped]
 	if !cached {
+		a.smtSetLogLabelForQuery(solver, "deadpath", goalAssert, dropped)
 		deadPath = budgeted.CheckBudget(dropped, smtDeadPathBudget)
 		if deadPath != smt.Unknown {
 			a.smtDeadPathCache[dropped] = deadPath
