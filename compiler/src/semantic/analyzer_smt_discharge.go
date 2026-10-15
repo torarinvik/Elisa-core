@@ -360,8 +360,11 @@ func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps st
 // the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
 // so every query is self-contained.
 func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
+	requires := a.smtRequiresHypotheses(tr)
+	locals := a.smtImmutableLocalHypotheses(tr)
+	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
+		hyps := requires + sliceImmutableLocalHypotheses(locals, smtPreambleContext(tr.factPreamble())+requires+others+obligation) + others
 		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
 			return false, ce
 		}
@@ -580,7 +583,10 @@ func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.E
 	if !ok {
 		return ""
 	}
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
+	requires := a.smtRequiresHypotheses(tr)
+	locals := a.smtImmutableLocalHypotheses(tr)
+	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
+	hyps := requires + sliceImmutableLocalHypotheses(locals, smtPreambleContext(tr.factPreamble())+requires+others+body) + others
 	proven, ce := a.smtCheckQuery(tr, hyps, body)
 	if proven {
 		return ""
@@ -3029,8 +3035,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if !ok {
 				return "", false
 			}
-			bv := "((_ int2bv " + strconv.Itoa(dbits) + ") " + inner + ")"
-			return smtBitvectorRead(bv, dsign, dbits), true
+			return smtSameWidthReinterpret(inner, dsign, dbits), true
 		}
 		return "", false
 	case *ast.GetExpr:
@@ -4381,6 +4386,21 @@ func (tr *smtTranslator) shiftRightBoundAux(bits, k int) string {
 // `bv2nat(b) - 2^W * topbit(b)` ∈ [-2^(W-1), 2^(W-1)) — so the produced Int EQUALS the machine value
 // and composes soundly with further Int reasoning (e.g. a sign-extension `(v << k) >> k` proves its
 // signed range). The top bit is read via a 1-bit extract.
+// smtSameWidthReinterpret is the same-width sign reinterpretation of the Int term `inner` read as a
+// `bits`-wide signed or unsigned value, in linear integer arithmetic. It equals
+// smtBitvectorRead((_ int2bv bits) inner) for EVERY Int (int2bv reduces modulo 2^bits, exactly what
+// `mod` by the constant 2^bits computes; the signed read subtracts 2^bits when the top bit is set),
+// but it keeps the query out of bit-vector theory: `x.len.usize()` over an i64 length cost z3 a 64-bit
+// int2bv/bv2nat round trip per occurrence, which made termination proofs over view lengths exceed the
+// per-query budget.
+func smtSameWidthReinterpret(inner string, signed bool, bits int) string {
+	m := "(mod " + inner + " " + smtPow2(bits) + ")"
+	if !signed {
+		return m
+	}
+	return "(- " + m + " (ite (>= " + m + " " + smtPow2(bits-1) + ") " + smtPow2(bits) + " 0))"
+}
+
 func smtBitvectorRead(bvExpr string, signed bool, bits int) string {
 	if !signed {
 		return "(bv2nat " + bvExpr + ")"
