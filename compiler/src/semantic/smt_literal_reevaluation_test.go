@@ -89,3 +89,47 @@ def in_tuple_last(c: mutable Cell&) -> (a: i64, b: i64):
 		}
 	}
 }
+
+// A projection THROUGH a literal component reads the component's field: `(false, fact).next.v` is
+// `fact.v` (stage1's ownership_binding_consume shape), for tuple and struct literals.
+func TestSMTNestedProjectionThroughLiteralComponent(t *testing.T) {
+	src := smtLiteralReevalDecls + `
+struct Fact:
+    reachable: bool
+    v: i64
+
+struct Step:
+    known: bool
+    next: Fact
+
+def keep(fact: Fact) -> (known: bool, next: Fact):
+    ensure result.next.reachable == fact.reachable
+    ensure result.next.v == fact.v
+    return (false, fact)
+
+def keep_struct(fact: Fact) -> Step:
+    ensure result.next.v == fact.v
+    return Step{known: true, next: fact}
+`
+	result := analyzeContractStrict(t, "literal_nested.elisa", src)
+	for _, fn := range []string{"keep", "keep_struct"} {
+		if ensureFailuresFor(result.Errors(), fn) != 0 {
+			t.Fatalf("%s must prove; got: %v", fn, result.Errors())
+		}
+	}
+}
+
+// SOUNDNESS: the component is a struct VALUE captured before a later component mutates its source;
+// `(c, bump(c)).first.v` is the old c.v, not the current one.
+func TestSMTNestedProjectionDeclinesComponentBeforeSideEffect(t *testing.T) {
+	src := smtLiteralReevalDecls + `
+def snap_cell(c: mutable Cell&) -> (first: Cell, b: i64):
+    requires c.v < 1000
+    ensure result.first.v == c.v
+    return (c, bump(c))
+`
+	result := analyzeContractStrict(t, "literal_nested_effect.elisa", src)
+	if ensureFailuresFor(result.Errors(), "snap_cell") == 0 {
+		t.Fatalf("bump(c) runs after c is captured: result.first.v is the old c.v; got: %v", result.Errors())
+	}
+}

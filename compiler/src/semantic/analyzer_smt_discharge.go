@@ -2893,6 +2893,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				}
 			}
 		}
+		if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
+			return tr.termEnv(rerooted, env)
+		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
 				return tr.termEnv(value, env)
@@ -3811,6 +3814,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 					return tr.boolTerm(value, env)
 				}
 			}
+		}
+		if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
+			return tr.boolTerm(rerooted, env)
 		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
