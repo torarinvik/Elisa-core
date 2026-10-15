@@ -1,6 +1,11 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"fmt"
+	"os"
+
+	"elisacore/src/ast"
+)
 
 // Store-scan DFS frames. calleeStoreModeIntoSeen / calleeReturnModeOf search callee summaries
 // depth first; a key already on the search STACK is a recursive cycle and answers `none` (a
@@ -119,6 +124,9 @@ func (a *Analyzer) storeScanSettled(query func() storeMode) storeMode {
 	hit := a.storeScanCycleHit
 	a.storeScanCycleHit = saved || hit
 	if hit {
+		if storeScanTrace && mode < storeHeader {
+			fmt.Fprintf(os.Stderr, "SETTLEDHDR mode=%d src=%s frames=%d\n", mode, storeScanTraceOther, len(a.storeScanFrames))
+		}
 		return storeHeader
 	}
 	return mode
