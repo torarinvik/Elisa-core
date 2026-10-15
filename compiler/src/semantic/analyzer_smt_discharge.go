@@ -3332,8 +3332,31 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 			return "", false
 		}
 		rbv = "((_ int2bv " + width + ") " + r + ")"
+		if bvop == "bvand" && !signed {
+			result := smtBitvectorRead("("+bvop+" "+lbv+" "+rbv+")", signed, bits)
+			tr.auxDecls = append(tr.auxDecls, smtAndBoundLemma(result, l, r, bits))
+			return result, true
+		}
 	}
 	return smtBitvectorRead("("+bvop+" "+lbv+" "+rbv+")", signed, bits), true
+}
+
+// smtAndBoundLemma states the AND bound for an unsigned `a & b` read back as `result`:
+// AND only clears bits, so the result is at most each operand. int2bv reduces its argument
+// modulo 2^W, so the bound speaks about the operands' INTEGER terms only when both already lie
+// in [0, 2^W); the guard is part of the lemma, so it is vacuous for any operand term outside
+// that range (a negative or oversized term, whose bit pattern is its wrapped value).
+// Without it z3 cannot carry `bv2nat(bvand …)` back to integer bounds and spends its whole
+// budget on goals like `hash & (capacity - 1) < capacity`.
+func smtAndBoundLemma(result, a, b string, bits int) string {
+	full := smtPow2(bits)
+	// One guarded bound per operand: `result <= t` needs only t itself in range (the other operand
+	// may be anything — AND with any bit pattern clears bits of t's pattern, which IS t). So a
+	// `hash & mask` with an unbounded hash still gets `result <= mask`.
+	bound := func(t string) string {
+		return "(=> (and (<= 0 " + t + ") (< " + t + " " + full + ")) (<= " + result + " " + t + "))"
+	}
+	return "(assert (and " + bound(a) + " " + bound(b) + "))" + smtAbstractionOnlyMarker + "\n"
 }
 
 // signedDivCannotOverflow reports whether signed `left / right` (or `%`) provably avoids the one
