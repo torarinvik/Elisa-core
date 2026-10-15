@@ -370,11 +370,20 @@ func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, fiel
 // parameters (`name: sview @source`), instantiated at this literal (`Node[a]{...}`), is a store
 // into that region: the field value must outlive it, exactly as `n.name <- v` is checked.
 func (a *Analyzer) checkStructLiteralFieldRegion(base *StructType, arg ast.Expr, expected, actual Type) {
-	if base == nil || base.Decl == nil || len(base.Decl.RegionParams) == 0 {
+	if base == nil || base.Decl == nil {
 		return
 	}
 	target := containerOrEntryRegion(expected)
 	if target == "" {
+		return
+	}
+	if a.isProgramRegion(target) {
+		// docs/128: a field typed with a program-lived region is a store into that
+		// region whether or not the struct has region parameters.
+		a.checkNestedRegionStoreEscape(arg, arg, expected, actual)
+		return
+	}
+	if len(base.Decl.RegionParams) == 0 {
 		return
 	}
 	for _, param := range base.Decl.RegionParams {

@@ -396,6 +396,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 					}
 				}
 				a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.enumConstructorMoveReason(enumType.Name, variant, i))
+				a.checkProgramRegionSlotStore(orderedArgs[i], variant.Payload[i], actual)
 			} else {
 				a.analyzeExpr(orderedArgs[i])
 			}

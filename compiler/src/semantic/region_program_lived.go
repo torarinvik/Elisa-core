@@ -46,3 +46,16 @@ func (a *Analyzer) collectProgramRegions(decls []scopedDecl) {
 func (r *Result) IsProgramRegion(name string) bool {
 	return r != nil && r.analyzer.isProgramRegion(name)
 }
+
+// checkProgramRegionSlotStore checks a value written into a slot whose type names a
+// program-lived region (an enum constructor payload, a tail payload element): only a
+// program-lived value may be stored there (docs/128 rule 3).
+func (a *Analyzer) checkProgramRegionSlotStore(arg ast.Expr, expected, actual Type) {
+	if len(a.programRegions) == 0 || arg == nil {
+		return
+	}
+	if !a.isProgramRegion(containerOrEntryRegion(expected)) {
+		return
+	}
+	a.checkNestedRegionStoreEscape(arg, arg, expected, actual)
+}

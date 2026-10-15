@@ -127,6 +127,7 @@ func (a *Analyzer) analyzePackedEnumConstructorArg(expr ast.Expr, variant *EnumV
 	rewritten, actual := a.analyzeCallLikeValueExpr(expr, expected)
 	ok := AssignableTo(expected, actual)
 	a.consumeAffineValueExpr(rewritten, expected, a.enumConstructorMoveReason(enumName, variant, index))
+	a.checkProgramRegionSlotStore(rewritten, expected, actual)
 	return rewritten, actual, ok
 }
 
@@ -142,6 +143,7 @@ func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *View
 				a.errorf(elem.Pos(), "tail payload element expects %s, got %s", expected.Elem, actualElem)
 			}
 			a.consumeAffineValueExpr(elem, expected.Elem, moveReason)
+			a.checkProgramRegionSlotStore(elem, expected.Elem, actualElem)
 		}
 		arrayType := &ArrayType{Elem: expected.Elem, Size: strconv.Itoa(len(list.Elems)), HasConstSize: true, ConstSize: int64(len(list.Elems))}
 		a.exprTypes[list] = arrayType
