@@ -423,9 +423,9 @@ func earlyFreeDerivedNames(body []ast.Stmt, name string) map[string]bool {
 			case reflect.Struct:
 				if vd, ok := v.Interface().(ast.VarDeclStmt); ok && earlyFreeScalarDeclType(vd.Type) {
 					// `n: i64 = buf.count` copies a scalar out: it cannot point into buf.
-				} else if value := v.FieldByName("Value"); value.IsValid() && mentions(value) {
+				} else if value := reflectFieldByName(v, "Value"); value.IsValid() && mentions(value) {
 					for _, field := range []string{"Name", "Names", "Target", "Pattern", "Store"} {
-						for _, bound := range earlyFreeBoundNames(v.FieldByName(field)) {
+						for _, bound := range earlyFreeBoundNames(reflectFieldByName(v, field)) {
 							if bound != "" && !derived[bound] {
 								derived[bound] = true
 								changed = true
@@ -514,8 +514,9 @@ func earlyFreeBoundNames(v reflect.Value) []string {
 			walk(v.Elem(), fieldName)
 		case reflect.Struct:
 			t := v.Type()
+			rfs := reflectFields(t)
 			for i := 0; i < v.NumField(); i++ {
-				walk(v.Field(i), t.Field(i).Name)
+				walk(v.Field(i), rfs[i].Name)
 			}
 		case reflect.Slice, reflect.Array:
 			for i := 0; i < v.Len(); i++ {

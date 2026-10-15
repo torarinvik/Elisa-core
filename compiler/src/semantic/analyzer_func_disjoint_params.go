@@ -226,8 +226,9 @@ func scanValueUsedIdents(v reflect.Value, names map[string]bool) {
 				scanValueUsedIdents(reflect.ValueOf(n.Func), names)
 			}
 			rt := v.Elem()
+			rfs := reflectFields(rt.Type())
 			for i := 0; i < rt.NumField(); i++ {
-				if rt.Type().Field(i).Name == "Func" {
+				if rfs[i].Name == "Func" {
 					continue
 				}
 				scanValueUsedIdents(rt.Field(i), names)

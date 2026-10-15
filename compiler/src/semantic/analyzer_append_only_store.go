@@ -144,8 +144,9 @@ func aoEachChild(v reflect.Value, visit func(interface{})) {
 	if v.Kind() != reflect.Struct {
 		return
 	}
+	rfs := reflectFields(v.Type())
 	for i := 0; i < v.NumField(); i++ {
-		field := v.Type().Field(i)
+		field := &rfs[i]
 		if field.PkgPath != "" || strings.HasPrefix(field.Name, "Resolved") || strings.HasPrefix(field.Name, "Lowered") || field.Name == "AsOverlayCall" || field.Name == "CollectionAppend" {
 			continue
 		}

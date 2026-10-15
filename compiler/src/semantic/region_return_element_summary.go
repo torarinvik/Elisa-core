@@ -170,8 +170,9 @@ func returnElementWalk(v reflect.Value, visit func(*ast.ReturnStmt), seen map[ui
 			returnElementWalk(v.Elem(), visit, seen)
 		}
 	case reflect.Struct:
+		rfs := reflectFields(v.Type())
 		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).IsExported() {
+			if rfs[i].IsExported() {
 				returnElementWalk(v.Field(i), visit, seen)
 			}
 		}

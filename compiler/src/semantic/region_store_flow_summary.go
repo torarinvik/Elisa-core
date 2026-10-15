@@ -397,9 +397,10 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 		if !storeFlowBinderNode(elem.Type().Name()) {
 			return
 		}
+		rfs := reflectFields(elem.Type())
 		for i := 0; i < elem.NumField(); i++ {
 			f := elem.Field(i)
-			if fieldName := elem.Type().Field(i).Name; fieldName == "Captures" || fieldName == "HeaderCaptures" {
+			if fieldName := rfs[i].Name; fieldName == "Captures" || fieldName == "HeaderCaptures" {
 				continue // capture lists name existing bindings; they bind nothing new
 			}
 			switch {
@@ -407,7 +408,7 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 				name := f.String()
 				*out = append(*out, name)
 				if name != "" {
-					if _, isRange := v.(*ast.ForStmt); !isRange || elem.Type().Field(i).Name != "Name" {
+					if _, isRange := v.(*ast.ForStmt); !isRange || rfs[i].Name != "Name" {
 						idx.untyped[name] = true
 					}
 				}
@@ -995,8 +996,9 @@ func (a *Analyzer) storeFlowEach(v reflect.Value, seen map[uintptr]bool, unit fu
 		}
 		a.storeFlowEach(v.Elem(), seen, unit)
 	case reflect.Struct:
+		rfs := reflectFields(v.Type())
 		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).IsExported() {
+			if rfs[i].IsExported() {
 				a.storeFlowEach(v.Field(i), seen, unit)
 			}
 		}
@@ -1345,8 +1347,9 @@ func storeFlowPatternBinders(pattern ast.MatchPattern) []string {
 				binders = append(binders, v.String())
 			}
 		case reflect.Struct:
+			rfs := reflectFields(v.Type())
 			for i := 0; i < v.NumField(); i++ {
-				field := v.Type().Field(i)
+				field := &rfs[i]
 				if !field.IsExported() || storeFlowSkipFields[field.Name] && (field.Type.Kind() == reflect.String || field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String) {
 					continue
 				}

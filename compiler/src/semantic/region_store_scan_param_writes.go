@@ -540,7 +540,7 @@ func storeScanTouchedLocals(idx *storeScanDeclIndex) map[string]bool {
 				continue
 			}
 			for _, field := range []string{"Target", "Store"} {
-				f := v.Elem().FieldByName(field)
+				f := reflectFieldByName(v.Elem(), field)
 				if f.IsValid() && f.CanInterface() {
 					if expr, ok := f.Interface().(ast.Expr); ok && expr != nil {
 						mark(expr)
@@ -563,7 +563,7 @@ func storeScanNodePlaceMentions(idx *storeScanDeclIndex, node any, names map[str
 		return false
 	}
 	for _, field := range []string{"Target", "Store"} {
-		f := v.FieldByName(field)
+		f := reflectFieldByName(v, field)
 		if !f.IsValid() || !f.CanInterface() {
 			continue
 		}

@@ -837,6 +837,9 @@ type Analyzer struct {
 	currentUsings               []string
 	importAliases               map[string]string
 	moduleAliases               map[string]string
+	// visibleAliasGen counts alias registrations (invalidates visibleCandidates).
+	visibleAliasGen   int
+	visibleCandidates visibleCandidateCache
 	// declaredModules is every `module` path (dot-flattened key) seen by
 	// validateModuleExtensions; rejectDotModulePath consults it.
 	declaredModules map[string]bool
