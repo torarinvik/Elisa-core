@@ -411,7 +411,19 @@ var fillMayAdoptSeenPool = sync.Pool{
 	New: func() any { return make(map[uintptr]bool) },
 }
 
+// fillMayAdoptWalkSeen walks v through the generated typed walker (ast_pointer_walk_gen.go, from
+// internal/astwalkgen) when v is an AST pointer or statement/declaration list, and reflectively
+// otherwise. Both visit exactly the same pointers in the same order; reflection cost ~7 s plus
+// garbage in a stage1 build.
 func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]bool) {
+	if v.IsValid() && v.CanInterface() && fillMayAdoptWalkTyped(v.Interface(), visit, seen) {
+		return
+	}
+	fillMayAdoptWalkReflect(v, visit, seen)
+}
+
+// fillMayAdoptWalkReflect is the reflective walker: the specification the generated one follows.
+func fillMayAdoptWalkReflect(v reflect.Value, visit func(any), seen map[uintptr]bool) {
 	if !v.IsValid() {
 		return
 	}
@@ -422,23 +434,23 @@ func fillMayAdoptWalkSeen(v reflect.Value, visit func(any), seen map[uintptr]boo
 		}
 		seen[v.Pointer()] = true
 		visit(v.Interface())
-		fillMayAdoptWalkSeen(v.Elem(), visit, seen)
+		fillMayAdoptWalkReflect(v.Elem(), visit, seen)
 	case reflect.Interface:
 		if !v.IsNil() {
-			fillMayAdoptWalkSeen(v.Elem(), visit, seen)
+			fillMayAdoptWalkReflect(v.Elem(), visit, seen)
 		}
 	case reflect.Struct:
 		for _, i := range fillMayAdoptExportedFields(v.Type()) {
-			fillMayAdoptWalkSeen(v.Field(i), visit, seen)
+			fillMayAdoptWalkReflect(v.Field(i), visit, seen)
 		}
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
-			fillMayAdoptWalkSeen(v.Index(i), visit, seen)
+			fillMayAdoptWalkReflect(v.Index(i), visit, seen)
 		}
 	case reflect.Map:
 		iter := v.MapRange()
 		for iter.Next() {
-			fillMayAdoptWalkSeen(iter.Value(), visit, seen)
+			fillMayAdoptWalkReflect(iter.Value(), visit, seen)
 		}
 	}
 }
