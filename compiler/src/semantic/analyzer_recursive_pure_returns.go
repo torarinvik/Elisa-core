@@ -10,6 +10,11 @@ type pureReturnCase struct {
 	Expr ast.Expr
 }
 
+const (
+	pureReturnMaxDepth = 64
+	pureReturnMaxWork  = 4096
+)
+
 // pureReturnBody extracts a function's pure return expression. Kept for callers that only need the
 // expression; it now accepts pure return-path trees (`if`/`elif`/`else`) in addition to a single
 // `return`.
@@ -29,7 +34,8 @@ func pureReturnCases(decl *ast.FuncDecl) ([]pureReturnCase, bool) {
 	if decl == nil || len(decl.Body) == 0 {
 		return nil, false
 	}
-	return pureReturnCasesFromStmts(decl.Body, nil, nil)
+	work := pureReturnMaxWork
+	return pureReturnCasesFromStmts(decl.Body, nil, nil, &work, 0)
 }
 
 // Preserve analyzed AST identity when no local alias needs substitution. The analyzer's type table
@@ -47,10 +53,11 @@ func substitutePureReturnExpr(expr ast.Expr, subst map[string]ast.Expr) (ast.Exp
 // expressions. Calls in local initializers are declined because purity cannot be decided here;
 // callers that reason about the resulting expression still apply their own purity and totality gates.
 // All other statements remain a conservative decline.
-func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]ast.Expr) ([]pureReturnCase, bool) {
-	if len(stmts) == 0 {
+func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]ast.Expr, work *int, depth int) ([]pureReturnCase, bool) {
+	if len(stmts) == 0 || work == nil || depth >= pureReturnMaxDepth || *work <= 0 {
 		return nil, false
 	}
+	(*work)--
 	if local, ok := stmts[0].(*ast.VarDeclStmt); ok {
 		if local == nil || local.Name == "" || local.Mutable || local.Owner != nil || local.Value == nil ||
 			len(stmts) == 1 || !wherePredicateIsSideEffectFree(local.Value) {
@@ -65,7 +72,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 			nextSubst[name] = expr
 		}
 		nextSubst[local.Name] = value
-		return pureReturnCasesFromStmts(stmts[1:], path, nextSubst)
+		return pureReturnCasesFromStmts(stmts[1:], path, nextSubst, work, depth+1)
 	}
 	if len(stmts) > 1 {
 		first, ok := stmts[0].(*ast.IfStmt)
@@ -77,7 +84,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 			return nil, false
 		}
 		thenCond := combinePathCond(path, cond)
-		thenCases, ok := pureReturnCasesFromStmts(first.Then, thenCond, subst)
+		thenCases, ok := pureReturnCasesFromStmts(first.Then, thenCond, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
@@ -85,19 +92,23 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 		var out []pureReturnCase
 		out = append(out, thenCases...)
 		for _, elif := range first.Elifs {
+			if *work <= 0 {
+				return nil, false
+			}
+			(*work)--
 			elifCond, ok := substitutePureReturnExpr(elif.Cond, subst)
 			if !ok {
 				return nil, false
 			}
 			branchCond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elifCond})
-			cases, ok := pureReturnCasesFromStmts(elif.Body, branchCond, subst)
+			cases, ok := pureReturnCasesFromStmts(elif.Body, branchCond, subst, work, depth+1)
 			if !ok {
 				return nil, false
 			}
 			out = append(out, cases...)
 			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elifCond.Pos(), Op: lexer.TOKEN_NOT, Operand: elifCond}}
 		}
-		fallthroughCases, ok := pureReturnCasesFromStmts(stmts[1:], combinePathCond(path, negatedPrior), subst)
+		fallthroughCases, ok := pureReturnCasesFromStmts(stmts[1:], combinePathCond(path, negatedPrior), subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
@@ -124,13 +135,17 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 		}
 		var out []pureReturnCase
 		thenCond := combinePathCond(path, cond)
-		thenCases, ok := pureReturnCasesFromStmts(n.Then, thenCond, subst)
+		thenCases, ok := pureReturnCasesFromStmts(n.Then, thenCond, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		out = append(out, thenCases...)
 		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: cond.Pos(), Op: lexer.TOKEN_NOT, Operand: cond})
 		for _, elif := range n.Elifs {
+			if *work <= 0 {
+				return nil, false
+			}
+			(*work)--
 			if elif.Cond == nil {
 				return nil, false
 			}
@@ -139,7 +154,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 				return nil, false
 			}
 			branchCond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elifCond})
-			cases, ok := pureReturnCasesFromStmts(elif.Body, branchCond, subst)
+			cases, ok := pureReturnCasesFromStmts(elif.Body, branchCond, subst, work, depth+1)
 			if !ok {
 				return nil, false
 			}
@@ -147,7 +162,7 @@ func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr, subst map[string]
 			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elifCond.Pos(), Op: lexer.TOKEN_NOT, Operand: elifCond}}
 		}
 		elseCond := combinePathCond(path, negatedPrior)
-		elseCases, ok := pureReturnCasesFromStmts(n.Else, elseCond, subst)
+		elseCases, ok := pureReturnCasesFromStmts(n.Else, elseCond, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}

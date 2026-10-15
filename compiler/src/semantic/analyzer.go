@@ -161,25 +161,29 @@ type Analyzer struct {
 	returnBorrowAliasJournal []returnBorrowAliasJournalEntry
 	// ufcsFunctionsVersion counts registrations into ufcsFunctionsByName; ufcsByLastSegment is
 	// that map re-keyed by each name's last `.`/`:` segment, valid while its version matches.
-	ufcsFunctionsVersion       int
-	ufcsByLastSegment          map[string][]*Symbol
-	ufcsByLastSegmentVersion   int
-	storageViewReturnOrigins   map[*ast.FuncDecl]*storageViewReturnOriginSummary
-	permissions                map[string]*PermissionSet
-	capabilityAliases          map[string][]ast.PermissionRef
-	globalScope                *Scope
-	functionTypes              map[string]*FuncType
-	externLinkNames            map[string]externLinkNameSignature
-	constValues                map[string]ConstValue
-	exprTypes                  map[ast.Expr]Type
-	compilerBuiltinHelperCalls map[*ast.CallExpr]string
-	permGrowthOps              map[ast.Expr]bool
-	rewriteDefaults            map[*ast.Ident]bool
-	optionalBindSourceTypes    map[*ast.OptionalBindExpr]Type
-	interfaceMethodRefs        map[*ast.FieldExpr]*InterfaceMethodRef
-	safeCalls                  map[*ast.CallExpr]*SafeCallInfo
-	exprFacts                  map[ast.Expr]OptimizationFacts
-	indexBoundsProven          map[*ast.IndexExpr]bool
+	ufcsFunctionsVersion     int
+	ufcsByLastSegment        map[string][]*Symbol
+	ufcsByLastSegmentVersion int
+	storageViewReturnOrigins map[*ast.FuncDecl]*storageViewReturnOriginSummary
+	// recursiveCallCertificatesInFlight prevents an SMT proof of a recursive-call
+	// certificate from recursively asking the same declaration edge to prove itself.
+	// Re-entry declines the nested certificate, leaving that call opaque in the inner goal.
+	recursiveCallCertificatesInFlight map[recursiveCallCertificateKey]bool
+	permissions                       map[string]*PermissionSet
+	capabilityAliases                 map[string][]ast.PermissionRef
+	globalScope                       *Scope
+	functionTypes                     map[string]*FuncType
+	externLinkNames                   map[string]externLinkNameSignature
+	constValues                       map[string]ConstValue
+	exprTypes                         map[ast.Expr]Type
+	compilerBuiltinHelperCalls        map[*ast.CallExpr]string
+	permGrowthOps                     map[ast.Expr]bool
+	rewriteDefaults                   map[*ast.Ident]bool
+	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
+	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
+	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
+	exprFacts                         map[ast.Expr]OptimizationFacts
+	indexBoundsProven                 map[*ast.IndexExpr]bool
 	// getWrappedIndexExprs records index expressions whose `else` recovery is
 	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
 	// use the explicit `get` head, so they must NOT receive the bare-`else`
