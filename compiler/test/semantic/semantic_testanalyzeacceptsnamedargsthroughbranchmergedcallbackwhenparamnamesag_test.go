@@ -490,7 +490,7 @@ def bad() -> void:
 	if len(errs) == 0 {
 		t.Fatal("expected parse error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "submit requires an active pool scope") {
-		t.Fatalf("expected active-pool submit parse diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "submit requires a concurrency scope") {
+		t.Fatalf("expected missing-concurrency-scope diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
