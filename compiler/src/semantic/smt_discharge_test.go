@@ -767,18 +767,35 @@ def to_slot(rack: u32 is Bounded[0, 31], voice: u32 is Bounded[0, 4095]) -> usiz
 	}
 }
 
-// A SIGN-changing conversion (i64 -> u64) is NOT value-preserving (it wraps for negatives), so it
-// is correctly NOT treated as identity — soundness floor for the conversion-transparency rule.
+// A SIGN-changing conversion (i64 -> u64) wraps for negatives: codegen lowers a same-width integer
+// conversion as a no-op (coerceNumericValue: actualBits == expectedBits returns the value), so the
+// round trip x.u64().i64() IS the identity and proves; but the intermediate u64 is NOT x — a claim
+// that only holds without the wrap must stay unproven (soundness floor for the reinterpret encoding).
 func TestSignChangingConversionNotIdentity(t *testing.T) {
 	src := `
 def widen(x: i64) -> i64:
     ensure result == x
     r: i64 = x.u64().i64()
     return r
+
+def nonneg(x: i64) -> i64:
+    ensure result >= 0
+    r: i64 = x.u64().i64()
+    return r
+
+def as_unsigned(x: i64) -> bool:
+    ensure result
+    return x.u64() <= 9223372036854775807
 `
 	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signchg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
-	if !contains(allDiagnostics(r), "could not be proven") {
-		t.Fatalf("a sign-changing i64->u64->i64 round-trip must NOT be assumed identity, got:\n%s", allDiagnostics(r))
+	diags := allDiagnostics(r)
+	if ensureFailuresFor(r.Errors(), "widen") != 0 {
+		t.Fatalf("same-width round trip is the identity bit pattern and must prove, got:\n%s", diags)
+	}
+	for _, fn := range []string{"nonneg", "as_unsigned"} {
+		if ensureFailuresFor(r.Errors(), fn) == 0 {
+			t.Fatalf("%s: a negative x wraps through u64; the claim is false and must stay unproven, got:\n%s", fn, diags)
+		}
 	}
 }
 
