@@ -77,7 +77,7 @@ def stepped() -> usize:
 `,
 		"field_end": `
 struct Box:
-    n: usize
+    n: mutable usize
 
 def field_end(b0: Box) -> usize:
     b: mutable Box = b0

@@ -2865,6 +2865,13 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return tr.termEnv(value, env)
 			}
 		}
+		// A constructor projection is its (re-evaluable) field argument, including after result
+		// substitution has replaced the result identifier with the literal.
+		if literal, ok := stripOptimizationParens(n.Object).(*ast.StructLitExpr); ok {
+			if value, found := tr.a.structLitFieldMap(literal)[n.Field]; found {
+				return tr.termEnv(value, env)
+			}
+		}
 		// Constant enum members retain their exact backing value, not an unconstrained projection.
 		if c, ok := tr.a.constIntValue(n); ok {
 			return smtInt(c), true
@@ -5323,7 +5330,7 @@ func (a *Analyzer) tupleLiteralFieldValue(tuple *ast.TupleExpr, name string) (as
 		if field.Name != name {
 			continue
 		}
-		if value != nil || tuple.Elems[i] == nil {
+		if value != nil || tuple.Elems[i] == nil || !a.literalComponentReevaluableAt(tuple.Elems, i) {
 			return nil, false
 		}
 		value = tuple.Elems[i]
@@ -5342,9 +5349,10 @@ func (a *Analyzer) tupleLiteralFieldMap(tuple *ast.TupleExpr) map[string]ast.Exp
 	if !ok || len(typ.Fields) != len(tuple.Elems) {
 		return nil
 	}
+	reevaluable := a.literalComponentReevaluable(tuple.Elems)
 	fields := make(map[string]ast.Expr, len(typ.Fields))
 	for i, field := range typ.Fields {
-		if field.Name == "" || tuple.Elems[i] == nil {
+		if field.Name == "" || tuple.Elems[i] == nil || !reevaluable[i] {
 			continue
 		}
 		if _, duplicate := fields[field.Name]; duplicate {
@@ -5368,6 +5376,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			return nil
 		}
 		out := make(map[string]ast.Expr, len(typ.Decl.Fields))
+		reevaluable := a.structLiteralReevaluable(sl)
 		for index, field := range typ.Decl.Fields {
 			if field.Name == "" || sl.ResolvedArgs[index] == nil {
 				return nil
@@ -5375,7 +5384,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			if _, duplicate := out[field.Name]; duplicate {
 				return nil
 			}
-			if a.constructorProjectionStable(sl.ResolvedArgs[index]) {
+			if a.constructorProjectionStable(sl.ResolvedArgs[index]) || reevaluable[sl.ResolvedArgs[index]] {
 				out[field.Name] = sl.ResolvedArgs[index]
 			}
 		}
@@ -5384,6 +5393,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 	if sl.CopyBase != nil || len(sl.Spreads) != 0 {
 		return nil
 	}
+	reevaluable := a.structLiteralReevaluable(sl)
 	args := sl.Args
 	var ordered []string
 	if st, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType); ok && st != nil && st.Decl != nil {
@@ -5400,7 +5410,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			}
 			name = ordered[i]
 		}
-		if name != "" && arg != nil && a.constructorProjectionStable(arg) {
+		if name != "" && arg != nil && (a.constructorProjectionStable(arg) || reevaluable[arg]) {
 			out[name] = arg
 		}
 	}
