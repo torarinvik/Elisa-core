@@ -160,6 +160,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		if t, known := a.exprTypes[inner]; known && t != nil && len(a.programRegions) != 0 && !containsTypeParam(t) && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
 			return storeNone
 		}
+		// A local declared `sview @source` (every declaration) views only program-region bytes.
+		// Spelled-type check: the callee body may not be analyzed yet (exprTypes empty).
+		if id, isIdent := inner.(*ast.Ident); isIdent && id != nil && a.storeScanLocalIsProgramView(decl, id.Name) {
+			return storeNone
+		}
 		// A struct literal stores each field value: judge them one by one.
 		if lit, isLit := inner.(*ast.StructLitExpr); isLit && lit != nil {
 			mode := storeNone
@@ -2309,4 +2314,29 @@ type storeScanTaintKey struct {
 
 type storeScanTaintResult struct {
 	params, header, content, targets, views, holders map[string]bool
+}
+
+// storeScanLocalIsProgramView: name is a body local (not a parameter, not bound by a pattern or
+// loop) whose every declaration spells a view type annotated with a program region
+// (`text: sview @source = ...`). Such a value can only view program-lived bytes.
+func (a *Analyzer) storeScanLocalIsProgramView(decl *ast.FuncDecl, name string) bool {
+	if decl == nil || len(a.programRegions) == 0 {
+		return false
+	}
+	for _, p := range decl.Params {
+		if p.Name == name {
+			return false
+		}
+	}
+	idx := a.storeScanIndex(decl)
+	if idx.otherBound[name] || len(idx.decls[name]) == 0 {
+		return false
+	}
+	for _, v := range idx.decls[name] {
+		nt, ok := v.Type.(*ast.NamedType)
+		if !ok || nt == nil || (nt.Name != "sview" && nt.Name != "cstr") || !a.programRegions[nt.Region] {
+			return false
+		}
+	}
+	return true
 }
