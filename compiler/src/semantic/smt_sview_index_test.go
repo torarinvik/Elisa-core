@@ -21,7 +21,10 @@ func TestSMTImmutableSviewSuffixIndex(t *testing.T) {
 
 func TestSMTSviewIndexDeclinesMutableAndLocalBindings(t *testing.T) {
 	sources := []string{
-		"def f(text: mutable sview) -> bool:\n    ensure result == (text.len > 0 and text[0] == 65)\n    return text.len > 0 and text[0] == 65\n",
+		// The return differs syntactically from the clause (`>= 1`): an identical return holds by
+		// reflexivity at the return point (both read the current binding), which is sound and is
+		// not what this test is about. The SMT sview model itself must decline the mutable binding.
+		"def f(text: mutable sview) -> bool:\n    ensure result == (text.len > 0 and text[0] == 65)\n    return text.len >= 1 and text[0] == 65\n",
 		"def f(text: sview) -> bool:\n    ensure result == (text.len > 0 and text[0] == 65)\n    local: sview = text\n    return local.len > 0 and local[0] == 65\n",
 	}
 	for _, source := range sources {
