@@ -34,3 +34,29 @@ func TestSolverResourceLimitIsDeterministicBudget(t *testing.T) {
 		t.Fatalf("expected unsat under the production budget, got %s", got)
 	}
 }
+
+// CheckBudget runs one query under its own budget and restores the session budget afterwards:
+// pigeonhole is Unknown at 1000 units but decided by the ample session limit right after.
+func TestSolverCheckBudgetIsScopedToOneQuery(t *testing.T) {
+	z3Available(t)
+	ample, err := Open(Options{ResourceLimit: 6_000_000})
+	if err != nil {
+		t.Fatalf("open solver: %v", err)
+	}
+	defer ample.Close()
+	budgeted, ok := ample.(interface {
+		CheckBudget(string, int64) Result
+	})
+	if !ok {
+		t.Fatal("process solver must offer CheckBudget")
+	}
+	if got := budgeted.CheckBudget(rlimitHardQuery, 1000); got != Unknown {
+		t.Fatalf("a 1000-unit budget cannot decide pigeonhole; want unknown, got %s", got)
+	}
+	if got := budgeted.CheckBudget("(declare-const x Int)\n(assert (> x 0))\n(assert (< x 0))", 20000); got != Unsat {
+		t.Fatalf("a trivial contradiction must be decided under a small budget, got %s", got)
+	}
+	if got, _ := ample.Check(rlimitHardQuery); got != Unsat {
+		t.Fatalf("the session budget must be restored after CheckBudget; got %s", got)
+	}
+}

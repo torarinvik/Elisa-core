@@ -642,7 +642,7 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 		}
 		return hit.proven, hit.ce
 	}
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
+	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
