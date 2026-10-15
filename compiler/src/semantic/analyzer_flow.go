@@ -1171,6 +1171,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// The count-up exit fact `i <= bound` is sound only if `i <= bound` at ENTRY; evaluate on the
 		// pristine pre-loop scope, since the body's `i <- i + 1` mutates i's tracked value below.
 		countUpExitSound := a.countUpExitFactSound(n)
+		a.havocLoopWrittenFacts(n.Body)
 		entryAffine := a.cloneAffineValueStates()
 		outerScope := a.currentScope
 		a.pushLoopAffineFrame()
@@ -1317,7 +1318,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// over an immutable value prove itself (`invariant y > 5` refined `y` to [6, ∞) and then
 			// "proved" `y > 5`), and an unproven invariant still fed later proofs through those
 			// refinements although it is "not used as a release proof fact".
-			if a.canAssumeContractFact(n.Cond) {
+			if a.isInductiveLoopInvariant(n) || a.canAssumeContractFact(n.Cond) {
 				a.applyConditionRefinements(a.currentScope, n.Cond, true)
 				a.applyIndexBoundsFactsForCondition(n.Cond, true)
 				a.recordSMTAssertFact(n.Cond)

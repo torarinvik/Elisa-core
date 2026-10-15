@@ -4605,9 +4605,9 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	ret := tr.freshAux(smtTypeNonNegative(resultType))
 	if canonKey != "" {
 		tr.callCanon[canonKey] = ret
-		if direct && decl != nil {
-			tr.assertGhostCallCongruence(decl, args, argEnv, ret)
-		}
+	}
+	if direct && decl != nil {
+		tr.assertGhostCallCongruence(decl, args, argEnv, ret)
 	}
 	if !direct || decl == nil {
 		return ret, true
@@ -6088,18 +6088,29 @@ func (tr *smtTranslator) assertGhostCallCongruence(decl *ast.FuncDecl, args []as
 		return
 	}
 	env := tr.canonKeyEnv(decl, argEnv)
+	// Sorts come from the callee's declared parameter types: an invariant is proven before the loop
+	// body (and so before its own argument expressions) is analyzed, so the arguments may be untyped.
+	var paramTypes []Type
+	if sym, ok := tr.a.symbolForFuncDecl(decl); ok && sym != nil {
+		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil && len(fnType.Params) == len(args) {
+			paramTypes = fnType.Params
+		}
+	}
+	if paramTypes == nil {
+		return
+	}
 	var name strings.Builder
 	fmt.Fprintf(&name, "%p", decl)
 	sorts := make([]string, 0, len(args))
 	terms := make([]string, 0, len(args))
-	for _, arg := range args {
+	for i, arg := range args {
 		if arg == nil {
 			return
 		}
-		argType := stripRefForBounds(tr.a.exprTypes[arg])
+		argType := stripRefForBounds(paramTypes[i])
 		switch {
 		case isStringViewType(argType):
-			key, ok := tr.callCanonArgKeyEnv(arg, env)
+			key, ok := tr.ghostViewArgKey(arg, env)
 			if !ok {
 				return
 			}
@@ -6145,4 +6156,23 @@ func fnvString(s string) uint64 {
 		h *= 1099511628211
 	}
 	return h
+}
+
+// ghostViewArgKey names a view argument by the IMMUTABLE binding it reads: the same binding is the
+// same view (bytes and length), wherever the call appears in the function. A call-site view is
+// otherwise bound to a fresh array per call (bindSMTSViewLengthArg), which shares nothing. A name the
+// env binds (a substituted callee formal) or any other expression declines.
+func (tr *smtTranslator) ghostViewArgKey(arg ast.Expr, env map[string]string) (string, bool) {
+	id, ok := stripOptimizationParens(arg).(*ast.Ident)
+	if !ok || id == nil || tr.a.currentScope == nil {
+		return "", false
+	}
+	if _, bound := env[id.Name]; bound {
+		return "", false
+	}
+	sym, found := tr.a.currentScope.Lookup(id.Name)
+	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
+		return "", false
+	}
+	return fmt.Sprintf("view:%s@%p", id.Name, sym), true
 }

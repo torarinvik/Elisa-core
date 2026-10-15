@@ -206,6 +206,10 @@ func leadingInvariants(body []ast.Stmt) []*ast.ContractStmt {
 	var out []*ast.ContractStmt
 	for _, s := range body {
 		cs, ok := s.(*ast.ContractStmt)
+		if ok && cs != nil && cs.Kind == ast.ContractDecreases {
+			// A `decreases` measure may lead or interleave with the invariants; it is not a body effect.
+			continue
+		}
 		if !ok || cs.Kind != ast.ContractInvariant {
 			break
 		}
@@ -534,6 +538,20 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	env, ok := a.smtEnvForSubst(tr, subst)
 	if !ok {
 		return false, ""
+	}
+	for name := range subst {
+		// The assignment stores the value into the variable's integer type, so the post-body value is
+		// the value REINTERPRETED at that width: `h <- h + 1` on a u64 is `(h + 1) mod 2^64`. The body
+		// is captured before it is analyzed, so the right-hand side carries no type of its own and
+		// would otherwise translate as unbounded arithmetic, disagreeing with every typed occurrence of
+		// the same expression (a callee unfolding `suf(n, i + 1, h + 1)`).
+		if sym, ok := a.currentScope.Lookup(name); ok && sym != nil && !IsBoolType(sym.Type) {
+			if signed, bits, ok := smtIntWidthSign(sym.Type); ok {
+				if term, bound := env[name]; bound && term != "" {
+					env[name] = smtSameWidthReinterpret(term, signed, bits)
+				}
+			}
+		}
 	}
 	// Array-element stores extend the environment with the post-body array value `(store arr idx val)`.
 	// The index/value are translated with the FREE (pre-body) environment — consistent with the
