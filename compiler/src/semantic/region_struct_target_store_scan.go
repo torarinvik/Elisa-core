@@ -155,6 +155,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
 			return storeNone
 		}
+		// docs/128: a value whose declared type is program-lived (a `darray[T] @source` field)
+		// reaches only program-region storage, whatever holds it.
+		if t, known := a.exprTypes[inner]; known && t != nil && len(a.programRegions) != 0 && !containsTypeParam(t) && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
+			return storeNone
+		}
 		// A struct literal stores each field value: judge them one by one.
 		if lit, isLit := inner.(*ast.StructLitExpr); isLit && lit != nil {
 			mode := storeNone
