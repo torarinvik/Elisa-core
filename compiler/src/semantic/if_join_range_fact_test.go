@@ -45,7 +45,7 @@ func TestIfJoinDropsInvalidatedRangeFact(t *testing.T) {
 `,
 	}
 	for name, src := range cases {
-		if errs := loopPathErrs(t, name+".elisa", src); !strings.Contains(errs, `ensure postcondition of "w"`) {
+		if errs := ifJoinErrs(t, name+".elisa", src); !strings.Contains(errs, `ensure postcondition of "w"`) {
 			t.Errorf("%s: a branch-written result must not prove ensure result == 0, got:\n%s", name, errs)
 		}
 	}
@@ -57,7 +57,14 @@ func TestIfJoinDropsInvalidatedRangeFact(t *testing.T) {
         index <- 7
     return index
 `
-	if errs := loopPathErrs(t, "if_join_ok.elisa", ok); errs != "" {
+	if errs := ifJoinErrs(t, "if_join_ok.elisa", ok); errs != "" {
 		t.Fatalf("the joined range [0, 7] must prove, got:\n%s", errs)
 	}
+}
+
+// ifJoinErrs is the strict-proof error list (selfhost-misc's loopPathErrs, without the solver-error
+// counter that branch adds to SMTProfile).
+func ifJoinErrs(t *testing.T, name, src string) string {
+	t.Helper()
+	return strings.Join(analyzeContractStrict(t, name, src).Errors(), "\n")
 }
