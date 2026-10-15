@@ -3,6 +3,9 @@ package semantic
 import (
 	"sort"
 	"strings"
+
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // hypothesisFact is the ONE common type for a logical hypothesis carried by the verifier. It unifies
@@ -71,6 +74,13 @@ type assertHypothesisFact struct {
 func (f assertHypothesisFact) hypotheses(tr *smtTranslator) []string {
 	if tr == nil || f.fact.Expr == nil {
 		return nil
+	}
+	// A top-level `value is Variant(binders)` path fact also equates each in-scope binder with the
+	// payload it denotes (only here: never inside a goal or under negation).
+	if bin, ok := stripOptimizationParens(f.fact.Expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_IS {
+		if h, ok := tr.enumIsFactTerm(bin, f.fact.Binders); ok {
+			return []string{"(assert " + h + ")\n"}
+		}
 	}
 	if h, ok := tr.boolTerm(f.fact.Expr, nil); ok {
 		return []string{"(assert " + h + ")\n"}

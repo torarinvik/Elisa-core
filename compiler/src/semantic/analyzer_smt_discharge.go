@@ -1255,6 +1255,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// as the un-substituted occurrence (structural induction). Tokens only key opaque predicate symbols;
 	// they never enter a numeric SMT term (the type checker forbids datatype operands in arithmetic).
 	if isDatatypeValuedType(a.exprTypes[argExpr]) {
+		if _, _, _, ok := tr.enumConstructor(argExpr); ok {
+			// Keep a substituted variant constructor recognizable: its tag is a constant and its payload
+			// is its arguments. The token never enters a numeric term.
+			token := dtTokenPrefix + "enumctor#" + strconv.Itoa(len(tr.enumBindings))
+			tr.enumBindings[token] = smtEnumBinding{expr: argExpr, env: argEnv}
+			env[name] = token
+			return true
+		}
 		env[name] = dtToken(smtProjectionName(argExpr))
 		return true
 	}
@@ -1562,6 +1570,10 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 type smtFact struct {
 	Expr ast.Expr
 	Deps map[string]bool
+	// Binders pins a `value is Variant(binders)` path fact to the exact pattern-binder symbols it
+	// introduced: a binder/payload equality is emitted only while the name still resolves to that
+	// symbol, never to a shadowing redeclaration that shares its SMT name.
+	Binders map[string]*Symbol
 }
 
 // smtAssertHypotheses translates flow-local proof facts into SMT assumptions. A fact may come from a
@@ -1743,6 +1755,10 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 
 func isSMTExactAssignmentType(t Type) bool {
 	t = stripRefForBounds(t)
+	if enumeration, ok := t.(*ConstEnumType); ok && enumeration != nil {
+		// A const-enum value IS its integer storage value (smtNumericValueType models it so).
+		t = enumeration.Storage
+	}
 	return t != nil && (IsNumericType(t) || IsBoolType(t)) && !IsFloatType(t)
 }
 
@@ -2233,6 +2249,13 @@ type smtTranslator struct {
 	// knownRequiresSumNoWrap). Without the clause, neither the hypothesis nor the clean body term exists,
 	// so the genuine overflow counterexample is preserved (the C1 soundness gate).
 	requiresHypMode bool
+	// enumDecls holds enum tag/payload symbol declarations (with their range facts), keyed by symbol.
+	enumDecls map[string]string
+	// enumBindings maps an env token to the enum-valued expression (and its env) it stands for, so a
+	// substituted constructor keeps its constant tag and payload arguments.
+	enumBindings map[string]smtEnumBinding
+	// enumPinnedBinders is set only while rendering one `is` path fact (see enumIsFactTerm).
+	enumPinnedBinders map[string]*Symbol
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -2261,6 +2284,8 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		callEqMaxUnroll:    1,
 		callEqDeclDepth:    map[*ast.FuncDecl]int{},
 		callEqMaxDeclDepth: 2,
+		enumDecls:          map[string]string{},
+		enumBindings:       map[string]smtEnumBinding{},
 	}
 }
 
@@ -2276,6 +2301,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			if bound, ok := env[n.Name]; ok {
 				return bound, true
 			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
 		}
 		// Resolve the array's element type from exprTypes (set once the node is analyzed) OR, when that
 		// is not yet populated — e.g. loop-invariant proving runs BEFORE the body is type-analyzed — from
@@ -2309,6 +2337,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			if bound, ok := env[smtProjectionName(n)]; ok {
 				return bound, true
 			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
 		}
 		// Resolve the field's array type from exprTypes (set once analyzed) OR — when the node is
 		// synthetic/cloned (e.g. the loop-termination prover's measure[body], whose field reads were
@@ -2632,6 +2663,12 @@ func (tr *smtTranslator) term(expr ast.Expr) (string, bool) {
 
 func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, bool) {
 	if n, ok := expr.(*ast.MatchExpr); ok {
+		if term, ok := tr.enumMatchTerm(n, env, tr.termEnv); ok {
+			return term, true
+		}
+		if term, ok := tr.constEnumMatchTerm(n, env, tr.termEnv); ok {
+			return term, true
+		}
 		return tr.scalarMatchTerm(n, env, tr.termEnv)
 	}
 
@@ -2758,6 +2795,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 					return tr.termEnv(arg, env)
 				}
 			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
 		}
 		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
 		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
@@ -3476,6 +3516,12 @@ func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
 func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string, bool) {
 	switch n := expr.(type) {
 	case *ast.MatchExpr:
+		if term, ok := tr.enumMatchTerm(n, env, tr.boolTerm); ok {
+			return term, true
+		}
+		if term, ok := tr.constEnumMatchTerm(n, env, tr.boolTerm); ok {
+			return term, true
+		}
 		return tr.booleanMatchTerm(n, env)
 	case *ast.ParenExpr:
 		return tr.boolTerm(n.Inner, env)
@@ -3658,6 +3704,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return bound, true
 			}
 		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
 		fieldType := tr.a.exprTypes[n]
 		if fieldType == nil {
 			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
@@ -3755,7 +3804,12 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return cmp, true
 			}
 			return smtCompare(n.Op, l, r), true
+		case lexer.TOKEN_IS:
+			return tr.enumIsTerm(n, env, false)
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+			if eq, ok := tr.enumEqualityTerm(n, env); ok {
+				return eq, true
+			}
 			if eq, ok := tr.constantStringEquality(n.Left, n.Right, env, 0); ok {
 				if n.Op == lexer.TOKEN_BANGEQ {
 					return "(not " + eq + ")", true
@@ -3767,6 +3821,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			// guard and the obligation. This lets `ensure (p != null) or (result == false)` discharge: the
 			// fall-through guard `p != null` and the disjunct refer to the same predicate.
 			if ptr := nullComparePointer(n); ptr != nil {
+				if tr.calleeFreeProjection(ptr, env) {
+					return "", false
+				}
 				pred := "isnull_" + smtProjectionName(stripOptimizationParens(ptr))
 				tr.boolDecls[pred] = true
 				if n.Op == lexer.TOKEN_EQEQ {
@@ -3783,6 +3840,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				leftType := tr.a.exprTypes[n.Left]
 				rightType := tr.a.exprTypes[n.Right]
 				if tr.a.exprIsPointerLike(leftType) && tr.a.exprIsPointerLike(rightType) {
+					if tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
+						return "", false
+					}
 					lPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Left))
 					rPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Right))
 					tr.boolDecls[lPred] = true
@@ -5002,6 +5062,7 @@ func (tr *smtTranslator) factPreamble() string {
 		// termination/preservation goal needs. Sound: it only ever asserts a fact the type guarantees.
 		b.WriteString("(assert (< " + sym + " 18446744073709551616))\n")
 	}
+	b.WriteString(tr.enumPreamble())
 	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
 	// mint order — deterministic because the counter is monotonic over a single translation.
 	for _, line := range tr.auxDecls {
@@ -5366,4 +5427,47 @@ func (a *Analyzer) currentFuncName() string {
 		return "<none>"
 	}
 	return a.currentFuncDecl.Name
+}
+
+// calleeFreeProjection reports whether, while lowering a CALLEE's body or contract (calleeBodyDepth >
+// 0), `expr` is a place rooted at an identifier the call environment does not bind. Such a root is the
+// callee's own formal or local; resolving it through a name-keyed symbol (`v_l__field__a`,
+// `isnull_p`, an array or length symbol) or the caller's scope would silently alias an unrelated
+// caller variable of the same spelling — a false proof. Every projection fallback declines on it.
+func (tr *smtTranslator) calleeFreeProjection(expr ast.Expr, env map[string]string) bool {
+	if tr == nil || tr.calleeBodyDepth == 0 {
+		return false
+	}
+	root := stripOptimizationParens(expr)
+	for {
+		switch n := root.(type) {
+		case *ast.FieldExpr:
+			if env != nil {
+				if _, ok := env[smtProjectionName(n)]; ok {
+					return false
+				}
+			}
+			root = stripOptimizationParens(n.Object)
+			continue
+		case *ast.IndexExpr:
+			root = stripOptimizationParens(n.Object)
+			continue
+		case *ast.Ident:
+			if env != nil {
+				if _, ok := env[n.Name]; ok {
+					return false
+				}
+			}
+			// A module path / type / constant root is global, not a callee local.
+			if _, ok := tr.a.constIntValue(n); ok {
+				return false
+			}
+			if _, _, ok := tr.a.lookupVisibleType(n.Name); ok {
+				return false
+			}
+			return true
+		default:
+			return false
+		}
+	}
 }
