@@ -47,6 +47,24 @@ func (r *Result) IsProgramRegion(name string) bool {
 	return r != nil && r.analyzer.isProgramRegion(name)
 }
 
+// ProgramLivedArgRegion returns the program region a value of type t lives in when t is
+// program-lived and holds region storage (the single declared program region), for the
+// backend to thread that region's arena into a region parameter the analyzer bound to it.
+func (r *Result) ProgramLivedArgRegion(t Type) (string, bool) {
+	if r == nil || r.analyzer == nil || len(r.analyzer.programRegions) != 1 || t == nil {
+		return "", false
+	}
+	a := r.analyzer
+	elem := stripRefForBounds(t)
+	if !a.typeCanContainRegionRefs(elem, map[string]bool{}) || !a.typeIsProgramLivedCached(elem) {
+		return "", false
+	}
+	for name := range a.programRegions {
+		return name, true
+	}
+	return "", false
+}
+
 // checkProgramRegionSlotStore checks a value written into a slot whose type names a
 // program-lived region (an enum constructor payload, a tail payload element): only a
 // program-lived value may be stored there (docs/128 rule 3).

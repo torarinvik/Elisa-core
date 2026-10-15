@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -727,6 +728,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			}
 		}
 		if _, ok := regionBindings[name]; !ok {
+			if program, ok := a.programLivedRegionArgBinding(ft, orderedArgs, name); ok {
+				regionBindings[name] = program
+			}
+		}
+		if _, ok := regionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
 		}
 	}
@@ -1183,4 +1189,40 @@ func (a *Analyzer) analyzeSafeTransformCallExpr(expr *ast.CallExpr) Type {
 		return a.namedTypes["void"]
 	}
 	return optionalizeSafeChainResult(resultType)
+}
+
+// programLivedRegionArgBinding: docs/128 -- a region parameter carried only by reference
+// parameters whose arguments are of a program-lived type (a struct whose every field is
+// `@source`) binds to the program region. The callee's growth of those fields allocates where
+// their storage already lives; the program region outlives every other storage.
+func (a *Analyzer) programLivedRegionArgBinding(ft *FuncType, args []ast.Expr, name string) (string, bool) {
+	if a == nil || ft == nil || len(a.programRegions) != 1 {
+		return "", false
+	}
+	program := ""
+	for region := range a.programRegions {
+		program = region
+	}
+	carriers := 0
+	for i, pt := range ft.Params {
+		ref, isRef := pt.(*RefType)
+		if !isRef || ref == nil || ref.Region != name {
+			if strings.Contains(typeString(pt), "@"+name) {
+				return "", false
+			}
+			continue
+		}
+		if i >= len(args) || args[i] == nil {
+			return "", false
+		}
+		at := a.exprTypes[args[i]]
+		if at == nil || !a.typeCanContainRegionRefs(stripRefForBounds(at), map[string]bool{}) || !a.typeIsProgramLivedCached(stripRefForBounds(at)) {
+			return "", false
+		}
+		carriers++
+	}
+	if carriers == 0 {
+		return "", false
+	}
+	return program, true
 }

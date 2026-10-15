@@ -491,6 +491,23 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 				arena = ambient
 			}
 		}
+		// docs/128: the analyzer binds a region parameter carried only by program-lived
+		// arguments to the program region; thread the program arena.
+		if arena == nil {
+			for i, p := range fn.Params {
+				if i >= len(loweredArgs) || (matchedRegionName(p, p, regionParam) == "" && containerRegionName(p) != regionParam) {
+					continue
+				}
+				if name, ok := s.g.result.ProgramLivedArgRegion(s.exprType(loweredArgs[i])); ok {
+					if binding, found, err := s.programRegionArena(name); err != nil {
+						return nil, err
+					} else if found {
+						arena = binding.ptr
+					}
+				}
+				break
+			}
+		}
 		if arena == nil {
 			return nil, fmt.Errorf("cannot resolve backing Arena for region parameter %q in call to %q", regionParam, fn.Name)
 		}
