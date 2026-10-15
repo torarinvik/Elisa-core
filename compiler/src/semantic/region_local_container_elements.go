@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -600,6 +602,7 @@ func (a *Analyzer) recordLocalContainerElementInit(sym *Symbol, value ast.Expr) 
 			return
 		}
 		a.currentElementStates[sym] = cloneRegionRefState(state)
+		a.traceElemState(sym, 602)
 		return
 	}
 	if tern, ok := stripParenExpr(value).(*ast.TernaryExpr); ok {
@@ -610,6 +613,7 @@ func (a *Analyzer) recordLocalContainerElementInit(sym *Symbol, value ast.Expr) 
 			return
 		}
 		a.currentElementStates[sym] = state
+		a.traceElemState(sym, 612)
 		return
 	}
 	if call, ok := stripParenExpr(value).(*ast.CallExpr); ok {
@@ -620,6 +624,7 @@ func (a *Analyzer) recordLocalContainerElementInit(sym *Symbol, value ast.Expr) 
 			return
 		}
 		a.currentElementStates[sym] = state
+		a.traceElemState(sym, 622)
 		return
 	}
 	lit, ok := value.(*ast.ListLitExpr)
@@ -648,6 +653,7 @@ func (a *Analyzer) recordLocalContainerElementInit(sym *Symbol, value ast.Expr) 
 	}
 	merged, _ := mergeRegionRefStates(states...)
 	a.currentElementStates[sym] = merged
+	a.traceElemState(sym, 650)
 }
 
 // ternaryInitElementState describes a ternary initializer whose branches are each a call
@@ -736,6 +742,7 @@ func (a *Analyzer) recordLocalContainerElementAssign(n *ast.AssignStmt) {
 	}
 	a.checkElementLoopAssumptions(sym, n, state, true)
 	a.currentElementStates[sym] = cloneRegionRefState(state)
+	a.traceElemState(sym, 738)
 }
 
 // recordLocalContainerElementPush merges a pushed value's provenance into the receiver's
@@ -774,6 +781,7 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 			merged, _ := mergeRegionRefStates(existing, state)
 			a.checkElementLoopAssumptions(sym, arg, merged, true)
 			a.currentElementStates[sym] = merged
+			a.traceElemState(sym, 776)
 			return
 		}
 		source, isIdent := stripParenExpr(arg).(*ast.Ident)
@@ -795,6 +803,7 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 				merged, _ := mergeRegionRefStates(existing, sourceState)
 				a.checkElementLoopAssumptions(sym, arg, merged, true)
 				a.currentElementStates[sym] = merged
+				a.traceElemState(sym, 797)
 				return
 			}
 		}
@@ -817,6 +826,7 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 			merged, _ := mergeRegionRefStates(existing, state)
 			a.checkElementLoopAssumptions(sym, arg, merged, true)
 			a.currentElementStates[sym] = merged
+			a.traceElemState(sym, 819)
 			return
 		}
 	}
@@ -832,6 +842,7 @@ func (a *Analyzer) recordLocalContainerElementPush(receiver ast.Expr, arg ast.Ex
 	merged, _ := mergeRegionRefStates(existing, state)
 	a.checkElementLoopAssumptions(sym, arg, merged, true)
 	a.currentElementStates[sym] = merged
+	a.traceElemState(sym, 834)
 }
 
 // localContainerElementState returns the tracked element provenance for a by-value read
@@ -1067,6 +1078,7 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 		}
 		a.checkElementLoopAssumptions(sym, call, merged, true)
 		a.currentElementStates[sym] = merged
+		a.traceElemState(sym, 1069)
 	}
 }
 
@@ -1415,4 +1427,22 @@ func (a *Analyzer) predictedUFCSScanCall() func(call *ast.CallExpr) *ast.CallExp
 		memo[call] = rewritten
 		return rewritten
 	}
+}
+
+var elemStateTrace = os.Getenv("ELISA_ELEMSTATE_TRACE") != ""
+
+// traceElemState (trace only): a local's tracked element state gained a local-region dependency.
+func (a *Analyzer) traceElemState(sym *Symbol, site int) {
+	if !elemStateTrace || sym == nil || a.currentElementStates == nil {
+		return
+	}
+	names := liveLocalRegionDependencyNames(a.currentElementStates[sym])
+	if len(names) == 0 {
+		return
+	}
+	fn := ""
+	if a.currentFuncDecl != nil {
+		fn = a.currentFuncDecl.Name
+	}
+	fmt.Fprintf(os.Stderr, "ELEMSTATE %s %s site=%d deps=%v\n", fn, sym.Name, site, names)
 }
