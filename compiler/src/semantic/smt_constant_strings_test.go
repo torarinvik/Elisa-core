@@ -312,3 +312,75 @@ func TestSMTConstantStringNarrowSelectorPatterns(t *testing.T) {
 		})
 	}
 }
+
+// Stage1's ABI classifier shape: string-literal tuple returns behind guards that call a pure
+// (single-return, immutable-formal) helper. The frame stays stable: nothing between the guards
+// and the return can write the borrowed view.
+const classifierFrameHelper = `
+def hs(t: sview) -> bool:
+    ensure result == (t.len > 0 and t[t.len - 1] == 63)
+    return t.len > 0 and t[t.len - 1] == 63
+`
+
+func TestSMTStringClassifierLiteralTupleReturnsAndPureCalls(t *testing.T) {
+	src := classifierFrameHelper + `
+def scalar(t: sview) -> sview:
+    ensure (result == "string") == (t == "cstr")
+    return "string" if t == "cstr"
+    return ""
+
+def pair(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstr")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+
+def guarded(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (not hs(t) and t == "cstr")
+    if hs(t):
+        return ("", "")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+`
+	result := analyzeContractStrict(t, "classifier_frame.elisa", src)
+	for _, fn := range []string{"scalar", "pair", "guarded"} {
+		if n := ensureFailuresFor(result.Errors(), fn); n != 0 {
+			t.Fatalf("%s must prove; got: %v", fn, result.Errors())
+		}
+	}
+}
+
+func TestSMTStringClassifierDeclinesFalseClaimsAndImpureFrames(t *testing.T) {
+	src := classifierFrameHelper + `
+def wrong_literal(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstrx")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+
+def wrong_guard(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstr")
+    if hs(t):
+        return ("string", "i32")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+
+def tick(n: mutable i64&) -> bool:
+    n += 1
+    return n > 0
+
+def impure_guard(t: sview, n: mutable i64&) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstr")
+    if tick(n) and false:
+        return ("", "")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+`
+	result := analyzeContractStrict(t, "classifier_frame_neg.elisa", src)
+	// wrong_literal: "cstr" and "cstrx" are distinct literals. wrong_guard: t = "a?" returns
+	// "string" without being "cstr". impure_guard: tick writes through a mutable formal, so the
+	// frame gate must decline even though the claim happens to hold.
+	for _, fn := range []string{"wrong_literal", "wrong_guard", "impure_guard"} {
+		if ensureFailuresFor(result.Errors(), fn) == 0 {
+			t.Fatalf("%s must stay unproven; got: %v", fn, result.Errors())
+		}
+	}
+}

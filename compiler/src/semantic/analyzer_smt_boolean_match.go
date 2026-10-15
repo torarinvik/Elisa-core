@@ -36,15 +36,22 @@ func pureClassifierPattern(pattern ast.MatchPattern) bool {
 // Only expression-only classifiers qualify: an immutable view binding does
 // not by itself guarantee that its backing bytes survive mutations or calls.
 func pureClassifierExpr(e ast.Expr) bool {
+	return pureClassifierExprCalls(e, nil)
+}
+
+// pureClassifierExprCalls is pureClassifierExpr that also admits the calls pureCall accepts.
+func pureClassifierExprCalls(e ast.Expr, pureCall func(*ast.CallExpr) bool) bool {
 	switch n := e.(type) {
 	case *ast.Ident, *ast.StringLit, *ast.BoolLit, *ast.IntLit:
 		return true
+	case *ast.CallExpr:
+		return n != nil && pureCall != nil && pureCall(n)
 	case *ast.ParenExpr:
-		return pureClassifierExpr(n.Inner)
+		return pureClassifierExprCalls(n.Inner, pureCall)
 	case *ast.BinaryExpr:
-		return n.LoweredCall == nil && pureClassifierExpr(n.Left) && pureClassifierExpr(n.Right)
+		return n.LoweredCall == nil && pureClassifierExprCalls(n.Left, pureCall) && pureClassifierExprCalls(n.Right, pureCall)
 	case *ast.MatchExpr:
-		if n.Store != nil || !pureClassifierExpr(n.Value) {
+		if n.Store != nil || !pureClassifierExprCalls(n.Value, pureCall) {
 			return false
 		}
 		for _, arm := range n.Arms {
@@ -52,13 +59,30 @@ func pureClassifierExpr(e ast.Expr) bool {
 				return false
 			}
 			tail, ok := arm.Body[0].(*ast.ExprStmt)
-			if !ok || !pureClassifierExpr(tail.Expr) {
+			if !ok || !pureClassifierExprCalls(tail.Expr, pureCall) {
 				return false
 			}
 		}
 		return true
 	}
 	return false
+}
+
+// pureClassifierReturnValue accepts a write-free return value: a pure classifier
+// expression, or a tuple of them (`("string", "i32")`).
+func pureClassifierReturnValue(value ast.Expr, pureCall func(*ast.CallExpr) bool) bool {
+	if tuple, ok := stripOptimizationParens(value).(*ast.TupleExpr); ok {
+		if len(tuple.Elems) == 0 {
+			return false
+		}
+		for _, elem := range tuple.Elems {
+			if !pureClassifierExprCalls(elem, pureCall) {
+				return false
+			}
+		}
+		return true
+	}
+	return value != nil && pureClassifierExprCalls(value, pureCall)
 }
 
 func pureClassifierBody(body []ast.Stmt) bool {
@@ -74,27 +98,29 @@ func pureClassifierBody(body []ast.Stmt) bool {
 	return false
 }
 
-func classifierStringControlFlowBody(body []ast.Stmt, allowEmpty bool) bool {
+func classifierStringControlFlowBody(body []ast.Stmt, allowEmpty bool, pureCall func(*ast.CallExpr) bool) bool {
 	if len(body) == 0 {
 		return allowEmpty
 	}
 	for _, stmt := range body {
 		switch n := stmt.(type) {
 		case *ast.ReturnStmt:
-			if _, ok := stripOptimizationParens(n.Value).(*ast.BoolLit); !ok {
+			// The returned value only has to be write-free: frame stability is about
+			// what runs BETWEEN the guards and the return, not about the result's shape.
+			if !pureClassifierReturnValue(n.Value, pureCall) {
 				return false
 			}
 		case *ast.IfStmt:
-			if !pureClassifierExpr(n.Cond) || !classifierStringControlFlowBody(n.Then, false) || !classifierStringControlFlowBody(n.Else, true) {
+			if !pureClassifierExprCalls(n.Cond, pureCall) || !classifierStringControlFlowBody(n.Then, false, pureCall) || !classifierStringControlFlowBody(n.Else, true, pureCall) {
 				return false
 			}
 			for _, clause := range n.Elifs {
-				if !pureClassifierExpr(clause.Cond) || !classifierStringControlFlowBody(clause.Body, false) {
+				if !pureClassifierExprCalls(clause.Cond, pureCall) || !classifierStringControlFlowBody(clause.Body, false, pureCall) {
 					return false
 				}
 			}
 		case *ast.CanStmt:
-			if n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.SuppressPermissionInference || n.As != "" || len(n.Permissions) == 0 || !classifierStringControlFlowBody(n.Body, false) {
+			if n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.SuppressPermissionInference || n.As != "" || len(n.Permissions) == 0 || !classifierStringControlFlowBody(n.Body, false, pureCall) {
 				return false
 			}
 			for _, permission := range n.Permissions {
@@ -120,7 +146,24 @@ func classifierStringFrameStable(a *Analyzer, decl *ast.FuncDecl) bool {
 	if pureClassifierBody(decl.Body) {
 		return true
 	}
-	if !classifierStringControlFlowBody(decl.Body, false) {
+	// A call keeps the frame stable only when the callee is a transitively pure single-return
+	// function over immutable scalar/view formals (functionPureEquationShape): it cannot write.
+	pureCall := func(call *ast.CallExpr) bool {
+		if a == nil {
+			return false
+		}
+		callee, ok := a.resolveDirectCallFuncDecl(call)
+		if !ok || callee == nil || !a.functionPureEquationShape(callee) {
+			return false
+		}
+		for _, arg := range call.Args {
+			if !pureClassifierExpr(arg) {
+				return false
+			}
+		}
+		return true
+	}
+	if !classifierStringControlFlowBody(decl.Body, false, pureCall) {
 		return false
 	}
 	isPanicOnly := func(permissions []ast.PermissionRef) bool {
