@@ -75,11 +75,22 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	var inductiveInvs []*ast.ContractStmt
 	allProven := true
 	written := loopWrittenRoots(stmt.Body)
+	guarded := map[*ast.ContractStmt]bool{}
 	// Establishment: each invariant from the pre-loop facts (plus the entry-value point ranges). The
 	// body has not been analyzed yet, so these facts are intact.
 	var candidates []*ast.ContractStmt
 	for _, inv := range invs {
 		established, viaSMT := a.proveLoopClause(inv.Cond, nil, establishScope)
+		if !established && stmt.Cond != nil {
+			// An invariant is checked at body entry, where the guard holds: establish it under the guard.
+			// Such a GUARDED invariant does not hold at loop exit (no exit facts).
+			guardScope := NewScope(establishScope)
+			a.applyConditionRefinements(guardScope, stmt.Cond, true)
+			a.recordSMTAssertFactInScope(guardScope, smtFactExprForCondition(stmt.Cond, true))
+			if established, viaSMT = a.proveLoopClause(inv.Cond, nil, guardScope); established {
+				guarded[inv] = true
+			}
+		}
 		if !established && !exprReadsAnyRoot(inv.Cond, written) {
 			// A frame invariant (it reads nothing the body may write) keeps the entry facts it reads
 			// at every loop head, so the in-place check decides it; no inductive lint.
@@ -135,8 +146,17 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 				// SMT: the loop variables are FREE, constrained only by the loop condition, the surviving
 				// invariants and the disjoint outer invariants, never by their stale pre-loop values.
 				if preserved, ce := a.proveLoopPreservationSMT(stmt.Cond, candidates, inv.Cond, subst, arrayStores, outerSafeInvs); !preserved {
-					failed, failedCE[inv] = inv, ce
-					break
+					// Guarded preservation: the invariant need only hold at the NEXT body entry, where the
+					// guard holds again: prove `cond' implies inv'`.
+					if stmt.Cond == nil {
+						failed, failedCE[inv] = inv, ce
+						break
+					}
+					if ok, _ := a.proveLoopPreservationSMT(stmt.Cond, candidates, guardedInvariantGoal(stmt.Cond, inv.Cond), subst, arrayStores, outerSafeInvs); !ok {
+						failed, failedCE[inv] = inv, ce
+						break
+					}
+					guarded[inv] = true
 				}
 				preserveTier[inv] = ProofProvenSMT
 				continue
@@ -145,9 +165,17 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 				if path.exits {
 					continue
 				}
-				if preserved, ce := a.proveLoopPreservationSMT(buildPathCond(stmt.Cond, path.conds), candidates, inv.Cond, path.subst, nil, outerSafeInvs); !preserved {
-					failed, failedCE[inv] = inv, ce
-					break
+				pathCond := buildPathCond(stmt.Cond, path.conds)
+				if preserved, ce := a.proveLoopPreservationSMT(pathCond, candidates, inv.Cond, path.subst, nil, outerSafeInvs); !preserved {
+					if stmt.Cond == nil {
+						failed, failedCE[inv] = inv, ce
+						break
+					}
+					if ok, _ := a.proveLoopPreservationSMT(pathCond, candidates, guardedInvariantGoal(stmt.Cond, inv.Cond), path.subst, nil, outerSafeInvs); !ok {
+						failed, failedCE[inv] = inv, ce
+						break
+					}
+					guarded[inv] = true
 				}
 			}
 			if failed != nil {
@@ -174,6 +202,10 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	for _, inv := range candidates {
 		a.recordProof(inv.Pos(), "loop invariant", "preserve", preserveTier[inv])
 		inductiveInvs = append(inductiveInvs, inv)
+		if guarded[inv] {
+			// Holds at every body entry, not necessarily when the guard fails: no exit facts.
+			allProven = false
+		}
 	}
 
 	// Sound exit facts require EVERY invariant proven inductive on a body we fully captured. A
@@ -1285,5 +1317,15 @@ func loopTerminationPlaceRoot(expr ast.Expr) (string, bool) {
 		return loopTerminationPlaceRoot(n.Object)
 	default:
 		return "", false
+	}
+}
+
+// guardedInvariantGoal is `not cond or inv`: the invariant holds whenever the body is entered again.
+func guardedInvariantGoal(cond, inv ast.Expr) ast.Expr {
+	return &ast.BinaryExpr{
+		Position: inv.Pos(),
+		Op:       lexer.TOKEN_OR,
+		Left:     &ast.UnaryExpr{Position: cond.Pos(), Op: lexer.TOKEN_NOT, Operand: ast.CloneExpr(cond)},
+		Right:    inv,
 	}
 }

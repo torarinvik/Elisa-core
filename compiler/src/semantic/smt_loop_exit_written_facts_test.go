@@ -101,3 +101,26 @@ func TestLoopInvariantsPreservedJointly(t *testing.T) {
 		t.Fatalf("neither invariant is inductive on its own; got %d preserved: %+v", got, r.ProofReport)
 	}
 }
+
+// An invariant is checked at body entry, where the guard holds, so it may be established and
+// preserved UNDER the guard: `i < n` is not inductive on its own but holds at every body entry. Such
+// a guarded invariant fails at exit (i == n there) and must not become an after-loop fact.
+func TestGuardedLoopInvariant(t *testing.T) {
+	src := `def f(n: i64) -> i64:
+    requires n > 0
+    ensure result < n
+    i: mutable i64 = 0
+    while i < n:
+        invariant i < n
+        i <- i + 1
+    return i
+`
+	errs := strictSMTErrors(t, "guarded_inv.elisa", src)
+	joined := strings.Join(errs, "\n")
+	if strings.Contains(joined, "loop invariant") || strings.Contains(joined, "invariant could not") {
+		t.Fatalf("i < n holds at every body entry, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "ensure postcondition") {
+		t.Fatalf("i == n at exit; a guarded invariant must not prove ensure result < n, got:\n%s", joined)
+	}
+}
