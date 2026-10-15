@@ -87,3 +87,41 @@ declaration states.
 - A backing clause (`global region source: reserve_commit(1 GiB)`) can be added to §1 without
   changing the checking rules.
 - Verification: the lattice facts are explicit, so a prover can consume them as axioms.
+
+## 8. Addendum — declared store region on store-backed enums (approved)
+
+A store-backed enum (a recursive plain enum, or a sealed hierarchy root with a `layout`
+suffix) normally places its node store in whatever region the construction site infers. A
+root may instead declare the store's region:
+
+```
+enum Node layout(handle: u32) @source:
+    pass
+```
+
+- The suffix is allowed only on a hierarchy root or a non-hierarchy store-backed enum, and
+  only with a program-lived region (v1). Refinements (`enum Expr is Node`) inherit it.
+- Every construction of a variant allocates its row in that region's store, whatever the
+  ambient region; the backend uses the program arena of §5.
+- **Binder provenance.** A value of such a type is a handle into a program-lived store. It
+  counts as program-lived for view provenance **only when every payload field of every
+  variant (and every common field) is itself program-lived**: scalars, other such handles,
+  or region-carrying types whose region is program-lived (`sview @source`,
+  `darray[T] @source` with T satisfying the same rule). Otherwise the binder keeps its
+  current, unrecorded status and stores of it are judged as before.
+- Payload stores are checked by rule 3 (§2) at the constructor, so a declared store never
+  holds a shorter-lived view.
+
+Cost: the store and everything its payloads point to live until exit. A compiler that
+declares its AST this way keeps the whole AST for the whole compile; the probe report
+records the peak-RSS change.
+
+## 9. Open: merge with `perm`
+
+stage0 already has a builtin program-lifetime ambient region `perm` (`in perm:`). It is not
+a declared region and is not part of the §2 lattice; region-polymorphic calls inside
+`in perm:` bind to it. Declared program-lived regions reuse that binding rule. Merging the
+two (making `perm` a predeclared `global region perm`) is deferred.
+
+Deferred: enum region **parameters** (`enum E[@r]`) — not needed once the store region is
+declared; added when a failing case needs them.
