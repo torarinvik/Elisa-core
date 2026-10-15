@@ -16,7 +16,7 @@ global mutable alias: mutable Cell& = &cell
 def update():
     can Global.Write:
         alias.value <- 1
-	`, "mutable global read", "Global.Read, Global.Write"},
+	`, "mutable global read", " can[Global.Read, Global.Write]"},
 		{"both_grants", `struct Cell:
     value: mutable i32
 global mutable cell: Cell = Cell{value: 0}
@@ -24,14 +24,14 @@ global mutable alias: mutable Cell& = &cell
 def update():
     can Global{Read, Write}:
         alias.value <- 1
-	`, "", "Global.Read, Global.Write"},
+	`, "", " can[Global.Read, Global.Write]"},
 		{"direct_global_field_write", `struct Cell:
     value: mutable i32
 global mutable cell: Cell = Cell{value: 0}
 def update():
     can Global.Write:
         cell.value <- 1
-	`, "", "Global.Write"},
+	`, "", " can[Global.Write]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,8 +52,8 @@ def update():
 			if !ok {
 				t.Fatalf("expected update function type, got %T", sym.Type)
 			}
-			if got := PermissionRefsString(fnType.PermissionRefs); !strings.Contains(got, tt.wantRow) {
-				t.Fatalf("expected inferred row to contain %q, got %q", tt.wantRow, got)
+			if got := PermissionRefsString(fnType.PermissionRefs); got != tt.wantRow {
+				t.Fatalf("expected inferred row %q, got %q", tt.wantRow, got)
 			}
 		})
 	}
