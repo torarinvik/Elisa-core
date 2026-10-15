@@ -66,7 +66,23 @@ func (p SMTStats) String() string {
 }
 
 // smtQueryResourceLimit is the deterministic per-(check-sat) z3 budget (see openSMT).
-const smtQueryResourceLimit = 6_000_000
+//
+// Measured over 73 stage1 files (1480 decided queries): p50 0.6k units, p90 25k, p99 1.1M-1.5M;
+// solver time scales with the budget because undecidable queries run to it (6M: 468 s, 2M: 192 s,
+// 1M: 110 s, 0.5M: 64 s, versus 291 s under the old 2 s timeout). 1M keeps 99% of decided queries;
+// the six slower unsat proofs in that corpus are the price of the CPU win (owner: CPU first).
+const smtQueryResourceLimit = 1_000_000
+
+// smtResourceLimit returns the budget, overridable by ELISA_SMT_RLIMIT (a positive integer) for
+// calibration sweeps only. A fixed value is still deterministic; production leaves it unset.
+func smtResourceLimit() int64 {
+	if v := os.Getenv("ELISA_SMT_RLIMIT"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return smtQueryResourceLimit
+}
 
 // openSMT lazily starts the solver on first need. Returns nil if SMT is off or the solver can't be
 // started (latched in smtUnavailable so we don't retry per query).
@@ -81,11 +97,9 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 		Binary: a.smtBinary,
 		// The per-query budget is z3 RESOURCE UNITS, not wall time, so a verdict never depends on
 		// machine load (a 2 s timeout made proofs such as fnv1a's `decreases` flicker between runs).
-		// Calibrated with ELISA_SMT_RLIMIT_LOG over 73 stage1 files: the most expensive query decided
-		// under the old 2 s timeout used 3.9M units, so 6M keeps every one of them with 1.5x headroom.
 		// An undecided obligation becomes Unknown and falls back to the runtime check.
-		ResourceLimit: smtQueryResourceLimit,
-		// Hang guard only, far above the time 6M units take even on a loaded machine; it should
+		ResourceLimit: smtResourceLimit(),
+		// Hang guard only, far above the time the budget takes even on a loaded machine; it should
 		// never be the limit that decides a verdict.
 		PerQueryTimeoutMillis: 120000,
 	})
