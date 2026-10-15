@@ -3,10 +3,88 @@
 package semantic
 
 import (
+	"strconv"
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
+
+func BenchmarkCallKeyTopLevelLocalLookup(b *testing.B) {
+	const localCount = 512
+	owner := &ast.FuncDecl{Name: "owner"}
+	owner.Body = make([]ast.Stmt, 0, localCount+1)
+	var target *ast.VarDeclStmt
+	for i := 0; i < localCount; i++ {
+		local := &ast.VarDeclStmt{
+			Position: lexer.Pos{Offset: i + 1},
+			Name:     "local_" + strconv.Itoa(i),
+			Value:    &ast.IntLit{Position: lexer.Pos{Offset: i + 1}, Value: "1"},
+		}
+		owner.Body = append(owner.Body, local)
+		target = local
+	}
+	identifier := &ast.Ident{Position: lexer.Pos{Offset: localCount + 2}, Name: target.Name}
+	owner.Body = append(owner.Body, &ast.ReturnStmt{Value: identifier})
+	scope := NewScope(nil)
+	scope.Define(&Symbol{Name: target.Name, Kind: SymbolLocal, Node: target})
+	analyzer := &Analyzer{currentScope: scope}
+	tr := analyzer.newSMTTranslator(nil)
+	if tr.callKeyTopLevelLocal(identifier, owner) == nil {
+		b.Fatal("benchmark fixture did not resolve its immutable local")
+	}
+
+	b.Run("cached_index", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if tr.callKeyTopLevelLocal(identifier, owner) == nil {
+				b.Fatal("cached lookup failed")
+			}
+		}
+	})
+	b.Run("uncached_ast_scan", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if callKeyTopLevelLocalScanBaseline(tr, identifier, owner) == nil {
+				b.Fatal("baseline lookup failed")
+			}
+		}
+	})
+}
+
+func callKeyTopLevelLocalScanBaseline(tr *smtTranslator, id *ast.Ident, owner *ast.FuncDecl) *ast.VarDeclStmt {
+	if tr == nil || tr.a == nil || id == nil || owner == nil || tr.a.currentScope == nil {
+		return nil
+	}
+	belongsToOwner := false
+	tr.a.walkStaticStmts(owner.Body, func(expr ast.Expr) bool {
+		if expr == id {
+			belongsToOwner = true
+			return true
+		}
+		return false
+	})
+	if !belongsToOwner {
+		return nil
+	}
+	var declaration *ast.VarDeclStmt
+	for _, stmt := range owner.Body {
+		local, ok := stmt.(*ast.VarDeclStmt)
+		if ok && local.Name == id.Name && local.Position.Offset > 0 && local.Position.Offset < id.Pos().Offset {
+			declaration = local
+		}
+	}
+	if declaration == nil || declaration.Mutable || declaration.Value == nil {
+		return nil
+	}
+	sym, ok := tr.a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil || sym.Mutable || sym.Kind != SymbolLocal || sym.Node != declaration {
+		return nil
+	}
+	return declaration
+}
 
 func TestCallKeyOwnerIndexCachesOnlyOwnedASTIdentifiers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "call_key_owner_index.elisa", `def first(value: i64) -> i64:
