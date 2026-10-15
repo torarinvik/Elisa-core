@@ -254,15 +254,40 @@ type smtVerdict = smt.Result
 
 type smtBudgetedSolver interface {
 	CheckBudget(assertions string, rlimit int64) smt.Result
+	CheckBudgetValues(assertions string, vars []string, rlimit int64) (smt.Result, map[string]string)
 }
+
+// smtAfterSatAbstractionBudget bounds the full Int<->BV query once its bit-vector abstraction
+// is definitively SAT: the abstraction already has a model, so only real bit semantics beyond
+// the AND bound lemma could still prove the goal. A lower budget only forgoes such proofs.
+const smtAfterSatAbstractionBudget = 50000
 
 // smtCheckSliced decides a query through its cone of influence: the sliced query first, then —
 // only if that does not prove — whether the dropped hypotheses are unsatisfiable by themselves
 // (a dead path), under a small budget. See smtSliceQuery for why both unsat cases prove the full
 // query and why a sat sliced query plus a sat dropped part is the full query's sat.
 func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, vars []string) (smt.Result, map[string]string) {
-	sliced, dropped, ok := smtSliceQuery(query, goalAssert)
+	// Bit-vector abstraction first (analyzer_smt_bv_abstract.go): an unsat weakening proves.
 	budgeted, canBudget := solver.(smtBudgetedSolver)
+	check := func(q string) (smt.Result, map[string]string) {
+		res, model, _ := solver.CheckValues(q, vars)
+		return res, model
+	}
+	if abstracted, ok := smtAbstractBitvectorReads(query); ok {
+		a.smtSetLogLabelForQuery(solver, "bv-abstract", goalAssert, abstracted)
+		res, _, _ := solver.CheckValues(abstracted, nil)
+		if res == smt.Unsat {
+			return smt.Unsat, nil
+		}
+		a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
+		if res == smt.Sat && canBudget && smtOnlyAndBitvectorOps(query) {
+			check = func(q string) (smt.Result, map[string]string) {
+				return budgeted.CheckBudgetValues(q, vars, smtAfterSatAbstractionBudget)
+			}
+		}
+	}
+	query = smtStripAbstractionOnly(query)
+	sliced, dropped, ok := smtSliceQuery(query, goalAssert)
 	// Slice only when the dropped part carries quantifiers: quantifier instantiation is what burns
 	// the budget on irrelevant facts. A quantifier-free remainder is cheap inside the full query,
 	// and slicing it would only add a second solver round trip.
@@ -270,10 +295,9 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 		ok = false
 	}
 	if !ok || !canBudget {
-		res, model, _ := solver.CheckValues(query, vars)
-		return res, model
+		return check(query)
 	}
-	res, model, _ := solver.CheckValues(sliced, vars)
+	res, model := check(sliced)
 	if res == smt.Unsat {
 		return res, model
 	}

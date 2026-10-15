@@ -242,27 +242,33 @@ func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[
 // session's; the session limit is restored afterwards. A non-positive budget is rejected (Unknown):
 // it would mean "unlimited". Used for cheap side checks that must not inherit the full budget.
 func (s *procSolver) CheckBudget(assertions string, rlimit int64) Result {
+	res, _ := s.CheckBudgetValues(assertions, nil, rlimit)
+	return res
+}
+
+// CheckBudgetValues is CheckValues under a one-off resource limit (see CheckBudget).
+func (s *procSolver) CheckBudgetValues(assertions string, vars []string, rlimit int64) (Result, map[string]string) {
 	if rlimit <= 0 {
-		return Unknown
+		return Unknown, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.broken {
-		return Unknown
+		return Unknown, nil
 	}
 	if _, sawError, err := s.exchange(fmt.Sprintf("(set-option :rlimit %d)\n", rlimit)); err != nil || sawError {
 		if err != nil {
 			s.broken = true
 		}
-		return Unknown
+		return Unknown, nil
 	}
-	res, _, _ := s.checkValuesLocked(assertions, nil)
+	res, values, _ := s.checkValuesLocked(assertions, vars)
 	if _, sawError, err := s.exchange(fmt.Sprintf("(set-option :rlimit %d)\n", s.resourceLimit)); err != nil || sawError {
 		// The session budget could not be restored: later verdicts would run under the wrong
 		// limit, so retire the process rather than continue with a different contract.
 		s.broken = true
 	}
-	return res
+	return res, values
 }
 
 func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result, map[string]string, time.Duration) {
