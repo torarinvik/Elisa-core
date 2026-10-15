@@ -304,6 +304,12 @@ func (a *Analyzer) localViewValueDeps(value ast.Expr, self string) ([]string, bo
 		}
 		state, recorded := a.regionRefStateForExpr(id)
 		if !recorded {
+			// docs/128 §8: a binder whose every reachable byte is program-lived (a handle into
+			// a declared program store with program-lived payloads, `sview @source`, ...)
+			// carries nothing a local region could free.
+			if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(stripRefForBounds(sym.Type)) {
+				return
+			}
 			if typeCarriesRegionStorage(sym.Type) || a.typeCanContainRegionRefs(stripRefForBounds(sym.Type), map[string]bool{}) {
 				ok = false
 				if storeScanTrace {

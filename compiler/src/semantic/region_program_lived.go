@@ -111,3 +111,77 @@ func (a *Analyzer) checkDeclaredStorePayload(enumType *EnumType, arg ast.Expr, p
 	}
 	a.checkProgramRegionSlotStore(arg, stamped, actual)
 }
+
+// typeIsProgramLived reports that every byte a value of type t can reach is program-lived
+// (docs/128 §8): scalars; handles into a declared program-lived store whose payloads are all
+// program-lived; and region-carrying types whose own region is program-lived, with
+// program-lived elements. Anything unannotated keeps its normal (unrecorded) treatment.
+func (a *Analyzer) typeIsProgramLived(t Type, seen map[Type]bool) bool {
+	if t == nil {
+		return false
+	}
+	if seen[t] {
+		return true // a recursive reference is judged by the rest of the walk
+	}
+	switch tt := t.(type) {
+	case *EnumType:
+		if tt.DeclaredStoreRegion() == "" {
+			return !a.typeCanContainRegionRefs(t, map[string]bool{})
+		}
+		seen[t] = true
+		root := tt.Root()
+		for _, field := range root.Common {
+			if !a.typeIsProgramLived(field.Type, seen) {
+				return false
+			}
+		}
+		return a.enumPayloadsProgramLived(root, seen)
+	case *OptionalType:
+		return a.typeIsProgramLived(tt.Value, seen)
+	case *SViewType:
+		return a.isProgramRegion(tt.Region)
+	case *DArrayType:
+		return a.isProgramRegion(tt.Region) && a.typeIsProgramLived(tt.Elem, seen)
+	case *StructType:
+		seen[t] = true
+		for _, field := range tt.Fields {
+			if !a.typeIsProgramLived(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return !a.typeCanContainRegionRefs(t, map[string]bool{})
+}
+
+// enumPayloadsProgramLived walks every variant of a hierarchy root and its refinements.
+func (a *Analyzer) enumPayloadsProgramLived(root *EnumType, seen map[Type]bool) bool {
+	for _, named := range a.namedTypes {
+		enum, ok := named.(*EnumType)
+		if !ok || enum.Root() != root {
+			continue
+		}
+		for _, variant := range enum.Variants {
+			for _, payload := range variant.Payload {
+				if !a.typeIsProgramLived(payload, seen) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// typeIsProgramLivedCached memoizes typeIsProgramLived per type (types are immutable once
+// declarations are collected).
+func (a *Analyzer) typeIsProgramLivedCached(t Type) bool {
+	if verdict, ok := a.programLivedTypes[t]; ok {
+		return verdict
+	}
+	verdict := a.typeIsProgramLived(t, map[Type]bool{})
+	if a.programLivedTypes == nil {
+		a.programLivedTypes = map[Type]bool{}
+	}
+	a.programLivedTypes[t] = verdict
+	return verdict
+}
