@@ -126,7 +126,54 @@ func (a *Analyzer) typeLoopSubstCastsForSMT(subst map[string]ast.Expr) {
 	defer func() { a.suppressDiagnostics = saved }()
 	for _, v := range subst {
 		a.typeCastNodesInExpr(v)
+		a.typeArithNodesForSMT(v)
 	}
+}
+
+// typeArithNodesForSMT gives the identifiers and arithmetic nodes of a captured loop-body value the
+// types the SMT term translator keys on (a `%` or `&` over usize needs its width), WITHOUT analyzing
+// them: the body has not been analyzed yet, and a speculative analysis against the pre-loop facts
+// would record optimization facts on body nodes. An identifier takes its symbol's type; an
+// arithmetic node takes its typed operand's type. Only missing entries are filled, and the real body
+// analysis later overwrites them.
+func (a *Analyzer) typeArithNodesForSMT(expr ast.Expr) Type {
+	if a == nil || expr == nil {
+		return nil
+	}
+	if t := a.exprTypes[expr]; t != nil {
+		return t
+	}
+	var t Type
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		t = a.typeArithNodesForSMT(n.Inner)
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok && sym != nil && (sym.Kind == SymbolLocal || sym.Kind == SymbolParam) {
+				t = sym.Type
+			}
+		}
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_MINUS {
+			t = a.typeArithNodesForSMT(n.Operand)
+		}
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
+			lexer.TOKEN_AMPERSAND, lexer.TOKEN_PIPE, lexer.TOKEN_CARET, lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+			l := a.typeArithNodesForSMT(n.Left)
+			r := a.typeArithNodesForSMT(n.Right)
+			if isSMTIntWidthType(l) {
+				t = stripRefForBounds(l)
+			} else if n.Op != lexer.TOKEN_LSHIFT && n.Op != lexer.TOKEN_RSHIFT && isSMTIntWidthType(r) {
+				t = stripRefForBounds(r)
+			}
+		}
+	}
+	if t != nil {
+		a.exprTypes[expr] = t
+	}
+	return t
 }
 
 // typeCastNodesInExpr walks a pure-arith substitution value and analyzes each CastExpr it contains
@@ -1023,4 +1070,12 @@ func (a *Analyzer) measureBoundedBelowWithTier(measure ast.Expr) (bool, bool) {
 		return true, true
 	}
 	return false, false
+}
+
+func isSMTIntWidthType(t Type) bool {
+	if t == nil {
+		return false
+	}
+	_, _, ok := smtIntWidthSign(t)
+	return ok
 }

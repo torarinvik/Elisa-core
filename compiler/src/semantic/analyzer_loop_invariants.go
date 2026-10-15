@@ -43,6 +43,9 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// capture — establishment still runs (it needs no body model), but preservation cannot, and no
 	// exit fact is exported.
 	subst, arrayStores, captured := a.captureLoopBodyEffect(stmt.Body)
+	for _, v := range subst {
+		a.typeArithNodesForSMT(v)
+	}
 
 	// Collect outer proven invariants that are DISJOINT from this inner loop's assigned variables —
 	// the conservative check that makes it sound to carry an outer invariant into the inner proof.
@@ -728,7 +731,9 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	// result the counterexample is a loop state satisfying cond + the invariants but VIOLATING the
 	// invariant after one body step — a concrete witness to non-preservation.
 	reqHyps := a.smtRequiresHypotheses(tr)
-	hyps := reqHyps + hypSB.String()
+	// An immutable local's defining equation (`mask: usize = cap - 1`) holds wherever it is in scope,
+	// at every iteration, so it is a sound hypothesis even though the ambient flow facts are not.
+	hyps := reqHyps + a.smtImmutableLocalHypotheses(tr) + hypSB.String()
 	// When the obligation lowered into the IR, discharge through the IR-aware helper so a goal that the
 	// smart constructors folded to `true` concludes with no solver call; the loop's OWN hypothesis set is
 	// passed through unchanged (loop variables free — the inductive hypothesis). Otherwise the opaque
@@ -1040,7 +1045,10 @@ func exprIsPureArith(expr ast.Expr) bool {
 		return n.Op == lexer.TOKEN_MINUS && exprIsPureArith(n.Operand)
 	case *ast.BinaryExpr:
 		switch n.Op {
-		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT:
+		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
+			lexer.TOKEN_AMPERSAND, lexer.TOKEN_PIPE, lexer.TOKEN_CARET, lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+			// Bitwise operators are pure too; the term translator models them exactly or mints an
+			// unconstrained value (which only declines a proof).
 			return exprIsPureArith(n.Left) && exprIsPureArith(n.Right)
 		}
 		return false
