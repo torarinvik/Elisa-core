@@ -59,6 +59,18 @@ global alias: mutable Cell& = &cell
 def update():
     alias.value <- 1
 	`, "mutable global read", " can[Global.Read, Global.Write]"},
+		{"immutable_global_mutable_field_write", `struct Cell:
+    value: mutable i32
+global cell: Cell = Cell{value: 0}
+def update():
+    cell.value <- 1
+	`, "mutable global write", " can[Global.Write]"},
+		{"immutable_global_mutating_collection_call", `struct State:
+    values: mutable darray[i32]
+global state: State = State{values: []}
+def update():
+    state.values.clear()
+	`, "mutable global write", " can[Global.Read, Global.Write]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

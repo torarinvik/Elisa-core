@@ -118,7 +118,28 @@ func (a *Analyzer) recordResolvedGlobalStorage(expr *ast.Ident, sym *Symbol) {
 
 func (a *Analyzer) mutableGlobalStorageRoot(expr ast.Expr) (*Symbol, bool) {
 	sym, ok := a.globalStorageRoot(expr)
-	return sym, ok && sym.Kind == SymbolGlobal && (sym.Mutable || a.globalPathLoadsReference(expr))
+	return sym, ok && sym.Kind == SymbolGlobal && (sym.Mutable || a.globalPathLoadsReference(expr) || a.globalPathHasMutableField(expr))
+}
+
+// globalPathHasMutableField reports whether a global-rooted projection selects a
+// mutable field. Such a field is writable even when the global binding itself is
+// immutable, and mutating collection methods may use that field as their receiver.
+func (a *Analyzer) globalPathHasMutableField(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		field, ok := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
+		return (ok && field.Mutable) || a.globalPathHasMutableField(n.Object)
+	case *ast.IndexExpr:
+		return a.globalPathHasMutableField(n.Object)
+	case *ast.SliceExpr:
+		return a.globalPathHasMutableField(n.Object)
+	case *ast.ParenExpr:
+		return a.globalPathHasMutableField(n.Inner)
+	case *ast.CastExpr:
+		return a.globalPathHasMutableField(n.Operand)
+	default:
+		return false
+	}
 }
 
 func referenceStorageType(t Type) bool {
