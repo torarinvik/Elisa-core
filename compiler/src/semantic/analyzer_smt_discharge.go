@@ -654,9 +654,31 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 // pure control-flow path. The extra path is used for recursive termination calls collected before
 // ordinary body analysis has seeded branch facts into the live scope.
 func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, formalParamSets ...[]ast.ParamDecl) (bool, string) {
+	proven, counterexample, _ := a.trySMTProveRequiresCore(clause, subst, path, formalParamSets...)
+	return proven, counterexample
+}
+
+// trySMTProveCallRequires proves one callee `requires` clause at an ordinary call site. It keeps the
+// established all-arguments binding; only when that binding declines (some argument the clause never
+// mentions lies outside the SMT fragment, e.g. a byte read of a view) does it retry with the selective
+// binding that recursive obligations use. The retry receives the callee's full formal list, so a
+// formal the clause mentions but the call does not bind still declines rather than resolving to a
+// same-named caller variable; unmentioned formals cannot affect the clause's value.
+func (a *Analyzer) trySMTProveCallRequires(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, params []ast.ParamDecl) (bool, string) {
+	proven, counterexample, envDeclined := a.trySMTProveRequiresCore(clause, subst, path)
+	if proven || !envDeclined || len(params) == 0 {
+		return proven, counterexample
+	}
+	proven, counterexample, _ = a.trySMTProveRequiresCore(clause, subst, path, params)
+	return proven, counterexample
+}
+
+// trySMTProveRequiresCore is trySMTProveRequiresWithPath that also reports whether the argument
+// binding (not the solver) declined.
+func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, formalParamSets ...[]ast.ParamDecl) (bool, string, bool) {
 	solver := a.openSMT()
 	if solver == nil || clause == nil {
-		return false, ""
+		return false, "", false
 	}
 	tr := a.newSMTTranslator(nil)
 	// Substitution values may be expressions that have not yet reached ordinary body analysis (notably
@@ -722,7 +744,7 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 				fmt.Fprintf(os.Stderr, "    subst %s = %T %s type=%v\n", k, v, optimizationExprString(v), a.exprTypes[v])
 			}
 		}
-		return false, ""
+		return false, "", true
 	}
 	// Register compound substituted expressions as counterexample readbacks so a Sat model reports
 	// the CONCRETE VALUE of each callee parameter at the refuting input, not only the free caller
@@ -763,7 +785,7 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		}
 		pathTerm, ok := tr.boolTerm(path, pathEnv)
 		if !ok {
-			return false, ""
+			return false, "", false
 		}
 		extra += "(assert " + pathTerm + ")\n"
 	}
@@ -776,9 +798,9 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		if smtQueryTrace {
 			fmt.Fprintf(os.Stderr, "=== TRACE goal-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
 		}
-		return false, ""
+		return false, "", false
 	}
-	return proven, counterexample
+	return proven, counterexample, false
 }
 
 // smtEnvForRelevantSubst binds only callee parameters that occur in this obligation. A recursive
@@ -1240,12 +1262,12 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	if _, ok := stripRefForBounds(argType).(*SViewType); ok {
 		// An immutable sview formal can be bound as an SMT byte array only when the enclosing
 		// expression context passes immutableSviewArrayParameter's read-only-function gate.
-		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
-		if !ok {
-			return false
+		if arr, ok := tr.arrayTermEnv(argExpr, argEnv); ok {
+			env[name] = arr
+			return true
 		}
-		env[name] = arr
-		return true
+		// Contents unavailable: bind the length only (see bindSMTSViewLengthArg).
+		return tr.bindSMTSViewLengthArg(env, name, argExpr, argEnv)
 	}
 	if a.smtEquationStructType(a.exprTypes[argExpr]) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
@@ -2256,6 +2278,8 @@ type smtTranslator struct {
 	enumBindings map[string]smtEnumBinding
 	// enumPinnedBinders is set only while rendering one `is` path fact (see enumIsFactTerm).
 	enumPinnedBinders map[string]*Symbol
+	// sviewArgCount numbers the fresh length-only sview bindings (see bindSMTSViewLengthArg).
+	sviewArgCount int
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -2319,6 +2343,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			tr.arrayDecls[n.Name] = true
 			arr := smtVar(n.Name)
 			tr.recordFixedArrayLen(arr, t)
+			tr.linkSViewArrayLength(n, arr)
 			return arr, true
 		}
 		return "", false
@@ -2808,7 +2833,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if c, ok := tr.a.constIntValue(n); ok {
 				return smtInt(c), true
 			}
-			if n.Field == "len" {
+			// The scope-keyed view length names the CURRENT function's binding; a name the env binds
+			// (a substituted callee formal) must resolve through the env instead, or a callee's
+			// `other.len` would read the caller's same-named view.
+			if n.Field == "len" && !tr.envBindsRoot(n.Object, env) {
 				if key, ok := immutableSViewLengthProjection(tr.a, tr.a.currentScope, n); ok {
 					lenSym := smtSViewLengthSymbol(key)
 					tr.lenDecls[lenSym] = true

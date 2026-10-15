@@ -167,7 +167,7 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			// SMT fallback (docs/90 brick 3): the linear clause prover declined, but the solver may
 			// still discharge a non-linear precondition (e.g. `requires lo * 2 <= cap`) under the
 			// caller's facts. Only `unsat` of the negation concludes — sound, off unless -smt.
-			proven, counterexample := a.trySMTProveRequiresWithPath(req, subst, callPath)
+			proven, counterexample := a.trySMTProveCallRequires(req, subst, callPath, params)
 			if proven {
 				a.recordProof(call.Pos(), subject, clauseName, ProofProvenSMT)
 				a.recordRequiresReport(declName, req, call.Pos(), true)
