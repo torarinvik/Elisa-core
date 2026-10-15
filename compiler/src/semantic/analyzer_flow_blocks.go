@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -1357,6 +1358,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	}
 	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
 	snapshot := affineFlowSnapshot{Regions: branchRegions, Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	blockEndRangeFacts(snapshot.RangeFacts, scope)
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
@@ -1373,4 +1375,28 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentViewStaticLen = savedViewStaticLen
 	a.currentViewMutable = savedViewMutable
 	return snapshot
+}
+
+// blockEndRangeFacts adds to a branch snapshot the range facts the block's own scope holds at its
+// end about names declared OUTSIDE the block (`r <- 0` inside `if c:` records r = [0, 0] there).
+// The snapshot is taken after the block scope is left, so without this a variable the branch wrote
+// is absent from the branch's facts and the if-join can only treat it as unknown; with it the join
+// is the hull of the branch-end values. Facts about names the block itself declares are skipped
+// (they are out of scope after the join and must not attach to a later same-named binding). A write
+// in the block invalidates the fact across the scope chain, so a fact still present here holds at
+// the block's end.
+func blockEndRangeFacts(out map[string]numRange, scope *Scope) {
+	if out == nil || scope == nil {
+		return
+	}
+	for key, r := range scope.rangeFacts {
+		root := key
+		if i := strings.IndexByte(key, '.'); i >= 0 {
+			root = key[:i]
+		}
+		if _, local := scope.Symbols[root]; local {
+			continue
+		}
+		out[key] = r
+	}
 }
