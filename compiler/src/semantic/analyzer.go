@@ -625,6 +625,7 @@ type Analyzer struct {
 	activeOuterLoopInvariants         []*ast.ContractStmt
 	implicitIntConvFuncs              map[*ast.FuncDecl]bool
 	rangeFactWriteLogs                [][]rangeFactWrite
+	pendingLoopInvariantLints         map[*ast.ContractStmt]string
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int

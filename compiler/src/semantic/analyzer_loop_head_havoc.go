@@ -280,3 +280,28 @@ func collectExprIdentNames(expr ast.Expr, out map[string]bool) {
 	}
 	walk(reflect.ValueOf(expr))
 }
+
+// deferLoopInvariantLint holds an inductive-proof failure for a leading loop invariant until the
+// in-place check at the loop head has run. That check sees the guard and every fact the body cannot
+// change (the havocked loop-head scope), so it often proves a clause the separate establishment or
+// preservation query could not; the lint is emitted only when both fail.
+func (a *Analyzer) deferLoopInvariantLint(inv *ast.ContractStmt, msg string) {
+	if a.pendingLoopInvariantLints == nil {
+		a.pendingLoopInvariantLints = map[*ast.ContractStmt]string{}
+	}
+	a.pendingLoopInvariantLints[inv] = msg
+}
+
+func (a *Analyzer) canAssumeLoopInvariantInPlace(stmt *ast.ContractStmt) bool {
+	msg, pending := a.pendingLoopInvariantLints[stmt]
+	if pending {
+		delete(a.pendingLoopInvariantLints, stmt)
+	}
+	if a.canAssumeContractFact(stmt.Cond) {
+		return true
+	}
+	if pending {
+		a.proofLint(stmt.Pos(), "%s", msg)
+	}
+	return false
+}

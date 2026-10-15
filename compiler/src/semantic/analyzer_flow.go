@@ -1318,7 +1318,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// over an immutable value prove itself (`invariant y > 5` refined `y` to [6, ∞) and then
 			// "proved" `y > 5`), and an unproven invariant still fed later proofs through those
 			// refinements although it is "not used as a release proof fact".
-			if a.isInductiveLoopInvariant(n) || a.canAssumeContractFact(n.Cond) {
+			if a.isInductiveLoopInvariant(n) || a.canAssumeLoopInvariantInPlace(n) {
 				a.applyConditionRefinements(a.currentScope, n.Cond, true)
 				a.applyIndexBoundsFactsForCondition(n.Cond, true)
 				a.recordSMTAssertFact(n.Cond)

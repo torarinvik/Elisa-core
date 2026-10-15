@@ -88,7 +88,7 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 		}
 		if !established {
 			a.recordProof(inv.Pos(), "loop invariant", "establish", ProofRuntime)
-			a.proofLint(inv.Pos(), "loop invariant could not be established on entry; it is only checked at runtime")
+			a.deferLoopInvariantLint(inv, "loop invariant could not be established on entry; it is only checked at runtime")
 			allProven = false
 			continue
 		}
@@ -169,7 +169,7 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 		// Every proof so far may have used the removed invariant: re-prove the survivors without it.
 		preserveTier = map[*ast.ContractStmt]ProofOutcome{}
 		a.recordProof(failed.Pos(), "loop invariant", "preserve", ProofRuntime)
-		a.proofLint(failed.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(failedCE[failed]))
+		a.deferLoopInvariantLint(failed, "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime"+a.counterexampleSuffix(failedCE[failed]))
 	}
 	for _, inv := range candidates {
 		a.recordProof(inv.Pos(), "loop invariant", "preserve", preserveTier[inv])
