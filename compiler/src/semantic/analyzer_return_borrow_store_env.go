@@ -201,6 +201,9 @@ func (a *Analyzer) evaluateReturnBorrowDeferFrame(fn *ast.FuncDecl, frame *retur
 			flow = a.returnBorrowFlowForExpr(check.value, nil, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 		}
 		if flow.Local {
+			if storeScanTrace && check.call != nil {
+				a.traceLocalBorrowStoreArgs(check.call, check.callArg)
+			}
 			a.errorf(check.value.Pos(), "%s; it dangles once the function returns. Store the value or owner by value, or clone it into a longer-lived region", check.message)
 		}
 	}
@@ -1325,8 +1328,6 @@ func (a *Analyzer) traceLocalBorrowStoreArgs(call *ast.CallExpr, index int) {
 			continue
 		}
 		f := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, func(k int) bool { return k == other }, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
-		if f.Local {
-			fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d arg=%s type=%s\n", call.Pos(), index+1, other+1, args[other].Pos(), typeString(a.exprTypes[args[other]]))
-		}
+		fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d local=%v arg=%s type=%s\n", call.Pos(), index+1, other+1, f.Local, args[other].Pos(), typeString(a.exprTypes[args[other]]))
 	}
 }
