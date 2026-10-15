@@ -1111,6 +1111,10 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	if IsBoolType(a.exprTypes[call]) {
 		retTerm = smtBoolVar(retSym)
 		tr.boolDecls[retTerm] = true
+	} else if isDatatypeValuedType(a.exprTypes[call]) {
+		// An aggregate result has no scalar term: bind it to a projection token so `result.f` in the
+		// caller's obligation and in the callee's ensures both re-root to `__return_call_result__field__f`.
+		retTerm = dtToken(retSym)
 	} else {
 		tr.decls[retSym] = true
 	}
@@ -1308,6 +1312,13 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
 	// body is type-analyzed (e.g. a loop body's `i+1`) has a nil exprTypes entry; falling through to
 	// termEnv resolves it via scope, which is what the loop-invariant preserve proof needs.
+	if isAnyArrayLike(a.exprTypes[argExpr]) && !tr.isArrayLike(a.exprTypes[argExpr]) {
+		// A container whose elements the array theory does not model: bind its length only.
+		if tr.bindSMTLengthOnlyArg(env, name, argExpr, argEnv) {
+			return true
+		}
+		return !requireBinding
+	}
 	if t := a.exprTypes[argExpr]; t != nil && !isSMTExactAssignmentType(t) {
 		return !requireBinding
 	}
@@ -2280,6 +2291,9 @@ type smtTranslator struct {
 	enumPinnedBinders map[string]*Symbol
 	// sviewArgCount numbers the fresh length-only sview bindings (see bindSMTSViewLengthArg).
 	sviewArgCount int
+	// lengthOnly marks env tokens that carry a container length but no element array
+	// (see bindSMTLengthOnlyArg); array-term lookups that hit one decline.
+	lengthOnly map[string]bool
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -2323,6 +2337,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
+				if tr.lengthOnly[bound] {
+					return "", false
+				}
 				return bound, true
 			}
 		}
@@ -2360,6 +2377,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// exactly what the bare-array Ident case does for `arr[k]`.
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
+				if tr.lengthOnly[bound] {
+					return "", false
+				}
 				return bound, true
 			}
 		}
@@ -2378,7 +2398,10 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			}
 		}
 		if tr.isArrayLike(ft) {
-			name := smtProjectionName(n)
+			name, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
 			tr.arrayDecls[name] = true
 			arr := smtVar(name)
 			tr.recordFixedArrayLen(arr, ft)
@@ -2407,6 +2430,9 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 				return bound + "_len", true
 			}
 		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
 		t := tr.a.exprTypes[n]
 		if t == nil && tr.a.currentScope != nil {
 			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
@@ -2424,7 +2450,19 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 			}
 		}
 		if isAnyArrayLike(t) {
-			return smtVar(smtProjectionName(n)) + "_len", true
+			if env != nil {
+				if bound, ok := env[smtProjectionName(n)]; ok {
+					return bound + "_len", true
+				}
+			}
+			if tr.calleeFreeProjection(n, env) {
+				return "", false
+			}
+			name, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
+			return smtVar(name) + "_len", true
 		}
 	}
 	return "", false
@@ -2519,7 +2557,11 @@ func (tr *smtTranslator) setTermEnv(expr ast.Expr, env map[string]string) (sym s
 		if !sok {
 			return "", "", false
 		}
-		sym = smtVar(smtProjectionName(n))
+		name, nok := tr.fieldProjectionKey(n, env)
+		if !nok || tr.calleeFreeProjection(n, env) {
+			return "", "", false
+		}
+		sym = smtVar(name)
 		tr.setDecls[sym] = ks
 		return sym, ks, true
 	}
@@ -2570,7 +2612,11 @@ func (tr *smtTranslator) dictTermEnv(expr ast.Expr, env map[string]string) (sym 
 		}
 		return tr.dictDeclFor(n, smtVar(n.Name))
 	case *ast.FieldExpr:
-		return tr.dictDeclFor(n, smtVar(smtProjectionName(n)))
+		name, ok := tr.fieldProjectionKey(n, env)
+		if !ok || tr.calleeFreeProjection(n, env) {
+			return "", "", false
+		}
+		return tr.dictDeclFor(n, smtVar(name))
 	}
 	return "", "", false
 }
@@ -2882,7 +2928,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// by the field type (e.g. unsigned >= 0 in factPreamble), not any relation to other
 			// fields or heap state. That is sound and is enough for practical contracts like
 			// `ensure result <= self.total` on unsigned storage.
-			name := smtProjectionName(n)
+			name, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
 			tr.decls[name] = true
 			tr.markIntVar(name, t)
 			return smtVar(name), true
@@ -3742,7 +3791,11 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			}
 		}
 		if IsBoolType(fieldType) {
-			pred := smtBoolVar(smtProjectionName(n))
+			key, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
+			pred := smtBoolVar(key)
 			tr.boolDecls[pred] = true
 			return pred, true
 		}

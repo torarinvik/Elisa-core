@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -104,6 +105,71 @@ func (tr *smtTranslator) linkSViewArrayLength(id *ast.Ident, arr string) {
 	tr.lenDecls[lenSym] = true
 	tr.lenDecls[arr+"_len"] = true
 	tr.enumDecls["~svlen_link_"+arr] = "(assert (= " + arr + "_len " + lenSym + "))\n"
+}
+
+// bindSMTLengthOnlyArg binds a container formal whose ELEMENTS are outside the array theory (a
+// darray of views, structs, floats, ...) by its length alone: a fresh token (`v_lenonly$N`) whose
+// `_len` is asserted equal to the argument's length. The token is registered in tr.lengthOnly, and
+// every array-term lookup that hits it declines, so `.count`/`.len` resolve while any element read
+// leaves the fragment instead of being modeled as an unconstrained Int (which would, e.g., make
+// `xs[i] == xs[i]` provable for float elements, false for NaN).
+func (tr *smtTranslator) bindSMTLengthOnlyArg(env map[string]string, name string, argExpr ast.Expr, argEnv map[string]string) bool {
+	lenTerm, ok := tr.arrayLenSymForAnyElem(argExpr, argEnv)
+	if !ok {
+		return false
+	}
+	tr.lenDecls[lenTerm] = true
+	fresh := smtVar("lenonly$" + strconv.Itoa(tr.sviewArgCount))
+	tr.sviewArgCount++
+	if tr.lengthOnly == nil {
+		tr.lengthOnly = map[string]bool{}
+	}
+	tr.lengthOnly[fresh] = true
+	tr.lenDecls[fresh+"_len"] = true
+	tr.enumDecls["~lenonly_"+fresh] = "(assert (= " + fresh + "_len " + lenTerm + "))\n"
+	env[name] = fresh
+	return true
+}
+
+// fieldProjectionKey names the symbol for a field-chain read `root.f.g` that the env did not bind
+// directly. Projection symbols are keyed by spelling, so when the env binds the ROOT (a substituted
+// callee formal) the spelling `root` denotes the ARGUMENT, not the current function's same-named
+// variable:
+//   - root bound to a datatype projection token (`__dt__q`, an opaque struct argument `q`): the
+//     read is re-rooted at the argument's projection (`q__field__f__field__g`), the very symbol the
+//     caller's own facts about `q.f.g` use;
+//   - root bound any other way (a scalar/array term, a constant string, a variant constructor): the
+//     field has no recoverable symbol, so the read declines.
+//
+// Without this, `need(q)` with `requires k <= p.n` read the CALLER's `p.n` (false proof).
+func (tr *smtTranslator) fieldProjectionKey(n ast.Expr, env map[string]string) (string, bool) {
+	name := smtProjectionName(n)
+	if env == nil {
+		return name, true
+	}
+	root := stripOptimizationParens(n)
+	for {
+		if f, ok := root.(*ast.FieldExpr); ok && f != nil {
+			root = stripOptimizationParens(f.Object)
+			continue
+		}
+		break
+	}
+	id, ok := root.(*ast.Ident)
+	if !ok || id == nil {
+		return name, true
+	}
+	if _, bound := env["\x00string:"+id.Name]; bound {
+		return "", false
+	}
+	bound, ok := env[id.Name]
+	if !ok {
+		return name, true
+	}
+	if !strings.HasPrefix(bound, dtTokenPrefix) || strings.HasPrefix(bound, dtTokenPrefix+"enumctor#") {
+		return "", false
+	}
+	return strings.TrimPrefix(bound, dtTokenPrefix) + strings.TrimPrefix(name, id.Name), true
 }
 
 // envBindsRoot reports whether expr is an identifier the substitution env binds (as a term or as a
