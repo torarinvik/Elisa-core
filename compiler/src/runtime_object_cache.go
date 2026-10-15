@@ -90,10 +90,6 @@ func runtimeObjectCacheArtifactFor(packedProfile backend.PackedLoweringProfile, 
 	testRunnerCacheWriteString(hash, "trace=false")
 	testRunnerCacheWriteString(hash, "packedProfile="+packedProfile.SelectionKey())
 	testRunnerCacheWriteString(hash, "targetTriple="+strings.TrimSpace(targetTriple))
-	// Env-driven codegen flags (-ffast-math, -fstrict-fp, -mcpu, ...) also shape the runtime.
-	for _, entry := range buildCacheEnvKey() {
-		testRunnerCacheWriteString(hash, "env="+entry)
-	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		testRunnerCacheWriteString(hash, "clang="+clangPath)
 		stamp, stampErr := toolchainContentStamp(clangPath)
