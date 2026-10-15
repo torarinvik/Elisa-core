@@ -1329,5 +1329,43 @@ func (a *Analyzer) traceLocalBorrowStoreArgs(call *ast.CallExpr, index int) {
 		}
 		f := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, func(k int) bool { return k == other }, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 		fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d local=%v arg=%s type=%s\n", call.Pos(), index+1, other+1, f.Local, args[other].Pos(), typeString(a.exprTypes[args[other]]))
+		if f.Local {
+			a.traceLocalFlowExplain(args[other], 3, "  ")
+		}
+	}
+}
+
+// traceLocalFlowExplain (trace only): why expr's return-borrow flow is frame-local -- a local's
+// initializer, a call's arguments, recursively.
+func (a *Analyzer) traceLocalFlowExplain(expr ast.Expr, depth int, indent string) {
+	if expr == nil || depth < 0 {
+		return
+	}
+	f := a.returnBorrowFlowForExpr(expr, nil, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+	fmt.Fprintf(os.Stderr, "%sEXPLAIN %T at %s local=%v params=%v type=%s\n", indent, expr, expr.Pos(), f.Local, f.Params, typeString(a.exprTypes[expr]))
+	if !f.Local {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if a.currentFuncDecl != nil {
+			idx := a.storeScanIndex(a.currentFuncDecl)
+			for _, v := range idx.decls[e.Name] {
+				if v.Value != nil {
+					a.traceLocalFlowExplain(v.Value, depth-1, indent+"  ")
+				}
+			}
+			if idx.otherBound[e.Name] {
+				fmt.Fprintf(os.Stderr, "%s  (bound by a pattern/loop)\n", indent)
+			}
+		}
+	case *ast.CallExpr:
+		for _, arg := range e.Args {
+			a.traceLocalFlowExplain(arg, depth-1, indent+"  ")
+		}
+	case *ast.FieldExpr:
+		a.traceLocalFlowExplain(e.Object, depth-1, indent+"  ")
+	case *ast.IndexExpr:
+		a.traceLocalFlowExplain(e.Object, depth-1, indent+"  ")
 	}
 }
