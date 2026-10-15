@@ -280,6 +280,11 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
 			return regionRefState{}, false
 		}
+		// docs/128: an element whose declared type reaches only program-lived bytes depends on
+		// no local region, whatever region holds the container (the FieldExpr rule above).
+		if len(a.programRegions) != 0 && a.provenanceAddrOfDepth == 0 && a.typeIsProgramLivedCached(resultType) {
+			return regionRefState{}, true
+		}
 		state, ok := a.regionRefStateForIndexElement(n)
 		// An element that owns arena storage (`xs[0]` of a `darray[darray[u8]]`) copies only a
 		// header; its backing may live anywhere that outlives the container — including the

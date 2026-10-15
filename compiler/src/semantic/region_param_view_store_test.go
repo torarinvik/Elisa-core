@@ -36,6 +36,48 @@ def caller[@a](n: mutable Node[a]&) -> void:
         d.push(65)
         g(n, d.as_sview())
 `, []string{":11:11", ":11:24"}},
+		{"program_lived_element_through_ternary", `global region source
+
+module M:
+    public:
+        struct Scope:
+            pool_names: mutable darray[sview @source]
+
+        enum Expr layout(handle: u32) @source:
+            Ident(sview @source, u32)
+            Nil
+            Wrap(Expr)
+
+        def g(n: u32) -> sview @source:
+            return ""
+
+        def f(s: mutable Scope&) -> darray[Expr] can[Memory.Allocate, Abort.Panic]:
+            x: sview = g(1)
+            b: sview = x if x != "" else s.pool_names[s.pool_names.count - 1.usize()]
+            out: mutable darray[Expr] = [Expr.Ident(b, 1), Expr.Nil]
+            return out
+`, nil},
+		{"region_less_element_through_ternary", `global region source
+
+module M:
+    public:
+        struct Scope:
+            pool_names: mutable darray[sview]
+
+        enum Expr layout(handle: u32) @source:
+            Ident(sview @source, u32)
+            Nil
+            Wrap(Expr)
+
+        def g(n: u32) -> sview @source:
+            return ""
+
+        def f(s: mutable Scope&) -> darray[Expr] can[Memory.Allocate, Abort.Panic]:
+            x: sview = g(1)
+            b: sview = x if x != "" else s.pool_names[s.pool_names.count - 1.usize()]
+            out: mutable darray[Expr] = [Expr.Ident(b, 1), Expr.Nil]
+            return out
+`, []string{":19:53"}},
 	}
 	for _, c := range cases {
 		result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, c.name+".elisa", c.src)
