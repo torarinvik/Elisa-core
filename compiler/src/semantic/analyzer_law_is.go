@@ -1053,7 +1053,19 @@ func (a *Analyzer) ensureClauseRefuted(clause ast.Expr, subst map[string]ast.Exp
 		return false
 	}
 	clause = normalizeBoolLiteralEnsure(clause)
-	return a.proveRequiresClause(clause, subst) == requiresRefuted
+	if a.proveRequiresClause(clause, subst) != requiresRefuted {
+		return false
+	}
+	// A refutation is only an ERROR on a reachable exit. The interval tier sees the returned value's
+	// bounds but not the path condition, so on a dead branch (`x: i64 = 5; return 1 if x == 5;
+	// return 2`) it "refutes" a clause no execution can violate and rejects a correct program. When the
+	// path's own facts are contradictory (the solver proves `false` from them), the exit is
+	// unreachable and nothing is refuted. This can only withdraw a hard error, never prove a clause:
+	// the strict ladder below still decides the obligation exactly as for any unrefuted clause.
+	if dead, _ := a.trySMTProveRequires(&ast.BoolLit{Position: clause.Pos(), Value: false}, nil); dead {
+		return false
+	}
+	return true
 }
 
 // reportRefutedEnsure emits the hard error for a postcondition statically proven false on a reachable
