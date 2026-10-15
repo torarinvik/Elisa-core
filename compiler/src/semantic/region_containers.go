@@ -1433,6 +1433,13 @@ func (a *Analyzer) checkNestedRegionBulkStoreEscape(sourceExpr, receiverExpr ast
 	if !typeCarriesRegionStorage(elemType) {
 		return // scalar / pointer-free elements can't dangle.
 	}
+	// docs/128: elements whose declared type is program-lived (darray[sview @source]) do not
+	// live in the source container's region; copying them dangles nowhere.
+	if len(a.programRegions) != 0 {
+		if da, ok := stripRefForBounds(sourceType).(*DArrayType); ok && da.Elem != nil && a.typeIsProgramLivedCached(da.Elem) {
+			return
+		}
+	}
 	valueRegion := containerRegion(sourceType)
 	if valueRegion == "" {
 		return
