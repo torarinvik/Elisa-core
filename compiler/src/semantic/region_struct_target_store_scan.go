@@ -2238,7 +2238,7 @@ func (a *Analyzer) storeScanExtendArgMode(arg ast.Expr, mode storeMode) storeMod
 		return mode
 	}
 	if t, known := a.exprTypes[storeScanUnwrap(arg)]; known && t != nil && !containsTypeParam(t) {
-		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && a.storeScanHoldsNoRegionStorage(da.Elem) {
+		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && (a.storeScanHoldsNoRegionStorage(da.Elem) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(da.Elem))) {
 			return storeNone
 		}
 	}
