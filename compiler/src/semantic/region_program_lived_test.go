@@ -92,3 +92,51 @@ def in_ok() -> void:
 		}
 	}
 }
+
+// `-> T @source` names no parameter: the result is a store into the program-lived region,
+// so a parameter-region view or an auto-region allocation is rejected, and a caller can
+// store the result into any program-lived slot. Element regions (`darray[sview @source]`)
+// follow the same rule.
+func TestProgramLivedRegionReturnsAndElements(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "program_lived_return.elisa", `global region source
+
+struct Box:
+    name: mutable sview @source
+
+def ret_param[@a](s: sview @a) -> sview @source:
+    return s
+
+def ret_local() -> sview @source:
+    can Memory.Allocate:
+        d: mutable dstr = []
+        d.push(65)
+        return d.as_sview()
+
+def ret_good(s: sview @source) -> sview @source:
+    return s
+
+def ret_lit() -> sview @source:
+    return "x"
+
+def use_it(b: mutable Box&) -> void:
+    b.name <- ret_good(ret_lit())
+
+def push_bad[@a](xs: mutable darray[sview @source]&, s: sview @a) -> void:
+    can Memory.Allocate:
+        xs.push(s)
+
+def push_good(xs: mutable darray[sview @source]&, b: Box) -> void:
+    can Memory.Allocate:
+        xs.push(b.name)
+`)
+	errs := result.Errors()
+	want := []string{":7:", ":7:", ":13:", ":26:"}
+	if len(errs) != len(want) {
+		t.Fatalf("expected lines 7, 13, 26 rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+	for i, w := range want {
+		if !strings.Contains(errs[i], w) {
+			t.Fatalf("expected lines 7, 13, 26 rejected, got:\n%s", strings.Join(errs, "\n"))
+		}
+	}
+}

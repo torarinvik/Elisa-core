@@ -852,6 +852,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
 		a.checkGlobalStorageReturnEscape(n.Value)
+		// docs/128: `-> T @source` is a store into the program-lived region.
+		a.checkProgramRegionSlotStore(n.Value, a.currentReturn, valueType)
 		if !a.checkTupleReturnRegionEscapes(n.Value, valueType, a.currentReturn) {
 			a.checkReturnRegionContainerEscape(n.Value, valueType)
 			a.checkRegionAggregateReturnEscape(n.Value, valueType)

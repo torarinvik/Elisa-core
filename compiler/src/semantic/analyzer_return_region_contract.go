@@ -13,6 +13,18 @@ func (a *Analyzer) applyDeclaredReturnRegion(fn *ast.FuncDecl, ft *FuncType) {
 		return
 	}
 	ft.ReturnRegion = fn.ReturnRegion
+	if a.isProgramRegion(fn.ReturnRegion) {
+		// docs/128: `-> T @source` names no parameter; the result lives in the program
+		// arena. Stamp the region onto the type so the return statement is checked as a
+		// store into `source` and callers receive a program-lived value.
+		stamped, carriesRegion, conflicts := stampAggregateRegion(ft.Return, fn.ReturnRegion)
+		if conflicts || !carriesRegion {
+			a.errorf(fn.Pos(), "return region @%s requires a region-carrying return type", fn.ReturnRegion)
+			return
+		}
+		ft.Return = stamped
+		return
+	}
 	if tuple, ok := ft.Return.(*TupleType); ok {
 		stamped, carriesRegion, conflicts := stampAggregateRegion(tuple, fn.ReturnRegion)
 		if conflicts {
