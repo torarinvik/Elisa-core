@@ -2092,16 +2092,19 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		// Sorted name order so the hypothesis text (and the brick-5 cache key) is deterministic — Symbols
 		// is a map, and its iteration order would otherwise vary the query string between identical goals.
-		names := make([]string, 0, len(sc.Symbols))
-		for name := range sc.Symbols {
+		// Filter before sorting: outer (module/global) scopes hold thousands of symbols and no
+		// immutable locals, and sorting all of them on every query was ~9 s of a stage1 build.
+		// The filter is exactly the per-name skip below, so the emitted hypotheses are unchanged.
+		var names []string
+		for name, sym := range sc.Symbols {
+			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+				continue
+			}
 			names = append(names, name)
 		}
 		sort.Strings(names)
 		for _, name := range names {
 			sym := sc.Symbols[name]
-			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
-				continue
-			}
 			seen[name] = true // a closer scope's binding shadows an outer one
 			vd, ok := sym.Node.(*ast.VarDeclStmt)
 			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
