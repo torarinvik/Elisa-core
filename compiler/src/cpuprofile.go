@@ -44,15 +44,24 @@ func startMemProfile() func() {
 }
 
 // defaultGCPercent trades heap headroom for collector time. The analyzer allocates tens of GB of
-// short-lived maps on a large program while its live heap stays near 1 GB; at Go's default 100
-// the collector was ~30% of CPU on the stage1 driver. 400 cut instructions retired by ~11% and
-// user time by ~17% there, raising peak heap from ~2 GB to ~5 GB (owner rule: speed over
-// memory). An explicit GOGC in the environment still wins.
-const defaultGCPercent = 400
+// short-lived maps on a large program while its live heap stays near 1 GB. Measured on the stage1
+// driver (Linux box, 2026-10-15, user CPU / peak RSS): GOGC 100 352 s / 3.6 GB, 400 163 s / 8.0 GB,
+// 800 134 s / 12.4 GB, 1200 126 s / 13.7 GB, 1600 127 s / 18.1 GB. 1200 is the knee (owner rule:
+// speed over memory). An explicit GOGC in the environment still wins.
+const defaultGCPercent = 1200
+
+// defaultMemoryLimitFraction caps the soft heap limit at this share of installed RAM, so the
+// generous GOGC tightens collection instead of swapping on a smaller machine. An explicit
+// GOMEMLIMIT in the environment still wins; with RAM unknown no limit is set.
+const defaultMemoryLimitFraction = 0.6
 
 func applyDefaultGCPercent() {
-	if _, set := os.LookupEnv("GOGC"); set {
-		return
+	if _, set := os.LookupEnv("GOGC"); !set {
+		debug.SetGCPercent(defaultGCPercent)
 	}
-	debug.SetGCPercent(defaultGCPercent)
+	if _, set := os.LookupEnv("GOMEMLIMIT"); !set {
+		if ram := physicalMemoryBytes(); ram > 0 {
+			debug.SetMemoryLimit(int64(float64(ram) * defaultMemoryLimitFraction))
+		}
+	}
 }
