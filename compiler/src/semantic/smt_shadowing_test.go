@@ -87,3 +87,24 @@ def sibling_reuse(x: i64) -> i64:
 		}
 	}
 }
+
+// SOUNDNESS: an ensure clause naming a parameter that a body local shadows at the return point
+// must not be proven (or refuted) against the local. `g(x)` in the clause is g(param x); the
+// return computes g(local x = 7). It was "proven": SMT symbols are keyed by spelling.
+func TestEnsureClauseOverShadowedParamNotProven(t *testing.T) {
+	src := `
+def g(v: i64) -> i64:
+    return v
+
+def shadowed(x: i64) -> i64:
+    ensure result == g(x)
+    if x > 0:
+        x: i64 = 7
+        return g(x)
+    return g(x)
+`
+	result := analyzeContractStrict(t, "shadow_ensure_call.elisa", src)
+	if ensureFailuresFor(result.Errors(), "shadowed") != 1 {
+		t.Fatalf("exactly the shadowed return must stay unproven; got: %v", result.Errors())
+	}
+}

@@ -686,6 +686,15 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		// Refutation gate (always on): a void-exit postcondition over params PROVABLY FALSE here is a
 		// hard error, like the refuted-`requires`/`where` gate. No `result` subst exists at a void exit
 		// (local bindings named `result` retain their ordinary lexical meaning). Only a provably-false verdict escalates.
+		// A clause naming a parameter that a body local shadows here would be resolved against the
+		// local by every tier below (SMT symbols are keyed by spelling): neither prove nor refute it.
+		if a.mentionsShadowedParam(clause) {
+			if a.enforceStrictProofs {
+				diag := a.buildEnsureFailureDiagnostic(clause, nil, "")
+				a.errorf(pos, "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
+			}
+			continue
+		}
 		if a.ensureClauseRefuted(clause, nil) {
 			a.reportRefutedEnsure(pos, clause, nil)
 			continue
@@ -955,6 +964,14 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// returned value is a hard error here, mirroring the refuted-`requires`/`where` gate. Only a
 		// provably-false verdict escalates; merely-unprovable clauses fall through to the strict ladder
 		// below (which lints / -strict-errors). Skip the rest of this clause once it is refuted.
+		// See dischargeEnsureBooleansAtVoidExit: a shadowed parameter makes every tier unsound here.
+		if a.mentionsShadowedParam(clause) {
+			if a.enforceStrictProofs {
+				diag := a.buildEnsureFailureDiagnostic(clause, subst, "")
+				a.errorf(n.Pos(), "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
+			}
+			continue
+		}
 		if a.ensureClauseRefuted(clause, subst) {
 			a.reportRefutedEnsure(n.Pos(), clause, subst)
 			continue
