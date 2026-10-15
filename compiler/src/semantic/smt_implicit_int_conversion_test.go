@@ -64,3 +64,28 @@ func TestImplicitIntConversionIsNotIdentity(t *testing.T) {
 		t.Fatalf("c == 300 also gives d == 44; the ensure must not prove, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// A view's length is non-negative, so `length: usize = view.len` is the identity and a suffix check
+// written over either spelling proves; a struct field merely NAMED len gets no such exemption.
+func TestImplicitViewLengthConversionIsExact(t *testing.T) {
+	src := `def has_suffix(text: sview, suffix: u8) -> bool:
+    ensure result == (text.len > 0 and text[text.len - 1] == suffix)
+    length: usize = text.len
+    return false if length == 0
+    return text[length - 1] == suffix
+`
+	if errs := strictSMTErrors(t, "view_len_conv.elisa", src); len(errs) != 0 {
+		t.Fatalf("a view length converts exactly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fake := `struct Span:
+    len: i64
+
+def h(s: Span) -> usize:
+    ensure result <= 9223372036854775807
+    n: usize = s.len
+    return n
+`
+	if errs := strictSMTErrors(t, "field_len_conv.elisa", fake); !strings.Contains(strings.Join(errs, "\n"), "could not be proven") {
+		t.Fatalf("a negative i64 field named len wraps; the ensure must not prove")
+	}
+}

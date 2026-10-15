@@ -1179,7 +1179,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// proofs can use them as additional hypotheses (for variables the inner loop doesn't mutate).
 		outerBase := len(a.activeOuterLoopInvariants)
 		a.activeOuterLoopInvariants = append(a.activeOuterLoopInvariants, provenInvariants...)
-		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
+		bodySnapshot := a.analyzeLoopBodyKeepingWrites(func() affineFlowSnapshot {
+			return a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
+		})
 		a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerBase]
 		a.loopDepth--
 		a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(n.Body))

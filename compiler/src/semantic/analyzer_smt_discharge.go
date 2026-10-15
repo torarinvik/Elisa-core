@@ -2330,6 +2330,8 @@ type smtTranslator struct {
 	// equation, and an inductive hypothesis about `g(n-1)`, actually CONNECT to the obligation's
 	// `g(n)`/`g(n-1)` terms instead of being unrelated fresh aux symbols.
 	callCanon map[string]string
+	// ghostUFDecls names the uninterpreted functions already declared for ghost-call congruence.
+	ghostUFDecls map[string]bool
 	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
 	// `g(n-1)` must remain distinct; only re-entering the exact same ground instance consumes fuel.
 	callEqInFlight map[string]int
@@ -4603,6 +4605,9 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	ret := tr.freshAux(smtTypeNonNegative(resultType))
 	if canonKey != "" {
 		tr.callCanon[canonKey] = ret
+		if direct && decl != nil {
+			tr.assertGhostCallCongruence(decl, args, argEnv, ret)
+		}
 	}
 	if !direct || decl == nil {
 		return ret, true
@@ -6068,4 +6073,76 @@ func (tr *smtTranslator) rangeBoundHypotheses(name string, r numRange) []string 
 		out = append(out, "(assert (<= "+v+" "+smtInt(r.hi)+"))\n")
 	}
 	return out
+}
+
+// assertGhostCallCongruence ties a ghost call's result symbol to an uninterpreted-function
+// application, so calls whose arguments are EQUAL under the hypotheses (not merely spelled alike)
+// share a value: `suf(text, i, h)` with `i == 0 and h == OFF` is `suf(text, 0, OFF)`. Canonical
+// keys only catch syntactic equality, which is why loop invariants over a ghost fold never proved.
+// A `ghost def` is pure and total, so equal arguments give equal results. Integer and Bool
+// arguments become UF parameters; a view argument is keyed into the function NAME by its array
+// binding (the same symbol is the same view, length included), so two different views never meet
+// as one UF argument. Any other argument shape declines (the fresh symbol stays unconstrained).
+func (tr *smtTranslator) assertGhostCallCongruence(decl *ast.FuncDecl, args []ast.Expr, argEnv map[string]string, ret string) {
+	if tr == nil || tr.a == nil || decl == nil || !decl.IsGhost || len(args) != len(decl.Params) {
+		return
+	}
+	env := tr.canonKeyEnv(decl, argEnv)
+	var name strings.Builder
+	fmt.Fprintf(&name, "%p", decl)
+	sorts := make([]string, 0, len(args))
+	terms := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == nil {
+			return
+		}
+		argType := stripRefForBounds(tr.a.exprTypes[arg])
+		switch {
+		case isStringViewType(argType):
+			key, ok := tr.callCanonArgKeyEnv(arg, env)
+			if !ok {
+				return
+			}
+			name.WriteString("|" + key)
+		case IsBoolType(argType):
+			t, ok := tr.boolTerm(arg, env)
+			if !ok {
+				return
+			}
+			sorts = append(sorts, "Bool")
+			terms = append(terms, t)
+		default:
+			if _, numeric := smtNumericValueType(argType); !numeric {
+				return
+			}
+			t, ok := tr.termEnv(arg, env)
+			if !ok {
+				return
+			}
+			sorts = append(sorts, "Int")
+			terms = append(terms, t)
+		}
+	}
+	fn := "|ghost_uf_" + strconv.FormatUint(fnvString(name.String()), 16) + "_" + strconv.Itoa(len(sorts)) + "|"
+	if tr.ghostUFDecls == nil {
+		tr.ghostUFDecls = map[string]bool{}
+	}
+	if !tr.ghostUFDecls[fn] {
+		tr.ghostUFDecls[fn] = true
+		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+fn+" ("+strings.Join(sorts, " ")+") Int)\n")
+	}
+	app := fn
+	if len(terms) != 0 {
+		app = "(" + fn + " " + strings.Join(terms, " ") + ")"
+	}
+	tr.auxDecls = append(tr.auxDecls, "(assert (= "+ret+" "+app+"))\n")
+}
+
+func fnvString(s string) uint64 {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	return h
 }

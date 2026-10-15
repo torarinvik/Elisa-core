@@ -774,9 +774,13 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	a.pushLoopAffineFrame()
 	a.loopDepth++
 	if stmt.Filter != nil {
-		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.Filter, true)
+		bodySnapshot = a.analyzeLoopBodyKeepingWrites(func() affineFlowSnapshot {
+			return a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.Filter, true)
+		})
 	} else if stmt.WhereFilter != nil {
-		bodySnapshot = a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.WhereFilter, true)
+		bodySnapshot = a.analyzeLoopBodyKeepingWrites(func() affineFlowSnapshot {
+			return a.analyzeBlockWithConditionAffineClone(stmt.Body, loopScope, stmt.WhereFilter, true)
+		})
 	} else {
 		bodySnapshot = a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 	}

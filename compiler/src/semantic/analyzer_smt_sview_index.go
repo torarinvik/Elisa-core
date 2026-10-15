@@ -320,6 +320,18 @@ func (a *Analyzer) implicitIntConversion(value ast.Expr, valueType Type, targetT
 		IntegerTypeFitsValue(targetType, r.lo) && IntegerTypeFitsValue(targetType, r.hi) {
 		return value
 	}
+	// Signed into an unsigned type at least as wide is the identity for every non-negative value, so
+	// a known lower bound >= 0 suffices (`length: usize = view.len`).
+	if ssign && !dsign && dbits >= sbits {
+		if r, ok := a.exprResultRange(value, nil); ok && r.loKnown && r.lo >= 0 {
+			return value
+		}
+		// A view's length is non-negative (the SMT preamble asserts it for every length symbol), so
+		// its conversion into a wide unsigned type preserves the value.
+		if f, ok := stripOptimizationParens(value).(*ast.FieldExpr); ok && f != nil && !f.Safe && f.Field == "len" && isStringViewType(stripRefForBounds(a.exprTypes[f.Object])) {
+			return value
+		}
+	}
 	cast := &ast.CastExpr{Position: value.Pos(), Operand: value}
 	a.exprTypes[cast] = stripRefForBounds(targetType)
 	return cast

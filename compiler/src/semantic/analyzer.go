@@ -624,6 +624,7 @@ type Analyzer struct {
 	// mutates ANY variable the outer invariant depends on, the outer invariant is NOT admitted).
 	activeOuterLoopInvariants         []*ast.ContractStmt
 	implicitIntConvFuncs              map[*ast.FuncDecl]bool
+	rangeFactWriteLogs                [][]rangeFactWrite
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int

@@ -871,6 +871,7 @@ func (a *Analyzer) invalidateRangeFacts(name string) {
 	if name == "" {
 		return
 	}
+	a.logRangeFactWrite(rangeFactWrite{name: name})
 	// Consult each fact's own deps() via the unified predicate (analyzer_fact.go), mirroring assert-fact
 	// invalidation. A range fact's sole dep is its subject variable, so this deletes exactly `name`.
 	rootSet := map[string]bool{name: true}
@@ -892,6 +893,7 @@ func (a *Analyzer) invalidateRangeFactsForFieldPath(path string) {
 	if path == "" {
 		return
 	}
+	a.logRangeFactWrite(rangeFactWrite{name: path, path: true})
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
 		if scope.rangeFacts != nil {
 			delete(scope.rangeFacts, path)
@@ -907,6 +909,7 @@ func (a *Analyzer) invalidateRangeFactsWithRootPrefix(root string) {
 	if root == "" {
 		return
 	}
+	a.logRangeFactWrite(rangeFactWrite{name: root, prefix: true})
 	prefix := root + "."
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
 		if scope.rangeFacts == nil {
@@ -3110,4 +3113,43 @@ func (a *Analyzer) rangeForBranchExpr(expr ast.Expr) (numRange, bool) {
 		return r, true
 	}
 	return numRange{}, false
+}
+
+// rangeFactWrite is one range-fact invalidation recorded while a loop body is analyzed.
+type rangeFactWrite struct {
+	name   string
+	path   bool
+	prefix bool
+}
+
+func (a *Analyzer) logRangeFactWrite(w rangeFactWrite) {
+	if n := len(a.rangeFactWriteLogs); n != 0 {
+		a.rangeFactWriteLogs[n-1] = append(a.rangeFactWriteLogs[n-1], w)
+	}
+}
+
+// analyzeLoopBodyKeepingWrites runs a loop body analysis whose block helper restores the scope
+// chain's range facts on exit (the condition-refined clone), then re-applies every range-fact
+// invalidation the body made. The restore exists to drop the CONDITION's refinements, but it also
+// resurrected entry facts of variables the body writes: `h: mutable u64 = 5; while i < n: h <- h + 1`
+// left `h in [5, 5]` after the loop and proved `ensure result == 5` for a function returning 8.
+// The body may run, so a fact it invalidates is unknown after the loop. Nested loops propagate
+// their writes to the enclosing log.
+func (a *Analyzer) analyzeLoopBodyKeepingWrites(analyze func() affineFlowSnapshot) affineFlowSnapshot {
+	a.rangeFactWriteLogs = append(a.rangeFactWriteLogs, nil)
+	snapshot := analyze()
+	n := len(a.rangeFactWriteLogs)
+	writes := a.rangeFactWriteLogs[n-1]
+	a.rangeFactWriteLogs = a.rangeFactWriteLogs[:n-1]
+	for _, w := range writes {
+		switch {
+		case w.prefix:
+			a.invalidateRangeFactsWithRootPrefix(w.name)
+		case w.path:
+			a.invalidateRangeFactsForFieldPath(w.name)
+		default:
+			a.invalidateRangeFacts(w.name)
+		}
+	}
+	return snapshot
 }
