@@ -292,7 +292,7 @@ def bad(flag: bool) -> void:
 	if !strings.Contains(warns, `call to "func" requires can[Pool]`) {
 		t.Fatalf("expected branch-merged callback warning, got:\n%s", warns)
 	}
-	if !strings.Contains(warns, `can[Pool.Submit, Pool.WaitAll]`) {
+	if !strings.Contains(warns, `can[Pool{Submit,WaitAll}]`) {
 		t.Fatalf("expected branch-merged callback warning to include both permission refs, got:\n%s", warns)
 	}
 }

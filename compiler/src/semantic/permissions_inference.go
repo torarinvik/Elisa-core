@@ -334,7 +334,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		sym, ok := c.analyzer.globalStorageRoot(n)
-		if ok && (!c.mutableGlobalsOnly || (sym.Kind == SymbolGlobal && sym.Mutable)) {
+		_, mutableGlobal := c.analyzer.mutableGlobalStorageRoot(n)
+		if ok && (!c.mutableGlobalsOnly || mutableGlobal) {
 			c.addRefs(globalReadRefs(n.Position))
 			if c.analyzer.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				c.addRefs(unsafeMutableGlobalRefs(n.Position))
@@ -580,8 +581,12 @@ func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead b
 	if expr == nil {
 		return
 	}
-	if sym, ok := c.analyzer.globalStorageRoot(expr); ok && (!c.mutableGlobalsOnly || (sym.Kind == SymbolGlobal && sym.Mutable)) {
+	_, mutableGlobal := c.analyzer.mutableGlobalStorageRoot(expr)
+	if sym, ok := c.analyzer.globalStorageRoot(expr); ok && (!c.mutableGlobalsOnly || mutableGlobal) {
 		c.addRefs(globalWriteRefs(expr.Pos()))
+		if c.analyzer.globalPathLoadsReference(expr) {
+			c.addRefs(globalReadRefs(expr.Pos()))
+		}
 		if alsoRead {
 			c.addRefs(globalReadRefs(expr.Pos()))
 		}

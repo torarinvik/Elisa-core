@@ -799,6 +799,87 @@ def as_unsigned(x: i64) -> bool:
 	}
 }
 
+// Same-width signedness conversions preserve the underlying bits. The signed-to-unsigned and
+// unsigned-to-signed pair therefore round-trips exactly, including negative signed inputs.
+func TestSameWidthSignChangingConversionRoundTripIsIdentity(t *testing.T) {
+	src := `
+def widen(x: i64) -> i64:
+    ensure result == x
+    r: i64 = x.u64().i64()
+    return r
+def shrink(x: u64) -> u64:
+    ensure result == x
+    r: u64 = x.i64().u64()
+    return r
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signchg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if len(r.Errors()) != 0 {
+		t.Fatalf("same-width sign conversion round-trip should preserve the original value, got:\n%s", allDiagnostics(r))
+	}
+	if !proofReportContains(r.ProofReport, "ensure widen", "ensure", ProofProvenSMT) {
+		t.Fatalf("expected the exact bit-preserving round-trip to prove, got: %+v", r.ProofReport)
+	}
+	if !proofReportContains(r.ProofReport, "ensure shrink", "ensure", ProofProvenSMT) {
+		t.Fatalf("expected the reverse bit-preserving round-trip to prove, got: %+v", r.ProofReport)
+	}
+}
+
+func TestSignedToUnsignedConversionDoesNotPreserveNegativeValue(t *testing.T) {
+	src := `
+def widen(x: i64) -> u64:
+    ensure result <= 9223372036854775807
+    return x.u64()
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signed_to_unsigned.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r), "could not be proven") {
+		t.Fatalf("negative i64 values convert to u64 values above i64::MAX, so the postcondition must not be proven; got diagnostics:\n%s\nproof report: %+v", allDiagnostics(r), r.ProofReport)
+	}
+}
+
+// `char` is physically stored as i64, but converting it to u8 uses LLVM truncation. The exact
+// SMT model is unsigned modulo 256: this proves the byte range while preserving wrapping for
+// out-of-range and negative char values.
+func TestSMTModelsCharToU8Truncation(t *testing.T) {
+	src := `
+def byte_value(c: char) -> u8:
+    ensure result >= 0
+    ensure result <= 255
+    return c.u8()
+`
+	r := analyzeContractStrict(t, "char_to_u8_truncation.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("char-to-u8 truncation should prove the u8 range, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestSMTProvesSViewIndexCharToU8Range(t *testing.T) {
+	src := `
+def byte_at(view: sview, index: usize) -> u8:
+    requires index < view.len.usize()
+    ensure result >= 0
+    ensure result <= 255
+    return view[index].u8()
+`
+	r := analyzeContractStrict(t, "sview_index_char_to_u8.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("sview[index].u8() should prove the byte range, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// Soundness control: char is a 64-bit numeric type, not globally an 8-bit type. Narrowing to u8
+// and widening back loses information for values outside 0..255 and must not prove identity.
+func TestSMTDoesNotTreatCharAsGloballyByteSized(t *testing.T) {
+	src := `
+def roundtrip(c: char) -> i64:
+    ensure result == c
+    return c.u8().i64()
+`
+	r := analyzeContractStrict(t, "char_u8_wrapping_control.elisa", src)
+	if !strings.Contains(strings.Join(r.Errors(), "\n"), "could not be proven statically") {
+		t.Fatalf("char-to-u8-to-i64 loses high bits and must not prove identity, got: %v", r.Errors())
+	}
+}
+
 // docs/85 gap #3: a fall-through after an early-return guard establishes the negated condition as a
 // flow fact for the static provers (`if x < 0: return 0` ⟹ `x >= 0` afterwards; `if a == 0: return`
 // ⟹ `a != 0` for unsigned). Combined with local-definition facts (#2) and SMT modulo reasoning, the

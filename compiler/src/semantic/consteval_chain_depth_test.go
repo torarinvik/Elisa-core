@@ -31,3 +31,20 @@ func TestEvalConstExprFoldsVeryLongBinaryChainIteratively(t *testing.T) {
 		t.Fatalf("expected 7, got ok=%v value=%+v", ok, value)
 	}
 }
+
+// Recursive aggregate-field chains can come from compiler-generated expressions as well as
+// source syntax. Unlike the iterative binary fold above, these descend through evalConstExpr
+// and must stop before consuming the Go stack.
+func TestEvalConstExprDeclinesOverdeepAggregateFieldChain(t *testing.T) {
+	var expr ast.Expr = &ast.IntLit{Value: "0"}
+	for i := 0; i < StaticEvalExprDepthLimit*4; i++ {
+		expr = &ast.FieldExpr{Object: expr, Field: "count"}
+	}
+	a := &Analyzer{}
+	if _, ok := a.evalConstExpr(expr); ok {
+		t.Fatal("expected overdeep aggregate-field expression to remain non-constant")
+	}
+	if a.constEvalDepth != 0 {
+		t.Fatalf("constant evaluation depth leaked: %d", a.constEvalDepth)
+	}
+}

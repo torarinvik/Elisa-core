@@ -42,7 +42,7 @@ def chained_realloc_runtime_test() -> void:
                 panic("chained darray tail growth accounting failed")
             if xs[0] != 7 or xs[256] != 256:
                 panic("chained darray data corrupted across in-place growth")
-        arena_free(&arena)
+        (arena_free(&arena) can Global{Read,Write})
 `
 	full := "include \"" + std + "\"\n" + src
 	if err := os.WriteFile(fixturePath, []byte(full), 0o644); err != nil {
@@ -105,7 +105,7 @@ def chained_non_tail_realloc_runtime_test() -> void:
                 panic("non-tail darray backing was reclaimed and reused under a live header copy")
             if xs[0] != 7 or xs[8] != 8 or filler[0] != 11 or reused[0] != 13 or snapshot[0] != 7:
                 panic("non-tail darray growth corrupted live data")
-        arena_free(&arena)
+        (arena_free(&arena) can Global{Read,Write})
 `
 	full := "include \"" + std + "\"\n" + src
 	if err := os.WriteFile(fixturePath, []byte(full), 0o644); err != nil {

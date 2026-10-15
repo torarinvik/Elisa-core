@@ -118,7 +118,68 @@ func (a *Analyzer) recordResolvedGlobalStorage(expr *ast.Ident, sym *Symbol) {
 
 func (a *Analyzer) mutableGlobalStorageRoot(expr ast.Expr) (*Symbol, bool) {
 	sym, ok := a.globalStorageRoot(expr)
-	return sym, ok && sym.Kind == SymbolGlobal && sym.Mutable
+	return sym, ok && sym.Kind == SymbolGlobal && (sym.Mutable || a.globalPathLoadsReference(expr) || a.globalPathHasMutableField(expr))
+}
+
+// globalPathHasMutableField reports whether a global-rooted projection selects a
+// mutable field. Such a field is writable even when the global binding itself is
+// immutable, and mutating collection methods may use that field as their receiver.
+func (a *Analyzer) globalPathHasMutableField(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		field, ok := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
+		return (ok && field.Mutable) || a.globalPathHasMutableField(n.Object)
+	case *ast.IndexExpr:
+		return a.globalPathHasMutableField(n.Object)
+	case *ast.SliceExpr:
+		return a.globalPathHasMutableField(n.Object)
+	case *ast.ParenExpr:
+		return a.globalPathHasMutableField(n.Inner)
+	case *ast.CastExpr:
+		return a.globalPathHasMutableField(n.Operand)
+	default:
+		return false
+	}
+}
+
+func mutableReferenceStorageType(t Type) bool {
+	for {
+		switch n := t.(type) {
+		case *OptionalType:
+			if n == nil {
+				return false
+			}
+			t = n.Value
+		case *RefType:
+			return n != nil && n.Mutable
+		default:
+			return false
+		}
+	}
+}
+
+// globalPathLoadsReference reports whether accessing this global-rooted path loads a reference
+// value from storage. A direct field/index projection into a global aggregate is address
+// formation, but projecting through a reference (including a reference-valued field) loads that
+// reference and reaches mutable state even when the global binding itself is immutable.
+func (a *Analyzer) globalPathLoadsReference(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		sym, ok := a.globalStorageRoot(n)
+		return ok && sym.Kind == SymbolGlobal && !sym.Mutable && mutableReferenceStorageType(sym.Type)
+	case *ast.FieldExpr:
+		return mutableReferenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
+	case *ast.IndexExpr:
+		return mutableReferenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
+	case *ast.SliceExpr:
+		return mutableReferenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
+	case *ast.ParenExpr:
+		return a.globalPathLoadsReference(n.Inner)
+	case *ast.CastExpr:
+		return mutableReferenceStorageType(a.exprTypes[n.Operand]) || a.globalPathLoadsReference(n.Operand)
+	default:
+		return false
+	}
 }
 
 // Calls through mutable references and mutating collection receivers can write

@@ -359,7 +359,7 @@ struct ArenaFreeHint:
 global mutable __elisa_free_hint: ArenaFreeHint = ArenaFreeHint{owner: 0.uintptr(), region: null}
 
 @internal
-def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
+def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&? can[Global.Read, Global.Write]:
     result: mutable heap Region&? = null
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
@@ -391,7 +391,7 @@ def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap
     return result
 
 @internal
-def arena_free_hint_get(owner: uintptr) -> mutable heap Region&?:
+def arena_free_hint_get(owner: uintptr) -> mutable heap Region&? can[Global.Read, Global.Write]:
     result: mutable heap Region&? = null
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
@@ -401,7 +401,7 @@ def arena_free_hint_get(owner: uintptr) -> mutable heap Region&?:
     return result
 
 @internal
-def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?):
+def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
@@ -410,7 +410,7 @@ def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?):
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
-def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?):
+def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
@@ -418,7 +418,7 @@ def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?):
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
-def arena_free_hint_clear(owner: uintptr):
+def arena_free_hint_clear(owner: uintptr) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
@@ -428,7 +428,7 @@ def arena_free_hint_clear(owner: uintptr):
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
-def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: mutable heap Region&?):
+def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
@@ -438,7 +438,7 @@ def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: muta
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
-def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
+def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
         # A reclaimed span stays inside its own arena's region and is released with
@@ -451,7 +451,7 @@ def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
-def arena_region_cache_try_park(r: heap Region&) -> bool:
+def arena_region_cache_try_park(r: heap Region&) -> bool can[Global.Read, Global.Write]:
     can Abort.Panic:
         false return if r.capacity > REGION_CACHE_MAX_SLOTS
         if r.count > r.capacity:
@@ -511,7 +511,7 @@ const RESERVE_CACHE_MAX_USED_SLOTS: usize = 32768
 global mutable __elisa_reserve_region_cache: ArenaRegionCache = ArenaRegionCache{slot: null, reclaimed_spans: 0}
 
 @internal
-def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
+def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&? can[Global.Read, Global.Write]:
     result: mutable heap Region&? = null
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
@@ -543,7 +543,7 @@ def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable hea
     return result
 
 @internal
-def arena_reserve_cache_try_park(r: heap Region&) -> bool:
+def arena_reserve_cache_try_park(r: heap Region&) -> bool can[Global.Read, Global.Write]:
     can Abort.Panic:
         false return if r.capacity <= REGION_CACHE_MAX_SLOTS
         if r.count > r.capacity:
@@ -652,7 +652,7 @@ static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
         trusted Unsafe.PointerCast:
             return arena_region_from_uintptr(raw_addr)
 
-def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&:
+def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         size_bytes: usize = arena_region_total_bytes(capacity)
 
@@ -716,7 +716,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         r.free_list <- null
         return r
 
-def new_region(capacity: usize) -> mutable heap Region&:
+def new_region(capacity: usize) -> mutable heap Region& can[Global.Read, Global.Write]:
     return (new_region_with_owner(capacity, 0.uintptr()) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
 
 # A libc-malloc-backed region block, available on every target (malloc/free are declared for
@@ -748,7 +748,7 @@ def new_region_malloc(capacity: usize) -> mutable heap Region&:
 # other backend it is identical to new_region (mmap demand-pages, or malloc/eager-commit), and
 # the commit-on-demand helper no-ops.
 @internal
-def new_region_reserve(capacity: usize) -> mutable heap Region&:
+def new_region_reserve(capacity: usize) -> mutable heap Region& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             size_bytes: usize = arena_region_total_bytes(capacity)
@@ -820,7 +820,7 @@ def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
 # Strategy-dispatching region allocator: chooses the block source. MALLOC draws blocks from
 # libc malloc; every other strategy (CHAINED/RESERVE_COMMIT/FIXED/SCRATCH) uses the compile-time
 # ARENA_BACKEND (mmap/VirtualAlloc), so it is identical to new_region for those.
-def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
+def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         new_region_malloc(capacity) return if strategy == ARENA_STRATEGY_MALLOC
         # reserve_commit/fixed take a contiguous block that grows in place. On Windows that block
@@ -891,7 +891,7 @@ def arena_find_free_region(start: mutable heap Region&?) -> mutable heap Region&
 
 
 @internal
-def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes: usize) -> mutable heap void&?:
+def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes: usize) -> mutable heap void&? can[Global.Read, Global.Write]:
     hinted: mutable heap Region&? = (arena_free_hint_get(a.cast[uintptr]) can Global{Read,Write})
     return null if hinted == null
 
@@ -968,13 +968,13 @@ def arena_region_contains_address(r: heap Region&, raw: uintptr) -> bool:
 # Compiler-emitted reclaim of a darray buffer the analyzer proved unreferenced (a reassigned local
 # whose old value has no other header copy or view; analyzer_reassign_reclaim.go). size_bytes is
 # the buffer's capacity in bytes. A pointer outside `a` is ignored by arena_reclaim_allocation.
-def arena_reclaim_bytes(a: mutable Arena&, ptr: mutable void&, size_bytes: usize):
+def arena_reclaim_bytes(a: mutable Arena&, ptr: mutable void&, size_bytes: usize) can[Global.Read, Global.Write]:
     can Abort.Panic:
         return if size_bytes == 0
         (arena_reclaim_allocation(a, ptr, arena_size_bytes_to_slots(size_bytes), size_bytes) can Global{Read,Write})
 
 @internal
-def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize):
+def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize) can[Global.Read, Global.Write]:
     can Abort.Panic:
         header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
         return if old_slots < header_slots
@@ -1012,7 +1012,7 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
                             return
             cursor <- cursor.next
 
-def free_region(r: heap Region&):
+def free_region(r: heap Region&) can[Global.Read, Global.Write]:
     can Memory.Release, Abort.Panic:
         static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
             trusted Unsafe.RawExtern:
@@ -1056,7 +1056,7 @@ def free_region_malloc(r: heap Region&):
 
 # Strategy-dispatching region free. MALLOC frees via libc free (matching new_region_backend's
 # MALLOC block source); every other strategy frees via free_region (munmap/VirtualFree).
-def free_region_backend(r: heap Region&, strategy: int):
+def free_region_backend(r: heap Region&, strategy: int) can[Global.Read, Global.Write]:
     can Memory.Release, Abort.Panic:
         if strategy == ARENA_STRATEGY_MALLOC:
             free_region_malloc(r)
@@ -1064,7 +1064,7 @@ def free_region_backend(r: heap Region&, strategy: int):
         trusted Unsafe.RawExtern:
             (free_region(r) can Global{Read,Write})
 
-def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
+def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         size: usize = arena_size_bytes_to_slots(size_bytes)
 
@@ -1215,7 +1215,7 @@ def arena_region_is_tail_allocation(r: heap Region&, ptr: void&, size_bytes: usi
             return false
         return size_bytes == used_bytes - offset_bytes
 
-def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
+def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         if newsz <= oldsz:
             return arena_heap_void_from_mutable(oldptr) can Unsafe.PointerCast
@@ -1364,7 +1364,7 @@ def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
 
     return true
 
-def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
+def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         n: usize = arena_strlen(cstr)
         allocation_bytes: usize = arena_checked_add_usize(n, 1)
@@ -1374,7 +1374,7 @@ def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
             dup[n] <- 0
         return dup
 
-def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&:
+def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void& can[Global.Read, Global.Write]:
     dup: mutable heap void& = (arena_alloc(a, size) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
     _ = arena_memcpy(dup, data, size)
     return dup
@@ -1390,7 +1390,7 @@ def arena_snapshot(a: Arena&) -> ArenaMark:
 
     return ArenaMark{region: a.end, count: a.end.count}
 
-def arena_reset(a: mutable Arena&):
+def arena_reset(a: mutable Arena&) can[Global.Read, Global.Write]:
     r: mutable heap Region&? = a.begin
     trusted Unsafe.AssumeProgress:
         while r != null:
@@ -1412,7 +1412,7 @@ def arena_reset(a: mutable Arena&):
         a.end_index
     )
 
-def arena_rewind(a: mutable Arena&, m: ArenaMark):
+def arena_rewind(a: mutable Arena&, m: ArenaMark) can[Global.Read, Global.Write]:
     if m.region == null:
         (arena_reset(a) can Global{Read,Write})
         return
@@ -1451,7 +1451,7 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
         region_index
     )
 
-def arena_free(a: mutable Arena&):
+def arena_free(a: mutable Arena&) can[Global.Read, Global.Write]:
     can Memory.Release, Abort.Panic:
         r: mutable heap Region&? = a.begin
 
@@ -1484,7 +1484,7 @@ def arena_free(a: mutable Arena&):
                     (free_region_backend(r0, a.strategy) can Global{Read,Write})
 
 
-def arena_trim(a: mutable Arena&):
+def arena_trim(a: mutable Arena&) can[Global.Read, Global.Write]:
     can Memory.Release, Abort.Panic:
         return if a.end == null
 
@@ -1516,7 +1516,7 @@ def arena_trim(a: mutable Arena&):
 # overwrites its data. The child is then emptied, so its own cleanup is a no-op.
 # The semantic layer has already proven the child is consumed and that the two
 # backings are compatible (so the parent's free can reclaim the adopted blocks).
-def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
+def arena_adopt(parent: mutable Arena&, child: mutable Arena&) can[Global.Read, Global.Write]:
     return if child.begin == null
 
     child_free_hint: mutable heap Region&? = (arena_free_hint_get(child.cast[uintptr]) can Global{Read,Write})
@@ -1666,7 +1666,7 @@ def collection_arena_begin_addr(a: Arena&) -> uintptr:
 
 # Record `r` (a collection stack linked into `a`'s chain) in the stack memo.
 @internal
-def collection_stack_memo_put(a: Arena&, r: mutable heap Region&):
+def collection_stack_memo_put(a: Arena&, r: mutable heap Region&) can[Global.Read, Global.Write]:
     key: uintptr = collection_region_table_addr(r)
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
@@ -1682,7 +1682,7 @@ def collection_stack_memo_put(a: Arena&, r: mutable heap Region&):
 
 # The memoised stack whose data base is `key` in arena `a`, or null.
 @internal
-def collection_stack_memo_get(a: Arena&, key: uintptr) -> mutable heap Region&?:
+def collection_stack_memo_get(a: Arena&, key: uintptr) -> mutable heap Region&? can[Global.Read, Global.Write]:
     result: mutable heap Region&? = null
     return result if key == 0.uintptr()
     arena_key: uintptr = collection_arena_addr(a)
@@ -1700,7 +1700,7 @@ def collection_stack_memo_get(a: Arena&, key: uintptr) -> mutable heap Region&?:
 # Drop `r` from the stack memo. Called for every collection-tagged region before it is
 # released, parked or retagged; a no-op when its slot holds another stack.
 @internal
-def collection_stack_memo_forget(r: heap Region&):
+def collection_stack_memo_forget(r: heap Region&) can[Global.Read, Global.Write]:
     key: uintptr = collection_region_table_addr(r)
     region_key: uintptr = collection_region_addr(r)
     slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
@@ -1716,7 +1716,7 @@ def collection_stack_memo_forget(r: heap Region&):
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
-def collection_arena_memo_last_table(a: Arena&) -> uintptr:
+def collection_arena_memo_last_table(a: Arena&) -> uintptr can[Global.Read, Global.Write]:
     result: mutable uintptr = 0.uintptr()
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
@@ -1730,7 +1730,7 @@ def collection_arena_memo_last_table(a: Arena&) -> uintptr:
     return result
 
 @internal
-def collection_arena_memo_no_pooled(a: Arena&) -> bool:
+def collection_arena_memo_no_pooled(a: Arena&) -> bool can[Global.Read, Global.Write]:
     result: mutable bool = false
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
@@ -1745,7 +1745,7 @@ def collection_arena_memo_no_pooled(a: Arena&) -> bool:
 
 # Update `a`'s arena memo: `last_table` when non-zero, and the no-pooled hint.
 @internal
-def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool):
+def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool) can[Global.Read, Global.Write]:
     arena_key: uintptr = collection_arena_addr(a)
     begin_key: uintptr = collection_arena_begin_addr(a)
     return if begin_key == 0.uintptr()
@@ -1763,7 +1763,7 @@ def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool):
 
 # Reset/rewind pool every stack of `a`: the no-pooled hint no longer holds.
 @internal
-def collection_arena_memo_pooled(a: Arena&):
+def collection_arena_memo_pooled(a: Arena&) can[Global.Read, Global.Write]:
     arena_key: uintptr = collection_arena_addr(a)
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
@@ -1781,7 +1781,7 @@ def collection_stack_table(r: heap Region&) -> mutable heap void&:
 # backend allocates it), so a table pointer alone cannot be assumed to sit at a stack's
 # base -- matched, never computed. Walked only on growth.
 @internal
-def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap Region&?:
+def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap Region&? can[Global.Read, Global.Write]:
     target: uintptr = collection_table_addr(table)
     memo: mutable heap Region&? = (collection_stack_memo_get(a, target) can Global{Read,Write})
     if memo is memo_stack and memo_stack.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr():
@@ -1800,7 +1800,7 @@ def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap R
 # materialises its own block through its strategy's path (one slot, once), so the bump
 # cursor is always an ordinary block.
 @internal
-def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&):
+def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&) can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         if a.end == null:
             _ = (arena_alloc(a, size_of(uintptr)) can Global{Read,Write})
@@ -1826,7 +1826,7 @@ def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&):
 # mapping. The result is claimed and committed where that is a separate step; the CALLER
 # zeroes the buckets, because a reused stack still holds the dead table. When the
 # collection had a live stack, it becomes the returned stack's spare.
-def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region&:
+def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         live: mutable heap Region&? = null
         chosen: mutable heap Region&? = null
@@ -1913,7 +1913,7 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
 # Rehash callers invoke this only after the last read of the old table. The stack
 # remains pooled for reuse, but the profiler must see the logical retirement so
 # allocation pressure and retained table capacity are not understated.
-def collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void:
+def collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void can[Global.Read, Global.Write]:
     return if:
         table == null
         elisa_profile_allocation_negotiate(ELISA_PROFILE_ALLOCATION_ABI_V1) != 1.u32()
@@ -1945,7 +1945,7 @@ extern vsnprintf(
     args: va_list
 ) -> i32
 
-def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&:
+def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8& can[Global.Read, Global.Write]:
     can Memory.Allocate, Console.Format, Abort.Panic:
         args_copy: mutable va_list = args
         n: mutable int = -1

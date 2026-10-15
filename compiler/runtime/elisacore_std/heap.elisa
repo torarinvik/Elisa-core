@@ -153,12 +153,12 @@ def fixed_buffer_release(a: mutable FixedBufferAllocator&, ptr: void&, size_byte
 def memory_pool_init[T]() -> MemoryPool[T]:
     return zeroed
 
-def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
+def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T] can[Global.Read, Global.Write]:
     out: mutable MemoryPool[T] = zeroed
     (memory_pool_add_capacity(&out, count) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
     return out
 
-def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
+def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize) can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         item_size: mutable usize = size_of(T)
         item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
@@ -170,7 +170,7 @@ def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
                 node.next <- pool.free_list
                 pool.free_list as & <- node
 
-def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
+def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         if pool.free_list != null:
             node: heap MemoryPoolFreeNode& = pool.free_list
@@ -197,11 +197,11 @@ def memory_pool_destroy[T](pool: mutable MemoryPool[T]&, ptr: mutable heap T&):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-def memory_pool_reset[T](pool: mutable MemoryPool[T]&):
+def memory_pool_reset[T](pool: mutable MemoryPool[T]&) can[Global.Read, Global.Write]:
     (arena_reset(&pool.arena) can Global{Read,Write})
     pool.free_list <- null
 
-def memory_pool_deinit[T](pool: mutable MemoryPool[T]&):
+def memory_pool_deinit[T](pool: mutable MemoryPool[T]&) can[Global.Read, Global.Write]:
     (arena_free(&pool.arena) can Global{Read,Write}) can Memory.Release, Abort.Panic
     pool.arena <- zeroed
     pool.free_list <- null
@@ -224,7 +224,7 @@ def region_pool_new[T](owner: mutable Arena&) -> RegionPool[T]:
     out.owner as & <- owner
     return out
 
-def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
+def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T& can[Global.Read, Global.Write]:
     can Memory.Allocate, Abort.Panic:
         if pool.free_list != null:
             node: heap MemoryPoolFreeNode& = pool.free_list
@@ -253,7 +253,7 @@ def region_pool_free[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-def create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
+def create[T](pool: mutable RegionPool[T]&) -> mutable heap T& can[Global.Read, Global.Write]:
     return (region_pool_create[T](pool) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
 
 def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
@@ -284,7 +284,7 @@ def recycle[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
 affine struct Pooled[T]:
     ptr: mutable heap T&
 
-def region_pool_acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
+def region_pool_acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T] can[Global.Read, Global.Write]:
     return Pooled[T]{ptr: (region_pool_create[T](pool) can Global{Read,Write})} can Memory.Allocate, Abort.Panic
 
 def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
@@ -298,7 +298,7 @@ def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
         node.next <- pool.free_list
         pool.free_list as & <- node
 
-def acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
+def acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T] can[Global.Read, Global.Write]:
     return (region_pool_acquire[T](pool) can Global{Read,Write}) can Memory.Allocate, Abort.Panic
 
 def release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):

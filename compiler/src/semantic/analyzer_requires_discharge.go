@@ -742,6 +742,28 @@ func (a *Analyzer) substitutedAffine(expr ast.Expr, subst map[string]ast.Expr) (
 			return affineForm{}, false
 		}
 		return negateAffine(inner), true
+	case *ast.CastExpr:
+		field, ok := stripOptimizationParens(n.Operand).(*ast.FieldExpr)
+		if !ok || field == nil {
+			return affineForm{}, false
+		}
+		base, ok := field.Object.(*ast.Ident)
+		if !ok || base == nil {
+			return affineForm{}, false
+		}
+		rebased := field
+		if arg, found := subst[base.Name]; found {
+			argIdent, ok := unwrapParen(arg).(*ast.Ident)
+			if !ok || argIdent == nil {
+				return affineForm{}, false
+			}
+			rebased = &ast.FieldExpr{Position: field.Position, Object: argIdent, Field: field.Field}
+		}
+		key, ok := affineSViewLengthCastKey(a, a.currentScope, n, rebased)
+		if !ok {
+			return affineForm{}, false
+		}
+		return affineForm{terms: map[string]int64{key: 1}}, true
 	case *ast.BinaryExpr:
 		l, ok := a.substitutedAffine(n.Left, subst)
 		if !ok {

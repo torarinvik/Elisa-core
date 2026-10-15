@@ -250,6 +250,90 @@ def main() -> i32:
 	}
 }
 
+func TestReadOnlyStoreFlowResolverAcceptsExactQualifiedModuleCall(t *testing.T) {
+	callee := &ast.FuncDecl{
+		Name:   "inspect",
+		Params: []ast.ParamDecl{{Name: "value"}},
+		Body:   []ast.Stmt{},
+	}
+	symbol := &Symbol{Name: "Module.inspect", Node: callee}
+	a := &Analyzer{
+		currentScope:    NewScope(nil),
+		globalScope:     NewScope(nil),
+		funcDeclSymbols: map[*ast.FuncDecl]*Symbol{callee: symbol},
+	}
+	call := &ast.CallExpr{
+		Func: &ast.Ident{Name: "Module.inspect"},
+		Args: []ast.Expr{&ast.Ident{Name: "value"}},
+	}
+	resolved, ok := a.resolveReadOnlyScanCallee(call)
+	if !ok || resolved != callee {
+		t.Fatalf("qualified direct call should resolve to its exact module declaration, got %p, %v", resolved, ok)
+	}
+
+	call.Func = &ast.Ident{Name: "Other.inspect"}
+	if resolved, ok := a.resolveReadOnlyScanCallee(call); ok || resolved != nil {
+		t.Fatalf("same-suffix declaration from another module must stay unresolved, got %p, %v", resolved, ok)
+	}
+}
+
+func TestQualifiedCallArgumentStoreCheckUsesExactStoreFlowSummary(t *testing.T) {
+	src := `module Helpers:
+    def inspect_without_retaining(value: sview, sink: mutable darray[sview]&) -> void:
+        sink.truncate(0)
+        _ = value.len
+
+    def retain(value: sview, sink: mutable darray[sview]&) -> void:
+        sink.push(value)
+
+def caller(inspected: mutable darray[sview]&, retained: mutable darray[sview]&) -> void can[Abort.Panic, Memory.Allocate]:
+    can Abort.Panic, Memory.Allocate:
+        region short(4096):
+            bytes: mutable darray[u8] @short = [65]
+            Helpers::inspect_without_retaining(bytes.as_sview(), inspected)
+            Helpers::retain(bytes.as_sview(), retained)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_qualified_call_argument_store.elisa", src, AnalyzeOptions{})
+	var inspect, retain *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		module, ok := decl.(*ast.NamespaceDecl)
+		if !ok || module == nil || module.Name != "Helpers" {
+			continue
+		}
+		for _, member := range module.Decls {
+			if fn, ok := member.(*ast.FuncDecl); ok {
+				switch fn.Name {
+				case "inspect_without_retaining":
+					inspect = fn
+				case "retain":
+					retain = fn
+				}
+			}
+		}
+	}
+	if inspect == nil || retain == nil {
+		t.Fatalf("qualified helper declarations were not parsed: inspect=%v retain=%v", inspect != nil, retain != nil)
+	}
+	inspectSummary := result.analyzer.storeFlowSummaryFor(inspect)
+	if inspectSummary == nil || !inspectSummary.writtenParam(1) || inspectSummary.reaches(0, 1) {
+		t.Fatalf("read-only qualified helper must write its sink without retaining value: summary=%#v", inspectSummary)
+	}
+	retainSummary := result.analyzer.storeFlowSummaryFor(retain)
+	if retainSummary == nil || !retainSummary.writtenParam(1) || !retainSummary.reaches(0, 1) {
+		t.Fatalf("qualified helper that pushes value must retain it in sink: summary=%#v", retainSummary)
+	}
+	diagnostics := strings.Join(result.Errors(), "\n")
+	if strings.Contains(diagnostics, "inspect_without_retaining") || strings.Contains(diagnostics, "through argument 1") {
+		t.Fatalf("a qualified callee's exact summary must suppress the safe borrow warning, got:\n%s", diagnostics)
+	}
+	if !strings.Contains(diagnostics, "through argument 2") {
+		t.Fatalf("a qualified real store must still report the retained borrow, got:\n%s", diagnostics)
+	}
+}
+
 // A callee that really stores a view argument into the writable container stays rejected, also
 // through a recursive hop.
 func TestStoreFlowSummaryStillRejectsRealStore(t *testing.T) {
@@ -436,6 +520,105 @@ def main() -> i32:
 		if strings.Contains(diagnostic, "call may store a reference to function-local storage") {
 			t.Fatalf("pointer-free inferred type metadata must not retain AST argument storage: %s", diagnostic)
 		}
+	}
+}
+
+func TestStoreFlowSummaryDoesNotFlowIntoPointerFreeDarrayElements(t *testing.T) {
+	src := `struct Expr:
+    text: sview
+struct ValueType:
+    kind: u32
+
+def infer_and_cache(arguments: darray[Expr]&, cached: mutable darray[ValueType]&) -> ValueType:
+    cached.push(ValueType{kind: arguments[0].text.len.u32()})
+    return ValueType{kind: arguments[0].text.len.u32()}
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_pointer_free_darray_push.elisa", src, AnalyzeOptions{})
+	var helper *ast.FuncDecl
+	for _, decl := range result.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "infer_and_cache" {
+			helper = fn
+			break
+		}
+	}
+	if helper == nil {
+		t.Fatal("test helper was not parsed")
+	}
+	summary := result.analyzer.storeFlowSummaryFor(helper)
+	if summary == nil {
+		t.Fatal("pointer-free DArray push should have a settled StoreFlow summary")
+	}
+	if !summary.writtenParam(1) {
+		t.Fatal("test must model mutation of the cached DArray")
+	}
+	if summary.reaches(0, 1) {
+		t.Fatalf("AST argument storage must not flow into pointer-free DArray elements: reach=%v conn=%v written=%v", summary.reach, summary.conn, summary.written)
+	}
+
+	borrowSrc := `struct Expr:
+    text: sview
+struct ValueType:
+    text: sview
+
+def cache_borrowed(arguments: darray[Expr]&, cached: mutable darray[ValueType]&) -> ValueType:
+    cached.push(ValueType{text: arguments[0].text})
+    return ValueType{text: arguments[0].text}
+
+def main() -> i32:
+    return 0
+`
+	borrowResult := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_borrowing_darray_push.elisa", borrowSrc, AnalyzeOptions{})
+	var borrowHelper *ast.FuncDecl
+	for _, decl := range borrowResult.File.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "cache_borrowed" {
+			borrowHelper = fn
+			break
+		}
+	}
+	if borrowHelper == nil {
+		t.Fatal("borrow-bearing test helper was not parsed")
+	}
+	borrowSummary := borrowResult.analyzer.storeFlowSummaryFor(borrowHelper)
+	if borrowSummary == nil || !borrowSummary.reaches(0, 1) {
+		t.Fatalf("view-bearing DArray elements must retain argument flow into the destination, summary=%+v", borrowSummary)
+	}
+}
+
+func TestStoreFlowSummaryDoesNotRetainSViewExtendedIntoByteDarray(t *testing.T) {
+	src := `struct ValueType:
+    text: sview
+
+def copy_text(text: sview, bytes: mutable darray[u8]&) -> void:
+    bytes.extend(text)
+
+def copy_values(source: darray[ValueType]&, target: mutable darray[ValueType]&) -> void:
+    target.extend(source)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_flow_sview_extend.elisa", src, AnalyzeOptions{})
+	findSummary := func(name string) *storeFlowSummary {
+		for _, decl := range result.File.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == name {
+				return result.analyzer.storeFlowSummaryFor(fn)
+			}
+		}
+		return nil
+	}
+	copyText := findSummary("copy_text")
+	if copyText == nil {
+		t.Fatal("sview-to-byte copy helper should have a settled StoreFlow summary")
+	}
+	if copyText.reaches(0, 1) {
+		t.Fatalf("byte extension copies data and must not retain the source sview: reach=%v conn=%v written=%v", copyText.reach, copyText.conn, copyText.written)
+	}
+	copyValues := findSummary("copy_values")
+	if copyValues == nil || !copyValues.reaches(0, 1) {
+		t.Fatalf("extension of borrow-bearing elements must preserve source flow, summary=%+v", copyValues)
 	}
 }
 

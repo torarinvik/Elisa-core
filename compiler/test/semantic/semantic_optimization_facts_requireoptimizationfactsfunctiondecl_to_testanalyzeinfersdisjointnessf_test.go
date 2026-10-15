@@ -454,12 +454,12 @@ def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	suffix: StringView = ctx_string_view_suffix(base, 2)
 	full_prefix: StringView = ctx_string_view_prefix(base, base.len)
 	full_suffix: StringView = ctx_string_view_suffix(base, 0)
-	region scratch(1024)
-	fresh_view_a: StringView = sview(new[scratch] 3, 0, 1)
-	fresh_view_b: StringView = sview(new[scratch] 4, 0, 1)
-	alloc_a: i32& @scratch = new[scratch] 1
-	alloc_b: i32& @scratch = new[scratch] 2
-	alloc_alias: i32& @scratch = alloc_a
+	region scratch(1024):
+		fresh_view_a: StringView = sview(new[scratch] 3, 0, 1)
+		fresh_view_b: StringView = sview(new[scratch] 4, 0, 1)
+		alloc_a: i32& @scratch = new[scratch] 1
+		alloc_b: i32& @scratch = new[scratch] 2
+		alloc_alias: i32& @scratch = alloc_a
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_disjoint_views.elisa", src)

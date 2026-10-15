@@ -144,7 +144,7 @@ def bt() -> void:
             panic("store columns did NOT land on the arena (heap-backed regression)")
         if regions < 1:
             panic("arena has no regions after building store")
-        arena_free(&a)
+        (arena_free(&a) can Global{Read,Write})
 `
 	buildAndRunSoATest(t, "soa_on_arena", src, "bt")
 }
@@ -172,7 +172,7 @@ def bt() -> void:
         used: usize = arena_used_bytes(&a)
         if used < 8192:
             panic("region-poly store columns did NOT land on the caller arena")
-        arena_free(&a)
+        (arena_free(&a) can Global{Read,Write})
 `
 	buildAndRunSoATest(t, "soa_regionpoly", src, "bt")
 }

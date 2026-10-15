@@ -11,6 +11,10 @@ import (
 )
 
 const StaticEvalCallDepthLimit = 64
+
+// StaticEvalExprDepthLimit bounds recursive constant-expression shapes. Deep trees
+// decline to a non-constant result; iterative folds such as long binary chains remain supported.
+const StaticEvalExprDepthLimit = 128
 const staticEvalLoopIterationLimit = 100000
 
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
@@ -120,6 +124,11 @@ func (a *Analyzer) analyzeStaticOnlyStmts(stmts []ast.Stmt) {
 }
 
 func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
+	if a.constEvalDepth >= StaticEvalExprDepthLimit {
+		return ConstValue{}, false
+	}
+	a.constEvalDepth++
+	defer func() { a.constEvalDepth-- }()
 	switch n := expr.(type) {
 	case *ast.IntLit:
 		// constEvalExpectedType lets a declared u64/usize/uintptr const accept a suffixless literal

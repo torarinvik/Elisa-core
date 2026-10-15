@@ -5,6 +5,11 @@ import (
 	"elisacore/src/lexer"
 )
 
+type recursiveCallCertificateKey struct {
+	caller *ast.FuncDecl
+	callee *ast.FuncDecl
+}
+
 type recursiveProofKind string
 
 const (
@@ -183,6 +188,22 @@ func (a *Analyzer) recursiveCallCertificateUnderPath(caller, callee *ast.FuncDec
 	if a == nil || caller == nil || callee == nil || call == nil {
 		return recursiveProofCertificate{}, false
 	}
+	if a.recursiveCallCertificatesInFlight == nil {
+		a.recursiveCallCertificatesInFlight = make(map[recursiveCallCertificateKey]bool)
+	}
+	key := recursiveCallCertificateKey{caller: caller, callee: callee}
+	if a.recursiveCallCertificatesInFlight[key] {
+		return recursiveProofCertificate{
+			Kind:    recursiveProofDirectNumeric,
+			Caller:  caller,
+			Callee:  callee,
+			Call:    call,
+			Outcome: ProofRuntime,
+			Reason:  "recursive termination certificate is already being checked",
+		}, false
+	}
+	a.recursiveCallCertificatesInFlight[key] = true
+	defer delete(a.recursiveCallCertificatesInFlight, key)
 	if caller == callee {
 		measures := decreaseMeasureComponents(caller.Decreases)
 		if len(measures) == 1 && a.isStructuralDecreaseMeasure(caller, measures[0]) {

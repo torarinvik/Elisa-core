@@ -52,7 +52,7 @@ def bt() -> void:
         # caller, leaving the param arena empty (after == 0). A depth-12 tree packs well over 8 KiB.
         if after < 8192:
             panic("store columns did NOT land on the param arena (region-selection regression)")
-        arena_free(&a)
+        (arena_free(&a) can Global{Read,Write})
 `
 	buildAndRunSoATest(t, "region_selection_param_arena", src, "bt")
 }

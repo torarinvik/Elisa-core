@@ -2347,6 +2347,23 @@ type smtTranslator struct {
 	calleeBodyDecl  *ast.FuncDecl
 	// callEqMaxDeclDepth bounds callEqDeclDepth.
 	callEqMaxDeclDepth int
+	// callClauseDepth bounds nested requires/ensures translation. Unlike defining
+	// equations, contract clauses can call functions with distinct argument keys, so
+	// callEqInFlight and callEqDeclDepth do not stop recursive clause expansion.
+	// At the limit the integer and Boolean call translators return an unconstrained
+	// symbol and omit deeper clauses, which only weakens the SMT assumptions.
+	callClauseDepth int
+	// callClauseExpansions caps new direct-call contract expansions for one
+	// obligation. A depth cap alone still permits a broad contract tree to expand
+	// exponentially through distinct argument keys.
+	callClauseExpansions int
+	// callClauseInFlight prevents recursive and mutually-recursive contracts from
+	// expanding their own clauses again at each new argument tuple.
+	callClauseInFlight map[*ast.FuncDecl]bool
+	// callKeyOwnerIndexes cache exact AST ownership and top-level immutable-local
+	// declarations for recursive call-key normalization. The source AST is immutable
+	// during translation, so each owner body only needs one walk per SMT obligation.
+	callKeyOwnerIndexes map[*ast.FuncDecl]*smtCallKeyOwnerIndex
 	// requiresHypMode is set ONLY while emitting an entry `requires` clause as a hypothesis. In that mode
 	// an unsigned upper-bound-by-type-max comparison (`a + b <= 2^W-1`) is read as the ℤ no-overflow
 	// predicate rather than B2's wrapped bvule (which is vacuously true, since `int2bv` reduces the sum
@@ -2369,34 +2386,39 @@ type smtTranslator struct {
 	lengthOnly map[string]bool
 }
 
+const smtCallClauseMaxDepth = 32
+const smtCallClauseMaxExpansions = 4096
+
 // newSMTTranslator builds a translator with all collection maps initialized.
 func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator {
 	if paramConsts == nil {
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:                  a,
-		stringParamInts:    map[smtStringParameterKey]string{},
-		stringLiteralInts:  map[string]int64{},
-		decls:              map[string]bool{},
-		arrayDecls:         map[string]bool{},
-		setDecls:           map[string]string{},
-		dictDecls:          map[string]string{},
-		lenDecls:           map[string]bool{},
-		lenConsts:          map[string]int64{},
-		nonNegDecls:        map[string]bool{},
-		unsignedBits:       map[string]int{},
-		signedBits:         map[string]int{},
-		boolDecls:          map[string]bool{},
-		paramConsts:        paramConsts,
-		ceExprs:            map[string]string{},
-		callCanon:          map[string]string{},
-		callEqInFlight:     map[string]int{},
-		callEqMaxUnroll:    1,
-		callEqDeclDepth:    map[*ast.FuncDecl]int{},
-		callEqMaxDeclDepth: 2,
-		enumDecls:          map[string]string{},
-		enumBindings:       map[string]smtEnumBinding{},
+		a:                   a,
+		stringParamInts:     map[smtStringParameterKey]string{},
+		stringLiteralInts:   map[string]int64{},
+		decls:               map[string]bool{},
+		arrayDecls:          map[string]bool{},
+		setDecls:            map[string]string{},
+		dictDecls:           map[string]string{},
+		lenDecls:            map[string]bool{},
+		lenConsts:           map[string]int64{},
+		nonNegDecls:         map[string]bool{},
+		unsignedBits:        map[string]int{},
+		signedBits:          map[string]int{},
+		boolDecls:           map[string]bool{},
+		paramConsts:         paramConsts,
+		ceExprs:             map[string]string{},
+		callCanon:           map[string]string{},
+		callClauseInFlight:  map[*ast.FuncDecl]bool{},
+		callKeyOwnerIndexes: map[*ast.FuncDecl]*smtCallKeyOwnerIndex{},
+		callEqInFlight:      map[string]int{},
+		callEqMaxUnroll:     1,
+		callEqDeclDepth:     map[*ast.FuncDecl]int{},
+		callEqMaxDeclDepth:  2,
+		enumDecls:           map[string]string{},
+		enumBindings:        map[string]smtEnumBinding{},
 	}
 }
 
@@ -2805,6 +2827,35 @@ func (tr *smtTranslator) term(expr ast.Expr) (string, bool) {
 	return tr.termEnv(expr, nil)
 }
 
+// sameWidthSignRoundTripEnv cancels a pair of postfix integer conversions that preserve
+// the same bits: signed -> unsigned -> signed (or the reverse), with all three types at
+// the same width. The backend lowers each same-width conversion to the original integer
+// value, and the corresponding bit-vector interpretation pair is exactly the identity.
+// Cancelling here avoids asking SMT to rediscover that identity through int2bv/bv2int.
+func (tr *smtTranslator) sameWidthSignRoundTripEnv(outer *ast.CastExpr, env map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || outer == nil || !isPureNumericValueCast(outer) {
+		return "", false
+	}
+	inner, ok := stripOptimizationParens(outer.Operand).(*ast.CastExpr)
+	if !ok || inner == nil || !isPureNumericValueCast(inner) {
+		return "", false
+	}
+	sourceType := tr.a.castOperandResolvedType(inner)
+	sourceSigned, sourceBits, sourceOK := smtIntWidthSign(sourceType)
+	innerSigned, innerBits, innerOK := smtIntWidthSign(tr.a.exprTypes[inner])
+	if !innerOK {
+		innerSigned, innerBits, innerOK = postfixCastTargetWidthSign(inner)
+	}
+	outerSigned, outerBits, outerOK := smtIntWidthSign(tr.a.exprTypes[outer])
+	if !outerOK {
+		outerSigned, outerBits, outerOK = postfixCastTargetWidthSign(outer)
+	}
+	if !sourceOK || !innerOK || !outerOK || sourceBits != innerBits || sourceBits != outerBits || sourceSigned == innerSigned || sourceSigned != outerSigned {
+		return "", false
+	}
+	return tr.termEnv(inner.Operand, env)
+}
+
 func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, bool) {
 	if n, ok := expr.(*ast.MatchExpr); ok {
 		if term, ok := tr.enumMatchTerm(n, env, tr.termEnv); ok {
@@ -3030,12 +3081,16 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "(- " + inner + ")", true
 	case *ast.CastExpr:
+		if term, ok := tr.sameWidthSignRoundTripEnv(n, env); ok {
+			return term, true
+		}
 		// A value-preserving integer conversion — widening or same-width, SAME signedness
 		// (`x.u64()`, `x.usize()`, an i32 used as i64) — is the IDENTITY in the unbounded-Int
 		// model, so the prover sees THROUGH the conversion and refinement bounds survive it
 		// (docs/85 gap #2). A narrowing or a sign change can wrap, so those are NOT identity
 		// and decline here (sound: a declined term only forgoes a proof).
-		ssign, sbits, sok := smtIntWidthSign(tr.a.castOperandResolvedType(n))
+		sourceType := tr.a.castOperandResolvedType(n)
+		ssign, sbits, sok := smtIntWidthSign(sourceType)
 		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
 		if !dok {
 			// The result type is unset for a synthetic/cloned cast node (e.g. the loop-termination
@@ -3044,6 +3099,18 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// information the analyzer would have recorded — so a field-read cast in the measure cancels
 			// against its analyzed twin. Declines for any non-integer / compound target (sound).
 			dsign, dbits, dok = postfixCastTargetWidthSign(n)
+		}
+		// `char` is represented as an i64 value, while string indexing produces a
+		// byte-sized code unit. Its conversion to u8 is LLVM truncation, exactly
+		// unsigned modulo 256 for every possible char value. Model that conversion
+		// explicitly instead of treating char as an 8-bit integer globally: char
+		// has other i64-producing sources and may carry values outside the byte range.
+		if source, ok := stripRefForBounds(sourceType).(*BuiltinType); ok && source != nil && source.Name == "char" && dok && !dsign && dbits == 8 {
+			inner, ok := tr.termEnv(n.Operand, env)
+			if !ok {
+				return "", false
+			}
+			return "(mod " + inner + " 256)", true
 		}
 		if !sok || !dok {
 			return "", false
@@ -4535,6 +4602,25 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if !direct || decl == nil {
 		return ret, true
 	}
+	expandsContract := len(decl.Requires) != 0 || len(decl.EnsureValues) != 0
+	// Keep calls congruent even after contract expansion reaches its resource bound.
+	// The canonical result was cached above, so repeated calls with the same arguments
+	// still share one opaque value while their deeper clauses are omitted soundly.
+	if expandsContract && (tr.callClauseDepth >= smtCallClauseMaxDepth || tr.callClauseExpansions >= smtCallClauseMaxExpansions) {
+		return ret, true
+	}
+	if expandsContract && tr.callClauseInFlight[decl] {
+		return ret, true
+	}
+	if expandsContract {
+		tr.callClauseExpansions++
+		tr.callClauseDepth++
+		tr.callClauseInFlight[decl] = true
+		defer func() {
+			tr.callClauseDepth--
+			delete(tr.callClauseInFlight, decl)
+		}()
+	}
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {
@@ -4777,6 +4863,24 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	if !direct || decl == nil {
 		return ret, true
 	}
+	expandsContract := len(decl.Requires) != 0 || len(decl.EnsureValues) != 0
+	// Preserve deterministic congruence at the bound: calls already have a stable
+	// canonical symbol, but no additional callee clauses are expanded.
+	if expandsContract && (tr.callClauseDepth >= smtCallClauseMaxDepth || tr.callClauseExpansions >= smtCallClauseMaxExpansions) {
+		return ret, true
+	}
+	if expandsContract && tr.callClauseInFlight[decl] {
+		return ret, true
+	}
+	if expandsContract {
+		tr.callClauseExpansions++
+		tr.callClauseDepth++
+		tr.callClauseInFlight[decl] = true
+		defer func() {
+			tr.callClauseDepth--
+			delete(tr.callClauseInFlight, decl)
+		}()
+	}
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {
@@ -4987,9 +5091,180 @@ func (tr *smtTranslator) callCanonArgKey(arg ast.Expr) (string, bool) {
 	return tr.callCanonArgKeyEnv(arg, nil)
 }
 
+type smtCallKeyOwnerIndex struct {
+	identifiers map[*ast.Ident]struct{}
+	locals      map[string][]*ast.VarDeclStmt
+}
+
+func (tr *smtTranslator) callKeyOwnerIndex(owner *ast.FuncDecl) *smtCallKeyOwnerIndex {
+	if tr == nil || tr.a == nil || owner == nil {
+		return nil
+	}
+	if index := tr.callKeyOwnerIndexes[owner]; index != nil {
+		return index
+	}
+	index := &smtCallKeyOwnerIndex{
+		identifiers: map[*ast.Ident]struct{}{},
+		locals:      map[string][]*ast.VarDeclStmt{},
+	}
+	tr.a.walkStaticStmts(owner.Body, func(expr ast.Expr) bool {
+		if id, ok := expr.(*ast.Ident); ok && id != nil {
+			index.identifiers[id] = struct{}{}
+		}
+		return false
+	})
+	for _, stmt := range owner.Body {
+		local, ok := stmt.(*ast.VarDeclStmt)
+		if ok && local != nil && local.Position.Offset > 0 {
+			index.locals[local.Name] = append(index.locals[local.Name], local)
+		}
+	}
+	for _, declarations := range index.locals {
+		sort.Slice(declarations, func(i, j int) bool {
+			return declarations[i].Position.Offset < declarations[j].Position.Offset
+		})
+	}
+	if tr.callKeyOwnerIndexes == nil {
+		tr.callKeyOwnerIndexes = map[*ast.FuncDecl]*smtCallKeyOwnerIndex{}
+	}
+	tr.callKeyOwnerIndexes[owner] = index
+	return index
+}
+
+func (tr *smtTranslator) callKeyTopLevelLocal(id *ast.Ident, owner *ast.FuncDecl) *ast.VarDeclStmt {
+	if tr == nil || tr.a == nil || id == nil || owner == nil || id.Pos().Offset == 0 || tr.a.currentScope == nil {
+		return nil
+	}
+	index := tr.callKeyOwnerIndex(owner)
+	if index == nil {
+		return nil
+	}
+	if _, belongsToOwner := index.identifiers[id]; !belongsToOwner {
+		return nil
+	}
+	declarations := index.locals[id.Name]
+	declarationIndex := sort.Search(len(declarations), func(i int) bool {
+		return declarations[i].Position.Offset >= id.Pos().Offset
+	})
+	if declarationIndex == 0 {
+		return nil
+	}
+	declaration := declarations[declarationIndex-1]
+	if declaration.Mutable || declaration.Value == nil {
+		return nil
+	}
+	sym, ok := tr.a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil || sym.Mutable || sym.Kind != SymbolLocal || sym.Node != declaration {
+		return nil
+	}
+	return declaration
+}
+
+func (tr *smtTranslator) callKeyExprIsPure(expr ast.Expr, owner *ast.FuncDecl, active map[*ast.VarDeclStmt]bool) bool {
+	if expr == nil || tr == nil || tr.a == nil || owner == nil {
+		return false
+	}
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit:
+		return true
+	case *ast.Ident:
+		if tr.a.equationIdentifierIsStable(n, owner) {
+			return true
+		}
+		local := tr.callKeyTopLevelLocal(n, owner)
+		if local == nil || active[local] {
+			return false
+		}
+		active[local] = true
+		pure := tr.callKeyExprIsPure(local.Value, owner, active)
+		delete(active, local)
+		return pure
+	case *ast.ParenExpr:
+		return tr.callKeyExprIsPure(n.Inner, owner, active)
+	case *ast.CastExpr:
+		return tr.callKeyExprIsPure(n.Operand, owner, active)
+	case *ast.IndexExpr:
+		return tr.a.pureEquationSViewIndex(n, owner) && tr.callKeyExprIsPure(n.Index, owner, active)
+	case *ast.UnaryExpr:
+		return n.LoweredCall == nil && n.Op != lexer.TOKEN_AMPERSAND && tr.callKeyExprIsPure(n.Operand, owner, active)
+	case *ast.BinaryExpr:
+		return n.LoweredCall == nil && tr.callKeyExprIsPure(n.Left, owner, active) && tr.callKeyExprIsPure(n.Right, owner, active)
+	case *ast.TernaryExpr:
+		return tr.callKeyExprIsPure(n.Cond, owner, active) && tr.callKeyExprIsPure(n.Value, owner, active) && tr.callKeyExprIsPure(n.Alt, owner, active)
+	default:
+		return false
+	}
+}
+
+func cloneSMTTermEnv(env map[string]string) map[string]string {
+	copy := make(map[string]string, len(env)+4)
+	for name, term := range env {
+		copy[name] = term
+	}
+	return copy
+}
+
+func (tr *smtTranslator) callKeyBindLocal(local *ast.VarDeclStmt, owner *ast.FuncDecl, env map[string]string, active map[*ast.VarDeclStmt]bool) bool {
+	if local == nil || local.Value == nil || active[local] {
+		return false
+	}
+	if _, bound := env[local.Name]; bound {
+		return true
+	}
+	active[local] = true
+	defer delete(active, local)
+	failed := false
+	tr.a.walkStaticExpr(local.Value, func(expr ast.Expr) bool {
+		id, ok := stripOptimizationParens(expr).(*ast.Ident)
+		if !ok || id == nil {
+			return false
+		}
+		nested := tr.callKeyTopLevelLocal(id, owner)
+		if nested != nil && !tr.callKeyBindLocal(nested, owner, env, active) {
+			failed = true
+			return true
+		}
+		return false
+	})
+	if failed || !tr.callKeyExprIsPure(local.Value, owner, map[*ast.VarDeclStmt]bool{local: true}) {
+		return false
+	}
+	var term string
+	var ok bool
+	if IsBoolType(tr.a.exprTypes[local.Value]) {
+		term, ok = tr.boolTerm(local.Value, env)
+	} else if _, isView := stripRefForBounds(tr.a.exprTypes[local.Value]).(*SViewType); isView {
+		term, ok = tr.arrayTermEnv(local.Value, env)
+	} else {
+		term, ok = tr.termEnv(local.Value, env)
+	}
+	if !ok {
+		return false
+	}
+	env[local.Name] = term
+	return true
+}
+
 func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string) (string, bool) {
 	if arg == nil {
 		return "", false
+	}
+	// Immutable views have no scalar SMT term, but call congruence can key them by
+	// their already-authorized byte-array binding. This preserves sharing for
+	// recursive contract calls without asserting any property of the view contents.
+	if _, ok := stripRefForBounds(tr.a.exprTypes[arg]).(*SViewType); ok {
+		return tr.arrayTermEnv(arg, env)
+	}
+	if id, ok := stripOptimizationParens(arg).(*ast.Ident); ok && id != nil && tr.a.currentFuncDecl != nil {
+		if _, bound := env[id.Name]; !bound {
+			local := tr.callKeyTopLevelLocal(id, tr.a.currentFuncDecl)
+			if local != nil {
+				localEnv := cloneSMTTermEnv(env)
+				if tr.callKeyBindLocal(local, tr.a.currentFuncDecl, localEnv, map[*ast.VarDeclStmt]bool{}) {
+					return localEnv[id.Name], true
+				}
+			}
+		}
 	}
 	if IsBoolType(tr.a.exprTypes[arg]) {
 		return tr.boolTerm(arg, env)

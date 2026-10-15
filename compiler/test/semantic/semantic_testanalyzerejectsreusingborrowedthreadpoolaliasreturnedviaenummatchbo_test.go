@@ -141,6 +141,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 			task_group_add(alias_holder.group_ref, move task)
 			trusted Unsafe.PointerCast:
 				wait all holder.group_ref
+	destroy store_owner
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_packed_enum_match_bound_aggregate_projected_callback_ok.elisa", src)
 	requireNoErrors(t, errs)

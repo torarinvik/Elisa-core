@@ -2092,15 +2092,20 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 		if !ok {
 			return affineForm{}, false
 		}
+		if field, ok := stripOptimizationParens(n.Operand).(*ast.FieldExpr); ok {
+			if key, keyOK := affineSViewLengthCastKey(a, scope, n, field); keyOK {
+				return affineForm{terms: map[string]int64{key: 1}}, true
+			}
+		}
 		target := a.resolveType(n.Target)
-		if _, _, isInt := BitIntInfo(target); !isInt {
+		if _, _, isInt := smtIntWidthSign(target); !isInt {
 			return affineForm{}, false
 		}
 		r := a.boundAffine(inner, scope)
 		if !r.loKnown || !r.hiKnown {
 			return affineForm{}, false // unbounded subject: cannot prove the cast is value-preserving
 		}
-		if !IntegerTypeFitsValue(target, r.lo) || !IntegerTypeFitsValue(target, r.hi) {
+		if !affineIntegerRangeFitsType(target, r.lo, r.hi) {
 			return affineForm{}, false // narrowing/wrapping cast: bound would be unsound
 		}
 		return inner, true
@@ -2143,6 +2148,45 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 	default:
 		return affineForm{}, false
 	}
+}
+
+func affineIntegerRangeFitsType(target Type, low, high int64) bool {
+	signed, bits, ok := smtIntWidthSign(target)
+	if !ok || bits <= 0 || bits > 64 || low > high {
+		return false
+	}
+	if signed {
+		if bits == 64 {
+			return true
+		}
+		limit := int64(1) << (bits - 1)
+		return low >= -limit && high < limit
+	}
+	if low < 0 {
+		return false
+	}
+	if bits == 64 {
+		return true // affine bounds are int64, so every nonnegative endpoint fits u64
+	}
+	return uint64(high) < (uint64(1) << bits)
+}
+
+// A cast of an unchanged immutable sview length is a stable affine atom even
+// when its numeric range is not known. Entry and recursive-call casts are equal
+// because the view binding is unchanged; no range or no-wrap assumption is made.
+func affineSViewLengthCastKey(a *Analyzer, scope *Scope, cast *ast.CastExpr, field *ast.FieldExpr) (string, bool) {
+	if a == nil || cast == nil || field == nil {
+		return "", false
+	}
+	projection, ok := immutableSViewLengthProjection(a, scope, field)
+	if !ok {
+		return "", false
+	}
+	target := a.resolveType(cast.Target)
+	if _, _, ok := smtIntWidthSign(target); !ok {
+		return "", false
+	}
+	return "\x00sview-len-cast:" + projection + ":" + target.String(), true
 }
 
 // immutableSViewLengthProjection identifies the stable length of an immutable sview binding.
