@@ -3,6 +3,7 @@ package semantic
 import (
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
@@ -232,6 +233,7 @@ func (a *Analyzer) registerImportAliases(n *ast.ImportDecl, namespace string) {
 			continue
 		}
 		a.importAliases[name] = target
+		a.visibleAliasGen++
 	}
 }
 
@@ -251,6 +253,7 @@ func (a *Analyzer) registerUsingMember(n *ast.UsingDecl, namespace string) {
 		return
 	}
 	a.importAliases[n.Member] = target
+	a.visibleAliasGen++
 }
 
 // registerModuleAlias records `using Foo as F` so the qualifier `F` rewrites to the
@@ -277,6 +280,7 @@ func (a *Analyzer) registerModuleAlias(n *ast.UsingDecl, namespace string) {
 		return
 	}
 	a.moduleAliases[n.Alias] = target
+	a.visibleAliasGen++
 }
 
 // reportUsingAmbiguity errors when a bare name is brought in by two or more
@@ -329,17 +333,68 @@ func (a *Analyzer) withResolutionContext(namespace string, usings []string, fn f
 	a.currentUsings = savedUsings
 }
 
+// visibleCandidateCache memoizes visibleNameCandidates. The candidate list is a pure function of
+// (lexical namespace, currentUsings, importAliases, moduleAliases, name). The first two form the
+// resolution context, checked on every call; the alias maps only grow through the register*
+// functions above, which bump aliasGen. Lists are stored and returned with cap == len, so a
+// caller's append copies instead of writing into the shared array.
+type visibleCandidateCache struct {
+	namespace string
+	usings    []string
+	aliasGen  int
+	byName    map[string][]string
+	// byContext keeps per-context tables across function switches (keyed by namespace, usings
+	// and aliasGen), so returning to an earlier context does not rebuild its lists.
+	byContext map[string]map[string][]string
+}
+
+func (a *Analyzer) visibleCandidateTable(namespace string) map[string][]string {
+	c := &a.visibleCandidates
+	if c.byName != nil && c.namespace == namespace && c.aliasGen == a.visibleAliasGen && slices.Equal(c.usings, a.currentUsings) {
+		return c.byName
+	}
+	if c.byContext == nil {
+		c.byContext = map[string]map[string][]string{}
+	}
+	var key strings.Builder
+	key.WriteString(strconv.Itoa(a.visibleAliasGen))
+	key.WriteByte(0)
+	key.WriteString(namespace)
+	for _, u := range a.currentUsings {
+		key.WriteByte(0)
+		key.WriteString(u)
+	}
+	table := c.byContext[key.String()]
+	if table == nil {
+		table = map[string][]string{}
+		c.byContext[key.String()] = table
+	}
+	c.namespace, c.usings, c.aliasGen, c.byName = namespace, a.currentUsings, a.visibleAliasGen, table
+	return table
+}
+
 func (a *Analyzer) visibleNameCandidates(name string) []string {
 	if name == "" {
 		return nil
 	}
-	candidates := make([]string, 0, len(a.currentUsings)+2)
 	namespace := a.currentNamespace
 	if namespace == "" && a.currentFuncType != nil {
 		if idx := strings.LastIndex(a.currentFuncType.Name, "."); idx >= 0 {
 			namespace = a.currentFuncType.Name[:idx]
 		}
 	}
+	table := a.visibleCandidateTable(namespace)
+	if cached, ok := table[name]; ok {
+		return cached
+	}
+	built := a.buildVisibleNameCandidates(namespace, name)
+	built = built[:len(built):len(built)]
+	table[name] = built
+	return built
+}
+
+func (a *Analyzer) buildVisibleNameCandidates(namespace, name string) []string {
+	candidates := make([]string, 0, len(a.currentUsings)+2)
 	for lexical := namespace; lexical != ""; {
 		candidates = append(candidates, joinQualifiedName(lexical, name))
 		if dot := strings.LastIndex(lexical, "."); dot >= 0 {
