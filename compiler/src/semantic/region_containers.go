@@ -2228,6 +2228,13 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		if !a.containerMayHoldRegionRefs(containerType) {
 			continue
 		}
+		// docs/128: when the CALLEE's parameter declares program-lived elements
+		// (`darray[sview @source]&`), the callee can only push program-lived values into it --
+		// its own stores are checked against that type. (The argument's type is not enough: a
+		// `darray[sview @source]` passed to a plain `darray[sview]&` parameter is not enforced.)
+		if len(a.programRegions) != 0 && a.darrayElemsProgramLived(paramType) {
+			continue
+		}
 		stored := containerElementPointees(containerType)
 		for other, arg := range args {
 			if other == index {
