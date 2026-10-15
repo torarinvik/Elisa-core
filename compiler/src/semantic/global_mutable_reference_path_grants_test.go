@@ -71,6 +71,24 @@ global state: State = State{values: []}
 def update():
     state.values.clear()
 	`, "mutable global write", " can[Global.Read, Global.Write]"},
+		{"immutable_global_mutable_container_call_rejected", `global values: mutable darray[i32] = zeroed
+def update():
+    values.clear()
+	`, "darray clear requires a mutable darray receiver", "*"},
+		{"immutable_global_mutable_container_index_write_rejected", `global values: mutable darray[i32] = zeroed
+def update():
+    values[0] <- 2
+	`, "cannot mutate through readonly ref", "*"},
+		{"immutable_global_container_index_write_rejected", `global values: darray[i32] = zeroed
+def update():
+    values[0] <- 2
+	`, "cannot mutate through readonly ref", "*"},
+		{"immutable_global_mutable_field_index_write", `struct State:
+    values: mutable darray[i32]
+global state: State = State{values: zeroed}
+def update():
+    state.values[0] <- 2
+	`, "mutable global write", " can[Global.Write]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,7 +109,7 @@ def update():
 			if !ok {
 				t.Fatalf("expected update function type, got %T", sym.Type)
 			}
-			if got := PermissionRefsString(fnType.PermissionRefs); got != tt.wantRow {
+			if got := PermissionRefsString(fnType.PermissionRefs); tt.wantRow != "*" && got != tt.wantRow {
 				t.Fatalf("expected inferred row %q, got %q", tt.wantRow, got)
 			}
 		})

@@ -142,7 +142,7 @@ func (a *Analyzer) globalPathHasMutableField(expr ast.Expr) bool {
 	}
 }
 
-func referenceStorageType(t Type) bool {
+func mutableReferenceStorageType(t Type) bool {
 	for {
 		switch n := t.(type) {
 		case *OptionalType:
@@ -151,7 +151,7 @@ func referenceStorageType(t Type) bool {
 			}
 			t = n.Value
 		case *RefType:
-			return n != nil
+			return n != nil && n.Mutable
 		default:
 			return false
 		}
@@ -166,17 +166,17 @@ func (a *Analyzer) globalPathLoadsReference(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		sym, ok := a.globalStorageRoot(n)
-		return ok && sym.Kind == SymbolGlobal && !sym.Mutable && referenceStorageType(sym.Type)
+		return ok && sym.Kind == SymbolGlobal && !sym.Mutable && mutableReferenceStorageType(sym.Type)
 	case *ast.FieldExpr:
-		return referenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
+		return mutableReferenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
 	case *ast.IndexExpr:
-		return referenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
+		return mutableReferenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
 	case *ast.SliceExpr:
-		return referenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
+		return mutableReferenceStorageType(a.exprTypes[n.Object]) || a.globalPathLoadsReference(n.Object)
 	case *ast.ParenExpr:
 		return a.globalPathLoadsReference(n.Inner)
 	case *ast.CastExpr:
-		return referenceStorageType(a.exprTypes[n.Operand]) || a.globalPathLoadsReference(n.Operand)
+		return mutableReferenceStorageType(a.exprTypes[n.Operand]) || a.globalPathLoadsReference(n.Operand)
 	default:
 		return false
 	}

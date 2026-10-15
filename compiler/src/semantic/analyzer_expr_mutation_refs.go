@@ -154,7 +154,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
-		a.requireWritableMutationPath(n.Object)
+		a.requireWritableMutationPath(n)
 		return field.Type
 	case *ast.IndexExpr:
 		if n.Fallback != nil {
@@ -390,16 +390,36 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 		if mut, tracked := a.currentViewMutable[ident.Name]; tracked {
 			return mut
 		}
+		var (
+			sym   *Symbol
+			found bool
+		)
+		if a.currentScope != nil {
+			sym, found = a.currentScope.Lookup(ident.Name)
+		}
+		if !found {
+			sym, _, found = a.lookupVisibleGlobal(ident.Name)
+		}
+		if found && sym.Kind == SymbolGlobal {
+			return sym.Mutable
+		}
+		// Preserve local and parameter place semantics here; their mutability is
+		// constrained by binding/ref checks at assignment and borrow sites.
+		return true
 	}
 	switch n := stripped.(type) {
 	case *ast.FieldExpr:
-		return a.mutationPathWritable(n.Object)
+		if ref, ok := a.exprTypes[n.Object].(*RefType); ok && !a.refExprAllowsMutation(n.Object, ref) {
+			return false
+		}
+		field, found := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
+		return (found && field.Mutable) || a.mutationPathWritable(n.Object)
 	case *ast.IndexExpr:
 		return a.mutationPathWritable(n.Object)
 	case *ast.SliceExpr:
 		return a.mutationPathWritable(n.Object)
 	default:
-		return true
+		return false
 	}
 }
 
@@ -650,7 +670,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
-		a.requireWritableMutationPath(n.Object)
+		a.requireWritableMutationPath(n)
 		return a.refTypeWithAsKind(field.Type, asKind)
 	case *ast.IndexExpr:
 		if n.Fallback != nil {
@@ -666,7 +686,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 			a.errorf(n.Pos(), "cannot take a reference to readonly view index result")
 			return invalidType
 		}
-		a.requireWritableMutationPath(n.Object)
+		a.requireWritableMutationPath(n)
 		return a.refTypeWithAsKind(targetType, asKind)
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
