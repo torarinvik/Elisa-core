@@ -2217,6 +2217,10 @@ type smtTranslator struct {
 	// callClauseInFlight prevents recursive and mutually-recursive contracts from
 	// expanding their own clauses again at each new argument tuple.
 	callClauseInFlight map[*ast.FuncDecl]bool
+	// callKeyOwnerIndexes cache exact AST ownership and top-level immutable-local
+	// declarations for recursive call-key normalization. The source AST is immutable
+	// during translation, so each owner body only needs one walk per SMT obligation.
+	callKeyOwnerIndexes map[*ast.FuncDecl]*smtCallKeyOwnerIndex
 	// requiresHypMode is set ONLY while emitting an entry `requires` clause as a hypothesis. In that mode
 	// an unsigned upper-bound-by-type-max comparison (`a + b <= 2^W-1`) is read as the ℤ no-overflow
 	// predicate rather than B2's wrapped bvule (which is vacuously true, since `int2bv` reduces the sum
@@ -2236,27 +2240,28 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:                  a,
-		stringParamInts:    map[smtStringParameterKey]string{},
-		stringLiteralInts:  map[string]int64{},
-		decls:              map[string]bool{},
-		arrayDecls:         map[string]bool{},
-		setDecls:           map[string]string{},
-		dictDecls:          map[string]string{},
-		lenDecls:           map[string]bool{},
-		lenConsts:          map[string]int64{},
-		nonNegDecls:        map[string]bool{},
-		unsignedBits:       map[string]int{},
-		signedBits:         map[string]int{},
-		boolDecls:          map[string]bool{},
-		paramConsts:        paramConsts,
-		ceExprs:            map[string]string{},
-		callCanon:          map[string]string{},
-		callClauseInFlight: map[*ast.FuncDecl]bool{},
-		callEqInFlight:     map[string]int{},
-		callEqMaxUnroll:    1,
-		callEqDeclDepth:    map[*ast.FuncDecl]int{},
-		callEqMaxDeclDepth: 2,
+		a:                   a,
+		stringParamInts:     map[smtStringParameterKey]string{},
+		stringLiteralInts:   map[string]int64{},
+		decls:               map[string]bool{},
+		arrayDecls:          map[string]bool{},
+		setDecls:            map[string]string{},
+		dictDecls:           map[string]string{},
+		lenDecls:            map[string]bool{},
+		lenConsts:           map[string]int64{},
+		nonNegDecls:         map[string]bool{},
+		unsignedBits:        map[string]int{},
+		signedBits:          map[string]int{},
+		boolDecls:           map[string]bool{},
+		paramConsts:         paramConsts,
+		ceExprs:             map[string]string{},
+		callCanon:           map[string]string{},
+		callClauseInFlight:  map[*ast.FuncDecl]bool{},
+		callKeyOwnerIndexes: map[*ast.FuncDecl]*smtCallKeyOwnerIndex{},
+		callEqInFlight:      map[string]int{},
+		callEqMaxUnroll:     1,
+		callEqDeclDepth:     map[*ast.FuncDecl]int{},
+		callEqMaxDeclDepth:  2,
 	}
 }
 
@@ -4759,29 +4764,66 @@ func (tr *smtTranslator) callCanonArgKey(arg ast.Expr) (string, bool) {
 	return tr.callCanonArgKeyEnv(arg, nil)
 }
 
+type smtCallKeyOwnerIndex struct {
+	identifiers map[*ast.Ident]struct{}
+	locals      map[string][]*ast.VarDeclStmt
+}
+
+func (tr *smtTranslator) callKeyOwnerIndex(owner *ast.FuncDecl) *smtCallKeyOwnerIndex {
+	if tr == nil || tr.a == nil || owner == nil {
+		return nil
+	}
+	if index := tr.callKeyOwnerIndexes[owner]; index != nil {
+		return index
+	}
+	index := &smtCallKeyOwnerIndex{
+		identifiers: map[*ast.Ident]struct{}{},
+		locals:      map[string][]*ast.VarDeclStmt{},
+	}
+	tr.a.walkStaticStmts(owner.Body, func(expr ast.Expr) bool {
+		if id, ok := expr.(*ast.Ident); ok && id != nil {
+			index.identifiers[id] = struct{}{}
+		}
+		return false
+	})
+	for _, stmt := range owner.Body {
+		local, ok := stmt.(*ast.VarDeclStmt)
+		if ok && local != nil && local.Position.Offset > 0 {
+			index.locals[local.Name] = append(index.locals[local.Name], local)
+		}
+	}
+	for _, declarations := range index.locals {
+		sort.Slice(declarations, func(i, j int) bool {
+			return declarations[i].Position.Offset < declarations[j].Position.Offset
+		})
+	}
+	if tr.callKeyOwnerIndexes == nil {
+		tr.callKeyOwnerIndexes = map[*ast.FuncDecl]*smtCallKeyOwnerIndex{}
+	}
+	tr.callKeyOwnerIndexes[owner] = index
+	return index
+}
+
 func (tr *smtTranslator) callKeyTopLevelLocal(id *ast.Ident, owner *ast.FuncDecl) *ast.VarDeclStmt {
 	if tr == nil || tr.a == nil || id == nil || owner == nil || id.Pos().Offset == 0 || tr.a.currentScope == nil {
 		return nil
 	}
-	belongsToOwner := false
-	tr.a.walkStaticStmts(owner.Body, func(expr ast.Expr) bool {
-		if expr == id {
-			belongsToOwner = true
-			return true
-		}
-		return false
-	})
-	if !belongsToOwner {
+	index := tr.callKeyOwnerIndex(owner)
+	if index == nil {
 		return nil
 	}
-	var declaration *ast.VarDeclStmt
-	for _, stmt := range owner.Body {
-		local, ok := stmt.(*ast.VarDeclStmt)
-		if ok && local.Name == id.Name && local.Position.Offset > 0 && local.Position.Offset < id.Pos().Offset {
-			declaration = local
-		}
+	if _, belongsToOwner := index.identifiers[id]; !belongsToOwner {
+		return nil
 	}
-	if declaration == nil || declaration.Mutable || declaration.Value == nil {
+	declarations := index.locals[id.Name]
+	declarationIndex := sort.Search(len(declarations), func(i int) bool {
+		return declarations[i].Position.Offset >= id.Pos().Offset
+	})
+	if declarationIndex == 0 {
+		return nil
+	}
+	declaration := declarations[declarationIndex-1]
+	if declaration.Mutable || declaration.Value == nil {
 		return nil
 	}
 	sym, ok := tr.a.currentScope.Lookup(id.Name)
