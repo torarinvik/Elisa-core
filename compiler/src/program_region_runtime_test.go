@@ -135,3 +135,64 @@ def store_across_test() -> void:
 		t.Fatalf("expected both declared store tests to pass, got:\n%s", stdout.String())
 	}
 }
+
+// docs/128 section 8: a darray typed in a program-lived region grows in the program arena (not
+// the function's or caller's arena, which die first), a list literal of that type allocates
+// there even when a local shadows the region's name, and a packed constructor's darray payload
+// already typed in the declared store region is not copied again on construction.
+func TestEmitLLVMProgramRegionDArrays(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "program_region_darrays.elisa")
+	src := `global region source
+
+enum Node layout(handle: u32) @source:
+    pass
+
+enum Expr is Node:
+    Name(name: sview @source)
+    Call(args: darray[Expr] @source)
+
+def names() -> darray[sview @source] @source:
+    can Memory.Allocate:
+        found: mutable darray[sview @source] @source = []
+        found.push("a")
+        found.push("b")
+        return found
+
+def literal(source: i64) -> darray[sview @source] @source:
+    can Memory.Allocate:
+        xs: darray[sview @source] @source = ["x", "y"]
+        return xs
+
+def call_of() -> Expr:
+    can Memory.Allocate:
+        args: mutable darray[Expr] @source = []
+        args.push((Expr.Name("q")))
+        return (Expr.Call(args))
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", "-strict", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected the program region darray fixture to compile, stderr:\n%s", stderr.String())
+	}
+	functions := map[string]string{}
+	for _, chunk := range strings.Split(stdout.String(), "\ndefine ")[1:] {
+		at := strings.Index(chunk, "@")
+		paren := strings.Index(chunk, "(")
+		if at >= 0 && paren > at {
+			functions[chunk[at+1:paren]] = chunk
+		}
+	}
+	const programArena = "@__elisa_program_region.source"
+	if body := functions["names"]; !strings.Contains(body, "@arena_realloc(ptr "+programArena) {
+		t.Fatalf("expected @source darray growth in the program arena, got:\n%s", body)
+	}
+	if body := functions["literal"]; !strings.Contains(body, "@arena_alloc(ptr "+programArena) {
+		t.Fatalf("expected the @source list literal in the program arena, got:\n%s", body)
+	}
+	if body := functions["call_of"]; body == "" || strings.Contains(body, "packed.payload.adopt") {
+		t.Fatalf("expected no adoption copy of a payload already in the store region, got:\n%s", body)
+	}
+}

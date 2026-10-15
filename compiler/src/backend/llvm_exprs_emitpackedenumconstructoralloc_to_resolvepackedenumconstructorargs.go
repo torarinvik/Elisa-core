@@ -338,12 +338,15 @@ func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.
 	if tailPlan != nil && index == tailPlan.index {
 		return s.emitPackedEnumTailPayloadValue(tailPlan, tailDataPtr)
 	}
-	argValue, _, err := s.emitExpr(arg, variant.Payload[index])
+	argValue, argType, err := s.emitExpr(arg, variant.Payload[index])
 	if err != nil {
 		return nil, err
 	}
 	if nicheEnumType, ok := s.g.optionalEnumNicheField(variant.Payload[index]); ok {
 		return s.packOptionalEnumNicheValue(argValue, nicheEnumType, "packed.enum.payload")
+	}
+	if programStoreHoldsPayload(enumType, argType) {
+		return argValue, nil // docs/128 §8: already in the store's program arena; nothing to adopt
 	}
 	return s.emitPackedEnumPayloadDArrayAdopt(argValue, variant.Payload[index], storeValue, enumType)
 }

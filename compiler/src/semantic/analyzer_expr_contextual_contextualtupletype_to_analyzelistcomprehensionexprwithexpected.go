@@ -606,7 +606,9 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 			a.errorf(expr.Owner.Pos(), "list literal allocation owner requires an expected darray type")
 		}
 	}
-	if expr.Owner == nil && len(expr.Elems) > 0 && useExpectedDArray && expectedDArray.Region != "" && !a.lookupRegionParam(expectedDArray.Region) {
+	// A program-lived region (docs/128) is not named through an owner expression: a local of
+	// the same name could shadow it. The backend resolves the darray type's region instead.
+	if expr.Owner == nil && len(expr.Elems) > 0 && useExpectedDArray && expectedDArray.Region != "" && !a.lookupRegionParam(expectedDArray.Region) && !a.isProgramRegion(expectedDArray.Region) {
 		expr.Owner = &ast.Ident{Position: expr.Position, Name: expectedDArray.Region}
 	}
 	// A region-less expected darray (e.g. a global's declared type) under the perm

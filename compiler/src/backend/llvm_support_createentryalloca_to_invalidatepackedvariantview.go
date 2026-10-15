@@ -323,6 +323,10 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 			}
 		}
 	}
+	// docs/128: a program-lived region's containers grow in its program arena.
+	if binding, ok, err := s.programRegionArena(region); ok && err == nil {
+		return treeAllocOwnerBinding{arenaRef: binding.ptr}, true
+	}
 	return treeAllocOwnerBinding{}, false
 }
 

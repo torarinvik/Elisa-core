@@ -121,3 +121,40 @@ func (s *functionState) programRegionArena(name string) (valueBinding, bool, err
 	s.g.globals[key] = value
 	return valueBinding{ptr: value, typ: arenaType}, true, nil
 }
+
+// programStoreHoldsPayload: a darray payload whose backing (and every nested container
+// backing) is already typed in the declared program-lived store region needs no adoption copy
+// -- the program arena is the store's arena and is never freed (docs/128 §8).
+func programStoreHoldsPayload(enumType *semantic.EnumType, argType semantic.Type) bool {
+	if enumType == nil {
+		return false
+	}
+	region := enumType.DeclaredStoreRegion()
+	darrayType, ok := argType.(*semantic.DArrayType)
+	if region == "" || !ok || darrayType == nil || darrayType.Region != region {
+		return false
+	}
+	return nestedContainersInRegion(darrayType.Elem, region, map[semantic.Type]bool{})
+}
+
+func nestedContainersInRegion(t semantic.Type, region string, seen map[semantic.Type]bool) bool {
+	if t == nil || seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *semantic.DArrayType:
+		return tt.Region == region && nestedContainersInRegion(tt.Elem, region, seen)
+	case *semantic.DictType, *semantic.SetType:
+		return false
+	case *semantic.StructType:
+		for _, field := range tt.Fields {
+			if !nestedContainersInRegion(field.Type, region, seen) {
+				return false
+			}
+		}
+	case *semantic.OptionalType:
+		return nestedContainersInRegion(tt.Value, region, seen)
+	}
+	return true
+}
