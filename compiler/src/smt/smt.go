@@ -95,6 +95,24 @@ type procSolver struct {
 	rlimitLast int64
 	// resourceLimit is the session `:rlimit` (0 = none); CheckBudget restores it.
 	resourceLimit int64
+	// label is appended (tab-separated) to rlimit log lines; calibration attribution only.
+	label string
+}
+
+// LogsRlimit reports whether ELISA_SMT_RLIMIT_LOG calibration logging is active, so callers
+// build attribution labels only when they will be written.
+func (s *procSolver) LogsRlimit() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rlimitLog != nil
+}
+
+// SetLogLabel sets the attribution label for subsequent rlimit log lines (tabs and newlines
+// are replaced by spaces). It never affects any verdict.
+func (s *procSolver) SetLogLabel(label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.label = strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(label)
 }
 
 // Options configures a solver subprocess.
@@ -287,7 +305,11 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 		} else if res == Unsat {
 			verdict = "unsat"
 		}
-		fmt.Fprintf(s.rlimitLog, "%d %d %s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict)
+		if s.label != "" {
+			fmt.Fprintf(s.rlimitLog, "%d %d %s\t%s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict, s.label)
+		} else {
+			fmt.Fprintf(s.rlimitLog, "%d %d %s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict)
+		}
 	}
 	values := map[string]string{}
 	if res == Sat && len(vars) > 0 {
