@@ -122,6 +122,12 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	if decl == nil || other < 0 || index < 0 || other >= len(decl.Params) || index >= len(decl.Params) || len(decl.Body) == 0 {
 		return storeHeader
 	}
+	// docs/128: everything reachable from a program-lived parameter (an AST node, a
+	// `darray[sview @source] @source` row) is program-lived: storing it anywhere keeps no
+	// shorter-lived storage alive.
+	if a.declParamIsProgramLived(decl, other) {
+		return storeNone
+	}
 	key := storeScanKey{decl, other, index}
 	// seen is the DFS STACK, not a visited set: a key finished on another path (left uncached
 	// because its own subtree met a cycle) is no cycle of a later query and must be rescanned,
@@ -1327,6 +1333,9 @@ func (a *Analyzer) storeScanTaintBinders(idx *storeScanDeclIndex, n ast.Stmt, he
 func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[storeScanKey]bool) storeMode {
 	if decl == nil || other < 0 || other >= len(decl.Params) || len(decl.Body) == 0 {
 		return storeHeader
+	}
+	if a.declParamIsProgramLived(decl, other) {
+		return storeNone // docs/128: a program-lived parameter's parts are program-lived
 	}
 	key := storeScanKey{decl, other, -1}
 	if mode, ok := a.storeScanCache[key]; ok {
