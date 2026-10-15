@@ -115,3 +115,20 @@ func TestSMTRelevantSubstIgnoresUnreferencedUnsupportedFormal(t *testing.T) {
 		t.Fatal("unreferenced formal must not be added to the SMT environment")
 	}
 }
+
+func TestSMTRequiresRetypingDoesNotUseShadowingCallerLocal(t *testing.T) {
+	src := `def wrapped_increment(value: u8) -> u8:
+    requires value + 1.u8() > value
+    return value + 1.u8()
+
+def caller(value: i32, byte: u8) -> u8:
+    return wrapped_increment(byte)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "requires_shadow.elisa", src, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "precondition of \"wrapped_increment\"") {
+		t.Fatalf("callee's u8 wrapping precondition was proved using the caller's shadowing i32 local: %s", strings.Join(result.Errors(), "\n"))
+	}
+}
