@@ -88,6 +88,7 @@ const (
 )
 
 type Analyzer struct {
+	programRegions                       map[string]bool
 	trustedRuntimeSourceFiles            map[string]bool
 	headerFunctionNames                  headerFunctionNameIndex
 	headerStabilityCompleted             map[*ast.FuncDecl]bool
@@ -1256,6 +1257,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.registerBuiltins()
 	a.populateTargetConstValues(options.TargetTriple, options.TargetDebug)
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)
+	a.collectProgramRegions(activeDecls)
 	a.collectConstValues(activeDecls)
 	a.validateModuleExtensions(activeFile.Decls)
 	a.collectPermissionDecls(activeDecls)

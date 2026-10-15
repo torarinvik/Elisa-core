@@ -378,6 +378,9 @@ func (a *Analyzer) regionQualifierDefined(name string) bool {
 	if name == "" {
 		return false
 	}
+	if a.isProgramRegion(name) {
+		return true
+	}
 	if a.currentScope != nil {
 		if sym, ok := a.currentScope.Lookup(name); ok {
 			if sym.Kind == SymbolRegion {

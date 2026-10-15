@@ -491,6 +491,8 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		}
 		_, err := g.ensureFunctionDeclared(sym.Name, fn)
 		return err
+	case *ast.GlobalRegionDecl:
+		return nil // docs/128: a type-level region; no storage of its own
 	case *ast.GlobalDecl, *ast.ExternVarDecl:
 		sym, ok := g.symbolsByNode[decl]
 		if !ok || sym.Type == nil {
@@ -696,6 +698,8 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		return g.defineFunctionBody(n, fn, fnValue)
 	case *ast.ExternFuncDecl:
 		return nil
+	case *ast.GlobalRegionDecl:
+		return nil // docs/128: a type-level region; no storage of its own
 	case *ast.GlobalDecl, *ast.ExternVarDecl:
 		sym, ok := g.symbolsByNode[decl]
 		if !ok {

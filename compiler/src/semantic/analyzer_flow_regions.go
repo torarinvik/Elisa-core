@@ -310,6 +310,7 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	// name), so a region that reopens the name of a region still open around it would
 	// be indistinguishable from it: a value of the inner region stored into a local of
 	// the outer one compared as the same region and was accepted, then read freed memory.
+	a.checkProgramRegionShadow(stmt.Name, stmt)
 	for _, open := range a.regionLiveStack {
 		if open == stmt.Name {
 			a.errorf(stmt.Pos(), "region %q shadows an enclosing region of the same name; values of the two cannot be told apart, so rename the inner region", stmt.Name)

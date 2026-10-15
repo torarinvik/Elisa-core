@@ -680,6 +680,16 @@ func (p *Parser) parseConstEnumMemberDecl() ast.ConstEnumMemberDecl {
 	p.expectNewlineAfterValueExpr(value)
 	return ast.ConstEnumMemberDecl{Position: pos, Name: name, Value: value}
 }
+// parseGlobalRegionDecl parses `global region NAME` (docs/128).
+func (p *Parser) parseGlobalRegionDecl() *ast.GlobalRegionDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_GLOBAL)
+	p.advance() // the contextual `region`
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.GlobalRegionDecl{Position: pos, Name: name}
+}
+
 func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_GLOBAL)

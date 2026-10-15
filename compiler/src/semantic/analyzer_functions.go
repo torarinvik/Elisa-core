@@ -37,6 +37,11 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	if fn != nil && !a.suppressDiagnostics && a.convergeDepth == 0 && !a.ambientFillAnalyzed[fn] && a.summaryAnalyzable(fn) && a.summaryRelevant(fn) && a.funcIsCyclic(fn) {
 		a.convergeSummaries(fn)
 	}
+	if fn != nil {
+		for _, regionParam := range fn.RegionParams {
+			a.checkProgramRegionShadow(regionParam, fn)
+		}
+	}
 	a.analyzeFuncWithTypeArgs(fn, nil)
 }
 

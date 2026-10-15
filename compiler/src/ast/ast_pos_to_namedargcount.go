@@ -6,6 +6,7 @@ func (n *GrammarReturnTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
+func (n *GlobalRegionDecl) Pos() lexer.Pos { return n.Position }
 func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
 func (n *StoreDecl) Pos() lexer.Pos      { return n.Position }
 func (n *FuncDecl) Pos() lexer.Pos       { return n.Position }
@@ -244,6 +245,7 @@ func (*GrammarBindTerm) nodeTag()                      {}
 func (*GrammarAssignTerm) nodeTag()                    {}
 func (*GrammarReturnTerm) nodeTag()                    {}
 func (*GlobalDecl) nodeTag()                           {}
+func (*GlobalRegionDecl) nodeTag()                     {}
 func (*StructDecl) nodeTag()                           {}
 func (*StoreDecl) nodeTag()                            {}
 func (*FuncDecl) nodeTag()                             {}
@@ -410,6 +412,7 @@ func (*GrammarDecl) declTag()                          {}
 func (*GrammarEnvDecl) declTag()                       {}
 func (*LexerDecl) declTag()                            {}
 func (*GlobalDecl) declTag()                           {}
+func (*GlobalRegionDecl) declTag()                     {}
 func (*StructDecl) declTag()                           {}
 func (*StoreDecl) declTag()                            {}
 func (*FuncDecl) declTag()                             {}

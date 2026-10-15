@@ -517,6 +517,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		}
 		return p.parseEnumDecl()
 	case lexer.TOKEN_GLOBAL:
+		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "region" && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT {
+			return p.parseGlobalRegionDecl()
+		}
 		return p.parseGlobalDecl()
 	case lexer.TOKEN_REPR:
 		return p.parseStructDecl()

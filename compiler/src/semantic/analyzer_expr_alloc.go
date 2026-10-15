@@ -84,6 +84,14 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	// declared `owned <store>` / a moved-in owned region (registered in
 	// currentRegions, see registerOwnedStoreOwner / markReceivedOwnedRegion).
 	sym, ok := a.currentScope.Lookup(ident.Name)
+	if ok && sym.Kind == SymbolRegion {
+		if _, program := sym.Node.(*ast.GlobalRegionDecl); program {
+			// docs/128 §5: the program arena is not lowered yet; reject rather than miscompile.
+			a.errorf(expr.Pos(), "new[%s]: allocation in a program-lived region is not supported yet", ident.Name)
+			a.analyzeExpr(expr.Value)
+			return invalidType
+		}
+	}
 	if !ok || (sym.Kind != SymbolRegion && !a.symbolIsRegionOwner(sym)) {
 		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType)
 		a.analyzeExpr(expr.Value)

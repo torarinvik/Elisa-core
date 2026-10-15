@@ -615,6 +615,12 @@ type EnumPayloadDecl struct {
 	Name     string
 	Type     TypeExpr
 }
+// GlobalRegionDecl is `global region NAME` (docs/128): a program-lived named region.
+type GlobalRegionDecl struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type GlobalDecl struct {
 	Position lexer.Pos
 	Mutable  bool

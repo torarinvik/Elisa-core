@@ -89,6 +89,7 @@ var schemaRootTypes = []reflect.Type{
 	reflect.TypeOf(ast.GenericValueArgTypeExpr{}),
 	reflect.TypeOf(ast.GetExpr{}),
 	reflect.TypeOf(ast.GlobalDecl{}),
+	reflect.TypeOf(ast.GlobalRegionDecl{}),
 	reflect.TypeOf(ast.GrammarAliasDecl{}),
 	reflect.TypeOf(ast.GrammarApplyArg{}),
 	reflect.TypeOf(ast.GrammarApplyTerm{}),

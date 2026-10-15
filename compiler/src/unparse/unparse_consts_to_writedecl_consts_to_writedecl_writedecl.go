@@ -148,6 +148,8 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			parts = append(parts, formatPermissionRef(ref))
 		}
 		f.writeLine(level, "alias "+n.Name+" = "+strings.Join(parts, ", "))
+	case *ast.GlobalRegionDecl:
+		f.writeLine(level, "global region "+n.Name)
 	case *ast.GlobalDecl:
 		line := "global "
 		if n.Mutable {

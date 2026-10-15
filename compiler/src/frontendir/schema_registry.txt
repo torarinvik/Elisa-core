@@ -1792,3 +1792,7 @@ T 280 StateTransitionDecl
 F StateTransitionDecl 1 From
 F StateTransitionDecl 2 Position
 F StateTransitionDecl 3 To
+
+T 281 GlobalRegionDecl
+F GlobalRegionDecl 1 Name
+F GlobalRegionDecl 2 Position

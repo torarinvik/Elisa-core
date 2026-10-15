@@ -915,6 +915,14 @@ func (a *Analyzer) regionOutlives(outer, inner string) bool {
 	if outer == inner {
 		return false
 	}
+	// docs/128 rules 1-3: a program-lived region outlives every region; only a
+	// program-lived region outlives one.
+	if a.isProgramRegion(outer) {
+		return true
+	}
+	if a.isProgramRegion(inner) {
+		return false
+	}
 	// A caller-owned region param outlives every local region: it is a true
 	// (implicit) ancestor of any region declared inside the function body.
 	if a.lookupRegionParam(outer) {
@@ -970,6 +978,14 @@ func (a *Analyzer) regionIsAncestor(outer, inner string) bool {
 func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 	if a == nil || targetRegion == "" || valueRegion == "" || targetRegion == valueRegion {
 		return false
+	}
+	// docs/128: a program-lived value outlives every target; a program-lived target
+	// accepts only program-lived values.
+	if a.isProgramRegion(valueRegion) {
+		return false
+	}
+	if a.isProgramRegion(targetRegion) {
+		return true
 	}
 	_, targetTracked := a.regionLifetimeOrdinal(targetRegion)
 	_, valueTracked := a.regionLifetimeOrdinal(valueRegion)

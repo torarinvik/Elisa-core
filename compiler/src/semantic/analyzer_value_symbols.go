@@ -55,6 +55,8 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: invalidType, Node: n, Mutable: false, Private: scoped.Private}, n.Pos())
 			case *ast.ConstEnumDecl:
+			case *ast.GlobalRegionDecl:
+				a.defineProgramRegion(n)
 			case *ast.GlobalDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)

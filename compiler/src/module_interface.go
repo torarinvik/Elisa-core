@@ -103,6 +103,8 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			}
 		}
 		return &ast.ImplDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), InterfaceName: n.InterfaceName, GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), ForType: n.ForType, Members: members}
+	case *ast.GlobalRegionDecl:
+		return &ast.GlobalRegionDecl{Position: n.Position, Name: n.Name}
 	case *ast.GlobalDecl:
 		return &ast.ExternVarDecl{Position: n.Position, Name: n.Name, Type: n.Type}
 	case *ast.NamespaceDecl:
