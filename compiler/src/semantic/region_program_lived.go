@@ -71,3 +71,43 @@ func (a *Analyzer) analyzeRegionOwnerExpr(expr ast.Expr) Type {
 	a.programRegionNameUse--
 	return t
 }
+
+// checkDeclaredStoreRegions validates `enum Root layout(...) @R:` (docs/128 §8): R must be a
+// program-lived region, the enum a store-backed root.
+func (a *Analyzer) checkDeclaredStoreRegions(decls []scopedDecl) {
+	for _, scoped := range decls {
+		n, ok := scoped.Decl.(*ast.EnumDecl)
+		if !ok || n.StoreRegion == "" {
+			continue
+		}
+		if n.Parent != "" {
+			a.errorf(n.Pos(), "enum %q: a store region is declared on the hierarchy root only; refinements inherit it", n.Name)
+			continue
+		}
+		if !a.isProgramRegion(n.StoreRegion) {
+			a.errorf(n.Pos(), "enum %q: store region %q must be a program-lived region (`global region %s`)", n.Name, n.StoreRegion, n.StoreRegion)
+			continue
+		}
+		if !n.Packed {
+			a.errorf(n.Pos(), "enum %q: a store region applies only to a store-backed enum (recursive, or a hierarchy root)", n.Name)
+		}
+	}
+}
+
+// checkDeclaredStorePayload: a node of a declared program-lived store (docs/128 §8) lives
+// until exit, so every region-carrying payload is a store into that region, annotated or
+// not. Without this a view of a caller's region would sit in a node that outlives it.
+func (a *Analyzer) checkDeclaredStorePayload(enumType *EnumType, arg ast.Expr, payload, actual Type) {
+	if enumType == nil || arg == nil {
+		return
+	}
+	region := enumType.DeclaredStoreRegion()
+	if region == "" {
+		return
+	}
+	stamped, carries, conflicts := stampAggregateRegion(payload, region)
+	if !carries || conflicts {
+		return // no region-carrying slot of its own, or already typed with a region (checked by rule 3)
+	}
+	a.checkProgramRegionSlotStore(arg, stamped, actual)
+}

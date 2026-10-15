@@ -382,6 +382,16 @@ type EnumType struct {
 
 // Root returns the topmost ancestor of a sealed hierarchy (docs/77) — the enum that owns the unified
 // representation and tag space. For a plain enum it returns the enum itself.
+// DeclaredStoreRegion is the program-lived region the root declares for its node store
+// (docs/128 §8), or "" when the store region is inferred at each construction site.
+func (e *EnumType) DeclaredStoreRegion() string {
+	root := e.Root()
+	if root == nil || root.Decl == nil {
+		return ""
+	}
+	return root.Decl.StoreRegion
+}
+
 func (e *EnumType) Root() *EnumType {
 	for e != nil && e.Parent != nil {
 		e = e.Parent

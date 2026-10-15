@@ -118,6 +118,9 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 // existing region-provenance/escape machinery keeps it from outliving that region.
 func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type {
 	region := a.activeContainerRegionName()
+	if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.DeclaredStoreRegion() != "" {
+		region = enumType.DeclaredStoreRegion() // docs/128 §8: the node lives in the declared store
+	}
 	if region == "" {
 		a.errorf(expr.Pos(), "`new` needs a region to infer (the native stack arena), but none is in scope here; return the allocation from this function so a region is threaded in, or open an explicit `region NAME(size):` scope (or write `new[r]` to target a named region)")
 		// A bare packed-enum constructor routes back into this function (docs/76 Slice 0b); re-analyzing

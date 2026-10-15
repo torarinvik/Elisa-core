@@ -284,6 +284,9 @@ func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (C.LL
 // hoisted store dominates the region's whole extent, and the binding is cached function-wide
 // (regionPackedStores, not the scope-restored packedStores) keyed by the region identity.
 func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType) (packedStoreBinding, error) {
+	if binding, ok, err := s.programPackedStore(enumType); ok || err != nil {
+		return binding, err // docs/128 §8: the declared program-lived store, whatever the region
+	}
 	// regionKey is the stable identity for the arena so that the "is this the same arena?" check below
 	// uses a compile-time-constant SSA value (an alloca pointer) rather than a loaded pointer value that
 	// is a fresh SSA each time. For direct Arena values (arenaRef), the alloca IS the stable key. For

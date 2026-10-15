@@ -1272,6 +1272,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectEffectHandlers(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateEnumVariants(activeDecls)
+	a.checkDeclaredStoreRegions(activeDecls)
 	// Struct-derived-state predicates may compare fields with qualified enum
 	// variants (for example, `self.phase == Lifecycle.Cold`). Enum variants
 	// therefore have to be populated before struct validation analyzes those

@@ -291,13 +291,18 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 		parent = p.parseQualifiedDeclName()
 	}
 	layout, layoutSet, sparse, indexWidth := p.parseEnumLayoutSuffix()
+	storeRegion := ""
+	if p.peek() == lexer.TOKEN_AT {
+		p.advance()
+		storeRegion = p.expect(lexer.TOKEN_IDENT).Text
+	}
 	p.expect(lexer.TOKEN_COLON)
 	// An abstract root that only gathers sub-categories may use the inline empty body `enum Node: pass`
 	// (docs/77) instead of an indented block.
 	if p.peek() == lexer.TOKEN_PASS {
 		p.advance()
 		p.expectNewline()
-		return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent}
+		return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent, StoreRegion: storeRegion}
 	}
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -331,7 +336,7 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent}
+	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent, StoreRegion: storeRegion}
 }
 
 // parseEnumLayoutSuffix parses an optional `layout soa|aos|c|packed` suffix on an enum declaration

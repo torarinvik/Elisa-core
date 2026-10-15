@@ -52,6 +52,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			// new[auto] depends on the innermost active inferred region exactly like new[region]
 			// depends on its named region — so the same return-escape / invalidation checks reject
 			// letting the reference outlive that region.
+			if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.DeclaredStoreRegion() != "" {
+				return regionRefState{}, true // docs/128 §8: a program-lived store; no live dependency
+			}
 			region := a.activeContainerRegionName()
 			if region == "" {
 				return regionRefState{}, false

@@ -297,6 +297,7 @@ F EnumDecl 8 Packed
 F EnumDecl 9 Parent
 F EnumDecl 10 Position
 F EnumDecl 11 Variants
+F EnumDecl 12 StoreRegion
 
 T 48 EnumPayloadDecl
 F EnumPayloadDecl 1 Name

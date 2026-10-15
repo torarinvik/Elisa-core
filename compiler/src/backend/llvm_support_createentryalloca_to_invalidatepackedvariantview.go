@@ -564,6 +564,9 @@ func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedSt
 			}
 		}
 	}
+	if binding, ok, err := s.programPackedStore(enumType); ok && err == nil {
+		return binding, true
+	}
 	return packedStoreBinding{}, false
 }
 func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueRef) {

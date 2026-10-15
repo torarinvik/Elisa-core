@@ -88,6 +88,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i], actual)
 				}
 			}
+			a.checkDeclaredStorePayload(enumType, orderedArgs[i], variant.Payload[i], actual)
 		} else {
 			a.analyzeExpr(orderedArgs[i])
 		}
@@ -108,6 +109,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 			a.errorf(commonArgs[commonDecl.Name].Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, field.Type, actual)
 		}
 		a.consumeAffineValueExpr(commonArgs[commonDecl.Name], field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
+		a.checkDeclaredStorePayload(enumType, commonArgs[commonDecl.Name], field.Type, actual)
 	}
 	return enumType
 }

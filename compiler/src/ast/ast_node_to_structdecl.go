@@ -164,6 +164,9 @@ type EnumDecl struct {
 	// sealed-refinement suffix. "" means a root (no parent). Child's cases are a subset of Parent's, so
 	// Child <: Parent.
 	Parent string
+	// StoreRegion is the declared store region (docs/128 §8): `enum Node layout(...) @source:`.
+	// Every node of this store-backed root (and its refinements) lives in that region's store.
+	StoreRegion string
 }
 type GrammarDecl struct {
 	Position               lexer.Pos

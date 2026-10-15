@@ -190,6 +190,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			header += " layout(" + strings.Join(opts, ", ") + ")"
 		}
+		if n.StoreRegion != "" {
+			header += " @" + n.StoreRegion
+		}
 		header += ":"
 		f.writeLine(level, header)
 		if len(n.Common) > 0 {
