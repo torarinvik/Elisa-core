@@ -1167,7 +1167,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		provenInvariants, loopExitFactsSound := a.proveLoopInvariants(n)
 		// Verify a leading `decreases` measure proves the loop terminates (strict decrease + bounded
 		// below on every iteration), on the same pristine pre-loop scope.
-		a.checkLoopTermination(n)
+		a.checkLoopTermination(n, provenInvariants)
 		// The count-up exit fact `i <= bound` is sound only if `i <= bound` at ENTRY; evaluate on the
 		// pristine pre-loop scope, since the body's `i <- i + 1` mutates i's tracked value below.
 		countUpExitSound := a.countUpExitFactSound(n)

@@ -473,7 +473,9 @@ func (a *Analyzer) measureDiffIsZero(measure ast.Expr, subst map[string]ast.Expr
 // records ProofRuntime and strict-proof mode may escalate the advisory lint, but acceptance never rests
 // on trusting an unproved termination claim. Called on the pristine pre-loop scope (before the body
 // mutates the loop variables).
-func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
+// checkLoopTermination proves a leading `decreases` measure. Only the invariants proven INDUCTIVE
+// (provenInvs) may serve as hypotheses: an unproven invariant holds only as a debug runtime check.
+func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt, provenInvs []*ast.ContractStmt) {
 	if a == nil || stmt == nil {
 		return
 	}
@@ -512,7 +514,7 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 			for _, p := range paths {
 				a.typeLoopSubstCastsForSMT(p.subst)
 			}
-			invs := leadingInvariants(stmt.Body)
+			invs := provenInvs
 			if a.proveLoopMeasureDecreasesAllPaths(stmt.Cond, invs, measures, paths) {
 				a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
 				return
@@ -533,7 +535,7 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	// cannot be resolved simply makes the SMT translation decline (sound: a declined term forgoes the
 	// proof, never fabricates a decrease).
 	a.typeLoopSubstCastsForSMT(subst)
-	invs := leadingInvariants(stmt.Body)
+	invs := provenInvs
 	proven, smtCE := a.proveLoopMeasureDecreases(stmt.Cond, invs, measures, subst)
 	if proven {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
