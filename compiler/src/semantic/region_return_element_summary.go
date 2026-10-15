@@ -216,22 +216,36 @@ func (a *Analyzer) callReturnedElementState(call *ast.CallExpr) (regionRefState,
 	indices := map[int]bool{}
 	regionRefStateParamIndices(summary, indices, map[uintptr]bool{})
 	states := []regionRefState{}
+	// covered: every summarized argument is a tracked local container that holds no bytes, so
+	// a returned element can only be (a copy of) one of its elements -- never a view of its own
+	// buffer -- and its tracked element state is the whole provenance. Instantiating the summary
+	// would add the container's own region instead.
+	covered := true
 	for _, index := range slices.Sorted(maps.Keys(indices)) { // map: sort — the merge below is order-sensitive
 		if index < 0 || index >= len(call.Args) {
 			return regionRefState{}, false
 		}
 		ident, isIdent := stripParenExpr(call.Args[index]).(*ast.Ident)
 		if !isIdent || a.currentScope == nil {
+			covered = false
 			continue
 		}
 		if sym, found := a.currentScope.Lookup(ident.Name); found && sym != nil {
-			if elems, tracked := a.currentElementStates[sym]; tracked && hasRegionProvenance(elems) {
+			elems, tracked := a.currentElementStates[sym]
+			if tracked && hasRegionProvenance(elems) {
 				states = append(states, elems)
 			}
+			if _, isDArray := stripRefForBounds(sym.Type).(*DArrayType); !tracked || !isDArray || !typeHoldsNoBytes(stripRefForBounds(sym.Type), map[Type]bool{}) {
+				covered = false
+			}
+		} else {
+			covered = false
 		}
 	}
-	if instantiated, ok := a.instantiateReturnProvenance(summary, call.Args); ok {
-		states = append(states, instantiated)
+	if !covered {
+		if instantiated, ok := a.instantiateReturnProvenance(summary, call.Args); ok {
+			states = append(states, instantiated)
+		}
 	}
 	merged, ok := mergeRegionRefStates(states...)
 	if !ok && len(states) != 0 {
