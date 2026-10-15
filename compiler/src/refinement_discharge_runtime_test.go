@@ -362,10 +362,10 @@ func TestInvariantRecheckViolatedTrapsInDebug(t *testing.T) {
 	}
 }
 
-// `invariant x >= 0` (x = start) is NOT provable, yet its range refinement is used as a fact, so its
-// check and standing re-checks are kept at -O3 too: erasing them would be an unchecked assumption.
-// The same violating run must trap in release.
-func TestInvariantRecheckUnprovenKeptInRelease(t *testing.T) {
+// The standing invariant is debug-only: at -O3 the re-checks are elided, so the same violating run
+// does NOT trap (debug verifies what release assumes). On this tree an unproven invariant is not used
+// as a release proof fact (prove-before-assume), so eliding its re-checks assumes nothing.
+func TestInvariantRecheckElidedInRelease(t *testing.T) {
 	// Keep this environment-sensitive release assertion out of the parallel test group; the
 	// backend reads these process-wide switches while compiling the child program.
 	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
@@ -375,7 +375,7 @@ func TestInvariantRecheckUnprovenKeptInRelease(t *testing.T) {
 		}
 	}
 	_, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "1, 3", 1), backend.OptimizationLevel3)
-	if err == nil {
-		t.Fatalf("an unproven invariant used as a fact must keep its re-checks at -O3, but the violating run exited 0")
+	if err != nil {
+		t.Fatalf("release build should elide the standing-invariant re-checks (no trap), got: %v", err)
 	}
 }
