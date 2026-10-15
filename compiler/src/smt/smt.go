@@ -93,6 +93,8 @@ type procSolver struct {
 	// check-sat: the resource units it consumed. Calibration only; off by default.
 	rlimitLog  io.Writer
 	rlimitLast int64
+	// resourceLimit is the session `:rlimit` (0 = none); CheckBudget restores it.
+	resourceLimit int64
 }
 
 // Options configures a solver subprocess.
@@ -139,6 +141,8 @@ func Open(opts Options) (Solver, error) {
 		cmd:   cmd,
 		stdin: stdin,
 		out:   bufio.NewReader(stdout),
+
+		resourceLimit: opts.ResourceLimit,
 	}
 	s.stats.SpawnMillis = time.Since(start)
 	// Print success/error tokens so we can read a deterministic line per command, and keep models
@@ -213,6 +217,37 @@ func (s *procSolver) exchange(batch string) ([]string, bool, error) {
 func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[string]string, time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.checkValuesLocked(assertions, vars)
+}
+
+// CheckBudget is Check under a one-off resource limit (z3 `:rlimit` units) instead of the
+// session's; the session limit is restored afterwards. A non-positive budget is rejected (Unknown):
+// it would mean "unlimited". Used for cheap side checks that must not inherit the full budget.
+func (s *procSolver) CheckBudget(assertions string, rlimit int64) Result {
+	if rlimit <= 0 {
+		return Unknown
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return Unknown
+	}
+	if _, sawError, err := s.exchange(fmt.Sprintf("(set-option :rlimit %d)\n", rlimit)); err != nil || sawError {
+		if err != nil {
+			s.broken = true
+		}
+		return Unknown
+	}
+	res, _, _ := s.checkValuesLocked(assertions, nil)
+	if _, sawError, err := s.exchange(fmt.Sprintf("(set-option :rlimit %d)\n", s.resourceLimit)); err != nil || sawError {
+		// The session budget could not be restored: later verdicts would run under the wrong
+		// limit, so retire the process rather than continue with a different contract.
+		s.broken = true
+	}
+	return res
+}
+
+func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result, map[string]string, time.Duration) {
 	s.stats.Queries++
 	if s.broken {
 		s.stats.Unknown++
