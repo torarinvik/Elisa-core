@@ -582,6 +582,9 @@ func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead b
 	}
 	if sym, ok := c.analyzer.globalStorageRoot(expr); ok && (!c.mutableGlobalsOnly || (sym.Kind == SymbolGlobal && sym.Mutable)) {
 		c.addRefs(globalWriteRefs(expr.Pos()))
+		if sym.Kind == SymbolGlobal && sym.Mutable && c.analyzer.globalTargetLoadsReference(expr) {
+			c.addRefs(globalReadRefs(expr.Pos()))
+		}
 		if alsoRead {
 			c.addRefs(globalReadRefs(expr.Pos()))
 		}

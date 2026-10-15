@@ -121,6 +121,43 @@ func (a *Analyzer) mutableGlobalStorageRoot(expr ast.Expr) (*Symbol, bool) {
 	return sym, ok && sym.Kind == SymbolGlobal && sym.Mutable
 }
 
+func referenceStorageType(t Type) bool {
+	for {
+		switch n := t.(type) {
+		case *OptionalType:
+			if n == nil {
+				return false
+			}
+			t = n.Value
+		case *RefType:
+			return n != nil
+		default:
+			return false
+		}
+	}
+}
+
+// globalTargetLoadsReference reports whether resolving a projected write target loads a
+// reference value from storage. A direct field/index projection into a global aggregate is
+// address formation, but projecting through a global reference (or a reference-valued field)
+// first reads that reference and therefore also needs Global.Read.
+func (a *Analyzer) globalTargetLoadsReference(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		return referenceStorageType(a.exprTypes[n.Object]) || a.globalTargetLoadsReference(n.Object)
+	case *ast.IndexExpr:
+		return referenceStorageType(a.exprTypes[n.Object]) || a.globalTargetLoadsReference(n.Object)
+	case *ast.SliceExpr:
+		return referenceStorageType(a.exprTypes[n.Object]) || a.globalTargetLoadsReference(n.Object)
+	case *ast.ParenExpr:
+		return a.globalTargetLoadsReference(n.Inner)
+	case *ast.CastExpr:
+		return referenceStorageType(a.exprTypes[n.Operand]) || a.globalTargetLoadsReference(n.Operand)
+	default:
+		return false
+	}
+}
+
 // Calls through mutable references and mutating collection receivers can write
 // global storage even when the syntax contains no assignment statement.
 func (a *Analyzer) mutableGlobalCallWriteRefs(call *ast.CallExpr) []ast.PermissionRef {
