@@ -620,6 +620,8 @@ If the true branch contains another low-precedence operator, wrap it so the inte
 return (left == right) if rhs is Value.Int(right) else false
 ```
 
+A plain string slice (`sview`, `cstr`, `str[N]`) never traps: it clamps like the runtime `string_view_slice`. A negative start means 0, a negative end means the length, both bounds are clamped to the length, and an inverted range such as `text[3:1]` gives an empty view. Compiled code, `-emit interpret` and the SMT view-length model all use this rule. To branch on whether the bounds are valid, use the checked `is` or `get` forms below.
+
 Slice operands also work with `is` binds. In that form, the slice acts as a checked view construction: the branch runs only when the slice bounds are valid, and the bound name has the resulting bounded view type inside the branch.
 
 ```elisa

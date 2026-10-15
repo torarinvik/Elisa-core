@@ -537,6 +537,10 @@ func indexValueAt(value Value, index int64) (Value, error) {
 }
 func sliceValue(value Value, start, end int64) (Value, error) {
 	value = derefValue(value)
+	if value.kind == valueString {
+		lo, hi := clampStringSliceBounds(int64(len(value.strVal)), start, end)
+		return StringValue(value.strVal[lo:hi]), nil
+	}
 	if start < 0 || end < start {
 		return VoidValue(), fmt.Errorf("invalid slice [%d:%d]", start, end)
 	}
@@ -554,6 +558,31 @@ func sliceValue(value Value, start, end int64) (Value, error) {
 	default:
 		return VoidValue(), fmt.Errorf("slicing requires list or string, got %s", value.String())
 	}
+}
+
+// clampStringSliceBounds mirrors the runtime's string_view_slice / sview
+// clamping, which compiled code and the SMT view-length model both use: a
+// negative start is 0, a negative end is the length, both clamp to the length,
+// and an inverted range is empty. Plain string slices never trap.
+func clampStringSliceBounds(length, start, end int64) (int64, int64) {
+	lo := start
+	if lo < 0 {
+		lo = 0
+	}
+	hi := end
+	if hi < 0 {
+		hi = length
+	}
+	if lo > length {
+		lo = length
+	}
+	if hi > length {
+		hi = length
+	}
+	if hi < lo {
+		hi = lo
+	}
+	return lo, hi
 }
 func valuesEqual(left, right Value) bool {
 	if left.kind == valueNull || right.kind == valueNull {
