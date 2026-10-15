@@ -42,6 +42,25 @@ def update():
     can Global.Write:
         holder.alias.value <- 1
 	`, "mutable global read", " can[Global.Read, Global.Write]"},
+		{"immutable_global_reference_valued_field_write", `struct Cell:
+    value: mutable i32
+struct Holder:
+    alias: mutable Cell&
+global mutable cell: Cell = Cell{value: 0}
+global holder: Holder = Holder{alias: &cell}
+def update():
+    holder.alias.value <- 1
+	`, "mutable global read", " can[Global.Read, Global.Write]"},
+		{"immutable_global_reference_valued_field_write_with_grants", `struct Cell:
+    value: mutable i32
+struct Holder:
+    alias: mutable Cell&
+global mutable cell: Cell = Cell{value: 0}
+global holder: Holder = Holder{alias: &cell}
+def update():
+    can Global{Read, Write}:
+        holder.alias.value <- 1
+	`, "", " can[Global.Read, Global.Write]"},
 		{"reference_field_rebind", `struct Cell:
     value: mutable i32
 struct Holder:
