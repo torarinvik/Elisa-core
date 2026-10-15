@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -87,6 +88,11 @@ type procSolver struct {
 	out    *bufio.Reader
 	stats  Stats
 	broken bool // once the pipe breaks, every further Check is Unknown
+	seq    int  // per-batch sentinel counter for exchange framing
+	// rlimitLog, when non-nil (ELISA_SMT_RLIMIT_LOG), receives one "delta elapsed_us verdict" line per
+	// check-sat: the resource units it consumed. Calibration only; off by default.
+	rlimitLog  io.Writer
+	rlimitLast int64
 }
 
 // Options configures a solver subprocess.
@@ -98,6 +104,10 @@ type Options struct {
 	// PerQueryTimeoutMillis bounds a single (check-sat). 0 = solver default. Keeps a pathological
 	// obligation from stalling the compile; a timeout surfaces as Unknown → runtime fallback.
 	PerQueryTimeoutMillis int
+	// ResourceLimit bounds a single (check-sat) in z3 resource units (`:rlimit`). Unlike a wall-clock
+	// timeout it is DETERMINISTIC: the same query gets the same verdict regardless of machine load.
+	// 0 = unlimited. Exhaustion surfaces as Unknown, exactly like a timeout.
+	ResourceLimit int64
 }
 
 // Open starts a solver subprocess in incremental mode. A nil error means the process is live and
@@ -142,6 +152,14 @@ func Open(opts Options) (Solver, error) {
 	if opts.PerQueryTimeoutMillis > 0 {
 		preamble += fmt.Sprintf("(set-option :timeout %d)\n", opts.PerQueryTimeoutMillis)
 	}
+	if opts.ResourceLimit > 0 {
+		preamble += fmt.Sprintf("(set-option :rlimit %d)\n", opts.ResourceLimit)
+	}
+	if path := os.Getenv("ELISA_SMT_RLIMIT_LOG"); path != "" {
+		if f, ferr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); ferr == nil {
+			s.rlimitLog = f
+		}
+	}
 	if _, err := io.WriteString(stdin, preamble); err != nil {
 		s.broken = true
 		return s, fmt.Errorf("smt: write preamble: %w", err)
@@ -152,58 +170,46 @@ func Open(opts Options) (Solver, error) {
 // Check implements Solver. It is safe for concurrent use (serialized — a single solver process has
 // one command stream).
 func (s *procSolver) Check(assertions string) (Result, time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stats.Queries++
-	if s.broken {
-		s.stats.Unknown++
-		return Unknown, 0
-	}
-	// Bracket the obligation's assertions in their own scope so shared base declarations (asserted
-	// once, outside any push) persist while each obligation's scratch state is discarded.
-	var b strings.Builder
-	b.WriteString("(push 1)\n")
-	b.WriteString(assertions)
-	if !strings.HasSuffix(assertions, "\n") {
-		b.WriteString("\n")
-	}
-	b.WriteString("(check-sat)\n")
-	b.WriteString("(pop 1)\n")
+	res, _, elapsed := s.CheckValues(assertions, nil)
+	return res, elapsed
+}
 
-	start := time.Now()
-	if _, err := io.WriteString(s.stdin, b.String()); err != nil {
-		s.broken = true
-		s.stats.Unknown++
-		return Unknown, 0
+// exchange writes one command batch followed by a unique `(echo ...)` sentinel and reads every reply
+// line up to that sentinel. Framing each batch keeps the command stream in lockstep: a solver
+// `(error ...)` reply (an ill-sorted assertion, an undeclared symbol) is an EXTRA output line, and
+// reading a fixed number of lines would leave the batch's real `sat`/`unsat` buffered as the answer
+// to the NEXT query — an order-dependent verdict that could even turn a stale `unsat` into a false
+// proof. It reports the reply lines and whether any of them was a solver error.
+func (s *procSolver) exchange(batch string) ([]string, bool, error) {
+	s.seq++
+	sentinel := fmt.Sprintf("elisa-smt-frame-%d", s.seq)
+	if _, err := io.WriteString(s.stdin, batch+"(echo \""+sentinel+"\")\n"); err != nil {
+		return nil, false, err
 	}
-	line, err := s.readNonEmptyLine()
-	elapsed := time.Since(start)
-	if err != nil {
-		s.broken = true
-		s.stats.Unknown++
-		return Unknown, elapsed
-	}
-	s.stats.Total += elapsed
-	if elapsed > s.stats.Slowest {
-		s.stats.Slowest = elapsed
-	}
-	switch strings.TrimSpace(line) {
-	case "unsat":
-		s.stats.Unsat++
-		return Unsat, elapsed
-	case "sat":
-		s.stats.Sat++
-		return Sat, elapsed
-	default: // "unknown" or anything unexpected
-		s.stats.Unknown++
-		return Unknown, elapsed
+	var lines []string
+	sawError := false
+	for {
+		line, err := s.out.ReadString('\n')
+		t := strings.TrimSpace(line)
+		if t == sentinel || t == "\""+sentinel+"\"" {
+			return lines, sawError, nil
+		}
+		if t != "" {
+			if strings.HasPrefix(t, "(error") {
+				sawError = true
+			}
+			lines = append(lines, t)
+		}
+		if err != nil {
+			return lines, sawError, err
+		}
 	}
 }
 
 // CheckValues runs Check and, on Sat, fetches the model values for `vars` via (get-value ...). A
 // fetch/parse failure degrades to an empty map (the proof verdict is unaffected — values are only a
-// diagnostic). Implemented as Check followed, while the scope is still on the stack, by get-value —
-// so it brackets its own push/pop and the value query sees the same assertions.
+// diagnostic). Any solver error inside the query batch makes the verdict Unknown: a query the solver
+// did not fully accept proves nothing either way.
 func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[string]string, time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -219,34 +225,45 @@ func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[
 		b.WriteString("\n")
 	}
 	b.WriteString("(check-sat)\n")
-	start := time.Now()
-	if _, err := io.WriteString(s.stdin, b.String()); err != nil {
-		s.broken = true
-		s.stats.Unknown++
-		return Unknown, nil, 0
+	if s.rlimitLog != nil {
+		s.rlimitLast = s.readRlimit()
 	}
-	line, err := s.readNonEmptyLine()
+	start := time.Now()
+	lines, sawError, err := s.exchange(b.String())
 	if err != nil {
 		s.broken = true
 		s.stats.Unknown++
 		return Unknown, nil, time.Since(start)
 	}
 	res := Unknown
-	switch strings.TrimSpace(line) {
-	case "unsat":
-		res = Unsat
-	case "sat":
-		res = Sat
+	if !sawError && len(lines) == 1 {
+		switch lines[0] {
+		case "unsat":
+			res = Unsat
+		case "sat":
+			res = Sat
+		}
+	}
+	if s.rlimitLog != nil {
+		checked := time.Since(start)
+		verdict := "unknown"
+		if res == Sat {
+			verdict = "sat"
+		} else if res == Unsat {
+			verdict = "unsat"
+		}
+		fmt.Fprintf(s.rlimitLog, "%d %d %s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict)
 	}
 	values := map[string]string{}
 	if res == Sat && len(vars) > 0 {
 		// (get-value (v1 v2 ...)) → "((v1 5) (v2 3))" possibly across lines.
-		_, _ = io.WriteString(s.stdin, "(get-value ("+strings.Join(vars, " ")+"))\n")
-		if raw, rerr := s.readBalancedSExpr(); rerr == nil {
-			parseGetValue(raw, values)
+		if raw, verr, gerr := s.exchange("(get-value (" + strings.Join(vars, " ") + "))\n"); gerr != nil {
+			s.broken = true
+		} else if !verr {
+			parseGetValue(strings.Join(raw, " "), values)
 		}
 	}
-	if _, err := io.WriteString(s.stdin, "(pop 1)\n"); err != nil {
+	if _, _, err := s.exchange("(pop 1)\n"); err != nil {
 		s.broken = true
 	}
 	elapsed := time.Since(start)
@@ -263,6 +280,19 @@ func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[
 		s.stats.Unknown++
 	}
 	return res, values, elapsed
+}
+
+// readRlimit returns z3's cumulative resource counter (calibration logging only); 0 when unavailable.
+func (s *procSolver) readRlimit() int64 {
+	lines, sawError, err := s.exchange("(get-info :rlimit)\n")
+	if err != nil || sawError || len(lines) != 1 {
+		return 0
+	}
+	var n int64
+	if _, perr := fmt.Sscanf(strings.TrimSpace(lines[0]), "(:rlimit %d)", &n); perr != nil {
+		return 0
+	}
+	return n
 }
 
 // readBalancedSExpr reads solver output until parentheses balance — a (get-value ...) reply may span

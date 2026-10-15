@@ -350,7 +350,7 @@ func (a *Analyzer) captureWPStepsToEnd() ([]wpStep, bool) {
 // and correctly DECLINES when it lowers p. Sound: `old(p)` is anchored to the entry symbol and never
 // rewritten; any sub-step outside the structural fragment declines (WP only ever adds proofs).
 func (a *Analyzer) tryProveVoidEnsureByWP(clause ast.Expr) bool {
-	if clause == nil {
+	if clause == nil || a.shadowingActive() {
 		return false
 	}
 	steps, ok := a.captureWPStepsToEnd()
@@ -504,7 +504,7 @@ func (a *Analyzer) wpTransport(tr *smtTranslator, steps []wpStep, goal vcFormula
 // standard hypotheses (the function's `requires`). Returns true only on a real proof; any sub-step
 // outside the structural fragment declines (sound: WP only ever forgoes a proof).
 func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool {
-	if clause == nil || ret == nil || ret.Value == nil {
+	if clause == nil || ret == nil || ret.Value == nil || a.shadowingActive() {
 		return false
 	}
 	steps, ok := a.captureWPSteps(ret)

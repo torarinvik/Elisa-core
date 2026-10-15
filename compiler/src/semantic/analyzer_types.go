@@ -116,6 +116,8 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 		a.errorf(pos, "%s", DuplicateLocalMessage(existing.Name, existing.Kind))
 		return
 	}
+	// A range fact already recorded in this scope under the name belongs to the binding it shadows.
+	forgetShadowedRangeFact(a.currentScope, sym.Name)
 	a.trackAffineValueSymbol(sym)
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
@@ -128,6 +130,8 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 		a.errorf(pos, "%s", DuplicateLocalMessage(existing.Name, existing.Kind))
 		return
 	}
+	// A range fact already recorded in this scope under the name belongs to the binding it shadows.
+	forgetShadowedRangeFact(scope, sym.Name)
 	a.trackAffineValueSymbol(sym)
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }

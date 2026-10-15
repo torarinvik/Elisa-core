@@ -686,6 +686,15 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		// Refutation gate (always on): a void-exit postcondition over params PROVABLY FALSE here is a
 		// hard error, like the refuted-`requires`/`where` gate. No `result` subst exists at a void exit
 		// (local bindings named `result` retain their ordinary lexical meaning). Only a provably-false verdict escalates.
+		// A clause naming a parameter that a body local shadows here would be resolved against the
+		// local by every tier below (SMT symbols are keyed by spelling): neither prove nor refute it.
+		if a.mentionsShadowedParam(clause) {
+			if a.enforceStrictProofs {
+				diag := a.buildEnsureFailureDiagnostic(clause, nil, "")
+				a.errorf(pos, "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
+			}
+			continue
+		}
 		if a.ensureClauseRefuted(clause, nil) {
 			a.reportRefutedEnsure(pos, clause, nil)
 			continue
@@ -695,6 +704,10 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 			continue
 		}
 		clause = normalizeBoolLiteralEnsure(clause)
+		if a.ensureGoalReflexivelyValid(clause, nil) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
+			continue
+		}
 		// Written-field fast-path: `ensure self.f == E` where the body writes `self.f <- V` and the
 		// recorded V proves the clause (V == 0 for `self.f == 0`; or both `self.a` and `self.b` trace
 		// to the same value expr for `self.a == self.b`). The fact is dropped at every mutation/borrow/
@@ -955,6 +968,14 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// returned value is a hard error here, mirroring the refuted-`requires`/`where` gate. Only a
 		// provably-false verdict escalates; merely-unprovable clauses fall through to the strict ladder
 		// below (which lints / -strict-errors). Skip the rest of this clause once it is refuted.
+		// See dischargeEnsureBooleansAtVoidExit: a shadowed parameter makes every tier unsound here.
+		if a.mentionsShadowedParam(clause) {
+			if a.enforceStrictProofs {
+				diag := a.buildEnsureFailureDiagnostic(clause, subst, "")
+				a.errorf(n.Pos(), "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
+			}
+			continue
+		}
 		if a.ensureClauseRefuted(clause, subst) {
 			a.reportRefutedEnsure(n.Pos(), clause, subst)
 			continue
@@ -964,6 +985,10 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			continue
 		}
 		clause = normalizeBoolLiteralEnsure(clause)
+		if a.ensureGoalReflexivelyValid(clause, subst) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
+			continue
+		}
 		// Reflexivity fast-path: `ensure result == E` where the body is `return E` and E is a pure
 		// place read (ident / field projection) holds definitionally — result IS the value of E at this
 		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a
@@ -1053,7 +1078,19 @@ func (a *Analyzer) ensureClauseRefuted(clause ast.Expr, subst map[string]ast.Exp
 		return false
 	}
 	clause = normalizeBoolLiteralEnsure(clause)
-	return a.proveRequiresClause(clause, subst) == requiresRefuted
+	if a.proveRequiresClause(clause, subst) != requiresRefuted {
+		return false
+	}
+	// A refutation is only an ERROR on a reachable exit. The interval tier sees the returned value's
+	// bounds but not the path condition, so on a dead branch (`x: i64 = 5; return 1 if x == 5;
+	// return 2`) it "refutes" a clause no execution can violate and rejects a correct program. When the
+	// path's own facts are contradictory (the solver proves `false` from them), the exit is
+	// unreachable and nothing is refuted. This can only withdraw a hard error, never prove a clause:
+	// the strict ladder below still decides the obligation exactly as for any unrefuted clause.
+	if dead, _ := a.trySMTProveRequires(&ast.BoolLit{Position: clause.Pos(), Value: false}, nil); dead {
+		return false
+	}
+	return true
 }
 
 // reportRefutedEnsure emits the hard error for a postcondition statically proven false on a reachable
@@ -1213,7 +1250,7 @@ func (a *Analyzer) exprIsPointerLike(t Type) bool {
 }
 
 func (a *Analyzer) trySMTProveEnsureFromPureReturnPaths(clause ast.Expr) bool {
-	if a == nil || a.currentFuncDecl == nil || clause == nil {
+	if a == nil || a.currentFuncDecl == nil || clause == nil || a.shadowingActive() {
 		return false
 	}
 	body, ok := pureReturnExpr(a.currentFuncDecl)

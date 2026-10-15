@@ -17,7 +17,7 @@ func (a *Analyzer) immutableConstEnumPatternCondition(value ast.Expr, pattern as
 		return nil
 	}
 	p, ok := pattern.(*ast.MatchVariantPattern)
-	if !ok || p.EnumName != enum.Name || len(p.Args) != 0 {
+	if !ok || len(p.Args) != 0 || !a.constEnumPatternNamesEnum(p.EnumName, enum) {
 		return nil
 	}
 	member, ok := enum.Member(p.Variant)
@@ -25,4 +25,21 @@ func (a *Analyzer) immutableConstEnumPatternCondition(value ast.Expr, pattern as
 		return nil
 	}
 	return &ast.BinaryExpr{Position: p.Pos(), Op: lexer.TOKEN_EQEQ, Left: value, Right: &ast.IntLit{Position: p.Pos(), Value: strconv.FormatInt(member.Value, 10)}}
+}
+
+// constEnumPatternNamesEnum reports whether a pattern's (possibly module-qualified) enum name denotes
+// `enum`. A spelling comparison would miss `Module::Kind.Member` patterns, dropping their path facts.
+func (a *Analyzer) constEnumPatternNamesEnum(name string, enum *ConstEnumType) bool {
+	if name == enum.Name {
+		return true
+	}
+	if name == "" {
+		return false
+	}
+	base, _, ok := a.lookupVisibleType(name)
+	if !ok {
+		return false
+	}
+	resolved, ok := base.(*ConstEnumType)
+	return ok && resolved == enum
 }

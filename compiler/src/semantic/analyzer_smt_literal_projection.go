@@ -93,3 +93,49 @@ func (a *Analyzer) constructorProjectionStable(value ast.Expr) bool {
 	}
 	return false
 }
+
+// rerootLiteralProjection rewrites `L.f.g` whose object `L.f` projects a constructor literal to the
+// component itself, `V.g` (e.g. `(false, fact).next.reachable` -> `fact.reachable`). The component
+// was accepted by reevaluableLiteralComponent (re-evaluable at this point), so reading its field here
+// equals reading the constructed value's field. The rewritten node carries n's analyzed type.
+func (a *Analyzer) rerootLiteralProjection(n *ast.FieldExpr) (*ast.FieldExpr, bool) {
+	inner, ok := stripOptimizationParens(n.Object).(*ast.FieldExpr)
+	if !ok || inner == nil {
+		return nil, false
+	}
+	value, found := a.reevaluableLiteralComponent(inner, 0)
+	if !found || value == nil {
+		return nil, false
+	}
+	rerooted := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
+	if t := a.exprTypes[n]; t != nil {
+		a.exprTypes[rerooted] = t
+	}
+	return rerooted, true
+}
+
+// reevaluableLiteralComponent resolves `L.f` (possibly through nested projections) to the literal's
+// component, only when that component may be re-evaluated in place of the constructed value: the
+// tuple and struct-literal field maps apply the literal re-evaluation rules (no later component
+// with side effects), unlike nestedLiteralFieldValue, which serves constant components only.
+func (a *Analyzer) reevaluableLiteralComponent(field *ast.FieldExpr, depth int) (ast.Expr, bool) {
+	if field == nil || depth > 32 {
+		return nil, false
+	}
+	object := stripOptimizationParens(field.Object)
+	if inner, ok := object.(*ast.FieldExpr); ok {
+		value, found := a.reevaluableLiteralComponent(inner, depth+1)
+		if !found {
+			return nil, false
+		}
+		object = stripOptimizationParens(value)
+	}
+	switch literal := object.(type) {
+	case *ast.TupleExpr:
+		return a.tupleLiteralFieldValue(literal, field.Field)
+	case *ast.StructLitExpr:
+		value, found := a.structLitFieldMap(literal)[field.Field]
+		return value, found && value != nil
+	}
+	return nil, false
+}

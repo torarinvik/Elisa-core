@@ -712,6 +712,11 @@ type Analyzer struct {
 	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
 	// cross-function key collision means a byte-identical proof).
 	smtQueryCache           map[string]smtQueryResult
+	// recursiveCertInProgress holds the recursive calls whose termination certificate or callee
+	// requires is being proven.
+	// The certificate's own goal translates the caller's immutable locals, and a local DEFINED by that
+	// same call would request the certificate again without end (stack overflow).
+	recursiveCertInProgress map[*ast.CallExpr]bool
 	proofReport             []ProofFact
 	currentProofCategory    ProofObligationCategory // elision-telemetry tag stamped on the next recordProof call; cleared after each call
 	indexBoundsRuntimeCount int                     // elision telemetry: index expressions that are NOT statically proven in-bounds

@@ -366,6 +366,8 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	covered := map[string]bool{}
 	hasWildcard := false
+	var fallthroughPatterns []ast.MatchPattern
+	fallthroughGuarded := false
 	for i, arm := range stmt.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
@@ -378,6 +380,7 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 				hasWildcard = true
 			}
 			a.analyzeMatchArmGuard(arm.Guard, scope)
+			a.recordEnumMatchArmFacts(stmt.Value, arm, priorPatterns, scope)
 			a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, stmt.Value, arm.Body, scope)
 			if variantPattern, ok := arm.Pattern.(*ast.MatchVariantPattern); ok {
 				a.refineAffineEnumVariant(stmt.Value, enumType, variantPattern)
@@ -389,6 +392,10 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 			a.recordAffineMatchPatternBindings(arm.Pattern, enumType, stmt.Value, scope)
 		})
 		if !blockDefinitelyExits(arm.Body) {
+			fallthroughPatterns = append(fallthroughPatterns, arm.Pattern)
+			if arm.Guard != nil {
+				fallthroughGuarded = true
+			}
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine
 				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
@@ -436,6 +443,9 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 	a.currentAliasCarriers = mergedAliasCarriers
 	a.currentAliasCarrierFieldOverrides = mergedAliasCarrierFieldOverrides
 	a.currentStorageViewDeps = mergedStorageViewDeps
+	if a.matchCoversAllVariants(enumType, covered, hasWildcard) && !fallthroughGuarded {
+		a.recordEnumMatchFallthroughFact(stmt.Value, fallthroughPatterns)
+	}
 	a.recordAffineDestructureConsumption(stmt.Value, valueType, "match over affine enum")
 }
 

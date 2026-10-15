@@ -1303,9 +1303,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if condType != nil && !IsBoolType(condType) {
 				a.errorf(n.Cond.Pos(), "invariant must be bool, got %s", condType)
 			}
-			a.applyConditionRefinements(a.currentScope, n.Cond, true)
-			a.applyIndexBoundsFactsForCondition(n.Cond, true)
+			// Prove BEFORE assuming. Applying the condition's refinements first let every invariant
+			// over an immutable value prove itself (`invariant y > 5` refined `y` to [6, ∞) and then
+			// "proved" `y > 5`), and an unproven invariant still fed later proofs through those
+			// refinements although it is "not used as a release proof fact".
 			if a.canAssumeContractFact(n.Cond) {
+				a.applyConditionRefinements(a.currentScope, n.Cond, true)
+				a.applyIndexBoundsFactsForCondition(n.Cond, true)
 				a.recordSMTAssertFact(n.Cond)
 			}
 		}

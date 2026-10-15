@@ -461,37 +461,44 @@ func storeScanMentionsHeader(node any, names map[string]bool) bool {
 // walkStoreScanNodes visits every AST node pointer reachable from stmts.
 func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 	// Desugaring shares subtrees (a nested guard chain reuses its operands), so an unmemoized
-	// reflective walk is exponential in nesting depth. Each node is visited once.
+	// walk is exponential in nesting depth. Each node is visited once. The generated typed walker
+	// (ast_scan_walk_gen.go) visits exactly what storeScanWalkReflect does, without reflection.
 	seen := map[uintptr]bool{}
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
+	if storeScanWalkTyped(stmts, visit, seen) {
+		return
+	}
+	storeScanWalkReflect(reflect.ValueOf(stmts), visit, seen)
+}
+
+// storeScanWalkReflect is the reflective store-scan walk, the specification the generated walker
+// follows: every non-nil pointer reachable through interfaceable struct fields, slices, arrays and
+// interfaces (not map values), each address once.
+func storeScanWalkReflect(v reflect.Value, visit func(any), seen map[uintptr]bool) {
+	if !v.IsValid() || !v.CanInterface() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() || seen[v.Pointer()] {
 			return
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() || seen[v.Pointer()] {
-				return
-			}
-			seen[v.Pointer()] = true
-			visit(v.Interface())
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
+		seen[v.Pointer()] = true
+		visit(v.Interface())
+		storeScanWalkReflect(v.Elem(), visit, seen)
+	case reflect.Interface:
+		if v.IsNil() {
+			return
+		}
+		storeScanWalkReflect(v.Elem(), visit, seen)
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			storeScanWalkReflect(v.Field(i), visit, seen)
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			storeScanWalkReflect(v.Index(i), visit, seen)
 		}
 	}
-	rec(reflect.ValueOf(stmts))
 }
 
 // exprMentionsAny reports whether any identifier in the node (or a string-valued binder field

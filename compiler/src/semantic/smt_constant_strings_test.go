@@ -312,3 +312,150 @@ func TestSMTConstantStringNarrowSelectorPatterns(t *testing.T) {
 		})
 	}
 }
+
+// Stage1's ABI classifier shape: string-literal tuple returns behind guards that call a pure
+// (single-return, immutable-formal) helper. The frame stays stable: nothing between the guards
+// and the return can write the borrowed view.
+const classifierFrameHelper = `
+def hs(t: sview) -> bool:
+    ensure result == (t.len > 0 and t[t.len - 1] == 63)
+    return t.len > 0 and t[t.len - 1] == 63
+`
+
+func TestSMTStringClassifierLiteralTupleReturnsAndPureCalls(t *testing.T) {
+	src := classifierFrameHelper + `
+def scalar(t: sview) -> sview:
+    ensure (result == "string") == (t == "cstr")
+    return "string" if t == "cstr"
+    return ""
+
+def pair(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstr")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+
+def guarded(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (not hs(t) and t == "cstr")
+    if hs(t):
+        return ("", "")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+`
+	result := analyzeContractStrict(t, "classifier_frame.elisa", src)
+	for _, fn := range []string{"scalar", "pair", "guarded"} {
+		if n := ensureFailuresFor(result.Errors(), fn); n != 0 {
+			t.Fatalf("%s must prove; got: %v", fn, result.Errors())
+		}
+	}
+}
+
+func TestSMTStringClassifierDeclinesFalseClaimsAndImpureFrames(t *testing.T) {
+	src := classifierFrameHelper + `
+def wrong_literal(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstrx")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+
+def wrong_guard(t: sview) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstr")
+    if hs(t):
+        return ("string", "i32")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+
+def tick(n: mutable i64&) -> bool:
+    n += 1
+    return n > 0
+
+def impure_guard(t: sview, n: mutable i64&) -> (binding: sview, w: sview):
+    ensure (result.binding == "string") == (t == "cstr")
+    if tick(n) and false:
+        return ("", "")
+    return ("string", "i32") if t == "cstr"
+    return ("", "")
+`
+	result := analyzeContractStrict(t, "classifier_frame_neg.elisa", src)
+	// wrong_literal: "cstr" and "cstrx" are distinct literals. wrong_guard: t = "a?" returns
+	// "string" without being "cstr". impure_guard: tick writes through a mutable formal, so the
+	// frame gate must decline even though the claim happens to hold.
+	for _, fn := range []string{"wrong_literal", "wrong_guard", "impure_guard"} {
+		if ensureFailuresFor(result.Errors(), fn) == 0 {
+			t.Fatalf("%s must stay unproven; got: %v", fn, result.Errors())
+		}
+	}
+}
+
+// String identities of write-free sview-returning calls: an immutable local bound to the call,
+// projected through a returned tuple, carries the callee's verified literal-equality contracts.
+// The callee lives in another module and is called qualified AFTER the earlier return points, so
+// the frame gate must resolve callees it has not analyzed yet (stage1's WASM ABI classifier).
+const stringCallIDCallee = `
+module Scalars:
+    public:
+        def wt(t: sview) -> sview can[Abort.Panic]:
+            ensure (result == "f32") == (t == "f32")
+            ensure (result == "i32") == (t == "i8" or t == "u8")
+            ensure (result == "") == (not (t == "f32" or t == "i8" or t == "u8"))
+            can Abort.Panic:
+                return when t:
+                    "f32" -> "f32"
+                    "i8" | "u8" -> "i32"
+                    _ -> ""
+`
+
+func TestSMTStringCallResultIdentity(t *testing.T) {
+	src := stringCallIDCallee + `
+def classify(t: sview) -> (binding: sview, w: sview) can[Abort.Panic]:
+    ensure (result.w == "f32") == (result.binding == "scalar" and t == "f32")
+    ensure (result.w == "i32") == (result.binding == "scalar" and (t == "i8" or t == "u8"))
+    ensure (result.binding == "") == (result.w == "")
+    can Abort.Panic:
+        if t == "cstr":
+            return ("", "")
+        s: sview = Scalars::wt(t)
+        return ("scalar", s) if s != ""
+        return ("", "")
+`
+	result := analyzeContractStrict(t, "string_call_id.elisa", src)
+	if n := ensureFailuresFor(result.Errors(), "classify"); n != 0 {
+		t.Fatalf("call-result string identity must prove classify; got: %v", result.Errors())
+	}
+}
+
+func TestSMTStringCallResultIdentityDeclines(t *testing.T) {
+	src := stringCallIDCallee + `
+def wrong(t: sview) -> (binding: sview, w: sview) can[Abort.Panic]:
+    ensure (result.w == "f32") == (t == "i8")
+    can Abort.Panic:
+        s: sview = Scalars::wt(t)
+        return ("scalar", s)
+
+def other_arg(t: sview, u: sview) -> (binding: sview, w: sview) can[Abort.Panic]:
+    ensure (result.w == "f32") == (u == "f32")
+    can Abort.Panic:
+        s: sview = Scalars::wt(t)
+        return ("scalar", s)
+
+def wt_writer(t: sview, n: mutable i64&) -> sview can[Abort.Panic]:
+    ensure (result == "f32") == (t == "f32")
+    n += 1
+    return "f32" if t == "f32"
+    return ""
+
+def writer_callee(t: sview, k: mutable i64&) -> (binding: sview, w: sview) can[Abort.Panic]:
+    ensure (result.w == "f32") == (t == "f32")
+    can Abort.Panic:
+        s: sview = wt_writer(t, k)
+        return ("scalar", s)
+`
+	result := analyzeContractStrict(t, "string_call_id_neg.elisa", src)
+	// wrong: the callee contract relates "f32" to t == "f32", not "i8". other_arg: the callee
+	// formal t must bind to the ARGUMENT t, never to another caller param. writer_callee: a callee
+	// that writes through a mutable formal is not write-free, so its result gets no identity (the
+	// claim holds, but the frame gate must decline).
+	for _, fn := range []string{"wrong", "other_arg", "writer_callee"} {
+		if ensureFailuresFor(result.Errors(), fn) == 0 {
+			t.Fatalf("%s must stay unproven; got: %v", fn, result.Errors())
+		}
+	}
+}

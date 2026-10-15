@@ -335,6 +335,8 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		}
 	}
 
+	a.recordForRangeSMTFact(stmt, loopScope, loopType)
+
 	savedIndexBounds, savedIndexBoundsShared := a.currentIndexBounds, a.indexBoundsShared
 	savedBoundEqual, savedBoundEqualShared := a.currentBoundEqual, a.boundEqualShared
 	savedViewStaticLen := a.currentViewStaticLen

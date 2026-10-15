@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"os"
 	"reflect"
 	"slices"
 	"sort"
@@ -64,6 +65,26 @@ func (p SMTStats) String() string {
 	)
 }
 
+// smtQueryResourceLimit is the deterministic per-(check-sat) z3 budget (see openSMT).
+//
+// Measured over 73 stage1 files (1480 decided queries): p50 0.6k units, p90 25k, p99 1.1M-1.5M;
+// solver time scales with the budget because undecidable queries run to it (6M: 468 s, 2M: 192 s,
+// 1M: 110 s, 0.5M: 64 s, versus 291 s under the old 2 s timeout). Box sweep over the full stage1
+// probe: 500k 195.6 s user / 1536 errors, 1M 212.7 s / 1535, 2M 256.7 s / 1535, 6M ~390 s / 1534
+// (wall-clock 2 s baseline: 215 s). Owner: CPU first, so 500k.
+const smtQueryResourceLimit = 500_000
+
+// smtResourceLimit returns the budget, overridable by ELISA_SMT_RLIMIT (a positive integer) for
+// calibration sweeps only. A fixed value is still deterministic; production leaves it unset.
+func smtResourceLimit() int64 {
+	if v := os.Getenv("ELISA_SMT_RLIMIT"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return smtQueryResourceLimit
+}
+
 // openSMT lazily starts the solver on first need. Returns nil if SMT is off or the solver can't be
 // started (latched in smtUnavailable so we don't retry per query).
 func (a *Analyzer) openSMT() smtSolverHandle {
@@ -75,9 +96,13 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 	}
 	solver, err := smt.Open(smt.Options{
 		Binary: a.smtBinary,
-		// A generous per-query ceiling: a single obligation that the solver can't crack quickly is
-		// not worth stalling the compile — it times out to Unknown and we use the runtime check.
-		PerQueryTimeoutMillis: 2000,
+		// The per-query budget is z3 RESOURCE UNITS, not wall time, so a verdict never depends on
+		// machine load (a 2 s timeout made proofs such as fnv1a's `decreases` flicker between runs).
+		// An undecided obligation becomes Unknown and falls back to the runtime check.
+		ResourceLimit: smtResourceLimit(),
+		// Hang guard only, far above the time the budget takes even on a loaded machine; it should
+		// never be the limit that decides a verdict.
+		PerQueryTimeoutMillis: 120000,
 	})
 	if err != nil || solver == nil {
 		a.smtUnavailable = true
@@ -221,7 +246,7 @@ func (a *Analyzer) smtParamRefinementHypotheses(tr *smtTranslator) string {
 				continue
 			}
 			inst := ast.CloneExprSubst(body, subst)
-			if inst == nil {
+			if inst == nil || a.mentionsShadowedParam(inst) {
 				continue
 			}
 			f, ok := tr.lowerVCFormula(inst, nil)
@@ -261,6 +286,9 @@ func (a *Analyzer) smtNonNullRefParamHypotheses(tr *smtTranslator) string {
 		rt, ok := IsRefType(t)
 		if !ok || rt.State != RefStateNonNull {
 			// Not a non-optional RefType → may be nullable; skip.
+			continue
+		}
+		if a.shadowedParam(param.Name) {
 			continue
 		}
 		pred := "isnull_" + param.Name
@@ -332,8 +360,11 @@ func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps st
 // the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
 // so every query is self-contained.
 func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
+	requires := a.smtRequiresHypotheses(tr)
+	locals := a.smtImmutableLocalHypotheses(tr)
+	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
+		hyps := requires + sliceImmutableLocalHypotheses(locals, smtPreambleContext(tr.factPreamble())+requires+others+obligation) + others
 		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
 			return false, ce
 		}
@@ -552,7 +583,10 @@ func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.E
 	if !ok {
 		return ""
 	}
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
+	requires := a.smtRequiresHypotheses(tr)
+	locals := a.smtImmutableLocalHypotheses(tr)
+	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
+	hyps := requires + sliceImmutableLocalHypotheses(locals, smtPreambleContext(tr.factPreamble())+requires+others+body) + others
 	proven, ce := a.smtCheckQuery(tr, hyps, body)
 	if proven {
 		return ""
@@ -592,6 +626,9 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 	}
 	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
 	a.smtStats.Attempts++
+	if smtQueryTrace {
+		fmt.Fprintf(os.Stderr, "=== SMT query (%s)\n%s", a.currentFuncName(), query)
+	}
 	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
 	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
 	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
@@ -650,9 +687,31 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 // pure control-flow path. The extra path is used for recursive termination calls collected before
 // ordinary body analysis has seeded branch facts into the live scope.
 func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, formalParamSets ...[]ast.ParamDecl) (bool, string) {
+	proven, counterexample, _ := a.trySMTProveRequiresCore(clause, subst, path, formalParamSets...)
+	return proven, counterexample
+}
+
+// trySMTProveCallRequires proves one callee `requires` clause at an ordinary call site. It keeps the
+// established all-arguments binding; only when that binding declines (some argument the clause never
+// mentions lies outside the SMT fragment, e.g. a byte read of a view) does it retry with the selective
+// binding that recursive obligations use. The retry receives the callee's full formal list, so a
+// formal the clause mentions but the call does not bind still declines rather than resolving to a
+// same-named caller variable; unmentioned formals cannot affect the clause's value.
+func (a *Analyzer) trySMTProveCallRequires(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, params []ast.ParamDecl) (bool, string) {
+	proven, counterexample, envDeclined := a.trySMTProveRequiresCore(clause, subst, path)
+	if proven || !envDeclined || len(params) == 0 {
+		return proven, counterexample
+	}
+	proven, counterexample, _ = a.trySMTProveRequiresCore(clause, subst, path, params)
+	return proven, counterexample
+}
+
+// trySMTProveRequiresCore is trySMTProveRequiresWithPath that also reports whether the argument
+// binding (not the solver) declined.
+func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, formalParamSets ...[]ast.ParamDecl) (bool, string, bool) {
 	solver := a.openSMT()
 	if solver == nil || clause == nil {
-		return false, ""
+		return false, "", false
 	}
 	tr := a.newSMTTranslator(nil)
 	// Substitution values may be expressions that have not yet reached ordinary body analysis (notably
@@ -712,7 +771,14 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		env, ok = a.smtEnvForSubst(tr, substForEnv)
 	}
 	if !ok {
-		return false, ""
+		if smtQueryTrace {
+			fmt.Fprintf(os.Stderr, "=== TRACE env-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
+			for _, k := range slices.Sorted(maps.Keys(substForEnv)) {
+				v := substForEnv[k]
+				fmt.Fprintf(os.Stderr, "    subst %s = %T %s type=%v\n", k, v, optimizationExprString(v), a.exprTypes[v])
+			}
+		}
+		return false, "", true
 	}
 	// Register compound substituted expressions as counterexample readbacks so a Sat model reports
 	// the CONCRETE VALUE of each callee parameter at the refuting input, not only the free caller
@@ -753,7 +819,7 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 		}
 		pathTerm, ok := tr.boolTerm(path, pathEnv)
 		if !ok {
-			return false, ""
+			return false, "", false
 		}
 		extra += "(assert " + pathTerm + ")\n"
 	}
@@ -763,9 +829,12 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 	// known facts that violates the precondition — a concrete witness for the diagnostic.
 	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, extra)
 	if !ok {
-		return false, ""
+		if smtQueryTrace {
+			fmt.Fprintf(os.Stderr, "=== TRACE goal-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
+		}
+		return false, "", false
 	}
-	return proven, counterexample
+	return proven, counterexample, false
 }
 
 // smtEnvForRelevantSubst binds only callee parameters that occur in this obligation. A recursive
@@ -794,7 +863,10 @@ func (a *Analyzer) smtEnvForRelevantSubst(tr *smtTranslator, subst map[string]as
 			return nil, false
 		}
 	}
-	for name, argExpr := range subst {
+	// Sorted: binding order names fresh symbols (svarg$N) and decides which binding declines
+	// first, so map order made the emitted query set differ run to run.
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		argExpr := subst[name]
 		if !used[name] || env[name] != "" {
 			continue
 		}
@@ -1070,7 +1142,19 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	tr := a.newSMTTranslator(nil)
 	retSym := "__return_call_result"
 	retTerm := smtVar(retSym)
-	tr.decls[retSym] = true
+	// The result symbol must carry the callee's result SORT. A bool-returning callee's ensures use
+	// `result` as a Bool (`x < 0 implies not result`); declaring it Int made every such query
+	// ill-sorted, so bool callee contracts never reached a call site.
+	if IsBoolType(a.exprTypes[call]) {
+		retTerm = smtBoolVar(retSym)
+		tr.boolDecls[retTerm] = true
+	} else if isDatatypeValuedType(a.exprTypes[call]) {
+		// An aggregate result has no scalar term: bind it to a projection token so `result.f` in the
+		// caller's obligation and in the callee's ensures both re-root to `__return_call_result__field__f`.
+		retTerm = dtToken(retSym)
+	} else {
+		tr.decls[retSym] = true
+	}
 	callerEnv := map[string]string{"result": retTerm}
 	obligation, ok := tr.boolTerm(clause, callerEnv)
 	if !ok {
@@ -1128,7 +1212,10 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 
 func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
 	env := map[string]string{}
-	for name, argExpr := range subst {
+	// Sorted: binding order names fresh symbols (svarg$N) and decides which binding declines
+	// first, so map order made the emitted query set differ run to run.
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		argExpr := subst[name]
 		if !a.bindSMTEnvArg(tr, env, name, argExpr, nil, true) {
 			return nil, false
 		}
@@ -1156,7 +1243,10 @@ func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Ex
 
 func (a *Analyzer) smtEnvForCallSubstEnv(tr *smtTranslator, subst map[string]ast.Expr, argEnv map[string]string) (map[string]string, bool) {
 	env := map[string]string{}
-	for name, argExpr := range subst {
+	// Sorted: binding order names fresh symbols (svarg$N) and decides which binding declines
+	// first, so map order made the emitted query set differ run to run.
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		argExpr := subst[name]
 		if !a.bindSMTEnvArg(tr, env, name, argExpr, argEnv, false) {
 			return nil, false
 		}
@@ -1217,13 +1307,25 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 	}
 	if _, ok := stripRefForBounds(argType).(*SViewType); ok {
+		// Carry the argument's string identity to the callee formal by explicit binding (never by
+		// name), so the callee's literal-equality contracts speak about the caller's string.
+		id, idOK := tr.stringIDTerm(argExpr, argEnv)
 		// An immutable sview formal can be bound as an SMT byte array only when the enclosing
 		// expression context passes immutableSviewArrayParameter's read-only-function gate.
-		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
-		if !ok {
+		if arr, ok := tr.arrayTermEnv(argExpr, argEnv); ok {
+			env[name] = arr
+			if idOK {
+				bindSMTStringID(env, name, id)
+			}
+			return true
+		}
+		// Contents unavailable: bind the length only (see bindSMTSViewLengthArg).
+		if !tr.bindSMTSViewLengthArg(env, name, argExpr, argEnv) {
 			return false
 		}
-		env[name] = arr
+		if idOK {
+			bindSMTStringID(env, name, id)
+		}
 		return true
 	}
 	if a.smtEquationStructType(a.exprTypes[argExpr]) {
@@ -1234,6 +1336,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// as the un-substituted occurrence (structural induction). Tokens only key opaque predicate symbols;
 	// they never enter a numeric SMT term (the type checker forbids datatype operands in arithmetic).
 	if isDatatypeValuedType(a.exprTypes[argExpr]) {
+		if _, _, _, ok := tr.enumConstructor(argExpr); ok {
+			// Keep a substituted variant constructor recognizable: its tag is a constant and its payload
+			// is its arguments. The token never enters a numeric term.
+			token := dtTokenPrefix + "enumctor#" + strconv.Itoa(len(tr.enumBindings))
+			tr.enumBindings[token] = smtEnumBinding{expr: argExpr, env: argEnv}
+			env[name] = token
+			return true
+		}
 		env[name] = dtToken(smtProjectionName(argExpr))
 		return true
 	}
@@ -1257,6 +1367,13 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
 	// body is type-analyzed (e.g. a loop body's `i+1`) has a nil exprTypes entry; falling through to
 	// termEnv resolves it via scope, which is what the loop-invariant preserve proof needs.
+	if isAnyArrayLike(a.exprTypes[argExpr]) && !tr.isArrayLike(a.exprTypes[argExpr]) {
+		// A container whose elements the array theory does not model: bind its length only.
+		if tr.bindSMTLengthOnlyArg(env, name, argExpr, argEnv) {
+			return true
+		}
+		return !requireBinding
+	}
 	if t := a.exprTypes[argExpr]; t != nil && !isSMTExactAssignmentType(t) {
 		return !requireBinding
 	}
@@ -1332,6 +1449,10 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		// (seedRequiresAsAssertFacts) and ride the standard mutation-invalidation instead, so they are
 		// skipped here to avoid the stale unconditional copy.
 		if a.requiresReferencesMutableRoot(req) {
+			continue
+		}
+		// A parameter shadowed at the proof point no longer owns its SMT symbol.
+		if a.mentionsShadowedParam(req) {
 			continue
 		}
 		tr.requiresHypMode = true
@@ -1541,6 +1662,14 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 type smtFact struct {
 	Expr ast.Expr
 	Deps map[string]bool
+	// Binders pins a `value is Variant(binders)` path fact to the exact pattern-binder symbols it
+	// introduced: a binder/payload equality is emitted only while the name still resolves to that
+	// symbol, never to a shadowing redeclaration that shares its SMT name.
+	Binders map[string]*Symbol
+	// Pins records the symbol every name in Expr resolved to when the fact was recorded. SMT symbols
+	// are keyed by spelling, so a fact is rendered only while each name still resolves to its pinned
+	// symbol: a later (or same-scope, later-declared) shadowing binding must not inherit it.
+	Pins map[string]*Symbol
 }
 
 // smtAssertHypotheses translates flow-local proof facts into SMT assumptions. A fact may come from a
@@ -1573,7 +1702,7 @@ func (a *Analyzer) recordSMTAssertFactInScope(scope *Scope, expr ast.Expr) {
 		a.recordSMTAssertFactInScope(scope, bin.Right)
 		return
 	}
-	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
+	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr), Pins: a.smtFactPins(scope, expr)})
 }
 
 func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
@@ -1722,6 +1851,10 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 
 func isSMTExactAssignmentType(t Type) bool {
 	t = stripRefForBounds(t)
+	if enumeration, ok := t.(*ConstEnumType); ok && enumeration != nil {
+		// A const-enum value IS its integer storage value (smtNumericValueType models it so).
+		t = enumeration.Storage
+	}
 	return t != nil && (IsNumericType(t) || IsBoolType(t)) && !IsFloatType(t)
 }
 
@@ -1981,19 +2114,27 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		// Sorted name order so the hypothesis text (and the brick-5 cache key) is deterministic — Symbols
 		// is a map, and its iteration order would otherwise vary the query string between identical goals.
-		names := make([]string, 0, len(sc.Symbols))
-		for name := range sc.Symbols {
+		// Filter before sorting: outer (module/global) scopes hold thousands of symbols and no
+		// immutable locals, and sorting all of them on every query was ~9 s of a stage1 build.
+		// The filter is exactly the per-name skip below, so the emitted hypotheses are unchanged.
+		var names []string
+		for name, sym := range sc.Symbols {
+			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+				continue
+			}
 			names = append(names, name)
 		}
 		sort.Strings(names)
 		for _, name := range names {
 			sym := sc.Symbols[name]
-			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
-				continue
-			}
 			seen[name] = true // a closer scope's binding shadows an outer one
 			vd, ok := sym.Node.(*ast.VarDeclStmt)
 			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
+				continue
+			}
+			// The initializer is translated with the proof point's names: skip it when any of them
+			// (or the local itself, `y: i64 = y + 1`) now denotes a different binding.
+			if !a.immutableLocalDefinitionCurrent(sc, sym, vd.Value) {
 				continue
 			}
 			eterm, ok := tr.termEnv(vd.Value, nil)
@@ -2212,6 +2353,18 @@ type smtTranslator struct {
 	// knownRequiresSumNoWrap). Without the clause, neither the hypothesis nor the clean body term exists,
 	// so the genuine overflow counterexample is preserved (the C1 soundness gate).
 	requiresHypMode bool
+	// enumDecls holds enum tag/payload symbol declarations (with their range facts), keyed by symbol.
+	enumDecls map[string]string
+	// enumBindings maps an env token to the enum-valued expression (and its env) it stands for, so a
+	// substituted constructor keeps its constant tag and payload arguments.
+	enumBindings map[string]smtEnumBinding
+	// enumPinnedBinders is set only while rendering one `is` path fact (see enumIsFactTerm).
+	enumPinnedBinders map[string]*Symbol
+	// sviewArgCount numbers the fresh length-only sview bindings (see bindSMTSViewLengthArg).
+	sviewArgCount int
+	// lengthOnly marks env tokens that carry a container length but no element array
+	// (see bindSMTLengthOnlyArg); array-term lookups that hit one decline.
+	lengthOnly map[string]bool
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -2240,6 +2393,8 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		callEqMaxUnroll:    1,
 		callEqDeclDepth:    map[*ast.FuncDecl]int{},
 		callEqMaxDeclDepth: 2,
+		enumDecls:          map[string]string{},
+		enumBindings:       map[string]smtEnumBinding{},
 	}
 }
 
@@ -2253,8 +2408,14 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
+				if tr.lengthOnly[bound] {
+					return "", false
+				}
 				return bound, true
 			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
 		}
 		// Resolve the array's element type from exprTypes (set once the node is analyzed) OR, when that
 		// is not yet populated — e.g. loop-invariant proving runs BEFORE the body is type-analyzed — from
@@ -2270,6 +2431,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			tr.arrayDecls[n.Name] = true
 			arr := smtVar(n.Name)
 			tr.recordFixedArrayLen(arr, t)
+			tr.linkSViewArrayLength(n, arr)
 			return arr, true
 		}
 		return "", false
@@ -2286,8 +2448,14 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// exactly what the bare-array Ident case does for `arr[k]`.
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
+				if tr.lengthOnly[bound] {
+					return "", false
+				}
 				return bound, true
 			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
 		}
 		// Resolve the field's array type from exprTypes (set once analyzed) OR — when the node is
 		// synthetic/cloned (e.g. the loop-termination prover's measure[body], whose field reads were
@@ -2301,7 +2469,10 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			}
 		}
 		if tr.isArrayLike(ft) {
-			name := smtProjectionName(n)
+			name, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
 			tr.arrayDecls[name] = true
 			arr := smtVar(name)
 			tr.recordFixedArrayLen(arr, ft)
@@ -2330,6 +2501,9 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 				return bound + "_len", true
 			}
 		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
 		t := tr.a.exprTypes[n]
 		if t == nil && tr.a.currentScope != nil {
 			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
@@ -2347,7 +2521,19 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 			}
 		}
 		if isAnyArrayLike(t) {
-			return smtVar(smtProjectionName(n)) + "_len", true
+			if env != nil {
+				if bound, ok := env[smtProjectionName(n)]; ok {
+					return bound + "_len", true
+				}
+			}
+			if tr.calleeFreeProjection(n, env) {
+				return "", false
+			}
+			name, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
+			return smtVar(name) + "_len", true
 		}
 	}
 	return "", false
@@ -2442,7 +2628,11 @@ func (tr *smtTranslator) setTermEnv(expr ast.Expr, env map[string]string) (sym s
 		if !sok {
 			return "", "", false
 		}
-		sym = smtVar(smtProjectionName(n))
+		name, nok := tr.fieldProjectionKey(n, env)
+		if !nok || tr.calleeFreeProjection(n, env) {
+			return "", "", false
+		}
+		sym = smtVar(name)
 		tr.setDecls[sym] = ks
 		return sym, ks, true
 	}
@@ -2493,7 +2683,11 @@ func (tr *smtTranslator) dictTermEnv(expr ast.Expr, env map[string]string) (sym 
 		}
 		return tr.dictDeclFor(n, smtVar(n.Name))
 	case *ast.FieldExpr:
-		return tr.dictDeclFor(n, smtVar(smtProjectionName(n)))
+		name, ok := tr.fieldProjectionKey(n, env)
+		if !ok || tr.calleeFreeProjection(n, env) {
+			return "", "", false
+		}
+		return tr.dictDeclFor(n, smtVar(name))
 	}
 	return "", "", false
 }
@@ -2611,6 +2805,12 @@ func (tr *smtTranslator) term(expr ast.Expr) (string, bool) {
 
 func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, bool) {
 	if n, ok := expr.(*ast.MatchExpr); ok {
+		if term, ok := tr.enumMatchTerm(n, env, tr.termEnv); ok {
+			return term, true
+		}
+		if term, ok := tr.constEnumMatchTerm(n, env, tr.termEnv); ok {
+			return term, true
+		}
 		return tr.scalarMatchTerm(n, env, tr.termEnv)
 	}
 
@@ -2715,8 +2915,18 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				}
 			}
 		}
+		if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
+			return tr.termEnv(rerooted, env)
+		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
+				return tr.termEnv(value, env)
+			}
+		}
+		// A constructor projection is its (re-evaluable) field argument, including after result
+		// substitution has replaced the result identifier with the literal.
+		if literal, ok := stripOptimizationParens(n.Object).(*ast.StructLitExpr); ok {
+			if value, found := tr.a.structLitFieldMap(literal)[n.Field]; found {
 				return tr.termEnv(value, env)
 			}
 		}
@@ -2738,6 +2948,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				}
 			}
 		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
 		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
 		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
 		// SPECIAL CASE: if the entire field expression evaluates to a compile-time constant (e.g.
@@ -2747,7 +2960,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if c, ok := tr.a.constIntValue(n); ok {
 				return smtInt(c), true
 			}
-			if n.Field == "len" {
+			// The scope-keyed view length names the CURRENT function's binding; a name the env binds
+			// (a substituted callee formal) must resolve through the env instead, or a callee's
+			// `other.len` would read the caller's same-named view.
+			if n.Field == "len" && !tr.envBindsRoot(n.Object, env) {
 				if key, ok := immutableSViewLengthProjection(tr.a, tr.a.currentScope, n); ok {
 					lenSym := smtSViewLengthSymbol(key)
 					tr.lenDecls[lenSym] = true
@@ -2793,7 +3009,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// by the field type (e.g. unsigned >= 0 in factPreamble), not any relation to other
 			// fields or heap state. That is sound and is enough for practical contracts like
 			// `ensure result <= self.total` on unsigned storage.
-			name := smtProjectionName(n)
+			name, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
 			tr.decls[name] = true
 			tr.markIntVar(name, t)
 			return smtVar(name), true
@@ -2844,8 +3063,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if !ok {
 				return "", false
 			}
-			bv := "((_ int2bv " + strconv.Itoa(dbits) + ") " + inner + ")"
-			return smtBitvectorRead(bv, dsign, dbits), true
+			return smtSameWidthReinterpret(inner, dsign, dbits), true
 		}
 		return "", false
 	case *ast.GetExpr:
@@ -3455,6 +3673,12 @@ func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
 func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string, bool) {
 	switch n := expr.(type) {
 	case *ast.MatchExpr:
+		if term, ok := tr.enumMatchTerm(n, env, tr.boolTerm); ok {
+			return term, true
+		}
+		if term, ok := tr.constEnumMatchTerm(n, env, tr.boolTerm); ok {
+			return term, true
+		}
 		return tr.booleanMatchTerm(n, env)
 	case *ast.ParenExpr:
 		return tr.boolTerm(n.Inner, env)
@@ -3613,6 +3837,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				}
 			}
 		}
+		if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
+			return tr.boolTerm(rerooted, env)
+		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
 				return tr.boolTerm(value, env)
@@ -3637,6 +3864,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return bound, true
 			}
 		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
 		fieldType := tr.a.exprTypes[n]
 		if fieldType == nil {
 			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
@@ -3644,7 +3874,11 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			}
 		}
 		if IsBoolType(fieldType) {
-			pred := smtBoolVar(smtProjectionName(n))
+			key, ok := tr.fieldProjectionKey(n, env)
+			if !ok {
+				return "", false
+			}
+			pred := smtBoolVar(key)
 			tr.boolDecls[pred] = true
 			return pred, true
 		}
@@ -3734,7 +3968,12 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return cmp, true
 			}
 			return smtCompare(n.Op, l, r), true
+		case lexer.TOKEN_IS:
+			return tr.enumIsTerm(n, env, false)
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+			if eq, ok := tr.enumEqualityTerm(n, env); ok {
+				return eq, true
+			}
 			if eq, ok := tr.constantStringEquality(n.Left, n.Right, env, 0); ok {
 				if n.Op == lexer.TOKEN_BANGEQ {
 					return "(not " + eq + ")", true
@@ -3746,6 +3985,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			// guard and the obligation. This lets `ensure (p != null) or (result == false)` discharge: the
 			// fall-through guard `p != null` and the disjunct refer to the same predicate.
 			if ptr := nullComparePointer(n); ptr != nil {
+				if tr.calleeFreeProjection(ptr, env) {
+					return "", false
+				}
 				pred := "isnull_" + smtProjectionName(stripOptimizationParens(ptr))
 				tr.boolDecls[pred] = true
 				if n.Op == lexer.TOKEN_EQEQ {
@@ -3762,6 +4004,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				leftType := tr.a.exprTypes[n.Left]
 				rightType := tr.a.exprTypes[n.Right]
 				if tr.a.exprIsPointerLike(leftType) && tr.a.exprIsPointerLike(rightType) {
+					if tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
+						return "", false
+					}
 					lPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Left))
 					rPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Right))
 					tr.boolDecls[lPred] = true
@@ -4172,6 +4417,21 @@ func (tr *smtTranslator) shiftRightBoundAux(bits, k int) string {
 // `bv2nat(b) - 2^W * topbit(b)` ∈ [-2^(W-1), 2^(W-1)) — so the produced Int EQUALS the machine value
 // and composes soundly with further Int reasoning (e.g. a sign-extension `(v << k) >> k` proves its
 // signed range). The top bit is read via a 1-bit extract.
+// smtSameWidthReinterpret is the same-width sign reinterpretation of the Int term `inner` read as a
+// `bits`-wide signed or unsigned value, in linear integer arithmetic. It equals
+// smtBitvectorRead((_ int2bv bits) inner) for EVERY Int (int2bv reduces modulo 2^bits, exactly what
+// `mod` by the constant 2^bits computes; the signed read subtracts 2^bits when the top bit is set),
+// but it keeps the query out of bit-vector theory: `x.len.usize()` over an i64 length cost z3 a 64-bit
+// int2bv/bv2nat round trip per occurrence, which made termination proofs over view lengths exceed the
+// per-query budget.
+func smtSameWidthReinterpret(inner string, signed bool, bits int) string {
+	m := "(mod " + inner + " " + smtPow2(bits) + ")"
+	if !signed {
+		return m
+	}
+	return "(- " + m + " (ite (>= " + m + " " + smtPow2(bits-1) + ") " + smtPow2(bits) + " 0))"
+}
+
 func smtBitvectorRead(bvExpr string, signed bool, bits int) string {
 	if !signed {
 		return "(bv2nat " + bvExpr + ")"
@@ -4280,18 +4540,28 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	// contract-sound postcondition holds for the actual arguments.
 	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
 	var recursiveCert recursiveProofCertificate
+	if recursiveProofCall && tr.a.recursiveCertInProgress[call] {
+		// Re-entered while proving this very call's certificate or requires (the goal mentions a local defined by
+		// the call). Decline the recursive ensure assumption here: assuming less is always sound.
+		recursiveProofCall = false
+	}
 	if recursiveProofCall {
 		callPath := tr.a.contractCallPath(call)
+		if tr.a.recursiveCertInProgress == nil {
+			tr.a.recursiveCertInProgress = map[*ast.CallExpr]bool{}
+		}
+		tr.a.recursiveCertInProgress[call] = true
 		var ok bool
 		recursiveCert, ok = tr.a.recursiveCallCertificateUnderPath(tr.a.currentFuncDecl, decl, call, callPath)
 		if !ok {
 			recursiveProofCall = false
 		}
-	}
-	if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
-		tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
-		tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
-		recursiveProofCall = false
+		if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
+			tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
+			tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
+			recursiveProofCall = false
+		}
+		delete(tr.a.recursiveCertInProgress, call)
 	}
 	ensureEnv := make(map[string]string, len(env)+1)
 	for name, term := range env {
@@ -4981,6 +5251,7 @@ func (tr *smtTranslator) factPreamble() string {
 		// termination/preservation goal needs. Sound: it only ever asserts a fact the type guarantees.
 		b.WriteString("(assert (< " + sym + " 18446744073709551616))\n")
 	}
+	b.WriteString(tr.enumPreamble())
 	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
 	// mint order — deterministic because the counter is monotonic over a single translation.
 	for _, line := range tr.auxDecls {
@@ -5144,7 +5415,7 @@ func (a *Analyzer) tupleLiteralFieldValue(tuple *ast.TupleExpr, name string) (as
 		if field.Name != name {
 			continue
 		}
-		if value != nil || tuple.Elems[i] == nil {
+		if value != nil || tuple.Elems[i] == nil || !a.literalComponentReevaluableAt(tuple.Elems, i) {
 			return nil, false
 		}
 		value = tuple.Elems[i]
@@ -5163,9 +5434,10 @@ func (a *Analyzer) tupleLiteralFieldMap(tuple *ast.TupleExpr) map[string]ast.Exp
 	if !ok || len(typ.Fields) != len(tuple.Elems) {
 		return nil
 	}
+	reevaluable := a.literalComponentReevaluable(tuple.Elems)
 	fields := make(map[string]ast.Expr, len(typ.Fields))
 	for i, field := range typ.Fields {
-		if field.Name == "" || tuple.Elems[i] == nil {
+		if field.Name == "" || tuple.Elems[i] == nil || !reevaluable[i] {
 			continue
 		}
 		if _, duplicate := fields[field.Name]; duplicate {
@@ -5189,6 +5461,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			return nil
 		}
 		out := make(map[string]ast.Expr, len(typ.Decl.Fields))
+		reevaluable := a.structLiteralReevaluable(sl)
 		for index, field := range typ.Decl.Fields {
 			if field.Name == "" || sl.ResolvedArgs[index] == nil {
 				return nil
@@ -5196,7 +5469,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			if _, duplicate := out[field.Name]; duplicate {
 				return nil
 			}
-			if a.constructorProjectionStable(sl.ResolvedArgs[index]) {
+			if a.constructorProjectionStable(sl.ResolvedArgs[index]) || reevaluable[sl.ResolvedArgs[index]] {
 				out[field.Name] = sl.ResolvedArgs[index]
 			}
 		}
@@ -5205,6 +5478,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 	if sl.CopyBase != nil || len(sl.Spreads) != 0 {
 		return nil
 	}
+	reevaluable := a.structLiteralReevaluable(sl)
 	args := sl.Args
 	var ordered []string
 	if st, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType); ok && st != nil && st.Decl != nil {
@@ -5221,7 +5495,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 			}
 			name = ordered[i]
 		}
-		if name != "" && arg != nil && a.constructorProjectionStable(arg) {
+		if name != "" && arg != nil && (a.constructorProjectionStable(arg) || reevaluable[arg]) {
 			out[name] = arg
 		}
 	}
@@ -5335,4 +5609,57 @@ func (tr *smtTranslator) calleeBoolTerm(decl *ast.FuncDecl, expr ast.Expr, env m
 	tr.calleeBodyDepth++
 	defer func() { tr.calleeBodyDecl = priorDecl; tr.calleeBodyDepth-- }()
 	return tr.boolTerm(expr, env)
+}
+
+// smtQueryTrace dumps every solver query to stderr (ELISA_SMT_TRACE=1) for prover debugging.
+var smtQueryTrace = os.Getenv("ELISA_SMT_TRACE") != ""
+
+func (a *Analyzer) currentFuncName() string {
+	if a.currentFuncDecl == nil {
+		return "<none>"
+	}
+	return a.currentFuncDecl.Name
+}
+
+// calleeFreeProjection reports whether, while lowering a CALLEE's body or contract (calleeBodyDepth >
+// 0), `expr` is a place rooted at an identifier the call environment does not bind. Such a root is the
+// callee's own formal or local; resolving it through a name-keyed symbol (`v_l__field__a`,
+// `isnull_p`, an array or length symbol) or the caller's scope would silently alias an unrelated
+// caller variable of the same spelling — a false proof. Every projection fallback declines on it.
+func (tr *smtTranslator) calleeFreeProjection(expr ast.Expr, env map[string]string) bool {
+	if tr == nil || tr.calleeBodyDepth == 0 {
+		return false
+	}
+	root := stripOptimizationParens(expr)
+	for {
+		switch n := root.(type) {
+		case *ast.FieldExpr:
+			if env != nil {
+				if _, ok := env[smtProjectionName(n)]; ok {
+					return false
+				}
+			}
+			root = stripOptimizationParens(n.Object)
+			continue
+		case *ast.IndexExpr:
+			root = stripOptimizationParens(n.Object)
+			continue
+		case *ast.Ident:
+			if env != nil {
+				if _, ok := env[n.Name]; ok {
+					return false
+				}
+			}
+			// A module path / type / constant root is global, not a callee local.
+			if _, ok := tr.a.constIntValue(n); ok {
+				return false
+			}
+			if _, _, ok := tr.a.lookupVisibleType(n.Name); ok {
+				return false
+			}
+			return true
+		default:
+			return false
+		}
+	}
 }
