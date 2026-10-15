@@ -89,11 +89,12 @@ func TestSMTAndBoundLemmaGuardsNegativeOperands(t *testing.T) {
 	if res, _ := solver.Check(q); res != smt.Sat {
 		t.Fatalf("the guarded lemma must be consistent with a negative operand; got %s", res)
 	}
-	abstracted, ok := smtAbstractBitvectorReads(q + "(assert (not (> " + and + " a)))\n")
+	// "Is (a & b) <= a derivable?" ⇔ is (not (<= R a)) unsat. It must not be.
+	abstracted, ok := smtAbstractBitvectorReads(q + "(assert (not (<= " + and + " a)))\n")
 	if !ok {
 		t.Fatal("abstraction should apply")
 	}
-	if res, _ := solver.Check(abstracted); res == smt.Unsat {
+	if res, _ := solver.Check(abstracted); res != smt.Sat {
 		t.Fatal("no bound may relate the AND to a negative operand: -1 & 5 = 5 > -1")
 	}
 }
@@ -117,5 +118,31 @@ def signed_mask(x: i64, m: i64) -> bool:
 	}
 	if ensureFailuresFor(result.Errors(), "signed_mask") == 0 {
 		t.Fatalf("signed x & m <= m is false for m < 0 and must stay unproven; got %v", result.Errors())
+	}
+}
+
+// Every abstraction constant keeps bv2nat's range: 0 <= r always, and r < 2^W when the read-back
+// is built from one int2bv width with width-preserving operators. A width-changing term (the
+// signed read's sign-bit extract) keeps only the lower bound rather than a guessed width.
+func TestSMTBitvectorAbstractionKeepsReadBackRange(t *testing.T) {
+	q := "(declare-const h Int)\n(declare-const m Int)\n" +
+		"(assert (= 1 " + maskAnd + "))\n" +
+		"(assert (= 2 " + smtBitvectorRead("(bvand ((_ int2bv 32) h) ((_ int2bv 32) m))", true, 32) + "))\n"
+	abstracted, ok := smtAbstractBitvectorReads(strings.ReplaceAll(q, "mask", "m"))
+	if !ok {
+		t.Fatalf("abstraction should apply:\n%s", q)
+	}
+	lower := strings.Count(abstracted, "(assert (<= 0 "+smtBVAbstractPrefix)
+	if lower != 3 {
+		t.Fatalf("every abstraction constant needs 0 <= r (want 3, got %d):\n%s", lower, abstracted)
+	}
+	if !strings.Contains(abstracted, " 18446744073709551616))") || !strings.Contains(abstracted, " 4294967296))") {
+		t.Fatalf("64- and 32-bit read-backs need r < 2^W:\n%s", abstracted)
+	}
+	if strings.Count(abstracted, "(assert (< "+smtBVAbstractPrefix) != 2 {
+		t.Fatalf("the extract (sign bit) read-back must not get a guessed upper bound:\n%s", abstracted)
+	}
+	if w, ok := smtBitvectorReadWidth("(bv2nat (bvand ((_ int2bv 64) a) ((_ int2bv 32) b)))"); ok {
+		t.Fatalf("mixed widths must decline, got %d", w)
 	}
 }

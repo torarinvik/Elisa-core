@@ -90,11 +90,48 @@ func smtAbstractBitvectorReads(query string) (string, bool) {
 		return "", false
 	}
 	decls := make([]string, 0, len(names))
-	for _, name := range names {
-		decls = append(decls, "(declare-const "+name+" Int)\n")
+	for term, name := range names {
+		// bv2nat of a W-bit vector lies in [0, 2^W): keep that range on the fresh constant. It
+		// holds for the original term, so the abstraction stays a weakening.
+		decl := "(declare-const " + name + " Int)\n(assert (<= 0 " + name + "))\n"
+		if w, ok := smtBitvectorReadWidth(term); ok {
+			decl += "(assert (< " + name + " " + smtPow2(w) + "))\n"
+		}
+		decls = append(decls, decl)
 	}
 	sort.Strings(decls)
 	return strings.Join(decls, "") + body, true
+}
+
+// smtBitvectorReadWidth returns W for a `(bv2nat …)` read-back whose bit-vector is built only
+// from `(_ int2bv W)` operands of one width with width-preserving operators. Any width-changing
+// operator (extract, concat, extension, repeat) or mixed widths decline: no upper bound is
+// asserted then, only the always-valid lower bound 0.
+func smtBitvectorReadWidth(term string) (int, bool) {
+	for _, op := range []string{"extract", "concat", "zero_extend", "sign_extend", "repeat", "rotate"} {
+		if strings.Contains(term, op) {
+			return 0, false
+		}
+	}
+	width := -1
+	rest := term
+	for {
+		i := strings.Index(rest, "(_ int2bv ")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("(_ int2bv "):]
+		j := strings.IndexByte(rest, ')')
+		if j < 0 {
+			return 0, false
+		}
+		w, err := strconv.Atoi(strings.TrimSpace(rest[:j]))
+		if err != nil || w <= 0 || w > 64 || (width >= 0 && w != width) {
+			return 0, false
+		}
+		width = w
+	}
+	return width, width > 0
 }
 
 // smtBalancedEnd returns the index just past the s-expression opening at text[start] ('(').
