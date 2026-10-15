@@ -316,6 +316,10 @@ type storeFlowBinderIndex struct {
 	rangeOther []string
 	other      []string
 	untyped    map[string]bool
+	// allNames memoizes binderNames: the index is immutable once built, and the store-flow scan
+	// asks for the full binder set per identifier (~2 s of map building in the q7 stage1 profile).
+	// Callers only read it.
+	allNames map[string]bool
 }
 
 type storeFlowTypedBinder struct {
@@ -356,10 +360,14 @@ func (idx *storeFlowBinderIndex) typedNames(pred func(ast.TypeExpr) bool) map[st
 }
 
 func (idx *storeFlowBinderIndex) binderNames() map[string]bool {
+	if idx.allNames != nil {
+		return idx.allNames
+	}
 	scalar, other := idx.sets(func(ast.TypeExpr) bool { return true })
 	for n := range other {
 		scalar[n] = true
 	}
+	idx.allNames = scalar
 	return scalar
 }
 
