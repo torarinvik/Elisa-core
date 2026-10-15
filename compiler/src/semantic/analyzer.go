@@ -322,6 +322,7 @@ type Analyzer struct {
 	interfaceAssocTypeScopes []map[string]Type
 	constParamScopes         []map[string]Type
 	constEvalScopes          []map[string]ConstValue
+	constEvalDepth           int
 	constInitDepth           int
 	staticContextDepth       int
 	staticCallDepth          int
