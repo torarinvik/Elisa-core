@@ -24,6 +24,10 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if state, ok := a.regionRefStateForBufferAddress(n.Operand); ok {
 			return state, true
 		}
+		// The address of a program-lived-typed local or field is still function-local
+		// storage: the docs/128 program-lived shortcuts below do not apply under `&`.
+		a.provenanceAddrOfDepth++
+		defer func() { a.provenanceAddrOfDepth-- }()
 		return a.regionRefStateForExpr(n.Operand)
 	case *ast.Ident:
 		if a.currentScope == nil {
@@ -32,6 +36,12 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		sym, ok := a.currentScope.Lookup(n.Name)
 		if !ok {
 			return regionRefState{}, false
+		}
+		// docs/128 §8: a local whose declared type reaches only program-lived bytes depends on
+		// no local region or parameter, whatever produced it; its binding was checked against
+		// the program region when it was stored.
+		if len(a.programRegions) != 0 && a.provenanceAddrOfDepth == 0 && sym != nil && sym.Kind == SymbolLocal && sym.Type != nil && a.typeCanContainRegionRefs(sym.Type, map[string]bool{}) && a.typeIsProgramLivedCached(sym.Type) {
+			return regionRefState{}, true
 		}
 		stateSym := sym
 		state, ok := a.currentRegionRefs[sym]
@@ -231,6 +241,13 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			}
 			return regionRefState{}, false
 		}
+		// docs/128: a field whose declared type reaches only program-lived bytes depends on no
+		// local region, whatever region holds the struct itself.
+		if len(a.programRegions) != 0 && a.provenanceAddrOfDepth == 0 {
+			if fieldType := a.exprTypes[n]; fieldType != nil && a.typeCanContainRegionRefs(fieldType, map[string]bool{}) && a.typeIsProgramLivedCached(fieldType) {
+				return regionRefState{}, true
+			}
+		}
 		if n.Field == "tags" {
 			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
 				return a.regionRefStateForExpr(n.Object)
@@ -325,6 +342,13 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return cloneRegionRefState(right), true
 	case *ast.CallExpr:
+		// docs/128 §8: a bare constructor of a declared program-lived store builds its node
+		// there; the handle depends on no local region.
+		if fieldExpr, isField := n.Func.(*ast.FieldExpr); isField {
+			if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr); ok && enumType != nil && variant != nil && enumType.DeclaredStoreRegion() != "" {
+				return regionRefState{}, true
+			}
+		}
 		if region := a.declaredCallReturnRegions[n]; region != "" {
 			if owner, state := a.lookupRegionState(region); owner != nil && !state.Destroyed {
 				return regionRefStateFromDependency(owner, state.Generation), true

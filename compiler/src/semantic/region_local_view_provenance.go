@@ -302,11 +302,17 @@ func (a *Analyzer) localViewValueDeps(value ast.Expr, self string) ([]string, bo
 		if !found || sym == nil || sym.Kind != SymbolLocal {
 			return
 		}
+		// docs/128 §8: a local whose every reachable byte is program-lived (a handle into a
+		// declared program store with program-lived payloads, `sview @source`, a darray typed
+		// in the program region, ...) carries nothing a local region could free -- neither its
+		// tracked state nor its own (program-region) storage is a dependency.
+		if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(sym.Type) {
+			return
+		}
 		state, recorded := a.regionRefStateForExpr(id)
 		if !recorded {
-			// docs/128 §8: a binder whose every reachable byte is program-lived (a handle into
-			// a declared program store with program-lived payloads, `sview @source`, ...)
-			// carries nothing a local region could free.
+			// An unrecorded binder of a program-lived referent type (a match/for binder) has
+			// no local storage of its own to point at.
 			if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(stripRefForBounds(sym.Type)) {
 				return
 			}

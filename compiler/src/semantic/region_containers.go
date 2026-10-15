@@ -1304,6 +1304,11 @@ func (a *Analyzer) enumCtorPayloadRegion(expr ast.Expr) string {
 	if _, isVariant := enumType.Variant(fieldExpr.Field); !isVariant {
 		return ""
 	}
+	if enumType.DeclaredStoreRegion() != "" {
+		// docs/128 §8: payloads were checked as stores into the program-lived store at the
+		// constructor and adopted into its arena; the handle carries no shorter region.
+		return ""
+	}
 	region := ""
 	for _, payloadArg := range call.Args {
 		payloadType := a.exprTypes[payloadArg]
@@ -1817,7 +1822,7 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 		a.noteAmbientFillFresh()
 		return
 	}
-	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic && targetRegion != "" {
+	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic && targetRegion != "" && !a.isProgramRegion(targetRegion) {
 		return // region-poly fn: the synthesized auto region adopts the caller's arena (regionPolyAutoAdopts).
 	}
 	if targetRegion == "" {
@@ -2039,6 +2044,11 @@ func liveLocalRegionDependencyName(state regionRefState) string {
 // synthesized `__auto_*` region allocates into the caller-provided arena instead of its own.
 func (a *Analyzer) autoRegionAdoptsCallerArena(targetRegion string) bool {
 	if a == nil {
+		return false
+	}
+	// docs/128: the caller's arena does not outlive a program-lived region, so adopting into
+	// it never sanctions a store there.
+	if a.isProgramRegion(targetRegion) {
 		return false
 	}
 	if a.currentFuncDecl != nil && targetRegion != "" && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {

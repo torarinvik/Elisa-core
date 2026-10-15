@@ -138,6 +138,8 @@ func (a *Analyzer) typeIsProgramLived(t Type, seen map[Type]bool) bool {
 		return a.enumPayloadsProgramLived(root, seen)
 	case *OptionalType:
 		return a.typeIsProgramLived(tt.Value, seen)
+	case *RefType:
+		return a.isProgramRegion(tt.Region) && a.typeIsProgramLived(tt.Elem, seen)
 	case *SViewType:
 		return a.isProgramRegion(tt.Region)
 	case *DArrayType:

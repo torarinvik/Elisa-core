@@ -44,6 +44,13 @@ func (a *Analyzer) checkElementLoopAssumptions(sym *Symbol, site ast.Node, next 
 	if info == nil || sym == nil || len(info.assumptions) == 0 {
 		return
 	}
+	// docs/128 §8: program-lived elements depend on no local region, so a later read of
+	// them can never dangle whatever state the read assumed.
+	if len(a.programRegions) != 0 {
+		if elem := dArrayLikeElemType(stripRefForBounds(sym.Type)); elem != nil && a.typeIsProgramLivedCached(elem) {
+			return
+		}
+	}
 	loops := info.modLoops[site]
 	for i := range info.assumptions {
 		assumption := &info.assumptions[i]
