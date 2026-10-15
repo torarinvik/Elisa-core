@@ -1213,7 +1213,7 @@ func (a *Analyzer) exprIsPointerLike(t Type) bool {
 }
 
 func (a *Analyzer) trySMTProveEnsureFromPureReturnPaths(clause ast.Expr) bool {
-	if a == nil || a.currentFuncDecl == nil || clause == nil {
+	if a == nil || a.currentFuncDecl == nil || clause == nil || a.shadowingActive() {
 		return false
 	}
 	body, ok := pureReturnExpr(a.currentFuncDecl)

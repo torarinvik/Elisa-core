@@ -697,14 +697,14 @@ func (a *Analyzer) recordEnumMatchArmFacts(subject ast.Expr, arm ast.MatchArm, p
 				binders[name] = sym
 			}
 		}
-		scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: fact, Deps: armDeps, Binders: binders})
+		scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: fact, Deps: armDeps, Binders: binders, Pins: a.smtFactPins(scope, fact)})
 	}
 	for _, p := range prior {
 		for _, vp := range enumPatternVariants(p) {
 			tagOnly := &ast.MatchVariantPattern{Position: vp.Position, EnumName: vp.EnumName, Variant: vp.Variant}
 			test := &ast.BinaryExpr{Position: vp.Position, Op: lexer.TOKEN_IS, Left: subject, Right: &ast.VariantTestExpr{Position: vp.Position, Pattern: tagOnly}}
 			fact := &ast.UnaryExpr{Position: vp.Position, Op: lexer.TOKEN_NOT, Operand: test}
-			scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: fact, Deps: deps})
+			scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: fact, Deps: deps, Pins: a.smtFactPins(scope, fact)})
 		}
 	}
 }
@@ -790,7 +790,7 @@ func (a *Analyzer) recordEnumMatchFallthroughFact(subject ast.Expr, fallArms []a
 		}
 	}
 	if disj != nil {
-		a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: disj, Deps: smtFactDeps(subject)})
+		a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: disj, Deps: smtFactDeps(subject), Pins: a.smtFactPins(a.currentScope, disj)})
 	}
 }
 

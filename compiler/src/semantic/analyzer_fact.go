@@ -137,6 +137,9 @@ func (a *Analyzer) renderHypothesisFacts(tr *smtTranslator, collect func(*Scope)
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		closedHere := sc.closedWorld
 		for _, f := range collect(sc) {
+			if !a.hypothesisFactBindingsCurrent(sc, f) {
+				continue // a shadowing binding now owns one of the fact's names
+			}
 			if dedupeByName {
 				if rf, ok := f.(rangeHypothesisFact); ok {
 					if seen[rf.name] {

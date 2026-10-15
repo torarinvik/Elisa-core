@@ -578,7 +578,8 @@ func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 	found := false
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
 		if scope.rangeFacts != nil {
-			if r, ok := scope.rangeFacts[name]; ok {
+			// A fact of an outer scope about a name a closer binding now shadows is not about it.
+			if r, ok := scope.rangeFacts[name]; ok && a.rangeFactBindingCurrent(scope, name) {
 				acc = acc.intersect(r)
 				found = true
 			}
@@ -648,6 +649,9 @@ func (a *Analyzer) collectRelationalEdges() []relationalEdge {
 	closedWorld := false
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
 		for _, fact := range scope.smtAssertFacts {
+			if !a.hypothesisFactBindingsCurrent(scope, assertHypothesisFact{fact: fact}) {
+				continue
+			}
 			addBinaryEdge(scope, fact.Expr)
 		}
 		if scope.closedWorld {
@@ -662,6 +666,9 @@ func (a *Analyzer) collectRelationalEdges() []relationalEdge {
 		for _, req := range a.currentFuncDecl.Requires {
 			if req == nil || a.requiresReferencesMutableRoot(req) {
 				continue // mutable-root clauses live in smtAssertFacts already
+			}
+			if a.mentionsShadowedParam(req) {
+				continue
 			}
 			addBinaryEdge(a.currentScope, req)
 		}
@@ -695,7 +702,7 @@ func (a *Analyzer) transitiveRangeFact(name string) (numRange, bool) {
 		found := false
 		for scope := a.currentScope; scope != nil; scope = scope.Parent {
 			if scope.rangeFacts != nil {
-				if r, ok := scope.rangeFacts[n]; ok {
+				if r, ok := scope.rangeFacts[n]; ok && a.rangeFactBindingCurrent(scope, n) {
 					acc = acc.intersect(r)
 					found = true
 				}

@@ -222,7 +222,7 @@ func (a *Analyzer) smtParamRefinementHypotheses(tr *smtTranslator) string {
 				continue
 			}
 			inst := ast.CloneExprSubst(body, subst)
-			if inst == nil {
+			if inst == nil || a.mentionsShadowedParam(inst) {
 				continue
 			}
 			f, ok := tr.lowerVCFormula(inst, nil)
@@ -262,6 +262,9 @@ func (a *Analyzer) smtNonNullRefParamHypotheses(tr *smtTranslator) string {
 		rt, ok := IsRefType(t)
 		if !ok || rt.State != RefStateNonNull {
 			// Not a non-optional RefType → may be nullable; skip.
+			continue
+		}
+		if a.shadowedParam(param.Name) {
 			continue
 		}
 		pred := "isnull_" + param.Name
@@ -1396,6 +1399,10 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		if a.requiresReferencesMutableRoot(req) {
 			continue
 		}
+		// A parameter shadowed at the proof point no longer owns its SMT symbol.
+		if a.mentionsShadowedParam(req) {
+			continue
+		}
 		tr.requiresHypMode = true
 		h, ok := tr.boolTerm(req, nil)
 		tr.requiresHypMode = false
@@ -1607,6 +1614,10 @@ type smtFact struct {
 	// introduced: a binder/payload equality is emitted only while the name still resolves to that
 	// symbol, never to a shadowing redeclaration that shares its SMT name.
 	Binders map[string]*Symbol
+	// Pins records the symbol every name in Expr resolved to when the fact was recorded. SMT symbols
+	// are keyed by spelling, so a fact is rendered only while each name still resolves to its pinned
+	// symbol: a later (or same-scope, later-declared) shadowing binding must not inherit it.
+	Pins map[string]*Symbol
 }
 
 // smtAssertHypotheses translates flow-local proof facts into SMT assumptions. A fact may come from a
@@ -1639,7 +1650,7 @@ func (a *Analyzer) recordSMTAssertFactInScope(scope *Scope, expr ast.Expr) {
 		a.recordSMTAssertFactInScope(scope, bin.Right)
 		return
 	}
-	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
+	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr), Pins: a.smtFactPins(scope, expr)})
 }
 
 func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
@@ -2064,6 +2075,11 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			seen[name] = true // a closer scope's binding shadows an outer one
 			vd, ok := sym.Node.(*ast.VarDeclStmt)
 			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
+				continue
+			}
+			// The initializer is translated with the proof point's names: skip it when any of them
+			// (or the local itself, `y: i64 = y + 1`) now denotes a different binding.
+			if !a.immutableLocalDefinitionCurrent(sc, sym, vd.Value) {
 				continue
 			}
 			eterm, ok := tr.termEnv(vd.Value, nil)
