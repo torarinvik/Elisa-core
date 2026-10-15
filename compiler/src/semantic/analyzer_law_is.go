@@ -998,7 +998,8 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// place read (ident / field projection) holds definitionally — result IS the value of E at this
 		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a
 		// reference field (`self.base`) are modeled as distinct opaque terms (shadPS4 memory-06 finding).
-		if !converted && ensureHoldsByReturnReflexivity(clause, n.Value) {
+		// NaN != NaN: a float result is never equal to itself by reflexivity.
+		if !converted && !IsFloatType(stripRefForBounds(a.exprTypes[n.Value])) && ensureHoldsByReturnReflexivity(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
 			continue
 		}
