@@ -255,7 +255,21 @@ func (a *Analyzer) lemmaTerminationVerified(decl *ast.FuncDecl) bool {
 // constant that means the same thing in the caller's scope. This conservatism is what keeps an
 // assumed fact sound: a partially-substituted clause referencing the lemma's own parameter name would
 // be a free, unconstrained variable in the caller and could license false conclusions.
+const (
+	lemmaSubstitutionMaxDepth = 128
+	lemmaSubstitutionMaxWork  = 8192
+)
+
 func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, bool) {
+	work := lemmaSubstitutionMaxWork
+	return substituteLemmaEnsureWithBudget(expr, subst, &work, 0)
+}
+
+func substituteLemmaEnsureWithBudget(expr ast.Expr, subst map[string]ast.Expr, work *int, depth int) (ast.Expr, bool) {
+	if expr == nil || work == nil || depth >= lemmaSubstitutionMaxDepth || *work <= 0 {
+		return nil, false
+	}
+	(*work)--
 	switch n := expr.(type) {
 	case *ast.Ident:
 		if arg, ok := subst[n.Name]; ok {
@@ -266,37 +280,37 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit, *ast.NullLit:
 		return n, true
 	case *ast.ParenExpr:
-		inner, ok := substituteLemmaEnsure(n.Inner, subst)
+		inner, ok := substituteLemmaEnsureWithBudget(n.Inner, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		return &ast.ParenExpr{Position: n.Position, Inner: inner}, true
 	case *ast.UnaryExpr:
-		operand, ok := substituteLemmaEnsure(n.Operand, subst)
+		operand, ok := substituteLemmaEnsureWithBudget(n.Operand, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		return &ast.UnaryExpr{Position: n.Position, Op: n.Op, Operand: operand}, true
 	case *ast.BinaryExpr:
-		left, ok := substituteLemmaEnsure(n.Left, subst)
+		left, ok := substituteLemmaEnsureWithBudget(n.Left, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
-		right, ok := substituteLemmaEnsure(n.Right, subst)
+		right, ok := substituteLemmaEnsureWithBudget(n.Right, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: left, Right: right}, true
 	case *ast.TernaryExpr:
-		cond, ok := substituteLemmaEnsure(n.Cond, subst)
+		cond, ok := substituteLemmaEnsureWithBudget(n.Cond, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
-		value, ok := substituteLemmaEnsure(n.Value, subst)
+		value, ok := substituteLemmaEnsureWithBudget(n.Value, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
-		alt, ok := substituteLemmaEnsure(n.Alt, subst)
+		alt, ok := substituteLemmaEnsureWithBudget(n.Alt, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
@@ -305,7 +319,7 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 		if n.Store != nil {
 			return nil, false
 		}
-		value, ok := substituteLemmaEnsure(n.Value, subst)
+		value, ok := substituteLemmaEnsureWithBudget(n.Value, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
@@ -319,7 +333,7 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 			if !ok {
 				return nil, false
 			}
-			body, ok := substituteLemmaEnsure(tail.Expr, subst)
+			body, ok := substituteLemmaEnsureWithBudget(tail.Expr, subst, work, depth+1)
 			if !ok {
 				return nil, false
 			}
@@ -328,17 +342,17 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 		}
 		return &ast.MatchExpr{Position: n.Position, Value: value, Arms: arms}, true
 	case *ast.FieldExpr:
-		object, ok := substituteLemmaEnsure(n.Object, subst)
+		object, ok := substituteLemmaEnsureWithBudget(n.Object, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		return &ast.FieldExpr{Position: n.Position, Object: object, Field: n.Field}, true
 	case *ast.IndexExpr:
-		object, ok := substituteLemmaEnsure(n.Object, subst)
+		object, ok := substituteLemmaEnsureWithBudget(n.Object, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
-		index, ok := substituteLemmaEnsure(n.Index, subst)
+		index, ok := substituteLemmaEnsureWithBudget(n.Index, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
@@ -348,19 +362,19 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 		// the cast over the substituted operand, preserving Origin/Target so the SMT term translator's
 		// CastExpr handler (which keys off exprTypes of operand and result) models it value-exactly. Only
 		// the operand is rewritten; the target type is unchanged.
-		operand, ok := substituteLemmaEnsure(n.Operand, subst)
+		operand, ok := substituteLemmaEnsureWithBudget(n.Operand, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		return &ast.CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin, RefShorthand: n.RefShorthand}, true
 	case *ast.CallExpr:
-		fn, ok := substituteLemmaEnsure(n.Func, subst)
+		fn, ok := substituteLemmaEnsureWithBudget(n.Func, subst, work, depth+1)
 		if !ok {
 			return nil, false
 		}
 		newArgs := make([]ast.Expr, len(n.Args))
 		for i, arg := range n.Args {
-			ra, ok := substituteLemmaEnsure(arg, subst)
+			ra, ok := substituteLemmaEnsureWithBudget(arg, subst, work, depth+1)
 			if !ok {
 				return nil, false
 			}

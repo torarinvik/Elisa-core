@@ -17,6 +17,28 @@ func TestRecursiveTerminationCertificateDeclinesReentry(t *testing.T) {
 	}
 }
 
+func TestPureReturnSubstitutionDeclinesAtExpressionDepthLimit(t *testing.T) {
+	var expr ast.Expr = &ast.IntLit{Value: "1"}
+	for i := 0; i < lemmaSubstitutionMaxDepth; i++ {
+		expr = &ast.ParenExpr{Inner: expr}
+	}
+	if _, ok := substituteLemmaEnsure(expr, map[string]ast.Expr{"x": &ast.IntLit{Value: "2"}}); ok {
+		t.Fatal("deep expression substitution must decline instead of recursing without a bound")
+	}
+	work := pureReturnMaxWork
+	if _, ok := substitutePureReturnExpr(expr, nil, &work); ok {
+		t.Fatal("deep no-op substitution must still preflight without cloning the analyzed node")
+	}
+	work = pureReturnMaxWork
+	if _, ok := pureReturnCasesFromStmts([]ast.Stmt{&ast.ReturnStmt{Value: expr}}, nil, nil, &work, 0); ok {
+		t.Fatal("deep return expressions must decline before downstream proof translation")
+	}
+	work = pureReturnMaxWork
+	if pureReturnExpressionShapeWithinBudget(expr, &work, 0) {
+		t.Fatal("deep local initializer shape must decline before recursive purity checking")
+	}
+}
+
 func TestPureReturnExtractionDeclinesAtStatementDepthLimit(t *testing.T) {
 	stmts := make([]ast.Stmt, 0, pureReturnMaxDepth+1)
 	for i := 0; i < pureReturnMaxDepth; i++ {
