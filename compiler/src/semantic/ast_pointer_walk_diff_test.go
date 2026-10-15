@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"testing"
 
+	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 )
@@ -30,6 +31,20 @@ func walkNodesTyped(t *testing.T, root any) []any {
 	return nodes
 }
 
+func scanNodesReflect(stmts []ast.Stmt) []any {
+	var nodes []any
+	storeScanWalkReflect(reflect.ValueOf(stmts), func(n any) { nodes = append(nodes, n) }, map[uintptr]bool{})
+	return nodes
+}
+
+func scanNodesTyped(t *testing.T, stmts []ast.Stmt) []any {
+	var nodes []any
+	if !storeScanWalkTyped(stmts, func(n any) { nodes = append(nodes, n) }, map[uintptr]bool{}) {
+		t.Fatal("typed scan walker declined []ast.Stmt")
+	}
+	return nodes
+}
+
 // sameVisits compares two visit sequences by identity (pointer and dynamic type), in order.
 func sameVisits(a, b []any) (bool, string) {
 	if len(a) != len(b) {
@@ -43,7 +58,7 @@ func sameVisits(a, b []any) (bool, string) {
 	return true, ""
 }
 
-// DIFFERENTIAL: the generated typed walker visits exactly the pointers the reflective walker
+// DIFFERENTIAL: the generated typed walkers visit exactly the pointers the reflective walker
 // visits, in the same order, over every .elisa program in the stage0 repository, both as parsed
 // and after analysis (which attaches lowered and resolved nodes). The walk roots are the file and
 // every top-level declaration, the shapes the call sites pass.
@@ -93,6 +108,17 @@ func TestTypedASTPointerWalkMatchesReflectiveWalk(t *testing.T) {
 				}
 				if ok, why := sameVisits(walkNodesReflect(r), walkNodesTyped(t, r)); !ok {
 					t.Fatalf("%s (%s): root %T: %s", path, stage, r, why)
+				}
+				compared++
+			}
+			// walkStoreScanNodes (no map values) over every function body.
+			for _, d := range file.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn == nil {
+					continue
+				}
+				if ok, why := sameVisits(scanNodesReflect(fn.Body), scanNodesTyped(t, fn.Body)); !ok {
+					t.Fatalf("%s (%s): scan walk of %s: %s", path, stage, fn.Name, why)
 				}
 				compared++
 			}
