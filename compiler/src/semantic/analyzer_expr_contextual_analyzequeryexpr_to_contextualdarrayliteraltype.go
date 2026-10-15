@@ -20,7 +20,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		a.errorf(expr.Pos(), "query expression value iteration does not support affine element type %s; use an explicit `for` loop (read-only iteration borrows affine elements automatically)", info.ItemType)
 	}
 	if expr.Owner != nil {
-		ownerType := a.analyzeExpr(expr.Owner)
+		ownerType := a.analyzeRegionOwnerExpr(expr.Owner)
 		arenaType := a.namedTypes["Arena"]
 		isArena := arenaType != nil && AssignableTo(arenaType, ownerType)
 		if !isArena {

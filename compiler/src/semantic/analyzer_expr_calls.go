@@ -716,8 +716,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		// checks can't see it, and binding to a short region would be a use-after-free. Such a call
 		// stays a conservative "cannot infer region parameter" error rather than a miscompile.
 		if _, ok := regionBindings[name]; !ok {
-			if a.activeContainerRegionName() == "perm" {
-				regionBindings[name] = "perm"
+			if active := a.activeContainerRegionName(); active == "perm" || a.isProgramRegion(active) {
+				// A declared program-lived region (docs/128) is program-lifetime like perm.
+				regionBindings[name] = active
 			}
 		}
 		if _, ok := regionBindings[name]; !ok {

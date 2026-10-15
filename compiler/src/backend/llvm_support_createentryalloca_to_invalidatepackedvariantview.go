@@ -666,6 +666,10 @@ func (s *functionState) lookupBinding(name string) (valueBinding, bool) {
 			return binding, true
 		}
 	}
+	// docs/128: a program-lived region resolves to its program arena in every function.
+	if binding, ok, err := s.programRegionArena(name); ok && err == nil {
+		return binding, true
+	}
 	return valueBinding{}, false
 }
 func (s *functionState) specializeFunctionType(base *semantic.FuncType) *semantic.FuncType {

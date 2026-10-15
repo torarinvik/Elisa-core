@@ -42,13 +42,53 @@ def program_new() -> i64&:
     return new[source] 5
 `)
 	errs := result.Errors()
-	want := []string{":7:", ":13:", ":13:", ":16:", ":18:", ":31:"}
+	want := []string{":7:", ":13:", ":13:", ":16:", ":18:"}
 	if len(errs) != len(want) {
-		t.Fatalf("expected lines 7, 13, 16, 18, 31 rejected, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("expected lines 7, 13, 16, 18 rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 	for i, w := range want {
 		if !strings.Contains(errs[i], w) {
-			t.Fatalf("expected lines 7, 13, 16, 18, 31 rejected, got:\n%s", strings.Join(errs, "\n"))
+			t.Fatalf("expected lines 7, 13, 16, 18 rejected, got:\n%s", strings.Join(errs, "\n"))
+		}
+	}
+}
+
+// The program arena is never freed or reset because its Arena value never reaches code: the
+// name is usable only in region position.
+func TestProgramLivedRegionIsNotAnArenaValue(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "program_lived_value.elisa", `global region source
+
+def take(a: Arena&) -> void:
+    return
+
+def addr_it() -> void:
+    take(&source)
+
+def bind_it() -> void:
+    a: Arena& = &source
+    take(a)
+
+def copy_it() -> void:
+    a: Arena = source
+
+def destroy_it() -> void:
+    destroy source
+
+def owner_ok() -> i64&:
+    return new[source] 5
+
+def in_ok() -> void:
+    in source:
+        return
+`)
+	errs := result.Errors()
+	want := []string{":7:", ":10:", ":14:", ":17:"}
+	if len(errs) != len(want) {
+		t.Fatalf("expected lines 7, 10, 14, 17 rejected, got:\n%s", strings.Join(errs, "\n"))
+	}
+	for i, w := range want {
+		if !strings.Contains(errs[i], w) {
+			t.Fatalf("expected lines 7, 10, 14, 17 rejected, got:\n%s", strings.Join(errs, "\n"))
 		}
 	}
 }

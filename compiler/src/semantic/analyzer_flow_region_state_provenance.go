@@ -209,11 +209,21 @@ func (a *Analyzer) instantiateReturnProvenanceWithContext(state regionRefState, 
 func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
 	for _, region := range sortedSymbolKeys(state.Deps) { // map: sort so the chosen region is stable
 		dep := state.Deps[region]
-		if dep.Valid {
+		if dep.Valid && !isProgramRegionSymbol(region) {
 			return region, dep, true
 		}
 	}
 	return nil, regionDependencyState{}, false
+}
+
+// isProgramRegionSymbol: a program-lived region (docs/128) is never freed, so a
+// dependency on it is never a live local region that a return or thread hand-off outlives.
+func isProgramRegionSymbol(region *Symbol) bool {
+	if region == nil {
+		return false
+	}
+	_, program := region.Node.(*ast.GlobalRegionDecl)
+	return program
 }
 
 func invalidateRegionDependencyInState(state regionRefState, region *Symbol, predicate func(regionDependencyState) bool, reason string) (regionRefState, bool) {

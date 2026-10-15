@@ -59,3 +59,15 @@ func (a *Analyzer) checkProgramRegionSlotStore(arg ast.Expr, expected, actual Ty
 	}
 	a.checkNestedRegionStoreEscape(arg, arg, expected, actual)
 }
+
+// analyzeRegionOwnerExpr analyzes an expression in region-owner position (`new[X]`,
+// `in X:`, a literal's owner), the one place a program-lived region may be named as a value.
+func (a *Analyzer) analyzeRegionOwnerExpr(expr ast.Expr) Type {
+	if _, bare := stripParenExpr(expr).(*ast.Ident); !bare {
+		return a.analyzeExpr(expr) // only a bare name is exempt, never `&source` inside a call
+	}
+	a.programRegionNameUse++
+	t := a.analyzeExpr(expr)
+	a.programRegionNameUse--
+	return t
+}

@@ -64,6 +64,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
 					return
 				}
+				if sym.Kind == SymbolRegion && a.programRegionNameUse == 0 {
+					if _, program := sym.Node.(*ast.GlobalRegionDecl); program {
+						// docs/128 rule 1 holds only because nothing frees or resets the program
+						// arena: its Arena value never reaches code that could.
+						a.errorf(n.Pos(), "program-lived region %q can only be named as a region (`in %s:`, `new[%s]`, `@%s`), not used as an Arena value", n.Name, n.Name, n.Name, n.Name)
+						return
+					}
+				}
 				if sym.Kind == SymbolCheckpoint {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore %q", n.Name, n.Name)
 					return

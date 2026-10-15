@@ -89,6 +89,7 @@ const (
 
 type Analyzer struct {
 	programRegions                       map[string]bool
+	programRegionNameUse                 int
 	trustedRuntimeSourceFiles            map[string]bool
 	headerFunctionNames                  headerFunctionNameIndex
 	headerStabilityCompleted             map[*ast.FuncDecl]bool

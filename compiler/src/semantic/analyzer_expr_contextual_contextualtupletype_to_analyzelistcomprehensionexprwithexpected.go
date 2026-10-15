@@ -591,7 +591,7 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		}
 	}
 	if expr.Owner != nil {
-		ownerType := a.analyzeExpr(expr.Owner)
+		ownerType := a.analyzeRegionOwnerExpr(expr.Owner)
 		arenaType := a.namedTypes["Arena"]
 		isArena := arenaType != nil && AssignableTo(arenaType, ownerType)
 		if !isArena {
@@ -727,7 +727,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	expectedSet, useExpectedSet := contextualSetLiteralType(expected)
 	regionAvailable := (useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) || (useExpectedDict && a.regionAvailableForContainer(expectedDict)) || (useExpectedSet && a.regionAvailableForContainer(expectedSet))
 	if expr.Owner != nil {
-		ownerType := a.analyzeExpr(expr.Owner)
+		ownerType := a.analyzeRegionOwnerExpr(expr.Owner)
 		arenaType := a.namedTypes["Arena"]
 		isArena := arenaType != nil && AssignableTo(arenaType, ownerType)
 		if !isArena {

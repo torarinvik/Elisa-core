@@ -95,7 +95,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 					return mergeRegionRefStatesWithExplicitFields(states, fieldStates)
 				}
 			}
-			if ownerType := a.analyzeExpr(n.Owner); ownerType != nil {
+			if ownerType := a.analyzeRegionOwnerExpr(n.Owner); ownerType != nil {
 				if _, ok := ownerType.(*PackedEnumStoreType); ok {
 					return a.regionRefStateForExpr(n.Owner)
 				}

@@ -383,7 +383,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	}
 	storeType := a.exprTypes[stmt.Store]
 	if storeType == nil {
-		storeType = a.analyzeExpr(stmt.Store)
+		storeType = a.analyzeRegionOwnerExpr(stmt.Store)
 	}
 	// Arena/region: set the current alloc expr for activeContainerRegionName
 	arenaType := a.namedTypes["Arena"]
