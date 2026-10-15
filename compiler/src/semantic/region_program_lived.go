@@ -226,3 +226,13 @@ func (a *Analyzer) typeIsProgramLivedCached(t Type) bool {
 	a.programLivedTypes[t] = verdict
 	return verdict
 }
+
+// darrayElemsProgramLived: t is (a reference to) a darray whose element type is program-lived
+// and can hold region references -- its element VALUES reach only program-region storage.
+func (a *Analyzer) darrayElemsProgramLived(t Type) bool {
+	da, ok := stripRefForBounds(t).(*DArrayType)
+	if !ok || da == nil || da.Elem == nil || containsTypeParam(da.Elem) {
+		return false
+	}
+	return a.typeCanContainRegionRefs(da.Elem, map[string]bool{}) && a.typeIsProgramLivedCached(da.Elem)
+}
