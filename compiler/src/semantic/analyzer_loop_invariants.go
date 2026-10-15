@@ -38,6 +38,10 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	if len(invs) == 0 {
 		return nil, false
 	}
+	// The invariants are proven before the body (which holds them) is analyzed, so their nodes carry
+	// no types yet and the SMT tier declines on any field access or call. Type them quietly on the
+	// pre-loop scope; the in-place analysis of the body re-types them and reports any diagnostics.
+	a.typeLoopInvariantsQuietly(invs)
 	// Capture the body's net effect on the loop variables as a simultaneous substitution. A body we
 	// cannot fully account for (calls, non-arithmetic writes, address-taking, control flow) declines
 	// capture — establishment still runs (it needs no body model), but preservation cannot, and no
@@ -125,8 +129,32 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 			paths, pathsOK = p, true
 		}
 	}
+	// When the joint focus (every invariant's variables) is unmodelable, each invariant may still be
+	// modeled on its own focus: preservation of `slot < cap` only needs the writes to slot and cap.
+	perInvPaths := map[*ast.ContractStmt][]loopBodyPath{}
 	if !captured && !pathsOK {
-		return nil, false
+		for _, inv := range candidates {
+			focus := map[string]bool{}
+			collectExprIdentNames(inv.Cond, focus)
+			if p, ok := a.enumerateLoopBodyPaths(stmt.Body, focus); ok {
+				for _, path := range p {
+					a.typeLoopSubstCastsForSMT(path.subst)
+				}
+				perInvPaths[inv] = p
+			}
+		}
+		if len(perInvPaths) == 0 {
+			return nil, false
+		}
+		kept := candidates[:0:0]
+		for _, inv := range candidates {
+			if _, ok := perInvPaths[inv]; ok {
+				kept = append(kept, inv)
+			} else {
+				allProven = false
+			}
+		}
+		candidates = kept
 	}
 	// Preservation is proven JOINTLY: each surviving invariant must be preserved under the hypothesis
 	// of the surviving SET. An invariant that fails is removed and the rest are re-proven without it,
@@ -164,7 +192,11 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 				preserveTier[inv] = ProofProvenSMT
 				continue
 			}
-			for _, path := range paths {
+			invPaths := paths
+			if !pathsOK {
+				invPaths = perInvPaths[inv]
+			}
+			for _, path := range invPaths {
 				if path.exits {
 					continue
 				}
@@ -325,6 +357,12 @@ func (a *Analyzer) proveLoopClause(clause ast.Expr, subst map[string]ast.Expr, s
 	a.currentScope = scope
 	defer func() { a.currentScope = saved }()
 	if a.proveLoopClauseAffine(clause, subst, scope) {
+		return true, false
+	}
+	// Establishment (no substitution) reads the live pre-loop facts, so the requires ladder the
+	// in-place check uses applies too: index-bound facts (`slot = h & mask` with `mask = cap - 1`
+	// bounds slot below cap) and the other non-SMT tiers.
+	if subst == nil && a.proveRequiresClause(clause, nil) == requiresProven {
 		return true, false
 	}
 	// SMT translates the clause against the scope's assert/flow facts (and the enclosing function's
@@ -1335,5 +1373,23 @@ func guardedInvariantGoal(cond, inv ast.Expr) ast.Expr {
 		Op:       lexer.TOKEN_OR,
 		Left:     &ast.UnaryExpr{Position: cond.Pos(), Op: lexer.TOKEN_NOT, Operand: ast.CloneExpr(cond)},
 		Right:    inv,
+	}
+}
+
+func (a *Analyzer) typeLoopInvariantsQuietly(invs []*ast.ContractStmt) {
+	savedSuppress := a.suppressDiagnostics
+	savedProofs := len(a.proofReport)
+	a.suppressDiagnostics = true
+	a.ghostReadAllowed++
+	defer func() {
+		a.suppressDiagnostics = savedSuppress
+		a.ghostReadAllowed--
+		// Proof records belong to the real (in-place) analysis, not this typing pass.
+		a.proofReport = a.proofReport[:savedProofs]
+	}()
+	for _, inv := range invs {
+		if inv != nil && inv.Cond != nil && a.exprTypes[inv.Cond] == nil {
+			a.analyzeCondExpr(inv.Cond)
+		}
 	}
 }
