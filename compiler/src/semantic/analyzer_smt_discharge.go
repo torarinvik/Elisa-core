@@ -4465,18 +4465,28 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	// contract-sound postcondition holds for the actual arguments.
 	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
 	var recursiveCert recursiveProofCertificate
+	if recursiveProofCall && tr.a.recursiveCertInProgress[call] {
+		// Re-entered while proving this very call's certificate or requires (the goal mentions a local defined by
+		// the call). Decline the recursive ensure assumption here: assuming less is always sound.
+		recursiveProofCall = false
+	}
 	if recursiveProofCall {
 		callPath := tr.a.contractCallPath(call)
+		if tr.a.recursiveCertInProgress == nil {
+			tr.a.recursiveCertInProgress = map[*ast.CallExpr]bool{}
+		}
+		tr.a.recursiveCertInProgress[call] = true
 		var ok bool
 		recursiveCert, ok = tr.a.recursiveCallCertificateUnderPath(tr.a.currentFuncDecl, decl, call, callPath)
 		if !ok {
 			recursiveProofCall = false
 		}
-	}
-	if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
-		tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
-		tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
-		recursiveProofCall = false
+		if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
+			tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
+			tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
+			recursiveProofCall = false
+		}
+		delete(tr.a.recursiveCertInProgress, call)
 	}
 	ensureEnv := make(map[string]string, len(env)+1)
 	for name, term := range env {
