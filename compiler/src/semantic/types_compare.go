@@ -109,9 +109,21 @@ func SameType(a, b Type) bool {
 	if sameTypeRuntimeCompatible(a, b) {
 		return true
 	}
-	if aID, ok := TryCanonicalTypeID(a); ok {
-		if bID, ok := TryCanonicalTypeID(b); ok {
-			return aID == bID
+	// Canonical-ID equality without the registry: two types get the same ID exactly when their
+	// canonical keys are equal, so compare the keys directly (no global lock, no map lookup).
+	// Two builtins' keys differ only in the name, and a type's key equals itself, so both cases
+	// skip building keys. (SameType's keys were ~12% of all bytes allocated self-compiling stage1.)
+	if ba, ok := a.(*BuiltinType); ok {
+		if bb, ok := b.(*BuiltinType); ok {
+			return ba.Name == bb.Name
+		}
+	}
+	if aKey, ok := canonicalTypeIDKey(a); ok {
+		if a == b {
+			return true
+		}
+		if bKey, ok := canonicalTypeIDKey(b); ok {
+			return aKey == bKey
 		}
 	}
 	switch ta := a.(type) {

@@ -108,12 +108,14 @@ const optimizationInlinerThresholdO3 = 400
 // LoopUnroll reads it only when OptLevel > 2, so -O1/-O2 output is unchanged (a test checks this).
 // It is installed lazily, the first time this process optimises at -O3. part_optimize in
 // parallel_emit.c installs the same value in worker processes.
-const optimizationUnrollThresholdO3 = 600
+// Kept as a package variable so the subprocess test can compare LLVM's default budget (300)
+// with the production setting (600) before LLVM's process-global option is initialized.
+var optimizationUnrollThresholdO3 = 600
 
 var o3UnrollThresholdOnce sync.Once
 
 func ensureO3UnrollThreshold(optLevel OptimizationLevel) {
-	if optLevel < OptimizationLevel3 {
+	if optLevel < OptimizationLevel3 || optimizationUnrollThresholdO3 <= 0 {
 		return
 	}
 	o3UnrollThresholdOnce.Do(func() { C.elisacoreEnsureO3UnrollThreshold(C.int(optimizationUnrollThresholdO3)) })
