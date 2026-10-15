@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 
@@ -1267,6 +1268,9 @@ func (a *Analyzer) queueCallArgumentStoreChecks(call *ast.CallExpr) {
 			continue
 		}
 		if a.returnBorrowCallArgStoreFlow(call, index).Local {
+			if storeScanTrace {
+				a.traceLocalBorrowStoreArgs(call, index)
+			}
 			a.errorf(call.Pos(), "%s; it dangles once the function returns. Store the value or owner by value, or clone it into a longer-lived region", message)
 		}
 	}
@@ -1307,4 +1311,22 @@ func (a *Analyzer) returnBorrowCallArgStoreFlow(call *ast.CallExpr, index int) r
 	keep := func(other int) bool { return !a.callArgNeverReaches(call, other, index) }
 	flow := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, keep, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 	return flow
+}
+
+// traceLocalBorrowStoreArgs (trace only): which other argument's flow is frame-local.
+func (a *Analyzer) traceLocalBorrowStoreArgs(call *ast.CallExpr, index int) {
+	fnType := a.returnBorrowCalleeSignature(call)
+	if fnType == nil {
+		return
+	}
+	args := returnBorrowCallArgs(call)
+	for other := range args {
+		if other == index || a.callArgNeverReaches(call, other, index) {
+			continue
+		}
+		f := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, func(k int) bool { return k == other }, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+		if f.Local {
+			fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d arg=%s type=%s\n", call.Pos(), index+1, other+1, args[other].Pos(), typeString(a.exprTypes[args[other]]))
+		}
+	}
 }
