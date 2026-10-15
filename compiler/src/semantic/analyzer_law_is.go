@@ -704,6 +704,10 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 			continue
 		}
 		clause = normalizeBoolLiteralEnsure(clause)
+		if a.ensureGoalReflexivelyValid(clause, nil) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
+			continue
+		}
 		// Written-field fast-path: `ensure self.f == E` where the body writes `self.f <- V` and the
 		// recorded V proves the clause (V == 0 for `self.f == 0`; or both `self.a` and `self.b` trace
 		// to the same value expr for `self.a == self.b`). The fact is dropped at every mutation/borrow/
@@ -981,6 +985,10 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			continue
 		}
 		clause = normalizeBoolLiteralEnsure(clause)
+		if a.ensureGoalReflexivelyValid(clause, subst) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
+			continue
+		}
 		// Reflexivity fast-path: `ensure result == E` where the body is `return E` and E is a pure
 		// place read (ident / field projection) holds definitionally — result IS the value of E at this
 		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a
