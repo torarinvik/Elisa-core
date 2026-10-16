@@ -381,6 +381,16 @@ func substituteLemmaEnsureWithBudget(expr ast.Expr, subst map[string]ast.Expr, w
 			newArgs[i] = ra
 		}
 		return &ast.CallExpr{Position: n.Position, Func: fn, Args: newArgs}, true
+	case *ast.TupleExpr:
+		elems := make([]ast.Expr, len(n.Elems))
+		for i, elem := range n.Elems {
+			re, ok := substituteLemmaEnsureWithBudget(elem, subst, work, depth+1)
+			if !ok {
+				return nil, false
+			}
+			elems[i] = re
+		}
+		return &ast.TupleExpr{Position: n.Position, Elems: elems}, true
 	default:
 		return nil, false
 	}

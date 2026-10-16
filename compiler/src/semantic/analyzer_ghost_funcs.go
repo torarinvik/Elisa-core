@@ -29,7 +29,96 @@ func (a *Analyzer) validateGhostFuncDecl(fn *ast.FuncDecl) {
 		a.errorf(fn.Pos(), "ghost function %q body must be a pure total return tree (`return` or exhaustive `if`/`else` returns), with no mutation, loops, or effectful statements", fn.Name)
 		return
 	}
-	if !a.functionPureEquationShape(fn) {
-		a.errorf(fn.Pos(), "ghost function %q must be pure and total so its defining equation can be used by the prover", fn.Name)
+	if a.functionPureEquationShape(fn) {
+		return
 	}
+	// The prover models only integer/bool/sview signatures. A ghost over other types (a darray, a
+	// tuple or struct result) gets no defining equation, but it must still be pure and total: its
+	// return tree may only call ghosts or other pure-total functions.
+	if !a.ghostSignatureModelable(fn) && a.ghostBodyPureTotal(fn, map[*ast.FuncDecl]bool{}) {
+		return
+	}
+	a.errorf(fn.Pos(), "ghost function %q must be pure and total so its defining equation can be used by the prover", fn.Name)
+}
+
+// ghostSignatureModelable reports whether every parameter and the result have an SMT model, i.e.
+// whether a defining equation is possible at all.
+func (a *Analyzer) ghostSignatureModelable(fn *ast.FuncDecl) bool {
+	sym, ok := a.symbolForFuncDecl(fn)
+	if !ok || sym == nil {
+		return true
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return true
+	}
+	if !a.smtEquationResultType(fnType.Return) {
+		return false
+	}
+	for _, pt := range fnType.Params {
+		if !a.smtEquationParamType(pt) {
+			return false
+		}
+	}
+	return true
+}
+
+// ghostBodyPureTotal is the type-independent purity/totality gate: the body is a pure return tree
+// (no mutation, loops or effectful statements), the function declares no effects and no mutable
+// parameter, and every call goes to a ghost or to a function that passes this same gate.
+func (a *Analyzer) ghostBodyPureTotal(fn *ast.FuncDecl, inProgress map[*ast.FuncDecl]bool) bool {
+	if fn == nil || fn.IsLemma || fn.DecreasesWild != "" || len(fn.Permissions) != 0 {
+		return false
+	}
+	if inProgress[fn] {
+		return true
+	}
+	for _, param := range fn.Params {
+		if param.Mutable || a.paramIsMutable(param) {
+			return false
+		}
+	}
+	body, ok := pureReturnExpr(fn)
+	work := pureReturnMaxWork
+	if !ok || !pureReturnExpressionShapeWithinBudget(body, &work, 0) {
+		return false
+	}
+	inProgress[fn] = true
+	defer delete(inProgress, fn)
+	pure := true
+	walkStoreScanNodes([]ast.Stmt{&ast.ExprStmt{Expr: body}}, func(node any) {
+		call, isCall := node.(*ast.CallExpr)
+		if !pure || !isCall || call == nil || a.ghostCallIsValueConversion(call) {
+			return
+		}
+		callee, ok := a.resolveDirectCallFuncDecl(call)
+		switch {
+		case !ok || callee == nil:
+			pure = false
+		case callee.IsGhost:
+			// Validated on its own; recursion terminates through its `decreases` check.
+		case !a.functionPureEquationShape(callee) && !a.ghostBodyPureTotal(callee, inProgress):
+			pure = false
+		}
+	})
+	return pure
+}
+
+// ghostCallIsValueConversion admits the builtin, total scalar conversions `x.u64()`.
+func (a *Analyzer) ghostCallIsValueConversion(call *ast.CallExpr) bool {
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok || field == nil || len(call.Args) != 0 {
+		return false
+	}
+	switch field.Field {
+	case "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize":
+	default:
+		return false
+	}
+	t, known := a.exprTypes[field.Object]
+	if !known || t == nil {
+		return false
+	}
+	t = stripRefForBounds(t)
+	return IsNumericType(t) && !IsFloatType(t)
 }
