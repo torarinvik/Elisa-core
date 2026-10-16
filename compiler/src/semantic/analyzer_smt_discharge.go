@@ -1311,6 +1311,11 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		env[name] = bterm
 		return true
 	}
+	if t := a.containerArgType(argExpr); t != nil && !tr.isArrayLike(t) {
+		if tr.bindContainerArg(env, name, argExpr, argEnv) {
+			return true
+		}
+	}
 	if tr.isArrayLike(a.exprTypes[argExpr]) {
 		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
 		if !ok {
@@ -2373,6 +2378,10 @@ type smtTranslator struct {
 	generalizeGoalAtoms bool
 	// ghostUFDecls names the uninterpreted functions already declared for ghost-call congruence.
 	ghostUFDecls map[string]bool
+	// Container theory (analyzer_smt_container_theory.go): bases whose value is fixed for the query,
+	// and the callee whose formals are being bound.
+	stableContainers map[string]bool
+	bindingCallee    *ast.FuncDecl
 	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
 	// `g(n-1)` must remain distinct; only re-entering the exact same ground instance consumes fuel.
 	callEqInFlight map[string]int
@@ -2476,7 +2485,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
-				if tr.lengthOnly[bound] {
+				// A container-theory base is not a flat integer array: its elements are read
+				// through the container theory only.
+				if tr.lengthOnly[bound] || tr.stableContainers[bound] {
 					return "", false
 				}
 				return bound, true
@@ -4706,10 +4717,17 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if expandsContract && (tr.callClauseDepth >= smtCallClauseMaxDepth || tr.callClauseExpansions >= smtCallClauseMaxExpansions) {
 		return ret, true
 	}
+	// A nested call of a callee whose clauses are being expanded gets no further clause expansion,
+	// but may still receive its (bounded, guarded) defining equation: that is how a terminating
+	// recursive spec unfolds more than one level. Its requires are translated for the guard only.
+	equationOnly := false
 	if expandsContract && tr.callClauseInFlight[decl] {
-		return ret, true
+		if !tr.callEquationEligible(decl) || tr.a.isRecursiveProofCall(decl) {
+			return ret, true
+		}
+		equationOnly = true
 	}
-	if expandsContract {
+	if expandsContract && !equationOnly {
 		tr.callClauseExpansions++
 		tr.callClauseDepth++
 		tr.callClauseInFlight[decl] = true
@@ -4725,7 +4743,10 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 		}
 		subst[param.Name] = args[i]
 	}
+	priorBinding := tr.bindingCallee
+	tr.bindingCallee = decl
 	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	tr.bindingCallee = priorBinding
 	opaqueArgs := false
 	if !ok {
 		// An argument outside the fragment becomes an unconstrained value of its parameter's type.
@@ -4754,6 +4775,12 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	}
 	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
 	// contract-sound postcondition holds for the actual arguments.
+	if equationOnly {
+		if !opaqueArgs {
+			tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, false, env)
+		}
+		return ret, true
+	}
 	recursiveProofCall := tr.a.isRecursiveProofCall(decl) && !opaqueArgs
 	var recursiveCert recursiveProofCertificate
 	if recursiveProofCall && tr.a.recursiveCertInProgress[call] {
@@ -5435,6 +5462,16 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 	// recursive contract calls without asserting any property of the view contents.
 	if _, ok := stripRefForBounds(tr.a.exprTypes[arg]).(*SViewType); ok {
 		return tr.arrayTermEnv(arg, env)
+	}
+	if t := tr.a.containerArgType(arg); t != nil && !tr.isArrayLike(t) {
+		inner := stripOptimizationParens(arg)
+		if addr, isAddr := inner.(*ast.AddrOfExpr); isAddr && addr != nil {
+			inner = addr.Operand
+		}
+		if base, ok := tr.containerBase(inner, env); ok {
+			return "container:" + base, true
+		}
+		return "", false
 	}
 	if id, ok := stripOptimizationParens(arg).(*ast.Ident); ok && id != nil && tr.a.currentFuncDecl != nil {
 		if _, bound := env[id.Name]; !bound {

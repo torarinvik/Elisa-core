@@ -94,12 +94,24 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		a.warnf(measures[0].Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
 		return
 	}
+	allProven := true
+	defer func() {
+		if allProven {
+			// Every recursive call's decrease is proven: fn is total, a property of fn itself that
+			// callers' defining-equation gate may rely on (measureVerifiedForCalls).
+			if a.terminationVerified == nil {
+				a.terminationVerified = map[*ast.FuncDecl]bool{}
+			}
+			a.terminationVerified[fn] = true
+		}
+	}()
 	for _, site := range calls {
 		cert, ok := a.directNumericTerminationCertificateUnderPath(fn, site.Call, site.Path)
 		if ok {
 			a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", cert.Outcome)
 			continue
 		}
+		allProven = false
 		a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", ProofRefuted)
 		witness := ""
 		if cert.Witness != "" {
@@ -793,7 +805,8 @@ func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []recursive
 	// the live scope when we are analyzing decl itself; for a foreign callee whose params are not in
 	// scope, decline (conservative — forgoes the equation, never fabricates it).
 	if decl != a.currentFuncDecl {
-		return false
+		// A foreign callee's measure was proven when decl itself was analyzed (checkTermination).
+		return a.terminationVerified[decl]
 	}
 	for _, c := range calls {
 		subst := a.substForSelfCall(decl, c.Call)
@@ -1028,6 +1041,11 @@ func (a *Analyzer) smtEquationParamType(t Type) bool {
 	// accepted only when its indexed reads pass pureEquationSViewIndex and the surrounding function
 	// is an immutable pure-return tree.
 	if _, ok := t.(*SViewType); ok {
+		return true
+	}
+	// A container parameter enters the equation through the container theory: its length and, for
+	// modeled element types, its elements, read through a stable base.
+	if _, ok := StripAggregateStateType(t).(*DArrayType); ok {
 		return true
 	}
 	return false

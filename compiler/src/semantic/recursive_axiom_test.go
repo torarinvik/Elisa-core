@@ -190,7 +190,10 @@ def grow(p: Point) -> i64:
 	}
 }
 
-func TestGhostRecursiveEquationDeclinesWhenBoundUnavailable(t *testing.T) {
+// A recursive ghost whose `decreases` was proven when it was analyzed is total, so a later caller
+// may unfold its guarded defining equation (countdown(0) == 0). This previously declined because
+// the measure was only re-checked in the callee's own scope. The false claim must still fail.
+func TestGhostRecursiveEquationUnfoldsAtForeignSite(t *testing.T) {
 	src := `
 ghost def countdown(n: i64) -> i64:
     requires n >= 0
@@ -202,9 +205,24 @@ ghost def countdown(n: i64) -> i64:
 def zero() -> i64:
     ensure result == countdown(0)
     return 0
+
+def off() -> i64:
+    ensure result == countdown(0)
+    return 1
 `
-	r := analyzeContractStrict(t, "ghost_recursive_declines.elisa", src)
-	if len(r.Errors()) == 0 {
-		t.Fatalf("expected recursive ghost equation without a safe unfolding certificate to decline, not accept")
+	r := analyzeContractStrict(t, "ghost_recursive_foreign.elisa", src)
+	for _, e := range r.Errors() {
+		if strings.Contains(e, `"zero"`) {
+			t.Fatalf("zero: expected countdown(0) == 0 by unfolding, got: %v", r.Errors())
+		}
+	}
+	found := false
+	for _, e := range r.Errors() {
+		if strings.Contains(e, `"off"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("off: countdown(0) == 1 must be refuted, got: %v", r.Errors())
 	}
 }

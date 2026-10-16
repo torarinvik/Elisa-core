@@ -833,6 +833,7 @@ type Analyzer struct {
 	// (`f(args) == body[params:=args]`) may be soundly asserted to the SMT tier. InProgress breaks
 	// self/mutual-recursive purity checks. A false verdict only forgoes the equation; it is never unsound.
 	definingEquationCache      map[*ast.FuncDecl]bool
+	terminationVerified        map[*ast.FuncDecl]bool
 	definingEquationInProgress map[*ast.FuncDecl]bool
 	// lastSMTCounterexample holds the satisfying model (as a readable "x=5, n=0" string) from the most
 	// recent FAILED refinement SMT proof, so the diagnostic that follows can show a concrete witness.
