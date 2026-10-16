@@ -224,6 +224,7 @@ func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]
 		subst[param.Name] = args[i]
 	}
 	tr.assumeAggregateCallEnsures(decl, subst, env, token)
+	tr.assumeGuardPrefixReturns(decl, subst, env, token)
 	return token, true
 }
 
