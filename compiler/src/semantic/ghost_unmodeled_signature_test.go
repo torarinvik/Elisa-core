@@ -95,3 +95,36 @@ ghost def span_of(names: darray[sview]&) -> Span:
 		t.Fatalf("impure struct-literal ghost accepted: %s", diags)
 	}
 }
+
+// A modelable signature whose body leaves the equation fragment (a slice comparison) gets no
+// defining equation but is still a valid pure, total ghost.
+func TestGhostUnmodeledBodySliceAccepted(t *testing.T) {
+	source := `ghost def find_from(text: sview, needle: sview, index: usize) -> usize:
+    requires needle.len > 0 and needle.len <= text.len and index <= text.len - needle.len + 1
+    decreases text.len - needle.len + 1 - index
+    return text.len if index == text.len - needle.len + 1
+    return index if text[index:index + needle.len] == needle
+    return find_from(text, needle, index + 1)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ghost_slice_body.elisa", source, ensureDiagOpts)
+	if diags := allDiagnostics(result); strings.Contains(diags, "ghost function") {
+		t.Fatalf("pure total slice ghost rejected: %s", diags)
+	}
+}
+
+// A modelable signature calling an effectful function stays rejected.
+func TestGhostModelableSignatureImpureCallRejected(t *testing.T) {
+	source := `def noisy(n: i64) -> i64:
+    can Memory.Allocate:
+        xs: mutable darray[i64] = []
+        xs.push(n)
+        return xs.count.i64()
+
+ghost def noisy_spec(n: i64) -> i64:
+    return noisy(n)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ghost_modelable_impure.elisa", source, ensureDiagOpts)
+	if diags := allDiagnostics(result); !strings.Contains(diags, `ghost function "noisy_spec" must be pure and total`) {
+		t.Fatalf("impure modelable ghost accepted: %s", diags)
+	}
+}

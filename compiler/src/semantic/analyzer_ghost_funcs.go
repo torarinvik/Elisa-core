@@ -32,35 +32,14 @@ func (a *Analyzer) validateGhostFuncDecl(fn *ast.FuncDecl) {
 	if a.functionPureEquationShape(fn) {
 		return
 	}
-	// The prover models only integer/bool/sview signatures. A ghost over other types (a darray, a
-	// tuple or struct result) gets no defining equation, but it must still be pure and total: its
-	// return tree may only call ghosts or other pure-total functions.
-	if !a.ghostSignatureModelable(fn) && a.ghostBodyPureTotal(fn, map[*ast.FuncDecl]bool{}) {
+	// A defining equation needs an SMT-modelable signature and body (integer/bool/sview values,
+	// no slices or calls to unmodeled functions). A ghost outside that fragment gets no defining
+	// equation, but it must still be pure and total: its return tree may only call ghosts or
+	// other pure-total functions.
+	if a.ghostBodyPureTotal(fn, map[*ast.FuncDecl]bool{}) {
 		return
 	}
 	a.errorf(fn.Pos(), "ghost function %q must be pure and total so its defining equation can be used by the prover", fn.Name)
-}
-
-// ghostSignatureModelable reports whether every parameter and the result have an SMT model, i.e.
-// whether a defining equation is possible at all.
-func (a *Analyzer) ghostSignatureModelable(fn *ast.FuncDecl) bool {
-	sym, ok := a.symbolForFuncDecl(fn)
-	if !ok || sym == nil {
-		return true
-	}
-	fnType, ok := sym.Type.(*FuncType)
-	if !ok || fnType == nil {
-		return true
-	}
-	if !a.smtEquationResultType(fnType.Return) {
-		return false
-	}
-	for _, pt := range fnType.Params {
-		if !a.smtEquationParamType(pt) {
-			return false
-		}
-	}
-	return true
 }
 
 // ghostBodyPureTotal is the type-independent purity/totality gate: the body is a pure return tree

@@ -391,6 +391,19 @@ func substituteLemmaEnsureWithBudget(expr ast.Expr, subst map[string]ast.Expr, w
 			elems[i] = re
 		}
 		return &ast.TupleExpr{Position: n.Position, Elems: elems}, true
+	case *ast.SliceExpr:
+		parts := [3]ast.Expr{n.Object, n.Start, n.End}
+		for i, part := range parts {
+			if part == nil {
+				continue
+			}
+			rp, ok := substituteLemmaEnsureWithBudget(part, subst, work, depth+1)
+			if !ok {
+				return nil, false
+			}
+			parts[i] = rp
+		}
+		return &ast.SliceExpr{Position: n.Position, Object: parts[0], Start: parts[1], End: parts[2]}, true
 	case *ast.StructLitExpr:
 		if n.CopyBase != nil || len(n.Spreads) != 0 {
 			return nil, false
