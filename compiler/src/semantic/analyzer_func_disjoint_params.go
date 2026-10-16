@@ -42,15 +42,28 @@ func orderedPair(i, j int) [2]int {
 // generic targets all return false: their call sites are not guaranteed to be fully observable
 // by name, so the conservative choice is to not record them (and finalize excludes such callees).
 func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl, bool) {
-	if call == nil || a.currentScope == nil {
+	if call == nil {
+		return nil, false
+	}
+	// Declaration-level validation (for example `validateGhostFuncDecl`) runs outside any function
+	// body, so there is no current scope. Calls there can only name program-level functions, which
+	// the global scope resolves exactly; a function body always resolves through its own scope.
+	scope := a.currentScope
+	if scope == nil {
+		scope = a.globalScope
+	}
+	if scope == nil {
 		return nil, false
 	}
 	ident, ok := call.Func.(*ast.Ident)
 	if !ok || ident == nil {
 		return nil, false
 	}
-	sym, ok := a.currentScope.Lookup(ident.Name)
+	sym, ok := scope.Lookup(ident.Name)
 	if !ok || sym == nil {
+		return nil, false
+	}
+	if a.currentScope == nil && sym.Kind != SymbolFunc {
 		return nil, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
