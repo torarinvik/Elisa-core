@@ -3044,7 +3044,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// SPECIAL CASE: if the entire field expression evaluates to a compile-time constant (e.g.
 		// `"abc".len == 3`), emit the integer directly so the proof discharges at the const tier
 		// rather than introducing an opaque length symbol.
-		if n.Field == "count" || n.Field == "len" {
+		// A tuple/struct field that happens to be NAMED `count`/`len` is an ordinary field read
+		// (handled by the projection below), never a container length.
+		if (n.Field == "count" || n.Field == "len") && !tr.a.recordFieldNamed(n.Object, n.Field) {
 			if c, ok := tr.a.constIntValue(n); ok {
 				return tr.constIntTerm(n, c), true
 			}
@@ -6362,4 +6364,22 @@ func (tr *smtTranslator) literalMembershipTerm(left, right ast.Expr, env map[str
 		return parts[0], true
 	}
 	return "(or " + strings.Join(parts, " ") + ")", true
+}
+
+// recordFieldNamed reports whether obj is a tuple or struct value with a declared field `name`.
+func (a *Analyzer) recordFieldNamed(obj ast.Expr, name string) bool {
+	switch t := stripRefForBounds(a.exprTypes[obj]).(type) {
+	case *TupleType:
+		for _, field := range t.Fields {
+			if field.Name == name {
+				return true
+			}
+		}
+	case *StructType:
+		if t != nil && t.Fields != nil {
+			_, ok := t.Fields[name]
+			return ok
+		}
+	}
+	return false
 }
