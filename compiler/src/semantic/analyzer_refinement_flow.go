@@ -1287,10 +1287,25 @@ func (a *Analyzer) mergePostIfRangeFacts(entry map[string]numRange, branches []m
 				joined = joined.join(r)
 			}
 		}
-		if a.currentScope.rangeFacts == nil {
-			a.currentScope.rangeFacts = map[string]numRange{}
+		// The joined range replaces the entry range wherever it lives. Lookup intersects every
+		// scope's fact, so an ancestor scope (e.g. outside the `can` block that holds this `if`)
+		// keeping the pre-if range would silently override the widening.
+		// The joined value is stored where the outermost such fact lived: it holds from this
+		// point on, and that scope outlives the enclosing block.
+		home := a.currentScope
+		for sc := a.currentScope.Parent; sc != nil; sc = sc.Parent {
+			if _, had := sc.rangeFacts[name]; had && a.rangeFactBindingCurrent(sc, name) {
+				delete(sc.rangeFacts, name)
+				home = sc
+			}
 		}
-		a.currentScope.rangeFacts[name] = joined
+		if home != a.currentScope && a.currentScope.rangeFacts != nil {
+			delete(a.currentScope.rangeFacts, name)
+		}
+		if home.rangeFacts == nil {
+			home.rangeFacts = map[string]numRange{}
+		}
+		home.rangeFacts[name] = joined
 	}
 }
 
