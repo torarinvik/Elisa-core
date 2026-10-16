@@ -4278,6 +4278,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		if sel, ok := tr.dictMethodCall(n, "keys", env); ok {
 			return sel, true
 		}
+		if !tr.opaqueCallQuantifierIndependent(n, env) {
+			return "", false
+		}
 		// Try structural-predicate canonicalization first (a `ghost def ... -> bool` over a recursive
 		// datatype canonicalizes to one opaque Bool symbol + its bounded structural defining equation —
 		// see analyzer_structural_induction.go); fall back to the general ghost bool-call path for
@@ -4673,6 +4676,9 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if sel, ok := tr.dictMethodCall(call, "vals", argEnv); ok {
 		return sel, true
 	}
+	if !tr.opaqueCallQuantifierIndependent(call, argEnv) {
+		return "", false
+	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
 	if resultType == nil && direct && decl != nil {
@@ -5031,6 +5037,9 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	// array, so it can serve as the in-domain GUARD for a value-lookup goal.
 	if sel, ok := tr.dictMethodCall(call, "keys", argEnv); ok {
 		return sel, true
+	}
+	if !tr.opaqueCallQuantifierIndependent(call, argEnv) {
+		return "", false
 	}
 	// A PROTOCOL-METHOD bool call (`x.le(y)` where le is an interface method, docs/85 P3) is modeled as
 	// an UNINTERPRETED predicate: a stable Bool symbol keyed by (Interface.method, argument idents). The

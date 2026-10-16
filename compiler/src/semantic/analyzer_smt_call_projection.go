@@ -68,6 +68,9 @@ func (tr *smtTranslator) aggregateProjectionKey(n *ast.FieldExpr, env map[string
 	root, path := projectionChain(n)
 	switch r := root.(type) {
 	case *ast.CallExpr:
+		if !tr.opaqueCallQuantifierIndependent(r, env) {
+			return "", nil, true
+		}
 		token, ok := tr.callProjectionToken(r, env)
 		if !ok {
 			return "", nil, false
@@ -139,6 +142,9 @@ func (tr *smtTranslator) aggregateProjectionTerm(n *ast.FieldExpr, env map[strin
 		t, ok := tr.translateLocalProjection(local, false)
 		return t, ok, true
 	}
+	if key == "" {
+		return "", false, true
+	}
 	fieldType := tr.a.exprTypes[n]
 	if fieldType == nil {
 		if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
@@ -168,6 +174,9 @@ func (tr *smtTranslator) aggregateProjectionBool(n *ast.FieldExpr, env map[strin
 		t, ok := tr.translateLocalProjection(local, true)
 		return t, ok, true
 	}
+	if key == "" {
+		return "", false, true
+	}
 	fieldType := tr.a.exprTypes[n]
 	if fieldType == nil {
 		if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
@@ -186,6 +195,9 @@ func (tr *smtTranslator) aggregateProjectionBool(n *ast.FieldExpr, env map[strin
 // ensures over the token's projections.
 func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]string) (string, bool) {
 	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	if !tr.opaqueCallQuantifierIndependent(call, env) {
 		return "", false
 	}
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
