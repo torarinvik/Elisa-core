@@ -2911,6 +2911,12 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			return v.String(), true
 		}
 		return "", false
+	case *ast.CharLit:
+		// A char literal is the byte codegen emits for it (ParseCharLiteral, emitCharLiteral).
+		if v, ok := ParseCharLiteral(n); ok {
+			return smtInt(v), true
+		}
+		return "", false
 	case *ast.Ident:
 		if value, constant := tr.a.resolvedPrimitiveConstant(n); constant && value.Kind == ConstInt {
 			return tr.constIntTerm(n, value.Int), true
@@ -4077,7 +4083,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				}
 				return "(select " + dsym + "_keys " + key + ")", true
 			}
-			return "", false
+			return tr.literalMembershipTerm(n.Left, n.Right, env)
 		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
 			l, ok := tr.termEnv(n.Left, env)
 			if !ok {
@@ -6269,4 +6275,76 @@ func (a *Analyzer) smtCallLocalResultOnlyEnsures(tr *smtTranslator, b *strings.B
 		tr.markIntVar(name, sym.Type)
 		b.WriteString("(assert " + h + ")\n")
 	}
+}
+
+// literalMembershipTerm lowers `x in [a, lo ..= hi, …]` (and a bare `x in lo ..< hi`) over an
+// integer/char scrutinee and literal candidates the way codegen evaluates it
+// (emitMembershipCompareValueAndExpr): a disjunction of `x == a` and `lo <= x <= hi` (`< hi` for
+// `..<`). Any other candidate shape declines.
+func (tr *smtTranslator) literalMembershipTerm(left, right ast.Expr, env map[string]string) (string, bool) {
+	if t, ok := smtNumericValueType(tr.a.exprTypes[left]); !ok || IsFloatType(t) {
+		return "", false
+	}
+	var elems []ast.Expr
+	switch r := stripOptimizationParens(right).(type) {
+	case *ast.ListLitExpr:
+		if r == nil || r.Keys != nil || r.Owner != nil || len(r.Elems) == 0 {
+			return "", false
+		}
+		for _, spread := range r.Spreads {
+			if spread {
+				return "", false
+			}
+		}
+		elems = r.Elems
+	case *ast.MembershipRangeExpr:
+		elems = []ast.Expr{r}
+	default:
+		return "", false
+	}
+	literal := func(e ast.Expr) bool {
+		switch stripOptimizationParens(e).(type) {
+		case *ast.IntLit, *ast.CharLit:
+			return true
+		}
+		return false
+	}
+	x, ok := tr.termEnv(left, env)
+	if !ok {
+		return "", false
+	}
+	var parts []string
+	for _, elem := range elems {
+		if rng, ok := stripOptimizationParens(elem).(*ast.MembershipRangeExpr); ok {
+			if rng == nil || !literal(rng.Start) || !literal(rng.End) {
+				return "", false
+			}
+			lo, ok := tr.termEnv(rng.Start, env)
+			if !ok {
+				return "", false
+			}
+			hi, ok := tr.termEnv(rng.End, env)
+			if !ok {
+				return "", false
+			}
+			upper := "<="
+			if rng.Op == lexer.TOKEN_RANGE_LT {
+				upper = "<"
+			}
+			parts = append(parts, "(and (>= "+x+" "+lo+") ("+upper+" "+x+" "+hi+"))")
+			continue
+		}
+		if !literal(elem) {
+			return "", false
+		}
+		v, ok := tr.termEnv(elem, env)
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, "(= "+x+" "+v+")")
+	}
+	if len(parts) == 1 {
+		return parts[0], true
+	}
+	return "(or " + strings.Join(parts, " ") + ")", true
 }

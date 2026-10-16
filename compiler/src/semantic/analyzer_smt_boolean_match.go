@@ -359,7 +359,7 @@ func pureScalarMatchEquation(n *ast.MatchExpr) bool {
 		if !ok || !scalarMatchProofExpr(tail.Expr) {
 			return false
 		}
-		if i != len(n.Arms)-1 && !lemmaScalarMatchPattern(arm.Pattern) {
+		if i != len(n.Arms)-1 && !lemmaScalarMatchPattern(arm.Pattern) && !scalarCharOrRangePattern(arm.Pattern) {
 			return false
 		}
 	}
@@ -403,12 +403,33 @@ func (tr *smtTranslator) scalarMatchGuard(value ast.Expr, pattern ast.MatchPatte
 		if p.Pinned {
 			return "", false
 		}
-		if !lemmaScalarMatchPattern(p) {
+		if !lemmaScalarMatchPattern(p) && !scalarCharOrRangePattern(p) {
 			return "", false
 		}
 		return tr.boolTerm(&ast.BinaryExpr{Position: value.Pos(), Op: lexer.TOKEN_EQEQ, Left: value, Right: p.Value}, env)
 	case *ast.MatchStringLiteralPattern:
 		return tr.classifierStringEquality(value, &ast.StringLit{Value: p.Value}, env)
+	case *ast.MatchRangePattern:
+		// `lo..=hi` / `lo..<hi` over integer or char literal bounds (scalarCharOrRangePattern).
+		if !scalarCharOrRangePattern(p) {
+			return "", false
+		}
+		v, ok := tr.termEnv(value, env)
+		if !ok {
+			return "", false
+		}
+		lo, ok := tr.termEnv(p.Lo, env)
+		if !ok {
+			return "", false
+		}
+		hi, ok := tr.termEnv(p.Hi, env)
+		if !ok {
+			return "", false
+		}
+		if p.Inclusive {
+			return "(and (<= " + lo + " " + v + ") (<= " + v + " " + hi + "))", true
+		}
+		return "(and (<= " + lo + " " + v + ") (< " + v + " " + hi + "))", true
 	case *ast.MatchOrPattern:
 		var guards []string
 		for _, option := range p.Options {
@@ -428,7 +449,7 @@ func (tr *smtTranslator) scalarMatchGuard(value ast.Expr, pattern ast.MatchPatte
 
 func scalarMatchProofExpr(expr ast.Expr) bool {
 	switch n := expr.(type) {
-	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.StringLit:
+	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit:
 		return true
 	case *ast.ParenExpr:
 		return scalarMatchProofExpr(n.Inner)
@@ -520,4 +541,33 @@ func (a *Analyzer) classifierFrameCallDecl(call *ast.CallExpr) (*ast.FuncDecl, b
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
 	return decl, ok && decl != nil
+}
+
+// scalarCharOrRangePattern accepts the scalar arm patterns lemmaScalarMatchPattern leaves out: a char
+// literal (`'e'`), an integer/char range (`'0'..='9'`, `0..<10`), and or-patterns of them.
+func scalarCharOrRangePattern(pattern ast.MatchPattern) bool {
+	literalBound := func(e ast.Expr) bool {
+		switch stripOptimizationParens(e).(type) {
+		case *ast.IntLit, *ast.CharLit:
+			return true
+		}
+		return false
+	}
+	switch p := pattern.(type) {
+	case *ast.MatchLiteralPattern:
+		return p != nil && !p.Pinned && literalBound(p.Value)
+	case *ast.MatchRangePattern:
+		return p != nil && p.Lo != nil && p.Hi != nil && literalBound(p.Lo) && literalBound(p.Hi)
+	case *ast.MatchOrPattern:
+		if p == nil || len(p.Options) == 0 {
+			return false
+		}
+		for _, option := range p.Options {
+			if !lemmaScalarMatchPattern(option) && !scalarCharOrRangePattern(option) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
