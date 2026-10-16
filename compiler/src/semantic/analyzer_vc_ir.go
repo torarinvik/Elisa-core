@@ -667,6 +667,14 @@ func (tr *smtTranslator) lowerVCFormula(expr ast.Expr, env map[string]string) (v
 	// Atom: delegate the remaining leaves to the existing translator (equality, quantifier, predicate).
 	s, ok := tr.boolTerm(expr, env)
 	if !ok {
+		// GOAL GENERALIZATION (smtCheckGoal only): an atom outside the fragment becomes a fresh,
+		// unconstrained Bool. The atoms reached here sit in the goal's propositional skeleton
+		// (and/or/not), never under a quantifier, so the generalized goal G[b] proven for every b
+		// entails G[atom]. Each occurrence is its own variable: no correlation is assumed. This is
+		// never applied to hypotheses, where a free stand-in would not be implied by the fact.
+		if tr.generalizeGoalAtoms {
+			return vcMkAtom(tr.freshBoolAux()), true
+		}
 		return nil, false
 	}
 	return vcMkAtom(s), true

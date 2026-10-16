@@ -552,7 +552,14 @@ func ceOpElisa(op string) string {
 func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[string]string, extraHyps string) (proven bool, counterexample string, lowered bool) {
 	goal, ok := tr.lowerVCFormula(goalExpr, env)
 	if !ok {
-		return false, "", false
+		// Generalize the goal's untranslatable propositional atoms (analyzer_vc_ir.go): proving the
+		// goal for EVERY value of such an atom proves it for the atom's actual value.
+		tr.generalizeGoalAtoms = true
+		goal, ok = tr.lowerVCFormula(goalExpr, env)
+		tr.generalizeGoalAtoms = false
+		if !ok {
+			return false, "", false
+		}
 	}
 	p, ce := a.smtDischargeFormula(tr, goal, extraHyps)
 	if !p {
@@ -2338,6 +2345,8 @@ type smtTranslator struct {
 	callCanon map[string]string
 	// callProjectionCount numbers aggregate call projection tokens (analyzer_smt_call_projection.go).
 	callProjectionCount int
+	// generalizeGoalAtoms makes lowerVCFormula replace an untranslatable goal atom by a fresh Bool.
+	generalizeGoalAtoms bool
 	// ghostUFDecls names the uninterpreted functions already declared for ghost-call congruence.
 	ghostUFDecls map[string]bool
 	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
