@@ -196,7 +196,7 @@ func (tr *smtTranslator) classifierStringParameter(expr ast.Expr, env map[string
 	if !ok || tr.a == nil || tr.a.currentScope == nil || tr.a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 {
 		return nil, smtStringParameterKey{}, false
 	}
-	if !classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) {
+	if !classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) && !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
 		return nil, smtStringParameterKey{}, false
 	}
 	if _, bound := env[id.Name]; bound {
@@ -302,7 +302,7 @@ func (tr *smtTranslator) booleanMatchTerm(n *ast.MatchExpr, env map[string]strin
 		if !ok {
 			return "", false
 		}
-		if _, ok := stripOptimizationParens(tail.Expr).(*ast.BoolLit); !ok {
+		if _, ok := stripOptimizationParens(tail.Expr).(*ast.BoolLit); !ok && !tr.a.matchArmValueReadOnly(tail.Expr, 0) {
 			return "", false
 		}
 		if index == len(n.Arms)-1 {
@@ -316,10 +316,19 @@ func (tr *smtTranslator) booleanMatchTerm(n *ast.MatchExpr, env map[string]strin
 	result := ""
 	for index := len(n.Arms) - 1; index >= 0; index-- {
 		arm := n.Arms[index]
-		literal := stripOptimizationParens(arm.Body[0].(*ast.ExprStmt).Expr).(*ast.BoolLit)
 		branch := "false"
-		if literal.Value {
-			branch = "true"
+		if literal, isLiteral := stripOptimizationParens(arm.Body[0].(*ast.ExprStmt).Expr).(*ast.BoolLit); isLiteral {
+			if literal.Value {
+				branch = "true"
+			}
+		} else {
+			// A read-only arm value (matchArmValueReadOnly): it denotes the value the arm yields when
+			// selected, and an unselected arm's term is masked by the ite guard.
+			term, ok := tr.boolTerm(arm.Body[0].(*ast.ExprStmt).Expr, env)
+			if !ok {
+				return "", false
+			}
+			branch = term
 		}
 		if index == len(n.Arms)-1 {
 			result = branch
@@ -564,6 +573,61 @@ func scalarCharOrRangePattern(pattern ast.MatchPattern) bool {
 		}
 		for _, option := range p.Options {
 			if !lemmaScalarMatchPattern(option) && !scalarCharOrRangePattern(option) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// matchArmValueReadOnly accepts an arm value that reads but never writes: names, literals,
+// non-overloaded operators, ternaries, non-optional field reads, plain indexing, numeric casts,
+// nested guard-free matches over such values, and calls to callees classified write-free. Such a
+// value may be translated for every arm (only the selected arm's term survives the ite fold), since
+// translating it neither duplicates an effect nor reads state a sibling arm could change.
+func (a *Analyzer) matchArmValueReadOnly(e ast.Expr, depth int) bool {
+	if a == nil || e == nil || depth > 64 {
+		return false
+	}
+	switch n := e.(type) {
+	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit:
+		return true
+	case *ast.ParenExpr:
+		return a.matchArmValueReadOnly(n.Inner, depth+1)
+	case *ast.UnaryExpr:
+		return n.LoweredCall == nil && a.matchArmValueReadOnly(n.Operand, depth+1)
+	case *ast.BinaryExpr:
+		return n.LoweredCall == nil && a.matchArmValueReadOnly(n.Left, depth+1) && a.matchArmValueReadOnly(n.Right, depth+1)
+	case *ast.TernaryExpr:
+		return a.matchArmValueReadOnly(n.Cond, depth+1) && a.matchArmValueReadOnly(n.Value, depth+1) && a.matchArmValueReadOnly(n.Alt, depth+1)
+	case *ast.FieldExpr:
+		return !n.Safe && a.matchArmValueReadOnly(n.Object, depth+1)
+	case *ast.IndexExpr:
+		return n.Index2 == nil && n.Fallback == nil && n.AsOverlayCall == nil && a.matchArmValueReadOnly(n.Object, depth+1) && a.matchArmValueReadOnly(n.Index, depth+1)
+	case *ast.CastExpr:
+		return isPureNumericValueCast(n) && a.matchArmValueReadOnly(n.Operand, depth+1)
+	case *ast.MatchExpr:
+		if n.Store != nil || !a.matchArmValueReadOnly(n.Value, depth+1) {
+			return false
+		}
+		for _, arm := range n.Arms {
+			if arm.Guard != nil || len(arm.Body) != 1 {
+				return false
+			}
+			tail, ok := arm.Body[0].(*ast.ExprStmt)
+			if !ok || !a.matchArmValueReadOnly(tail.Expr, depth+1) {
+				return false
+			}
+		}
+		return true
+	case *ast.CallExpr:
+		callee, ok := a.classifierFrameCallDecl(n)
+		if !ok || callee == nil || !(a.functionPureEquationShape(callee) || a.classifierCalleeWriteFree(callee)) {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.matchArmValueReadOnly(arg, depth+1) {
 				return false
 			}
 		}

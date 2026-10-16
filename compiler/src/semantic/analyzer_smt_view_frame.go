@@ -185,6 +185,23 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			}
 		}
 		return len(n.Elems) != 0
+	case *ast.MatchExpr:
+		if n.Store != nil || !g.expr(n.Value, depth+1) {
+			return false
+		}
+		for _, arm := range n.Arms {
+			if arm.Guard != nil && !g.expr(arm.Guard, depth+1) {
+				return false
+			}
+			if len(arm.Body) != 1 {
+				return false
+			}
+			tail, ok := arm.Body[0].(*ast.ExprStmt)
+			if !ok || !g.expr(tail.Expr, depth+1) {
+				return false
+			}
+		}
+		return true
 	case *ast.CallExpr:
 		callee, ok := g.a.classifierFrameCallDecl(n)
 		if !ok || callee == nil || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee)) {
