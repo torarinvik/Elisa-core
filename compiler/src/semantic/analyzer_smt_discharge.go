@@ -4058,6 +4058,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return tr.boolTerm(value, env)
 			}
 		}
+		if tern, ok := stripOptimizationParens(n.Object).(*ast.TernaryExpr); ok && tern != nil {
+			return tr.ternaryProjectionBool(n, tern, env)
+		}
 		if tr.resultFields != nil && tr.calleeBodyDepth == 0 && !tr.envBindsRoot(&ast.Ident{Name: "result"}, env) {
 			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && id.Name == "result" {
 				if value, found := tr.resultFields[n.Field]; found {
