@@ -74,6 +74,17 @@ func (tr *smtTranslator) aggregateProjectionKey(n *ast.FieldExpr, env map[string
 		}
 		return token + path, nil, true
 	case *ast.Ident:
+		// `result.f.g…` while `result` is substituted by a returned tuple/struct literal: read the
+		// chain from the literal's `f` component (re-evaluable at the return, as resultFields
+		// already is for `result.f`).
+		if r.Name == "result" && tr.resultFields != nil && tr.calleeBodyDepth == 0 && !tr.envBindsRoot(r, env) {
+			if rerooted, ok := rerootBelowFirstField(n, tr.resultFields, tr.a); ok {
+				return "", rerooted, true
+			}
+		}
+		if literal, ok := tr.immutableLiteralLocal(r, env); ok {
+			return "", rerootProjection(n, literal, tr.a), true
+		}
 		if env == nil {
 			return "", nil, false
 		}
@@ -299,4 +310,75 @@ func (a *Analyzer) smtAggregateCallLocalEnsures(tr *smtTranslator, declScope *Sc
 		subst[param.Name] = args[i]
 	}
 	tr.assumeAggregateCallEnsures(decl, subst, nil, localProjectionTokenPrefix+sym.Name)
+}
+
+// immutableLiteralLocal resolves `missing` in `missing.owner.value` to its constructor literal when
+// it is an immutable local of the current function initialized by a tuple/struct literal whose
+// definition is still current (same bindings, none written since): the projection then reads the
+// literal's component, as for `(false, missing).known`. Only at caller level (no callee frame, name
+// not substituted by the env).
+func (tr *smtTranslator) immutableLiteralLocal(id *ast.Ident, env map[string]string) (ast.Expr, bool) {
+	if tr == nil || tr.a == nil || id == nil || tr.calleeBodyDepth != 0 || tr.a.currentScope == nil {
+		return nil, false
+	}
+	if _, bound := env[id.Name]; bound {
+		return nil, false
+	}
+	var declScope *Scope
+	var sym *Symbol
+	for sc := tr.a.currentScope; sc != nil; sc = sc.Parent {
+		if found, ok := sc.Symbols[id.Name]; ok {
+			declScope, sym = sc, found
+			break
+		}
+	}
+	if sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+		return nil, false
+	}
+	vd, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok || vd == nil || vd.Value == nil {
+		return nil, false
+	}
+	switch literal := stripOptimizationParens(vd.Value).(type) {
+	case *ast.StructLitExpr:
+		if literal.CopyBase != nil || len(literal.Spreads) != 0 {
+			return nil, false
+		}
+	case *ast.TupleExpr:
+	default:
+		return nil, false
+	}
+	if !tr.a.immutableLocalDefinitionCurrent(declScope, sym, vd.Value) {
+		return nil, false
+	}
+	return stripOptimizationParens(vd.Value), true
+}
+
+// rerootBelowFirstField rewrites `root.f.g…` (at least two fields deep) to `V.g…`, where V is
+// fields[f]. ok=false for a one-field chain (handled by the caller's direct lookup) or a missing f.
+func rerootBelowFirstField(n *ast.FieldExpr, fields map[string]ast.Expr, a *Analyzer) (*ast.FieldExpr, bool) {
+	inner, ok := stripOptimizationParens(n.Object).(*ast.FieldExpr)
+	if !ok || inner == nil {
+		return nil, false
+	}
+	if _, rootIdent := stripOptimizationParens(inner.Object).(*ast.Ident); rootIdent {
+		value, found := fields[inner.Field]
+		if !found || value == nil {
+			return nil, false
+		}
+		out := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
+		if t := a.exprTypes[n]; t != nil {
+			a.exprTypes[out] = t
+		}
+		return out, true
+	}
+	rebuilt, ok := rerootBelowFirstField(inner, fields, a)
+	if !ok {
+		return nil, false
+	}
+	out := &ast.FieldExpr{Position: n.Position, Object: rebuilt, Field: n.Field}
+	if t := a.exprTypes[n]; t != nil {
+		a.exprTypes[out] = t
+	}
+	return out, true
 }
