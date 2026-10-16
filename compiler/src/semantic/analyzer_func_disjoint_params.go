@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -69,6 +70,12 @@ func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl,
 		}
 		global, _, found := a.lookupVisibleGlobal(ident.Name)
 		if !found || global == nil || global.Kind != SymbolFunc {
+			return nil, false
+		}
+		// Only a plain function declared under the spelled name: an overload or extension set is
+		// registered under a mangled name and is resolved by argument types, never by name here.
+		fd, isDecl := global.Node.(*ast.FuncDecl)
+		if !isDecl || fd == nil || unqualifiedCallName(fd.Name) != unqualifiedCallName(ident.Name) {
 			return nil, false
 		}
 		sym = global
@@ -268,4 +275,15 @@ func scanValueUsedIdents(v reflect.Value, names map[string]bool) {
 			scanValueUsedIdents(v.Index(i), names)
 		}
 	}
+}
+
+// unqualifiedCallName strips a `::` or `.` module qualification from a callee spelling.
+func unqualifiedCallName(name string) string {
+	if i := strings.LastIndex(name, "::"); i >= 0 {
+		name = name[i+2:]
+	}
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
 }
