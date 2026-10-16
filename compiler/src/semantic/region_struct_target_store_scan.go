@@ -1672,6 +1672,9 @@ func (a *Analyzer) storeScanParamFieldChainType(decl *ast.FuncDecl, expr ast.Exp
 	if t, ok := a.storeScanLocalLiteralType(decl, root.Name); ok {
 		return storeScanWalkFields(t, fields)
 	}
+	if t, ok := a.storeScanPatternBinderType(decl, root.Name); ok {
+		return storeScanWalkFields(t, fields)
+	}
 	index := -1
 	for i, p := range decl.Params {
 		if p.Name == root.Name {
@@ -2073,17 +2076,25 @@ func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type,
 		return nil, false
 	}
 	switch e := expr.(type) {
+	case *ast.Ident:
+		if e == nil {
+			return nil, false
+		}
+		return a.storeScanPatternBinderType(decl, e.Name)
 	case *ast.FieldExpr:
 		return a.storeScanParamFieldChainType(decl, e)
 	case *ast.IndexExpr:
 		if e == nil || e.Index2 != nil {
 			return nil, false
 		}
-		object, ok := storeScanUnwrap(e.Object).(*ast.FieldExpr)
-		if !ok {
-			return nil, false
+		var t Type
+		var ok bool
+		switch object := storeScanUnwrap(e.Object).(type) {
+		case *ast.FieldExpr:
+			t, ok = a.storeScanParamFieldChainType(decl, object)
+		case *ast.Ident:
+			t, ok = a.storeScanPatternBinderType(decl, object.Name)
 		}
-		t, ok := a.storeScanParamFieldChainType(decl, object)
 		if !ok {
 			return nil, false
 		}

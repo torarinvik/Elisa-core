@@ -294,6 +294,7 @@ type Analyzer struct {
 	storeScanAllocCycleHit   bool
 	storeScanFilledCache     map[storeScanKey]map[string]bool
 	storeScanIndexCache      map[*ast.FuncDecl]*storeScanDeclIndex
+	storeScanBinderTypes     map[*ast.FuncDecl]map[string]storeScanBinderVerdict // storeScanPatternBinderType memo
 	storeScanParamWriteCache map[storeScanParamKey]bool
 	storeScanLastHolders     map[string]bool // holders of the last storeScanTaint (read at once)
 	storeScanNoStorageCache  map[Type]bool
