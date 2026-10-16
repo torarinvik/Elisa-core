@@ -283,3 +283,58 @@ def zero() -> i64:
 		}
 	}
 }
+
+// The syntactic `param - const` termination rule certifies recursion with no
+// proven lower bound. That is sound for unfolding because defining equations are
+// GROUND instances (one per translated call term, depth-capped), never a
+// quantified axiom over Int: strictly decreasing arguments make the instance set
+// acyclic, so it is always satisfiable by choosing the opaque leaves and
+// computing upward. Probe below the base case, where descent never terminates:
+// `g` has no solution over all of Int (x*x+1 has no infinite backward orbit), yet
+// no false claim about g(m), m < 0, may be derived; a true one-step unfolding of
+// h at a negative argument is still proven.
+func TestGhostSyntacticDecreaseUnboundedUnfoldingIsGround(t *testing.T) {
+	src := `
+ghost def g(n: i64) -> i64:
+    decreases n
+    if n == 0:
+        return 0
+    return g(n - 1) * g(n - 1) + 1
+
+ghost def h(n: i64) -> i64:
+    decreases n
+    if n == 0:
+        return 0
+    return h(n - 1) + 1
+
+def false_g(m: i64) -> i64:
+    requires m < 0
+    ensure result == 7 or g(m) == g(m - 1) * g(m - 1) + 2
+    return 3
+
+def false_h(m: i64) -> i64:
+    requires m < 0
+    ensure result == 7 or h(m) != h(m - 1) + 1
+    return 3
+
+def true_h(m: i64) -> i64:
+    requires m < 0
+    ensure result == 7 or h(m) == h(m - 1) + 1
+    return 3
+`
+	r := analyzeContractStrict(t, "ghost_syntactic_unbounded.elisa", src)
+	has := func(name string) bool {
+		for _, e := range r.Errors() {
+			if strings.Contains(e, `"`+name+`"`) {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("false_g") || !has("false_h") {
+		t.Fatalf("false claims below the base case must not be proven, got: %v", r.Errors())
+	}
+	if has("true_h") {
+		t.Fatalf("true_h: one-step ground unfolding should prove, got: %v", r.Errors())
+	}
+}
