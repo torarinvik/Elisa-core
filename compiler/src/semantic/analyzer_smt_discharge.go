@@ -1382,6 +1382,17 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 		return !requireBinding
 	}
+	// A tuple-valued call (`return parse(x)` substituted for `result`) binds to its call-projection
+	// token, so `result.f` reads the same symbols as the call's own `parse(x).f` and its verified
+	// ensures (analyzer_smt_call_projection.go).
+	if call, isCall := stripOptimizationParens(argExpr).(*ast.CallExpr); isCall && call != nil {
+		if _, tuple := stripRefForBounds(a.exprTypes[argExpr]).(*TupleType); tuple {
+			if token, ok := tr.callProjectionToken(call, argEnv); ok {
+				env[name] = dtToken(token)
+				return true
+			}
+		}
+	}
 	if t := a.exprTypes[argExpr]; t != nil && !isSMTExactAssignmentType(t) {
 		return !requireBinding
 	}
