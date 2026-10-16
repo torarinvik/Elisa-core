@@ -190,6 +190,9 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			return false
 		}
 		for _, arm := range n.Arms {
+			if !sviewFramePattern(arm.Pattern, 0) {
+				return false
+			}
 			if arm.Guard != nil && !g.expr(arm.Guard, depth+1) {
 				return false
 			}
@@ -209,6 +212,49 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 		}
 		for _, arg := range n.Args {
 			if !g.expr(arg, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// sviewFramePattern accepts patterns whose test evaluates nothing: wildcards, string/int/bool/char
+// literals (never pinned: a pinned pattern evaluates its expression), literal ranges, and
+// or-patterns of those.
+func sviewFramePattern(pattern ast.MatchPattern, depth int) bool {
+	if depth > 16 {
+		return false
+	}
+	if pureClassifierPattern(pattern) {
+		return true
+	}
+	switch n := pattern.(type) {
+	case *ast.MatchLiteralPattern:
+		if n == nil || n.Pinned {
+			return false
+		}
+		_, ok := stripOptimizationParens(n.Value).(*ast.CharLit)
+		return ok
+	case *ast.MatchRangePattern:
+		if n == nil {
+			return false
+		}
+		literal := func(e ast.Expr) bool {
+			switch stripOptimizationParens(e).(type) {
+			case *ast.IntLit, *ast.CharLit:
+				return true
+			}
+			return false
+		}
+		return literal(n.Lo) && literal(n.Hi)
+	case *ast.MatchOrPattern:
+		if n == nil || len(n.Options) == 0 {
+			return false
+		}
+		for _, option := range n.Options {
+			if !sviewFramePattern(option, depth+1) {
 				return false
 			}
 		}
