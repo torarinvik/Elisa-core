@@ -184,28 +184,20 @@ enum ContainerExpr:
     Values(items: darray[i64])
 
 def repeated_match_length(e: ContainerExpr) -> bool:
-    ensure result
-    return (
-        (match e:
-            ContainerExpr.Empty: true
-            ContainerExpr.Values(items): items.count == 0)
-        ==
-        (match e:
-            ContainerExpr.Empty: true
-            ContainerExpr.Values(other): other.count == 0)
-    )
+    ensure match e:
+        ContainerExpr.Empty: result == true
+        ContainerExpr.Values(items): result == (items.count == 0)
+    return match e:
+        ContainerExpr.Empty: true
+        ContainerExpr.Values(other): other.count == 0
 
 def independent_payload_lengths(a: ContainerExpr, b: ContainerExpr) -> bool:
-    ensure not result
-    return (
-        (match a:
-            ContainerExpr.Empty: true
-            ContainerExpr.Values(items): items.count == 0)
-        ==
-        (match b:
-            ContainerExpr.Empty: true
-            ContainerExpr.Values(other): other.count == 0)
-    )
+    ensure match a:
+        ContainerExpr.Empty: result == true
+        ContainerExpr.Values(items): result == (items.count == 0)
+    return match b:
+        ContainerExpr.Empty: true
+        ContainerExpr.Values(other): other.count == 0
 
 def append_one(items: mutable darray[i64]&):
     items.push(1)
