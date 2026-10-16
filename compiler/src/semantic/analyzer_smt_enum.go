@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/hex"
 	"sort"
 	"strconv"
 	"strings"
@@ -336,6 +337,19 @@ func (tr *smtTranslator) bindEnumPayloadName(env map[string]string, name string,
 	}
 	if et, _, ok := resolveMatchableEnumType(pt); ok && et != nil {
 		env[name] = dtTokenPrefix + key
+		return true
+	}
+	// An unknown array payload has a stable length for this enum projection, but its
+	// elements are not modeled. Give it a length-only token so repeated matches can
+	// reason about `.count` without inventing an SMT array for the payload contents.
+	// Constructor arguments use the branch above and must keep their actual length.
+	if _, ok := pt.(*DArrayType); ok {
+		base := smtVar("enum_payload_len_" + hex.EncodeToString([]byte(key)))
+		if tr.lengthOnly == nil {
+			tr.lengthOnly = map[string]bool{}
+		}
+		tr.lengthOnly[base] = true
+		env[name] = base
 		return true
 	}
 	if st, ok := pt.(*StructType); ok && st != nil {
