@@ -1031,8 +1031,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
 		entryRangeFacts := a.visibleRangeFacts()
 		rangeBranches := make([]map[string]numRange, 0, len(n.Elifs)+2)
+		var factBranches [][]smtFact
+		var survivorBranches []smtFactFrame
+		entryFacts := a.snapshotSMTFactFrame()
 		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
+		thenSurvivors := a.restoreSMTFactFrame(entryFacts)
 		if (!conditionIsConstant || constantCondition) && !blockDefinitelyExits(n.Then) {
+			factBranches = append(factBranches, thenSnapshot.SMTFacts)
+			survivorBranches = append(survivorBranches, thenSurvivors)
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			regionBranches = append(regionBranches, thenSnapshot.Regions)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
@@ -1049,7 +1055,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType)
 			}
 			elifSnapshot := a.analyzeBlockWithConditionAffineClone(elif.Body, a.currentScope, elif.Cond, true)
+			elifSurvivors := a.restoreSMTFactFrame(entryFacts)
 			if (!conditionIsConstant || !constantCondition) && !blockDefinitelyExits(elif.Body) {
+				factBranches = append(factBranches, elifSnapshot.SMTFacts)
+				survivorBranches = append(survivorBranches, elifSurvivors)
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
 				regionBranches = append(regionBranches, elifSnapshot.Regions)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
@@ -1063,7 +1072,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if len(n.Elifs) == 0 {
 			elseSnapshot := a.analyzeBlockWithConditionAffineClone(n.Else, a.currentScope, n.Cond, false)
+			elseSurvivors := a.restoreSMTFactFrame(entryFacts)
 			if (!conditionIsConstant || !constantCondition) && !blockDefinitelyExits(n.Else) {
+				factBranches = append(factBranches, elseSnapshot.SMTFacts)
+				survivorBranches = append(survivorBranches, elseSurvivors)
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				regionBranches = append(regionBranches, elseSnapshot.Regions)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
@@ -1076,7 +1088,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		} else {
 			elseSnapshot := a.analyzeBranchBlockWithAffineClone(n.Else, NewScope(a.currentScope))
+			elseSurvivors := a.restoreSMTFactFrame(entryFacts)
 			if (!conditionIsConstant || !constantCondition) && !blockDefinitelyExits(n.Else) {
+				factBranches = append(factBranches, elseSnapshot.SMTFacts)
+				survivorBranches = append(survivorBranches, elseSurvivors)
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				regionBranches = append(regionBranches, elseSnapshot.Regions)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
@@ -1119,6 +1134,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		}
 		a.mergePostIfRangeFacts(entryRangeFacts, rangeBranches)
+		a.joinIfSMTFacts(entryFacts, survivorBranches, factBranches, !conditionIsConstant)
 		a.applyPostIfFallthroughRefinement(n)
 		if len(n.Elifs) == 0 && len(n.Else) == 0 && blockDefinitelyExits(n.Then) {
 			a.applyIndexBoundsFactsForCondition(n.Cond, false)

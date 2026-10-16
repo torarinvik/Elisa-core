@@ -637,6 +637,9 @@ type affineFlowSnapshot struct {
 	StorageViewDeps            map[*Symbol]storageViewDependencyState
 	AliasCarriers              map[string][]string
 	AliasCarrierFieldOverrides map[string]map[string][]string
+	// SMTFacts are the flow facts the block's own scope held at its end (its guard, the exact
+	// assignment equalities of its writes); the if-join disjoins them (analyzer_smt_if_join.go).
+	SMTFacts []smtFact
 }
 
 type borrowedOwnerRefSummaryTarget struct {
@@ -1359,6 +1362,9 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
 	snapshot := affineFlowSnapshot{Regions: branchRegions, Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	blockEndRangeFacts(snapshot.RangeFacts, scope)
+	if scope != nil {
+		snapshot.SMTFacts = append([]smtFact(nil), scope.smtAssertFacts...)
+	}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
