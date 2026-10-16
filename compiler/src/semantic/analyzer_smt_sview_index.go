@@ -232,6 +232,10 @@ func (a *Analyzer) immutableSliceLocalInit(id *ast.Ident) (*ast.SliceExpr, bool)
 	if _, ok := sym.Type.(*SViewType); !ok {
 		return nil, false
 	}
+	// One of the initializer's inputs was written after the slice was taken.
+	if a.smtStaleLocalDefs[sym] {
+		return nil, false
+	}
 	decl, ok := sym.Node.(*ast.VarDeclStmt)
 	if !ok || decl == nil || decl.Mutable || decl.Name != id.Name {
 		return nil, false
@@ -257,8 +261,25 @@ func (a *Analyzer) immutableSliceLocalInit(id *ast.Ident) (*ast.SliceExpr, bool)
 				return true
 			}
 			s, found := a.currentScope.Lookup(n.Name)
-			if !found || s == nil || symbolRootMutable(s) {
+			if !found || s == nil {
 				return false
+			}
+			if symbolRootMutable(s) {
+				// A by-value mutable local declared before the slice: its current value is the one
+				// the slice read unless it was written since, and every write (assignment, `&x`,
+				// mutable argument, loop-head havoc) marks this slice local stale (checked above).
+				if s.Kind != SymbolLocal || !s.Mutable {
+					return false
+				}
+				if _, isRef := s.Type.(*RefType); isRef {
+					return false
+				}
+				d, ok := s.Node.(*ast.VarDeclStmt)
+				if !ok || d == nil || d.Name != n.Name {
+					return false
+				}
+				p := d.Position
+				return p.File == declPos.File && (p.Line < declPos.Line || (p.Line == declPos.Line && p.Col < declPos.Col))
 			}
 			switch s.Kind {
 			case SymbolParam:
