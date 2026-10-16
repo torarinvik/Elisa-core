@@ -1138,7 +1138,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 				if !idx.headerMentions(n, content) {
 					continue
 				}
-				a.storeScanTaintBinders(idx, n, header, content, add, &changed)
+				a.storeScanTaintBinders(decl, idx, n, header, content, add, &changed)
 			}
 		}
 	}
@@ -1382,7 +1382,7 @@ func (a *Analyzer) declParamIsViewOrScalar(decl *ast.FuncDecl, index int) bool {
 // storeScanTaintBinders: a binding construct whose header mentions a tainted name taints its
 // binders. Pattern binders of a match / `is` test project fields or payloads (content); only
 // other binders (a rebind of a call result, a destructure) may be the whole.
-func (a *Analyzer) storeScanTaintBinders(idx *storeScanDeclIndex, n ast.Stmt, header, content map[string]bool, add func(map[string]bool, string) bool, changed *bool) {
+func (a *Analyzer) storeScanTaintBinders(decl *ast.FuncDecl, idx *storeScanDeclIndex, n ast.Stmt, header, content map[string]bool, add func(map[string]bool, string) bool, changed *bool) {
 	if n == nil {
 		return
 	}
@@ -1401,6 +1401,12 @@ func (a *Analyzer) storeScanTaintBinders(idx *storeScanDeclIndex, n ast.Stmt, he
 	}
 	whole := readsHeader && !storeScanProjectingStmt(n)
 	for _, name := range bound {
+		// A by-value loop capture whose element type cannot contain region storage does
+		// not inherit taint from the container's header or contents. Opaque foreign
+		// handles such as LLVMValueRef are copied values, not Elisa borrows.
+		if elem, ok := a.storeScanLoopBinderElemType(decl, &ast.Ident{Name: name}); ok && elem != nil && !containsTypeParam(elem) && a.storeScanHoldsNoRegionStorage(elem) {
+			continue
+		}
 		if add(content, name) {
 			*changed = true
 		}

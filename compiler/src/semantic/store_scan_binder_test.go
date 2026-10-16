@@ -115,6 +115,27 @@ func TestStoreScanParamRowElementsTyped(t *testing.T) {
 	}
 }
 
+func TestStoreScanOpaqueLoopBinderDoesNotCarrySource(t *testing.T) {
+	src := `extern LLVMValueRef
+
+def copy_handles(out: mutable darray[LLVMValueRef]&, values: darray[LLVMValueRef]&) -> void:
+    for value in values:
+        out.push(value)
+
+def copy_views(out: mutable darray[sview]&, values: darray[sview]&):
+    for value in values:
+        out.push(value)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_opaque_loop_binder.elisa", src, AnalyzeOptions{})
+	storeScanUntyped(result)
+	if got := result.analyzer.calleeStoreModeInto(storeScanFindFunc(t, result, "copy_handles"), 1, 0); got != storeNone {
+		t.Errorf("opaque handles copied from a source must not carry source storage, got mode %d", got)
+	}
+	if got := result.analyzer.calleeStoreModeInto(storeScanFindFunc(t, result, "copy_views"), 1, 0); got == storeNone {
+		t.Errorf("view elements copied from a source must remain tainted")
+	}
+}
+
 // The check_never_leak_push_loop:144 shape: a for-capture over a local declared
 // `darray[u32]` copies a scalar each iteration, read off the declared type.
 const storeScanLocalLoopSource = `struct Block:
