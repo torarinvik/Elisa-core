@@ -154,6 +154,10 @@ func (a *Analyzer) immutableLocalDefinitionCurrent(declScope *Scope, sym *Symbol
 	if a == nil || a.currentScope == nil || declScope == nil || sym == nil || value == nil {
 		return false
 	}
+	// The initializer captured its inputs' values at the declaration; one of them was written since.
+	if a.smtStaleLocalDefs[sym] {
+		return false
+	}
 	declPos := sym.Node.Pos()
 	names := map[string]bool{}
 	for name := range smtFactDeps(value) {
@@ -176,6 +180,58 @@ func (a *Analyzer) immutableLocalDefinitionCurrent(declScope *Scope, sym *Symbol
 				return false // declared after the initializer was evaluated
 			}
 		}
+		// A mutable global can change in any callee, so no defining equation over it survives.
+		if then != nil && then.Kind == SymbolGlobal && then.Mutable {
+			return false
+		}
 	}
 	return true
+}
+
+// markLocalDefinitionsStale records a write to the places rooted at roots (nil: an unidentifiable
+// place, which may be any of them). Every immutable local visible here whose initializer read one
+// of those roots loses its defining equation for the rest of the function: `y: i64 = x + 1;
+// x <- 5` must not prove `y == 6`. It runs from the same mutation chokepoint that drops assert
+// facts (assignments, compound assignments, `&x`/receiver/mutable-argument calls, and the loop-head
+// havoc of every root a loop body writes, which covers the back edge), so a local declared before
+// a loop whose body writes its input is stale inside and after the loop. Locals declared after the
+// write are not yet visible and keep their equation, which holds from their declaration on.
+func (a *Analyzer) markLocalDefinitionsStale(roots map[string]bool) {
+	if a == nil {
+		return
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, sym := range sc.Symbols {
+			if sym == nil || sym.Mutable || sym.Kind != SymbolLocal || a.smtStaleLocalDefs[sym] {
+				continue
+			}
+			vd, ok := sym.Node.(*ast.VarDeclStmt)
+			if !ok || vd == nil || vd.Value == nil {
+				continue
+			}
+			hit := roots == nil
+			if !hit {
+				for name := range smtFactDeps(vd.Value) {
+					if roots[name] {
+						hit = true
+						break
+					}
+				}
+			}
+			if !hit {
+				for _, name := range exprIdentNames(vd.Value) {
+					if roots[name] {
+						hit = true
+						break
+					}
+				}
+			}
+			if hit {
+				if a.smtStaleLocalDefs == nil {
+					a.smtStaleLocalDefs = map[*Symbol]bool{}
+				}
+				a.smtStaleLocalDefs[sym] = true
+			}
+		}
+	}
 }

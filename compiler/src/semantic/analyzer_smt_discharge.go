@@ -1757,6 +1757,7 @@ func (a *Analyzer) invalidateSMTAssertFactsForTargetPreservingNullness(target as
 	// mutated through writes the underlying place — audit cluster C). No identifiable root ⇒ clear all.
 	roots := a.mutationRootsForTarget(target)
 	if len(roots) == 0 {
+		a.markLocalDefinitionsStale(nil)
 		a.clearSMTAssertFacts()
 		return
 	}
@@ -1764,6 +1765,7 @@ func (a *Analyzer) invalidateSMTAssertFactsForTargetPreservingNullness(target as
 	for _, r := range roots {
 		rootSet[r] = true
 	}
+	a.markLocalDefinitionsStale(rootSet)
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		if len(sc.smtAssertFacts) == 0 {
 			continue
@@ -2135,6 +2137,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
 				continue
 			}
+			a.smtCallLocalResultOnlyEnsures(tr, &b, name, sym, vd.Value)
 			// The initializer is translated with the proof point's names: skip it when any of them
 			// (or the local itself, `y: i64 = y + 1`) now denotes a different binding.
 			if !a.immutableLocalDefinitionCurrent(sc, sym, vd.Value) {
@@ -6175,4 +6178,44 @@ func (tr *smtTranslator) ghostViewArgKey(arg ast.Expr, env map[string]string) (s
 		return "", false
 	}
 	return fmt.Sprintf("view:%s@%p", id.Name, sym), true
+}
+
+// smtCallLocalResultOnlyEnsures asserts, for an immutable numeric local initialized by a direct call
+// (`first: i64 = json_hex4(data, cursor.position)`), every callee `ensure` that mentions no formal —
+// only `result` and constants (`result == -1 or (result >= 0 and result <= 65535)`). Such a clause
+// holds for the value the call returned whatever its arguments were, so it survives later writes to
+// the arguments that retire the local's defining equation (`cursor.position <- …`). Gates: the
+// callee has no `requires` (its ensures are unconditional), is not the current function or
+// recursive (no unverified induction hypothesis), and the local's type is the call's own type (no
+// implicit conversion between the returned value and the binding). Formals are left unbound and
+// lowered with calleeBoolTerm, so a clause that does read one declines instead of resolving to a
+// same-named caller binding.
+func (a *Analyzer) smtCallLocalResultOnlyEnsures(tr *smtTranslator, b *strings.Builder, name string, sym *Symbol, value ast.Expr) {
+	call, ok := stripOptimizationParens(value).(*ast.CallExpr)
+	if !ok || call == nil {
+		return
+	}
+	decl, direct := a.resolveDirectCallFuncDecl(call)
+	if !direct || decl == nil || len(decl.Requires) != 0 || len(decl.EnsureValues) == 0 || decl == a.currentFuncDecl || a.isRecursiveProofCall(decl) {
+		return
+	}
+	if a.implicitIntConversion(value, a.exprTypes[value], sym.Type) != value {
+		return
+	}
+	if _, _, ok := smtIntWidthSign(sym.Type); !ok {
+		return
+	}
+	env := map[string]string{"result": smtVar(name)}
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		h, ok := tr.calleeBoolTerm(decl, ensure, env)
+		if !ok {
+			continue
+		}
+		tr.decls[name] = true
+		tr.markIntVar(name, sym.Type)
+		b.WriteString("(assert " + h + ")\n")
+	}
 }
