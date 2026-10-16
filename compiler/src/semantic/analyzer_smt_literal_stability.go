@@ -9,7 +9,7 @@ import "elisacore/src/ast"
 // operators), so a component is re-evaluable when every LATER component is side-effect free: the
 // state at the proof point is then the state right after the component ran. (The component's own
 // internal evaluation carries exactly the exposure of a direct `return expr` substitution, which the
-// call-result model already governs.) Constants and immutable scalar bindings
+// call-result model already governs.) Constants and immutable scalar/value-record bindings
 // (constructorProjectionStable) are re-evaluable regardless.
 
 // sideEffectFreeExpr is a conservative whitelist: literals, names, field reads, casts and

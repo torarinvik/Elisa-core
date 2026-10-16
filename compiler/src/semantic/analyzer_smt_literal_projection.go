@@ -63,7 +63,7 @@ func (a *Analyzer) nestedLiteralFieldValue(field *ast.FieldExpr, depth int) (ast
 }
 
 // Constructor fields capture values before later arguments run. Only constants
-// and immutable scalar bindings can safely be translated again after construction.
+// and immutable scalar/value-record bindings can safely be translated again after construction.
 func (a *Analyzer) constructorProjectionStable(value ast.Expr) bool {
 	if _, ok := a.evalConstExpr(value); ok {
 		return true
@@ -91,7 +91,35 @@ func (a *Analyzer) constructorProjectionStable(value ast.Expr) bool {
 	if builtin, ok := sym.Type.(*BuiltinType); ok && builtin.Name == "bool" {
 		return true
 	}
-	return false
+	return immutableProjectionRecord(sym.Type, 0)
+}
+
+// Immutable records made entirely of immutable scalar fields have no interior
+// aliases a later call could mutate. References, containers and mutable fields
+// deliberately stay outside this proof, even behind an immutable root binding.
+func immutableProjectionRecord(t Type, depth int) bool {
+	if depth > 32 || t == nil {
+		return false
+	}
+	if _, reference := t.(*RefType); reference {
+		return false
+	}
+	if _, _, integer := smtIntWidthSign(t); integer {
+		return true
+	}
+	if builtin, ok := t.(*BuiltinType); ok {
+		return builtin.Name == "bool"
+	}
+	record, ok := t.(*StructType)
+	if !ok || record == nil || record.Decl == nil {
+		return false
+	}
+	for _, field := range record.Fields {
+		if field.Mutable || !immutableProjectionRecord(field.Type, depth+1) {
+			return false
+		}
+	}
+	return true
 }
 
 // rerootLiteralProjection rewrites `L.f.g` whose object `L.f` projects a constructor literal to the
