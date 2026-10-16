@@ -2400,6 +2400,8 @@ type smtTranslator struct {
 	generalizeGoalAtoms bool
 	// ghostUFDecls names the uninterpreted functions already declared for ghost-call congruence.
 	ghostUFDecls map[string]bool
+	// scalarCallUFNames assigns collision-free names to state-independent scalar call models.
+	scalarCallUFNames map[string]string
 	// Container theory (analyzer_smt_container_theory.go): bases whose value is fixed for the query,
 	// and the callee whose formals are being bound.
 	stableContainers map[string]bool
@@ -4311,13 +4313,14 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			return sel, true
 		}
 		if !tr.opaqueCallQuantifierIndependent(n, env) {
-			return "", false
+			return tr.scalarCallUF(n, env, "Bool")
 		}
 		// Try structural-predicate canonicalization first (a `ghost def ... -> bool` over a recursive
 		// datatype canonicalizes to one opaque Bool symbol + its bounded structural defining equation —
 		// see analyzer_structural_induction.go); fall back to the general ghost bool-call path for
 		// non-predicate bool-returning calls so the docs/101 ghost-beyond-int behavior is preserved.
 		if sym, ok := tr.boolPredicateCallSym(n, env); ok {
+			tr.linkScalarCallUF(n, env, sym, "Bool")
 			return sym, true
 		}
 		return tr.callResultBoolTermEnv(n, env)
@@ -4709,7 +4712,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 		return sel, true
 	}
 	if !tr.opaqueCallQuantifierIndependent(call, argEnv) {
-		return "", false
+		return tr.scalarCallUF(call, argEnv, "Int")
 	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
@@ -4761,6 +4764,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 		}
 	}
 	ret := tr.freshAux(smtTypeNonNegative(resultType))
+	tr.linkScalarCallUF(call, argEnv, ret, "Int")
 	// A call returns a value of its machine integer type, so it lies in that type's range.
 	if signed, bits, ok := smtIntWidthSign(resultType); ok && bits > 0 && bits <= 64 {
 		lo, hi := "0", new(big.Int).Lsh(big.NewInt(1), uint(bits)).String()
@@ -5071,7 +5075,7 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 		return sel, true
 	}
 	if !tr.opaqueCallQuantifierIndependent(call, argEnv) {
-		return "", false
+		return tr.scalarCallUF(call, argEnv, "Bool")
 	}
 	// A PROTOCOL-METHOD bool call (`x.le(y)` where le is an interface method, docs/85 P3) is modeled as
 	// an UNINTERPRETED predicate: a stable Bool symbol keyed by (Interface.method, argument idents). The
@@ -5104,6 +5108,7 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 		}
 	}
 	ret := tr.freshBoolAux()
+	tr.linkScalarCallUF(call, argEnv, ret, "Bool")
 	if canonKey != "" {
 		tr.callCanon[canonKey] = ret
 	}
