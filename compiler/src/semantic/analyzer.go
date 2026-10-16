@@ -91,6 +91,7 @@ type Analyzer struct {
 	// smtStaleLocalDefs marks immutable locals whose initializer read a binding that has since been
 	// written (analyzer_smt_shadowing.go); their defining equation no longer holds.
 	smtStaleLocalDefs map[*Symbol]bool
+	sviewFrameWriteFreeCache map[*ast.FuncDecl]bool
 	programRegions                       map[string]bool
 	programRegionNameUse                 int
 	programLivedTypes                    map[Type]bool
