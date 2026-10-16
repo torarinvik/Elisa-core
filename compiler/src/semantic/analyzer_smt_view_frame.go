@@ -15,11 +15,12 @@ import (
 //   - locals: immutable bindings of write-free values; MUTABLE bindings only when the declared
 //     type is a scalar (integer/bool) or sview — rebinding such a slot writes no shared memory;
 //   - assignments `x <- v` / `x += v` only to those mutable scalar/view locals;
-//   - if/elif/else, while (condition and body write-free), return, and `can Abort.Panic:`;
+//   - if/elif/else, while (condition and body write-free), return, read-only contracts, and
+//     Abort.Panic / Unsafe.UncheckedIndex blocks (the latter permits a load, never a write);
 //   - expressions: identifiers, literals, operators without overloads, ternaries, non-optional
 //     field reads, view slices and indexing, plain integer casts, tuples, and calls to callees
 //     classified write-free (classifierCalleeWriteFree / functionPureEquationShape);
-//   - the function has no mutable parameters and uses no permission beyond Abort.Panic.
+//   - the function has no mutable parameters and uses only those read-only permissions.
 //
 // Anything else declines (the caller keeps the conservative per-read modeling).
 func (a *Analyzer) sviewFrameWriteFree(decl *ast.FuncDecl) bool {
@@ -43,18 +44,18 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	panicOnly := func(permissions []ast.PermissionRef) bool {
+	readOnly := func(permissions []ast.PermissionRef) bool {
 		for _, permission := range permissions {
-			if permission.Name != "Abort" || permission.Member != "Panic" || len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
+			if !sviewFrameReadPermission(permission) {
 				return false
 			}
 		}
 		return true
 	}
-	if !panicOnly(decl.Permissions) {
+	if !readOnly(decl.Permissions) {
 		return false
 	}
-	if decl == a.currentFuncDecl && !panicOnly(a.currentFunctionUsedPermissionRefs) {
+	if decl == a.currentFuncDecl && !readOnly(a.currentFunctionUsedPermissionRefs) {
 		return false
 	}
 	g := &sviewFrameGate{a: a, rebindable: map[string]bool{}}
@@ -65,6 +66,14 @@ type sviewFrameGate struct {
 	a *Analyzer
 	// rebindable names the mutable scalar/view locals declared so far; only they may be assigned.
 	rebindable map[string]bool
+}
+
+func sviewFrameReadPermission(permission ast.PermissionRef) bool {
+	if len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
+		return false
+	}
+	return (permission.Name == "Abort" && permission.Member == "Panic") ||
+		(permission.Name == "Unsafe" && permission.Member == "UncheckedIndex")
 }
 
 func sviewFrameRebindableType(te ast.TypeExpr) bool {
@@ -136,7 +145,7 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 			return false
 		}
 		switch n.Kind {
-		case ast.ContractInvariant, ast.ContractDecreases:
+		case ast.ContractRequire, ast.ContractEnsure, ast.ContractInvariant, ast.ContractDecreases:
 			return n.Cond != nil && g.expr(n.Cond, 0)
 		case ast.ContractDecreasesWild:
 			return true
@@ -146,11 +155,11 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		// The proof block is verification-only; the condition is checked in place.
 		return n != nil && g.expr(n.Cond, 0)
 	case *ast.CanStmt:
-		if n == nil || n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.SuppressPermissionInference || n.As != "" || len(n.Permissions) == 0 {
+		if n == nil || n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.As != "" || len(n.Permissions) == 0 {
 			return false
 		}
 		for _, permission := range n.Permissions {
-			if permission.Name != "Abort" || permission.Member != "Panic" || len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
+			if !sviewFrameReadPermission(permission) {
 				return false
 			}
 		}

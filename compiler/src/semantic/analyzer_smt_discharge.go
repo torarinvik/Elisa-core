@@ -2330,6 +2330,7 @@ type smtTranslator struct {
 	a                    *Analyzer
 	decls                map[string]bool // Elisa ident -> declared as an SMT Int const
 	arrayDecls           map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	byteReadBounds       map[string]bool // stable byte-select terms whose unsigned range was emitted
 	// setDecls / dictDecls model set[T] / dict[K,V] containers. A set is an (Array <KSort> Bool)
 	// membership function (`p in s` = `(select s p)`). A dict is modeled as TWO arrays keyed by the
 	// same KSort: a `<sym>_keys` (Array <KSort> Bool) membership predicate plus a `<sym>_vals`
@@ -2999,6 +3000,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.IndexExpr:
+		if term, ok := tr.stableSviewByteIndex(n, env); ok {
+			return term, true
+		}
 		// A read of a constant integer table (`__classtable_f[c]`, a folded classifier) is the
 		// table's value at the index (analyzer_smt_const_table.go).
 		if term, ok := tr.constTableIndexTerm(n, env); ok {
