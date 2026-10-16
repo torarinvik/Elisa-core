@@ -164,8 +164,15 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
 		// declared type (`scope.deferred.count` is a usize).
 		if _, known := a.exprTypes[inner]; !known {
-			if t, ok := a.storeScanDeclTypeOf(decl, inner); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
-				return storeNone
+			if t, ok := a.storeScanDeclTypeOf(decl, inner); ok && t != nil && !containsTypeParam(t) {
+				if a.storeScanHoldsNoRegionStorage(t) {
+					return storeNone
+				}
+				// docs/128: a declared program-lived type (an element of a
+				// `darray[sview @source]` parameter row) reaches only program-region storage.
+				if len(a.programRegions) != 0 && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
+					return storeNone
+				}
 			}
 			// A by-value loop binder over a parameter field chain is a copy of one element.
 			if id, isIdent := inner.(*ast.Ident); isIdent {
