@@ -165,7 +165,13 @@ func (a *Analyzer) setDictQuantifierCounterexample(tr *smtTranslator, goalExpr a
 	// `(and guard (not body))` — an IN-RANGE element that VIOLATES the body, i.e. the witness. The
 	// returned SAT model names idxSym and the binder element value.
 	obligation := "(=> " + guard + " " + body + ")"
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	requires := a.smtRequiresHypotheses(tr)
+	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	locals := a.smtImmutableLocalHypotheses(tr)
+	context := smtPreambleContext(tr.factPreamble()) + requires + locals + others + obligation
+	context = smtBoolMacroContext(tr, context)
+	boolLocals := a.smtImmutableBoolLocalHypotheses(tr, context)
+	hyps := requires + locals + boolLocals + others
 	proven, ce := a.smtCheckQuery(tr, hyps, obligation)
 	if proven {
 		// No in-range element violates the body — no witness to report.

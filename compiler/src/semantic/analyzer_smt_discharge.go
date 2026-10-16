@@ -364,7 +364,16 @@ func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extr
 	locals := a.smtImmutableLocalHypotheses(tr)
 	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
-		hyps := requires + sliceImmutableLocalHypotheses(locals, smtPreambleContext(tr.factPreamble())+requires+others+obligation) + others
+		context := smtPreambleContext(tr.factPreamble()) + requires + others + obligation
+		queryLocals := locals
+		if len(tr.boolLocalRefs) != 0 {
+			context = smtBoolMacroContext(tr, context)
+			boolDemandContext := context + sliceImmutableLocalHypotheses(locals, context)
+			queryLocals += a.smtImmutableBoolLocalHypotheses(tr, boolDemandContext)
+			context = smtPreambleContext(tr.factPreamble()) + requires + others + obligation
+			context = smtBoolMacroContext(tr, context)
+		}
+		hyps := requires + sliceImmutableLocalHypotheses(queryLocals, context) + others
 		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
 			return false, ce
 		}
@@ -593,7 +602,15 @@ func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.E
 	requires := a.smtRequiresHypotheses(tr)
 	locals := a.smtImmutableLocalHypotheses(tr)
 	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
-	hyps := requires + sliceImmutableLocalHypotheses(locals, smtPreambleContext(tr.factPreamble())+requires+others+body) + others
+	context := smtPreambleContext(tr.factPreamble()) + requires + others + body
+	if len(tr.boolLocalRefs) != 0 {
+		context = smtBoolMacroContext(tr, context)
+		boolDemandContext := context + sliceImmutableLocalHypotheses(locals, context)
+		locals += a.smtImmutableBoolLocalHypotheses(tr, boolDemandContext)
+		context = smtPreambleContext(tr.factPreamble()) + requires + others + body
+		context = smtBoolMacroContext(tr, context)
+	}
+	hyps := requires + sliceImmutableLocalHypotheses(locals, context) + others
 	proven, ce := a.smtCheckQuery(tr, hyps, body)
 	if proven {
 		return ""
@@ -2347,11 +2364,15 @@ type smtTranslator struct {
 	// This is what makes the wraparound model (wrapMachineArith) PRECISE rather than merely sound: with
 	// operands pinned to their representable range an in-range computation does not actually wrap, so
 	// divisibility/alignment proofs through `value - value%alignment` survive.
-	unsignedBits map[string]int
-	signedBits   map[string]int
-	boolDecls    map[string]bool     // free bool-typed idents declared as SMT Bool consts
-	resultFields map[string]ast.Expr // when `result` is a struct literal, its field -> arg expr
-	paramConsts  map[string]int64    // law static params bound to constants
+	unsignedBits     map[string]int
+	signedBits       map[string]int
+	boolDecls        map[string]bool     // free bool-typed idents declared as SMT Bool consts
+	boolLocalRefs    map[string]*Symbol  // source bool locals translated from the current proof scope
+	boolDefs         map[string]string   // query-demanded immutable bool locals defined as SMT macros
+	boolDefOrder     []string            // dependency-first order for boolDefs in the fact preamble
+	onBoolIdentifier func(string)        // optional observer for newly translated free bool identifiers
+	resultFields     map[string]ast.Expr // when `result` is a struct literal, its field -> arg expr
+	paramConsts      map[string]int64    // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
 	// divisor). Each is a free integer constrained only by what is provably true (never a false
@@ -2462,6 +2483,8 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		unsignedBits:        map[string]int{},
 		signedBits:          map[string]int{},
 		boolDecls:           map[string]bool{},
+		boolLocalRefs:       map[string]*Symbol{},
+		boolDefs:            map[string]string{},
 		paramConsts:         paramConsts,
 		ceExprs:             map[string]string{},
 		callCanon:           map[string]string{},
@@ -4026,6 +4049,15 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && !sym.Mutable && IsBoolType(sym.Type) {
 			name := smtBoolVar(n.Name)
 			tr.boolDecls[name] = true
+			if sym.Kind == SymbolLocal {
+				if tr.boolLocalRefs == nil {
+					tr.boolLocalRefs = make(map[string]*Symbol)
+				}
+				tr.boolLocalRefs[name] = sym
+				if tr.onBoolIdentifier != nil {
+					tr.onBoolIdentifier(name)
+				}
+			}
 			return name, true
 		}
 		// A by-value MUTABLE bool local/param denotes its value at this proof point, exactly like a
@@ -5815,6 +5847,9 @@ func (tr *smtTranslator) factPreamble() string {
 	}
 	sort.Strings(bools)
 	for _, name := range bools {
+		if _, defined := tr.boolDefs[name]; defined {
+			continue
+		}
 		b.WriteString("(declare-const " + name + " Bool)\n")
 	}
 	// Length symbols (`arr.count`/`.len`), each a non-negative Int.
@@ -5844,6 +5879,7 @@ func (tr *smtTranslator) factPreamble() string {
 	b.WriteString(tr.enumPreamble())
 	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
 	// mint order — deterministic because the counter is monotonic over a single translation.
+	var auxAssertions []string
 	for _, line := range tr.auxDecls {
 		// An auxiliary ASSUMPTION minted while translating a quantifier body (a callee's defining
 		// equation or ensure over the binder) is hoisted to top level, where the `q_` binder is
@@ -5851,6 +5887,26 @@ func (tr *smtTranslator) factPreamble() string {
 		if strings.HasPrefix(line, "(assert ") && smtTermMentionsQuantifierBinder(line) {
 			continue
 		}
+		if strings.HasPrefix(line, "(assert ") {
+			auxAssertions = append(auxAssertions, line)
+			continue
+		}
+		b.WriteString(line)
+	}
+	// Immutable local bools are macros rather than free constants plus equalities. Emit them after
+	// every declaration (including auxiliary symbols minted while translating an initializer), in
+	// dependency-first order so SMT-LIB never needs a forward reference.
+	for _, name := range tr.boolDefOrder {
+		value, ok := tr.boolDefs[name]
+		if !ok {
+			continue
+		}
+		b.WriteString("(define-fun " + name + " () Bool " + value + ")\n")
+	}
+	// Auxiliary constraints can mention a Boolean local that became a macro after its translation.
+	// Defer those assertions until the macros are defined, while keeping all auxiliary declarations
+	// above them so both the assertions and macro bodies have every symbol in scope.
+	for _, line := range auxAssertions {
 		b.WriteString(line)
 	}
 	return b.String()

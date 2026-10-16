@@ -80,6 +80,9 @@ func localHypothesisSymbol(line string) (string, bool) {
 				return "", false
 			}
 			sym := rest[:end]
+			if strings.HasPrefix(prefix, "(assert (= ") && strings.HasPrefix(sym, "b_") {
+				return sym, true
+			}
 			if !strings.HasPrefix(sym, "v_") {
 				return "", false
 			}
@@ -95,7 +98,7 @@ func localHypothesisSymbol(line string) (string, bool) {
 func smtPreambleContext(preamble string) string {
 	var b strings.Builder
 	for _, line := range strings.SplitAfter(preamble, "\n") {
-		if strings.HasPrefix(line, "(declare-") || strings.HasPrefix(line, ";") {
+		if strings.HasPrefix(line, "(declare-") || strings.HasPrefix(line, "(define-fun ") || strings.HasPrefix(line, ";") {
 			continue
 		}
 		symbols := 0
