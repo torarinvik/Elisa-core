@@ -93,7 +93,10 @@ func (a *Analyzer) recordStorageViewBinding(sym *Symbol, value ast.Expr) {
 	// A scalar binding (`t: i64 = r` with `r = &xs[0]`) holds a COPY of the referent, not an
 	// address into the buffer: nothing a later relocation or replacement of xs does can make
 	// it stale, so it carries no storage dependency.
-	if storageViewScalarBindingType(sym.Type) {
+	// docs/128: a binding whose declared type is program-lived (`sview @source`) views bytes in
+	// the program region, never a container's buffer; relocating or replacing the container it
+	// was read from cannot make it stale. The type checker proves the value is program-lived.
+	if storageViewScalarBindingType(sym.Type) || a.storageViewBindingIsProgramLived(sym.Type) {
 		if a.currentStorageViewDeps != nil {
 			delete(a.currentStorageViewDeps, sym)
 		}
@@ -122,6 +125,18 @@ func (a *Analyzer) recordStorageViewBinding(sym *Symbol, value ast.Expr) {
 		}
 	}
 	a.currentStorageViewDeps[sym] = dep
+}
+
+func (a *Analyzer) storageViewBindingIsProgramLived(t Type) bool {
+	if t == nil || len(a.programRegions) == 0 || containsTypeParam(t) {
+		return false
+	}
+	// A container value (a darray of program-lived views) may still share a relocatable
+	// buffer with the place it was read from; only the views themselves are exempt.
+	if a.storageViewTypeOwnsRelocatable(stripStorageViewRefs(t), map[Type]bool{}) {
+		return false
+	}
+	return a.typeCanContainRegionRefs(t, map[string]bool{}) && a.typeIsProgramLivedCached(t)
 }
 
 // storageViewScalarBindingType: plain value scalars. `uintptr` is excluded -- it can hold an
