@@ -70,7 +70,53 @@ func (tr *smtTranslator) boolPredicateCallSym(call *ast.CallExpr, env map[string
 	// (2) bounded structural defining equation — only for a well-founded recursive (or trivially total
 	// non-recursive) predicate. A NO-OP otherwise, leaving `sym` purely opaque (still sound).
 	tr.emitStructuralPredicateEquation(call, decl, sym, args, env, key)
+	tr.assumeBoolPredicateEnsures(decl, args, env, sym)
 	return sym, true
+}
+
+// assumeBoolPredicateEnsures assumes a canonicalized bool predicate's ensures for this call (see
+// assumeBoolCallEnsures), within the shared call-clause expansion budget.
+func (tr *smtTranslator) assumeBoolPredicateEnsures(decl *ast.FuncDecl, args []ast.Expr, argEnv map[string]string, sym string) {
+	if len(decl.EnsureValues) == 0 || tr.callClauseInFlight[decl] {
+		return
+	}
+	if tr.callClauseDepth >= smtCallClauseMaxDepth || tr.callClauseExpansions >= smtCallClauseMaxExpansions {
+		return
+	}
+	tr.callClauseExpansions++
+	tr.callClauseDepth++
+	tr.callClauseInFlight[decl] = true
+	defer func() {
+		tr.callClauseDepth--
+		delete(tr.callClauseInFlight, decl)
+	}()
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	if !ok {
+		return
+	}
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.calleeBoolTerm(decl, req, env)
+		if !ok {
+			return
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
+	tr.assumeBoolCallEnsures(decl, env, guard, sym)
 }
 
 // boolPredicateCanonKey builds the canonicalization key for a bool-predicate call: the callee identity

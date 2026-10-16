@@ -4932,8 +4932,38 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 			guard = "(and " + guard + " " + h + ")"
 		}
 	}
+	tr.assumeBoolCallEnsures(decl, env, guard, ret)
 	tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, false, env)
 	return ret, true
+}
+
+// assumeBoolCallEnsures asserts a bool callee's ensures for one call occurrence, with `result` bound
+// to the call's Bool symbol and the formals to the argument terms, under the callee's `requires`
+// guard — the bool counterpart of the ensure assumption in callResultTermEnv. A recursive callee is
+// skipped: its ensures at a recursive call are an induction hypothesis that needs a certificate.
+func (tr *smtTranslator) assumeBoolCallEnsures(decl *ast.FuncDecl, env map[string]string, guard, ret string) {
+	if decl == nil || len(decl.EnsureValues) == 0 || tr.a.isRecursiveProofCall(decl) || decl == tr.a.currentFuncDecl {
+		return
+	}
+	ensureEnv := make(map[string]string, len(env)+1)
+	for name, term := range env {
+		ensureEnv[name] = term
+	}
+	ensureEnv["result"] = ret
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		h, ok := tr.calleeBoolTerm(decl, ensure, ensureEnv)
+		if !ok {
+			continue
+		}
+		if guard == "true" {
+			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+		} else {
+			tr.auxDecls = append(tr.auxDecls, "(assert (=> "+guard+" "+h+"))\n")
+		}
+	}
 }
 
 // callCanonKey builds the canonicalization key for a direct call: the callee's identity plus the
