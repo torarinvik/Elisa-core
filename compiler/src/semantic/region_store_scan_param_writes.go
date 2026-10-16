@@ -163,6 +163,10 @@ func (a *Analyzer) storeScanMayShare(decl *ast.FuncDecl, value ast.Expr) bool {
 		if t := a.storeScanCallReturnType(e); t != nil && !containsTypeParam(t) && !a.storeScanSharesCached(t) {
 			return false
 		}
+	case *ast.TernaryExpr:
+		// Only the selected branch is returned. Effects of evaluating the
+		// condition are scanned separately, not retained in the result.
+		return a.storeScanMayShare(decl, e.Value) || a.storeScanMayShare(decl, e.Alt)
 	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit:
 		return false
 	}
@@ -686,6 +690,8 @@ func (a *Analyzer) storeScanFlowsFrom(decl *ast.FuncDecl, idx *storeScanDeclInde
 			return false
 		}
 		switch e := stripParenExpr(value).(type) {
+		case *ast.TernaryExpr:
+			return flows(e.Value) || flows(e.Alt)
 		case *ast.CallExpr:
 			if field, isMethod := e.Func.(*ast.FieldExpr); isMethod && field != nil && flows(field.Object) {
 				return true
