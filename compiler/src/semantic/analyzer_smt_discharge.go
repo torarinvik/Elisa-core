@@ -3959,6 +3959,16 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			tr.boolDecls[name] = true
 			return name, true
 		}
+		// A by-value MUTABLE bool local/param denotes its value at this proof point, exactly like a
+		// mutable integer local in termEnv: every flow fact about it is retired at each write (the
+		// mutation chokepoint), and no defining equation is ever asserted for a mutable binding.
+		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && sym.Mutable && (sym.Kind == SymbolLocal || sym.Kind == SymbolParam) && IsBoolType(sym.Type) {
+			if _, isRef := sym.Type.(*RefType); !isRef {
+				name := smtBoolVar(n.Name)
+				tr.boolDecls[name] = true
+				return name, true
+			}
+		}
 		return "", false
 	case *ast.FieldExpr:
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {

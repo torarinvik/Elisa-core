@@ -1363,7 +1363,9 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	snapshot := affineFlowSnapshot{Regions: branchRegions, Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	blockEndRangeFacts(snapshot.RangeFacts, scope)
 	if scope != nil {
-		snapshot.SMTFacts = append([]smtFact(nil), scope.smtAssertFacts...)
+		// Facts over branch-local immutable locals are rewritten through their initializers so they
+		// survive the join (analyzer_smt_branch_local_facts.go).
+		snapshot.SMTFacts = a.projectBranchLocalFacts(scope, append([]smtFact(nil), scope.smtAssertFacts...))
 	}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
