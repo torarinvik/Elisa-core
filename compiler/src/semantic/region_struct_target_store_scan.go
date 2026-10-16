@@ -222,7 +222,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				for _, arg := range call.Args {
 					argMode := valueMode(arg)
 					if field.Field == "extend" {
-						argMode = a.storeScanExtendArgMode(arg, argMode)
+						argMode = a.storeScanExtendArgMode(decl, arg, argMode)
 					}
 					mode = maxStoreMode(mode, argMode)
 				}
@@ -314,7 +314,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					for _, arg := range n.Args {
 						argMode := valueMode(arg)
 						if copiesElements {
-							argMode = a.storeScanExtendArgMode(arg, argMode)
+							argMode = a.storeScanExtendArgMode(decl, arg, argMode)
 						}
 						mode = storeScanRaise(decl, 177, n, mode, argMode)
 					}
@@ -348,7 +348,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					for _, s := range taintedArgs {
 						argMode := s.mode
 						if copiesElements {
-							argMode = a.storeScanExtendArgMode(n.Args[s.index], argMode)
+							argMode = a.storeScanExtendArgMode(decl, n.Args[s.index], argMode)
 						}
 						mode = storeScanRaise(decl, 204, n, mode, argMode)
 					}
@@ -1030,7 +1030,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 							}
 							if copiesElements {
 								// Scalar elements copied out of xs carry nothing of it.
-								if a.storeScanExtendArgMode(arg, storeElements) == storeNone {
+								if a.storeScanExtendArgMode(decl, arg, storeElements) == storeNone {
 									continue
 								}
 								if idx.mentions(arg, content) && add(content, root.Name) {
@@ -1745,6 +1745,16 @@ func (a *Analyzer) storeScanLocalLiteralType(decl *ast.FuncDecl, name string) (T
 	idx := a.storeScanIndex(decl)
 	litName, ok, other := "", true, idx.otherBound[name]
 	for _, v := range idx.decls[name] {
+		// An explicitly typed declaration (`action: DeferredAction = xs[i]`) is checked to hold
+		// that struct, whatever its initializer; a region-qualified spelling is not modeled.
+		if named, isNamed := v.Type.(*ast.NamedType); isNamed && named != nil && named.Region == "" {
+			if litName != "" && named.Name != litName {
+				ok = false
+				break
+			}
+			litName = named.Name
+			continue
+		}
 		lit, isLit := storeScanUnwrap(v.Value).(*ast.StructLitExpr)
 		if !isLit || lit == nil || len(lit.TypeArgs) > 0 || (litName != "" && lit.Name != litName) {
 			ok = false
@@ -2343,11 +2353,17 @@ func storeScanPlaceDepth(expr ast.Expr) int {
 // storeScanExtendArgMode: a builtin darray's `extend(xs)` copies xs's ELEMENTS into the
 // receiver and never retains xs's own header; elements whose type holds no region storage
 // (`darray[u32]`) carry nothing from xs at all.
-func (a *Analyzer) storeScanExtendArgMode(arg ast.Expr, mode storeMode) storeMode {
+func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode storeMode) storeMode {
 	if mode == storeNone {
 		return mode
 	}
-	if t, known := a.exprTypes[storeScanUnwrap(arg)]; known && t != nil && !containsTypeParam(t) {
+	t, known := a.exprTypes[storeScanUnwrap(arg)]
+	if !known {
+		// The callee may not be typed yet: a field chain of a parameter or of an explicitly
+		// typed local still has its declared type.
+		t, known = a.storeScanDeclTypeOf(decl, storeScanUnwrap(arg))
+	}
+	if known && t != nil && !containsTypeParam(t) {
 		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && (a.storeScanHoldsNoRegionStorage(da.Elem) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(da.Elem))) {
 			return storeNone
 		}
