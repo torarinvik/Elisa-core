@@ -458,6 +458,25 @@ func (tr *smtTranslator) scalarMatchGuard(value ast.Expr, pattern ast.MatchPatte
 
 func scalarMatchProofExpr(expr ast.Expr) bool {
 	switch n := expr.(type) {
+	case *ast.MembershipRangeExpr:
+		return scalarMatchProofExpr(n.Start) && scalarMatchProofExpr(n.End)
+	case *ast.ListLitExpr:
+		// Membership normalizes its candidates to a list, including a single range.
+		// No owner, dictionary keys, spreads, or calls may enter a match equation.
+		if n.Keys != nil || n.Owner != nil {
+			return false
+		}
+		for _, spread := range n.Spreads {
+			if spread {
+				return false
+			}
+		}
+		for _, elem := range n.Elems {
+			if !scalarMatchProofExpr(elem) {
+				return false
+			}
+		}
+		return true
 	case *ast.Ident, *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit:
 		return true
 	case *ast.ParenExpr:
