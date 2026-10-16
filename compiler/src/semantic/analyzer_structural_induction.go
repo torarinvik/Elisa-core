@@ -70,8 +70,48 @@ func (tr *smtTranslator) boolPredicateCallSym(call *ast.CallExpr, env map[string
 	// (2) bounded structural defining equation — only for a well-founded recursive (or trivially total
 	// non-recursive) predicate. A NO-OP otherwise, leaving `sym` purely opaque (still sound).
 	tr.emitStructuralPredicateEquation(call, decl, sym, args, env, key)
+	tr.emitBoolPredicateDefiningEquation(call, decl, sym, args, env, key)
 	tr.assumeBoolPredicateEnsures(decl, args, env, sym)
 	return sym, true
+}
+
+// emitBoolPredicateDefiningEquation gives a bool predicate that is a pure, TOTAL function (verified
+// numeric `decreases`, see functionDefiningEquationEligible) its bounded, requires-guarded defining
+// equation — the same equation an integer-valued function receives in callResultTermEnv.
+func (tr *smtTranslator) emitBoolPredicateDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, sym string, args []ast.Expr, argEnv map[string]string, key string) {
+	if !tr.callEquationEligible(decl) || tr.a.isRecursiveProofCall(decl) {
+		return
+	}
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			return
+		}
+		subst[param.Name] = args[i]
+	}
+	prior := tr.bindingCallee
+	tr.bindingCallee = decl
+	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	tr.bindingCallee = prior
+	if !ok {
+		return
+	}
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.calleeBoolTerm(decl, req, env)
+		if !ok {
+			return
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
+	tr.emitDefiningEquationWithEnv(call, decl, sym, subst, key, guard, false, env)
 }
 
 // assumeBoolPredicateEnsures assumes a canonicalized bool predicate's ensures for this call (see

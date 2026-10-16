@@ -44,3 +44,60 @@ func TestContainerTheoryLengthUnfolding(t *testing.T) {
 		t.Fatalf("distinct: two containers must not share a value; got %v", result.Errors())
 	}
 }
+
+// Step 2: view elements of a stable container are read through per-base element functions, so a
+// recursive membership spec unfolds over `xs[index] == w`. Negatives: another container, a
+// different index, a read past count (never an in-bounds fact) and a mutable container.
+func TestContainerTheoryViewElements(t *testing.T) {
+	src := `module M:
+    public:
+        ghost def pres(xs: darray[sview]&, w: sview, index: usize) -> bool:
+            requires index <= xs.count
+            decreases xs.count - index
+            return false if index == xs.count
+            return true if xs[index] == w
+            return pres(xs, w, index + 1.usize())
+
+        def two(xs: darray[sview], w: sview) -> bool:
+            requires xs.count == 1 and xs[0] == w
+            ensure result == pres(xs, w, 0.usize())
+            return true
+
+        def later(xs: darray[sview], w: sview) -> bool:
+            requires xs.count == 2 and xs[1] == w
+            ensure result == pres(xs, w, 0.usize())
+            return true
+
+        def other(xs: darray[sview], ys: darray[sview], w: sview) -> bool:
+            requires xs.count == 1 and xs[0] == w and ys.count == 1
+            ensure result == pres(ys, w, 0.usize())
+            return true
+
+        def wrongidx(xs: darray[sview], w: sview) -> bool:
+            requires xs.count == 2 and xs[1] == w
+            ensure result == (xs[0] == w)
+            return true
+
+        def past(xs: darray[sview], w: sview) -> bool:
+            requires xs.count == 1 and xs[3] == w
+            ensure result == (xs.count > 3)
+            return true
+
+        def mutated(xs: mutable darray[sview], w: sview) -> bool:
+            requires xs.count == 1 and xs[0] == w
+            ensure result == pres(xs, w, 0.usize())
+            xs[0] <- "zz"
+            return true
+`
+	result := analyzeContractStrict(t, "container_elems.elisa", src)
+	for _, fn := range []string{"two", "later"} {
+		if n := ensureFailuresFor(result.Errors(), fn); n != 0 {
+			t.Fatalf("%s: expected element unfolding proof, got %v", fn, result.Errors())
+		}
+	}
+	for _, fn := range []string{"other", "wrongidx", "past", "mutated"} {
+		if ensureFailuresFor(result.Errors(), fn) == 0 {
+			t.Fatalf("%s: must stay unproven; got %v", fn, result.Errors())
+		}
+	}
+}

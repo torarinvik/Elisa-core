@@ -56,6 +56,10 @@ func (tr *smtTranslator) sviewContentParts(expr ast.Expr, env map[string]string)
 			}
 		}
 	}
+	if base, k, ok := tr.containerViewIndex(e, env); ok {
+		arr, lo, length := tr.containerViewElement(base, k)
+		return arr, lo, length, true
+	}
 	slice, isSlice := e.(*ast.SliceExpr)
 	if !isSlice {
 		switch e.(type) {

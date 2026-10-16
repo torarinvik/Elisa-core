@@ -134,3 +134,66 @@ func (a *Analyzer) containerArgType(arg ast.Expr) Type {
 	}
 	return nil
 }
+
+// containerElementType is the element type of a darray-typed container expression, or nil.
+func (tr *smtTranslator) containerElementType(expr ast.Expr) Type {
+	t := tr.a.containerArgType(expr)
+	if t == nil {
+		return nil
+	}
+	if r, ok := t.(*RefType); ok {
+		t = r.Elem
+	}
+	if d, ok := StripAggregateStateType(t).(*DArrayType); ok && d != nil {
+		return d.Elem
+	}
+	return nil
+}
+
+// containerViewIndex recognizes `xs[k]` on a stable container of views and returns its base and
+// index term.
+func (tr *smtTranslator) containerViewIndex(expr ast.Expr, env map[string]string) (string, string, bool) {
+	idx, ok := stripOptimizationParens(expr).(*ast.IndexExpr)
+	if !ok || idx == nil || idx.Index2 != nil || idx.Fallback != nil || idx.LegacyElseFallback ||
+		idx.AsSpecialize != nil || idx.AsOverlayCall != nil || idx.AsBuiltinDictGet != nil {
+		return "", "", false
+	}
+	elem := tr.containerElementType(idx.Object)
+	if elem == nil {
+		return "", "", false
+	}
+	if _, isView := stripRefForBounds(elem).(*SViewType); !isView {
+		return "", "", false
+	}
+	base, ok := tr.containerBase(idx.Object, env)
+	if !ok {
+		return "", "", false
+	}
+	k, ok := tr.termEnv(idx.Index, env)
+	if !ok {
+		return "", "", false
+	}
+	return base, k, true
+}
+
+// containerViewElement is the view stored at index k of a container: its byte array, start offset
+// and length, as per-base uninterpreted functions of the index. The length is non-negative (a view
+// length); nothing else is assumed, in particular not that k is in bounds.
+func (tr *smtTranslator) containerViewElement(base, k string) (arr, lo, length string) {
+	data := "|" + base + "$edata|"
+	start := "|" + base + "$elo|"
+	size := "|" + base + "$elen|"
+	if tr.ghostUFDecls == nil {
+		tr.ghostUFDecls = map[string]bool{}
+	}
+	if !tr.ghostUFDecls[data] {
+		tr.ghostUFDecls[data] = true
+		tr.auxDecls = append(tr.auxDecls,
+			"(declare-fun "+data+" (Int) (Array Int Int))\n",
+			"(declare-fun "+start+" (Int) Int)\n",
+			"(declare-fun "+size+" (Int) Int)\n")
+	}
+	length = "(" + size + " " + k + ")"
+	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+length+" 0))\n")
+	return "(" + data + " " + k + ")", "(" + start + " " + k + ")", length
+}

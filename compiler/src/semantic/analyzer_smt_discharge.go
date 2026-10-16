@@ -3027,6 +3027,12 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if n.Field == "len" {
+			if base, k, ok := tr.containerViewIndex(n.Object, env); ok {
+				_, _, length := tr.containerViewElement(base, k)
+				return length, true
+			}
+		}
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
 				if _, constant := stripOptimizationParens(value).(*ast.IntLit); constant {
@@ -3844,6 +3850,24 @@ func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
 // `env` maps an Elisa identifier (notably the law's `self`) to a pre-built SMT term.
 func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string, bool) {
 	switch n := expr.(type) {
+	case *ast.TernaryExpr:
+		// A bool-valued conditional `v if c else w` (the folded form of guard-return chains).
+		if n == nil || n.Cond == nil || n.Value == nil || n.Alt == nil {
+			return "", false
+		}
+		c, ok := tr.boolTerm(n.Cond, env)
+		if !ok {
+			return "", false
+		}
+		v, ok := tr.boolTerm(n.Value, env)
+		if !ok {
+			return "", false
+		}
+		w, ok := tr.boolTerm(n.Alt, env)
+		if !ok {
+			return "", false
+		}
+		return "(ite " + c + " " + v + " " + w + ")", true
 	case *ast.MatchExpr:
 		if term, ok := tr.enumMatchTerm(n, env, tr.boolTerm); ok {
 			return term, true
@@ -5044,10 +5068,14 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	if expandsContract && (tr.callClauseDepth >= smtCallClauseMaxDepth || tr.callClauseExpansions >= smtCallClauseMaxExpansions) {
 		return ret, true
 	}
+	equationOnly := false
 	if expandsContract && tr.callClauseInFlight[decl] {
-		return ret, true
+		if !tr.callEquationEligible(decl) || tr.a.isRecursiveProofCall(decl) {
+			return ret, true
+		}
+		equationOnly = true
 	}
-	if expandsContract {
+	if expandsContract && !equationOnly {
 		tr.callClauseExpansions++
 		tr.callClauseDepth++
 		tr.callClauseInFlight[decl] = true
@@ -5063,7 +5091,10 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 		}
 		subst[param.Name] = args[i]
 	}
+	priorBinding := tr.bindingCallee
+	tr.bindingCallee = decl
 	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	tr.bindingCallee = priorBinding
 	if !ok {
 		return ret, true
 	}
@@ -5082,7 +5113,9 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 			guard = "(and " + guard + " " + h + ")"
 		}
 	}
-	tr.assumeBoolCallEnsures(decl, env, guard, ret)
+	if !equationOnly {
+		tr.assumeBoolCallEnsures(decl, env, guard, ret)
+	}
 	tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, false, env)
 	return ret, true
 }

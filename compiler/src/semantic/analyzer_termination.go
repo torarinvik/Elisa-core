@@ -860,7 +860,7 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr, owner *ast.FuncDecl
 	case *ast.FieldExpr:
 		return n != nil && a.exprIsPureShapeForEquation(n.Object, owner)
 	case *ast.IndexExpr:
-		return a.pureEquationSViewIndex(n, owner) && a.exprIsPureShapeForEquation(n.Index, owner)
+		return (a.pureEquationSViewIndex(n, owner) || a.pureEquationContainerIndex(n, owner)) && a.exprIsPureShapeForEquation(n.Index, owner)
 	case *ast.ParenExpr:
 		return n != nil && a.exprIsPureShapeForEquation(n.Inner, owner)
 	case *ast.UnaryExpr:
@@ -979,7 +979,7 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr, owner *ast.FuncDecl) boo
 	case *ast.FieldExpr:
 		return n != nil && a.exprIsPureForEquation(n.Object, owner)
 	case *ast.IndexExpr:
-		return a.pureEquationSViewIndex(n, owner) && a.exprIsPureForEquation(n.Index, owner)
+		return (a.pureEquationSViewIndex(n, owner) || a.pureEquationContainerIndex(n, owner)) && a.exprIsPureForEquation(n.Index, owner)
 	case *ast.ParenExpr:
 		return n != nil && a.exprIsPureForEquation(n.Inner, owner)
 	case *ast.UnaryExpr:
@@ -1117,4 +1117,37 @@ func contractConds(cs []*ast.ContractStmt) []ast.Expr {
 		}
 	}
 	return out
+}
+
+// pureEquationContainerIndex admits `xs[k]` on an immutable darray parameter of the owner; its
+// element is read through the container theory (a read the theory cannot model declines there).
+func (a *Analyzer) pureEquationContainerIndex(index *ast.IndexExpr, owner *ast.FuncDecl) bool {
+	if a == nil || index == nil || owner == nil || index.Index2 != nil || index.Fallback != nil ||
+		index.LegacyElseFallback || index.AsSpecialize != nil || index.AsOverlayCall != nil || index.AsBuiltinDictGet != nil {
+		return false
+	}
+	object, ok := stripOptimizationParens(index.Object).(*ast.Ident)
+	if !ok || object == nil || !a.equationIdentifierIsStable(object, owner) {
+		return false
+	}
+	sym, ok := a.symbolForFuncDecl(owner)
+	if !ok || sym == nil {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil || len(fn.Params) != len(owner.Params) {
+		return false
+	}
+	for i, param := range owner.Params {
+		if param.Name != object.Name {
+			continue
+		}
+		pt := fn.Params[i]
+		if ref, isRef := pt.(*RefType); isRef && (ref.Mutable || ref.Linear) {
+			return false
+		}
+		_, isContainer := StripAggregateStateType(stripRefForBounds(pt)).(*DArrayType)
+		return isContainer
+	}
+	return false
 }
