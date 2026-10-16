@@ -157,6 +157,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	var valueMode func(value ast.Expr) storeMode
 	valueMode = func(value ast.Expr) storeMode {
 		inner := storeScanUnwrap(value)
+		// A conditional carries the selected branch value, never the condition's storage.
+		// Calls in the condition are visited separately and retain their own store effects.
+		if choice, ok := inner.(*ast.TernaryExpr); ok && choice != nil {
+			return maxStoreMode(valueMode(choice.Value), valueMode(choice.Alt))
+		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
 		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
 			return storeNone
@@ -974,7 +979,12 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 	}
 	views = a.storeScanViewLocalsCached(decl, other)
 	idx := a.storeScanIndex(decl)
-	taint := func(name string, value ast.Expr) bool {
+	var taint func(string, ast.Expr) bool
+	taint = func(name string, value ast.Expr) bool {
+		if choice, ok := storeScanUnwrap(value).(*ast.TernaryExpr); ok && choice != nil {
+			changed := taint(name, choice.Value)
+			return taint(name, choice.Alt) || changed
+		}
 		changed := false
 		if views[name] && idx.mentions(value, content) {
 			// A view-typed local derived from a non-byte darray source holds (part of) an element
