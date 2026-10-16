@@ -826,10 +826,23 @@ func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast
 			}
 		}
 		pathTerm, ok := tr.boolTerm(path, pathEnv)
-		if !ok {
-			return false, "", false
+		if ok {
+			extra += "(assert " + pathTerm + ")\n"
+		} else {
+			// A path is a conjunction of branch guards, each of which holds at the site. Asserting
+			// only the conjuncts the translator models drops hypotheses and never adds one, so the
+			// query stays sound; with none translatable the old decline is kept.
+			kept := 0
+			for _, conjunct := range smtPathConjuncts(path) {
+				if term, ok := tr.boolTerm(conjunct, pathEnv); ok {
+					extra += "(assert " + term + ")\n"
+					kept++
+				}
+			}
+			if kept == 0 {
+				return false, "", false
+			}
 		}
-		extra += "(assert " + pathTerm + ")\n"
 	}
 	// Lower the clause to the VC IR and discharge against the standard hypothesis set (the enclosing
 	// function's `requires` — docs/90 brick 90-13 — its immutable-local defining equalities, flow
@@ -6425,4 +6438,34 @@ func (tr *smtTranslator) ternaryProjectionTerm(n *ast.FieldExpr, tern *ast.Terna
 		return "", false
 	}
 	return "(ite " + cond + " " + then + " " + alt + ")", true
+}
+
+// smtPathConjuncts flattens a branch path's top-level `and` tree, including `not (A or B)` as
+// `not A` and `not B`, into the guards that each hold on the path.
+func smtPathConjuncts(path ast.Expr) []ast.Expr {
+	switch e := path.(type) {
+	case *ast.ParenExpr:
+		return smtPathConjuncts(e.Inner)
+	case *ast.BinaryExpr:
+		if e.Op == lexer.TOKEN_AND {
+			return append(smtPathConjuncts(e.Left), smtPathConjuncts(e.Right)...)
+		}
+	case *ast.UnaryExpr:
+		if e.Op == lexer.TOKEN_NOT {
+			inner := e.Operand
+			for {
+				p, ok := inner.(*ast.ParenExpr)
+				if !ok {
+					break
+				}
+				inner = p.Inner
+			}
+			if b, ok := inner.(*ast.BinaryExpr); ok && b.Op == lexer.TOKEN_OR {
+				return append(
+					smtPathConjuncts(&ast.UnaryExpr{Position: e.Position, Op: lexer.TOKEN_NOT, Operand: b.Left}),
+					smtPathConjuncts(&ast.UnaryExpr{Position: e.Position, Op: lexer.TOKEN_NOT, Operand: b.Right})...)
+			}
+		}
+	}
+	return []ast.Expr{path}
 }
