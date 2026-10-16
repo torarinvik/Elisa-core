@@ -67,6 +67,7 @@ func (tr *smtTranslator) boolPredicateCallSym(call *ast.CallExpr, env map[string
 	}
 	sym := tr.freshBoolPredAux()
 	tr.callCanon[key] = sym
+	tr.assertGhostCallCongruenceSort(decl, args, env, sym, "Bool")
 	// (2) bounded structural defining equation — only for a well-founded recursive (or trivially total
 	// non-recursive) predicate. A NO-OP otherwise, leaving `sym` purely opaque (still sound).
 	tr.emitStructuralPredicateEquation(call, decl, sym, args, env, key)

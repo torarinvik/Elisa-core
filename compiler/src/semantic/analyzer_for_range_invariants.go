@@ -101,6 +101,15 @@ func (a *Analyzer) proveForRangeInvariants(stmt *ast.ForStmt, loopType Type) (pr
 
 // loopBodyContinues reports a `continue` that targets this loop (one not nested in an inner loop).
 func loopBodyContinues(body []ast.Stmt) bool {
+	return loopBodyHasJump(body, false)
+}
+
+// loopBodyBreaks reports a `break` that targets this loop.
+func loopBodyBreaks(body []ast.Stmt) bool {
+	return loopBodyHasJump(body, true)
+}
+
+func loopBodyHasJump(body []ast.Stmt, wantBreak bool) bool {
 	found := false
 	var walk func(v reflect.Value, depth int)
 	walk = func(v reflect.Value, depth int) {
@@ -114,7 +123,14 @@ func loopBodyContinues(body []ast.Stmt) bool {
 			}
 			switch v.Interface().(type) {
 			case *ast.ContinueStmt:
-				found = true
+				if !wantBreak {
+					found = true
+				}
+				return
+			case *ast.BreakStmt:
+				if wantBreak {
+					found = true
+				}
 				return
 			case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt, *ast.ParallelForStmt, *ast.LambdaExpr:
 				return

@@ -101,3 +101,67 @@ func TestContainerTheoryViewElements(t *testing.T) {
 		}
 	}
 }
+
+// Step 3: a membership scan with an inductive invariant against the recursive spec. Ghost bool
+// predicates over a stable container and a view are congruent across frames, and a loop without
+// `break` exports inv ∧ ¬cond (a `return` leaves the function). Negatives: the negated spec, and
+// a loop that can `break` (no exit facts: after a break the guard may still hold).
+func TestContainerTheoryMembershipLoop(t *testing.T) {
+	src := `module P:
+    public:
+        ghost def name_present_from(names: darray[sview]&, wanted: sview, index: usize) -> bool:
+            requires index <= names.count
+            decreases names.count - index
+            return false if index == names.count
+            return true if names[index] == wanted
+            return name_present_from(names, wanted, index + 1.usize())
+
+        ghost def name_present_spec(names: darray[sview]&, wanted: sview) -> bool:
+            return name_present_from(names, wanted, 0)
+
+        def name_present(names: darray[sview]&, wanted: sview) -> bool:
+            ensure result == name_present_spec(names, wanted)
+            index: mutable usize = 0
+            while index < names.count |index|:
+                decreases names.count - index
+                invariant index <= names.count
+                invariant name_present_from(names, wanted, index) == name_present_from(names, wanted, 0)
+                if names[index] == wanted:
+                    return true
+                index <- index + 1
+            return false
+
+        def wrong(names: darray[sview]&, wanted: sview) -> bool:
+            ensure result == (not name_present_spec(names, wanted))
+            index: mutable usize = 0
+            while index < names.count |index|:
+                decreases names.count - index
+                invariant index <= names.count
+                invariant name_present_from(names, wanted, index) == name_present_from(names, wanted, 0)
+                if names[index] == wanted:
+                    return true
+                index <- index + 1
+            return false
+
+        def broke(n: i64) -> i64:
+            requires n > 5 and n < 100
+            ensure result == n
+            i: mutable i64 = 0
+            while i < n |i|:
+                decreases n - i
+                invariant i <= n
+                if i == 3:
+                    break
+                i <- i + 1
+            return i
+`
+	result := analyzeContractStrict(t, "container_scan.elisa", src)
+	if n := ensureFailuresFor(result.Errors(), "name_present"); n != 0 {
+		t.Fatalf("name_present: expected proof, got %v", result.Errors())
+	}
+	for _, fn := range []string{"wrong", "broke"} {
+		if ensureFailuresFor(result.Errors(), fn) == 0 {
+			t.Fatalf("%s: must stay unproven; got %v", fn, result.Errors())
+		}
+	}
+}

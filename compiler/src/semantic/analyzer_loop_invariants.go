@@ -150,10 +150,9 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	if !captured && !pathsOK && seqOK {
 		paths, pathsOK = seqPaths, true
 	}
-	seqExits := false
-	for _, p := range seqPaths {
-		seqExits = seqExits || p.exits
-	}
+	// A `return` path leaves the function, not the loop: code after the loop is reached only when
+	// the guard fails, unless the body can `break`.
+	seqExits := loopBodyBreaks(stmt.Body)
 	perInvPaths := map[*ast.ContractStmt][]loopBodyPath{}
 	if !captured && !pathsOK {
 		for _, inv := range candidates {
@@ -267,10 +266,11 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// inductiveInvs (not invs) is returned so the caller only pushes PROVEN invariants onto the
 	// outer-loop stack — an invariant whose preservation fell back to runtime is NOT admitted as a
 	// hypothesis in nested inner loops (it is not guaranteed to hold at every iteration boundary).
-	// A body modeled path by path with NO exiting path reaches the loop head again on every path, so
-	// the loop leaves only through the guard: `inv ∧ ¬cond` holds at exit exactly as for a captured
-	// straight-line body. This needs every invariant inductive (allProven) on that model.
-	exitSound := captured || (seqOK && pathsOK && sameLoopPathSet(paths, seqPaths) && !seqExits && len(perInvPaths) == 0)
+	// A body modeled path by path (enumerated or sequential) whose every invariant was proven
+	// inductive on every non-exiting path, and which has no `break`, leaves the loop only through
+	// the guard (a `return` leaves the function): `inv ∧ ¬cond` holds after the loop exactly as for
+	// a captured straight-line body.
+	exitSound := captured || ((pathsOK || len(perInvPaths) != 0) && !seqExits)
 	return inductiveInvs, allProven && exitSound
 }
 

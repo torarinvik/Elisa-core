@@ -6325,6 +6325,11 @@ func (tr *smtTranslator) rangeBoundHypotheses(name string, r numRange) []string 
 // binding (the same symbol is the same view, length included), so two different views never meet
 // as one UF argument. Any other argument shape declines (the fresh symbol stays unconstrained).
 func (tr *smtTranslator) assertGhostCallCongruence(decl *ast.FuncDecl, args []ast.Expr, argEnv map[string]string, ret string) {
+	tr.assertGhostCallCongruenceSort(decl, args, argEnv, ret, "Int")
+}
+
+// assertGhostCallCongruenceSort is assertGhostCallCongruence for a result of the given SMT sort.
+func (tr *smtTranslator) assertGhostCallCongruenceSort(decl *ast.FuncDecl, args []ast.Expr, argEnv map[string]string, ret, resultSort string) {
 	if tr == nil || tr.a == nil || decl == nil || !decl.IsGhost || len(args) != len(decl.Params) {
 		return
 	}
@@ -6367,11 +6372,15 @@ func (tr *smtTranslator) assertGhostCallCongruence(decl *ast.FuncDecl, args []as
 			if ref, isRef := paramTypes[i].(*RefType); isRef && (ref.Mutable || ref.Linear) {
 				return
 			}
-			key, ok := tr.ghostContainerArgKey(arg, env)
+			inner := stripOptimizationParens(arg)
+			if addr, isAddr := inner.(*ast.AddrOfExpr); isAddr && addr != nil {
+				inner = addr.Operand
+			}
+			base, ok := tr.containerBase(inner, env)
 			if !ok {
 				return
 			}
-			name.WriteString("|" + key)
+			name.WriteString("|container:" + base)
 		default:
 			if _, numeric := smtNumericValueType(argType); !numeric {
 				return
@@ -6384,13 +6393,13 @@ func (tr *smtTranslator) assertGhostCallCongruence(decl *ast.FuncDecl, args []as
 			terms = append(terms, t)
 		}
 	}
-	fn := "|ghost_uf_" + strconv.FormatUint(fnvString(name.String()), 16) + "_" + strconv.Itoa(len(sorts)) + "|"
+	fn := "|ghost_uf_" + strconv.FormatUint(fnvString(name.String()), 16) + "_" + strconv.Itoa(len(sorts)) + "_" + resultSort + "|"
 	if tr.ghostUFDecls == nil {
 		tr.ghostUFDecls = map[string]bool{}
 	}
 	if !tr.ghostUFDecls[fn] {
 		tr.ghostUFDecls[fn] = true
-		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+fn+" ("+strings.Join(sorts, " ")+") Int)\n")
+		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+fn+" ("+strings.Join(sorts, " ")+") "+resultSort+")\n")
 	}
 	app := fn
 	if len(terms) != 0 {
@@ -6417,46 +6426,22 @@ func (tr *smtTranslator) ghostViewArgKey(arg ast.Expr, env map[string]string) (s
 	if !ok || id == nil || tr.a.currentScope == nil {
 		return "", false
 	}
-	if _, bound := env[id.Name]; bound {
-		return "", false
+	// The key is the view's byte-array symbol, so it agrees across frames: a callee formal bound
+	// to the caller's view carries that view's symbol (never a length-only stand-in).
+	if bound, isBound := env[id.Name]; isBound {
+		if tr.lengthOnly[bound] || bound == "" {
+			return "", false
+		}
+		return "view:" + bound, true
 	}
-	sym, found := tr.a.currentScope.Lookup(id.Name)
-	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
-		return "", false
-	}
-	return fmt.Sprintf("view:%s@%p", id.Name, sym), true
-}
-
-// ghostContainerArgKey names a darray argument of a ghost call by its binding when that binding can
-// never change: an immutable local, or an immutable parameter (at most an immutable reference), of
-// the function being analyzed (not a callee frame, not substituted by env). Two applications with the same key then receive the same
-// container value, so congruence over the remaining arguments is sound.
-func (tr *smtTranslator) ghostContainerArgKey(arg ast.Expr, env map[string]string) (string, bool) {
 	if tr.calleeBodyDepth != 0 {
 		return "", false
 	}
-	arg = stripOptimizationParens(arg)
-	if addr, ok := arg.(*ast.AddrOfExpr); ok && addr != nil {
-		// The implicit borrow inserted for an immutable reference parameter names the same binding.
-		arg = stripOptimizationParens(addr.Operand)
-	}
-	id, ok := arg.(*ast.Ident)
-	if !ok || id == nil || tr.a.currentScope == nil {
-		return "", false
-	}
-	if _, bound := env[id.Name]; bound {
-		return "", false
-	}
 	sym, found := tr.a.currentScope.Lookup(id.Name)
 	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
 		return "", false
 	}
-	if ref, isRef := StripAggregateStateType(sym.Type).(*RefType); isRef && (sym.Kind != SymbolParam || ref.Mutable || ref.Linear) {
-		// A by-value darray parameter is passed as an immutable reference; the same exclusivity the
-		// view key (ghostViewArgKey) relies on keeps its referent fixed for the call.
-		return "", false
-	}
-	return fmt.Sprintf("darray:%s@%p", id.Name, sym), true
+	return "view:" + smtVar(id.Name), true
 }
 
 // smtCallLocalResultOnlyEnsures asserts, for an immutable numeric local initialized by a direct call
