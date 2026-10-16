@@ -78,3 +78,39 @@ func TestStoreScanMatchBinderPayloadTyped(t *testing.T) {
 		t.Errorf("a plain-view binder payload must stay a store")
 	}
 }
+
+// The check_borrow_after_move:2006 shape: a diagnostic literal built from elements of the
+// callee's own parameter rows. Untyped, an element of a `darray[u32]&` or `darray[sview @source]&`
+// parameter is judged by the row's declared element type.
+const storeScanParamRowSource = `global region source
+
+struct Note:
+    name: sview @source
+    count: u32 = 0
+
+struct Table:
+    notes: mutable darray[Note] = []
+    plain: mutable darray[sview] = []
+
+def note_rows(table: mutable Table&, kinds: darray[u32]&, details: darray[sview @source]&, slot: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.notes.push(Note{name: details[slot], count: kinds[slot]})
+
+def note_plain(table: mutable Table&, names: darray[sview]&, slot: usize) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.plain.push(names[slot])
+`
+
+func TestStoreScanParamRowElementsTyped(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_param_rows.elisa", storeScanParamRowSource, AnalyzeOptions{})
+	storeScanUntyped(result)
+	for _, src := range []int{1, 2} {
+		if got := result.analyzer.calleeStoreModeInto(storeScanFindFunc(t, result, "note_rows"), src, 0); got != storeNone {
+			t.Errorf("param %d: row element store mode %d, want storeNone", src, got)
+		}
+	}
+	// Negative: an element of a plain darray[sview] parameter is still a store of its views.
+	if got := result.analyzer.calleeStoreModeInto(storeScanFindFunc(t, result, "note_plain"), 1, 0); got == storeNone {
+		t.Errorf("a plain-view row element must stay a store")
+	}
+}

@@ -2080,7 +2080,7 @@ func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type,
 		if e == nil {
 			return nil, false
 		}
-		return a.storeScanPatternBinderType(decl, e.Name)
+		return a.storeScanSubjectDeclType(decl, e)
 	case *ast.FieldExpr:
 		return a.storeScanParamFieldChainType(decl, e)
 	case *ast.IndexExpr:
@@ -2093,7 +2093,7 @@ func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type,
 		case *ast.FieldExpr:
 			t, ok = a.storeScanParamFieldChainType(decl, object)
 		case *ast.Ident:
-			t, ok = a.storeScanPatternBinderType(decl, object.Name)
+			t, ok = a.storeScanSubjectDeclType(decl, object)
 		}
 		if !ok {
 			return nil, false
