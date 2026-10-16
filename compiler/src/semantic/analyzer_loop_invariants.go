@@ -278,19 +278,32 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 // some path needed the guarded form (the invariant then holds only at body entry).
 func (a *Analyzer) proveInvariantOnPaths(cond ast.Expr, candidates []*ast.ContractStmt, inv *ast.ContractStmt, paths []loopBodyPath, outer []*ast.ContractStmt) (bool, bool, string) {
 	guardedUse := false
+	read := map[string]bool{}
+	collectExprIdentNames(inv.Cond, read)
+	if cond != nil {
+		collectExprIdentNames(cond, read)
+	}
 	for _, path := range paths {
 		if path.exits {
 			continue
 		}
+		// Only the post-state of variables the goal reads enters the obligation; an update the
+		// translator cannot model for an unrelated variable must not decline it.
+		subst := map[string]ast.Expr{}
+		for name, v := range path.subst {
+			if read[name] {
+				subst[name] = v
+			}
+		}
 		pathCond := buildPathCond(cond, path.conds)
-		preserved, ce := a.proveLoopPreservationSMT(pathCond, candidates, inv.Cond, path.subst, nil, outer)
+		preserved, ce := a.proveLoopPreservationSMT(pathCond, candidates, inv.Cond, subst, nil, outer)
 		if preserved {
 			continue
 		}
 		if cond == nil {
 			return false, false, ce
 		}
-		if ok, _ := a.proveLoopPreservationSMT(pathCond, candidates, guardedInvariantGoal(cond, inv.Cond), path.subst, nil, outer); !ok {
+		if ok, _ := a.proveLoopPreservationSMT(pathCond, candidates, guardedInvariantGoal(cond, inv.Cond), subst, nil, outer); !ok {
 			return false, false, ce
 		}
 		guardedUse = true

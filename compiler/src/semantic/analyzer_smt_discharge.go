@@ -5227,6 +5227,9 @@ func sanitizeSMTFragment(s string) string {
 }
 
 func (tr *smtTranslator) callCanonKeyEnv(decl *ast.FuncDecl, args []ast.Expr, env map[string]string) (string, bool) {
+	if !tr.a.callResultStateIndependent(decl) {
+		return "", false
+	}
 	// Verified self-recursion canonicalizes source arguments in its own lexical
 	// frame, rather than the unfolded substitution frame (the IH uses that key).
 	if env == nil && decl == tr.a.currentFuncDecl && tr.calleeBodyDecl == decl && tr.a.isRecursiveProofCall(decl) {
@@ -6569,4 +6572,40 @@ func smtPathConjuncts(path ast.Expr) []ast.Expr {
 		}
 	}
 	return []ast.Expr{path}
+}
+
+// callResultStateIndependent reports whether a callee's result is a function of its arguments
+// alone, so two calls with equal arguments may share one SMT symbol. A callee whose effect set
+// includes anything beyond Abort (a global read or write, I/O, allocation, unsafe access, a user
+// effect) may observe or change state between calls: `tick() - tick()` must not fold to zero.
+// Each call still receives its own verified ensures.
+func (a *Analyzer) callResultStateIndependent(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil {
+		return false
+	}
+	if decl.IsGhost {
+		return true
+	}
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return false
+	}
+	if len(fnType.MutableGlobalPermissionRefs) != 0 || len(fnType.MutableGlobalSourceNames) != 0 {
+		return false
+	}
+	for _, family := range fnType.Permissions {
+		if family != "Abort" {
+			return false
+		}
+	}
+	for _, ref := range fnType.PermissionRefs {
+		if ref.Name != "Abort" {
+			return false
+		}
+	}
+	return true
 }

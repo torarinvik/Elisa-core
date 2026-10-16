@@ -140,7 +140,7 @@ func (tr *smtTranslator) stringCallID(call *ast.CallExpr, env map[string]string)
 		return "", false
 	}
 	decl, direct := a.classifierFrameCallDecl(call)
-	if !direct || decl == nil || decl == a.currentFuncDecl || !a.classifierCalleeWriteFree(decl) {
+	if !direct || decl == nil || decl == a.currentFuncDecl || !a.classifierCalleeWriteFree(decl) || !a.callResultStateIndependent(decl) {
 		return "", false
 	}
 	sym, ok := a.symbolForFuncDecl(decl)

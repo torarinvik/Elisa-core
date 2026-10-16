@@ -373,7 +373,7 @@ func (tr *smtTranslator) predicateArmEnv(armEnv map[string]string) map[string]st
 // canonicalize and (when well-founded) unfold. Conservative: bool return, pure predicate shape (a ghost
 // def, or a pure-return / single-match body). Anything unsure is ineligible (forgoes completeness only).
 func (a *Analyzer) boolPredicateEligible(decl *ast.FuncDecl) bool {
-	if a == nil || decl == nil || decl.IsLemma {
+	if a == nil || decl == nil || decl.IsLemma || !a.callResultStateIndependent(decl) {
 		return false
 	}
 	sym, ok := a.symbolForFuncDecl(decl)

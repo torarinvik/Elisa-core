@@ -113,3 +113,70 @@ module M:
 		t.Fatalf("ensure through a mutating callee must stay unproven; got %v", result.Errors())
 	}
 }
+
+// A clause is preserved on the sequential model even when another variable's update (a view
+// comparison here) is outside the translator: only the variables the goal reads are substituted.
+func TestLoopSequentialModelIgnoresUnreadUpdates(t *testing.T) {
+	src := `
+def scan(names: darray[sview]&, wanted: sview) -> bool:
+    found: mutable bool = false
+    remaining: mutable usize = names.count
+    while remaining > 0 |found, remaining, names, wanted|:
+        invariant remaining <= names.count
+        index: usize = names.count - remaining
+        found <- found or names[index] == wanted
+        remaining <- remaining - 1
+    return found
+`
+	result := analyzeContractStrict(t, "seq_unread.elisa", src)
+	if n := loopLintCount(result.Errors()); n != 0 {
+		t.Fatalf("expected the bound invariant proven, got %v", result.Errors())
+	}
+}
+
+// SOUNDNESS: a callee that reads and writes a global returns different values on two calls with
+// the same (empty) arguments, so the calls must not share one SMT symbol — neither straight-line
+// nor in a loop body modeled sequentially.
+func TestSMTGlobalEffectCallsAreNotCanonicalized(t *testing.T) {
+	src := `
+global mutable counter: i64 = 0
+
+def tick() -> i64:
+    can Global{Read, Write}:
+        counter <- counter + 1
+        return counter
+
+def once() -> i64:
+    ensure result == 0
+    can Global{Read, Write}:
+        a: i64 = tick()
+        b: i64 = tick()
+        return a - b
+
+def run(n: i64) -> i64:
+    requires n > 0 and n < 100
+    d: mutable i64 = 0
+    i: mutable i64 = 0
+    can Global{Read, Write}:
+        while i < n |i, d|:
+            invariant d == 0
+            a: i64 = tick()
+            b: i64 = tick()
+            d <- a - b
+            i <- i + 1
+    return d
+`
+	result := analyzeContractStrict(t, "global_canon.elisa", src)
+	if ensureFailuresFor(result.Errors(), "once") == 0 {
+		t.Fatalf("once: tick() - tick() must not fold to 0; got %v", result.Errors())
+	}
+	found := false
+	for _, e := range result.Errors() {
+		if strings.Contains(e, "invariant") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("run: the false invariant d == 0 must stay unproven; got %v", result.Errors())
+	}
+}
