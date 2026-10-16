@@ -520,6 +520,15 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt, provenInvs []*ast.C
 				return
 			}
 		}
+		if a.seqLoopSpecsReadNoGlobals(append([]ast.Expr{stmt.Cond}, measures...)...) && a.seqLoopSpecsReadNoGlobals(contractConds(provenInvs)...) {
+			if paths, ok := a.sequentialLoopBodyPaths(stmt.Body); ok {
+				a.typeSequentialPathsQuietly(paths)
+				if a.proveLoopMeasureDecreasesAllPaths(stmt.Cond, provenInvs, measures, paths) {
+					a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
+					return
+				}
+			}
+		}
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
 		if !terminationAssumed {
 			a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow); falling back to the runtime loop-progress check")
@@ -1080,4 +1089,14 @@ func isSMTIntWidthType(t Type) bool {
 	}
 	_, _, ok := smtIntWidthSign(t)
 	return ok
+}
+
+func contractConds(cs []*ast.ContractStmt) []ast.Expr {
+	out := make([]ast.Expr, 0, len(cs))
+	for _, c := range cs {
+		if c != nil {
+			out = append(out, c.Cond)
+		}
+	}
+	return out
 }

@@ -131,6 +131,29 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	}
 	// When the joint focus (every invariant's variables) is unmodelable, each invariant may still be
 	// modeled on its own focus: preservation of `slot < cap` only needs the writes to slot and cap.
+	// The sequential model (analyzer_loop_sequential_model.go) is a second, independent body model:
+	// an invariant the enumerated paths cannot preserve is retried on it.
+	var seqPaths []loopBodyPath
+	seqOK := false
+	if !captured && len(candidates) != 0 {
+		specs := []ast.Expr{stmt.Cond}
+		for _, inv := range invs {
+			specs = append(specs, inv.Cond)
+		}
+		if a.seqLoopSpecsReadNoGlobals(specs...) {
+			if p, ok := a.sequentialLoopBodyPaths(stmt.Body); ok {
+				a.typeSequentialPathsQuietly(p)
+				seqPaths, seqOK = p, true
+			}
+		}
+	}
+	if !captured && !pathsOK && seqOK {
+		paths, pathsOK = seqPaths, true
+	}
+	seqExits := false
+	for _, p := range seqPaths {
+		seqExits = seqExits || p.exits
+	}
 	perInvPaths := map[*ast.ContractStmt][]loopBodyPath{}
 	if !captured && !pathsOK {
 		for _, inv := range candidates {
@@ -196,25 +219,20 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 			if !pathsOK {
 				invPaths = perInvPaths[inv]
 			}
-			for _, path := range invPaths {
-				if path.exits {
-					continue
-				}
-				pathCond := buildPathCond(stmt.Cond, path.conds)
-				if preserved, ce := a.proveLoopPreservationSMT(pathCond, candidates, inv.Cond, path.subst, nil, outerSafeInvs); !preserved {
-					if stmt.Cond == nil {
-						failed, failedCE[inv] = inv, ce
-						break
-					}
-					if ok, _ := a.proveLoopPreservationSMT(pathCond, candidates, guardedInvariantGoal(stmt.Cond, inv.Cond), path.subst, nil, outerSafeInvs); !ok {
-						failed, failedCE[inv] = inv, ce
-						break
-					}
-					guarded[inv] = true
+			preserved, guardedUse, ce := a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, outerSafeInvs)
+			if !preserved && seqOK && !sameLoopPathSet(invPaths, seqPaths) {
+				var seqCE string
+				preserved, guardedUse, seqCE = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, seqPaths, outerSafeInvs)
+				if !preserved && ce == "" {
+					ce = seqCE
 				}
 			}
-			if failed != nil {
+			if !preserved {
+				failed, failedCE[inv] = inv, ce
 				break
+			}
+			if guardedUse {
+				guarded[inv] = true
 			}
 			preserveTier[inv] = ProofProvenSMT
 		}
@@ -249,7 +267,45 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// inductiveInvs (not invs) is returned so the caller only pushes PROVEN invariants onto the
 	// outer-loop stack — an invariant whose preservation fell back to runtime is NOT admitted as a
 	// hypothesis in nested inner loops (it is not guaranteed to hold at every iteration boundary).
-	return inductiveInvs, allProven && captured
+	// A body modeled path by path with NO exiting path reaches the loop head again on every path, so
+	// the loop leaves only through the guard: `inv ∧ ¬cond` holds at exit exactly as for a captured
+	// straight-line body. This needs every invariant inductive (allProven) on that model.
+	exitSound := captured || (seqOK && pathsOK && sameLoopPathSet(paths, seqPaths) && !seqExits && len(perInvPaths) == 0)
+	return inductiveInvs, allProven && exitSound
+}
+
+// proveInvariantOnPaths proves inv preserved on every non-exiting path; guardedUse reports that
+// some path needed the guarded form (the invariant then holds only at body entry).
+func (a *Analyzer) proveInvariantOnPaths(cond ast.Expr, candidates []*ast.ContractStmt, inv *ast.ContractStmt, paths []loopBodyPath, outer []*ast.ContractStmt) (bool, bool, string) {
+	guardedUse := false
+	for _, path := range paths {
+		if path.exits {
+			continue
+		}
+		pathCond := buildPathCond(cond, path.conds)
+		preserved, ce := a.proveLoopPreservationSMT(pathCond, candidates, inv.Cond, path.subst, nil, outer)
+		if preserved {
+			continue
+		}
+		if cond == nil {
+			return false, false, ce
+		}
+		if ok, _ := a.proveLoopPreservationSMT(pathCond, candidates, guardedInvariantGoal(cond, inv.Cond), path.subst, nil, outer); !ok {
+			return false, false, ce
+		}
+		guardedUse = true
+	}
+	return true, guardedUse, ""
+}
+
+func sameLoopPathSet(x, y []loopBodyPath) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	if len(x) == 0 {
+		return true
+	}
+	return &x[0] == &y[0]
 }
 
 // seedLoopExitFacts records `inv ∧ ¬cond` as after-loop facts on the current scope. Called only with
@@ -748,8 +804,12 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 		hypSB.WriteString("(assert " + term + ")\n")
 		return true
 	}
-	if !addHyp(cond) {
-		return false, ""
+	if cond != nil && !addHyp(cond) {
+		// The guard and path conditions are hypotheses: asserting only the conjuncts the translator
+		// models drops hypotheses and never adds one.
+		for _, conjunct := range smtPathConjuncts(cond) {
+			addHyp(conjunct)
+		}
 	}
 	for _, inv := range invs {
 		if !addHyp(inv.Cond) {
