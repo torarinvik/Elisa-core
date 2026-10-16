@@ -139,7 +139,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		storeScanTraceOther, storeScanTraceTarget = decl.Params[other].Name, decl.Params[index].Name
 		defer func() { storeScanTraceOther, storeScanTraceTarget = savedOther, savedTarget }()
 	}
-	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name)
+	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name, seen)
 	scanIdx := a.storeScanIndex(decl)
 	holders := a.storeScanLastHolders
 	// targetsOrHolders: anything that mentions the target or a holder of its parts.
@@ -778,7 +778,7 @@ func (a *Analyzer) storeScanCallResultDropsTarget(arg ast.Expr, targets map[stri
 			continue
 		}
 		// A provisional (open-cycle) answer proves nothing dropped: settled counts it as header.
-		if a.storeScanSettled(func() storeMode { return a.calleeReturnModeOf(callee, i, seen) }) > storeViews && !a.calleeReturnsNothingWritableFrom(callee, i) {
+		if a.storeScanSettled(func() storeMode { return a.calleeReturnModeOf(callee, i, seen) }) > storeViews && !a.calleeReturnsNothingWritableFrom(callee, i, seen) {
 			return false
 		}
 	}
@@ -788,7 +788,7 @@ func (a *Analyzer) storeScanCallResultDropsTarget(arg ast.Expr, targets map[stri
 // calleeReturnsNothingWritableFrom: every value decl returns is explicit (a `return`, no lmut
 // thread slots) and carries from parameter i only read-only parts -- views and scalars, judged by
 // storeScanBundleHasWritableTargetRO over the names derived from that parameter.
-func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int) bool {
+func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int, seen map[storeScanKey]bool) bool {
 	if decl == nil || i < 0 || i >= len(decl.Params) || len(decl.Body) == 0 || len(decl.LmutThreadSlots) > 0 {
 		return false
 	}
@@ -796,7 +796,7 @@ func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int) b
 	if cached, ok := a.storeScanWritableCache[key]; ok {
 		return cached
 	}
-	_, _, content, _, _ := a.storeScanTaint(decl, i, "")
+	_, _, content, _, _ := a.storeScanTaint(decl, i, "", seen)
 	readOnly := a.storeScanReadOnlyLocals(decl)
 	ok, sawReturn := true, false
 	a.storeScanEachNode(decl, func(node any) {
@@ -944,7 +944,7 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 // parameter (header) or something read out of it (content), and which names may alias the
 // target place (targetName; "" for none). Locals become tainted by binding (decl/assign of the
 // local itself) and by receiving a tainted store (`local.f <- v`, `local.xs.push(v)`).
-func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName string) (params, header, content, targets, views map[string]bool) {
+func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName string, seen map[storeScanKey]bool) (params, header, content, targets, views map[string]bool) {
 	// Memoized per (decl, source, target): every summary query of the same pair recomputed the
 	// fixpoint. Results are read-only to callers; types learned later only make taint smaller,
 	// so a result computed earlier is conservative (as the scalar / view caches already are).
@@ -984,6 +984,40 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 		if choice, ok := storeScanUnwrap(value).(*ast.TernaryExpr); ok && choice != nil {
 			changed := taint(name, choice.Value)
 			return taint(name, choice.Alt) || changed
+		}
+		// An assigned call result carries only what the callee returns. Its
+		// argument/condition side effects are scanned separately below.
+		if call, ok := storeScanUnwrap(value).(*ast.CallExpr); ok && call != nil {
+			if callee, known := a.resolveReadOnlyScanCallee(call); known && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) && !a.declReturnsVoid(callee) {
+				mode := storeNone
+				for i, arg := range returnBorrowCallArgs(call) {
+					argMode := storeNone
+					if storeScanMentionsHeader(arg, header) {
+						argMode = storeHeader
+					} else if idx.mentions(arg, content) {
+						argMode = storeElements
+					}
+					if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
+						continue
+					}
+					returned := a.storeScanSettled(func() storeMode { return a.calleeReturnModeOf(callee, i, seen) })
+					// A view read from an owned byte buffer can retain its backing
+					// even when the returned value is only an element. Preserve the
+					// source's storage unless it is known to hold no byte buffers.
+					if argMode == storeHeader && returned != storeNone && !a.storeScanSourceHasNoBytes(decl, other) {
+						returned = storeHeader
+					}
+					mode = maxStoreMode(mode, narrowStoreMode(argMode, returned))
+				}
+				changed := false
+				if mode != storeNone {
+					changed = add(content, name)
+				}
+				if mode == storeHeader && !views[name] {
+					changed = add(header, name) || changed
+				}
+				return changed
+			}
 		}
 		changed := false
 		if views[name] && idx.mentions(value, content) {
@@ -1402,7 +1436,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
 	mark := a.storeScanPushFrame(key)
-	_, header, content, _, views := a.storeScanTaint(decl, other, "")
+	_, header, content, _, views := a.storeScanTaint(decl, other, "", seen)
 	filled := a.lazyFilledLocals(decl, other, content, views, seen)
 	mode := storeNone
 	sawReturn := false
@@ -1421,6 +1455,15 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 			return
 		}
 		value := storeScanUnwrap(ret.Value)
+		if len(a.programRegions) != 0 {
+			t, known := a.exprTypes[value]
+			if !known {
+				t, known = a.storeScanDeclTypeOf(decl, value)
+			}
+			if known && t != nil && !containsTypeParam(t) && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
+				return
+			}
+		}
 		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
 			if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
 				for i, arg := range returnBorrowCallArgs(call) {

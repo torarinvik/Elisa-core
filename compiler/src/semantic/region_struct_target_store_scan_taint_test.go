@@ -63,7 +63,7 @@ func TestStoreScanMatchArmBodyIsNotTheHeader(t *testing.T) {
 	result.analyzer.currentScope = result.analyzer.globalScope
 	// Source: tracked_loop_vars (1). Its content is the tracked list and nothing matched out of
 	// `statements`.
-	_, _, content, _, _ := result.analyzer.storeScanTaint(walk, 1, "table")
+	_, _, content, _, _ := result.analyzer.storeScanTaint(walk, 1, "table", map[storeScanKey]bool{})
 	// then_body is passed to walk next to current_tracked. walk's by-value darray parameter
 	// shares then_body's storage, but walk's own summary stores nothing into `statements`, so
 	// the callee-write taint leaves then_body clean.
@@ -76,7 +76,7 @@ func TestStoreScanMatchArmBodyIsNotTheHeader(t *testing.T) {
 		t.Errorf("the local bound from the source must stay tainted: %v", content)
 	}
 	// Source: statements (0). Now the scrutinee is tainted, so the binders are content.
-	_, _, content, _, _ = result.analyzer.storeScanTaint(walk, 0, "table")
+	_, _, content, _, _ = result.analyzer.storeScanTaint(walk, 0, "table", map[storeScanKey]bool{})
 	for _, name := range []string{"statement", "target", "name", "then_body"} {
 		if !content[name] {
 			t.Errorf("binder %q of a match over a tainted scrutinee must be content: %v", name, content)
