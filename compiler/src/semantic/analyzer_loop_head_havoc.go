@@ -31,6 +31,7 @@ func (a *Analyzer) havocLoopWrittenFacts(body []ast.Stmt, cond ast.Expr) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	elementOnly := loopElementOnlyRoots(body)
 	for _, name := range names {
 		target := &ast.Ident{Name: name}
 		a.invalidateRangeFactsWithRootPrefix(name)
@@ -38,6 +39,11 @@ func (a *Analyzer) havocLoopWrittenFacts(body []ast.Stmt, cond ast.Expr) {
 		a.invalidateWrittenFieldsForRoot(name)
 		a.invalidatePredFacts(name)
 		a.invalidateSMTAssertFactsForTarget(target)
+		if elementOnly[name] && a.loopRootIsBuiltinIndexable(name) {
+			// Element stores (`a[i] <- v`) never change the container's length, so index-bound and
+			// length-equality facts about it (`i < a.count`) still hold at every loop head.
+			continue
+		}
 		a.invalidateIndexBoundsReferencingBase(name)
 		a.invalidateBoundEqualReferencingBase(name)
 	}
@@ -304,4 +310,80 @@ func (a *Analyzer) canAssumeLoopInvariantInPlace(stmt *ast.ContractStmt) bool {
 		a.proofLint(stmt.Pos(), "%s", msg)
 	}
 	return false
+}
+
+// loopElementOnlyRoots returns the roots whose every write in body is a plain element store
+// `root[i] <- v` (no reassignment of the root, no field write, no borrow, no method call on it).
+func loopElementOnlyRoots(body []ast.Stmt) map[string]bool {
+	element := map[string]bool{}
+	other := map[string]bool{}
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if v.Kind() == reflect.Interface {
+				walk(v.Elem())
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.AssignStmt:
+				if idx, ok := stripOptimizationParens(n.Target).(*ast.IndexExpr); ok && idx != nil {
+					if id, ok := stripOptimizationParens(idx.Object).(*ast.Ident); ok && id != nil {
+						element[id.Name] = true
+						break
+					}
+				}
+				addLoopWrittenRoot(n.Target, other)
+			case *ast.AugAssignStmt:
+				addLoopWrittenRoot(n.Target, other)
+			case *ast.AsRefAssignStmt:
+				addLoopWrittenRoot(n.Target, other)
+			case *ast.AddrOfExpr:
+				addLoopWrittenRoot(n.Operand, other)
+			case *ast.CallExpr:
+				if field, ok := stripOptimizationParens(n.Func).(*ast.FieldExpr); ok && field != nil {
+					addLoopWrittenRoot(field.Object, other)
+				}
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	for _, stmt := range body {
+		walk(reflect.ValueOf(stmt))
+	}
+	for name := range other {
+		delete(element, name)
+	}
+	return element
+}
+
+// loopRootIsBuiltinIndexable: a built-in array or darray, whose element store cannot change its
+// length (a user type's index-assignment operator could).
+func (a *Analyzer) loopRootIsBuiltinIndexable(name string) bool {
+	if a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil {
+		return false
+	}
+	if isDArrayTypeMaybeRef(sym.Type) {
+		return true
+	}
+	_, isArray := stripRefForBounds(sym.Type).(*ArrayType)
+	return isArray
 }
