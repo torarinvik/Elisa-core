@@ -823,6 +823,14 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 		if proof := proofAt(fn.EnsureProofs, i); proof != nil {
 			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "", "ensure by scoped")
 		}
+		// Left-to-right well-definedness: a later clause is evaluated (by the debug postcondition
+		// checks, in declaration order, each aborting on failure) only after every earlier clause
+		// held or was proven by its scoped proof, and a caller assumes the clauses jointly. So the
+		// call preconditions inside later clauses may assume the earlier ones. The fact lives in this
+		// clause-only scope and is gone when the ensure analysis ends.
+		if t != nil && IsBoolType(t) {
+			a.recordSMTAssertFact(e)
+		}
 	}
 	a.currentScope = saved
 }
