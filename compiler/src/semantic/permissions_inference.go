@@ -187,7 +187,12 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.DeferStmt:
 		c.collectStmts(n.Body)
 	case *ast.AssignStmt:
-		c.collectWriteTarget(n.Target, false)
+		// A scalar assignment through a reference reads the reference value from
+		// its storage before writing the referent. `collectWriteTarget` accounts
+		// for that read when the reference slot itself is an immutable global;
+		// preserve the semantic marker here for mutable global reference slots too.
+		c.collectWriteTarget(n.Target, n.WriteThrough)
+		c.addRefs(c.analyzer.mutableGlobalBorrowAssignRefs[n])
 		c.collectExpr(n.Value)
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.stmtRequiresUnsafeAlias(n) {
 			c.addRefs(unsafeAliasRefs(n.Position))
@@ -276,6 +281,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		}
 		c.collectStmts(n.Body)
 	case *ast.IterForStmt:
+		c.addRefs(c.analyzer.mutableGlobalStoreRowsReadRefs(n.Source))
+		c.addRefs(c.analyzer.mutableGlobalStoreRowsWriteRefs(n.Source))
 		c.collectExpr(n.Source)
 		c.collectExpr(n.WhereFilter)
 		c.collectExpr(n.Filter)
@@ -328,6 +335,10 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 }
 
 func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
+	c.collectExprWithValueContext(expr, true)
+}
+
+func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, wholeValue bool) {
 	if expr == nil {
 		return
 	}
@@ -335,7 +346,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.Ident:
 		sym, ok := c.analyzer.globalStorageRoot(n)
 		_, mutableGlobal := c.analyzer.mutableGlobalStorageRoot(n)
-		if ok && (!c.mutableGlobalsOnly || mutableGlobal) {
+		wholeMutableGlobal := c.mutableGlobalsOnly && wholeValue && c.analyzer.globalWholeValueReadRequiresGrant(n)
+		if ok && (!c.mutableGlobalsOnly || mutableGlobal || wholeMutableGlobal) {
 			c.addRefs(globalReadRefs(n.Position))
 			if c.analyzer.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				c.addRefs(unsafeMutableGlobalRefs(n.Position))
@@ -404,16 +416,25 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			}
 		}
 	case *ast.FieldExpr:
-		c.collectExpr(n.Object)
+		if c.mutableGlobalsOnly && (c.analyzer.globalProjectionBeginsMutablePath(n) || (wholeValue && c.analyzer.globalWholeValueReadRequiresGrant(n))) {
+			c.addRefs(globalReadRefs(n.Position))
+		}
+		c.collectExprWithValueContext(n.Object, false)
 	case *ast.IndexExpr:
-		c.collectExpr(n.Object)
+		if c.mutableGlobalsOnly && (c.analyzer.globalProjectionBeginsMutablePath(n) || (wholeValue && c.analyzer.globalWholeValueReadRequiresGrant(n))) {
+			c.addRefs(globalReadRefs(n.Position))
+		}
+		c.collectExprWithValueContext(n.Object, false)
 		c.collectExpr(n.Index)
 		c.collectExpr(n.Fallback)
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.indexExprRequiresUncheckedIndexPermission(n) {
 			c.addRefs(unsafeUncheckedIndexRefs(n.Position))
 		}
 	case *ast.SliceExpr:
-		c.collectExpr(n.Object)
+		if c.mutableGlobalsOnly && (c.analyzer.globalProjectionBeginsMutablePath(n) || (wholeValue && c.analyzer.globalWholeValueReadRequiresGrant(n))) {
+			c.addRefs(globalReadRefs(n.Position))
+		}
+		c.collectExprWithValueContext(n.Object, false)
 		c.collectExpr(n.Start)
 		c.collectExpr(n.End)
 	case *ast.ListLitExpr:
@@ -426,7 +447,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.collectExpr(call)
 			break
 		}
-		c.collectExpr(n.Operand)
+		c.collectExprWithValueContext(n.Operand, wholeValue)
 		src := c.analyzer.exprTypes[n.Operand]
 		dst := c.analyzer.exprTypes[n]
 		if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && c.analyzer.castRequiresUnsafeGuestHostPointerCast(n, dst) {
@@ -477,6 +498,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.collectExpr(elem)
 		}
 	case *ast.ListComprehensionExpr:
+		c.addRefs(c.analyzer.mutableGlobalStoreRowsReadRefs(n.Source))
 		for _, b := range n.Bindings {
 			if vd, ok := b.(*ast.VarDeclStmt); ok {
 				c.collectStmt(vd)
@@ -490,6 +512,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Filter)
 		c.collectExpr(n.Owner)
 	case *ast.QueryExpr:
+		c.addRefs(c.analyzer.mutableGlobalStoreRowsReadRefs(n.Source))
 		c.collectExpr(n.Source)
 		c.collectExpr(n.Filter)
 		c.collectExpr(n.Projection)
@@ -508,7 +531,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectStmts(n.Stmts)
 		c.collectExpr(n.Value)
 	case *ast.ParenExpr:
-		c.collectExpr(n.Inner)
+		c.collectExprWithValueContext(n.Inner, wholeValue)
 	case *ast.RaiseExpr:
 		c.collectExpr(n.Error)
 	case *ast.TryExpr:
@@ -563,10 +586,37 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.collectStmts(arm.Body)
 		}
 	case *ast.FoldExpr:
+		c.addRefs(c.analyzer.mutableGlobalStoreRowsReadRefs(n.Value))
+		c.addRefs(c.analyzer.mutableGlobalFoldEmitRefs(n))
 		c.collectExpr(n.Value)
 		for _, arm := range n.Arms {
 			c.collectExpr(arm.Guard)
 			c.collectStmts(arm.Body)
+		}
+	case *ast.EmitExpr:
+		c.collectExpr(n.Value)
+	case *ast.MachineFromExpr:
+		if n.Lowered != nil {
+			c.collectExpr(n.Lowered)
+			break
+		}
+		c.addRefs(c.analyzer.mutableGlobalMachinePayloadRefs(n))
+		for _, arg := range n.StartArgs {
+			c.collectExpr(arg)
+		}
+		c.collectExpr(n.Decreases)
+		for _, declaration := range n.HeaderDecls {
+			c.collectStmt(declaration)
+		}
+		for _, arm := range n.Arms {
+			c.collectStmts(arm.Body)
+			for _, term := range arm.Terminators {
+				c.collectExpr(term.Guard)
+				for _, arg := range term.Args {
+					c.collectExpr(arg)
+				}
+				c.collectExpr(term.Value)
+			}
 		}
 	case *ast.IsPatternExpr:
 		for _, target := range n.Targets {
@@ -584,7 +634,7 @@ func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead b
 	_, mutableGlobal := c.analyzer.mutableGlobalStorageRoot(expr)
 	if sym, ok := c.analyzer.globalStorageRoot(expr); ok && (!c.mutableGlobalsOnly || mutableGlobal) {
 		c.addRefs(globalWriteRefs(expr.Pos()))
-		if c.analyzer.globalPathLoadsReference(expr) {
+		if c.analyzer.globalPathLoadsMutableBorrow(expr) {
 			c.addRefs(globalReadRefs(expr.Pos()))
 		}
 		if alsoRead {

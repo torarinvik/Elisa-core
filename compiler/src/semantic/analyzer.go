@@ -858,15 +858,16 @@ type Analyzer struct {
 	// validateModuleExtensions; rejectDotModulePath consults it.
 	declaredModules map[string]bool
 	// reportedDotModulePaths dedupes rejectDotModulePathExpr across re-analysis.
-	reportedDotModulePaths   map[*ast.FieldExpr]bool
-	reportedDotModuleTypes   map[string]bool
-	resolvedTypeNames        map[ast.TypeExpr]string
-	contextualTypeBindings   map[ast.TypeExpr]Type
-	mutableGlobalBorrowRefs  map[*ast.VarDeclStmt][]ast.PermissionRef
-	resolvedGlobalStorage    map[*ast.Ident]*Symbol
-	resolvedValueNames       map[*ast.Ident]string
-	currentImplicitScopes    []map[string]ast.Expr
-	semanticLimitDiagnostics map[string]bool
+	reportedDotModulePaths        map[*ast.FieldExpr]bool
+	reportedDotModuleTypes        map[string]bool
+	resolvedTypeNames             map[ast.TypeExpr]string
+	contextualTypeBindings        map[ast.TypeExpr]Type
+	mutableGlobalBorrowRefs       map[*ast.VarDeclStmt][]ast.PermissionRef
+	mutableGlobalBorrowAssignRefs map[*ast.AssignStmt][]ast.PermissionRef
+	resolvedGlobalStorage         map[*ast.Ident]*Symbol
+	resolvedValueNames            map[*ast.Ident]string
+	currentImplicitScopes         []map[string]ast.Expr
+	semanticLimitDiagnostics      map[string]bool
 	// semanticLimitHits counts reportSemanticDepthLimit calls, so a memo can tell whether a
 	// traversal was cut short (and must not be cached).
 	semanticLimitHits int

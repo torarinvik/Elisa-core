@@ -159,7 +159,7 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 		if n.Fallback != nil {
 			return false
 		}
-		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
+		if a.readOnlyViewIndexSource(n.Object) {
 			return false
 		}
 		return a.mutationPathWritable(n.Object)

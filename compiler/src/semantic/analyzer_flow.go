@@ -148,14 +148,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// `in <region>:` scope carries that region in its type; escape checks and
 		// codegen arena routing consult it (see REGION_CONTAINERS_DESIGN.md).
 		bindingType = a.stampContainerRegion(bindingType)
-		if mutableGlobalReferenceType(bindingType) && !a.suppressDiagnostics {
-			if root := globalReferenceStorageExpr(n.Value); root != nil {
-				if _, global := a.mutableGlobalStorageRoot(root); global {
-					if a.mutableGlobalBorrowRefs == nil {
-						a.mutableGlobalBorrowRefs = make(map[*ast.VarDeclStmt][]ast.PermissionRef)
-					}
-					a.mutableGlobalBorrowRefs[n] = globalWriteRefs(root.Pos())
+		if a.typeContainsMutableBorrowCapability(bindingType, map[Type]bool{}, map[*StructType][][]Type{}, 0) && !a.suppressDiagnostics {
+			if refs := a.mutableGlobalBorrowTransferRefs(n.Value, bindingType); len(refs) != 0 {
+				if a.mutableGlobalBorrowRefs == nil {
+					a.mutableGlobalBorrowRefs = make(map[*ast.VarDeclStmt][]ast.PermissionRef)
 				}
+				a.mutableGlobalBorrowRefs[n] = refs
 			}
 		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
@@ -576,6 +574,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				if targetSym, ok := a.currentScope.Lookup(ident.Name); ok && a.isInvalidUninitializedSymbol(targetSym) {
 					a.errorf(n.Pos(), "cannot write through uninitialized reference %q; initialize or rebind the reference first", ident.Name)
 				}
+			}
+		}
+		if !n.Optional && !n.WriteThrough && !a.suppressDiagnostics {
+			if refs := a.mutableGlobalBorrowTransferRefs(n.Value, targetType); len(refs) != 0 {
+				if a.mutableGlobalBorrowAssignRefs == nil {
+					a.mutableGlobalBorrowAssignRefs = make(map[*ast.AssignStmt][]ast.PermissionRef)
+				}
+				a.mutableGlobalBorrowAssignRefs[n] = refs
 			}
 		}
 		// A store through a byte reference (`r: mutable u8&`, `mutable static u8&`) takes ONE

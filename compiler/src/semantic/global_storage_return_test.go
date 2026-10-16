@@ -90,10 +90,12 @@ def items_of() -> darray[i64]&:
 global store: mutable Box
 
 def first() -> i64:
-    return store.items[0] + store.n
+    can Global.Read:
+        return store.items[0] + store.n
 
 def count() -> i64:
-    return store.items.count.i64()
+    can Global.Read:
+        return store.items.count.i64()
 `,
 		"global_fresh.pos.elisa": `global mutable gitems: mutable darray[i64] = zeroed
 

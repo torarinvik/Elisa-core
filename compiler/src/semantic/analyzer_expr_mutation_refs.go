@@ -166,7 +166,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			a.errorf(n.Pos(), "cannot assign to %s", kind)
 			return invalidType
 		}
-		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
+		if a.readOnlyViewIndexSource(n.Object) {
 			a.errorf(n.Pos(), "cannot assign to readonly view index result")
 			return invalidType
 		}
@@ -175,6 +175,40 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
+	}
+}
+
+// readOnlyViewIndexSource distinguishes a readonly optimization fact from a
+// mutable view capability stored in an otherwise readonly aggregate field.
+func (a *Analyzer) readOnlyViewIndexSource(expr ast.Expr) bool {
+	facts, ok := a.exprFacts[expr]
+	if !ok || !facts.ReadOnly {
+		return false
+	}
+	if mutableViewCapabilityType(a.exprTypes[expr]) {
+		return false
+	}
+	return true
+}
+
+func mutableViewCapabilityType(typ Type) bool {
+	for {
+		switch t := typ.(type) {
+		case *AggregateStateType:
+			if t == nil {
+				return false
+			}
+			typ = t.Base
+		case *RefType:
+			if t == nil {
+				return false
+			}
+			typ = t.Elem
+		case *ViewType:
+			return t != nil && t.Mutable
+		default:
+			return false
+		}
 	}
 }
 
@@ -381,6 +415,9 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 		objType = a.analyzeExpr(stripped)
 	}
 	if ref, ok := objType.(*RefType); ok {
+		if mutableViewCapabilityType(ref.Elem) {
+			return true
+		}
 		return a.refExprAllowsMutation(stripped, ref)
 	}
 	// A slice-derived bounded view is writable only when its source was writable
@@ -401,6 +438,9 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 			sym, _, found = a.lookupVisibleGlobal(ident.Name)
 		}
 		if found && sym.Kind == SymbolGlobal {
+			if view, ok := objType.(*ViewType); ok {
+				return view.Mutable
+			}
 			return sym.Mutable
 		}
 		// Preserve local and parameter place semantics here; their mutability is
@@ -409,12 +449,24 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 	}
 	switch n := stripped.(type) {
 	case *ast.FieldExpr:
+		field, found := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
+		// An immutable aggregate may store a mutable view by value. Writing
+		// through that view mutates its backing elements, not the field slot.
+		if found {
+			if view, ok := field.Type.(*ViewType); ok && view.Mutable {
+				return true
+			}
+		}
 		if ref, ok := a.exprTypes[n.Object].(*RefType); ok && !a.refExprAllowsMutation(n.Object, ref) {
 			return false
 		}
-		field, found := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
 		return (found && field.Mutable) || a.mutationPathWritable(n.Object)
 	case *ast.IndexExpr:
+		// Indexing through a mutable view field mutates the borrowed elements,
+		// not the immutable field slot that stores the view itself.
+		if view, ok := a.exprTypes[n.Object].(*ViewType); ok && view.Mutable {
+			return true
+		}
 		return a.mutationPathWritable(n.Object)
 	case *ast.SliceExpr:
 		return a.mutationPathWritable(n.Object)
@@ -682,7 +734,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 			a.errorf(n.Pos(), "cannot take a reference to %s", kind)
 			return invalidType
 		}
-		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
+		if a.readOnlyViewIndexSource(n.Object) {
 			a.errorf(n.Pos(), "cannot take a reference to readonly view index result")
 			return invalidType
 		}
