@@ -405,6 +405,9 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 			}
 			switch {
 			case f.Kind() == reflect.String:
+				if storeScanQualifierFields[rfs[i].Name] {
+					continue // pattern selectors name types/variants, not bindings
+				}
 				name := f.String()
 				*out = append(*out, name)
 				if name != "" {
@@ -421,6 +424,10 @@ func buildStoreFlowBinderIndex(decl *ast.FuncDecl) *storeFlowBinderIndex {
 					}
 				}
 			case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.Struct:
+				// Pattern argument strings are field labels; the AST walker visits their binders.
+				if f.Type().Elem() == storeScanPatternArgType {
+					continue
+				}
 				// value-typed binder records (e.g. []ParamDecl): their string fields bind too
 				for j := 0; j < f.Len(); j++ {
 					item := f.Index(j)
