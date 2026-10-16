@@ -4681,6 +4681,15 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 		}
 	}
 	ret := tr.freshAux(smtTypeNonNegative(resultType))
+	// A call returns a value of its machine integer type, so it lies in that type's range.
+	if signed, bits, ok := smtIntWidthSign(resultType); ok && bits > 0 && bits <= 64 {
+		lo, hi := "0", new(big.Int).Lsh(big.NewInt(1), uint(bits)).String()
+		if signed {
+			half := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
+			lo, hi = "(- "+half.String()+")", half.String()
+		}
+		tr.auxDecls = append(tr.auxDecls, "(assert (and (>= "+ret+" "+lo+") (< "+ret+" "+hi+")))\n")
+	}
 	if canonKey != "" {
 		tr.callCanon[canonKey] = ret
 	}
@@ -4717,8 +4726,16 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 		subst[param.Name] = args[i]
 	}
 	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	opaqueArgs := false
 	if !ok {
-		return ret, true
+		// An argument outside the fragment becomes an unconstrained value of its parameter's type.
+		// The callee's (requires ⇒ ensures) holds for every argument value, so asserting it for a
+		// free stand-in only weakens what is known; the defining equation and recursive IH are skipped.
+		env, ok = tr.a.smtEnvForCallSubstOpaque(tr, decl, subst, argEnv)
+		if !ok {
+			return ret, true
+		}
+		opaqueArgs = true
 	}
 	guard := "true"
 	for _, req := range decl.Requires {
@@ -4737,7 +4754,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	}
 	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
 	// contract-sound postcondition holds for the actual arguments.
-	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
+	recursiveProofCall := tr.a.isRecursiveProofCall(decl) && !opaqueArgs
 	var recursiveCert recursiveProofCertificate
 	if recursiveProofCall && tr.a.recursiveCertInProgress[call] {
 		// Re-entered while proving this very call's certificate or requires (the goal mentions a local defined by
@@ -4794,8 +4811,51 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
 	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
 	// finite.
-	tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, recursiveProofCall, env)
+	if !opaqueArgs {
+		tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, recursiveProofCall, env)
+	}
 	return ret, true
+}
+
+// smtEnvForCallSubstOpaque binds each callee parameter to its argument's term, or, for an integer
+// parameter whose argument does not translate, to a fresh unconstrained integer (non-negative for an
+// unsigned type). Any other untranslatable argument declines.
+func (a *Analyzer) smtEnvForCallSubstOpaque(tr *smtTranslator, decl *ast.FuncDecl, subst map[string]ast.Expr, argEnv map[string]string) (map[string]string, bool) {
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return nil, false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || len(fnType.Params) != len(decl.Params) {
+		return nil, false
+	}
+	paramType := map[string]Type{}
+	for i, p := range decl.Params {
+		paramType[p.Name] = fnType.Params[i]
+	}
+	env := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(subst)) {
+		scratch := map[string]string{}
+		if a.bindSMTEnvArg(tr, scratch, name, subst[name], argEnv, false) {
+			for k, v := range scratch {
+				env[k] = v
+			}
+			continue
+		}
+		t := paramType[name]
+		if t == nil || !IsNumericType(t) || IsFloatType(t) || IsBoolType(t) {
+			return nil, false
+		}
+		if _, isRef := t.(*RefType); isRef {
+			return nil, false
+		}
+		signed, _, ok := smtIntWidthSign(t)
+		if !ok {
+			return nil, false
+		}
+		env[name] = tr.freshAux(!signed)
+	}
+	return env, true
 }
 
 // abstractMethodReturnType recovers the return type of an abstract protocol-method call (one with no
@@ -6230,6 +6290,15 @@ func (tr *smtTranslator) assertGhostCallCongruence(decl *ast.FuncDecl, args []as
 			}
 			sorts = append(sorts, "Bool")
 			terms = append(terms, t)
+		case isDArrayTypeMaybeRef(argType):
+			if ref, isRef := paramTypes[i].(*RefType); isRef && (ref.Mutable || ref.Linear) {
+				return
+			}
+			key, ok := tr.ghostContainerArgKey(arg, env)
+			if !ok {
+				return
+			}
+			name.WriteString("|" + key)
 		default:
 			if _, numeric := smtNumericValueType(argType); !numeric {
 				return
@@ -6283,6 +6352,38 @@ func (tr *smtTranslator) ghostViewArgKey(arg ast.Expr, env map[string]string) (s
 		return "", false
 	}
 	return fmt.Sprintf("view:%s@%p", id.Name, sym), true
+}
+
+// ghostContainerArgKey names a darray argument of a ghost call by its binding when that binding can
+// never change: an immutable local, or an immutable parameter (at most an immutable reference), of
+// the function being analyzed (not a callee frame, not substituted by env). Two applications with the same key then receive the same
+// container value, so congruence over the remaining arguments is sound.
+func (tr *smtTranslator) ghostContainerArgKey(arg ast.Expr, env map[string]string) (string, bool) {
+	if tr.calleeBodyDepth != 0 {
+		return "", false
+	}
+	arg = stripOptimizationParens(arg)
+	if addr, ok := arg.(*ast.AddrOfExpr); ok && addr != nil {
+		// The implicit borrow inserted for an immutable reference parameter names the same binding.
+		arg = stripOptimizationParens(addr.Operand)
+	}
+	id, ok := arg.(*ast.Ident)
+	if !ok || id == nil || tr.a.currentScope == nil {
+		return "", false
+	}
+	if _, bound := env[id.Name]; bound {
+		return "", false
+	}
+	sym, found := tr.a.currentScope.Lookup(id.Name)
+	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
+		return "", false
+	}
+	if ref, isRef := StripAggregateStateType(sym.Type).(*RefType); isRef && (sym.Kind != SymbolParam || ref.Mutable || ref.Linear) {
+		// A by-value darray parameter is passed as an immutable reference; the same exclusivity the
+		// view key (ghostViewArgKey) relies on keeps its referent fixed for the call.
+		return "", false
+	}
+	return fmt.Sprintf("darray:%s@%p", id.Name, sym), true
 }
 
 // smtCallLocalResultOnlyEnsures asserts, for an immutable numeric local initialized by a direct call
