@@ -509,14 +509,22 @@ func (a *Analyzer) analyzeCondExprInScope(expr ast.Expr, scope *Scope) Type {
 		switch n.Op {
 		case lexer.TOKEN_AND:
 			left := a.analyzeCondExprInScope(n.Left, scope)
-			right := a.analyzeCondExprInScope(n.Right, a.refinedScopeForCondition(scope, n.Left, true))
+			rightScope := a.refinedScopeForCondition(scope, n.Left, true)
+			if a.shortCircuitStablePredicate(n.Left) {
+				a.recordSMTAssertFactInScope(rightScope, smtFactExprForCondition(n.Left, true))
+			}
+			right := a.analyzeCondExprInScope(n.Right, rightScope)
 			if !IsBoolType(left) || !IsBoolType(right) {
 				a.errorf(n.Pos(), "logical operator requires bool operands")
 			}
 			return a.namedTypes["bool"]
 		case lexer.TOKEN_OR:
 			left := a.analyzeCondExprInScope(n.Left, scope)
-			right := a.analyzeCondExprInScope(n.Right, a.refinedScopeForCondition(scope, n.Left, false))
+			rightScope := a.refinedScopeForCondition(scope, n.Left, false)
+			if a.shortCircuitStablePredicate(n.Left) {
+				a.recordSMTAssertFactInScope(rightScope, smtFactExprForCondition(n.Left, false))
+			}
+			right := a.analyzeCondExprInScope(n.Right, rightScope)
 			if !IsBoolType(left) || !IsBoolType(right) {
 				a.errorf(n.Pos(), "logical operator requires bool operands")
 			}
