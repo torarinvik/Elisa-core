@@ -135,9 +135,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	seen[key] = true
 	defer delete(seen, key)
 	if storeScanTrace {
-		savedOther := storeScanTraceOther
-		storeScanTraceOther = decl.Params[other].Name
-		defer func() { storeScanTraceOther = savedOther }()
+		savedOther, savedTarget := storeScanTraceOther, storeScanTraceTarget
+		storeScanTraceOther, storeScanTraceTarget = decl.Params[other].Name, decl.Params[index].Name
+		defer func() { storeScanTraceOther, storeScanTraceTarget = savedOther, savedTarget }()
 	}
 	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name)
 	scanIdx := a.storeScanIndex(decl)
@@ -390,6 +390,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					// The callee stores at most what this argument carried (an element value of an
 					// element-mode argument is never this source's header).
 					inner := narrowStoreMode(s.mode, a.calleeStoreModeIntoSeen(callee, s.index, ti, seen))
+					if storeChainTrace && inner != storeNone && s.index < len(callee.Params) && ti < len(callee.Params) {
+						fmt.Fprintf(os.Stderr, "CHAIN %s(%s->%s) -> %s(%s->%s) at %s\n", decl.Name, decl.Params[other].Name, decl.Params[index].Name, callee.Name, callee.Params[s.index].Name, callee.Params[ti].Name, n.Pos())
+					}
 					mode = storeScanRaise(decl, 233, n, mode, inner)
 				}
 			}
@@ -712,14 +715,28 @@ func stmtHeaderMentionsAny(stmt ast.Stmt, names map[string]bool) bool {
 	return found
 }
 
-var storeScanTrace = os.Getenv("ELISA_STORESCAN_TRACE") != ""
+var storeScanTrace = os.Getenv("ELISA_STORESCAN_TRACE") != "" || storeChainTrace
 
-// storeScanTraceOther names the source parameter of the body scan in progress (trace only).
-var storeScanTraceOther string
+// storeChainTrace (ELISA_STORE_TRACE=1) is a debug aid for "call may store" diagnostics: every
+// raising store in a callee body prints a RAISE line, and every call that carries a callee's
+// store back into the caller prints a CHAIN line, so a call-site error can be followed to the
+// statements that cause it:
+//
+//	RAISE <fn> rule=<n> mode=<m> src=<source param>-><target param> at <pos>
+//	CHAIN <fn>(<src>-><tgt>) -> <callee>(<src>-><tgt>) at <pos>
+var storeChainTrace = os.Getenv("ELISA_STORE_TRACE") != ""
+
+// storeScanTraceOther / storeScanTraceTarget name the source and target parameters of the body
+// scan in progress (trace only).
+var storeScanTraceOther, storeScanTraceTarget string
 
 func storeScanRaise(decl *ast.FuncDecl, rule int, node ast.Node, mode, next storeMode) storeMode {
 	if next > mode && storeScanTrace && node != nil {
-		fmt.Fprintf(os.Stderr, "STORESCAN %s rule=%d mode=%d src=%s at %s\n", decl.Name, rule, next, storeScanTraceOther, node.Pos())
+		if storeChainTrace {
+			fmt.Fprintf(os.Stderr, "RAISE %s rule=%d mode=%d src=%s->%s at %s\n", decl.Name, rule, next, storeScanTraceOther, storeScanTraceTarget, node.Pos())
+		} else {
+			fmt.Fprintf(os.Stderr, "STORESCAN %s rule=%d mode=%d src=%s at %s\n", decl.Name, rule, next, storeScanTraceOther, node.Pos())
+		}
 	}
 	return maxStoreMode(mode, next)
 }
