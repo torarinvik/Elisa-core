@@ -14,7 +14,7 @@ import (
 // callee `ensure result.f …` was lost at the call site. Each read is now modeled the way a struct
 // ARGUMENT already is: the call is named by a projection token (`callproj$N`, canonical per callee +
 // argument terms, so equal calls share it), its field reads are symbols under that token
-// (`callproj$N__field__valid`), and the callee's verified ensures are asserted over those symbols
+// (`callproj$N.valid`), and the callee's verified ensures are asserted over those symbols
 // with `result` bound to the token and the formals bound to the argument terms, guarded by the
 // callee's `requires` exactly as for scalar call results (callResultTermEnv).
 //
@@ -28,8 +28,8 @@ import (
 // (immutableLocalDefinitionCurrent: same bindings, none written since), so the arguments translated
 // at the proof point equal the ones the call received.
 
-const callProjectionTokenPrefix = "callproj$"
-const localProjectionTokenPrefix = "local$"
+const callProjectionTokenPrefix = "@callproj$"
+const localProjectionTokenPrefix = "@local$"
 
 // aggregateCallResultType reports whether t is an aggregate whose field reads callers project.
 func aggregateCallResultType(t Type) bool {
@@ -40,7 +40,7 @@ func aggregateCallResultType(t Type) bool {
 	return false
 }
 
-// projectionChain splits `root.f.g` into its root expression and field path ("__field__f__field__g").
+// projectionChain splits `root.f.g` into its root expression and field path (".f.g").
 func projectionChain(n *ast.FieldExpr) (ast.Expr, string) {
 	var fields []string
 	var root ast.Expr = n
@@ -54,7 +54,7 @@ func projectionChain(n *ast.FieldExpr) (ast.Expr, string) {
 	}
 	var b strings.Builder
 	for i := len(fields) - 1; i >= 0; i-- {
-		b.WriteString("__field__")
+		b.WriteString(smtFieldSeparator)
 		b.WriteString(fields[i])
 	}
 	return stripOptimizationParens(root), b.String()

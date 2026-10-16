@@ -342,7 +342,7 @@ func (tr *smtTranslator) bindEnumPayloadName(env map[string]string, name string,
 		bound := false
 		for _, field := range sortedStructFieldNames(st) {
 			ft := stripRefForBounds(st.Fields[field].Type)
-			proj := name + "__field__" + field
+			proj := name + smtFieldSeparator + field
 			fkey := key + "." + field
 			if IsBoolType(ft) {
 				env[proj] = tr.enumPayloadBoolSym(fkey)
@@ -586,9 +586,9 @@ func (tr *smtTranslator) enumIsTerm(n *ast.BinaryExpr, env map[string]string, fa
 }
 
 // enumBinderLocalTerm translates an in-scope binder (or one of its struct-field projections, named
-// `b__field__f`) exactly as the surrounding code will reference it.
+// `b.f`) exactly as the surrounding code will reference it.
 func (tr *smtTranslator) enumBinderLocalTerm(name string) (string, bool) {
-	parts := strings.Split(name, "__field__")
+	parts := strings.Split(name, smtFieldSeparator)
 	var expr ast.Expr = &ast.Ident{Name: parts[0]}
 	if tr.a.currentScope == nil {
 		return "", false

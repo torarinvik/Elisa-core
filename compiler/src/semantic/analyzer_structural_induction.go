@@ -250,7 +250,7 @@ func (tr *smtTranslator) emitStructuralPredicateEquation(call *ast.CallExpr, dec
 				penv[param.Name] = bt
 			}
 		} else if tr.a.smtEquationStructType(tr.a.exprTypes[args[i]]) {
-			// A struct argument binds field-wise (`l__field__a`), so the body's `l.a` reads the actual
+			// A struct argument binds field-wise (`l.a`), so the body's `l.a` reads the actual
 			// argument's field rather than a free symbol named after the formal.
 			tr.a.bindSMTStructEnvArg(tr, penv, param.Name, args[i], env, false)
 		} else if t, ok := tr.termEnv(args[i], env); ok {

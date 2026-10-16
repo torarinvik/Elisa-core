@@ -1072,7 +1072,7 @@ func exprIsSideEffectFreeForTermination(expr ast.Expr) bool {
 //     `*ast.Ident` receiver through `*ast.FieldExpr` hops only — `self.xs`, `self.a.b`. No calls,
 //     no index/subscript, no deref, no safe-navigation in the path; anything else declines.
 //
-// The returned key is a canonical string for the base path (`self`, `self__field__xs`), so the
+// The returned key is a canonical string for the base path (`self`, `self.xs`), so the
 // caller's stored-once / not-also-reassigned tracking treats two syntactically-equal paths as the
 // same array (conservative aliasing: identical paths alias; distinct paths we cannot prove disjoint
 // are kept apart only by syntactic string, and a store is permitted at most ONCE per key — so the
@@ -1094,9 +1094,9 @@ func loopStoreTargetBaseKey(target *ast.IndexExpr, forTermination bool) (string,
 		return arrIdent.Name, true
 	}
 	// Struct-field array paths (`s.data[i] <- v`) are admitted on BOTH the invariant path and the
-	// termination path. The normalized path key (e.g. `s__field__data`) matches the projection name
+	// termination path. The normalized path key (e.g. `s.data`) matches the projection name
 	// that smtProjectionName / arrayTermEnv uses, so proveLoopPreservationSMT injects
-	//   env["s__field__data"] = "(store v_s__field__data i v)"
+	//   env["s.data"] = "(store v_s.data i v)"
 	// and arrayTermEnv's FieldExpr env-lookup picks it up when translating `s.data[k]` in the
 	// quantified invariant. Soundness constraints remain identical: stored-once per path,
 	// never whole-reassigned, pure-arith index/value.
@@ -1127,7 +1127,7 @@ func normalizeFieldPathLValue(expr ast.Expr) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		return base + "__field__" + n.Field, true
+		return base + smtFieldSeparator + n.Field, true
 	default:
 		return "", false
 	}

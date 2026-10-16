@@ -1141,8 +1141,8 @@ func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string) {
 			continue
 		}
 		// Only register when the label is a simple Elisa identifier (no struct-field suffix), to keep
-		// the output readable. The __field__ key used for struct-field bindings is not shown.
-		if strings.Contains(label, "__field__") || strings.HasPrefix(label, "__") {
+		// the output readable. Dotted keys used for struct-field bindings are not shown.
+		if strings.Contains(label, smtFieldSeparator) || strings.HasPrefix(label, "__") {
 			continue
 		}
 		if _, alreadyPresent := tr.ceExprs[label]; !alreadyPresent {
@@ -1161,7 +1161,7 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 		return false
 	}
 	tr := a.newSMTTranslator(nil)
-	retSym := "__return_call_result"
+	retSym := "@return_call_result"
 	retTerm := smtVar(retSym)
 	// The result symbol must carry the callee's result SORT. A bool-returning callee's ensures use
 	// `result` as a Bool (`x < 0 implies not result`); declaring it Int made every such query
@@ -1171,7 +1171,7 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 		tr.boolDecls[retTerm] = true
 	} else if isDatatypeValuedType(a.exprTypes[call]) {
 		// An aggregate result has no scalar term: bind it to a projection token so `result.f` in the
-		// caller's obligation and in the callee's ensures both re-root to `__return_call_result__field__f`.
+		// caller's obligation and in the callee's ensures both re-root to `@return_call_result.f`.
 		retTerm = dtToken(retSym)
 	} else {
 		tr.decls[retSym] = true
@@ -1431,7 +1431,7 @@ func (a *Analyzer) bindSMTStructEnvArg(tr *smtTranslator, env map[string]string,
 		field := st.Fields[fieldName]
 		ft := stripRefForBounds(field.Type)
 		fieldExpr := &ast.FieldExpr{Object: argExpr, Field: fieldName}
-		key := name + "__field__" + fieldName
+		key := name + smtFieldSeparator + fieldName
 		if IsBoolType(ft) {
 			bterm, ok := tr.boolTerm(fieldExpr, argEnv)
 			if !ok {
@@ -2521,7 +2521,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// return r.data.count` discharge — both sides resolve to the same length symbol.
 		//
 		// Check env FIRST: the loop-preservation prover injects a path-keyed (store …) substitution
-		// for struct-field array stores (`s.data[i] <- v` → env["s__field__data"] = "(store …)").
+		// for struct-field array stores (`s.data[i] <- v` → env["s.data"] = "(store …)").
 		// The env key is the same normalizedFieldPath / smtProjectionName, so picking it up here
 		// lets `s.data[k]` in a quantified invariant resolve to the post-body array term — which is
 		// exactly what the bare-array Ident case does for `arr[k]`.
@@ -5195,7 +5195,8 @@ func (tr *smtTranslator) interfaceMethodBoolSym(call *ast.CallExpr, env map[stri
 	} else {
 		return "", false
 	}
-	parts := make([]string, 0, len(operands))
+	parts := make([]string, 0, len(operands)+2)
+	parts = append(parts, ifaceName, sel.Field)
 	for _, op := range operands {
 		name, ok := lawOperandIdentName(op, env)
 		if !ok {
@@ -5203,7 +5204,24 @@ func (tr *smtTranslator) interfaceMethodBoolSym(call *ast.CallExpr, env map[stri
 		}
 		parts = append(parts, name)
 	}
-	sym := smtBoolVar("__iface_" + sanitizeSMTFragment(ifaceName) + "_" + sel.Field + "_" + strings.Join(parts, "_"))
+	// Hex components are injective even for qualified names and substituted SMT
+	// terms. Build the final symbol once, avoiding per-component formatted copies.
+	size := len("b_@iface") + len(parts)
+	for _, part := range parts {
+		size += 2 * len(part)
+	}
+	var symbol strings.Builder
+	symbol.Grow(size)
+	symbol.WriteString("b_@iface")
+	const hex = "0123456789abcdef"
+	for _, part := range parts {
+		symbol.WriteByte('.')
+		for i := 0; i < len(part); i++ {
+			symbol.WriteByte(hex[part[i]>>4])
+			symbol.WriteByte(hex[part[i]&15])
+		}
+	}
+	sym := symbol.String()
 	tr.boolDecls[sym] = true
 	return sym, true
 }
@@ -6083,7 +6101,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 //     invalidateWrittenFieldsForRoot(name) — which fires on whole-root reassignment, mutable borrow,
 //     or escape to a mutating callee. So if the entry is present, every field not in writtenField has
 //     never been touched, hence still holds the zeroed initial value.
-//   - writtenField entries for `name__field__f` are dropped by invalidateWrittenField or
+//   - writtenField entries for `name.f` are dropped by invalidateWrittenField or
 //     invalidateWrittenFieldsForRoot at every mutation/escape of root or field, so a stale fact can
 //     never persist.
 //   - We only use isStableWrittenFieldValue-passing values (recorded by recordWrittenFieldForTarget),
@@ -6104,7 +6122,7 @@ func (a *Analyzer) zeroedStructLocalFieldMap(id *ast.Ident) map[string]ast.Expr 
 	zeroLit := &ast.IntLit{Value: "0"}
 	out := make(map[string]ast.Expr, len(st.Decl.Fields))
 	for _, fd := range st.Decl.Fields {
-		key := id.Name + "__field__" + fd.Name
+		key := id.Name + smtFieldSeparator + fd.Name
 		if v, found := a.lookupWrittenField(key); found {
 			out[fd.Name] = v
 		} else {
@@ -6130,16 +6148,22 @@ func nullComparePointer(n *ast.BinaryExpr) ast.Expr {
 	return nil
 }
 
+// smtFieldSeparator cannot occur in an Elisa identifier (including a field name),
+// and is legal in a simple SMT symbol. Thus root and field components round-trip
+// without escaping or allocating encoded copies. Generated roots start with @,
+// which also cannot occur in source identifiers.
+const smtFieldSeparator = "."
+
 func smtProjectionName(expr ast.Expr) string {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		return n.Name
 	case *ast.FieldExpr:
-		return smtProjectionName(n.Object) + "__field__" + n.Field
+		return smtProjectionName(n.Object) + smtFieldSeparator + n.Field
 	case *ast.ParenExpr:
 		return smtProjectionName(n.Inner)
 	default:
-		return "expr__" + smtSanitize(fmt.Sprintf("%T_%s", expr, expr.Pos().String()))
+		return "@expr." + fmt.Sprintf("%x", fmt.Sprintf("%T_%s", expr, expr.Pos().String()))
 	}
 }
 
@@ -6188,7 +6212,7 @@ func (a *Analyzer) currentFuncName() string {
 
 // calleeFreeProjection reports whether, while lowering a CALLEE's body or contract (calleeBodyDepth >
 // 0), `expr` is a place rooted at an identifier the call environment does not bind. Such a root is the
-// callee's own formal or local; resolving it through a name-keyed symbol (`v_l__field__a`,
+// callee's own formal or local; resolving it through a name-keyed symbol (`v_l.a`,
 // `isnull_p`, an array or length symbol) or the caller's scope would silently alias an unrelated
 // caller variable of the same spelling — a false proof. Every projection fallback declines on it.
 func (tr *smtTranslator) calleeFreeProjection(expr ast.Expr, env map[string]string) bool {

@@ -12,7 +12,7 @@ import (
 // A view's length is part of the view value, so at the binding point the formal's `.len` equals the
 // argument's `.len`.
 //
-// The formal is bound to a FRESH byte-array symbol (`v_svarg$N`; `$` cannot occur in an Elisa
+// The formal is bound to a FRESH byte-array symbol (`v_@svarg$N`; `@` cannot occur in an Elisa
 // identifier, so it never collides with a caller or callee name) whose length symbol is asserted
 // equal to the argument's length term. Every existing array path (`.len`, `.count`, indexing,
 // quantifiers) then treats the formal as an ordinary bound array: the length is exact and the
@@ -24,7 +24,7 @@ func (tr *smtTranslator) bindSMTSViewLengthArg(env map[string]string, name strin
 	if !ok {
 		return false
 	}
-	fresh := "svarg$" + strconv.Itoa(tr.sviewArgCount)
+	fresh := "@svarg$" + strconv.Itoa(tr.sviewArgCount)
 	tr.sviewArgCount++
 	tr.arrayDecls[fresh] = true
 	arr := smtVar(fresh)
@@ -119,7 +119,7 @@ func (tr *smtTranslator) bindSMTLengthOnlyArg(env map[string]string, name string
 		return false
 	}
 	tr.lenDecls[lenTerm] = true
-	fresh := smtVar("lenonly$" + strconv.Itoa(tr.sviewArgCount))
+	fresh := smtVar("@lenonly$" + strconv.Itoa(tr.sviewArgCount))
 	tr.sviewArgCount++
 	if tr.lengthOnly == nil {
 		tr.lengthOnly = map[string]bool{}
@@ -136,7 +136,7 @@ func (tr *smtTranslator) bindSMTLengthOnlyArg(env map[string]string, name string
 // callee formal) the spelling `root` denotes the ARGUMENT, not the current function's same-named
 // variable:
 //   - root bound to a datatype projection token (`__dt__q`, an opaque struct argument `q`): the
-//     read is re-rooted at the argument's projection (`q__field__f__field__g`), the very symbol the
+//     read is re-rooted at the argument's projection (`q.f.g`), the very symbol the
 //     caller's own facts about `q.f.g` use;
 //   - root bound any other way (a scalar/array term, a constant string, a variant constructor): the
 //     field has no recoverable symbol, so the read declines.
@@ -205,7 +205,6 @@ func (tr *smtTranslator) sviewSliceBoundI64(expr ast.Expr, env map[string]string
 	return term, true
 }
 
-// smtArrayLenSuffix names an array symbol's length (`v_xs` -> `v_xs$len`). `$` cannot occur in an
-// Elisa identifier, so the length can never collide with the SMT variable of a local or parameter
-// named like it (`xs_len` -> `v_xs_len`); with the old `_len` suffix the two were the same symbol.
-const smtArrayLenSuffix = "$len"
+// smtArrayLenSuffix names an array's length in a namespace unavailable to source
+// identifiers or field paths. Elisa identifiers allow $, but do not allow @.
+const smtArrayLenSuffix = "@len"

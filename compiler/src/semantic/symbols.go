@@ -530,7 +530,7 @@ type Scope struct {
 	writtenListCount map[string]int64
 	// writtenField records the last value written to a STRUCT-FIELD place via `self.f <- value`
 	// (`root.field`), keyed by the field path's canonical projection name (smtProjectionName, e.g.
-	// `self__field__pool_budget`). Used to discharge an `ensure self.f == E` postcondition over fields
+	// `self.pool_budget`). Used to discharge an `ensure self.f == E` postcondition over fields
 	// the void body writes — proving `self.f == 0` directly and `self.a == self.b` when both fields
 	// trace to the same value expr — which the SMT lane otherwise fails because two loads of a
 	// reference field are distinct opaque terms. Routed through the SAME root-keyed invalidation as

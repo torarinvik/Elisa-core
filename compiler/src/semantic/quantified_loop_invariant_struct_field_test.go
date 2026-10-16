@@ -7,8 +7,8 @@ import "testing"
 // COMPLETENESS-POSITIVE: a quantified loop invariant over a STRUCT-FIELD array is proven inductive.
 // The struct `Buf` has a field `data: darray[i64]`; the loop fills `b.data[i] <- 0` and advances `i`.
 // The invariant `forall k: (0 <= k and k < i) implies b.data[k] == 0` is established vacuously (i=0)
-// and preserved via the SMT array-store model `(store v_b__field__data i 0)`, exactly mirroring the
-// bare-array case — the path key `b__field__data` produced by normalizeFieldPathLValue matches the
+// and preserved via the SMT array-store model `(store v_b.data i 0)`, exactly mirroring the
+// bare-array case — the path key `b.data` produced by normalizeFieldPathLValue matches the
 // projection name smtProjectionName uses in arrayTermEnv.
 func TestQuantifiedLoopInvariantOverStructFieldArrayFillPreserved(t *testing.T) {
 	src := `

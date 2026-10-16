@@ -380,7 +380,7 @@ func (a *Analyzer) invalidateWrittenFieldsForRoot(name string) {
 	if name == "" {
 		return
 	}
-	prefix := name + "__field__"
+	prefix := name + smtFieldSeparator
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
 		if scope.writtenField == nil {
 			continue
@@ -517,7 +517,7 @@ func (a *Analyzer) lookupWrittenField(key string) (ast.Expr, bool) {
 // isPureProjectionKey reports whether a projection name was built purely from ident/field components
 // (so it round-trips a real field place) rather than smtProjectionName's `expr__…` position fallback.
 func isPureProjectionKey(key string) bool {
-	return key != "" && !strings.HasPrefix(key, "expr__")
+	return key != "" && !strings.HasPrefix(key, "@expr.")
 }
 
 // lookupWrittenStructField returns the construction-time value expr of `name.field` when `name` is a
