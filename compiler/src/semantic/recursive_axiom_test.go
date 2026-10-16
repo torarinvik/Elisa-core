@@ -226,3 +226,60 @@ def off() -> i64:
 		t.Fatalf("off: countdown(0) == 1 must be refuted, got: %v", r.Errors())
 	}
 }
+
+// Unfolding at a foreign site requires a PROVEN termination certificate
+// (4674e1d8: "no unfolding without a safe unfolding certificate"). When the
+// decreases clause cannot be proven, countdown(0) == 0 must not be derived.
+// (A bare `countdown(n - 1)` with no `requires n >= 0` IS certified: the
+// syntactic `param - const` rule relies on the fixed-width chain being finite,
+// so that variant is not a negative here.)
+func TestGhostRecursiveEquationNoUnfoldWithoutProvenTermination(t *testing.T) {
+	cases := map[string]string{
+		"measure_unchanged": `
+ghost def countdown(n: i64) -> i64:
+    requires n >= 0
+    decreases n
+    if n == 0:
+        return 0
+    return countdown(n) + 1
+`,
+		"measure_unbounded_below": `
+ghost def countdown(n: i64) -> i64:
+    decreases n
+    if n == 0:
+        return 0
+    return countdown(n - n * n) + 1
+`,
+		"measure_not_decreasing": `
+ghost def countdown(n: i64) -> i64:
+    requires n >= 0
+    decreases n
+    if n == 0:
+        return 0
+    return countdown(n + 1) + 1
+`,
+	}
+	use := `
+def zero() -> i64:
+    ensure result == countdown(0)
+    return 0
+`
+	for name, spec := range cases {
+		r := analyzeContractStrict(t, "ghost_unproven_"+name+".elisa", spec+use)
+		terminationFailed, zeroFailed := false, false
+		for _, e := range r.Errors() {
+			if strings.Contains(e, "decreases") {
+				terminationFailed = true
+			}
+			if strings.Contains(e, `"zero"`) {
+				zeroFailed = true
+			}
+		}
+		if !terminationFailed {
+			t.Fatalf("%s: decreases must be unproven, got: %v", name, r.Errors())
+		}
+		if !zeroFailed {
+			t.Fatalf("%s: countdown(0) == 0 must NOT be proven by unfolding without a termination certificate, got: %v", name, r.Errors())
+		}
+	}
+}
