@@ -2964,6 +2964,11 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.IndexExpr:
+		// A read of a constant integer table (`__classtable_f[c]`, a folded classifier) is the
+		// table's value at the index (analyzer_smt_const_table.go).
+		if term, ok := tr.constTableIndexTerm(n, env); ok {
+			return term, true
+		}
 		// Array element access `arr[idx]` → `(select <arr> <idx>)` over SMT array theory (docs/90
 		// brick 90-5). The element value is an Int; out-of-range indices are an arbitrary-but-total
 		// value, which a quantifier's range guard constrains away.
