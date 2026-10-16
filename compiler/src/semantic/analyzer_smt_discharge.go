@@ -3018,6 +3018,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if c, ok := tr.a.constIntValue(n); ok {
 			return tr.constIntTerm(n, c), true
 		}
+		// `(X if c else Y).f` is `X.f` where c holds and `Y.f` elsewhere.
+		if tern, ok := stripOptimizationParens(n.Object).(*ast.TernaryExpr); ok && tern != nil {
+			return tr.ternaryProjectionTerm(n, tern, env)
+		}
 		// A projection of an aggregate-valued call or call-initialized local (analyzer_smt_call_projection.go).
 		if term, ok, handled := tr.aggregateProjectionTerm(n, env); handled {
 			return term, ok
@@ -6382,4 +6386,29 @@ func (a *Analyzer) recordFieldNamed(obj ast.Expr, name string) bool {
 		}
 	}
 	return false
+}
+
+// ternaryProjectionTerm lowers a field read of a conditional value to the conditional of the field
+// reads: only the selected arm is evaluated, and the ite masks the other arm's term.
+func (tr *smtTranslator) ternaryProjectionTerm(n *ast.FieldExpr, tern *ast.TernaryExpr, env map[string]string) (string, bool) {
+	cond, ok := tr.boolTerm(tern.Cond, env)
+	if !ok {
+		return "", false
+	}
+	arm := func(value ast.Expr) (string, bool) {
+		field := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
+		if t := tr.a.exprTypes[n]; t != nil {
+			tr.a.exprTypes[field] = t
+		}
+		return tr.termEnv(field, env)
+	}
+	then, ok := arm(tern.Value)
+	if !ok {
+		return "", false
+	}
+	alt, ok := arm(tern.Alt)
+	if !ok {
+		return "", false
+	}
+	return "(ite " + cond + " " + then + " " + alt + ")", true
 }
