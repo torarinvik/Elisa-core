@@ -174,9 +174,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					return storeNone
 				}
 			}
-			// A by-value loop binder over a parameter field chain is a copy of one element.
+			// A by-value loop binder copies one element, not the container's backing storage.
 			if id, isIdent := inner.(*ast.Ident); isIdent {
-				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
+				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !containsTypeParam(t) && (a.storeScanHoldsNoRegionStorage(t) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(t))) {
 					return storeNone
 				}
 			}
@@ -2129,8 +2129,8 @@ func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type,
 	return nil, false
 }
 
-// storeScanLoopBinderElemType types a by-value loop binder `for x in p.f` (p a parameter) as the
-// element type of p.f. Only when that loop is the name's ONLY binding in decl (no parameter, no
+// storeScanLoopBinderElemType types a by-value loop binder over a parameter or parameter field
+// as a copy of its element type. Only when that loop is the name's ONLY binding in decl (no parameter, no
 // declaration, no other pattern or loop binds it), so every use of the name is that copy.
 func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident) (Type, bool) {
 	if decl == nil || id == nil {
@@ -2173,6 +2173,11 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 		// scalar, read off the declared type expression (no resolver needed for a builtin).
 		if name, ok := a.storeScanLocalScalarDArrayElem(decl, local.Name); ok {
 			return &BuiltinType{Name: name}, true
+		}
+		if t, ok := a.storeScanSubjectDeclType(decl, local); ok && t != nil {
+			if c, ok := stripRefForBounds(t).(*DArrayType); ok && c != nil && c.Elem != nil {
+				return c.Elem, true
+			}
 		}
 		return nil, false
 	}
