@@ -366,11 +366,16 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	// Classify the entry range before checking mutations in the body. Restrict
 	// this exclusion to the built-in ascending, default-step range.
 	_, emptyRange, _ := a.classifyDerivedLiteralRange(stmt)
+	// Inductive range-loop invariants, proven on the pristine pre-loop facts (analyzer_for_range_invariants.go).
+	forInvariants, forExitFacts := a.proveForRangeInvariants(stmt, loopType)
 	a.havocLoopWrittenFacts(stmt.Body, nil)
+	outerInvariantBase := len(a.activeOuterLoopInvariants)
+	a.activeOuterLoopInvariants = append(a.activeOuterLoopInvariants, forInvariants...)
 	a.pushLoopAffineFrame()
 	a.pushStorageViewLoopUseFrame(outerScope, stmt.Body)
 	a.loopDepth++
 	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
+	a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerInvariantBase]
 	a.loopDepth--
 	a.checkStorageViewLoopBackEdge(bodySnapshot.StorageViewDeps, blockDefinitelyExits(stmt.Body))
 	if !emptyRange {
@@ -406,6 +411,9 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 		}
 	}
 	a.currentStorageViewDeps = mergedStorageViewDeps
+	for _, fact := range forExitFacts {
+		a.recordSMTAssertFact(fact)
+	}
 	a.maybeAutoReserveCountingFill(stmt)
 }
 

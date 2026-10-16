@@ -1134,7 +1134,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		}
 		a.mergePostIfRangeFacts(entryRangeFacts, rangeBranches)
-		a.joinIfSMTFacts(entryFacts, survivorBranches, factBranches, !conditionIsConstant)
+		// With a constant condition only the branches that can run are survivors (the others were never
+		// added above), so their end facts may be joined exactly as for a computed condition. This is
+		// what carries facts out of the synthesized `if true:` scope around a captured loop header.
+		a.joinIfSMTFacts(entryFacts, survivorBranches, factBranches, true)
 		a.applyPostIfFallthroughRefinement(n)
 		if len(n.Elifs) == 0 && len(n.Else) == 0 && blockDefinitelyExits(n.Then) {
 			a.applyIndexBoundsFactsForCondition(n.Cond, false)
