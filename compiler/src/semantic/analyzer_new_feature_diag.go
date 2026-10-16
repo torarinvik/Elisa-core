@@ -158,7 +158,7 @@ func (a *Analyzer) setDictQuantifierCounterexample(tr *smtTranslator, goalExpr a
 	if !ok {
 		return ""
 	}
-	lenSym := arr + "_len"
+	lenSym := arr + smtArrayLenSuffix
 	tr.lenDecls[lenSym] = true
 	guard := "(and (<= 0 " + idxSym + ") (< " + idxSym + " " + lenSym + "))"
 	// smtCheckQuery asserts `(not obligation)`. With obligation `(=> guard body)`, its negation is

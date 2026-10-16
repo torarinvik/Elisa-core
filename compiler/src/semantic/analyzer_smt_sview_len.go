@@ -28,7 +28,7 @@ func (tr *smtTranslator) bindSMTSViewLengthArg(env map[string]string, name strin
 	tr.sviewArgCount++
 	tr.arrayDecls[fresh] = true
 	arr := smtVar(fresh)
-	lenSym := arr + "_len"
+	lenSym := arr + smtArrayLenSuffix
 	tr.lenDecls[lenSym] = true
 	// "~" sorts after every declaration key in the enum preamble, which follows all declarations.
 	tr.enumDecls["~svarg_len_"+fresh] = "(assert (= " + lenSym + " " + lenTerm + "))\n"
@@ -103,8 +103,8 @@ func (tr *smtTranslator) linkSViewArrayLength(id *ast.Ident, arr string) {
 	}
 	lenSym := smtSViewLengthSymbol(key)
 	tr.lenDecls[lenSym] = true
-	tr.lenDecls[arr+"_len"] = true
-	tr.enumDecls["~svlen_link_"+arr] = "(assert (= " + arr + "_len " + lenSym + "))\n"
+	tr.lenDecls[arr+smtArrayLenSuffix] = true
+	tr.enumDecls["~svlen_link_"+arr] = "(assert (= " + arr + smtArrayLenSuffix + " " + lenSym + "))\n"
 }
 
 // bindSMTLengthOnlyArg binds a container formal whose ELEMENTS are outside the array theory (a
@@ -125,8 +125,8 @@ func (tr *smtTranslator) bindSMTLengthOnlyArg(env map[string]string, name string
 		tr.lengthOnly = map[string]bool{}
 	}
 	tr.lengthOnly[fresh] = true
-	tr.lenDecls[fresh+"_len"] = true
-	tr.enumDecls["~lenonly_"+fresh] = "(assert (= " + fresh + "_len " + lenTerm + "))\n"
+	tr.lenDecls[fresh+smtArrayLenSuffix] = true
+	tr.enumDecls["~lenonly_"+fresh] = "(assert (= " + fresh + smtArrayLenSuffix + " " + lenTerm + "))\n"
 	env[name] = fresh
 	return true
 }
@@ -204,3 +204,8 @@ func (tr *smtTranslator) sviewSliceBoundI64(expr ast.Expr, env map[string]string
 	}
 	return term, true
 }
+
+// smtArrayLenSuffix names an array symbol's length (`v_xs` -> `v_xs$len`). `$` cannot occur in an
+// Elisa identifier, so the length can never collide with the SMT variable of a local or parameter
+// named like it (`xs_len` -> `v_xs_len`); with the old `_len` suffix the two were the same symbol.
+const smtArrayLenSuffix = "$len"

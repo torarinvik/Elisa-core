@@ -130,6 +130,21 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		return true
 	case *ast.WhileStmt:
 		return n != nil && g.expr(n.Cond, 0) && g.scoped(n.Body)
+	case *ast.ContractStmt:
+		// Loop `invariant` / `decreases` clauses only read (they are checked in place).
+		if n == nil {
+			return false
+		}
+		switch n.Kind {
+		case ast.ContractInvariant, ast.ContractDecreases:
+			return n.Cond != nil && g.expr(n.Cond, 0)
+		case ast.ContractDecreasesWild:
+			return true
+		}
+		return false
+	case *ast.AssertByStmt:
+		// The proof block is verification-only; the condition is checked in place.
+		return n != nil && g.expr(n.Cond, 0)
 	case *ast.CanStmt:
 		if n == nil || n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.SuppressPermissionInference || n.As != "" || len(n.Permissions) == 0 {
 			return false
@@ -185,6 +200,10 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			}
 		}
 		return len(n.Elems) != 0
+	case *ast.QuantifierExpr:
+		return (n.In == nil || g.expr(n.In, depth+1)) && g.expr(n.Body, depth+1)
+	case *ast.MembershipRangeExpr:
+		return g.expr(n.Start, depth+1) && g.expr(n.End, depth+1)
 	case *ast.MatchExpr:
 		if n.Store != nil || !g.expr(n.Value, depth+1) {
 			return false

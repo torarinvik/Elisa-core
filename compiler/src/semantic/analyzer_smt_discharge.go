@@ -2553,7 +2553,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
-				return bound + "_len", true
+				return bound + smtArrayLenSuffix, true
 			}
 		}
 		if tr.calleeFreeProjection(n, env) {
@@ -2566,7 +2566,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 			}
 		}
 		if isAnyArrayLike(t) {
-			return smtVar(n.Name) + "_len", true
+			return smtVar(n.Name) + smtArrayLenSuffix, true
 		}
 	case *ast.FieldExpr:
 		t := tr.a.exprTypes[n]
@@ -2578,7 +2578,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 		if isAnyArrayLike(t) {
 			if env != nil {
 				if bound, ok := env[smtProjectionName(n)]; ok {
-					return bound + "_len", true
+					return bound + smtArrayLenSuffix, true
 				}
 			}
 			if tr.calleeFreeProjection(n, env) {
@@ -2588,7 +2588,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 			if !ok {
 				return "", false
 			}
-			return smtVar(name) + "_len", true
+			return smtVar(name) + smtArrayLenSuffix, true
 		}
 	}
 	return "", false
@@ -2617,7 +2617,7 @@ func (tr *smtTranslator) recordFixedArrayLen(arr string, t Type) {
 	if !ok || at == nil || !at.HasConstSize {
 		return
 	}
-	tr.lenConsts[arr+"_len"] = at.ConstSize
+	tr.lenConsts[arr+smtArrayLenSuffix] = at.ConstSize
 }
 
 // isArrayLike reports whether a type is an integer-element array/darray we can model as (Array Int
@@ -3096,7 +3096,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				tr.lenDecls[lenSym] = true
 				return lenSym, true
 			}
-			lenSym := arr + "_len"
+			lenSym := arr + smtArrayLenSuffix
 			if c, ok := tr.lenConsts[lenSym]; ok {
 				return smtInt(c), true
 			}
@@ -3898,7 +3898,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			if !ok {
 				return "", false
 			}
-			lenSym := arr + "_len"
+			lenSym := arr + smtArrayLenSuffix
 			tr.lenDecls[lenSym] = true
 			guard := "(and (<= 0 " + idxSym + ") (< " + idxSym + " " + lenSym + "))"
 			// E-matching trigger (docs/90 brick 90-16): a `forall x in xs` / `forall i in xs.indices`
@@ -4060,6 +4060,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "", false
 	case *ast.BinaryExpr:
+		if term, ok := tr.sviewContentEqualityTerm(n, env); ok {
+			return term, true
+		}
 		switch n.Op {
 		case lexer.TOKEN_AND, lexer.TOKEN_OR:
 			l, ok := tr.boolTerm(n.Left, env)
