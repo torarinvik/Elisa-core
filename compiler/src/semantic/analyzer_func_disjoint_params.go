@@ -61,7 +61,17 @@ func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl,
 	}
 	sym, ok := scope.Lookup(ident.Name)
 	if !ok || sym == nil {
-		return nil, false
+		// No binding of the spelled name: resolve a module-scoped or `::`-qualified function the
+		// way expression analysis does (namespace, using and import candidates, with visibility).
+		// Only a function symbol is accepted, and only when nothing in scope binds the name.
+		if a.globalScope == nil {
+			return nil, false
+		}
+		global, _, found := a.lookupVisibleGlobal(ident.Name)
+		if !found || global == nil || global.Kind != SymbolFunc {
+			return nil, false
+		}
+		sym = global
 	}
 	if a.currentScope == nil && sym.Kind != SymbolFunc {
 		return nil, false
