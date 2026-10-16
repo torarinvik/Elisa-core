@@ -111,6 +111,17 @@ func pureReturnExpressionShapeWithinBudget(expr ast.Expr, work *int, depth int) 
 			}
 		}
 		return true
+	case *ast.StructLitExpr:
+		// A plain struct literal builds a value from its field values.
+		if n.CopyBase != nil || len(n.Spreads) != 0 {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !pureReturnExpressionShapeWithinBudget(arg, work, depth+1) {
+				return false
+			}
+		}
+		return true
 	case *ast.TupleExpr:
 		for _, elem := range n.Elems {
 			if !pureReturnExpressionShapeWithinBudget(elem, work, depth+1) {

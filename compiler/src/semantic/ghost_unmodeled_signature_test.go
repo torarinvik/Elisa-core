@@ -57,3 +57,41 @@ func TestGhostUnmodeledSignatureNonTotalBodyRejected(t *testing.T) {
 		t.Fatalf("non-total ghost over unmodeled types accepted: %s", diags)
 	}
 }
+
+// A struct-literal result is a pure value constructor: a return tree over it is a valid ghost.
+func TestGhostStructLiteralResultAccepted(t *testing.T) {
+	source := `struct Span:
+    start: usize
+    end: usize
+
+ghost def span_of(names: darray[sview]&, index: usize) -> Span:
+    return Span{start: 0, end: 0} if index >= names.count
+    return Span{start: index, end: index + names[index].len.usize()}
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ghost_struct_lit.elisa", source, ensureDiagOpts)
+	if diags := allDiagnostics(result); strings.Contains(diags, "ghost function") {
+		t.Fatalf("struct-literal ghost rejected: %s", diags)
+	}
+}
+
+// A struct-literal field computed by an impure call keeps the ghost rejected.
+func TestGhostStructLiteralImpureFieldRejected(t *testing.T) {
+	source := `struct Span:
+    start: usize
+    end: usize
+
+def grow(names: darray[sview]&) -> usize:
+    can Memory.Allocate:
+        copy: mutable darray[sview] = []
+        for name in names |copy|:
+            copy.push(name)
+        return copy.count
+
+ghost def span_of(names: darray[sview]&) -> Span:
+    return Span{start: 0, end: grow(names)}
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ghost_struct_impure.elisa", source, ensureDiagOpts)
+	if diags := allDiagnostics(result); !strings.Contains(diags, `ghost function "span_of" must be pure and total`) {
+		t.Fatalf("impure struct-literal ghost accepted: %s", diags)
+	}
+}

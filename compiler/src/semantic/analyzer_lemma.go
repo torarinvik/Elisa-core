@@ -391,6 +391,21 @@ func substituteLemmaEnsureWithBudget(expr ast.Expr, subst map[string]ast.Expr, w
 			elems[i] = re
 		}
 		return &ast.TupleExpr{Position: n.Position, Elems: elems}, true
+	case *ast.StructLitExpr:
+		if n.CopyBase != nil || len(n.Spreads) != 0 {
+			return nil, false
+		}
+		args := make([]ast.Expr, len(n.Args))
+		for i, arg := range n.Args {
+			ra, ok := substituteLemmaEnsureWithBudget(arg, subst, work, depth+1)
+			if !ok {
+				return nil, false
+			}
+			args[i] = ra
+		}
+		lit := *n
+		lit.Args = args
+		return &lit, true
 	default:
 		return nil, false
 	}
