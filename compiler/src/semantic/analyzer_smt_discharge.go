@@ -2134,6 +2134,9 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			sym := sc.Symbols[name]
 			seen[name] = true // a closer scope's binding shadows an outer one
 			vd, ok := sym.Node.(*ast.VarDeclStmt)
+			if ok && vd != nil && vd.Value != nil && sym.Type != nil && !IsNumericType(sym.Type) {
+				a.smtAggregateCallLocalEnsures(tr, sc, sym, vd)
+			}
 			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
 				continue
 			}
@@ -2333,6 +2336,8 @@ type smtTranslator struct {
 	// equation, and an inductive hypothesis about `g(n-1)`, actually CONNECT to the obligation's
 	// `g(n)`/`g(n-1)` terms instead of being unrelated fresh aux symbols.
 	callCanon map[string]string
+	// callProjectionCount numbers aggregate call projection tokens (analyzer_smt_call_projection.go).
+	callProjectionCount int
 	// ghostUFDecls names the uninterpreted functions already declared for ghost-call congruence.
 	ghostUFDecls map[string]bool
 	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
@@ -2993,6 +2998,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if c, ok := tr.a.constIntValue(n); ok {
 			return tr.constIntTerm(n, c), true
 		}
+		// A projection of an aggregate-valued call or call-initialized local (analyzer_smt_call_projection.go).
+		if term, ok, handled := tr.aggregateProjectionTerm(n, env); handled {
+			return term, ok
+		}
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
 				return bound, true
@@ -3000,7 +3009,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		// `result.field` where `result` is bound to a struct literal → that field's construction
 		// argument, so `ensure result.a == 1` for `return Pair(1, 2)` proves.
-		if tr.resultFields != nil {
+		if tr.resultFields != nil && tr.calleeBodyDepth == 0 && !tr.envBindsRoot(&ast.Ident{Name: "result"}, env) {
 			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && id.Name == "result" {
 				if arg, ok := tr.resultFields[n.Field]; ok {
 					return tr.termEnv(arg, env)
@@ -3954,12 +3963,15 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return tr.boolTerm(value, env)
 			}
 		}
-		if tr.resultFields != nil {
+		if tr.resultFields != nil && tr.calleeBodyDepth == 0 && !tr.envBindsRoot(&ast.Ident{Name: "result"}, env) {
 			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && id.Name == "result" {
 				if value, found := tr.resultFields[n.Field]; found {
 					return tr.boolTerm(value, env)
 				}
 			}
+		}
+		if term, ok, handled := tr.aggregateProjectionBool(n, env); handled {
+			return term, ok
 		}
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {

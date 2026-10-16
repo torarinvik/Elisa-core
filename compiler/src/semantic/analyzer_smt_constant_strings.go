@@ -19,6 +19,10 @@ func constantStringResult(expr ast.Expr, depth int) bool {
 	switch n := stripOptimizationParens(expr).(type) {
 	case *ast.StringLit:
 		return !strings.ContainsRune(n.Value, 0)
+	case *ast.TernaryExpr:
+		// `"a" if c else "b"`: evaluated once at the return, so the call-free condition re-reads
+		// the same values in the obligation.
+		return n != nil && exprIsCallFreeCondition(n.Cond, 0) && constantStringResult(n.Value, depth+1) && constantStringResult(n.Alt, depth+1)
 	case *ast.MatchExpr:
 		// A source match evaluates its subject once; do not duplicate call or
 		// mutable projection evaluation while lowering the individual arm guards.
@@ -132,6 +136,21 @@ func (tr *smtTranslator) constantStringEquality(left, right ast.Expr, env map[st
 	if atom, ok := tr.classifierStringEquality(left, right, env); ok {
 		return atom, true
 	}
+	if ternary, ok := left.(*ast.TernaryExpr); ok && constantStringResult(ternary, depth) {
+		guard, ok := tr.boolTerm(ternary.Cond, env)
+		if !ok {
+			return "", false
+		}
+		then, ok := tr.constantStringEquality(ternary.Value, wanted, env, depth+1)
+		if !ok {
+			return "", false
+		}
+		otherwise, ok := tr.constantStringEquality(ternary.Alt, wanted, env, depth+1)
+		if !ok {
+			return "", false
+		}
+		return "(ite " + guard + " " + then + " " + otherwise + ")", true
+	}
 	match, ok := left.(*ast.MatchExpr)
 	if !ok || !constantStringResult(match, depth) {
 		return "", false
@@ -190,7 +209,7 @@ func (tr *smtTranslator) constantStringProjection(field *ast.FieldExpr) (ast.Exp
 	}
 	var value ast.Expr
 	var found bool
-	if tr.resultFields != nil {
+	if tr.resultFields != nil && tr.calleeBodyDepth == 0 {
 		if id, ok := stripOptimizationParens(field.Object).(*ast.Ident); ok && id.Name == "result" {
 			value, found = tr.resultFields[field.Field]
 		}
@@ -210,4 +229,32 @@ func (tr *smtTranslator) constantStringProjection(field *ast.FieldExpr) (ast.Exp
 	}
 	_, literal := stripOptimizationParens(value).(*ast.StringLit)
 	return value, literal
+}
+
+// exprIsCallFreeCondition reports whether a condition is built only from literals, identifiers,
+// field reads and operators, so evaluating it again (in an obligation) cannot run a call or a
+// side effect and reads the same values as the evaluation it stands for.
+func exprIsCallFreeCondition(expr ast.Expr, depth int) bool {
+	if depth > 32 {
+		return false
+	}
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.BoolLit, *ast.IntLit, *ast.StringLit, *ast.Ident:
+		return true
+	case *ast.FieldExpr:
+		return n != nil && exprIsCallFreeCondition(n.Object, depth+1)
+	case *ast.UnaryExpr:
+		return n != nil && n.LoweredCall == nil && (n.Op == lexer.TOKEN_NOT || n.Op == lexer.TOKEN_MINUS) && exprIsCallFreeCondition(n.Operand, depth+1)
+	case *ast.BinaryExpr:
+		// An overloaded operator lowers to a user call, which may have effects.
+		if n == nil || n.LoweredCall != nil {
+			return false
+		}
+		switch n.Op {
+		case lexer.TOKEN_AND, lexer.TOKEN_OR, lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ,
+			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR:
+			return exprIsCallFreeCondition(n.Left, depth+1) && exprIsCallFreeCondition(n.Right, depth+1)
+		}
+	}
+	return false
 }

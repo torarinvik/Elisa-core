@@ -50,6 +50,12 @@ func pureClassifierExprCalls(e ast.Expr, pureCall func(*ast.CallExpr) bool) bool
 		return pureClassifierExprCalls(n.Inner, pureCall)
 	case *ast.BinaryExpr:
 		return n.LoweredCall == nil && pureClassifierExprCalls(n.Left, pureCall) && pureClassifierExprCalls(n.Right, pureCall)
+	case *ast.UnaryExpr:
+		// `not c` / `-x` evaluate their operand and write nothing (an overload lowers to a call).
+		return n != nil && n.LoweredCall == nil && (n.Op == lexer.TOKEN_NOT || n.Op == lexer.TOKEN_MINUS) && pureClassifierExprCalls(n.Operand, pureCall)
+	case *ast.TernaryExpr:
+		// `a if c else b` evaluates write-free parts and writes nothing itself.
+		return n != nil && pureClassifierExprCalls(n.Cond, pureCall) && pureClassifierExprCalls(n.Value, pureCall) && pureClassifierExprCalls(n.Alt, pureCall)
 	case *ast.MatchExpr:
 		if n.Store != nil || !pureClassifierExprCalls(n.Value, pureCall) {
 			return false
