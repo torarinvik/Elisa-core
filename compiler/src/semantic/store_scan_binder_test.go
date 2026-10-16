@@ -114,3 +114,63 @@ func TestStoreScanParamRowElementsTyped(t *testing.T) {
 		t.Errorf("a plain-view row element must stay a store")
 	}
 }
+
+// The check_never_leak_push_loop:144 shape: a for-capture over a local declared
+// `darray[u32]` copies a scalar each iteration, read off the declared type.
+const storeScanLocalLoopSource = `struct Block:
+    lines: mutable darray[u32] = []
+    names: mutable darray[sview] = []
+    text: mutable darray[u8] = []
+
+struct Walk:
+    clause_lines: mutable darray[u32] = []
+    names: mutable darray[sview] = []
+
+def fill_lines(name: sview, out: mutable darray[u32]&) -> bool:
+    can Memory.Allocate, Abort.Panic:
+        out.push(name.len.u32() + 1)
+        return true
+
+def fill_names(block: Block&, out: mutable darray[sview]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        out.push(block.names[0])
+
+def copy_lines(walk: mutable Walk&, block: Block&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        found: mutable darray[bool] = []
+        for local in 0..<block.names.count |found, block, walk|:
+            found.push(false)
+            name: sview = block.names[local]
+            lines: mutable darray[u32] = []
+            continue if not fill_lines(name, lines)
+            for line in lines |walk|:
+                walk.clause_lines.push(line)
+            found[local] <- true
+
+def copy_names(walk: mutable Walk&, block: Block&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        names: mutable darray[sview] = []
+        fill_names(block, names)
+        for name in names |walk|:
+            walk.names.push(name)
+`
+
+func TestStoreScanLocalScalarLoopCaptureTyped(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_local_loop.elisa", storeScanLocalLoopSource, AnalyzeOptions{})
+	storeScanUntyped(result)
+	lineType, ok := result.analyzer.storeScanLoopBinderElemType(storeScanFindFunc(t, result, "copy_lines"), &ast.Ident{Name: "line"})
+	if !ok || lineType == nil || lineType.String() != "u32" {
+		t.Fatalf("capture over a local darray[u32]: got %v %v, want u32", lineType, ok)
+	}
+	if !result.analyzer.storeScanHoldsNoRegionStorage(lineType) {
+		t.Fatalf("a u32 capture must hold no region storage")
+	}
+	// Negative: a capture over a local darray[sview] is not typed from the spelling (its views
+	// may point into the source), so the scan keeps judging it as a store.
+	if nameType, ok := result.analyzer.storeScanLoopBinderElemType(storeScanFindFunc(t, result, "copy_names"), &ast.Ident{Name: "name"}); ok {
+		t.Fatalf("capture over a local darray[sview] must not be typed, got %v", nameType)
+	}
+	if got := result.analyzer.calleeStoreModeInto(storeScanFindFunc(t, result, "copy_names"), 1, 0); got == storeNone {
+		t.Errorf("a view loop capture must stay a store")
+	}
+}

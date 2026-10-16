@@ -2168,6 +2168,14 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 	if pat, ok := loop.Pattern.(*ast.MoveBindNamePattern); !ok || pat == nil || pat.Name != id.Name {
 		return nil, false
 	}
+	if local, isIdent := storeScanUnwrap(loop.Source).(*ast.Ident); isIdent && local != nil {
+		// A local whose every declaration spells `darray[<scalar>]`: each element copy is that
+		// scalar, read off the declared type expression (no resolver needed for a builtin).
+		if name, ok := a.storeScanLocalScalarDArrayElem(decl, local.Name); ok {
+			return &BuiltinType{Name: name}, true
+		}
+		return nil, false
+	}
 	source, ok := storeScanUnwrap(loop.Source).(*ast.FieldExpr)
 	if !ok || source == nil {
 		return nil, false
@@ -2180,6 +2188,64 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 		return c.Elem, true
 	}
 	return nil, false
+}
+
+// storeScanLocalScalarDArrayElem: the builtin scalar element name of a local (not a parameter,
+// never bound by a pattern or loop) whose every declaration spells `darray[E]` for the same
+// numeric or bool E.
+func (a *Analyzer) storeScanLocalScalarDArrayElem(decl *ast.FuncDecl, name string) (string, bool) {
+	for _, p := range decl.Params {
+		if p.Name == name {
+			return "", false
+		}
+	}
+	idx := a.storeScanIndex(decl)
+	if idx.otherBound[name] || len(idx.decls[name]) == 0 {
+		return "", false
+	}
+	elem := ""
+	for _, v := range idx.decls[name] {
+		got, ok := storeScanTypeExprScalarDArrayElem(v.Type)
+		if !ok || (elem != "" && got != elem) {
+			return "", false
+		}
+		elem = got
+	}
+	return elem, elem != ""
+}
+
+func storeScanTypeExprScalarDArrayElem(t ast.TypeExpr) (string, bool) {
+	for {
+		switch tt := t.(type) {
+		case *ast.MutableType:
+			if tt == nil {
+				return "", false
+			}
+			t = tt.Elem
+			continue
+		case *ast.BuiltinTypeExpr:
+			if tt == nil || tt.Name != "darray" || len(tt.TypeArgs) != 1 || len(tt.ValueArgs) != 0 {
+				return "", false
+			}
+			var elemName string
+			switch e := tt.TypeArgs[0].(type) {
+			case *ast.NamedType:
+				if e != nil && e.Region == "" {
+					elemName = e.Name
+				}
+			case *ast.BuiltinTypeExpr:
+				if e != nil && len(e.TypeArgs) == 0 && len(e.ValueArgs) == 0 {
+					elemName = e.Name
+				}
+			}
+			switch elemName {
+			case "u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "i64", "isize", "f32", "f64", "bool":
+				return elemName, true
+			}
+			return "", false
+		}
+		return "", false
+	}
 }
 
 // storeScanTypeExprIsView: a declared `sview` / `cstr` (no reference wrapper).
