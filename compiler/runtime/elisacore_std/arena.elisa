@@ -375,30 +375,31 @@ def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap
     result: mutable heap Region&? = null
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache can Global{Read,Write}
-        reuse_previous: mutable heap Region&? = null
-        reuse_cursor: mutable heap Region&? = reuse_cache.slot
-        reuse_probes: mutable usize = REGION_CACHE_MAX_ENTRIES
-        while reuse_cursor != null and reuse_probes > 0:
-            reuse_probes <- reuse_probes - 1
-            cache_candidate: mutable heap Region&? = reuse_cursor
-            if cache_candidate is cached and cached.capacity >= capacity:
-                if reuse_previous is previous:
-                    previous.next <- cached.next
-                else:
-                    reuse_cache.slot <- cached.next
-                reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
-                cached.next <- null
-                cached.count <- 0
-                cached.owner_tag <- owner_tag
-                cached.owner_next <- null
-                cached.global_index <- 0
-                cached.committed <- 0
-                cached.free_list <- null
-                result <- cached
-                break
-            reuse_previous <- reuse_cursor
-            reuse_cursor <- reuse_cursor.next
+        can Global{Read,Write}:
+            reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+            reuse_previous: mutable heap Region&? = null
+            reuse_cursor: mutable heap Region&? = reuse_cache.slot
+            reuse_probes: mutable usize = REGION_CACHE_MAX_ENTRIES
+            while reuse_cursor != null and reuse_probes > 0:
+                reuse_probes <- reuse_probes - 1
+                cache_candidate: mutable heap Region&? = reuse_cursor
+                if cache_candidate is cached and cached.capacity >= capacity:
+                    if reuse_previous is previous:
+                        previous.next <- cached.next
+                    else:
+                        reuse_cache.slot <- cached.next
+                    reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
+                    cached.next <- null
+                    cached.count <- 0
+                    cached.owner_tag <- owner_tag
+                    cached.owner_next <- null
+                    cached.global_index <- 0
+                    cached.committed <- 0
+                    cached.free_list <- null
+                    result <- cached
+                    break
+                reuse_previous <- reuse_cursor
+                reuse_cursor <- reuse_cursor.next
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
@@ -416,50 +417,55 @@ def arena_free_hint_get(owner: uintptr) -> mutable heap Region&? can[Global.Read
 def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
-        hint.owner <- owner
-        hint.region <- region
+        can Global{Read,Write}:
+            hint: mutable ArenaFreeHint& = &__elisa_free_hint
+            hint.owner <- owner
+            hint.region <- region
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
-        hint.region <- region if hint.owner == owner
+        can Global{Read,Write}:
+            hint: mutable ArenaFreeHint& = &__elisa_free_hint
+            hint.region <- region if hint.owner == owner
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_free_hint_clear(owner: uintptr) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
-        if hint.owner == owner:
-            hint.owner <- 0.uintptr()
-            hint.region <- null
+        can Global{Read,Write}:
+            hint: mutable ArenaFreeHint& = &__elisa_free_hint
+            if hint.owner == owner:
+                hint.owner <- 0.uintptr()
+                hint.region <- null
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
-        if hint.owner == child and child_region != null:
-            hint.owner <- parent
-            hint.region <- child_region
+        can Global{Read,Write}:
+            hint: mutable ArenaFreeHint& = &__elisa_free_hint
+            if hint.owner == child and child_region != null:
+                hint.owner <- parent
+                hint.region <- child_region
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
 def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?) can[Global.Read, Global.Write]:
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        # A reclaimed span stays inside its own arena's region and is released with
-        # that arena, so it must not consume the parked-region budget: charging it
-        # here (with only a cache hit ever refunding) permanently closed the cache
-        # after 128 reclaims and sent every later free_region to munmap.
-        hint: mutable ArenaFreeHint& = &__elisa_free_hint can Global{Read,Write}
-        hint.owner <- owner
-        hint.region <- region
+        can Global{Read,Write}:
+            # A reclaimed span stays inside its own arena's region and is released with
+            # that arena, so it must not consume the parked-region budget: charging it
+            # here (with only a cache hit ever refunding) permanently closed the cache
+            # after 128 reclaims and sent every later free_region to munmap.
+            hint: mutable ArenaFreeHint& = &__elisa_free_hint
+            hint.owner <- owner
+            hint.region <- region
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
@@ -488,14 +494,15 @@ def arena_region_cache_try_park(r: heap Region&) -> bool can[Global.Read, Global
         parked_ok: mutable bool = false
         __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
         trusted Unsafe.MutableGlobal:
-            cache: mutable ArenaRegionCache& = &__elisa_region_cache can Global{Read,Write}
-            if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
-                trusted Unsafe.PointerCast:
-                    parked: mutable heap Region& = r.cast[mutable heap Region&]
-                    parked.next <- cache.slot
-                    cache.slot <- parked
-                cache.reclaimed_spans <- cache.reclaimed_spans + 1
-                parked_ok <- true
+            can Global{Read,Write}:
+                cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
+                    trusted Unsafe.PointerCast:
+                        parked: mutable heap Region& = r.cast[mutable heap Region&]
+                        parked.next <- cache.slot
+                        cache.slot <- parked
+                    cache.reclaimed_spans <- cache.reclaimed_spans + 1
+                    parked_ok <- true
         __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
         return parked_ok
 
@@ -527,30 +534,31 @@ def arena_reserve_cache_take(capacity: usize, owner_tag: uintptr) -> mutable hea
     result: mutable heap Region&? = null
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        reuse_cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache can Global{Read,Write}
-        reuse_previous: mutable heap Region&? = null
-        reuse_cursor: mutable heap Region&? = reuse_cache.slot
-        reuse_probes: mutable usize = RESERVE_CACHE_MAX_ENTRIES
-        while reuse_cursor != null and reuse_probes > 0:
-            reuse_probes <- reuse_probes - 1
-            cache_candidate: mutable heap Region&? = reuse_cursor
-            if cache_candidate is cached and cached.capacity >= capacity:
-                if reuse_previous is previous:
-                    previous.next <- cached.next
-                else:
-                    reuse_cache.slot <- cached.next
-                reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
-                cached.next <- null
-                cached.count <- 0
-                cached.owner_tag <- owner_tag
-                cached.owner_next <- null
-                cached.global_index <- 0
-                cached.committed <- 0
-                cached.free_list <- null
-                result <- cached
-                break
-            reuse_previous <- reuse_cursor
-            reuse_cursor <- reuse_cursor.next
+        can Global{Read,Write}:
+            reuse_cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache
+            reuse_previous: mutable heap Region&? = null
+            reuse_cursor: mutable heap Region&? = reuse_cache.slot
+            reuse_probes: mutable usize = RESERVE_CACHE_MAX_ENTRIES
+            while reuse_cursor != null and reuse_probes > 0:
+                reuse_probes <- reuse_probes - 1
+                cache_candidate: mutable heap Region&? = reuse_cursor
+                if cache_candidate is cached and cached.capacity >= capacity:
+                    if reuse_previous is previous:
+                        previous.next <- cached.next
+                    else:
+                        reuse_cache.slot <- cached.next
+                    reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
+                    cached.next <- null
+                    cached.count <- 0
+                    cached.owner_tag <- owner_tag
+                    cached.owner_next <- null
+                    cached.global_index <- 0
+                    cached.committed <- 0
+                    cached.free_list <- null
+                    result <- cached
+                    break
+                reuse_previous <- reuse_cursor
+                reuse_cursor <- reuse_cursor.next
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
     return result
 
@@ -579,14 +587,15 @@ def arena_reserve_cache_try_park(r: heap Region&) -> bool can[Global.Read, Globa
         parked_ok: mutable bool = false
         __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
         trusted Unsafe.MutableGlobal:
-            cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache can Global{Read,Write}
-            if cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES:
-                trusted Unsafe.PointerCast:
-                    parked: mutable heap Region& = r.cast[mutable heap Region&]
-                    parked.next <- cache.slot
-                    cache.slot <- parked
-                cache.reclaimed_spans <- cache.reclaimed_spans + 1
-                parked_ok <- true
+            can Global{Read,Write}:
+                cache: mutable ArenaRegionCache& = &__elisa_reserve_region_cache
+                if cache.reclaimed_spans < RESERVE_CACHE_MAX_ENTRIES:
+                    trusted Unsafe.PointerCast:
+                        parked: mutable heap Region& = r.cast[mutable heap Region&]
+                        parked.next <- cache.slot
+                        cache.slot <- parked
+                    cache.reclaimed_spans <- cache.reclaimed_spans + 1
+                    parked_ok <- true
         __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
         return parked_ok
 
@@ -1685,11 +1694,12 @@ def collection_stack_memo_put(a: Arena&, r: mutable heap Region&) can[Global.Rea
     slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot] can Global{Read,Write}
-        entry.table <- key
-        entry.region <- r
-        entry.arena <- arena_key
-        entry.begin <- begin_key
+        can Global{Read,Write}:
+            entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+            entry.table <- key
+            entry.region <- r
+            entry.arena <- arena_key
+            entry.begin <- begin_key
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 # The memoised stack whose data base is `key` in arena `a`, or null.
@@ -1718,13 +1728,14 @@ def collection_stack_memo_forget(r: heap Region&) can[Global.Read, Global.Write]
     slot: usize = collection_memo_hash(key, COLLECTION_STACK_MEMO_SLOTS)
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot] can Global{Read,Write}
-        held: heap Region&? = entry.region
-        if held is held_region and collection_region_addr(held_region) == region_key:
-            entry.table <- 0.uintptr()
-            entry.region <- null
-            entry.arena <- 0.uintptr()
-            entry.begin <- 0.uintptr()
+        can Global{Read,Write}:
+            entry: mutable CollectionStackMemoEntry& = &__elisa_collection_stack_memo[slot]
+            held: heap Region&? = entry.region
+            if held is held_region and collection_region_addr(held_region) == region_key:
+                entry.table <- 0.uintptr()
+                entry.region <- null
+                entry.arena <- 0.uintptr()
+                entry.begin <- 0.uintptr()
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 @internal
@@ -1764,13 +1775,14 @@ def collection_arena_memo_set(a: Arena&, last_table: uintptr, no_pooled: bool) c
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global{Read,Write}
-        if entry.arena != arena_key or entry.begin != begin_key:
-            entry.arena <- arena_key
-            entry.begin <- begin_key
-            entry.last_table <- 0.uintptr()
-        entry.last_table <- last_table if last_table != 0.uintptr()
-        entry.no_pooled <- no_pooled
+        can Global{Read,Write}:
+            entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+            if entry.arena != arena_key or entry.begin != begin_key:
+                entry.arena <- arena_key
+                entry.begin <- begin_key
+                entry.last_table <- 0.uintptr()
+            entry.last_table <- last_table if last_table != 0.uintptr()
+            entry.no_pooled <- no_pooled
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 # Reset/rewind pool every stack of `a`: the no-pooled hint no longer holds.
@@ -1780,8 +1792,9 @@ def collection_arena_memo_pooled(a: Arena&) can[Global.Read, Global.Write]:
     slot: usize = collection_memo_hash(arena_key, COLLECTION_ARENA_MEMO_SLOTS)
     __elisa_arena_cache_lock_acquire() can Global{Read,Write}, Atomics.Exchange
     trusted Unsafe.MutableGlobal:
-        entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot] can Global{Read,Write}
-        entry.no_pooled <- false if entry.arena == arena_key
+        can Global{Read,Write}:
+            entry: mutable CollectionArenaMemoEntry& = &__elisa_collection_arena_memo[slot]
+            entry.no_pooled <- false if entry.arena == arena_key
     __elisa_arena_cache_lock_release() can Global{Read,Write}, Atomics.Store
 
 # The table a stack holds: its data base.
