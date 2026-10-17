@@ -17,6 +17,7 @@ import (
 // production equations, so differences expose missing scheduling dependencies.
 func permissionReferenceSweep(a *Analyzer, decls []scopedDecl) int {
 	evaluations := 0
+	a.permissionEffectsOutcome = permissionInferenceOutcome{}
 	for iter := 0; iter < len(decls)+4; iter++ {
 		changed := false
 		for _, decl := range decls {
@@ -25,6 +26,7 @@ func permissionReferenceSweep(a *Analyzer, decls []scopedDecl) int {
 			evaluations++
 		}
 		if !changed {
+			a.permissionEffectsOutcome.Converged = true
 			break
 		}
 	}
@@ -335,5 +337,59 @@ func TestPermissionWorklistStableFastPath(t *testing.T) {
 		if f.a.permissionInference != nil || !reflect.DeepEqual(before, permissionFixtureRows(f)) {
 			t.Fatal("stable pass changed rows or retained observer")
 		}
+	}
+}
+
+func TestPermissionWorklistReportsCompletion(t *testing.T) {
+	empty := newPermissionGraphFixture(0)
+	if got := empty.a.solveFunctionPermissionEffects(empty.decls, 0); !got.Converged || got.Evaluations != 0 || got.Pending != 0 {
+		t.Fatalf("empty graph: %+v", got)
+	}
+	for _, budget := range []int{0, 1, 2, 7, 8, 12} {
+		f := newPermissionGraphFixture(8)
+		for i := 0; i < 7; i++ {
+			f.edge(i, i+1)
+		}
+		f.edge(7, -1)
+		got := f.a.solveFunctionPermissionEffects(f.decls, budget)
+		if f.a.permissionInference != nil {
+			t.Fatal("retained inference observer")
+		}
+		if got.Rounds > budget || got.Evaluations > budget*len(f.decls) {
+			t.Fatalf("exceeded budget: %+v", got)
+		}
+		if budget < 8 && (got.Converged || got.Pending == 0) {
+			t.Fatalf("partial reverse chain published completion: %+v", got)
+		}
+		if budget >= 8 {
+			if !got.Converged || got.Pending != 0 {
+				t.Fatalf("completed reverse chain: %+v", got)
+			}
+			oracle := newPermissionGraphFixture(8)
+			for i := 0; i < 7; i++ {
+				oracle.edge(i, i+1)
+			}
+			oracle.edge(7, -1)
+			permissionReferenceSweep(oracle.a, oracle.decls)
+			if !reflect.DeepEqual(permissionFixtureRows(f), permissionFixtureRows(oracle)) {
+				t.Fatal("completion changed fixed point")
+			}
+		}
+	}
+	stable := newPermissionGraphFixture(8)
+	if got := stable.a.solveFunctionPermissionEffects(stable.decls, 1); !got.Converged || got.Rounds != 1 || got.Evaluations != 8 {
+		t.Fatalf("stable dense pass: %+v", got)
+	}
+}
+
+func TestPermissionInferenceCompletionOnResult(t *testing.T) {
+	file := parseIncrementalSessionFile(t, "def answer() -> i64:\n    return 42\n")
+	result := Analyze(file)
+	if !result.PermissionEffectsConverged {
+		t.Fatal("normal final inference did not establish completion")
+	}
+	result = analyzeWithEffectInference(parseIncrementalSessionFile(t, "def answer() -> i64:\n    return 42\n"), AnalyzeOptions{}, nil, func(*Analyzer, []scopedDecl) {})
+	if result.PermissionEffectsConverged {
+		t.Fatal("custom solver without completion published complete summaries")
 	}
 }

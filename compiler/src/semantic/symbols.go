@@ -30,6 +30,10 @@ func (d Diagnostic) String() string {
 }
 
 type Result struct {
+	// PermissionEffectsConverged is true only when the final effect work queue
+	// drained. False includes an exhausted budget or a custom solver which did
+	// not establish completion. Partial rows are unsuitable for retained summaries.
+	PermissionEffectsConverged bool
 	// SMTProfile reports the optional SMT discharge tier's cost (docs/90): query count, verdict
 	// breakdown, and wall time. Zero-valued when the tier is off. Surfaced by `--explain` so "is SMT
 	// cheap or demanding?" is answered with data.
@@ -77,11 +81,11 @@ type Result struct {
 	// analyzer proved are registered in a local TaskGroup and followed by its
 	// matching wait on every normal path. The backend uses the group binding to
 	// register each handle; lifetime analysis uses the same call identity.
-	TaskGroupSubmits   map[*ast.CallExpr]TaskGroupSubmitInfo
-	CallArgDisjoint    map[*ast.CallExpr]*CallArgDisjointInfo
+	TaskGroupSubmits map[*ast.CallExpr]TaskGroupSubmitInfo
+	CallArgDisjoint  map[*ast.CallExpr]*CallArgDisjointInfo
 	// ReassignReclaims are `x <- f(..)` assignments whose target's previous darray buffer is
 	// provably unreferenced (analyzer_reassign_reclaim.go); the backend returns it to its arena.
-	ReassignReclaims map[*ast.AssignStmt]bool
+	ReassignReclaims   map[*ast.AssignStmt]bool
 	FuncDisjointParams map[*ast.FuncDecl]*FuncDisjointParamInfo
 	// LawIsCalls desugars a `subject is Law` predicate application (docs/85 §2: `is` = UFCS
 	// first-arg binding) into the synthetic call `Law(subject)`. Analysis type-checks the call and

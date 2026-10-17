@@ -1138,3 +1138,44 @@ checks passed (semantic 1.825 s; root 1.484 s). The initial full semantic run
 passed in 56.635 s; the final full suite passed in 60.799 s.
 Existing broader root-suite failures and the historical Stage1 diagnostics are
 not resolved by this query work. All runs were local.
+
+### Effect-summary completion boundary
+
+Final permission inference now records whether its work queue drained. A bounded
+solve returns evaluations, rounds, pending functions and a convergence flag;
+`Result.PermissionEffectsConverged` publishes only that flag. Zero functions are
+complete, an unchanged initial dense pass is complete, and a nonempty queue at
+the budget boundary is incomplete. The production cap and declaration-order
+scheduling remain unchanged. A custom test solver which does not establish
+completion leaves the flag false. This status is a recomputed aggregate in the
+complete-function-product inventory, rather than a replayed body annotation.
+Future persistent callee summaries must require it; no general callee-summary
+replay is implemented by this status field.
+
+Tests force short budgets on a reverse dependency chain, distinguish pending work
+from convergence, check the completed rows against the reference sweep, and check
+the public Result boundary. The existing full-analysis sweep/worklist differential
+also compares the new field; its reference solver explicitly establishes completion
+on an unchanged pass. This keeps a cutoff from silently authorizing a persistent
+summary while preserving the existing equations and diagnostics.
+
+The local project probe accepts `ELISA_INCREMENTAL_PROJECT_PROBE_CPU_OUT` to
+profile only its warmed `incremental_repeat` analysis. Loading, preflight syntax
+capture and earlier analyses are excluded from that profile. The first such
+frozen-parser profile sampled 5.02 s CPU: 51.79% flat in memory clearing and about
+0.40 s in the raw mutable-borrow traversal's stacks. Recursive cumulative totals
+inflate the traversal's apparent cost; the local projection-decline fallback
+accounts for most of its remaining work. Structural projection and retained-query
+lookup account for roughly 80 ms and 30 ms respectively in this sample. The probe
+passed exposed diagnostic parity in 32.381 s. This evidence favors eliminating
+body-analysis allocation/reanalysis and representing generic substitution inputs;
+it does not establish a whole-project incremental speedup.
+
+Validation for the completion boundary: full semantic suite 66.308 s; focused
+worklist/completion/product/capability race checks 2.445 s; exact-budget boundary
+checks 0.305 s. Frozen parser diagnostic parity passed again in 28.593 s. The
+frontend wrapper returns a nil Result on errors, so a convergence flag cannot be
+inferred from that failing-project probe: an interim false value in that log
+represented a missing Result, not a proven inference cutoff. The probe now emits
+the flag only when a Result is available; the semantic completion fixtures check
+the flag directly. Broader root-suite failures remain outside this checkpoint.

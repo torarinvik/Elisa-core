@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 	"testing"
 	"time"
@@ -93,14 +94,37 @@ func TestLocalIncrementalProjectProbe(t *testing.T) {
 			analysisSession = session
 		}
 		var diagnostics bytes.Buffer
+		// Profile one warmed analysis, excluding source loading, preflight and
+		// other stages. This avoids attributing cold setup to retained queries.
+		var cpuFile *os.File
+		if cpuOut := os.Getenv("ELISA_INCREMENTAL_PROJECT_PROBE_CPU_OUT"); cpuOut != "" && label == "incremental_repeat" {
+			var err error
+			cpuFile, err = os.Create(cpuOut)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := pprof.StartCPUProfile(cpuFile); err != nil {
+				cpuFile.Close()
+				t.Fatal(err)
+			}
+		}
 		start := time.Now()
 		_, result, success := analyzeLoadedProgramWithSession(&program, &diagnostics, semantic.AnalyzeOptions{}, analysisSession)
 		elapsed := time.Since(start)
+		if cpuFile != nil {
+			pprof.StopCPUProfile()
+			if err := cpuFile.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		response := compileServerResponse{OK: success, Stderr: strings.TrimSpace(diagnostics.String())}
 		if success {
 			response.Output = generateSemanticReport(result)
 		}
 		record := map[string]any{"source_sha256": fmt.Sprintf("%x", sha256.Sum256(source)), "label": label, "elapsed_ms": float64(elapsed.Microseconds()) / 1000, "ok": success, "diagnostic_bytes": len(response.Stderr), "diagnostic_sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(response.Stderr))), "token_hits": cache.tokens.hits, "token_misses": cache.tokens.misses, "parse_hits": cache.tokens.parseHits, "prefix_declarations": cache.tokens.prefixParsedDeclarations, "retained_source_bytes": cache.tokens.bytes}
+		if result != nil {
+			record["permission_effects_converged"] = result.PermissionEffectsConverged
+		}
 		if incremental {
 			record["semantic_stats"] = session.Stats()
 		}

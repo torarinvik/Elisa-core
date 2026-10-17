@@ -26,6 +26,8 @@ type FunctionProductRequirement struct {
 // Explicit inventory: new semantic Result fields must not silently disappear
 // from a reused body. Keep this list exhaustive rather than guessing from types.
 var functionProductFieldPolicies = map[string]FunctionProductDisposition{
+	"PermissionEffectsConverged": FunctionProductAggregate,
+
 	"SMTProfile":              FunctionProductInvocation,
 	"EnforcePerfLints":        FunctionProductInvocation,
 	"File":                    FunctionProductInvocation,

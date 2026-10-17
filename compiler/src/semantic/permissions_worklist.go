@@ -32,14 +32,34 @@ func (q *permissionFunctionQueue) Pop() any {
 	return x
 }
 
-// Dirty functions execute in the same declaration order and at most the same
-// number of rounds as the reference sweep. An earlier/self reader goes into the
-// next round; a later reader can still execute in the current round.
+// permissionInferenceOutcome distinguishes queue exhaustion from budget exhaustion.
+// A partial row must never be admitted as a completed incremental callee summary.
+type permissionInferenceOutcome struct {
+	Evaluations, Rounds, Pending int
+	Converged                    bool
+}
+
 func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl) int {
+	outcome := a.solveFunctionPermissionEffects(decls, len(decls)+4)
+	a.permissionEffectsOutcome = outcome
+	return outcome.Evaluations
+}
+
+// Dirty functions execute in declaration order. An earlier/self reader goes
+// into the next round; a later reader can execute in the current round.
+// maxRounds includes the initial dense pass. Tests use a smaller budget to
+// exercise the incomplete path without changing the production scheduling cap.
+func (a *Analyzer) solveFunctionPermissionEffects(decls []scopedDecl, maxRounds int) permissionInferenceOutcome {
 	n := len(decls)
+	outcome := permissionInferenceOutcome{Converged: n == 0}
 	if n == 0 {
-		return 0
+		return outcome
 	}
+	if maxRounds <= 0 {
+		outcome.Pending = n
+		return outcome
+	}
+	outcome.Rounds = 1
 	// Most files already have stable body-local rows. Keep their common case
 	// to one dense pass without allocating the graph or heaps. Observe nested
 	// lambda writes too; they may change even when the owner's row stays equal.
@@ -52,7 +72,9 @@ func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl) in
 		changed = changed || different
 	}
 	if !changed {
-		return n
+		outcome.Evaluations = n
+		outcome.Converged = true
+		return outcome
 	}
 	current := make(permissionFunctionQueue, n)
 	currentQueued := make([]bool, n)
@@ -97,7 +119,8 @@ func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl) in
 		},
 	}
 	evaluations := n
-	for round := 0; round < n+3 && len(current) > 0; round++ {
+	for round := 1; round < maxRounds && len(current) > 0; round++ {
+		outcome.Rounds++
 		for len(current) > 0 {
 			index = heap.Pop(&current).(int)
 			currentQueued[index] = false
@@ -117,5 +140,8 @@ func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl) in
 		current, next = next, current
 		currentQueued, nextQueued = nextQueued, currentQueued
 	}
-	return evaluations
+	outcome.Evaluations = evaluations
+	outcome.Pending = len(current)
+	outcome.Converged = len(current) == 0
+	return outcome
 }

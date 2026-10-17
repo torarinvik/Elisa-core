@@ -88,9 +88,10 @@ const (
 )
 
 type Analyzer struct {
-	permissionInference *permissionInferenceObserver
-	incrementalBodies   *incrementalBodyInvocation
-	capabilityQueries   *capabilityQueryInvocation
+	permissionEffectsOutcome permissionInferenceOutcome
+	permissionInference      *permissionInferenceObserver
+	incrementalBodies        *incrementalBodyInvocation
+	capabilityQueries        *capabilityQueryInvocation
 	// smtStaleLocalDefs marks immutable locals whose initializer read a binding that has since been
 	// written (analyzer_smt_shadowing.go); their defining equation no longer holds.
 	smtStaleLocalDefs                    map[*Symbol]bool
@@ -1514,6 +1515,8 @@ func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *
 		ExportedFuncs:           a.exportedFuncs,
 		ExportedGlobals:         a.exportedGlobals,
 		Diagnostics:             a.diagnostics,
+
+		PermissionEffectsConverged: a.permissionEffectsOutcome.Converged,
 	}
 	recordInternalParityCase(file, options, analysisResult)
 	return analysisResult
