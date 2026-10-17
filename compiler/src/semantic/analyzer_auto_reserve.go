@@ -198,9 +198,24 @@ func (a *Analyzer) reserveBoundResolvableHere(bound ast.Expr) bool {
 }
 
 func (a *Analyzer) semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr) ast.Stmt {
+	receiver := &ast.Ident{Position: pos, Name: target}
+	// A pre-reserve can be retained from a diagnostics-suppressed analysis pass.
+	// Save its lexical receiver now: later effect validation may run outside
+	// this scope and must not reinterpret a local as a same-named global.
+	if a.currentScope != nil {
+		if sym, found := a.currentScope.Lookup(target); found {
+			if !isGlobalStorageSymbol(sym) {
+				sym = nil
+			}
+			if a.resolvedGlobalStorage == nil {
+				a.resolvedGlobalStorage = make(map[*ast.Ident]*Symbol)
+			}
+			a.resolvedGlobalStorage[receiver] = sym
+		}
+	}
 	call := &ast.CallExpr{
 		Position: pos,
-		Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: target}, Field: "reserve"},
+		Func:     &ast.FieldExpr{Position: pos, Object: receiver, Field: "reserve"},
 		Args:     []ast.Expr{bound},
 	}
 	a.recordCompilerBuiltinHelperCall(call, "darray.reserve")
