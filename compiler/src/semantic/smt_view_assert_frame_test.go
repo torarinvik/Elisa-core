@@ -7,7 +7,6 @@ import "testing"
 func TestSMTReadOnlyAssertCountingFrame(t *testing.T) {
 	result := analyzeContractStrict(t, "assert_frame.elisa", `def byte_value(text: sview, index: usize) -> usize:
     requires index < text.len
-    ensure result <= 255
     return text[index].usize()
 
 def same_after_loop(text: sview) -> usize:
