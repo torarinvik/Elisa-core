@@ -19,8 +19,9 @@ import (
 )
 
 // IncrementalAnalysisSession is an opt-in, in-process semantic session. The
-// initial body class is closed integer-return expressions. It reuses primary
-// expression typing; return checks, declarations, summaries and CFGs stay fresh.
+// initial body classes are integer returns with current-bound i64 parameters.
+// It reuses expression typing; parameter reads, return checks, declarations,
+// summaries and CFGs stay fresh.
 // It is not a complete incremental compiler or a persistent whole-body cache.
 type IncrementalAnalysisSession struct {
 	mu             sync.Mutex
@@ -141,7 +142,8 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			if !ok {
 				continue
 			}
-			keyBytes := []byte("primitive/noargs/i64/v1\x00")
+			keyBytes := []byte("primitive/i64-parameters/v2\x00")
+			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
 			qualifiedName := joinQualifiedName(namespace, fn.Name)
 			if len(qualifiedName) > primitiveSourceByteBudget {
 				continue
@@ -208,7 +210,7 @@ func primitiveReturnHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 	}
 	// Every other declaration feature stays cold, including future added fields.
 	header := *fn
-	if len(header.Params) != 0 {
+	if !primitiveParameterSyntax(header.Params) {
 		return nil, false
 	}
 	header.Params = nil // the parser uses a non-nil empty list for `()`
@@ -265,6 +267,17 @@ func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 		return nil, false
 	}
 	sourceBytes := len(fn.Name)
+	var parameters map[string]bool
+	if len(fn.Params) > 0 {
+		parameters = make(map[string]bool, len(fn.Params))
+	}
+	for _, param := range fn.Params {
+		parameters[param.Name] = true
+		sourceBytes += len(param.Name)
+	}
+	if sourceBytes > primitiveSourceByteBudget {
+		return nil, false
+	}
 	var nodes []ast.Expr
 	seen := primitiveSeenPool.Get().(map[ast.Expr]bool)
 	defer func() { clear(seen); primitiveSeenPool.Put(seen) }()
@@ -279,6 +292,12 @@ func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 		seen[expr] = true
 		nodes = append(nodes, expr)
 		switch node := expr.(type) {
+		case *ast.Ident:
+			if !primitiveParameterSchemaValid || !parameters[node.Name] || len(node.Name) > primitiveSourceByteBudget-sourceBytes {
+				return false
+			}
+			sourceBytes += len(node.Name)
+			return true
 		case *ast.IntLit:
 			if len(node.Value) > primitiveSourceByteBudget-sourceBytes {
 				return false
@@ -325,11 +344,20 @@ func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 // values are length-prefixed, and literal spelling/hex mode remain inputs.
 func primitiveExpressionDigest(fn *ast.FuncDecl, nodes []ast.Expr) string {
 	data := make([]byte, 0, len(nodes)*12+len(fn.Name)+32)
-	data = append(data, "closed-i64-typing-v1\x00"...)
+	data = append(data, "parameter-i64-typing-v2\x00"...)
 	data = binary.LittleEndian.AppendUint64(data, uint64(len(fn.Name)))
 	data = append(data, fn.Name...)
+	data = binary.LittleEndian.AppendUint64(data, uint64(len(fn.Params)))
+	for _, param := range fn.Params {
+		data = binary.LittleEndian.AppendUint64(data, uint64(len(param.Name)))
+		data = append(data, param.Name...)
+	}
 	for _, expr := range nodes {
 		switch node := expr.(type) {
+		case *ast.Ident:
+			data = append(data, 'N')
+			data = binary.LittleEndian.AppendUint64(data, uint64(len(node.Name)))
+			data = append(data, node.Name...)
 		case *ast.IntLit:
 			data = append(data, 'I')
 			if node.IsHex {
@@ -384,7 +412,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	} // validate current lookup absence at the reuse boundary
 	currentReturn, returnOK := a.currentReturn.(*BuiltinType)
 	nodes, eligible := primitiveReturnExpressions(fn)
-	if !indexed || !eligible || invocation.safety != "canonical-primitives-no-impls" || !returnOK || currentReturn.Name != "i64" || currentReturn != a.namedTypes["i64"] {
+	if !indexed || !eligible || !primitiveCurrentParameterBindings(a, fn) || invocation.safety != "canonical-primitives-no-impls" || !returnOK || currentReturn.Name != "i64" || currentReturn != a.namedTypes["i64"] {
 		if indexed && !eligible {
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-source", key), Remove: true}, incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
 			invocation.session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: key})
@@ -401,15 +429,9 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	encoded, err := session.db.Evaluate(context.Background(), query)
 	if err == nil && encoded != "" {
 		if len(encoded) == len(nodes) && validPrimitiveTyping(encoded) {
-			for i, expr := range nodes {
-				name := "int"
-				if encoded[i] == 'i' {
-					name = "i64"
-				}
-				a.recordAnalyzedExprType(expr, a.namedTypes[name])
-			}
+			restored := replayPrimitiveParameterNodes(a, nodes, encoded)
 			session.stats.PrimaryBodiesReused++
-			session.stats.ReusedExpressionNodes += uint64(len(nodes))
+			session.stats.ReusedExpressionNodes += uint64(restored)
 			a.visitFunctionBodyWithElementScan(fn.Body, func(stmt ast.Stmt) {
 				ret := stmt.(*ast.ReturnStmt)
 				a.analyzeReturnStatement(ret, a.exprTypes[ret.Value])
@@ -433,7 +455,8 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	types := make([]byte, len(nodes))
 	for i, expr := range nodes {
 		typ, ok := a.exprTypes[expr].(*BuiltinType)
-		if !ok || a.exprFacts[expr].HasAnyFacts() || typ != a.namedTypes[typ.Name] {
+		_, parameter := expr.(*ast.Ident)
+		if !ok || (!parameter && a.exprFacts[expr].HasAnyFacts()) || typ != a.namedTypes[typ.Name] {
 			return
 		}
 		switch typ.Name {

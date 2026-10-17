@@ -115,12 +115,13 @@ live-analyzer hydration and actual body-cache integration remain unfinished.
 
 `semantic.NewIncrementalAnalysisSession().Analyze(freshFile, options)` accepts a
 freshly parsed complete program on each call. Keep one session per expanded
-program/root. It currently reuses only no-parameter, canonical-i64 functions
-whose single return is made from unsuffixed integer literals, parentheses,
-unary minus and binary `+`, `-`, `*`. Plain namespace/module functions have
-qualified identities. Other declarations, conditional declaration containers,
-parameters, locals, calls, contracts, generics and overload environments stay
-cold. The original Analyze/AnalyzeWithOptions APIs retain the cold path.
+program/root. It currently reuses canonical-i64 single-return functions with
+immutable canonical-i64 parameters. Expressions admit parameter reads,
+unsuffixed integer literals, parentheses, unary minus and binary `+`, `-`, `*`.
+Plain namespace/module functions have qualified identities; parameter arity
+separates admitted overload owners. Other declarations, conditional declaration
+containers, parameter kinds, locals, calls, contracts and generics stay cold.
+The original Analyze/AnalyzeWithOptions APIs retain the cold path.
 
 Each query reads a position-independent, versioned closed-grammar source digest,
 complete options/effective environment, canonical primitive bindings with the
@@ -377,3 +378,31 @@ suites pass. On Apple M5, a synthetic 1024-node reflection walk measured median
 with zero allocations for both (three one-second samples, variable system load).
 That is a walker microbenchmark, not an end-to-end compiler speedup claim.
 Cold/warm whole-analysis timings remain noisy and broader reuse is incomplete.
+
+
+### Current parameter binding reuse
+
+An admitted parameter must have a plain i64 type, no mutable qualifier or default
+value, and a unique name. The checked parameter/identifier AST schemas fail
+closed on field changes. Parameter count is bounded at 256. Ordered parameter
+names enter the source digest; owner identity includes parameter arity, origin
+and qualified name. At every reuse boundary, current scope lookup must yield a
+SymbolParam owned by the current function, with the expected ordinal, canonical
+i64 type and immutable, non-ghost, non-alias binding.
+
+Identifier reads still execute normal analyzeExpr checks against those current
+symbols. Only surrounding expression typing is restored. Replay follows cold
+child-before-parent order, including left-to-right child traversal. No symbols,
+scopes or identifier facts are serialized; identifier optimization facts are
+recomputed. PrimaryExprChecks includes these fresh reads and
+ReusedExpressionNodes excludes them. Return checking, summaries and CFG work
+remain fresh as before. This expands real body reuse beyond closed literals,
+but does not yet implement locals or call-dependent semantic products.
+
+Tests compare every published Result field and current function summary,
+including both overload bodies, and require independent warm overload hits plus
+one-owner invalidation after an edit. Parameter renames/type/default/mutability
+changes, removed bindings, bare/repeated reads and source shifts are covered.
+The LLVM/native parity gate includes a parameterized function and a subsequent
+edit. These tests qualify correctness, not broad performance or completion of
+professional incremental compilation.

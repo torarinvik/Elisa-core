@@ -15,14 +15,14 @@ import (
 )
 
 func TestIncrementalSessionNativeAndLLVMParity(t *testing.T) {
-	const source = `def first() -> i64:
-    return 20 + 1
+	const source = `def first(value: i64) -> i64:
+    return value + 1
 
 def second() -> i64:
     return 20 + 1
 
 def main() -> i64:
-    return first() + second()
+    return first(20) + second()
 `
 	session := semantic.NewIncrementalAnalysisSession()
 	analyze := func(src string, useSession bool) *semantic.Result {

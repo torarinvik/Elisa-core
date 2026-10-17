@@ -38,12 +38,13 @@ func assertIncrementalResultParity(t *testing.T, cold, warm *Result) {
 		out := map[string]*ast.FuncDecl{}
 		var walk func([]ast.Decl, string)
 		walk = func(decls []ast.Decl, namespace string) {
-			for _, decl := range decls {
+			for ordinal, decl := range decls {
+				path := fmt.Sprintf("%s/%d", namespace, ordinal)
 				switch node := decl.(type) {
 				case *ast.NamespaceDecl:
-					walk(node.Decls, joinQualifiedName(namespace, node.Name))
+					walk(node.Decls, path)
 				case *ast.FuncDecl:
-					out[joinQualifiedName(namespace, node.Name)] = node
+					out[path] = node
 				}
 			}
 		}
@@ -64,8 +65,11 @@ func assertIncrementalResultParity(t *testing.T, cold, warm *Result) {
 		for i, node := range nodes {
 			mapping[node] = current[i]
 		}
-		left, _ := cold.GlobalScope.Lookup(name)
-		right, _ := warm.GlobalScope.Lookup(name)
+		left := cold.analyzer.funcDeclSymbols[fn]
+		right := warm.analyzer.funcDeclSymbols[other]
+		if left == nil || right == nil {
+			t.Fatalf("missing function symbol at declaration path %s", name)
+		}
 		if !reflect.DeepEqual(left.Type, right.Type) {
 			t.Fatalf("function type/summary differs: %s", name)
 		}
@@ -171,7 +175,7 @@ def second() -> i64:
 
 func TestIncrementalSessionEligibilityIsClosed(t *testing.T) {
 	for _, source := range []string{
-		`def work(value: i64) -> i64:
+		`def work(value: i32) -> i64:
     return value + 1
 `,
 		`def work() -> i64:
@@ -431,7 +435,7 @@ func TestIncrementalSessionStrictProfilesAndColdFallback(t *testing.T) {
 		t.Fatal("strict profile did not reuse")
 	}
 	assertIncrementalResultParity(t, AnalyzeWithOptions(parseIncrementalSessionFile(t, "\n"+source), options), current)
-	source = "def work(value: i64) -> i64:\n    return value + 1\n"
+	source = "def work(value: i32) -> i64:\n    return value + 1\n"
 	before = session.Stats()
 	current = session.Analyze(parseIncrementalSessionFile(t, source), options)
 	if session.Stats().ColdFallbackAnalyses-before.ColdFallbackAnalyses != 1 {
