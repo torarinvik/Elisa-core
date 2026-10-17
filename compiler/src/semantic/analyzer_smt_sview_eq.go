@@ -76,7 +76,7 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 func (tr *smtTranslator) sviewContentParts(expr ast.Expr, env map[string]string) (arr, lo, length string, ok bool) {
 	e := stripOptimizationParens(expr)
 	if id, isIdent := e.(*ast.Ident); isIdent && id != nil {
-		if _, bound := env[id.Name]; !bound && tr.calleeBodyDepth == 0 {
+		if !tr.envBindsViewRoot(id, env) && tr.calleeBodyDepth == 0 {
 			if init, isSlice := tr.a.immutableSliceLocalInit(id); isSlice {
 				e = init
 			}

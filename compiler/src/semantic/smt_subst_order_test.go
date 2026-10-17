@@ -39,7 +39,7 @@ def caller(text: sview, i: usize, j: usize, k: usize) -> usize:
 		return <-done
 	}
 	want := captureQueries()
-	if !strings.Contains(want, "@svarg$3") {
+	if !strings.Contains(want, "@svarg$3") && !strings.Contains(want, "@slice$3") {
 		t.Fatalf("fixture no longer binds four sview arguments; queries:\n%s", want)
 	}
 	for i := 0; i < 24; i++ {

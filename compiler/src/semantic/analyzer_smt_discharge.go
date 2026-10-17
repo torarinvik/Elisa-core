@@ -2475,7 +2475,8 @@ type smtTranslator struct {
 	// enumPinnedBinders is set only while rendering one `is` path fact (see enumIsFactTerm).
 	enumPinnedBinders map[string]*Symbol
 	// sviewArgCount numbers the fresh length-only sview bindings (see bindSMTSViewLengthArg).
-	sviewArgCount int
+	sviewArgCount    int
+	sviewSliceArrays map[smtSViewSliceKey]string
 	// lengthOnly marks env tokens that carry a container length but no element array
 	// (see bindSMTLengthOnlyArg); array-term lookups that hit one decline.
 	lengthOnly map[string]bool
@@ -2526,6 +2527,8 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return tr.arrayTermEnv(n.Inner, env)
+	case *ast.SliceExpr:
+		return tr.sviewSliceArrayTerm(n, env)
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
@@ -2539,6 +2542,12 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		}
 		if tr.calleeFreeProjection(n, env) {
 			return "", false
+		}
+		if tr.envBindsViewRoot(n, env) {
+			return "", false
+		}
+		if arr, ok := tr.sviewSliceLocalArrayTerm(n, env); ok {
+			return arr, true
 		}
 		// Resolve the array's element type from exprTypes (set once the node is analyzed) OR, when that
 		// is not yet populated — e.g. loop-invariant proving runs BEFORE the body is type-analyzed — from
