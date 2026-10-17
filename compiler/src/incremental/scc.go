@@ -134,7 +134,9 @@ func compactSCCNames(names []string) []string {
 	}
 	return out
 }
-func SCCEvaluators() map[string]Evaluator { return map[string]Evaluator{SCCQueryKind: evaluateSCC} }
+func SCCEvaluators() map[string]Evaluator {
+	return map[string]Evaluator{SCCQueryKind: evaluateSCC, SCCComponentQueryKind: evaluateSCCComponent}
+}
 
 type sccVisit struct{ node, next int }
 type sccReady []int

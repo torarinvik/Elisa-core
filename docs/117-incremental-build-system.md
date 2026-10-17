@@ -1863,3 +1863,30 @@ Current declaration authority, complete effect inputs, stable component products
 and normal solver integration remain necessary before retaining semantic rows.
 No end-to-end throughput improvement is claimed for this addition. All runs were
 local.
+
+
+### Stable component topology projections
+
+`SCCComponentPublication` adds a tracked per-node projection of its current
+recursive group's sorted members and direct dependency groups. It depends on the
+complete SCC plan, but exposes names rather than graph-wide component numbers.
+Adding an unrelated earlier-sorted node therefore leaves its output equal and
+prunes downstream users. Cycle splits, dependency merges and member removal
+change the output or fail; restoring the node recovers normally. Changes inside
+a dependency's outgoing graph do not alter a direct projection unless its group
+membership changes. Semantic summaries must separately depend on the dependency
+summaries and all non-topological semantic inputs.
+
+Each admitted projection reserves a fixed 64 KiB result budget and one query
+dependency. Larger products decline, requiring a fresh-analysis fallback. The
+fixed reservation avoids retiring projections when unrelated inventory sizes
+change. This reservation is a capacity cost: admitting every possible node can
+exceed the default session byte budget and callers must handle skipped admission.
+Projection evaluation currently decodes the complete plan; it is supporting
+infrastructure, not a demonstrated hot-path performance optimization.
+
+The full incremental race suite passed in 1.768 s, including a retained-session
+history checking unrelated node addition, cycle split, removal/recovery,
+transitive-edge isolation and recursive dependency merge. Normal semantic row
+reuse and full-project iteration-speed qualification remain unfinished. All work
+stayed local and unrelated SMT changes were preserved.
