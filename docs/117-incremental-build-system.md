@@ -115,7 +115,7 @@ live-analyzer hydration and actual body-cache integration remain unfinished.
 
 `semantic.NewIncrementalAnalysisSession().Analyze(freshFile, options)` accepts a
 freshly parsed complete program on each call. Keep one session per expanded
-program/root. It currently reuses canonical-i64 single-return functions with
+program/root. Primary body products reuse canonical-i64 single-return functions with
 immutable canonical-i64 parameters. Expressions admit parameter reads,
 unsuffixed integer literals, parentheses, unary minus and binary `+`, `-`, `*`.
 Plain namespace/module functions have qualified identities; parameter arity
@@ -406,3 +406,41 @@ changes, removed bindings, bare/repeated reads and source shifts are covered.
 The LLVM/native parity gate includes a parameterized function and a subsequent
 edit. These tests qualify correctness, not broad performance or completion of
 professional incremental compilation.
+
+### Sequential scalar local initializer queries
+
+Straight-line canonical-i64 functions may now reuse individual typed, immutable
+i64 local initializers before a final closed return. Each initializer supports
+the arithmetic grammar over parameters and preceding locals. Normal declaration
+analysis creates each current SymbolLocal and runs conversion, value binding,
+range/optimization, ownership, borrow and drop logic. Later identifier reads,
+return typing and whole-function summaries remain fresh.
+
+Query identity combines qualified owner/arity with declaration ordinal. Inputs
+include declared name, arithmetic syntax, ordered visible binding names and a
+digest of preceding declarations. A preceding value edit invalidates downstream
+arithmetic even if its type stays unchanged; a later edit preserves earlier
+hits. Statement boundaries and fixed plain-i64 annotation presence are part of
+the admitted grammar. Inferred/mutable/ghost/owner-bearing/explicit-binding or
+duplicate/shadow declarations, forward/global reads, calls and nested control
+flow take the cold path.
+
+The hook revalidates current syntax, function owner and symbol ownership before
+lookup. Local symbols must point at current declarations. Products store compact
+expression tags plus the original initializer result type before conversions.
+No AST, symbol or binding fact enters the database. All primitive products use
+a shared publication boundary.
+
+LocalInitializersChecked/Reused report actual initializer work separately from
+body counters. ReusedExpressionNodes excludes fresh identifier reads. Tests
+cover metadata parity, prefix invalidation, removal/readmission, unsupported
+bindings and owner checks. The LLVM/native gate requires identical IR and exit
+42 then 63 after an edit. BenchmarkIncrementalLocalInitializers measures fresh
+parsing plus full analysis with 64 warm initializer queries; this is measurement
+coverage, not a broad performance claim.
+
+A local Apple M5 run (three one-second samples, GOMAXPROCS=4) measured median
+10.79 ms cold versus 10.97 ms warm, with 64 initializer hits. Allocations fell
+from 123600 to 105345, while allocated bytes rose from 12.45 MB to 12.64 MB. This
+fixture establishes no meaningful throughput gain; the path remains opt-in and
+further dependency/replay work is required.

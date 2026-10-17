@@ -114,3 +114,86 @@ def main() -> i64:
 		}
 	}
 }
+
+func TestIncrementalLocalInitializerNativeAndLLVMParity(t *testing.T) {
+	source := `def work(value: i64) -> i64:
+    first: i64 = value + 1
+    second: i64 = first * 2
+    return second
+
+def main() -> i64:
+    return work(20)
+`
+	session := semantic.NewIncrementalAnalysisSession()
+	analyze := func(source string, warm bool) *semantic.Result {
+		t.Helper()
+		l := lexer.New("incremental_locals.elisa", []byte(source))
+		p := parser.New(l.Tokenize())
+		file := p.ParseFile("incremental_locals.elisa")
+		if len(l.Errors()) != 0 || len(p.Errors()) != 0 {
+			t.Fatal("invalid test source")
+		}
+		var result *semantic.Result
+		if warm {
+			result = session.Analyze(file, semantic.AnalyzeOptions{})
+		} else {
+			result = semantic.Analyze(file)
+		}
+		if len(result.Errors()) != 0 {
+			t.Fatal(result.Errors())
+		}
+		return result
+	}
+	analyze(source, true)
+	for _, step := range []struct {
+		source string
+		status int
+		hits   uint64
+	}{{source, 42, 2}, {strings.Replace(source, "first * 2", "first * 3", 1), 63, 1}} {
+		before := session.Stats()
+		warm := analyze(step.source, true)
+		cold := analyze(step.source, false)
+		if session.Stats().LocalInitializersReused-before.LocalInitializersReused != step.hits {
+			t.Fatal("wrong local reuse count")
+		}
+		got, err := generateLLVMIRWithDefaultPackedLoweringForTest(warm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := generateLLVMIRWithDefaultPackedLoweringForTest(cold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatal("initializer reuse changed LLVM IR")
+		}
+		config := os.Getenv("LLVM_CONFIG")
+		clang := ""
+		if config != "" {
+			if path, err := exec.LookPath(config); err == nil {
+				config = path
+			}
+			clang = filepath.Join(filepath.Dir(config), "clang")
+		} else {
+			clang, _ = exec.LookPath("clang")
+		}
+		if clang == "" {
+			t.Log("native toolchain unavailable; LLVM parity checked")
+			continue
+		}
+		dir := t.TempDir()
+		ir := filepath.Join(dir, "main.ll")
+		exe := filepath.Join(dir, "main")
+		if err := os.WriteFile(ir, []byte(got), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(clang, "-O0", "-x", "ir", ir, "-o", exe).CombinedOutput(); err != nil {
+			t.Fatalf("native link: %v %s", err, output)
+		}
+		err = exec.Command(exe).Run()
+		status, ok := err.(*exec.ExitError)
+		if !ok || status.ExitCode() != step.status {
+			t.Fatalf("native result: expected%d got%v", step.status, err)
+		}
+	}
+}

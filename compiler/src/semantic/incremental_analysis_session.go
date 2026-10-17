@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"sync"
 
 	"elisacore/src/ast"
@@ -34,17 +35,19 @@ type IncrementalAnalysisStats struct {
 	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes uint64
 	PrimaryValueChecks, PrimaryExprChecks                                      uint64
 	PrimaryElementScans                                                        uint64
+	LocalInitializersChecked, LocalInitializersReused                          uint64
 	DatabaseResets                                                             uint64
 	ColdFallbackAnalyses                                                       uint64
 	Queries                                                                    incremental.Stats
 }
 type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
 type incrementalBodyInvocation struct {
-	session        *IncrementalAnalysisSession
-	keys           map[*ast.FuncDecl]string
-	changes        []incremental.Change
-	config, safety string
-	tracking       bool
+	session           *IncrementalAnalysisSession
+	keys              map[*ast.FuncDecl]string
+	changes           []incremental.Change
+	config, safety    string
+	tracking          bool
+	localInitializers map[*ast.VarDeclStmt]*primitiveLocalInitializer
 }
 
 var primitiveConfigKey = incremental.Key{Kind: "semantic-config", Name: "primitive-return-v1"}
@@ -91,6 +94,13 @@ func (session *IncrementalAnalysisSession) Stats() IncrementalAnalysisStats {
 	}
 	return stats
 }
+
+// All primitive products use the same publication boundary.
+func (session *IncrementalAnalysisSession) storePrimitiveProduct(name string, encoded string) bool {
+	session.db.Apply(incremental.Change{Key: primitiveInput("function-product", name), Value: encoded})
+	return true
+}
+
 func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options AnalyzeOptions) *Result {
 	session.mu.Lock()
 	defer session.mu.Unlock()
@@ -111,7 +121,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		return AnalyzeWithOptions(file, options)
 	}
 	digest := sha256.Sum256(config)
-	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, config: hex.EncodeToString(digest[:])}
+	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, localInitializers: map[*ast.VarDeclStmt]*primitiveLocalInitializer{}, config: hex.EncodeToString(digest[:])}
 	invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveConfigKey, Value: invocation.config})
 	current := map[incremental.Key]bool{}
 	origin := file.Filename
@@ -139,8 +149,12 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 				continue
 			}
 			_, ok = primitiveReturnHeader(fn)
+			var locals []*primitiveLocalInitializer
 			if !ok {
-				continue
+				locals, ok = primitiveLocalInitializers(fn)
+				if !ok {
+					continue
+				}
 			}
 			keyBytes := []byte("primitive/i64-parameters/v2\x00")
 			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
@@ -157,6 +171,11 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			invocation.keys[fn] = name
 			key := primitiveInput("function-source", name)
 			current[key] = true
+			for ordinal, input := range locals {
+				input.key = name + "/local/" + strconv.Itoa(ordinal)
+				invocation.localInitializers[input.declaration] = input
+				current[primitiveInput("function-source", input.key)] = true
+			}
 		}
 	}
 	collect(file.Decls, "", 0)
@@ -469,6 +488,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		}
 	}
 	product, _ := json.Marshal(primitiveBodyProduct{Source: source, Config: invocation.config, Safety: invocation.safety, Types: string(types)})
-	session.db.Apply(incremental.Change{Key: primitiveInput("function-product", key), Value: string(product)})
-	_, _ = session.db.Evaluate(context.Background(), query)
+	if session.storePrimitiveProduct(key, string(product)) {
+		_, _ = session.db.Evaluate(context.Background(), query)
+	}
 }

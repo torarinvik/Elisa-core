@@ -59,7 +59,7 @@ func (a *Analyzer) analyzeVariableDeclaration(n *ast.VarDeclStmt) {
 			if lambda, isLambda := stripOptimizationParens(n.Value).(*ast.LambdaExpr); isLambda {
 				a.pendingClosureBinding = lambda
 			}
-			valueType = a.analyzeValueExpr(n.Value, declType)
+			valueType = a.analyzeLocalInitializer(n, declType)
 			a.pendingClosureBinding = nil
 			a.zeroedPlaceholderExpected = previousZeroedPlaceholder
 		}
