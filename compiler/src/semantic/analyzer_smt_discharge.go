@@ -4242,23 +4242,39 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				}
 				return "(not " + pred + ")", true
 			}
-			// Pointer-pointer equality (`p == q` / `p != q` where both sides are nullable pointers and
-			// neither is null). Equal pointers have the same nullness, so `(p == q)` discharges as
-			// `(= isnull_p isnull_q)`. This lets `requires p == q; ensure (p != null) == (q != null)`
-			// discharge, and `(p == q) implies (p != null)` follow from `q != null`.
-			// Sound: two equal nullable references have identical null-ness by definition.
+			// Pointer identity implies equal nullness, but the converse only holds
+			// when both pointers are null. Keep identity as a separate predicate:
+			// distinct non-null pointers must remain a possible counterexample.
 			if tr.a != nil {
 				leftType := tr.a.exprTypes[n.Left]
 				rightType := tr.a.exprTypes[n.Right]
 				if tr.a.exprIsPointerLike(leftType) && tr.a.exprIsPointerLike(rightType) {
-					if tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
+					if smtEnvHasQuantifierBinder(env) || tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
 						return "", false
+					}
+					if left, ok := stripOptimizationParens(n.Left).(*ast.Ident); ok {
+						if right, ok := stripOptimizationParens(n.Right).(*ast.Ident); ok && left.Name == right.Name {
+							return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
+						}
 					}
 					lPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Left))
 					rPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Right))
 					tr.boolDecls[lPred] = true
 					tr.boolDecls[rPred] = true
-					eq := "(= " + lPred + " " + rPred + ")"
+					if rPred < lPred {
+						lPred, rPred = rPred, lPred
+					}
+					eq := "|@pointer_eq_" + hex.EncodeToString([]byte(strconv.Itoa(len(lPred))+":"+lPred+rPred)) + "|"
+					if tr.ghostUFDecls == nil {
+						tr.ghostUFDecls = map[string]bool{}
+					}
+					if !tr.ghostUFDecls[eq] {
+						tr.ghostUFDecls[eq] = true
+						tr.auxDecls = append(tr.auxDecls,
+							"(declare-const "+eq+" Bool)\n",
+							"(assert (=> "+eq+" (= "+lPred+" "+rPred+")))\n",
+							"(assert (=> (and "+lPred+" "+rPred+") "+eq+"))\n")
+					}
 					if n.Op == lexer.TOKEN_BANGEQ {
 						return "(not " + eq + ")", true
 					}

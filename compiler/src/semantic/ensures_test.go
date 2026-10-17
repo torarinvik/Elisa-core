@@ -736,7 +736,7 @@ def bad_guard(p: void&?, q: void&?) -> bool:
     return true
 `, false},
 		// Pointer-equality implication: `(p == q) implies (p != null == q != null)`.
-		// boolTerm lowers `p == q` for pointer types to `(= isnull_p isnull_q)` — Gap C fix.
+		// The pointer identity predicate implies equal nullness; the converse is not assumed.
 		// This discharges the null-equivalence postcondition from the p==q requires hypothesis.
 		{"pointer_eq_implies_null_equiv", `
 def eq_null_equiv(p: void&?, q: void&?) -> bool:
