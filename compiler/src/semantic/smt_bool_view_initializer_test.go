@@ -138,3 +138,77 @@ def check(name: sview) -> bool:
 		})
 	}
 }
+
+func TestSMTBoolViewModuleConstants(t *testing.T) {
+	source := `# Pure syntactic type-name policy shared by semantic resolution and proofs.
+module SemanticPrimitiveTypeName:
+    public:
+        const INT_PREFIX_LENGTH: usize = 1
+        const MIN_INT_NAME_LENGTH: usize = INT_PREFIX_LENGTH + 1
+        const INT_LEAD_INDEX: usize = 0
+        const INDEX_STEP: usize = 1
+        const ASCII_LOWER_I: u8 = 105
+        const ASCII_LOWER_U: u8 = 117
+        const ASCII_DIGIT_ZERO: u8 = 48
+        const ASCII_DIGIT_NINE: u8 = 57
+
+        def is_ascii_digit(byte: u8) -> bool:
+            ensure result == (byte >= ASCII_DIGIT_ZERO and byte <= ASCII_DIGIT_NINE)
+            return byte >= ASCII_DIGIT_ZERO and byte <= ASCII_DIGIT_NINE
+
+        # Contract-safe lexical specification. Keep this expression total so other
+        # policy contracts do not inherit the runtime scanner's Abort.Panic effect.
+        def is_bit_width_int_shape(name: sview) -> bool:
+            ensure result == (
+                name.len >= MIN_INT_NAME_LENGTH and
+                (name[INT_LEAD_INDEX] == ASCII_LOWER_I or name[INT_LEAD_INDEX] == ASCII_LOWER_U) and
+                (forall digit_index in 0..<name.len: digit_index < INT_PREFIX_LENGTH or is_ascii_digit(name[digit_index]))
+            )
+            valid_prefix: bool = name.len >= MIN_INT_NAME_LENGTH and
+                (name[INT_LEAD_INDEX] == ASCII_LOWER_I or name[INT_LEAD_INDEX] == ASCII_LOWER_U)
+            all_digits: bool = forall digit_index in 0..<name.len: digit_index < INT_PREFIX_LENGTH or is_ascii_digit(name[digit_index])
+            return valid_prefix and all_digits
+
+`
+	for _, wrong := range []bool{false, true} {
+		candidate := source
+		if wrong {
+			candidate = strings.Replace(candidate, "valid_prefix: bool = name.len >= MIN_INT_NAME_LENGTH and\n                (name[INT_LEAD_INDEX]", "valid_prefix: bool = name.len >= MIN_INT_NAME_LENGTH and\n                (name[INDEX_STEP]", 1)
+		}
+		r := analyzeContractStrict(t, "module_shape.elisa", candidate)
+		for _, diagnostic := range r.Errors() {
+			if !strings.Contains(diagnostic, `ensure postcondition of "is_bit_width_int_shape"`) {
+				t.Fatal(allDiagnostics(r))
+			}
+		}
+		if rejected := len(r.Errors()) != 0; rejected != wrong {
+			t.Fatalf("wrong-offset %v, rejected %v: %s", wrong, rejected, allDiagnostics(r))
+		}
+	}
+}
+
+func TestSMTBoolModuleConstantBinderShadow(t *testing.T) {
+	for _, wrong := range []bool{false, true} {
+		expected := "false"
+		if wrong {
+			expected = "true"
+		}
+		source := `module Shadow:
+    public:
+        const LIMIT: usize = 0
+        def check() -> bool:
+            ensure result == EXPECTED
+            saved: bool = forall LIMIT in 0..<2: LIMIT < 1
+            return saved
+`
+		r := analyzeContractStrict(t, "constant_binder_shadow.elisa", strings.Replace(source, "EXPECTED", expected, 1))
+		for _, diagnostic := range r.Errors() {
+			if !strings.Contains(diagnostic, `ensure postcondition of "check"`) {
+				t.Fatal(allDiagnostics(r))
+			}
+		}
+		if rejected := len(r.Errors()) != 0; rejected != wrong {
+			t.Fatalf("wrong %v, rejected %v: %s", wrong, rejected, allDiagnostics(r))
+		}
+	}
+}

@@ -331,6 +331,11 @@ func (a *Analyzer) smtBoolInitializerStableWithBinders(expr ast.Expr, walkedNode
 	case *ast.ParenExpr:
 		return a.smtBoolInitializerStableWithBinders(n.Inner, walkedNodes, identifiers, depth+1, binders)
 	case *ast.Ident:
+		// An analyzed module constant keeps its resolved identity even when the
+		// current lexical scope has no bare-name binding for it.
+		if _, constant := a.resolvedPrimitiveConstant(n); constant {
+			return true
+		}
 		if binders[n.Name] {
 			return true
 		}
@@ -386,6 +391,11 @@ func (a *Analyzer) smtScalarInitializerStableWithBinders(expr ast.Expr, walkedNo
 	case *ast.ParenExpr:
 		return a.smtScalarInitializerStableWithBinders(n.Inner, walkedNodes, identifiers, depth+1, binders)
 	case *ast.Ident:
+		// An analyzed module constant keeps its resolved identity even when the
+		// current lexical scope has no bare-name binding for it.
+		if _, constant := a.resolvedPrimitiveConstant(n); constant {
+			return true
+		}
 		if binders[n.Name] {
 			return true
 		}
