@@ -14,6 +14,10 @@ struct RecordFlag:
 def equal_record(left: RecordBinding, right: RecordBinding) -> bool:
     ensure result == (left.owner.value == right.owner.value and left.serial == right.serial)
     return left.owner.value == right.owner.value and left.serial == right.serial
+def overwrite_record(table: RecordTable) -> bool:
+    requires table.rows.count > 0
+    table.rows[0] <- RecordBinding{owner: RecordOwner{value: 0}, serial: 0}
+    return true
 `
 
 func TestSMTRecordElementCongruence(t *testing.T) {
@@ -107,8 +111,14 @@ def unequal_flag(rows: darray[RecordFlag]&) -> bool:
     requires rows.count > 1
     ensure result == rows[1].known
     return rows[0].known
+def called_mutator(table: RecordTable) -> u32:
+    requires table.rows.count > 0
+    ensure result == table.rows[0].owner.value
+    before: u32 = table.rows[0].owner.value
+    changed: bool = overwrite_record(table)
+    return before
 `)
-	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table", "unequal_call", "unequal_flag"} {
+	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table", "unequal_call", "unequal_flag", "called_mutator"} {
 		if ensureFailuresFor(result.Errors(), function) == 0 {
 			t.Fatalf("%s: false record claim was accepted:\n%s", function, allDiagnostics(result))
 		}
