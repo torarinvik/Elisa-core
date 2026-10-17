@@ -40,8 +40,10 @@ func TestSMTIntegerCastLiteralBounds(t *testing.T) {
 			}
 		})
 	}
+	// Equality converts its right operand to the left type. Widen the result so this checks
+	// preservation of the original i64 value, rather than equality of two truncated i8 values.
 	r := analyzeContractStrict(t, "cast_wrap.elisa", `def check(value: i64) -> i8:
-    ensure result == value
+    ensure result.i64() == value
     return value.i8()
 `)
 	if ensureFailuresFor(r.Errors(), "check") == 0 {

@@ -2267,6 +2267,29 @@ func (a *Analyzer) castOperandResolvedType(n *ast.CastExpr) Type {
 	return nil
 }
 
+// Callee environments bind values, not the caller's same-spelled source types. Cloned callee
+// operands without recorded types must decline rather than borrowing a caller local's width.
+func (tr *smtTranslator) castOperandType(n *ast.CastExpr) Type {
+	if n == nil {
+		return nil
+	}
+	if tr.calleeBodyDepth == 0 {
+		return tr.a.castOperandResolvedType(n)
+	}
+	operand := n.Operand
+	for operand != nil {
+		if typ := tr.a.exprTypes[operand]; typ != nil {
+			return typ
+		}
+		paren, ok := operand.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		operand = paren.Inner
+	}
+	return nil
+}
+
 // postfixCastTargetWidthSign derives the destination integer width/sign of a value-form numeric
 // postfix cast (`x.usize()`, `x.u32()`) directly from its TARGET NAME, for cloned cast nodes whose
 // result type was never recorded. Only the postfix-shorthand origin with a plain integer target name
@@ -2916,7 +2939,7 @@ func (tr *smtTranslator) sameWidthSignRoundTripEnv(outer *ast.CastExpr, env map[
 	if !ok || inner == nil || !isPureNumericValueCast(inner) {
 		return "", false
 	}
-	sourceType := tr.a.castOperandResolvedType(inner)
+	sourceType := tr.castOperandType(inner)
 	sourceSigned, sourceBits, sourceOK := smtIntWidthSign(sourceType)
 	innerSigned, innerBits, innerOK := smtIntWidthSign(tr.a.exprTypes[inner])
 	if !innerOK {
@@ -3203,9 +3226,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// A value-preserving integer conversion — widening or same-width, SAME signedness
 		// (`x.u64()`, `x.usize()`, an i32 used as i64) — is the IDENTITY in the unbounded-Int
 		// model, so the prover sees THROUGH the conversion and refinement bounds survive it
-		// (docs/85 gap #2). A narrowing or a sign change can wrap, so those are NOT identity
-		// and decline here (sound: a declined term only forgoes a proof).
-		sourceType := tr.a.castOperandResolvedType(n)
+		// (docs/85 gap #2). Narrowing and sign changes can wrap; the cases below model their bits
+		// explicitly rather than treating them as identity.
+		sourceType := tr.castOperandType(n)
 		ssign, sbits, sok := smtIntWidthSign(sourceType)
 		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
 		if !dok {
@@ -3262,11 +3285,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if !ssign && dsign && dbits > sbits {
 			return tr.termEnv(n.Operand, env)
 		}
-		// Same-width sign reinterpretation (`(u32 field).i32()`): a bitcast — the bit pattern is
-		// unchanged, only the interpretation flips. Model the destination as the signed/unsigned read
-		// of the operand's bits (exact, so a field cast then sign-extended proves its range). Soundness:
-		// it is the precise two's-complement relationship, not an approximation.
-		if sbits == dbits {
+		// Same-width sign reinterpretation preserves the bits. Narrowing uses LLVM truncation,
+		// preserving only the low destination-width bits, irrespective of source signedness.
+		// In both cases, read those bits with the destination's signed/unsigned interpretation.
+		if sbits == dbits || (dbits > 0 && dbits < sbits && sbits <= 64) {
 			inner, ok := tr.termEnv(n.Operand, env)
 			if !ok {
 				return "", false
