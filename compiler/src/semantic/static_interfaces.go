@@ -747,7 +747,7 @@ func (a *Analyzer) resolveInterfaceMethodExprType(expr *ast.FieldExpr) (Type, bo
 	if !ok || sig == nil {
 		return invalidType, true
 	}
-	a.interfaceMethodRefs[expr] = &InterfaceMethodRef{InterfaceName: matchedImpl.InterfaceName, MethodName: expr.Field}
+	a.interfaceMethodRefs[expr] = &InterfaceMethodRef{InterfaceName: matchedImpl.InterfaceName, MethodName: expr.Field, ImplKey: StaticImplLookupKey(matchedImpl.InterfaceName, matchedImpl.Receiver)}
 	return sig, true
 }
 

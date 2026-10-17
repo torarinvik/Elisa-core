@@ -675,19 +675,15 @@ func staticTypeExprForType(pos lexer.Pos, typ Type) ast.Expr {
 	if name == "" || strings.ContainsAny(name, "[]&*? ") {
 		return nil
 	}
-	parts := strings.Split(name, ".")
-	var expr ast.Expr
-	for _, part := range parts {
+	// This is an already-resolved canonical type name, not a source-level
+	// chain of value fields. A FieldExpr chain would spell A.Point and reject
+	// namespace A; the qualified identifier retains the selected type identity.
+	for _, part := range strings.Split(name, ".") {
 		if part == "" {
 			return nil
 		}
-		if expr == nil {
-			expr = &ast.Ident{Position: pos, Name: part}
-			continue
-		}
-		expr = &ast.FieldExpr{Position: pos, Object: expr, Field: part}
 	}
-	return expr
+	return &ast.Ident{Position: pos, Name: name}
 }
 func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)

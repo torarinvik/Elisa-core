@@ -71,3 +71,34 @@ func (tr *smtTranslator) samePointerIdentityExpr(left, right ast.Expr) bool {
 	r, rok := stripOptimizationParens(right).(*ast.AddrOfExpr)
 	return lok && rok && l != nil && r != nil && tr.a.sameExprText(l.Operand, r.Operand)
 }
+
+// Substituting a return value creates field nodes without exprTypes entries.
+// Scope lookup is valid only for caller expressions; a callee formal must never
+// acquire the type (or literal value) of a same-spelled caller local.
+func (tr *smtTranslator) pointerIdentityOperandType(expr ast.Expr) Type {
+	typ := tr.a.exprTypes[expr]
+	if typ == nil && tr.calleeBodyDepth == 0 {
+		typ = tr.a.smtOperandType(expr)
+		if typ == nil {
+			if field, ok := stripOptimizationParens(expr).(*ast.FieldExpr); ok {
+				object := tr.a.smtOperandType(field.Object)
+				if runtime := tr.a.runtimeBackedStructType(peelNamedStateRefs(object)); runtime != nil {
+					typ, _ = tr.a.lookupResolvedFieldType(runtime, field.Field)
+				}
+			}
+		}
+	}
+	return typ
+}
+
+// Callee envs carry scalar values, view bytes/length and aggregate tokens, not
+// address terms. Formal-name predicates would merge different calls, including
+// composite addresses whose offsets depend on scalar formals. Keep them opaque
+// until addresses can be bound; reflexivity is handled independently.
+func (tr *smtTranslator) pointerHasUnboundCalleeAddress(expr ast.Expr, env map[string]string) bool {
+	if tr.calleeBodyDepth == 0 {
+		return false
+	}
+	_, literalNull := stripOptimizationParens(expr).(*ast.NullLit)
+	return !literalNull
+}

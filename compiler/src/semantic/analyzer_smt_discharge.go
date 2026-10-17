@@ -4275,6 +4275,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				if tr.a != nil && tr.a.shadowingActive() {
 					return "", false
 				}
+				if tr.pointerHasUnboundCalleeAddress(ptr, env) {
+					return "", false
+				}
 				ptr = tr.pointerLiteralOperand(ptr, env, 0)
 				if _, null := stripOptimizationParens(ptr).(*ast.NullLit); null {
 					return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
@@ -4293,10 +4296,16 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			// when both pointers are null. Keep identity as a separate predicate:
 			// distinct non-null pointers must remain a possible counterexample.
 			if tr.a != nil {
-				leftType := tr.a.exprTypes[n.Left]
-				rightType := tr.a.exprTypes[n.Right]
+				leftType := tr.pointerIdentityOperandType(n.Left)
+				rightType := tr.pointerIdentityOperandType(n.Right)
 				if tr.a.exprIsPointerLike(leftType) && tr.a.exprIsPointerLike(rightType) {
 					if tr.a.shadowingActive() || smtEnvHasQuantifierBinder(env) || tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
+						return "", false
+					}
+					if tr.pointerHasUnboundCalleeAddress(n.Left, env) || tr.pointerHasUnboundCalleeAddress(n.Right, env) {
+						if tr.pointerIdentityReadStable(n.Left) && tr.pointerIdentityReadStable(n.Right) && tr.samePointerIdentityExpr(n.Left, n.Right) {
+							return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
+						}
 						return "", false
 					}
 					left := tr.pointerLiteralOperand(n.Left, env, 0)
@@ -5136,6 +5145,9 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	}
 	if !tr.opaqueCallQuantifierIndependent(call, argEnv) {
 		return tr.scalarCallUF(call, argEnv, "Bool")
+	}
+	if concrete, ok := tr.concreteStaticBoolMethodCall(call); ok {
+		return tr.callResultBoolTermEnv(concrete, argEnv)
 	}
 	// A PROTOCOL-METHOD bool call (`x.le(y)` where le is an interface method, docs/85 P3) is modeled as
 	// an UNINTERPRETED predicate: a stable Bool symbol keyed by (Interface.method, argument idents). The

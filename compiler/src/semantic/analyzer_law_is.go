@@ -747,7 +747,7 @@ func exprReferencesResult(expr ast.Expr) bool {
 // a pure logical identity, asserting nothing extra, so an unprovable `X` still declines.
 func normalizeBoolLiteralEnsure(clause ast.Expr) ast.Expr {
 	bin, ok := stripOptimizationParens(clause).(*ast.BinaryExpr)
-	if !ok || bin == nil {
+	if !ok || bin == nil || bin.LoweredCall != nil {
 		return clause
 	}
 	if bin.Op != lexer.TOKEN_EQEQ && bin.Op != lexer.TOKEN_BANGEQ {
@@ -779,7 +779,7 @@ func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
 		return false
 	}
 	bin, ok := clause.(*ast.BinaryExpr)
-	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+	if !ok || bin == nil || bin.LoweredCall != nil || bin.Op != lexer.TOKEN_EQEQ {
 		return false
 	}
 	leftIsResult := isResultIdent(bin.Left)
@@ -808,7 +808,7 @@ func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
 // (otherwise this adds nothing the SMT lane didn't already try).
 func (a *Analyzer) ensureHoldsByWrittenField(clause ast.Expr) bool {
 	bin, ok := clause.(*ast.BinaryExpr)
-	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+	if !ok || bin == nil || bin.LoweredCall != nil || bin.Op != lexer.TOKEN_EQEQ {
 		return false
 	}
 	left, leftResolved := a.resolveWrittenFieldOperand(bin.Left)
@@ -930,7 +930,7 @@ func resultEqualityDisjunction(a *Analyzer, expr ast.Expr) (ast.Expr, []int64, b
 		return leftSubject, append(leftConsts, rightConsts...), true
 	}
 	bin, ok := expr.(*ast.BinaryExpr)
-	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+	if !ok || bin == nil || bin.LoweredCall != nil || bin.Op != lexer.TOKEN_EQEQ {
 		return nil, nil, false
 	}
 	if isResultIdent(bin.Left) {

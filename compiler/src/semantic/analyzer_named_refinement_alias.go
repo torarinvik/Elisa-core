@@ -312,6 +312,19 @@ func (a *Analyzer) rewriteLocalRefineAlias(stmt *ast.VarDeclStmt) {
 // by the mapped expression. It is a structural rewrite over the pure predicate expression grammar
 // (the same grammar wherePredicateIsSideEffectFree accepts), which is all a refine predicate may use.
 func substituteIdents(expr ast.Expr, subst map[string]ast.Expr) ast.Expr {
+	return substituteIdentsMemo(expr, subst, map[ast.Expr]ast.Expr{})
+}
+
+// Analyzed calls share Args with ResolvedArgs, and lowered operators share their
+// operands with LoweredCall.Args. Preserve this DAG rather than expanding it.
+func substituteIdentsMemo(expr ast.Expr, subst map[string]ast.Expr, memo map[ast.Expr]ast.Expr) (rewritten ast.Expr) {
+	if expr == nil {
+		return nil
+	}
+	if cached, ok := memo[expr]; ok {
+		return cached
+	}
+	defer func() { memo[expr] = rewritten }()
 	switch n := expr.(type) {
 	case nil:
 		return nil
@@ -321,34 +334,72 @@ func substituteIdents(expr ast.Expr, subst map[string]ast.Expr) ast.Expr {
 		}
 		return n
 	case *ast.ParenExpr:
-		return &ast.ParenExpr{Position: n.Position, Inner: substituteIdents(n.Inner, subst)}
+		return &ast.ParenExpr{Position: n.Position, Inner: substituteIdentsMemo(n.Inner, subst, memo)}
 	case *ast.UnaryExpr:
-		return &ast.UnaryExpr{Position: n.Position, Op: n.Op, Operand: substituteIdents(n.Operand, subst)}
+		out := *n
+		out.Operand = substituteIdentsMemo(n.Operand, subst, memo)
+		if n.LoweredCall != nil {
+			out.LoweredCall, _ = substituteIdentsMemo(n.LoweredCall, subst, memo).(*ast.CallExpr)
+		}
+		return &out
 	case *ast.BinaryExpr:
-		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: substituteIdents(n.Left, subst), Right: substituteIdents(n.Right, subst)}
+		out := *n
+		out.Left = substituteIdentsMemo(n.Left, subst, memo)
+		out.Right = substituteIdentsMemo(n.Right, subst, memo)
+		if n.LoweredCall != nil {
+			out.LoweredCall, _ = substituteIdentsMemo(n.LoweredCall, subst, memo).(*ast.CallExpr)
+		}
+		return &out
 	case *ast.FieldExpr:
 		out := *n
-		out.Object = substituteIdents(n.Object, subst)
+		out.Object = substituteIdentsMemo(n.Object, subst, memo)
 		return &out
 	case *ast.IndexExpr:
 		out := *n
-		out.Object = substituteIdents(n.Object, subst)
-		out.Index = substituteIdents(n.Index, subst)
-		out.Index2 = substituteIdents(n.Index2, subst)
-		out.Fallback = substituteIdents(n.Fallback, subst)
+		out.Object = substituteIdentsMemo(n.Object, subst, memo)
+		out.Index = substituteIdentsMemo(n.Index, subst, memo)
+		out.Index2 = substituteIdentsMemo(n.Index2, subst, memo)
+		out.Fallback = substituteIdentsMemo(n.Fallback, subst, memo)
 		return &out
 	case *ast.SliceExpr:
 		out := *n
-		out.Object = substituteIdents(n.Object, subst)
-		out.Start = substituteIdents(n.Start, subst)
-		out.End = substituteIdents(n.End, subst)
+		out.Object = substituteIdentsMemo(n.Object, subst, memo)
+		out.Start = substituteIdentsMemo(n.Start, subst, memo)
+		out.End = substituteIdentsMemo(n.End, subst, memo)
 		return &out
 	case *ast.CallExpr:
 		out := *n
-		out.Func = substituteIdents(n.Func, subst)
+		// Keep an unchanged callee node: its analyzed method/type identity is
+		// keyed by this AST node. Value arguments still receive substitution.
+		out.Func = n.Func
+		for name := range collectExprIdents(n.Func, nil) {
+			if _, changed := subst[name]; changed {
+				out.Func = substituteIdentsMemo(n.Func, subst, memo)
+				break
+			}
+		}
+		out.SafeReceiver = substituteIdentsMemo(n.SafeReceiver, subst, memo)
+		if n.ResolvedArgs != nil {
+			out.ResolvedArgs = make([]ast.Expr, len(n.ResolvedArgs))
+			for i, arg := range n.ResolvedArgs {
+				out.ResolvedArgs[i] = substituteIdentsMemo(arg, subst, memo)
+			}
+		}
+		if n.ResolvedImplicitArgs != nil {
+			out.ResolvedImplicitArgs = make([]ast.Expr, len(n.ResolvedImplicitArgs))
+			for i, arg := range n.ResolvedImplicitArgs {
+				out.ResolvedImplicitArgs[i] = substituteIdentsMemo(arg, subst, memo)
+			}
+		}
+		if n.ResolvedCommonArgs != nil {
+			out.ResolvedCommonArgs = make(map[string]ast.Expr, len(n.ResolvedCommonArgs))
+			for name, arg := range n.ResolvedCommonArgs {
+				out.ResolvedCommonArgs[name] = substituteIdentsMemo(arg, subst, memo)
+			}
+		}
 		out.Args = make([]ast.Expr, len(n.Args))
 		for i, arg := range n.Args {
-			out.Args[i] = substituteIdents(arg, subst)
+			out.Args[i] = substituteIdentsMemo(arg, subst, memo)
 		}
 		return &out
 	}
