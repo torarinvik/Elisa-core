@@ -3206,6 +3206,29 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// against its analyzed twin. Declines for any non-integer / compound target (sound).
 			dsign, dbits, dok = postfixCastTargetWidthSign(n)
 		}
+		// A literal that fits the destination is unchanged even by a narrowing
+		// cast. Do not route this through float-based constant conversion: large
+		// integer literals must retain their exact value in a proof.
+		literal := stripOptimizationParens(n.Operand)
+		negated := false
+		if unary, ok := literal.(*ast.UnaryExpr); ok && unary.Op == lexer.TOKEN_MINUS && unary.LoweredCall == nil {
+			literal = stripOptimizationParens(unary.Operand)
+			negated = true
+		}
+		if _, integer := literal.(*ast.IntLit); integer && sok && dok && dbits > 0 && dbits <= 64 && (!negated || ssign) {
+			if value, known := tr.a.constIntValue(n.Operand); known && (ssign || value >= 0) {
+				limit := new(big.Int).Lsh(big.NewInt(1), uint(dbits))
+				minimum := new(big.Int)
+				if dsign {
+					limit.Rsh(limit, 1)
+					minimum.Neg(limit)
+				}
+				constant := big.NewInt(value)
+				if constant.Cmp(minimum) >= 0 && constant.Cmp(limit) < 0 {
+					return tr.termEnv(n.Operand, env)
+				}
+			}
+		}
 		// `char` is represented as an i64 value, while string indexing produces a
 		// byte-sized code unit. Its conversion to u8 is LLVM truncation, exactly
 		// unsigned modulo 256 for every possible char value. Model that conversion
