@@ -853,9 +853,17 @@ func (a *Analyzer) analyzeSpecClauseExpr(expr ast.Expr, clause string) Type {
 	if expr == nil {
 		return nil
 	}
+	// Track each clause independently. Ghost values/functions have no runtime
+	// representation, so their clauses must be erased from debug codegen too.
+	savedGhostReadSeen := a.ghostReadSeen
+	a.ghostReadSeen = false
+	defer func() { a.ghostReadSeen = savedGhostReadSeen }()
 	savedRefs := a.currentFunctionUsedPermissionRefs
 	start := len(savedRefs)
 	t := a.analyzeExpr(expr)
+	if a.ghostReadSeen {
+		a.markGhostContract(expr)
+	}
 	if introduced := a.currentFunctionUsedPermissionRefs[start:]; len(introduced) > 0 {
 		msg := fmt.Sprintf("%s clause must be pure but uses the `%s` effect; a contract may not perform effects (no IO, allocation, mutation, time, or randomness) — an effectful or non-deterministic clause is unsound because the verifier treats a spec-position call as a single deterministic value", clause, lawEffectName(introduced[0]))
 		// A common cause is reading a module-level `global` inside the clause. If the offending read is

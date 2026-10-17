@@ -221,3 +221,33 @@ ghost def bad() -> i64:
 		t.Fatalf("expected impure ghost function body to be rejected, got: %v", result.Errors())
 	}
 }
+
+func TestGhostValueContractErasureIsClauseLocal(t *testing.T) {
+	r := analyzeContractStrict(t, "ghost_clause_flags.elisa", `ghost def spec_nonnegative(n: i64) -> bool:
+    return n >= 0
+def check(n: i64) -> i64:
+    requires spec_nonnegative(n)
+    requires n >= 0
+    ensure spec_nonnegative(result)
+    ensure result >= 0
+    return n
+`)
+	if len(r.Errors()) != 0 {
+		t.Fatalf("unexpected errors: %s", allDiagnostics(r))
+	}
+	if len(r.GhostContracts) != 2 {
+		t.Fatalf("want exactly two ghost clauses, got %d", len(r.GhostContracts))
+	}
+}
+
+func TestGhostFalseEnsureStillRejected(t *testing.T) {
+	r := analyzeContractStrict(t, "ghost_false_ensure.elisa", `ghost def spec_false(n: i64) -> bool:
+    return false
+def check(n: i64) -> i64:
+    ensure spec_false(result)
+    return n
+`)
+	if ensureFailuresFor(r.Errors(), "check") == 0 {
+		t.Fatalf("false ghost ensure must still be rejected: %s", allDiagnostics(r))
+	}
+}
