@@ -1778,3 +1778,57 @@ SMT overlay restores eight unrelated modified files and excludes the unrelated
 untracked SMT test, preserving those working files. The combined SMT worktree,
 historical root failures and Stage1 errors are not claimed green. All runs stayed
 local.
+
+### Sparse scheduling from the first effect pass
+
+Final permission inference now keeps a bounded flat trace of initial reads and
+row writes. After the first declaration-ordered pass, it queues only functions
+that consumed a row before that row's last write. Later readers that already saw
+the new row do not need another pass. Lambda writes and concrete declarations
+behind generic/function-value copies participate through the existing observer.
+The dependency graph is built only when another evaluation is necessary; the
+stable path still avoids graph maps and heaps, while recording the flat trace.
+
+Read ordering is preserved conservatively: adjacent duplicate reads retain the
+earliest observation. Changed/self readers still enter later rounds using the
+existing heap scheduler. Completion means no outdated readers remain, rather
+than requiring a redundant confirming dense pass. Existing round limits and
+incomplete-result reporting remain in force. If the initial trace exceeds
+1,048,576 records or sees an unidentifiable write, scheduling falls back to the
+prior dense second pass. Temporary trace storage is pooled only up to 65,536
+records and cleared before pooling, so previous Type/AST arenas are not retained.
+
+The reference sweep still supplies the same equations as an oracle. Existing
+random graph, lambda/callback/drop/lowering and complete-Result comparisons pass.
+New histories test selective first-pass seeding, fresh later readers reaching a
+fixed point in one pass, and tiny trace limits preserving the reference result.
+A 256-function sparse graph now evaluates 257 functions versus 512 with the former
+scheduler; the 2,048-function version evaluates 2,049 versus 4,096.
+
+Sequential baseline/candidate/candidate/baseline samples (100 iterations and two
+repetitions per run) showed sparse phase medians of 37.05 us versus 62.34 us at
+256 functions, and 183.24 us versus 457.07 us at 2,048. The latter uses about
+44,722 versus 75,633 bytes and 159 versus 2,005 allocations per operation. These
+are effect-phase component workloads. Whole-analysis chain medians moved only
+1.2–1.6%, which is not sufficient evidence of an overall compiler speed gain.
+Short stable-only timing samples were noisy, including the unchanged sweep
+control; no zero-overhead assertion follows from those samples.
+
+This optimization executes in normal compilation and reduces fresh effect
+scheduler work. It is not a persistent SCC/summary cache and does not finish the
+broader incremental compilation objective. Cross-invocation body/declaration
+query scheduling, complete dependencies/result hydration, object/relink/client
+integration and project edit/iteration qualification remain unfinished.
+
+Longer stable-only samples (candidate/baseline/baseline/candidate, three one-second
+repetitions per run) give a chain128 median of 397.825 us versus 391.155 us: about
+1.7% slower, with ~343 extra bytes and five extra allocations per pass. This is a
+measured stable-path tradeoff for the sparse-phase gain, not a zero-overhead
+change. It does not establish whole-project throughput. Logs retain both the
+initial noisy short runs and the longer controlled comparison.
+
+Validation: isolated full semantic suite passed in 44.684 s and incremental in
+0.284 s. Focused reference/random-graph/actual-source/completion/fallback races
+passed in 1.819 s. The same unrelated-SMT overlay was used; working files and the
+proof stash were preserved. The combined SMT tree and historical Stage1/root
+errors are not claimed green. All runs were local.

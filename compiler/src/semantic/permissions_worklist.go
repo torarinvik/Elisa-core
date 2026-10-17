@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"container/heap"
+	"sync"
 )
 
 // These callbacks exist only during one fresh analyzer's final effect inference.
@@ -50,6 +51,21 @@ func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl) in
 // maxRounds includes the initial dense pass. Tests use a smaller budget to
 // exercise the incomplete path without changing the production scheduling cap.
 func (a *Analyzer) solveFunctionPermissionEffects(decls []scopedDecl, maxRounds int) permissionInferenceOutcome {
+	return a.solveFunctionPermissionEffectsWithReadLimit(decls, maxRounds, permissionInitialReadLimit)
+}
+
+const permissionInitialReadLimit = 1 << 20
+const permissionInitialReadRetain = 1 << 16
+
+type permissionInitialRead struct {
+	target     *FuncType
+	reader, at int
+}
+
+var permissionInitialReads = sync.Pool{New: func() any { return make([]permissionInitialRead, 0, 256) }}
+
+func (a *Analyzer) solveFunctionPermissionEffectsWithReadLimit(decls []scopedDecl, maxRounds, readLimit int) permissionInferenceOutcome {
+
 	n := len(decls)
 	outcome := permissionInferenceOutcome{Converged: n == 0}
 	if n == 0 {
@@ -60,32 +76,116 @@ func (a *Analyzer) solveFunctionPermissionEffects(decls []scopedDecl, maxRounds 
 		return outcome
 	}
 	outcome.Rounds = 1
-	// Most files already have stable body-local rows. Keep their common case
-	// to one dense pass without allocating the graph or heaps. Observe nested
-	// lambda writes too; they may change even when the owner's row stays equal.
+	// Keep the first pass's actual read/write ordering. A function only needs
+	// another evaluation if a row it read changed later; fresh later readers
+	// already consumed the new value. The bounded flat trace avoids graph maps
+	// on stable files and is cleared before pooling so no old Type arena survives.
 	saved := a.permissionInference
 	defer func() { a.permissionInference = saved }()
-	changed := false
-	a.permissionInference = &permissionInferenceObserver{changed: func(*FuncType) { changed = true }}
-	for _, decl := range decls {
-		_, different := a.recomputeFunctionPermissionEffects(decl)
-		changed = changed || different
+	initial := permissionInitialReads.Get().([]permissionInitialRead)[:0]
+	defer func() {
+		if cap(initial) <= permissionInitialReadRetain {
+			clear(initial)
+			permissionInitialReads.Put(initial[:0])
+		}
+	}()
+	writes := map[*FuncType]int(nil)
+	clock, reader := 0, 0
+	changed, fallback := false, false
+	markChanged := func(ft *FuncType) {
+		changed = true
+		clock++
+		if ft == nil {
+			fallback = true
+			return
+		}
+		if !fallback {
+			if writes == nil {
+				writes = map[*FuncType]int{}
+			}
+			writes[ft] = clock
+		}
 	}
+	a.permissionInference = &permissionInferenceObserver{
+		read: func(ft *FuncType) {
+			if fallback {
+				return
+			}
+			// Repeated adjacent reads by the two collectors need only the
+			// earliest observation. Keeping it is conservative even if a write
+			// intervened: an earlier consumed value still requires validation.
+			if len(initial) > 0 {
+				last := initial[len(initial)-1]
+				if last.reader == reader && last.target == ft {
+					return
+				}
+			}
+			if len(initial) >= readLimit {
+				fallback = true
+				clear(initial)
+				initial = initial[:0]
+				return
+			}
+			clock++
+			initial = append(initial, permissionInitialRead{ft, reader, clock})
+		},
+		changed: markChanged,
+	}
+	for i, decl := range decls {
+		reader = i
+		ft, different := a.recomputeFunctionPermissionEffects(decl)
+		if different {
+			markChanged(ft)
+		}
+	}
+	outcome.Evaluations = n
 	if !changed {
-		outcome.Evaluations = n
 		outcome.Converged = true
 		return outcome
 	}
-	current := make(permissionFunctionQueue, n)
+	current := permissionFunctionQueue{}
 	currentQueued := make([]bool, n)
+	if fallback {
+		for i := 0; i < n; i++ {
+			current = append(current, i)
+			currentQueued[i] = true
+		}
+	} else {
+		for _, read := range initial {
+			if writes[read.target] > read.at {
+				currentQueued[read.reader] = true
+			}
+		}
+		for i, dirty := range currentQueued {
+			if dirty {
+				current = append(current, i)
+			}
+		}
+	}
+	if len(current) == 0 {
+		outcome.Converged = true
+		return outcome
+	}
 	next := permissionFunctionQueue{}
 	nextQueued := make([]bool, n)
-	for i := range current {
-		current[i] = i
-		currentQueued[i] = true
-	}
 	reads := make([]map[*FuncType]struct{}, n)
 	readers := map[*FuncType]map[int]struct{}{}
+	if !fallback {
+		for _, read := range initial {
+			i, ft := read.reader, read.target
+			if reads[i] == nil {
+				reads[i] = map[*FuncType]struct{}{}
+			}
+			if _, present := reads[i][ft]; present {
+				continue
+			}
+			reads[i][ft] = struct{}{}
+			if readers[ft] == nil {
+				readers[ft] = map[int]struct{}{}
+			}
+			readers[ft][i] = struct{}{}
+		}
+	}
 	index := -1
 	enqueue := func(i int) {
 		if i > index {
