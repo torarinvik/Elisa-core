@@ -169,6 +169,9 @@ type functionSyntaxEncoder struct {
 	failure     error
 	seen        map[functionSyntaxPointer]uint64
 	nodes       []PositionedFunctionNode
+	// Optional explicit derived-cache exclusions for nominal fingerprints.
+	// Source syntax fingerprints leave this nil and remain fully structural.
+	skipFields map[reflect.Type]map[string]bool
 }
 
 var functionPositionType = reflect.TypeOf(lexer.Pos{})
@@ -254,6 +257,9 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 		return e.encode(value.Elem())
 	case reflect.Struct:
 		for i := 0; i < value.NumField(); i++ {
+			if e.skipFields[value.Type()][value.Type().Field(i).Name] {
+				continue
+			}
 			if !value.Field(i).CanInterface() {
 				return fmt.Errorf("unpublished function syntax field %s.%s", value.Type(), value.Type().Field(i).Name)
 			}

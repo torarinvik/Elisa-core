@@ -69,9 +69,7 @@ adapters exist. No mutable AST is persisted, and no body skip is enabled.
 adapter: ExprTypes, ResolvedTypeNames, ResolvedValueNames, PermGrowthOps,
 RewriteDefaults, IndexBoundsProven, LemmaCalls, GhostDecls and GhostContracts.
 The product owns a deterministic encoded string; restore returns separate maps
-on current source nodes and newly allocated audited scalar types. Only builtin,
-bit-integer, never and null leaf types are supported; nominal, composite, invalid
-and unknown types decline capture. Numeric CanonicalTypeID values and Type.String
+on current source nodes. Numeric CanonicalTypeID values and Type.String
 are never used as persistent type identities. Exact field names/types, payload
 schema, entry/string/byte budgets, duplicate entries and typed anchor matches
 are checked. A failed restore exposes no partial maps. Explicit false entries
@@ -83,6 +81,35 @@ relocation. Other outputs and live-analyzer state still come from fresh analysis
 in that test. This qualifies metadata replay only: it does not skip a body,
 establish semantic dependencies or validate proof retry policy. The enclosing
 function query must supply those guarantees before any production reuse.
+
+Payload v3 adds `semantic/incremental_type_values.go`. Audited owned type recipes
+preserve scalar attributes (bounds, region, reference state/storage/mutability,
+surface names, generic arguments and error payloads) and sharing/cycles across all
+expression entries through one function-wide type table. Ref, view, optional, tuple, ID/address-space, container, generic,
+aggregate-state and parameter types are covered. Non-nil AST refinement/type
+expressions, non-nil Shape objects, function types, invalid types and unsupported
+symbolic state types still decline capture. Every supported node has an exact
+field-name/type schema; graph edges, required children, discriminator ranges and
+incremental byte/work/depth budgets are checked before publication.
+
+Struct, enum, const-enum, opaque and named errorset definitions are references
+into a loader-authorized current `FunctionTypeEnvironment`. Products contain
+only stable origin/name/kind keys and complete bounded fingerprints. Restore
+recomputes those fingerprints rather than trusting an environment-construction
+snapshot, and returns current declaration objects. The derived enum variant
+packed-view memo is explicitly excluded; all other unsupported/private state
+declines fingerprinting. Field, layout, drop-hook and enum-payload changes
+invalidate even when the name is unchanged. Nominal dependency keys/fingerprints
+can be extracted with `TypeDependencies` and read from the current environment
+with `CurrentDependency`; these are only part of a body query's dependencies.
+
+Capture and lookup must use the same published declaration-analysis phase.
+The current fingerprint is conservative and may include implementation syntax;
+it is not yet the minimal exported API fingerprint needed to prune all private
+implementation edits. The backend tests additionally qualify view metadata and
+current nominal pointer restoration through the public encoded product path.
+Type ownership across other Result outputs, remaining adapters, generated-node restoration,
+live-analyzer hydration and actual body-cache integration remain unfinished.
 
 `FunctionProductRequirements` explicitly classifies all 58 current Result fields.
 A new or removed field without an updated policy closes the product-index gate.

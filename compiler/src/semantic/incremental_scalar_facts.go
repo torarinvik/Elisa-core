@@ -32,7 +32,7 @@ type FunctionScalarFacts struct{ encoded string }
 
 func (facts FunctionScalarFacts) Encoded() string { return facts.encoded }
 
-const functionScalarFactsVersion = 1
+const functionScalarFactsVersion = 3
 const functionScalarFactsMaxBytes = 4 * 1024 * 1024
 const functionScalarFactsMaxEntries = 100_000
 
@@ -70,13 +70,15 @@ type scalarTypeValue struct {
 	Name   string
 	Signed bool
 	Width  int
+	Root   uint32 `json:",omitempty"`
 }
 type scalarFactEntry struct {
-	Field  string
-	Anchor scalarNodeReference
-	Type   *scalarTypeValue `json:",omitempty"`
-	Text   string           `json:",omitempty"`
-	Flag   bool             `json:",omitempty"`
+	Field      string
+	Anchor     scalarNodeReference
+	Type       *scalarTypeValue `json:",omitempty"`
+	Text       string           `json:",omitempty"`
+	Flag       bool             `json:",omitempty"`
+	sourceType Type
 }
 type scalarNodeReference struct {
 	Ordinal uint32
@@ -87,39 +89,10 @@ type scalarFactsPayload struct {
 	FunctionKey string
 	Tree        [32]byte
 	Entries     []scalarFactEntry
+	Types       *functionTypeGraph `json:",omitempty"`
 }
 
-// Audited leaf types only. Numeric CanonicalTypeID values are invocation-local,
-// and Type.String() does not encode all semantic properties of arbitrary types.
-func captureScalarType(t Type) (*scalarTypeValue, error) {
-	value := reflect.ValueOf(t)
-	if !value.IsValid() || value.Kind() != reflect.Pointer || value.IsNil() {
-		return nil, fmt.Errorf("missing scalar expression type")
-	}
-	fields := 0
-	var out scalarTypeValue
-	switch t := t.(type) {
-	case *BuiltinType:
-		fields = 1
-		out = scalarTypeValue{Kind: "builtin", Name: t.Name}
-	case *BitIntType:
-		fields = 2
-		out = scalarTypeValue{Kind: "bitint", Signed: t.Signed, Width: t.Width}
-	case *NeverType:
-		out.Kind = "never"
-	case *NullType:
-		out.Kind = "null"
-	default:
-		return nil, fmt.Errorf("unsupported function scalar type %T", t)
-	}
-	if value.Elem().NumField() != fields {
-		return nil, fmt.Errorf("scalar type schema changed: %T", t)
-	}
-	if _, err := restoreScalarType(&out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
+// Validate audited leaf values used by the shared owned type graph.
 func restoreScalarType(t *scalarTypeValue) (Type, error) {
 	if t == nil {
 		return nil, fmt.Errorf("missing scalar type value")
@@ -150,6 +123,12 @@ func restoreScalarType(t *scalarTypeValue) (Type, error) {
 }
 
 func CaptureFunctionScalarFacts(index *FunctionSourceIndex, input FunctionScalarObservations) (FunctionScalarFacts, error) {
+	return CaptureFunctionScalarFactsWithTypes(index, input, nil)
+}
+
+// CaptureFunctionScalarFactsWithTypes permits audited owned composite types and
+// references to nominal declarations in the current invocation's environment.
+func CaptureFunctionScalarFactsWithTypes(index *FunctionSourceIndex, input FunctionScalarObservations, env *FunctionTypeEnvironment) (FunctionScalarFacts, error) {
 	if index == nil {
 		return FunctionScalarFacts{}, fmt.Errorf("missing function source index")
 	}
@@ -171,16 +150,9 @@ func CaptureFunctionScalarFacts(index *FunctionSourceIndex, input FunctionScalar
 		}
 		entry := scalarFactEntry{Field: field, Text: text, Flag: flag}
 		if field == "ExprTypes" {
-			value, err := captureScalarType(typ)
-			if err != nil {
-				return err
-			}
-			entry.Type = value
+			entry.sourceType = typ
 		}
 		cost := len(text) + len(field) + len(reflect.TypeOf(node).String())
-		if entry.Type != nil {
-			cost += len(entry.Type.Name)
-		}
 		if functionScalarFactsMaxBytes-encodedBudget < 128 || cost > (functionScalarFactsMaxBytes-encodedBudget-128)/6 {
 			return fmt.Errorf("scalar fact string budget exceeded")
 		}
@@ -227,7 +199,33 @@ func CaptureFunctionScalarFacts(index *FunctionSourceIndex, input FunctionScalar
 		}
 		return entries[i].Anchor.Ordinal < entries[j].Anchor.Ordinal
 	})
-	data, err := json.Marshal(scalarFactsPayload{Version: functionScalarFactsVersion, FunctionKey: index.key, Tree: index.digest, Entries: entries})
+	var typeRoots []Type
+	for _, entry := range entries {
+		if entry.Field == "ExprTypes" {
+			typeRoots = append(typeRoots, entry.sourceType)
+		}
+	}
+	graph, rootIDs, err := captureFunctionTypeGraphs(typeRoots, env)
+	if err != nil {
+		return FunctionScalarFacts{}, err
+	}
+	nextType := 0
+	for i := range entries {
+		if entries[i].Field == "ExprTypes" {
+			entries[i].Type = &scalarTypeValue{Kind: "graph-ref", Root: rootIDs[nextType]}
+			nextType++
+		}
+	}
+	if graph != nil {
+		data, err := json.Marshal(graph)
+		if err != nil {
+			return FunctionScalarFacts{}, err
+		}
+		if len(data) > functionScalarFactsMaxBytes-encodedBudget {
+			return FunctionScalarFacts{}, fmt.Errorf("function type table byte budget exceeded")
+		}
+	}
+	data, err := json.Marshal(scalarFactsPayload{Version: functionScalarFactsVersion, FunctionKey: index.key, Tree: index.digest, Entries: entries, Types: graph})
 	if err != nil {
 		return FunctionScalarFacts{}, err
 	}
@@ -264,6 +262,11 @@ func decodeScalarFacts(encoded string) (*scalarFactsPayload, error) {
 	if payload.Version != functionScalarFactsVersion || payload.FunctionKey == "" || len(payload.Entries) > functionScalarFactsMaxEntries {
 		return nil, fmt.Errorf("unsupported scalar fact payload")
 	}
+	if payload.Types != nil {
+		if _, err := payload.Types.restoreAll(nil, true); err != nil {
+			return nil, err
+		}
+	}
 	seen := make(map[string]bool, len(payload.Entries))
 	for _, entry := range payload.Entries {
 		key := fmt.Sprintf("%s:%d", entry.Field, entry.Anchor.Ordinal)
@@ -276,8 +279,8 @@ func decodeScalarFacts(encoded string) (*scalarFactsPayload, error) {
 			if entry.Text != "" || entry.Flag {
 				return nil, fmt.Errorf("invalid expression type fact")
 			}
-			if _, err := restoreScalarType(entry.Type); err != nil {
-				return nil, err
+			if entry.Type == nil || entry.Type.Kind != "graph-ref" || entry.Type.Name != "" || entry.Type.Signed || entry.Type.Width != 0 || entry.Type.Root == 0 || payload.Types == nil || uint64(entry.Type.Root) > uint64(len(payload.Types.Nodes)) {
+				return nil, fmt.Errorf("invalid expression type reference")
 			}
 		case "ResolvedTypeNames", "ResolvedValueNames":
 			if entry.Type != nil || entry.Flag {
@@ -295,6 +298,10 @@ func decodeScalarFacts(encoded string) (*scalarFactsPayload, error) {
 }
 
 func (facts FunctionScalarFacts) Restore(index *FunctionSourceIndex) (FunctionScalarObservations, error) {
+	return facts.RestoreWithTypes(index, nil)
+}
+
+func (facts FunctionScalarFacts) RestoreWithTypes(index *FunctionSourceIndex, env *FunctionTypeEnvironment) (FunctionScalarObservations, error) {
 	if err := validateScalarObservationSchema(reflect.TypeOf(FunctionScalarObservations{})); err != nil {
 		return FunctionScalarObservations{}, err
 	}
@@ -313,6 +320,13 @@ func (facts FunctionScalarFacts) Restore(index *FunctionSourceIndex) (FunctionSc
 	if err != nil {
 		return FunctionScalarObservations{}, err
 	}
+	var typePool []Type
+	if payload.Types != nil {
+		typePool, err = payload.Types.restoreAll(env, false)
+		if err != nil {
+			return FunctionScalarObservations{}, err
+		}
+	}
 	output := FunctionScalarObservations{
 		ExprTypes: map[ast.Expr]Type{}, ResolvedTypeNames: map[ast.TypeExpr]string{}, ResolvedValueNames: map[*ast.Ident]string{},
 		PermGrowthOps: map[ast.Expr]bool{}, RewriteDefaults: map[*ast.Ident]bool{}, IndexBoundsProven: map[*ast.IndexExpr]bool{},
@@ -326,11 +340,7 @@ func (facts FunctionScalarFacts) Restore(index *FunctionSourceIndex) (FunctionSc
 			if !ok {
 				return FunctionScalarObservations{}, fmt.Errorf("expression fact has non-expression anchor")
 			}
-			typ, err := restoreScalarType(entry.Type)
-			if err != nil {
-				return FunctionScalarObservations{}, err
-			}
-			output.ExprTypes[n] = typ
+			output.ExprTypes[n] = typePool[entry.Type.Root-1]
 		case "ResolvedTypeNames":
 			n, ok := node.(ast.TypeExpr)
 			if !ok {
