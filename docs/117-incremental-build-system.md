@@ -1671,3 +1671,55 @@ The same eight-file SMT overlay and excluded untracked SMT test remain in use;
 original working files are preserved. These are candidate-only checks, not a
 claim that the combined SMT worktree or historical root/Stage1 failures are green.
 All execution remained local.
+
+### Declaration-backed function type values
+
+Function type graphs can now represent named function types as declaration-backed
+references, allowing function-valued ExprTypes to enter the existing scalar-fact
+capture/restore path. `NewFunctionTypeEnvironmentFromResult` requires a current
+Result whose permission-effect worklist completed, and a named function binding
+must be exactly the current global function symbol's Type. The legacy constructor
+continues to reject direct function references. Anonymous/specialized values
+without a current named global declaration still decline.
+
+Products retain only a declaration key, kind and full structural Type fingerprint.
+Restore binds that reference to the fresh current function Type, including its
+current AST-backed contract/default metadata, instead of copying an earlier
+invocation's function object. Effect completion and symbol membership are checked
+again at use, so revoking completion, deleting/replacing the binding, or changing
+Type metadata invalidates the reference. Nested function signatures also require
+completed current effects; nesting them inside a nominal struct cannot bypass
+that gate. Loader-authorized origin and resolved declaration names remain caller
+responsibilities, and invalid UTF-8 identity strings now decline before JSON could
+replace and conflate them.
+
+The fingerprint walks all FuncType fields using the existing bounded structural
+encoder. Its private IntBitSet provenance values now have an explicit schema gate
+and bounded canonical word encoding: overflow membership participates, allocation
+capacity and trailing zero words do not. Source AST fingerprinting leaves this
+semantic projection disabled. Existing derived EnumVariant packed-view memo
+exclusions remain unchanged. Field additions are included automatically or cause
+capture to decline if the new field cannot be represented.
+
+A real analyzed caller now captures its function-valued callee expression through
+`CaptureFunctionScalarFactsWithTypes`, exports the callee reference through
+`TypeDependencies`, and restores onto relocated source nodes using a separate
+fresh analysis's function Type. Changing the callee's Type interface then rejects
+that stored caller fact product. Regressions cover parameters, returns, effects,
+ABI, owned parameters, frame writes, async metadata, defaults, provenance overflow
+bits, nested completion, foreign Result pointers, live completion revocation and
+binding removal/replacement.
+
+This is a function Type dependency/rehydration building block, not a complete
+callee summary or SCC cache. Symbol metadata, generic/interface constraints,
+lookup visibility, body/codegen content and other analysis summaries still need
+their own dependencies. Normal compilation does not yet replay general call
+bodies through this API. Full per-body dependency coverage, owned AST/live-analyzer
+hydration and measured project iteration-speed gains remain unfinished.
+
+Validation: isolated full semantic suite passed in 55.056 s and incremental in
+0.186 s. Focused function-Type/scalar-fact/environment races passed in 1.410 s.
+The same overlay restores eight unrelated modified Go files to their checkpoint
+baseline and excludes the unrelated untracked SMT test; working files are
+preserved. No combined-SMT, general body-replay or full-build throughput claim is
+made. Existing Stage1/root failures remain unresolved. All work stayed local.

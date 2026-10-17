@@ -127,7 +127,8 @@ func CaptureFunctionScalarFacts(index *FunctionSourceIndex, input FunctionScalar
 }
 
 // CaptureFunctionScalarFactsWithTypes permits audited owned composite types and
-// references to nominal declarations in the current invocation's environment.
+// references to nominal declarations and converged named function types in the
+// current invocation's environment.
 func CaptureFunctionScalarFactsWithTypes(index *FunctionSourceIndex, input FunctionScalarObservations, env *FunctionTypeEnvironment) (FunctionScalarFacts, error) {
 	if index == nil {
 		return FunctionScalarFacts{}, fmt.Errorf("missing function source index")

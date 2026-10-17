@@ -171,7 +171,9 @@ type functionSyntaxEncoder struct {
 	nodes       []PositionedFunctionNode
 	// Optional explicit derived-cache exclusions for nominal fingerprints.
 	// Source syntax fingerprints leave this nil and remain fully structural.
-	skipFields map[reflect.Type]map[string]bool
+	skipFields               map[reflect.Type]map[string]bool
+	semanticBitSets          bool
+	validateSemanticFunction func(*FuncType) error
 }
 
 var functionPositionType = reflect.TypeOf(lexer.Pos{})
@@ -229,6 +231,14 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 	e.text(value.Type().String())
 	if e.failure != nil {
 		return e.failure
+	}
+	if e.validateSemanticFunction != nil && value.Type() == reflect.TypeOf((*FuncType)(nil)) && !value.IsNil() {
+		if err := e.validateSemanticFunction(value.Interface().(*FuncType)); err != nil {
+			return err
+		}
+	}
+	if e.semanticBitSets && value.Type() == reflect.TypeOf(IntBitSet{}) {
+		return e.encodeSemanticIntBitSet(value.Interface().(IntBitSet))
 	}
 	switch value.Kind() {
 	case reflect.Interface:

@@ -8,10 +8,12 @@ import (
 	"io"
 	"reflect"
 	"sort"
+	"unicode/utf8"
 )
 
 // FunctionTypeBinding is loader-authorized provenance, not a source-written
-// #line. QualifiedName must identify the current resolved nominal declaration.
+// #line. QualifiedName must identify the current resolved declaration. Named function
+// types additionally require a current Result with completed effect inference.
 type FunctionTypeBinding struct {
 	Origin, QualifiedName string
 	Type                  Type
@@ -20,8 +22,9 @@ type FunctionTypeBinding struct {
 // FunctionTypeEnvironment is invocation-local; products never retain it.
 // Construct it from the current declaration environment, not a previous Result.
 type FunctionTypeEnvironment struct {
-	byKey  map[string]FunctionTypeBinding
-	byType map[Type]string
+	byKey         map[string]FunctionTypeBinding
+	byType        map[Type]string
+	currentResult *Result
 }
 type functionTypeReference struct {
 	Key, Kind   string
@@ -73,20 +76,40 @@ var nominalFunctionTypeKinds = map[string]reflect.Type{
 	"StructType": reflect.TypeOf(StructType{}), "EnumType": reflect.TypeOf(EnumType{}),
 	"ConstEnumType": reflect.TypeOf(ConstEnumType{}), "OpaqueType": reflect.TypeOf(OpaqueType{}),
 	"ErrorSetType": reflect.TypeOf(ErrorSetType{}),
+	"FuncType":     reflect.TypeOf(FuncType{}),
 }
 
 func NewFunctionTypeEnvironment(bindings []FunctionTypeBinding) (*FunctionTypeEnvironment, error) {
-	env := &FunctionTypeEnvironment{byKey: map[string]FunctionTypeBinding{}, byType: map[Type]string{}}
+	return newFunctionTypeEnvironment(bindings, nil)
+}
+
+// NewFunctionTypeEnvironmentFromResult admits named function references only
+// from this completed current analysis. It does not make other function/body
+// products complete; loader provenance is still the caller's responsibility.
+func NewFunctionTypeEnvironmentFromResult(bindings []FunctionTypeBinding, current *Result) (*FunctionTypeEnvironment, error) {
+	return newFunctionTypeEnvironment(bindings, current)
+}
+func newFunctionTypeEnvironment(bindings []FunctionTypeBinding, current *Result) (*FunctionTypeEnvironment, error) {
+	env := &FunctionTypeEnvironment{byKey: map[string]FunctionTypeBinding{}, byType: map[Type]string{}, currentResult: current}
 	for _, binding := range bindings {
 		kind, name, err := nominalFunctionTypeIdentity(binding.Type)
-		if err != nil || binding.Origin == "" || binding.QualifiedName == "" || name != binding.QualifiedName {
+		if err != nil || binding.Origin == "" || binding.QualifiedName == "" || !utf8.ValidString(binding.Origin) || !utf8.ValidString(binding.QualifiedName) || name != binding.QualifiedName {
 			return nil, fmt.Errorf("invalid current nominal type binding")
 		}
 		if len(binding.Origin) > functionScalarFactsMaxBytes-len(binding.QualifiedName) {
 			return nil, fmt.Errorf("nominal identity byte budget exceeded")
 		}
+		if kind == "FuncType" {
+			if err := validateCurrentFunctionTypeBinding(current, binding); err != nil {
+				return nil, err
+			}
+		}
 		encoded, _ := json.Marshal([]string{binding.Origin, binding.QualifiedName, kind})
-		key := fmt.Sprintf("nominal-v1:%x", sha256.Sum256(encoded))
+		prefix := "nominal-v1"
+		if kind == "FuncType" {
+			prefix = "callee-type-v1"
+		}
+		key := fmt.Sprintf("%s:%x", prefix, sha256.Sum256(encoded))
 		if _, exists := env.byKey[key]; exists {
 			return nil, fmt.Errorf("duplicate nominal type binding")
 		}
@@ -122,10 +145,15 @@ func (env *FunctionTypeEnvironment) reference(t Type) (*functionTypeReference, e
 	if err != nil || name != binding.QualifiedName {
 		return nil, fmt.Errorf("nominal binding changed identity")
 	}
+	if kind == "FuncType" {
+		if err := validateCurrentFunctionTypeBinding(env.currentResult, binding); err != nil {
+			return nil, err
+		}
+	}
 	// Conservative complete graph fingerprint, including layout, fields, drop
 	// hooks and declaration metadata. Unsupported graphs decline capture. This
 	// may over-invalidate on implementation changes; it never uses Name as shape.
-	fingerprint, err := functionNominalTypeFingerprint(t)
+	fingerprint, err := functionNominalTypeFingerprintWithResult(t, env.currentResult)
 	if err != nil {
 		return nil, err
 	}
@@ -133,11 +161,21 @@ func (env *FunctionTypeEnvironment) reference(t Type) (*functionTypeReference, e
 }
 
 func functionNominalTypeFingerprint(t Type) ([32]byte, error) {
-	encoder := &functionSyntaxEncoder{seen: map[functionSyntaxPointer]uint64{}, skipFields: map[reflect.Type]map[string]bool{
+	return functionNominalTypeFingerprintWithResult(t, nil)
+}
+func functionNominalTypeFingerprintWithResult(t Type, current *Result) ([32]byte, error) {
+
+	encoder := &functionSyntaxEncoder{seen: map[functionSyntaxPointer]uint64{}, semanticBitSets: true, skipFields: map[reflect.Type]map[string]bool{
 		// types_enums.go derives this memo solely from the current Enum/Variant.
 		// It is not a declaration input and may be populated lazily by codegen.
 		reflect.TypeOf(EnumVariant{}): {"packedViewType": true},
 	}}
+	encoder.validateSemanticFunction = func(*FuncType) error {
+		if current == nil || !current.PermissionEffectsConverged {
+			return fmt.Errorf("nested function type requires completed current effects")
+		}
+		return nil
+	}
 	encoder.WriteString("elisa-nominal-interface-v1\x00")
 	if err := encoder.encode(reflect.ValueOf(t)); err != nil {
 		return [32]byte{}, err
@@ -515,7 +553,7 @@ func scalarLeafFromType(t Type) (*scalarTypeValue, bool) {
 	return nil, false
 }
 
-// FunctionTypeDependency is an owned nominal-declaration input to the enclosing
+// FunctionTypeDependency is an owned declaration-backed type input to the enclosing
 // query. It is only the type-reference portion of that query's dependencies.
 type FunctionTypeDependency struct {
 	Key         string
@@ -561,4 +599,42 @@ func (facts FunctionScalarFacts) TypeDependencies() ([]FunctionTypeDependency, e
 	}
 	sort.Slice(output, func(i, j int) bool { return output[i].Key < output[j].Key })
 	return output, nil
+}
+
+// This check is repeated at use: an environment is not a memo of a completion
+// flag or a substitute for a current function symbol. Type replacement/removal
+// after construction must fail instead of returning the former declaration.
+func validateCurrentFunctionTypeBinding(current *Result, binding FunctionTypeBinding) error {
+	if current == nil || !current.PermissionEffectsConverged || current.GlobalScope == nil {
+		return fmt.Errorf("function type requires completed current effect inference")
+	}
+	symbol, found := current.GlobalScope.Symbols[binding.QualifiedName]
+	if !found || symbol == nil || symbol.Kind != SymbolFunc || symbol.Type != binding.Type {
+		return fmt.Errorf("function type is not the current declaration binding")
+	}
+	return nil
+}
+
+// Encode semantic set membership, including overflow words, without reading
+// private representation through reflection or ignoring meaningful bits. The
+// field inventory fails closed if IntBitSet gains additional state.
+func (e *functionSyntaxEncoder) encodeSemanticIntBitSet(set IntBitSet) error {
+	if err := validateFunctionTypeFields(reflect.TypeOf(set), "inline:uint64 extra:[]uint64"); err != nil {
+		return err
+	}
+	remaining := functionSyntaxMaxBytes - e.Len()
+	if len(set.extra) > functionSyntaxMaxWork-e.work || remaining < 16 || len(set.extra) > (remaining-16)/8 {
+		return ErrFunctionSyntaxBudget
+	}
+	e.work += len(set.extra)
+	used := len(set.extra)
+	for used > 0 && set.extra[used-1] == 0 {
+		used--
+	}
+	e.number(set.inline)
+	e.number(uint64(used))
+	for _, word := range set.extra[:used] {
+		e.number(word)
+	}
+	return e.failure
 }
