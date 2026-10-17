@@ -731,3 +731,47 @@ oversized cyclic/diamond plus duplicate-self-call union bounds. These preserve
 the distinctions a retained dependency value will need; persistent row hydration
 (including nested lambda writes), complete semantic input recipes and real-project
 incremental performance remain unfinished.
+
+### Server-local source token reuse
+
+Compile-server requests with `incremental: true` now share a bounded token cache
+across emit/analysis profiles. Exact loaded source bytes and the diagnostic
+filename form the key. Changed bytes lex cold; this is whole-input reuse, not
+incremental tokenization of edited declaration ranges. Decoded frontend IR keeps
+its own fresh AST path and bypasses source-token lookup.
+
+Each admitted cold entry lexes a private source copy: lexer Text/Suffix strings
+are zero-copy views, so a shallow token copy alone would retain mutable caller
+storage. The cache also owns its filename. Every parser receives a separate token
+slice because contextual keyword recovery mutates token kinds. Parsing, notices,
+AST/map creation and semantic analysis remain fresh. Lexer.New still registers
+parity source on hits, and existing parse/lex failure cleanup remains in place.
+
+The independent LRU defaults to32 entries and512 MiB of accounted retained payload
+per server. Accounting includes the complete owned source backing buffer, token
+array, string lengths and diagnostic text; shared source/token text may be counted
+more than once. It is not an allocator/RSS limit. Oversized inputs stay cold;
+concurrent duplicate misses retain one entry, and hit token copies happen outside
+the cache lock. Stateless requests do not populate this cache.
+
+Tests compare output/status/diagnostics through warm/edit/revert requests, ensure
+parser keyword rewriting does not corrupt later hits, vary filenames, mutate the
+caller's original bytes, verify fresh AST nodes, bound comment-heavy source
+backing storage, exercise LRU eviction/concurrent copies and bypass decoded IR.
+The mutation oracle lexes independent expected bytes so aliasing cannot corrupt
+both expected and actual values together.
+
+Local Apple M5, Go1.27.2, GOMAXPROCS=4 parse-only measurements use3 repetitions of
+30 iterations on generated arithmetic functions:
+
+| Functions | Cold lex+parse median | Cached-token parse median |
+| --- | --- | --- |
+| 16 | 55.7 µs | 35.4 µs |
+| 256 | 0.969 ms | 0.655 ms |
+| 2,048 | 9.74 ms | 5.32 ms |
+
+At2,048 functions, allocated bytes per parse fall from19.97 MB to8.12 MB and
+allocation count from34,837 to30,737. Cold admission pays for the owned snapshot
+and retained token copy; these warm measurements exclude priming, semantic work,
+LLVM/linking and network overhead. Real-project incremental speed and finer-grained
+parse/call/module dependency reuse remain open qualification requirements.

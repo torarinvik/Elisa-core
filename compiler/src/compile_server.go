@@ -94,6 +94,9 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 	if err != nil {
 		return compileServerResponse{OK: false, Error: err.Error()}, http.StatusBadRequest
 	}
+	if sessions != nil && req.Incremental && program.file == nil {
+		program.tokenCache = sessions.tokens
+	}
 	mode := normalizeEmitMode(req.Mode)
 	if mode == "" {
 		mode = emitAST

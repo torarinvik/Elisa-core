@@ -108,11 +108,22 @@ func frontendTimingLog(label string, since time.Time) {
 }
 
 func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, bool) {
+	return parseProgramWithTokenCache(filename, src, stderr, nil)
+}
+
+func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, cache *sourceTokenCache) (*ast.File, bool) {
 	lexStart := time.Now()
-	l := lexer.New(filename, src)
-	tokens := l.Tokenize()
+	var tokens []lexer.Token
+	var errs []string
+	if cache == nil {
+		l := lexer.New(filename, src)
+		tokens = l.Tokenize()
+		errs = l.Errors()
+	} else {
+		tokens, errs = cache.lex(filename, src)
+	}
 	frontendTimingLog("lex", lexStart)
-	if errs := l.Errors(); len(errs) > 0 {
+	if len(errs) > 0 {
 		lexer.DropParitySource(filename)
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
@@ -150,7 +161,11 @@ func analyzeProgramWithOptions(filename string, src []byte, stderr io.Writer, op
 }
 
 func analyzeProgramWithAnalyzer(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
-	file, ok := parseProgram(filename, src, stderr)
+	return analyzeProgramWithAnalyzerAndTokens(filename, src, stderr, options, nil, analyze)
+}
+
+func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, cache *sourceTokenCache, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
+	file, ok := parseProgramWithTokenCache(filename, src, stderr, cache)
 	if !ok {
 		return nil, nil, false
 	}

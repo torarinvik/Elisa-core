@@ -27,6 +27,7 @@ func isSurfaceSourcePath(path string) bool {
 }
 
 type loadedProgram struct {
+	tokenCache  *sourceTokenCache
 	filename    string
 	source      []byte
 	file        *ast.File
@@ -81,7 +82,7 @@ func parseLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, bo
 	if program.file != nil {
 		return program.file, true
 	}
-	return parseProgram(program.filename, program.source, stderr)
+	return parseProgramWithTokenCache(program.filename, program.source, stderr, program.tokenCache)
 }
 
 func analyzeLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, *semantic.Result, bool) {
@@ -142,7 +143,7 @@ func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, o
 		}
 		options.TrustedRuntimeSourceFiles = append(options.TrustedRuntimeSourceFiles, runtimeSource)
 	}
-	file, result, ok := analyzeProgramWithAnalyzer(program.filename, program.source, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		return analyzeSemanticWithSession(file, options, session)
 	})
 	if ok && result != nil {

@@ -24,6 +24,7 @@ type compileServerSessionEntry struct {
 // source path and analysis profile. The bound prevents an HTTP server that sees
 // many one-off filenames from retaining every session for its entire lifetime.
 type compileServerSessionCache struct {
+	tokens     *sourceTokenCache
 	mu         sync.Mutex
 	maxEntries int
 	clock      uint64
@@ -36,6 +37,7 @@ func newCompileServerSessionCache(maxEntries int) *compileServerSessionCache {
 	}
 	return &compileServerSessionCache{
 		maxEntries: maxEntries,
+		tokens:     newSourceTokenCache(maxEntries, defaultSourceTokenCacheBytes),
 		entries:    make(map[compileServerSessionKey]compileServerSessionEntry),
 	}
 }
