@@ -21,6 +21,32 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 	if n == nil || (n.Op != lexer.TOKEN_EQEQ && n.Op != lexer.TOKEN_BANGEQ) || n.LoweredCall != nil {
 		return "", false
 	}
+	// The empty string has no byte comparisons: equality depends only on the current header.
+	// In particular, this needs no byte-array model or immutable-backing assumption.
+	value := n.Left
+	empty := false
+	if literal, ok := stripOptimizationParens(n.Right).(*ast.StringLit); ok && literal.Value == "" {
+		empty = true
+	} else if literal, ok := stripOptimizationParens(n.Left).(*ast.StringLit); ok && literal.Value == "" {
+		value, empty = n.Right, true
+	}
+	_, viewValue := stripRefForBounds(tr.a.exprTypes[value]).(*SViewType)
+	if empty && viewValue {
+		length, ok := tr.termEnv(&ast.FieldExpr{Position: value.Pos(), Object: value, Field: "len"}, env)
+		if ok {
+			eq := "(= " + length + " 0)"
+			// String dispatch uses literal identity terms. Keep its empty identity
+			// consistent with this header-only equality when both models are available.
+			if identity, ok := tr.stringIDTerm(value, env); ok {
+				emptyID := smtInt(tr.classifierStringLiteralInt(""))
+				tr.auxDecls = append(tr.auxDecls, "(assert (= (= "+identity+" "+emptyID+") "+eq+"))\n")
+			}
+			if n.Op == lexer.TOKEN_BANGEQ {
+				eq = "(not " + eq + ")"
+			}
+			return eq, true
+		}
+	}
 	if _, ok := stripRefForBounds(tr.a.exprTypes[n.Left]).(*SViewType); !ok {
 		return "", false
 	}
