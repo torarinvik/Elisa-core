@@ -285,3 +285,26 @@ func TestGuardIf_EarlyReturn_Proved(t *testing.T) {
 `
 	guardIfProved(t, "early_return.elisa", src)
 }
+
+// The fallthrough excludes one, so subtracting two cannot wrap at zero.
+func TestGuardIf_PreciseEarlyExitAvoidsUnsignedUnderflow(t *testing.T) {
+	guardIfProved(t, "precise_early_exit.elisa", `def loop(n: usize):
+    i: mutable usize = n
+    while i > 0:
+        decreases i
+        if i == 1:
+            return
+        i <- i - 2
+`)
+}
+
+func TestGuardIf_PreciseEarlyExitStillRejectsUnsignedUnderflow(t *testing.T) {
+	guardIfRejected(t, "precise_early_exit_wrap.elisa", `def loop(n: usize):
+    i: mutable usize = n
+    while i > 0:
+        decreases i
+        if i == 2:
+            return
+        i <- i - 2
+`)
+}

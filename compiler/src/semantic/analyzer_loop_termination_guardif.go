@@ -3,7 +3,6 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
-	"strconv"
 )
 
 // GUARD-`if` modeling for the loop-TERMINATION prover (highest-risk, TRUSTED code).
@@ -74,7 +73,11 @@ func (a *Analyzer) enumPaths(stmts []ast.Stmt, depth int) ([]pathFrag, bool) {
 		}
 		switch n := s.(type) {
 		case *ast.IfStmt:
-			if a.ifIsOpaqueExitFallthrough(n) {
+			// Preserve representable guards before falling back to an opaque exit.
+			// In particular, the negated guard can rule out wraparound on the
+			// continuing path; dropping it needlessly weakens the decrease proof.
+			branches, ok := a.ifBranchGuards(n)
+			if !ok && a.ifIsOpaqueExitFallthrough(n) {
 				next := make([]pathFrag, 0, len(frontier)*2)
 				for _, p := range frontier {
 					if p.exited {
@@ -91,7 +94,6 @@ func (a *Analyzer) enumPaths(stmts []ast.Stmt, depth int) ([]pathFrag, bool) {
 				frontier = next
 				continue
 			}
-			branches, ok := a.ifBranchGuards(n)
 			if !ok {
 				return nil, false
 			}
@@ -468,10 +470,8 @@ func (a *Analyzer) proveLoopMeasureDecreasesAllPaths(loopCond ast.Expr, invs []*
 			continue // loop terminates on this path — no decrease obligation
 		}
 		pathCond := buildPathCond(loopCond, p.conds)
-		if !simpleCountdownPathDecrease(measures, p.subst) {
-			if proven, _ := a.proveLoopMeasureDecreases(pathCond, invs, measures, p.subst); !proven {
-				return false // this non-exit path does not provably decrease → reject the whole loop
-			}
+		if proven, _ := a.proveLoopMeasureDecreases(pathCond, invs, measures, p.subst); !proven {
+			return false // every continuing path must discharge the actual measure obligation
 		}
 		provedAny = true
 	}
@@ -479,34 +479,6 @@ func (a *Analyzer) proveLoopMeasureDecreasesAllPaths(loopCond ast.Expr, invs []*
 	// with no non-exit path is degenerate; require at least one proven decreasing path to record an SMT
 	// proof (otherwise decline to the runtime backstop — conservative).
 	return provedAny
-}
-
-func simpleCountdownPathDecrease(measures []ast.Expr, subst map[string]ast.Expr) bool {
-	if len(measures) != 1 || len(subst) == 0 {
-		return false
-	}
-	measure, ok := measures[0].(*ast.Ident)
-	if !ok || measure == nil {
-		return false
-	}
-	next, ok := subst[measure.Name]
-	if !ok {
-		return false
-	}
-	bin, ok := next.(*ast.BinaryExpr)
-	if !ok || bin == nil || bin.Op != lexer.TOKEN_MINUS {
-		return false
-	}
-	left, ok := bin.Left.(*ast.Ident)
-	if !ok || left == nil || left.Name != measure.Name {
-		return false
-	}
-	right, ok := bin.Right.(*ast.IntLit)
-	if !ok || right == nil || right.IsHex {
-		return false
-	}
-	value, err := strconv.ParseInt(right.Value, 10, 64)
-	return err == nil && value > 0
 }
 
 // buildPathCond conjoins the loop condition with a path's guard conditions into a single boolean
