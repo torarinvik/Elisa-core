@@ -1444,30 +1444,12 @@ func (a *Analyzer) bindSMTStructEnvArg(tr *smtTranslator, env map[string]string,
 	if !ok || st == nil {
 		return !requireBinding
 	}
-	for _, fieldName := range sortedFieldNames(st.Fields) {
-		field := st.Fields[fieldName]
-		ft := stripRefForBounds(field.Type)
-		fieldExpr := &ast.FieldExpr{Object: argExpr, Field: fieldName}
-		key := name + smtFieldSeparator + fieldName
-		if IsBoolType(ft) {
-			bterm, ok := tr.boolTerm(fieldExpr, argEnv)
-			if !ok {
-				return false
-			}
-			env[key] = bterm
-			continue
-		}
-		if IsNumericType(ft) && !IsFloatType(ft) {
-			term, ok := tr.termEnv(fieldExpr, argEnv)
-			if !ok {
-				return false
-			}
-			env[key] = term
-			continue
-		}
-		if requireBinding {
-			return false
-		}
+	leaves, ok := tr.scalarStructArgLeaves(argExpr, st, argEnv)
+	if !ok {
+		return false
+	}
+	for _, leaf := range leaves {
+		env[name+smtFieldSeparator+leaf.path] = leaf.term
 	}
 	return true
 }
@@ -3062,7 +3044,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return length, true
 			}
 		}
-		if term, handled, ok := tr.recordElementFieldTerm(n, env); handled {
+		if term, handled, ok := tr.recordElementFieldTerm(n, env, "Int"); handled {
 			return term, ok
 		}
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
@@ -4077,6 +4059,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if term, handled, ok := tr.recordElementFieldTerm(n, env, "Bool"); handled {
+			return term, ok
+		}
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
 				if _, constant := stripOptimizationParens(value).(*ast.BoolLit); constant {
@@ -5607,24 +5592,13 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 	}
 	if tr.a.smtEquationStructType(tr.a.exprTypes[arg]) {
 		st, _ := stripRefForBounds(tr.a.exprTypes[arg]).(*StructType)
+		leaves, ok := tr.scalarStructArgLeaves(arg, st, env)
+		if !ok {
+			return "", false
+		}
 		var parts []string
-		for _, fieldName := range sortedStructFieldNames(st) {
-			field := st.Fields[fieldName]
-			fieldExpr := &ast.FieldExpr{Object: arg, Field: fieldName}
-			ft := stripRefForBounds(field.Type)
-			if IsBoolType(ft) {
-				t, ok := tr.boolTerm(fieldExpr, env)
-				if !ok {
-					return "", false
-				}
-				parts = append(parts, fieldName+"="+t)
-				continue
-			}
-			t, ok := tr.termEnv(fieldExpr, env)
-			if !ok {
-				return "", false
-			}
-			parts = append(parts, fieldName+"="+t)
+		for _, leaf := range leaves {
+			parts = append(parts, leaf.path+"="+leaf.term)
 		}
 		return "struct{" + strings.Join(parts, ",") + "}", true
 	}

@@ -7,14 +7,55 @@ import (
 	"elisacore/src/ast"
 )
 
+type smtStructArgLeaf struct {
+	path string
+	term string
+}
+
+// Use the same scalar leaves for callee bindings and call congruence keys.
+// A nested value such as BindingId.owner.value must not revert to an opaque
+// token merely because its scalar component is one record deeper.
+func (tr *smtTranslator) scalarStructArgLeaves(arg ast.Expr, st *StructType, env map[string]string) ([]smtStructArgLeaf, bool) {
+	var leaves []smtStructArgLeaf
+	var walk func(ast.Expr, *StructType, string) bool
+	walk = func(object ast.Expr, record *StructType, prefix string) bool {
+		for _, name := range sortedStructFieldNames(record) {
+			field := record.Fields[name]
+			expr := &ast.FieldExpr{Object: object, Field: name}
+			path := prefix + name
+			typ := stripRefForBounds(field.Type)
+			if nested, ok := StripAggregateStateType(field.Type).(*StructType); ok {
+				if !plainFrameRecordType(nested, map[*StructType]bool{}) || !walk(expr, nested, path+smtFieldSeparator) {
+					return false
+				}
+				continue
+			}
+			var term string
+			var ok bool
+			if IsBoolType(typ) {
+				term, ok = tr.boolTerm(expr, env)
+			} else if IsNumericType(typ) && !IsFloatType(typ) {
+				term, ok = tr.termEnv(expr, env)
+			}
+			if !ok {
+				return false
+			}
+			leaves = append(leaves, smtStructArgLeaf{path: path, term: term})
+		}
+		return true
+	}
+	ok := walk(arg, st, "")
+	return leaves, ok
+}
+
 // A record's scalar fields are functions of the container and index, rather
 // than of the source location of a read. Keep the index inside the application
 // so quantified reads cannot become one binder-independent scalar.
-func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string]string) (string, bool, bool) {
+func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string]string, sort string) (string, bool, bool) {
 	root, path := projectionChain(n)
 	if id, ok := root.(*ast.Ident); ok {
 		if value, found := tr.immutableIndexedRecordLocal(id, env); found {
-			return tr.recordElementFieldTerm(rerootProjection(n, value, tr.a), env)
+			return tr.recordElementFieldTerm(rerootProjection(n, value, tr.a), env, sort)
 		}
 	}
 	index, ok := root.(*ast.IndexExpr)
@@ -47,7 +88,7 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 		leaf = field.Type
 	}
 	signed, bits, numeric := smtIntWidthSign(leaf)
-	if !numeric || bits <= 0 || bits > 64 {
+	if (sort == "Int" && (!numeric || bits <= 0 || bits > 64)) || (sort == "Bool" && !IsBoolType(leaf)) {
 		return "", true, false
 	}
 	base, stable := tr.containerBase(index.Object, env)
@@ -58,15 +99,19 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 	if !ok {
 		return "", true, false
 	}
-	name := "|@record_field_" + hex.EncodeToString([]byte(base+"/"+path)) + "|"
+	name := "|@record_field_" + hex.EncodeToString([]byte(base+"/"+path+"/"+sort)) + "|"
 	if tr.ghostUFDecls == nil {
 		tr.ghostUFDecls = map[string]bool{}
 	}
 	if !tr.ghostUFDecls[name] {
 		tr.ghostUFDecls[name] = true
-		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+name+" (Int) Int)\n")
+		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+name+" (Int) "+sort+")\n")
 	}
-	return smtSameWidthReinterpret("("+name+" "+k+")", signed, bits), true, true
+	term := "(" + name + " " + k + ")"
+	if sort == "Int" {
+		term = smtSameWidthReinterpret(term, signed, bits)
+	}
+	return term, true, true
 }
 
 // Fields of a read-only aggregate parameter can contain mutable arrays. They

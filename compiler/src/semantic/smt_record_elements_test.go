@@ -9,6 +9,11 @@ struct RecordBinding:
     serial: u64
 struct RecordTable:
     rows: mutable darray[RecordBinding]
+struct RecordFlag:
+    known: bool
+def equal_record(left: RecordBinding, right: RecordBinding) -> bool:
+    ensure result == (left.owner.value == right.owner.value and left.serial == right.serial)
+    return left.owner.value == right.owner.value and left.serial == right.serial
 `
 
 func TestSMTRecordElementCongruence(t *testing.T) {
@@ -17,6 +22,16 @@ func TestSMTRecordElementCongruence(t *testing.T) {
     requires i < rows.count and j < rows.count and i == j
     ensure result == rows[j].owner.value
     return rows[i].owner.value
+`,
+		`def same_through_call(rows: darray[RecordBinding]&, i: usize, j: usize) -> bool:
+    requires i < rows.count and j < rows.count and i == j
+    ensure result == true
+    return equal_record(rows[i], rows[j])
+`,
+		`def same_flag(rows: darray[RecordFlag]&, i: usize, j: usize) -> bool:
+    requires i < rows.count and j < rows.count and i == j
+    ensure result == rows[j].known
+    return rows[i].known
 `,
 		`def copied(rows: darray[RecordBinding]&, i: usize) -> u32:
     requires i < rows.count
@@ -84,8 +99,16 @@ def shadowed_table(table: RecordTable, other_table: RecordTable) -> u32:
         table: RecordTable = other_table
         return table.rows[0].owner.value
     return 0
+def unequal_call(rows: darray[RecordBinding]&) -> bool:
+    requires rows.count > 1
+    ensure result == true
+    return equal_record(rows[0], rows[1])
+def unequal_flag(rows: darray[RecordFlag]&) -> bool:
+    requires rows.count > 1
+    ensure result == rows[1].known
+    return rows[0].known
 `)
-	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table"} {
+	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table", "unequal_call", "unequal_flag"} {
 		if ensureFailuresFor(result.Errors(), function) == 0 {
 			t.Fatalf("%s: false record claim was accepted:\n%s", function, allDiagnostics(result))
 		}

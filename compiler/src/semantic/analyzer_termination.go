@@ -1058,7 +1058,10 @@ func (a *Analyzer) smtEquationStructType(t Type) bool {
 	}
 	for _, field := range st.Fields {
 		ft := stripRefForBounds(field.Type)
-		if !((IsNumericType(ft) && !IsFloatType(ft)) || IsBoolType(ft)) {
+		if (IsNumericType(ft) && !IsFloatType(ft)) || IsBoolType(ft) {
+			continue
+		}
+		if !plainFrameRecordType(field.Type, map[*StructType]bool{}) {
 			return false
 		}
 	}
