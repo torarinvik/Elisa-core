@@ -49,8 +49,14 @@ func TryCanonicalTypeID(t Type) (TypeID, bool) {
 func canonicalTypeIDKey(t Type) (string, bool) {
 	var b strings.Builder
 	b.Grow(64)
-	var stack [16]typeIDActiveFrame
-	active := &typeIDActive{frames: stack[:0]}
+	active := typeIDActivePool.Get().(*typeIDActive)
+	defer func() {
+		// pop clears every used slot, including unsuccessful encoding. Do not
+		// retain unusually deep backing arrays in the shared scratch pool.
+		if cap(active.frames) <= maxTypeIDPooledFrames {
+			typeIDActivePool.Put(active)
+		}
+	}()
 	nextCycleID := 1
 	if !appendTypeIDKey(&b, t, active, &nextCycleID) {
 		return "", false
@@ -58,8 +64,13 @@ func canonicalTypeIDKey(t Type) (string, bool) {
 	return b.String(), true
 }
 
-// typeIDActive is the stack of types on the current key path (a type met again on its own
-// path is a cycle). Paths are short, so a linear scan of a stack beats a map allocated per key.
+const maxTypeIDPooledFrames = 64
+
+var typeIDActivePool = sync.Pool{New: func() any { return &typeIDActive{frames: make([]typeIDActiveFrame, 0, 16)} }}
+
+// typeIDActive tracks the current path; meeting a type on that path is a cycle.
+// Each invocation rebuilds the current structural key; only active-frame storage
+// is reused across calls, with source-type references cleared on pop.
 type typeIDActive struct {
 	frames []typeIDActiveFrame
 }
@@ -82,7 +93,11 @@ func (s *typeIDActive) push(t Type, id int) {
 	s.frames = append(s.frames, typeIDActiveFrame{t: t, id: id})
 }
 
-func (s *typeIDActive) pop() { s.frames = s.frames[:len(s.frames)-1] }
+func (s *typeIDActive) pop() {
+	index := len(s.frames) - 1
+	s.frames[index] = typeIDActiveFrame{}
+	s.frames = s.frames[:index]
+}
 
 func appendTypeIDKey(b *strings.Builder, t Type, active *typeIDActive, nextCycleID *int) bool {
 	if t == nil {

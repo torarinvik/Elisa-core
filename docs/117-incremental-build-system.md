@@ -1013,3 +1013,78 @@ admission-order regression, passed in 2.694 s. The changed lexer prefix-comparis
 code also passed the full lexer race suite earlier in this checkpoint (10.743 s).
 These checks do not supersede the previously recorded failures in the broader
 root compiler-package suite, which was not rerun here.
+
+### Local project probes and query-key allocation
+
+The opt-in TestLocalIncrementalProjectProbe loads a real entry file with the normal
+include loader, then compares stateless and session frontends on the same expanded
+bytes and sourceFiles authority. It records source/diagnostic hashes, stage times,
+source-cache counters and semantic query statistics. Loading, HTTP/JSON transport,
+semantic-report formatting, backend work and linking are outside each timed
+frontend call. Error-bearing runs compare status and exposed diagnostics; they do
+not prove equivalence of every internal semantic Result field. The normal test
+suite skips this probe unless explicitly enabled.
+
+Use ELISA_INCREMENTAL_PROJECT_PROBE=/absolute/path/entry.elisa with
+`go test -C compiler ./src -run '^TestLocalIncrementalProjectProbe$' -count=1 -v`.
+The optional ELISA_INCREMENTAL_PROJECT_PROBE_SNAPSHOT_OUT and SNAPSHOT_IN variants
+write/read a local expanded-input JSON snapshot, preserving filename and loader
+sourceFiles. This freezes source input for comparisons while other project work
+continues; it is a developer probe artifact, not a hermetic build/dependency cache.
+ELISA_INCREMENTAL_PROJECT_PROBE_PROFILE_ONLY=1 runs only the stateless baseline
+for profiling, without the repeated/edit parity sequence. Normal probe execution
+checks the baseline, three identical session requests and an added pure function
+against an edited stateless reference. Early/dependency/error-to-fix edits remain
+outside this probe's current history coverage.
+
+Local measurements on the Stage1 lexer component covered 177,422 expanded bytes
+from 27 files. Parser-component measurements covered about 2.5 MB from 152 files
+and 363,000 tokens. Both preserved exposed diagnostics, but original component
+bodies had zero semantic-query reuse. The parser component had 425 parser notices,
+so it could not supply a retained parser trace; independent whole-file snapshot
+capture also exceeded its work/depth bound. Appending the probe's simple function
+admitted only that new 223-byte scalar product. Analysis dominated: roughly
+100–175 ms for the lexer component and 5–7 seconds for the parser component,
+versus about 8–10 ms and 126–139 ms parsing respectively. These exploratory runs
+show admission/coverage gaps, not a project-level incremental speedup. Process,
+solver and allocation warmup also differ between sequential stages.
+
+CPU profiling of the parser diagnostic workload attributed about 55% of samples
+to memory clearing. A single-baseline allocation profile sampled about 5.18 GB:
+tracked-type graph cloning was the largest flat allocation site (~1.55 GB),
+followed by mutable-borrow classification (~0.61 GB) and canonical type-ID key
+construction (~0.58 GB flat). Generic/shape scope wrappers have high cumulative
+cost because they invoke body analysis; their empty-context setup is not the
+identified bottleneck. Persistent resolved body/type queries and cheaper isolated
+flow-state products remain the main architectural work.
+
+Canonical key construction now reuses its active-path scratch workspace. Each
+call still encodes the current graph, with the same traversal-local cycle numbers
+and unsupported-type behavior. Pop clears source-type references; backing arrays
+above 64 frames are not pooled. Returned strings keep their own builder storage.
+No type result or process-local numeric TypeID becomes a persistent query key.
+Tests compare the previous unpooled workspace, actual cycles, shared DAGs, deep
+paths, unsupported types, mutation between calls, reference clearing and concurrent
+isolation. The microbenchmark rotates five short type fixtures; deeper/cyclic
+fixtures are correctness checks rather than its measured workload.
+
+On M5/Go1.27.2/GOMAXPROCS=4, three 200,000-iteration runs measured unpooled
+171.8/189.1/131.4 ns and pooled 84.07/93.35/112.5 ns per key. Allocations fell
+from 473 B/two allocations to 89 B/one allocation. A frozen parser snapshot
+(SHA-256 511b5939bf14e412dbe3e287d308d4d65437a7fcf1701de590c468310cd371f4)
+was then profiled with parent typeid.go overlaid and with the new implementation.
+Both emitted the same 776,280 diagnostic bytes and diagnostic digest. Sampled
+whole-probe allocation totals were 5,461.64 MB and 4,693.33 MB; canonical-key
+cumulative allocation fell from about 732 MB to 115 MB. The single timed frontend
+pair was 4.291 s versus 4.149 s, which is too little evidence for a repeatable
+project throughput claim. Earlier source hashes differed between runs and are
+explicitly excluded from before/after comparison. The component still has no
+original-body incremental reuse after this allocation change.
+
+Verification for the scratch/probe checkpoint: full semantic suite passed in
+61.387 s; focused canonical-key/concurrency race tests passed in 1.747 s and
+compile-server/source-cache race tests in 2.418 s. Real lexer/parser repeated/edit
+probes and the frozen parent/candidate diagnostic comparisons passed. The broader
+root-suite failures recorded earlier remain unresolved. Next architectural work
+must expand actual resolved body/callee/type dependency products and isolated
+flow-state hydration; the allocation optimization does not close that coverage gap.
