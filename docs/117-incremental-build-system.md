@@ -577,13 +577,13 @@ and its default are accepted while zero violates the exported precondition.
 This does not qualify `.elisai` as a complete incremental module cache key.
 Remaining losses include return-region and lmut manifests, visibility and
 associated-type defaults, lemma/ghost declaration kinds,
-higher-order parameter contracts lifted out of Requires, fulfills-derived frames,
+higher-order parameter contracts lifted out of Requires, protocol-bound call frames,
 contract applications on methods, default-body proof attachments, and inferred
 poststate/provenance/effect summaries with their boundary kind. Named-contract definitions and extern contract-derived frames are covered by
 the normalization step below; effect/shape obligations remain incomplete.
-`uses` applications are not newly serialized here: analyzed declarations retain
-both expanded clauses and their original application, so an explicit canonical
-export representation must prevent duplicate application on import.
+Analyzed declarations retain both expanded clauses and their original `uses`
+application. Interface normalization below prevents duplicate application, while
+the general source formatter preserves unexpanded extern applications.
 No module object reuse or performance improvement is claimed by this prerequisite.
 
 
@@ -600,8 +600,9 @@ Already-analyzed ordinary function boundaries emit their expanded value/frame
 clauses and omit the retained original `Uses`. Import therefore does not apply the
 same contract twice. Tests run three analyze/emit/import cycles with stable text,
 then apply the exported contract in a new consumer and reject violating arguments.
-The public generation path remains post-analysis; raw source formatting is not a
-lossless serialization of an unexpanded function's `uses` applications.
+The public interface generation path remains post-analysis. General extern source
+formatting retains unexpanded `uses`; interface clones explicitly omit the
+applications after expansion instead of relying on formatter omission.
 
 Expansion also refreshes the existing function types' frame and canonical value
 specification in place: value symbols were registered before expansion, so their
@@ -612,8 +613,43 @@ A no-uses compilation skips the symbol-to-type publication index entirely.
 
 Qualification includes source/native extern value contracts, source/extern
 frame-law includes, generic contract proof attachments and all law syntax kinds.
-Effect/composite/shape includes that become Fulfills still need an exported
-obligation representation; extern expansion lacks a Fulfills field. Namespace
+Effect/composite/shape includes that become Fulfills use the exported obligation
+representation below; verification of their final summaries remains open. Namespace
 contract lookup and method applications also need broader qualification. The
 remaining lifetime, visibility, higher-order and inferred-summary gaps above
 continue to block general module cache admission. No speedup is claimed here.
+
+### Exported law obligations
+
+`ExternFuncDecl.Fulfills` now represents both declared and named-contract-derived
+law obligations. The boundary adapter, top-level/protocol/impl parsers, formatter,
+extern expansion and generated AST walkers retain the field. Extern function type
+construction passes it to the existing frame-summary resolver; a declared frame
+law therefore yields the same bounded writes before and after interface import.
+Function-level effect/composite/shape obligations retain their law names rather
+than disappearing when an ordinary function becomes an extern boundary.
+
+Tests cover expanded composite/effect/shape obligations on source functions and
+native externs through three stable analyze/emit/import cycles, explicit frame-law
+summary parity and method/default-method obligation syntax. These tests establish
+retention and frame semantics, not proof of an external body's effect/shape claim.
+A bodiless boundary continues to require trust or a separately verified producer.
+
+General incremental module admission remains unavailable. Inferred permission,
+mutable-global and returned-callback effect rows are stored in FuncType, not the
+source declaration; they still need a canonical exported semantic-summary record.
+Effect-law checking must also use converged interprocedural rows rather than
+assuming the early body-local row is final. Shape/measure verification uses its
+own body/codegen evidence and must not be inferred from a retained law name.
+Lifetime/provenance, declaration-kind, visibility and higher-order summaries also
+remain on the full module reuse path. No throughput improvement is claimed here.
+
+
+The frontend IR registry assigns the new extern field the next append-only field
+ID (19), leaving prior IDs and wire version unchanged. A bundle round-trip test
+compares both subject-free and parameter-bound obligations including positions.
+Unknown-field tolerance in a wire reader is not evidence of semantic cache
+compatibility: compiler/semantic identity must also participate in artifact keys.
+General extern formatting now retains raw generic `uses` applications; only
+post-analysis interface clones omit them. Protocol bound-call frame summaries
+and method law-obligation conformance remain separate semantic qualification work.

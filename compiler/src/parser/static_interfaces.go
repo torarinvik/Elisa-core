@@ -179,6 +179,10 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 	// A trailing `:` introduces a DEFAULT METHOD BODY: the protocol method carries an
 	// implementation that conforming types inherit unless they override it. Represented as a
 	// FuncDecl member (mirroring the impl-method shape) rather than a bodiless ExternFuncDecl.
+	var fulfills []ast.FulfillsClause
+	if p.matchIdentText("fulfills") {
+		fulfills = p.parseFulfillsClausesAfterKeyword()
+	}
 	if p.match(lexer.TOKEN_COLON) {
 		body := p.parseFuncBodyAfterColon()
 		reqs, reqProofs, ensureVals, ensureProofs, _, _, _, body := liftLeadingContracts(body)
@@ -197,6 +201,7 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 			EnsureProofs:     ensureProofs,
 			Changes:          changes,
 			Preserves:        preserves,
+			Fulfills:         fulfills,
 			Params:           params,
 			ReturnType:       retType,
 			Body:             body,
@@ -229,6 +234,7 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 		EnsureValues:     ensureVals,
 		Changes:          changes,
 		Preserves:        preserves,
+		Fulfills:         fulfills,
 		Params:           params,
 		ReturnType:       retType,
 	}
@@ -474,6 +480,10 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		preserves = p.parseChangesPathsAfterKeyword()
 	}
 
+	var fulfills []ast.FulfillsClause
+	if p.matchIdentText("fulfills") {
+		fulfills = p.parseFulfillsClausesAfterKeyword()
+	}
 	if p.match(lexer.TOKEN_COLON) {
 		body := p.parseFuncBodyAfterColon()
 		// Lift leading value contracts (`requires`/`ensure`) off the impl-method body into the decl,
@@ -481,11 +491,11 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		// against the protocol method's contracts (contravariant requires, covariant ensure + P4's
 		// effect/error/frame subset variance).
 		reqs, reqProofs, ensureVals, ensureProofs, _, _, _, body := liftLeadingContracts(body)
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, RequiresProofs: reqProofs, EnsureValues: ensureVals, EnsureProofs: ensureProofs, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, RequiresProofs: reqProofs, EnsureValues: ensureVals, EnsureProofs: ensureProofs, Changes: changes, Preserves: preserves, Fulfills: fulfills, Params: params, ReturnType: retType, Body: body}
 	}
 	reqs, ensureVals, blockChanges, blockPreserves := p.parseBodilessMethodContracts()
 	changes = append(changes, blockChanges...)
 	preserves = append(preserves, blockPreserves...)
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, EnsureValues: ensureVals, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, EnsureValues: ensureVals, Changes: changes, Preserves: preserves, Fulfills: fulfills, Params: params, ReturnType: retType}
 }

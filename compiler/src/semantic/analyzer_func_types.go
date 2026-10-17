@@ -14,8 +14,8 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 // funcTypeFromExternDecl builds the signature of an `extern` function. It is identical to
 // funcTypeFromDecl except that no implicit `preserve` poststates are synthesized: the native body is
 // unverifiable, so callers must keep widening a borrowed stateful argument across the call.
-func (a *Analyzer) funcTypeFromExternDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, requires []ast.Expr, ensureValues []ast.Expr, changes []ast.EnsuresPath, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
-	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, requires, ensureValues, changes, nil, params, ret, variadic, true)
+func (a *Analyzer) funcTypeFromExternDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, requires []ast.Expr, ensureValues []ast.Expr, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, requires, ensureValues, changes, fulfills, params, ret, variadic, true)
 }
 
 // funcTypeFromDeclWithFrame is funcTypeFromDecl plus the callee's frame clauses (docs/87 87-3), so

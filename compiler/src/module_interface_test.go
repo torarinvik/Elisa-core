@@ -2,6 +2,7 @@ package main
 
 import (
 	"elisacore/src/semantic"
+	"elisacore/src/unparse"
 	"reflect"
 	"strings"
 	"testing"
@@ -365,5 +366,129 @@ func TestInterfaceProtocolLawRetainsKind(t *testing.T) {
 	}
 	if again := generateModuleInterface(parsed); again != generated {
 		t.Fatalf("unstable protocol law:\n%s\nthen:\n%s", generated, again)
+	}
+}
+
+func TestInterfacePreservesExpandedFunctionLawObligations(t *testing.T) {
+	source := `law NoAlloc forbids Memory.Allocate
+law Leaf includes NoAlloc, NoBoundsChecks
+
+contract LeafWork(x: i64):
+    includes Leaf()
+
+def work(x: i64) -> i64:
+    uses LeafWork(x)
+    return x
+
+extern native_work(x: i64) -> i64 uses LeafWork(x)
+`
+	checked := semantic.Analyze(parseInterfaceTestSource(t, source))
+	if len(checked.Errors()) != 0 {
+		t.Fatal(checked.Errors())
+	}
+	for _, decl := range checked.File.Decls {
+		switch n := decl.(type) {
+		case *ast.FuncDecl:
+			if n.Name == "work" && (len(n.Fulfills) != 1 || n.Fulfills[0].Law != "Leaf") {
+				t.Fatalf("source obligation missing: %#v", n.Fulfills)
+			}
+		case *ast.ExternFuncDecl:
+			if n.Name == "native_work" && (len(n.Fulfills) != 1 || n.Fulfills[0].Law != "Leaf") {
+				t.Fatalf("extern expansion lost obligation: %#v", n.Fulfills)
+			}
+		}
+	}
+	generated := generateModuleInterface(checked.File)
+	if strings.Count(generated, "fulfills Leaf") != 2 {
+		t.Fatalf("lost obligations:\n%s", generated)
+	}
+	for revision := 0; revision < 3; revision++ {
+		parsed := parseInterfaceTestNamedSource(t, "interface.elisai", generated)
+		for _, decl := range parsed.Decls {
+			if ext, ok := decl.(*ast.ExternFuncDecl); ok && (len(ext.Fulfills) != 1 || ext.Fulfills[0].Law != "Leaf") {
+				t.Fatalf("import lost obligation: %#v", ext.Fulfills)
+			}
+		}
+		imported := semantic.Analyze(parsed)
+		if len(imported.Errors()) != 0 {
+			t.Fatal(imported.Errors())
+		}
+		again := generateModuleInterface(imported.File)
+		if again != generated {
+			t.Fatalf("obligations changed at revision %d:\n%s\nthen:\n%s", revision, generated, again)
+		}
+		generated = again
+	}
+}
+
+func TestInterfacePreservesDeclaredFrameLawObligations(t *testing.T) {
+	source := `struct Render:
+    px: mutable i32
+    health: mutable i32
+
+law PixelOnly(s: mutable Render&) changes s.px preserves s.health
+
+def bump(s: mutable Render&) fulfills s is PixelOnly:
+    s.px <- s.px + 1
+
+extern native_bump(s: mutable Render&) fulfills s is PixelOnly
+`
+	checked := semantic.Analyze(parseInterfaceTestSource(t, source))
+	if len(checked.Errors()) != 0 {
+		t.Fatal(checked.Errors())
+	}
+	generated := generateModuleInterface(checked.File)
+	imported := semantic.Analyze(parseInterfaceTestNamedSource(t, "interface.elisai", generated))
+	if len(imported.Errors()) != 0 {
+		t.Fatal(imported.Errors())
+	}
+	if strings.Count(generated, "fulfills s is PixelOnly") != 2 {
+		t.Fatalf("lost frame obligations:\n%s", generated)
+	}
+	for _, name := range []string{"bump", "native_bump"} {
+		before := checked.GlobalScope.Symbols[name].Type.(*semantic.FuncType)
+		after := imported.GlobalScope.Symbols[name].Type.(*semantic.FuncType)
+		if !before.FrameBounded || !after.FrameBounded || !reflect.DeepEqual(before.FrameWrites, after.FrameWrites) {
+			t.Fatalf("frame mismatch %s: %#v / %#v", name, before.FrameWrites, after.FrameWrites)
+		}
+	}
+}
+
+func TestInterfaceMethodLawObligationRoundTrip(t *testing.T) {
+	for _, source := range []string{
+		`protocol Worker:
+    def work(x: i64) -> i64 fulfills NoAlloc, NoBoundsChecks
+`,
+		`protocol Worker:
+    def work(x: i64) -> i64 fulfills NoAlloc, NoBoundsChecks:
+        return x
+`,
+		`impl i64:
+    def work(x: i64) -> i64 fulfills NoAlloc, NoBoundsChecks:
+        return x
+`,
+	} {
+		generated := generateModuleInterface(parseInterfaceTestSource(t, source))
+		if !strings.Contains(generated, "fulfills NoAlloc, NoBoundsChecks") {
+			t.Fatalf("lost method obligations:\n%s", generated)
+		}
+		parsed := parseInterfaceTestNamedSource(t, "interface.elisai", generated)
+		if again := generateModuleInterface(parsed); again != generated {
+			t.Fatalf("unstable method obligations:\n%s\nthen:\n%s", generated, again)
+		}
+	}
+}
+
+func TestFormatExternUsesPreservesUnexpandedApplication(t *testing.T) {
+	source := `extern work(x: i64) -> i64 uses Ordered[i64](0, x) fulfills Leaf
+`
+	formatted := unparse.FormatFile(parseInterfaceTestSource(t, source))
+	parsed := parseInterfaceTestSource(t, formatted)
+	ext := parsed.Decls[0].(*ast.ExternFuncDecl)
+	if len(ext.Uses) != 1 || ext.Uses[0].UsesName != "Ordered" || len(ext.Uses[0].UsesTypeArgs) != 1 || len(ext.Uses[0].UsesArgs) != 2 {
+		t.Fatalf("lost unexpanded uses: %s", formatted)
+	}
+	if again := unparse.FormatFile(parsed); again != formatted {
+		t.Fatalf("unstable unexpanded uses: %s / %s", formatted, again)
 	}
 }

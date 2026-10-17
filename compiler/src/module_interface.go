@@ -54,7 +54,9 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		if hasInterfaceInternalAnnotation(n.Annotations) {
 			return nil
 		}
-		return n
+		copy := *n
+		copy.Uses = nil // post-analysis clauses already contain the expansion
+		return &copy
 	case *ast.InterfaceDecl:
 		members := make([]ast.InterfaceMember, 0, len(n.Members))
 		for _, member := range n.Members {
@@ -63,6 +65,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 				members = append(members, &ast.AssociatedTypeDecl{Position: m.Position, Name: m.Name})
 			case *ast.ExternFuncDecl:
 				copy := *m
+				copy.Uses = nil
 				members = append(members, &copy)
 			case *ast.FuncDecl:
 				// Default method: a downstream module needs the body to inherit the default, so
@@ -93,6 +96,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 					continue
 				}
 				copy := *m
+				copy.Uses = nil
 				members = append(members, &copy)
 			}
 		}
@@ -166,14 +170,14 @@ func hasInterfaceInternalAnnotation(annotations []ast.Annotation) bool {
 }
 
 // interfaceFunctionBoundary copies the contracts represented by ExternFuncDecl.
-// Return regions, lmut manifests, named contracts, inferred summaries and other
+// Return regions, lmut manifests, inferred summaries and other
 // body-dependent exports still need a lossless schema before module cache reuse.
 func interfaceFunctionBoundary(n *ast.FuncDecl) *ast.ExternFuncDecl {
 	return &ast.ExternFuncDecl{
 		Position: n.Position, Annotations: n.Annotations, Override: n.Override, Name: n.Name,
 		TypeParams: n.TypeParams, PermissionParams: n.PermissionParams, GenericParams: n.GenericParams,
 		RegionParams: n.RegionParams, Permissions: n.Permissions, Ensures: n.Ensures,
-		Requires: n.Requires, EnsureValues: n.EnsureValues, Uses: n.Uses,
-		Changes: n.Changes, Preserves: n.Preserves, Params: n.Params, ReturnType: n.ReturnType, Variadic: n.Variadic,
+		Requires: n.Requires, EnsureValues: n.EnsureValues,
+		Changes: n.Changes, Preserves: n.Preserves, Fulfills: n.Fulfills, Params: n.Params, ReturnType: n.ReturnType, Variadic: n.Variadic,
 	}
 }

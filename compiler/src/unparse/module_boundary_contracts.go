@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func formatBoundaryValueContracts(requires []ast.Expr, ensures []ast.Expr) string {
+func formatBoundaryValueContracts(requires []ast.Expr, uses []*ast.ContractStmt, ensures []ast.Expr) string {
 	line := ""
 	appendConditions := func(keyword string, expressions []ast.Expr) {
 		if len(expressions) == 0 {
@@ -18,6 +18,21 @@ func formatBoundaryValueContracts(requires []ast.Expr, ensures []ast.Expr) strin
 		line += " " + keyword + " " + strings.Join(parts, ", ")
 	}
 	appendConditions("requires", requires)
+	for _, used := range uses {
+		line += " uses " + used.UsesName
+		if len(used.UsesTypeArgs) > 0 {
+			parts := make([]string, len(used.UsesTypeArgs))
+			for i, t := range used.UsesTypeArgs {
+				parts[i] = formatTypeExpr(t)
+			}
+			line += "[" + strings.Join(parts, ", ") + "]"
+		}
+		parts := make([]string, len(used.UsesArgs))
+		for i, arg := range used.UsesArgs {
+			parts[i] = formatExpr(arg)
+		}
+		line += "(" + strings.Join(parts, ", ") + ")"
+	}
 	appendConditions("ensure", ensures)
 	return line
 }
@@ -48,4 +63,18 @@ func (f *formatter) writeBoundaryContracts(level int, requires, ensures []ast.Ex
 	for _, e := range ensures {
 		f.writeLine(level, "ensure "+formatExpr(e))
 	}
+}
+
+func formatBoundaryFulfills(clauses []ast.FulfillsClause) string {
+	if len(clauses) == 0 {
+		return ""
+	}
+	parts := make([]string, len(clauses))
+	for i, clause := range clauses {
+		parts[i] = clause.Law
+		if clause.Param != "" {
+			parts[i] = clause.Param + " is " + clause.Law
+		}
+	}
+	return " fulfills " + strings.Join(parts, ", ")
 }

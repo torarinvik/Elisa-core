@@ -1996,6 +1996,9 @@ func astWalkVal_ast_ExternFuncDecl(p *ast.ExternFuncDecl, visit func(any), seen 
 	for i0 := range p.Preserves {
 		astWalkVal_ast_EnsuresPath(&p.Preserves[i0], visit, seen)
 	}
+	for i0 := range p.Fulfills {
+		astWalkVal_ast_FulfillsClause(&p.Fulfills[i0], visit, seen)
+	}
 	for i0 := range p.Params {
 		astWalkVal_ast_ParamDecl(&p.Params[i0], visit, seen)
 	}

@@ -389,6 +389,7 @@ F ExternFuncDecl 15 ReturnType
 F ExternFuncDecl 16 TypeParams
 F ExternFuncDecl 17 Uses
 F ExternFuncDecl 18 Variadic
+F ExternFuncDecl 19 Fulfills
 
 T 62 ExternTypeDecl
 F ExternTypeDecl 1 Annotations

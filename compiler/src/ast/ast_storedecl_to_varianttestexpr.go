@@ -309,8 +309,10 @@ type ExternFuncDecl struct {
 	// Changes / Preserves hold the frame condition (`changes`/`preserves <path>, ...`, docs/87) on a
 	// bodiless boundary or protocol method. On a PROTOCOL method, Changes is the upper-bound frame an
 	// impl may write (impl `changes` must be a subset of it; P4 effect/frame variance).
-	Changes    []EnsuresPath
-	Preserves  []EnsuresPath
+	Changes   []EnsuresPath
+	Preserves []EnsuresPath
+	// Fulfills retains declared or named-contract-derived law obligations on a bodiless boundary.
+	Fulfills   []FulfillsClause
 	Params     []ParamDecl
 	ReturnType TypeExpr
 	Variadic   bool

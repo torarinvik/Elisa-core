@@ -73,7 +73,7 @@ func (a *Analyzer) expandUsesContracts(decls []scopedDecl) {
 		if !ok || fn == nil || len(fn.Uses) == 0 || fn.IsContract {
 			if ext, extOK := sd.Decl.(*ast.ExternFuncDecl); extOK && ext != nil && len(ext.Uses) > 0 {
 				a.expandExternUsesContracts(ext, contracts)
-				publish(sd, ext.Changes, nil)
+				publish(sd, ext.Changes, ext.Fulfills)
 			}
 			continue
 		}
@@ -95,6 +95,7 @@ func (a *Analyzer) expandExternUsesContracts(ext *ast.ExternFuncDecl, contracts 
 		PermissionParams: append([]string(nil), ext.PermissionParams...),
 		GenericParams:    append([]ast.GenericParam(nil), ext.GenericParams...),
 		Permissions:      append([]ast.PermissionRef(nil), ext.Permissions...),
+		Fulfills:         append([]ast.FulfillsClause(nil), ext.Fulfills...),
 		Changes:          append([]ast.EnsuresPath(nil), ext.Changes...),
 		Preserves:        append([]ast.EnsuresPath(nil), ext.Preserves...),
 		Requires:         append([]ast.Expr(nil), ext.Requires...),
@@ -106,6 +107,7 @@ func (a *Analyzer) expandExternUsesContracts(ext *ast.ExternFuncDecl, contracts 
 	for _, use := range ext.Uses {
 		a.expandOneUse(fn, use, contracts)
 	}
+	ext.Fulfills = append([]ast.FulfillsClause(nil), fn.Fulfills...)
 	ext.Changes = append([]ast.EnsuresPath(nil), fn.Changes...)
 	ext.Preserves = append([]ast.EnsuresPath(nil), fn.Preserves...)
 	ext.Requires = append([]ast.Expr(nil), fn.Requires...)
