@@ -126,7 +126,8 @@ The original Analyze/AnalyzeWithOptions APIs retain the cold path.
 
 Each query reads a position-independent, versioned closed-grammar source digest,
 complete options/effective environment, canonical primitive bindings with the
-absence of static impls, and an immutable typing product. Current source nodes
+absence of applicable primitive binary operator candidates, and an immutable
+typing product. Current source nodes
 are collected by the same checked grammar; compact `int`/`i64` tags resolve to
 the current analyzer's canonical types. Exact AST field-name/type manifests
 close the path on schema changes, even for newly added zero fields. Depth,
@@ -478,3 +479,32 @@ partial local admission, retained-owner insertion/removal, cross-owner priority,
 unsupported caller starvation, and many retained owners gaining local declarations.
 The 4096-node expression boundary permits the additional local initializer-result
 tag (4097 total tags); one-over-limit expressions still compile cold.
+
+
+### Operator lookup absence and unrelated impls
+
+Arithmetic reuse no longer requires an empty impl registry. The safety input is
+a versioned proof that canonical int/i64 receivers have no exact matching
+`__add__`, `__sub__` or `__mul__` candidates. It enumerates candidates using the
+SameType relation used by binary operator dispatch. Any match, including multiple
+ambiguous matches, forces cold typing. An unrelated impl or unrelated method does
+not change the absence value and preserves existing products.
+
+The current numeric unary-minus path and numeric span-algebra path bypass
+protocol dispatch. Generic-unifying method resolution is a separate path, so it
+is not substituted for the exact resolver used by these binary operations. Tests
+cross-check every claimed absence against the actual operator-call builder.
+
+The proof is cached only within a fresh analyzer and keyed by its canonical
+primitive type pointers. Impl collection invalidates it on entry and exit;
+probes during collection are never memoized. Production receiver/method registry
+writes are contained in that collection boundary. This avoids rescanning all
+stdlib impls at every body/initializer boundary. No impl, symbol or analyzer
+pointer is retained in the session product.
+
+Source and native tests add an unrelated impl (reuse and exit 21), add an exact
+i64 addition impl (cold lowering and exit 20), then remove it (reuse and exit 21).
+Cold/warm LLVM text, published metadata and impl method summaries are compared.
+The parity oracle now maps the whole current AST bijectively, including impl
+syntax and declaration-visibility map keys. This expands usable environments;
+it is not a general call/trait dependency graph or an end-to-end speedup claim.

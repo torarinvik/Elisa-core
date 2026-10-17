@@ -34,6 +34,7 @@ func assertIncrementalResultParity(t *testing.T, cold, warm *Result) {
 	// every published field except invocation objects/costs. No output inventory
 	// is silently limited to the maps restored by the cache.
 	mapping := map[PositionedFunctionNode]PositionedFunctionNode{}
+	mapIncrementalCurrentAST(t, reflect.ValueOf(cold.File), reflect.ValueOf(warm.File), mapping)
 	collect := func(file *ast.File) map[string]*ast.FuncDecl {
 		out := map[string]*ast.FuncDecl{}
 		var walk func([]ast.Decl, string)
@@ -43,6 +44,12 @@ func assertIncrementalResultParity(t *testing.T, cold, warm *Result) {
 				switch node := decl.(type) {
 				case *ast.NamespaceDecl:
 					walk(node.Decls, path)
+				case *ast.ImplDecl:
+					for memberIndex, member := range node.Members {
+						if fn, ok := member.(*ast.FuncDecl); ok {
+							out[fmt.Sprintf("%s/member/%d", path, memberIndex)] = fn
+						}
+					}
 				case *ast.FuncDecl:
 					out[path] = node
 				}
@@ -211,7 +218,7 @@ func TestIncrementalSessionEligibilityIsClosed(t *testing.T) {
 	}
 }
 
-func TestIncrementalSessionSafetyFailureAndRemoval(t *testing.T) {
+func TestIncrementalSessionUnrelatedImplAndRemoval(t *testing.T) {
 	const source = "def work() -> i64:\n    return 20 + 1\n"
 	const impl = `struct BuilderTag:
     tag: int
@@ -229,17 +236,18 @@ impl Builder for BuilderTag:
 	var session IncrementalAnalysisSession // zero value is usable too
 	session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
 	before := session.Stats()
-	blocked := session.Analyze(parseIncrementalSessionFile(t, impl+source), AnalyzeOptions{})
-	if len(blocked.Errors()) != 0 {
-		t.Fatal(blocked.Errors())
+	withImpl := session.Analyze(parseIncrementalSessionFile(t, impl+source), AnalyzeOptions{})
+	if len(withImpl.Errors()) != 0 {
+		t.Fatal(withImpl.Errors())
 	}
-	if session.Stats().PrimaryBodiesReused != before.PrimaryBodiesReused {
-		t.Fatal("new static impl did not block reuse")
+	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, impl+source)), withImpl)
+	if session.Stats().PrimaryBodiesReused != before.PrimaryBodiesReused+1 {
+		t.Fatal("unrelated static impl blocked reuse")
 	}
 	restored := session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
 	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, source)), restored)
-	if session.Stats().PrimaryBodiesReused != before.PrimaryBodiesReused+1 {
-		t.Fatal("safe environment did not restore reuse")
+	if session.Stats().PrimaryBodiesReused != before.PrimaryBodiesReused+2 {
+		t.Fatal("unrelated impl removal lost reuse")
 	}
 	// A new contract/error must never be hidden by previously valid body facts.
 	invalid := "def work() -> i64:\n    ensure result == 0\n    return 20 + 1\n"

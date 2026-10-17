@@ -149,6 +149,7 @@ type Analyzer struct {
 	finalizingRefinements bool
 	staticInterfaces      map[string]*StaticInterface
 	staticImpls           map[string]*StaticImpl
+	incrementalOperators  primitiveOperatorSafety
 	effectHandlers        map[string]*EffectHandler
 	// regionPolyFn is the function under examination by the region-polymorphism
 	// classification pre-pass; it supplies the generic-param protocol bounds for

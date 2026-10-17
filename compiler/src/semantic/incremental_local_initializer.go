@@ -152,7 +152,7 @@ func (a *Analyzer) analyzeLocalInitializer(n *ast.VarDeclStmt, expected Type) Ty
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	invocation.prepareAnalyzer(a)
-	if invocation.safety != "canonical-primitives-no-impls" || !input.currentBindings(a) {
+	if invocation.safety != primitiveOperatorAbsence || !input.currentBindings(a) {
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	session := invocation.session

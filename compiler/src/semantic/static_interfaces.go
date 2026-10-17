@@ -824,6 +824,8 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 }
 
 func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
+	a.incrementalOperators.beginCollection()
+	defer a.incrementalOperators.endCollection()
 	for _, scoped := range decls {
 		decl, ok := scoped.Decl.(*ast.ImplDecl)
 		if !ok {

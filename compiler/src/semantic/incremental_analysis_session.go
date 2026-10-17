@@ -81,7 +81,7 @@ func (session *IncrementalAnalysisSession) resetDatabase() {
 		config, _ := reader.Input(primitiveConfigKey)
 		safety, _ := reader.Input(primitiveSafetyKey)
 		encoded, ok := reader.Input(primitiveInput("function-product", name))
-		if !ok || safety != "canonical-primitives-no-impls" {
+		if !ok || safety != primitiveOperatorAbsence {
 			return "", errPrimitiveProductMiss
 		}
 		var product primitiveBodyProduct
@@ -350,8 +350,8 @@ func (invocation *incrementalBodyInvocation) prepareAnalyzer(a *Analyzer) {
 	invocation.safety = "blocked"
 	intType, intOK := a.namedTypes["int"].(*BuiltinType)
 	i64Type, i64OK := a.namedTypes["i64"].(*BuiltinType)
-	if intOK && i64OK && intType.Name == "int" && i64Type.Name == "i64" && len(a.staticImpls) == 0 {
-		invocation.safety = "canonical-primitives-no-impls"
+	if intOK && i64OK && intType.Name == "int" && i64Type.Name == "i64" && a.incrementalOperators.operatorsAbsent(a, intType, i64Type) {
+		invocation.safety = primitiveOperatorAbsence
 	}
 	invocation.session.db.Apply(incremental.Change{Key: primitiveSafetyKey, Value: invocation.safety})
 }
@@ -565,7 +565,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	} // validate current lookup absence at the reuse boundary
 	currentReturn, returnOK := a.currentReturn.(*BuiltinType)
 	nodes, eligible := primitiveReturnExpressions(fn)
-	if !indexed || !eligible || !primitiveCurrentParameterBindings(a, fn) || invocation.safety != "canonical-primitives-no-impls" || !returnOK || currentReturn.Name != "i64" || currentReturn != a.namedTypes["i64"] {
+	if !indexed || !eligible || !primitiveCurrentParameterBindings(a, fn) || invocation.safety != primitiveOperatorAbsence || !returnOK || currentReturn.Name != "i64" || currentReturn != a.namedTypes["i64"] {
 		if indexed && !eligible {
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-source", key), Remove: true}, incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
 			invocation.session.forgetPrimitiveProduct(key)
