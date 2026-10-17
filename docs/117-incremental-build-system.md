@@ -319,3 +319,24 @@ separate-compilation/interface model for Stage 2 is designed and reviewed.
 - Cross-unit monomorphization of generics (`fn[T]`) — like `@inline`, the
   instantiated body crosses unit boundaries and must be tracked.
 - Cache eviction policy and a `elisac clean`/cache-stats surface.
+
+
+### Running compiler and tool replacement
+
+Native cache compiler identity pins an executable descriptor before `main`.
+Linux opens `/proc/self/exe`; other supported Unix systems open the executable
+path during package initialization. Hashing is deferred to the first native
+cache lookup and memoized, with descriptor metadata checked on every lookup.
+Device/inode/change-time metadata detects in-place writes even when size and
+mtime are restored. A changed pinned artifact disables reuse conservatively;
+unlinking an old image during installation can also cause this fallback.
+Unsupported metadata or an unavailable executable descriptor disables native
+cache reuse rather than guessing an identity. The initial path-open race on
+systems without a running-image handle is not eliminated by this design.
+
+Tool digests are memoized only while their file fingerprint remains unchanged;
+same-path replacement invalidates them. This detects replacement between
+lookups, but does not bind a path-based tool invocation to the previously hashed
+bytes. Replacement between identity lookup and execution remains an open
+publication-coherence requirement. Neither change establishes artifact-content
+integrity or complete external link dependency tracking.
