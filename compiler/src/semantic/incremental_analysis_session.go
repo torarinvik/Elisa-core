@@ -42,6 +42,7 @@ type IncrementalAnalysisStats struct {
 	DatabaseResets                                                             uint64
 	ColdFallbackAnalyses                                                       uint64
 	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes     uint64
+	CapacityLimitedAnalyses, CapacitySkippedQueries                            uint64
 	Queries                                                                    incremental.Stats
 }
 type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
@@ -183,28 +184,72 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if absolute, err := filepath.Abs(origin); err == nil {
 		origin = absolute
 	}
-	tooManyTrackedBodies := false
-	var collect func([]ast.Decl, string, int)
-	collect = func(decls []ast.Decl, namespace string, depth int) {
-		if depth > 128 || tooManyTrackedBodies {
+	skipped := 0
+	var pendingLocals []*primitiveLocalInitializer
+	trimPending := func() {
+		available := session.trackedBodyLimit() - len(current)
+		if len(pendingLocals) > available {
+			skipped += len(pendingLocals) - available
+			clear(pendingLocals[available:])
+			pendingLocals = pendingLocals[:available]
+		}
+	}
+	var collect func([]ast.Decl, string, int, bool)
+	collect = func(decls []ast.Decl, namespace string, depth int, retainedOnly bool) {
+		if depth > 128 {
 			return
 		}
 		for _, decl := range decls {
-			if tooManyTrackedBodies {
-				return
-			}
 			if nested, ok := decl.(*ast.NamespaceDecl); ok {
 				if len(nested.Name) > primitiveSourceByteBudget-len(namespace)-1 {
 					continue
 				}
-				collect(nested.Decls, joinQualifiedName(namespace, nested.Name), depth+1)
+				collect(nested.Decls, joinQualifiedName(namespace, nested.Name), depth+1, retainedOnly)
 				continue
 			}
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
+			if !ok || fn == nil {
 				continue
 			}
-			_, ok = primitiveReturnHeader(fn)
+			if fn.Name == "" || len(fn.Name) > primitiveSourceByteBudget {
+				continue
+			}
+			qualifiedName := joinQualifiedName(namespace, fn.Name)
+			if len(qualifiedName) > primitiveSourceByteBudget {
+				continue
+			}
+			keyBytes := []byte("primitive/i64-parameters/v2\x00")
+			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
+			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(origin)))
+			keyBytes = append(keyBytes, origin...)
+			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(qualifiedName)))
+			keyBytes = append(keyBytes, qualifiedName...)
+			identity := sha256.Sum256(keyBytes)
+			name := "primitive-v1:" + hex.EncodeToString(identity[:])
+			key := primitiveInput("function-source", name)
+			retained := session.previous[key]
+			if retained && len(fn.Body) > 1 {
+				// A local-function owner is useful only together with a local
+				// query. A former return-body owner is not a retained local unit.
+				retained = false
+				if len(fn.Body) <= 257 {
+					for _, stmt := range fn.Body {
+						local, ok := stmt.(*ast.VarDeclStmt)
+						if !ok || local == nil || len(local.Name) > primitiveSourceByteBudget {
+							continue
+						}
+						id := sha256.Sum256([]byte(local.Name))
+						if session.previous[primitiveInput("function-source", name+"/local-name-v2/"+hex.EncodeToString(id[:]))] {
+							retained = true
+							break
+						}
+					}
+				}
+			}
+			if retainedOnly != retained || current[key] {
+				continue
+			}
+			_, ok = primitiveReturnExpressions(fn)
 			var locals []*primitiveLocalInitializer
 			if !ok {
 				locals, ok = primitiveLocalInitializers(fn)
@@ -212,40 +257,59 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 					continue
 				}
 			}
-			keyBytes := []byte("primitive/i64-parameters/v2\x00")
-			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
-			qualifiedName := joinQualifiedName(namespace, fn.Name)
-			if len(qualifiedName) > primitiveSourceByteBudget {
+			needed := 1
+			if len(locals) > 0 {
+				needed = 2
+			} // owner context plus at least one initializer
+			if len(current)+needed > session.trackedBodyLimit() {
+				skipped += 1 + len(locals)
 				continue
 			}
-			if len(invocation.keys)+len(invocation.localInitializers)+1+len(locals) > session.trackedBodyLimit() {
-				tooManyTrackedBodies = true
-				return
-			}
-			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(origin)))
-			keyBytes = append(keyBytes, origin...)
-			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(qualifiedName)))
-			keyBytes = append(keyBytes, qualifiedName...)
-			identity := sha256.Sum256(keyBytes)
-			name := "primitive-v1:" + hex.EncodeToString(identity[:])
 			invocation.keys[fn] = name
-			key := primitiveInput("function-source", name)
 			current[key] = true
+			trimPending()
 			for _, input := range locals {
 				identity := sha256.Sum256([]byte(input.declaration.Name))
 				input.key = name + "/local-name-v2/" + hex.EncodeToString(identity[:])
+				localKey := primitiveInput("function-source", input.key)
+				if retainedOnly && !session.previous[localKey] {
+					// Reserve space for all other retained owners before new locals.
+					if len(current)+len(pendingLocals) >= session.trackedBodyLimit() {
+						skipped++
+						continue
+					}
+					pendingLocals = append(pendingLocals, input)
+					continue
+				}
+				if len(current) >= session.trackedBodyLimit() {
+					skipped++
+					continue
+				}
 				invocation.localInitializers[input.declaration] = input
-				current[primitiveInput("function-source", input.key)] = true
+				current[localKey] = true
+				trimPending()
 			}
 		}
 	}
-	collect(file.Decls, "", 0)
-	if tooManyTrackedBodies {
-		// Do not partially index a large file. Preserve any prior bounded session
-		// state, analyze this request normally, and try again on a later revision.
-		session.stats.ColdFallbackAnalyses++
-		session.stats.CapacityFallbackAnalyses++
-		return AnalyzeWithOptions(file, options)
+	// Budget pressure must not turn a large request entirely cold. Retain
+	// existing owners first, then fill available slots in declaration order.
+	if len(session.previous) > 0 {
+		collect(file.Decls, "", 0, true)
+	}
+	for _, input := range pendingLocals {
+		if len(current) >= session.trackedBodyLimit() {
+			skipped++
+			continue
+		}
+		invocation.localInitializers[input.declaration] = input
+		current[primitiveInput("function-source", input.key)] = true
+	}
+	clear(pendingLocals)
+	pendingLocals = nil
+	collect(file.Decls, "", 0, false)
+	if skipped > 0 {
+		session.stats.CapacityLimitedAnalyses++
+		session.stats.CapacitySkippedQueries += uint64(skipped)
 	}
 	var removed []incremental.Key
 	for key := range session.previous {
@@ -469,7 +533,8 @@ func primitiveExpressionDigest(fn *ast.FuncDecl, nodes []ast.Expr) string {
 	return hex.EncodeToString(digest[:])
 }
 func validPrimitiveTyping(types string) bool {
-	if len(types) == 0 || len(types) > 4096 {
+	// A local product adds one pre-conversion result tag to 4096 expression tags.
+	if len(types) == 0 || len(types) > 4097 {
 		return false
 	}
 	for i := range types {

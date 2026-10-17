@@ -143,9 +143,23 @@ speculative/fixpoint/specialization work. Each body edit invalidates its own
 product; source shifts reuse without keeping old nodes or positions.
 
 The session serializes analyses and retains only strings/keys between calls.
-Each session indexes at most 4096 candidate owner/initializer plans and retains at most 1 MiB of
-encoded typing products. Requests above the body limit take the cold path without
-partially changing that session; products above the byte budget are not admitted.
+Each session indexes at most 4096 admitted owner/initializer keys and retains at
+most 1 MiB of encoded typing products. Above the key budget, retained eligible
+owners and their retained local queries are selected first. Remaining slots go
+to new locals of selected owners, then new owners in declaration order. Every
+unselected body/initializer compiles normally; the request retains available
+hits rather than becoming entirely cold. Unsupported return grammars never
+consume a slot. A local owner needs room for its context and at least one
+initializer, so context alone cannot monopolize a slot. Owners changing from
+return-body products to locals without retained initializer keys join new
+admission rather than displacing existing retained units. Selected plus queued
+new-local plans stay within the key budget;
+trimmed pointers are cleared. Products above the byte budget are not admitted.
+CapacityLimitedAnalyses/CapacitySkippedQueries describe partial admission;
+ColdFallbackAnalyses continues to describe whole cold requests. The legacy
+CapacityFallbackAnalyses counter remains zero. This deterministic retention
+policy is not access-based LRU and can leave new candidates unadmitted while
+existing eligible owners remain present.
 The HTTP compile server currently offers this through an opt-in, 32-entry LRU
 partitioned by canonical filename and analysis profile; default requests remain
 stateless. Removed/ineligible owners lose product inputs and query memos; periodic
@@ -457,3 +471,10 @@ samples, GOMAXPROCS=4) measured median
 from 123600 to 105345, while allocated bytes rose from 12.45 MB to 12.64 MB. This
 fixture establishes no meaningful throughput gain; the path remains opt-in and
 further dependency/replay work is required.
+
+
+Capacity regression tests include a real 4097-function program with warm hits,
+partial local admission, retained-owner insertion/removal, cross-owner priority,
+unsupported caller starvation, and many retained owners gaining local declarations.
+The 4096-node expression boundary permits the additional local initializer-result
+tag (4097 total tags); one-over-limit expressions still compile cold.
