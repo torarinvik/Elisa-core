@@ -16,6 +16,36 @@ func TestSMTPointerSubstitutedViewProjection(t *testing.T) {
     ensure result.data == view.data
     return view
 `, false},
+		{"guarded_same_view", `def check(view: sview, flag: bool) -> sview:
+    ensure (flag and result.len > 0) implies result.data == view.data
+    return view
+`, false},
+		{"guarded_wrong_view", `def check(view: sview, other: sview, flag: bool) -> sview:
+    requires view.data != other.data
+    ensure (flag and result.len > 0) implies result.data == view.data
+    return other
+`, true},
+		{"branch_same_view", `def check(view: sview, other: sview, flag: bool) -> sview:
+    ensure (flag and result.len > 0) implies result.data == view.data
+    can Unsafe.PointerArithmetic:
+        return other if not flag
+        return view
+`, false},
+		{"branch_wrong_view", `def check(view: sview, other: sview, flag: bool) -> sview:
+    requires view.data != other.data
+    ensure (flag and result.len > 0) implies result.data == view.data
+    can Unsafe.PointerArithmetic:
+        return view if not flag
+        return other
+`, true},
+		{"branch_float_is_not_reflexive", `struct FloatBox:
+    value: f64
+def check(box: FloatBox, other: FloatBox, flag: bool) -> FloatBox:
+    ensure flag implies result.value == box.value
+    can Unsafe.PointerArithmetic:
+        return other if not flag
+        return box
+`, true},
 		{"nested_return", `def check(view: sview) -> (found: bool, value: sview):
     ensure result.value.data == view.data
     return (true, view)

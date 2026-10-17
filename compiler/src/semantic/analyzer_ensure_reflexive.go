@@ -97,7 +97,14 @@ func (a *Analyzer) reflexiveOperandsEqual(l, r ast.Expr) bool {
 	}
 	if t := a.exprTypes[stripOptimizationParens(l)]; t == nil {
 		if rt := a.exprTypes[stripOptimizationParens(r)]; rt == nil {
-			return false // untyped on both sides: cannot rule out a float
+			// Result substitution clones field nodes, including unchanged pointer projections on
+			// the other side. Recover their caller-scope types before declining: a stable pointer
+			// read is reflexive, whereas an unknown or floating-point read must remain excluded.
+			tr := &smtTranslator{a: a}
+			if !a.exprIsPointerLike(tr.pointerIdentityOperandType(l)) || !a.exprIsPointerLike(tr.pointerIdentityOperandType(r)) ||
+				!tr.pointerIdentityReadStable(l) || !tr.pointerIdentityReadStable(r) {
+				return false
+			}
 		}
 	}
 	return a.sameExprText(l, r)
