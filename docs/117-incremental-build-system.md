@@ -65,6 +65,25 @@ to reconstruct mutated semantic content. Generated default arguments, replaced
 nodes and detached nodes decline capture until dedicated origin/reconstruction
 adapters exist. No mutable AST is persisted, and no body skip is enabled.
 
+`semantic/incremental_scalar_facts.go` implements the first typed observation
+adapter: ExprTypes, ResolvedTypeNames, ResolvedValueNames, PermGrowthOps,
+RewriteDefaults, IndexBoundsProven, LemmaCalls, GhostDecls and GhostContracts.
+The product owns a deterministic encoded string; restore returns separate maps
+on current source nodes and newly allocated audited scalar types. Only builtin,
+bit-integer, never and null leaf types are supported; nominal, composite, invalid
+and unknown types decline capture. Numeric CanonicalTypeID values and Type.String
+are never used as persistent type identities. Exact field names/types, payload
+schema, entry/string/byte budgets, duplicate entries and typed anchor matches
+are checked. A failed restore exposes no partial maps. Explicit false entries
+remain distinct from absent entries.
+
+The backend regression replaces all nine covered output maps with restored
+observations and checks LLVM IR against an independent cold analysis after source
+relocation. Other outputs and live-analyzer state still come from fresh analysis
+in that test. This qualifies metadata replay only: it does not skip a body,
+establish semantic dependencies or validate proof retry policy. The enclosing
+function query must supply those guarantees before any production reuse.
+
 `FunctionProductRequirements` explicitly classifies all 58 current Result fields.
 A new or removed field without an updated policy closes the product-index gate.
 These policies are requirements, not implemented replay adapters. Mixed-phase
