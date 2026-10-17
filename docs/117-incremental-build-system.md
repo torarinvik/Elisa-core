@@ -37,6 +37,34 @@ the dependency mechanism, not a claim that compiler body visits are skipped.
 Portable function products, current-node rebinding, persistent graph storage,
 and parallel query scheduling remain separate implementation work.
 
+Function-product identity and anchor APIs now live in
+`semantic/incremental_function_identity.go`. Declaration identity includes loader
+origin, resolved qualified name, receiver implementation, ordered specialization
+context, and an explicit structural signature digest. The digest covers lifted
+contracts and lifetime/frame fields; the pretty printer is not a lossless
+semantic serialization. Function bodies are separate inputs. Position-independent
+node anchors cover the whole declaration, including contracts and sorted
+resolved-argument maps. Batch capture validates the source tree; batch replay
+validates the destination and returns current node pointers/positions. Mutation,
+detached nodes, mismatching kinds or changed graph topology decline replay.
+Parsed and lowered trees remain distinct: synthesized lowering nodes must be
+restored before replaying metadata that refers to them.
+Depth, work and encoded-size budgets reject oversized product graphs without
+turning the optional cache path into unbounded recursive work. These source
+identities and structural anchors are not resolved API fingerprints or cache-hit
+authorization; the enclosing semantic query must separately validate its inputs.
+
+`FunctionProductRequirements` explicitly classifies all 58 current Result fields.
+A new or removed field without an updated policy closes the product-index gate.
+These policies are requirements, not implemented replay adapters. Mixed-phase
+progress summaries need both body-seed restoration and fresh blocking/SCC work.
+The live analyzer also needs hydration: backend APIs for builtin identity,
+static branches, program regions and generic specialization delegate to it.
+Its private summaries/deferred contributions still need their own adapter audit.
+Semantic options, effective environment policy (including initialization-time
+auto-reserve state), lookup sets and source authority must be tracked query inputs.
+No function-body skip is enabled by this identity/schema groundwork.
+
 Run the reproducible supporting workload with:
 
 ```sh
