@@ -1088,3 +1088,53 @@ probes and the frozen parent/candidate diagnostic comparisons passed. The broade
 root-suite failures recorded earlier remain unresolved. Next architectural work
 must expand actual resolved body/callee/type dependency products and isolated
 flow-state hydration; the allocation optimization does not close that coverage gap.
+
+### Resolved mutable-borrow capability queries
+
+The opt-in semantic session now retains the Boolean capability classification of
+resolved nongeneric type graphs. Unlike the initial i64 body products, this
+reaches aggregate types in the existing parser component. Each product owns an
+immutable structural description; no AST, Symbol, Type pointer, substitution
+context or mutable flow state is retained between analyses. Relevant field flags,
+container elements, enum/error payloads and mutable-reference flags participate in
+the description. Generic instances and unknown types use the original traversal.
+Queries run only after declaration shapes freeze. A bounded invocation-local memo
+avoids repeatedly describing the same current Type pointer; it is discarded with
+the analyzer. Its 65,536-entry limit favors throughput over a smaller working set.
+
+The projection is bounded to 256 distinct nodes, 4,096 edges and 64 KiB, including
+collection entries and names. This conservative node limit ensures a retained
+answer cannot suppress the original depth-limit diagnostic in any traversal
+order. Incomplete traversals are never published. Recursive intermediate answers
+are not cached: their seen-set context can make a negative result root-dependent.
+The session retains at most 1,024 products and 8 MiB of accounted payload; periodic
+rebuilds bound database input tombstones as well as live query entries. Trivial
+scalar leaves and directly mutable references/views bypass the persistent query.
+
+Fresh-graph/edit/revert tests compare complete semantic Results, current AST
+annotations and global permission rows. Coverage includes cycles, ghost/phantom
+fields, payloads, unsupported generics, depth diagnostics, bounded cache churn,
+invalidated database inputs and mutable-to-readonly aggregate changes. Returning
+an immutable global aggregate containing a mutable view still requires
+Global.Write after warm reuse and after reverting a readonly edit.
+
+The frozen 2.5 MB parser-component probe preserves the previous source and
+776,280-byte diagnostic digests across cold/repeated/added-function analyses.
+With the initial 4,096-entry local memo, only 206 unique retained products were
+computed; each subsequent analysis reused 16,811 products and 47,246 local
+answers. Sequential frontend times were 4.833 s stateless, 4.897 s first session,
+5.560/5.384 s repeated, and 5.227/5.162 s stateless/session after appending a
+function. These establish real query coverage and diagnostic parity, not an
+overall throughput improvement. The larger local memo passed the same frozen-source diagnostic checks: each
+subsequent analysis used 59,409 local answers and 4,648 retained products, while
+unique computations stayed at 206. It cuts repeated projection/database work;
+that run overlapped validation jobs, so its elapsed times are not comparative
+throughput evidence. Retained capability payload stayed at 652,286 accounted
+bytes. General body/callee products, flow-state hydration and whole-project
+incremental compilation remain unfinished.
+
+Focused capability/projection/invalidation and compile-server/source-cache race
+checks passed (semantic 1.825 s; root 1.484 s). The initial full semantic run
+passed in 56.635 s; the final full suite passed in 60.799 s.
+Existing broader root-suite failures and the historical Stage1 diagnostics are
+not resolved by this query work. All runs were local.

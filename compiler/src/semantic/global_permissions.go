@@ -165,7 +165,7 @@ func (a *Analyzer) mutableGlobalBorrowStorageRoot(expr ast.Expr) (*Symbol, bool)
 	if sym, mutable := a.mutableGlobalStorageRoot(expr); mutable {
 		return sym, true
 	}
-	if !a.typeContainsMutableBorrowCapability(a.exprTypes[expr], map[Type]bool{}, map[*StructType][][]Type{}, 0) {
+	if !a.hasMutableBorrowCapability(a.exprTypes[expr]) {
 		return nil, false
 	}
 	if sym, ok := a.globalStorageRoot(expr); ok && sym.Kind == SymbolGlobal {
@@ -182,13 +182,13 @@ func (a *Analyzer) mutableGlobalBorrowStorageRoot(expr ast.Expr) (*Symbol, bool)
 // inspect the complete typed expression tree and charge each global-backed
 // capability source.
 func (a *Analyzer) mutableGlobalBorrowTransferRefs(value ast.Expr, destinationType Type) []ast.PermissionRef {
-	if value == nil || !a.typeContainsMutableBorrowCapability(destinationType, map[Type]bool{}, map[*StructType][][]Type{}, 0) {
+	if value == nil || !a.hasMutableBorrowCapability(destinationType) {
 		return nil
 	}
 	var refs []ast.PermissionRef
 	var visit func(ast.Expr, int)
 	visit = func(expr ast.Expr, depth int) {
-		if expr == nil || depth > semanticTraversalDepthLimit || !a.typeContainsMutableBorrowCapability(a.exprTypes[expr], map[Type]bool{}, map[*StructType][][]Type{}, 0) {
+		if expr == nil || depth > semanticTraversalDepthLimit || !a.hasMutableBorrowCapability(a.exprTypes[expr]) {
 			return
 		}
 		if call, ok := expr.(*ast.CallExpr); ok && !a.isEnumVariantConstructorCall(call) {
@@ -444,7 +444,7 @@ func (a *Analyzer) mutableGlobalStoreRowsReadRefs(source ast.Expr) []ast.Permiss
 }
 
 func (a *Analyzer) globalStoreRowsCapabilityRoot(source ast.Expr) ast.Expr {
-	if !a.typeContainsMutableBorrowCapability(a.exprTypes[source], map[Type]bool{}, map[*StructType][][]Type{}, 0) {
+	if !a.hasMutableBorrowCapability(a.exprTypes[source]) {
 		return nil
 	}
 	return a.globalStoreRowsViewRoot(source, 0)
@@ -997,7 +997,7 @@ func (a *Analyzer) mutableGlobalCallWriteRefs(call *ast.CallExpr) []ast.Permissi
 			if i >= len(ft.Params) {
 				break
 			}
-			if a.typeContainsMutableBorrowCapability(ft.Params[i], map[Type]bool{}, map[*StructType][][]Type{}, 0) {
+			if a.hasMutableBorrowCapability(ft.Params[i]) {
 				refs = append(refs, a.mutableGlobalBorrowTransferRefs(arg, ft.Params[i])...)
 			}
 		}

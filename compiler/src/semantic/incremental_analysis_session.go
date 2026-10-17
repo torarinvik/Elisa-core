@@ -21,10 +21,12 @@ import (
 // IncrementalAnalysisSession is an opt-in, in-process semantic session. The
 // initial body classes are integer returns with current-bound i64 parameters.
 // It reuses expression typing; parameter reads, return checks, declarations,
-// summaries and CFGs stay fresh.
+// summaries and CFGs stay fresh. Resolved nongeneric mutable-borrow capability
+// queries also reuse pointer-free products after declaration shapes are frozen.
 // It is not a complete incremental compiler or a persistent whole-body cache.
 type IncrementalAnalysisSession struct {
 	mu                                           sync.Mutex
+	capabilities                                 *capabilityQueryCache
 	db                                           *incremental.Database
 	previous                                     map[incremental.Key]bool
 	productBytes                                 map[incremental.Key]int
@@ -37,16 +39,19 @@ type IncrementalAnalysisSession struct {
 	retiredQueries                               int
 }
 type IncrementalAnalysisStats struct {
-	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes         uint64
-	PrimaryValueChecks, PrimaryExprChecks                                              uint64
-	PrimaryElementScans                                                                uint64
-	LocalInitializersChecked, LocalInitializersReused                                  uint64
-	DatabaseResets                                                                     uint64
-	ColdFallbackAnalyses                                                               uint64
-	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes             uint64
-	CapacityLimitedAnalyses, CapacitySkippedQueries                                    uint64
-	BindingSpecAdmissionMisses, RetainedBindingSourceBytes, RetainedBindingSourceEdges uint64
-	Queries                                                                            incremental.Stats
+	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes                                                                    uint64
+	PrimaryValueChecks, PrimaryExprChecks                                                                                                         uint64
+	PrimaryElementScans                                                                                                                           uint64
+	LocalInitializersChecked, LocalInitializersReused                                                                                             uint64
+	DatabaseResets                                                                                                                                uint64
+	ColdFallbackAnalyses                                                                                                                          uint64
+	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes                                                                        uint64
+	CapacityLimitedAnalyses, CapacitySkippedQueries                                                                                               uint64
+	BindingSpecAdmissionMisses, RetainedBindingSourceBytes, RetainedBindingSourceEdges                                                            uint64
+	Queries                                                                                                                                       incremental.Stats
+	CapabilityReads, CapabilityLocalHits, CapabilityComputed, CapabilityProductsReused, CapabilityProductsPublished, CapabilityProjectionDeclines uint64
+	CapabilityRetainedBytes                                                                                                                       uint64
+	CapabilityQueries                                                                                                                             incremental.Stats
 }
 type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
 type incrementalBodyInvocation struct {
@@ -92,6 +97,15 @@ func (session *IncrementalAnalysisSession) Stats() IncrementalAnalysisStats {
 	stats.RetainedProductBytes = uint64(session.retainedProductBytes)
 	stats.RetainedBindingSourceBytes = uint64(session.bindingSourceBytes)
 	stats.RetainedBindingSourceEdges = uint64(session.bindingSourceEdges)
+	if cache := session.capabilities; cache != nil {
+		stats.CapabilityRetainedBytes = uint64(cache.bytes)
+		stats.CapabilityQueries = cache.db.Stats()
+		stats.CapabilityQueries.Executed += cache.queries.Executed
+		stats.CapabilityQueries.MemoHits += cache.queries.MemoHits
+		stats.CapabilityQueries.Validated += cache.queries.Validated
+		stats.CapabilityQueries.DependencyChecks += cache.queries.DependencyChecks
+		stats.CapabilityQueries.InputReads += cache.queries.InputReads
+	}
 	if session.db != nil {
 		stats.Queries = session.db.Stats()
 	}
@@ -383,7 +397,6 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	session.bindingSourceEdges = invocation.bindingEdges
 	if len(invocation.keys) == 0 {
 		session.stats.ColdFallbackAnalyses++
-		return AnalyzeWithOptions(file, options)
 	}
 	return analyzeWithBodyInvocation(file, options, invocation)
 }

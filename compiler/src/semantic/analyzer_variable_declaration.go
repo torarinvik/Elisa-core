@@ -144,7 +144,7 @@ func (a *Analyzer) analyzeVariableDeclaration(n *ast.VarDeclStmt) {
 	// `in <region>:` scope carries that region in its type; escape checks and
 	// codegen arena routing consult it (see REGION_CONTAINERS_DESIGN.md).
 	bindingType = a.stampContainerRegion(bindingType)
-	if a.typeContainsMutableBorrowCapability(bindingType, map[Type]bool{}, map[*StructType][][]Type{}, 0) && !a.suppressDiagnostics {
+	if a.hasMutableBorrowCapability(bindingType) && !a.suppressDiagnostics {
 		if refs := a.mutableGlobalBorrowTransferRefs(n.Value, bindingType); len(refs) != 0 {
 			if a.mutableGlobalBorrowRefs == nil {
 				a.mutableGlobalBorrowRefs = make(map[*ast.VarDeclStmt][]ast.PermissionRef)

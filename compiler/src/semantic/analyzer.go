@@ -90,6 +90,7 @@ const (
 type Analyzer struct {
 	permissionInference *permissionInferenceObserver
 	incrementalBodies   *incrementalBodyInvocation
+	capabilityQueries   *capabilityQueryInvocation
 	// smtStaleLocalDefs marks immutable locals whose initializer read a binding that has since been
 	// written (analyzer_smt_shadowing.go); their defining equation no longer holds.
 	smtStaleLocalDefs                    map[*Symbol]bool
@@ -1299,7 +1300,13 @@ func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
-	defer func() { a.incrementalBodies = nil }()
+	if bodies != nil {
+		a.capabilityQueries = &capabilityQueryInvocation{session: bodies.session, local: map[Type]capabilityLocalResult{}}
+		if len(bodies.keys) == 0 {
+			a.incrementalBodies = nil
+		}
+	}
+	defer func() { a.incrementalBodies = nil; a.capabilityQueries = nil }()
 	// docs/120 §10: the uniform linear-mutation rule is default-on now that the whole
 	// self-hosted frontend is converted to the reassignment form. `ELISA_LINEAR_MUTATION=0`
 	// is the explicit off-switch (escape hatch during any residual migration).
@@ -1404,7 +1411,7 @@ func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *
 	a.expandHigherOrderContracts(activeDecls)
 	a.returnBorrowLateEnabled = true
 	a.typeShapesFrozen = true
-	if bodies != nil {
+	if a.incrementalBodies != nil {
 		bodies.prepareAnalyzer(a)
 	}
 	a.analyzeDecls(activeDecls)
