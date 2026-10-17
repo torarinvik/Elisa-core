@@ -34,6 +34,14 @@ func TestSMTRecordElementCongruence(t *testing.T) {
     ensure forall j in 0..<rows.count: j == i implies result == rows[j].owner.value
     return rows[i].owner.value
 `,
+		`def local_record_frame(table: RecordTable&, i: usize) -> u32:
+    requires i < table.rows.count
+    ensure result == table.rows[i].owner.value
+    selected: mutable RecordBinding = RecordBinding{owner: RecordOwner{value: 0}, serial: 0}
+    for step in 0..<1 |selected|:
+        selected <- table.rows[i]
+    return table.rows[i].owner.value
+`,
 	} {
 		result := analyzeContractStrict(t, "record_elements.elisa", recordElementTypes+source)
 		if len(result.Errors()) != 0 {
@@ -61,8 +69,22 @@ def mutated(rows: mutable darray[RecordBinding]&) -> u32:
     before: u32 = rows[0].owner.value
     rows[0] <- RecordBinding{owner: RecordOwner{value: 0}, serial: 0}
     return before
+def shadowed(rows: darray[RecordBinding], other_rows: darray[RecordBinding]) -> u32:
+    requires rows.count > 0 and other_rows.count > 0
+    ensure result == rows[0].owner.value
+    if true:
+        rows: darray[RecordBinding] = other_rows
+        return rows[0].owner.value
+    return 0
+def shadowed_table(table: RecordTable, other_table: RecordTable) -> u32:
+    requires table.rows.count > 0 and other_table.rows.count > 0
+    ensure result == table.rows[0].owner.value
+    if true:
+        table: RecordTable = other_table
+        return table.rows[0].owner.value
+    return 0
 `)
-	for _, function := range []string{"other", "index", "field", "mutated"} {
+	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table"} {
 		if ensureFailuresFor(result.Errors(), function) == 0 {
 			t.Fatalf("%s: false record claim was accepted:\n%s", function, allDiagnostics(result))
 		}

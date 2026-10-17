@@ -13,7 +13,8 @@ import (
 //
 // The gate is syntactic over the whole body (statements after the proof point included):
 //   - locals: immutable bindings of write-free values; MUTABLE bindings only when the declared
-//     type is a scalar (integer/bool) or sview — rebinding such a slot writes no shared memory;
+//     type is a scalar (integer/bool), sview, or a plain scalar-only record —
+//     rebinding such a slot writes no shared memory;
 //   - assignments `x <- v` / `x += v` only to those mutable scalar/view locals;
 //   - if/elif/else, while (condition and body write-free), return, read-only contracts, and
 //     Abort.Panic / Unsafe.UncheckedIndex blocks (the latter permits a load, never a write);
@@ -106,7 +107,7 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 			return false
 		}
 		if n.Mutable {
-			if !sviewFrameRebindableType(n.Type) {
+			if !sviewFrameRebindableType(n.Type) && !g.plainRecordLocalType(n.Type) {
 				return false
 			}
 			g.rebindable[n.Name] = true
@@ -139,6 +140,12 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		return true
 	case *ast.WhileStmt:
 		return n != nil && g.expr(n.Cond, 0) && g.scoped(n.Body)
+	case *ast.ForStmt:
+		return n != nil && !ast.HasSynthesizedPreReserveStmts(n) &&
+			g.expr(n.Start, 0) && g.expr(n.End, 0) &&
+			(n.Step == nil || g.expr(n.Step, 0)) && g.scoped(n.Body)
+	case *ast.BreakStmt, *ast.ContinueStmt:
+		return true
 	case *ast.ContractStmt:
 		// Loop `invariant` / `decreases` clauses only read (they are checked in place).
 		if n == nil {
@@ -209,6 +216,28 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			}
 		}
 		return len(n.Elems) != 0
+	case *ast.StructLitExpr:
+		if !n.Brace || n.CopyBase != nil || len(n.Spreads) != 0 || len(n.TypeArgs) != 0 {
+			return false
+		}
+		typ, _, found := g.a.lookupVisibleType(n.Name)
+		if !found || !plainFrameRecordType(typ, map[*StructType]bool{}) {
+			return false
+		}
+		st := StripAggregateStateType(typ).(*StructType)
+		args := n.Args
+		if n.ResolvedArgsValid {
+			args = n.ResolvedArgs
+		} else if len(args) != len(st.Fields) {
+			// Missing fields may introduce default expressions not analyzed yet.
+			return false
+		}
+		for _, arg := range args {
+			if !g.expr(arg, depth+1) {
+				return false
+			}
+		}
+		return true
 	case *ast.QuantifierExpr:
 		return (n.In == nil || g.expr(n.In, depth+1)) && g.expr(n.Body, depth+1)
 	case *ast.MembershipRangeExpr:
@@ -246,6 +275,38 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 		return true
 	}
 	return false
+}
+
+func (g *sviewFrameGate) plainRecordLocalType(expr ast.TypeExpr) bool {
+	named, ok := expr.(*ast.NamedType)
+	if !ok || named == nil || named.Region != "" {
+		return false
+	}
+	typ, _, found := g.a.lookupVisibleType(named.Name)
+	return found && plainFrameRecordType(typ, map[*StructType]bool{})
+}
+
+// Rebinding a plain record copies only scalar values. References, containers,
+// resources and destructors are excluded: they could write shared memory.
+func plainFrameRecordType(typ Type, active map[*StructType]bool) bool {
+	st, ok := StripAggregateStateType(typ).(*StructType)
+	if !ok || st == nil || st.Affine || st.Resource || st.DropHook != "" || active[st] {
+		return false
+	}
+	active[st] = true
+	defer delete(active, st)
+	for _, field := range st.Fields {
+		if IsBoolType(field.Type) {
+			continue
+		}
+		if _, _, integer := smtIntWidthSign(field.Type); integer {
+			continue
+		}
+		if !plainFrameRecordType(field.Type, active) {
+			return false
+		}
+	}
+	return true
 }
 
 // sviewFramePattern accepts patterns whose test evaluates nothing: wildcards, string/int/bool/char
