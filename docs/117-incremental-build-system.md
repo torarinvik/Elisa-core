@@ -845,20 +845,20 @@ not admitted, so warning suppression and diagnostics retain their normal path.
 Decoded frontend IR continues to bypass this cache. Parser construction currently
 has no options; future syntax-affecting options must participate in this key.
 
-Capture uses checked reflection to own all strings and mutable graph storage,
+Capture uses generated typed traversal to own all strings and mutable graph storage,
 with bounded work, depth and retained payload. Partial/overlapping backing views,
 private fields, unknown struct schemas and unsupported storage decline admission.
 Generated typed replay preserves shared nodes, cycles, map-key node identities,
 and full capacity-visible slice contents, while allocating private mutable nodes
 and containers for each request. Immutable snapshot-owned strings can be shared.
 The checked-in generator has a freshness test; runtime field-name/type validation
-and capture's known-type guard refuse stale schema coverage.
+and generated interface switches refuse stale or unsupported schema coverage.
 
 Snapshots share the token cache's 32-revision/512-MiB LRU payload budget. Container
 accounting includes estimated overhead; this is not a process RSS bound. Capture
 and replay run outside the cache lock, with publication rechecked under the lock.
 Capture is delayed until the revision is requested a second time: a one-off edit
-pays no reflection capture cost. The second request still parses and pays capture;
+pays no snapshot capture cost. The second request still parses and pays capture;
 only subsequent exact hits benefit. Edit histories still use lexer checkpoints
 and fresh parsing rather than declaration-level parser replay.
 
@@ -890,3 +890,35 @@ visible failures (selected-test phase logging, packed-ML runtime warnings, and
 allocator-interface effects) also fail with the parent revision's parser/cache
 implementation overlaid via Go's overlay mechanism (2.152s). The full compiler
 suite is therefore not green, and no all-errors-resolved claim is made here.
+
+
+### Typed snapshot capture
+
+Capture now has a separate generated method family from warm replay. The capture
+methods own/intern strings, check work/depth, charge storage before allocation,
+and reject overlapping storage before publishing a snapshot. Replay methods retain
+their previous shallow assignments for immutable strings/positions and contain no
+capture ownership/budget traversal. An initial shared-method implementation slowed
+warm replay in local measurements; it was replaced before this checkpoint.
+The reflection copier is retained only in tests as an independent reference.
+
+Generated capture is compared with owned reflection capture, including equal
+payload accounting, caller-buffer mutation, strings/nodes beyond slice length,
+shared containers and pointer-keyed declaration visibility. Depth limits are
+qualified explicitly; partial-view and byte-budget rejection tests still apply.
+
+With the same M5/Go1.27.2/GOMAXPROCS=4 fixture and three100-iteration runs, the
+parent implementation (Go overlay of the two production snapshot files, excluding
+the added capture helper) measured capture15.54/11.83/12.94ms. Typed capture
+measured5.17/5.83/5.76ms. Capture allocations fell from10.86MB/55,510 to
+9.31MB/28,934. Parent replay was2.78/2.85/2.76ms and current replay
+2.53/2.62/2.65ms. These sequential local microbenchmarks supersede the reflection
+capture figures above; they do not establish end-to-end project performance.
+Second-request capture still costs work and must be amortized by later exact hits.
+
+Final typed-capture verification: full AST race tests and generated-output freshness
+race tests passed in1.214s/3.678s; focused snapshot/cache root race tests passed
+in2.098s; all TestCompileServer tests passed with race instrumentation in1.830s.
+Unknown test-only interface implementations are rejected and typed nil expressions
+survive capture/replay. The broader compiler-suite failures recorded above remain
+unresolved; this checkpoint does not claim a full-suite pass.

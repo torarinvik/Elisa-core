@@ -20,10 +20,14 @@ type syntaxFastMap struct {
 	pointer unsafe.Pointer
 }
 type syntaxFastCopier struct {
-	nodes  map[any]any
-	slices map[syntaxFastSlice]any
-	maps   map[syntaxFastMap]any
-	err    error
+	nodes                     map[any]any
+	slices                    map[syntaxFastSlice]any
+	maps                      map[syntaxFastMap]any
+	err                       error
+	own                       bool
+	limit, bytes, depth, work int
+	text                      map[string]string
+	storage                   []syntaxStorage
 }
 
 func copyFastSyntaxFile(file *File) (*File, error) {
@@ -5537,6 +5541,9164 @@ func (c *syntaxFastCopier) syntaxFast352(in []*GrammarBindTerm) []*GrammarBindTe
 	}
 	return out
 }
+
+func (c *syntaxFastCopier) syntaxCapture1(in *File) *File {
+	if !c.enter() {
+		var zero *File
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*File)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(File)
+	c.nodes[in] = out
+	*out = *in
+	out.Filename = c.syntaxCapture2(in.Filename)
+	out.Decls = c.syntaxCapture3(in.Decls)
+	out.DeclVisibility = c.syntaxCapture4(in.DeclVisibility)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture2(in string) string {
+	if !c.enter() {
+		var zero string
+		return zero
+	}
+	defer c.leave()
+	return string(c.textValue(string(in)))
+}
+
+func (c *syntaxFastCopier) syntaxCapture3(in []Decl) []Decl {
+	if !c.enter() {
+		var zero []Decl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture3", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]Decl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(Decl)), cap(in)) {
+		return nil
+	}
+	out := make([]Decl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture5(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture4(in map[Decl]string) map[Decl]string {
+	if !c.enter() {
+		var zero map[Decl]string
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastMap{"syntaxCapture4", reflect.ValueOf(in).UnsafePointer()}
+	if prior, ok := c.maps[key]; ok {
+		return prior.(map[Decl]string)
+	}
+	if !c.captureMap(unsafe.Sizeof(*new(Decl))+unsafe.Sizeof(*new(string)), len(in)) {
+		return nil
+	}
+	out := make(map[Decl]string, len(in))
+	c.maps[key] = out
+	for k, v := range in {
+		if c.err != nil {
+			break
+		}
+		out[c.syntaxCapture5(k)] = c.syntaxCapture2(v)
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture5(in Decl) Decl {
+	if !c.enter() {
+		var zero Decl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *AliasDecl:
+		return c.syntaxCapture6(value)
+	case *CharsetDecl:
+		return c.syntaxCapture7(value)
+	case *ConstDecl:
+		return c.syntaxCapture8(value)
+	case *ConstEnumDecl:
+		return c.syntaxCapture9(value)
+	case *EnumDecl:
+		return c.syntaxCapture10(value)
+	case *ErrorDecl:
+		return c.syntaxCapture11(value)
+	case *ExportFuncDecl:
+		return c.syntaxCapture12(value)
+	case *ExportGlobalDecl:
+		return c.syntaxCapture13(value)
+	case *ExportTypeDecl:
+		return c.syntaxCapture14(value)
+	case *ExternFuncDecl:
+		return c.syntaxCapture15(value)
+	case *ExternTypeDecl:
+		return c.syntaxCapture16(value)
+	case *ExternVarDecl:
+		return c.syntaxCapture17(value)
+	case *FuncDecl:
+		return c.syntaxCapture18(value)
+	case *GlobalDecl:
+		return c.syntaxCapture19(value)
+	case *GlobalRegionDecl:
+		return c.syntaxCapture20(value)
+	case *GrammarDecl:
+		return c.syntaxCapture21(value)
+	case *GrammarEnvDecl:
+		return c.syntaxCapture22(value)
+	case *ImplDecl:
+		return c.syntaxCapture23(value)
+	case *ImportDecl:
+		return c.syntaxCapture24(value)
+	case *InterfaceDecl:
+		return c.syntaxCapture25(value)
+	case *KeywordMapDecl:
+		return c.syntaxCapture26(value)
+	case *LayoutDecl:
+		return c.syntaxCapture27(value)
+	case *LexerDecl:
+		return c.syntaxCapture28(value)
+	case *NamespaceDecl:
+		return c.syntaxCapture29(value)
+	case *PermissionDecl:
+		return c.syntaxCapture30(value)
+	case *RefineDecl:
+		return c.syntaxCapture31(value)
+	case *StaticAssertBlockDecl:
+		return c.syntaxCapture32(value)
+	case *StaticAssertDecl:
+		return c.syntaxCapture33(value)
+	case *StaticGenerateDecl:
+		return c.syntaxCapture34(value)
+	case *StaticIfDecl:
+		return c.syntaxCapture35(value)
+	case *StoreDecl:
+		return c.syntaxCapture36(value)
+	case *StructDecl:
+		return c.syntaxCapture37(value)
+	case *TokenSetDecl:
+		return c.syntaxCapture38(value)
+	case *TypeAliasDecl:
+		return c.syntaxCapture39(value)
+	case *UsingDecl:
+		return c.syntaxCapture40(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture6(in *AliasDecl) *AliasDecl {
+	if !c.enter() {
+		var zero *AliasDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AliasDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AliasDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Refs = c.syntaxCapture42(in.Refs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture7(in *CharsetDecl) *CharsetDecl {
+	if !c.enter() {
+		var zero *CharsetDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CharsetDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CharsetDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Terms = c.syntaxCapture43(in.Terms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture8(in *ConstDecl) *ConstDecl {
+	if !c.enter() {
+		var zero *ConstDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ConstDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ConstDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture9(in *ConstEnumDecl) *ConstEnumDecl {
+	if !c.enter() {
+		var zero *ConstEnumDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ConstEnumDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ConstEnumDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Storage = c.syntaxCapture44(in.Storage)
+	out.Members = c.syntaxCapture46(in.Members)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture10(in *EnumDecl) *EnumDecl {
+	if !c.enter() {
+		var zero *EnumDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*EnumDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(EnumDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Common = c.syntaxCapture48(in.Common)
+	out.Variants = c.syntaxCapture49(in.Variants)
+	out.IndexWidth = c.syntaxCapture2(in.IndexWidth)
+	out.Parent = c.syntaxCapture2(in.Parent)
+	out.StoreRegion = c.syntaxCapture2(in.StoreRegion)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture11(in *ErrorDecl) *ErrorDecl {
+	if !c.enter() {
+		var zero *ErrorDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ErrorDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ErrorDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Tags = c.syntaxCapture50(in.Tags)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture12(in *ExportFuncDecl) *ExportFuncDecl {
+	if !c.enter() {
+		var zero *ExportFuncDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExportFuncDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExportFuncDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Params = c.syntaxCapture51(in.Params)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	out.TargetName = c.syntaxCapture2(in.TargetName)
+	out.TargetTypeArgs = c.syntaxCapture52(in.TargetTypeArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture13(in *ExportGlobalDecl) *ExportGlobalDecl {
+	if !c.enter() {
+		var zero *ExportGlobalDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExportGlobalDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExportGlobalDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.TargetName = c.syntaxCapture2(in.TargetName)
+	out.Alias = c.syntaxCapture2(in.Alias)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture14(in *ExportTypeDecl) *ExportTypeDecl {
+	if !c.enter() {
+		var zero *ExportTypeDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExportTypeDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExportTypeDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.ExportedType = c.syntaxCapture44(in.ExportedType)
+	out.Alias = c.syntaxCapture2(in.Alias)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture15(in *ExternFuncDecl) *ExternFuncDecl {
+	if !c.enter() {
+		var zero *ExternFuncDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExternFuncDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExternFuncDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.PermissionParams = c.syntaxCapture53(in.PermissionParams)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.RegionParams = c.syntaxCapture53(in.RegionParams)
+	out.Permissions = c.syntaxCapture42(in.Permissions)
+	out.Ensures = c.syntaxCapture55(in.Ensures)
+	out.Requires = c.syntaxCapture56(in.Requires)
+	out.EnsureValues = c.syntaxCapture56(in.EnsureValues)
+	out.Uses = c.syntaxCapture57(in.Uses)
+	out.Changes = c.syntaxCapture58(in.Changes)
+	out.Preserves = c.syntaxCapture58(in.Preserves)
+	out.Fulfills = c.syntaxCapture59(in.Fulfills)
+	out.Params = c.syntaxCapture51(in.Params)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture16(in *ExternTypeDecl) *ExternTypeDecl {
+	if !c.enter() {
+		var zero *ExternTypeDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExternTypeDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExternTypeDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture17(in *ExternVarDecl) *ExternVarDecl {
+	if !c.enter() {
+		var zero *ExternVarDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExternVarDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExternVarDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture18(in *FuncDecl) *FuncDecl {
+	if !c.enter() {
+		var zero *FuncDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*FuncDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(FuncDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.RegionParams = c.syntaxCapture53(in.RegionParams)
+	out.InferredRegionParams = c.syntaxCapture53(in.InferredRegionParams)
+	out.AmbientGrownContainerRegion = c.syntaxCapture2(in.AmbientGrownContainerRegion)
+	out.PermissionParams = c.syntaxCapture53(in.PermissionParams)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.Permissions = c.syntaxCapture42(in.Permissions)
+	out.Ensures = c.syntaxCapture55(in.Ensures)
+	out.Requires = c.syntaxCapture56(in.Requires)
+	out.RequiresProofs = c.syntaxCapture60(in.RequiresProofs)
+	out.EnsureValues = c.syntaxCapture56(in.EnsureValues)
+	out.EnsureProofs = c.syntaxCapture60(in.EnsureProofs)
+	out.Decreases = c.syntaxCapture56(in.Decreases)
+	out.DecreasesWild = c.syntaxCapture2(in.DecreasesWild)
+	out.Params = c.syntaxCapture51(in.Params)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	out.ReturnRegion = c.syntaxCapture2(in.ReturnRegion)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.LmutThreadSlots = c.syntaxCapture62(in.LmutThreadSlots)
+	out.Changes = c.syntaxCapture58(in.Changes)
+	out.Preserves = c.syntaxCapture58(in.Preserves)
+	out.Fulfills = c.syntaxCapture59(in.Fulfills)
+	out.ContractIncludes = c.syntaxCapture63(in.ContractIncludes)
+	out.Forbids = c.syntaxCapture42(in.Forbids)
+	out.Includes = c.syntaxCapture53(in.Includes)
+	out.Uses = c.syntaxCapture57(in.Uses)
+	out.ParamContracts = c.syntaxCapture64(in.ParamContracts)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture19(in *GlobalDecl) *GlobalDecl {
+	if !c.enter() {
+		var zero *GlobalDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GlobalDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GlobalDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture20(in *GlobalRegionDecl) *GlobalRegionDecl {
+	if !c.enter() {
+		var zero *GlobalRegionDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GlobalRegionDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GlobalRegionDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture21(in *GrammarDecl) *GrammarDecl {
+	if !c.enter() {
+		var zero *GrammarDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.RegionParams = c.syntaxCapture53(in.RegionParams)
+	out.PermissionParams = c.syntaxCapture53(in.PermissionParams)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.EnvType = c.syntaxCapture44(in.EnvType)
+	out.OverType = c.syntaxCapture44(in.OverType)
+	out.UsingType = c.syntaxCapture44(in.UsingType)
+	out.Uses = c.syntaxCapture52(in.Uses)
+	out.ErrorType = c.syntaxCapture44(in.ErrorType)
+	out.CursorExpr = c.syntaxCapture45(in.CursorExpr)
+	out.AllocExpr = c.syntaxCapture45(in.AllocExpr)
+	out.TokenKindType = c.syntaxCapture44(in.TokenKindType)
+	out.TokenEnumName = c.syntaxCapture2(in.TokenEnumName)
+	out.TokenEnumStorage = c.syntaxCapture44(in.TokenEnumStorage)
+	out.EOFExpr = c.syntaxCapture45(in.EOFExpr)
+	out.TokenKindField = c.syntaxCapture2(in.TokenKindField)
+	out.CurrentFunc = c.syntaxCapture2(in.CurrentFunc)
+	out.AdvanceFunc = c.syntaxCapture2(in.AdvanceFunc)
+	out.ExpectFunc = c.syntaxCapture2(in.ExpectFunc)
+	out.ExpectKindFunc = c.syntaxCapture2(in.ExpectKindFunc)
+	out.RecordErrorFunc = c.syntaxCapture2(in.RecordErrorFunc)
+	out.TokenLookupFunc = c.syntaxCapture2(in.TokenLookupFunc)
+	out.TokenLookupCompareFunc = c.syntaxCapture2(in.TokenLookupCompareFunc)
+	out.TokenAliases = c.syntaxCapture65(in.TokenAliases)
+	out.Channels = c.syntaxCapture66(in.Channels)
+	out.TokenSets = c.syntaxCapture67(in.TokenSets)
+	out.GrammarAliases = c.syntaxCapture68(in.GrammarAliases)
+	out.GrammarFns = c.syntaxCapture69(in.GrammarFns)
+	out.RecoveryPolicies = c.syntaxCapture70(in.RecoveryPolicies)
+	out.InfixTables = c.syntaxCapture71(in.InfixTables)
+	out.Productions = c.syntaxCapture72(in.Productions)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture22(in *GrammarEnvDecl) *GrammarEnvDecl {
+	if !c.enter() {
+		var zero *GrammarEnvDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarEnvDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarEnvDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.OverType = c.syntaxCapture44(in.OverType)
+	out.UsingType = c.syntaxCapture44(in.UsingType)
+	out.ErrorType = c.syntaxCapture44(in.ErrorType)
+	out.CursorExpr = c.syntaxCapture45(in.CursorExpr)
+	out.AllocExpr = c.syntaxCapture45(in.AllocExpr)
+	out.TokenKindType = c.syntaxCapture44(in.TokenKindType)
+	out.TokenGrammarName = c.syntaxCapture2(in.TokenGrammarName)
+	out.EOFExpr = c.syntaxCapture45(in.EOFExpr)
+	out.TokenKindField = c.syntaxCapture2(in.TokenKindField)
+	out.CurrentFunc = c.syntaxCapture2(in.CurrentFunc)
+	out.AdvanceFunc = c.syntaxCapture2(in.AdvanceFunc)
+	out.ExpectFunc = c.syntaxCapture2(in.ExpectFunc)
+	out.ExpectKindFunc = c.syntaxCapture2(in.ExpectKindFunc)
+	out.RecordErrorFunc = c.syntaxCapture2(in.RecordErrorFunc)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture23(in *ImplDecl) *ImplDecl {
+	if !c.enter() {
+		var zero *ImplDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ImplDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ImplDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.InterfaceName = c.syntaxCapture2(in.InterfaceName)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.ForType = c.syntaxCapture44(in.ForType)
+	out.Members = c.syntaxCapture73(in.Members)
+	out.HandlerName = c.syntaxCapture2(in.HandlerName)
+	out.HandlerParams = c.syntaxCapture51(in.HandlerParams)
+	out.HandlerEffect = c.syntaxCapture44(in.HandlerEffect)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture24(in *ImportDecl) *ImportDecl {
+	if !c.enter() {
+		var zero *ImportDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ImportDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ImportDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Module = c.syntaxCapture2(in.Module)
+	out.Names = c.syntaxCapture53(in.Names)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture25(in *InterfaceDecl) *InterfaceDecl {
+	if !c.enter() {
+		var zero *InterfaceDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*InterfaceDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(InterfaceDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.Bases = c.syntaxCapture53(in.Bases)
+	out.Members = c.syntaxCapture74(in.Members)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture26(in *KeywordMapDecl) *KeywordMapDecl {
+	if !c.enter() {
+		var zero *KeywordMapDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*KeywordMapDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(KeywordMapDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.InputType = c.syntaxCapture44(in.InputType)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	out.Fallback = c.syntaxCapture45(in.Fallback)
+	out.Entries = c.syntaxCapture75(in.Entries)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture27(in *LayoutDecl) *LayoutDecl {
+	if !c.enter() {
+		var zero *LayoutDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LayoutDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LayoutDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Fields = c.syntaxCapture76(in.Fields)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture28(in *LexerDecl) *LexerDecl {
+	if !c.enter() {
+		var zero *LexerDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LexerDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LexerDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TokenKindType = c.syntaxCapture44(in.TokenKindType)
+	out.ModeEnumName = c.syntaxCapture2(in.ModeEnumName)
+	out.GrammarName = c.syntaxCapture2(in.GrammarName)
+	out.KeywordCompareFunc = c.syntaxCapture2(in.KeywordCompareFunc)
+	out.Modes = c.syntaxCapture77(in.Modes)
+	out.CharClasses = c.syntaxCapture78(in.CharClasses)
+	out.Keywords = c.syntaxCapture79(in.Keywords)
+	out.Literals = c.syntaxCapture80(in.Literals)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture29(in *NamespaceDecl) *NamespaceDecl {
+	if !c.enter() {
+		var zero *NamespaceDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*NamespaceDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(NamespaceDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Decls = c.syntaxCapture3(in.Decls)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture30(in *PermissionDecl) *PermissionDecl {
+	if !c.enter() {
+		var zero *PermissionDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*PermissionDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(PermissionDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Members = c.syntaxCapture53(in.Members)
+	out.Includes = c.syntaxCapture53(in.Includes)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture31(in *RefineDecl) *RefineDecl {
+	if !c.enter() {
+		var zero *RefineDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RefineDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RefineDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.Params = c.syntaxCapture51(in.Params)
+	out.Base = c.syntaxCapture44(in.Base)
+	out.Predicate = c.syntaxCapture45(in.Predicate)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture32(in *StaticAssertBlockDecl) *StaticAssertBlockDecl {
+	if !c.enter() {
+		var zero *StaticAssertBlockDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticAssertBlockDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticAssertBlockDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Assertions = c.syntaxCapture81(in.Assertions)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture33(in *StaticAssertDecl) *StaticAssertDecl {
+	if !c.enter() {
+		var zero *StaticAssertDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticAssertDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticAssertDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture34(in *StaticGenerateDecl) *StaticGenerateDecl {
+	if !c.enter() {
+		var zero *StaticGenerateDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticGenerateDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticGenerateDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Body = c.syntaxCapture82(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture35(in *StaticIfDecl) *StaticIfDecl {
+	if !c.enter() {
+		var zero *StaticIfDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticIfDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticIfDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Then = c.syntaxCapture3(in.Then)
+	out.Elifs = c.syntaxCapture83(in.Elifs)
+	out.Else = c.syntaxCapture3(in.Else)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture36(in *StoreDecl) *StoreDecl {
+	if !c.enter() {
+		var zero *StoreDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StoreDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StoreDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Fields = c.syntaxCapture48(in.Fields)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture37(in *StructDecl) *StructDecl {
+	if !c.enter() {
+		var zero *StructDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StructDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StructDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.RegionParams = c.syntaxCapture53(in.RegionParams)
+	out.RegionOwner = c.syntaxCapture2(in.RegionOwner)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.NamedStateCases = c.syntaxCapture53(in.NamedStateCases)
+	out.TerminalStateCases = c.syntaxCapture53(in.TerminalStateCases)
+	out.DerivedStates = c.syntaxCapture84(in.DerivedStates)
+	out.StateTransitions = c.syntaxCapture85(in.StateTransitions)
+	out.Fields = c.syntaxCapture48(in.Fields)
+	out.Invariants = c.syntaxCapture56(in.Invariants)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture38(in *TokenSetDecl) *TokenSetDecl {
+	if !c.enter() {
+		var zero *TokenSetDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TokenSetDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TokenSetDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.ElemType = c.syntaxCapture44(in.ElemType)
+	out.Value = c.syntaxCapture86(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture39(in *TypeAliasDecl) *TypeAliasDecl {
+	if !c.enter() {
+		var zero *TypeAliasDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TypeAliasDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TypeAliasDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.Target = c.syntaxCapture44(in.Target)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture40(in *UsingDecl) *UsingDecl {
+	if !c.enter() {
+		var zero *UsingDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*UsingDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(UsingDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Member = c.syntaxCapture2(in.Member)
+	out.Alias = c.syntaxCapture2(in.Alias)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture41(in lexer.Pos) lexer.Pos {
+	if !c.enter() {
+		var zero lexer.Pos
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.File = c.syntaxCapture2(in.File)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture42(in []PermissionRef) []PermissionRef {
+	if !c.enter() {
+		var zero []PermissionRef
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture42", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]PermissionRef)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(PermissionRef)), cap(in)) {
+		return nil
+	}
+	out := make([]PermissionRef, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture87(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture43(in []LexerCharClassTerm) []LexerCharClassTerm {
+	if !c.enter() {
+		var zero []LexerCharClassTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture43", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LexerCharClassTerm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LexerCharClassTerm)), cap(in)) {
+		return nil
+	}
+	out := make([]LexerCharClassTerm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture88(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture44(in TypeExpr) TypeExpr {
+	if !c.enter() {
+		var zero TypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *AggregateStateTypeExpr:
+		return c.syntaxCapture89(value)
+	case *ArrayType:
+		return c.syntaxCapture90(value)
+	case *BuiltinTypeExpr:
+		return c.syntaxCapture91(value)
+	case *ErrorSetExpr:
+		return c.syntaxCapture92(value)
+	case *ErrorUnionTypeExpr:
+		return c.syntaxCapture93(value)
+	case *FuncTypeExpr:
+		return c.syntaxCapture94(value)
+	case *GenericType:
+		return c.syntaxCapture95(value)
+	case *GenericValueArgTypeExpr:
+		return c.syntaxCapture96(value)
+	case *MutableType:
+		return c.syntaxCapture97(value)
+	case *NamedType:
+		return c.syntaxCapture98(value)
+	case *OptionalTypeExpr:
+		return c.syntaxCapture99(value)
+	case *OwnedType:
+		return c.syntaxCapture100(value)
+	case *RefStateLiteralTypeExpr:
+		return c.syntaxCapture101(value)
+	case *RefStorageLiteralTypeExpr:
+		return c.syntaxCapture102(value)
+	case *RefType:
+		return c.syntaxCapture103(value)
+	case *RefinementTypeExpr:
+		return c.syntaxCapture104(value)
+	case *StateSetTypeExpr:
+		return c.syntaxCapture105(value)
+	case *TailType:
+		return c.syntaxCapture106(value)
+	case *TupleTypeExpr:
+		return c.syntaxCapture107(value)
+	case *WhereRefinementTypeExpr:
+		return c.syntaxCapture108(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture45(in Expr) Expr {
+	if !c.enter() {
+		var zero Expr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *AddrOfExpr:
+		return c.syntaxCapture109(value)
+	case *AlignofExpr:
+		return c.syntaxCapture110(value)
+	case *AllocExpr:
+		return c.syntaxCapture111(value)
+	case *BinaryExpr:
+		return c.syntaxCapture112(value)
+	case *BoolLit:
+		return c.syntaxCapture113(value)
+	case *CallExpr:
+		return c.syntaxCapture114(value)
+	case *CanExpr:
+		return c.syntaxCapture115(value)
+	case *CastExpr:
+		return c.syntaxCapture116(value)
+	case *CatchExpr:
+		return c.syntaxCapture117(value)
+	case *CharLit:
+		return c.syntaxCapture118(value)
+	case *EmitExpr:
+		return c.syntaxCapture119(value)
+	case *EnumColumnExpr:
+		return c.syntaxCapture120(value)
+	case *ExprBlock:
+		return c.syntaxCapture121(value)
+	case *FieldExpr:
+		return c.syntaxCapture122(value)
+	case *FloatLit:
+		return c.syntaxCapture123(value)
+	case *FoldExpr:
+		return c.syntaxCapture124(value)
+	case *GetExpr:
+		return c.syntaxCapture125(value)
+	case *Ident:
+		return c.syntaxCapture126(value)
+	case *IndexExpr:
+		return c.syntaxCapture127(value)
+	case *IntLit:
+		return c.syntaxCapture128(value)
+	case *IsAliasExpr:
+		return c.syntaxCapture129(value)
+	case *IsPatternExpr:
+		return c.syntaxCapture130(value)
+	case *LambdaExpr:
+		return c.syntaxCapture131(value)
+	case *ListComprehensionExpr:
+		return c.syntaxCapture132(value)
+	case *ListLitExpr:
+		return c.syntaxCapture86(value)
+	case *MachineFromExpr:
+		return c.syntaxCapture133(value)
+	case *MatchExpr:
+		return c.syntaxCapture134(value)
+	case *MembershipRangeExpr:
+		return c.syntaxCapture135(value)
+	case *MoveExpr:
+		return c.syntaxCapture136(value)
+	case *NullLit:
+		return c.syntaxCapture137(value)
+	case *OffsetofExpr:
+		return c.syntaxCapture138(value)
+	case *OptionalBindExpr:
+		return c.syntaxCapture139(value)
+	case *ParenExpr:
+		return c.syntaxCapture140(value)
+	case *QuantifierExpr:
+		return c.syntaxCapture141(value)
+	case *QueryExpr:
+		return c.syntaxCapture142(value)
+	case *RaiseExpr:
+		return c.syntaxCapture143(value)
+	case *RecordUpdateExpr:
+		return c.syntaxCapture144(value)
+	case *ShorthandMemberExpr:
+		return c.syntaxCapture145(value)
+	case *SizeofExpr:
+		return c.syntaxCapture146(value)
+	case *SliceExpr:
+		return c.syntaxCapture147(value)
+	case *SpecializeExpr:
+		return c.syntaxCapture148(value)
+	case *StringLit:
+		return c.syntaxCapture149(value)
+	case *StructLitExpr:
+		return c.syntaxCapture150(value)
+	case *StructTestExpr:
+		return c.syntaxCapture151(value)
+	case *TernaryExpr:
+		return c.syntaxCapture152(value)
+	case *TryExpr:
+		return c.syntaxCapture153(value)
+	case *TupleExpr:
+		return c.syntaxCapture154(value)
+	case *TypeExprExpr:
+		return c.syntaxCapture155(value)
+	case *UnaryExpr:
+		return c.syntaxCapture156(value)
+	case *UnwrapElseExpr:
+		return c.syntaxCapture157(value)
+	case *VariantTestExpr:
+		return c.syntaxCapture158(value)
+	case *ZeroedLit:
+		return c.syntaxCapture159(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture46(in []ConstEnumMemberDecl) []ConstEnumMemberDecl {
+	if !c.enter() {
+		var zero []ConstEnumMemberDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture46", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ConstEnumMemberDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ConstEnumMemberDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]ConstEnumMemberDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture160(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture47(in []Annotation) []Annotation {
+	if !c.enter() {
+		var zero []Annotation
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture47", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]Annotation)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(Annotation)), cap(in)) {
+		return nil
+	}
+	out := make([]Annotation, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture161(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture48(in []FieldDecl) []FieldDecl {
+	if !c.enter() {
+		var zero []FieldDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture48", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]FieldDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(FieldDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]FieldDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture162(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture49(in []EnumVariantDecl) []EnumVariantDecl {
+	if !c.enter() {
+		var zero []EnumVariantDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture49", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]EnumVariantDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(EnumVariantDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]EnumVariantDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture163(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture50(in []ErrorVariantDecl) []ErrorVariantDecl {
+	if !c.enter() {
+		var zero []ErrorVariantDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture50", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ErrorVariantDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ErrorVariantDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]ErrorVariantDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture164(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture51(in []ParamDecl) []ParamDecl {
+	if !c.enter() {
+		var zero []ParamDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture51", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ParamDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ParamDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]ParamDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture165(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture52(in []TypeExpr) []TypeExpr {
+	if !c.enter() {
+		var zero []TypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture52", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]TypeExpr)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(TypeExpr)), cap(in)) {
+		return nil
+	}
+	out := make([]TypeExpr, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture44(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture53(in []string) []string {
+	if !c.enter() {
+		var zero []string
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture53", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]string)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(string)), cap(in)) {
+		return nil
+	}
+	out := make([]string, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture2(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture54(in []GenericParam) []GenericParam {
+	if !c.enter() {
+		var zero []GenericParam
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture54", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GenericParam)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GenericParam)), cap(in)) {
+		return nil
+	}
+	out := make([]GenericParam, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture166(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture55(in []EnsuresClause) []EnsuresClause {
+	if !c.enter() {
+		var zero []EnsuresClause
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture55", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]EnsuresClause)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(EnsuresClause)), cap(in)) {
+		return nil
+	}
+	out := make([]EnsuresClause, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture167(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture56(in []Expr) []Expr {
+	if !c.enter() {
+		var zero []Expr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture56", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]Expr)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(Expr)), cap(in)) {
+		return nil
+	}
+	out := make([]Expr, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture45(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture57(in []*ContractStmt) []*ContractStmt {
+	if !c.enter() {
+		var zero []*ContractStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture57", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]*ContractStmt)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(*ContractStmt)), cap(in)) {
+		return nil
+	}
+	out := make([]*ContractStmt, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture168(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture58(in []EnsuresPath) []EnsuresPath {
+	if !c.enter() {
+		var zero []EnsuresPath
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture58", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]EnsuresPath)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(EnsuresPath)), cap(in)) {
+		return nil
+	}
+	out := make([]EnsuresPath, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture169(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture59(in []FulfillsClause) []FulfillsClause {
+	if !c.enter() {
+		var zero []FulfillsClause
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture59", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]FulfillsClause)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(FulfillsClause)), cap(in)) {
+		return nil
+	}
+	out := make([]FulfillsClause, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture170(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture60(in []*ProofBlockStmt) []*ProofBlockStmt {
+	if !c.enter() {
+		var zero []*ProofBlockStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture60", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]*ProofBlockStmt)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(*ProofBlockStmt)), cap(in)) {
+		return nil
+	}
+	out := make([]*ProofBlockStmt, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture171(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture61(in []Stmt) []Stmt {
+	if !c.enter() {
+		var zero []Stmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture61", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]Stmt)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(Stmt)), cap(in)) {
+		return nil
+	}
+	out := make([]Stmt, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture172(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture62(in []LmutThreadSlot) []LmutThreadSlot {
+	if !c.enter() {
+		var zero []LmutThreadSlot
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture62", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LmutThreadSlot)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LmutThreadSlot)), cap(in)) {
+		return nil
+	}
+	out := make([]LmutThreadSlot, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture173(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture63(in []ContractInclude) []ContractInclude {
+	if !c.enter() {
+		var zero []ContractInclude
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture63", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ContractInclude)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ContractInclude)), cap(in)) {
+		return nil
+	}
+	out := make([]ContractInclude, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture174(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture64(in []ParamContract) []ParamContract {
+	if !c.enter() {
+		var zero []ParamContract
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture64", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ParamContract)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ParamContract)), cap(in)) {
+		return nil
+	}
+	out := make([]ParamContract, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture175(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture65(in []GrammarTokenAliasDecl) []GrammarTokenAliasDecl {
+	if !c.enter() {
+		var zero []GrammarTokenAliasDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture65", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarTokenAliasDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarTokenAliasDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarTokenAliasDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture176(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture66(in []GrammarChannelDecl) []GrammarChannelDecl {
+	if !c.enter() {
+		var zero []GrammarChannelDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture66", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarChannelDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarChannelDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarChannelDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture177(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture67(in []GrammarTokenSetDecl) []GrammarTokenSetDecl {
+	if !c.enter() {
+		var zero []GrammarTokenSetDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture67", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarTokenSetDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarTokenSetDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarTokenSetDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture178(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture68(in []GrammarAliasDecl) []GrammarAliasDecl {
+	if !c.enter() {
+		var zero []GrammarAliasDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture68", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarAliasDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarAliasDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarAliasDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture179(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture69(in []GrammarFnDecl) []GrammarFnDecl {
+	if !c.enter() {
+		var zero []GrammarFnDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture69", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarFnDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarFnDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarFnDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture180(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture70(in []GrammarRecoveryDecl) []GrammarRecoveryDecl {
+	if !c.enter() {
+		var zero []GrammarRecoveryDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture70", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarRecoveryDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarRecoveryDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarRecoveryDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture181(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture71(in []GrammarInfixTableDecl) []GrammarInfixTableDecl {
+	if !c.enter() {
+		var zero []GrammarInfixTableDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture71", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarInfixTableDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarInfixTableDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarInfixTableDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture182(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture72(in []GrammarProductionDecl) []GrammarProductionDecl {
+	if !c.enter() {
+		var zero []GrammarProductionDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture72", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarProductionDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarProductionDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarProductionDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture183(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture73(in []ImplMember) []ImplMember {
+	if !c.enter() {
+		var zero []ImplMember
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture73", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ImplMember)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ImplMember)), cap(in)) {
+		return nil
+	}
+	out := make([]ImplMember, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture184(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture74(in []InterfaceMember) []InterfaceMember {
+	if !c.enter() {
+		var zero []InterfaceMember
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture74", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]InterfaceMember)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(InterfaceMember)), cap(in)) {
+		return nil
+	}
+	out := make([]InterfaceMember, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture185(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture75(in []KeywordMapEntry) []KeywordMapEntry {
+	if !c.enter() {
+		var zero []KeywordMapEntry
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture75", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]KeywordMapEntry)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(KeywordMapEntry)), cap(in)) {
+		return nil
+	}
+	out := make([]KeywordMapEntry, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture186(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture76(in []LayoutFieldDecl) []LayoutFieldDecl {
+	if !c.enter() {
+		var zero []LayoutFieldDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture76", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LayoutFieldDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LayoutFieldDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]LayoutFieldDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture187(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture77(in []LexerModeDecl) []LexerModeDecl {
+	if !c.enter() {
+		var zero []LexerModeDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture77", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LexerModeDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LexerModeDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]LexerModeDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture188(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture78(in []LexerCharClassDecl) []LexerCharClassDecl {
+	if !c.enter() {
+		var zero []LexerCharClassDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture78", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LexerCharClassDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LexerCharClassDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]LexerCharClassDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture189(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture79(in *LexerKeywordDecl) *LexerKeywordDecl {
+	if !c.enter() {
+		var zero *LexerKeywordDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LexerKeywordDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LexerKeywordDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Fallback = c.syntaxCapture2(in.Fallback)
+	out.Entries = c.syntaxCapture190(in.Entries)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture80(in *LexerLiteralDecl) *LexerLiteralDecl {
+	if !c.enter() {
+		var zero *LexerLiteralDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LexerLiteralDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LexerLiteralDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Fallback = c.syntaxCapture2(in.Fallback)
+	out.Entries = c.syntaxCapture191(in.Entries)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture81(in []StaticAssertItem) []StaticAssertItem {
+	if !c.enter() {
+		var zero []StaticAssertItem
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture81", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]StaticAssertItem)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(StaticAssertItem)), cap(in)) {
+		return nil
+	}
+	out := make([]StaticAssertItem, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture192(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture82(in []StaticGenerateStmt) []StaticGenerateStmt {
+	if !c.enter() {
+		var zero []StaticGenerateStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture82", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]StaticGenerateStmt)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(StaticGenerateStmt)), cap(in)) {
+		return nil
+	}
+	out := make([]StaticGenerateStmt, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture193(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture83(in []StaticElifDecl) []StaticElifDecl {
+	if !c.enter() {
+		var zero []StaticElifDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture83", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]StaticElifDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(StaticElifDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]StaticElifDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture194(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture84(in []DerivedStateDecl) []DerivedStateDecl {
+	if !c.enter() {
+		var zero []DerivedStateDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture84", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]DerivedStateDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(DerivedStateDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]DerivedStateDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture195(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture85(in []StateTransitionDecl) []StateTransitionDecl {
+	if !c.enter() {
+		var zero []StateTransitionDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture85", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]StateTransitionDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(StateTransitionDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]StateTransitionDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture196(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture86(in *ListLitExpr) *ListLitExpr {
+	if !c.enter() {
+		var zero *ListLitExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ListLitExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ListLitExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elems = c.syntaxCapture56(in.Elems)
+	out.Spreads = c.syntaxCapture197(in.Spreads)
+	out.Owner = c.syntaxCapture45(in.Owner)
+	out.Keys = c.syntaxCapture56(in.Keys)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture87(in PermissionRef) PermissionRef {
+	if !c.enter() {
+		var zero PermissionRef
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Member = c.syntaxCapture2(in.Member)
+	out.TypeArgs = c.syntaxCapture52(in.TypeArgs)
+	out.Via = c.syntaxCapture42(in.Via)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture88(in LexerCharClassTerm) LexerCharClassTerm {
+	if !c.enter() {
+		var zero LexerCharClassTerm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Start = c.syntaxCapture2(in.Start)
+	out.End = c.syntaxCapture2(in.End)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture89(in *AggregateStateTypeExpr) *AggregateStateTypeExpr {
+	if !c.enter() {
+		var zero *AggregateStateTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AggregateStateTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AggregateStateTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Base = c.syntaxCapture44(in.Base)
+	out.States = c.syntaxCapture198(in.States)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture90(in *ArrayType) *ArrayType {
+	if !c.enter() {
+		var zero *ArrayType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ArrayType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ArrayType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture44(in.Elem)
+	out.Size = c.syntaxCapture45(in.Size)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture91(in *BuiltinTypeExpr) *BuiltinTypeExpr {
+	if !c.enter() {
+		var zero *BuiltinTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*BuiltinTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(BuiltinTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeArgs = c.syntaxCapture52(in.TypeArgs)
+	out.ValueArgs = c.syntaxCapture56(in.ValueArgs)
+	out.Region = c.syntaxCapture2(in.Region)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture92(in *ErrorSetExpr) *ErrorSetExpr {
+	if !c.enter() {
+		var zero *ErrorSetExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ErrorSetExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ErrorSetExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Tags = c.syntaxCapture199(in.Tags)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture93(in *ErrorUnionTypeExpr) *ErrorUnionTypeExpr {
+	if !c.enter() {
+		var zero *ErrorUnionTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ErrorUnionTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ErrorUnionTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture44(in.Value)
+	out.Errors = c.syntaxCapture44(in.Errors)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture94(in *FuncTypeExpr) *FuncTypeExpr {
+	if !c.enter() {
+		var zero *FuncTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*FuncTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(FuncTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Params = c.syntaxCapture52(in.Params)
+	out.Return = c.syntaxCapture44(in.Return)
+	out.Permissions = c.syntaxCapture42(in.Permissions)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture95(in *GenericType) *GenericType {
+	if !c.enter() {
+		var zero *GenericType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GenericType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GenericType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Spelling = c.syntaxCapture2(in.Spelling)
+	out.Args = c.syntaxCapture52(in.Args)
+	out.Region = c.syntaxCapture2(in.Region)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture96(in *GenericValueArgTypeExpr) *GenericValueArgTypeExpr {
+	if !c.enter() {
+		var zero *GenericValueArgTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GenericValueArgTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GenericValueArgTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture97(in *MutableType) *MutableType {
+	if !c.enter() {
+		var zero *MutableType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MutableType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MutableType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture44(in.Elem)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture98(in *NamedType) *NamedType {
+	if !c.enter() {
+		var zero *NamedType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*NamedType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(NamedType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Region = c.syntaxCapture2(in.Region)
+	out.Spelling = c.syntaxCapture2(in.Spelling)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture99(in *OptionalTypeExpr) *OptionalTypeExpr {
+	if !c.enter() {
+		var zero *OptionalTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*OptionalTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(OptionalTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture44(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture100(in *OwnedType) *OwnedType {
+	if !c.enter() {
+		var zero *OwnedType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*OwnedType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(OwnedType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture44(in.Elem)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture101(in *RefStateLiteralTypeExpr) *RefStateLiteralTypeExpr {
+	if !c.enter() {
+		var zero *RefStateLiteralTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RefStateLiteralTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RefStateLiteralTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture102(in *RefStorageLiteralTypeExpr) *RefStorageLiteralTypeExpr {
+	if !c.enter() {
+		var zero *RefStorageLiteralTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RefStorageLiteralTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RefStorageLiteralTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture103(in *RefType) *RefType {
+	if !c.enter() {
+		var zero *RefType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RefType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RefType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture44(in.Elem)
+	out.Region = c.syntaxCapture2(in.Region)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture104(in *RefinementTypeExpr) *RefinementTypeExpr {
+	if !c.enter() {
+		var zero *RefinementTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RefinementTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RefinementTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Base = c.syntaxCapture44(in.Base)
+	out.Preds = c.syntaxCapture200(in.Preds)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture105(in *StateSetTypeExpr) *StateSetTypeExpr {
+	if !c.enter() {
+		var zero *StateSetTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StateSetTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StateSetTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cases = c.syntaxCapture53(in.Cases)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture106(in *TailType) *TailType {
+	if !c.enter() {
+		var zero *TailType
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TailType)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TailType)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture44(in.Elem)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture107(in *TupleTypeExpr) *TupleTypeExpr {
+	if !c.enter() {
+		var zero *TupleTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TupleTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TupleTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Fields = c.syntaxCapture201(in.Fields)
+	out.Region = c.syntaxCapture2(in.Region)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture108(in *WhereRefinementTypeExpr) *WhereRefinementTypeExpr {
+	if !c.enter() {
+		var zero *WhereRefinementTypeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*WhereRefinementTypeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(WhereRefinementTypeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Base = c.syntaxCapture44(in.Base)
+	out.Predicate = c.syntaxCapture45(in.Predicate)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture109(in *AddrOfExpr) *AddrOfExpr {
+	if !c.enter() {
+		var zero *AddrOfExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AddrOfExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AddrOfExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Operand = c.syntaxCapture45(in.Operand)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture110(in *AlignofExpr) *AlignofExpr {
+	if !c.enter() {
+		var zero *AlignofExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AlignofExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AlignofExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture111(in *AllocExpr) *AllocExpr {
+	if !c.enter() {
+		var zero *AllocExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AllocExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AllocExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Owner = c.syntaxCapture45(in.Owner)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture112(in *BinaryExpr) *BinaryExpr {
+	if !c.enter() {
+		var zero *BinaryExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*BinaryExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(BinaryExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Left = c.syntaxCapture45(in.Left)
+	out.Right = c.syntaxCapture45(in.Right)
+	out.LoweredCall = c.syntaxCapture114(in.LoweredCall)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture113(in *BoolLit) *BoolLit {
+	if !c.enter() {
+		var zero *BoolLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*BoolLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(BoolLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture114(in *CallExpr) *CallExpr {
+	if !c.enter() {
+		var zero *CallExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CallExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CallExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Func = c.syntaxCapture45(in.Func)
+	out.SafeReceiver = c.syntaxCapture45(in.SafeReceiver)
+	out.ArgForwardPos = c.syntaxCapture41(in.ArgForwardPos)
+	out.Args = c.syntaxCapture56(in.Args)
+	out.ArgNames = c.syntaxCapture53(in.ArgNames)
+	out.ArgShorthand = c.syntaxCapture197(in.ArgShorthand)
+	out.ArgItemOrder = c.syntaxCapture202(in.ArgItemOrder)
+	out.LmutRebindClaims = c.syntaxCapture203(in.LmutRebindClaims)
+	out.ResolvedArgs = c.syntaxCapture56(in.ResolvedArgs)
+	out.ResolvedCommonArgs = c.syntaxCapture204(in.ResolvedCommonArgs)
+	out.ResolvedImplicitArgs = c.syntaxCapture56(in.ResolvedImplicitArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture115(in *CanExpr) *CanExpr {
+	if !c.enter() {
+		var zero *CanExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CanExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CanExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Expr = c.syntaxCapture45(in.Expr)
+	out.Permissions = c.syntaxCapture42(in.Permissions)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture116(in *CastExpr) *CastExpr {
+	if !c.enter() {
+		var zero *CastExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CastExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CastExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Operand = c.syntaxCapture45(in.Operand)
+	out.Target = c.syntaxCapture44(in.Target)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture117(in *CatchExpr) *CatchExpr {
+	if !c.enter() {
+		var zero *CatchExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CatchExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CatchExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Success = c.syntaxCapture205(in.Success)
+	out.Arms = c.syntaxCapture206(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture118(in *CharLit) *CharLit {
+	if !c.enter() {
+		var zero *CharLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CharLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CharLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture2(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture119(in *EmitExpr) *EmitExpr {
+	if !c.enter() {
+		var zero *EmitExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*EmitExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(EmitExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture120(in *EnumColumnExpr) *EnumColumnExpr {
+	if !c.enter() {
+		var zero *EnumColumnExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*EnumColumnExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(EnumColumnExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Enum = c.syntaxCapture2(in.Enum)
+	out.Field = c.syntaxCapture2(in.Field)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture121(in *ExprBlock) *ExprBlock {
+	if !c.enter() {
+		var zero *ExprBlock
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExprBlock)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExprBlock)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Stmts = c.syntaxCapture61(in.Stmts)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Captures = c.syntaxCapture53(in.Captures)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture122(in *FieldExpr) *FieldExpr {
+	if !c.enter() {
+		var zero *FieldExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*FieldExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(FieldExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Object = c.syntaxCapture45(in.Object)
+	out.Field = c.syntaxCapture2(in.Field)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture123(in *FloatLit) *FloatLit {
+	if !c.enter() {
+		var zero *FloatLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*FloatLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(FloatLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture2(in.Value)
+	out.Suffix = c.syntaxCapture2(in.Suffix)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture124(in *FoldExpr) *FoldExpr {
+	if !c.enter() {
+		var zero *FoldExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*FoldExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(FoldExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Keyword = c.syntaxCapture2(in.Keyword)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Root = c.syntaxCapture44(in.Root)
+	out.ResultType = c.syntaxCapture44(in.ResultType)
+	out.Arms = c.syntaxCapture207(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture125(in *GetExpr) *GetExpr {
+	if !c.enter() {
+		var zero *GetExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GetExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GetExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Fallback = c.syntaxCapture45(in.Fallback)
+	out.Recovery = c.syntaxCapture208(in.Recovery)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture126(in *Ident) *Ident {
+	if !c.enter() {
+		var zero *Ident
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*Ident)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(Ident)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture127(in *IndexExpr) *IndexExpr {
+	if !c.enter() {
+		var zero *IndexExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*IndexExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(IndexExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Object = c.syntaxCapture45(in.Object)
+	out.Index = c.syntaxCapture45(in.Index)
+	out.Index2 = c.syntaxCapture45(in.Index2)
+	out.Fallback = c.syntaxCapture45(in.Fallback)
+	out.AsSpecialize = c.syntaxCapture148(in.AsSpecialize)
+	out.AsOverlayCall = c.syntaxCapture114(in.AsOverlayCall)
+	out.AsBuiltinDictGet = c.syntaxCapture114(in.AsBuiltinDictGet)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture128(in *IntLit) *IntLit {
+	if !c.enter() {
+		var zero *IntLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*IntLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(IntLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture2(in.Value)
+	out.Suffix = c.syntaxCapture2(in.Suffix)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture129(in *IsAliasExpr) *IsAliasExpr {
+	if !c.enter() {
+		var zero *IsAliasExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*IsAliasExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(IsAliasExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Target = c.syntaxCapture45(in.Target)
+	out.Alias = c.syntaxCapture2(in.Alias)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture130(in *IsPatternExpr) *IsPatternExpr {
+	if !c.enter() {
+		var zero *IsPatternExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*IsPatternExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(IsPatternExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Targets = c.syntaxCapture56(in.Targets)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture131(in *LambdaExpr) *LambdaExpr {
+	if !c.enter() {
+		var zero *LambdaExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LambdaExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LambdaExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Keyword = c.syntaxCapture2(in.Keyword)
+	out.Params = c.syntaxCapture51(in.Params)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.BodyExpr = c.syntaxCapture45(in.BodyExpr)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture132(in *ListComprehensionExpr) *ListComprehensionExpr {
+	if !c.enter() {
+		var zero *ListComprehensionExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ListComprehensionExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ListComprehensionExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.SecondName = c.syntaxCapture2(in.SecondName)
+	out.Source = c.syntaxCapture45(in.Source)
+	out.RangeEnd = c.syntaxCapture45(in.RangeEnd)
+	out.RangeStep = c.syntaxCapture45(in.RangeStep)
+	out.Filter = c.syntaxCapture45(in.Filter)
+	out.Owner = c.syntaxCapture45(in.Owner)
+	out.Key = c.syntaxCapture45(in.Key)
+	out.Bindings = c.syntaxCapture61(in.Bindings)
+	out.LoweredParallel = c.syntaxCapture45(in.LoweredParallel)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture133(in *MachineFromExpr) *MachineFromExpr {
+	if !c.enter() {
+		var zero *MachineFromExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MachineFromExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MachineFromExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.StartEnum = c.syntaxCapture2(in.StartEnum)
+	out.StartState = c.syntaxCapture2(in.StartState)
+	out.StartArgs = c.syntaxCapture56(in.StartArgs)
+	out.Decreases = c.syntaxCapture45(in.Decreases)
+	out.HeaderDecls = c.syntaxCapture61(in.HeaderDecls)
+	out.HeaderCaptures = c.syntaxCapture53(in.HeaderCaptures)
+	out.Arms = c.syntaxCapture209(in.Arms)
+	out.Lowered = c.syntaxCapture45(in.Lowered)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture134(in *MatchExpr) *MatchExpr {
+	if !c.enter() {
+		var zero *MatchExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Store = c.syntaxCapture45(in.Store)
+	out.Arms = c.syntaxCapture210(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture135(in *MembershipRangeExpr) *MembershipRangeExpr {
+	if !c.enter() {
+		var zero *MembershipRangeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MembershipRangeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MembershipRangeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Start = c.syntaxCapture45(in.Start)
+	out.End = c.syntaxCapture45(in.End)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture136(in *MoveExpr) *MoveExpr {
+	if !c.enter() {
+		var zero *MoveExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MoveExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MoveExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Operand = c.syntaxCapture45(in.Operand)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture137(in *NullLit) *NullLit {
+	if !c.enter() {
+		var zero *NullLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*NullLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(NullLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture138(in *OffsetofExpr) *OffsetofExpr {
+	if !c.enter() {
+		var zero *OffsetofExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*OffsetofExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(OffsetofExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Field = c.syntaxCapture2(in.Field)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture139(in *OptionalBindExpr) *OptionalBindExpr {
+	if !c.enter() {
+		var zero *OptionalBindExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*OptionalBindExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(OptionalBindExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture140(in *ParenExpr) *ParenExpr {
+	if !c.enter() {
+		var zero *ParenExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ParenExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ParenExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Inner = c.syntaxCapture45(in.Inner)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture141(in *QuantifierExpr) *QuantifierExpr {
+	if !c.enter() {
+		var zero *QuantifierExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*QuantifierExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(QuantifierExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Vars = c.syntaxCapture53(in.Vars)
+	out.In = c.syntaxCapture45(in.In)
+	out.Body = c.syntaxCapture45(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture142(in *QueryExpr) *QueryExpr {
+	if !c.enter() {
+		var zero *QueryExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*QueryExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(QueryExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Pattern = c.syntaxCapture211(in.Pattern)
+	out.Source = c.syntaxCapture45(in.Source)
+	out.Filter = c.syntaxCapture45(in.Filter)
+	out.PatternFilter = c.syntaxCapture212(in.PatternFilter)
+	out.PatternFilterSubject = c.syntaxCapture2(in.PatternFilterSubject)
+	out.Projection = c.syntaxCapture45(in.Projection)
+	out.Owner = c.syntaxCapture45(in.Owner)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture143(in *RaiseExpr) *RaiseExpr {
+	if !c.enter() {
+		var zero *RaiseExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RaiseExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RaiseExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Error = c.syntaxCapture45(in.Error)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture144(in *RecordUpdateExpr) *RecordUpdateExpr {
+	if !c.enter() {
+		var zero *RecordUpdateExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RecordUpdateExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RecordUpdateExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Base = c.syntaxCapture45(in.Base)
+	out.Args = c.syntaxCapture56(in.Args)
+	out.ArgNames = c.syntaxCapture53(in.ArgNames)
+	out.ResolvedArgs = c.syntaxCapture56(in.ResolvedArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture145(in *ShorthandMemberExpr) *ShorthandMemberExpr {
+	if !c.enter() {
+		var zero *ShorthandMemberExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ShorthandMemberExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ShorthandMemberExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Parts = c.syntaxCapture53(in.Parts)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture146(in *SizeofExpr) *SizeofExpr {
+	if !c.enter() {
+		var zero *SizeofExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*SizeofExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(SizeofExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture147(in *SliceExpr) *SliceExpr {
+	if !c.enter() {
+		var zero *SliceExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*SliceExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(SliceExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Object = c.syntaxCapture45(in.Object)
+	out.Start = c.syntaxCapture45(in.Start)
+	out.End = c.syntaxCapture45(in.End)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture148(in *SpecializeExpr) *SpecializeExpr {
+	if !c.enter() {
+		var zero *SpecializeExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*SpecializeExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(SpecializeExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Operand = c.syntaxCapture45(in.Operand)
+	out.TypeArgs = c.syntaxCapture52(in.TypeArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture149(in *StringLit) *StringLit {
+	if !c.enter() {
+		var zero *StringLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StringLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StringLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture2(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture150(in *StructLitExpr) *StructLitExpr {
+	if !c.enter() {
+		var zero *StructLitExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StructLitExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StructLitExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeArgs = c.syntaxCapture52(in.TypeArgs)
+	out.Args = c.syntaxCapture56(in.Args)
+	out.ArgNames = c.syntaxCapture53(in.ArgNames)
+	out.Spreads = c.syntaxCapture56(in.Spreads)
+	out.CopyBase = c.syntaxCapture45(in.CopyBase)
+	out.ResolvedArgs = c.syntaxCapture56(in.ResolvedArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture151(in *StructTestExpr) *StructTestExpr {
+	if !c.enter() {
+		var zero *StructTestExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StructTestExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StructTestExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Pattern = c.syntaxCapture213(in.Pattern)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture152(in *TernaryExpr) *TernaryExpr {
+	if !c.enter() {
+		var zero *TernaryExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TernaryExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TernaryExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Alt = c.syntaxCapture45(in.Alt)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture153(in *TryExpr) *TryExpr {
+	if !c.enter() {
+		var zero *TryExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TryExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TryExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Fallback = c.syntaxCapture45(in.Fallback)
+	out.Recovery = c.syntaxCapture208(in.Recovery)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture154(in *TupleExpr) *TupleExpr {
+	if !c.enter() {
+		var zero *TupleExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TupleExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TupleExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elems = c.syntaxCapture56(in.Elems)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture155(in *TypeExprExpr) *TypeExprExpr {
+	if !c.enter() {
+		var zero *TypeExprExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TypeExprExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TypeExprExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture156(in *UnaryExpr) *UnaryExpr {
+	if !c.enter() {
+		var zero *UnaryExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*UnaryExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(UnaryExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Operand = c.syntaxCapture45(in.Operand)
+	out.LoweredCall = c.syntaxCapture114(in.LoweredCall)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture157(in *UnwrapElseExpr) *UnwrapElseExpr {
+	if !c.enter() {
+		var zero *UnwrapElseExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*UnwrapElseExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(UnwrapElseExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Fallback = c.syntaxCapture45(in.Fallback)
+	out.Recovery = c.syntaxCapture208(in.Recovery)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture158(in *VariantTestExpr) *VariantTestExpr {
+	if !c.enter() {
+		var zero *VariantTestExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*VariantTestExpr)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(VariantTestExpr)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Pattern = c.syntaxCapture214(in.Pattern)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture159(in *ZeroedLit) *ZeroedLit {
+	if !c.enter() {
+		var zero *ZeroedLit
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ZeroedLit)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ZeroedLit)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture160(in ConstEnumMemberDecl) ConstEnumMemberDecl {
+	if !c.enter() {
+		var zero ConstEnumMemberDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture161(in Annotation) Annotation {
+	if !c.enter() {
+		var zero Annotation
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Args = c.syntaxCapture53(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture162(in FieldDecl) FieldDecl {
+	if !c.enter() {
+		var zero FieldDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Annotations = c.syntaxCapture47(in.Annotations)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.DefaultValue = c.syntaxCapture45(in.DefaultValue)
+	out.BitGroup = c.syntaxCapture215(in.BitGroup)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture163(in EnumVariantDecl) EnumVariantDecl {
+	if !c.enter() {
+		var zero EnumVariantDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Payload = c.syntaxCapture216(in.Payload)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture164(in ErrorVariantDecl) ErrorVariantDecl {
+	if !c.enter() {
+		var zero ErrorVariantDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Payload = c.syntaxCapture51(in.Payload)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture165(in ParamDecl) ParamDecl {
+	if !c.enter() {
+		var zero ParamDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.DefaultValue = c.syntaxCapture45(in.DefaultValue)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture166(in GenericParam) GenericParam {
+	if !c.enter() {
+		var zero GenericParam
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.InterfaceBound = c.syntaxCapture2(in.InterfaceBound)
+	out.StateCases = c.syntaxCapture53(in.StateCases)
+	out.StateOwner = c.syntaxCapture2(in.StateOwner)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture167(in EnsuresClause) EnsuresClause {
+	if !c.enter() {
+		var zero EnsuresClause
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Condition = c.syntaxCapture217(in.Condition)
+	out.Target = c.syntaxCapture169(in.Target)
+	out.StateCases = c.syntaxCapture53(in.StateCases)
+	out.RefinementLaw = c.syntaxCapture2(in.RefinementLaw)
+	out.RefinementArgs = c.syntaxCapture56(in.RefinementArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture168(in *ContractStmt) *ContractStmt {
+	if !c.enter() {
+		var zero *ContractStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ContractStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ContractStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Proof = c.syntaxCapture61(in.Proof)
+	out.WildReason = c.syntaxCapture2(in.WildReason)
+	out.UsesName = c.syntaxCapture2(in.UsesName)
+	out.UsesTypeArgs = c.syntaxCapture52(in.UsesTypeArgs)
+	out.UsesArgs = c.syntaxCapture56(in.UsesArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture169(in EnsuresPath) EnsuresPath {
+	if !c.enter() {
+		var zero EnsuresPath
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Root = c.syntaxCapture2(in.Root)
+	out.Fields = c.syntaxCapture53(in.Fields)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture170(in FulfillsClause) FulfillsClause {
+	if !c.enter() {
+		var zero FulfillsClause
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Param = c.syntaxCapture2(in.Param)
+	out.Law = c.syntaxCapture2(in.Law)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture171(in *ProofBlockStmt) *ProofBlockStmt {
+	if !c.enter() {
+		var zero *ProofBlockStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ProofBlockStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ProofBlockStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Goal = c.syntaxCapture45(in.Goal)
+	out.Proof = c.syntaxCapture61(in.Proof)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture172(in Stmt) Stmt {
+	if !c.enter() {
+		var zero Stmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *AdoptStmt:
+		return c.syntaxCapture218(value)
+	case *AsRefAssignStmt:
+		return c.syntaxCapture219(value)
+	case *AssertByStmt:
+		return c.syntaxCapture220(value)
+	case *AssertHoleStmt:
+		return c.syntaxCapture221(value)
+	case *AssignStmt:
+		return c.syntaxCapture222(value)
+	case *AugAssignStmt:
+		return c.syntaxCapture223(value)
+	case *BreakStmt:
+		return c.syntaxCapture224(value)
+	case *CanStmt:
+		return c.syntaxCapture225(value)
+	case *CheckpointStmt:
+		return c.syntaxCapture226(value)
+	case *ContinueStmt:
+		return c.syntaxCapture227(value)
+	case *ContractStmt:
+		return c.syntaxCapture168(value)
+	case *DeferStmt:
+		return c.syntaxCapture228(value)
+	case *DestroyStmt:
+		return c.syntaxCapture229(value)
+	case *DiscardStmt:
+		return c.syntaxCapture230(value)
+	case *ExpectPatternStmt:
+		return c.syntaxCapture231(value)
+	case *ExprStmt:
+		return c.syntaxCapture232(value)
+	case *ForStmt:
+		return c.syntaxCapture233(value)
+	case *GroupedCheckpointStmt:
+		return c.syntaxCapture234(value)
+	case *IfStmt:
+		return c.syntaxCapture235(value)
+	case *InStoreStmt:
+		return c.syntaxCapture236(value)
+	case *IterForStmt:
+		return c.syntaxCapture237(value)
+	case *LeakStmt:
+		return c.syntaxCapture238(value)
+	case *LetDestructureStmt:
+		return c.syntaxCapture239(value)
+	case *LockStmt:
+		return c.syntaxCapture240(value)
+	case *MachineCoverageStmt:
+		return c.syntaxCapture241(value)
+	case *MarkStmt:
+		return c.syntaxCapture242(value)
+	case *MatchStmt:
+		return c.syntaxCapture243(value)
+	case *MoveBindStmt:
+		return c.syntaxCapture244(value)
+	case *PanicStmt:
+		return c.syntaxCapture245(value)
+	case *ParallelForStmt:
+		return c.syntaxCapture246(value)
+	case *PassStmt:
+		return c.syntaxCapture247(value)
+	case *PoolStmt:
+		return c.syntaxCapture248(value)
+	case *PromoteStmt:
+		return c.syntaxCapture249(value)
+	case *ProofBlockStmt:
+		return c.syntaxCapture171(value)
+	case *ProofUseStmt:
+		return c.syntaxCapture250(value)
+	case *RegionStmt:
+		return c.syntaxCapture251(value)
+	case *ResetStmt:
+		return c.syntaxCapture252(value)
+	case *RestoreCheckpointStmt:
+		return c.syntaxCapture253(value)
+	case *RestoreStmt:
+		return c.syntaxCapture254(value)
+	case *ReturnStmt:
+		return c.syntaxCapture255(value)
+	case *ScopeStmt:
+		return c.syntaxCapture256(value)
+	case *SignalStmt:
+		return c.syntaxCapture257(value)
+	case *StaticAssertBlockStmt:
+		return c.syntaxCapture258(value)
+	case *StaticAssertStmt:
+		return c.syntaxCapture259(value)
+	case *StaticBlockStmt:
+		return c.syntaxCapture260(value)
+	case *StaticErrorStmt:
+		return c.syntaxCapture261(value)
+	case *StaticIfStmt:
+		return c.syntaxCapture262(value)
+	case *TupleBindStmt:
+		return c.syntaxCapture263(value)
+	case *VarDeclStmt:
+		return c.syntaxCapture264(value)
+	case *WhileStmt:
+		return c.syntaxCapture265(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture173(in LmutThreadSlot) LmutThreadSlot {
+	if !c.enter() {
+		var zero LmutThreadSlot
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.ParamName = c.syntaxCapture2(in.ParamName)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture174(in ContractInclude) ContractInclude {
+	if !c.enter() {
+		var zero ContractInclude
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Law = c.syntaxCapture2(in.Law)
+	out.Args = c.syntaxCapture56(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture175(in ParamContract) ParamContract {
+	if !c.enter() {
+		var zero ParamContract
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Param = c.syntaxCapture2(in.Param)
+	out.Pred = c.syntaxCapture45(in.Pred)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture176(in GrammarTokenAliasDecl) GrammarTokenAliasDecl {
+	if !c.enter() {
+		var zero GrammarTokenAliasDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Kind = c.syntaxCapture2(in.Kind)
+	out.Literal = c.syntaxCapture2(in.Literal)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture177(in GrammarChannelDecl) GrammarChannelDecl {
+	if !c.enter() {
+		var zero GrammarChannelDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Default = c.syntaxCapture45(in.Default)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture178(in GrammarTokenSetDecl) GrammarTokenSetDecl {
+	if !c.enter() {
+		var zero GrammarTokenSetDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Terms = c.syntaxCapture266(in.Terms)
+	out.Excluded = c.syntaxCapture266(in.Excluded)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture179(in GrammarAliasDecl) GrammarAliasDecl {
+	if !c.enter() {
+		var zero GrammarAliasDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Params = c.syntaxCapture267(in.Params)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture180(in GrammarFnDecl) GrammarFnDecl {
+	if !c.enter() {
+		var zero GrammarFnDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.TypeParams = c.syntaxCapture53(in.TypeParams)
+	out.GenericParams = c.syntaxCapture54(in.GenericParams)
+	out.Params = c.syntaxCapture267(in.Params)
+	out.Return = c.syntaxCapture269(in.Return)
+	out.Terms = c.syntaxCapture266(in.Terms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture181(in GrammarRecoveryDecl) GrammarRecoveryDecl {
+	if !c.enter() {
+		var zero GrammarRecoveryDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Message = c.syntaxCapture45(in.Message)
+	out.Until = c.syntaxCapture266(in.Until)
+	out.Fallback = c.syntaxCapture45(in.Fallback)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture182(in GrammarInfixTableDecl) GrammarInfixTableDecl {
+	if !c.enter() {
+		var zero GrammarInfixTableDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Result = c.syntaxCapture2(in.Result)
+	out.Levels = c.syntaxCapture270(in.Levels)
+	out.Dynamic = c.syntaxCapture271(in.Dynamic)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture183(in GrammarProductionDecl) GrammarProductionDecl {
+	if !c.enter() {
+		var zero GrammarProductionDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Params = c.syntaxCapture51(in.Params)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	out.RecoverPolicy = c.syntaxCapture2(in.RecoverPolicy)
+	out.RecoverMsg = c.syntaxCapture45(in.RecoverMsg)
+	out.RecoverUntil = c.syntaxCapture266(in.RecoverUntil)
+	out.RecoverValue = c.syntaxCapture45(in.RecoverValue)
+	out.Channels = c.syntaxCapture66(in.Channels)
+	out.Terms = c.syntaxCapture266(in.Terms)
+	out.ExternalHost = c.syntaxCapture2(in.ExternalHost)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture184(in ImplMember) ImplMember {
+	if !c.enter() {
+		var zero ImplMember
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *ExternFuncDecl:
+		return c.syntaxCapture15(value)
+	case *FuncDecl:
+		return c.syntaxCapture18(value)
+	case *ImplAssociatedTypeDecl:
+		return c.syntaxCapture272(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture185(in InterfaceMember) InterfaceMember {
+	if !c.enter() {
+		var zero InterfaceMember
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *AssociatedTypeDecl:
+		return c.syntaxCapture273(value)
+	case *ExternFuncDecl:
+		return c.syntaxCapture15(value)
+	case *FuncDecl:
+		return c.syntaxCapture18(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture186(in KeywordMapEntry) KeywordMapEntry {
+	if !c.enter() {
+		var zero KeywordMapEntry
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Text = c.syntaxCapture2(in.Text)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture187(in LayoutFieldDecl) LayoutFieldDecl {
+	if !c.enter() {
+		var zero LayoutFieldDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture2(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture188(in LexerModeDecl) LexerModeDecl {
+	if !c.enter() {
+		var zero LexerModeDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture189(in LexerCharClassDecl) LexerCharClassDecl {
+	if !c.enter() {
+		var zero LexerCharClassDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Terms = c.syntaxCapture43(in.Terms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture190(in []LexerKeywordEntry) []LexerKeywordEntry {
+	if !c.enter() {
+		var zero []LexerKeywordEntry
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture190", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LexerKeywordEntry)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LexerKeywordEntry)), cap(in)) {
+		return nil
+	}
+	out := make([]LexerKeywordEntry, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture274(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture191(in []LexerLiteralEntry) []LexerLiteralEntry {
+	if !c.enter() {
+		var zero []LexerLiteralEntry
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture191", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LexerLiteralEntry)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LexerLiteralEntry)), cap(in)) {
+		return nil
+	}
+	out := make([]LexerLiteralEntry, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture275(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture192(in StaticAssertItem) StaticAssertItem {
+	if !c.enter() {
+		var zero StaticAssertItem
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture193(in StaticGenerateStmt) StaticGenerateStmt {
+	if !c.enter() {
+		var zero StaticGenerateStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *StaticGenerateEmitDecl:
+		return c.syntaxCapture276(value)
+	case *StaticGenerateForDecl:
+		return c.syntaxCapture277(value)
+	case *StaticGenerateIfDecl:
+		return c.syntaxCapture278(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture194(in StaticElifDecl) StaticElifDecl {
+	if !c.enter() {
+		var zero StaticElifDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Body = c.syntaxCapture3(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture195(in DerivedStateDecl) DerivedStateDecl {
+	if !c.enter() {
+		var zero DerivedStateDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.StateName = c.syntaxCapture2(in.StateName)
+	out.Condition = c.syntaxCapture45(in.Condition)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture196(in StateTransitionDecl) StateTransitionDecl {
+	if !c.enter() {
+		var zero StateTransitionDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.From = c.syntaxCapture2(in.From)
+	out.To = c.syntaxCapture2(in.To)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture197(in []bool) []bool {
+	if !c.enter() {
+		var zero []bool
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture197", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]bool)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(bool)), cap(in)) {
+		return nil
+	}
+	out := make([]bool, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture198(in []RefState) []RefState {
+	if !c.enter() {
+		var zero []RefState
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture198", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]RefState)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(RefState)), cap(in)) {
+		return nil
+	}
+	out := make([]RefState, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture199(in []ErrorTagExpr) []ErrorTagExpr {
+	if !c.enter() {
+		var zero []ErrorTagExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture199", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ErrorTagExpr)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ErrorTagExpr)), cap(in)) {
+		return nil
+	}
+	out := make([]ErrorTagExpr, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture279(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture200(in []RefinementPredExpr) []RefinementPredExpr {
+	if !c.enter() {
+		var zero []RefinementPredExpr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture200", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]RefinementPredExpr)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(RefinementPredExpr)), cap(in)) {
+		return nil
+	}
+	out := make([]RefinementPredExpr, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture280(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture201(in []TupleTypeField) []TupleTypeField {
+	if !c.enter() {
+		var zero []TupleTypeField
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture201", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]TupleTypeField)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(TupleTypeField)), cap(in)) {
+		return nil
+	}
+	out := make([]TupleTypeField, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture281(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture202(in []CallArgItem) []CallArgItem {
+	if !c.enter() {
+		var zero []CallArgItem
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture202", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]CallArgItem)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(CallArgItem)), cap(in)) {
+		return nil
+	}
+	out := make([]CallArgItem, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture282(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture203(in []LmutRebindClaim) []LmutRebindClaim {
+	if !c.enter() {
+		var zero []LmutRebindClaim
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture203", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]LmutRebindClaim)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(LmutRebindClaim)), cap(in)) {
+		return nil
+	}
+	out := make([]LmutRebindClaim, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture283(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture204(in map[string]Expr) map[string]Expr {
+	if !c.enter() {
+		var zero map[string]Expr
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastMap{"syntaxCapture204", reflect.ValueOf(in).UnsafePointer()}
+	if prior, ok := c.maps[key]; ok {
+		return prior.(map[string]Expr)
+	}
+	if !c.captureMap(unsafe.Sizeof(*new(string))+unsafe.Sizeof(*new(Expr)), len(in)) {
+		return nil
+	}
+	out := make(map[string]Expr, len(in))
+	c.maps[key] = out
+	for k, v := range in {
+		if c.err != nil {
+			break
+		}
+		out[c.syntaxCapture2(k)] = c.syntaxCapture45(v)
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture205(in CatchArm) CatchArm {
+	if !c.enter() {
+		var zero CatchArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Payload = c.syntaxCapture53(in.Payload)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture206(in []CatchArm) []CatchArm {
+	if !c.enter() {
+		var zero []CatchArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture206", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]CatchArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(CatchArm)), cap(in)) {
+		return nil
+	}
+	out := make([]CatchArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture205(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture207(in []VisitArm) []VisitArm {
+	if !c.enter() {
+		var zero []VisitArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture207", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]VisitArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(VisitArm)), cap(in)) {
+		return nil
+	}
+	out := make([]VisitArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture284(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture208(in *RecoveryClause) *RecoveryClause {
+	if !c.enter() {
+		var zero *RecoveryClause
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RecoveryClause)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RecoveryClause)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Binding = c.syntaxCapture2(in.Binding)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture209(in []MachineFromArm) []MachineFromArm {
+	if !c.enter() {
+		var zero []MachineFromArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture209", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MachineFromArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MachineFromArm)), cap(in)) {
+		return nil
+	}
+	out := make([]MachineFromArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture285(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture210(in []MatchArm) []MatchArm {
+	if !c.enter() {
+		var zero []MatchArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture210", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MatchArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MatchArm)), cap(in)) {
+		return nil
+	}
+	out := make([]MatchArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture286(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture211(in MoveBindPattern) MoveBindPattern {
+	if !c.enter() {
+		var zero MoveBindPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *MoveBindNamePattern:
+		return c.syntaxCapture287(value)
+	case *MoveBindStructPattern:
+		return c.syntaxCapture288(value)
+	case *MoveBindTuplePattern:
+		return c.syntaxCapture289(value)
+	case *MoveBindVariantPattern:
+		return c.syntaxCapture290(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture212(in MatchPattern) MatchPattern {
+	if !c.enter() {
+		var zero MatchPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *MatchBindPattern:
+		return c.syntaxCapture291(value)
+	case *MatchListPattern:
+		return c.syntaxCapture292(value)
+	case *MatchLiteralPattern:
+		return c.syntaxCapture293(value)
+	case *MatchOrPattern:
+		return c.syntaxCapture294(value)
+	case *MatchRangePattern:
+		return c.syntaxCapture295(value)
+	case *MatchRestPattern:
+		return c.syntaxCapture296(value)
+	case *MatchStringLiteralPattern:
+		return c.syntaxCapture297(value)
+	case *MatchStructPattern:
+		return c.syntaxCapture213(value)
+	case *MatchTuplePattern:
+		return c.syntaxCapture298(value)
+	case *MatchVariantPattern:
+		return c.syntaxCapture214(value)
+	case *MatchWildcardPattern:
+		return c.syntaxCapture299(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture213(in *MatchStructPattern) *MatchStructPattern {
+	if !c.enter() {
+		var zero *MatchStructPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchStructPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchStructPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.TypeName = c.syntaxCapture2(in.TypeName)
+	out.Args = c.syntaxCapture300(in.Args)
+	out.ResolvedArgs = c.syntaxCapture301(in.ResolvedArgs)
+	out.As = c.syntaxCapture2(in.As)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture214(in *MatchVariantPattern) *MatchVariantPattern {
+	if !c.enter() {
+		var zero *MatchVariantPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchVariantPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchVariantPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.EnumName = c.syntaxCapture2(in.EnumName)
+	out.Variant = c.syntaxCapture2(in.Variant)
+	out.Args = c.syntaxCapture300(in.Args)
+	out.ResolvedArgs = c.syntaxCapture301(in.ResolvedArgs)
+	out.As = c.syntaxCapture2(in.As)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture215(in *BitGroupDecl) *BitGroupDecl {
+	if !c.enter() {
+		var zero *BitGroupDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*BitGroupDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(BitGroupDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Members = c.syntaxCapture302(in.Members)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture216(in []EnumPayloadDecl) []EnumPayloadDecl {
+	if !c.enter() {
+		var zero []EnumPayloadDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture216", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]EnumPayloadDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(EnumPayloadDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]EnumPayloadDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture303(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture217(in EnsuresCondition) EnsuresCondition {
+	if !c.enter() {
+		var zero EnsuresCondition
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture218(in *AdoptStmt) *AdoptStmt {
+	if !c.enter() {
+		var zero *AdoptStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AdoptStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AdoptStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Child = c.syntaxCapture2(in.Child)
+	out.Parent = c.syntaxCapture2(in.Parent)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture219(in *AsRefAssignStmt) *AsRefAssignStmt {
+	if !c.enter() {
+		var zero *AsRefAssignStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AsRefAssignStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AsRefAssignStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Target = c.syntaxCapture45(in.Target)
+	out.AsKind = c.syntaxCapture2(in.AsKind)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture220(in *AssertByStmt) *AssertByStmt {
+	if !c.enter() {
+		var zero *AssertByStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AssertByStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AssertByStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Proof = c.syntaxCapture61(in.Proof)
+	out.ScopedTheory = c.syntaxCapture2(in.ScopedTheory)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture221(in *AssertHoleStmt) *AssertHoleStmt {
+	if !c.enter() {
+		var zero *AssertHoleStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AssertHoleStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AssertHoleStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture222(in *AssignStmt) *AssignStmt {
+	if !c.enter() {
+		var zero *AssignStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AssignStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AssignStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Target = c.syntaxCapture45(in.Target)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.AsOverlayCall = c.syntaxCapture114(in.AsOverlayCall)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture223(in *AugAssignStmt) *AugAssignStmt {
+	if !c.enter() {
+		var zero *AugAssignStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AugAssignStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AugAssignStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.CollectionAppend = c.syntaxCapture114(in.CollectionAppend)
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Target = c.syntaxCapture45(in.Target)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture224(in *BreakStmt) *BreakStmt {
+	if !c.enter() {
+		var zero *BreakStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*BreakStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(BreakStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture225(in *CanStmt) *CanStmt {
+	if !c.enter() {
+		var zero *CanStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CanStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CanStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Permissions = c.syntaxCapture42(in.Permissions)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.As = c.syntaxCapture2(in.As)
+	out.HandlerName = c.syntaxCapture2(in.HandlerName)
+	out.HandlerArgs = c.syntaxCapture56(in.HandlerArgs)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture226(in *CheckpointStmt) *CheckpointStmt {
+	if !c.enter() {
+		var zero *CheckpointStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*CheckpointStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(CheckpointStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Target = c.syntaxCapture45(in.Target)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture227(in *ContinueStmt) *ContinueStmt {
+	if !c.enter() {
+		var zero *ContinueStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ContinueStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ContinueStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture228(in *DeferStmt) *DeferStmt {
+	if !c.enter() {
+		var zero *DeferStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*DeferStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(DeferStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture229(in *DestroyStmt) *DestroyStmt {
+	if !c.enter() {
+		var zero *DestroyStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*DestroyStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(DestroyStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture230(in *DiscardStmt) *DiscardStmt {
+	if !c.enter() {
+		var zero *DiscardStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*DiscardStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(DiscardStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture231(in *ExpectPatternStmt) *ExpectPatternStmt {
+	if !c.enter() {
+		var zero *ExpectPatternStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExpectPatternStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExpectPatternStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Patterns = c.syntaxCapture304(in.Patterns)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture232(in *ExprStmt) *ExprStmt {
+	if !c.enter() {
+		var zero *ExprStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ExprStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ExprStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Expr = c.syntaxCapture45(in.Expr)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture233(in *ForStmt) *ForStmt {
+	if !c.enter() {
+		var zero *ForStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ForStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ForStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Start = c.syntaxCapture45(in.Start)
+	out.End = c.syntaxCapture45(in.End)
+	out.Step = c.syntaxCapture45(in.Step)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.PreReserve = c.syntaxCapture172(in.PreReserve)
+	out.PreReserves = c.syntaxCapture61(in.PreReserves)
+	out.AutovecReason = c.syntaxCapture2(in.AutovecReason)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture234(in *GroupedCheckpointStmt) *GroupedCheckpointStmt {
+	if !c.enter() {
+		var zero *GroupedCheckpointStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GroupedCheckpointStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GroupedCheckpointStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Targets = c.syntaxCapture56(in.Targets)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture235(in *IfStmt) *IfStmt {
+	if !c.enter() {
+		var zero *IfStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*IfStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(IfStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Then = c.syntaxCapture61(in.Then)
+	out.Elifs = c.syntaxCapture305(in.Elifs)
+	out.Else = c.syntaxCapture61(in.Else)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture236(in *InStoreStmt) *InStoreStmt {
+	if !c.enter() {
+		var zero *InStoreStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*InStoreStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(InStoreStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Store = c.syntaxCapture45(in.Store)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture237(in *IterForStmt) *IterForStmt {
+	if !c.enter() {
+		var zero *IterForStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*IterForStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(IterForStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Pattern = c.syntaxCapture211(in.Pattern)
+	out.Source = c.syntaxCapture45(in.Source)
+	out.PatternFilter = c.syntaxCapture212(in.PatternFilter)
+	out.PatternFilterSubject = c.syntaxCapture2(in.PatternFilterSubject)
+	out.WhereFilter = c.syntaxCapture45(in.WhereFilter)
+	out.Filter = c.syntaxCapture45(in.Filter)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.PreReserve = c.syntaxCapture172(in.PreReserve)
+	out.PreReserves = c.syntaxCapture61(in.PreReserves)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture238(in *LeakStmt) *LeakStmt {
+	if !c.enter() {
+		var zero *LeakStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LeakStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LeakStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture239(in *LetDestructureStmt) *LetDestructureStmt {
+	if !c.enter() {
+		var zero *LetDestructureStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LetDestructureStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LetDestructureStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Pattern = c.syntaxCapture288(in.Pattern)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture240(in *LockStmt) *LockStmt {
+	if !c.enter() {
+		var zero *LockStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*LockStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(LockStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Mutex = c.syntaxCapture45(in.Mutex)
+	out.GuardName = c.syntaxCapture2(in.GuardName)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture241(in *MachineCoverageStmt) *MachineCoverageStmt {
+	if !c.enter() {
+		var zero *MachineCoverageStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MachineCoverageStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MachineCoverageStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Input = c.syntaxCapture45(in.Input)
+	out.States = c.syntaxCapture306(in.States)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture242(in *MarkStmt) *MarkStmt {
+	if !c.enter() {
+		var zero *MarkStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MarkStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MarkStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.RegionName = c.syntaxCapture2(in.RegionName)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture243(in *MatchStmt) *MatchStmt {
+	if !c.enter() {
+		var zero *MatchStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Store = c.syntaxCapture45(in.Store)
+	out.Arms = c.syntaxCapture210(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture244(in *MoveBindStmt) *MoveBindStmt {
+	if !c.enter() {
+		var zero *MoveBindStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MoveBindStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MoveBindStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Store = c.syntaxCapture45(in.Store)
+	out.Pattern = c.syntaxCapture211(in.Pattern)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture245(in *PanicStmt) *PanicStmt {
+	if !c.enter() {
+		var zero *PanicStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*PanicStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(PanicStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture246(in *ParallelForStmt) *ParallelForStmt {
+	if !c.enter() {
+		var zero *ParallelForStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ParallelForStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ParallelForStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.IndexName = c.syntaxCapture2(in.IndexName)
+	out.Source = c.syntaxCapture45(in.Source)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture247(in *PassStmt) *PassStmt {
+	if !c.enter() {
+		var zero *PassStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*PassStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(PassStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture248(in *PoolStmt) *PoolStmt {
+	if !c.enter() {
+		var zero *PoolStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*PoolStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(PoolStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Workers = c.syntaxCapture45(in.Workers)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.BorrowedPool = c.syntaxCapture2(in.BorrowedPool)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture249(in *PromoteStmt) *PromoteStmt {
+	if !c.enter() {
+		var zero *PromoteStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*PromoteStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(PromoteStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Region = c.syntaxCapture2(in.Region)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture250(in *ProofUseStmt) *ProofUseStmt {
+	if !c.enter() {
+		var zero *ProofUseStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ProofUseStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ProofUseStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Citations = c.syntaxCapture56(in.Citations)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture251(in *RegionStmt) *RegionStmt {
+	if !c.enter() {
+		var zero *RegionStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RegionStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RegionStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Capacity = c.syntaxCapture45(in.Capacity)
+	out.OwnerName = c.syntaxCapture2(in.OwnerName)
+	out.Allocator = c.syntaxCapture2(in.Allocator)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture252(in *ResetStmt) *ResetStmt {
+	if !c.enter() {
+		var zero *ResetStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ResetStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ResetStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture253(in *RestoreCheckpointStmt) *RestoreCheckpointStmt {
+	if !c.enter() {
+		var zero *RestoreCheckpointStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RestoreCheckpointStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RestoreCheckpointStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture254(in *RestoreStmt) *RestoreStmt {
+	if !c.enter() {
+		var zero *RestoreStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*RestoreStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(RestoreStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.RegionName = c.syntaxCapture2(in.RegionName)
+	out.MarkName = c.syntaxCapture2(in.MarkName)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture255(in *ReturnStmt) *ReturnStmt {
+	if !c.enter() {
+		var zero *ReturnStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ReturnStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ReturnStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture256(in *ScopeStmt) *ScopeStmt {
+	if !c.enter() {
+		var zero *ScopeStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ScopeStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ScopeStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Guard = c.syntaxCapture45(in.Guard)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture257(in *SignalStmt) *SignalStmt {
+	if !c.enter() {
+		var zero *SignalStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*SignalStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(SignalStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Permissions = c.syntaxCapture42(in.Permissions)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture258(in *StaticAssertBlockStmt) *StaticAssertBlockStmt {
+	if !c.enter() {
+		var zero *StaticAssertBlockStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticAssertBlockStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticAssertBlockStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Assertions = c.syntaxCapture81(in.Assertions)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture259(in *StaticAssertStmt) *StaticAssertStmt {
+	if !c.enter() {
+		var zero *StaticAssertStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticAssertStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticAssertStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture260(in *StaticBlockStmt) *StaticBlockStmt {
+	if !c.enter() {
+		var zero *StaticBlockStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticBlockStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticBlockStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture261(in *StaticErrorStmt) *StaticErrorStmt {
+	if !c.enter() {
+		var zero *StaticErrorStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticErrorStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticErrorStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture262(in *StaticIfStmt) *StaticIfStmt {
+	if !c.enter() {
+		var zero *StaticIfStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticIfStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticIfStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Then = c.syntaxCapture61(in.Then)
+	out.Elifs = c.syntaxCapture307(in.Elifs)
+	out.Else = c.syntaxCapture61(in.Else)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture263(in *TupleBindStmt) *TupleBindStmt {
+	if !c.enter() {
+		var zero *TupleBindStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*TupleBindStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(TupleBindStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Names = c.syntaxCapture308(in.Names)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture264(in *VarDeclStmt) *VarDeclStmt {
+	if !c.enter() {
+		var zero *VarDeclStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*VarDeclStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(VarDeclStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Owner = c.syntaxCapture45(in.Owner)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture265(in *WhileStmt) *WhileStmt {
+	if !c.enter() {
+		var zero *WhileStmt
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*WhileStmt)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(WhileStmt)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.Captures = c.syntaxCapture53(in.Captures)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture266(in []GrammarTerm) []GrammarTerm {
+	if !c.enter() {
+		var zero []GrammarTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture266", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarTerm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarTerm)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarTerm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture268(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture267(in []GrammarFnParam) []GrammarFnParam {
+	if !c.enter() {
+		var zero []GrammarFnParam
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture267", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarFnParam)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarFnParam)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarFnParam, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture309(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture268(in GrammarTerm) GrammarTerm {
+	if !c.enter() {
+		var zero GrammarTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	switch value := in.(type) {
+	case *GrammarApplyTerm:
+		return c.syntaxCapture310(value)
+	case *GrammarAssignTerm:
+		return c.syntaxCapture311(value)
+	case *GrammarAttemptTerm:
+		return c.syntaxCapture312(value)
+	case *GrammarBindTerm:
+		return c.syntaxCapture313(value)
+	case *GrammarCallTerm:
+		return c.syntaxCapture314(value)
+	case *GrammarChoiceTerm:
+		return c.syntaxCapture315(value)
+	case *GrammarConcatTerm:
+		return c.syntaxCapture316(value)
+	case *GrammarCutTerm:
+		return c.syntaxCapture317(value)
+	case *GrammarDelimitedTerm:
+		return c.syntaxCapture318(value)
+	case *GrammarDynamicClimbTerm:
+		return c.syntaxCapture319(value)
+	case *GrammarEmptyTerm:
+		return c.syntaxCapture320(value)
+	case *GrammarExprTerm:
+		return c.syntaxCapture321(value)
+	case *GrammarFirstTerm:
+		return c.syntaxCapture322(value)
+	case *GrammarFlatRepeatTerm:
+		return c.syntaxCapture323(value)
+	case *GrammarGuardTerm:
+		return c.syntaxCapture324(value)
+	case *GrammarInfixTableTerm:
+		return c.syntaxCapture325(value)
+	case *GrammarListTerm:
+		return c.syntaxCapture326(value)
+	case *GrammarLookaheadTerm:
+		return c.syntaxCapture327(value)
+	case *GrammarMatchTerm:
+		return c.syntaxCapture328(value)
+	case *GrammarOptionalTerm:
+		return c.syntaxCapture329(value)
+	case *GrammarPassTerm:
+		return c.syntaxCapture330(value)
+	case *GrammarPostfixTerm:
+		return c.syntaxCapture331(value)
+	case *GrammarPrecedenceTerm:
+		return c.syntaxCapture332(value)
+	case *GrammarRecoverTerm:
+		return c.syntaxCapture333(value)
+	case *GrammarRepeatTerm:
+		return c.syntaxCapture334(value)
+	case *GrammarRequiredTerm:
+		return c.syntaxCapture335(value)
+	case *GrammarReturnTerm:
+		return c.syntaxCapture336(value)
+	case *GrammarSeparatedTerm:
+		return c.syntaxCapture337(value)
+	case *GrammarSeqTerm:
+		return c.syntaxCapture338(value)
+	case *GrammarSingletonTerm:
+		return c.syntaxCapture339(value)
+	case *GrammarSuffixTerm:
+		return c.syntaxCapture340(value)
+	case *GrammarTokenKindTerm:
+		return c.syntaxCapture341(value)
+	case *GrammarTokenSetRefTerm:
+		return c.syntaxCapture342(value)
+	case *GrammarTokenTerm:
+		return c.syntaxCapture343(value)
+	case *GrammarWhenTerm:
+		return c.syntaxCapture344(value)
+	default:
+		c.err = fmt.Errorf("unsupported syntax replay type %T", in)
+		return nil
+	}
+}
+
+func (c *syntaxFastCopier) syntaxCapture269(in GrammarFnType) GrammarFnType {
+	if !c.enter() {
+		var zero GrammarFnType
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Kind = c.syntaxCapture2(in.Kind)
+	out.Result = c.syntaxCapture44(in.Result)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture270(in []GrammarPrecedenceLevel) []GrammarPrecedenceLevel {
+	if !c.enter() {
+		var zero []GrammarPrecedenceLevel
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture270", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarPrecedenceLevel)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarPrecedenceLevel)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarPrecedenceLevel, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture345(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture271(in *GrammarDynamicInfixSpec) *GrammarDynamicInfixSpec {
+	if !c.enter() {
+		var zero *GrammarDynamicInfixSpec
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarDynamicInfixSpec)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarDynamicInfixSpec)
+	c.nodes[in] = out
+	*out = *in
+	out.FixityRef = c.syntaxCapture2(in.FixityRef)
+	out.ReturnType = c.syntaxCapture44(in.ReturnType)
+	out.Atom = c.syntaxCapture268(in.Atom)
+	out.CombineParams = c.syntaxCapture53(in.CombineParams)
+	out.Combine = c.syntaxCapture45(in.Combine)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture272(in *ImplAssociatedTypeDecl) *ImplAssociatedTypeDecl {
+	if !c.enter() {
+		var zero *ImplAssociatedTypeDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*ImplAssociatedTypeDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(ImplAssociatedTypeDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture273(in *AssociatedTypeDecl) *AssociatedTypeDecl {
+	if !c.enter() {
+		var zero *AssociatedTypeDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*AssociatedTypeDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(AssociatedTypeDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.DefaultType = c.syntaxCapture44(in.DefaultType)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture274(in LexerKeywordEntry) LexerKeywordEntry {
+	if !c.enter() {
+		var zero LexerKeywordEntry
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Text = c.syntaxCapture2(in.Text)
+	out.Kind = c.syntaxCapture2(in.Kind)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture275(in LexerLiteralEntry) LexerLiteralEntry {
+	if !c.enter() {
+		var zero LexerLiteralEntry
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Text = c.syntaxCapture2(in.Text)
+	out.Kind = c.syntaxCapture2(in.Kind)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture276(in *StaticGenerateEmitDecl) *StaticGenerateEmitDecl {
+	if !c.enter() {
+		var zero *StaticGenerateEmitDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticGenerateEmitDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticGenerateEmitDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Tokens = c.syntaxCapture346(in.Tokens)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture277(in *StaticGenerateForDecl) *StaticGenerateForDecl {
+	if !c.enter() {
+		var zero *StaticGenerateForDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticGenerateForDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticGenerateForDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Source = c.syntaxCapture45(in.Source)
+	out.Filter = c.syntaxCapture45(in.Filter)
+	out.Body = c.syntaxCapture82(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture278(in *StaticGenerateIfDecl) *StaticGenerateIfDecl {
+	if !c.enter() {
+		var zero *StaticGenerateIfDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*StaticGenerateIfDecl)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(StaticGenerateIfDecl)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Then = c.syntaxCapture82(in.Then)
+	out.Elifs = c.syntaxCapture347(in.Elifs)
+	out.Else = c.syntaxCapture82(in.Else)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture279(in ErrorTagExpr) ErrorTagExpr {
+	if !c.enter() {
+		var zero ErrorTagExpr
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.SetName = c.syntaxCapture2(in.SetName)
+	out.Tag = c.syntaxCapture2(in.Tag)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture280(in RefinementPredExpr) RefinementPredExpr {
+	if !c.enter() {
+		var zero RefinementPredExpr
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Args = c.syntaxCapture56(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture281(in TupleTypeField) TupleTypeField {
+	if !c.enter() {
+		var zero TupleTypeField
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture282(in CallArgItem) CallArgItem {
+	if !c.enter() {
+		var zero CallArgItem
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture283(in LmutRebindClaim) LmutRebindClaim {
+	if !c.enter() {
+		var zero LmutRebindClaim
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture284(in VisitArm) VisitArm {
+	if !c.enter() {
+		var zero VisitArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.TargetName = c.syntaxCapture2(in.TargetName)
+	out.BindName = c.syntaxCapture2(in.BindName)
+	out.ChildResultsName = c.syntaxCapture2(in.ChildResultsName)
+	out.ChildBindings = c.syntaxCapture348(in.ChildBindings)
+	out.Guard = c.syntaxCapture45(in.Guard)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture285(in MachineFromArm) MachineFromArm {
+	if !c.enter() {
+		var zero MachineFromArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.State = c.syntaxCapture2(in.State)
+	out.Bindings = c.syntaxCapture53(in.Bindings)
+	out.DeclaredOut = c.syntaxCapture53(in.DeclaredOut)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.Terminators = c.syntaxCapture349(in.Terminators)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture286(in MatchArm) MatchArm {
+	if !c.enter() {
+		var zero MatchArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Pattern = c.syntaxCapture212(in.Pattern)
+	out.Body = c.syntaxCapture61(in.Body)
+	out.Guard = c.syntaxCapture45(in.Guard)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture287(in *MoveBindNamePattern) *MoveBindNamePattern {
+	if !c.enter() {
+		var zero *MoveBindNamePattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MoveBindNamePattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MoveBindNamePattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture288(in *MoveBindStructPattern) *MoveBindStructPattern {
+	if !c.enter() {
+		var zero *MoveBindStructPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MoveBindStructPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MoveBindStructPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.TypeName = c.syntaxCapture2(in.TypeName)
+	out.Args = c.syntaxCapture350(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture289(in *MoveBindTuplePattern) *MoveBindTuplePattern {
+	if !c.enter() {
+		var zero *MoveBindTuplePattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MoveBindTuplePattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MoveBindTuplePattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Args = c.syntaxCapture350(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture290(in *MoveBindVariantPattern) *MoveBindVariantPattern {
+	if !c.enter() {
+		var zero *MoveBindVariantPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MoveBindVariantPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MoveBindVariantPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.EnumName = c.syntaxCapture2(in.EnumName)
+	out.Variant = c.syntaxCapture2(in.Variant)
+	out.Args = c.syntaxCapture300(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture291(in *MatchBindPattern) *MatchBindPattern {
+	if !c.enter() {
+		var zero *MatchBindPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchBindPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchBindPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Binder = c.syntaxCapture2(in.Binder)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture292(in *MatchListPattern) *MatchListPattern {
+	if !c.enter() {
+		var zero *MatchListPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchListPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchListPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elems = c.syntaxCapture304(in.Elems)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture293(in *MatchLiteralPattern) *MatchLiteralPattern {
+	if !c.enter() {
+		var zero *MatchLiteralPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchLiteralPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchLiteralPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture294(in *MatchOrPattern) *MatchOrPattern {
+	if !c.enter() {
+		var zero *MatchOrPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchOrPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchOrPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Options = c.syntaxCapture304(in.Options)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture295(in *MatchRangePattern) *MatchRangePattern {
+	if !c.enter() {
+		var zero *MatchRangePattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchRangePattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchRangePattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Lo = c.syntaxCapture45(in.Lo)
+	out.Hi = c.syntaxCapture45(in.Hi)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture296(in *MatchRestPattern) *MatchRestPattern {
+	if !c.enter() {
+		var zero *MatchRestPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchRestPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchRestPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture297(in *MatchStringLiteralPattern) *MatchStringLiteralPattern {
+	if !c.enter() {
+		var zero *MatchStringLiteralPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchStringLiteralPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchStringLiteralPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture2(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture298(in *MatchTuplePattern) *MatchTuplePattern {
+	if !c.enter() {
+		var zero *MatchTuplePattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchTuplePattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchTuplePattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elems = c.syntaxCapture304(in.Elems)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture299(in *MatchWildcardPattern) *MatchWildcardPattern {
+	if !c.enter() {
+		var zero *MatchWildcardPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchWildcardPattern)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchWildcardPattern)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture300(in []MatchPatternArg) []MatchPatternArg {
+	if !c.enter() {
+		var zero []MatchPatternArg
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture300", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MatchPatternArg)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MatchPatternArg)), cap(in)) {
+		return nil
+	}
+	out := make([]MatchPatternArg, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture351(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture301(in []*MatchPatternArg) []*MatchPatternArg {
+	if !c.enter() {
+		var zero []*MatchPatternArg
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture301", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]*MatchPatternArg)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(*MatchPatternArg)), cap(in)) {
+		return nil
+	}
+	out := make([]*MatchPatternArg, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture352(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture302(in []BitGroupMemberDecl) []BitGroupMemberDecl {
+	if !c.enter() {
+		var zero []BitGroupMemberDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture302", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]BitGroupMemberDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(BitGroupMemberDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]BitGroupMemberDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture353(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture303(in EnumPayloadDecl) EnumPayloadDecl {
+	if !c.enter() {
+		var zero EnumPayloadDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Relation = c.syntaxCapture354(in.Relation)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture304(in []MatchPattern) []MatchPattern {
+	if !c.enter() {
+		var zero []MatchPattern
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture304", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MatchPattern)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MatchPattern)), cap(in)) {
+		return nil
+	}
+	out := make([]MatchPattern, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture212(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture305(in []ElifClause) []ElifClause {
+	if !c.enter() {
+		var zero []ElifClause
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture305", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]ElifClause)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(ElifClause)), cap(in)) {
+		return nil
+	}
+	out := make([]ElifClause, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture355(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture306(in []MachineCoverageState) []MachineCoverageState {
+	if !c.enter() {
+		var zero []MachineCoverageState
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture306", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MachineCoverageState)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MachineCoverageState)), cap(in)) {
+		return nil
+	}
+	out := make([]MachineCoverageState, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture356(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture307(in []StaticElifClause) []StaticElifClause {
+	if !c.enter() {
+		var zero []StaticElifClause
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture307", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]StaticElifClause)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(StaticElifClause)), cap(in)) {
+		return nil
+	}
+	out := make([]StaticElifClause, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture357(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture308(in []TupleBindName) []TupleBindName {
+	if !c.enter() {
+		var zero []TupleBindName
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture308", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]TupleBindName)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(TupleBindName)), cap(in)) {
+		return nil
+	}
+	out := make([]TupleBindName, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture358(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture309(in GrammarFnParam) GrammarFnParam {
+	if !c.enter() {
+		var zero GrammarFnParam
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture269(in.Type)
+	out.Default = c.syntaxCapture268(in.Default)
+	out.DefaultExpr = c.syntaxCapture45(in.DefaultExpr)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture310(in *GrammarApplyTerm) *GrammarApplyTerm {
+	if !c.enter() {
+		var zero *GrammarApplyTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarApplyTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarApplyTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Args = c.syntaxCapture359(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture311(in *GrammarAssignTerm) *GrammarAssignTerm {
+	if !c.enter() {
+		var zero *GrammarAssignTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarAssignTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarAssignTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture312(in *GrammarAttemptTerm) *GrammarAttemptTerm {
+	if !c.enter() {
+		var zero *GrammarAttemptTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarAttemptTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarAttemptTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Expr = c.syntaxCapture45(in.Expr)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture313(in *GrammarBindTerm) *GrammarBindTerm {
+	if !c.enter() {
+		var zero *GrammarBindTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarBindTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarBindTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture314(in *GrammarCallTerm) *GrammarCallTerm {
+	if !c.enter() {
+		var zero *GrammarCallTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarCallTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarCallTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Args = c.syntaxCapture56(in.Args)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture315(in *GrammarChoiceTerm) *GrammarChoiceTerm {
+	if !c.enter() {
+		var zero *GrammarChoiceTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarChoiceTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarChoiceTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Options = c.syntaxCapture266(in.Options)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture316(in *GrammarConcatTerm) *GrammarConcatTerm {
+	if !c.enter() {
+		var zero *GrammarConcatTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarConcatTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarConcatTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Terms = c.syntaxCapture266(in.Terms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture317(in *GrammarCutTerm) *GrammarCutTerm {
+	if !c.enter() {
+		var zero *GrammarCutTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarCutTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarCutTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture318(in *GrammarDelimitedTerm) *GrammarDelimitedTerm {
+	if !c.enter() {
+		var zero *GrammarDelimitedTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarDelimitedTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarDelimitedTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Open = c.syntaxCapture268(in.Open)
+	out.Body = c.syntaxCapture268(in.Body)
+	out.Close = c.syntaxCapture268(in.Close)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture319(in *GrammarDynamicClimbTerm) *GrammarDynamicClimbTerm {
+	if !c.enter() {
+		var zero *GrammarDynamicClimbTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarDynamicClimbTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarDynamicClimbTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.TableName = c.syntaxCapture2(in.TableName)
+	out.MinPrecName = c.syntaxCapture2(in.MinPrecName)
+	out.Spec = c.syntaxCapture271(in.Spec)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture320(in *GrammarEmptyTerm) *GrammarEmptyTerm {
+	if !c.enter() {
+		var zero *GrammarEmptyTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarEmptyTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarEmptyTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture321(in *GrammarExprTerm) *GrammarExprTerm {
+	if !c.enter() {
+		var zero *GrammarExprTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarExprTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarExprTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Expr = c.syntaxCapture45(in.Expr)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture322(in *GrammarFirstTerm) *GrammarFirstTerm {
+	if !c.enter() {
+		var zero *GrammarFirstTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarFirstTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarFirstTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture323(in *GrammarFlatRepeatTerm) *GrammarFlatRepeatTerm {
+	if !c.enter() {
+		var zero *GrammarFlatRepeatTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarFlatRepeatTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarFlatRepeatTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture268(in.Elem)
+	out.Until = c.syntaxCapture266(in.Until)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture324(in *GrammarGuardTerm) *GrammarGuardTerm {
+	if !c.enter() {
+		var zero *GrammarGuardTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarGuardTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarGuardTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture325(in *GrammarInfixTableTerm) *GrammarInfixTableTerm {
+	if !c.enter() {
+		var zero *GrammarInfixTableTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarInfixTableTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarInfixTableTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.TableName = c.syntaxCapture2(in.TableName)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture326(in *GrammarListTerm) *GrammarListTerm {
+	if !c.enter() {
+		var zero *GrammarListTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarListTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarListTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture268(in.Elem)
+	out.Separator = c.syntaxCapture268(in.Separator)
+	out.Until = c.syntaxCapture266(in.Until)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture327(in *GrammarLookaheadTerm) *GrammarLookaheadTerm {
+	if !c.enter() {
+		var zero *GrammarLookaheadTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarLookaheadTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarLookaheadTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture328(in *GrammarMatchTerm) *GrammarMatchTerm {
+	if !c.enter() {
+		var zero *GrammarMatchTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarMatchTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarMatchTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Arms = c.syntaxCapture360(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture329(in *GrammarOptionalTerm) *GrammarOptionalTerm {
+	if !c.enter() {
+		var zero *GrammarOptionalTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarOptionalTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarOptionalTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture330(in *GrammarPassTerm) *GrammarPassTerm {
+	if !c.enter() {
+		var zero *GrammarPassTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarPassTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarPassTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture331(in *GrammarPostfixTerm) *GrammarPostfixTerm {
+	if !c.enter() {
+		var zero *GrammarPostfixTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarPostfixTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarPostfixTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.LeftName = c.syntaxCapture2(in.LeftName)
+	out.Seed = c.syntaxCapture268(in.Seed)
+	out.Arms = c.syntaxCapture361(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture332(in *GrammarPrecedenceTerm) *GrammarPrecedenceTerm {
+	if !c.enter() {
+		var zero *GrammarPrecedenceTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarPrecedenceTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarPrecedenceTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Assoc = c.syntaxCapture2(in.Assoc)
+	out.Result = c.syntaxCapture2(in.Result)
+	out.Levels = c.syntaxCapture270(in.Levels)
+	out.LeftName = c.syntaxCapture2(in.LeftName)
+	out.Seed = c.syntaxCapture268(in.Seed)
+	out.Arms = c.syntaxCapture362(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture333(in *GrammarRecoverTerm) *GrammarRecoverTerm {
+	if !c.enter() {
+		var zero *GrammarRecoverTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarRecoverTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarRecoverTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Term = c.syntaxCapture268(in.Term)
+	out.RecoverPolicy = c.syntaxCapture2(in.RecoverPolicy)
+	out.RecoverMsg = c.syntaxCapture45(in.RecoverMsg)
+	out.RecoverUntil = c.syntaxCapture266(in.RecoverUntil)
+	out.RecoverValue = c.syntaxCapture45(in.RecoverValue)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture334(in *GrammarRepeatTerm) *GrammarRepeatTerm {
+	if !c.enter() {
+		var zero *GrammarRepeatTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarRepeatTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarRepeatTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture268(in.Elem)
+	out.Until = c.syntaxCapture266(in.Until)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture335(in *GrammarRequiredTerm) *GrammarRequiredTerm {
+	if !c.enter() {
+		var zero *GrammarRequiredTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarRequiredTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarRequiredTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Term = c.syntaxCapture268(in.Term)
+	out.Message = c.syntaxCapture45(in.Message)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture336(in *GrammarReturnTerm) *GrammarReturnTerm {
+	if !c.enter() {
+		var zero *GrammarReturnTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarReturnTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarReturnTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture337(in *GrammarSeparatedTerm) *GrammarSeparatedTerm {
+	if !c.enter() {
+		var zero *GrammarSeparatedTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarSeparatedTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarSeparatedTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Elem = c.syntaxCapture268(in.Elem)
+	out.Separator = c.syntaxCapture268(in.Separator)
+	out.Until = c.syntaxCapture266(in.Until)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture338(in *GrammarSeqTerm) *GrammarSeqTerm {
+	if !c.enter() {
+		var zero *GrammarSeqTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarSeqTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarSeqTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Terms = c.syntaxCapture266(in.Terms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture339(in *GrammarSingletonTerm) *GrammarSingletonTerm {
+	if !c.enter() {
+		var zero *GrammarSingletonTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarSingletonTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarSingletonTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Type = c.syntaxCapture44(in.Type)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture340(in *GrammarSuffixTerm) *GrammarSuffixTerm {
+	if !c.enter() {
+		var zero *GrammarSuffixTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarSuffixTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarSuffixTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.LeftName = c.syntaxCapture2(in.LeftName)
+	out.Seed = c.syntaxCapture268(in.Seed)
+	out.Arms = c.syntaxCapture361(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture341(in *GrammarTokenKindTerm) *GrammarTokenKindTerm {
+	if !c.enter() {
+		var zero *GrammarTokenKindTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarTokenKindTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarTokenKindTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Kind = c.syntaxCapture2(in.Kind)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture342(in *GrammarTokenSetRefTerm) *GrammarTokenSetRefTerm {
+	if !c.enter() {
+		var zero *GrammarTokenSetRefTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarTokenSetRefTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarTokenSetRefTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture343(in *GrammarTokenTerm) *GrammarTokenTerm {
+	if !c.enter() {
+		var zero *GrammarTokenTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarTokenTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarTokenTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Value = c.syntaxCapture2(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture344(in *GrammarWhenTerm) *GrammarWhenTerm {
+	if !c.enter() {
+		var zero *GrammarWhenTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*GrammarWhenTerm)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(GrammarWhenTerm)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.TokenKindGate = c.syntaxCapture2(in.TokenKindGate)
+	out.Then = c.syntaxCapture268(in.Then)
+	out.Else = c.syntaxCapture268(in.Else)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture345(in GrammarPrecedenceLevel) GrammarPrecedenceLevel {
+	if !c.enter() {
+		var zero GrammarPrecedenceLevel
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Assoc = c.syntaxCapture2(in.Assoc)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.LeftName = c.syntaxCapture2(in.LeftName)
+	out.Seed = c.syntaxCapture268(in.Seed)
+	out.Arms = c.syntaxCapture362(in.Arms)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture346(in []lexer.Token) []lexer.Token {
+	if !c.enter() {
+		var zero []lexer.Token
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture346", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]lexer.Token)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(lexer.Token)), cap(in)) {
+		return nil
+	}
+	out := make([]lexer.Token, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture363(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture347(in []StaticGenerateElifDecl) []StaticGenerateElifDecl {
+	if !c.enter() {
+		var zero []StaticGenerateElifDecl
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture347", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]StaticGenerateElifDecl)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(StaticGenerateElifDecl)), cap(in)) {
+		return nil
+	}
+	out := make([]StaticGenerateElifDecl, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture364(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture348(in []VisitArmChildBinding) []VisitArmChildBinding {
+	if !c.enter() {
+		var zero []VisitArmChildBinding
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture348", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]VisitArmChildBinding)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(VisitArmChildBinding)), cap(in)) {
+		return nil
+	}
+	out := make([]VisitArmChildBinding, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture365(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture349(in []MachineFromTerminator) []MachineFromTerminator {
+	if !c.enter() {
+		var zero []MachineFromTerminator
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture349", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MachineFromTerminator)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MachineFromTerminator)), cap(in)) {
+		return nil
+	}
+	out := make([]MachineFromTerminator, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture366(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture350(in []MoveBindArg) []MoveBindArg {
+	if !c.enter() {
+		var zero []MoveBindArg
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture350", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]MoveBindArg)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(MoveBindArg)), cap(in)) {
+		return nil
+	}
+	out := make([]MoveBindArg, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture367(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture351(in MatchPatternArg) MatchPatternArg {
+	if !c.enter() {
+		var zero MatchPatternArg
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Pattern = c.syntaxCapture212(in.Pattern)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture352(in *MatchPatternArg) *MatchPatternArg {
+	if !c.enter() {
+		var zero *MatchPatternArg
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	if prior, ok := c.nodes[in]; ok {
+		return prior.(*MatchPatternArg)
+	}
+	if !c.captureStorage(unsafe.Pointer(in), unsafe.Sizeof(*in), 1) {
+		return nil
+	}
+	out := new(MatchPatternArg)
+	c.nodes[in] = out
+	*out = *in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Pattern = c.syntaxCapture212(in.Pattern)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture353(in BitGroupMemberDecl) BitGroupMemberDecl {
+	if !c.enter() {
+		var zero BitGroupMemberDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Type = c.syntaxCapture44(in.Type)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture354(in EnumPayloadRelation) EnumPayloadRelation {
+	if !c.enter() {
+		var zero EnumPayloadRelation
+		return zero
+	}
+	defer c.leave()
+	return EnumPayloadRelation(c.textValue(string(in)))
+}
+
+func (c *syntaxFastCopier) syntaxCapture355(in ElifClause) ElifClause {
+	if !c.enter() {
+		var zero ElifClause
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture356(in MachineCoverageState) MachineCoverageState {
+	if !c.enter() {
+		var zero MachineCoverageState
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Tags = c.syntaxCapture53(in.Tags)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture357(in StaticElifClause) StaticElifClause {
+	if !c.enter() {
+		var zero StaticElifClause
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Body = c.syntaxCapture61(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture358(in TupleBindName) TupleBindName {
+	if !c.enter() {
+		var zero TupleBindName
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture359(in []GrammarApplyArg) []GrammarApplyArg {
+	if !c.enter() {
+		var zero []GrammarApplyArg
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture359", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarApplyArg)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarApplyArg)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarApplyArg, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture368(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture360(in []GrammarMatchArm) []GrammarMatchArm {
+	if !c.enter() {
+		var zero []GrammarMatchArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture360", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarMatchArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarMatchArm)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarMatchArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture369(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture361(in []GrammarPostfixArm) []GrammarPostfixArm {
+	if !c.enter() {
+		var zero []GrammarPostfixArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture361", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarPostfixArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarPostfixArm)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarPostfixArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture370(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture362(in []GrammarPrecedenceArm) []GrammarPrecedenceArm {
+	if !c.enter() {
+		var zero []GrammarPrecedenceArm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture362", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]GrammarPrecedenceArm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(GrammarPrecedenceArm)), cap(in)) {
+		return nil
+	}
+	out := make([]GrammarPrecedenceArm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture371(full[i])
+	}
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture363(in lexer.Token) lexer.Token {
+	if !c.enter() {
+		var zero lexer.Token
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Text = c.syntaxCapture2(in.Text)
+	out.Pos = c.syntaxCapture41(in.Pos)
+	out.Suffix = c.syntaxCapture2(in.Suffix)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture364(in StaticGenerateElifDecl) StaticGenerateElifDecl {
+	if !c.enter() {
+		var zero StaticGenerateElifDecl
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Cond = c.syntaxCapture45(in.Cond)
+	out.Body = c.syntaxCapture82(in.Body)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture365(in VisitArmChildBinding) VisitArmChildBinding {
+	if !c.enter() {
+		var zero VisitArmChildBinding
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.FieldName = c.syntaxCapture2(in.FieldName)
+	out.BindName = c.syntaxCapture2(in.BindName)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture366(in MachineFromTerminator) MachineFromTerminator {
+	if !c.enter() {
+		var zero MachineFromTerminator
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Target = c.syntaxCapture2(in.Target)
+	out.Args = c.syntaxCapture56(in.Args)
+	out.Value = c.syntaxCapture45(in.Value)
+	out.Guard = c.syntaxCapture45(in.Guard)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture367(in MoveBindArg) MoveBindArg {
+	if !c.enter() {
+		var zero MoveBindArg
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Field = c.syntaxCapture2(in.Field)
+	out.Name = c.syntaxCapture2(in.Name)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture368(in GrammarApplyArg) GrammarApplyArg {
+	if !c.enter() {
+		var zero GrammarApplyArg
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Name = c.syntaxCapture2(in.Name)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture369(in GrammarMatchArm) GrammarMatchArm {
+	if !c.enter() {
+		var zero GrammarMatchArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.Patterns = c.syntaxCapture304(in.Patterns)
+	out.Term = c.syntaxCapture268(in.Term)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture370(in GrammarPostfixArm) GrammarPostfixArm {
+	if !c.enter() {
+		var zero GrammarPostfixArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.OpName = c.syntaxCapture2(in.OpName)
+	out.Op = c.syntaxCapture268(in.Op)
+	out.Bindings = c.syntaxCapture372(in.Bindings)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture371(in GrammarPrecedenceArm) GrammarPrecedenceArm {
+	if !c.enter() {
+		var zero GrammarPrecedenceArm
+		return zero
+	}
+	defer c.leave()
+	out := in
+	out.Position = c.syntaxCapture41(in.Position)
+	out.OpName = c.syntaxCapture2(in.OpName)
+	out.Op = c.syntaxCapture268(in.Op)
+	out.Bindings = c.syntaxCapture372(in.Bindings)
+	out.Value = c.syntaxCapture45(in.Value)
+	return out
+}
+
+func (c *syntaxFastCopier) syntaxCapture372(in []*GrammarBindTerm) []*GrammarBindTerm {
+	if !c.enter() {
+		var zero []*GrammarBindTerm
+		return zero
+	}
+	defer c.leave()
+	if in == nil {
+		return nil
+	}
+	key := syntaxFastSlice{"syntaxCapture372", unsafe.Pointer(unsafe.SliceData(in)), len(in), cap(in)}
+	if prior, ok := c.slices[key]; ok {
+		return prior.([]*GrammarBindTerm)
+	}
+	if !c.captureStorage(key.pointer, unsafe.Sizeof(*new(*GrammarBindTerm)), cap(in)) {
+		return nil
+	}
+	out := make([]*GrammarBindTerm, len(in), cap(in))
+	c.slices[key] = out
+	full, target := in[:cap(in)], out[:cap(out)]
+	copy(target, full)
+	for i := range full {
+		if c.err != nil {
+			break
+		}
+		target[i] = c.syntaxCapture313(full[i])
+	}
+	return out
+}
+
+func captureSyntaxFile(c *syntaxFastCopier, file *File) *File { return c.syntaxCapture1(file) }
 
 var syntaxFastTypes = map[reflect.Type][]string{
 	reflect.TypeOf(AddrOfExpr{}):                {"Position:lexer.Pos", "Operand:ast.Expr"},

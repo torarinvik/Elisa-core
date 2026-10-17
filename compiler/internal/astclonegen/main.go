@@ -69,6 +69,7 @@ type generator struct {
 	structs  map[string]*types.Named
 	queue    []func()
 	serial   int
+	own      bool
 }
 
 func sourceType(t types.Type) string {
@@ -82,17 +83,19 @@ func sourceType(t types.Type) string {
 func fieldType(t types.Type) string {
 	return types.TypeString(t, func(p *types.Package) string { return p.Name() })
 }
-func mutable(t types.Type) bool {
+func (g *generator) mutable(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.Named:
-		return mutable(t.Underlying())
+		return g.mutable(t.Underlying())
 	case *types.Pointer, *types.Slice, *types.Map, *types.Interface:
 		return true
+	case *types.Basic:
+		return g.own && t.Kind() == types.String
 	case *types.Array:
-		return mutable(t.Elem())
+		return g.mutable(t.Elem())
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
-			if mutable(t.Field(i).Type()) {
+			if g.mutable(t.Field(i).Type()) {
 				return true
 			}
 		}
@@ -128,14 +131,18 @@ func (g *generator) track(t types.Type) {
 }
 func (g *generator) expression(t types.Type, in string) string {
 	g.track(t)
-	if !mutable(t) {
+	if !g.mutable(t) {
 		return in
 	}
 	key := fieldType(t)
 	name, ok := g.needed[key]
 	if !ok {
 		g.serial++
-		name = fmt.Sprintf("syntaxFast%d", g.serial)
+		prefix := "syntaxFast"
+		if g.own {
+			prefix = "syntaxCapture"
+		}
+		name = fmt.Sprintf("%s%d", prefix, g.serial)
 		g.needed[key] = name
 		g.queue = append(g.queue, func() { g.emit(name, t) })
 	}
@@ -148,7 +155,7 @@ func (g *generator) fields(st *types.Struct, from, to string) {
 			panic("private syntax field")
 		}
 		g.track(f.Type())
-		if mutable(f.Type()) {
+		if g.mutable(f.Type()) {
 			fmt.Fprintf(&g.out, "%s.%s = %s\n", to, f.Name(), g.expression(f.Type(), from+"."+f.Name()))
 		}
 	}
@@ -156,21 +163,28 @@ func (g *generator) fields(st *types.Struct, from, to string) {
 func (g *generator) emit(name string, t types.Type) {
 	text := sourceType(t)
 	fmt.Fprintf(&g.out, "func(c *syntaxFastCopier) %s(in %s) %s {\n", name, text, text)
+	if g.own {
+		fmt.Fprintf(&g.out, "if !c.enter() {var zero %s;return zero};defer c.leave()\n", text)
+	}
 	underlying := t
 	if n, ok := t.(*types.Named); ok {
 		underlying = n.Underlying()
 	}
 	switch tt := underlying.(type) {
 	case *types.Pointer:
-		fmt.Fprintf(&g.out, "if in==nil {return nil};if prior,ok:=c.nodes[in];ok {return prior.(%s)}\nout:=new(%s);c.nodes[in]=out;*out=*in\n", text, sourceType(tt.Elem()))
+		storage := ""
+		if g.own {
+			storage = "if !c.captureStorage(unsafe.Pointer(in),unsafe.Sizeof(*in),1) {return nil};"
+		}
+		fmt.Fprintf(&g.out, "if in==nil {return nil};if prior,ok:=c.nodes[in];ok {return prior.(%s)}\n%sout:=new(%s);c.nodes[in]=out;*out=*in\n", text, storage, sourceType(tt.Elem()))
 		if n, ok := tt.Elem().(*types.Named); ok {
 			if st, ok := n.Underlying().(*types.Struct); ok {
 				g.track(n)
 				g.fields(st, "in", "out")
-			} else if mutable(tt.Elem()) {
+			} else if g.mutable(tt.Elem()) {
 				fmt.Fprintf(&g.out, "*out=%s\n", g.expression(tt.Elem(), "*in"))
 			}
-		} else if mutable(tt.Elem()) {
+		} else if g.mutable(tt.Elem()) {
 			fmt.Fprintf(&g.out, "*out=%s\n", g.expression(tt.Elem(), "*in"))
 		}
 		g.out.WriteString("return out\n")
@@ -190,13 +204,34 @@ func (g *generator) emit(name string, t types.Type) {
 		}
 		g.out.WriteString("default:c.err=fmt.Errorf(\"unsupported syntax replay type %T\",in);return nil\n}\n")
 	case *types.Slice:
-		fmt.Fprintf(&g.out, "if in==nil {return nil};key:=syntaxFastSlice{%q,unsafe.Pointer(unsafe.SliceData(in)),len(in),cap(in)}\nif prior,ok:=c.slices[key];ok {return prior.(%s)}\nout:=make(%s,len(in),cap(in));c.slices[key]=out\nfull,target:=in[:cap(in)],out[:cap(out)];copy(target,full)\n", name, text, text)
-		if mutable(tt.Elem()) {
-			fmt.Fprintf(&g.out, "for i:=range full {target[i]=%s}\n", g.expression(tt.Elem(), "full[i]"))
+		storage := ""
+		if g.own {
+			storage = fmt.Sprintf("if !c.captureStorage(key.pointer,unsafe.Sizeof(*new(%s)),cap(in)) {return nil};", sourceType(tt.Elem()))
+		}
+		fmt.Fprintf(&g.out, "if in==nil {return nil};key:=syntaxFastSlice{%q,unsafe.Pointer(unsafe.SliceData(in)),len(in),cap(in)}\nif prior,ok:=c.slices[key];ok {return prior.(%s)}\n%sout:=make(%s,len(in),cap(in));c.slices[key]=out\nfull,target:=in[:cap(in)],out[:cap(out)];copy(target,full)\n", name, text, storage, text)
+		if g.mutable(tt.Elem()) {
+			stop := ""
+			if g.own {
+				stop = "if c.err!=nil {break};"
+			}
+			fmt.Fprintf(&g.out, "for i:=range full {%starget[i]=%s}\n", stop, g.expression(tt.Elem(), "full[i]"))
 		}
 		g.out.WriteString("return out\n")
 	case *types.Map:
-		fmt.Fprintf(&g.out, "if in==nil {return nil};key:=syntaxFastMap{%q,reflect.ValueOf(in).UnsafePointer()}\nif prior,ok:=c.maps[key];ok {return prior.(%s)}\nout:=make(%s,len(in));c.maps[key]=out\nfor k,v:=range in {out[%s]=%s};return out\n", name, text, text, g.expression(tt.Key(), "k"), g.expression(tt.Elem(), "v"))
+		storage := ""
+		if g.own {
+			storage = fmt.Sprintf("if !c.captureMap(unsafe.Sizeof(*new(%s))+unsafe.Sizeof(*new(%s)),len(in)) {return nil};", sourceType(tt.Key()), sourceType(tt.Elem()))
+		}
+		stop := ""
+		if g.own {
+			stop = "if c.err!=nil {break};"
+		}
+		fmt.Fprintf(&g.out, "if in==nil {return nil};key:=syntaxFastMap{%q,reflect.ValueOf(in).UnsafePointer()}\nif prior,ok:=c.maps[key];ok {return prior.(%s)}\n%sout:=make(%s,len(in));c.maps[key]=out\nfor k,v:=range in {%sout[%s]=%s};return out\n", name, text, storage, text, stop, g.expression(tt.Key(), "k"), g.expression(tt.Elem(), "v"))
+	case *types.Basic:
+		if tt.Kind() != types.String {
+			panic("unsupported scalar copy")
+		}
+		fmt.Fprintf(&g.out, "return %s(c.textValue(string(in)))\n", text)
 	case *types.Array:
 		fmt.Fprintf(&g.out, "out:=in;for i:=range in {out[i]=%s};return out\n", g.expression(tt.Elem(), "in[i]"))
 	default:
@@ -230,11 +265,22 @@ func generate() ([]byte, error) {
 			emit()
 		}
 	}
+	capture := &generator{astPkg: pkg, universe: g.universe, needed: map[string]string{}, structs: g.structs, own: true}
+	captureExpression := capture.expression(types.NewPointer(root), "file")
+	for len(capture.queue) > 0 {
+		queue := capture.queue
+		capture.queue = nil
+		for _, emit := range queue {
+			emit()
+		}
+	}
 	var out bytes.Buffer
 	out.WriteString("// Code generated by internal/astclonegen; DO NOT EDIT.\npackage ast\nimport(\"fmt\";\"reflect\";\"unsafe\";\"elisacore/src/lexer\")\nvar _ = lexer.Pos{}\n")
-	out.WriteString("type syntaxFastSlice struct {kind string; pointer unsafe.Pointer; length,capacity int}\ntype syntaxFastMap struct {kind string; pointer unsafe.Pointer}\ntype syntaxFastCopier struct {nodes map[any]any;slices map[syntaxFastSlice]any;maps map[syntaxFastMap]any;err error}\n")
+	out.WriteString("type syntaxFastSlice struct {kind string; pointer unsafe.Pointer; length,capacity int}\ntype syntaxFastMap struct {kind string; pointer unsafe.Pointer}\ntype syntaxFastCopier struct {nodes map[any]any;slices map[syntaxFastSlice]any;maps map[syntaxFastMap]any;err error;own bool;limit,bytes,depth,work int;text map[string]string;storage []syntaxStorage}\n")
 	fmt.Fprintf(&out, "func copyFastSyntaxFile(file *File) (*File,error) {c:=&syntaxFastCopier{nodes:map[any]any{},slices:map[syntaxFastSlice]any{},maps:map[syntaxFastMap]any{}};out:=%s;return out,c.err}\n", expression)
 	out.Write(g.out.Bytes())
+	out.Write(capture.out.Bytes())
+	fmt.Fprintf(&out, "func captureSyntaxFile(c *syntaxFastCopier,file *File) *File {return %s}\n", captureExpression)
 	out.WriteString("var syntaxFastTypes=map[reflect.Type][]string{\n")
 	keys := make([]string, 0, len(g.structs))
 	for key := range g.structs {
