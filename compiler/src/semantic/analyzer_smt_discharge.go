@@ -812,7 +812,7 @@ func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast
 	// "offset=-1, x=0" — naming the callee-parameter expression that actually violates the clause.
 	// Simple bindings (where the SMT term is already a declared free variable) are skipped because
 	// they duplicate an entry already in tr.decls.
-	trRegisterSubstCEExprs(tr, env)
+	trRegisterSubstCEExprs(tr, env, substForEnv)
 	// Emit a structural null-ness fact for `result` when its null-ness is definitively known from the
 	// return expression's type or value. This is EXTRA (not in the standard hypothesis set) because it
 	// is substitution-specific: on a literal-null return `isnull_result` is true, on a T& (non-optional
@@ -1092,8 +1092,8 @@ func smtFreeIdentifierSet(expr ast.Expr) (map[string]bool, bool) {
 // Entries already in tr.decls (plain `v_<name>` symbols) are skipped to avoid duplicate output.
 // Only integer-typed entries can be ceExprs (the define-fun emits `() Int`); boolean or array terms
 // are silently skipped (they cannot be defined as Int constants).
-func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string) {
-	if tr == nil || len(env) == 0 {
+func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string, subst map[string]ast.Expr) {
+	if tr == nil || tr.a == nil || len(env) == 0 {
 		return
 	}
 	// Sort for deterministic output (env iteration order varies).
@@ -1105,6 +1105,12 @@ func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string) {
 	for _, label := range labels {
 		smt := env[label]
 		if smt == "" {
+			continue
+		}
+		// A Boolean UF application looks like a numeric application syntactically.
+		// Readbacks are declared as Int, so require the actual source value to
+		// have an integer type rather than guessing its sort from the SMT text.
+		if _, _, integer := smtIntWidthSign(tr.a.exprTypes[subst[label]]); !integer {
 			continue
 		}
 		// Only register compound integer-valued SMT expressions. We must avoid:
