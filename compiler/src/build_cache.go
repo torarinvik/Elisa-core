@@ -86,6 +86,9 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		return buildCacheArtifact{}, false
 	}
 	hash := sha256.New()
+	if err := writeNativeCacheTarget(hash, options.targetTriple); err != nil {
+		return buildCacheArtifact{}, false
+	}
 	testRunnerCacheWriteString(hash, "build-object-v2-source-snapshot")
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)

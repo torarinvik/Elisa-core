@@ -113,6 +113,13 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 // link flags, the elisacore runtime support, and the compiler's own Go sources.
 // Both cache keys layer their distinguishing inputs on top of this.
 func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) error {
+	if err := writeNativeCacheTarget(hash, targetTriple); err != nil {
+		return err
+	}
+	for _, entry := range buildCacheEnvKey() {
+		testRunnerCacheWriteString(hash, "env="+entry)
+	}
+
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())

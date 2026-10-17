@@ -45,3 +45,37 @@ func TestWriteLLVMObjectFileForExplicitAArch64Target(t *testing.T) {
 		t.Fatalf("expected object output %s to be non-empty", outputPath)
 	}
 }
+
+func TestResolvedTargetIdentityMatchesTargetSelection(t *testing.T) {
+	t.Setenv(TargetCPUEnv, "")
+	native, err := ResolveTargetIdentity("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if native.Triple == "" || native.CPU == "" {
+		t.Fatalf("unresolved native target: %+v", native)
+	}
+	cross, err := ResolveTargetIdentity("x86_64-unknown-linux-gnu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cross.Triple != "x86_64-unknown-linux-gnu" || cross.CPU != "" || cross.Features != "" {
+		t.Fatalf("cross target inherited host settings: %+v", cross)
+	}
+	t.Setenv(TargetCPUEnv, "native")
+	tuned, err := ResolveTargetIdentity(cross.Triple)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tuned.CPU != native.CPU || tuned.Features != native.Features {
+		t.Fatalf("explicit native CPU differs: %+v / %+v", tuned, native)
+	}
+	t.Setenv(TargetCPUEnv, "generic")
+	generic, err := ResolveTargetIdentity("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generic.Triple != native.Triple || generic.CPU != "generic" || generic.Features != "" {
+		t.Fatalf("generic inherited host features: %+v", generic)
+	}
+}

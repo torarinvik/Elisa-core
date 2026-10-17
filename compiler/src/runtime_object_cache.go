@@ -78,6 +78,9 @@ func compilerSourceStamp() (string, error) {
 
 func runtimeObjectCacheArtifactFor(packedProfile backend.PackedLoweringProfile, targetTriple string) (runtimeObjectCacheArtifact, error) {
 	hash := sha256.New()
+	if err := writeNativeCacheTarget(hash, targetTriple); err != nil {
+		return runtimeObjectCacheArtifact{}, err
+	}
 	testRunnerCacheWriteString(hash, "runtime-object-v2-environment")
 	for _, entry := range buildCacheEnvKey() {
 		testRunnerCacheWriteString(hash, "environment="+entry)

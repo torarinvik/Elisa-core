@@ -311,29 +311,19 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	// `native` selects the host CPU and its features even for an explicit triple, `generic`
 	// gives a portable baseline for a native build, and any other value names an LLVM CPU
 	// (its default feature set is implied by the CPU name).
-	hostTuned := false
-	var cpu, features *C.char
-	requestedCPU := RequestedTargetCPU()
-	switch {
-	case requestedCPU == "native" || (requestedCPU == "" && strings.TrimSpace(g.requestedTargetTriple) == ""):
-		cpu = C.LLVMGetHostCPUName()
-		features = C.LLVMGetHostCPUFeatures()
-		hostTuned = true
-	case requestedCPU != "":
-		cpu = cString(requestedCPU)
-		features = cString("")
-	default:
-		cpu = cString("")
-		features = cString("")
+	identity, err := ResolveTargetIdentity(g.requestedTargetTriple)
+	if err != nil {
+		if tripleOwnedByLLVM {
+			C.LLVMDisposeMessage(triple)
+		} else {
+			C.free(unsafe.Pointer(triple))
+		}
+		return err
 	}
+	cpu, features := cString(identity.CPU), cString(identity.Features)
 	tm := C.elisacoreCreateTargetMachineDefault(target, triple, cpu, features)
-	if hostTuned {
-		C.LLVMDisposeMessage(cpu)
-		C.LLVMDisposeMessage(features)
-	} else {
-		C.free(unsafe.Pointer(cpu))
-		C.free(unsafe.Pointer(features))
-	}
+	C.free(unsafe.Pointer(cpu))
+	C.free(unsafe.Pointer(features))
 	if tm == nil {
 		tripleText := C.GoString(triple)
 		if tripleOwnedByLLVM {
@@ -473,4 +463,36 @@ func (g *llvmGenerator) syncWordBitsWithTarget() error {
 	}
 	g.wordBits = int(pointerBytes * 8)
 	return nil
+}
+
+// ResolveTargetIdentity returns the same concrete target settings used by emission.
+// Cache keys must include host features: an empty or native CPU request is not
+// a portable target identity when caches are shared across machines.
+func ResolveTargetIdentity(requestedTriple string) (TargetIdentity, error) {
+	triple := strings.TrimSpace(requestedTriple)
+	if triple == "" {
+		value := C.LLVMGetDefaultTargetTriple()
+		if value == nil {
+			return TargetIdentity{}, fmt.Errorf("failed to determine default target triple")
+		}
+		triple = C.GoString(value)
+		C.LLVMDisposeMessage(value)
+	}
+	cpu := RequestedTargetCPU()
+	if cpu == "native" || (cpu == "" && strings.TrimSpace(requestedTriple) == "") {
+		name, features := C.LLVMGetHostCPUName(), C.LLVMGetHostCPUFeatures()
+		if name == nil || features == nil {
+			if name != nil {
+				C.LLVMDisposeMessage(name)
+			}
+			if features != nil {
+				C.LLVMDisposeMessage(features)
+			}
+			return TargetIdentity{}, fmt.Errorf("failed to determine host CPU identity")
+		}
+		defer C.LLVMDisposeMessage(name)
+		defer C.LLVMDisposeMessage(features)
+		return TargetIdentity{Triple: triple, CPU: C.GoString(name), Features: C.GoString(features)}, nil
+	}
+	return TargetIdentity{Triple: triple, CPU: cpu}, nil
 }

@@ -104,3 +104,7 @@ func WriteLLVMLTOBitcodeFile(result *semantic.Result, outputPath string, options
 	_ = options
 	return nil, fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
+
+func ResolveTargetIdentity(requestedTriple string) (TargetIdentity, error) {
+	return TargetIdentity{}, fmt.Errorf("LLVM target identity requires cgo")
+}

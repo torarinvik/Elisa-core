@@ -49,3 +49,10 @@ func ParseLTOMode(value string) (LTOMode, bool) {
 		return LTOOff, false
 	}
 }
+
+// TargetIdentity contains resolved LLVM target-machine inputs, not just requests.
+type TargetIdentity struct {
+	Triple   string
+	CPU      string
+	Features string
+}

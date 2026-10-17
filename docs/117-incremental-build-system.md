@@ -251,8 +251,11 @@ The lower llc object cache also hashes **exact IR bytes** (v2 namespace). A prio
 regex normalized temporary-looking text throughout IR, including user string
 constants, which could merge different programs. Provenance and runtime strings
 remain part of object identity until a structured remapping design proves an
-exclusion safe. Native/tool/target identity, external dependency completeness and
-persistent artifact integrity still require further qualification; these fixes
+exclusion safe. Object, runtime-object and test-runner keys now include the backend's resolved
+triple, CPU and feature string, using the same resolver as LLVM target-machine
+creation. Test runners and runtime objects also include the sorted codegen
+environment used by build-object keys. Native compiler/tool identity, external
+dependency completeness and persistent artifact integrity still require further qualification; these fixes
 do not establish that all native caches are ready for Stage 2.
 
 ### Storage & lifecycle
