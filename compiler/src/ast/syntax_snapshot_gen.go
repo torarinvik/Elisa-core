@@ -35,6 +35,7 @@ func copyFastSyntaxFile(file *File) (*File, error) {
 	out := c.syntaxFast1(file)
 	return out, c.err
 }
+func copyFastSyntaxFileInto(c *syntaxFastCopier, file *File) *File { return c.syntaxFast1(file) }
 func (c *syntaxFastCopier) syntaxFast1(in *File) *File {
 	if in == nil {
 		return nil

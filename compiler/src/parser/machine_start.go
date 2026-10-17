@@ -35,8 +35,7 @@ import (
 // identifier (the state name). A variable named `state` is used as `state = …`, `state.x`,
 // `state(…)`, or `state: T` — none of which put a bare identifier directly after `state`.
 func (p *Parser) looksLikeStateDeclStmt() bool {
-	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "state" &&
-		p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE)
+	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "state" && p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LBRACE)
 }
 
 // parseStateDeclStmt consumes a `state` declaration into pendingStateDecls and produces no
@@ -52,8 +51,7 @@ func (p *Parser) parseStateDeclStmt() ast.Stmt {
 // entry state). A variable named `start` appears as `start + 1`, `start(…)`, `start.x`,
 // `start[…]` — never `start <IDENT>`.
 func (p *Parser) looksLikeStartExpr() bool {
-	return p.cur().Text == "start" &&
-		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
+	return p.cur().Text == "start" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT
 }
 
 // parseStartExpr lowers `start State …:` <arms> to `machine from <synth>.State …:` <arms>.

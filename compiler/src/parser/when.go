@@ -89,10 +89,10 @@ type whenRow struct {
 // Postfix/operator continuations (`when(x)`, `when[i]`, `when.f`, `when <- v`) keep
 // their identifier meaning.
 func (p *Parser) looksLikeWhenConstruct() bool {
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	switch p.tokens[p.pos+1].Kind {
+	switch p.tokenAt(p.pos + 1).Kind {
 	case lexer.TOKEN_IDENT, lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT, lexer.TOKEN_FLOAT_LIT,
 		lexer.TOKEN_CHAR_LIT, lexer.TOKEN_STRING_LIT, lexer.TOKEN_TRUE, lexer.TOKEN_FALSE,
 		lexer.TOKEN_MINUS:
@@ -157,8 +157,7 @@ func (p *Parser) parseWhenRow(ncols int, exprForm bool) whenRow {
 	row := whenRow{pos: p.cur().Pos}
 
 	// The bare `_ ->` default row matches the whole scrutinee (tuple included).
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" &&
-		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ARROW {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ARROW {
 		p.advance()
 		row.fullWild = true
 	} else {

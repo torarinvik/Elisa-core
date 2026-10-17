@@ -10,10 +10,10 @@ func (p *Parser) peekQualifiedDeclNameFollowedBy(text string) bool {
 		return false
 	}
 	i := p.pos + 1
-	for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+	for p.hasToken(i+1) && (p.tokenAt(i).Kind == lexer.TOKEN_DOT || p.tokenAt(i).Kind == lexer.TOKEN_SCOPE) && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT {
 		i += 2
 	}
-	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_IDENT && p.tokens[i].Text == text
+	return p.hasToken(i) && p.tokenAt(i).Kind == lexer.TOKEN_IDENT && p.tokenAt(i).Text == text
 }
 
 func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {

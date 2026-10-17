@@ -236,3 +236,29 @@ func TestGeneratedSyntaxCapturePreservesTypedNil(t *testing.T) {
 		t.Fatal("typed nil syntax changed")
 	}
 }
+
+func TestSyntaxSnapshotPrefixOwnsNestedVisibilityAndDropsSuffix(t *testing.T) {
+	nested := &FuncDecl{Name: "same"}
+	suffix := &FuncDecl{Name: "same"}
+	original := &File{Filename: "prefix.elisa", Decls: []Decl{&NamespaceDecl{Name: "M", Decls: []Decl{nested}}, suffix}, DeclVisibility: map[Decl]string{nested: "public", suffix: "private"}}
+	snapshot, err := NewSyntaxSnapshot(original, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := snapshot.CopyPrefix(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := snapshot.CopyPrefix(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := first.Decls[0].(*NamespaceDecl).Decls[0]
+	if cap(first.Decls) != 1 || len(first.DeclVisibility) != 1 || first.DeclVisibility[node] != "public" || first.DeclVisibility[nested] != "" || node == second.Decls[0].(*NamespaceDecl).Decls[0] {
+		t.Fatal("prefix retained suffix capacity, lost nested identity, or shared mutable declarations")
+	}
+	node.(*FuncDecl).Name = "changed"
+	if second.Decls[0].(*NamespaceDecl).Decls[0].(*FuncDecl).Name != "same" {
+		t.Fatal("prefix copies shared nested graph")
+	}
+}

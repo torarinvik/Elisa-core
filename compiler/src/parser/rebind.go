@@ -40,7 +40,7 @@ type rebindTarget struct {
 // ident begins a target list; a variable named `rebind` would be `rebind =`,
 // `rebind <-`, `rebind:`, `rebind.` … — i.e. an operator directly after the name.
 func (p *Parser) looksLikeRebindStmt() bool {
-	return p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
+	return p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT
 }
 
 func (p *Parser) parseRebindStmt() ast.Stmt {
@@ -232,8 +232,8 @@ func (p *Parser) freshRebindName(pos lexer.Pos, slot int) string {
 // and the scan stops at the first top-level newline/indent boundary.
 func (p *Parser) multiPlaceArrowAhead() bool {
 	depth := 0
-	for i := p.pos; i < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
+	for i := p.pos; p.hasToken(i); i++ {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:

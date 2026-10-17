@@ -56,10 +56,10 @@ func (p *Parser) peekOwnedQualifier() bool {
 	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "owned" {
 		return false
 	}
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	switch p.tokens[p.pos+1].Kind {
+	switch p.tokenAt(p.pos + 1).Kind {
 	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_TAIL, lexer.TOKEN_LPAREN:
 		return true
 	default:
@@ -119,7 +119,7 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	// aggregate whose region-carrying fields all share the same lifetime.
 	// On a reference it is equivalent to the legacy region prefix `r T&` -- both
 	// populate the same Region field, so the analyzer treats them identically.
-	if p.peek() == lexer.TOKEN_AT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+	if p.peek() == lexer.TOKEN_AT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 		p.advance() // '@'
 		regionName := p.advance().Text
 		switch t := typ.(type) {
@@ -164,7 +164,7 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	}
 	// docs/85: a refinement-type suffix `Base is Pred[…], …`. Only `is` directly followed by a
 	// predicate name in type position; the expression-level `is` operator never reaches here.
-	if p.peek() == lexer.TOKEN_IS && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+	if p.peek() == lexer.TOKEN_IS && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 		typ = p.parseRefinementTypeSuffix(typ)
 	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
@@ -928,7 +928,7 @@ func (p *Parser) parseQueryExpr() ast.Expr {
 	return &ast.QueryExpr{Position: pos, Kind: kind, Name: name, Pattern: pattern, Source: source, Filter: filter, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, Owner: owner}
 }
 func (p *Parser) looksLikeQueryExpr() bool {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+3 >= len(p.tokens) {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+3) {
 		return false
 	}
 	switch p.cur().Text {
@@ -936,18 +936,18 @@ func (p *Parser) looksLikeQueryExpr() bool {
 	default:
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
 	index := p.pos + 2
-	for index < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_COMMA {
+	for p.hasToken(index) && p.tokenAt(index).Kind == lexer.TOKEN_COMMA {
 		index++
-		if index >= len(p.tokens) || p.tokens[index].Kind != lexer.TOKEN_IDENT {
+		if !p.hasToken(index) || p.tokenAt(index).Kind != lexer.TOKEN_IDENT {
 			return false
 		}
 		index++
 	}
-	return index < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_IN
+	return p.hasToken(index) && p.tokenAt(index).Kind == lexer.TOKEN_IN
 }
 func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
@@ -1108,7 +1108,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "where" && !isPostReturnClauseKeyword(p.tokens[p.pos+1].Text) {
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text != "where" && !isPostReturnClauseKeyword(p.tokenAt(p.pos+1).Text) {
 			// The legacy `<ident> T&` region prefix is removed (docs/68 §7): use the
 			// canonical `T& @r` suffix. Now that refstorage params are gone this prefix is
 			// unambiguously a region, so we can reject it. Recover by treating the ident as
@@ -1168,7 +1168,7 @@ func (p *Parser) parseGenericTypeArgExpr() ast.TypeExpr {
 		p.advance()
 		return &ast.RefStateLiteralTypeExpr{Position: pos, State: ast.RefStateNull}
 	case lexer.TOKEN_HEAP, lexer.TOKEN_STACK, lexer.TOKEN_STATIC:
-		if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		if !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 			pos := p.cur().Pos
 			switch p.advance().Kind {
 			case lexer.TOKEN_HEAP:
@@ -1188,13 +1188,13 @@ func (p *Parser) parseGenericTypeArgExpr() ast.TypeExpr {
 	return p.parseTypeExpr()
 }
 func (p *Parser) peekStateSetTypeExpr() bool {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+2 >= len(p.tokens) {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+2) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_PIPE {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_PIPE {
 		return false
 	}
-	return p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT
+	return p.tokenAt(p.pos+2).Kind == lexer.TOKEN_IDENT
 }
 func (p *Parser) parseStateSetTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
@@ -1214,8 +1214,8 @@ func (p *Parser) peekAggregateStateBracketList() ([]ast.RefState, bool) {
 	states := make([]ast.RefState, 0, 1)
 	i := p.pos + 1
 	expectState := true
-	for i < len(p.tokens) {
-		tok := p.tokens[i]
+	for p.hasToken(i) {
+		tok := p.tokenAt(i)
 		if expectState {
 			switch tok.Kind {
 			case lexer.TOKEN_AMPERSAND:
@@ -1329,17 +1329,17 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 		} else {
 			hasTopLevelComma := p.peekTopLevelCommaInCurrentBracketList()
 			afterBracket := lexer.TOKEN_EOF
-			if p.pos+1 < len(p.tokens) {
-				afterBracket = p.tokens[p.pos+1].Kind
+			if p.hasToken(p.pos + 1) {
+				afterBracket = p.tokenAt(p.pos + 1).Kind
 			}
 			isArray := afterBracket == lexer.TOKEN_INT_LIT || afterBracket == lexer.TOKEN_HEX_LIT
-			if !hasTopLevelComma && afterBracket == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) {
-				afterIdent := p.tokens[p.pos+2].Kind
+			if !hasTopLevelComma && afterBracket == lexer.TOKEN_IDENT && p.hasToken(p.pos+2) {
+				afterIdent := p.tokenAt(p.pos + 2).Kind
 				isArray = afterIdent != lexer.TOKEN_AMPERSAND && afterIdent != lexer.TOKEN_QUESTION &&
 					afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_COMMA &&
 					afterIdent != lexer.TOKEN_LBRACKET && afterIdent != lexer.TOKEN_PIPE && afterIdent != lexer.TOKEN_DOT
 				if afterIdent == lexer.TOKEN_RBRACKET {
-					argName := p.tokens[p.pos+1].Text
+					argName := p.tokenAt(p.pos + 1).Text
 					isArray = isSingleUppercaseIdentifier(name) || isConstantStyleArraySizeIdentifier(argName)
 				}
 			}
@@ -1407,8 +1407,8 @@ func (p *Parser) peekTopLevelCommaInCurrentBracketList() bool {
 	}
 	bracketDepth := 0
 	parenDepth := 0
-	for i := p.pos; i < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
+	for i := p.pos; p.hasToken(i); i++ {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_LBRACKET:
 			bracketDepth++
 		case lexer.TOKEN_RBRACKET:

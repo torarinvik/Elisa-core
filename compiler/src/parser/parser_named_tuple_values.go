@@ -11,8 +11,8 @@ import (
 // its top-level assignment first. Nested delimiters keep their punctuation local.
 func (p *Parser) namedTupleValueAhead() bool {
 	depth := 0
-	for index := p.pos + 1; index < len(p.tokens); index++ {
-		switch p.tokens[index].Kind {
+	for index := p.pos + 1; p.hasToken(index); index++ {
+		switch p.tokenAt(index).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN:

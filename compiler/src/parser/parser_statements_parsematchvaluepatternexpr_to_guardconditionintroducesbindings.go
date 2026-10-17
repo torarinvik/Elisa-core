@@ -58,7 +58,7 @@ func (p *Parser) parseMatchValuePatternExpr() ast.Expr {
 	}
 }
 func (p *Parser) parseMatchPatternArg() ast.MatchPatternArg {
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_COLON)
@@ -132,7 +132,7 @@ func (p *Parser) parseCheckpointStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("checkpoint")
 	p.errorAt(pos, "`checkpoint …:` has been removed; snapshot the darray lengths (`n: usize = xs.count`) and restore them on exit with `defer block:` + `xs.truncate(n)`")
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ASSIGN {
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
 		target := p.parseExpr()
@@ -215,8 +215,8 @@ func (p *Parser) parseAdopt() *ast.AdoptStmt {
 // `promote` usable as an ordinary identifier elsewhere.
 func (p *Parser) looksLikePromoteStmt() bool {
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_NEWLINE:
 			return false
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
@@ -226,7 +226,7 @@ func (p *Parser) looksLikePromoteStmt() bool {
 				depth--
 			}
 		case lexer.TOKEN_IDENT:
-			if depth == 0 && p.tokens[i].Text == "into" {
+			if depth == 0 && p.tokenAt(i).Text == "into" {
 				return true
 			}
 		}
@@ -293,8 +293,8 @@ func (p *Parser) parseReturn() ast.Stmt {
 // call, or index) does not count.
 func (p *Parser) returnIfIsValueForm() bool {
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -344,14 +344,14 @@ func (p *Parser) parseValueExprAllowTuple() ast.Expr {
 	return p.parseTupleExprFromFirst(first.Pos(), first)
 }
 func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COMMA {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_COMMA {
 		return nil
 	}
 	savedPos := p.pos
 	names := make([]ast.TupleBindName, 0, 4)
 	for {
 		if p.peek() != lexer.TOKEN_IDENT {
-			p.pos = savedPos
+			p.seek(savedPos)
 			return nil
 		}
 		tok := p.advance()
@@ -368,7 +368,7 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 	case lexer.TOKEN_LARROW:
 		p.advance()
 	default:
-		p.pos = savedPos
+		p.seek(savedPos)
 		return nil
 	}
 	var value ast.Expr
@@ -558,7 +558,7 @@ func (p *Parser) parseIf() ast.Stmt {
 // isElseIfChain reports whether the cursor is at a removed two-word `else if` chain
 // (an `else` immediately followed by `if`), as opposed to a plain trailing `else:` block.
 func (p *Parser) isElseIfChain() bool {
-	return p.peek() == lexer.TOKEN_ELSE && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IF
+	return p.peek() == lexer.TOKEN_ELSE && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IF
 }
 func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
@@ -568,15 +568,15 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	}
 	headStart := p.pos
 	head := p.withInMembershipDisabled(p.parseExpr)
-	if p.peek() == lexer.TOKEN_IN && p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE) {
-		p.pos = headStart
+	if p.peek() == lexer.TOKEN_IN && p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LBRACKET || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LBRACE) {
+		p.seek(headStart)
 		cond := p.parseExpr()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseStmtBodyAfterColon()
 		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
 	}
 	if p.notInMembershipAhead() {
-		p.pos = headStart
+		p.seek(headStart)
 		cond := p.parseExpr()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseStmtBodyAfterColon()
@@ -616,7 +616,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 			body := p.parseBlock()
 			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body}
 		}
-		p.pos = headStart
+		p.seek(headStart)
 		cond := p.parseExpr()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseStmtBodyAfterColon()
@@ -662,8 +662,8 @@ func (p *Parser) parseGuardConditionExpr() ast.Expr {
 	depth := 0
 	start := p.pos
 	end := start
-	for end < len(p.tokens) {
-		tok := p.tokens[end]
+	for p.hasToken(end) {
+		tok := p.tokenAt(end)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -686,14 +686,14 @@ parse:
 		p.errorf("guard requires a condition before else")
 		return &ast.BoolLit{Position: p.cur().Pos, Value: false}
 	}
-	slice := append([]lexer.Token(nil), p.tokens[start:end]...)
+	slice := append([]lexer.Token(nil), p.tokenSpan(start, end)...)
 	eofPos := slice[len(slice)-1].Pos
 	slice = append(slice, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: eofPos})
 	sub := New(slice)
 	sub.poolScopes = append([]string(nil), p.poolScopes...)
 	expr := sub.parseExpr()
 	p.errors = append(p.errors, sub.Errors()...)
-	p.pos = end
+	p.seek(end)
 	return expr
 }
 func guardConditionIntroducesBindings(expr ast.Expr) bool {

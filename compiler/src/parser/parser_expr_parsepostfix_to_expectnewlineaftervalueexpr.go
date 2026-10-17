@@ -19,8 +19,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 		// follows, and a `.field` selector comes next. This sequence is not
 		// otherwise valid, so it cannot shadow ordinary expressions.
 		if ident, ok := expr.(*ast.Ident); ok &&
-			p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "of" &&
-			p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_DOT {
+			p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "of" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_DOT {
 			pos := p.cur().Pos
 			p.advance() // consume `of`
 			p.expect(lexer.TOKEN_DOT)
@@ -30,7 +29,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 		}
 		switch p.peek() {
 		case lexer.TOKEN_QUESTION:
-			if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_DOT {
+			if !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_DOT {
 				return expr
 			}
 			pos := p.cur().Pos
@@ -57,7 +56,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.advance()
 				target := p.parseTypeExpr()
 				p.expect(lexer.TOKEN_RBRACKET)
-				if p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
+				if p.peek() == lexer.TOKEN_LPAREN && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_RPAREN {
 					p.errorf("legacy cast syntax `.cast[T]()` is no longer supported; use `.cast[T]` instead")
 					p.advance()
 					p.advance()
@@ -130,10 +129,10 @@ func (p *Parser) parsePostfix() ast.Expr {
 					expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target}
 					continue
 				}
-				p.pos = savedCastPos
+				p.seek(savedCastPos)
 			}
 
-			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_QUESTION && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN && p.tokens[p.pos+2].Kind == lexer.TOKEN_RPAREN {
+			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_QUESTION && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LPAREN && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_RPAREN {
 				castPos := pos
 				p.advance()
 				p.advance()
@@ -143,7 +142,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				continue
 			}
 
-			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
+			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_LPAREN && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_RPAREN {
 				castPos := pos
 				p.advance()
 				p.advance()
@@ -519,7 +518,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.looksLikeQueryExpr() {
 			return p.parseQueryExpr()
 		}
-		if p.cur().Text == "do" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		if p.cur().Text == "do" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 			pos := p.cur().Pos
 			// docs/119 §2: the bare block form (`x =` NEWLINE INDENT ... tail) supersedes
 			// `do:`. In positions the bare form cannot express (call arguments, list
@@ -541,11 +540,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 			}
 			return target
 		}
-		if p.cur().Text == "visit" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
+		if p.cur().Text == "visit" && !(p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LPAREN) {
 			p.errorf("the `visit` expression has been removed with the `tree` construct (docs/81); use `match` over the `enum … is` hierarchy")
 			return p.parseExprAfterRemovedPrefixKeyword()
 		}
-		if p.cur().Text == "fold" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		if p.cur().Text == "fold" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 			p.errorf("the tree `fold … as … into …` expression has been removed (docs/81); use a recursive function with `match` over the `enum … is` hierarchy")
 			return p.parseExprAfterRemovedPrefixKeyword()
 		}
@@ -554,7 +553,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 		// so call sites like `get(x)`, method calls `x.get(i)`, indexing `get[i]`,
 		// and bare `get` identifiers are left untouched. A trailing `else` is
 		// folded into the GetExpr at parseExpr, mirroring TryExpr.
-		if p.cur().Text == "get" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		if p.cur().Text == "get" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 			pos := p.cur().Pos
 			p.advance()
 			value := p.parseOr()
@@ -723,7 +722,7 @@ func (p *Parser) parseBareExprBlockValue(pos lexer.Pos) ast.Expr {
 // that sequence is a guaranteed parse error, so claiming it is backward
 // compatible.
 func (p *Parser) bareExprBlockAhead() bool {
-	return p.peek() == lexer.TOKEN_NEWLINE && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_INDENT
+	return p.peek() == lexer.TOKEN_NEWLINE && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_INDENT
 }
 
 // valueCaptureHeaderAhead reports whether the RHS position starts a captured
@@ -737,20 +736,17 @@ func (p *Parser) valueCaptureHeaderAhead() bool {
 	}
 	i := p.pos + 1
 	for {
-		if i >= len(p.tokens) || p.tokens[i].Kind != lexer.TOKEN_IDENT {
+		if !p.hasToken(i) || p.tokenAt(i).Kind != lexer.TOKEN_IDENT {
 			return false
 		}
 		i++
-		if i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_COMMA {
+		if p.hasToken(i) && p.tokenAt(i).Kind == lexer.TOKEN_COMMA {
 			i++
 			continue
 		}
 		break
 	}
-	return i+2 < len(p.tokens) &&
-		p.tokens[i].Kind == lexer.TOKEN_PIPE &&
-		p.tokens[i+1].Kind == lexer.TOKEN_NEWLINE &&
-		p.tokens[i+2].Kind == lexer.TOKEN_INDENT
+	return p.hasToken(i+2) && p.tokenAt(i).Kind == lexer.TOKEN_PIPE && p.tokenAt(i+1).Kind == lexer.TOKEN_NEWLINE && p.tokenAt(i+2).Kind == lexer.TOKEN_INDENT
 }
 
 // parseValueBlockRHS parses the two block-expression RHS forms every `=`/`<-`
@@ -814,14 +810,14 @@ func (p *Parser) peekStructLiteralTypeArgsFollowedBy(close lexer.TokenKind) bool
 		return false
 	}
 	depth := 0
-	for i := p.pos; i < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
+	for i := p.pos; p.hasToken(i); i++ {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_LBRACKET:
 			depth++
 		case lexer.TOKEN_RBRACKET:
 			depth--
 			if depth == 0 {
-				return i+1 < len(p.tokens) && p.tokens[i+1].Kind == close
+				return p.hasToken(i+1) && p.tokenAt(i+1).Kind == close
 			}
 		}
 	}
@@ -971,7 +967,7 @@ func (p *Parser) expectNewline() {
 	}
 }
 func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
-	if _, ok := expr.(*ast.QuantifierExpr); ok && p.pos > 0 && p.tokens[p.pos-1].Kind == lexer.TOKEN_DEDENT {
+	if _, ok := expr.(*ast.QuantifierExpr); ok && p.pos > 0 && p.tokenAt(p.pos-1).Kind == lexer.TOKEN_DEDENT {
 		return
 	}
 

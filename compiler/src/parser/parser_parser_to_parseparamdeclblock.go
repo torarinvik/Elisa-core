@@ -67,6 +67,10 @@ type Parser struct {
 	stmtGuardBlockEnd bool
 	// Innermost loop's simple yielded accumulator, or "" for a statement loop.
 	loopBreakTargets []string
+	// Keep the original hot parser fields at their previous offsets.
+	trace       *SyntaxTrace
+	readThrough int
+	readLength  bool
 }
 
 // takeStmtGuard consumes a recorded postfix statement guard, if any, wrapping the finished
@@ -118,28 +122,8 @@ func (p *Parser) activePoolName() string {
 	}
 	return p.poolScopes[len(p.poolScopes)-1]
 }
-func (p *Parser) cur() lexer.Token {
-	if p.pos >= len(p.tokens) {
-		return lexer.Token{Kind: lexer.TOKEN_EOF}
-	}
-	return p.tokens[p.pos]
-}
 func (p *Parser) peek() lexer.TokenKind {
 	return p.cur().Kind
-}
-func (p *Parser) peekAt(offset int) lexer.TokenKind {
-	i := p.pos + offset
-	if i >= len(p.tokens) {
-		return lexer.TOKEN_EOF
-	}
-	return p.tokens[i].Kind
-}
-func (p *Parser) advance() lexer.Token {
-	tok := p.cur()
-	if p.pos < len(p.tokens) {
-		p.pos++
-	}
-	return tok
 }
 func (p *Parser) expect(kind lexer.TokenKind) lexer.Token {
 	tok := p.cur()
@@ -288,8 +272,14 @@ func (p *Parser) skipRejectedDecl() {
 	}
 }
 
-func (p *Parser) ParseFile(filename string) *ast.File {
-	file := &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount()), DeclVisibility: p.declVisibility}
+func (p *Parser) ParseFile(filename string) *ast.File { return p.parseFile(filename, nil) }
+func (p *Parser) parseFile(filename string, file *ast.File) *ast.File {
+	if file == nil {
+		file = &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount()), DeclVisibility: p.declVisibility}
+	}
+	if p.trace != nil {
+		defer func() { p.trace.complete = len(p.errors) == 0 && len(p.notices) == 0 && !p.trace.invalid }()
+	}
 	defer p.recoverNestingOverflow()
 	p.skipNewlines()
 	for p.peek() != lexer.TOKEN_EOF {
@@ -302,6 +292,9 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 			p.pendingDecls = nil
 		}
 		p.skipNewlines()
+		if p.trace != nil {
+			p.recordSyntaxBoundary(file)
+		}
 	}
 	return file
 }
@@ -343,7 +336,7 @@ func (p *Parser) parseVisibilityPrefixedDecl() ast.Decl {
 
 func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("public") || p.peekIdentText("private") {
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 			p.errorf("visibility section %q is only valid inside declaration blocks", p.cur().Text+":")
 			p.advance()
 			p.advance()
@@ -361,10 +354,10 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("typestate") {
 		return p.parseTypestateDecl()
 	}
-	if (p.peekIdentText("linear") || p.peekIdentText("affine")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "typestate" {
+	if (p.peekIdentText("linear") || p.peekIdentText("affine")) && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "typestate" {
 		return p.parseTypestateDecl()
 	}
-	if p.peek() == lexer.TOKEN_STATIC && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "interface" {
+	if p.peek() == lexer.TOKEN_STATIC && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "interface" {
 		p.errorf("`static interface` has been removed; use `protocol`")
 		p.skipRejectedDecl()
 		return nil
@@ -389,7 +382,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("module") {
 		return p.parseNamespaceDecl()
 	}
-	if p.peekIdentText("extend") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "grammar" {
+	if p.peekIdentText("extend") && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "grammar" {
 		p.errorf("grammar and lexer DSL declarations have been removed")
 		p.skipRejectedDecl()
 		return nil
@@ -424,7 +417,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("layout") && p.looksLikeLayoutDecl() {
 		return p.parseLayoutDecl()
 	}
-	if p.peek() == lexer.TOKEN_ENUM && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "map" {
+	if p.peek() == lexer.TOKEN_ENUM && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "map" {
 		return p.parseEnumMapDecl()
 	}
 	if p.peekIdentText("attribute") {
@@ -489,7 +482,7 @@ func (p *Parser) parseDecl() ast.Decl {
 		case lexer.TOKEN_REPR:
 			return p.parseStructDeclWithAnnotations(annotations)
 		case lexer.TOKEN_PACKED:
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
 			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
@@ -503,27 +496,27 @@ func (p *Parser) parseDecl() ast.Decl {
 			return nil
 		}
 	}
-	if p.peek() == lexer.TOKEN_PACKED && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
+	if p.peek() == lexer.TOKEN_PACKED && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ENUM {
 		return p.parsePackedEnumDecl()
 	}
 	switch p.peek() {
 	case lexer.TOKEN_CONST:
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "module" {
+		if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "module" {
 			return p.parseConstModuleDecl()
 		}
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
+		if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ENUM {
 			return p.parseConstEnumDecl()
 		}
 		return p.parseConstDecl()
 	case lexer.TOKEN_ERROR:
 		return p.parseErrorDecl()
 	case lexer.TOKEN_ENUM:
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "map" {
+		if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "map" {
 			return p.parseEnumMapDecl()
 		}
 		return p.parseEnumDecl()
 	case lexer.TOKEN_GLOBAL:
-		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "region" && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT {
+		if p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "region" && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_IDENT {
 			return p.parseGlobalRegionDecl()
 		}
 		return p.parseGlobalDecl()
@@ -553,19 +546,19 @@ func (p *Parser) parseLayoutStructDecl() ast.Decl {
 // position a law is `law <name> [generics] ( … )`, so require an identifier name followed by
 // `(` or `[`.
 func (p *Parser) looksLikeLawDecl() bool {
-	if p.pos+2 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 2) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	switch p.tokens[p.pos+2].Kind {
+	switch p.tokenAt(p.pos + 2).Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 		return true
 	case lexer.TOKEN_IDENT:
 		// Subject-free function-level law with no param list: effect law `law NoAlloc forbids ...`
 		// (docs/85 §4) or composite law `law Leaf includes ...` (docs/85 §6).
-		return p.tokens[p.pos+2].Text == "forbids" || p.tokens[p.pos+2].Text == "includes"
+		return p.tokenAt(p.pos+2).Text == "forbids" || p.tokenAt(p.pos+2).Text == "includes"
 	default:
 		return false
 	}
@@ -574,13 +567,13 @@ func (p *Parser) looksLikeLawDecl() bool {
 // looksLikeLemmaDecl distinguishes a `lemma` declaration (`lemma Name(...)` / `lemma Name[...]`) from
 // an identifier that merely happens to be spelled `lemma` (contextual keyword, like `law`).
 func (p *Parser) looksLikeLemmaDecl() bool {
-	if p.pos+2 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 2) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	switch p.tokens[p.pos+2].Kind {
+	switch p.tokenAt(p.pos + 2).Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 		return true
 	default:
@@ -602,7 +595,7 @@ func (p *Parser) parseLemmaDecl() ast.Decl {
 }
 
 func (p *Parser) looksLikeGhostFuncDecl() bool {
-	return p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_DEF
+	return p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_DEF
 }
 
 func (p *Parser) parseGhostFuncDecl() ast.Decl {
@@ -757,13 +750,13 @@ func (p *Parser) parseLawDecl() ast.Decl {
 // `refine <name> [generics]? (params)? = <base> where <pred>`, so require an identifier name followed
 // by `[`, `(`, or `=`.
 func (p *Parser) looksLikeRefineDecl() bool {
-	if p.pos+2 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 2) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	switch p.tokens[p.pos+2].Kind {
+	switch p.tokenAt(p.pos + 2).Kind {
 	case lexer.TOKEN_LBRACKET, lexer.TOKEN_LPAREN, lexer.TOKEN_ASSIGN:
 		return true
 	default:
@@ -818,13 +811,13 @@ func (p *Parser) parseRefineDecl() ast.Decl {
 // merely spelled `contract`. At decl position a contract is `contract <name> [generics] ( … ):`, so
 // require an identifier name followed by `(` or `[`.
 func (p *Parser) looksLikeContractDecl() bool {
-	if p.pos+2 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 2) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	switch p.tokens[p.pos+2].Kind {
+	switch p.tokenAt(p.pos + 2).Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 		return true
 	default:
@@ -1222,10 +1215,10 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 func (p *Parser) parseErrorPayloadDecl() ast.ParamDecl {
 	pos := p.cur().Pos
 	i := p.pos
-	if i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_MUTABLE {
+	if p.hasToken(i) && p.tokenAt(i).Kind == lexer.TOKEN_MUTABLE {
 		i++
 	}
-	if i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_IDENT && p.tokens[i+1].Kind == lexer.TOKEN_COLON {
+	if p.hasToken(i+1) && p.tokenAt(i).Kind == lexer.TOKEN_IDENT && p.tokenAt(i+1).Kind == lexer.TOKEN_COLON {
 		return p.parseParam(false)
 	}
 	return ast.ParamDecl{Position: pos, Type: p.parseTypeExpr()}

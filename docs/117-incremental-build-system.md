@@ -830,7 +830,9 @@ cold parsing measured9.28 ms in that run, consistent with no obvious regression
 against the previous9.74 ms short sample; these are not controlled statistical
 claims. Earlier edits, files below the checkpoint stride and cold admission may
 benefit less or pay tracking/copy costs. Hashing/common-prefix comparison and
-source/token copying remain linear, and the entire AST is still reparsed. These
+source/token copying remain linear. This lexer-only checkpoint still reparsed the
+entire AST; the declaration-prefix replay extension below can now avoid prefix
+parsing after snapshot admission. These
 synthetic tail-edit results do not establish general edit or whole-project compile
 speed. Declaration-level parsing, persistent semantic/call/module reuse and
 end-to-end project qualification remain active requirements.
@@ -860,7 +862,8 @@ and replay run outside the cache lock, with publication rechecked under the lock
 Capture is delayed until the revision is requested a second time: a one-off edit
 pays no snapshot capture cost. The second request still parses and pays capture;
 only subsequent exact hits benefit. Edit histories still use lexer checkpoints
-and fresh parsing rather than declaration-level parser replay.
+and fresh parsing in this initial snapshot checkpoint; the extension below adds
+declaration-prefix replay.
 
 Ownership fixtures cover source mutation, shared and cyclic nodes, pointer-keyed
 visibility, full slice tails, partial-view rejection, concurrent copy/mutation,
@@ -922,3 +925,91 @@ in2.098s; all TestCompileServer tests passed with race instrumentation in1.830s.
 Unknown test-only interface implementations are rejected and typed nil expressions
 survive capture/replay. The broader compiler-suite failures recorded above remain
 unresolved; this checkpoint does not claim a full-suite pass.
+
+
+### Edited-source declaration-prefix replay
+
+An admitted pristine snapshot can now supply the unchanged declaration prefix of
+an edited source revision. The server selects the latest retained same-filename
+snapshot before lexing can evict it, compares complete token values and diagnostic
+positions, and selects the largest checkpoint whose cumulative inspected prefix
+still matches. It clones that declaration graph privately and parses the remaining
+source with the checkpoint's outgoing parser state. Successful prefix use touches
+the retained revision in the shared LRU; no separate unbounded history is kept.
+
+The parser records at most 4,096 safe top-level boundaries. Cursor initialization,
+advance and seek observe their destination; offset/index/span probes observe
+lookahead too, including failed EOF probes. Speculative rewinds never erase the
+read watermark. Explicit token-count reads require equal lengths. Capacity-only
+estimates remain outside syntax dependencies. Static tests audit all current
+Parser fields, raw token-read locations and cursor writes. Ordinary cur/peek
+retain their original access path, and trace collection runs only for repeated
+revisions eligible for snapshot admission. An untraced concurrent request cannot
+publish a snapshot before a traced request and permanently lose its checkpoints.
+
+Checkpoints preserve rebind/nursery/by-par counters, the one-per-file ForeignEnum
+error-set flag and visibility state. Other modes, nesting, scope stacks, guards
+and pending buffers must be quiescent before a boundary is recorded. Synthesized
+pending declarations are drained before recording the declaration count. The
+trace contains owned scalar/string metadata rather than AST/token pointers and
+shares the existing 512-MiB accounted-payload budget with tokens and snapshots.
+Capture still occurs before semantic mutation and only for successful parses
+without notices or token-recovery rewrites.
+
+CopyPrefix limits declaration capacity to the retained prefix and rebuilds
+visibility keys only for reachable cloned declarations, including nested module
+members. It preserves cross-node sharing and returns no mutable snapshot storage
+or hidden suffix graph. Reused strings are snapshot-owned and immutable; token
+position equality avoids guessed source relocation. The rest of the file remains
+fresh, including the edited declaration itself. Source/AST metadata from a later
+admitted revision owns its storage rather than retaining a snapshot ancestor chain.
+
+Qualification includes 160 seeded independent edits against an admitted revision
+(including malformed syntax and recovery), plus six successive revisions with
+three requests each under one- and two-entry eviction. AST comparison uses a
+bidirectional node correspondence for pointer-keyed visibility. Dedicated cases
+cover identical-looking nested/suffix visibility nodes, rebind and nursery/par
+counters, typestate expansion, two foreign enums across a replay boundary, and an
+edited next-declaration token invalidating prior lookahead. Server tests require
+actual nonzero declaration replay across unique edits and semantic/lowered/LLVM/IR
+transitions after default-argument mutation. A deterministic publication-order
+regression covers the untraced/traced concurrent admission race.
+
+This remains prefix replay from an admitted revision. There is no unchanged-suffix
+replay after an earlier edit, source relocation, declaration-body slicing, or
+persistent general semantic/module/object dependency reuse yet. First-use and
+unsupported revisions remain cold; early edits may have no reusable boundary.
+A revision with parser notices cannot become a retained prefix provider; changed
+suffix diagnostics are still produced fresh.
+Token comparison, prefix graph cloning and some metadata work remain linear, and
+snapshot admission still requires amortization. The complete professional
+incremental compiler goal and whole-project performance qualification remain open.
+
+Final local throughput measurements (M5, Go1.27.2, GOMAXPROCS=4, three
+100-iteration runs) use 2,048 simple functions and distinct edits to the last
+function. Lexer reuse with fresh parsing measured 5.91/5.45/5.99 ms; admitted
+prefix replay measured 3.58/3.98/3.62 ms. Both include digest lookup, edited
+lexing, token comparison and parsing/replay; setup's two original parses and
+snapshot capture are excluded. The benchmark requires at least 2,047 replayed
+declarations per edit, preventing an accidentally cold path from appearing valid.
+Allocated bytes rise from 11.31 MB to about 14.21 MB, while allocation count falls
+from 26,829 to about 22,889. This deliberately favors throughput over memory.
+
+Cold/one-off controls use the parent parser/cache implementation through Go
+overlays and independently built binaries in parent/current/current/parent order
+(100 iterations per process). Parent cold runs measured 9.60/9.71 ms and current
+12.76/10.10 ms. Parent lexer-only edits measured 6.68/5.93 ms and current
+7.39/5.92 ms; allocation counts and bytes are unchanged. An earlier grouped
+100-iteration comparison was closer (parent/current cold 10.34/10.45 ms and
+lexer-only edits 6.34/6.35 ms). The observed spread and residual cold overhead do
+not establish zero regression. The initial tracing draft was substantially slower
+and was replaced by destination observation plus demand-based trace collection.
+These are synthetic parsing measurements, not whole-project compile speedups.
+
+Final verification for declaration-prefix replay: the full semantic package passed
+in 71.500 s. Full parser/AST/generator race suites passed in 33.642/1.276/4.121 s;
+compile-server and source-cache race tests, including chained snapshots and the
+admission-order regression, passed in 2.694 s. The changed lexer prefix-comparison
+code also passed the full lexer race suite earlier in this checkpoint (10.743 s).
+These checks do not supersede the previously recorded failures in the broader
+root compiler-package suite, which was not rerun here.

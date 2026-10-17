@@ -112,12 +112,19 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 }
 
 func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, cache *sourceTokenCache) (*ast.File, bool) {
+	wantTrace := false
 	if cache != nil {
 		replayStart := time.Now()
-		if file, ok := cache.parsedFile(filename, src); ok {
+		file, ok, trace := cache.parsedFile(filename, src)
+		wantTrace = trace
+		if ok {
 			frontendTimingLog("parse", replayStart)
 			return file, true
 		}
+	}
+	var previous sourceTokenEntry
+	if cache != nil {
+		previous = cache.prefixCandidate(filename)
 	}
 	lexStart := time.Now()
 	var tokens []lexer.Token
@@ -139,8 +146,21 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 	}
 
 	parseStart := time.Now()
-	p := parser.New(tokens)
-	file := p.ParseFile(filename)
+	var p *parser.Parser
+	if wantTrace {
+		p = parser.NewWithSyntaxTrace(tokens)
+	} else {
+		p = parser.New(tokens)
+	}
+	var file *ast.File
+	if cache != nil {
+		if prefix, checkpoint, ok := cache.parsePrefix(previous, tokens); ok {
+			file = p.ParseFileFromPrefix(filename, prefix, previous.trace, checkpoint)
+		}
+	}
+	if file == nil {
+		file = p.ParseFile(filename)
+	}
 	frontendTimingLog("parse", parseStart)
 	if warns := p.Notices(); len(warns) > 0 {
 		for _, w := range warns {
@@ -158,7 +178,7 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 		return nil, false
 	}
 	if cache != nil {
-		cache.rememberParsed(filename, src, file, len(p.Notices()) == 0)
+		cache.rememberParsed(filename, src, file, p.SyntaxTrace(), len(p.Notices()) == 0)
 	}
 	return file, true
 }

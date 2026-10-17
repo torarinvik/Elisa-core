@@ -31,13 +31,13 @@ func isReservedWordToken(tok lexer.Token) bool {
 // whose keyword is name-like into an identifier after reporting it.
 func (p *Parser) recoverReservedWordStatementName() {
 	tok := p.cur()
-	if !statementNameLikeReservedWords[tok.Text] || !isReservedWordToken(tok) || p.pos+1 >= len(p.tokens) {
+	if !statementNameLikeReservedWords[tok.Text] || !isReservedWordToken(tok) || !p.hasToken(p.pos+1) {
 		return
 	}
-	next := p.tokens[p.pos+1]
+	next := p.tokenAt(p.pos + 1)
 	switch next.Kind {
 	case lexer.TOKEN_COLON:
-		if p.pos+2 >= len(p.tokens) || p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE {
+		if !p.hasToken(p.pos+2) || p.tokenAt(p.pos+2).Kind == lexer.TOKEN_NEWLINE {
 			return // `kw:` block opener — not a name
 		}
 	case lexer.TOKEN_ASSIGN, lexer.TOKEN_LARROW:
@@ -45,17 +45,17 @@ func (p *Parser) recoverReservedWordStatementName() {
 		return
 	}
 	p.reportReservedWordAsName(tok)
-	p.tokens[p.pos].Kind = lexer.TOKEN_IDENT
+	p.rewriteTokenKind(p.pos, lexer.TOKEN_IDENT)
 }
 
 // recoverReservedWordLoopBinder handles `for to in xs:` / `for tail, x in …`; idx is the binder.
 func (p *Parser) recoverReservedWordLoopBinder(idx int) {
-	if idx+1 >= len(p.tokens) || !isReservedWordToken(p.tokens[idx]) {
+	if !p.hasToken(idx+1) || !isReservedWordToken(p.tokenAt(idx)) {
 		return
 	}
-	if next := p.tokens[idx+1].Kind; next != lexer.TOKEN_IN && next != lexer.TOKEN_COMMA {
+	if next := p.tokenAt(idx + 1).Kind; next != lexer.TOKEN_IN && next != lexer.TOKEN_COMMA {
 		return
 	}
-	p.reportReservedWordAsName(p.tokens[idx])
-	p.tokens[idx].Kind = lexer.TOKEN_IDENT
+	p.reportReservedWordAsName(p.tokenAt(idx))
+	p.rewriteTokenKind(idx, lexer.TOKEN_IDENT)
 }

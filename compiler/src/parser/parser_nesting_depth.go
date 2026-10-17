@@ -57,9 +57,9 @@ func (p *Parser) recoverNestingOverflow() {
 			panic(r)
 		}
 		p.errors = append(p.errors, overflow.message())
-		p.pos = len(p.tokens) - 1
+		p.seek(p.tokenCount() - 1)
 		if p.pos < 0 {
-			p.pos = 0
+			p.seek(0)
 		}
 	}
 }

@@ -187,7 +187,7 @@ func (p *Parser) parseConstModuleBlock() []ast.Decl {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 			visibility := p.cur().Text
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)
@@ -320,8 +320,8 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 			p.advance()
 			continue
 		}
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.pos+1 < len(p.tokens) {
-			switch p.tokens[p.pos+1].Kind {
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.hasToken(p.pos+1) {
+			switch p.tokenAt(p.pos + 1).Kind {
 			case lexer.TOKEN_COLON:
 				// Legacy indented block form: `common:` then fields below.
 				commonFields = append(commonFields, p.parseEnumCommonFields()...)
@@ -475,8 +475,8 @@ func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 	return ast.EnumVariantDecl{Position: pos, Name: name, Payload: payload}
 }
 func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
-		relationText := p.tokens[p.pos].Text
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
+		relationText := p.tokenAt(p.pos).Text
 		var relation ast.EnumPayloadRelation
 		switch relationText {
 		case string(ast.EnumPayloadRelationChild):
@@ -488,11 +488,11 @@ func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
 		}
 		colonIndex := p.pos + 2
 		optionalNamed := false
-		if colonIndex < len(p.tokens) && p.tokens[colonIndex].Kind == lexer.TOKEN_QUESTION {
+		if p.hasToken(colonIndex) && p.tokenAt(colonIndex).Kind == lexer.TOKEN_QUESTION {
 			optionalNamed = true
 			colonIndex++
 		}
-		if relation != ast.EnumPayloadRelationNone && colonIndex < len(p.tokens) && p.tokens[colonIndex].Kind == lexer.TOKEN_COLON {
+		if relation != ast.EnumPayloadRelationNone && p.hasToken(colonIndex) && p.tokenAt(colonIndex).Kind == lexer.TOKEN_COLON {
 			pos := p.cur().Pos
 			p.expect(lexer.TOKEN_IDENT)
 			nameTok := p.expect(lexer.TOKEN_IDENT)
@@ -507,9 +507,9 @@ func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
 			return ast.EnumPayloadDecl{Position: pos, Relation: relation, Name: nameTok.Text, Type: typ}
 		}
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) {
-		optionalNamed := p.tokens[p.pos+1].Kind == lexer.TOKEN_QUESTION && p.pos+2 < len(p.tokens) && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
-		if p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON || optionalNamed {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) {
+		optionalNamed := p.tokenAt(p.pos+1).Kind == lexer.TOKEN_QUESTION && p.hasToken(p.pos+2) && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_COLON
+		if p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON || optionalNamed {
 			pos := p.cur().Pos
 			nameTok := p.expect(lexer.TOKEN_IDENT)
 			if optionalNamed {
@@ -527,7 +527,7 @@ func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
 	return ast.EnumPayloadDecl{Position: typ.Pos(), Type: typ}
 }
 func (p *Parser) peekTreeMemberHeader(keyword string) bool {
-	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == keyword && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
+	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == keyword && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_COLON
 }
 func (p *Parser) parseConstDecl() *ast.ConstDecl {
 	pos := p.cur().Pos
@@ -554,11 +554,11 @@ func (p *Parser) parseConstDecl() *ast.ConstDecl {
 // `struct`/`enum`/`(` means the overlay form; `struct`/`enum`/`(` first (or a newline) means it is the
 // layout-mode prefix and we defer to the struct/enum decl path.
 func (p *Parser) looksLikeLayoutDecl() bool {
-	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	for j := p.pos + 1; j < len(p.tokens); j++ {
-		switch p.tokens[j].Kind {
+	for j := p.pos + 1; p.hasToken(j); j++ {
+		switch p.tokenAt(j).Kind {
 		case lexer.TOKEN_COLON:
 			return true
 		case lexer.TOKEN_STRUCT, lexer.TOKEN_ENUM, lexer.TOKEN_LPAREN, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
@@ -685,6 +685,7 @@ func (p *Parser) parseConstEnumMemberDecl() ast.ConstEnumMemberDecl {
 	p.expectNewlineAfterValueExpr(value)
 	return ast.ConstEnumMemberDecl{Position: pos, Name: name, Value: value}
 }
+
 // parseGlobalRegionDecl parses `global region NAME` (docs/128).
 func (p *Parser) parseGlobalRegionDecl() *ast.GlobalRegionDecl {
 	pos := p.cur().Pos
@@ -973,7 +974,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 			derivedStates = append(derivedStates, p.parseDerivedStateBlock()...)
 			continue
 		}
-		if p.peekIdentText("transitions") && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE {
+		if p.peekIdentText("transitions") && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_NEWLINE {
 			stateTransitions = append(stateTransitions, p.parseStateTransitionGraph()...)
 			continue
 		}
@@ -984,7 +985,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 			p.expectNewline()
 			continue
 		}
-		if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "private" || p.cur().Text == "public") && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE {
+		if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "private" || p.cur().Text == "public") && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_NEWLINE {
 			private := p.advance().Text == "private"
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
@@ -1008,7 +1009,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, RegionOwner: regionOwner, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, HasDerivedStateBlock: hasDerivedStateBlock, StateTransitions: stateTransitions, Affine: affine, Droppable: droppable, ReprC: reprC, Layout: layout, Fields: fields, Invariants: invariants}
 }
 func (p *Parser) peekNamedStructStateBracket() bool {
-	return p.peek() == lexer.TOKEN_LBRACKET && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "state"
+	return p.peek() == lexer.TOKEN_LBRACKET && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "state"
 }
 func (p *Parser) parseNamedStructStateBracket(structName string) []string {
 	p.expect(lexer.TOKEN_LBRACKET)
@@ -1069,7 +1070,7 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 	// modifier; it is only consumed when followed by another identifier (the field name), so a
 	// field literally named `ghost` (`ghost: T`) still parses as an ordinary field.
 	ghost := false
-	if p.peekIdentText("ghost") && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+	if p.peekIdentText("ghost") && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 		p.advance()
 		ghost = true
 		pos = p.cur().Pos

@@ -16,7 +16,7 @@ import (
 // no-op (`for i in 0..<len step 2:` stepped by 1 — a silent miscompile). Anything the
 // expression grammar leaves behind is now a parse error at the first leftover token.
 func (p *Parser) parseForHeaderSlice(end int, boundaryPos lexer.Pos) ast.Expr {
-	subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
+	subTokens := append([]lexer.Token(nil), p.tokenSpan(p.pos, end)...)
 	subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: boundaryPos})
 	sub := New(subTokens)
 	sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
@@ -25,15 +25,15 @@ func (p *Parser) parseForHeaderSlice(end int, boundaryPos lexer.Pos) ast.Expr {
 	if len(sub.Errors()) == 0 && sub.peek() != lexer.TOKEN_EOF {
 		p.errorAt(sub.cur().Pos, "unexpected trailing tokens in for-loop header, starting at %s", sub.cur())
 	}
-	p.pos = end
+	p.seek(end)
 	return expr
 }
 
 func (p *Parser) parseForHeaderExpr() ast.Expr {
 	end := p.pos
 	depth := 0
-	for end < len(p.tokens) {
-		tok := p.tokens[end]
+	for p.hasToken(end) {
+		tok := p.tokenAt(end)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
@@ -57,13 +57,13 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 			// with a directed diagnostic (the stride is spelled on the range: `lo..<hi..N`). Without
 			// this boundary the slice sub-parse silently TRUNCATED `step N` — the loop compiled and
 			// stepped by 1. Guarded to end > p.pos so a source expression named `step` still parses.
-			if depth == 0 && tok.Text == "step" && end > p.pos && end+1 < len(p.tokens) && p.tokens[end+1].Kind != lexer.TOKEN_COLON {
+			if depth == 0 && tok.Text == "step" && end > p.pos && p.hasToken(end+1) && p.tokenAt(end+1).Kind != lexer.TOKEN_COLON {
 				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 			// A trailing `by par` / `by simd` data-parallel marker ends the range-bound expression
 			// (e.g. the `n` in `for i in 0 ..< n by par:`). Stop the header scan at `by` so the loop
 			// parser can see and consume the marker.
-			if depth == 0 && tok.Text == "by" && end+1 < len(p.tokens) && p.tokens[end+1].Kind == lexer.TOKEN_IDENT {
+			if depth == 0 && tok.Text == "by" && p.hasToken(end+1) && p.tokenAt(end+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 			if depth == 0 && p.isForHeaderWhereClauseBoundary(end) {
@@ -79,14 +79,14 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 }
 
 func (p *Parser) isForHeaderWhereClauseBoundary(index int) bool {
-	if index <= p.pos || index >= len(p.tokens) {
+	if index <= p.pos || !p.hasToken(index) {
 		return false
 	}
-	tok := p.tokens[index]
+	tok := p.tokenAt(index)
 	if tok.Kind != lexer.TOKEN_IDENT || tok.Text != "where" {
 		return false
 	}
-	return index == 0 || p.tokens[index-1].Kind != lexer.TOKEN_DOT
+	return index == 0 || p.tokenAt(index-1).Kind != lexer.TOKEN_DOT
 }
 
 func unwrapReverseIterableSource(expr ast.Expr) (ast.Expr, bool) {
@@ -110,7 +110,7 @@ func (p *Parser) parseIterLoopPattern() ast.MoveBindPattern {
 	if p.peek() == lexer.TOKEN_LBRACE {
 		return p.parseMoveBindPattern()
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COMMA {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COMMA {
 		pos := p.cur().Pos
 		args := make([]ast.MoveBindArg, 0, 4)
 		for {
@@ -130,18 +130,18 @@ func (p *Parser) parseIterLoopPattern() ast.MoveBindPattern {
 	return p.parseMoveBindPattern()
 }
 func (p *Parser) looksLikeLetDestructureStmt() bool {
-	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "let" || p.pos+1 >= len(p.tokens) {
+	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "let" || !p.hasToken(p.pos+1) {
 		return false
 	}
-	switch p.tokens[p.pos+1].Kind {
+	switch p.tokenAt(p.pos + 1).Kind {
 	case lexer.TOKEN_LBRACE:
 		return true
 	case lexer.TOKEN_IDENT:
 		i := p.pos + 2
-		for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+		for p.hasToken(i+1) && (p.tokenAt(i).Kind == lexer.TOKEN_DOT || p.tokenAt(i).Kind == lexer.TOKEN_SCOPE) && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT {
 			i += 2
 		}
-		return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_LBRACE
+		return p.hasToken(i) && p.tokenAt(i).Kind == lexer.TOKEN_LBRACE
 	default:
 		return false
 	}
@@ -243,7 +243,7 @@ func (p *Parser) parseMatchAsCatch(pos lexer.Pos, value ast.Expr) ast.Stmt {
 		armPos := p.cur().Pos
 		// `ok:` — the success arm. Its body becomes the catch success body; the value
 		// is bound to okName from `as`.
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "ok" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "ok" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)
 			success.Body = p.parseCatchArmBody(armPos)
@@ -303,8 +303,7 @@ func (p *Parser) parseMatchExprArms() []ast.MatchArm {
 
 func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 	pos := p.cur().Pos
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "case" &&
-		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "case" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind != lexer.TOKEN_COLON {
 		p.errorAt(pos, "match arms do not use a `case` keyword; write the pattern directly (e.g. `E.A(v: v):`)")
 		p.advance()
 	}
@@ -1380,8 +1379,7 @@ func (p *Parser) parseMatchArm() []ast.MatchArm {
 	// A leading `case` is a common habit from other languages; Elisa match arms are
 	// the pattern itself. Diagnose it once and skip the keyword so the arm (pattern,
 	// colon, body) still parses normally instead of cascading recovery errors.
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "case" &&
-		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "case" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind != lexer.TOKEN_COLON {
 		p.errorAt(pos, "match arms do not use a `case` keyword; write the pattern directly (e.g. `E.A(v: v):`)")
 		p.advance()
 	}
@@ -1585,10 +1583,10 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 // followed by `stop`.
 func (p *Parser) peekQualifiedPathTailBefore(stop lexer.TokenKind) bool {
 	i := p.pos
-	for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+	for p.hasToken(i+1) && (p.tokenAt(i).Kind == lexer.TOKEN_DOT || p.tokenAt(i).Kind == lexer.TOKEN_SCOPE) && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT {
 		i += 2
 	}
-	return i > p.pos && i < len(p.tokens) && p.tokens[i].Kind == stop
+	return i > p.pos && p.hasToken(i) && p.tokenAt(i).Kind == stop
 }
 
 func containsSeparator(separators []string, wanted string) bool {
@@ -1702,8 +1700,7 @@ func (p *Parser) parseMatchStructPatternAfterName(pos lexer.Pos, typeName string
 			// docs/122 §5.7: a bare `_` arg is the struct-rest marker — match the named
 			// fields, ignore the remainder. It must be the final arg. (`count(...)` keeps
 			// its positional grammar untouched.)
-			if typeName != "count" && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" &&
-				p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == close || p.tokens[p.pos+1].Kind == lexer.TOKEN_COMMA) {
+			if typeName != "count" && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" && p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == close || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COMMA) {
 				p.advance()
 				rest = true
 				if p.peek() != close {
@@ -1732,7 +1729,7 @@ func (p *Parser) parseMatchStructPatternAfterName(pos lexer.Pos, typeName string
 	return structPat
 }
 func (p *Parser) parseMatchStructPatternArg() ast.MatchPatternArg {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		p.errorf("struct pattern fields must use name: pattern")
 		pattern := p.parseNestedOrMatchPattern()

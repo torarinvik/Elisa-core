@@ -66,7 +66,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_IDENT {
 		switch p.cur().Text {
 		case "assert":
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_QUESTION {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_QUESTION {
 				return p.parseAssertHoleStmt()
 			}
 			// `assert COND by:` — a Dafny-style proof-carrying assert (the `by:` proof block is
@@ -80,15 +80,15 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parseProofBlockStmt()
 			}
 		case "use":
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseProofUseStmt()
 			}
 		case "can":
-			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
+			if p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LBRACKET) {
 				return p.parseCanStmt()
 			}
 		case "trusted":
-			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
+			if p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LBRACKET) {
 				return p.parseTrustedStmt()
 			}
 		case "signal":
@@ -96,11 +96,11 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parseSignalStmt()
 			}
 		case "wait":
-			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "all" {
+			if p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "all" {
 				return p.parseWaitAllStmt()
 			}
 		case "notify":
-			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && (p.tokens[p.pos+1].Text == "one" || p.tokens[p.pos+1].Text == "all") {
+			if p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && (p.tokenAt(p.pos+1).Text == "one" || p.tokenAt(p.pos+1).Text == "all") {
 				return p.parseNotifyStmt()
 			}
 		case "machine":
@@ -270,19 +270,19 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parseGhostStmt()
 			}
 		case "region":
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseRegion()
 			}
 		case "destroy":
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseDestroy()
 			}
 		case "leak":
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseLeak()
 			}
 		case "mark":
-			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_AS && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+3) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_AS && p.tokenAt(p.pos+3).Kind == lexer.TOKEN_IDENT {
 				return p.parseMark()
 			}
 		case "checkpoint":
@@ -290,14 +290,14 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parseCheckpointStmt()
 			}
 		case "restore":
-			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Text == "from" && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+3) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Text == "from" && p.tokenAt(p.pos+3).Kind == lexer.TOKEN_IDENT {
 				return p.parseRestore()
 			}
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseRestoreCheckpointStmt()
 			}
 		case "reset":
-			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 				return p.parseReset()
 			}
 		case "promote":
@@ -305,7 +305,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return p.parsePromote()
 			}
 		case "adopt":
-			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Text == "into" && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
+			if p.hasToken(p.pos+3) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Text == "into" && p.tokenAt(p.pos+3).Kind == lexer.TOKEN_IDENT {
 				return p.parseAdopt()
 			}
 		}
@@ -386,10 +386,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 // `ghost: i32 = 5` ordinary decl keeps working because COLON is followed by a type ident, not a
 // newline. `ghost = ...` (assignment to a var named ghost) never matches.
 func (p *Parser) looksLikeGhostStmt() bool {
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	next := p.tokens[p.pos+1]
+	next := p.tokenAt(p.pos + 1)
 	switch next.Kind {
 	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE:
 		// `ghost x ...` / `ghost mutable ...` — but reject `ghost mutable` as a standalone if it is
@@ -397,8 +397,8 @@ func (p *Parser) looksLikeGhostStmt() bool {
 		return true
 	case lexer.TOKEN_COLON:
 		// Block form only when a newline (then indent) follows the colon.
-		if p.pos+2 < len(p.tokens) {
-			return p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE
+		if p.hasToken(p.pos + 2) {
+			return p.tokenAt(p.pos+2).Kind == lexer.TOKEN_NEWLINE
 		}
 		return false
 	default:
@@ -468,10 +468,10 @@ func (p *Parser) parseEmitStmt() ast.Stmt {
 	return &ast.ExprStmt{Position: pos, Expr: &ast.EmitExpr{Position: pos, Value: value}}
 }
 func (p *Parser) looksLikeSequenceEmitStmt() bool {
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return true
 	}
-	switch p.tokens[p.pos+1].Kind {
+	switch p.tokenAt(p.pos + 1).Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_DOT:
 		return false
 	default:
@@ -479,12 +479,12 @@ func (p *Parser) looksLikeSequenceEmitStmt() bool {
 	}
 }
 func (p *Parser) looksLikeSignalStmt() bool {
-	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -501,12 +501,12 @@ func (p *Parser) looksLikeSignalStmt() bool {
 	return true
 }
 func (p *Parser) looksLikePoolStmt() bool {
-	if p.pos+2 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_LPAREN {
+	if !p.hasToken(p.pos+2) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT || p.tokenAt(p.pos+2).Kind != lexer.TOKEN_LPAREN {
 		return false
 	}
 	depth := 0
-	for i := p.pos + 2; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 2; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -538,8 +538,8 @@ func (p *Parser) parseAssertHoleStmt() ast.Stmt {
 // (where it cannot be the proof opener) is ignored.
 func (p *Parser) looksLikeAssertByStmt() bool {
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
@@ -548,18 +548,15 @@ func (p *Parser) looksLikeAssertByStmt() bool {
 				depth--
 			}
 		case lexer.TOKEN_IDENT:
-			if depth == 0 && tok.Text == "by" && i+1 < len(p.tokens) {
+			if depth == 0 && tok.Text == "by" && p.hasToken(i+1) {
 				// `by:` or the closed-world `by scoped:` (docs/99) both open a proof block.
-				if p.tokens[i+1].Kind == lexer.TOKEN_COLON {
+				if p.tokenAt(i+1).Kind == lexer.TOKEN_COLON {
 					return true
 				}
-				if p.tokens[i+1].Kind == lexer.TOKEN_IDENT && p.tokens[i+1].Text == "scoped" &&
-					i+2 < len(p.tokens) && p.tokens[i+2].Kind == lexer.TOKEN_COLON {
+				if p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(i+1).Text == "scoped" && p.hasToken(i+2) && p.tokenAt(i+2).Kind == lexer.TOKEN_COLON {
 					return true
 				}
-				if p.tokens[i+1].Kind == lexer.TOKEN_IDENT && p.tokens[i+1].Text == "scoped" &&
-					i+3 < len(p.tokens) && p.tokens[i+2].Kind == lexer.TOKEN_COLON &&
-					p.tokens[i+3].Kind == lexer.TOKEN_IDENT && isScopedProofTheory(p.tokens[i+3].Text) {
+				if p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(i+1).Text == "scoped" && p.hasToken(i+3) && p.tokenAt(i+2).Kind == lexer.TOKEN_COLON && p.tokenAt(i+3).Kind == lexer.TOKEN_IDENT && isScopedProofTheory(p.tokenAt(i+3).Text) {
 					return true
 				}
 			}
@@ -608,8 +605,8 @@ func isScopedProofTheory(name string) bool {
 
 func (p *Parser) looksLikeProofBlockStmt() bool {
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
@@ -665,8 +662,8 @@ func (p *Parser) parseProofUseStmt() ast.Stmt {
 
 func (p *Parser) looksLikeGuardStmt() bool {
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -685,46 +682,46 @@ func (p *Parser) looksLikeGuardStmt() bool {
 	return false
 }
 func (p *Parser) looksLikeDeferStmt() bool {
-	if p.pos+2 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 2) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	mode := p.tokens[p.pos+1].Text
+	mode := p.tokenAt(p.pos + 1).Text
 	if mode != "block" && mode != "function" {
 		return false
 	}
-	return p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
+	return p.tokenAt(p.pos+2).Kind == lexer.TOKEN_COLON
 }
 func (p *Parser) looksLikeParallelForStmt() bool {
-	if p.pos+4 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 4) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+1].Text != "for" {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IDENT || p.tokenAt(p.pos+1).Text != "for" {
 		return false
 	}
-	if p.tokens[p.pos+2].Kind != lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+2).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
 	sourcePos := p.pos + 3
-	if p.tokens[sourcePos].Kind == lexer.TOKEN_IDENT && p.tokens[sourcePos].Text == "at" {
-		if p.pos+6 >= len(p.tokens) {
+	if p.tokenAt(sourcePos).Kind == lexer.TOKEN_IDENT && p.tokenAt(sourcePos).Text == "at" {
+		if !p.hasToken(p.pos + 6) {
 			return false
 		}
-		if p.tokens[p.pos+4].Kind != lexer.TOKEN_IDENT {
+		if p.tokenAt(p.pos+4).Kind != lexer.TOKEN_IDENT {
 			return false
 		}
-		if p.tokens[p.pos+5].Kind != lexer.TOKEN_IN {
+		if p.tokenAt(p.pos+5).Kind != lexer.TOKEN_IN {
 			return false
 		}
 		sourcePos = p.pos + 6
-	} else if p.tokens[sourcePos].Kind != lexer.TOKEN_IN {
+	} else if p.tokenAt(sourcePos).Kind != lexer.TOKEN_IN {
 		return false
 	}
 	depth := 0
-	for i := sourcePos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := sourcePos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -741,12 +738,12 @@ func (p *Parser) looksLikeParallelForStmt() bool {
 	return false
 }
 func (p *Parser) looksLikeScopeStmt() bool {
-	if p.pos+2 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 2) {
 		return false
 	}
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -763,12 +760,12 @@ func (p *Parser) looksLikeScopeStmt() bool {
 	return false
 }
 func (p *Parser) looksLikeCheckpointStmt() bool {
-	if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_ASSIGN {
+	if p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_ASSIGN {
 		return true
 	}
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -789,21 +786,21 @@ func (p *Parser) looksLikeForStmt() bool {
 }
 
 func (p *Parser) looksLikeForStmtAt(pos int) bool {
-	if pos < 0 || pos+2 >= len(p.tokens) {
+	if pos < 0 || !p.hasToken(pos+2) {
 		return false
 	}
-	if p.tokens[pos].Kind != lexer.TOKEN_IDENT || p.tokens[pos].Text != "for" {
+	if p.tokenAt(pos).Kind != lexer.TOKEN_IDENT || p.tokenAt(pos).Text != "for" {
 		return false
 	}
-	switch p.tokens[pos+1].Kind {
+	switch p.tokenAt(pos + 1).Kind {
 	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_LBRACE:
 	default:
 		return false
 	}
 	depth := 0
 	seenIn := false
-	for i := pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
@@ -842,7 +839,7 @@ func (p *Parser) parseIterBindMode() ast.IterBindMode {
 		}
 		return ast.IterBindMutableRef
 	}
-	if p.peekIdentText("ref") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_IN {
+	if p.peekIdentText("ref") && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IN {
 		// Removed `for ref x in ...`: an immutable binding's copy-vs-ref mechanism is
 		// inferred now. Directed error; recover as IterBindRef so the semantics the
 		// author relied on (borrow, e.g. affine elements) still hold with no cascade.
@@ -855,8 +852,8 @@ func (p *Parser) parseIterBindMode() ast.IterBindMode {
 func (p *Parser) looksLikeLockStmt() bool {
 	depth := 0
 	seenAs := false
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -865,7 +862,7 @@ func (p *Parser) looksLikeLockStmt() bool {
 				depth--
 			}
 		case lexer.TOKEN_AS:
-			if depth == 0 && i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+			if depth == 0 && p.hasToken(i+1) && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT {
 				seenAs = true
 			}
 		case lexer.TOKEN_COLON:
@@ -879,10 +876,10 @@ func (p *Parser) looksLikeLockStmt() bool {
 
 // looksLikeNurseryStmt matches `nursery:` or `nursery workers(N):` at statement position.
 func (p *Parser) looksLikeNurseryStmt() bool {
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	next := p.tokens[p.pos+1]
+	next := p.tokenAt(p.pos + 1)
 	if next.Kind == lexer.TOKEN_COLON {
 		return true
 	}
@@ -892,11 +889,7 @@ func (p *Parser) looksLikeNurseryStmt() bool {
 	if next.Text == "workers" {
 		return true
 	}
-	return next.Text == "on" && p.pos+5 < len(p.tokens) &&
-		p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN &&
-		p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+4].Kind == lexer.TOKEN_RPAREN &&
-		p.tokens[p.pos+5].Kind == lexer.TOKEN_COLON
+	return next.Text == "on" && p.hasToken(p.pos+5) && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_LPAREN && p.tokenAt(p.pos+3).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+4).Kind == lexer.TOKEN_RPAREN && p.tokenAt(p.pos+5).Kind == lexer.TOKEN_COLON
 }
 
 // parseNurseryStmt desugars a structured nursery to the existing pool machinery:
@@ -1039,8 +1032,8 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
 	reverse := false
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" && p.pos+1 < len(p.tokens) {
-		nextKind := p.tokens[p.pos+1].Kind
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" && p.hasToken(p.pos+1) {
+		nextKind := p.tokenAt(p.pos + 1).Kind
 		if nextKind == lexer.TOKEN_IDENT || nextKind == lexer.TOKEN_MUTABLE {
 			p.errorf("legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported; use `for ... in rev(...):` instead")
 			reverse = true
@@ -1133,13 +1126,13 @@ func (p *Parser) parseForStmt() ast.Stmt {
 			p.expect(lexer.TOKEN_IDENT)
 			p.expect(lexer.TOKEN_IS)
 			patternFilter = p.parseMatchPattern()
-			if p.peek() == lexer.TOKEN_COLON && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_NEWLINE {
+			if p.peek() == lexer.TOKEN_COLON && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind != lexer.TOKEN_NEWLINE {
 				p.advance()
 				whereFilter = p.parseForHeaderExpr()
 			}
 		} else if p.peekForWherePatternFilter() {
 			patternFilter = p.parseMatchPattern()
-			if p.peek() == lexer.TOKEN_COLON && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_NEWLINE {
+			if p.peek() == lexer.TOKEN_COLON && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind != lexer.TOKEN_NEWLINE {
 				p.advance()
 				whereFilter = p.parseForHeaderExpr()
 			}
@@ -1210,7 +1203,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 }
 
 func (p *Parser) peekForWhereSubjectPattern(pattern ast.MoveBindPattern) (string, bool) {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IS {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IS {
 		return "", false
 	}
 	subject := p.cur().Text
@@ -1359,22 +1352,22 @@ func (p *Parser) peekForWherePatternFilter() bool {
 		if p.cur().Text == "_" {
 			return true
 		}
-		if p.pos+1 >= len(p.tokens) {
+		if !p.hasToken(p.pos + 1) {
 			return false
 		}
-		next := p.tokens[p.pos+1].Kind
+		next := p.tokenAt(p.pos + 1).Kind
 		if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE {
 			return forWhereIdentLooksLikePatternType(p.cur().Text)
 		}
 		if next == lexer.TOKEN_DOT || next == lexer.TOKEN_SCOPE {
 			index := p.pos + 1
-			for index+1 < len(p.tokens) && (p.tokens[index].Kind == lexer.TOKEN_DOT || p.tokens[index].Kind == lexer.TOKEN_SCOPE) && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
+			for p.hasToken(index+1) && (p.tokenAt(index).Kind == lexer.TOKEN_DOT || p.tokenAt(index).Kind == lexer.TOKEN_SCOPE) && p.tokenAt(index+1).Kind == lexer.TOKEN_IDENT {
 				index += 2
 			}
-			if index >= len(p.tokens) {
+			if !p.hasToken(index) {
 				return false
 			}
-			switch p.tokens[index].Kind {
+			switch p.tokenAt(index).Kind {
 			case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACE:
 				// `M::Enum.Variant(...)` / `M::Point(...)` are patterns; a pure `::` chain
 				// ending in a lowercase name (`Lexer::text_or_empty(...)`) is a CALL.
@@ -1382,7 +1375,7 @@ func (p *Parser) peekForWherePatternFilter() bool {
 			case lexer.TOKEN_COLON:
 				return forWhereIdentLooksLikePatternType(p.cur().Text)
 			case lexer.TOKEN_IDENT:
-				return p.tokens[index].Text == "for" && forWhereIdentLooksLikePatternType(p.cur().Text)
+				return p.tokenAt(index).Text == "for" && forWhereIdentLooksLikePatternType(p.cur().Text)
 			default:
 				return false
 			}
@@ -1405,11 +1398,11 @@ func (p *Parser) whereChainLooksLikePattern(start int, end int) bool {
 	hasDot := false
 	last := ""
 	for i := start; i < end; i++ {
-		switch p.tokens[i].Kind {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_DOT:
 			hasDot = true
 		case lexer.TOKEN_IDENT:
-			last = p.tokens[i].Text
+			last = p.tokenAt(i).Text
 		}
 	}
 	return hasDot || forWhereIdentLooksLikePatternType(last)
@@ -1426,19 +1419,18 @@ func forWhereIdentLooksLikePatternType(name string) bool {
 // looksLikeUsesStmt reports whether a leading `uses` is a named-contract application `uses Name(`
 // (docs/97) rather than a variable named `uses`.
 func (p *Parser) looksLikeUsesStmt() bool {
-	return p.pos+2 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT &&
-		(p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN || p.tokens[p.pos+2].Kind == lexer.TOKEN_LBRACKET)
+	return p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT &&
+		(p.tokenAt(p.pos+2).Kind == lexer.TOKEN_LPAREN || p.tokenAt(p.pos+2).Kind == lexer.TOKEN_LBRACKET)
 }
 
 // looksLikeContractStmt reports whether a leading `requires` is a value-contract precondition
 // rather than an identifier named "requires" being assigned/typed. It is a contract unless the next
 // token ends the line or begins an assignment/binding (=, :, <-).
 func (p *Parser) looksLikeContractStmt() bool {
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	switch p.tokens[p.pos+1].Kind {
+	switch p.tokenAt(p.pos + 1).Kind {
 	case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_ASSIGN, lexer.TOKEN_COLON, lexer.TOKEN_LARROW:
 		return false
 	}

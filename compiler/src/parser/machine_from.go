@@ -31,8 +31,7 @@ import (
 
 // looksLikeMachineFromExpr gates the expression form: `machine from …`.
 func (p *Parser) looksLikeMachineFromExpr() bool {
-	return p.cur().Text == "machine" && p.pos+1 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "from"
+	return p.cur().Text == "machine" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "from"
 }
 
 func (p *Parser) parseMachineFromExpr() ast.Expr {
@@ -243,8 +242,8 @@ func (p *Parser) parseMachineFromValueExpr() ast.Expr {
 	end := p.pos
 	depth := 0
 valueScan:
-	for end < len(p.tokens) {
-		switch p.tokens[end].Kind {
+	for p.hasToken(end) {
+		switch p.tokenAt(end).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -258,7 +257,7 @@ valueScan:
 		}
 		end++
 	}
-	return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+	return p.parseForHeaderSlice(end, p.tokenAtOrLast(end).Pos)
 }
 
 // validateMachineFromArmStmt enforces the shared arm law (docs/125 §5 R1) on a `machine

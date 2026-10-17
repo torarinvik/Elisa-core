@@ -68,10 +68,10 @@ func (p *Parser) parseGuardStmt() ast.Stmt {
 	}
 }
 func (p *Parser) looksLikeExpectPatternStmt() bool {
-	if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "let" {
+	if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "let" {
 		depth := 0
-		for i := p.pos + 2; i < len(p.tokens); i++ {
-			tok := p.tokens[i]
+		for i := p.pos + 2; p.hasToken(i); i++ {
+			tok := p.tokenAt(i)
 			switch tok.Kind {
 			case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 				depth++
@@ -92,8 +92,8 @@ func (p *Parser) looksLikeExpectPatternStmt() bool {
 		return false
 	}
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		tok := p.tokens[i]
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		tok := p.tokenAt(i)
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 			depth++
@@ -222,8 +222,8 @@ func (p *Parser) parseWhile() ast.Stmt {
 	depth := 0
 	boundary := -1
 scan:
-	for condEnd < len(p.tokens) {
-		switch p.tokens[condEnd].Kind {
+	for p.hasToken(condEnd) {
+		switch p.tokenAt(condEnd).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -243,7 +243,7 @@ scan:
 		condEnd++
 	}
 	if boundary >= 0 {
-		cond = p.parseForHeaderSlice(boundary, p.tokens[boundary].Pos)
+		cond = p.parseForHeaderSlice(boundary, p.tokenAt(boundary).Pos)
 	} else {
 		cond = p.parseExpr()
 	}
@@ -313,7 +313,7 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
 			elifBody := p.parseBlock()
-			elifs = append(elifs, ast.StaticElifClause{Position: p.tokens[saved].Pos, Cond: elifCond, Body: elifBody})
+			elifs = append(elifs, ast.StaticElifClause{Position: p.tokenAt(saved).Pos, Cond: elifCond, Body: elifBody})
 		} else if p.peek() == lexer.TOKEN_ELSE {
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)
@@ -321,7 +321,7 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 			elseBlock = p.parseBlock()
 			break
 		} else {
-			p.pos = saved
+			p.seek(saved)
 			break
 		}
 	}
@@ -462,10 +462,10 @@ func (p *Parser) peekQualifiedStructDestructurePattern() bool {
 		return false
 	}
 	i := p.pos + 1
-	for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+	for p.hasToken(i+1) && (p.tokenAt(i).Kind == lexer.TOKEN_DOT || p.tokenAt(i).Kind == lexer.TOKEN_SCOPE) && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT {
 		i += 2
 	}
-	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_LBRACE
+	return p.hasToken(i) && p.tokenAt(i).Kind == lexer.TOKEN_LBRACE
 }
 func (p *Parser) parseMoveBindStructBracePattern(pos lexer.Pos, typeName string) *ast.MoveBindStructPattern {
 	p.expect(lexer.TOKEN_LBRACE)
@@ -494,7 +494,7 @@ func (p *Parser) parseMoveBindStructBraceArg() ast.MoveBindArg {
 	return ast.MoveBindArg{Position: pos, Field: field, Name: name}
 }
 func (p *Parser) parseMoveBindVariantArg() ast.MatchPatternArg {
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_COLON)
@@ -513,7 +513,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	pos := p.cur().Pos
 
 	// Discard: _ = expr
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ASSIGN {
 		p.advance() // _
 		p.advance() // =
 		value := p.parseValueExprAllowTuple()
@@ -531,8 +531,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	// Keep the historical `name: mutable T` spelling unchanged below.
 	bindingExplicit := false
 	bindingMutable := false
-	if (p.peek() == lexer.TOKEN_MUTABLE || p.peek() == lexer.TOKEN_CONST) &&
-		p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+	if (p.peek() == lexer.TOKEN_MUTABLE || p.peek() == lexer.TOKEN_CONST) && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_COLON {
 		bindingMutable = p.peek() == lexer.TOKEN_MUTABLE
 		p.advance()
 		pos = p.cur().Pos
@@ -541,11 +540,11 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	// Variable declaration: name: [mutable] Type [= value]
 	// But NOT name:mutable (no space) which would be field:Type
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 		colonPos := p.pos + 1
 		afterColon := lexer.TOKEN_EOF
-		if colonPos+1 < len(p.tokens) {
-			afterColon = p.tokens[colonPos+1].Kind
+		if p.hasToken(colonPos + 1) {
+			afterColon = p.tokenAt(colonPos + 1).Kind
 		}
 		// TOKEN_LPAREN opens a tuple type (`t: (a: i64, b: i64) = …`), which
 		// parseTypeExpr already handles and which the parameter and return
@@ -598,7 +597,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}
 	}
 
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_ASSIGN {
 		name := p.cur().Text
 		p.advance()
 		p.advance()
@@ -779,13 +778,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		commaIndex := p.pos
 		errorsBefore, noticesBefore := len(p.errors), len(p.notices)
 		tuple := p.parseTupleExprFromFirst(expr.Pos(), expr)
-		if p.exprBlockDepth == 0 && p.peek() != lexer.TOKEN_EOF && !(p.peek() == lexer.TOKEN_NEWLINE && p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_DEDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_EOF)) {
+		if p.exprBlockDepth == 0 && p.peek() != lexer.TOKEN_EOF && !(p.peek() == lexer.TOKEN_NEWLINE && p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == lexer.TOKEN_DEDENT || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_EOF)) {
 			// The tuple parse is abandoned and the tokens after the comma are parsed again, so
 			// drop what it reported: kept, every rewind re-reported each later comma, making a
 			// run of n commas cost O(n^2) duplicate diagnostics (4000 commas: 2M lines, ~40 s).
 			p.errors, p.notices = p.errors[:errorsBefore], p.notices[:noticesBefore]
 			p.errorAt(comma.Pos, "unexpected token , in expression")
-			p.pos = commaIndex + 1
+			p.seek(commaIndex + 1)
 			p.expectNewline()
 			return &ast.ExprStmt{Position: pos, Expr: expr}
 		}

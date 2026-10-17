@@ -50,7 +50,7 @@ func (p *Parser) parseStaticDecl() ast.Decl {
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
 			elifBody := p.parseDeclBlock()
-			elifs = append(elifs, ast.StaticElifDecl{Position: p.tokens[saved].Pos, Cond: elifCond, Body: elifBody})
+			elifs = append(elifs, ast.StaticElifDecl{Position: p.tokenAt(saved).Pos, Cond: elifCond, Body: elifBody})
 		} else if p.peek() == lexer.TOKEN_ELSE {
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)
@@ -58,7 +58,7 @@ func (p *Parser) parseStaticDecl() ast.Decl {
 			elseBlock = p.parseDeclBlock()
 			break
 		} else {
-			p.pos = saved
+			p.seek(saved)
 			break
 		}
 	}
@@ -196,7 +196,7 @@ func (p *Parser) parseDeclBlock() []ast.Decl {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 			visibility := p.cur().Text
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)

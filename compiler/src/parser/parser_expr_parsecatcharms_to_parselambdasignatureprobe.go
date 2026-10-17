@@ -34,7 +34,7 @@ func (p *Parser) parseCatchArms() (ast.CatchArm, []ast.CatchArm) {
 func (p *Parser) parseCatchArm() ast.CatchArm {
 	// `ok value:` binds the successful payload. Keep the legacy
 	// `Variant(value):` spelling below for tagged-union catch arms.
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "ok" && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "ok" && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		p.advance()
 		name := p.expect(lexer.TOKEN_IDENT).Text
@@ -42,7 +42,7 @@ func (p *Parser) parseCatchArm() ast.CatchArm {
 		body := p.parseCatchArmBody(pos)
 		return ast.CatchArm{Position: pos, Name: name, Body: body}
 	}
-	if p.peek() == lexer.TOKEN_ERROR && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_ERROR && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		p.advance()
 		name := p.expect(lexer.TOKEN_IDENT).Text
@@ -323,7 +323,7 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.CallArgIte
 		name := ""
 		namePos := lexer.Pos{}
 		shorthand := false
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && !p.peekImmediateGroupedBlockExprStart() {
+		if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON && !p.peekImmediateGroupedBlockExprStart() {
 			tok := p.advance()
 			name = tok.Text
 			namePos = tok.Pos
@@ -369,10 +369,7 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.CallArgIte
 }
 func (p *Parser) peekImmediateGroupedBlockExprStart() bool {
 	return p.peek() == lexer.TOKEN_IDENT &&
-		p.isImmediateGroupedBlockExprName(p.cur().Text) &&
-		p.pos+2 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON &&
-		p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE
+		p.isImmediateGroupedBlockExprName(p.cur().Text) && p.hasToken(p.pos+2) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON && p.tokenAt(p.pos+2).Kind == lexer.TOKEN_NEWLINE
 }
 func (p *Parser) isImmediateGroupedBlockExprName(name string) bool {
 	switch name {

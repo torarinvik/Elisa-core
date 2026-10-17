@@ -99,7 +99,7 @@ func (p *Parser) parseExpr() ast.Expr {
 	defer p.leaveNesting()
 	// Quantifier prefix. Specifications retain quantified formulas; finite runtime
 	// ranges lower to a short-circuiting loop. Bare identifiers keep their meaning.
-	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "forall" || p.cur().Text == "exists") && p.quantifierStartsHere() && (p.allowQuantifiers || p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT) {
+	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "forall" || p.cur().Text == "exists") && p.quantifierStartsHere() && (p.allowQuantifiers || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT) {
 		return p.parseQuantifier()
 	}
 	expr := p.parseOr()
@@ -122,7 +122,7 @@ func (p *Parser) parseExpr() ast.Expr {
 		return expr
 	}
 
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && (p.tokens[p.pos+1].Text == "first" || p.tokens[p.pos+1].Text == "each") {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && (p.tokenAt(p.pos+1).Text == "first" || p.tokenAt(p.pos+1).Text == "each") {
 		return p.parseProjectionQueryExpr(expr)
 	}
 	if p.allowWhereExpr && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
@@ -225,7 +225,7 @@ func (p *Parser) parseExpr() ast.Expr {
 // quantifierStartsHere confirms a `forall`/`exists` keyword is followed by a binder identifier (so a
 // variable literally named `forall` used in expression position is not misparsed as a quantifier).
 func (p *Parser) quantifierStartsHere() bool {
-	return p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN)
+	return p.hasToken(p.pos+1) && (p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LPAREN)
 }
 
 // parseQuantifier parses `forall i, j: <body>` / `exists i: <body>` (docs/90 brick 90-4). Binders are
@@ -404,7 +404,7 @@ func (p *Parser) parseWhereViewExpr(source ast.Expr) ast.Expr {
 	if p.peekWhereTupleSubjectPattern() {
 		return p.parseWhereTupleSubjectPatternViewExpr(source, pos)
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IS {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IS {
 		return p.parseWhereSubjectPatternViewExpr(source, pos)
 	}
 	if p.peekWhereViewPatternFilter() {
@@ -566,9 +566,7 @@ func (p *Parser) parseWherePatternViewExpr(source ast.Expr, pos lexer.Pos) ast.E
 func (p *Parser) peekExplicitWhereSubjectPattern(name string) bool {
 	return name != "" &&
 		p.peek() == lexer.TOKEN_IDENT &&
-		p.cur().Text == name &&
-		p.pos+1 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_IS
+		p.cur().Text == name && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IS
 }
 
 func (p *Parser) parseQueryBindPattern() (string, ast.MoveBindPattern) {
@@ -589,7 +587,7 @@ func (p *Parser) parseQueryBindPattern() (string, ast.MoveBindPattern) {
 }
 
 func (p *Parser) peekQueryWhereSubjectPattern(name string, pattern ast.MoveBindPattern) (string, bool) {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IS {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_IS {
 		return "", false
 	}
 	subject := p.cur().Text
@@ -616,19 +614,19 @@ func (p *Parser) peekQueryWhereSubjectPattern(name string, pattern ast.MoveBindP
 }
 
 func (p *Parser) peekWhereTupleSubjectPattern() bool {
-	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COMMA {
+	if p.peek() != lexer.TOKEN_IDENT || !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_COMMA {
 		return false
 	}
 	index := p.pos + 2
-	for index < len(p.tokens) {
-		if p.tokens[index].Kind != lexer.TOKEN_IDENT {
+	for p.hasToken(index) {
+		if p.tokenAt(index).Kind != lexer.TOKEN_IDENT {
 			return false
 		}
 		index++
-		if index >= len(p.tokens) {
+		if !p.hasToken(index) {
 			return false
 		}
-		switch p.tokens[index].Kind {
+		switch p.tokenAt(index).Kind {
 		case lexer.TOKEN_IS:
 			return true
 		case lexer.TOKEN_COMMA:
@@ -644,10 +642,10 @@ func (p *Parser) peekWhereViewPatternFilter() bool {
 	if p.peek() != lexer.TOKEN_IDENT {
 		return false
 	}
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	next := p.tokens[p.pos+1].Kind
+	next := p.tokenAt(p.pos + 1).Kind
 	if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE {
 		return forWhereIdentLooksLikePatternType(p.cur().Text)
 	}
@@ -655,16 +653,16 @@ func (p *Parser) peekWhereViewPatternFilter() bool {
 		return false
 	}
 	index := p.pos + 1
-	for index+1 < len(p.tokens) && (p.tokens[index].Kind == lexer.TOKEN_DOT || p.tokens[index].Kind == lexer.TOKEN_SCOPE) && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
+	for p.hasToken(index+1) && (p.tokenAt(index).Kind == lexer.TOKEN_DOT || p.tokenAt(index).Kind == lexer.TOKEN_SCOPE) && p.tokenAt(index+1).Kind == lexer.TOKEN_IDENT {
 		index += 2
 	}
-	if index >= len(p.tokens) || !forWhereIdentLooksLikePatternType(p.cur().Text) {
+	if !p.hasToken(index) || !forWhereIdentLooksLikePatternType(p.cur().Text) {
 		return false
 	}
 	if !p.whereChainLooksLikePattern(p.pos, index) {
 		return false
 	}
-	switch p.tokens[index].Kind {
+	switch p.tokenAt(index).Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_COLON, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_COMMA, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 		return true
 	default:
@@ -692,18 +690,18 @@ func (p *Parser) elseIntroducesRecoveryClause() bool {
 		return false
 	}
 	next := p.pos + 1
-	if next >= len(p.tokens) {
+	if !p.hasToken(next) {
 		return false
 	}
-	switch p.tokens[next].Kind {
+	switch p.tokenAt(next).Kind {
 	case lexer.TOKEN_RETURN, lexer.TOKEN_RAISE:
 		return true
 	case lexer.TOKEN_IDENT:
-		if p.tokens[next].Text == "void" {
+		if p.tokenAt(next).Text == "void" {
 			return true
 		}
 		// `else binding:` block recovery.
-		return next+1 < len(p.tokens) && p.tokens[next+1].Kind == lexer.TOKEN_COLON
+		return p.hasToken(next+1) && p.tokenAt(next+1).Kind == lexer.TOKEN_COLON
 	}
 	return false
 }
@@ -721,7 +719,7 @@ func (p *Parser) parseRecoveryClause(pos lexer.Pos) *ast.RecoveryClause {
 			p.advance()
 			return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryVoid}
 		}
-		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		if p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON {
 			binding := p.cur().Text
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)
@@ -788,7 +786,7 @@ func (p *Parser) parseNot() ast.Expr {
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: operand}
 	}
 	if p.matchIdentText("let") {
-		pos := p.tokens[p.pos-1].Pos
+		pos := p.tokenAt(p.pos - 1).Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
 		value := p.parseNestedNot()
@@ -848,7 +846,7 @@ func (p *Parser) membershipLiteralAhead() bool {
 	return p.allowInMembership && p.peek() == lexer.TOKEN_IN
 }
 func (p *Parser) notInMembershipAhead() bool {
-	return p.allowInMembership && p.peek() == lexer.TOKEN_NOT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IN
+	return p.allowInMembership && p.peek() == lexer.TOKEN_NOT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IN
 }
 func (p *Parser) parseMembershipRight() ast.Expr {
 	start := p.parseAs()
@@ -897,8 +895,8 @@ func (p *Parser) peekIsBareBindingTarget() (string, bool) {
 	if name == "" || name[0] < 'a' || name[0] > 'z' || isBuiltinBareTypeName[name] {
 		return "", false
 	}
-	if p.pos+1 < len(p.tokens) {
-		switch p.tokens[p.pos+1].Kind {
+	if p.hasToken(p.pos + 1) {
+		switch p.tokenAt(p.pos + 1).Kind {
 		case lexer.TOKEN_DOT, lexer.TOKEN_SCOPE, lexer.TOKEN_LPAREN,
 			lexer.TOKEN_LBRACE, lexer.TOKEN_LBRACKET, lexer.TOKEN_PIPE, lexer.TOKEN_AS:
 			return "", false
@@ -929,7 +927,7 @@ func (p *Parser) parseIsTestExpr() ast.Expr {
 }
 func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
 	target := p.parseSingleIsTestTargetExprWithoutAlias()
-	if p.peek() == lexer.TOKEN_AS && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+	if p.peek() == lexer.TOKEN_AS && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 		pos := p.cur().Pos
 		p.advance()
 		alias := p.expect(lexer.TOKEN_IDENT).Text
@@ -956,8 +954,8 @@ func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
 	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) &&
-		(p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE) {
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) &&
+		(p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LPAREN || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_LBRACE) {
 		return p.parseStructIsTestExpr()
 	}
 	if p.peek() == lexer.TOKEN_DOT {
@@ -974,11 +972,11 @@ func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
 	// binder identifier. Intercepted BEFORE the type parser, whose legacy region-prefix
 	// grammar (`r T&`) would otherwise swallow both identifiers. The binder form never
 	// continues with `&` / `.` / `[` after the second identifier.
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
-		second := p.tokens[p.pos+1].Text
+	if p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
+		second := p.tokenAt(p.pos + 1).Text
 		cont := lexer.TOKEN_EOF
-		if p.pos+2 < len(p.tokens) {
-			cont = p.tokens[p.pos+2].Kind
+		if p.hasToken(p.pos + 2) {
+			cont = p.tokenAt(p.pos + 2).Kind
 		}
 		if second != "" && second != "_" && second[0] >= 'a' && second[0] <= 'z' &&
 			cont != lexer.TOKEN_AMPERSAND && cont != lexer.TOKEN_DOT && cont != lexer.TOKEN_LBRACKET {
@@ -999,14 +997,14 @@ func (p *Parser) peekQualifiedVariantTargetWithPayload() bool {
 	// variant test it is (it used to fall through to a parse error).
 	i := p.pos
 	sawDot := false
-	for i+1 < len(p.tokens) && (p.tokens[i+1].Kind == lexer.TOKEN_DOT || p.tokens[i+1].Kind == lexer.TOKEN_SCOPE) {
-		if i+2 >= len(p.tokens) || p.tokens[i+2].Kind != lexer.TOKEN_IDENT {
+	for p.hasToken(i+1) && (p.tokenAt(i+1).Kind == lexer.TOKEN_DOT || p.tokenAt(i+1).Kind == lexer.TOKEN_SCOPE) {
+		if !p.hasToken(i+2) || p.tokenAt(i+2).Kind != lexer.TOKEN_IDENT {
 			return false
 		}
 		sawDot = true
 		i += 2
 	}
-	return sawDot && i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_LPAREN
+	return sawDot && p.hasToken(i+1) && p.tokenAt(i+1).Kind == lexer.TOKEN_LPAREN
 }
 func (p *Parser) parseQualifiedVariantTarget() (string, string, lexer.Pos) {
 	pos := p.cur().Pos
@@ -1131,7 +1129,7 @@ func (p *Parser) parseUnary() ast.Expr {
 		return &ast.Ident{Position: pos, Name: "__invalid_removed_node_sugar"}
 	}
 	if p.matchIdentText("submit") {
-		pos := p.tokens[p.pos-1].Pos
+		pos := p.tokenAt(p.pos - 1).Pos
 		var explicitPool ast.Expr
 		hasExplicitPool := false
 		if p.match(lexer.TOKEN_LBRACKET) {
@@ -1196,7 +1194,7 @@ func (p *Parser) parseUnary() ast.Expr {
 		return submitCall
 	}
 	if p.matchIdentText("await") {
-		pos := p.tokens[p.pos-1].Pos
+		pos := p.tokenAt(p.pos - 1).Pos
 		operand := p.parseNestedUnary()
 		return &ast.CallExpr{
 			Position: pos,
@@ -1205,7 +1203,7 @@ func (p *Parser) parseUnary() ast.Expr {
 		}
 	}
 	if p.matchIdentText("move") {
-		pos := p.tokens[p.pos-1].Pos
+		pos := p.tokenAt(p.pos - 1).Pos
 		operand := p.parseNestedUnary()
 		return &ast.MoveExpr{Position: pos, Operand: operand}
 	}
@@ -1257,24 +1255,24 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value, AutoRegion: autoRegion, ExplicitAutoRegion: explicitAutoRegion}
 }
 func (p *Parser) looksLikeNodeAllocExpr() bool {
-	if p.pos+1 >= len(p.tokens) {
+	if !p.hasToken(p.pos + 1) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+	if p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 		return true
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_LBRACKET {
+	if p.tokenAt(p.pos+1).Kind != lexer.TOKEN_LBRACKET {
 		return false
 	}
 	depth := 0
-	for i := p.pos + 1; i < len(p.tokens); i++ {
-		switch p.tokens[i].Kind {
+	for i := p.pos + 1; p.hasToken(i); i++ {
+		switch p.tokenAt(i).Kind {
 		case lexer.TOKEN_LBRACKET:
 			depth++
 		case lexer.TOKEN_RBRACKET:
 			depth--
 			if depth == 0 {
-				return i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT
+				return p.hasToken(i+1) && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT
 			}
 		case lexer.TOKEN_EOF, lexer.TOKEN_NEWLINE:
 			return false
@@ -1295,7 +1293,7 @@ func (p *Parser) parseCatchExpr() ast.Expr {
 // indented value block) leaves behind. A postfix-ternary `if` directly after that
 // boundary belongs to the NEXT statement.
 func (p *Parser) prevTokenIsDedent() bool {
-	return p.pos > 0 && p.tokens[p.pos-1].Kind == lexer.TOKEN_DEDENT
+	return p.pos > 0 && p.tokenAt(p.pos-1).Kind == lexer.TOKEN_DEDENT
 }
 
 // parseNestedUnary parses the operand of a prefix operator; the extra level counts toward

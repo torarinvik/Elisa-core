@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/parser"
 	"strings"
 	"sync"
 	"unsafe"
@@ -18,6 +19,7 @@ type sourceTokenKey struct {
 type sourceTokenEntry struct {
 	lexed         *lexer.SourceTokens
 	parsed        *ast.SyntaxSnapshot
+	trace         *parser.SyntaxTrace
 	parseDeclined bool
 	parseRequests uint64
 	bytes         int
@@ -30,6 +32,7 @@ type sourceTokenCache struct {
 	clock, hits, misses         uint64
 	prefixReusedTokens          uint64
 	parseHits                   uint64
+	prefixParsedDeclarations    uint64
 }
 
 func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
@@ -115,7 +118,8 @@ func (c *sourceTokenCache) lex(filename string, source []byte) ([]lexer.Token, [
 
 // parsedFile replays only exact diagnostic-free parses. Parser construction has
 // no options; filename and source bytes determine the syntax and its positions.
-func (c *sourceTokenCache) parsedFile(filename string, source []byte) (*ast.File, bool) {
+// The third result requests tracing only when this retained revision can admit a snapshot.
+func (c *sourceTokenCache) parsedFile(filename string, source []byte) (*ast.File, bool, bool) {
 	key := sourceTokenKey{filename, sha256.Sum256(source)}
 	c.mu.Lock()
 	entry, exists := c.entries[key]
@@ -126,12 +130,12 @@ func (c *sourceTokenCache) parsedFile(filename string, source []byte) (*ast.File
 	}
 	if !exists || snapshot == nil {
 		c.mu.Unlock()
-		return nil, false
+		return nil, false, exists && !entry.parseDeclined && snapshot == nil
 	}
 	c.mu.Unlock()
 	file, err := snapshot.CopyFile()
 	if err != nil {
-		return nil, false
+		return nil, false, false
 	}
 	c.mu.Lock()
 	c.clock++
@@ -143,12 +147,15 @@ func (c *sourceTokenCache) parsedFile(filename string, source []byte) (*ast.File
 	c.parseHits++
 	c.mu.Unlock()
 	_ = lexer.New(filename, source)
-	return file, true
+	return file, true, false
 }
 
 // Capture precedes semantic mutation. Unsupported graph shapes and parser
 // notices retain the normal token/parse path. Snapshot cost shares the LRU budget.
-func (c *sourceTokenCache) rememberParsed(filename string, source []byte, file *ast.File, diagnosticFree bool) {
+func (c *sourceTokenCache) rememberParsed(filename string, source []byte, file *ast.File, trace *parser.SyntaxTrace, diagnosticFree bool) {
+	if trace == nil && diagnosticFree {
+		return
+	}
 	key := sourceTokenKey{filename, sha256.Sum256(source)}
 	c.mu.Lock()
 	entry, exists := c.entries[key]
@@ -162,7 +169,8 @@ func (c *sourceTokenCache) rememberParsed(filename string, source []byte, file *
 		c.mu.Unlock()
 		return
 	}
-	limit := c.maxBytes - entry.bytes
+	traceBytes := trace.RetainedBytes()
+	limit := c.maxBytes - entry.bytes - traceBytes
 	c.mu.Unlock()
 	snapshot, err := ast.NewSyntaxSnapshot(file, limit)
 	c.mu.Lock()
@@ -176,7 +184,7 @@ func (c *sourceTokenCache) rememberParsed(filename string, source []byte, file *
 		c.entries[key] = entry
 		return
 	}
-	size := snapshot.RetainedBytes()
+	size := snapshot.RetainedBytes() + traceBytes
 	for c.bytes > c.maxBytes-size {
 		var oldest sourceTokenKey
 		use := ^uint64(0)
@@ -195,7 +203,48 @@ func (c *sourceTokenCache) rememberParsed(filename string, source []byte, file *
 		delete(c.entries, oldest)
 	}
 	entry.parsed = snapshot
+	entry.trace = trace
 	entry.bytes += size
 	c.entries[key] = entry
 	c.bytes += size
+}
+
+// Select before lexing can evict the previous revision. In-flight immutable
+// products may outlive LRU eviction; no secondary unbounded history is retained.
+func (c *sourceTokenCache) prefixCandidate(filename string) sourceTokenEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var candidate sourceTokenEntry
+	for key, entry := range c.entries {
+		if key.filename == filename && entry.parsed != nil && entry.trace != nil && entry.lastUse > candidate.lastUse {
+			candidate = entry
+		}
+	}
+	return candidate
+}
+func (c *sourceTokenCache) parsePrefix(candidate sourceTokenEntry, tokens []lexer.Token) (*ast.File, parser.PrefixCheckpoint, bool) {
+	if candidate.trace == nil || candidate.parsed == nil || candidate.lexed == nil {
+		return nil, parser.PrefixCheckpoint{}, false
+	}
+	matching := candidate.lexed.MatchingTokenPrefix(tokens)
+	checkpoint, ok := candidate.trace.ReusablePrefix(matching, len(tokens))
+	if !ok || checkpoint.Declarations() == 0 {
+		return nil, parser.PrefixCheckpoint{}, false
+	}
+	file, err := candidate.parsed.CopyPrefix(checkpoint.Declarations())
+	if err != nil {
+		return nil, parser.PrefixCheckpoint{}, false
+	}
+	c.mu.Lock()
+	c.prefixParsedDeclarations += uint64(checkpoint.Declarations())
+	c.clock++
+	for key, entry := range c.entries {
+		if entry.parsed == candidate.parsed {
+			entry.lastUse = c.clock
+			c.entries[key] = entry
+			break
+		}
+	}
+	c.mu.Unlock()
+	return file, checkpoint, true
 }

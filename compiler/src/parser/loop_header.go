@@ -45,10 +45,7 @@ func loopBreakTarget(hdr *loopHeader) string {
 //     or `->` (docs/119 §6). A bitwise `a | b | c` never satisfies this: its second
 //     top-level pipe is followed by another operand, not the loop's `:`/`->`.
 func (p *Parser) loopHeaderDeclsAt(i int) bool {
-	if i+2 < len(p.tokens) &&
-		p.tokens[i].Kind == lexer.TOKEN_PIPE &&
-		p.tokens[i+1].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[i+2].Kind == lexer.TOKEN_ASSIGN {
+	if p.hasToken(i+2) && p.tokenAt(i).Kind == lexer.TOKEN_PIPE && p.tokenAt(i+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(i+2).Kind == lexer.TOKEN_ASSIGN {
 		return true
 	}
 	return p.captureHeaderAt(i)
@@ -59,14 +56,12 @@ func (p *Parser) loopHeaderDeclsAt(i int) bool {
 // top-level `|` (outside ()[]{}) closes the header, so an init with a bitwise `|` must
 // be parenthesized (same rule as decl headers).
 func (p *Parser) captureHeaderAt(i int) bool {
-	if i+1 >= len(p.tokens) ||
-		p.tokens[i].Kind != lexer.TOKEN_PIPE ||
-		p.tokens[i+1].Kind != lexer.TOKEN_IDENT {
+	if !p.hasToken(i+1) || p.tokenAt(i).Kind != lexer.TOKEN_PIPE || p.tokenAt(i+1).Kind != lexer.TOKEN_IDENT {
 		return false
 	}
 	depth := 0
-	for j := i + 1; j < len(p.tokens); j++ {
-		switch p.tokens[j].Kind {
+	for j := i + 1; p.hasToken(j); j++ {
+		switch p.tokenAt(j).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -76,8 +71,8 @@ func (p *Parser) captureHeaderAt(i int) bool {
 		case lexer.TOKEN_PIPE:
 			if depth == 0 {
 				// Closing pipe — a header only if the loop body / yield follows directly.
-				return j+1 < len(p.tokens) &&
-					(p.tokens[j+1].Kind == lexer.TOKEN_COLON || p.tokens[j+1].Kind == lexer.TOKEN_ARROW)
+				return p.hasToken(j+1) &&
+					(p.tokenAt(j+1).Kind == lexer.TOKEN_COLON || p.tokenAt(j+1).Kind == lexer.TOKEN_ARROW)
 			}
 		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			if depth == 0 {
@@ -163,8 +158,8 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 		end := p.pos
 		depth := 0
 	initScan:
-		for end < len(p.tokens) {
-			switch p.tokens[end].Kind {
+		for p.hasToken(end) {
+			switch p.tokenAt(end).Kind {
 			case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 				depth++
 			case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -178,7 +173,7 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 			}
 			end++
 		}
-		init := p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+		init := p.parseForHeaderSlice(end, p.tokenAtOrLast(end).Pos)
 		if captured[nameTok.Text] {
 			p.errorAt(nameTok.Pos, "loop header both declares and captures %q (docs/119 §6.3)", nameTok.Text)
 		}

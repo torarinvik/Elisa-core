@@ -32,7 +32,7 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 		// Canonical region-param spelling: `@r` — the same token used at every use site
 		// (`darray[T] @r`, `&@r`), so declaration and use read identically (cf. Rust lifetimes).
 		// `[T, @r]` composes: the `@` marks the entry as a region.
-		if !isRegionParam && allowRegion && p.peek() == lexer.TOKEN_AT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		if !isRegionParam && allowRegion && p.peek() == lexer.TOKEN_AT && p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT {
 			p.advance() // consume '@'
 			isRegionParam = true
 		}

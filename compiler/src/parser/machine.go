@@ -117,9 +117,7 @@ type machineForHeader struct {
 // only when followed by the ident `over` — no legal expression puts two bare identifiers
 // in sequence, so a variable named `machine` still parses normally.
 func (p *Parser) looksLikeMachineStmt() bool {
-	return p.pos+1 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+1].Text == "over"
+	return p.hasToken(p.pos+1) && p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IDENT && p.tokenAt(p.pos+1).Text == "over"
 }
 
 func (p *Parser) parseMachineStmt() ast.Stmt {
@@ -219,8 +217,8 @@ func (p *Parser) parseMachineForHeader() *machineForHeader {
 func (p *Parser) parseMachineForSource() ast.Expr {
 	end := p.pos
 	depth := 0
-	for end < len(p.tokens) {
-		kind := p.tokens[end].Kind
+	for p.hasToken(end) {
+		kind := p.tokenAt(end).Kind
 		switch kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
@@ -230,12 +228,12 @@ func (p *Parser) parseMachineForSource() ast.Expr {
 			}
 		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_RANGE_LE, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			if depth == 0 {
-				return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+				return p.parseForHeaderSlice(end, p.tokenAtOrLast(end).Pos)
 			}
 		}
 		end++
 	}
-	return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+	return p.parseForHeaderSlice(end, p.tokenAtOrLast(end).Pos)
 }
 
 // parseMachineHeaderExpr sub-parses one machine-header clause expression, bounded at the
@@ -245,8 +243,8 @@ func (p *Parser) parseMachineHeaderExpr(stopAtWhile bool) ast.Expr {
 	end := p.pos
 	depth := 0
 headerScan:
-	for end < len(p.tokens) {
-		switch p.tokens[end].Kind {
+	for p.hasToken(end) {
+		switch p.tokenAt(end).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -262,13 +260,13 @@ headerScan:
 				break headerScan
 			}
 		case lexer.TOKEN_IDENT:
-			if depth == 0 && stopAtWhile && p.tokens[end].Text == "for" {
+			if depth == 0 && stopAtWhile && p.tokenAt(end).Text == "for" {
 				break headerScan
 			}
 		}
 		end++
 	}
-	return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+	return p.parseForHeaderSlice(end, p.tokenAtOrLast(end).Pos)
 }
 
 func (p *Parser) parseMachineStateDecl() machineState {
@@ -300,7 +298,7 @@ func (p *Parser) parseMachineStateDecl() machineState {
 // or a concise group of payload-less declarations (`state {A, B, C}`). The grouped form
 // is declaration sugar only; downstream machine validation sees the same state slice.
 func (p *Parser) parseMachineStateDecls() []machineState {
-	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_LBRACE {
+	if !p.hasToken(p.pos+1) || p.tokenAt(p.pos+1).Kind != lexer.TOKEN_LBRACE {
 		return []machineState{p.parseMachineStateDecl()}
 	}
 	p.advance() // state
@@ -322,8 +320,8 @@ func (p *Parser) parseMachineStateDecls() []machineState {
 // of same-named payload fields across states without needing a TypeExpr unparser.
 func (p *Parser) tokenTextSpan(start, end int) string {
 	var b strings.Builder
-	for i := start; i < end && i < len(p.tokens); i++ {
-		b.WriteString(p.tokens[i].Text)
+	for i := start; i < end && p.hasToken(i); i++ {
+		b.WriteString(p.tokenAt(i).Text)
 	}
 	return b.String()
 }
@@ -347,8 +345,8 @@ func (p *Parser) parseMachineArm(states []machineState) machineArm {
 	case p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_":
 		p.advance()
 		arm.inputWild = true
-	case p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) &&
-		(p.tokens[p.pos+1].Kind == lexer.TOKEN_IF || p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON):
+	case p.peek() == lexer.TOKEN_IDENT && p.hasToken(p.pos+1) &&
+		(p.tokenAt(p.pos+1).Kind == lexer.TOKEN_IF || p.tokenAt(p.pos+1).Kind == lexer.TOKEN_COLON):
 		// Input BIND pattern: `Scanning, character if character.is_identifier_char():` —
 		// matches any input (like `_`) and names it for the guard/body, so call-predicate
 		// dispatch reads the input once. A qualified member (`TokenKind.Ident`) has a `.`
@@ -406,8 +404,8 @@ func (p *Parser) parseMachinePayloadPat() machinePayloadPat {
 	end := p.pos
 	depth := 0
 argScan:
-	for end < len(p.tokens) {
-		switch p.tokens[end].Kind {
+	for p.hasToken(end) {
+		switch p.tokenAt(end).Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
@@ -422,7 +420,7 @@ argScan:
 		}
 		end++
 	}
-	expr := p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+	expr := p.parseForHeaderSlice(end, p.tokenAtOrLast(end).Pos)
 	if id, ok := expr.(*ast.Ident); ok {
 		return machinePayloadPat{pos: pos, bind: id.Name}
 	}

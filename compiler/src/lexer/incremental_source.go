@@ -266,3 +266,18 @@ func (s *SourceTokens) addCheckpoint(state Lexer, old, new []byte, count, requir
 	s.checkpointBytes += payload + growth
 	return true
 }
+
+// MatchingTokenPrefix compares syntax and exact diagnostic positions without
+// exposing mutable cached tokens. SourceTokens owns every string it retains.
+func (s *SourceTokens) MatchingTokenPrefix(tokens []Token) int {
+	if s == nil {
+		return 0
+	}
+	count := min(len(s.tokens), len(tokens))
+	for i := 0; i < count; i++ {
+		if s.tokens[i] != tokens[i] {
+			return i
+		}
+	}
+	return count
+}
