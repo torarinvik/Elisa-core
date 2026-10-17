@@ -1438,3 +1438,50 @@ remain unresolved. No remote compute was used.
 Focused isolated session/lookup races also passed: incremental 1.263 s and semantic
 1.663 s. General function/body/type/callee products are still required before this
 owner can make the normal compile path incremental.
+
+### Lexical selection checkpoint
+
+`incremental_lexical_query.go` adds a portable first-present selection query for
+symbol, local-only symbol, type/const/shape parameter, associated type, parameter
+interface and permission/error-set/region binder domains. Recipes describe the
+complete current chain; missing inner frames are tracked negative inputs. An
+unread suffix cannot invalidate a hit. Present nil entries stop lookup: parameter
+interfaces report not-found, while symbol and type-like domains report found.
+Boolean binder maps use their value, so an inner false continues to outer frames.
+Products contain only a source binding slot and presence flags, never a Symbol,
+Type, Scope or flow fact.
+
+`publishLexicalSnapshot` publishes symbol and binder requests in one Session
+revision. Its invocation-local maps bind portable results to current symbols and
+binder values; obsolete revision handles fail, including across equal selections.
+A stable global selection slot therefore cannot accidentally return the previous
+invocation's Symbol. Scope/type/flow reads still need their own current semantic
+work and dependencies. Lookup sites need explicit roles to distinguish contexts.
+The adapter snapshots the current scopes; callers must prepare a snapshot at the
+actual lookup point, rather than infer earlier reads from final scope contents.
+
+Source liveness capture is batched once per source index within each domain's
+preparation, with sealed batches and failed-validation authority revocation.
+Combined symbol and binder preparation currently uses separate batches, so a
+shared function may be scanned twice. Source mutation, foreign/generated local
+nodes, cyclic scopes, duplicate binding slots and oversized requests fail closed.
+Captured outer locals from another source index currently decline. Binder source
+owners are caller-supplied: liveness and frame count are checked, but actual
+push/pop ownership still must be wired into analyzer scope construction. These
+adapters are not yet called by the normal compiler and cannot authorize general
+body replay. No end-to-end iteration speed gain is claimed at this checkpoint.
+
+Regression coverage exercises tracked misses and unread suffixes in all ten
+domains, nil policies, boolean fall-through, global slot replacement, local-only
+lookup, coherent symbol/binder publication, equal-output memo reuse across source
+relocation with fresh Symbol rebinding, stale revision rejection, foreign binder
+owners, missing frame sources and one liveness traversal for 257 statement sites.
+
+Validation: isolated full semantic suite passed in 47.845 s and incremental package
+in 0.171 s. Expanded lexical regressions passed under the race detector in 1.382 s,
+including source-backed local shadow insertion/removal, distinct before/after
+Define sites and replacement Symbol values at the same source slot. The full
+suite preceded that final test-only addition. The overlay restored eight unrelated
+modified Go files to ac840eac and excluded the untracked SMT test; their working
+files were preserved. This does not establish that the combined SMT worktree is
+green. Existing Stage1 errors were not rerun; all execution remained local.
