@@ -27,7 +27,7 @@ type primitiveLocalInitializer struct {
 }
 
 // Plans own only invocation-local syntax. Persistent queries contain strings.
-// A prefix dependency includes preceding values, not merely their scalar types:
+// Consumed bindings include transitive value syntax, not merely scalar types:
 // constant/range diagnostics can depend on those values.
 func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer, bool) {
 	if !primitiveLocalSchemaValid || fn == nil || len(fn.Body) < 2 || len(fn.Body) > 257 {
@@ -45,7 +45,7 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		names[p.Name] = true
 		bindings = append(bindings, primitiveLocalBinding{name: p.Name, parameter: i})
 	}
-	prefix := "local-initializer-prefix-v1"
+	values := map[string]string{}
 	var inputs []*primitiveLocalInitializer
 	for _, stmt := range fn.Body[:len(fn.Body)-1] {
 		decl, ok := stmt.(*ast.VarDeclStmt)
@@ -65,10 +65,33 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		if !ok {
 			return nil, false
 		}
+		used := map[string]bool{}
+		for _, node := range nodes {
+			if id, ok := node.(*ast.Ident); ok {
+				used[id.Name] = true
+			}
+		}
+		var consumed []primitiveLocalBinding
+		var params []ast.ParamDecl
+		dependencies := "local-consumed-values-v2"
+		for i, binding := range bindings {
+			if !used[binding.name] {
+				continue
+			}
+			consumed = append(consumed, binding)
+			params = append(params, available[i])
+			value := values[binding.name]
+			if binding.local == nil {
+				value = "parameter:" + strconv.Itoa(binding.parameter)
+			}
+			dependencies += "\x00" + strconv.Itoa(len(binding.name)) + ":" + binding.name + ":" + value
+		}
+		syntax.Params = params
 		expression := primitiveExpressionDigest(syntax, nodes)
-		digest := sha256.Sum256([]byte(prefix + "\x00" + strconv.Itoa(len(decl.Name)) + ":" + decl.Name + "\x00" + expression))
-		prefix = hex.EncodeToString(digest[:])
-		inputs = append(inputs, &primitiveLocalInitializer{owner: fn, declaration: decl, syntax: syntax, nodes: nodes, bindings: append([]primitiveLocalBinding(nil), bindings...), source: prefix, expression: expression})
+		digest := sha256.Sum256([]byte(dependencies + "\x00" + strconv.Itoa(len(decl.Name)) + ":" + decl.Name + "\x00" + expression))
+		source := hex.EncodeToString(digest[:])
+		values[decl.Name] = source
+		inputs = append(inputs, &primitiveLocalInitializer{owner: fn, declaration: decl, syntax: syntax, nodes: nodes, bindings: consumed, source: source, expression: expression})
 		names[decl.Name] = true
 		available = append(available, ast.ParamDecl{Name: decl.Name, Type: decl.Type})
 		bindings = append(bindings, primitiveLocalBinding{name: decl.Name, parameter: -1, local: decl})
@@ -122,7 +145,7 @@ func (a *Analyzer) analyzeLocalInitializer(n *ast.VarDeclStmt, expected Type) Ty
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	input := invocation.localInitializers[n]
-	if input == nil || expected != a.namedTypes["i64"] {
+	if input == nil || expected != a.namedTypes["i64"] || len(a.diagnostics) != 0 {
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	if !input.currentSyntax() {

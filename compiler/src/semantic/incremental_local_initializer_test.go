@@ -219,3 +219,45 @@ func TestIncrementalLocalSyntaxValidationRejectsMutation(t *testing.T) {
 		}
 	}
 }
+
+func TestIncrementalLocalConsumedValuesIgnoreUnrelatedEdit(t *testing.T) {
+	source := "def work(value: i64) -> i64:\n    unrelated: i64 = 1\n    first: i64 = value + 1\n    second: i64 = first * 2\n    return second + unrelated\n"
+	session := NewIncrementalAnalysisSession()
+	session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
+	edited := strings.Replace(source, "unrelated: i64 = 1", "unrelated: i64 = 2", 1)
+	before := session.Stats()
+	current := session.Analyze(parseIncrementalSessionFile(t, edited), AnalyzeOptions{})
+	after := session.Stats()
+	if after.LocalInitializersReused-before.LocalInitializersReused != 2 || after.LocalInitializersChecked-before.LocalInitializersChecked != 1 {
+		t.Fatalf("unread value invalidated queries: before%+v after%+v", before, after)
+	}
+	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, edited)), current)
+	edited = strings.Replace(edited, "value + 1", "value + 3", 1)
+	before = session.Stats()
+	current = session.Analyze(parseIncrementalSessionFile(t, edited), AnalyzeOptions{})
+	after = session.Stats()
+	if after.LocalInitializersReused-before.LocalInitializersReused != 1 || after.LocalInitializersChecked-before.LocalInitializersChecked != 2 {
+		t.Fatal("transitive consumed value failed to invalidate")
+	}
+	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, edited)), current)
+}
+
+func TestIncrementalLocalUnrelatedInsertionPreservesOwners(t *testing.T) {
+	original := "def work(value: i64) -> i64:\n    first: i64 = value + 1\n    second: i64 = first * 2\n    return second\n"
+	inserted := strings.Replace(original, "    first:", "    unrelated: i64 = 7\n    first:", 1)
+	session := NewIncrementalAnalysisSession()
+	session.Analyze(parseIncrementalSessionFile(t, original), AnalyzeOptions{})
+	before := session.Stats()
+	current := session.Analyze(parseIncrementalSessionFile(t, inserted), AnalyzeOptions{})
+	after := session.Stats()
+	if after.LocalInitializersReused-before.LocalInitializersReused != 2 || after.LocalInitializersChecked-before.LocalInitializersChecked != 1 {
+		t.Fatal("unrelated insertion shifted existing query owners")
+	}
+	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, inserted)), current)
+	before = session.Stats()
+	current = session.Analyze(parseIncrementalSessionFile(t, original), AnalyzeOptions{})
+	if session.Stats().LocalInitializersReused-before.LocalInitializersReused != 2 {
+		t.Fatal("unrelated removal invalidated existing owners")
+	}
+	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, original)), current)
+}

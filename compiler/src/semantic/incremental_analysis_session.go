@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"sync"
 
 	"elisacore/src/ast"
@@ -232,8 +231,9 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			invocation.keys[fn] = name
 			key := primitiveInput("function-source", name)
 			current[key] = true
-			for ordinal, input := range locals {
-				input.key = name + "/local/" + strconv.Itoa(ordinal)
+			for _, input := range locals {
+				identity := sha256.Sum256([]byte(input.declaration.Name))
+				input.key = name + "/local-name-v2/" + hex.EncodeToString(identity[:])
 				invocation.localInitializers[input.declaration] = input
 				current[primitiveInput("function-source", input.key)] = true
 			}

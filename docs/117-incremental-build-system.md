@@ -423,11 +423,14 @@ analysis creates each current SymbolLocal and runs conversion, value binding,
 range/optimization, ownership, borrow and drop logic. Later identifier reads,
 return typing and whole-function summaries remain fresh.
 
-Query identity combines qualified owner/arity with declaration ordinal. Inputs
-include declared name, arithmetic syntax, ordered visible binding names and a
-digest of preceding declarations. A preceding value edit invalidates downstream
-arithmetic even if its type stays unchanged; a later edit preserves earlier
-hits. Statement boundaries and fixed plain-i64 annotation presence are part of
+Query identity combines qualified owner/arity with a digest of the unique local
+name. Unrelated insertion/removal therefore preserves existing owners. Inputs
+include declared name, arithmetic syntax and only the bindings actually read.
+Consumed locals contribute transitive initializer fingerprints; parameters
+contribute current signature ordinals. A consumed value edit invalidates dependent
+arithmetic even if its type stays unchanged. Unread preceding edits preserve hits.
+These dependency fingerprints are constructed from the checked straight-line
+syntax; they are not yet independent database value queries. Statement boundaries and fixed plain-i64 annotation presence are part of
 the admitted grammar. Inferred/mutable/ghost/owner-bearing/explicit-binding or
 duplicate/shadow declarations, forward/global reads, calls and nested control
 flow take the cold path.
@@ -436,17 +439,20 @@ The hook revalidates current syntax, function owner and symbol ownership before
 lookup. Local symbols must point at current declarations. Products store compact
 expression tags plus the original initializer result type before conversions.
 No AST, symbol or binding fact enters the database. All primitive products use
-a shared publication boundary.
+a shared publication boundary. Existing diagnostics force cold initializer analysis
+until a broader diagnostic/path-context dependency model is available.
 
 LocalInitializersChecked/Reused report actual initializer work separately from
 body counters. ReusedExpressionNodes excludes fresh identifier reads. Tests
-cover metadata parity, prefix invalidation, removal/readmission, unsupported
+cover metadata parity, consumed/transitive invalidation, unrelated edits,
+removal/readmission, unsupported
 bindings and owner checks. The LLVM/native gate requires identical IR and exit
 42 then 63 after an edit. BenchmarkIncrementalLocalInitializers measures fresh
 parsing plus full analysis with 64 warm initializer queries; this is measurement
 coverage, not a broad performance claim.
 
-A local Apple M5 run (three one-second samples, GOMAXPROCS=4) measured median
+A run of the initial prefix-invalidation version on Apple M5 (three one-second
+samples, GOMAXPROCS=4) measured median
 10.79 ms cold versus 10.97 ms warm, with 64 initializer hits. Allocations fell
 from 123600 to 105345, while allocated bytes rose from 12.45 MB to 12.64 MB. This
 fixture establishes no meaningful throughput gain; the path remains opt-in and
