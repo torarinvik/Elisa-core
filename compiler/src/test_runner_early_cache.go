@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -118,4 +119,27 @@ func publishEarlyTestCache(key string, executable string, cases []cachedTestCase
 		return
 	}
 	_ = os.Rename(tmpName, metaPath)
+}
+
+// Early lookup and publication must identify the same original loaded snapshot,
+// before law/property harnesses are appended. Include semantic source authority,
+// since identical text analyzed with different trusted origins is not equivalent.
+func earlyTestCacheKeyForProgram(program *loadedProgram, filter string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, error) {
+	if program == nil || program.file != nil {
+		return "", fmt.Errorf("early test cache requires a loaded source snapshot")
+	}
+	base, err := earlyTestCacheKey(program.source, filter, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	testRunnerCacheWriteString(hash, "early-loaded-snapshot-v2")
+	testRunnerCacheWriteString(hash, base)
+	testRunnerCacheWriteString(hash, program.filename)
+	origins := append([]string(nil), program.sourceFiles...)
+	sort.Strings(origins)
+	for _, origin := range origins {
+		testRunnerCacheWriteString(hash, origin)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

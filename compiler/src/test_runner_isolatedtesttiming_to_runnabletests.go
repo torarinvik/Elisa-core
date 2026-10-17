@@ -215,11 +215,11 @@ func selectAnnotatedFunctions(result *semantic.Result, annotationName string, fi
 	}
 	return selected
 }
-func generateTestRunnerSource(inputFile string, result *semantic.Result, filter string) (string, error) {
-	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
-	if err != nil {
-		return "", err
+func generateTestRunnerSource(program *loadedProgram, result *semantic.Result, filter string) (string, error) {
+	if program == nil {
+		return "", fmt.Errorf("missing loaded test program")
 	}
+	source := append([]byte(nil), program.source...)
 	source = appendLawFuzzHarnessSource(source, result)
 	driverSource, propertyCases := buildPropertyDrivers(result, filter)
 	if driverSource != "" {
@@ -1244,14 +1244,15 @@ func runTestExecutableCases(exePath string, cases []cachedTestCase, targetTriple
 	return passed, skipped, failed, runTotal
 }
 
-func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer) int {
+func executeSelectedTests(program *loadedProgram, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer) int {
 	suiteStart := time.Now()
-	writeTestPhaseLine(stderr, "selected_tests", "read_source")
-	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %s\n", err)
+	if program == nil {
+		fmt.Fprintln(stderr, "error: missing loaded test program")
 		return 1
 	}
+	// Analysis, selection, generated source and publication share one snapshot.
+	// Harness construction owns a copy so append operations cannot mutate it.
+	source := append([]byte(nil), program.source...)
 	writeTestPhaseLine(stderr, "selected_tests", "select_cases")
 	source = appendLawFuzzHarnessSource(source, result)
 	testCases := selectTestCases(result, filter)
@@ -1342,8 +1343,8 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 	cachedCases := toCachedTestCases(testCases)
 	// Publish the early (source-level) cache so the next unchanged run skips the
 	// whole front-end (parse+analyze) and jumps straight to running this binary.
-	if exePath != "" {
-		if key, keyErr := earlyTestCacheKey(source, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo); keyErr == nil {
+	if exePath != "" && earlyTestCacheEnabled() {
+		if key, keyErr := earlyTestCacheKeyForProgram(program, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo); keyErr == nil {
 			publishEarlyTestCache(key, exePath, cachedCases)
 		}
 	}

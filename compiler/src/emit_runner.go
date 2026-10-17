@@ -24,14 +24,8 @@ func tryEarlyCachedTestRun(program *loadedProgram, options cliOptions, stdout io
 	if !earlyTestCacheEnabled() || program == nil || program.file != nil {
 		return 0, false
 	}
-	srcStart := time.Now()
-	source, err := readSourceWithIncludes(program.filename, map[string]bool{})
-	if err != nil {
-		return 0, false
-	}
-	frontendTimingLog("early-source-read", srcStart)
 	keyStart := time.Now()
-	key, err := earlyTestCacheKey(source, options.filter, program.easm, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace)
+	key, err := earlyTestCacheKeyForProgram(program, options.filter, program.easm, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace)
 	frontendTimingLog("early-key", keyStart)
 	if err != nil {
 		return 0, false
@@ -314,7 +308,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		printAnnotatedFunctions(stdout, result, options.emit, options.filter)
 		return 0
 	case emitTestRunner:
-		runnerSource, err := generateTestRunnerSource(program.filename, result, options.filter)
+		runnerSource, err := generateTestRunnerSource(program, result, options.filter)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
@@ -334,7 +328,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		writeTestPhaseLine(stderr, "emit_test", "selected_test_execution")
-		return executeSelectedTests(program.filename, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stdout, stderr)
+		return executeSelectedTests(program, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stdout, stderr)
 	case emitInterpret:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)

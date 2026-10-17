@@ -340,3 +340,21 @@ lookups, but does not bind a path-based tool invocation to the previously hashed
 bytes. Replacement between identity lookup and execution remains an open
 publication-coherence requirement. Neither change establishes artifact-content
 integrity or complete external link dependency tracking.
+
+
+### Test-runner source snapshots
+
+Test-runner generation and selected-test execution now consume the same
+`loadedProgram.source` used for analysis. Neither rereads the input filename.
+Harness construction copies the bytes before appending generated law/property
+drivers. Early-cache lookup and publication both identify the original loaded
+source, effective filename and sorted source-authority set; generated harness
+text is not substituted for the original source during publication. Decoded
+frontend-IR programs remain outside the early source cache. Disabling the test
+cache also disables early publication.
+
+Race tests exercise a replacement source with a different cached runner, source
+deletion after loading with successful native execution and a subsequent early
+hit, property-driver publication followed by a warm hit, snapshot immutability,
+and filename/authority invalidation. External foreign/runtime/tool inputs still
+need a coherent snapshot through their compilation and cache publication.
