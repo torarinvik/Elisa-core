@@ -743,8 +743,9 @@ its own fresh AST path and bypasses source-token lookup.
 Each admitted cold entry lexes a private source copy: lexer Text/Suffix strings
 are zero-copy views, so a shallow token copy alone would retain mutable caller
 storage. The cache also owns its filename. Every parser receives a separate token
-slice because contextual keyword recovery mutates token kinds. Parsing, notices,
-AST/map creation and semantic analysis remain fresh. Lexer.New still registers
+slice because contextual keyword recovery mutates token kinds. Parser notices remain fresh; exact diagnostic-free revisions can use the
+pristine syntax replay path described below. AST/map creation and semantic
+analysis remain fresh. Lexer.New still registers
 parity source on hits, and existing parse/lex failure cleanup remains in place.
 
 The independent LRU defaults to32 entries and512 MiB of accounted retained payload
@@ -833,3 +834,50 @@ source/token copying remain linear, and the entire AST is still reparsed. These
 synthetic tail-edit results do not establish general edit or whole-project compile
 speed. Declaration-level parsing, persistent semantic/call/module reuse and
 end-to-end project qualification remain active requirements.
+
+
+### Pristine syntax replay for repeated source revisions
+
+Exact filename and source-byte hits in the opt-in compile server can bypass
+parsing using an owned pristine AST snapshot. Capture happens after successful
+parsing and before semantic analysis. Parses emitting any notice or error are
+not admitted, so warning suppression and diagnostics retain their normal path.
+Decoded frontend IR continues to bypass this cache. Parser construction currently
+has no options; future syntax-affecting options must participate in this key.
+
+Capture uses checked reflection to own all strings and mutable graph storage,
+with bounded work, depth and retained payload. Partial/overlapping backing views,
+private fields, unknown struct schemas and unsupported storage decline admission.
+Generated typed replay preserves shared nodes, cycles, map-key node identities,
+and full capacity-visible slice contents, while allocating private mutable nodes
+and containers for each request. Immutable snapshot-owned strings can be shared.
+The checked-in generator has a freshness test; runtime field-name/type validation
+and capture's known-type guard refuse stale schema coverage.
+
+Snapshots share the token cache's 32-revision/512-MiB LRU payload budget. Container
+accounting includes estimated overhead; this is not a process RSS bound. Capture
+and replay run outside the cache lock, with publication rechecked under the lock.
+Capture is delayed until the revision is requested a second time: a one-off edit
+pays no reflection capture cost. The second request still parses and pays capture;
+only subsequent exact hits benefit. Edit histories still use lexer checkpoints
+and fresh parsing rather than declaration-level parser replay.
+
+Ownership fixtures cover source mutation, shared and cyclic nodes, pointer-keyed
+visibility, full slice tails, partial-view rejection, concurrent copy/mutation,
+and generated-versus-reflection replay. Server tests cover shared-budget
+accounting, edit invalidation, decoded-IR bypass, diagnostics/filename parity,
+and semantic/lowered/LLVM/IR mode transitions including default argument mutation.
+
+On Apple M5, Go1.27.2, GOMAXPROCS=4, three 100-iteration runs of the
+2,048-function parse benchmark measured token-only parsing at5.78/6.45/6.45ms
+and exact snapshot replay at3.37/2.89/2.95ms. Allocations fell from8.12MB and
+30,737 allocations to7.38MB and26,824 allocations per operation. A full compiler
+test suite was running concurrently, so these are indicative local microbenchmarks,
+not controlled end-to-end project speedups. Warm setup includes two untimed parses
+to publish the snapshot; it excludes the second-request capture penalty.
+
+Separate 30-iteration capture runs measured12.37/12.56/12.31ms for this fixture
+(10.86MB and55,510 allocations). That cost is paid in addition to parsing on the
+second request. Revisions used only twice therefore regress; several later exact
+hits are needed to amortize capture. This admission policy is a limited first
+step, and cheaper capture or workload-aware admission remains performance work.

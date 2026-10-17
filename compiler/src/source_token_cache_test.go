@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"fmt"
 	"io"
@@ -152,13 +153,21 @@ func BenchmarkSourceTokenCacheParse(b *testing.B) {
 			fmt.Fprintf(&program, "def work%d(x: i64) -> i64:\n    return x * 3 + 1\n\n", i)
 		}
 		source := []byte(program.String())
-		for _, mode := range []string{"cold", "warm"} {
+		for _, mode := range []string{"cold", "tokens", "warm"} {
 			b.Run(fmt.Sprintf("functions%d/%s", count, mode), func(b *testing.B) {
 				var cache *sourceTokenCache
-				if mode == "warm" {
+				if mode != "cold" {
 					cache = newSourceTokenCache(4, defaultSourceTokenCacheBytes)
-					if _, ok := parseProgramWithTokenCache("bench.elisa", source, io.Discard, cache); !ok {
-						b.Fatal("prime failed")
+					for prime := 0; prime < 2; prime++ {
+						if _, ok := parseProgramWithTokenCache("bench.elisa", source, io.Discard, cache); !ok {
+							b.Fatal("prime failed")
+						}
+						if mode == "tokens" {
+							for key, entry := range cache.entries {
+								entry.parseDeclined = true
+								cache.entries[key] = entry
+							}
+						}
 					}
 				}
 				b.ReportAllocs()
@@ -196,7 +205,7 @@ func TestCompileServerTokenCacheBypassesDecodedIR(t *testing.T) {
 	}
 }
 
-func TestCompileServerTokenCacheSharesOnlyTokensAcrossModes(t *testing.T) {
+func TestCompileServerSyntaxCacheSharesPristineSyntaxAcrossModes(t *testing.T) {
 	cache := newCompileServerSessionCache(4)
 	request := compileServerRequest{Filename: "shared_modes.elisa", Source: "def value(x: i64) -> i64:\n    return x * 3 + 1\n", Incremental: true}
 	for _, mode := range []string{"semantic", "llvm", "ir", "semantic", "lowered"} {
@@ -303,5 +312,76 @@ func TestSourceTokenCacheConcurrentEditedRevisions(t *testing.T) {
 	wg.Wait()
 	if cache.prefixReusedTokens == 0 || cache.bytes > cache.maxBytes || len(cache.entries) > 2 {
 		t.Fatal("concurrent revision cache bounds/reuse failed")
+	}
+}
+
+func TestSourceSyntaxSnapshotAdmissionAndPrivateReplay(t *testing.T) {
+	cache := newSourceTokenCache(4, 1<<20)
+	source := []byte("def f() -> i64:\n    return 21\n")
+	for i := 0; i < 2; i++ {
+		file, ok := parseProgramWithTokenCache("snapshot.elisa", source, io.Discard, cache)
+		if !ok {
+			t.Fatal("parse failed")
+		}
+		if i == 0 {
+			for _, entry := range cache.entries {
+				if entry.parsed != nil {
+					t.Fatal("one-off revision captured")
+				}
+			}
+		}
+		file.Decls[0].(*ast.FuncDecl).Body = nil
+	}
+	if cache.parseHits != 0 {
+		t.Fatal("unexpected early replay")
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			file, ok := parseProgramWithTokenCache("snapshot.elisa", source, io.Discard, cache)
+			if !ok {
+				t.Error("replay failed")
+				return
+			}
+			fn := file.Decls[0].(*ast.FuncDecl)
+			if len(fn.Body) != 1 {
+				t.Error("semantic/caller mutation leaked into pristine cache")
+			}
+			fn.Body = nil
+		}()
+	}
+	wg.Wait()
+	if cache.parseHits != 8 {
+		t.Fatalf("no replay: %d", cache.parseHits)
+	}
+	total := 0
+	for _, entry := range cache.entries {
+		total += entry.bytes
+	}
+	if total != cache.bytes || total > cache.maxBytes {
+		t.Fatal("snapshot accounting escaped shared budget")
+	}
+	edited := bytes.ReplaceAll(source, []byte("21"), []byte("42"))
+	file, ok := parseProgramWithTokenCache("snapshot.elisa", edited, io.Discard, cache)
+	if !ok || file.Decls[0].(*ast.FuncDecl).Body[0].(*ast.ReturnStmt).Value.(*ast.IntLit).Value != "42" {
+		t.Fatal("edit reused stale syntax")
+	}
+}
+
+func TestCompileServerSyntaxReplayAfterDefaultArgumentMutation(t *testing.T) {
+	cache := newCompileServerSessionCache(4)
+	request := compileServerRequest{Filename: "defaults_snapshot.elisa", Source: "def add(x: i64, y: i64 = 7) -> i64:\n    return x + y\n\ndef main() -> i64:\n    return add(14)\n", Incremental: true}
+	for _, mode := range []string{"semantic", "lowered", "llvm", "ir", "semantic", "lowered"} {
+		request.Mode = mode
+		actual, status := executeCompileServerRequestWithSessions(request, cache)
+		expected, wantStatus := executeCompileServerRequest(request)
+		if !actual.OK || status != wantStatus || !compileServerResponsesEqual(actual, expected) {
+			t.Fatalf("default argument replay changed %s: %#v / %#v", mode, actual, expected)
+		}
+	}
+	if cache.tokens.parseHits < 4 {
+		t.Fatal("fixture never replayed syntax")
 	}
 }

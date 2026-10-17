@@ -112,6 +112,13 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 }
 
 func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, cache *sourceTokenCache) (*ast.File, bool) {
+	if cache != nil {
+		replayStart := time.Now()
+		if file, ok := cache.parsedFile(filename, src); ok {
+			frontendTimingLog("parse", replayStart)
+			return file, true
+		}
+	}
 	lexStart := time.Now()
 	var tokens []lexer.Token
 	var errs []string
@@ -149,6 +156,9 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 			fmt.Fprintf(stderr, "%s\n", e)
 		}
 		return nil, false
+	}
+	if cache != nil {
+		cache.rememberParsed(filename, src, file, len(p.Notices()) == 0)
 	}
 	return file, true
 }
