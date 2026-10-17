@@ -20,7 +20,7 @@ import (
 //     Abort.Panic / Unsafe.UncheckedIndex blocks (the latter permits a load, never a write);
 //   - expressions: identifiers, literals, operators without overloads, ternaries, non-optional
 //     field reads, view slices and indexing, plain integer casts, tuples, and calls to callees
-//     classified write-free (classifierCalleeWriteFree / functionPureEquationShape);
+//     classified write-free, or completed non-generic bodies checked by this gate;
 //   - the function has no mutable parameters and uses only those read-only permissions.
 //
 // Anything else declines (the caller keeps the conservative per-read modeling).
@@ -31,10 +31,13 @@ func (a *Analyzer) sviewFrameWriteFree(decl *ast.FuncDecl) bool {
 	if cached, ok := a.sviewFrameWriteFreeCache[decl]; ok {
 		return cached
 	}
-	result := a.computeSViewFrameWriteFree(decl)
 	if a.sviewFrameWriteFreeCache == nil {
 		a.sviewFrameWriteFreeCache = map[*ast.FuncDecl]bool{}
 	}
+	// Decline recursive call cycles while inspecting their bodies. A recursive
+	// callee must never make a partially checked frame look write-free.
+	a.sviewFrameWriteFreeCache[decl] = false
+	result := a.computeSViewFrameWriteFree(decl)
 	a.sviewFrameWriteFreeCache[decl] = result
 	return result
 }
@@ -288,7 +291,7 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 		return true
 	case *ast.CallExpr:
 		callee, ok := g.a.classifierFrameCallDecl(n)
-		if !ok || callee == nil || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee)) {
+		if !ok || callee == nil || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
 			return false
 		}
 		for _, arg := range n.Args {
@@ -374,4 +377,29 @@ func sviewFramePattern(pattern ast.MatchPattern, depth int) bool {
 		return true
 	}
 	return false
+}
+
+// A completed, non-generic body can prove that a table/reference helper only
+// reads memory even though its parameter types exceed the scalar classifier.
+// Require every argument explicitly: an unexpanded default can execute a call.
+func (a *Analyzer) sviewFrameCallBodyWriteFree(decl *ast.FuncDecl, argCount int) bool {
+	if decl == nil || decl.Variadic || argCount != len(decl.Params) || len(decl.TypeParams) != 0 ||
+		len(decl.GenericParams) != 0 || len(decl.RegionParams) != 0 || len(decl.PermissionParams) != 0 {
+		return false
+	}
+	sym, found := a.symbolForFuncDecl(decl)
+	if !found || sym == nil {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil || !fn.ReturnBorrowedOwnerRefsKnown ||
+		len(fn.MutableGlobalPermissionRefs) != 0 || len(fn.MutableGlobalSourceNames) != 0 {
+		return false
+	}
+	for _, permission := range fn.PermissionRefs {
+		if !sviewFrameReadPermission(permission) {
+			return false
+		}
+	}
+	return a.sviewFrameWriteFree(decl)
 }

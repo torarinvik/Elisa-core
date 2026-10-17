@@ -18,6 +18,11 @@ def overwrite_record(table: RecordTable) -> bool:
     requires table.rows.count > 0
     table.rows[0] <- RecordBinding{owner: RecordOwner{value: 0}, serial: 0}
     return true
+def recursive_overwrite(table: RecordTable, depth: usize) -> bool:
+    requires table.rows.count > 0
+    return recursive_overwrite(table, depth - 1) if depth > 0
+    table.rows[0] <- RecordBinding{owner: RecordOwner{value: 0}, serial: 0}
+    return true
 `
 
 func TestSMTRecordElementCongruence(t *testing.T) {
@@ -117,10 +122,32 @@ def called_mutator(table: RecordTable) -> u32:
     before: u32 = table.rows[0].owner.value
     changed: bool = overwrite_record(table)
     return before
+def called_recursive_mutator(table: RecordTable) -> u32:
+    requires table.rows.count > 0
+    ensure result == table.rows[0].owner.value
+    before: u32 = table.rows[0].owner.value
+    changed: bool = recursive_overwrite(table, 1)
+    return before
 `)
-	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table", "unequal_call", "unequal_flag", "called_mutator"} {
+	for _, function := range []string{"other", "index", "field", "mutated", "shadowed", "shadowed_table", "unequal_call", "unequal_flag", "called_mutator", "called_recursive_mutator"} {
 		if ensureFailuresFor(result.Errors(), function) == 0 {
 			t.Fatalf("%s: false record claim was accepted:\n%s", function, allDiagnostics(result))
 		}
+	}
+}
+
+func TestSMTRecordElementTupleResult(t *testing.T) {
+	result := analyzeContractStrict(t, "record_tuple.elisa", recordElementTypes+`def candidate(table: RecordTable&, owner: RecordOwner) -> bool:
+    return table.rows.count > 0 and table.rows[0].owner.value == owner.value
+def selected(table: RecordTable&, owner: RecordOwner) -> (known: bool, binding_id: RecordBinding):
+    requires table.rows.count > 0 and table.rows[0].owner.value == owner.value
+    ensure result.known and result.binding_id.owner.value == owner.value
+    chosen: RecordBinding = table.rows[0]
+    assert chosen.owner.value == owner.value
+    assert candidate(table, owner)
+    return (true, chosen)
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("tuple record projection declined:\n%s", allDiagnostics(result))
 	}
 }
