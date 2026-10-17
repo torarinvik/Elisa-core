@@ -77,7 +77,17 @@ func (a *Analyzer) enumPaths(stmts []ast.Stmt, depth int) ([]pathFrag, bool) {
 			// In particular, the negated guard can rule out wraparound on the
 			// continuing path; dropping it needlessly weakens the decrease proof.
 			branches, ok := a.ifBranchGuards(n)
-			if !ok && a.ifIsOpaqueExitFallthrough(n) {
+			// Guards read the state at their statement, whereas path hypotheses
+			// use the loop-head state. Until prefix substitution is modeled,
+			// retain the conservative opaque split after any body statements.
+			hasPrefix := false
+			for _, p := range frontier {
+				if !p.exited && len(p.stmts) != 0 {
+					hasPrefix = true
+					break
+				}
+			}
+			if (!ok || hasPrefix) && a.ifIsOpaqueExitFallthrough(n) {
 				next := make([]pathFrag, 0, len(frontier)*2)
 				for _, p := range frontier {
 					if p.exited {
@@ -94,7 +104,7 @@ func (a *Analyzer) enumPaths(stmts []ast.Stmt, depth int) ([]pathFrag, bool) {
 				frontier = next
 				continue
 			}
-			if !ok {
+			if !ok || hasPrefix {
 				return nil, false
 			}
 			next := make([]pathFrag, 0, len(frontier))

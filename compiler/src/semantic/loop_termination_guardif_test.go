@@ -308,3 +308,28 @@ func TestGuardIf_PreciseEarlyExitStillRejectsUnsignedUnderflow(t *testing.T) {
         i <- i - 2
 `)
 }
+
+func TestGuardIf_EarlyExitAfterUpdateDoesNotUseLoopHeadGuard(t *testing.T) {
+	guardIfRejected(t, "early_exit_after_update.elisa", `def loop(n: usize):
+    i: mutable usize = n
+    while i > 0:
+        decreases i
+        i <- i - 2
+        if i == 1:
+            return
+`)
+}
+
+func TestGuardIf_MixedBranchAfterUpdateDoesNotUseLoopHeadGuard(t *testing.T) {
+	guardIfRejected(t, "mixed_branch_after_update.elisa", `def loop(n: usize):
+    i: mutable usize = n
+    other: mutable usize = 0
+    while i > 0:
+        decreases i
+        i <- i - 2
+        if i != 1:
+            other <- 0
+        else:
+            return
+`)
+}
