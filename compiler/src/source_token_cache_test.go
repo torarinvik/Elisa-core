@@ -211,3 +211,97 @@ func TestCompileServerTokenCacheSharesOnlyTokensAcrossModes(t *testing.T) {
 		t.Fatalf("mode reuse %d/%d", cache.tokens.hits, cache.tokens.misses)
 	}
 }
+
+func TestCompileServerTokenCacheReusesEditedPrefix(t *testing.T) {
+	var source strings.Builder
+	for i := 0; i < 256; i++ {
+		fmt.Fprintf(&source, "def work%d(x: i64) -> i64:\n    return x + 1\n\n", i)
+	}
+	original := source.String()
+	index := strings.LastIndex(original, "+ 1")
+	changed := original[:index] + strings.Replace(original[index:], "+ 1", "+ 2", 1)
+	cache := newCompileServerSessionCache(1)
+	for step, text := range []string{original, changed, original, changed} {
+		request := compileServerRequest{Mode: []string{"lowered", "semantic", "llvm", "ir"}[step], Filename: "editing.elisa", Source: text, Incremental: true}
+		actual, status := executeCompileServerRequestWithSessions(request, cache)
+		expected, expectedStatus := executeCompileServerRequest(request)
+		if status != http.StatusOK || !actual.OK || status != expectedStatus || !compileServerResponsesEqual(actual, expected) {
+			t.Fatal("edited prefix changed server output")
+		}
+	}
+	if cache.tokens.prefixReusedTokens < 1000 {
+		t.Fatalf("edited request did not skip a substantial prefix: %d", cache.tokens.prefixReusedTokens)
+	}
+	if len(cache.tokens.entries) != 1 || cache.tokens.bytes > cache.tokens.maxBytes {
+		t.Fatal("edit history escaped cache bounds")
+	}
+}
+
+func BenchmarkSourceTokenCacheEditedParse(b *testing.B) {
+	for _, count := range []int{256, 2048} {
+		var program strings.Builder
+		for i := 0; i < count; i++ {
+			fmt.Fprintf(&program, "def work%d(x: i64) -> i64:\n    return x * 3 + 1\n\n", i)
+		}
+		original := program.String()
+		index := strings.LastIndex(original, "+ 1")
+		changed := original[:index] + strings.Replace(original[index:], "+ 1", "+ 2", 1)
+		sources := [][]byte{[]byte(original), []byte(changed)}
+		for _, mode := range []string{"cold", "edit"} {
+			b.Run(fmt.Sprintf("functions%d/%s", count, mode), func(b *testing.B) {
+				var cache *sourceTokenCache
+				if mode == "edit" {
+					cache = newSourceTokenCache(1, defaultSourceTokenCacheBytes)
+					if _, ok := parseProgramWithTokenCache("bench.elisa", sources[0], io.Discard, cache); !ok {
+						b.Fatal("prime failed")
+					}
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, ok := parseProgramWithTokenCache("bench.elisa", sources[(i+1)%2], io.Discard, cache); !ok {
+						b.Fatal("parse failed")
+					}
+				}
+				if cache != nil && cache.prefixReusedTokens == 0 {
+					b.Fatal("no edited-prefix reuse")
+				}
+			})
+		}
+	}
+}
+
+func TestSourceTokenCacheConcurrentEditedRevisions(t *testing.T) {
+	var prefix strings.Builder
+	prefix.WriteString("#line 50 shared.elisa\n")
+	for i := 0; i < 128; i++ {
+		fmt.Fprintf(&prefix, "def work%d():\n    if true:\n        return 1\n", i)
+	}
+	var sources [][]byte
+	for i := 0; i < 3; i++ {
+		sources = append(sources, []byte(prefix.String()+fmt.Sprintf("#line %d tail%d.elisa\ndef tail():\n    if true:\n%sreturn %d\n", 90+i, i, strings.Repeat(" ", 8+4*i), i)))
+	}
+	cache := newSourceTokenCache(2, defaultSourceTokenCacheBytes)
+	cache.lex("concurrent.elisa", sources[0])
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			for edit := 0; edit < 4; edit++ {
+				source := sources[(index+edit)%len(sources)]
+				actual, errors := cache.lex("concurrent.elisa", source)
+				cold := lexer.New("concurrent.elisa", source)
+				expected := cold.Tokenize()
+				if !reflect.DeepEqual(actual, expected) || !reflect.DeepEqual(errors, cold.Errors()) {
+					t.Error("concurrent edit changed tokens")
+				}
+				actual[0].Kind = lexer.TOKEN_EOF
+			}
+		}(i)
+	}
+	wg.Wait()
+	if cache.prefixReusedTokens == 0 || cache.bytes > cache.maxBytes || len(cache.entries) > 2 {
+		t.Fatal("concurrent revision cache bounds/reuse failed")
+	}
+}

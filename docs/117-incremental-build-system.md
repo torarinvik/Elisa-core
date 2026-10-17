@@ -736,8 +736,8 @@ incremental performance remain unfinished.
 
 Compile-server requests with `incremental: true` now share a bounded token cache
 across emit/analysis profiles. Exact loaded source bytes and the diagnostic
-filename form the key. Changed bytes lex cold; this is whole-input reuse, not
-incremental tokenization of edited declaration ranges. Decoded frontend IR keeps
+filename form the key. Exact hits reuse the full token sequence; changed inputs
+can reuse inspected prefixes through the checkpoint path below. Decoded frontend IR keeps
 its own fresh AST path and bypasses source-token lookup.
 
 Each admitted cold entry lexes a private source copy: lexer Text/Suffix strings
@@ -775,3 +775,61 @@ allocation count from34,837 to30,737. Cold admission pays for the owned snapshot
 and retained token copy; these warm measurements exclude priming, semantic work,
 LLVM/linking and network overhead. Real-project incremental speed and finer-grained
 parse/call/module dependency reuse remain open qualification requirements.
+
+
+### Checked token-prefix reuse after edits
+
+On a new digest for the same filename, the server selects the most recently used
+retained revision as a hint. An older concurrent revision is also safe: reuse is
+validated against the actual new bytes rather than a presumed editor generation.
+The shared LRU remains bounded by revision count and accounted bytes; an edit-heavy
+file can evict other entries. There is no unbounded secondary latest-file index.
+
+The lexer records a checkpoint every256 tokens, capped at4,096 checkpoints and
+16 MiB of checkpoint storage, including reserved header capacity, exact cloned
+stacks/pending buffers, filename and diagnostic text. Source-token admission also
+accounts retained slice capacities under the existing512 MiB server budget.
+Comment-heavy token arrays are trimmed when their capacity is disproportionate.
+
+A checkpoint owns the full Lexer state: logical filename/line/column, cursor,
+layout/grouping stacks, pending tokens/pattern blocks, last token kind and errors.
+It also records the maximum source range inspected so far. All source-sensitive
+byte/slice/existence reads go through tracking helpers, including distant `when`
+lookahead, boolean continuation and unsuccessful EOF probes. UTF-8 lookahead
+records up to four bytes. A field inventory and source-access guard require review
+when those state/read channels change.
+
+Only a checkpoint whose entire observed prefix is unchanged can resume. Earlier
+tokens are reused; the suffix is freshly lexed with actual new offsets and #line
+mapping. Every source-backed prefix string and checkpoint view is rebound to the
+new owned source buffer. Decoded escape strings remain intact. The new record
+retains no previous SourceTokens/source owner chain. Parsing and semantic analysis
+still receive fresh ASTs, maps and mutable token slices.
+
+Differential tests compare every token field and errors against a fresh lexer for
+400 seeded edits, insertion/deletion/revert, escaped strings/chars/numeric suffixes,
+multiline comments/f-strings, grouped layout, distant contextual lookahead, line
+mapping and incomplete UTF-8/EOF append. Mutating the prior owned source after a
+resume cannot corrupt the new revision. Server histories span lowered/semantic/
+LLVM/IR modes with capacity1 (preventing historical exact hits), and concurrent
+edited revisions exercise immutable checkpoint sharing under the race detector.
+
+Final local Apple M5 / Go1.27.2 / GOMAXPROCS=4 measurements use3 repetitions of
+30 iterations. The edit benchmark alternates a last-function literal with a
+one-entry cache, so every measured request is a digest miss with prefix reuse:
+
+| Functions | Cold lex+parse median | Tail-edit lex+parse median |
+| --- | --- | --- |
+| 256 | 0.939 ms | 0.745 ms |
+| 2,048 | 9.41 ms | 5.75 ms |
+
+At2,048 functions, bytes/parse fall from19.97 MB to12.63 MB and allocation count
+from34,837 to30,937. A separate current exact-hit run measured5.04 ms. Ordinary
+cold parsing measured9.28 ms in that run, consistent with no obvious regression
+against the previous9.74 ms short sample; these are not controlled statistical
+claims. Earlier edits, files below the checkpoint stride and cold admission may
+benefit less or pay tracking/copy costs. Hashing/common-prefix comparison and
+source/token copying remain linear, and the entire AST is still reparsed. These
+synthetic tail-edit results do not establish general edit or whole-project compile
+speed. Declaration-level parsing, persistent semantic/call/module reuse and
+end-to-end project qualification remain active requirements.

@@ -15,8 +15,7 @@ type sourceTokenKey struct {
 	source   [32]byte
 }
 type sourceTokenEntry struct {
-	tokens  []lexer.Token
-	errors  []string
+	lexed   *lexer.SourceTokens
 	bytes   int
 	lastUse uint64
 }
@@ -25,6 +24,7 @@ type sourceTokenCache struct {
 	entries                     map[sourceTokenKey]sourceTokenEntry
 	maxEntries, maxBytes, bytes int
 	clock, hits, misses         uint64
+	prefixReusedTokens          uint64
 }
 
 func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
@@ -50,30 +50,41 @@ func (c *sourceTokenCache) lex(filename string, source []byte) ([]lexer.Token, [
 		entry.lastUse = c.clock
 		c.entries[key] = entry
 		c.mu.Unlock()
-		tokens := append([]lexer.Token(nil), entry.tokens...)
-		errors := append([]string(nil), entry.errors...)
+		tokens := entry.lexed.CopyTokens()
+		errors := entry.lexed.CopyErrors()
 		_ = lexer.New(filename, source)
 		return tokens, errors
 	}
 	c.misses++
-	c.mu.Unlock()
-	// Oversized inputs cannot be retained; preserve the ordinary cold path.
-	owned := source
-	if len(source) <= c.maxBytes {
-		owned = append([]byte(nil), source...)
+	var previous *lexer.SourceTokens
+	var recent uint64
+	for candidate, entry := range c.entries {
+		if candidate.filename == filename && entry.lastUse > recent {
+			previous = entry.lexed
+			recent = entry.lastUse
+		}
 	}
-	filename = strings.Clone(filename)
-	key.filename = filename
-	l := lexer.New(filename, owned)
-	tokens := l.Tokenize()
-	errors := l.Errors()
-	size, admit := c.entryBytes(filename, len(owned), tokens, errors)
+	c.mu.Unlock()
+	if len(source) > c.maxBytes {
+		l := lexer.New(filename, source)
+		return l.Tokenize(), l.Errors()
+	}
+	lexed := lexer.TokenizeSource(filename, source, previous)
+	tokens, errors := lexed.CopyTokens(), lexed.CopyErrors()
+	key.filename = strings.Clone(filename)
+	overhead := int(unsafe.Sizeof(sourceTokenEntry{})) + len(filename) + 32
+	if overhead > c.maxBytes {
+		return tokens, errors
+	}
+	size, admit := lexed.RetainedBytes(c.maxBytes - overhead)
 	if !admit {
 		return tokens, errors
 	}
-	entry := sourceTokenEntry{tokens: append([]lexer.Token(nil), tokens...), errors: append([]string(nil), errors...), bytes: size}
+	size += overhead
+	entry := sourceTokenEntry{lexed: lexed, bytes: size}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.prefixReusedTokens += uint64(lexed.ReusedTokens())
 	// Concurrent cold requests may compute the same immutable entry. Keep one.
 	if _, exists := c.entries[key]; exists {
 		return tokens, errors
@@ -95,35 +106,4 @@ func (c *sourceTokenCache) lex(filename string, source []byte) ([]lexer.Token, [
 	c.entries[key] = entry
 	c.bytes += size
 	return tokens, errors
-}
-
-func (c *sourceTokenCache) entryBytes(filename string, sourceBytes int, tokens []lexer.Token, errors []string) (int, bool) {
-	size := int(unsafe.Sizeof(sourceTokenEntry{})) + len(filename) + 32
-	if sourceBytes > c.maxBytes-size {
-		return 0, false
-	}
-	size += sourceBytes
-	tokenSize := int(unsafe.Sizeof(lexer.Token{}))
-	if size > c.maxBytes || len(tokens) > (c.maxBytes-size)/tokenSize {
-		return 0, false
-	}
-	size += len(tokens) * tokenSize
-	add := func(n int) bool {
-		if n > c.maxBytes-size {
-			return false
-		}
-		size += n
-		return true
-	}
-	for _, token := range tokens {
-		if !add(len(token.Text)) || !add(len(token.Suffix)) || !add(len(token.Pos.File)) {
-			return 0, false
-		}
-	}
-	for _, err := range errors {
-		if !add(int(unsafe.Sizeof(""))) || !add(len(err)) {
-			return 0, false
-		}
-	}
-	return size, true
 }

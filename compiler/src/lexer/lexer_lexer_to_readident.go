@@ -6,11 +6,13 @@ import (
 )
 
 type Lexer struct {
-	src      []byte
-	filename string
-	pos      int
-	line     int
-	col      int
+	trackReads bool
+	readLimit  int
+	src        []byte
+	filename   string
+	pos        int
+	line       int
+	col        int
 
 	// Indentation tracking
 	indentStack   []int
@@ -90,33 +92,33 @@ func (l *Lexer) Errors() []string {
 	return out
 }
 func (l *Lexer) peek() byte {
-	if l.pos >= len(l.src) {
+	if !l.sourceHas(l.pos) {
 		return 0
 	}
-	return l.src[l.pos]
+	return l.sourceByte(l.pos)
 }
 func (l *Lexer) peekRune() (rune, int) {
-	if l.pos >= len(l.src) {
+	if !l.sourceHas(l.pos) {
 		return 0, 0
 	}
-	r, size := utf8.DecodeRune(l.src[l.pos:])
+	r, size := utf8.DecodeRune(l.runeBytes(l.pos))
 	if r == utf8.RuneError && size == 1 {
-		return rune(l.src[l.pos]), 1
+		return rune(l.sourceByte(l.pos)), 1
 	}
 	return r, size
 }
 func (l *Lexer) peekAt(offset int) byte {
 	idx := l.pos + offset
-	if idx >= len(l.src) {
+	if !l.sourceHas(idx) {
 		return 0
 	}
-	return l.src[idx]
+	return l.sourceByte(idx)
 }
 func (l *Lexer) advance() byte {
-	if l.pos >= len(l.src) {
+	if !l.sourceHas(l.pos) {
 		return 0
 	}
-	ch := l.src[l.pos]
+	ch := l.sourceByte(l.pos)
 	l.pos++
 	if ch == '\n' {
 		l.line++
@@ -144,7 +146,7 @@ func (l *Lexer) match(expected byte) bool {
 	return false
 }
 func (l *Lexer) skipLineComment() {
-	for l.pos < len(l.src) && l.peek() != '\n' {
+	for l.sourceHas(l.pos) && l.peek() != '\n' {
 		l.advance()
 	}
 }
@@ -164,7 +166,7 @@ func (l *Lexer) skipBlockComment() {
 	l.advance()
 	l.advance()
 	l.advance()
-	for l.pos < len(l.src) {
+	for l.sourceHas(l.pos) {
 		if l.isBlockCommentStart() {
 			// Consume the closing `"""`.
 			l.advance()
@@ -187,46 +189,46 @@ func (l *Lexer) tryConsumeLineDirective() bool {
 	// `#   line 1: ...` must remain comments and must not reset the source position.
 	i := l.pos + 1
 	const kw = "line"
-	if i+len(kw) > len(l.src) {
+	if !l.sourceHas(i + len(kw) - 1) {
 		return false
 	}
 	for k := 0; k < len(kw); k++ {
-		if l.src[i+k] != kw[k] {
+		if l.sourceByte(i+k) != kw[k] {
 			return false
 		}
 	}
 	j := i + len(kw)
-	if j >= len(l.src) || (l.src[j] != ' ' && l.src[j] != '\t') {
+	if !l.sourceHas(j) || (l.sourceByte(j) != ' ' && l.sourceByte(j) != '\t') {
 		return false
 	}
-	for j < len(l.src) && (l.src[j] == ' ' || l.src[j] == '\t') {
+	for l.sourceHas(j) && (l.sourceByte(j) == ' ' || l.sourceByte(j) == '\t') {
 		j++
 	}
 	numStart := j
 	num := 0
-	for j < len(l.src) && l.src[j] >= '0' && l.src[j] <= '9' {
-		num = num*10 + int(l.src[j]-'0')
+	for l.sourceHas(j) && l.sourceByte(j) >= '0' && l.sourceByte(j) <= '9' {
+		num = num*10 + int(l.sourceByte(j)-'0')
 		j++
 	}
 	if j == numStart {
 		return false
 	}
-	for j < len(l.src) && (l.src[j] == ' ' || l.src[j] == '\t') {
+	for l.sourceHas(j) && (l.sourceByte(j) == ' ' || l.sourceByte(j) == '\t') {
 		j++
 	}
 	fileStart := j
-	for j < len(l.src) && l.src[j] != '\n' {
+	for l.sourceHas(j) && l.sourceByte(j) != '\n' {
 		j++
 	}
 	fileEnd := j
-	for fileEnd > fileStart && (l.src[fileEnd-1] == ' ' || l.src[fileEnd-1] == '\t' || l.src[fileEnd-1] == '\r') {
+	for fileEnd > fileStart && (l.sourceByte(fileEnd-1) == ' ' || l.sourceByte(fileEnd-1) == '\t' || l.sourceByte(fileEnd-1) == '\r') {
 		fileEnd--
 	}
 	if fileEnd == fileStart {
 		return false
 	}
-	file := string(l.src[fileStart:fileEnd])
-	if j < len(l.src) && l.src[j] == '\n' {
+	file := string(l.sourceSlice(fileStart, fileEnd))
+	if l.sourceHas(j) && l.sourceByte(j) == '\n' {
 		j++
 	}
 	l.pos = j
@@ -238,7 +240,7 @@ func (l *Lexer) tryConsumeLineDirective() bool {
 }
 func (l *Lexer) measureIndent() int {
 	indent := 0
-	for l.pos < len(l.src) {
+	for l.sourceHas(l.pos) {
 		ch := l.peek()
 		if ch == ' ' {
 			indent++
@@ -259,7 +261,7 @@ func (l *Lexer) handleIndentation() {
 
 	// Skip blank lines and comment-only lines (consume them entirely)
 	for {
-		if l.pos >= len(l.src) || l.peek() == '\n' {
+		if !l.sourceHas(l.pos) || l.peek() == '\n' {
 			// Consuming a `#line` directive below sets atLineStart; clear it so it
 			// does not leak out and trigger a spurious mid-line re-entry into
 			// indentation handling on the next token.
@@ -276,10 +278,10 @@ func (l *Lexer) handleIndentation() {
 			}
 			// Skip comment and trailing newline, then re-measure
 			l.skipLineComment()
-			if l.pos < len(l.src) && l.peek() == '\n' {
+			if l.sourceHas(l.pos) && l.peek() == '\n' {
 				l.advance()
 				// Skip consecutive blank lines
-				for l.pos < len(l.src) && l.peek() == '\n' {
+				for l.sourceHas(l.pos) && l.peek() == '\n' {
 					l.advance()
 				}
 			}
@@ -290,15 +292,15 @@ func (l *Lexer) handleIndentation() {
 			// A `""" ... """` block comment at line start: consume it (it may span
 			// lines) so it is invisible to indentation, exactly like a `#` line.
 			l.skipBlockComment()
-			for l.pos < len(l.src) && (l.peek() == ' ' || l.peek() == '\t') {
+			for l.sourceHas(l.pos) && (l.peek() == ' ' || l.peek() == '\t') {
 				l.advance()
 			}
-			if l.pos >= len(l.src) || l.peek() == '\n' {
+			if !l.sourceHas(l.pos) || l.peek() == '\n' {
 				// Comment-only line: skip the newline + blanks and re-measure the
 				// next real line's indentation.
-				if l.pos < len(l.src) && l.peek() == '\n' {
+				if l.sourceHas(l.pos) && l.peek() == '\n' {
 					l.advance()
-					for l.pos < len(l.src) && l.peek() == '\n' {
+					for l.sourceHas(l.pos) && l.peek() == '\n' {
 						l.advance()
 					}
 				}
@@ -353,7 +355,7 @@ func (l *Lexer) readString() Token {
 	p := l.curPos()
 	l.advance() // consume opening "
 	decoded := make([]byte, 0, 16)
-	for l.pos < len(l.src) {
+	for l.sourceHas(l.pos) {
 		ch := l.peek()
 		if ch == '"' {
 			l.advance()
@@ -371,7 +373,7 @@ func (l *Lexer) readString() Token {
 
 		escapePos := l.curPos()
 		l.advance() // consume backslash
-		if l.pos >= len(l.src) {
+		if !l.sourceHas(l.pos) {
 			l.reportErrorAt(escapePos.WithEnd(l.curPos()), "unterminated escape sequence in string literal")
 			return l.finishToken(Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
@@ -450,7 +452,7 @@ func (l *Lexer) readChar() Token {
 	l.advance() // consume opening '
 	decoded := make([]byte, 0, 4)
 	invalid := false
-	for l.pos < len(l.src) {
+	for l.sourceHas(l.pos) {
 		ch := l.peek()
 		if ch == '\'' {
 			l.advance()
@@ -478,7 +480,7 @@ func (l *Lexer) readChar() Token {
 
 		escapePos := l.curPos()
 		l.advance() // consume backslash
-		if l.pos >= len(l.src) {
+		if !l.sourceHas(l.pos) {
 			l.reportErrorAt(escapePos.WithEnd(l.curPos()), "unterminated escape sequence in char literal")
 			return l.finishToken(Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
@@ -564,7 +566,7 @@ func (l *Lexer) readChar() Token {
 func (l *Lexer) readFixedHexDigits(count int) (int, bool) {
 	value := 0
 	for i := 0; i < count; i++ {
-		if l.pos >= len(l.src) || !isHexDigit(l.peek()) {
+		if !l.sourceHas(l.pos) || !isHexDigit(l.peek()) {
 			return 0, false
 		}
 		value = (value << 4) | hexDigitValue(l.advance())
@@ -575,25 +577,25 @@ func (l *Lexer) readNumber() Token {
 	p := l.curPos()
 	start := l.pos
 
-	if l.peek() == '0' && l.pos+1 < len(l.src) && (l.src[l.pos+1] == 'x' || l.src[l.pos+1] == 'X') {
+	if l.peek() == '0' && l.sourceHas(l.pos+1) && (l.sourceByte(l.pos+1) == 'x' || l.sourceByte(l.pos+1) == 'X') {
 		l.advance() // 0
 		l.advance() // x
-		for l.pos < len(l.src) && isHexDigit(l.peek()) {
+		for l.sourceHas(l.pos) && isHexDigit(l.peek()) {
 			l.advance()
 		}
-		text := bytesToStringView(l.src[start:l.pos])
+		text := bytesToStringView(l.sourceSlice(start, l.pos))
 		suffix := l.readTypeSuffix()
 		return l.finishToken(Token{Kind: TOKEN_HEX_LIT, Text: text, Pos: p, Suffix: suffix})
 	}
 
-	for l.pos < len(l.src) && isDigit(l.peek()) {
+	for l.sourceHas(l.pos) && isDigit(l.peek()) {
 		l.advance()
 	}
 	isFloat := false
 	if l.shouldReadFloatFraction() {
 		isFloat = true
 		l.advance()
-		for l.pos < len(l.src) && isDigit(l.peek()) {
+		for l.sourceHas(l.pos) && isDigit(l.peek()) {
 			l.advance()
 		}
 	}
@@ -608,12 +610,12 @@ func (l *Lexer) readNumber() Token {
 			if l.peek() == '+' || l.peek() == '-' {
 				l.advance()
 			}
-			for l.pos < len(l.src) && isDigit(l.peek()) {
+			for l.sourceHas(l.pos) && isDigit(l.peek()) {
 				l.advance()
 			}
 		}
 	}
-	text := bytesToStringView(l.src[start:l.pos])
+	text := bytesToStringView(l.sourceSlice(start, l.pos))
 	suffix := l.readTypeSuffix()
 	if suffix == "f32" || suffix == "f64" {
 		isFloat = true
@@ -654,7 +656,7 @@ func (l *Lexer) hasFloatSuffixAt(offset int) bool {
 }
 func (l *Lexer) readTypeSuffix() string {
 	// Read optional type suffix: u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, u, i, f32, f64
-	if l.pos >= len(l.src) {
+	if !l.sourceHas(l.pos) {
 		return ""
 	}
 	ch := l.peek()
@@ -667,10 +669,10 @@ func (l *Lexer) readTypeSuffix() string {
 	l.advance() // consume 'u' or 'i'
 
 	// Read digits or "size"
-	for l.pos < len(l.src) && (isDigit(l.peek()) || isAlpha(l.peek())) {
+	for l.sourceHas(l.pos) && (isDigit(l.peek()) || isAlpha(l.peek())) {
 		l.advance()
 	}
-	suffix := bytesToStringView(l.src[start:l.pos])
+	suffix := bytesToStringView(l.sourceSlice(start, l.pos))
 
 	// Validate known suffixes
 	switch suffix {
@@ -689,14 +691,14 @@ func (l *Lexer) readTypeSuffix() string {
 func (l *Lexer) readIdent() Token {
 	p := l.curPos()
 	start := l.pos
-	for l.pos < len(l.src) {
+	for l.sourceHas(l.pos) {
 		r, _ := l.peekRune()
 		if !isIdentCharRune(r) {
 			break
 		}
 		l.advanceRune()
 	}
-	text := bytesToStringView(l.src[start:l.pos])
+	text := bytesToStringView(l.sourceSlice(start, l.pos))
 	kind := LookupKeyword(text)
 	l.pendingGroupedBlock = kind == TOKEN_IDENT && isImmediateGroupedBlockIntroducer(text)
 	if l.parenDepth > 0 && (kind == TOKEN_MATCH || (kind == TOKEN_IDENT && text == "when" && l.patternScrutineeFollows())) {
@@ -717,7 +719,7 @@ func (l *Lexer) readFString() Token {
 	l.advance() // consume opening "
 	start := l.pos
 	braceDepth := 0
-	for l.pos < len(l.src) {
+	for l.sourceHas(l.pos) {
 		ch := l.peek()
 		if ch == '\n' {
 			break
@@ -725,12 +727,12 @@ func (l *Lexer) readFString() Token {
 		if braceDepth == 0 {
 			switch ch {
 			case '"':
-				raw := bytesToStringView(l.src[start:l.pos])
+				raw := bytesToStringView(l.sourceSlice(start, l.pos))
 				l.advance() // consume closing "
 				return l.finishToken(Token{Kind: TOKEN_FSTRING_LIT, Text: raw, Pos: p})
 			case '\\':
 				l.advance()
-				if l.pos < len(l.src) && l.peek() != '\n' {
+				if l.sourceHas(l.pos) && l.peek() != '\n' {
 					l.advance()
 				}
 				continue
@@ -760,7 +762,7 @@ func (l *Lexer) readFString() Token {
 			braceDepth--
 		case '"':
 			l.advance()
-			for l.pos < len(l.src) && l.peek() != '"' && l.peek() != '\n' {
+			for l.sourceHas(l.pos) && l.peek() != '"' && l.peek() != '\n' {
 				if l.peek() == '\\' {
 					l.advance()
 				}
@@ -770,17 +772,17 @@ func (l *Lexer) readFString() Token {
 		l.advance()
 	}
 	l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated f-string literal")
-	return l.finishToken(Token{Kind: TOKEN_FSTRING_LIT, Text: bytesToStringView(l.src[start:l.pos]), Pos: p})
+	return l.finishToken(Token{Kind: TOKEN_FSTRING_LIT, Text: bytesToStringView(l.sourceSlice(start, l.pos)), Pos: p})
 }
 
 func (l *Lexer) currentLineIndent() int {
 	start := l.pos
-	for start > 0 && l.src[start-1] != '\n' {
+	for start > 0 && l.sourceByte(start-1) != '\n' {
 		start--
 	}
 	indent := 0
-	for start < len(l.src) {
-		switch l.src[start] {
+	for l.sourceHas(start) {
+		switch l.sourceByte(start) {
 		case ' ':
 			indent++
 		case '\t':
@@ -797,39 +799,39 @@ func (l *Lexer) currentLineIndent() int {
 // fields and named arguments keep `when` as an ordinary identifier.
 func (l *Lexer) patternScrutineeFollows() bool {
 	index := l.pos
-	for index < len(l.src) {
-		switch l.src[index] {
+	for l.sourceHas(index) {
+		switch l.sourceByte(index) {
 		case ' ', '\t', '\r', '\n':
 			index++
 			continue
 		case '#':
-			for index < len(l.src) && l.src[index] != '\n' {
+			for l.sourceHas(index) && l.sourceByte(index) != '\n' {
 				index++
 			}
 			continue
 		}
 		break
 	}
-	if index >= len(l.src) {
+	if !l.sourceHas(index) {
 		return false
 	}
-	ch := l.src[index]
-	if ch == '-' || ch == '\'' || ch == '"' || (ch >= '0' && ch <= '9') || (ch == '.' && index+1 < len(l.src) && isDigit(l.src[index+1])) {
+	ch := l.sourceByte(index)
+	if ch == '-' || ch == '\'' || ch == '"' || (ch >= '0' && ch <= '9') || (ch == '.' && l.sourceHas(index+1) && isDigit(l.sourceByte(index+1))) {
 		return true
 	}
-	r, size := utf8.DecodeRune(l.src[index:])
+	r, size := utf8.DecodeRune(l.runeBytes(index))
 	if !isIdentStartRune(r) {
 		return false
 	}
 	start := index
 	index += size
-	for index < len(l.src) {
-		r, size = utf8.DecodeRune(l.src[index:])
+	for l.sourceHas(index) {
+		r, size = utf8.DecodeRune(l.runeBytes(index))
 		if !isIdentCharRune(r) {
 			break
 		}
 		index += size
 	}
-	kind := LookupKeyword(bytesToStringView(l.src[start:index]))
+	kind := LookupKeyword(bytesToStringView(l.sourceSlice(start, index)))
 	return kind == TOKEN_IDENT || kind == TOKEN_TRUE || kind == TOKEN_FALSE
 }

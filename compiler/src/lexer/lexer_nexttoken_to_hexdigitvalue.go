@@ -23,7 +23,7 @@ func (l *Lexer) NextToken() (result Token) {
 	// include expansion, always at column 0) before indentation handling, so they
 	// retarget Pos to the real source file without producing tokens or affecting
 	// indentation.
-	for l.atLineStart && l.pos < len(l.src) && l.src[l.pos] == '#' {
+	for l.atLineStart && l.sourceHas(l.pos) && l.sourceByte(l.pos) == '#' {
 		if !l.tryConsumeLineDirective() {
 			break
 		}
@@ -44,11 +44,11 @@ func (l *Lexer) NextToken() (result Token) {
 	}
 
 	// Skip spaces (not newlines)
-	for l.pos < len(l.src) && (l.peek() == ' ' || l.peek() == '\t') {
+	for l.sourceHas(l.pos) && (l.peek() == ' ' || l.peek() == '\t') {
 		l.advance()
 	}
 
-	if l.pos >= len(l.src) {
+	if !l.sourceHas(l.pos) {
 		// Emit remaining DEDENT tokens at EOF
 		if len(l.indentStack) > 1 {
 			l.indentStack = l.indentStack[:len(l.indentStack)-1]
@@ -77,7 +77,7 @@ func (l *Lexer) NextToken() (result Token) {
 			return l.NextToken()
 		}
 		// Skip consecutive blank lines
-		for l.pos < len(l.src) && l.peek() == '\n' {
+		for l.sourceHas(l.pos) && l.peek() == '\n' {
 			l.advance()
 		}
 		if l.parenDepth > 0 && !l.activeGroupedBlockContext() {
@@ -271,7 +271,7 @@ func (l *Lexer) NextToken() (result Token) {
 			// `when` is also a legal named field/argument. A block header has
 			// a scrutinee between its introducer and the terminating colon.
 			for index := header.HeadStart; index < l.pos-1; index++ {
-				switch l.src[index] {
+				switch l.sourceByte(index) {
 				case ' ', '\t', '\r', '\n':
 				default:
 					patternBlock = true
@@ -424,8 +424,8 @@ func hexDigitValue(ch byte) int {
 
 func (l *Lexer) booleanContinuation() bool {
 	i, indent := l.pos, 0
-	for i < len(l.src) && (l.src[i] == ' ' || l.src[i] == '\t') {
-		if l.src[i] == '\t' {
+	for l.sourceHas(i) && (l.sourceByte(i) == ' ' || l.sourceByte(i) == '\t') {
+		if l.sourceByte(i) == '\t' {
 			indent += 4
 		} else {
 			indent++
@@ -436,7 +436,7 @@ func (l *Lexer) booleanContinuation() bool {
 		return false
 	}
 	for _, op := range []string{"and", "or", "==", "!=", "<=", ">=", "<", ">"} {
-		if i+len(op) < len(l.src) && string(l.src[i:i+len(op)]) == op && (l.src[i+len(op)] == ' ' || l.src[i+len(op)] == '\t') {
+		if l.sourceHas(i+len(op)) && string(l.sourceSlice(i, i+len(op))) == op && (l.sourceByte(i+len(op)) == ' ' || l.sourceByte(i+len(op)) == '\t') {
 			return true
 		}
 	}
