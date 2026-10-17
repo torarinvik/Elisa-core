@@ -22,6 +22,8 @@ type compileServerRequest struct {
 	Filename string `json:"filename,omitempty"`
 	Source   string `json:"source,omitempty"`
 	IR       string `json:"ir,omitempty"`
+	// Incremental opts into a bounded, server-local semantic session for this request.
+	Incremental bool `json:"incremental,omitempty"`
 }
 
 type compileServerResponse struct {
@@ -45,18 +47,26 @@ func serveCompileServer(addr string, stdout io.Writer, stderr io.Writer) error {
 }
 
 func newCompileServerMux(stdout io.Writer, stderr io.Writer) http.Handler {
+	return newCompileServerMuxWithSessions(stdout, stderr, newCompileServerSessionCache(defaultCompileServerSessionCacheEntries))
+}
+
+func newCompileServerMuxWithSessions(stdout io.Writer, stderr io.Writer, sessions *compileServerSessionCache) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
 	})
 	mux.HandleFunc("/api/v1/compile", func(w http.ResponseWriter, r *http.Request) {
-		handleCompileServerAPI(w, r)
+		handleCompileServerAPIWithSessions(w, r, sessions)
 	})
 	return mux
 }
 
 func handleCompileServerAPI(w http.ResponseWriter, r *http.Request) {
+	handleCompileServerAPIWithSessions(w, r, nil)
+}
+
+func handleCompileServerAPIWithSessions(w http.ResponseWriter, r *http.Request, sessions *compileServerSessionCache) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -69,12 +79,16 @@ func handleCompileServerAPI(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(compileServerResponse{OK: false, Error: err.Error()})
 		return
 	}
-	resp, status := executeCompileServerRequest(req)
+	resp, status := executeCompileServerRequestWithSessions(req, sessions)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func executeCompileServerRequest(req compileServerRequest) (compileServerResponse, int) {
+	return executeCompileServerRequestWithSessions(req, nil)
+}
+
+func executeCompileServerRequestWithSessions(req compileServerRequest, sessions *compileServerSessionCache) (compileServerResponse, int) {
 	var stderr bytes.Buffer
 	program, err := loadedProgramFromRequest(req)
 	if err != nil {
@@ -84,6 +98,10 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 	if mode == "" {
 		mode = emitAST
 	}
+	var session *semantic.IncrementalAnalysisSession
+	if sessions != nil && req.Incremental && compileServerModeAnalyzes(mode) {
+		session = sessions.session(program.filename, mode)
+	}
 	response := compileServerResponse{OK: true}
 	switch mode {
 	case emitAST:
@@ -91,7 +109,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		emitSemanticWarningsIfNoErrors(file, &stderr)
+		emitSemanticWarningsIfNoErrorsWithSession(file, &stderr, session)
 		var out bytes.Buffer
 		printFile(&out, file)
 		response.Output = out.String()
@@ -102,13 +120,13 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		}
 		response.Output = unparse.FormatFile(file)
 	case emitSemantic:
-		_, result, ok := analyzeLoadedProgram(program, &stderr)
+		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
 		response.Output = generateSemanticReport(result)
 	case emitFacts:
-		_, result, ok := analyzeLoadedProgram(program, &stderr)
+		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
@@ -122,7 +140,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceUnsafePermissions: true})
+		result := analyzeSemanticWithSession(file, semantic.AnalyzeOptions{EnforceUnsafePermissions: true}, session)
 		if errs := result.Errors(); len(errs) > 0 {
 			for _, e := range errs {
 				fmt.Fprintf(&stderr, "%s\n", e)
@@ -135,7 +153,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnforceProgressSafety: true})
+		result := analyzeSemanticWithSession(file, semantic.AnalyzeOptions{EnforceProgressSafety: true}, session)
 		if errs := result.Errors(); len(errs) > 0 {
 			for _, e := range errs {
 				fmt.Fprintf(&stderr, "%s\n", e)
@@ -148,17 +166,17 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		emitSemanticWarningsIfNoErrors(file, &stderr)
+		emitSemanticWarningsIfNoErrorsWithSession(file, &stderr, session)
 		response.Output = unparse.FormatFile(file)
 	case emitDoc:
 		file, ok := parseLoadedProgram(program, &stderr)
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		emitSemanticWarningsIfNoErrors(file, &stderr)
+		emitSemanticWarningsIfNoErrorsWithSession(file, &stderr, session)
 		response.Output = generateReferenceDoc(program.filename, file)
 	case emitIR:
-		file, _, ok := analyzeLoadedProgram(program, &stderr)
+		file, _, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
@@ -168,7 +186,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		}
 		response.IR = base64.StdEncoding.EncodeToString(encoded)
 	case emitLLVM:
-		_, result, ok := analyzeLoadedProgram(program, &stderr)
+		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
@@ -178,7 +196,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		}
 		response.Output = output
 	case emitInterpret:
-		_, result, ok := analyzeLoadedProgram(program, &stderr)
+		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}

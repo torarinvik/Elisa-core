@@ -146,13 +146,17 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 }
 
 func analyzeProgramWithOptions(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions) (*ast.File, *semantic.Result, bool) {
+	return analyzeProgramWithAnalyzer(filename, src, stderr, options, semantic.AnalyzeWithOptions)
+}
+
+func analyzeProgramWithAnalyzer(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
 	file, ok := parseProgram(filename, src, stderr)
 	if !ok {
 		return nil, nil, false
 	}
 
 	analyzeStart := time.Now()
-	result := semantic.AnalyzeWithOptions(file, options)
+	result := analyze(file, options)
 	frontendTimingLog("analyze", analyzeStart)
 	if warns := result.Notices(); len(warns) > 0 {
 		for _, w := range warns {
@@ -172,6 +176,10 @@ func analyzeProgramWithOptions(filename string, src []byte, stderr io.Writer, op
 	return file, result, true
 }
 func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
+	emitSemanticWarningsIfNoErrorsWithSession(file, stderr, nil)
+}
+
+func emitSemanticWarningsIfNoErrorsWithSession(file *ast.File, stderr io.Writer, session *semantic.IncrementalAnalysisSession) {
 	if file == nil {
 		return
 	}
@@ -181,7 +189,7 @@ func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
 	// warning here. Kept NON-strict: provability stays a warning (the AST/format still prints) rather than
 	// a hard error. z3 is opened lazily — a file with no hard refinements never spawns it, so formatting
 	// contract-free code costs nothing.
-	result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnableSMT: true})
+	result := analyzeSemanticWithSession(file, semantic.AnalyzeOptions{EnableSMT: true}, session)
 	if len(result.Errors()) != 0 {
 		return
 	}

@@ -27,7 +27,8 @@ Non-`POST` methods on `/api/v1/compile` return method-not-allowed response.
   "filter": "function=contains:parse_expr",
   "filename": "request.elisa",
   "source": "def main() -> int:\n    return 0\n",
-  "ir": ""
+  "ir": "",
+  "incremental": false
 }
 ```
 
@@ -38,6 +39,10 @@ Current request rules:
 - if `filename` is omitted for source mode, server uses `request.elisa`
 - if `filename` is omitted for IR mode, server uses bundle `SourceFilename`; if that is blank, `request.elisair`
 - if `mode` is empty, server defaults to `ast`
+- `incremental` defaults to `false`; set it to `true` to opt into server-local
+  semantic reuse for analyzed modes. Sessions are isolated by canonical filename
+  and analysis profile, and held in a bounded LRU. Format/lowered-only requests
+  do not allocate a semantic session. The response shape and output are unchanged.
 
 ## Response JSON
 
