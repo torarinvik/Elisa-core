@@ -4304,7 +4304,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 					if tr.calleeFreeProjection(left, env) || tr.calleeFreeProjection(right, env) {
 						return "", false
 					}
-					if !tr.a.shadowingActive() && sideEffectFreeExpr(left, 0) && sideEffectFreeExpr(right, 0) && tr.a.sameExprText(left, right) {
+					if !tr.a.shadowingActive() && tr.pointerIdentityReadStable(left) && tr.pointerIdentityReadStable(right) && tr.samePointerIdentityExpr(left, right) {
 						return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
 					}
 					lPred := "isnull_" + smtProjectionName(left)

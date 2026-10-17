@@ -31,3 +31,43 @@ func (tr *smtTranslator) pointerLiteralOperand(expr ast.Expr, env map[string]str
 	}
 	return expr
 }
+
+// pointerIdentityReadStable permits reflexivity of builtin element addresses.
+// Computing an address reads the container header and index but not the element.
+// Keep this local to pointer equality: it does not make an indexed value safe to
+// re-evaluate after later constructor arguments have mutated its storage or index.
+func (tr *smtTranslator) pointerIdentityReadStable(expr ast.Expr) bool {
+	if sideEffectFreeExpr(expr, 0) {
+		return true
+	}
+	address, ok := stripOptimizationParens(expr).(*ast.AddrOfExpr)
+	if !ok || address == nil || tr.a == nil {
+		return false
+	}
+	index, ok := stripOptimizationParens(address.Operand).(*ast.IndexExpr)
+	if !ok || index == nil || index.Index2 != nil || index.Fallback != nil || index.AsOverlayCall != nil ||
+		!sideEffectFreeExpr(index.Object, 0) || !sideEffectFreeExpr(index.Index, 0) {
+		return false
+	}
+	typ := tr.a.exprTypes[index.Object]
+	switch stripRefForBounds(typ).(type) {
+	case *ArrayType, *DArrayType:
+		return true
+	}
+	// Raw pointers to primitive integers use builtin indexing. A reference to a
+	// user-defined indexable value must not acquire this rule by its syntax.
+	if ref, ok := typ.(*RefType); ok && ref != nil {
+		_, _, integer := smtIntWidthSign(ref.Elem)
+		return integer
+	}
+	return false
+}
+
+func (tr *smtTranslator) samePointerIdentityExpr(left, right ast.Expr) bool {
+	if tr.a.sameExprText(left, right) {
+		return true
+	}
+	l, lok := stripOptimizationParens(left).(*ast.AddrOfExpr)
+	r, rok := stripOptimizationParens(right).(*ast.AddrOfExpr)
+	return lok && rok && l != nil && r != nil && tr.a.sameExprText(l.Operand, r.Operand)
+}
