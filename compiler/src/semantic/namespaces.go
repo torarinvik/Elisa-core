@@ -288,8 +288,17 @@ func (a *Analyzer) registerModuleAlias(n *ast.UsingDecl, namespace string) {
 // be resolved by qualifying the reference (`Foo::bar`). A current-namespace or
 // local binding takes precedence and is never ambiguous. Returns true if it erred.
 func (a *Analyzer) reportUsingAmbiguity(name string, pos lexer.Pos) bool {
-	if a == nil || name == "" || strings.Contains(name, ".") || len(a.currentUsings) < 2 {
+	matches := a.usingAmbiguityMatches(name)
+	if len(matches) < 2 {
 		return false
+	}
+	a.errorf(pos, "ambiguous reference %q is brought in by multiple `using` imports (%s); qualify it explicitly", name, strings.Join(matches, ", "))
+	return true
+}
+
+func (a *Analyzer) usingAmbiguityMatches(name string) []string {
+	if a == nil || name == "" || strings.Contains(name, ".") || len(a.currentUsings) < 2 {
+		return nil
 	}
 	namespace := a.currentNamespace
 	if namespace == "" && a.currentFuncType != nil {
@@ -297,7 +306,7 @@ func (a *Analyzer) reportUsingAmbiguity(name string, pos lexer.Pos) bool {
 	}
 	if namespace != "" {
 		if _, ok := a.globalScope.Lookup(joinQualifiedName(namespace, name)); ok {
-			return false
+			return nil
 		}
 	}
 	seen := map[string]bool{}
@@ -317,10 +326,9 @@ func (a *Analyzer) reportUsingAmbiguity(name string, pos lexer.Pos) bool {
 	}
 	if len(matches) > 1 {
 		sort.Strings(matches)
-		a.errorf(pos, "ambiguous reference %q is brought in by multiple `using` imports (%s); qualify it explicitly", name, strings.Join(matches, ", "))
-		return true
+		return matches
 	}
-	return false
+	return nil
 }
 
 func (a *Analyzer) withResolutionContext(namespace string, usings []string, fn func()) {
@@ -420,6 +428,10 @@ func (a *Analyzer) buildVisibleNameCandidates(namespace, name string) []string {
 	return dedupeQualifiedNames(candidates)
 }
 
+func (a *Analyzer) typeNameIsVisible(name string) bool {
+	return !(a.privateTypeNames[name] && !a.canAccessPrivateName(name)) && a.privateModuleOnPath(name) == ""
+}
+
 func (a *Analyzer) lookupVisibleType(name string) (Type, string, bool) {
 	var reads []lookupCandidateRead
 	if a.lookupTrace != nil {
@@ -427,7 +439,7 @@ func (a *Analyzer) lookupVisibleType(name string) (Type, string, bool) {
 	}
 	for _, candidate := range a.visibleNameCandidates(name) {
 		t, present := a.namedTypes[candidate]
-		visible := present && !(a.privateTypeNames[candidate] && !a.canAccessPrivateName(candidate)) && a.privateModuleOnPath(candidate) == ""
+		visible := present && a.typeNameIsVisible(candidate)
 		if a.lookupTrace != nil {
 			reads = appendLookupCandidate(reads, lookupCandidateRead{candidate, present, visible})
 		}

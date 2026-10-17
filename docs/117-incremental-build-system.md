@@ -1291,3 +1291,76 @@ queries, local shadowing, actual full-Result/AST parity, final inference ownersh
 string ownership, context interning/remapping, invalid UTF-8 and overflow paths.
 Broader root-suite failures and Stage1 diagnostics remain unresolved. No remote
 compute was used.
+
+### Tracked name-selection and ambiguity queries
+
+The next query layer now evaluates first-visible name selection through
+`incremental.Reader.Input`, including absent and inaccessible candidates. Current
+Analyzer metadata produces the complete ordered candidates, candidate visibility
+and enclosing-local-shadow state before a coherent input revision is committed.
+Old audit prefixes are request inventories, never publication authority. Effective
+namespace (including the function-name fallback), ordered imports, root label and
+lookup domain determine selection context; owner labels are not needed for an
+otherwise equal global selection. Enclosing-member queries additionally require a
+nonempty lexical-site token, whose source/function authority the producer must
+validate separately. Two sites with different local shadows cannot share a key.
+
+The selection value contains only qualified name and found status. Its tracked
+negative/visibility dependencies can change and rerun the child without rerunning
+parents when the selected name remains equal. Unread lower-priority candidates do
+not invalidate this domain. That property alone is insufficient for diagnostics:
+a new wildcard-import match can make a reference ambiguous while the selected
+name stays equal. A separate ambiguity query reads all relevant imported matches,
+including absent/hidden candidates and the namespace-member override, and returns
+the sorted diagnostic match set (or no ambiguity). Both query domains have distinct
+recipe/binding input keys; their present-nil symbol policies intentionally differ.
+The production ambiguity checker now shares a pure match collector with its prior
+behavior and still emits diagnostics at the current source position.
+
+Inputs, specs and products own encoded values, not Symbol/Type/AST pointers.
+Unknown domains, malformed/noncanonical recipes, invalid UTF-8, unsupported
+shadow contexts and oversized inputs fail without memoizing a result. Each encoded
+key/recipe/product is bounded to 64 KiB, imports/candidates to 4,096, and generated
+name bytes are preflighted before namespace/import concatenation. Counting
+potential duplicates conservatively can decline a query; it cannot alter ordinary
+resolution. This does not yet bound a session's total retained lookup graph:
+full context keys repeat in candidate input names, and obsolete inputs need an
+owner's admission/retirement/compaction policy before normal server integration.
+
+Tests compose selection and ambiguity children under a parent dependency query.
+They verify missing-to-present invalidation, visibility changes, equal-output
+pruning, unread suffixes, aliases, independent lexical shadows, malformed-input
+recovery and present-nil behavior in both domains. Fresh analyzers are also tested
+through declaration/body/return-type edits, removal and reverts. Name selection
+stays equal across a callee's i64-to-bool edit while fresh caller typing correctly
+reports the incompatible return: type/callee dependencies cannot be replaced by
+a name decision. Direct Scope/builtin precedence is another uncovered domain;
+the initial caller fixture exposed the existing builtin `target` record and was
+renamed to avoid that unrelated binding. Full identifier resolution also needs
+its enclosing-name AST rewrite, generic binder reads and fresh diagnostic inputs.
+
+The opt-in `TestLocalLookupSelectionProjectProbe` uses a saved lookup audit only
+as an inventory of requests. It rebuilds all query inputs from a fresh final
+Analyzer and compares each result against the current resolver. Across two passes
+it checked 57,175 selection requests per pass and 74,530 ambiguity results, skipping
+396 enclosing requests without validated lexical sites. The database executed
+17,654 unique queries on pass one and none additional on pass two; memo/validation
+counters increased. Selected names also differed from the original audit zero
+times on this frozen workload. This establishes final-declaration adapter parity
+and component reuse, not reconstruction of every original generic/local/proof
+context or full Result/backend parity. The probe's default semantic analysis still
+has 980 existing errors; no error-reduction or compiler-throughput claim follows.
+
+The kernels are not yet consumed by the compile server to skip general body
+analysis. Remaining integration requires coherent declaration publication, bounded
+lookup-session storage, direct Scope/binder and type/callee summary queries, and
+complete current-AST/live-analyzer result hydration. Native object/relink work
+and normal-client integration remain unfinished too.
+
+Validation: lookup-only full semantic suite plus the opt-in project probe passed
+in 55.779 s using a Go overlay that restored the two unrelated concurrent SMT
+pointer files to 397316c5. Focused isolated lookup/ambiguity/query/trace races passed
+in 1.620 s after the final strict serialization checks. The post-preflight project
+probe passed in 5.297 s with unchanged admitted coverage. The concurrent pointer
+edits were preserved and are outside this checkpoint's validation. Earlier broader
+root-suite failures and Stage1 diagnostics remain unresolved. All runs were local.
