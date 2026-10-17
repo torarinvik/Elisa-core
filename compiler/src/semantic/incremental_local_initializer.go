@@ -18,12 +18,16 @@ type primitiveLocalBinding struct {
 	local     *ast.VarDeclStmt
 }
 type primitiveLocalInitializer struct {
-	owner                   *ast.FuncDecl
-	declaration             *ast.VarDeclStmt
-	syntax                  *ast.FuncDecl
-	nodes                   []ast.Expr
-	bindings                []primitiveLocalBinding
-	source, expression, key string
+	owner                      *ast.FuncDecl
+	declaration                *ast.VarDeclStmt
+	syntax                     *ast.FuncDecl
+	nodes                      []ast.Expr
+	bindings                   []primitiveLocalBinding
+	source, expression, key    string
+	bindingOwn                 string
+	dependencies               []primitiveBindingDependency
+	localDependencies          []*ast.VarDeclStmt
+	bindingBytes, bindingEdges int
 }
 
 // Plans own only invocation-local syntax. Persistent queries contain strings.
@@ -73,7 +77,8 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		}
 		var consumed []primitiveLocalBinding
 		var params []ast.ParamDecl
-		dependencies := "local-consumed-values-v2"
+		var parameters, dependencies []primitiveBindingDependency
+		var localDependencies []*ast.VarDeclStmt
 		for i, binding := range bindings {
 			if !used[binding.name] {
 				continue
@@ -84,14 +89,21 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 			if binding.local == nil {
 				value = "parameter:" + strconv.Itoa(binding.parameter)
 			}
-			dependencies += "\x00" + strconv.Itoa(len(binding.name)) + ":" + binding.name + ":" + value
+			id := sha256.Sum256([]byte(binding.name))
+			dependency := primitiveBindingDependency{Identity: hex.EncodeToString(id[:]), Value: value}
+			if binding.local == nil {
+				parameters = append(parameters, dependency)
+			} else {
+				dependencies = append(dependencies, dependency)
+				localDependencies = append(localDependencies, binding.local)
+			}
 		}
 		syntax.Params = params
 		expression := primitiveExpressionDigest(syntax, nodes)
-		digest := sha256.Sum256([]byte(dependencies + "\x00" + strconv.Itoa(len(decl.Name)) + ":" + decl.Name + "\x00" + expression))
-		source := hex.EncodeToString(digest[:])
+		own := primitiveBindingOwn(decl.Name, expression, parameters)
+		source := primitiveBindingSource(own, dependencies)
 		values[decl.Name] = source
-		inputs = append(inputs, &primitiveLocalInitializer{owner: fn, declaration: decl, syntax: syntax, nodes: nodes, bindings: consumed, source: source, expression: expression})
+		inputs = append(inputs, &primitiveLocalInitializer{owner: fn, declaration: decl, syntax: syntax, nodes: nodes, bindings: consumed, source: source, expression: expression, bindingOwn: own, dependencies: dependencies, localDependencies: localDependencies})
 		names[decl.Name] = true
 		available = append(available, ast.ParamDecl{Name: decl.Name, Type: decl.Type})
 		bindings = append(bindings, primitiveLocalBinding{name: decl.Name, parameter: -1, local: decl})
@@ -156,8 +168,7 @@ func (a *Analyzer) analyzeLocalInitializer(n *ast.VarDeclStmt, expected Type) Ty
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	session := invocation.session
-	session.db.Apply(incremental.Change{Key: primitiveInput("function-source", input.key), Value: input.source})
-	query := incremental.Key{Kind: "primitive-return", Name: input.key}
+	query := incremental.Key{Kind: primitiveLocalTypingKind, Name: input.key}
 	encoded, err := session.db.Evaluate(context.Background(), query)
 	if err == nil && len(encoded) == len(input.nodes)+1 && validPrimitiveTyping(encoded) {
 		restored := replayPrimitiveParameterNodes(a, input.nodes, encoded[:len(input.nodes)])

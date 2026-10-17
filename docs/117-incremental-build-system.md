@@ -441,11 +441,11 @@ return typing and whole-function summaries remain fresh.
 Query identity combines qualified owner/arity with a digest of the unique local
 name. Unrelated insertion/removal therefore preserves existing owners. Inputs
 include declared name, arithmetic syntax and only the bindings actually read.
-Consumed locals contribute transitive initializer fingerprints; parameters
-contribute current signature ordinals. A consumed value edit invalidates dependent
-arithmetic even if its type stays unchanged. Unread preceding edits preserve hits.
-These dependency fingerprints are constructed from the checked straight-line
-syntax; they are not yet independent database value queries. Statement boundaries and fixed plain-i64 annotation presence are part of
+Consumed locals now contribute independent binding-source query results;
+parameters contribute current signature ordinals to the own-source digest. A
+consumed source edit invalidates dependent arithmetic even if its type stays
+unchanged. Unread preceding edits preserve hits. These are conservative source
+fingerprints, not semantic constant values or equivalence proofs. Statement boundaries and fixed plain-i64 annotation presence are part of
 the admitted grammar. Inferred/mutable/ghost/owner-bearing/explicit-binding or
 duplicate/shadow declarations, forward/global reads, calls and nested control
 flow take the cold path.
@@ -461,8 +461,8 @@ LocalInitializersChecked/Reused report actual initializer work separately from
 body counters. ReusedExpressionNodes excludes fresh identifier reads. Tests
 cover metadata parity, consumed/transitive invalidation, unrelated edits,
 removal/readmission, unsupported
-bindings and owner checks. The LLVM/native gate requires identical IR and exit
-42 then 63 after an edit. BenchmarkIncrementalLocalInitializers measures fresh
+bindings and owner checks. The LLVM/native gate requires identical IR and exits
+42, then 63 after a consumer edit, then 69 after an upstream-only producer edit. BenchmarkIncrementalLocalInitializers measures fresh
 parsing plus full analysis with 64 warm initializer queries; this is measurement
 coverage, not a broad performance claim.
 
@@ -508,3 +508,51 @@ Cold/warm LLVM text, published metadata and impl method summaries are compared.
 The parity oracle now maps the whole current AST bijectively, including impl
 syntax and declaration-visibility map keys. This expands usable environments;
 it is not a general call/trait dependency graph or an end-to-end speedup claim.
+
+
+### Explicit local binding-source query graph
+
+The database now evaluates `primitive-binding-source` queries from compact
+immutable recipes. Each reads only its own recipe input and calls Reader.Query
+for admitted producer bindings. `primitive-local-typing` depends on that source
+query plus configuration, operator absence and its captured typing product.
+The normal return-body query remains separate. Recipes use fixed-size digests
+and stable query keys, retaining no AST, symbol, scope or analyzer pointers.
+Parameter identities are inline signature data; they are not yet general type
+or callee interface queries.
+
+All selected recipes are installed atomically before semantic analysis. A
+producer taking a diagnostic/type/safety cold bypass therefore cannot expose a
+previous recipe to its consumer. For a producer outside admission, the consumer
+recipe carries its current immutable source fingerprint instead. For an admitted
+producer the fallback field is omitted entirely: an upstream edit leaves the
+consumer input byte-identical and propagates through the actual query edge.
+Admission of an equal fallback as a producer query can change dependencies while
+preserving the source result, pruning downstream typing reexecution.
+
+Missing/malformed recipes and query cycles produce cache misses; no successful
+partial result is published. Removal retires recipe/product inputs and all three
+query kinds, and history compaction preserves only current recipe inputs before
+cold repopulation. Byte rejection of a typing product does not invalidate the
+independent binding-source query used by other consumers.
+
+Besides 4096 admitted semantic units and 1 MiB of typing products, recipe admission
+has defaults of 64 MiB reserved encoding space and 65,536 direct dependency records.
+The 512-byte header/record bound and edge limit constrain the current format to
+about 34 MiB of reservation even before the byte limit; encoded recipes are smaller.
+These are current admission limits; recipes retain no AST memory.
+New pending recipes reserve resources only after retained recipes. Rejected units
+compile cold; consumers use the current compact fallback. Empty local-owner
+contexts are removed so recipe pressure does not starve otherwise useful bodies.
+RetainedBindingSourceBytes reports actual encoded bytes,
+RetainedBindingSourceEdges counts logical query/fallback records, and
+BindingSpecAdmissionMisses counts declined recipes.
+
+Integration tests mutate only an admitted producer database input, verify consumer
+recipe identity across ordinary edits, replace/detach consumed dependencies,
+exercise fallback/equal admission with evaluator-execution counters, reject/recover
+missing and cyclic inputs, enforce byte/edge budgets and retained-owner priority,
+and churn 4,100 rename revisions while checking immediate memo eviction and bounded
+history. Full metadata parity and native producer-only output changes qualify the
+wiring. General call interfaces, path facts, SCC summaries, module objects and
+persistent graph storage remain unfinished; no broad speedup is claimed here.

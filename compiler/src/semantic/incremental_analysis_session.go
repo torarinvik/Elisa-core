@@ -24,35 +24,40 @@ import (
 // summaries and CFGs stay fresh.
 // It is not a complete incremental compiler or a persistent whole-body cache.
 type IncrementalAnalysisSession struct {
-	mu                      sync.Mutex
-	db                      *incremental.Database
-	previous                map[incremental.Key]bool
-	productBytes            map[incremental.Key]int
-	retainedProductBytes    int
-	maxTrackedBodies        int // zero selects the production default; tests may lower it
-	maxRetainedProductBytes int // zero selects the production default; tests may lower it
-	stats                   IncrementalAnalysisStats
-	retiredQueries          int
+	mu                                           sync.Mutex
+	db                                           *incremental.Database
+	previous                                     map[incremental.Key]bool
+	productBytes                                 map[incremental.Key]int
+	retainedProductBytes                         int
+	maxTrackedBodies                             int // zero selects the production default; tests may lower it
+	maxRetainedProductBytes                      int // zero selects the production default; tests may lower it
+	maxBindingSourceBytes, maxBindingSourceEdges int
+	bindingSourceBytes, bindingSourceEdges       int
+	stats                                        IncrementalAnalysisStats
+	retiredQueries                               int
 }
 type IncrementalAnalysisStats struct {
-	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes uint64
-	PrimaryValueChecks, PrimaryExprChecks                                      uint64
-	PrimaryElementScans                                                        uint64
-	LocalInitializersChecked, LocalInitializersReused                          uint64
-	DatabaseResets                                                             uint64
-	ColdFallbackAnalyses                                                       uint64
-	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes     uint64
-	CapacityLimitedAnalyses, CapacitySkippedQueries                            uint64
-	Queries                                                                    incremental.Stats
+	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes         uint64
+	PrimaryValueChecks, PrimaryExprChecks                                              uint64
+	PrimaryElementScans                                                                uint64
+	LocalInitializersChecked, LocalInitializersReused                                  uint64
+	DatabaseResets                                                                     uint64
+	ColdFallbackAnalyses                                                               uint64
+	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes             uint64
+	CapacityLimitedAnalyses, CapacitySkippedQueries                                    uint64
+	BindingSpecAdmissionMisses, RetainedBindingSourceBytes, RetainedBindingSourceEdges uint64
+	Queries                                                                            incremental.Stats
 }
 type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
 type incrementalBodyInvocation struct {
-	session           *IncrementalAnalysisSession
-	keys              map[*ast.FuncDecl]string
-	changes           []incremental.Change
-	config, safety    string
-	tracking          bool
-	localInitializers map[*ast.VarDeclStmt]*primitiveLocalInitializer
+	session                                    *IncrementalAnalysisSession
+	keys                                       map[*ast.FuncDecl]string
+	changes                                    []incremental.Change
+	config, safety                             string
+	tracking                                   bool
+	localInitializers                          map[*ast.VarDeclStmt]*primitiveLocalInitializer
+	bindingReservedBytes, bindingReservedEdges int
+	bindingBytes, bindingEdges                 int
 }
 
 var primitiveConfigKey = incremental.Key{Kind: "semantic-config", Name: "primitive-return-v1"}
@@ -76,32 +81,17 @@ func NewIncrementalAnalysisSession() *IncrementalAnalysisSession {
 func (session *IncrementalAnalysisSession) resetDatabase() {
 	session.productBytes = make(map[incremental.Key]int)
 	session.retainedProductBytes = 0
-	session.db = incremental.New(map[string]incremental.Evaluator{"primitive-return": func(reader *incremental.Reader, name string) (string, error) {
-		source, _ := reader.Input(primitiveInput("function-source", name))
-		config, _ := reader.Input(primitiveConfigKey)
-		safety, _ := reader.Input(primitiveSafetyKey)
-		encoded, ok := reader.Input(primitiveInput("function-product", name))
-		if !ok || safety != primitiveOperatorAbsence {
-			return "", errPrimitiveProductMiss
-		}
-		var product primitiveBodyProduct
-		if err := json.Unmarshal([]byte(encoded), &product); err != nil {
-			return "", errPrimitiveProductMiss
-		}
-		if product.Source != source || product.Config != config || product.Safety != safety {
-			return "", errPrimitiveProductMiss
-		}
-		if !validPrimitiveTyping(product.Types) {
-			return "", errPrimitiveProductMiss
-		}
-		return product.Types, nil
-	}})
+	session.bindingSourceBytes = 0
+	session.bindingSourceEdges = 0
+	session.db = incremental.New(primitiveQueryEvaluators())
 }
 func (session *IncrementalAnalysisSession) Stats() IncrementalAnalysisStats {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	stats := session.stats
 	stats.RetainedProductBytes = uint64(session.retainedProductBytes)
+	stats.RetainedBindingSourceBytes = uint64(session.bindingSourceBytes)
+	stats.RetainedBindingSourceEdges = uint64(session.bindingSourceEdges)
 	if session.db != nil {
 		stats.Queries = session.db.Stats()
 	}
@@ -143,7 +133,7 @@ func (session *IncrementalAnalysisSession) storePrimitiveProduct(name string, en
 	retained := session.retainedProductBytes - oldSize + len(encoded)
 	if retained > session.productByteLimit() {
 		session.db.Apply(incremental.Change{Key: productKey, Remove: true})
-		session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: name})
+		session.evictPrimitiveTyping(name)
 		session.forgetPrimitiveProduct(name)
 		session.stats.ProductAdmissionMisses++
 		return false
@@ -285,9 +275,37 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 					skipped++
 					continue
 				}
+				if !invocation.reserveBinding(input) {
+					skipped++
+					continue
+				}
 				invocation.localInitializers[input.declaration] = input
 				current[localKey] = true
 				trimPending()
+			}
+			if len(locals) > 0 {
+				admitted := false
+				for _, input := range locals {
+					if input.bindingBytes > 0 {
+						admitted = true
+						break
+					}
+				}
+				if !admitted {
+					delete(invocation.keys, fn)
+					delete(current, key)
+					skipped++
+					kept := pendingLocals[:0]
+					for _, pending := range pendingLocals {
+						if pending.owner == fn {
+							skipped++
+						} else {
+							kept = append(kept, pending)
+						}
+					}
+					clear(pendingLocals[len(kept):])
+					pendingLocals = kept
+				}
 			}
 		}
 	}
@@ -301,23 +319,44 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			skipped++
 			continue
 		}
+		if invocation.keys[input.owner] == "" {
+			skipped++
+			continue
+		}
+		if !invocation.reserveBinding(input) {
+			skipped++
+			continue
+		}
 		invocation.localInitializers[input.declaration] = input
 		current[primitiveInput("function-source", input.key)] = true
 	}
 	clear(pendingLocals)
 	pendingLocals = nil
+	localOwners := map[*ast.FuncDecl]bool{}
+	for _, input := range invocation.localInitializers {
+		localOwners[input.owner] = true
+	}
+	for fn, name := range invocation.keys {
+		if len(fn.Body) > 1 && !localOwners[fn] {
+			delete(invocation.keys, fn)
+			delete(current, primitiveInput("function-source", name))
+			skipped++
+		}
+	}
 	collect(file.Decls, "", 0, false)
 	if skipped > 0 {
 		session.stats.CapacityLimitedAnalyses++
 		session.stats.CapacitySkippedQueries += uint64(skipped)
 	}
+	invocation.registerBindingRecipes()
 	var removed []incremental.Key
 	for key := range session.previous {
 		if !current[key] {
 			invocation.changes = append(invocation.changes, incremental.Change{Key: key, Remove: true})
 			invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveInput("function-product", key.Name), Remove: true})
+			invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveInput(primitiveBindingRecipeKind, key.Name), Remove: true})
 			session.forgetPrimitiveProduct(key.Name)
-			removed = append(removed, incremental.Key{Kind: "primitive-return", Name: key.Name})
+			removed = append(removed, incremental.Key{Kind: "primitive-return", Name: key.Name}, incremental.Key{Kind: primitiveLocalTypingKind, Name: key.Name}, incremental.Key{Kind: primitiveBindingSourceKind, Name: key.Name})
 		}
 	}
 	session.previous = current
@@ -325,7 +364,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	for _, key := range removed {
 		session.db.EvictQuery(key)
 	}
-	session.retiredQueries += len(removed)
+	session.retiredQueries += len(removed) / 3
 	// Removed products are released immediately. Periodically discard their
 	// small key tombstones as well; active program size is not capped here.
 	if session.retiredQueries > 4096 {
@@ -340,6 +379,8 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		session.retiredQueries = 0
 		session.stats.DatabaseResets++
 	}
+	session.bindingSourceBytes = invocation.bindingBytes
+	session.bindingSourceEdges = invocation.bindingEdges
 	if len(invocation.keys) == 0 {
 		session.stats.ColdFallbackAnalyses++
 		return AnalyzeWithOptions(file, options)

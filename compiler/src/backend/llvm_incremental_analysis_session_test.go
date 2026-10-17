@@ -149,7 +149,7 @@ def main() -> i64:
 		source string
 		status int
 		hits   uint64
-	}{{source, 42, 2}, {strings.Replace(source, "first * 2", "first * 3", 1), 63, 1}} {
+	}{{source, 42, 2}, {strings.Replace(source, "first * 2", "first * 3", 1), 63, 1}, {strings.Replace(strings.Replace(source, "first * 2", "first * 3", 1), "value + 1", "value + 3", 1), 69, 0}} {
 		before := session.Stats()
 		warm := analyze(step.source, true)
 		cold := analyze(step.source, false)
@@ -168,6 +168,11 @@ def main() -> i64:
 			t.Fatal("initializer reuse changed LLVM IR")
 		}
 		config := os.Getenv("LLVM_CONFIG")
+		if config == "" {
+			if discovered, err := exec.LookPath("llvm-config"); err == nil {
+				config = discovered
+			}
+		}
 		clang := ""
 		if config != "" {
 			if path, err := exec.LookPath(config); err == nil {
