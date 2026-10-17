@@ -65,7 +65,8 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 
 type sviewFrameGate struct {
 	a *Analyzer
-	// rebindable names the mutable scalar/view locals declared so far; only they may be assigned.
+	// rebindable records locals declared so far, with true only for safe local
+	// assignments. Keeping immutable names also preserves builtin shadowing.
 	rebindable map[string]bool
 }
 
@@ -113,7 +114,7 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 			g.rebindable[n.Name] = true
 		} else {
 			// An immutable binding shadows any same-named rebindable local.
-			delete(g.rebindable, n.Name)
+			g.rebindable[n.Name] = false
 		}
 		return true
 	case *ast.AssignStmt:
@@ -146,6 +147,29 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 			(n.Step == nil || g.expr(n.Step, 0)) && g.scoped(n.Body)
 	case *ast.BreakStmt, *ast.ContinueStmt:
 		return true
+	case *ast.ExprStmt:
+		call, ok := n.Expr.(*ast.CallExpr)
+		if !ok || call.Safe || call.SafeReceiver != nil || len(call.Args) != 1 {
+			return false
+		}
+		if g.a.isCompilerBuiltinHelperCall(call, "assert") || g.a.isCompilerBuiltinHelperCall(call, "ASSERT") {
+			return g.expr(call.Args[0], 0)
+		}
+		if g.a.exprTypes[call.Func] != nil {
+			// An analyzed user call must not be reclassified by its spelling.
+			return false
+		}
+		id, ok := call.Func.(*ast.Ident)
+		if !ok {
+			return false
+		}
+		if _, shadowed := g.rebindable[id.Name]; shadowed {
+			return false
+		}
+		// Whole-frame inspection can reach assertions not analyzed yet. Resolve
+		// those against the current scope and the lexical locals tracked above.
+		condition, builtin := g.a.assertedCondition(n.Expr)
+		return builtin && g.expr(condition, 0)
 	case *ast.ContractStmt:
 		// Loop `invariant` / `decreases` clauses only read (they are checked in place).
 		if n == nil {

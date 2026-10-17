@@ -38,6 +38,7 @@ func TestSMTRecordElementCongruence(t *testing.T) {
     requires i < table.rows.count
     ensure result == table.rows[i].owner.value
     selected: mutable RecordBinding = RecordBinding{owner: RecordOwner{value: 0}, serial: 0}
+    assert i < table.rows.count
     for step in 0..<1 |selected|:
         selected <- table.rows[i]
     return table.rows[i].owner.value
