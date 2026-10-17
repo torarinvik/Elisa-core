@@ -182,7 +182,7 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 			}
 			walk(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range syntaxWalkFields(v.Type()) {
 				if v.Field(i).CanInterface() {
 					walk(v.Field(i))
 				}

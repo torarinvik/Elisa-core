@@ -358,3 +358,22 @@ deletion after loading with successful native execution and a subsequent early
 hit, property-driver publication followed by a warm hit, snapshot immutability,
 and filename/authority invalidation. External foreign/runtime/tool inputs still
 need a coherent snapshot through their compilation and cache publication.
+
+
+### Reflection traversal overhead
+
+A local CPU profile of fresh parsing plus cold/warm analysis identified repeated
+reflection walks as remaining frontend work. Five syntax-oriented walkers now
+share an immutable per-struct field plan, visiting pointer/interface/composite
+fields while skipping scalar fields and lexer.Pos. Their callbacks and traversal
+order are unchanged, including lowered call links. This helper is only for
+walkers that already ignore maps and never inspect scalar/position callbacks.
+It does not authorize skipping semantic checks or reusing call effects.
+
+The differential traversal test compares visited pointer identity and order,
+including nested composite fields and lowered calls. Full semantic and query
+suites pass. On Apple M5, a synthetic 1024-node reflection walk measured median
+98.5 microseconds for all fields versus 58.0 microseconds for the field plan,
+with zero allocations for both (three one-second samples, variable system load).
+That is a walker microbenchmark, not an end-to-end compiler speedup claim.
+Cold/warm whole-analysis timings remain noisy and broader reuse is incomplete.

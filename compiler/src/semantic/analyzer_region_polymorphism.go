@@ -1693,7 +1693,7 @@ func (a *Analyzer) bodyCallsRegionPolyOutsideRegion(stmts []ast.Stmt) bool {
 			}
 			rec(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range syntaxWalkFields(v.Type()) {
 				rec(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:

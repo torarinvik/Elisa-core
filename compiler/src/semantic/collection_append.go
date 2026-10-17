@@ -72,7 +72,7 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 					walk(v.Elem(), env)
 				}
 			case reflect.Struct:
-				for i := 0; i < v.NumField(); i++ {
+				for _, i := range syntaxWalkFields(v.Type()) {
 					walk(v.Field(i), env)
 				}
 			case reflect.Slice, reflect.Array:
@@ -122,7 +122,7 @@ func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
 				walk(v.Elem(), env)
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range syntaxWalkFields(v.Type()) {
 				walk(v.Field(i), env)
 			}
 		case reflect.Slice, reflect.Array:
