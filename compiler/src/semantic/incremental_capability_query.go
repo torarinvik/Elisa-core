@@ -13,7 +13,7 @@ import (
 )
 
 const capabilityQueryKind = "mutable-borrow-capability-v1"
-const capabilityMaxNodes = semanticTraversalDepthLimit
+const capabilityMaxNodes = 4096
 const capabilityMaxEdges = 4096
 const capabilityMaxSourceBytes = 64 << 10
 const capabilityMaxProducts = 1024
@@ -131,13 +131,27 @@ func (c *capabilityQueryCache) store(source string, value bool) bool {
 
 // capabilityTypeProjection captures only resolved inputs of the nongeneric
 // capability predicate. It performs no substitution, lookup or diagnostics.
-// At most traversalLimit distinct nodes makes every simple DFS path, including
-// a closing cycle edge, fit the original traversal's depth bound in any map order.
+// Small graphs need no auxiliary proof. Large graphs are admitted only when
+// the SCC-weighted longest path bounds every DFS order below the old depth cap.
 func capabilityTypeProjection(root Type) (string, bool) {
+	var overflow bool
+	source, ok := capabilityTypeProjectionBounded(root, semanticTraversalDepthLimit, nil, &overflow)
+	if ok || !overflow {
+		return source, ok
+	}
+	graph := &capabilityDepthGraph{}
+	source, ok = capabilityTypeProjectionBounded(root, capabilityMaxNodes, graph, nil)
+	if !ok || !graph.withinDepth(semanticTraversalDepthLimit) {
+		return "", false
+	}
+	return source, true
+}
+func capabilityTypeProjectionBounded(root Type, maxNodes int, graph *capabilityDepthGraph, overflow *bool) (string, bool) {
 	var out capabilityWriter
 	out.tag(capabilityQueryKind)
 	seen := map[Type]int{}
 	edges := 0
+	parent := -1
 	var visit func(Type) bool
 	visit = func(typ Type) bool {
 		edges++
@@ -148,15 +162,35 @@ func capabilityTypeProjection(root Type) (string, bool) {
 			out.tag("nil")
 			return true
 		}
-		if old, ok := seen[typ]; ok {
+		id, exists := seen[typ]
+		if !exists {
+			id = len(seen)
+		}
+		if graph != nil {
+			if id >= graph.nodes {
+				graph.nodes = id + 1
+			}
+			if parent >= 0 {
+				graph.edges = append(graph.edges, [2]int{parent, id})
+			}
+		}
+		if exists {
 			out.tag("edge")
-			out.integer(old)
+			out.integer(id)
 			return true
 		}
-		if len(seen) >= capabilityMaxNodes {
+		if len(seen) >= maxNodes {
+			if overflow != nil {
+				*overflow = true
+			}
 			return false
 		}
-		seen[typ] = len(seen)
+		seen[typ] = id
+		if graph != nil {
+			prior := parent
+			parent = id
+			defer func() { parent = prior }()
+		}
 		out.tag("node")
 		out.integer(seen[typ])
 		fields := func(items map[string]Field) bool {

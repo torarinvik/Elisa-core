@@ -3,6 +3,7 @@
 package semantic
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -78,5 +79,33 @@ def update() -> State:
 	}
 	if session.Stats().CapabilityProductsReused == 0 {
 		t.Fatal("global aggregate history did not reuse capability products")
+	}
+}
+
+func TestCapabilityQueryWideAggregateFullResultParity(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("struct Wide:\n")
+	for i := 0; i < 400; i++ {
+		fmt.Fprintf(&source, "    field%d: i64?\n", i)
+	}
+	source.WriteString("def transfer(value: Wide) -> Wide:\n    return value\n\ndef relay(value: Wide) -> Wide:\n    return transfer(value)\n")
+	base := source.String()
+	edited := strings.Replace(base, "field0: i64?", "field0: mutable i64&", 1)
+	session := NewIncrementalAnalysisSession()
+	for step, text := range []string{base, base, edited, edited, base} {
+		before := session.Stats()
+		cold := Analyze(parseIncrementalSessionFile(t, text))
+		warm := session.Analyze(parseIncrementalSessionFile(t, text), AnalyzeOptions{})
+		assertIncrementalResultParity(t, cold, warm)
+		if len(cold.Errors()) != 0 {
+			t.Fatalf("fixture errors: %v", cold.Errors())
+		}
+		var overflow bool
+		if _, ok := capabilityTypeProjectionBounded(cold.NamedTypes["Wide"], semanticTraversalDepthLimit, nil, &overflow); ok || !overflow {
+			t.Fatal("fixture did not exercise larger type graph")
+		}
+		if (step == 1 || step == 3 || step == 4) && session.Stats().CapabilityProductsReused <= before.CapabilityProductsReused {
+			t.Fatalf("step%d did not reuse a large graph product", step)
+		}
 	}
 }

@@ -97,7 +97,7 @@ func TestCapabilityProjectionCoversPayloadsFlagsAndOwnership(t *testing.T) {
 func TestCapabilityProjectionDeclinesUnrepresentedAndOversizedInputs(t *testing.T) {
 	scalar := &BuiltinType{Name: "i64"}
 	deep := Type(scalar)
-	for i := 0; i < capabilityMaxNodes; i++ {
+	for i := 0; i < semanticTraversalDepthLimit; i++ {
 		deep = &OptionalType{Value: deep}
 	}
 	nilVariants := &EnumType{Variants: make([]*EnumVariant, capabilityMaxEdges+1)}

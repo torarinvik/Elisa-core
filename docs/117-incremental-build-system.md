@@ -1102,10 +1102,11 @@ Queries run only after declaration shapes freeze. A bounded invocation-local mem
 avoids repeatedly describing the same current Type pointer; it is discarded with
 the analyzer. Its 65,536-entry limit favors throughput over a smaller working set.
 
-The projection is bounded to 256 distinct nodes, 4,096 edges and 64 KiB, including
-collection entries and names. This conservative node limit ensures a retained
-answer cannot suppress the original depth-limit diagnostic in any traversal
-order. Incomplete traversals are never published. Recursive intermediate answers
+The projection is bounded to 4,096 distinct nodes, 4,096 edges and 64 KiB,
+including collection entries and names. Graphs above 256 nodes require the
+order-independent depth proof described below; smaller graphs keep the cheap
+node-count proof. A retained answer cannot suppress the original depth-limit
+diagnostic in any traversal order. Incomplete traversals are never published. Recursive intermediate answers
 are not cached: their seen-set context can make a negative result root-dependent.
 The session retains at most 1,024 products and 8 MiB of accounted payload; periodic
 rebuilds bound database input tombstones as well as live query entries. Trivial
@@ -1179,3 +1180,43 @@ inferred from that failing-project probe: an interim false value in that log
 represented a missing Result, not a proven inference cutoff. The probe now emits
 the flag only when a Result is available; the semantic completion fixtures check
 the flag directly. Broader root-suite failures remain outside this checkpoint.
+
+### Depth-safe reuse of wide type graphs
+
+The first type-query admission limit conflated total graph size with recursive
+path depth. Wide types can now reuse capability products even above 256 nodes.
+The common small-graph projection remains the first pass. Only a node-budget
+miss retries with the larger bounded projection and records all edges, including
+references to previously visited nodes. Strongly connected components are then
+weighted by their node counts. A longest-path sum in the condensation DAG bounds
+every simple DFS path through the original graph; requiring that sum to fit the
+semantic depth limit also accounts for a closing/seen edge, because the original
+classifier checks depth before its seen set. Large recursive components and deep
+alternative routes to an already visited shared tail remain cold.
+
+A successful raw traversal by itself does not establish this property: another
+map iteration order could reach a depth-limited branch before finding a mutable
+capability. Such incomplete/potentially incomplete inputs still are not memoized
+locally or retained across analyses. Generic substitution inputs remain outside
+this projection. The larger proof does not authorize caching generic fallback
+answers or recursive intermediate results.
+
+Tests cover fresh wide graphs through mutable/readonly/revert histories, a deep
+branch beside a short-circuiting mutable sibling, a long prefix feeding an
+already projected shared tail, and wide graphs sharing a small recursive
+component. An independent exhaustive simple-path oracle checks 500 seeded small
+random graphs; large DAG/chain/cycle fixtures exercise the linear SCC algorithm.
+The frozen parser probe retains the same diagnostic digest and expands unique
+products from 206 to 208. Per repeated analysis local hits rise from 59,409 to
+59,458, retained hits from 4,648 to 4,650, and projection declines fall from 556 to
+554. Retained payload grows from 652,286 to 702,566 accounted bytes. This is a
+small real coverage gain, not evidence of a whole-project throughput improvement.
+General function/callee products and isolated analyzer-state hydration remain the
+primary architectural work.
+
+Validation: full semantic suite passed in 50.930 s; focused capability/depth race
+checks passed in 1.568 s; frozen parser diagnostic parity passed in 29.155 s. A
+400-field source fixture additionally compares complete Results and current AST
+annotations across readonly/mutable edits, repeats and reverts (0.436 s); it
+asserts that the resolved graph actually exceeds the small-projection gate.
+Earlier broader root-suite failures and Stage1 errors remain unresolved.
