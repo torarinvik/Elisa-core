@@ -59,7 +59,10 @@ type IncrementalAnalysisStats struct {
 	CapabilityRetainedBytes                                                                                                                                  uint64
 	CapabilityQueries                                                                                                                                        incremental.Stats
 }
-type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
+type primitiveBodyProduct struct {
+	Source, Config, Safety, Types string
+	Class                         string `json:",omitempty"`
+}
 type incrementalBodyInvocation struct {
 	lexical                                    *lexicalReadInvocation
 	session                                    *IncrementalAnalysisSession
@@ -400,6 +403,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		if !current[key] {
 			invocation.changes = append(invocation.changes, incremental.Change{Key: key, Remove: true})
 			invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveInput("function-product", key.Name), Remove: true})
+			invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveInput("predicate-safety", key.Name), Remove: true})
 			invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveInput(primitiveBindingRecipeKind, key.Name), Remove: true})
 			session.forgetPrimitiveProduct(key.Name)
 			removed = append(removed, incremental.Key{Kind: "primitive-return", Name: key.Name}, incremental.Key{Kind: primitiveLocalTypingKind, Name: key.Name}, incremental.Key{Kind: primitiveBindingSourceKind, Name: key.Name})
@@ -502,6 +506,13 @@ const primitiveSourceByteBudget = 1024 * 1024
 var primitiveSeenPool = sync.Pool{New: func() any { return make(map[ast.Expr]bool, 256) }}
 
 func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
+	if nodes, ok := primitiveI64ReturnExpressions(fn); ok {
+		return nodes, true
+	}
+	return predicateReturnExpressions(fn)
+}
+
+func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	stmt, ok := primitiveReturnHeader(fn)
 	if !ok || len(fn.Name) > primitiveSourceByteBudget {
 		return nil, false
@@ -584,13 +595,21 @@ func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 // values are length-prefixed, and literal spelling/hex mode remain inputs.
 func primitiveExpressionDigest(fn *ast.FuncDecl, nodes []ast.Expr) string {
 	data := make([]byte, 0, len(nodes)*12+len(fn.Name)+32)
-	data = append(data, "parameter-i64-typing-v2\x00"...)
+	data = append(data, "canonical-scalar-typing-v3\x00"...)
 	data = binary.LittleEndian.AppendUint64(data, uint64(len(fn.Name)))
 	data = append(data, fn.Name...)
+	returnName := predicateBuiltinSyntaxName(fn.ReturnType)
+	data = binary.LittleEndian.AppendUint64(data, uint64(len(returnName)))
+	data = append(data, returnName...)
+
 	data = binary.LittleEndian.AppendUint64(data, uint64(len(fn.Params)))
 	for _, param := range fn.Params {
 		data = binary.LittleEndian.AppendUint64(data, uint64(len(param.Name)))
 		data = append(data, param.Name...)
+		typeName := predicateBuiltinSyntaxName(param.Type)
+		data = binary.LittleEndian.AppendUint64(data, uint64(len(typeName)))
+		data = append(data, typeName...)
+
 	}
 	for _, expr := range nodes {
 		switch node := expr.(type) {
@@ -605,6 +624,17 @@ func primitiveExpressionDigest(fn *ast.FuncDecl, nodes []ast.Expr) string {
 			} else {
 				data = append(data, 0)
 			}
+			data = binary.LittleEndian.AppendUint64(data, uint64(len(node.Value)))
+			data = append(data, node.Value...)
+		case *ast.BoolLit:
+			data = append(data, 'T')
+			if node.Value {
+				data = append(data, 1)
+			} else {
+				data = append(data, 0)
+			}
+		case *ast.CharLit:
+			data = append(data, 'C')
 			data = binary.LittleEndian.AppendUint64(data, uint64(len(node.Value)))
 			data = append(data, node.Value...)
 		case *ast.ParenExpr:
@@ -662,9 +692,34 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	} // validate current lookup absence at the reuse boundary
 	currentReturn, returnOK := a.currentReturn.(*BuiltinType)
 	nodes, eligible := primitiveReturnExpressions(fn)
-	if !indexed || !eligible || !primitiveCurrentParameterBindings(a, fn) || invocation.safety != primitiveOperatorAbsence || !returnOK || currentReturn.Name != "i64" || currentReturn != a.namedTypes["i64"] {
+	predicate := predicateBuiltinSyntaxName(fn.ReturnType) == "bool"
+	returnName := "i64"
+	bindingsReady := primitiveCurrentParameterBindings(a, fn)
+	safetyReady := invocation.safety == primitiveOperatorAbsence
+	if predicate {
+		returnName = "bool"
+		if eligible {
+			bindingsReady = predicateCurrentBindingsAndOperators(a, fn, nodes)
+			safetyReady = bindingsReady
+			safety := "blocked"
+			if safetyReady {
+				safety = predicateOperatorAbsence
+			}
+			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("predicate-safety", key), Value: safety})
+		} else {
+			bindingsReady, safetyReady = false, false
+			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("predicate-safety", key), Remove: true})
+		}
+	} else {
+		invocation.session.db.Apply(incremental.Change{Key: primitiveInput("predicate-safety", key), Remove: true})
+	}
+	if !eligible || !bindingsReady || !safetyReady || !returnOK || currentReturn.Name != returnName || currentReturn != a.namedTypes[returnName] {
 		if indexed && !eligible {
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-source", key), Remove: true}, incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
+			invocation.session.forgetPrimitiveProduct(key)
+			invocation.session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: key})
+		} else if predicate && (!bindingsReady || !safetyReady) {
+			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
 			invocation.session.forgetPrimitiveProduct(key)
 			invocation.session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: key})
 		}
@@ -679,7 +734,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	query := incremental.Key{Kind: "primitive-return", Name: key}
 	encoded, err := session.db.Evaluate(context.Background(), query)
 	if err == nil && encoded != "" {
-		if len(encoded) == len(nodes) && validPrimitiveTyping(encoded) {
+		if len(encoded) == len(nodes) && ((!predicate && validPrimitiveTyping(encoded)) || (predicate && validPredicateTyping(encoded))) {
 			restored := replayPrimitiveParameterNodes(a, nodes, encoded)
 			session.stats.PrimaryBodiesReused++
 			session.stats.ReusedExpressionNodes += uint64(restored)
@@ -700,6 +755,9 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	if len(a.diagnostics) != diagnosticsBefore {
 		return
 	}
+	if predicate && !safetyReady {
+		return
+	}
 	currentNodes, valid := primitiveReturnExpressions(fn)
 	if !valid || primitiveExpressionDigest(fn, currentNodes) != source {
 		return
@@ -711,6 +769,14 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		if !ok || (!parameter && a.exprFacts[expr].HasAnyFacts()) || typ != a.namedTypes[typ.Name] {
 			return
 		}
+		if predicate {
+			tag := predicateTypeTag(typ.Name)
+			if tag == 0 {
+				return
+			}
+			types[i] = tag
+			continue
+		}
 		switch typ.Name {
 		case "int":
 			types[i] = 'n'
@@ -720,7 +786,15 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 			return
 		}
 	}
-	product, _ := json.Marshal(primitiveBodyProduct{Source: source, Config: invocation.config, Safety: invocation.safety, Types: string(types)})
+	value := primitiveBodyProduct{Source: source, Config: invocation.config, Safety: invocation.safety, Types: string(types)}
+	if predicate {
+		value.Class = "predicate-v1"
+		value.Safety = predicateOperatorAbsence
+		if !validPredicateTyping(value.Types) {
+			return
+		}
+	}
+	product, _ := json.Marshal(value)
 	if session.storePrimitiveProduct(key, string(product)) {
 		_, _ = session.db.Evaluate(context.Background(), query)
 	}

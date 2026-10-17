@@ -200,3 +200,31 @@ func (tr *smtTranslator) containerViewElement(base, k string) (arr, lo, length s
 	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+length+" 0))\n")
 	return "(" + data + " " + k + ")", "(" + start + " " + k + ")", length
 }
+
+// indexedSViewCallArray binds a sview read from a stable container as a
+// zero-based byte array for a verified read-only call. The container theory
+// supplies the element's backing bytes, start offset, and length as functions
+// of the same base/index pair used by caller-side reads. Normalize that window
+// through sviewWindowArrayTerm so call ensures and caller facts share contents.
+func (tr *smtTranslator) indexedSViewCallArray(expr ast.Expr, env map[string]string) (array, length string, ok bool) {
+	if tr == nil || tr.a == nil || tr.bindingCallee == nil || tr.a.currentFuncDecl == nil {
+		return "", "", false
+	}
+	// A stable container preserves its view headers. Also require the caller and
+	// callee bodies to avoid writes while the modeled byte window is in use; a
+	// view header alone does not make its backing bytes immutable.
+	if !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) ||
+		!tr.a.sviewFrameCallBodyWriteFree(tr.bindingCallee, len(tr.bindingCallee.Params)) {
+		return "", "", false
+	}
+	base, index, ok := tr.containerViewIndex(expr, env)
+	if !ok {
+		return "", "", false
+	}
+	backing, offset, length := tr.containerViewElement(base, index)
+	array, ok = tr.sviewWindowArrayTerm(backing, offset, length)
+	if !ok {
+		return "", "", false
+	}
+	return array, length, true
+}

@@ -41,7 +41,18 @@ func (tr *smtTranslator) sviewSliceLocalArrayTerm(id *ast.Ident, env map[string]
 // pointer identity, and retains the length-only fallback when the base frame is unavailable.
 func (tr *smtTranslator) sviewSliceArrayTerm(slice *ast.SliceExpr, env map[string]string) (string, bool) {
 	base, offset, length, ok := tr.sviewContentParts(slice, env)
-	if !ok || smtTermMentionsQuantifierBinder(base) || smtTermMentionsQuantifierBinder(offset) || smtTermMentionsQuantifierBinder(length) {
+	if !ok {
+		return "", false
+	}
+	return tr.sviewWindowArrayTerm(base, offset, length)
+}
+
+// sviewWindowArrayTerm gives a view a zero-based byte array while preserving
+// its relationship to the source backing array. It is shared by source slices
+// and verified projections such as an sview stored in a stable container.
+func (tr *smtTranslator) sviewWindowArrayTerm(base, offset, length string) (string, bool) {
+	if base == "" || offset == "" || length == "" || smtTermMentionsQuantifierBinder(base) ||
+		smtTermMentionsQuantifierBinder(offset) || smtTermMentionsQuantifierBinder(length) {
 		return "", false
 	}
 	key := smtSViewSliceKey{base, offset, length}

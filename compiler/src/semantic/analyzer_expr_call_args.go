@@ -369,9 +369,11 @@ func (a *Analyzer) rewriteBoundTypeParamMethodCall(expr *ast.CallExpr, fieldExpr
 	// concrete impl. The protocol method's `requires`/params live on its bodiless decl. The
 	// prepended args (receiver first) align positionally with the protocol method's params.
 	if protoDecl := method.Decl; protoDecl != nil && len(protoDecl.Requires) > 0 {
-		a.checkCalleeRequires(expr, iface.Name+"."+fieldExpr.Field, protoDecl.Requires, protoDecl.Params, expr.Args)
+		// Protocol declarations are extern-shaped contract records without a function body, so they
+		// cannot authorize the indexed-SView read-only body projection.
+		a.checkCalleeRequires(expr, iface.Name+"."+fieldExpr.Field, protoDecl.Requires, protoDecl.Params, expr.Args, nil)
 	} else if def := method.Default; def != nil && len(def.Requires) > 0 {
-		a.checkCalleeRequires(expr, iface.Name+"."+fieldExpr.Field, def.Requires, def.Params, expr.Args)
+		a.checkCalleeRequires(expr, iface.Name+"."+fieldExpr.Field, def.Requires, def.Params, expr.Args, def)
 	}
 	return extensionMethodCallRewriteApplied
 }

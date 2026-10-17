@@ -32,12 +32,13 @@ func (tr *smtTranslator) pointerLiteralOperand(expr ast.Expr, env map[string]str
 	return expr
 }
 
-// pointerIdentityReadStable permits reflexivity of builtin element addresses.
-// Computing an address reads the container header and index but not the element.
-// Keep this local to pointer equality: it does not make an indexed value safe to
-// re-evaluate after later constructor arguments have mutated its storage or index.
+// pointerIdentityReadStable permits reflexivity of stable pointer reads and
+// builtin element addresses. Computing an address reads the container header
+// and index but not the element. Keep call support local to pointer equality:
+// it does not make an indexed value safe to re-evaluate after later constructor
+// arguments have mutated its storage or index.
 func (tr *smtTranslator) pointerIdentityReadStable(expr ast.Expr) bool {
-	if sideEffectFreeExpr(expr, 0) {
+	if tr.pointerIdentityStableExpr(expr, 0) {
 		return true
 	}
 	address, ok := stripOptimizationParens(expr).(*ast.AddrOfExpr)
@@ -46,7 +47,7 @@ func (tr *smtTranslator) pointerIdentityReadStable(expr ast.Expr) bool {
 	}
 	index, ok := stripOptimizationParens(address.Operand).(*ast.IndexExpr)
 	if !ok || index == nil || index.Index2 != nil || index.Fallback != nil || index.AsOverlayCall != nil ||
-		!sideEffectFreeExpr(index.Object, 0) || !sideEffectFreeExpr(index.Index, 0) {
+		!tr.pointerIdentityStableExpr(index.Object, 0) || !tr.pointerIdentityStableExpr(index.Index, 0) {
 		return false
 	}
 	typ := tr.a.exprTypes[index.Object]
@@ -61,6 +62,113 @@ func (tr *smtTranslator) pointerIdentityReadStable(expr ast.Expr) bool {
 		return integer
 	}
 	return false
+}
+
+// pointerIdentityStableExpr extends the ordinary side-effect-free expression
+// whitelist only for calls whose completed bodies are proven write-free. This
+// is deliberately local to pointer identity: a safe call may be repeated while
+// comparing the same pointer expression, but it is not globally re-evaluable
+// for constructor projection or other proof translations.
+func (tr *smtTranslator) pointerIdentityStableExpr(expr ast.Expr, depth int) bool {
+	if expr == nil || depth > 64 || tr.a == nil {
+		return false
+	}
+	if sideEffectFreeExpr(expr, 0) {
+		return true
+	}
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.ParenExpr:
+		return tr.pointerIdentityStableExpr(n.Inner, depth+1)
+	case *ast.UnaryExpr:
+		return n.LoweredCall == nil && tr.pointerIdentityStableExpr(n.Operand, depth+1)
+	case *ast.BinaryExpr:
+		return n.LoweredCall == nil && tr.pointerIdentityStableExpr(n.Left, depth+1) && tr.pointerIdentityStableExpr(n.Right, depth+1)
+	case *ast.TernaryExpr:
+		return tr.pointerIdentityStableExpr(n.Cond, depth+1) &&
+			tr.pointerIdentityStableExpr(n.Value, depth+1) && tr.pointerIdentityStableExpr(n.Alt, depth+1)
+	case *ast.CastExpr:
+		return tr.pointerIdentityStableExpr(n.Operand, depth+1)
+	case *ast.FieldExpr:
+		return tr.pointerIdentityStableExpr(n.Object, depth+1)
+	case *ast.CallExpr:
+		return tr.pointerIdentityCallStable(n, depth+1)
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			if !tr.pointerIdentityStableExpr(elem, depth+1) {
+				return false
+			}
+		}
+		return true
+	case *ast.StructLitExpr:
+		if n.CopyBase != nil || len(n.Spreads) != 0 {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !tr.pointerIdentityStableExpr(arg, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func pointerIdentityStableValueType(typ Type) bool {
+	if typ == nil {
+		return false
+	}
+	if _, isRef := typ.(*RefType); isRef {
+		return false
+	}
+	if _, isView := typ.(*SViewType); isView {
+		return true
+	}
+	if IsBoolType(typ) {
+		return true
+	}
+	_, _, integer := smtIntWidthSign(typ)
+	return integer && !IsFloatType(typ)
+}
+
+func pointerIdentityIntegralValueType(typ Type) bool {
+	if typ == nil {
+		return false
+	}
+	if _, isRef := typ.(*RefType); isRef {
+		return false
+	}
+	_, _, integer := smtIntWidthSign(typ)
+	return integer && !IsFloatType(typ)
+}
+
+func (tr *smtTranslator) pointerIdentityCallStable(call *ast.CallExpr, depth int) bool {
+	if call == nil || depth > 64 || tr.a == nil || tr.a.shadowingActive() {
+		return false
+	}
+	if tr.a.ghostCallIsValueConversion(call) {
+		field, ok := call.Func.(*ast.FieldExpr)
+		return ok && field != nil && tr.pointerIdentityStableExpr(field.Object, depth+1)
+	}
+	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	if !direct || decl == nil || decl == tr.a.currentFuncDecl || decl.IsLemma || decl.IsGhost ||
+		len(call.Args) != len(decl.Params) || !tr.a.sviewFrameCallBodyWriteFree(decl, len(call.Args)) {
+		return false
+	}
+	sym, found := tr.a.symbolForFuncDecl(decl)
+	if !found || sym == nil {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil || !pointerIdentityIntegralValueType(fn.Return) || len(fn.Params) != len(call.Args) {
+		return false
+	}
+	for i, arg := range call.Args {
+		if decl.Params[i].Mutable || tr.a.paramIsMutable(decl.Params[i]) ||
+			!pointerIdentityStableValueType(fn.Params[i]) || !tr.pointerIdentityStableExpr(arg, depth+1) {
+			return false
+		}
+	}
+	return true
 }
 
 func (tr *smtTranslator) samePointerIdentityExpr(left, right ast.Expr) bool {

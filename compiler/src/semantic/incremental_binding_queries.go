@@ -55,14 +55,14 @@ func primitiveQueryEvaluators() map[string]incremental.Evaluator {
 			if !ok {
 				return "", errPrimitiveProductMiss
 			}
-			return evaluatePrimitiveProduct(reader, name, source)
+			return evaluatePrimitiveProduct(reader, name, source, true)
 		},
 		primitiveLocalTypingKind: func(reader *incremental.Reader, name string) (string, error) {
 			source, err := reader.Query(incremental.Key{Kind: primitiveBindingSourceKind, Name: name})
 			if err != nil {
 				return "", err
 			}
-			return evaluatePrimitiveProduct(reader, name, source)
+			return evaluatePrimitiveProduct(reader, name, source, false)
 		},
 		primitiveBindingSourceKind: func(reader *incremental.Reader, name string) (string, error) {
 			encoded, ok := reader.Input(primitiveInput(primitiveBindingRecipeKind, name))
@@ -96,15 +96,29 @@ func primitiveQueryEvaluators() map[string]incremental.Evaluator {
 	}
 }
 
-func evaluatePrimitiveProduct(reader *incremental.Reader, name, source string) (string, error) {
+func evaluatePrimitiveProduct(reader *incremental.Reader, name, source string, allowPredicate bool) (string, error) {
 	config, _ := reader.Input(primitiveConfigKey)
-	safety, _ := reader.Input(primitiveSafetyKey)
 	encoded, ok := reader.Input(primitiveInput("function-product", name))
-	if !ok || safety != primitiveOperatorAbsence {
+	if !ok {
 		return "", errPrimitiveProductMiss
 	}
 	var product primitiveBodyProduct
-	if json.Unmarshal([]byte(encoded), &product) != nil || product.Source != source || product.Config != config || product.Safety != safety || !validPrimitiveTyping(product.Types) {
+	if json.Unmarshal([]byte(encoded), &product) != nil || product.Source != source || product.Config != config {
+		return "", errPrimitiveProductMiss
+	}
+	safetyKey := primitiveSafetyKey
+	expected := primitiveOperatorAbsence
+	if product.Class == "predicate-v1" && allowPredicate {
+		safetyKey = primitiveInput("predicate-safety", name)
+		expected = predicateOperatorAbsence
+		if !validPredicateTyping(product.Types) {
+			return "", errPrimitiveProductMiss
+		}
+	} else if product.Class != "" || !validPrimitiveTyping(product.Types) {
+		return "", errPrimitiveProductMiss
+	}
+	safety, _ := reader.Input(safetyKey)
+	if safety != expected || product.Safety != safety {
 		return "", errPrimitiveProductMiss
 	}
 	return product.Types, nil

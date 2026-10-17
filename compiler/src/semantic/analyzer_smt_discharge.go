@@ -739,23 +739,28 @@ func (a *Analyzer) trySMTProveRequiresWithPath(clause ast.Expr, subst map[string
 // binding that recursive obligations use. The retry receives the callee's full formal list, so a
 // formal the clause mentions but the call does not bind still declines rather than resolving to a
 // same-named caller variable; unmentioned formals cannot affect the clause's value.
-func (a *Analyzer) trySMTProveCallRequires(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, params []ast.ParamDecl) (bool, string) {
-	proven, counterexample, envDeclined := a.trySMTProveRequiresCore(clause, subst, path)
+func (a *Analyzer) trySMTProveCallRequires(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, params []ast.ParamDecl, callee *ast.FuncDecl) (bool, string) {
+	proven, counterexample, envDeclined := a.trySMTProveRequiresCoreWithCallee(clause, subst, path, callee)
 	if proven || !envDeclined || len(params) == 0 {
 		return proven, counterexample
 	}
-	proven, counterexample, _ = a.trySMTProveRequiresCore(clause, subst, path, params)
+	proven, counterexample, _ = a.trySMTProveRequiresCoreWithCallee(clause, subst, path, callee, params)
 	return proven, counterexample
 }
 
 // trySMTProveRequiresCore is trySMTProveRequiresWithPath that also reports whether the argument
 // binding (not the solver) declined.
 func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, formalParamSets ...[]ast.ParamDecl) (bool, string, bool) {
+	return a.trySMTProveRequiresCoreWithCallee(clause, subst, path, nil, formalParamSets...)
+}
+
+func (a *Analyzer) trySMTProveRequiresCoreWithCallee(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, callee *ast.FuncDecl, formalParamSets ...[]ast.ParamDecl) (bool, string, bool) {
 	solver := a.openSMT()
 	if solver == nil || clause == nil {
 		return false, "", false
 	}
 	tr := a.newSMTTranslator(nil)
+	tr.bindingCallee = callee
 	// Substitution values may be expressions that have not yet reached ordinary body analysis (notably
 	// a pure return expression while checking its `ensure`). Type them before translating so arithmetic
 	// keeps its machine width and is modeled with wrapping semantics when necessary.
@@ -1229,6 +1234,10 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 		}
 		subst[param.Name] = args[i]
 	}
+	// Call-argument binding can use callee-specific frame and formal metadata. In
+	// particular, an indexed `darray[sview]` argument is only projected as a
+	// stable byte window when the direct callee is known to be write-free.
+	tr.bindingCallee = decl
 	calleeEnv, ok := a.smtEnvForCallSubst(tr, subst)
 	if !ok {
 		return false
@@ -1373,6 +1382,19 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	}
 	argType := a.exprTypes[argExpr]
 	if argType == nil {
+		// Loop-invariant preservation runs before the loop body has gone
+		// through ordinary expression analysis. Recover a plain darray
+		// element's type from its container so an indexed `darray[sview]`
+		// argument can still reach indexedSViewCallArray in that earlier
+		// proof phase. The projection itself remains gated by stable-container
+		// and read-only-frame checks below.
+		if idx, isIndex := stripOptimizationParens(argExpr).(*ast.IndexExpr); isIndex && idx != nil &&
+			idx.Index2 == nil && idx.Fallback == nil && !idx.LegacyElseFallback &&
+			idx.AsSpecialize == nil && idx.AsOverlayCall == nil && idx.AsBuiltinDictGet == nil {
+			argType = tr.containerElementType(idx.Object)
+		}
+	}
+	if argType == nil {
 		if id, isIdent := stripOptimizationParens(argExpr).(*ast.Ident); isIdent && id != nil && a.currentScope != nil {
 			if sym, found := a.currentScope.Lookup(id.Name); found && sym != nil {
 				argType = sym.Type
@@ -1383,6 +1405,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		// Carry the argument's string identity to the callee formal by explicit binding (never by
 		// name), so the callee's literal-equality contracts speak about the caller's string.
 		id, idOK := tr.stringIDTerm(argExpr, argEnv)
+		if arr, length, ok := tr.indexedSViewCallArray(argExpr, argEnv); ok {
+			env[name] = arr
+			env[name+".len"] = length
+			if idOK {
+				bindSMTStringID(env, name, id)
+			}
+			return true
+		}
 		// An immutable sview formal can be bound as an SMT byte array only when the enclosing
 		// expression context passes immutableSviewArrayParameter's read-only-function gate.
 		if arr, ok := tr.arrayTermEnv(argExpr, argEnv); ok {
@@ -3300,6 +3330,13 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return "", false
 			}
 			return "(mod " + inner + " 256)", true
+		}
+		// `char` is represented as a signed 64-bit value. Widening it to an
+		// equal-width signed integer is therefore the identity, including inside
+		// substituted callee contracts where generic width lookup intentionally
+		// does not borrow a same-named caller type.
+		if source, ok := stripRefForBounds(sourceType).(*BuiltinType); ok && source != nil && source.Name == "char" && dok && dsign && dbits == 64 {
+			return tr.termEnv(n.Operand, env)
 		}
 		if !sok || !dok {
 			return "", false

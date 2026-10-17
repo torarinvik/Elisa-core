@@ -112,10 +112,7 @@ func replayPrimitiveParameterNodes(a *Analyzer, nodes []ast.Expr, types string) 
 		if _, parameter := expr.(*ast.Ident); parameter {
 			a.analyzeExpr(expr)
 		} else {
-			name := "int"
-			if types[index] == 'i' {
-				name = "i64"
-			}
+			name := predicateTypeName(types[index])
 			a.recordAnalyzedExprType(expr, a.namedTypes[name])
 			restored++
 		}

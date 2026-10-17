@@ -106,7 +106,8 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 	}
 	// Boundary preconditions, including extern FFI contracts, are checked at every call site so the
 	// caller cannot hand a callee an out-of-domain argument.
-	a.checkCalleeRequires(call, scheme.DeclName, scheme.Requires, scheme.Params, args)
+	callee, _ := a.resolveDirectCallFuncDecl(call)
+	a.checkCalleeRequires(call, scheme.DeclName, scheme.Requires, scheme.Params, args, callee)
 	a.checkCalleeParamWhereRefinements(call, scheme.DeclName, scheme.Params, args)
 	// SpecSignature-based where discharge: handles imported/cross-module callees whose AST is
 	// unavailable by reading the predicate from the canonical SpecSignature.ParamPredicates.
@@ -134,7 +135,7 @@ func (a *Analyzer) resolveDirectCallExternFuncDecl(call *ast.CallExpr) (*ast.Ext
 
 // checkCalleeRequires discharges/checks a callee's precondition clauses against the caller's
 // arguments — shared by ordinary and extern (FFI boundary) calls.
-func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requires []ast.Expr, params []ast.ParamDecl, args []ast.Expr) {
+func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requires []ast.Expr, params []ast.ParamDecl, args []ast.Expr, callee *ast.FuncDecl) {
 	// Map each callee parameter name to the caller's argument expression. A param with no
 	// corresponding argument (variadic tail, defaulted) is simply absent — a clause that mentions it
 	// then leaves the fragment and declines.
@@ -167,7 +168,7 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			// SMT fallback (docs/90 brick 3): the linear clause prover declined, but the solver may
 			// still discharge a non-linear precondition (e.g. `requires lo * 2 <= cap`) under the
 			// caller's facts. Only `unsat` of the negation concludes — sound, off unless -smt.
-			proven, counterexample := a.trySMTProveCallRequires(req, subst, callPath, params)
+			proven, counterexample := a.trySMTProveCallRequires(req, subst, callPath, params, callee)
 			if proven {
 				a.recordProof(call.Pos(), subject, clauseName, ProofProvenSMT)
 				a.recordRequiresReport(declName, req, call.Pos(), true)
