@@ -17,7 +17,8 @@ import (
 //     rebinding such a slot writes no shared memory;
 //   - assignments `x <- v` / `x += v` only to those mutable scalar/view locals;
 //   - if/elif/else, while (condition and body write-free), return, read-only contracts, and
-//     Abort.Panic / Unsafe.UncheckedIndex blocks (the latter permits a load, never a write);
+//     Abort.Panic / Unsafe.UncheckedIndex / Unsafe.AssumeProgress blocks, with their bodies
+//     still checked for writes and unknown calls;
 //   - expressions: identifiers, literals, operators without overloads, ternaries, non-optional
 //     field reads, view slices and indexing, plain integer casts, tuples, noncapturing
 //     value blocks checked under these same rules, and calls to callees
@@ -82,7 +83,7 @@ func sviewFrameReadPermission(permission ast.PermissionRef) bool {
 		return false
 	}
 	return (permission.Name == "Abort" && permission.Member == "Panic") ||
-		(permission.Name == "Unsafe" && permission.Member == "UncheckedIndex")
+		(permission.Name == "Unsafe" && (permission.Member == "UncheckedIndex" || permission.Member == "AssumeProgress"))
 }
 
 func sviewFrameRebindableType(te ast.TypeExpr) bool {
