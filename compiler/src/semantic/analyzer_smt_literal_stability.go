@@ -13,7 +13,8 @@ import "elisacore/src/ast"
 // (constructorProjectionStable) are re-evaluable regardless.
 
 // sideEffectFreeExpr is a conservative whitelist: literals, names, field reads, casts and
-// primitive (non-overloaded) unary/binary operators over them, and nested literals of the same.
+// primitive (non-overloaded) unary/binary operators, ternaries with pure conditions/arms,
+// and nested literals of the same.
 // Index expressions are excluded (a user type may lower indexing to a call).
 func sideEffectFreeExpr(expr ast.Expr, depth int) bool {
 	if expr == nil || depth > 64 {
@@ -28,6 +29,9 @@ func sideEffectFreeExpr(expr ast.Expr, depth int) bool {
 		return n.LoweredCall == nil && sideEffectFreeExpr(n.Operand, depth+1)
 	case *ast.BinaryExpr:
 		return n.LoweredCall == nil && sideEffectFreeExpr(n.Left, depth+1) && sideEffectFreeExpr(n.Right, depth+1)
+	case *ast.TernaryExpr:
+		return sideEffectFreeExpr(n.Cond, depth+1) &&
+			sideEffectFreeExpr(n.Value, depth+1) && sideEffectFreeExpr(n.Alt, depth+1)
 	case *ast.CastExpr:
 		return sideEffectFreeExpr(n.Operand, depth+1)
 	case *ast.FieldExpr:

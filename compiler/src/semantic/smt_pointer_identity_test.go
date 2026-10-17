@@ -135,3 +135,35 @@ def check(p: u8&, offset: usize) -> BytePointerBox:
 		t.Fatalf("pointer offset constructor declined:\n%s", allDiagnostics(r))
 	}
 }
+
+func TestSMTPointerConditionalOffsetConstructor(t *testing.T) {
+	r := analyzeContractStrict(t, "conditional_pointer.elisa", `struct BytePointerBox:
+    data: u8&
+def check(p: u8&, offset: i64) -> BytePointerBox:
+    ensure result.data == p + (offset if offset > 0 else 0).usize()
+    can Unsafe.PointerArithmetic:
+        return BytePointerBox{data: p + (offset if offset > 0 else 0).usize()}
+`)
+	if len(r.Errors()) != 0 {
+		t.Fatalf("pure conditional pointer declined:\n%s", allDiagnostics(r))
+	}
+}
+
+func TestSMTPointerConditionalConstructorDoesNotRereadCapturedValue(t *testing.T) {
+	for _, expression := range []string{"clear(&value) if flag else false", "false if clear(&value) else false", "false if not flag else clear(&value)"} {
+		r := analyzeContractStrict(t, "conditional_capture.elisa", `struct PointerCapture:
+    data: void&?
+    changed: bool
+def clear(value: mutable void&?&) -> bool:
+    value <- null
+    return true
+def check(value: mutable void&?, flag: bool) -> PointerCapture:
+    requires value != null and flag
+    ensure result.data == value
+    return PointerCapture{data: value, changed: `+expression+`}
+`)
+		if ensureFailuresFor(r.Errors(), "check") == 0 {
+			t.Fatalf("conditional effect reread captured pointer:\n%s", allDiagnostics(r))
+		}
+	}
+}
