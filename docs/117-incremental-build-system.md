@@ -54,6 +54,17 @@ turning the optional cache path into unbounded recursive work. These source
 identities and structural anchors are not resolved API fingerprints or cache-hit
 authorization; the enclosing semantic query must separately validate its inputs.
 
+`semantic/incremental_source_anchors.go` adds a separate invocation-local source
+index, captured before analysis. Its portable anchors refer only to original
+parser nodes that survive analysis; semantic annotation or insertion of lowering
+nodes does not renumber them. Rebinding uses a matching pristine current parse
+and returns its exact spans, including when spacing changes independently between
+statements. Function provenance and declaration identity are checked as well as
+the complete source-tree digest. These are source-origin references, not a way
+to reconstruct mutated semantic content. Generated default arguments, replaced
+nodes and detached nodes decline capture until dedicated origin/reconstruction
+adapters exist. No mutable AST is persisted, and no body skip is enabled.
+
 `FunctionProductRequirements` explicitly classifies all 58 current Result fields.
 A new or removed field without an updated policy closes the product-index gate.
 These policies are requirements, not implemented replay adapters. Mixed-phase
