@@ -303,3 +303,60 @@ func TestDatabaseHistoryMatchesFreshEvaluation(t *testing.T) {
 		}
 	}
 }
+
+func TestEvictionRevalidatesParentQueries(t *testing.T) {
+	db := New(map[string]Evaluator{
+		"leaf": func(r *Reader, name string) (string, error) { return "first", nil },
+		"parent": func(r *Reader, name string) (string, error) {
+			child, err := r.Query(Key{"leaf", name})
+			return "parent:" + child, err
+		},
+	})
+	parent := Key{"parent", "item"}
+	leaf := Key{"leaf", "item"}
+	before, err := db.Evaluate(context.Background(), parent)
+	if err != nil || before != "parent:first" {
+		t.Fatal(before, err)
+	}
+	// Explicit eviction is allowed for an unusable memo even without an input edit.
+	if !db.EvictQuery(leaf) || db.EvictQuery(leaf) {
+		t.Fatal("eviction status incorrect")
+	}
+	after, err := db.Evaluate(context.Background(), parent)
+	if err != nil || after != "parent:first" {
+		t.Fatal("parent reused an evicted child", after, err)
+	}
+	if db.Stats().Executed != 4 {
+		t.Fatal("parent failed to revalidate its discarded child")
+	}
+}
+
+func TestFailedRefreshPreservesEqualResultRevision(t *testing.T) {
+	unavailable := errors.New("product needs refresh")
+	parents := 0
+	db := New(map[string]Evaluator{
+		"child": func(r *Reader, name string) (string, error) {
+			ready, _ := r.Input(Key{"ready", name})
+			if ready != "yes" {
+				return "", unavailable
+			}
+			return "same fact", nil
+		},
+		"parent": func(r *Reader, name string) (string, error) { parents++; return r.Query(Key{"child", name}) },
+	})
+	key := Key{"parent", "item"}
+	input := Key{"ready", "item"}
+	db.Apply(Change{Key: input, Value: "yes"})
+	if _, err := db.Evaluate(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	db.Apply(Change{Key: input, Value: "no"})
+	if _, err := db.Evaluate(context.Background(), key); !errors.Is(err, unavailable) {
+		t.Fatal("incomplete child was published", err)
+	}
+	db.Apply(Change{Key: input, Value: "yes"})
+	value, err := db.Evaluate(context.Background(), key)
+	if err != nil || value != "same fact" || parents != 1 {
+		t.Fatal("transient miss invalidated unchanged facts", value, err, parents)
+	}
+}

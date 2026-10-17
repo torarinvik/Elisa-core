@@ -62,6 +62,9 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 	return result
 }
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
+	if invocation := a.incrementalBodies; invocation != nil && invocation.tracking && !a.suppressDiagnostics {
+		invocation.session.stats.PrimaryValueChecks++
+	}
 	if isZeroedInitializer(expr) && expected != nil {
 		// The expected type already failed to resolve and that failure was
 		// reported; judging `zeroed` against it would only cascade.

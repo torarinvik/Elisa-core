@@ -64,6 +64,13 @@ type Change struct {
 func (db *Database) Apply(changes ...Change) bool {
 	db.gate <- struct{}{}
 	defer func() { <-db.gate }()
+	if len(changes) == 1 {
+		change := changes[0]
+		old := db.inputs[change.Key]
+		if old.present == !change.Remove && (change.Remove || old.value == change.Value) {
+			return false
+		}
+	}
 	pending := make(map[Key]Change, len(changes))
 	for _, change := range changes {
 		pending[change.Key] = change
@@ -94,10 +101,30 @@ func (db *Database) Apply(changes ...Change) bool {
 	return true
 }
 
+// EvictQuery releases a memoized value. Advancing the revision makes parents
+// revalidate discarded children before reusing their own values.
+func (db *Database) EvictQuery(key Key) bool {
+	db.gate <- struct{}{}
+	defer func() { <-db.gate }()
+	if _, ok := db.results[key]; !ok {
+		return false
+	}
+	delete(db.results, key)
+	db.revision++
+	return true
+}
+
 func (db *Database) Stats() Stats {
 	db.gate <- struct{}{}
 	defer func() { <-db.gate }()
 	return db.stats
+}
+
+// EntryCounts includes tombstone inputs and supports bounded cache maintenance.
+func (db *Database) EntryCounts() (inputs, queries int) {
+	db.gate <- struct{}{}
+	defer func() { <-db.gate }()
+	return len(db.inputs), len(db.results)
 }
 
 // Evaluate validates only the requested dependency closure. Semantic diagnostics
@@ -145,6 +172,7 @@ func (r *Reader) Query(key Key) (string, error) {
 	}
 	return value, err
 }
+
 // Context is for cancellation and tracing only. Semantic options and source
 // authority must be tracked Inputs, never values obtained from Context.Value.
 func (r *Reader) Context() context.Context { return r.context }

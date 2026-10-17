@@ -88,6 +88,7 @@ const (
 )
 
 type Analyzer struct {
+	incrementalBodies *incrementalBodyInvocation
 	// smtStaleLocalDefs marks immutable locals whose initializer read a binding that has since been
 	// written (analyzer_smt_shadowing.go); their defining equation no longer holds.
 	smtStaleLocalDefs                    map[*Symbol]bool
@@ -1154,6 +1155,10 @@ func Analyze(file *ast.File) *Result {
 }
 
 func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
+	return analyzeWithBodyInvocation(file, options, nil)
+}
+
+func analyzeWithBodyInvocation(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation) *Result {
 	loweredFile := file
 	activeFile := loweredFile
 	// Fold recognized total char classifiers to static lookup tables (docs/125 §9.6 / C3)
@@ -1189,6 +1194,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a := &Analyzer{
 		trustedRuntimeSourceFiles:         trustedRuntimeSourceFileSet(options.TrustedRuntimeSourceFiles),
 		file:                              file,
+		incrementalBodies:                 bodies,
 		namedTypes:                        map[string]Type{},
 		staticInterfaces:                  map[string]*StaticInterface{},
 		staticImpls:                       map[string]*StaticImpl{},
@@ -1285,6 +1291,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
+	defer func() { a.incrementalBodies = nil }()
 	// docs/120 §10: the uniform linear-mutation rule is default-on now that the whole
 	// self-hosted frontend is converted to the reassignment form. `ELISA_LINEAR_MUTATION=0`
 	// is the explicit off-switch (escape hatch during any residual migration).
@@ -1389,6 +1396,9 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.expandHigherOrderContracts(activeDecls)
 	a.returnBorrowLateEnabled = true
 	a.typeShapesFrozen = true
+	if bodies != nil {
+		bodies.prepareAnalyzer(a)
+	}
 	a.analyzeDecls(activeDecls)
 	a.evaluateLateReturnBorrowFrames()
 	// A4: discharge each protocol default method's own contract against its own body (the default

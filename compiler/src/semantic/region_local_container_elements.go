@@ -99,6 +99,9 @@ var (
 // scanLocalContainerElementReads computes, for one function body, the index reads whose
 // element provenance may be used (see the file comment).
 func (a *Analyzer) scanLocalContainerElementReads(body []ast.Stmt) (map[*ast.IndexExpr]bool, map[*ast.IterForStmt]bool, *elementLoopInfo) {
+	if invocation := a.incrementalBodies; invocation != nil && invocation.tracking && !a.suppressDiagnostics {
+		invocation.session.stats.PrimaryElementScans++
+	}
 	scan := &localContainerElementScan{
 		argReadOnly:       a.callArgBindsReadOnlyParam,
 		argFillable:       a.callArgFillsWritableParam,

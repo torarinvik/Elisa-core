@@ -6,6 +6,9 @@ import (
 )
 
 func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
+	if invocation := a.incrementalBodies; invocation != nil && invocation.tracking && !a.suppressDiagnostics {
+		invocation.session.stats.PrimaryExprChecks++
+	}
 	if a.suppressDiagnostics {
 		a.shortCircuitStability = nil
 	}

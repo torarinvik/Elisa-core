@@ -32,10 +32,9 @@ Cycles and interrupted/failed evaluations never publish partial results, even if
 an evaluator ignores a failed dependency. Interprocedural recursion needs an
 explicit strongly connected summary/fixpoint query. Inputs and evaluation are
 serialized for a consistent snapshot, and queued evaluation can be cancelled.
-This engine is not yet wired into function-body analysis: it currently supplies
-the dependency mechanism, not a claim that compiler body visits are skipped.
-Portable function products, current-node rebinding, persistent graph storage,
-and parallel query scheduling remain separate implementation work.
+The engine now drives the opt-in closed-integer session described below. General
+function-product reuse, persistent graph storage and parallel query scheduling
+remain separate implementation work.
 
 Function-product identity and anchor APIs now live in
 `semantic/incremental_function_identity.go`. Declaration identity includes loader
@@ -63,7 +62,8 @@ statements. Function provenance and declaration identity are checked as well as
 the complete source-tree digest. These are source-origin references, not a way
 to reconstruct mutated semantic content. Generated default arguments, replaced
 nodes and detached nodes decline capture until dedicated origin/reconstruction
-adapters exist. No mutable AST is persisted, and no body skip is enabled.
+adapters exist. This source-index API alone does not authorize skipping analysis;
+no mutable AST is persisted.
 
 `semantic/incremental_scalar_facts.go` implements the first typed observation
 adapter: ExprTypes, ResolvedTypeNames, ResolvedValueNames, PermGrowthOps,
@@ -110,6 +110,60 @@ implementation edits. The backend tests additionally qualify view metadata and
 current nominal pointer restoration through the public encoded product path.
 Type ownership across other Result outputs, remaining adapters, generated-node restoration,
 live-analyzer hydration and actual body-cache integration remain unfinished.
+
+## First live semantic reuse path (opt-in)
+
+`semantic.NewIncrementalAnalysisSession().Analyze(freshFile, options)` accepts a
+freshly parsed complete program on each call. Keep one session per expanded
+program/root. It currently reuses only no-parameter, canonical-i64 functions
+whose single return is made from unsuffixed integer literals, parentheses,
+unary minus and binary `+`, `-`, `*`. Plain namespace/module functions have
+qualified identities. Other declarations, conditional declaration containers,
+parameters, locals, calls, contracts, generics and overload environments stay
+cold. The original Analyze/AnalyzeWithOptions APIs retain the cold path.
+
+Each query reads a position-independent, versioned closed-grammar source digest,
+complete options/effective environment, canonical primitive bindings with the
+absence of static impls, and an immutable typing product. Current source nodes
+are collected by the same checked grammar; compact `int`/`i64` tags resolve to
+the current analyzer's canonical types. Exact AST field-name/type manifests
+close the path on schema changes, even for newly added zero fields. Depth,
+node-count and source-spelling budgets bound the optional path. Failed or
+unusable records take the ordinary path and are replaced after successful work.
+
+Hits skip primary expression typing and reuse the grammar's provably empty
+container-element-read summary. The normal body-state save/restore still runs.
+Return checks, provenance/borrow tracking, implicit conversion flags, permissions,
+CFGs, function facts, global summaries and code generation run on the current
+invocation. No diagnostic/SMT timeout is memoized by this slice. Primary counters
+separate checked/reused bodies, expression checks and element scans from later
+speculative/fixpoint/specialization work. Each body edit invalidates its own
+product; source shifts reuse without keeping old nodes or positions.
+
+The session serializes analyses and retains only strings/keys between calls.
+Removed/ineligible owners lose product inputs and query memos; periodic database
+compaction bounds historical key tombstones. This is not a persisted build graph
+or a complete function cache. Scope/type/call dependency tracking, general body
+products, module objects, cross-module inline/generic invalidation and relinking
+remain required for Stage 2.
+
+Tests compare all published Result fields (rekeying source nodes and preserving
+invocation-local optimization-base alias relations), complete FuncType summaries,
+LLVM IR and native O0 output. They prove zero additional primary expression/value
+checks and element scans on hits, one-body edit locality, module identity,
+options/safety invalidation, new errors, corrupt-record repair, removal/re-addition
+and large owner churn. The session must still be integrated and qualified in
+production driver lifetimes; an API test is not a whole-compiler speedup claim.
+
+The local benchmark includes fresh parsing and full semantic analysis of 16
+synthetic closed functions. It covers 1/32/128/512 literal leaves per function.
+The first generic metadata replay was materially slower; the compact path
+reduced overhead and allocations. A 3×300ms exploratory matrix found median
+cold/warm times of 0.227/0.238ms, 2.623/2.546ms, 11.143/10.711ms and
+47.904/41.250ms respectively. Large-case timings were noisy; tiny bodies still
+regress. These numbers qualify neither general program speed nor a professional
+incremental-build performance milestone. The path remains opt-in while coverage
+and driver integration advance.
 
 `FunctionProductRequirements` explicitly classifies all 58 current Result fields.
 A new or removed field without an updated policy closes the product-index gate.

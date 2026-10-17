@@ -15,17 +15,34 @@ import (
 // are scoped to this body and dropped on return. (Nested blocks get the same treatment in
 // analyzeBlockInScope; function bodies are iterated directly here, so they need the same threading.)
 func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
+	a.visitFunctionBodyStmts(body, a.analyzeStmt)
+}
+
+func (a *Analyzer) visitFunctionBodyStmts(body []ast.Stmt, visit func(ast.Stmt)) {
+	a.visitFunctionBodyWithElementScan(body, visit, false)
+}
+
+func (a *Analyzer) visitFunctionBodyWithElementScan(body []ast.Stmt, visit func(ast.Stmt), closedPrimitive bool) {
 	savedSizeGuards := len(a.overlaySizeGuards)
 	savedElementReads, savedElementStates, savedBinderLoops, savedLoop := a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops, a.currentElementLoop
 	savedExtendSources := a.currentElementExtendSources
-	a.currentElementReads, a.currentElementBinderLoops, a.currentElementLoop = a.scanLocalContainerElementReads(body)
+	if closedPrimitive {
+		// The validated cached grammar has no identifiers, element accesses,
+		// containers, calls or loops. Its element-read summary is exactly empty.
+		a.currentElementReads = map[*ast.IndexExpr]bool{}
+		a.currentElementBinderLoops = map[*ast.IterForStmt]bool{}
+		a.currentElementLoop = nil
+		a.currentElementExtendSources = map[ast.Expr]bool{}
+	} else {
+		a.currentElementReads, a.currentElementBinderLoops, a.currentElementLoop = a.scanLocalContainerElementReads(body)
+	}
 	a.currentElementStates = map[*Symbol]regionRefState{}
 	defer func() {
 		a.currentElementReads, a.currentElementStates, a.currentElementBinderLoops, a.currentElementLoop = savedElementReads, savedElementStates, savedBinderLoops, savedLoop
 		a.currentElementExtendSources = savedExtendSources
 	}()
 	for _, stmt := range body {
-		a.analyzeStmt(stmt)
+		visit(stmt)
 		a.applyOverlayFallthroughGuard(stmt)
 	}
 	a.overlaySizeGuards = a.overlaySizeGuards[:savedSizeGuards]
@@ -256,7 +273,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					a.analyzeReturnWhereRefinement(fn, fnType)
-					a.analyzeFunctionBodyStmts(fn.Body)
+					a.analyzeIncrementalFunctionBody(fn, typeArgs)
 					a.verifyLemmaEnsures(fn)
 					// docs/126 D1: close the drop ledger while the affine state is still
 					// live — records the fall-through drops and folds each destructor's
