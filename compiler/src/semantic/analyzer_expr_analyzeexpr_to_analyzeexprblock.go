@@ -33,7 +33,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// lookup (which also filters it) and reports an undefined name when
 			// accessed from outside its owning module. Locals/params are never
 			// Private, so this only affects qualified globals.
-			if sym, ok := a.currentScope.Lookup(n.Name); ok && a.globalNameIsVisible(sym, n.Name) {
+			if sym, ok := a.lookupIdentifierScope(n); ok && a.globalNameIsVisible(sym, n.Name) {
 				a.recordResolvedPrimitiveConstantName(n, sym)
 				if len(a.storageViewLoopUseFrames) != 0 || len(a.loopAffineFrames) != 0 {
 					if base, named := trackedNamedStateStructBase(sym.Type); named && base != nil && !base.ProtocolStates {

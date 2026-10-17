@@ -50,16 +50,9 @@ func IndexFunctionSource(fn *ast.FuncDecl, scope FunctionIdentityContext) (*Func
 // only original source pointers still present in the analyzed declaration.
 // Default-argument clones from another declaration deliberately fail here.
 func (index *FunctionSourceIndex) Capture(nodes []PositionedFunctionNode) ([]FunctionSourceAnchor, error) {
-	if index == nil {
-		return nil, fmt.Errorf("missing function source index")
-	}
-	_, current, err := functionSyntaxFingerprint(index.root)
+	live, err := index.liveSourceNodes()
 	if err != nil {
 		return nil, err
-	}
-	live := make(map[PositionedFunctionNode]bool, len(current))
-	for _, node := range current {
-		live[node] = true
 	}
 	anchors := make([]FunctionSourceAnchor, 0, len(nodes))
 	for _, node := range nodes {
@@ -74,6 +67,23 @@ func (index *FunctionSourceIndex) Capture(nodes []PositionedFunctionNode) ([]Fun
 		anchors = append(anchors, FunctionSourceAnchor{index.key, index.digest, ordinal, reflect.TypeOf(node).String()})
 	}
 	return anchors, nil
+}
+
+// liveSourceNodes is shared by strict capture and partial query publication.
+// Failure never grants authority to a subset of an unvalidated source graph.
+func (index *FunctionSourceIndex) liveSourceNodes() (map[PositionedFunctionNode]bool, error) {
+	if index == nil {
+		return nil, fmt.Errorf("missing function source index")
+	}
+	_, current, err := functionSyntaxFingerprint(index.root)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[PositionedFunctionNode]bool, len(current))
+	for _, node := range current {
+		live[node] = true
+	}
+	return live, nil
 }
 
 // Rebind returns fresh parsed nodes, including their current exact spans. The

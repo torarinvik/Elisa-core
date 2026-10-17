@@ -360,6 +360,7 @@ type Analyzer struct {
 	// function being analyzed. Reset per function; walked backwards at each exit edge
 	// so drops run in reverse declaration order (docs/126 §2).
 	currentDropLocals        []dropLocalBinding
+	lexicalReads             *lexicalReadInvocation
 	lexicalBinders           *lexicalBinderOwnership
 	typeParamScopes          []map[string]Type
 	typeParamInterfaceScopes []map[string]*StaticInterface
@@ -1311,6 +1312,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	}
 	if bodies != nil {
 		a.lexicalBinders = &lexicalBinderOwnership{}
+		a.lexicalReads = bodies.lexical
 		a.capabilityQueries = &capabilityQueryInvocation{session: bodies.session, local: map[Type]capabilityLocalResult{}}
 		if len(bodies.keys) == 0 {
 			a.incrementalBodies = nil
@@ -1321,6 +1323,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 			bodies.session.stats.BinderFramesOwned += a.lexicalBinders.owned
 			bodies.session.stats.BinderFramesOwnerless += a.lexicalBinders.ownerless
 		}
+		a.lexicalReads = nil
 		a.lexicalBinders = nil
 		a.incrementalBodies = nil
 		a.capabilityQueries = nil

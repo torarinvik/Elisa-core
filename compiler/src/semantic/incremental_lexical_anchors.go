@@ -65,3 +65,24 @@ func (b *lexicalAnchorBatch) anchor(index *FunctionSourceIndex, node PositionedF
 	}
 	return anchor, nil
 }
+
+// validateAvailable retains only original nodes independently proven live in a
+// single traversal per index. One unavailable node cannot authorize itself or
+// deny unrelated surviving sites. An unscannable graph loses its entire index.
+func (b *lexicalAnchorBatch) validateAvailable() {
+	b.validated = false
+	for index, entries := range b.nodes {
+		live, err := index.liveSourceNodes()
+		b.scans++
+		if err != nil {
+			delete(b.nodes, index)
+			continue
+		}
+		for node := range entries {
+			if !live[node] {
+				delete(entries, node)
+			}
+		}
+	}
+	b.validated = true
+}

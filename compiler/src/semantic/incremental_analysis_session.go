@@ -26,6 +26,7 @@ import (
 // It is not a complete incremental compiler or a persistent whole-body cache.
 type IncrementalAnalysisSession struct {
 	mu                                           sync.Mutex
+	lexical                                      *incremental.Session
 	capabilities                                 *capabilityQueryCache
 	db                                           *incremental.Database
 	previous                                     map[incremental.Key]bool
@@ -39,23 +40,26 @@ type IncrementalAnalysisSession struct {
 	retiredQueries                               int
 }
 type IncrementalAnalysisStats struct {
-	BinderFramesOwned, BinderFramesOwnerless                                                                                                      uint64
-	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes                                                                    uint64
-	PrimaryValueChecks, PrimaryExprChecks                                                                                                         uint64
-	PrimaryElementScans                                                                                                                           uint64
-	LocalInitializersChecked, LocalInitializersReused                                                                                             uint64
-	DatabaseResets                                                                                                                                uint64
-	ColdFallbackAnalyses                                                                                                                          uint64
-	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes                                                                        uint64
-	CapacityLimitedAnalyses, CapacitySkippedQueries                                                                                               uint64
-	BindingSpecAdmissionMisses, RetainedBindingSourceBytes, RetainedBindingSourceEdges                                                            uint64
-	Queries                                                                                                                                       incremental.Stats
-	CapabilityReads, CapabilityLocalHits, CapabilityComputed, CapabilityProductsReused, CapabilityProductsPublished, CapabilityProjectionDeclines uint64
-	CapabilityRetainedBytes                                                                                                                       uint64
-	CapabilityQueries                                                                                                                             incremental.Stats
+	LexicalSourceIndexesBuilt, LexicalReadsObserved, LexicalSelectionsVerified, LexicalReadsDropped, LexicalVerificationFailures, LexicalPublicationFailures uint64
+	LexicalQueriesExecuted, LexicalQueryMemoHits, LexicalQueriesSkipped                                                                                      uint64
+	BinderFramesOwned, BinderFramesOwnerless                                                                                                                 uint64
+	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes                                                                               uint64
+	PrimaryValueChecks, PrimaryExprChecks                                                                                                                    uint64
+	PrimaryElementScans                                                                                                                                      uint64
+	LocalInitializersChecked, LocalInitializersReused                                                                                                        uint64
+	DatabaseResets                                                                                                                                           uint64
+	ColdFallbackAnalyses                                                                                                                                     uint64
+	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes                                                                                   uint64
+	CapacityLimitedAnalyses, CapacitySkippedQueries                                                                                                          uint64
+	BindingSpecAdmissionMisses, RetainedBindingSourceBytes, RetainedBindingSourceEdges                                                                       uint64
+	Queries                                                                                                                                                  incremental.Stats
+	CapabilityReads, CapabilityLocalHits, CapabilityComputed, CapabilityProductsReused, CapabilityProductsPublished, CapabilityProjectionDeclines            uint64
+	CapabilityRetainedBytes                                                                                                                                  uint64
+	CapabilityQueries                                                                                                                                        incremental.Stats
 }
 type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
 type incrementalBodyInvocation struct {
+	lexical                                    *lexicalReadInvocation
 	session                                    *IncrementalAnalysisSession
 	keys                                       map[*ast.FuncDecl]string
 	changes                                    []incremental.Change
@@ -180,6 +184,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	}
 	digest := sha256.Sum256(config)
 	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, localInitializers: map[*ast.VarDeclStmt]*primitiveLocalInitializer{}, config: hex.EncodeToString(digest[:])}
+	invocation.lexical = &lexicalReadInvocation{indexes: map[*ast.FuncDecl]*FunctionSourceIndex{}}
 	invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveConfigKey, Value: invocation.config})
 	current := map[incremental.Key]bool{}
 	origin := file.Filename
@@ -223,6 +228,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			if len(qualifiedName) > primitiveSourceByteBudget {
 				continue
 			}
+
 			keyBytes := []byte("primitive/i64-parameters/v2\x00")
 			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
 			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(origin)))
@@ -254,7 +260,30 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			if retainedOnly != retained || current[key] {
 				continue
 			}
-			_, ok = primitiveReturnExpressions(fn)
+			expressions, primitiveReturn := primitiveReturnExpressions(fn)
+			ok = primitiveReturn
+			if _, exists := invocation.lexical.indexes[fn]; !exists && len(invocation.lexical.indexes) < lexicalReadMaxFunctions {
+				readFree := primitiveReturn
+				for _, expr := range expressions {
+					if _, ident := expr.(*ast.Ident); ident {
+						readFree = false
+						break
+					}
+				}
+				var index *FunctionSourceIndex
+				if !readFree {
+					index, _ = IndexFunctionSource(fn, FunctionIdentityContext{Origin: origin, QualifiedName: qualifiedName})
+					if index != nil {
+						if len(index.ordinals) > lexicalReadMaxFrames-invocation.lexical.indexNodes {
+							index = nil
+						} else {
+							invocation.lexical.indexNodes += len(index.ordinals)
+							session.stats.LexicalSourceIndexesBuilt++
+						}
+					}
+				}
+				invocation.lexical.indexes[fn] = index
+			}
 			var locals []*primitiveLocalInitializer
 			if !ok {
 				locals, ok = primitiveLocalInitializers(fn)
@@ -399,7 +428,9 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if len(invocation.keys) == 0 {
 		session.stats.ColdFallbackAnalyses++
 	}
-	return analyzeWithBodyInvocation(file, options, invocation)
+	result := analyzeWithBodyInvocation(file, options, invocation)
+	invocation.lexical.publish(session)
+	return result
 }
 func (invocation *incrementalBodyInvocation) prepareAnalyzer(a *Analyzer) {
 	invocation.safety = "blocked"
@@ -601,6 +632,15 @@ func validPrimitiveTyping(types string) bool {
 }
 
 func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []Type) {
+	if reads := a.lexicalReads; reads != nil {
+		prior := reads.primaryOwner
+		reads.primaryOwner = nil
+		if !a.suppressDiagnostics && a.convergeDepth == 0 && len(typeArgs) == 0 {
+			reads.primaryOwner = fn
+		}
+		defer func() { reads.primaryOwner = prior }()
+	}
+
 	invocation := a.incrementalBodies
 	if invocation == nil || a.suppressDiagnostics || a.convergeDepth != 0 || len(typeArgs) != 0 {
 		a.analyzeFunctionBodyStmts(fn.Body)

@@ -1524,3 +1524,84 @@ through the real incremental analysis entry point. Raw malformed recipes/cells
 also reject and recover after correction. The eight-file SMT overlay remains
 based on ac840eac (those baseline files match 59dbd0a0); the unrelated untracked
 SMT test stays excluded. No combined-SMT or full-project speed claim is made.
+
+### Actual identifier read-point publication
+
+Incremental analysis now observes the raw Scope selection in the real identifier
+path, before global visibility filtering. Each observation freezes the chain's
+selected-name cells and source-slot descriptor fields at the read point. Later
+Define/removal, Symbol metadata changes or final scope contents cannot rewrite
+that observation. Original Symbol pointers are kept only in invocation-local
+rebinding/verification tables. The resolver still executes current visibility,
+type, region, affine, initialization, function-value and refinement checks.
+
+Observations are limited to primary template body traversal. Suppressed/speculative
+passes and specialized bodies cannot silently share that context. Repeated
+same-key visits must publish identical input worlds; a conflicting or unsupported
+visit revokes that key for the invocation. The completed analysis publishes one
+coherent lexical query world and checks every admitted result against the actual
+read's Symbol/presence. A verification failure revokes the whole world. Admission
+order is sorted by full key, so pressure does not depend on Go map iteration.
+Old queries absent from the next world retire. Primitive replay still executes
+parameter reads normally and those reads participate in memo reuse.
+
+Source indexes are created before analysis, with at most 4,096 function entries
+and 262,144 retained source nodes. Observation count is bounded at 65,536 and
+scope-cell capture at 262,144 frames. Generated/foreign sites, unanchored local
+symbols, unsupported owners and budget overflows explicitly decline. Liveness is
+validated once per indexed function: only independently surviving original nodes
+are retained, so an unavailable read no longer denies unrelated reads in the same
+function. The strict all-or-nothing Capture API retains its prior behavior.
+This partial liveness check cannot grant authority to a removed node or to any
+node from a graph that fails traversal.
+
+The lexical session permits 65,536 queries, 327,680 inputs/ownership/dependency
+reservations and 256 MiB of accounted storage, with bounded fallback beyond that.
+This is intentionally larger than the generic owner's default because read-site
+queries outnumber distinct global-name queries. Compiler Scope/AST snapshots and
+construction temporaries remain invocation-local and outside that storage model.
+The owner stores only portable query inputs/products.
+
+A first benchmark exposed redundant full source indexing in read-free reused
+primitive bodies (~62.2 MB/op warm versus ~48.2 MB/op baseline). The collector now
+uses the primitive expression enumeration it already computed to prove the
+absence of identifier reads and skip that index. A regression requires zero
+source indexes and observations for those bodies. In sequential 10-iteration,
+two-sample runs of 16 functions with 512 expression leaves, warm allocations
+returned to 48.236–48.246 MB/op versus baseline 48.206–48.235 MB/op. Timing varied
+37.1–42.3 ms versus baseline 37.2–37.5 ms: no speedup or zero-overhead claim follows.
+The initial concurrent timing samples were confounded and are not performance
+qualification.
+
+This remains selection dependency publication/verification, not general body
+replay. Missing observations are not a certificate of complete function coverage;
+future reused-body products must preserve and revalidate their own dependency
+edges. Global/type/callee/SCC query composition, binder reads at actual use sites,
+complete Result/live-analyzer hydration and object/relink/client integration
+remain unfinished. Observing current reads has an overhead until those broader
+products can use the dependencies to avoid semantic work.
+
+The frozen parser workload now observes 57,261 primary identifier scope reads per
+analysis, indexes 1,913 functions and verifies 35,468 distinct selections. The
+repeat adds 35,468 memo hits and zero evaluator executions. All supported queries
+fit without capacity skips: 206,530 input/ownership/dependency reservations and
+169,715,856 accounted bytes. There are 12,281 declined observations and repeated
+reads coalesce; these metrics are not a partition proving complete body coverage.
+The frontend still reports its existing 980 errors. The project probe verifies
+raw selection parity at actual read points, not whole-project Result/backend
+parity or iteration-speed improvement. One complete project run took 15.248 s for
+both fresh analyses and parsing; individual analyses took 7.562 s and 6.829 s in
+that run with concurrent verification work.
+
+Validation: isolated full semantic suite passed in 53.431 s and incremental in
+0.193 s before the final lexical quota increase. The final-quota project probe
+passed and expanded lexical/session/source-anchor race checks passed in 1.685 s.
+Regressions cover read-point mutation isolation, fresh-AST relocation/memo reuse,
+actual parameter reads during primitive replay, read-free index avoidance,
+conflicting/unsupported repeated visits, deterministic pressured admission,
+observation overflow preserving resolver behavior, verification-failure revocation,
+partial liveness without whole-owner poisoning and strict Capture behavior.
+The overlay restores eight unrelated modified Go files to ac840eac (unchanged
+through 2dbbcb04) and excludes the unrelated untracked SMT test; all working files
+remain untouched. Broader root/Stage1 failures remain outside this checkpoint.
+No remote compute was used.
