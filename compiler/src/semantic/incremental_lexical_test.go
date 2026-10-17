@@ -91,10 +91,17 @@ func TestLexicalCombinedRevisionRebindsCurrentValues(t *testing.T) {
 		scope := NewScope(global)
 		symbol := &Symbol{Name: "value", Kind: SymbolParam, Node: fn, ParamIndex: 0}
 		scope.Symbols["value"] = symbol
-		a := &Analyzer{permissionParamScopes: []map[string]bool{{"P": true}, {"P": false}}}
+		a := &Analyzer{lexicalBinders: &lexicalBinderOwnership{}}
+		var snapshot lexicalSnapshot
+		var skipped []incremental.Key
 		symbols := []lexicalSymbolRequest{{Index: index, Site: fn.Body[0], Role: "read", Name: "value", Current: scope, Global: global}}
-		binders := []lexicalBinderRequest{{Index: index, Site: fn.Body[0], Role: "permission", Domain: "permission-param", Name: "P", Sources: []lexicalBinderSource{{index, fn, "outer"}, {index, fn, "inner"}}}}
-		snapshot, skipped, err := publishLexicalSnapshot(ctx, session, a, symbols, binders)
+		binders := []lexicalBinderRequest{{Index: index, Site: fn.Body[0], Role: "permission", Domain: "permission-param", Name: "P", Sources: []lexicalBinderSource{{index, fn, "permission-param"}, {index, fn.Body[0], "permission-param"}}}}
+		a.withSourcePermissionParams(fn, []string{"P"}, func() {
+			a.withSourcePermissionParams(fn.Body[0], []string{"P"}, func() {
+				a.permissionParamScopes[1]["P"] = false
+				snapshot, skipped, err = publishLexicalSnapshot(ctx, session, a, symbols, binders)
+			})
+		})
 		if err != nil || len(skipped) != 0 {
 			t.Fatalf("publication: %v %v", err, skipped)
 		}
@@ -224,29 +231,34 @@ func TestLexicalBinderNilAdaptersAndOwnerValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &Analyzer{typeParamScopes: []map[string]Type{{"T": nil}}, typeParamInterfaceScopes: []map[string]*StaticInterface{{"T": nil}}}
-	for _, domain := range []string{"type-param", "param-interface"} {
-		request := lexicalBinderRequest{Index: index, Site: fn.Body[0], Role: "read", Name: "T", Domain: domain, Sources: []lexicalBinderSource{{index, fn, "generic"}}}
-		snapshot, _, err := publishLexicalSnapshot(ctx, session, a, nil, []lexicalBinderRequest{request})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for key := range snapshot.binders.requests {
-			value, found, err := snapshot.binders.lookup(ctx, key)
-			if err != nil || value != nil || found != (domain == "type-param") {
-				t.Fatalf("nil policy: %v %v %v", value, found, err)
+	a := &Analyzer{lexicalBinders: &lexicalBinderOwnership{}}
+	a.withSourceTypeParams(fn, []string{"T"}, nil, func() {
+		a.withSourceTypeParamInterfaces(fn, map[string]*StaticInterface{"T": nil}, func() {
+			a.typeParamScopes[0]["T"] = nil
+			for _, domain := range []string{"type-param", "param-interface"} {
+				request := lexicalBinderRequest{Index: index, Site: fn.Body[0], Role: "read", Name: "T", Domain: domain, Sources: []lexicalBinderSource{{index, fn, domain}}}
+				snapshot, _, err := publishLexicalSnapshot(ctx, session, a, nil, []lexicalBinderRequest{request})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for key := range snapshot.binders.requests {
+					value, found, err := snapshot.binders.lookup(ctx, key)
+					if err != nil || value != nil || found != (domain == "type-param") {
+						t.Fatalf("nil policy: %v %v %v", value, found, err)
+					}
+				}
+				request.Sources = nil
+				if _, _, err := publishLexicalSnapshot(ctx, session, a, nil, []lexicalBinderRequest{request}); err == nil {
+					t.Fatal("missing source frame accepted")
+				}
+				foreign := parseProductFunction(t, "def other() -> i64:\n    return 1\n")
+				request.Sources = []lexicalBinderSource{{index, foreign, "generic"}}
+				if _, _, err := publishLexicalSnapshot(ctx, session, a, nil, []lexicalBinderRequest{request}); err == nil {
+					t.Fatal("foreign owner accepted")
+				}
 			}
-		}
-		request.Sources = nil
-		if _, _, err := publishLexicalSnapshot(ctx, session, a, nil, []lexicalBinderRequest{request}); err == nil {
-			t.Fatal("missing source frame accepted")
-		}
-		foreign := parseProductFunction(t, "def other() -> i64:\n    return 1\n")
-		request.Sources = []lexicalBinderSource{{index, foreign, "generic"}}
-		if _, _, err := publishLexicalSnapshot(ctx, session, a, nil, []lexicalBinderRequest{request}); err == nil {
-			t.Fatal("foreign owner accepted")
-		}
-	}
+		})
+	})
 }
 
 func TestLexicalSourceLocalShadowInsertionAndRemoval(t *testing.T) {
@@ -295,4 +307,31 @@ func TestLexicalSourceLocalShadowInsertionAndRemoval(t *testing.T) {
 	replacement := &Symbol{Name: "x", Kind: SymbolLocal, Node: fn.Body[0]}
 	scope.Symbols["x"] = replacement
 	read(fn.Body[1], replacement)
+}
+
+func TestLexicalMalformedInputsRejectAndRecover(t *testing.T) {
+	spec := lexicalTestSpec("permission-param")
+	publication, err := lexicalPublication(spec, []lexicalFrameValue{{Present: true, Binding: "outer"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := publication.Key
+	for _, change := range []incremental.Change{
+		{Key: lexicalRecipeInput(key), Remove: true},
+		{Key: lexicalRecipeInput(key), Value: "01"},
+		{Key: lexicalCellInput(key, 0), Value: `{"Binding":"","Nil":true}`},
+		{Key: lexicalCellInput(key, 0), Value: `{"Binding":"outer", "Nil":false}`},
+		{Key: lexicalCellInput(key, 0), Value: `{"Binding":"","Nil":false}`},
+	} {
+		db := incremental.New(lexicalQueryEvaluators())
+		db.Apply(publication.Inputs...)
+		db.Apply(change)
+		if _, err := db.Evaluate(context.Background(), key); err == nil {
+			t.Fatalf("malformed input accepted: %+v", change)
+		}
+		db.Apply(publication.Inputs...)
+		if _, err := db.Evaluate(context.Background(), key); err != nil {
+			t.Fatal("valid corrected input did not recover:", err)
+		}
+	}
 }

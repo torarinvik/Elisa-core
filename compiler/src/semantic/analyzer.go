@@ -360,6 +360,7 @@ type Analyzer struct {
 	// function being analyzed. Reset per function; walked backwards at each exit edge
 	// so drops run in reverse declaration order (docs/126 §2).
 	currentDropLocals        []dropLocalBinding
+	lexicalBinders           *lexicalBinderOwnership
 	typeParamScopes          []map[string]Type
 	typeParamInterfaceScopes []map[string]*StaticInterface
 	interfaceAssocTypeScopes []map[string]Type
@@ -1309,12 +1310,22 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
 	if bodies != nil {
+		a.lexicalBinders = &lexicalBinderOwnership{}
 		a.capabilityQueries = &capabilityQueryInvocation{session: bodies.session, local: map[Type]capabilityLocalResult{}}
 		if len(bodies.keys) == 0 {
 			a.incrementalBodies = nil
 		}
 	}
-	defer func() { a.incrementalBodies = nil; a.capabilityQueries = nil; a.lookupTrace = nil }()
+	defer func() {
+		if bodies != nil && a.lexicalBinders != nil {
+			bodies.session.stats.BinderFramesOwned += a.lexicalBinders.owned
+			bodies.session.stats.BinderFramesOwnerless += a.lexicalBinders.ownerless
+		}
+		a.lexicalBinders = nil
+		a.incrementalBodies = nil
+		a.capabilityQueries = nil
+		a.lookupTrace = nil
+	}()
 	// docs/120 §10: the uniform linear-mutation rule is default-on now that the whole
 	// self-hosted frontend is converted to the reassignment form. `ELISA_LINEAR_MUTATION=0`
 	// is the explicit off-switch (escape hatch during any residual migration).

@@ -23,6 +23,10 @@ func isLegacyOutParamName(name string) bool {
 }
 
 func (a *Analyzer) withShapeParams(names []string, fn func()) {
+	a.withSourceShapeParams(nil, names, fn)
+}
+
+func (a *Analyzer) withSourceShapeParams(owner ast.Node, names []string, fn func()) {
 	if len(names) == 0 {
 		fn()
 		return
@@ -32,7 +36,10 @@ func (a *Analyzer) withShapeParams(names []string, fn func()) {
 		bindings[name] = &ShapeParam{Name: name}
 	}
 	a.shapeParamScopes = append(a.shapeParamScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("shape-param", owner, bindings)
 	fn()
+	ownership.pop("shape-param")
 	a.shapeParamScopes = a.shapeParamScopes[:len(a.shapeParamScopes)-1]
 }
 

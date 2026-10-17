@@ -39,6 +39,7 @@ type IncrementalAnalysisSession struct {
 	retiredQueries                               int
 }
 type IncrementalAnalysisStats struct {
+	BinderFramesOwned, BinderFramesOwnerless                                                                                                      uint64
 	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes                                                                    uint64
 	PrimaryValueChecks, PrimaryExprChecks                                                                                                         uint64
 	PrimaryElementScans                                                                                                                           uint64

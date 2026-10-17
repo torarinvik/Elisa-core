@@ -209,10 +209,10 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 			}
 		}
 	}
-	a.withGenericParams(fn.GenericParams, typeArgs, func() {
-		a.withRegionParams(fn.RegionParams, func() {
-			a.withPermissionParams(fn.PermissionParams, func() {
-				a.withShapeParams(fnType.ShapeParams, func() {
+	a.withSourceGenericParams(fn, fn.GenericParams, typeArgs, func() {
+		a.withSourceRegionParams(fn, fn.RegionParams, func() {
+			a.withSourcePermissionParams(fn, fn.PermissionParams, func() {
+				a.withSourceShapeParams(fn, fnType.ShapeParams, func() {
 					for i, param := range allParamDecls {
 						var ptype Type = invalidType
 						if fnType != nil && i < len(fnType.Params) {
@@ -469,10 +469,10 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		a.currentUsings = append([]string(nil), a.funcDeclUsings[fn]...)
 	}
 
-	a.withGenericParams(fn.GenericParams, nil, func() {
-		a.withRegionParams(fn.RegionParams, func() {
-			a.withPermissionParams(fn.PermissionParams, func() {
-				a.withShapeParams(fnType.ShapeParams, func() {
+	a.withSourceGenericParams(fn, fn.GenericParams, nil, func() {
+		a.withSourceRegionParams(fn, fn.RegionParams, func() {
+			a.withSourcePermissionParams(fn, fn.PermissionParams, func() {
+				a.withSourceShapeParams(fn, fnType.ShapeParams, func() {
 					for i, param := range a.expandedFuncDeclParams(fn) {
 						var ptype Type = invalidType
 						if i < len(fnType.Params) {
@@ -663,10 +663,10 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 		a.currentUsings = append([]string(nil), a.funcDeclUsings[fn]...)
 	}
 
-	a.withGenericParams(fn.GenericParams, nil, func() {
-		a.withRegionParams(fn.RegionParams, func() {
-			a.withPermissionParams(fn.PermissionParams, func() {
-				a.withShapeParams(fnType.ShapeParams, func() {
+	a.withSourceGenericParams(fn, fn.GenericParams, nil, func() {
+		a.withSourceRegionParams(fn, fn.RegionParams, func() {
+			a.withSourcePermissionParams(fn, fn.PermissionParams, func() {
+				a.withSourceShapeParams(fn, fnType.ShapeParams, func() {
 					for i, param := range a.expandedFuncDeclParams(fn) {
 						var ptype Type = invalidType
 						if i < len(fnType.Params) {

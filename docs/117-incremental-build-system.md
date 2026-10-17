@@ -1485,3 +1485,42 @@ suite preceded that final test-only addition. The overlay restored eight unrelat
 modified Go files to ac840eac and excluded the untracked SMT test; their working
 files were preserved. This does not establish that the combined SMT worktree is
 green. Existing Stage1 errors were not rerun; all execution remained local.
+
+### Binder frame ownership wiring
+
+The lexical adapter now requires actual push-time ownership. All eight binder
+helper domains record their source owner and live map when an incremental analysis
+is active. Function body analysis and its return-provenance/borrowed-owner passes
+supply the actual FuncDecl for generic, region, permission and shape frames;
+generic decomposition propagates it to type, const, error-set and interface-bound
+frames. Ordinary analysis keeps the recorder disabled. The session exposes
+cumulative owned/ownerless helper-frame counts without retaining any frame or AST
+in persistent query storage.
+
+Preparation matches source owners and domain roles against that live record and
+checks invocation-local map identity. A different surviving AST node at the same
+stack depth cannot relabel the frame; replacing the map with equal contents also
+declines. Pop clears the owner/map references. Each helper keeps the recorder it
+used at push, so enabling recording inside an older untracked helper neither
+claims that older frame nor pops the new recorder incorrectly. Unowned helper
+frames and direct synthetic region pushes decline admission. Non-function
+signature/default/associated-type contexts still need explicit source ownership
+at their own call sites. Zero-frame misses need no owner.
+
+This supersedes the earlier caller-trust limitation for admitted binder requests.
+Source-index liveness validation still applies independently. Ownership alone is
+not resolved Type identity, specialization context, effect convergence or full
+Result hydration; broad body reuse and normal lexical query publication remain
+unfinished. Incremental analysis now records frame provenance, but does not yet
+substitute these selection queries for normal resolver work.
+
+Validation: final isolated full semantic suite passed in 43.650 s and incremental
+package in 0.118 s. Expanded lexical plus incremental-session race regressions
+passed in 1.589 s. Coverage includes all eight helper domains, incorrect live
+owners/roles, replaced equal-content maps, nested ownerless frames, direct
+synthetic regions, recording enabled inside an untracked helper, restoration
+and reference clearing on pop, generic decomposition and complete-result parity
+through the real incremental analysis entry point. Raw malformed recipes/cells
+also reject and recover after correction. The eight-file SMT overlay remains
+based on ac840eac (those baseline files match 59dbd0a0); the unrelated untracked
+SMT test stays excluded. No combined-SMT or full-project speed claim is made.

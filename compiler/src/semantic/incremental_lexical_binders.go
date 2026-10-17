@@ -8,7 +8,8 @@ import (
 
 // Sources are outer-to-inner, just like the live analyzer stacks. Each source
 // must identify its actual binder owner, including captured enclosing owners.
-// A role cannot be reused for two frames at the same source owner.
+// Role must equal the binder domain; source owners and map identities must match
+// the recorder attached at the actual push. Duplicate source slots decline.
 type lexicalBinderSource struct {
 	Index *FunctionSourceIndex
 	Owner PositionedFunctionNode
@@ -62,6 +63,44 @@ func (a *Analyzer) prepareLexicalBinder(request lexicalBinderRequest, batch *lex
 	}
 	if count != len(request.Sources) || count > lexicalMaxFrames {
 		return result, fmt.Errorf("binder source/stack mismatch")
+	}
+	var live []any
+	switch request.Domain {
+	case "type-param":
+		for _, bindings := range a.typeParamScopes {
+			live = append(live, bindings)
+		}
+	case "const-param":
+		for _, bindings := range a.constParamScopes {
+			live = append(live, bindings)
+		}
+	case "shape-param":
+		for _, bindings := range a.shapeParamScopes {
+			live = append(live, bindings)
+		}
+	case "assoc-type":
+		for _, bindings := range a.interfaceAssocTypeScopes {
+			live = append(live, bindings)
+		}
+	case "param-interface":
+		for _, bindings := range a.typeParamInterfaceScopes {
+			live = append(live, bindings)
+		}
+	case "permission-param":
+		for _, bindings := range a.permissionParamScopes {
+			live = append(live, bindings)
+		}
+	case "error-set-param":
+		for _, bindings := range a.errorSetParamScopes {
+			live = append(live, bindings)
+		}
+	case "region-param":
+		for _, bindings := range a.regionParamScopes {
+			live = append(live, bindings)
+		}
+	}
+	if err := a.lexicalBinders.validate(request.Domain, request.Sources, live); err != nil {
+		return result, err
 	}
 	var frames []lexicalFrameValue
 	ids := map[string]bool{}

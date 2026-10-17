@@ -356,22 +356,36 @@ func (a *Analyzer) lookupInterfaceAssocType(name string) (Type, bool) {
 }
 
 func (a *Analyzer) withInterfaceAssocTypes(bindings map[string]Type, fn func()) {
+	a.withSourceInterfaceAssocTypes(nil, bindings, fn)
+}
+
+func (a *Analyzer) withSourceInterfaceAssocTypes(owner ast.Node, bindings map[string]Type, fn func()) {
 	if len(bindings) == 0 {
 		fn()
 		return
 	}
 	a.interfaceAssocTypeScopes = append(a.interfaceAssocTypeScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("assoc-type", owner, bindings)
 	fn()
+	ownership.pop("assoc-type")
 	a.interfaceAssocTypeScopes = a.interfaceAssocTypeScopes[:len(a.interfaceAssocTypeScopes)-1]
 }
 
 func (a *Analyzer) withTypeParamInterfaces(bindings map[string]*StaticInterface, fn func()) {
+	a.withSourceTypeParamInterfaces(nil, bindings, fn)
+}
+
+func (a *Analyzer) withSourceTypeParamInterfaces(owner ast.Node, bindings map[string]*StaticInterface, fn func()) {
 	if len(bindings) == 0 {
 		fn()
 		return
 	}
 	a.typeParamInterfaceScopes = append(a.typeParamInterfaceScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("param-interface", owner, bindings)
 	fn()
+	ownership.pop("param-interface")
 	a.typeParamInterfaceScopes = a.typeParamInterfaceScopes[:len(a.typeParamInterfaceScopes)-1]
 }
 

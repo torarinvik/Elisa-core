@@ -5,6 +5,10 @@ import (
 )
 
 func (a *Analyzer) withTypeParams(names []string, args []Type, fn func()) {
+	a.withSourceTypeParams(nil, names, args, fn)
+}
+
+func (a *Analyzer) withSourceTypeParams(owner ast.Node, names []string, args []Type, fn func()) {
 	if len(names) == 0 {
 		fn()
 		return
@@ -18,11 +22,18 @@ func (a *Analyzer) withTypeParams(names []string, args []Type, fn func()) {
 		}
 	}
 	a.typeParamScopes = append(a.typeParamScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("type-param", owner, bindings)
 	fn()
+	ownership.pop("type-param")
 	a.typeParamScopes = a.typeParamScopes[:len(a.typeParamScopes)-1]
 }
 
 func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn func()) {
+	a.withSourceGenericParams(nil, params, args, fn)
+}
+
+func (a *Analyzer) withSourceGenericParams(owner ast.Node, params []ast.GenericParam, args []Type, fn func()) {
 	if len(params) == 0 {
 		fn()
 		return
@@ -61,16 +72,20 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 			}
 		}
 	}
-	a.withTypeParamInterfaces(typeInterfaces, func() {
-		a.withTypeParams(typeNames, typeArgs, func() {
-			a.withErrorSetParams(errorSetNames, func() {
-				a.withConstParams(constNames, constArgs, fn)
+	a.withSourceTypeParamInterfaces(owner, typeInterfaces, func() {
+		a.withSourceTypeParams(owner, typeNames, typeArgs, func() {
+			a.withSourceErrorSetParams(owner, errorSetNames, func() {
+				a.withSourceConstParams(owner, constNames, constArgs, fn)
 			})
 		})
 	})
 }
 
 func (a *Analyzer) withConstParams(names []string, args []Type, fn func()) {
+	a.withSourceConstParams(nil, names, args, fn)
+}
+
+func (a *Analyzer) withSourceConstParams(owner ast.Node, names []string, args []Type, fn func()) {
 	if len(names) == 0 {
 		fn()
 		return
@@ -84,7 +99,10 @@ func (a *Analyzer) withConstParams(names []string, args []Type, fn func()) {
 		}
 	}
 	a.constParamScopes = append(a.constParamScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("const-param", owner, bindings)
 	fn()
+	ownership.pop("const-param")
 	a.constParamScopes = a.constParamScopes[:len(a.constParamScopes)-1]
 }
 
@@ -116,6 +134,10 @@ func (a *Analyzer) lookupShapeParam(name string) (Shape, bool) {
 }
 
 func (a *Analyzer) withPermissionParams(names []string, fn func()) {
+	a.withSourcePermissionParams(nil, names, fn)
+}
+
+func (a *Analyzer) withSourcePermissionParams(owner ast.Node, names []string, fn func()) {
 	if len(names) == 0 {
 		fn()
 		return
@@ -125,7 +147,10 @@ func (a *Analyzer) withPermissionParams(names []string, fn func()) {
 		bindings[name] = true
 	}
 	a.permissionParamScopes = append(a.permissionParamScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("permission-param", owner, bindings)
 	fn()
+	ownership.pop("permission-param")
 	a.permissionParamScopes = a.permissionParamScopes[:len(a.permissionParamScopes)-1]
 }
 
@@ -139,6 +164,10 @@ func (a *Analyzer) lookupPermissionParam(name string) bool {
 }
 
 func (a *Analyzer) withErrorSetParams(names []string, fn func()) {
+	a.withSourceErrorSetParams(nil, names, fn)
+}
+
+func (a *Analyzer) withSourceErrorSetParams(owner ast.Node, names []string, fn func()) {
 	if len(names) == 0 {
 		fn()
 		return
@@ -148,7 +177,10 @@ func (a *Analyzer) withErrorSetParams(names []string, fn func()) {
 		bindings[name] = true
 	}
 	a.errorSetParamScopes = append(a.errorSetParamScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("error-set-param", owner, bindings)
 	fn()
+	ownership.pop("error-set-param")
 	a.errorSetParamScopes = a.errorSetParamScopes[:len(a.errorSetParamScopes)-1]
 }
 
@@ -190,6 +222,10 @@ func (a *Analyzer) permissionParamsInRefs(refs []ast.PermissionRef) []string {
 }
 
 func (a *Analyzer) withRegionParams(names []string, fn func()) {
+	a.withSourceRegionParams(nil, names, fn)
+}
+
+func (a *Analyzer) withSourceRegionParams(owner ast.Node, names []string, fn func()) {
 	if len(names) == 0 {
 		fn()
 		return
@@ -199,7 +235,10 @@ func (a *Analyzer) withRegionParams(names []string, fn func()) {
 		bindings[name] = true
 	}
 	a.regionParamScopes = append(a.regionParamScopes, bindings)
+	ownership := a.lexicalBinders
+	ownership.push("region-param", owner, bindings)
 	fn()
+	ownership.pop("region-param")
 	a.regionParamScopes = a.regionParamScopes[:len(a.regionParamScopes)-1]
 }
 
