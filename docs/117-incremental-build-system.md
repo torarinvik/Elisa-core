@@ -881,3 +881,12 @@ Separate 30-iteration capture runs measured12.37/12.56/12.31ms for this fixture
 second request. Revisions used only twice therefore regress; several later exact
 hits are needed to amortize capture. This admission policy is a limited first
 step, and cheaper capture or workload-aware admission remains performance work.
+
+Validation: snapshot/generator tests and focused root race tests pass, including
+cross-mode/default-argument replay. The broader root compiler-package suite failed
+in299.787s; parser and generator packages passed in2.615s/0.681s. Its output was
+large and truncated, so this is not an all-failures baseline comparison. Three
+visible failures (selected-test phase logging, packed-ML runtime warnings, and
+allocator-interface effects) also fail with the parent revision's parser/cache
+implementation overlaid via Go's overlay mechanism (2.152s). The full compiler
+suite is therefore not green, and no all-errors-resolved claim is made here.
