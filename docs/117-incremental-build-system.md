@@ -1890,3 +1890,43 @@ history checking unrelated node addition, cycle split, removal/recovery,
 transitive-edge isolation and recursive dependency merge. Normal semantic row
 reuse and full-project iteration-speed qualification remain unfinished. All work
 stayed local and unrelated SMT changes were preserved.
+
+
+### Real-project analysis benchmark and remaining admission cost
+
+`BenchmarkIncrementalProjectAnalysis` reads the opt-in frozen project selected by
+`ELISA_LOOKUP_QUERY_PROBE_SNAPSHOT`. Each sample receives a freshly parsed AST;
+parsing and retained-session prewarming are outside the timed/allocation region.
+The retained measurement includes dependency capture, publication and validation.
+Both paths keep checking diagnostic counts across iterations. This is an
+analysis-only benchmark, not an edit-to-executable benchmark or a proof that all
+diagnostic contents match.
+
+Local qualification on Apple M5, Go 1.27.2, GOMAXPROCS=4, GOGC=1200 and
+GOMEMLIMIT=14GiB used the frozen snapshot SHA-256
+`86e7b5e6520848f6083217b40ac7ede1b09336dfe232f64c31d544e8bda94bd1`.
+With `-run '^$' -bench '^BenchmarkIncrementalProjectAnalysis$' -benchtime=1x
+-count=2`, ordinary analysis took 4.268/4.329 s and warm retained analysis took
+5.647/5.664 s. Allocation totals were about 4.56 GB versus 6.07 GB per analysis.
+All four samples produced 980 diagnostics; retained samples reported 50,211
+lookup memo hits but zero primary body reuses. The two samples per mode are
+sequential, not randomized or an ABBA comparison, so they are a baseline showing
+substantial remaining cost, not precision throughput qualification. In these
+samples retained analysis is about 32% slower, despite the lookup hits.
+
+A separate two-analysis CPU/allocation profile of the existing real-project
+probe passed in 11.633 s. Sampled total allocation was 12,287.88 MiB (not live RSS);
+tracked-type cloning directly accounted for 3,232.74 MiB, capability traversal
+seen-map writes for 704 MiB, and Session.PublishPrepared directly for 727.20 MiB.
+CPU samples were dominated by runtime.madvise (36.82%) and memory clearing
+(18.23%). These samples identify allocation-heavy work worth investigating; they
+do not establish that any particular cache or allocation change will improve
+throughput. Normal retained analysis still executes the expensive general body
+and flow analysis. Broad safe reuse and reducing publication overhead now take
+priority over adding disconnected query primitives or counting memo hits.
+
+Logs/profiles are `/tmp/elisa-project-analysis-bench.log`,
+`/tmp/elisa-retained-project-profile.log`, `/tmp/elisa-retained-project.cpu` and
+`/tmp/elisa-retained-project.mem`. Both runs used the existing unrelated-SMT
+isolation overlay. No combined dirty-tree, zero-error or complete incremental
+compiler claim follows from this benchmark. All execution stayed local.
