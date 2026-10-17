@@ -1220,3 +1220,74 @@ checks passed in 1.568 s; frozen parser diagnostic parity passed in 29.155 s. A
 annotations across readonly/mutable edits, repeats and reverts (0.436 s); it
 asserts that the resolved graph actually exceeds the small-projection gate.
 Earlier broader root-suite failures and Stage1 errors remain unresolved.
+
+### Function-scoped lookup dependency audit
+
+`semantic.AnalyzeWithLookupTrace` runs full fresh analysis and returns owned,
+versioned lookup observations alongside the ordinary Result. It records ordered
+candidate reads for global values, named types and permission families, plus the
+enclosing-module preference and its local-shadow outcome. Missing candidates
+and present-but-inaccessible candidates remain visible in the record; a selected
+binding alone would miss invalidation when a new higher-priority name appears.
+Namespace, ordered usings, function label, root-file label and phase are captured
+without retaining AST, Scope, Symbol or Type pointers. These labels are not a
+complete function identity: imported declaration provenance, impl identity and
+specialization are separate requirements.
+
+Final effect inference has a dedicated observation owner. It does not install a
+fake current function declaration/type, which would change resolution fallback
+or diagnostic locations. Ordinary analysis does not enable recording, and its
+recorder reference is cleared before publishing the Result. The loaded-program
+analyzer seam preserves the same runtime-source authority and decoded-IR policy
+for normal analysis and the opt-in audit.
+
+The trace stores each context once and uses bounded integer references in its
+records. Snapshot canonicalization sorts contexts and remaps references, making
+numbering independent of observation order; storage admission reserves room for
+that ID growth. Payload is bounded to 16 MiB and contexts plus records to 65,536
+entries. A candidate list keeps at most 4,096 reads plus an overflow marker; the
+entire observation is rejected if incomplete. Invalid UTF-8 is rejected rather
+than silently merged by JSON replacement. Truncation and dropped observations
+are explicit. Dropped counts can include repeated rejected reads and therefore
+are not a count of unique missing dependencies.
+
+This is one audited dependency domain, not an admission certificate or a body
+cache. Direct Scope reads, type/callee values and summaries, generic/implicit
+contexts, flow state and complete Result/live-analyzer hydration remain required.
+Even an untruncated lookup trace cannot authorize skipping function analysis.
+The audit performs JSON capture and intentionally adds work; no compile-time
+speed improvement is claimed from this instrumentation.
+
+The local frozen-project audit is enabled with
+`ELISA_INCREMENTAL_LOOKUP_PROBE_SNAPSHOT_IN`; optional
+`ELISA_INCREMENTAL_LOOKUP_PROBE_OUT` writes its owned JSON result. It compares
+fresh traced and untraced status plus complete exposed diagnostics under the
+same loader authority. Before context interning, the frozen parser produced
+1,351,931 observed lookup calls and hit the 16 MiB budget at 39,244 records,
+rejecting 893,547 observations while preserving all 776,281 raw diagnostic bytes
+(including the trailing newline). The retained subset covered 1,951 function
+labels, with 72,519 missing candidates. This partial subset is not representative
+of all reads. Context interning addresses its duplicated payload before using
+these observations to develop actual tracked lookup/callee queries.
+
+With interned contexts, the same frozen parser audit fits without truncation:
+1,351,931 calls, 57,571 distinct records, 3,929 contexts and 14,348,135 payload
+bytes, with zero rejected observations. Its 1,951 owner labels have 37,088 retained
+function-phase records and 20,483 final-effect-phase records; 111,952 candidate
+reads were absent. Domains comprise 37,265 value, 15,906 type, 4,004 permission
+and 396 enclosing-member observations. This proves coverage of the instrumented
+lookup domain on this workload; it does not prove complete function dependencies.
+The traced/untraced diagnostic comparison passed in 13.809 s. The trace itself
+adds work (the measured traced analysis was 7.814 s), and differing process/GC
+conditions prohibit treating these sequential audit timings as a compiler
+throughput result. Saturated traces may retain different subsets under different
+observation orders; only complete traces have the canonical-order guarantee.
+
+Validation for this audit checkpoint: final full semantic suite passed in
+58.125 s; focused interned-trace race tests passed in 1.468 s; compile-server,
+source-cache and loaded-program/runtime-authority focused race checks passed in
+2.146 s. Tests cover positive/negative/private lookups, type and permission
+queries, local shadowing, actual full-Result/AST parity, final inference ownership,
+string ownership, context interning/remapping, invalid UTF-8 and overflow paths.
+Broader root-suite failures and Stage1 diagnostics remain unresolved. No remote
+compute was used.

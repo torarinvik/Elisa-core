@@ -421,14 +421,17 @@ func (a *Analyzer) buildVisibleNameCandidates(namespace, name string) []string {
 }
 
 func (a *Analyzer) lookupVisibleType(name string) (Type, string, bool) {
+	var reads []lookupCandidateRead
+	if a.lookupTrace != nil {
+		defer func() { a.lookupTrace.record(a, "type", name, reads, false) }()
+	}
 	for _, candidate := range a.visibleNameCandidates(name) {
-		if t, ok := a.namedTypes[candidate]; ok {
-			if a.privateTypeNames[candidate] && !a.canAccessPrivateName(candidate) {
-				continue
-			}
-			if a.privateModuleOnPath(candidate) != "" {
-				continue
-			}
+		t, present := a.namedTypes[candidate]
+		visible := present && !(a.privateTypeNames[candidate] && !a.canAccessPrivateName(candidate)) && a.privateModuleOnPath(candidate) == ""
+		if a.lookupTrace != nil {
+			reads = appendLookupCandidate(reads, lookupCandidateRead{candidate, present, visible})
+		}
+		if visible {
 			return t, candidate, true
 		}
 	}
@@ -436,8 +439,16 @@ func (a *Analyzer) lookupVisibleType(name string) (Type, string, bool) {
 }
 
 func (a *Analyzer) lookupVisiblePermission(name string) (*PermissionSet, string, bool) {
+	var reads []lookupCandidateRead
+	if a.lookupTrace != nil {
+		defer func() { a.lookupTrace.record(a, "permission", name, reads, false) }()
+	}
 	for _, candidate := range a.visibleNameCandidates(name) {
-		if permission, ok := a.permissions[candidate]; ok {
+		permission, present := a.permissions[candidate]
+		if a.lookupTrace != nil {
+			reads = appendLookupCandidate(reads, lookupCandidateRead{candidate, present, present})
+		}
+		if present {
 			return permission, candidate, true
 		}
 	}
@@ -511,25 +522,35 @@ func (a *Analyzer) enclosingNamespaceMember(name string) (*Symbol, string, bool)
 		return nil, "", false
 	}
 	if _, shadowed := a.lookupLocalSymbol(name); shadowed {
+		if a.lookupTrace != nil {
+			a.lookupTrace.record(a, "enclosing", name, nil, true)
+		}
 		return nil, "", false
 	}
 	qualified := joinQualifiedName(namespace, name)
 	sym, ok := a.globalScope.Lookup(qualified)
-	if !ok || sym == nil {
-		return nil, "", false
+	visible := ok && sym != nil && a.globalNameIsVisible(sym, qualified)
+	if a.lookupTrace != nil {
+		a.lookupTrace.record(a, "enclosing", name, []lookupCandidateRead{{qualified, ok, visible}}, false)
 	}
-	if !a.globalNameIsVisible(sym, qualified) {
+	if !visible {
 		return nil, "", false
 	}
 	return sym, qualified, true
 }
 
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
+	var reads []lookupCandidateRead
+	if a.lookupTrace != nil {
+		defer func() { a.lookupTrace.record(a, "value", name, reads, false) }()
+	}
 	for _, candidate := range a.visibleNameCandidates(name) {
-		if sym, ok := a.globalScope.Lookup(candidate); ok {
-			if sym != nil && !a.globalNameIsVisible(sym, candidate) {
-				continue
-			}
+		sym, present := a.globalScope.Lookup(candidate)
+		visible := present && (sym == nil || a.globalNameIsVisible(sym, candidate))
+		if a.lookupTrace != nil {
+			reads = appendLookupCandidate(reads, lookupCandidateRead{candidate, present, visible})
+		}
+		if visible {
 			return sym, candidate, true
 		}
 	}

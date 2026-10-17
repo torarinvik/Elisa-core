@@ -47,6 +47,14 @@ func (a *Analyzer) recomputeFunctionPermissionEffects(scoped scopedDecl) (*FuncT
 		if !ok || fnType == nil {
 			return
 		}
+		if a.lookupTrace != nil {
+			saved := a.lookupTraceOwner
+			a.lookupTraceOwner = fnType.Name
+			if a.lookupTraceOwner == "" {
+				a.lookupTraceOwner = joinQualifiedName(scoped.Namespace, fn.Name)
+			}
+			defer func() { a.lookupTraceOwner = saved }()
+		}
 		result = fnType
 		usedRefs := a.collectFunctionPermissionRefs(fn)
 		mutableCollector := permissionEffectCollector{analyzer: a, mutableGlobalsOnly: true, returnType: fnType.Return}

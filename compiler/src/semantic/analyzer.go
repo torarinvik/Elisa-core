@@ -88,6 +88,8 @@ const (
 )
 
 type Analyzer struct {
+	lookupTraceOwner         string
+	lookupTrace              *lookupDependencyRecorder
 	permissionEffectsOutcome permissionInferenceOutcome
 	permissionInference      *permissionInferenceObserver
 	incrementalBodies        *incrementalBodyInvocation
@@ -1169,6 +1171,10 @@ func analyzeWithBodyInvocation(file *ast.File, options AnalyzeOptions, bodies *i
 // The private solver seam permits complete-result differential tests against the
 // reference inference scheduler without changing public analysis options.
 func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl)) *Result {
+	return analyzeWithLookupRecorder(file, options, bodies, solver, nil)
+}
+
+func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl), recorder *lookupDependencyRecorder) *Result {
 	loweredFile := file
 	activeFile := loweredFile
 	// Fold recognized total char classifiers to static lookup tables (docs/125 §9.6 / C3)
@@ -1202,6 +1208,7 @@ func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *
 		parallelForCapacity = 4
 	}
 	a := &Analyzer{
+		lookupTrace:                       recorder,
 		trustedRuntimeSourceFiles:         trustedRuntimeSourceFileSet(options.TrustedRuntimeSourceFiles),
 		file:                              file,
 		incrementalBodies:                 bodies,
@@ -1307,7 +1314,7 @@ func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *
 			a.incrementalBodies = nil
 		}
 	}
-	defer func() { a.incrementalBodies = nil; a.capabilityQueries = nil }()
+	defer func() { a.incrementalBodies = nil; a.capabilityQueries = nil; a.lookupTrace = nil }()
 	// docs/120 §10: the uniform linear-mutation rule is default-on now that the whole
 	// self-hosted frontend is converted to the reassignment form. `ELISA_LINEAR_MUTATION=0`
 	// is the explicit off-switch (escape hatch during any residual migration).

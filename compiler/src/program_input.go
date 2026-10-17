@@ -101,6 +101,14 @@ func analyzeSemanticWithSession(file *ast.File, options semantic.AnalyzeOptions,
 }
 
 func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, session *semantic.IncrementalAnalysisSession) (*ast.File, *semantic.Result, bool) {
+	return analyzeLoadedProgramUsing(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+		return analyzeSemanticWithSession(file, options, session)
+	})
+}
+
+// Keep provenance/options handling identical for the normal analyzer and
+// opt-in dependency audits; an injected analyzer must still do full analysis.
+func analyzeLoadedProgramUsing(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
 	if program == nil {
 		fmt.Fprintf(stderr, "error: missing program input\n")
 		return nil, nil, false
@@ -109,7 +117,7 @@ func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, o
 		// A decoded frontend-IR AST does not carry the include loader's source
 		// provenance, so it cannot authorize source-sensitive TaskGroup proofs.
 		options.TrustedRuntimeSourceFiles = nil
-		result := analyzeSemanticWithSession(program.file, options, session)
+		result := analyze(program.file, options)
 		result.EASMModules = append([]*easm.Module(nil), program.easm...)
 		if warns := result.Notices(); len(warns) > 0 {
 			for _, w := range warns {
@@ -144,7 +152,7 @@ func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, o
 		options.TrustedRuntimeSourceFiles = append(options.TrustedRuntimeSourceFiles, runtimeSource)
 	}
 	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
-		return analyzeSemanticWithSession(file, options, session)
+		return analyze(file, options)
 	})
 	if ok && result != nil {
 		result.EASMModules = append([]*easm.Module(nil), program.easm...)
