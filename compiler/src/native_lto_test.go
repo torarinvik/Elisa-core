@@ -230,6 +230,31 @@ func TestLLCCodegenLevelFollowsOptimizationLevel(t *testing.T) {
 	}
 }
 
+func TestLLCObjectCacheKeyIncludesResolvedTargetIdentity(t *testing.T) {
+	base := backend.TargetIdentity{
+		Triple:   "x86_64-unknown-linux-gnu",
+		CPU:      "x86-64",
+		Features: "+sse2",
+	}
+	key := func(target backend.TargetIdentity) string {
+		t.Helper()
+		return llcObjectCacheKeyForInputs([]byte("define i32 @f() { ret i32 1 }\n"), "-O2", target, "/tool/llc", "tool-stamp")
+	}
+	baseKey := key(base)
+	if baseKey != key(base) {
+		t.Fatal("identical llc inputs produced different keys")
+	}
+	for _, changed := range []backend.TargetIdentity{
+		{Triple: "aarch64-unknown-linux-gnu", CPU: base.CPU, Features: base.Features},
+		{Triple: base.Triple, CPU: "znver4", Features: base.Features},
+		{Triple: base.Triple, CPU: base.CPU, Features: "+sse2,+avx2"},
+	} {
+		if got := key(changed); got == baseKey {
+			t.Fatalf("resolved target change collided with llc object key: %+v", changed)
+		}
+	}
+}
+
 // The panic path declares printf for its message. C's printf returns a 32-bit int, which is how
 // programs declare it; the panic path insisted on `int` (i64), so a program declaring
 // `extern printf(...) -> i32` that could panic failed with "conflicting LLVM function

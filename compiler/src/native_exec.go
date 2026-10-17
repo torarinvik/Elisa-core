@@ -913,24 +913,27 @@ func llcObjectCacheKey(irPath string, codegenOpt string, targetTriple string, ll
 	if err != nil {
 		return "", false
 	}
-	h := sha256.New()
-	testRunnerCacheWriteString(h, "llc-object-exact-ir-v2")
-	h.Write(irBytes)
-	h.Write([]byte("\x00llc\x00"))
-	h.Write([]byte(strings.TrimSpace(targetTriple)))
-	h.Write([]byte{0})
-	h.Write([]byte("cpu=" + resolvedNativeTargetCPU(targetTriple) + " codegen=" + codegenOpt))
-	h.Write([]byte{0})
-	h.Write([]byte(llcPath))
-	// Hash the tool contents rather than relying on size+mtime: an in-place toolchain
-	// replacement can preserve both of those metadata fields and must still invalidate
-	// the object cache.
-	if stamp, stampErr := toolchainContentStamp(llcPath); stampErr == nil {
-		testRunnerCacheWriteString(h, "llc-content="+stamp)
-	} else {
+	target, err := backend.ResolveTargetIdentity(targetTriple)
+	if err != nil {
 		return "", false
 	}
-	return hex.EncodeToString(h.Sum(nil)), true
+	toolStamp, err := toolchainContentStamp(llcPath)
+	if err != nil {
+		return "", false
+	}
+	return llcObjectCacheKeyForInputs(irBytes, codegenOpt, target, llcPath, toolStamp), true
+}
+
+func llcObjectCacheKeyForInputs(irBytes []byte, codegenOpt string, target backend.TargetIdentity, llcPath string, toolStamp string) string {
+	h := sha256.New()
+	testRunnerCacheWriteString(h, "llc-object-exact-ir-v3")
+	h.Write(irBytes)
+	h.Write([]byte("\x00llc\x00"))
+	writeResolvedNativeCacheTarget(h, target)
+	testRunnerCacheWriteString(h, "codegen="+codegenOpt)
+	testRunnerCacheWriteString(h, "llc-path="+llcPath)
+	testRunnerCacheWriteString(h, "llc-content="+toolStamp)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func lookupCachedObject(key string) (string, bool) {
