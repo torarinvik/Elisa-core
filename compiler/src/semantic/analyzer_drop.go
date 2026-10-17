@@ -343,6 +343,7 @@ func (a *Analyzer) implicitDropPermissionRefs(owner ast.Node) []ast.PermissionRe
 		}
 		seen[site.TypeName] = true
 		if hook, ok := a.dropHooks[site.TypeName]; ok && hook.FnType != nil {
+			a.observePermissionFunction(hook.FnType)
 			refs = append(refs, hook.FnType.PermissionRefs...)
 		}
 	}

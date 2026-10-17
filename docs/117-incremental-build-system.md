@@ -653,3 +653,50 @@ compatibility: compiler/semantic identity must also participate in artifact keys
 General extern formatting now retains raw generic `uses` applications; only
 post-analysis interface clones omit them. Protocol bound-call frame summaries
 and method law-obligation conformance remain separate semantic qualification work.
+
+### Dependency-driven final permission inference
+
+Final effect inference now uses an adaptive worklist. Its first dense pass keeps
+already-stable files on the existing one-pass path without dependency-map or heap
+allocation. If execution, mutable-global, returned-callback or nested-lambda rows
+change, it seeds a tracked pass and subsequently revisits only readers of changed
+function rows. Current/next priority queues preserve declaration order and the
+existing total `function count + 4` round limit. The original convergence cap is
+retained; this is not a new proof that arbitrary effect equations converge.
+
+Dependencies are recorded at the semantic row readers, including current named
+declarations behind specialized/function-value copies and callback-factory source
+names. Both empty and nonempty reads count. Destructor effects, cast/init/operator
+lowerings and callback transfer use those same readers. Nested lambda collectors
+publish mutable-row changes independently of their owner's execution effects.
+Consumed edges are replaced on reevaluation. This graph belongs to one fresh
+Analyzer invocation and is released afterward; it is not yet a persistent module
+or inter-invocation semantic cache.
+
+Tests compare every published effect row against the previous ordered sweep on
+100 seeded graphs and focused chain/SCC/diamond, specialized-copy, alias,
+returned-callback, callback-transfer, lambda-global, destructor, cast and lowered
+initializer/operator cases. Complete-result comparison also runs both solvers
+through fresh full analysis, including diagnostics and metadata. Stable/no-call
+cases require exactly one evaluation per function and observer cleanup.
+
+Local Apple M5 / Go1.27.2 / GOMAXPROCS=4 measurements use three repetitions.
+Synthetic initially-empty inference chains (100 iterations per repetition) have
+median sweep/worklist times of 0.558/0.0611 ms at16 nodes and29.83/0.511 ms at128.
+Stable128-node inference is0.429/0.437 ms; the fast path adds3 allocations/~32bytes,
+so stable throughput is approximately equal within these short samples.
+
+The separate source benchmark includes parsing and complete semantic analysis
+(20 iterations per repetition), with an extern allocation effect at the end of a
+call chain:
+
+| Functions | Sweep median | Worklist median | Allocations, sweep → worklist |
+| --- | --- | --- | --- |
+| 16 | 0.616 ms | 0.394 ms | 8,943 → 5,492 |
+| 128 | 18.9 ms | 2.79 ms | 256,831 → 35,037 |
+
+These synthetic semantic workloads exclude LLVM emission/linking and do not
+establish a real-project incremental speedup. The implementation continues to use
+the existing permission-row equations/comparators; stronger TypeArgs/Via identity,
+converged effect-law validation, lossless exported semantic summaries and actual
+persistent call/module queries remain required work.

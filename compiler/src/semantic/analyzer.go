@@ -88,7 +88,8 @@ const (
 )
 
 type Analyzer struct {
-	incrementalBodies *incrementalBodyInvocation
+	permissionInference *permissionInferenceObserver
+	incrementalBodies   *incrementalBodyInvocation
 	// smtStaleLocalDefs marks immutable locals whose initializer read a binding that has since been
 	// written (analyzer_smt_shadowing.go); their defining equation no longer holds.
 	smtStaleLocalDefs                    map[*Symbol]bool
@@ -1160,6 +1161,12 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 }
 
 func analyzeWithBodyInvocation(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation) *Result {
+	return analyzeWithEffectInference(file, options, bodies, nil)
+}
+
+// The private solver seam permits complete-result differential tests against the
+// reference inference scheduler without changing public analysis options.
+func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl)) *Result {
 	loweredFile := file
 	activeFile := loweredFile
 	// Fold recognized total char classifiers to static lookup tables (docs/125 §9.6 / C3)
@@ -1406,7 +1413,11 @@ func analyzeWithBodyInvocation(file *ast.File, options AnalyzeOptions, bodies *i
 	// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
 	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
 	a.checkProtocolDefaultMethodContracts(activeDecls)
-	a.inferFunctionPermissionEffects(activeDecls)
+	if solver == nil {
+		a.inferFunctionPermissionEffects(activeDecls)
+	} else {
+		solver(a, activeDecls)
+	}
 	a.validateDeferredBorrowedNurseryShutdownCalls()
 	for _, check := range a.deferredImplEffectChecks {
 		check()

@@ -26,57 +26,58 @@ func permissionFunctionDecls(decls []scopedDecl) []scopedDecl {
 }
 
 func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
-	decls = permissionFunctionDecls(decls)
-	for iter := 0; iter < len(decls)+4; iter++ {
-		changed := false
-		for _, scoped := range decls {
-			fn, ok := scoped.Decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-				sym, ok := a.symbolForFuncDecl(fn)
-				if !ok {
-					return
-				}
-				fnType, ok := sym.Type.(*FuncType)
-				if !ok || fnType == nil {
-					return
-				}
-				usedRefs := a.collectFunctionPermissionRefs(fn)
-				mutableCollector := permissionEffectCollector{analyzer: a, mutableGlobalsOnly: true, returnType: fnType.Return}
-				mutableCollector.collectStmts(fn.Body)
-				mutableRefs := mutableCollector.refs()
-				returnedGlobalRefs := canonicalizePermissionRefs(mutableCollector.returnedFunctionGlobalRefs)
-				if !samePermissionRefs(fnType.ReturnedFunctionGlobalPermissionRefs, returnedGlobalRefs) {
-					fnType.ReturnedFunctionGlobalPermissionRefs = returnedGlobalRefs
-					changed = true
-				}
-				returnedRefs := canonicalizePermissionRefs(mutableCollector.returnedFunctionRefs)
-				if !samePermissionRefs(fnType.ReturnedFunctionPermissionRefs, returnedRefs) {
-					fnType.ReturnedFunctionPermissionRefs = returnedRefs
-					changed = true
-				}
-				if !samePermissionRefs(fnType.MutableGlobalPermissionRefs, mutableRefs) {
-					fnType.MutableGlobalPermissionRefs = mutableRefs
-					changed = true
-				}
-				mergedRefs := mergePermissionRefs(fnType.DeclaredPermissionRefs, usedRefs)
-				mergedFamilies := mergePermissionFamilies(fnType.DeclaredPermissions, permissionFamiliesFromRefs(mergedRefs))
-				if !samePermissionRefs(fnType.PermissionRefs, mergedRefs) {
-					fnType.PermissionRefs = mergedRefs
-					changed = true
-				}
-				if !sameStringSlice(fnType.Permissions, mergedFamilies) {
-					fnType.Permissions = mergedFamilies
-					changed = true
-				}
-			})
-		}
-		if !changed {
+	a.inferFunctionPermissionEffectsWorklist(permissionFunctionDecls(decls))
+}
+
+// recomputeFunctionPermissionEffects updates all rows published by one function.
+// The worklist and the test reference sweep use the same row equations.
+func (a *Analyzer) recomputeFunctionPermissionEffects(scoped scopedDecl) (*FuncType, bool) {
+	var result *FuncType
+	changed := false
+	fn, ok := scoped.Decl.(*ast.FuncDecl)
+	if !ok {
+		return nil, false
+	}
+	a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+		sym, ok := a.symbolForFuncDecl(fn)
+		if !ok {
 			return
 		}
-	}
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok || fnType == nil {
+			return
+		}
+		result = fnType
+		usedRefs := a.collectFunctionPermissionRefs(fn)
+		mutableCollector := permissionEffectCollector{analyzer: a, mutableGlobalsOnly: true, returnType: fnType.Return}
+		mutableCollector.collectStmts(fn.Body)
+		mutableRefs := mutableCollector.refs()
+		returnedGlobalRefs := canonicalizePermissionRefs(mutableCollector.returnedFunctionGlobalRefs)
+		if !samePermissionRefs(fnType.ReturnedFunctionGlobalPermissionRefs, returnedGlobalRefs) {
+			fnType.ReturnedFunctionGlobalPermissionRefs = returnedGlobalRefs
+			changed = true
+		}
+		returnedRefs := canonicalizePermissionRefs(mutableCollector.returnedFunctionRefs)
+		if !samePermissionRefs(fnType.ReturnedFunctionPermissionRefs, returnedRefs) {
+			fnType.ReturnedFunctionPermissionRefs = returnedRefs
+			changed = true
+		}
+		if !samePermissionRefs(fnType.MutableGlobalPermissionRefs, mutableRefs) {
+			fnType.MutableGlobalPermissionRefs = mutableRefs
+			changed = true
+		}
+		mergedRefs := mergePermissionRefs(fnType.DeclaredPermissionRefs, usedRefs)
+		mergedFamilies := mergePermissionFamilies(fnType.DeclaredPermissions, permissionFamiliesFromRefs(mergedRefs))
+		if !samePermissionRefs(fnType.PermissionRefs, mergedRefs) {
+			fnType.PermissionRefs = mergedRefs
+			changed = true
+		}
+		if !sameStringSlice(fnType.Permissions, mergedFamilies) {
+			fnType.Permissions = mergedFamilies
+			changed = true
+		}
+	})
+	return result, changed
 }
 
 func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.PermissionRef {
@@ -522,7 +523,15 @@ func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, w
 			collector := permissionEffectCollector{analyzer: c.analyzer, mutableGlobalsOnly: true, returnType: ft.Return}
 			collector.collectStmts(n.Body)
 			collector.collectExpr(n.BodyExpr)
-			ft.MutableGlobalPermissionRefs = collector.refs()
+			refs := collector.refs()
+			changed := !samePermissionRefs(ft.MutableGlobalPermissionRefs, refs)
+			ft.MutableGlobalPermissionRefs = refs
+			if changed {
+				a := c.analyzer
+				if a.permissionInference != nil {
+					a.permissionInference.changed(ft)
+				}
+			}
 		}
 	case *ast.ExprBlock:
 		// A value block is an executable expression. Its leading statements and

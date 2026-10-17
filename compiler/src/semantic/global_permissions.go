@@ -1030,14 +1030,17 @@ func (a *Analyzer) mandatoryGlobalPermissionRefs(fn *FuncType) []ast.PermissionR
 	if fn == nil {
 		return nil
 	}
+	a.observePermissionFunction(fn)
 	refs := append([]ast.PermissionRef(nil), fn.MutableGlobalPermissionRefs...)
 	for _, name := range fn.FunctionReturnSourceNames {
 		if factory := a.functionTypes[name]; factory != nil {
+			a.observePermissionFunction(factory)
 			refs = append(refs, factory.ReturnedFunctionGlobalPermissionRefs...)
 		}
 	}
 	for _, name := range fn.MutableGlobalSourceNames {
 		if source := a.functionTypes[name]; source != nil {
+			a.observePermissionFunction(source)
 			refs = append(refs, source.MutableGlobalPermissionRefs...)
 		}
 	}
@@ -1045,6 +1048,7 @@ func (a *Analyzer) mandatoryGlobalPermissionRefs(fn *FuncType) []ast.PermissionR
 	// named declaration's final mutable row instead of trusting that stale copy.
 	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
 		if declared, ok := sym.Type.(*FuncType); ok {
+			a.observePermissionFunction(declared)
 			refs = append(refs, declared.MutableGlobalPermissionRefs...)
 		}
 	}
@@ -1074,17 +1078,21 @@ func (a *Analyzer) effectiveFunctionPermissionRefs(fn *FuncType) []ast.Permissio
 	if fn == nil {
 		return nil
 	}
+	a.observePermissionFunction(fn)
 	refs := append([]ast.PermissionRef(nil), functionPermissionRefs(fn)...)
 	for _, name := range fn.MutableGlobalSourceNames {
 		if source := a.functionTypes[name]; source != nil {
+			a.observePermissionFunction(source)
 			refs = append(refs, functionPermissionRefs(source)...)
 		}
 	}
 	if source := a.functionTypes[fn.Name]; source != nil {
+		a.observePermissionFunction(source)
 		refs = append(refs, functionPermissionRefs(source)...)
 	}
 	for _, name := range fn.FunctionReturnSourceNames {
 		if factory := a.functionTypes[name]; factory != nil {
+			a.observePermissionFunction(factory)
 			refs = append(refs, factory.ReturnedFunctionPermissionRefs...)
 		}
 	}
