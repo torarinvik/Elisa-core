@@ -1981,3 +1981,49 @@ The combined dirty SMT tree and historical Stage1/root failures are not claimed
 green. Logs, profiles, the frozen source, profile executable and self-contained
 overlay backing files were archived under the Stage1 checkout's ignored
 `build/verification/incremental-publication-20261017` directory for repeatability.
+
+
+### Full seed timing and explicit solver benchmark mode
+
+The preceding 4–6-second frozen-project analysis measurements used
+`AnalyzeOptions{}`: SMT proof discharge was disabled. They isolate non-solver
+analysis and publication, and cannot estimate a production compiler seed.
+`BenchmarkIncrementalProjectAnalysis` now reports `smt-enabled` explicitly and
+accepts `ELISA_PROJECT_BENCH_SMT=1` to enable proof discharge on both fresh and
+retained paths, including prewarming. The fresh path uses AnalyzeWithOptions so
+both receive identical options. Other CLI flags and loader runtime authority
+are still outside this benchmark; the seed command remains the full workflow
+measurement.
+
+A fresh Stage0 built from bb0b884b with the unrelated-SMT overlay attempted the
+current Stage1 seed locally. The default 6 GiB RSS guard terminated the first
+attempt after 35.208 s (status 125), before analysis completion. This is not a
+compile-time measurement. A retry with GOMAXPROCS=4, GOGC=1200, GOMEMLIMIT=10GiB
+and a 14 GiB RSS guard completed the attempt in 152.704 s: lex 300 ms, parse
+1.390 s, analysis 149.967 s. It exited 1 with semantic diagnostics, before
+code generation/linking. Reported maximum child RSS was 6,083,477,504 bytes.
+Whole-build cache was disabled and the existing exact-proof cache enabled.
+The new Stage0 hash has its own proof-cache namespace, so this is not a fully
+warmed-cache qualification.
+
+This result is observational: the source manifest detected changes to
+`src/backend/easm_compose_text.elisa` and `src/backend/easm_text_scan.elisa`
+during the retry. It is not an immutable-input baseline or a controlled
+comparison against the historical 117.05/107.03-second pair. The log contains
+158 non-warning source diagnostic rows using the same location extractor that
+finds 207 in the historical checkpoint. This does not attribute diagnostic
+changes to incremental compilation and does not establish a successful build.
+The installed compiler was not replaced.
+
+Attempt logs, source hashes, changed-input list, environment, Stage0 artifact
+hash and resource measurements are preserved in the Stage1 checkout's ignored
+`build/verification/current-seed-bb0b884b` and
+`build/verification/current-seed-bb0b884b-expanded` directories. Stable-source
+full seed, warm/edit iteration latency, broader body reuse and successful
+codegen/link qualification remain outstanding. LOCAL ONLY.
+
+
+Benchmark-mode smoke validation passed with SMT off and on using the existing
+nonlinear proof-cache fixture as a small frozen snapshot. Both fresh and retained
+paths reported the requested 0/1 solver metric and zero diagnostics. These smoke
+timings are not performance evidence. Log: `/tmp/elisa-project-bench-smt-smoke.log`.

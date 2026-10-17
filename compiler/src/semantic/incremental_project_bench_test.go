@@ -15,6 +15,9 @@ import (
 // frozen real project. Parsing is excluded equally, but each iteration gets a
 // fresh AST. Retained includes current dependency capture/publication costs.
 // This measures analysis alone, not client edit-to-executable latency.
+// SMT is disabled by default to isolate non-solver work. Set
+// ELISA_PROJECT_BENCH_SMT=1 to include proof discharge in both paths;
+// other CLI-specific options and loader authority are not reconstructed here.
 func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 	path := os.Getenv("ELISA_LOOKUP_QUERY_PROBE_SNAPSHOT")
 	if path == "" {
@@ -31,6 +34,7 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 	if snapshot.Filename == "" || snapshot.Source == "" {
 		b.Fatal("empty frozen project")
 	}
+	options := AnalyzeOptions{EnableSMT: os.Getenv("ELISA_PROJECT_BENCH_SMT") == "1"}
 	parse := func() *ast.File {
 		lex := lexer.New(snapshot.Filename, []byte(snapshot.Source))
 		p := parser.New(lex.Tokenize())
@@ -47,7 +51,7 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 			expectedErrors := -1
 			if mode == "retained" {
 				session = NewIncrementalAnalysisSession()
-				expectedErrors = len(session.Analyze(parse(), AnalyzeOptions{}).Errors())
+				expectedErrors = len(session.Analyze(parse(), options).Errors())
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -56,9 +60,9 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 				b.StartTimer()
 				var result *Result
 				if session != nil {
-					result = session.Analyze(file, AnalyzeOptions{})
+					result = session.Analyze(file, options)
 				} else {
-					result = Analyze(file)
+					result = AnalyzeWithOptions(file, options)
 				}
 				b.StopTimer()
 				errors := len(result.Errors())
@@ -75,6 +79,11 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 				b.ReportMetric(float64(stats.LexicalQueryMemoHits)/float64(b.N), "lookup-hits/op")
 			}
 			b.ReportMetric(float64(expectedErrors), "diagnostics")
+			if options.EnableSMT {
+				b.ReportMetric(1, "smt-enabled")
+			} else {
+				b.ReportMetric(0, "smt-enabled")
+			}
 		})
 	}
 }
