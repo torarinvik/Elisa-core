@@ -25,11 +25,15 @@ import (
 // summaries and CFGs stay fresh.
 // It is not a complete incremental compiler or a persistent whole-body cache.
 type IncrementalAnalysisSession struct {
-	mu             sync.Mutex
-	db             *incremental.Database
-	previous       map[incremental.Key]bool
-	stats          IncrementalAnalysisStats
-	retiredQueries int
+	mu                      sync.Mutex
+	db                      *incremental.Database
+	previous                map[incremental.Key]bool
+	productBytes            map[incremental.Key]int
+	retainedProductBytes    int
+	maxTrackedBodies        int // zero selects the production default; tests may lower it
+	maxRetainedProductBytes int // zero selects the production default; tests may lower it
+	stats                   IncrementalAnalysisStats
+	retiredQueries          int
 }
 type IncrementalAnalysisStats struct {
 	Analyses, PrimaryBodiesChecked, PrimaryBodiesReused, ReusedExpressionNodes uint64
@@ -38,6 +42,7 @@ type IncrementalAnalysisStats struct {
 	LocalInitializersChecked, LocalInitializersReused                          uint64
 	DatabaseResets                                                             uint64
 	ColdFallbackAnalyses                                                       uint64
+	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes     uint64
 	Queries                                                                    incremental.Stats
 }
 type primitiveBodyProduct struct{ Source, Config, Safety, Types string }
@@ -54,6 +59,11 @@ var primitiveConfigKey = incremental.Key{Kind: "semantic-config", Name: "primiti
 var primitiveSafetyKey = incremental.Key{Kind: "semantic-lookup-set", Name: "closed-integer-operators-v1"}
 var errPrimitiveProductMiss = errors.New("primitive typing product requires cold analysis")
 
+const (
+	primitiveSessionMaxTrackedBodies        = 4096
+	primitiveSessionMaxRetainedProductBytes = 1 << 20
+)
+
 func primitiveInput(kind, name string) incremental.Key {
 	return incremental.Key{Kind: kind, Name: name}
 }
@@ -64,6 +74,8 @@ func NewIncrementalAnalysisSession() *IncrementalAnalysisSession {
 	return session
 }
 func (session *IncrementalAnalysisSession) resetDatabase() {
+	session.productBytes = make(map[incremental.Key]int)
+	session.retainedProductBytes = 0
 	session.db = incremental.New(map[string]incremental.Evaluator{"primitive-return": func(reader *incremental.Reader, name string) (string, error) {
 		source, _ := reader.Input(primitiveInput("function-source", name))
 		config, _ := reader.Input(primitiveConfigKey)
@@ -89,15 +101,56 @@ func (session *IncrementalAnalysisSession) Stats() IncrementalAnalysisStats {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	stats := session.stats
+	stats.RetainedProductBytes = uint64(session.retainedProductBytes)
 	if session.db != nil {
 		stats.Queries = session.db.Stats()
 	}
 	return stats
 }
 
-// All primitive products use the same publication boundary.
+func (session *IncrementalAnalysisSession) trackedBodyLimit() int {
+	if session.maxTrackedBodies > 0 {
+		return session.maxTrackedBodies
+	}
+	return primitiveSessionMaxTrackedBodies
+}
+
+func (session *IncrementalAnalysisSession) productByteLimit() int {
+	if session.maxRetainedProductBytes > 0 {
+		return session.maxRetainedProductBytes
+	}
+	return primitiveSessionMaxRetainedProductBytes
+}
+
+func (session *IncrementalAnalysisSession) forgetPrimitiveProduct(name string) {
+	key := primitiveInput("function-product", name)
+	if size, ok := session.productBytes[key]; ok {
+		if size >= session.retainedProductBytes {
+			session.retainedProductBytes = 0
+		} else {
+			session.retainedProductBytes -= size
+		}
+		delete(session.productBytes, key)
+	}
+}
+
 func (session *IncrementalAnalysisSession) storePrimitiveProduct(name string, encoded string) bool {
-	session.db.Apply(incremental.Change{Key: primitiveInput("function-product", name), Value: encoded})
+	productKey := primitiveInput("function-product", name)
+	oldSize := session.productBytes[productKey]
+	if oldSize > session.retainedProductBytes {
+		oldSize = session.retainedProductBytes
+	}
+	retained := session.retainedProductBytes - oldSize + len(encoded)
+	if retained > session.productByteLimit() {
+		session.db.Apply(incremental.Change{Key: productKey, Remove: true})
+		session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: name})
+		session.forgetPrimitiveProduct(name)
+		session.stats.ProductAdmissionMisses++
+		return false
+	}
+	session.db.Apply(incremental.Change{Key: productKey, Value: encoded})
+	session.productBytes[productKey] = len(encoded)
+	session.retainedProductBytes = retained
 	return true
 }
 
@@ -131,12 +184,16 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if absolute, err := filepath.Abs(origin); err == nil {
 		origin = absolute
 	}
+	tooManyTrackedBodies := false
 	var collect func([]ast.Decl, string, int)
 	collect = func(decls []ast.Decl, namespace string, depth int) {
-		if depth > 128 {
+		if depth > 128 || tooManyTrackedBodies {
 			return
 		}
 		for _, decl := range decls {
+			if tooManyTrackedBodies {
+				return
+			}
 			if nested, ok := decl.(*ast.NamespaceDecl); ok {
 				if len(nested.Name) > primitiveSourceByteBudget-len(namespace)-1 {
 					continue
@@ -162,6 +219,10 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			if len(qualifiedName) > primitiveSourceByteBudget {
 				continue
 			}
+			if len(invocation.keys)+len(invocation.localInitializers)+1+len(locals) > session.trackedBodyLimit() {
+				tooManyTrackedBodies = true
+				return
+			}
 			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(origin)))
 			keyBytes = append(keyBytes, origin...)
 			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(qualifiedName)))
@@ -179,11 +240,19 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		}
 	}
 	collect(file.Decls, "", 0)
+	if tooManyTrackedBodies {
+		// Do not partially index a large file. Preserve any prior bounded session
+		// state, analyze this request normally, and try again on a later revision.
+		session.stats.ColdFallbackAnalyses++
+		session.stats.CapacityFallbackAnalyses++
+		return AnalyzeWithOptions(file, options)
+	}
 	var removed []incremental.Key
 	for key := range session.previous {
 		if !current[key] {
 			invocation.changes = append(invocation.changes, incremental.Change{Key: key, Remove: true})
 			invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveInput("function-product", key.Name), Remove: true})
+			session.forgetPrimitiveProduct(key.Name)
 			removed = append(removed, incremental.Key{Kind: "primitive-return", Name: key.Name})
 		}
 	}
@@ -434,6 +503,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	if !indexed || !eligible || !primitiveCurrentParameterBindings(a, fn) || invocation.safety != "canonical-primitives-no-impls" || !returnOK || currentReturn.Name != "i64" || currentReturn != a.namedTypes["i64"] {
 		if indexed && !eligible {
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-source", key), Remove: true}, incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
+			invocation.session.forgetPrimitiveProduct(key)
 			invocation.session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: key})
 		}
 		invocation.session.stats.PrimaryBodiesChecked++
@@ -459,6 +529,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		}
 		// Drop an unusable memo before the cold fallback. Other valid products stay.
 		session.db.Apply(incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
+		session.forgetPrimitiveProduct(key)
 		session.db.EvictQuery(query)
 	}
 	session.stats.PrimaryBodiesChecked++

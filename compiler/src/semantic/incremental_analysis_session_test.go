@@ -364,6 +364,57 @@ func TestIncrementalSessionCorruptProductAndBounds(t *testing.T) {
 	}
 }
 
+func TestIncrementalSessionBoundsTrackedBodiesAndProductBytes(t *testing.T) {
+	const one = "def first() -> i64:\n    return 20 + 1\n"
+	const two = one + "\ndef second() -> i64:\n    return 30 + 2\n"
+
+	t.Run("body count falls back atomically", func(t *testing.T) {
+		session := NewIncrementalAnalysisSession()
+		if result := session.Analyze(parseIncrementalSessionFile(t, one), AnalyzeOptions{}); len(result.Errors()) != 0 {
+			t.Fatal(result.Errors())
+		}
+		prior := session.Stats()
+		session.maxTrackedBodies = 1
+		if result := session.Analyze(parseIncrementalSessionFile(t, two), AnalyzeOptions{}); len(result.Errors()) != 0 {
+			t.Fatal(result.Errors())
+		}
+		afterLarge := session.Stats()
+		if afterLarge.CapacityFallbackAnalyses != prior.CapacityFallbackAnalyses+1 || afterLarge.ColdFallbackAnalyses != prior.ColdFallbackAnalyses+1 {
+			t.Fatalf("oversized session input did not take the bounded cold path: before=%+v after=%+v", prior, afterLarge)
+		}
+		if len(session.previous) != 1 || afterLarge.RetainedProductBytes != prior.RetainedProductBytes {
+			t.Fatal("large cold fallback partially changed retained session state")
+		}
+		session.maxTrackedBodies = 0
+		beforeReuse := session.Stats()
+		if result := session.Analyze(parseIncrementalSessionFile(t, one), AnalyzeOptions{}); len(result.Errors()) != 0 {
+			t.Fatal(result.Errors())
+		}
+		if got := session.Stats().PrimaryBodiesReused; got != beforeReuse.PrimaryBodiesReused+1 {
+			t.Fatal("bounded fallback discarded a prior valid product")
+		}
+	})
+
+	t.Run("product bytes stop admission", func(t *testing.T) {
+		session := NewIncrementalAnalysisSession()
+		session.maxRetainedProductBytes = 1
+		for attempt := 0; attempt < 2; attempt++ {
+			before := session.Stats()
+			result := session.Analyze(parseIncrementalSessionFile(t, one), AnalyzeOptions{})
+			if len(result.Errors()) != 0 {
+				t.Fatal(result.Errors())
+			}
+			after := session.Stats()
+			if after.PrimaryBodiesChecked != before.PrimaryBodiesChecked+1 || after.PrimaryBodiesReused != before.PrimaryBodiesReused {
+				t.Fatalf("product over budget was reused: before=%+v after=%+v", before, after)
+			}
+			if after.ProductAdmissionMisses != before.ProductAdmissionMisses+1 || after.RetainedProductBytes != 0 {
+				t.Fatalf("product budget was not enforced: before=%+v after=%+v", before, after)
+			}
+		}
+	})
+}
+
 func TestIncrementalSessionLargeRemovalCompactsTombstones(t *testing.T) {
 	session := NewIncrementalAnalysisSession()
 	var changes []incremental.Change
@@ -442,4 +493,31 @@ func TestIncrementalSessionStrictProfilesAndColdFallback(t *testing.T) {
 		t.Fatal("all-ineligible program did not use the cold API")
 	}
 	assertIncrementalResultParity(t, AnalyzeWithOptions(parseIncrementalSessionFile(t, source), options), current)
+}
+
+func TestIncrementalSessionLocalProductAdmissionBudget(t *testing.T) {
+	session := NewIncrementalAnalysisSession()
+	session.maxRetainedProductBytes = 1
+	source := "def work(value: i64) -> i64:\n    local: i64 = value + 1\n    return local\n"
+	for range 2 {
+		result := session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
+		assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, source)), result)
+	}
+	if stats := session.Stats(); stats.RetainedProductBytes != 0 || stats.ProductAdmissionMisses != 2 || stats.LocalInitializersReused != 0 {
+		t.Fatalf("local product bypassed admission: %+v", stats)
+	}
+}
+
+func TestIncrementalSessionTrackedLimitCountsLocalQueries(t *testing.T) {
+	session := NewIncrementalAnalysisSession()
+	session.maxTrackedBodies = 2
+	source := "def work(value: i64) -> i64:\n    first: i64 = value + 1\n    second: i64 = first + 1\n    return second\n"
+	result := session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
+	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, source)), result)
+	if stats := session.Stats(); stats.CapacityFallbackAnalyses != 1 || stats.LocalInitializersChecked != 0 || stats.LocalInitializersReused != 0 || stats.RetainedProductBytes != 0 {
+		t.Fatalf("local plans bypassed tracked limit: %+v", stats)
+	}
+	if len(session.previous) != 0 {
+		t.Fatal("capacity fallback partially installed owners")
+	}
 }

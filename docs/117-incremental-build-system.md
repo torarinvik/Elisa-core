@@ -115,12 +115,13 @@ live-analyzer hydration and actual body-cache integration remain unfinished.
 
 `semantic.NewIncrementalAnalysisSession().Analyze(freshFile, options)` accepts a
 freshly parsed complete program on each call. Keep one session per expanded
-program/root. Primary body products reuse canonical-i64 single-return functions with
-immutable canonical-i64 parameters. Expressions admit parameter reads,
-unsuffixed integer literals, parentheses, unary minus and binary `+`, `-`, `*`.
-Plain namespace/module functions have qualified identities; parameter arity
-separates admitted overload owners. Other declarations, conditional declaration
-containers, parameter kinds, locals, calls, contracts and generics stay cold.
+program/root. Primary body products reuse canonical-i64 single-return functions with no
+parameters or with immutable, non-defaulted canonical-i64 parameters. Expressions
+admit parameter reads, unsuffixed integer literals, parentheses, unary minus and
+binary `+`, `-`, `*`. Plain namespace/module functions have qualified identities;
+parameter arity separates admitted overload owners. Other declarations,
+conditional declaration containers, mutable/defaulted/nonnumeric parameters,
+locals, calls, contracts and generics stay cold.
 The original Analyze/AnalyzeWithOptions APIs retain the cold path.
 
 Each query reads a position-independent, versioned closed-grammar source digest,
@@ -142,19 +143,25 @@ speculative/fixpoint/specialization work. Each body edit invalidates its own
 product; source shifts reuse without keeping old nodes or positions.
 
 The session serializes analyses and retains only strings/keys between calls.
-Removed/ineligible owners lose product inputs and query memos; periodic database
-compaction bounds historical key tombstones. This is not a persisted build graph
-or a complete function cache. Scope/type/call dependency tracking, general body
-products, module objects, cross-module inline/generic invalidation and relinking
-remain required for Stage 2.
+Each session indexes at most 4096 candidate owner/initializer plans and retains at most 1 MiB of
+encoded typing products. Requests above the body limit take the cold path without
+partially changing that session; products above the byte budget are not admitted.
+The HTTP compile server currently offers this through an opt-in, 32-entry LRU
+partitioned by canonical filename and analysis profile; default requests remain
+stateless. Removed/ineligible owners lose product inputs and query memos; periodic
+database compaction bounds historical key tombstones. This is not a persisted
+build graph or a complete function cache. Scope/type/call dependency tracking,
+general body products, module objects, cross-module inline/generic invalidation
+and relinking remain required for Stage 2.
 
 Tests compare all published Result fields (rekeying source nodes and preserving
 invocation-local optimization-base alias relations), complete FuncType summaries,
 LLVM IR and native O0 output. They prove zero additional primary expression/value
 checks and element scans on hits, one-body edit locality, module identity,
 options/safety invalidation, new errors, corrupt-record repair, removal/re-addition
-and large owner churn. The session must still be integrated and qualified in
-production driver lifetimes; an API test is not a whole-compiler speedup claim.
+and large owner churn. The compile-server integration is covered by output-parity,
+opt-in, isolation, LRU and concurrency tests. It is not used by the CLI or native
+build path, and an API test is not a whole-compiler speedup claim.
 
 The local benchmark includes fresh parsing and full semantic analysis of 16
 synthetic closed functions. It covers 1/32/128/512 literal leaves per function.
