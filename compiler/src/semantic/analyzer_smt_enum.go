@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/hex"
 	"sort"
 	"strconv"
 	"strings"
@@ -233,6 +234,27 @@ func (tr *smtTranslator) enumPayloadKey(v smtEnumValue, variant *EnumVariant, i 
 	return v.key + "#" + variant.Name + "#" + strconv.Itoa(i)
 }
 
+// enumArrayPayloadLengthStable restricts length-only payload identity to immutable
+// local/parameter subjects in call-free functions. A call could mutate an aliased
+// payload between two match expressions, so reusing its length across the function
+// would otherwise assert a stale heap fact.
+func (tr *smtTranslator) enumArrayPayloadLengthStable(v smtEnumValue) bool {
+	if tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || v.key == "" || strings.Contains(v.key, ".") {
+		return false
+	}
+	sym, ok := tr.a.currentScope.Lookup(v.key)
+	if !ok || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
+		return false
+	}
+	stable := true
+	tr.a.storeScanEachNode(tr.a.currentFuncDecl, func(node any) {
+		if _, isCall := node.(*ast.CallExpr); isCall {
+			stable = false
+		}
+	})
+	return stable
+}
+
 // enumPayloadIntSym declares (once) an Int payload symbol carrying its type bounds.
 func (tr *smtTranslator) enumPayloadIntSym(key string, t Type) string {
 	sym := "|epay_" + smtEnumQuote(key) + "|"
@@ -336,6 +358,19 @@ func (tr *smtTranslator) bindEnumPayloadName(env map[string]string, name string,
 	}
 	if et, _, ok := resolveMatchableEnumType(pt); ok && et != nil {
 		env[name] = dtTokenPrefix + key
+		return true
+	}
+	// An unknown array payload has a stable length for this enum projection, but its
+	// elements are not modeled. Give it a length-only token so repeated matches can
+	// reason about `.count` without inventing an SMT array for the payload contents.
+	// Constructor arguments use the branch above and must keep their actual length.
+	if _, ok := pt.(*DArrayType); ok && tr.enumArrayPayloadLengthStable(v) {
+		base := smtVar("enum_payload_len_" + hex.EncodeToString([]byte(key)))
+		if tr.lengthOnly == nil {
+			tr.lengthOnly = map[string]bool{}
+		}
+		tr.lengthOnly[base] = true
+		env[name] = base
 		return true
 	}
 	if st, ok := pt.(*StructType); ok && st != nil {

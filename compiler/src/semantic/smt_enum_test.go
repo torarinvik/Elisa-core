@@ -177,6 +177,46 @@ def payload_eq(a: E, b: E) -> bool:
 	requireUnproven(t, "enum_match_soundness.elisa", src, "wrong_payload", "wrong_default", "wrong_alt", "shadowed", "mutated", "payload_eq")
 }
 
+func TestSMTEnumArrayPayloadLengthIdentity(t *testing.T) {
+	src := `
+enum ContainerExpr:
+    Empty
+    Values(items: darray[i64])
+
+def repeated_match_length(e: ContainerExpr) -> bool:
+    ensure match e:
+        ContainerExpr.Empty: result == true
+        ContainerExpr.Values(items): result == (items.count == 0)
+    return match e:
+        ContainerExpr.Empty: true
+        ContainerExpr.Values(other): other.count == 0
+
+def independent_payload_lengths(a: ContainerExpr, b: ContainerExpr) -> bool:
+    ensure match a:
+        ContainerExpr.Empty: result == true
+        ContainerExpr.Values(items): result == (items.count == 0)
+    return match b:
+        ContainerExpr.Empty: true
+        ContainerExpr.Values(other): other.count == 0
+
+def append_one(items: mutable darray[i64]&):
+    items.push(1)
+
+def do_not_reuse_payload_length_after_call(e: ContainerExpr, items: mutable darray[i64]&) -> bool:
+    ensure result
+    before: usize = match e:
+        ContainerExpr.Empty: 0
+        ContainerExpr.Values(values): values.count
+    append_one(items)
+    after: usize = match e:
+        ContainerExpr.Empty: 0
+        ContainerExpr.Values(values): values.count
+    return before == after
+`
+	requireProven(t, "enum_array_payload_length.elisa", src, "repeated_match_length")
+	requireUnproven(t, "enum_array_payload_length.elisa", src, "independent_payload_lengths", "do_not_reuse_payload_length_after_call")
+}
+
 // Const-enum matches: an exhaustive `return match` without a wildcard, and module-qualified member
 // patterns in a statement match (their path facts used to be dropped by a spelling comparison).
 func TestSMTConstEnumMatchForms(t *testing.T) {

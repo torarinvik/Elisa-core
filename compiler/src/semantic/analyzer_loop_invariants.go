@@ -844,7 +844,11 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	reqHyps := a.smtRequiresHypotheses(tr)
 	// An immutable local's defining equation (`mask: usize = cap - 1`) holds wherever it is in scope,
 	// at every iteration, so it is a sound hypothesis even though the ambient flow facts are not.
-	hyps := reqHyps + a.smtImmutableLocalHypotheses(tr) + hypSB.String()
+	locals := a.smtImmutableLocalHypotheses(tr)
+	context := smtPreambleContext(tr.factPreamble()) + reqHyps + locals + hypSB.String() + obligation
+	context = smtBoolMacroContext(tr, context)
+	boolLocals := a.smtImmutableBoolLocalHypotheses(tr, context)
+	hyps := reqHyps + locals + boolLocals + hypSB.String()
 	// When the obligation lowered into the IR, discharge through the IR-aware helper so a goal that the
 	// smart constructors folded to `true` concludes with no solver call; the loop's OWN hypothesis set is
 	// passed through unchanged (loop variables free — the inductive hypothesis). Otherwise the opaque
