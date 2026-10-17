@@ -1832,3 +1832,34 @@ Validation: isolated full semantic suite passed in 44.684 s and incremental in
 passed in 1.819 s. The same unrelated-SMT overlay was used; working files and the
 proof stash were preserved. The combined SMT tree and historical Stage1/root
 errors are not claimed green. All runs were local.
+
+
+### Retained SCC topology plans
+
+The bounded incremental query engine now accepts a complete current node inventory
+and adjacency through `SCCPublication`, with `SCCEvaluators` producing a portable
+`SCCPlan`. Edges point from readers to dependencies. Components and members have
+deterministic ordering, and the condensation graph has a dependency-first order.
+Iterative traversal handles long chains without recursive stack growth.
+
+Inventory and every adjacency list are tracked inputs, including empty lists.
+Missing adjacency, dangling targets, malformed identities and exceeded budgets
+fail without caching success. Limits are 4,096 nodes, 65,536 raw edges and 16 MiB
+of accounted source/output storage; construction preflights expansion before
+copying and encoding. Reservations remain stable across edge-only edits so a
+redundant internal edge removal can preserve equal output and prune parent work.
+The retained product contains strings and integers, not old AST or Type pointers.
+
+Tests compare 100 random graphs against mutual-reachability partitions, exercise
+a 4,096-node chain, and cover cycle splits, node removals, missing authority,
+recovery, stale revisions and equal-output pruning. Incremental race checks
+passed in 1.600 s; isolated full semantic and incremental suites passed in
+44.024 s and 0.292 s. The existing unrelated-SMT overlay preserved working files;
+the combined dirty tree and historical Stage1/root failures are not claimed green.
+
+This is a topology query foundation, not normal effect-summary reuse. Call edges
+alone omit grants, callback sources, drop hooks and typed lowering dependencies.
+Current declaration authority, complete effect inputs, stable component products,
+and normal solver integration remain necessary before retaining semantic rows.
+No end-to-end throughput improvement is claimed for this addition. All runs were
+local.
