@@ -2,8 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
+	"elisacore/src/backend"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -177,5 +180,32 @@ func TestRunningCompilerIdentitySurvivesPathReplacementBeforeFirstKey(t *testing
 	}
 	if result != "DECLINED" && result != hex.EncodeToString(expected[:]) {
 		t.Fatalf("running compiler adopted replacement identity: %s", result)
+	}
+}
+
+func TestTestRunnerUnavailableCompilerIdentityCompilesCold(t *testing.T) {
+	clang, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang unavailable")
+	}
+	t.Setenv("ELISACORE_TEST_CACHE", "1")
+	t.Setenv("ELISACORE_TEST_CACHE_DEBUG", "1")
+	previous := nativeCompilerArtifactErr
+	nativeCompilerArtifactErr = errors.New("forced unavailable compiler identity")
+	t.Cleanup(func() { nativeCompilerArtifactErr = previous })
+	var diagnostics bytes.Buffer
+	executable, cleanup, timing, _, _, err := compileTestRunnerExecutableWithShim(clang, "def main() -> int:\n\treturn 0\n", "", nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false, &diagnostics)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("identity failure prevented cold compilation: %v\n%s", err, diagnostics.String())
+	}
+	if !strings.Contains(diagnostics.String(), "forced unavailable compiler identity") {
+		t.Fatal("test did not exercise unavailable-identity cache fallback")
+	}
+	if timing.CacheHit || timing.CachePublish != 0 {
+		t.Fatal("unidentified compiler reused or published cache artifact")
+	}
+	if output, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("cold executable failed: %v %s", err, output)
 	}
 }

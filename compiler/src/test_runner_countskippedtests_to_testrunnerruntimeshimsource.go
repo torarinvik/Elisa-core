@@ -46,7 +46,13 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 		cacheArtifact = artifact
 		lookupElapsed := time.Since(cacheLookupStart)
 		if err != nil {
-			return "", func() {}, nativeBuildTiming{CacheLookup: lookupElapsed}, 0, 0, err
+			// Cache identity is an optimization prerequisite, not a build
+			// prerequisite. Compile cold and do not publish under an unknown key.
+			cacheArtifact = testRunnerCacheArtifact{}
+			hit = false
+			if testRunnerCacheDebugEnabled() && stderr != nil {
+				fmt.Fprintf(stderr, "[ cache    ] lookup-error err=%s\n", err)
+			}
 		}
 		if hit {
 			debugTestRunnerCache(stderr, "hit", artifact)
