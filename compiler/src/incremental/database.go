@@ -1,0 +1,220 @@
+// Package incremental implements revisioned, tracked compiler queries. Values are
+// immutable strings so retaining a result never shares mutable compiler state.
+package incremental
+
+import (
+	"context"
+	"fmt"
+)
+
+// Key identifies a query or input independently of source offsets. Kind separates
+// dependency domains (body, interface, lookup set, target, and so on).
+type Key struct{ Kind, Name string }
+
+type Evaluator func(*Reader, string) (string, error)
+
+type input struct {
+	value   string
+	present bool
+	changed uint64
+}
+type dependency struct {
+	key   Key
+	query bool
+}
+type result struct {
+	value             string
+	dependencies      []dependency
+	verified, changed uint64
+}
+
+// Stats distinguishes work executed from queries reused after dependency checks.
+type Stats struct{ Executed, MemoHits, Validated, DependencyChecks, InputReads uint64 }
+
+// Database serializes revisions and evaluation, giving each query a consistent
+// input snapshot. Evaluators are immutable for the database lifetime. They must
+// read all changing data through Reader, including failed name lookups.
+// Parallel scheduling and portable result storage are separate layers.
+type Database struct {
+	gate       chan struct{}
+	revision   uint64
+	evaluators map[string]Evaluator
+	inputs     map[Key]input
+	results    map[Key]*result
+	stats      Stats
+}
+
+func New(evaluators map[string]Evaluator) *Database {
+	registry := make(map[string]Evaluator, len(evaluators))
+	for kind, evaluate := range evaluators {
+		registry[kind] = evaluate
+	}
+	return &Database{gate: make(chan struct{}, 1), revision: 1, evaluators: registry, inputs: map[Key]input{}, results: map[Key]*result{}}
+}
+
+// Change can distinguish removing an input from setting it to an empty value.
+type Change struct {
+	Key    Key
+	Value  string
+	Remove bool
+}
+
+// Apply commits a batch as one revision. A byte-identical batch is a no-op.
+// Later entries for one key win, so a change followed by its reversal is a no-op.
+func (db *Database) Apply(changes ...Change) bool {
+	db.gate <- struct{}{}
+	defer func() { <-db.gate }()
+	pending := make(map[Key]Change, len(changes))
+	for _, change := range changes {
+		pending[change.Key] = change
+	}
+	modified := false
+	for key, change := range pending {
+		old := db.inputs[key]
+		if old.present != !change.Remove || (!change.Remove && old.value != change.Value) {
+			modified = true
+			break
+		}
+	}
+	if !modified {
+		return false
+	}
+	db.revision++
+	for key, change := range pending {
+		old := db.inputs[key]
+		if old.present == !change.Remove && (change.Remove || old.value == change.Value) {
+			continue
+		}
+		value := change.Value
+		if change.Remove {
+			value = ""
+		}
+		db.inputs[key] = input{value: value, present: !change.Remove, changed: db.revision}
+	}
+	return true
+}
+
+func (db *Database) Stats() Stats {
+	db.gate <- struct{}{}
+	defer func() { <-db.gate }()
+	return db.stats
+}
+
+// Evaluate validates only the requested dependency closure. Semantic diagnostics
+// belong in the immutable result value; errors mean evaluation could not finish
+// (cancellation, an unsupported query, or a cycle) and are never memoized.
+// Evaluators cannot suppress dependency errors: those invalidate their result too.
+func (db *Database) Evaluate(ctx context.Context, key Key) (string, error) {
+	select {
+	case db.gate <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-db.gate }()
+	return db.evaluate(ctx, key, map[Key]bool{})
+}
+
+// Reader is scoped to one evaluator. Never retain it or use it concurrently.
+type Reader struct {
+	db           *Database
+	context      context.Context
+	active       map[Key]bool
+	dependencies []dependency
+	seen         map[dependency]bool
+	failure      error
+}
+
+func (r *Reader) remember(dependency dependency) {
+	if !r.seen[dependency] {
+		r.seen[dependency] = true
+		r.dependencies = append(r.dependencies, dependency)
+	}
+}
+func (r *Reader) Input(key Key) (string, bool) {
+	r.remember(dependency{key: key})
+	r.db.stats.InputReads++
+	value := r.db.inputs[key]
+	return value.value, value.present
+}
+func (r *Reader) Query(key Key) (string, error) {
+	value, err := r.db.evaluate(r.context, key, r.active)
+	if err == nil {
+		r.remember(dependency{key: key, query: true})
+	} else if r.failure == nil {
+		r.failure = err
+	}
+	return value, err
+}
+// Context is for cancellation and tracing only. Semantic options and source
+// authority must be tracked Inputs, never values obtained from Context.Value.
+func (r *Reader) Context() context.Context { return r.context }
+
+// CycleError requires a compiler client to evaluate an interprocedural SCC as a
+// single query/fixpoint, rather than accepting a partially computed body result.
+type CycleError struct{ Key Key }
+
+func (e *CycleError) Error() string {
+	return fmt.Sprintf("incremental query cycle: %s:%s", e.Key.Kind, e.Key.Name)
+}
+
+func (db *Database) evaluate(ctx context.Context, key Key, active map[Key]bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if active[key] {
+		return "", &CycleError{key}
+	}
+	old, known := db.results[key]
+	if known && old.verified == db.revision {
+		db.stats.MemoHits++
+		return old.value, nil
+	}
+	active[key] = true
+	defer delete(active, key)
+	if known {
+		unchanged := true
+		for _, dep := range old.dependencies {
+			db.stats.DependencyChecks++
+			changed := uint64(0)
+			if dep.query {
+				if _, err := db.evaluate(ctx, dep.key, active); err != nil {
+					return "", err
+				}
+				changed = db.results[dep.key].changed
+			} else {
+				changed = db.inputs[dep.key].changed
+			}
+			if changed > old.verified {
+				unchanged = false
+				break
+			}
+		}
+		if unchanged {
+			old.verified = db.revision
+			db.stats.Validated++
+			return old.value, nil
+		}
+	}
+	evaluator, ok := db.evaluators[key.Kind]
+	if !ok || evaluator == nil {
+		return "", fmt.Errorf("unknown incremental query kind %q", key.Kind)
+	}
+	reader := &Reader{db: db, context: ctx, active: active, seen: map[dependency]bool{}}
+	db.stats.Executed++
+	value, err := evaluator(reader, key.Name)
+	if reader.failure != nil {
+		return "", reader.failure
+	}
+	if err != nil {
+		return "", err
+	}
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
+	changed := db.revision
+	if known && old.value == value {
+		changed = old.changed
+	}
+	db.results[key] = &result{value: value, dependencies: reader.dependencies, verified: db.revision, changed: changed}
+	return value, nil
+}

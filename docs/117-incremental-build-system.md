@@ -19,6 +19,24 @@ same local trust boundary as compiler object artifacts, rather than serving as
 an independently checked proof certificate. Currently the solver is still
 started before the first persistent lookup.
 
+The in-memory tracked-query engine in `compiler/src/incremental` is a second
+foundation. It commits input batches as revisions, records query and input reads
+(including missing inputs), validates only requested dependency closures, and
+preserves a result's change revision when recomputation produces identical bytes.
+That last distinction prevents a private body edit from invalidating callers
+whose exported interface stayed unchanged. Dependencies are replaced after each
+evaluation, rather than accumulating obsolete edges. Values are immutable strings;
+semantic diagnostics belong in these values and can be reused along with success.
+
+Cycles and interrupted/failed evaluations never publish partial results, even if
+an evaluator ignores a failed dependency. Interprocedural recursion needs an
+explicit strongly connected summary/fixpoint query. Inputs and evaluation are
+serialized for a consistent snapshot, and queued evaluation can be cancelled.
+This engine is not yet wired into function-body analysis: it currently supplies
+the dependency mechanism, not a claim that compiler body visits are skipped.
+Portable function products, current-node rebinding, persistent graph storage,
+and parallel query scheduling remain separate implementation work.
+
 Run the reproducible supporting workload with:
 
 ```sh
