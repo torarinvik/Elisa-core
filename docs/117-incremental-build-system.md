@@ -2027,3 +2027,66 @@ Benchmark-mode smoke validation passed with SMT off and on using the existing
 nonlinear proof-cache fixture as a small frozen snapshot. Both fresh and retained
 paths reported the requested 0/1 solver metric and zero diagnostics. These smoke
 timings are not performance evidence. Log: `/tmp/elisa-project-bench-smt-smoke.log`.
+
+
+### Streaming SMT atoms on the actual proof path
+
+A copied Stage1 source tree was profiled with the bb0b884b Stage0 artifact,
+proofs enabled, GOMAXPROCS=4, GOGC=1200 and GOMEMLIMIT=10GiB. The manifest remained
+unchanged throughout this failed semantic seed. The profiled attempt took
+223.616 s (analysis 217.378 s), with 5,156,159,488 bytes maximum child RSS.
+It includes CPU profiling and allocation sampling at 64 KiB, uses a different
+source path/cache workload, and is not a speed comparison against the prior
+152.704-second attempt. No codegen or successful compiler product was produced.
+
+The allocation profile sampled 28,746.35 MiB total (not live memory), including
+3,404.05 MiB directly in tracked-type cloning, 2,097.39 MiB in Builder.WriteString,
+1,327.83 MiB in FieldsFunc and 1,029.10 MiB in smtAtoms. CPU samples totalled
+159.42 s, with memory clearing at 39.52%, madvise at 11.08%, and local-definition
+staleness traversal at 4.17% cumulative. Profiling overhead is visible as well;
+these measurements identify candidates, not guaranteed end-to-end gains.
+
+Normal SMT query slicing and quantifier weakening now stream atoms through a
+small cursor instead of constructing disposable atom slices. Command heads and
+declaration names stop after the required one or two atoms. Symbol references
+still preserve original ordering and deduplication. Quoted symbols, skipped
+strings, delimiter behavior and malformed-input stopping preserve the old
+collector's semantics; the change does not alter slicing admission or solver
+verdict rules. A differential test compares the previous collector with the
+cursor over fixed cases and 2,000 deterministic random inputs, including
+malformed quotes, invalid UTF-8 bytes and non-ASCII symbols.
+
+Sequential ABBA component comparisons on M5/GOMAXPROCS=4 used two repetitions
+per run. A 128-declaration/256-hypothesis query slice went from 315.384 us to
+196.988 us (37.5% less time), 433,075 to 164,307 bytes and 3,521 to 569 allocations.
+The quantified-hypothesis fixture went from 999.5 ns to 458.95 ns (54.1% less
+time), 1,064 to 232 bytes and 19 to four allocations. These used 1,000 iterations.
+A separate 100,000-iteration single-command head comparison went from 269.75 ns
+to 25.075 ns and from 496 bytes/five allocations to zero. The initial benchmark
+also scanned a whole multi-command query for its head; those initial head figures
+are not used as a representative command measurement. Slicing and weakening
+figures remain from the unchanged fixture in that initial run.
+
+Build timing now emits the existing SMT cost/cache summary under `[front-smt]`
+before diagnostic failure handling, for source and decoded frontend-IR inputs.
+This is enabled only with the existing ELISACORE_BUILD_TIMING option. Failed
+builds can therefore expose solver time and cache hits; normal diagnostic failure
+status is preserved. Focused coverage checks reporting on/off and both input paths.
+
+Full frozen source, manifests, profiled executable and CPU/allocation reports are
+archived under Stage1's ignored `build/verification/frozen-seed-profile-bb0b884b`.
+Component logs and baseline overlays are in
+`build/verification/smt-atom-streaming-20261017`. This is a measured improvement
+to a normal proof-processing component, not completed incremental body reuse or
+a demonstrated full compiler-build speedup. Stable same-input CLI comparisons,
+complete body dependencies/hydration, codegen/relink reuse and iteration-speed
+qualification remain outstanding. Work stayed local and unrelated SMT edits
+were preserved.
+
+
+Validation: full isolated semantic suite passed in 72.823 s and incremental in
+0.225 s. Focused scanner/slicing/quantifier races passed in 2.244 s; root CLI
+failure-reporting race checks passed in 9.189 s. The standalone focused semantic
+checks passed in 0.726 s. The existing unrelated-SMT overlay was used throughout;
+the combined dirty tree, historical root failures and successful Stage1 build
+are not claimed green.

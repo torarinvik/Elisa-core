@@ -203,6 +203,7 @@ func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.
 	analyzeStart := time.Now()
 	result := analyze(file, options)
 	frontendTimingLog("analyze", analyzeStart)
+	frontendSMTTimingLog(stderr, result)
 	if warns := result.Notices(); len(warns) > 0 {
 		for _, w := range warns {
 			if shouldSuppressDeprecatedWarningsForTests(w) {

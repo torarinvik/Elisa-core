@@ -8,7 +8,8 @@ import "strings"
 // Declarations, definitions, the goal and all subsequent commands stay intact.
 func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
 	containsQuantifier := func(command string) bool {
-		for _, atom := range smtAtoms(command) {
+		scan := smtAtomScanner{text: command}
+		for atom, present := scan.next(); present; atom, present = scan.next() {
 			if atom == "forall" || atom == "exists" {
 				return true
 			}

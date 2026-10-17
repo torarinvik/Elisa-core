@@ -90,46 +90,52 @@ func smtSplitTopLevel(text string) ([]string, bool) {
 	return out, depth == 0
 }
 
-// smtAtoms returns the symbol atoms of an s-expression (quoted |…| symbols kept whole).
-func smtAtoms(sexpr string) []string {
-	var atoms []string
-	i := 0
-	for i < len(sexpr) {
+// smtAtomScanner streams symbol atoms without building a temporary slice.
+// Quoted |…| symbols stay whole; string literals are skipped, matching the
+// previous atom collector. It owns no storage beyond the current query string.
+type smtAtomScanner struct {
+	text   string
+	offset int
+}
+
+func (scan *smtAtomScanner) next() (string, bool) {
+	sexpr := scan.text
+	for scan.offset < len(sexpr) {
+		i := scan.offset
 		c := sexpr[i]
 		switch {
 		case c == '(' || c == ')' || c == ' ' || c == '\n' || c == '\t' || c == '\r':
-			i++
+			scan.offset++
 		case c == '|':
 			j := strings.IndexByte(sexpr[i+1:], '|')
 			if j < 0 {
-				return atoms
+				scan.offset = len(sexpr)
+				return "", false
 			}
-			atoms = append(atoms, sexpr[i:i+j+2])
-			i += j + 2
+			scan.offset = i + j + 2
+			return sexpr[i:scan.offset], true
 		case c == '"':
 			j := i + 1
 			for j < len(sexpr) && sexpr[j] != '"' {
 				j++
 			}
-			i = j + 1
+			scan.offset = j + 1
 		default:
 			j := i
 			for j < len(sexpr) && !strings.ContainsRune("() \n\t\r|\"", rune(sexpr[j])) {
 				j++
 			}
-			atoms = append(atoms, sexpr[i:j])
-			i = j
+			scan.offset = j
+			return sexpr[i:j], true
 		}
 	}
-	return atoms
+	return "", false
 }
 
 func smtCommandHead(sexpr string) string {
-	atoms := smtAtoms(sexpr)
-	if len(atoms) == 0 {
-		return ""
-	}
-	return atoms[0]
+	scan := smtAtomScanner{text: sexpr}
+	head, _ := scan.next()
+	return head
 }
 
 // smtSliceQuery splits a query around its goal assert. sliced holds every command except the
@@ -153,18 +159,20 @@ func smtSliceQuery(query, goalAssert string) (sliced, dropped string, ok bool) {
 	cmds := make([]smtTopLevelCommand, len(exprs))
 	declared := map[string]bool{}
 	for i, e := range exprs {
-		atoms := smtAtoms(e)
-		if len(atoms) == 0 {
+		scan := smtAtomScanner{text: e}
+		head, present := scan.next()
+		if !present {
 			return "", "", false
 		}
-		cmds[i] = smtTopLevelCommand{text: e, head: atoms[0]}
-		switch atoms[0] {
+		cmds[i] = smtTopLevelCommand{text: e, head: head}
+		switch head {
 		case "declare-const", "declare-fun", "define-fun", "define-const", "define-fun-rec":
-			if len(atoms) < 2 {
+			name, present := scan.next()
+			if !present {
 				return "", "", false
 			}
-			cmds[i].name = atoms[1]
-			declared[atoms[1]] = true
+			cmds[i].name = name
+			declared[name] = true
 		case "assert", "set-option", "set-info", "set-logic":
 		default:
 			// declare-sort / define-sort / declare-datatype(s) / push / … : not modeled.
@@ -174,7 +182,9 @@ func smtSliceQuery(query, goalAssert string) (sliced, dropped string, ok bool) {
 	for i := range cmds {
 		if cmds[i].head == "assert" || cmds[i].head == "define-fun" || cmds[i].head == "define-const" || cmds[i].head == "define-fun-rec" {
 			seen := map[string]bool{}
-			for _, atom := range smtAtoms(cmds[i].text)[1:] {
+			scan := smtAtomScanner{text: cmds[i].text}
+			_, _ = scan.next() // command head is not a referenced symbol
+			for atom, present := scan.next(); present; atom, present = scan.next() {
 				if declared[atom] && !seen[atom] {
 					seen[atom] = true
 					cmds[i].syms = append(cmds[i].syms, atom)
