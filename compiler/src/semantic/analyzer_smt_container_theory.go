@@ -29,6 +29,9 @@ func (tr *smtTranslator) containerBase(expr ast.Expr, env map[string]string) (st
 		return "", false
 	}
 	e := stripOptimizationParens(expr)
+	if field, ok := e.(*ast.FieldExpr); ok {
+		return tr.recordFieldContainerBase(field, env)
+	}
 	id, ok := e.(*ast.Ident)
 	if !ok || id == nil {
 		return "", false

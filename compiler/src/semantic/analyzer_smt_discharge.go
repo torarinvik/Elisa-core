@@ -3062,6 +3062,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return length, true
 			}
 		}
+		if term, handled, ok := tr.recordElementFieldTerm(n, env); handled {
+			return term, ok
+		}
 		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
 				if _, constant := stripOptimizationParens(value).(*ast.IntLit); constant {
