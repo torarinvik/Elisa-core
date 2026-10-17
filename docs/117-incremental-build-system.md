@@ -1364,3 +1364,77 @@ in 1.620 s after the final strict serialization checks. The post-preflight proje
 probe passed in 5.297 s with unchanged admitted coverage. The concurrent pointer
 edits were preserved and are outside this checkpoint's validation. Earlier broader
 root-suite failures and Stage1 diagnostics remain unresolved. All runs were local.
+
+### Bounded coherent query sessions
+
+`incremental.Session` now owns publication and memo lifetime for an immutable
+registry of query evaluators. The registry can include lookup, function, type and
+callee parents together; compaction preserves that same registry. Each admitted
+query reserves result bytes and dependency count and declares owned positive or
+explicitly negative inputs. Identical shared declarations are merged; conflicting
+input/publication batches are rejected before database mutation. Existing current
+queries receive admission priority; capacity misses are reported as skipped keys,
+so a parent missing a child fails closed instead of reading an old cached answer.
+
+Publication is a complete snapshot under a session gate. Revision handles become
+unavailable when a replacement generation begins; query evaluation cannot observe
+an intermediate batch. `PublishPrepared` invalidates handles before invoking the
+input builder too, covering adapter/recipe preparation failures. Rejected builds
+preserve bounded memo storage for possible later reuse but leave no current ready
+world. A pre-canceled operation preserves the old world consistently. Results are
+owned immutable strings; current AST/Symbol/Type rebinding remains separate.
+
+Readers in this owner enforce the admitted input/query universe and per-query
+dependency reservation, including transitive children. A retired negative input
+must invalidate its old readers even though its Boolean absence did not change;
+`Database.RetireInputs` records an explicit retirement revision rather than
+physically deleting its timestamp. Retired queries are evicted. Bounded retirement
+debt triggers a rebuild from the current owned input snapshot, removing tombstones
+and stale dependency records while preserving evaluator kinds and cumulative
+statistics. Canonical owned keys prevent dependencies from retaining arbitrary
+caller buffers. Unchanged owned values are reused, avoiding a second retained copy
+when Database.Apply is a no-op; evaluator results are copied so a small substring
+cannot retain a large input buffer.
+
+Default live reservations allow 32,768 queries, 262,144 inputs/ownership edges and
+dependency edges, and 128 MiB of accounted storage. Admission counts full query and
+input keys, values, result reservations and metadata allowances. Input/query
+retirement debt is separately bounded before compaction. These are storage and
+graph bounds, not an exact Go allocator/RSS limit or a bound on arbitrary evaluator
+computation. Publication validation/planning has explicit count limits; construction inside
+a prepare callback remains caller-controlled. Evaluators still
+must obtain all changing semantic data through Reader; the owner does not make a
+mutable external closure a valid compiler query.
+
+`lookupPublication` validates complete lookup recipe/binding ownership and derives
+tight result/dependency reservations from fresh current metadata. It rejects
+missing negative inputs and foreign/conflicting bindings. The two lookup kernels
+now use the generic registry factory, and a composed-parent test exercises them
+through this session owner. Tests additionally cover atomic two-input worlds,
+preparation rejection/recovery, generation handles, partial child admission,
+transitive negative authority loss both with and without compaction, dependency
+and output overflows, key/input/result buffer ownership, cancellation, and churn
+of input tombstones and constant query keys.
+
+The bounded frozen-parser probe admitted all 17,654 distinct lookup/ambiguity
+queries and 43,431 declared input/ownership/dependency reservations with zero skips.
+It accounted for 34,530,986 bytes; the DB held 20,427 actual inputs (negative inputs
+need not occupy a row until changed/retired) and 17,654 memoized queries. Republishing
+the same world added 17,654 memo hits, with no additional executions. Products
+matched the current final declaration-table resolvers. As before, 396 unanchored
+enclosing sites were excluded and the frontend had 980 existing errors. This is
+bounded component reuse, not function-body replay or an end-to-end compiler speed
+measurement. Normal compile-server integration, direct Scope/binder dependencies,
+type/callee/SCC products and complete result hydration remain unfinished.
+
+Validation for the owner checkpoint: isolated full semantic suite including both
+opt-in project probes passed in 50.927 s; incremental package passed in 0.247 s.
+All generic DB/session race tests passed in 1.905 s, including key-debt compaction.
+The bounded project-only probe passed in 5.380 s. The overlay restored eight known
+unrelated modified Go files to 9f9d56b0 and excluded the unrelated untracked SMT
+test, preserving the working files. This is candidate-only validation; the combined
+SMT worktree is not claimed green. Earlier broad root failures and Stage1 errors
+remain unresolved. No remote compute was used.
+Focused isolated session/lookup races also passed: incremental 1.263 s and semantic
+1.663 s. General function/body/type/callee products are still required before this
+owner can make the normal compile path incremental.

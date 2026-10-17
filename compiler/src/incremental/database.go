@@ -143,30 +143,72 @@ func (db *Database) Evaluate(ctx context.Context, key Key) (string, error) {
 
 // Reader is scoped to one evaluator. Never retain it or use it concurrently.
 type Reader struct {
-	db           *Database
-	context      context.Context
-	active       map[Key]bool
-	dependencies []dependency
-	seen         map[dependency]bool
-	failure      error
+	db                  *Database
+	context             context.Context
+	active              map[Key]bool
+	dependencies        []dependency
+	seen                map[dependency]bool
+	failure             error
+	inputAuthority      map[Key]Key
+	queryAuthority      map[Key]Key
+	boundedDependencies bool
+	maxDependencies     int
 }
 
-func (r *Reader) remember(dependency dependency) {
+func (r *Reader) remember(dependency dependency) bool {
+	if r.failure != nil {
+		return false
+	}
 	if !r.seen[dependency] {
+		if r.boundedDependencies && len(r.dependencies) >= r.maxDependencies {
+			r.failure = ErrDependencyBudget
+			return false
+		}
 		r.seen[dependency] = true
 		r.dependencies = append(r.dependencies, dependency)
 	}
+	return true
 }
 func (r *Reader) Input(key Key) (string, bool) {
-	r.remember(dependency{key: key})
+	if r.failure != nil {
+		return "", false
+	}
+	if r.inputAuthority != nil {
+		canonical, ok := r.inputAuthority[key]
+		if !ok {
+			r.failure = fmt.Errorf("%w: %v", ErrUnpublishedInput, key)
+			return "", false
+		}
+		key = canonical
+	}
+	if !r.remember(dependency{key: key}) {
+		return "", false
+	}
 	r.db.stats.InputReads++
 	value := r.db.inputs[key]
 	return value.value, value.present
 }
 func (r *Reader) Query(key Key) (string, error) {
+	if r.failure != nil {
+		return "", r.failure
+	}
+	if r.queryAuthority != nil {
+		canonical, ok := r.queryAuthority[key]
+		if !ok {
+			r.failure = fmt.Errorf("%w: %v", ErrUnpublishedQuery, key)
+			return "", r.failure
+		}
+		key = canonical
+	}
+	if r.boundedDependencies && !r.seen[dependency{key: key, query: true}] && len(r.dependencies) >= r.maxDependencies {
+		r.failure = ErrDependencyBudget
+		return "", r.failure
+	}
 	value, err := r.db.evaluate(r.context, key, r.active)
 	if err == nil {
-		r.remember(dependency{key: key, query: true})
+		if !r.remember(dependency{key: key, query: true}) {
+			return "", r.failure
+		}
 	} else if r.failure == nil {
 		r.failure = err
 	}
@@ -245,4 +287,20 @@ func (db *Database) evaluate(ctx context.Context, key Key, active map[Key]bool) 
 	}
 	db.results[key] = &result{value: value, dependencies: reader.dependencies, verified: db.revision, changed: changed}
 	return value, nil
+}
+
+// RetireInputs invalidates readers even when an input was already absent.
+// Ownership retirement is different from publishing an unchanged negative
+// binding: readers must re-establish that their input is still published.
+// Tombstones remain until the owning session compacts its database.
+func (db *Database) RetireInputs(keys ...Key) {
+	if len(keys) == 0 {
+		return
+	}
+	db.gate <- struct{}{}
+	defer func() { <-db.gate }()
+	db.revision++
+	for _, key := range keys {
+		db.inputs[key] = input{changed: db.revision}
+	}
 }

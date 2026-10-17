@@ -15,7 +15,8 @@ import (
 
 // The trace is a request inventory, never publication authority. Every query's
 // COMPLETE candidates and binding states come from a current fresh Analyzer.
-func TestLocalLookupSelectionProjectProbe(t *testing.T) {
+func loadLookupQueryProject(t *testing.T) (*Result, []lookupDependencyContext, []lookupDependencyRecord) {
+	t.Helper()
 	snapshotPath := os.Getenv("ELISA_LOOKUP_QUERY_PROBE_SNAPSHOT")
 	tracePath := os.Getenv("ELISA_LOOKUP_QUERY_PROBE_TRACE")
 	if snapshotPath == "" || tracePath == "" {
@@ -66,6 +67,11 @@ func TestLocalLookupSelectionProjectProbe(t *testing.T) {
 		t.Fatal("frozen syntax changed")
 	}
 	result := Analyze(file)
+	return result, contexts, records
+}
+
+func TestLocalLookupSelectionProjectProbe(t *testing.T) {
+	result, contexts, records := loadLookupQueryProject(t)
 	a := result.analyzer
 	db := newLookupSelectionDatabase()
 	checked, skipped, changedFromAudit, ambiguityChecks := 0, 0, 0, 0

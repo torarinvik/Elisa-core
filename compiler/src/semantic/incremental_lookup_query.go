@@ -195,7 +195,7 @@ func evaluateLookupSelection(r *incremental.Reader, name string) (string, error)
 // The registry can be composed with function/type/callee evaluators in one DB,
 // allowing a parent query to depend on the selected lookup through Reader.Query.
 func newLookupSelectionDatabase() *incremental.Database {
-	return incremental.New(map[string]incremental.Evaluator{lookupSelectionQueryKind: evaluateLookupSelection, lookupAmbiguityQueryKind: evaluateLookupAmbiguity})
+	return incremental.New(lookupQueryEvaluators())
 }
 func readLookupSelection(db *incremental.Database, key incremental.Key) (lookupSelectionProduct, error) {
 	if key.Kind != lookupSelectionQueryKind {
