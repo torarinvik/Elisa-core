@@ -287,6 +287,18 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 		}
 	}
 	query = smtStripAbstractionOnly(query)
+	// Related quantified callee clauses can overwhelm an otherwise simple
+	// arithmetic proof. Try a bounded weakening first, accepting UNSAT only.
+	if canBudget {
+		if weaker, ok := smtWithoutQuantifiedHypotheses(query, goalAssert); ok {
+			a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
+			res, model := budgeted.CheckBudgetValues(weaker, vars, smtDeadPathBudget)
+			if res == smt.Unsat {
+				return res, model
+			}
+			a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
+		}
+	}
 	sliced, dropped, ok := smtSliceQuery(query, goalAssert)
 	// Slice only when the dropped part carries quantifiers: quantifier instantiation is what burns
 	// the budget on irrelevant facts. A quantifier-free remainder is cheap inside the full query,
