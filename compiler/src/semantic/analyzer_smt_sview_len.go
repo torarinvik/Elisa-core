@@ -46,6 +46,15 @@ func (tr *smtTranslator) bindSMTSViewLengthArg(env map[string]string, name strin
 // every input — never the `end - start` an in-bounds reading would suggest.
 func (tr *smtTranslator) sviewArgLengthTerm(argExpr ast.Expr, argEnv map[string]string) (string, bool) {
 	expr := stripOptimizationParens(argExpr)
+	if literal, ok := expr.(*ast.StringLit); ok && literal != nil {
+		// A contextual sview literal stores the decoded UTF-8 byte count,
+		// including embedded zero bytes. Its contents need not be modeled
+		// to bind a callee's header length exactly.
+		if _, view := stripRefForBounds(tr.a.exprTypes[literal]).(*SViewType); view {
+			return smtInt(int64(len(literal.Value))), true
+		}
+		return "", false
+	}
 	if slice, ok := expr.(*ast.SliceExpr); ok && slice != nil {
 		return tr.sviewSliceLengthTerm(slice, argEnv)
 	}

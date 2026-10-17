@@ -1310,6 +1310,13 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 		tr.stringBindings[token] = smtConstantStringBinding{expr: argExpr, env: capturedEnv}
 		env["\x00string:"+name] = token
+		// Constant-string comparison and view-header reads use separate
+		// bindings. Preserve both when a literal is passed as an sview.
+		if _, literal := stripOptimizationParens(argExpr).(*ast.StringLit); literal {
+			if _, view := stripRefForBounds(a.exprTypes[argExpr]).(*SViewType); view {
+				return tr.bindSMTSViewLengthArg(env, name, argExpr, argEnv)
+			}
+		}
 		return true
 	}
 	// A literal-null substitution (e.g. `result` on a `return null` path) has no scalar SMT term. It is
