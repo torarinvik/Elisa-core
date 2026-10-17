@@ -576,12 +576,44 @@ and its default are accepted while zero violates the exported precondition.
 
 This does not qualify `.elisai` as a complete incremental module cache key.
 Remaining losses include return-region and lmut manifests, visibility and
-associated-type defaults, law/lemma/ghost/named-contract declaration kinds,
+associated-type defaults, lemma/ghost declaration kinds,
 higher-order parameter contracts lifted out of Requires, fulfills-derived frames,
 contract applications on methods, default-body proof attachments, and inferred
-poststate/provenance/effect summaries with their boundary kind. Named-contract
-exports and extern contract-derived frames need dedicated semantic round trips.
+poststate/provenance/effect summaries with their boundary kind. Named-contract definitions and extern contract-derived frames are covered by
+the normalization step below; effect/shape obligations remain incomplete.
 `uses` applications are not newly serialized here: analyzed declarations retain
 both expanded clauses and their original application, so an explicit canonical
 export representation must prevent duplicate application on import.
 No module object reuse or performance improvement is claimed by this prerequisite.
+
+
+### Named contract and law boundary normalization
+
+Post-analysis interfaces retain `contract` and `law` declaration kinds rather
+than converting them into callable extern functions. Contract formatting carries
+its generic binders, value/frame clauses, scoped proof attachments and law
+includes. Law formatting covers value/block, frame, effect and composite laws,
+including protocol member laws. This keeps the definitions available for a fresh
+downstream `uses` application.
+
+Already-analyzed ordinary function boundaries emit their expanded value/frame
+clauses and omit the retained original `Uses`. Import therefore does not apply the
+same contract twice. Tests run three analyze/emit/import cycles with stable text,
+then apply the exported contract in a new consumer and reject violating arguments.
+The public generation path remains post-analysis; raw source formatting is not a
+lossless serialization of an unexpanded function's `uses` applications.
+
+Expansion also refreshes the existing function types' frame and canonical value
+specification in place: value symbols were registered before expansion, so their
+old signature could otherwise disagree with the analyzed AST and imported
+interface. Canonical binders and type predicates stay intact. Extern expansion
+now retains derived Changes/Preserves and refreshes its boundary value clauses.
+A no-uses compilation skips the symbol-to-type publication index entirely.
+
+Qualification includes source/native extern value contracts, source/extern
+frame-law includes, generic contract proof attachments and all law syntax kinds.
+Effect/composite/shape includes that become Fulfills still need an exported
+obligation representation; extern expansion lacks a Fulfills field. Namespace
+contract lookup and method applications also need broader qualification. The
+remaining lifetime, visibility, higher-order and inferred-summary gaps above
+continue to block general module cache admission. No speedup is claimed here.

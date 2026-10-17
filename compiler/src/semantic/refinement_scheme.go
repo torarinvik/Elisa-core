@@ -142,18 +142,7 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 		deps := specDependencies([]ast.Expr{wt.Predicate}, nameRefs, subject)
 		sig.ResultPredicates = append(sig.ResultPredicates, NewRefinementPredicate(RefinementPredicateType, subject, "", nil, deps, wt.Predicate, wt.Position))
 	}
-	for _, req := range requires {
-		deps := specDependencies([]ast.Expr{req}, nameRefs, BinderRef{})
-		sig.Requires = append(sig.Requires, NewRefinementPredicate(RefinementPredicateRequires, BinderRef{}, "", nil, deps, req, req.Pos()))
-	}
-	for _, ens := range ensureValues {
-		subject := BinderRef{}
-		if result != nil {
-			subject = result.Ref()
-		}
-		deps := specDependencies([]ast.Expr{ens}, nameRefs, subject)
-		sig.Ensures = append(sig.Ensures, NewRefinementPredicate(RefinementPredicateEnsures, subject, "", nil, deps, ens, ens.Pos()))
-	}
+	replaceSpecValueContracts(sig, requires, ensureValues)
 	for _, re := range refinementEnsures {
 		if re.ParamIndex < 0 || re.ParamIndex >= len(binders) {
 			continue
@@ -363,4 +352,31 @@ func paramSpecBinderID(index int) SpecBinderID {
 
 func resultSpecBinderID() SpecBinderID {
 	return SpecBinderID("result")
+}
+
+// replaceSpecValueContracts keeps canonical binders and type refinements intact
+// when a later declaration expansion changes only its value contracts.
+func replaceSpecValueContracts(sig *SpecSignature, requires, ensureValues []ast.Expr) {
+	if sig == nil {
+		return
+	}
+	sig.Requires = nil
+	sig.Ensures = nil
+	if len(requires) == 0 && len(ensureValues) == 0 {
+		return
+	}
+	nameRefs := specBinderRefsByName(sig.Params, sig.Result)
+	result := sig.Result
+	for _, req := range requires {
+		deps := specDependencies([]ast.Expr{req}, nameRefs, BinderRef{})
+		sig.Requires = append(sig.Requires, NewRefinementPredicate(RefinementPredicateRequires, BinderRef{}, "", nil, deps, req, req.Pos()))
+	}
+	for _, ens := range ensureValues {
+		subject := BinderRef{}
+		if result != nil {
+			subject = result.Ref()
+		}
+		deps := specDependencies([]ast.Expr{ens}, nameRefs, subject)
+		sig.Ensures = append(sig.Ensures, NewRefinementPredicate(RefinementPredicateEnsures, subject, "", nil, deps, ens, ens.Pos()))
+	}
 }

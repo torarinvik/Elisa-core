@@ -19,23 +19,68 @@ import (
 // from the (already namespace-flattened) decls and then unfolds every function's `uses` clauses.
 func (a *Analyzer) expandUsesContracts(decls []scopedDecl) {
 	contracts := map[string]*ast.FuncDecl{}
+	needsExpansion := false
 	for _, sd := range decls {
+		switch n := sd.Decl.(type) {
+		case *ast.FuncDecl:
+			needsExpansion = needsExpansion || (!n.IsContract && len(n.Uses) > 0)
+		case *ast.ExternFuncDecl:
+			needsExpansion = needsExpansion || len(n.Uses) > 0
+		}
 		if fn, ok := sd.Decl.(*ast.FuncDecl); ok && fn != nil && fn.IsContract {
 			contracts[fn.Name] = fn
 			contracts[joinQualifiedName(sd.Namespace, fn.Name)] = fn
 		}
+	}
+	if !needsExpansion {
+		return
+	}
+	// Function types are registered before uses expansion. Update their frame
+	// and value specifications so existing aliases observe the expanded boundary.
+	typesByDecl := map[ast.Node][]*FuncType{}
+	for _, symbol := range a.globalScope.Symbols {
+		if symbol == nil || symbol.Node == nil {
+			continue
+		}
+		if ft, ok := symbol.Type.(*FuncType); ok {
+			typesByDecl[symbol.Node] = append(typesByDecl[symbol.Node], ft)
+		}
+	}
+	publish := func(sd scopedDecl, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause) {
+		a.withResolutionContext(sd.Namespace, sd.Usings, func() {
+			for _, ft := range typesByDecl[sd.Decl] {
+				params := make([]ast.ParamDecl, len(ft.ExplicitParamNames))
+				for i, name := range ft.ExplicitParamNames {
+					params[i].Name = name
+				}
+				ft.FrameWrites, ft.FrameBounded = a.resolveFrameSummary(params, changes, fulfills)
+				ft.SpecSignature = cloneSpecSignature(ft.SpecSignature)
+				switch n := sd.Decl.(type) {
+				case *ast.FuncDecl:
+					replaceSpecValueContracts(ft.SpecSignature, n.Requires, n.EnsureValues)
+				case *ast.ExternFuncDecl:
+					replaceSpecValueContracts(ft.SpecSignature, n.Requires, n.EnsureValues)
+				}
+				if ext, ok := sd.Decl.(*ast.ExternFuncDecl); ok {
+					ft.ExternRequires = append([]ast.Expr(nil), ext.Requires...)
+					ft.ExternEnsureValues = append([]ast.Expr(nil), ext.EnsureValues...)
+				}
+			}
+		})
 	}
 	for _, sd := range decls {
 		fn, ok := sd.Decl.(*ast.FuncDecl)
 		if !ok || fn == nil || len(fn.Uses) == 0 || fn.IsContract {
 			if ext, extOK := sd.Decl.(*ast.ExternFuncDecl); extOK && ext != nil && len(ext.Uses) > 0 {
 				a.expandExternUsesContracts(ext, contracts)
+				publish(sd, ext.Changes, nil)
 			}
 			continue
 		}
 		for _, use := range fn.Uses {
 			a.expandOneUse(fn, use, contracts)
 		}
+		publish(sd, fn.Changes, fn.Fulfills)
 	}
 }
 
@@ -50,6 +95,8 @@ func (a *Analyzer) expandExternUsesContracts(ext *ast.ExternFuncDecl, contracts 
 		PermissionParams: append([]string(nil), ext.PermissionParams...),
 		GenericParams:    append([]ast.GenericParam(nil), ext.GenericParams...),
 		Permissions:      append([]ast.PermissionRef(nil), ext.Permissions...),
+		Changes:          append([]ast.EnsuresPath(nil), ext.Changes...),
+		Preserves:        append([]ast.EnsuresPath(nil), ext.Preserves...),
 		Requires:         append([]ast.Expr(nil), ext.Requires...),
 		EnsureValues:     append([]ast.Expr(nil), ext.EnsureValues...),
 		Uses:             append([]*ast.ContractStmt(nil), ext.Uses...),
@@ -59,6 +106,8 @@ func (a *Analyzer) expandExternUsesContracts(ext *ast.ExternFuncDecl, contracts 
 	for _, use := range ext.Uses {
 		a.expandOneUse(fn, use, contracts)
 	}
+	ext.Changes = append([]ast.EnsuresPath(nil), fn.Changes...)
+	ext.Preserves = append([]ast.EnsuresPath(nil), fn.Preserves...)
 	ext.Requires = append([]ast.Expr(nil), fn.Requires...)
 	ext.EnsureValues = append([]ast.Expr(nil), fn.EnsureValues...)
 }

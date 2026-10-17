@@ -207,3 +207,163 @@ func TestInterfacePreservesVariadicBoundary(t *testing.T) {
 		t.Fatalf("lost variadic ABI: %s", generated)
 	}
 }
+
+func TestInterfaceNamedContractsRemainReusableWithoutExpansionGrowth(t *testing.T) {
+	source := `law Positive(x: i64) = x > 0
+
+contract PositiveResult(x: i64):
+    includes Positive(x)
+    ensure result > 0
+
+def positive(x: i64) -> i64:
+    uses PositiveResult(x)
+    return x
+
+extern native_positive(x: i64) -> i64 uses PositiveResult(x)
+`
+	options := semantic.AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true}
+	checked := semantic.AnalyzeWithOptions(parseInterfaceTestSource(t, source), options)
+	if len(checked.Errors()) != 0 {
+		t.Fatal(checked.Errors())
+	}
+	for _, name := range []string{"positive", "native_positive"} {
+		ft := checked.GlobalScope.Symbols[name].Type.(*semantic.FuncType)
+		if ft.SpecSignature == nil || len(ft.SpecSignature.Requires) != 1 || len(ft.SpecSignature.Ensures) != 1 {
+			t.Fatalf("stale canonical source contracts: %#v", ft.SpecSignature)
+		}
+	}
+	generated := generateModuleInterface(checked.File)
+	for _, want := range []string{"law Positive(", "contract PositiveResult(", "includes Positive(x)"} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("lost %q:\n%s", want, generated)
+		}
+	}
+	if strings.Contains(generated, "uses PositiveResult") {
+		t.Fatalf("expanded function application exported twice:\n%s", generated)
+	}
+	for revision := 0; revision < 3; revision++ {
+		imported := semantic.AnalyzeWithOptions(parseInterfaceTestNamedSource(t, "interface.elisai", generated), options)
+		if len(imported.Errors()) != 0 {
+			t.Fatal(imported.Errors())
+		}
+		again := generateModuleInterface(imported.File)
+		if again != generated {
+			t.Fatalf("interface grew at revision %d:\n%s\nthen:\n%s", revision, generated, again)
+		}
+		generated = again
+	}
+	for _, call := range []string{"positive(1)", "positive(0)", "native_positive(1)", "native_positive(0)", "consumer(1)", "consumer(0)"} {
+		client := `def consumer(x: i64) -> i64:
+    uses PositiveResult(x)
+    return x
+
+def caller() -> i64:
+    return ` + call + "\n"
+		result := semantic.AnalyzeWithOptions(parseInterfaceTestNamedSource(t, "interface.elisai", generated+"\n"+client), options)
+		if strings.HasSuffix(call, "(0)") && len(result.Errors()) == 0 {
+			t.Fatalf("violating exported contract accepted: %s", call)
+		}
+		if strings.HasSuffix(call, "(1)") && len(result.Errors()) != 0 {
+			t.Fatalf("valid exported contract rejected: %s: %v", call, result.Errors())
+		}
+	}
+}
+
+func TestInterfaceNamedFrameContractParity(t *testing.T) {
+	source := `struct Render:
+    px: mutable i32
+    health: mutable i32
+
+law PixelOnly(s: mutable Render&) changes s.px preserves s.health
+
+contract WritePixel(s: mutable Render&):
+    includes PixelOnly(s)
+
+def bump(s: mutable Render&):
+    uses WritePixel(s)
+    s.px <- s.px + 1
+
+extern native_bump(s: mutable Render&) uses WritePixel(s)
+`
+	checked := semantic.Analyze(parseInterfaceTestSource(t, source))
+	if len(checked.Errors()) != 0 {
+		t.Fatal(checked.Errors())
+	}
+	generated := generateModuleInterface(checked.File)
+	imported := semantic.Analyze(parseInterfaceTestNamedSource(t, "interface.elisai", generated))
+	if len(imported.Errors()) != 0 {
+		t.Fatal(imported.Errors())
+	}
+	if again := generateModuleInterface(imported.File); again != generated {
+		t.Fatalf("frame interface grew:\n%s\nthen:\n%s", generated, again)
+	}
+	for _, name := range []string{"bump", "native_bump"} {
+		before := checked.GlobalScope.Symbols[name].Type.(*semantic.FuncType)
+		after := imported.GlobalScope.Symbols[name].Type.(*semantic.FuncType)
+		if !before.FrameBounded || !after.FrameBounded || !reflect.DeepEqual(before.FrameWrites, after.FrameWrites) {
+			t.Fatalf("lost %s frame: %#v / %#v", name, before.FrameWrites, after.FrameWrites)
+		}
+		for _, field := range []string{"px", "health"} {
+			caller := "\ndef caller(r: mutable Render&) changes r." + field + ":\n    " + name + "(r)\n"
+			result := semantic.Analyze(parseInterfaceTestNamedSource(t, "interface.elisai", generated+caller))
+			if field == "px" && len(result.Errors()) != 0 {
+				t.Fatalf("valid caller rejected: %v", result.Errors())
+			}
+			if field == "health" && !strings.Contains(strings.Join(result.Errors(), "\n"), "outside the `changes` set") {
+				t.Fatalf("invalid caller accepted: %v", result.Errors())
+			}
+		}
+	}
+}
+
+func TestInterfacePreservesLawKinds(t *testing.T) {
+	source := `law Positive(x: i64) = x > 0
+law NoAlloc forbids Memory.Allocate
+law NoPanic forbids Abort.Panic
+law Leaf includes NoAlloc, NoPanic
+law FieldOnly(s: mutable Render&) changes s.px preserves s.health
+`
+	generated := generateModuleInterface(parseInterfaceTestSource(t, source))
+	parsed := parseInterfaceTestNamedSource(t, "interface.elisai", generated)
+	for _, decl := range parsed.Decls {
+		if !decl.(*ast.FuncDecl).IsLaw {
+			t.Fatalf("lost law kind: %s", generated)
+		}
+	}
+	if again := generateModuleInterface(parsed); again != generated {
+		t.Fatalf("unstable laws:\n%s\nthen:\n%s", generated, again)
+	}
+}
+
+func TestInterfaceNamedGenericContractRetainsProofAttachments(t *testing.T) {
+	source := `contract Ordered[T](lo: T, hi: T):
+    requires lo <= hi by scoped:
+        assert true
+    ensure result >= lo by scoped:
+        assert true
+`
+	generated := generateModuleInterface(parseInterfaceTestSource(t, source))
+	parsed := parseInterfaceTestNamedSource(t, "interface.elisai", generated)
+	contract := parsed.Decls[0].(*ast.FuncDecl)
+	if !contract.IsContract || len(contract.GenericParams) != 1 || len(contract.RequiresProofs) != 1 || contract.RequiresProofs[0] == nil || len(contract.RequiresProofs[0].Proof) != 1 || len(contract.EnsureProofs) != 1 || contract.EnsureProofs[0] == nil || len(contract.EnsureProofs[0].Proof) != 1 {
+		t.Fatalf("lost generic contract or proof attachment: %#v\n%s", contract, generated)
+	}
+	if again := generateModuleInterface(parsed); again != generated {
+		t.Fatalf("proof contract unstable:\n%s\nthen:\n%s", generated, again)
+	}
+}
+
+func TestInterfaceProtocolLawRetainsKind(t *testing.T) {
+	source := `protocol PositiveValue:
+    law Positive(x: i64) = x > 0
+`
+	generated := generateModuleInterface(parseInterfaceTestSource(t, source))
+	parsed := parseInterfaceTestNamedSource(t, "interface.elisai", generated)
+	law := parsed.Decls[0].(*ast.InterfaceDecl).Members[0].(*ast.FuncDecl)
+	if !law.IsLaw {
+		t.Fatalf("lost protocol law kind:\n%s", generated)
+	}
+	if again := generateModuleInterface(parsed); again != generated {
+		t.Fatalf("unstable protocol law:\n%s\nthen:\n%s", generated, again)
+	}
+}

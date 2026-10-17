@@ -45,6 +45,10 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		if n.Static || hasInterfaceInternalAnnotation(n.Annotations) {
 			return nil
 		}
+		if n.IsContract || n.IsLaw {
+			copy := *n
+			return &copy
+		}
 		return interfaceFunctionBoundary(n)
 	case *ast.ExternFuncDecl:
 		if hasInterfaceInternalAnnotation(n.Annotations) {

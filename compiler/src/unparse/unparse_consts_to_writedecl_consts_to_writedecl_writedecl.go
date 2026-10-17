@@ -486,6 +486,10 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)+formatBoundaryFrames(m.Changes, m.Preserves))
 				f.writeBoundaryContracts(level+2, m.Requires, m.EnsureValues)
 			case *ast.FuncDecl:
+				if m.IsLaw {
+					f.writeLaw(level+1, m)
+					continue
+				}
 				// Default method: signature line + body.
 				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)+formatBoundaryFrames(m.Changes, m.Preserves)+":")
 				f.writeBoundaryContracts(level+2, m.Requires, m.EnsureValues)
@@ -560,6 +564,14 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 		}
 	case *ast.FuncDecl:
+		if n.IsContract {
+			f.writeNamedContract(level, n)
+			return
+		}
+		if n.IsLaw {
+			f.writeLaw(level, n)
+			return
+		}
 		f.writeAnnotations(level, n.Annotations)
 		header := formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, n.Variadic)
 		if n.Static {
