@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestUsableCachedFileRejectsInvalidEntries(t *testing.T) {
@@ -73,5 +74,47 @@ func TestToolchainContentStampDistinguishesToolBytes(t *testing.T) {
 	}
 	if again != firstStamp {
 		t.Fatalf("tool stamp was not stable: %q != %q", again, firstStamp)
+	}
+}
+
+func TestToolchainContentStampInvalidatesSamePathReplacement(t *testing.T) {
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "tool")
+	replacementPath := filepath.Join(dir, "tool.new")
+	fixedTime := time.Unix(1_700_000_000, 0)
+	if err := os.WriteFile(toolPath, []byte("toolchain-v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(toolPath, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	first, err := toolchainContentStamp(toolPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a package manager atomically replacing a binary at the same path while
+	// preserving the same byte length and mtime. Device/inode and ctime still change.
+	if err := os.WriteFile(replacementPath, []byte("toolchain-v2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(replacementPath, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(toolPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacementPath, toolPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(toolPath, fixedTime, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	second, err := toolchainContentStamp(toolPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("same-path replacement reused stale tool digest %q", first)
 	}
 }
