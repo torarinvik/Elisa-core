@@ -12,7 +12,8 @@ import (
 // A view's length is part of the view value, so at the binding point the formal's `.len` equals the
 // argument's `.len`.
 //
-// The formal is bound to a FRESH byte-array symbol (`v_@svarg$N`; `@` cannot occur in an Elisa
+// Literal arguments bind only the exact `.len` projection and expose no byte array.
+// Other arguments bind a FRESH byte-array symbol (`v_@svarg$N`; `@` cannot occur in an Elisa
 // identifier, so it never collides with a caller or callee name) whose length symbol is asserted
 // equal to the argument's length term. Every existing array path (`.len`, `.count`, indexing,
 // quantifiers) then treats the formal as an ordinary bound array: the length is exact and the
@@ -23,6 +24,13 @@ func (tr *smtTranslator) bindSMTSViewLengthArg(env map[string]string, name strin
 	lenTerm, ok := tr.sviewArgLengthTerm(argExpr, argEnv)
 	if !ok {
 		return false
+	}
+	if _, literal := stripOptimizationParens(argExpr).(*ast.StringLit); literal {
+		// The literal's header is exact, but this binding does not model its
+		// bytes. Keep the scalar projection without introducing an unrelated
+		// array whose element contracts would burden length-only proofs.
+		env[name+".len"] = lenTerm
+		return true
 	}
 	fresh := "@svarg$" + strconv.Itoa(tr.sviewArgCount)
 	tr.sviewArgCount++
@@ -181,11 +189,23 @@ func (tr *smtTranslator) fieldProjectionKey(n ast.Expr, env map[string]string) (
 	return strings.TrimPrefix(bound, dtTokenPrefix) + strings.TrimPrefix(name, id.Name), true
 }
 
-// envBindsRoot reports whether expr is an identifier the substitution env binds (as a term or as a
+// envBindsRoot reports whether expr is rooted at an identifier the substitution env binds (as a term or as a
 // constant-string binding). Such a name denotes the substituted argument, never the current
 // function's same-spelled binding, so scope-keyed lowerings must not resolve it.
 func (tr *smtTranslator) envBindsRoot(expr ast.Expr, env map[string]string) bool {
-	id, ok := stripOptimizationParens(expr).(*ast.Ident)
+	root := stripOptimizationParens(expr)
+	for {
+		switch n := root.(type) {
+		case *ast.FieldExpr:
+			root = stripOptimizationParens(n.Object)
+		case *ast.IndexExpr:
+			root = stripOptimizationParens(n.Object)
+		default:
+			goto rootFound
+		}
+	}
+rootFound:
+	id, ok := root.(*ast.Ident)
 	if !ok || id == nil || env == nil {
 		return false
 	}

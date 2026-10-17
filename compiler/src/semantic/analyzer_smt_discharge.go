@@ -3051,6 +3051,15 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if env != nil {
+			if bound, ok := env[smtProjectionName(n)]; ok {
+				return bound, true
+			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
+		boundRoot := tr.envBindsRoot(n.Object, env)
 		if n.Field == "len" {
 			if base, k, ok := tr.containerViewIndex(n.Object, env); ok {
 				_, _, length := tr.containerViewElement(base, k)
@@ -3060,15 +3069,17 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if term, handled, ok := tr.recordElementFieldTerm(n, env, "Int"); handled {
 			return term, ok
 		}
-		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
+		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested && !boundRoot {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
 				if _, constant := stripOptimizationParens(value).(*ast.IntLit); constant {
 					return tr.termEnv(value, env)
 				}
 			}
 		}
-		if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
-			return tr.termEnv(rerooted, env)
+		if !boundRoot {
+			if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
+				return tr.termEnv(rerooted, env)
+			}
 		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
@@ -3083,7 +3094,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			}
 		}
 		// Constant enum members retain their exact backing value, not an unconstrained projection.
-		if c, ok := tr.a.constIntValue(n); ok {
+		if c, ok := tr.a.constIntValue(n); ok && !boundRoot {
 			return tr.constIntTerm(n, c), true
 		}
 		// `(X if c else Y).f` is `X.f` where c holds and `Y.f` elsewhere.
@@ -3094,11 +3105,6 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if term, ok, handled := tr.aggregateProjectionTerm(n, env); handled {
 			return term, ok
 		}
-		if env != nil {
-			if bound, ok := env[smtProjectionName(n)]; ok {
-				return bound, true
-			}
-		}
 		// `result.field` where `result` is bound to a struct literal → that field's construction
 		// argument, so `ensure result.a == 1` for `return Pair(1, 2)` proves.
 		if tr.resultFields != nil && tr.calleeBodyDepth == 0 && !tr.envBindsRoot(&ast.Ident{Name: "result"}, env) {
@@ -3108,9 +3114,6 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				}
 			}
 		}
-		if tr.calleeFreeProjection(n, env) {
-			return "", false
-		}
 		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
 		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
 		// SPECIAL CASE: if the entire field expression evaluates to a compile-time constant (e.g.
@@ -3119,7 +3122,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// A tuple/struct field that happens to be NAMED `count`/`len` is an ordinary field read
 		// (handled by the projection below), never a container length.
 		if (n.Field == "count" || n.Field == "len") && !tr.a.recordFieldNamed(n.Object, n.Field) {
-			if c, ok := tr.a.constIntValue(n); ok {
+			if c, ok := tr.a.constIntValue(n); ok && !boundRoot {
 				return tr.constIntTerm(n, c), true
 			}
 			// An sview slice's `.len` is modeled exactly (string_view_slice clamps).
@@ -4095,18 +4098,29 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		return "", false
 	case *ast.FieldExpr:
+		if env != nil {
+			if bound, ok := env[smtProjectionName(n)]; ok {
+				return bound, true
+			}
+		}
+		if tr.calleeFreeProjection(n, env) {
+			return "", false
+		}
+		boundRoot := tr.envBindsRoot(n.Object, env)
 		if term, handled, ok := tr.recordElementFieldTerm(n, env, "Bool"); handled {
 			return term, ok
 		}
-		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested {
+		if _, nested := stripOptimizationParens(n.Object).(*ast.FieldExpr); nested && !boundRoot {
 			if value, found := tr.a.nestedLiteralFieldValue(n, 0); found {
 				if _, constant := stripOptimizationParens(value).(*ast.BoolLit); constant {
 					return tr.boolTerm(value, env)
 				}
 			}
 		}
-		if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
-			return tr.boolTerm(rerooted, env)
+		if !boundRoot {
+			if rerooted, ok := tr.a.rerootLiteralProjection(n); ok {
+				return tr.boolTerm(rerooted, env)
+			}
 		}
 		if tuple, ok := stripOptimizationParens(n.Object).(*ast.TupleExpr); ok {
 			if value, found := tr.a.tupleLiteralFieldValue(tuple, n.Field); found {
@@ -4132,14 +4146,6 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		if term, ok, handled := tr.aggregateProjectionBool(n, env); handled {
 			return term, ok
-		}
-		if env != nil {
-			if bound, ok := env[smtProjectionName(n)]; ok {
-				return bound, true
-			}
-		}
-		if tr.calleeFreeProjection(n, env) {
-			return "", false
 		}
 		fieldType := tr.a.exprTypes[n]
 		if fieldType == nil {
