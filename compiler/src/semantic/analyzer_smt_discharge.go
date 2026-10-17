@@ -40,15 +40,16 @@ type smtSolverHandle = smt.Solver
 // SMTStats is the cost report for the SMT tier (mirrors smt.Stats plus discharge-level counts).
 // Exported so the CLI's --explain can render it. Zero-valued (Enabled=false) when the tier is off.
 type SMTStats struct {
-	Enabled      bool
-	Attempts     int           // obligations handed to the tier (linear declined)
-	Proven       int           // unsat → proven
-	Declined     int           // sat/unknown → fell back to runtime
-	SolverProven int           // == Proven, kept for clarity in the report
-	CacheHits    int           // obligations answered from the query cache (no solver round-trip)
-	SpawnTime    time.Duration // one-time solver process start
-	SolverTime   time.Duration // wall time inside the solver across all queries
-	Slowest      time.Duration // slowest single query
+	Enabled             bool
+	Attempts            int // obligations handed to the tier (linear declined)
+	Proven              int // unsat → proven
+	Declined            int // sat/unknown → fell back to runtime
+	SolverProven        int // == Proven, kept for clarity in the report
+	PersistentCacheHits int
+	CacheHits           int           // obligations answered from the query cache (no solver round-trip)
+	SpawnTime           time.Duration // one-time solver process start
+	SolverTime          time.Duration // wall time inside the solver across all queries
+	Slowest             time.Duration // slowest single query
 }
 
 // String renders the profile for the --explain report (empty when the tier is off).
@@ -56,13 +57,17 @@ func (p SMTStats) String() string {
 	if !p.Enabled {
 		return ""
 	}
-	return fmt.Sprintf(
+	report := fmt.Sprintf(
 		"SMT tier: %d obligations, %d proven, %d declined, %d cached; solver %.1fms (spawn %.1fms, slowest %.1fms)",
 		p.Attempts, p.Proven, p.Declined, p.CacheHits,
 		float64(p.SolverTime.Microseconds())/1000.0,
 		float64(p.SpawnTime.Microseconds())/1000.0,
 		float64(p.Slowest.Microseconds())/1000.0,
 	)
+	if p.PersistentCacheHits > 0 {
+		report += fmt.Sprintf("; %d persistent", p.PersistentCacheHits)
+	}
+	return report
 }
 
 // smtQueryResourceLimit is the deterministic per-(check-sat) z3 budget (see openSMT).
@@ -666,12 +671,24 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 		}
 		return hit.proven, hit.ce
 	}
+	if !a.smtProofCacheInitialized {
+		a.smtProofCacheInitialized = true
+		a.smtProofCache = newSMTProofCache(os.Getenv("ELISACORE_SMT_CACHE_DIR"), a.smtBinary)
+	}
+	if a.smtProofCache.contains(query) {
+		a.smtStats.CacheHits++
+		a.smtStats.PersistentCacheHits++
+		a.smtStats.Proven++
+		a.cacheSMTQuery(query, smtQueryResult{proven: true})
+		return true, ""
+	}
 	a.smtSetLogLabelForQuery(solver, "query", obligation, query)
 	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
 		a.cacheSMTQuery(query, smtQueryResult{proven: true})
+		a.smtProofCache.publish(query)
 		return true, ""
 	}
 	a.smtStats.Declined++

@@ -4,6 +4,34 @@
 Stage 1 (build-avoidance object cache) **implemented**. Stage 2 (module-granular
 incremental compilation) **designed, not implemented** — see "Stage 2" below.
 
+An opt-in cross-process exact-proof cache is also implemented. Set
+`ELISACORE_SMT_CACHE_DIR` to a compiler-owned local cache directory to reuse
+definitive UNSAT results for byte-identical, complete SMT queries. The key pins
+the running compiler artifact, solver bytes/version, platform, solver budget and
+query text. Atomic, bounded records with integrity checks make incomplete or
+corrupt entries misses. SAT models and unknown/timeouts are not persisted.
+`--explain` reports persistent hits separately from in-memory query hits.
+
+This avoids solver work; it does not skip function analysis, query construction,
+parsing, IR construction, or optimization. It therefore supports the larger
+incremental-compilation goal without completing Stage 2. Cache storage has the
+same local trust boundary as compiler object artifacts, rather than serving as
+an independently checked proof certificate. Currently the solver is still
+started before the first persistent lookup.
+
+Run the reproducible supporting workload with:
+
+```sh
+python3 compiler/bench/incremental_proofs.py /absolute/path/to/elisac /empty/output/directory
+```
+
+It alternates seven disabled/warm pairs after priming, checks semantic output and
+diagnostic parity, and tests one body edit against clean compilation. Whole-object
+avoidance is disabled. This synthetic nonlinear-proof workload measures proof
+reuse only; report its priming cost and do not extrapolate it to whole-project
+incrementality. Function-result reuse, semantic dependency tracking, diagnostic
+rebinding, specialization handling, and incremental code generation remain work.
+
 This is the long-term plan for "incremental builds like other languages." It is
 deliberately staged: Stage 1 is the content-addressed foundation every mature
 build system has (Go's `GOCACHE`, ccache); Stage 2 — true per-unit recompilation

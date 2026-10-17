@@ -725,7 +725,9 @@ type Analyzer struct {
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
 	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
 	// cross-function key collision means a byte-identical proof).
-	smtQueryCache map[string]smtQueryResult
+	smtQueryCache            map[string]smtQueryResult
+	smtProofCache            *smtProofCache
+	smtProofCacheInitialized bool
 	// smtDeadPathCache memoizes cone-of-influence dead-path verdicts by the dropped text.
 	smtDeadPathCache map[string]smtVerdict
 	// recursiveCertInProgress holds the recursive calls whose termination certificate or callee

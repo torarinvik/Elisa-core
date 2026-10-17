@@ -1,0 +1,192 @@
+package semantic
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"time"
+
+	"elisacore/src/smt"
+)
+
+// This cache stores only definitive UNSAT answers to complete queries. It does
+// not authorize skipping semantic analysis, and never stores timeout decisions.
+const smtProofCacheSchema = "elisa-exact-smt-proof-v1"
+
+type smtProofCache struct{ directory, identity string }
+type smtProofCacheRecord struct{ Schema, Key, Verdict, Checksum string }
+
+// Keep the compiler artifact opened from process startup. Renaming a new
+// compiler over its pathname must not identify already-running code as that new build.
+var smtProofCompilerArtifact, smtProofCompilerStat = func() (*os.File, os.FileInfo) {
+	path, err := os.Executable()
+	if err != nil {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil
+	}
+	return f, info
+}()
+
+func smtProofCompilerHash() (string, error) {
+	return smtProofOpenedArtifactHash(smtProofCompilerArtifact, smtProofCompilerStat)
+}
+
+func smtProofOpenedArtifactHash(artifact *os.File, original os.FileInfo) (string, error) {
+	if artifact == nil || original == nil {
+		return "", fmt.Errorf("compiler identity unavailable")
+	}
+	before, err := artifact.Stat()
+	if err != nil {
+		return "", err
+	}
+	unchanged := func(info os.FileInfo) bool {
+		return info.Size() == original.Size() && info.ModTime().Equal(original.ModTime())
+	}
+	if !unchanged(before) {
+		return "", fmt.Errorf("running compiler artifact changed")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, io.NewSectionReader(artifact, 0, before.Size())); err != nil {
+		return "", err
+	}
+	after, err := artifact.Stat()
+	if err != nil || !unchanged(after) {
+		return "", fmt.Errorf("compiler changed during identity read")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func smtProofArtifactHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err = io.Copy(hash, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func newSMTProofCache(directory, binary string) *smtProofCache {
+	if directory == "" {
+		return nil
+	}
+	solver, err := exec.LookPath(smt.ResolveBinary(binary))
+	if err != nil {
+		return nil
+	}
+	// Re-read identities for each analysis so a long-lived compile server cannot
+	// keep an old cache namespace after its solver has been replaced.
+	compilerHash, err := smtProofCompilerHash()
+	if err != nil {
+		return nil
+	}
+	solverHash, err := smtProofArtifactHash(solver)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var version smtProofVersionOutput
+	command := exec.CommandContext(ctx, solver, "--version")
+	command.WaitDelay = 500 * time.Millisecond
+	command.Stdout = &version
+	command.Stderr = io.Discard
+	if command.Run() != nil {
+		return nil
+	}
+	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, compilerHash, solverHash, version.String(), runtime.GOOS, runtime.GOARCH)
+
+	return &smtProofCache{directory: directory, identity: fmt.Sprintf("%s\x00rlimit=%d\x00timeout=120000\x00mbqi=true\x00models=true", identity, smtResourceLimit())}
+}
+
+func (c *smtProofCache) key(query string) string {
+	hash := sha256.New()
+	io.WriteString(hash, c.identity)
+	hash.Write([]byte{0})
+	io.WriteString(hash, query)
+	return hex.EncodeToString(hash.Sum(nil))
+}
+func smtProofChecksum(key string) string {
+	hash := sha256.Sum256([]byte(smtProofCacheSchema + "\x00" + key + "\x00unsat"))
+	return hex.EncodeToString(hash[:])
+}
+func (c *smtProofCache) path(key string) string {
+	return filepath.Join(c.directory, key[:2], key+".json")
+}
+func (c *smtProofCache) contains(query string) bool {
+	if c == nil {
+		return false
+	}
+	key := c.key(query)
+	f, err := os.Open(c.path(key))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	payload, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil || len(payload) > 4096 {
+		return false
+	}
+	var record smtProofCacheRecord
+	if json.Unmarshal(payload, &record) != nil {
+		return false
+	}
+	return record.Schema == smtProofCacheSchema && record.Key == key && record.Verdict == "unsat" && record.Checksum == smtProofChecksum(key)
+}
+func (c *smtProofCache) publish(query string) {
+	if c == nil {
+		return
+	}
+	key := c.key(query)
+	path := c.path(key)
+	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
+		return
+	}
+	payload, err := json.Marshal(smtProofCacheRecord{smtProofCacheSchema, key, "unsat", smtProofChecksum(key)})
+	if err != nil {
+		return
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".proof-*")
+	if err != nil {
+		return
+	}
+	temporary := f.Name()
+	defer os.Remove(temporary)
+	if _, err = f.Write(payload); err != nil {
+		f.Close()
+		return
+	}
+	if err = f.Close(); err != nil {
+		return
+	}
+	_ = os.Rename(temporary, path)
+}
+
+// Bound identity-probe output as well as its elapsed time.
+type smtProofVersionOutput struct{ bytes.Buffer }
+
+func (b *smtProofVersionOutput) Write(payload []byte) (int, error) {
+	if b.Len()+len(payload) > 4096 {
+		return 0, fmt.Errorf("solver version output exceeds limit")
+	}
+	return b.Buffer.Write(payload)
+}
