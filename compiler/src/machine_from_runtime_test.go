@@ -148,39 +148,41 @@ def declared_out_runs() -> void:
 // multi-accumulator pipe on a cyclic machine whose measure names an accumulator.
 func TestMachineFromHeaderPipeRuntime(t *testing.T) {
 	body := `
-global CHANGED: array[u8, 8] = zeroed
+global mutable CHANGED: array[u8, 8] = zeroed
 
 enum Coalesce:
     Scan
     Grow(i32, i32)
     Emit(i32, i32)
 
-def count_blocks(dh: i32) -> i32:
-    return machine from Coalesce.Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
-        Coalesce.Scan:
-            at_end: bool = r >= dh
-            row_changed: bool = (not at_end) and CHANGED[r.usize()] != 0
-            r <- r + 1
-            done blocks if at_end
-            next Coalesce.Grow(r - 1, r - 1) if row_changed
-            next Coalesce.Scan
-        Coalesce.Grow(first, last):
-            in_range: bool = r < dh
-            cur_changed: bool = in_range and CHANGED[r.usize()] != 0
-            step: i32 = 1 if cur_changed else 0
-            r <- r + step
-            next Coalesce.Grow(first, r - 1) if cur_changed
-            next Coalesce.Emit(first, last)
-        Coalesce.Emit(first, last):
-            blocks <- blocks + 1
-            next Coalesce.Scan
+def count_blocks(dh: i32) -> i32 can[Global.Read]:
+    can Global.Read:
+        return machine from Coalesce.Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
+            Coalesce.Scan:
+                at_end: bool = r >= dh
+                row_changed: bool = (not at_end) and CHANGED[r.usize()] != 0
+                r <- r + 1
+                done blocks if at_end
+                next Coalesce.Grow(r - 1, r - 1) if row_changed
+                next Coalesce.Scan
+            Coalesce.Grow(first, last):
+                in_range: bool = r < dh
+                cur_changed: bool = in_range and CHANGED[r.usize()] != 0
+                step: i32 = 1 if cur_changed else 0
+                r <- r + step
+                next Coalesce.Grow(first, r - 1) if cur_changed
+                next Coalesce.Emit(first, last)
+            Coalesce.Emit(first, last):
+                blocks <- blocks + 1
+                next Coalesce.Scan
 
-def set(i: i32) -> void:
-    CHANGED[i.usize()] <- 1
+def set(i: i32) -> void can[Global.Write]:
+    can Global.Write:
+        CHANGED[i.usize()] <- 1
 
 @test
 def header_pipe_accumulators() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Global.Read, Global.Write:
         # empty bitmap -> 0 blocks
         if count_blocks(8) != 0:
             panic("empty")
@@ -203,30 +205,31 @@ def header_pipe_accumulators() -> void:
 // machine with the header pipe + a payload-binding machine, both over inline states.
 func TestMachineFromStateStartSugarRuntime(t *testing.T) {
 	body := `
-global CHANGED: array[u8, 8] = zeroed
+global mutable CHANGED: array[u8, 8] = zeroed
 
-def count_blocks(dh: i32) -> i32:
-    state Scan
-    state Grow(first: i32, last: i32)
-    state Emit(first: i32, last: i32)
-    return start Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
-        Scan:
-            at_end: bool = r >= dh
-            row_changed: bool = (not at_end) and CHANGED[r.usize()] != 0
-            r <- r + 1
-            done blocks if at_end
-            next Grow(r - 1, r - 1) if row_changed
-            next Scan
-        Grow(first, last):
-            in_range: bool = r < dh
-            cur_changed: bool = in_range and CHANGED[r.usize()] != 0
-            step: i32 = 1 if cur_changed else 0
-            r <- r + step
-            next Grow(first, r - 1) if cur_changed
-            next Emit(first, last)
-        Emit(first, last):
-            blocks <- blocks + 1
-            next Scan
+def count_blocks(dh: i32) -> i32 can[Global.Read]:
+    can Global.Read:
+        state Scan
+        state Grow(first: i32, last: i32)
+        state Emit(first: i32, last: i32)
+        return start Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
+            Scan:
+                at_end: bool = r >= dh
+                row_changed: bool = (not at_end) and CHANGED[r.usize()] != 0
+                r <- r + 1
+                done blocks if at_end
+                next Grow(r - 1, r - 1) if row_changed
+                next Scan
+            Grow(first, last):
+                in_range: bool = r < dh
+                cur_changed: bool = in_range and CHANGED[r.usize()] != 0
+                step: i32 = 1 if cur_changed else 0
+                r <- r + step
+                next Grow(first, r - 1) if cur_changed
+                next Emit(first, last)
+            Emit(first, last):
+                blocks <- blocks + 1
+                next Scan
 
 def classify(x: i64) -> i64:
     state Start
@@ -242,12 +245,13 @@ def classify(x: i64) -> i64:
         End(val):
             => val
 
-def set(i: i32) -> void:
-    CHANGED[i.usize()] <- 1
+def set(i: i32) -> void can[Global.Write]:
+    can Global.Write:
+        CHANGED[i.usize()] <- 1
 
 @test
 def state_start_sugar() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Global.Read, Global.Write:
         if count_blocks(8) != 0:
             panic("empty")
         set(0)
