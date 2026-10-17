@@ -483,10 +483,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 					f.writeLine(level+1, "type "+m.Name)
 				}
 			case *ast.ExternFuncDecl:
-				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)+formatBoundaryFrames(m.Changes, m.Preserves))
+				f.writeBoundaryContracts(level+2, m.Requires, m.EnsureValues)
 			case *ast.FuncDecl:
 				// Default method: signature line + body.
-				f.writeLine(level+1, formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false))
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)+formatBoundaryFrames(m.Changes, m.Preserves)+":")
+				f.writeBoundaryContracts(level+2, m.Requires, m.EnsureValues)
 				for _, stmt := range m.Body {
 					f.writeStmt(level+2, stmt)
 				}
@@ -549,11 +551,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				}
 			case *ast.ExternFuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
+				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic) + formatBoundaryFrames(m.Changes, m.Preserves)
 				if m.Override {
 					header = "override " + header
 				}
 				f.writeLine(level+1, header)
+				f.writeBoundaryContracts(level+2, m.Requires, m.EnsureValues)
 			}
 		}
 	case *ast.FuncDecl:
@@ -568,7 +571,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.ExternFuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, n.Variadic))
+		header := formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, nil, n.Variadic)
+		header += formatBoundaryValueContracts(n.Requires, n.EnsureValues)
+		header += formatEnsuresClauses(n.Ensures)
+		header += formatBoundaryFrames(n.Changes, n.Preserves)
+		f.writeLine(level, header)
 	case *ast.ExternVarDecl:
 		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))

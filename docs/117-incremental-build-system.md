@@ -556,3 +556,32 @@ and churn 4,100 rename revisions while checking immediate memo eviction and boun
 history. Full metadata parity and native producer-only output changes qualify the
 wiring. General call interfaces, path facts, SCC summaries, module objects and
 persistent graph storage remain unfinished; no broad speedup is claimed here.
+
+### Declared module boundary contracts (prerequisite, not cache admission)
+
+Generated interfaces now retain the value preconditions, postconditions,
+frame clauses and variadic flag represented by `ExternFuncDecl`.
+Top-level extern formatting emits those clauses; the extern parser accepts
+`changes`/`preserves`, and signature construction propagates declared `changes`
+into `FuncType.FrameBounded`/`FrameWrites`. Protocol and impl method formatting
+retains value/frame contracts, including lifted value contracts on default bodies.
+Boundary conversion uses one function adapter and copies existing method nodes
+without manually dropping their remaining AST fields.
+
+Tests check first-generation clause presence, stable regeneration, contract/default
+edits changing the interface while an ordinary private body edit does not, and
+semantic source-to-`.elisai` parity from the analyzed AST. A struct field frame
+permits a disjoint caller and rejects an out-of-frame write; a positive argument
+and its default are accepted while zero violates the exported precondition.
+
+This does not qualify `.elisai` as a complete incremental module cache key.
+Remaining losses include return-region and lmut manifests, visibility and
+associated-type defaults, law/lemma/ghost/named-contract declaration kinds,
+higher-order parameter contracts lifted out of Requires, fulfills-derived frames,
+contract applications on methods, default-body proof attachments, and inferred
+poststate/provenance/effect summaries with their boundary kind. Named-contract
+exports and extern contract-derived frames need dedicated semantic round trips.
+`uses` applications are not newly serialized here: analyzed declarations retain
+both expanded clauses and their original application, so an explicit canonical
+export representation must prevent duplicate application on import.
+No module object reuse or performance improvement is claimed by this prerequisite.

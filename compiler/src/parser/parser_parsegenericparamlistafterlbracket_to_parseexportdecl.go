@@ -638,9 +638,16 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	if p.matchIdentText("ensures") {
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
+	var changes, preserves []ast.EnsuresPath
+	if p.matchIdentText("changes") {
+		changes = p.parseChangesPathsAfterKeyword()
+	}
+	if p.matchIdentText("preserves") {
+		preserves = p.parseChangesPathsAfterKeyword()
+	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Requires: requires, EnsureValues: ensureValues, Uses: uses, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Requires: requires, EnsureValues: ensureValues, Uses: uses, Ensures: ensures, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseUsesContractAfterKeyword() *ast.ContractStmt {

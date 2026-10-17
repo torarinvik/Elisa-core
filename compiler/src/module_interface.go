@@ -45,20 +45,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		if n.Static || hasInterfaceInternalAnnotation(n.Annotations) {
 			return nil
 		}
-		return &ast.ExternFuncDecl{
-			Position:         n.Position,
-			Annotations:      append([]ast.Annotation(nil), n.Annotations...),
-			Override:         n.Override,
-			Name:             n.Name,
-			TypeParams:       append([]string(nil), n.TypeParams...),
-			PermissionParams: append([]string(nil), n.PermissionParams...),
-			GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
-			RegionParams:     append([]string(nil), n.RegionParams...),
-			Permissions:      append([]ast.PermissionRef(nil), n.Permissions...),
-			Ensures:          append([]ast.EnsuresClause(nil), n.Ensures...),
-			Params:           append([]ast.ParamDecl(nil), n.Params...),
-			ReturnType:       n.ReturnType,
-		}
+		return interfaceFunctionBoundary(n)
 	case *ast.ExternFuncDecl:
 		if hasInterfaceInternalAnnotation(n.Annotations) {
 			return nil
@@ -71,11 +58,13 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			case *ast.AssociatedTypeDecl:
 				members = append(members, &ast.AssociatedTypeDecl{Position: m.Position, Name: m.Name})
 			case *ast.ExternFuncDecl:
-				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
+				copy := *m
+				members = append(members, &copy)
 			case *ast.FuncDecl:
 				// Default method: a downstream module needs the body to inherit the default, so
 				// the FuncDecl (signature + body) is carried into the public interface verbatim.
-				members = append(members, &ast.FuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Body: m.Body})
+				copy := *m
+				members = append(members, &copy)
 			}
 		}
 		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, IsEffect: n.IsEffect, GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), Bases: append([]string(nil), n.Bases...), Members: members}
@@ -94,12 +83,13 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 				if m.Static || hasInterfaceInternalAnnotation(m.Annotations) {
 					continue
 				}
-				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType})
+				members = append(members, interfaceFunctionBoundary(m))
 			case *ast.ExternFuncDecl:
 				if hasInterfaceInternalAnnotation(m.Annotations) {
 					continue
 				}
-				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
+				copy := *m
+				members = append(members, &copy)
 			}
 		}
 		return &ast.ImplDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), InterfaceName: n.InterfaceName, GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), ForType: n.ForType, Members: members}
@@ -169,4 +159,17 @@ func hasInterfaceInternalAnnotation(annotations []ast.Annotation) bool {
 		}
 	}
 	return false
+}
+
+// interfaceFunctionBoundary copies the contracts represented by ExternFuncDecl.
+// Return regions, lmut manifests, named contracts, inferred summaries and other
+// body-dependent exports still need a lossless schema before module cache reuse.
+func interfaceFunctionBoundary(n *ast.FuncDecl) *ast.ExternFuncDecl {
+	return &ast.ExternFuncDecl{
+		Position: n.Position, Annotations: n.Annotations, Override: n.Override, Name: n.Name,
+		TypeParams: n.TypeParams, PermissionParams: n.PermissionParams, GenericParams: n.GenericParams,
+		RegionParams: n.RegionParams, Permissions: n.Permissions, Ensures: n.Ensures,
+		Requires: n.Requires, EnsureValues: n.EnsureValues, Uses: n.Uses,
+		Changes: n.Changes, Preserves: n.Preserves, Params: n.Params, ReturnType: n.ReturnType, Variadic: n.Variadic,
+	}
 }
