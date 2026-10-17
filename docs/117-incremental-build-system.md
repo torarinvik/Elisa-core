@@ -211,21 +211,23 @@ not have yet.
 The key reusable asset is the cache machinery in `test_runner_cache.go` /
 `runtime_object_cache.go`: content hashing (`testRunnerCacheWrite*`), transitive
 include expansion (`readSourceWithIncludes`), the **compiler-identity stamp**
-(`compilerSourceStamp` — a digest of all compiler `.go` sources, so any codegen
-change invalidates every cached artifact), and an atomic stage-then-rename
+(`compilerSourceStamp` — an executable-content digest, so rebuilt code changes
+artifact identity), and an atomic stage-then-rename
 publish that is safe under the parallel test suite.
 
 ## Stage 1 — content-addressed object cache (implemented)
 
 `build_cache.go`. A plain `elisac -emit obj` consults a content-addressed cache
 keyed on everything that can change the object's bytes; a hit serves the cached
-copy and **skips parse + semantic analysis + codegen entirely** (the check runs
-in `runWithOptions`, before `loadProgramInput`).
+copy and **skips parse + semantic analysis + codegen entirely**. It loads one
+include-expanded program snapshot before lookup; the exact same snapshot is
+passed to compilation on a miss.
 
 ### Key derivation (correctness-critical)
 The cache key is `sha256` of:
 - `goos`, `goarch`, Go version;
-- the **full include-expanded source** (`readSourceWithIncludes` of the root);
+- the **full include-expanded source** from that loaded snapshot, its effective
+  filename, and the sorted source-file authority set used by analysis;
 - the **entire `cliOptions`** with only the three fields that cannot affect
   object content blanked (`output`, `addr`, `filter`). Folding in the whole
   struct means any codegen-affecting flag — `-O`, packed profile, target triple,
@@ -239,6 +241,19 @@ The dangerous failure mode for any build cache is a key that misses an input —
 that yields a *silent stale build*. The whole-struct-minus-three-fields strategy
 is chosen specifically so adding a new codegen flag later does not silently
 under-key.
+
+The v2 source-snapshot key prevents a save between identity derivation and
+codegen from publishing a later revision under an earlier key. Decoded frontend-IR
+inputs currently stay cold here: resolved source text alone does not identify the
+complete AST, so that path needs a frozen full-bundle identity before reuse.
+
+The lower llc object cache also hashes **exact IR bytes** (v2 namespace). A prior
+regex normalized temporary-looking text throughout IR, including user string
+constants, which could merge different programs. Provenance and runtime strings
+remain part of object identity until a structured remapping design proves an
+exclusion safe. Native/tool/target identity, external dependency completeness and
+persistent artifact integrity still require further qualification; these fixes
+do not establish that all native caches are ready for Stage 2.
 
 ### Storage & lifecycle
 - Cache root: `$ELISAC_BUILD_CACHE_DIR`, else `os.UserCacheDir()/elisacore/build_objects`,

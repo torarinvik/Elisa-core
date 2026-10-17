@@ -26,8 +26,8 @@ import (
 //   - every CLI option except the few that provably cannot affect object CONTENT
 //     (output path, server addr, test filter); over-keying only costs cache reuse,
 //     under-keying would serve a stale object, so we err toward over-keying
-//   - the compiler's own identity (compilerSourceStamp — a digest of all compiler
-//     .go sources, so any codegen change invalidates every cached object)
+//   - the compiler's own identity (compilerSourceStamp — a digest of the running compiler
+//     artifact, so any codegen change invalidates every cached object)
 //   - host GOOS/GOARCH/Go version and the resolved clang path
 
 func buildCacheEnabled() bool {
@@ -72,8 +72,21 @@ func buildCacheKeyOptions(options cliOptions) cliOptions {
 // ok=false (no error surfaced) means "not cacheable" — e.g. the source could not
 // be expanded — and callers transparently fall back to a normal build.
 func buildCacheObjectArtifactFor(options cliOptions) (buildCacheArtifact, bool) {
+	program, ok := loadProgramInput(options.filename, io.Discard)
+	if !ok {
+		return buildCacheArtifact{}, false
+	}
+	return buildCacheObjectArtifactForProgram(options, program)
+}
+
+// Key and compiler consume the same loaded snapshot. Frontend-IR inputs require
+// a separate full-bundle identity; resolved source alone cannot identify an AST.
+func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgram) (buildCacheArtifact, bool) {
+	if program == nil || program.file != nil || len(program.easm) != 0 {
+		return buildCacheArtifact{}, false
+	}
 	hash := sha256.New()
-	testRunnerCacheWriteString(hash, "build-object-v1")
+	testRunnerCacheWriteString(hash, "build-object-v2-source-snapshot")
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
@@ -82,11 +95,13 @@ func buildCacheObjectArtifactFor(options cliOptions) (buildCacheArtifact, bool) 
 		testRunnerCacheWriteString(hash, "env="+entry)
 	}
 
-	source, err := readSourceWithIncludes(options.filename, map[string]bool{})
-	if err != nil {
-		return buildCacheArtifact{}, false
+	testRunnerCacheWriteBytes(hash, "program-source", program.source)
+	testRunnerCacheWriteString(hash, "program-filename="+program.filename)
+	origins := append([]string(nil), program.sourceFiles...)
+	sort.Strings(origins)
+	for _, origin := range origins {
+		testRunnerCacheWriteString(hash, "source-authority="+origin)
 	}
-	testRunnerCacheWriteBytes(hash, "program-source", source)
 
 	stamp, err := compilerSourceStamp()
 	if err != nil {
@@ -161,10 +176,19 @@ func debugBuildCache(stderr io.Writer, status string, artifact buildCacheArtifac
 // exitCode immediately; when false the caller proceeds with a normal build.
 // On a miss it performs the build itself so it can publish the result.
 func tryBuildObjectCache(options cliOptions, stdout io.Writer, stderr io.Writer) (int, bool) {
+	return tryBuildObjectCacheWith(options, stdout, stderr, loadProgramInput, runLoadedProgramWithOptions)
+}
+
+// The callbacks make snapshot ownership testable without running a native tool.
+func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load func(string, io.Writer) (*loadedProgram, bool), build func(cliOptions, *loadedProgram, io.Writer, io.Writer) int) (int, bool) {
 	if !buildCacheEnabled() || !isPureObjectEmit(options) {
 		return 0, false
 	}
-	artifact, ok := buildCacheObjectArtifactFor(options)
+	program, okLoad := load(options.filename, stderr)
+	if !okLoad {
+		return 1, true
+	}
+	artifact, ok := buildCacheObjectArtifactForProgram(options, program)
 	if !ok {
 		return 0, false
 	}
@@ -180,11 +204,7 @@ func tryBuildObjectCache(options cliOptions, stdout io.Writer, stderr io.Writer)
 		// Any copy/parent failure: fall back to a normal build below.
 	}
 
-	program, okLoad := loadProgramInput(options.filename, stderr)
-	if !okLoad {
-		return 1, true
-	}
-	rc := runLoadedProgramWithOptions(options, program, stdout, stderr)
+	rc := build(options, program, stdout, stderr)
 	if rc == 0 {
 		if err := publishCachedBuildObject(artifact, outputPath); err != nil {
 			debugBuildCache(stderr, "store-failed", artifact)

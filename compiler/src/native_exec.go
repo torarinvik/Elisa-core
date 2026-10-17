@@ -906,25 +906,15 @@ func objectCacheDir() (string, bool) {
 	return dir, true
 }
 
-// objCacheTempRunRE matches the per-run temp directory segment that the test
-// harness embeds in the IR (ModuleID, source_filename, and @panic.file string
-// constants). It is normalized away before hashing so re-runs of the same test
-// produce a stable cache key. (A reused object may therefore show a previous
-// run's temp path in a panic message; this is cosmetic only.)
-var objCacheTempRunRE = regexp.MustCompile(`elisacore-(test|native)-run-[0-9]+`)
-
-// llcObjectCacheKey hashes the IR content (with the per-run temp path
-// normalized) plus the target triple and llc binary so cached objects are
-// invalidated when any of those change.
+// llcObjectCacheKey hashes exact IR bytes. Text resembling a temporary path
+// can be user data; normalizing arbitrary IR would merge different programs.
 func llcObjectCacheKey(irPath string, codegenOpt string, targetTriple string, llcPath string) (string, bool) {
 	irBytes, err := os.ReadFile(irPath)
 	if err != nil {
 		return "", false
 	}
-	if objCacheTempRunRE != nil {
-		irBytes = objCacheTempRunRE.ReplaceAll(irBytes, []byte("elisacore-run-CACHED"))
-	}
 	h := sha256.New()
+	testRunnerCacheWriteString(h, "llc-object-exact-ir-v2")
 	h.Write(irBytes)
 	h.Write([]byte("\x00llc\x00"))
 	h.Write([]byte(strings.TrimSpace(targetTriple)))
