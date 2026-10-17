@@ -5,6 +5,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/smt"
 )
 
 func requireBoolLocalEnsurePasses(t *testing.T, name, source, function string) {
@@ -160,6 +162,39 @@ func TestSMTBoolLocalMacroPreambleOrder(t *testing.T) {
 	}
 	if context := smtPreambleContext(preamble); strings.Contains(context, "b_input") {
 		t.Fatalf("macro definition unexpectedly made its dependencies query-reachable: %s", context)
+	}
+}
+
+func TestSMTViewLengthEquationPreambleOrder(t *testing.T) {
+	tr := &smtTranslator{
+		a:        &Analyzer{},
+		lenDecls: map[string]bool{"view_len": true},
+		enumDecls: map[string]string{
+			"~slice_len":        "(assert (= view_len (ite b_local aux_1 0)))\n",
+			"tag":               "(declare-const tag Int)\n(assert (= tag 0))\n",
+			"~binder_slice_len": "(assert (= view_len q_index))\n",
+		},
+		boolDecls:    map[string]bool{"b_local": true},
+		boolDefs:     map[string]string{"b_local": "(>= aux_1 0)"},
+		boolDefOrder: []string{"b_local"},
+		auxDecls:     []string{"(declare-const aux_1 Int)\n"},
+	}
+	preamble := tr.factPreamble()
+	if strings.Contains(preamble, "q_index") {
+		t.Fatalf("binder-dependent view equation escaped to top level:\n%s", preamble)
+	}
+	decl := strings.Index(preamble, "(declare-const aux_1 Int)")
+	macro := strings.Index(preamble, "(define-fun b_local () Bool")
+	equation := strings.Index(preamble, "(assert (= view_len (ite b_local aux_1 0)))")
+	if decl < 0 || macro < 0 || equation < 0 || !(decl < macro && macro < equation) {
+		t.Fatalf("view-length equation precedes its dependencies:\n%s", preamble)
+	}
+	solver := openCOISolver(t, 100_000)
+	if verdict, _ := solver.Check(preamble + "(assert (= aux_1 3))\n"); verdict != smt.Sat {
+		t.Fatalf("valid view-length query should be satisfiable, got %v", verdict)
+	}
+	if verdict, _ := solver.Check(preamble + "(assert (= aux_1 3))\n(assert (distinct view_len 3))\n"); verdict != smt.Unsat {
+		t.Fatalf("view-length equation should prove length 3, got %v", verdict)
 	}
 }
 

@@ -5942,10 +5942,21 @@ func (tr *smtTranslator) factPreamble() string {
 		}
 		b.WriteString("(assert (< " + sym + " 18446744073709551616))\n")
 	}
-	b.WriteString(tr.enumPreamble())
 	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
 	// mint order — deterministic because the counter is monotonic over a single translation.
 	var auxAssertions []string
+	// Enum metadata also carries view-length equations. A sliced view's length can refer to an
+	// auxiliary call result, so those equations must wait for all declarations and Bool macros.
+	for line := range strings.SplitSeq(tr.enumPreamble(), "\n") {
+		if strings.HasPrefix(line, "(assert ") {
+			if smtTermMentionsQuantifierBinder(line) {
+				continue
+			}
+			auxAssertions = append(auxAssertions, line+"\n")
+		} else if line != "" {
+			b.WriteString(line + "\n")
+		}
+	}
 	for _, line := range tr.auxDecls {
 		// An auxiliary ASSUMPTION minted while translating a quantifier body (a callee's defining
 		// equation or ensure over the binder) is hoisted to top level, where the `q_` binder is
