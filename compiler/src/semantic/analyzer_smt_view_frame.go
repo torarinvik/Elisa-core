@@ -19,7 +19,8 @@ import (
 //   - if/elif/else, while (condition and body write-free), return, read-only contracts, and
 //     Abort.Panic / Unsafe.UncheckedIndex blocks (the latter permits a load, never a write);
 //   - expressions: identifiers, literals, operators without overloads, ternaries, non-optional
-//     field reads, view slices and indexing, plain integer casts, tuples, and calls to callees
+//     field reads, view slices and indexing, plain integer casts, tuples, noncapturing
+//     value blocks checked under these same rules, and calls to callees
 //     classified write-free, or completed non-generic bodies checked by this gate;
 //   - the function has no mutable parameters and uses only those read-only permissions.
 //
@@ -63,12 +64,15 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 		return false
 	}
 	g := &sviewFrameGate{a: a, rebindable: map[string]bool{}}
+	for _, param := range decl.Params {
+		g.rebindable[param.Name] = false
+	}
 	return g.stmts(decl.Body)
 }
 
 type sviewFrameGate struct {
 	a *Analyzer
-	// rebindable records locals declared so far, with true only for safe local
+	// rebindable records parameters and locals, with true only for safe local
 	// assignments. Keeping immutable names also preserves builtin shadowing.
 	rebindable map[string]bool
 }
@@ -112,7 +116,11 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		}
 		if n.Mutable {
 			if !sviewFrameRebindableType(n.Type) && !g.plainRecordLocalType(n.Type) {
-				return false
+				// Runtime quantifiers introduce inferred mutable Boolean temps.
+				_, boolean := stripOptimizationParens(n.Value).(*ast.BoolLit)
+				if n.Type != nil || !boolean {
+					return false
+				}
 			}
 			g.rebindable[n.Name] = true
 		} else {
@@ -145,9 +153,19 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 	case *ast.WhileStmt:
 		return n != nil && g.expr(n.Cond, 0) && g.scoped(n.Body)
 	case *ast.ForStmt:
-		return n != nil && !ast.HasSynthesizedPreReserveStmts(n) &&
-			g.expr(n.Start, 0) && g.expr(n.End, 0) &&
-			(n.Step == nil || g.expr(n.Step, 0)) && g.scoped(n.Body)
+		if n == nil || ast.HasSynthesizedPreReserveStmts(n) || !g.expr(n.Start, 0) || !g.expr(n.End, 0) ||
+			(n.Step != nil && !g.expr(n.Step, 0)) {
+			return false
+		}
+		outer, bound := g.rebindable[n.Name]
+		g.rebindable[n.Name] = false
+		ok := g.scoped(n.Body)
+		if bound {
+			g.rebindable[n.Name] = outer
+		} else {
+			delete(g.rebindable, n.Name)
+		}
+		return ok
 	case *ast.BreakStmt, *ast.ContinueStmt:
 		return true
 	case *ast.ExprStmt:
@@ -271,6 +289,17 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			}
 		}
 		return true
+	case *ast.ExprBlock:
+		if len(n.Captures) != 0 || n.Value == nil {
+			return false
+		}
+		saved := g.rebindable
+		g.rebindable = make(map[string]bool, len(saved))
+		for name, rebindable := range saved {
+			g.rebindable[name] = rebindable
+		}
+		defer func() { g.rebindable = saved }()
+		return g.stmts(n.Stmts) && g.expr(n.Value, depth+1)
 	case *ast.QuantifierExpr:
 		return (n.In == nil || g.expr(n.In, depth+1)) && g.expr(n.Body, depth+1)
 	case *ast.MembershipRangeExpr:
@@ -296,6 +325,12 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 		}
 		return true
 	case *ast.CallExpr:
+		if id, ok := n.Func.(*ast.Ident); ok {
+			if _, local := g.rebindable[id.Name]; local {
+				// A callback can shadow a read-only namespace function.
+				return false
+			}
+		}
 		callee, ok := g.a.classifierFrameCallDecl(n)
 		if !ok || callee == nil || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
 			return false
