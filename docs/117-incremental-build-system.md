@@ -1723,3 +1723,58 @@ The same overlay restores eight unrelated modified Go files to their checkpoint
 baseline and excludes the unrelated untracked SMT test; working files are
 preserved. No combined-SMT, general body-replay or full-build throughput claim is
 made. Existing Stage1/root failures remain unresolved. All work stayed local.
+
+### Type-value dependency queries and caller fact checking
+
+`function-type-value-v1` represents an owned type graph whose declaration
+references are supplied by current tracked inputs. A retained recipe preserves
+owned structure and declaration identities, with historical fingerprints removed.
+The evaluator obtains readiness, recipe and current declaration kind/fingerprint
+through Reader, verifies the graph, then fills the current reference stamps into
+its portable result. It never reads mutable Type or Result objects from an
+untracked evaluator closure. A declaration interface change therefore updates the
+child result without pretending the old recipe's fingerprint is current.
+
+The producer fetches dependencies from the current function-Type environment.
+Declaration-backed products require a completed current Result, while entirely
+owned scalar/composite graphs need no declaration environment. Missing bindings,
+revoked completion, malformed recipes, wrong declaration kinds, inconsistent
+historical references and unavailable inputs decline. Preparation belongs inside
+PublishPrepared so failure revokes the former world. Successful graph values can
+be restored through the current environment to fresh declaration Type objects.
+
+A batch producer shares each current declaration fingerprint across requested
+graphs within one exclusive compiler metadata snapshot. This memo is discarded
+with the batch, so later publications observe mutations. Request order is sorted;
+duplicate keys and budget overflow reject the batch. Per graph, reference count
+is limited to 4,096 and graph byte/work bounds are preflighted before typed JSON
+restoration. Batch preparation permits at most 65,536 requests/declarations and
+256 MiB of accounted construction strings/reservations; exact allocator/RSS and
+caller-owned source graphs are outside that accounting. Session admission still
+applies independently. Input and product ownership does not retain compiler
+Type/AST/Result pointers.
+
+`function-scalar-type-gate-v1` checks the declaration-Type portion of actual stored
+FunctionScalarFacts against that child query. A real caller/callee regression
+captures the caller, repeats unchanged without evaluator work, changes the callee
+source by adding a default parameter, rejects the previous caller fact product,
+and recovers using a fresh analysis. Restoring the accepted facts onto relocated
+caller source binds the current function Type. Tests also demonstrate equal
+projection output pruning a grandparent, uncached fresh-typing failures, readiness
+revocation/recovery, type/lexical coexistence in one Session world, shared batch
+inputs and malformed-input recovery.
+
+These are type-value and partial fact-dependency checks, not complete body-cache
+admission. Constants, name/operator selection, flow/proof inputs, target/config,
+AST lowering/default reconstruction, symbol metadata and other callee/SCC facts
+still need dependencies and hydration. The gate must not authorize replay of
+other scalar proof fields merely because declaration Types match. Normal compiler
+body analysis does not yet use these queries to skip general call bodies; no
+full-build iteration-speed improvement is claimed at this checkpoint.
+
+Validation: isolated full semantic suite passed in 53.183 s and incremental in
+0.171 s. Focused type-value/fact-gate race checks passed in 1.402 s. The existing
+SMT overlay restores eight unrelated modified files and excludes the unrelated
+untracked SMT test, preserving those working files. The combined SMT worktree,
+historical root failures and Stage1 errors are not claimed green. All runs stayed
+local.
