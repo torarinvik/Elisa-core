@@ -1930,3 +1930,54 @@ Logs/profiles are `/tmp/elisa-project-analysis-bench.log`,
 `/tmp/elisa-retained-project.mem`. Both runs used the existing unrelated-SMT
 isolation overlay. No combined dirty-tree, zero-error or complete incremental
 compiler claim follows from this benchmark. All execution stayed local.
+
+
+### Compact publication input plans
+
+Session publication now stores each query's normalized input plan as a compact
+slice. Up to 16 raw inputs use bounded linear duplicate detection; larger sets
+use a temporary key-only hash set. Complete-snapshot conflict checking still
+rejects conflicting inputs, including duplicates inside a query. Duplicate query
+publications compare normalized sets independent of order, with hashing for
+large comparisons. Removal normalization, unique-edge accounting, retained-first
+admission, generation invalidation, ownership cloning and reservations remain in
+force. This removes a separate Change-valued hash map for each query without
+retaining caller storage after publication.
+
+Boundary regressions cover duplicate/reordered publications with 1, 15, 16, 17
+and 100 unique inputs, exact unique-edge counts, conflicting duplicates and
+rejection invalidating previous revisions. Two component benchmarks publish 1,024
+queries with four or 32 inputs each. Sequential baseline/candidate/candidate/
+baseline runs used two repetitions per run on Apple M5 with GOMAXPROCS=4:
+
+| Inputs/query | Baseline median | Candidate median | Bytes/op before → after | Allocations/op before → after |
+| --- | --- | --- | --- | --- |
+| 4 | 3.141 ms | 2.763 ms | 7,750,674 → 7,284,243 | 2,257 → 1,233 |
+| 32 | 23.197 ms | 19.387 ms | 57,647,428 → 50,725,698 | 10,215 → 5,095 |
+
+The component time reductions are about 12.0% and 16.4%. These benchmarks include
+the complete publication path, not general semantic analysis.
+
+A separate real-project retained-analysis ABBA comparison used the same frozen
+snapshot and GOGC=1200/GOMEMLIMIT=14GiB settings as the previous baseline.
+Baseline samples were 10.136/5.746 s and candidate samples 8.678/5.751 s. The wide
+time variation prevents a credible project speedup claim. Median allocation was
+6,072,684,356 versus 6,043,427,400 bytes, about 29 MB less per retained analysis.
+Every sample still produced 980 diagnostics, 50,211 lookup hits and zero primary
+body reuses. Broad semantic reuse and the overall incremental goal remain
+unfinished.
+
+Measurement logs are `/tmp/elisa-publication-component-abba.log`,
+`/tmp/elisa-publication-large-abba.log` and
+`/tmp/elisa-publication-project-abba.log`. Baseline runs restore only session.go
+in addition to the existing unrelated-SMT isolation overlay. All runs stayed
+local; unrelated working files and the proof stash were preserved.
+
+
+Validation: isolated full semantic suite passed in 53.742 s and incremental in
+0.194 s; the full incremental race suite passed in 1.535 s. Existing query
+admission, retirement, ownership and failed-generation tests remain covered.
+The combined dirty SMT tree and historical Stage1/root failures are not claimed
+green. Logs, profiles, the frozen source, profile executable and self-contained
+overlay backing files were archived under the Stage1 checkout's ignored
+`build/verification/incremental-publication-20261017` directory for repeatability.

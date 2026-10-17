@@ -33,7 +33,7 @@ type sessionQuery struct {
 }
 type publicationPlan struct {
 	publication Publication
-	inputs      map[Key]Change
+	inputs      []Change
 }
 
 type Session struct {
@@ -111,10 +111,31 @@ func samePlan(a, b publicationPlan) bool {
 	if a.publication.MaxResultBytes != b.publication.MaxResultBytes || a.publication.MaxDependencies != b.publication.MaxDependencies || len(a.inputs) != len(b.inputs) {
 		return false
 	}
-	for key, value := range a.inputs {
-		other, ok := b.inputs[key]
-		if !ok || !sameChange(value, other) {
-			return false
+	// Duplicate publications are uncommon. Bound linear comparison to small
+	// input sets; large sets retain linear expected work through hashing.
+	if len(a.inputs) > 16 {
+		lookup := make(map[Key]Change, len(b.inputs))
+		for _, change := range b.inputs {
+			lookup[change.Key] = change
+		}
+		for _, value := range a.inputs {
+			other, ok := lookup[value.Key]
+			if !ok || !sameChange(value, other) {
+				return false
+			}
+		}
+	} else {
+		for _, value := range a.inputs {
+			found := false
+			for _, other := range b.inputs {
+				if value.Key == other.Key {
+					found = sameChange(value, other)
+					break
+				}
+			}
+			if !found {
+				return false
+			}
 		}
 	}
 	return true
@@ -185,18 +206,35 @@ func (s *Session) PublishPrepared(ctx context.Context, prepare func() ([]Publica
 			return result, fmt.Errorf("publication edge work budget exceeded")
 		}
 		work += len(publication.Inputs)
-		plan := publicationPlan{publication: publication, inputs: map[Key]Change{}}
+		plan := publicationPlan{publication: publication, inputs: make([]Change, 0, len(publication.Inputs))}
+		var seenInputs map[Key]bool
+		if len(publication.Inputs) > 16 {
+			seenInputs = make(map[Key]bool, len(publication.Inputs))
+		}
 		for _, change := range publication.Inputs {
 			if change.Remove {
 				change.Value = ""
 			}
-			if old, ok := plan.inputs[change.Key]; ok && !sameChange(old, change) {
-				return result, fmt.Errorf("conflicting query input")
-			}
 			if old, ok := allInputs[change.Key]; ok && !sameChange(old, change) {
 				return result, fmt.Errorf("conflicting snapshot input")
 			}
-			plan.inputs[change.Key] = change
+			// Snapshot-wide conflict checking above also covers duplicates within
+			// a query. Small lists avoid a separate hash-map allocation per query.
+			duplicate := false
+			if seenInputs != nil {
+				duplicate = seenInputs[change.Key]
+				seenInputs[change.Key] = true
+			} else {
+				for _, previous := range plan.inputs {
+					if previous.Key == change.Key {
+						duplicate = true
+						break
+					}
+				}
+			}
+			if !duplicate {
+				plan.inputs = append(plan.inputs, change)
+			}
 			allInputs[change.Key] = change
 		}
 		if old, ok := plans[publication.Key]; ok {
@@ -237,7 +275,8 @@ func (s *Session) PublishPrepared(ctx context.Context, prepare func() ([]Publica
 			add(keyCost(key))
 			add(p.MaxResultBytes)
 			newInputs := 0
-			for input, change := range plan.inputs {
+			for _, change := range plan.inputs {
+				input := change.Key
 				if _, ok := selectedInputs[input]; !ok {
 					newInputs++
 					add(inputCost(change))
@@ -248,7 +287,8 @@ func (s *Session) PublishPrepared(ctx context.Context, prepare func() ([]Publica
 				continue
 			}
 			selected[key] = plan
-			for input, change := range plan.inputs {
+			for _, change := range plan.inputs {
+				input := change.Key
 				selectedInputs[input] = change
 			}
 			bytes += cost
