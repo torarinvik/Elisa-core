@@ -1,6 +1,11 @@
 package semantic
 
-import "testing"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"testing"
+)
 
 const recordElementTypes = `struct RecordOwner:
     value: u32
@@ -137,7 +142,7 @@ def called_recursive_mutator(table: RecordTable) -> u32:
 }
 
 func TestSMTRecordElementTupleResult(t *testing.T) {
-	result := analyzeContractStrict(t, "record_tuple.elisa", recordElementTypes+`def candidate(table: RecordTable&, owner: RecordOwner) -> bool:
+	source := recordElementTypes + `def candidate(table: RecordTable&, owner: RecordOwner) -> bool:
     return table.rows.count > 0 and table.rows[0].owner.value == owner.value
 def selected(table: RecordTable&, owner: RecordOwner) -> (known: bool, binding_id: RecordBinding):
     requires table.rows.count > 0 and table.rows[0].owner.value == owner.value
@@ -146,8 +151,48 @@ def selected(table: RecordTable&, owner: RecordOwner) -> (known: bool, binding_i
     assert chosen.owner.value == owner.value
     assert candidate(table, owner)
     return (true, chosen)
-`)
+`
+	result := analyzeContractStrict(t, "record_tuple.elisa", source)
 	if len(result.Errors()) != 0 {
 		t.Fatalf("tuple record projection declined:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSMTRecordElementTupleResultInLazyRegion(t *testing.T) {
+	source := recordElementTypes + `def selected(table: RecordTable&, owner: RecordOwner) -> (known: bool, binding_id: RecordBinding):
+    requires table.rows.count > 0 and table.rows[0].owner.value == owner.value
+    ensure result.known and result.binding_id.owner.value == owner.value
+    chosen: RecordBinding = table.rows[0]
+    assert chosen.owner.value == owner.value
+    return (true, chosen)
+def stale(table: RecordTable) -> u32:
+    requires table.rows.count > 0
+    ensure result == table.rows[0].owner.value
+    before: u32 = table.rows[0].owner.value
+    changed: bool = overwrite_record(table)
+    return before
+`
+	lex := lexer.New("record_region.elisa", []byte(source))
+	parse := parser.New(lex.Tokenize())
+	file := parse.ParseFile("record_region.elisa")
+	if len(lex.Errors()) != 0 || len(parse.Errors()) != 0 {
+		t.Fatalf("invalid regression source: %v %v", lex.Errors(), parse.Errors())
+	}
+	wrapped := false
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && (fn.Name == "selected" || fn.Name == "stale") {
+			wrapFuncBodyInLazyAutoRegion(fn)
+			wrapped = true
+		}
+	}
+	if !wrapped {
+		t.Fatal("selected function missing")
+	}
+	result := AnalyzeWithOptions(file, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+	if ensureFailuresFor(result.Errors(), "selected") != 0 {
+		t.Fatalf("generated region lost stable record fields:\n%s", allDiagnostics(result))
+	}
+	if ensureFailuresFor(result.Errors(), "stale") == 0 {
+		t.Fatalf("generated region hid a table write:\n%s", allDiagnostics(result))
 	}
 }

@@ -188,6 +188,12 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 	case *ast.AssertByStmt:
 		// The proof block is verification-only; the condition is checked in place.
 		return n != nil && g.expr(n.Cond, 0)
+	case *ast.RegionStmt:
+		// A compiler-generated lazy wrapper owns no storage until its body
+		// allocates. Inspect that body; explicit/user regions stay outside the
+		// frame model, as do all allocation calls and writes within a wrapper.
+		return n != nil && n.Lazy && !n.UserAuto && isSynthesizedAutoRegion(n.Name) &&
+			n.Capacity == nil && n.OwnerName == "" && n.Allocator == "" && g.scoped(n.Body)
 	case *ast.CanStmt:
 		if n == nil || n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.As != "" || len(n.Permissions) == 0 {
 			return false
