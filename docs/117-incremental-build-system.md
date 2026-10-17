@@ -1605,3 +1605,69 @@ The overlay restores eight unrelated modified Go files to ac840eac (unchanged
 through 2dbbcb04) and excludes the unrelated untracked SMT test; all working files
 remain untouched. Broader root/Stage1 failures remain outside this checkpoint.
 No remote compute was used.
+
+### Actual type-binder read-point composition
+
+The NamedType resolver now observes its type-parameter and associated-type
+lookups at the actual read. Lookup order stays unchanged: a type-parameter hit
+returns immediately; its miss permits the associated-type lookup, then normal
+visible/projected type resolution. Contextual Type bindings and all current
+semantic checks continue to execute. Signatures, speculative/specialized passes
+and non-primary contexts remain outside this observation domain.
+
+Capture derives binder sources from push-time ownership rather than accepting
+caller-supplied labels. It checks the complete live frame count, actual owner and
+map identity before freezing each queried-name cell. Current Type values stay in
+invocation-local observation/rebinding tables. Publication later rechecks source
+liveness, so pop or map mutation after the read cannot rewrite the captured world.
+Present nil blockers, typed-nil Type values, zero-frame misses and insertion of a
+new frame retain the live lookup's behavior. Unsupported owners and replaced maps
+decline without changing resolver output.
+
+Symbol and binder reads publish through the same bounded Session revision and
+sorted admission batch. Neither domain retires the other's queries. Repeated
+binder visits with different source chains revoke that key; verification failure
+in either domain revokes the complete world. Fresh Type objects can bind an equal
+portable selection result, because that result identifies a source slot rather
+than the mutable Type's semantic contents. Resolved Type identity and properties
+remain separate required dependencies before any general body replay.
+
+The shared capture limits now allow 131,072 observations and 524,288 scope/binder
+frames. Source indexing remains separately bounded at 4,096 function entries and
+262,144 nodes. Query storage still allows 65,536 queries and 256 MiB accounted;
+input/ownership/dependency reservations are now bounded at 589,824 to match the
+larger frame capture budget. Capture metrics are explicit. The first composed
+probe showed the old shared limit displaced existing symbol reads, so capture
+was expanded rather than sacrificing symbol coverage to add binder coverage.
+
+On the frozen parser workload, each analysis observes 57,261 symbol reads and
+20,661 binder reads; 77,548 observations capture 281,997 frames. It verifies
+37,755 distinct symbol selections and 12,456 binder selections, improving symbol
+coverage over the previous checkpoint while adding real binder reads. The repeat
+adds 50,211 memo hits with zero evaluator executions. All 50,211 supported queries
+fit without capacity skips: 234,083 input/ownership/dependency reservations and
+196,452,558 accounted bytes. There remain 9,369 declined symbol observations and
+228 declined binder observations; repeated reads coalesce. The frontend still
+has its existing 980 errors. The two-analysis project probe passed in 16.761 s;
+individual analyses took 8.299 s and 7.601 s during concurrent verification. This
+is selection parity/reuse evidence, not whole-project Type/Result/backend parity
+or an end-to-end compilation speed claim.
+
+Other binder lookup domains still need actual use-site observation and their
+source contexts. Non-function associated/default frames without ownership
+continue to decline. Complete per-body dependency coverage, type/callee/SCC
+products, complete current-AST/live-analyzer hydration and object/relink/client
+integration remain required. The query world still verifies selections after
+fresh semantic work; it does not yet authorize skipping that work.
+
+Validation: isolated full semantic suite passed in 62.549 s and incremental package
+in 0.203 s. Expanded lexical/session race checks passed in 1.722 s. Regressions
+exercise actual generic and concrete NamedType resolution with complete Result
+parity against fresh analysis, symbol/binder revision composition, fresh Type
+rebinding across equal selection outputs, mutation/pop isolation, zero-frame miss
+to nil-blocker insertion, typed nils, replaced/ownerless map rejection, conflicting
+same-site chains and shared budget declines preserving resolver behavior.
+The same eight-file SMT overlay and excluded untracked SMT test remain in use;
+original working files are preserved. These are candidate-only checks, not a
+claim that the combined SMT worktree or historical root/Stage1 failures are green.
+All execution remained local.

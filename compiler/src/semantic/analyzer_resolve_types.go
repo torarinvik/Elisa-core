@@ -35,10 +35,10 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return &DArrayType{Elem: a.namedTypes["u8"], Shape: &WildcardShape{}, SurfaceName: "dstr"}
 		}
 		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)
-		if t, ok := a.lookupTypeParam(n.Name); ok {
+		if t, ok := a.lookupTypeParamAt(n); ok {
 			return t
 		}
-		if t, ok := a.lookupInterfaceAssocType(n.Name); ok {
+		if t, ok := a.lookupInterfaceAssocTypeAt(n); ok {
 			if a.contextualTypeBindings != nil {
 				a.contextualTypeBindings[n] = t
 			}

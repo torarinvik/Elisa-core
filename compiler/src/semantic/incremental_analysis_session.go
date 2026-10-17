@@ -40,6 +40,8 @@ type IncrementalAnalysisSession struct {
 	retiredQueries                               int
 }
 type IncrementalAnalysisStats struct {
+	LexicalCapturedObservations, LexicalCapturedFrames                                                                                                       uint64
+	LexicalBinderReadsObserved, LexicalBinderReadsDropped, LexicalBinderSelectionsVerified                                                                   uint64
 	LexicalSourceIndexesBuilt, LexicalReadsObserved, LexicalSelectionsVerified, LexicalReadsDropped, LexicalVerificationFailures, LexicalPublicationFailures uint64
 	LexicalQueriesExecuted, LexicalQueryMemoHits, LexicalQueriesSkipped                                                                                      uint64
 	BinderFramesOwned, BinderFramesOwnerless                                                                                                                 uint64
@@ -274,7 +276,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 				if !readFree {
 					index, _ = IndexFunctionSource(fn, FunctionIdentityContext{Origin: origin, QualifiedName: qualifiedName})
 					if index != nil {
-						if len(index.ordinals) > lexicalReadMaxFrames-invocation.lexical.indexNodes {
+						if len(index.ordinals) > lexicalReadMaxSourceNodes-invocation.lexical.indexNodes {
 							index = nil
 						} else {
 							invocation.lexical.indexNodes += len(index.ordinals)

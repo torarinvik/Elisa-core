@@ -164,9 +164,9 @@ func TestLexicalObservationBudgetDeclinesExplicitly(t *testing.T) {
 		t.Fatal("frame overflow not explicit")
 	}
 	reads.frames = 0
-	reads.observations = make([]lexicalSymbolObservation, lookupTraceMaxEntries)
+	reads.observations = make([]lexicalSymbolObservation, lexicalReadMaxObservations)
 	a.lookupIdentifierScope(site)
-	if reads.dropped != 2 || len(reads.observations) != lookupTraceMaxEntries {
+	if reads.dropped != 2 || len(reads.observations) != lexicalReadMaxObservations {
 		t.Fatal("observation overflow not explicit")
 	}
 }

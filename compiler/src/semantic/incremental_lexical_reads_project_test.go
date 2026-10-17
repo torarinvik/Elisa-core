@@ -52,6 +52,8 @@ func TestLocalLexicalReadPointProjectProbe(t *testing.T) {
 		if pass == 1 && after.LexicalQueryMemoHits <= before.LexicalQueryMemoHits {
 			t.Fatal("no project memo reuse")
 		}
+		t.Logf("captures=%d frames=%d", after.LexicalCapturedObservations-before.LexicalCapturedObservations, after.LexicalCapturedFrames-before.LexicalCapturedFrames)
+		t.Logf("binder observed=%d verified=%d dropped=%d", after.LexicalBinderReadsObserved-before.LexicalBinderReadsObserved, after.LexicalBinderSelectionsVerified-before.LexicalBinderSelectionsVerified, after.LexicalBinderReadsDropped-before.LexicalBinderReadsDropped)
 		t.Logf("pass%d duration=%s errors=%d indexes=%d observed=%d verified=%d dropped=%d executed=%d hits=%d skipped=%d owner=%+v", pass, elapsed, len(result.Errors()), after.LexicalSourceIndexesBuilt-before.LexicalSourceIndexesBuilt, after.LexicalReadsObserved-before.LexicalReadsObserved, after.LexicalSelectionsVerified-before.LexicalSelectionsVerified, after.LexicalReadsDropped-before.LexicalReadsDropped, after.LexicalQueriesExecuted-before.LexicalQueriesExecuted, after.LexicalQueryMemoHits-before.LexicalQueryMemoHits, after.LexicalQueriesSkipped-before.LexicalQueriesSkipped, session.lexical.Stats())
 	}
 }

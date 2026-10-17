@@ -59,16 +59,20 @@ func observeLexicalSymbol(request lexicalSymbolRequest, expected *Symbol, found 
 // used to invent a future environment. Nothing here survives in Session except
 // bounded owned query inputs/products.
 type lexicalReadInvocation struct {
-	primaryOwner      *ast.FuncDecl
-	indexes           map[*ast.FuncDecl]*FunctionSourceIndex
-	observations      []lexicalSymbolObservation
-	frames            int
-	indexNodes        int
-	observed, dropped uint64
+	primaryOwner                    *ast.FuncDecl
+	indexes                         map[*ast.FuncDecl]*FunctionSourceIndex
+	observations                    []lexicalSymbolObservation
+	binders                         []lexicalBinderObservation
+	bindersObserved, bindersDropped uint64
+	frames                          int
+	indexNodes                      int
+	observed, dropped               uint64
 }
 
 const lexicalReadMaxFunctions = 4096
-const lexicalReadMaxFrames = lookupTraceMaxEntries * 4
+const lexicalReadMaxSourceNodes = lookupTraceMaxEntries * 4
+const lexicalReadMaxObservations = lookupTraceMaxEntries * 2
+const lexicalReadMaxFrames = lookupTraceMaxEntries * 8
 
 func (reads *lexicalReadInvocation) observe(a *Analyzer, site *ast.Ident, symbol *Symbol, found bool) {
 	if reads == nil || a.suppressDiagnostics || a.currentFuncDecl == nil || reads.primaryOwner != a.currentFuncDecl {
@@ -80,7 +84,7 @@ func (reads *lexicalReadInvocation) observe(a *Analyzer, site *ast.Ident, symbol
 		reads.dropped++
 		return
 	}
-	if len(reads.observations) >= lookupTraceMaxEntries {
+	if len(reads.observations)+len(reads.binders) >= lexicalReadMaxObservations {
 		reads.dropped++
 		return
 	}
@@ -114,9 +118,13 @@ func (reads *lexicalReadInvocation) publish(session *IncrementalAnalysisSession)
 	if reads == nil {
 		return
 	}
-	if session.lexical == nil && len(reads.observations) == 0 {
+	if session.lexical == nil && len(reads.observations)+len(reads.binders) == 0 {
 		session.stats.LexicalReadsObserved += reads.observed
 		session.stats.LexicalReadsDropped += reads.dropped
+		session.stats.LexicalBinderReadsObserved += reads.bindersObserved
+		session.stats.LexicalBinderReadsDropped += reads.bindersDropped
+		session.stats.LexicalCapturedObservations += uint64(len(reads.observations) + len(reads.binders))
+		session.stats.LexicalCapturedFrames += uint64(reads.frames)
 		return
 	}
 	if session.lexical == nil {
@@ -129,6 +137,8 @@ func (reads *lexicalReadInvocation) publish(session *IncrementalAnalysisSession)
 	before := session.lexical.Stats().Queries
 	prepared := map[incremental.Key]preparedLexicalSymbol{}
 	expected := map[incremental.Key]lexicalSymbolObservation{}
+	var preparedBinders map[incremental.Key]preparedLexicalBinder
+	var expectedBinders map[incremental.Key]lexicalBinderObservation
 	published, err := session.lexical.PublishPrepared(context.Background(), func() ([]incremental.Publication, error) {
 		// Validate one function's captured source nodes together. Unsupported owners
 		// do not prevent supported functions from contributing their observations.
@@ -197,8 +207,12 @@ func (reads *lexicalReadInvocation) publish(session *IncrementalAnalysisSession)
 				expected[key] = observation
 			}
 		}
-		keys := make([]incremental.Key, 0, len(prepared))
+		preparedBinders, expectedBinders = reads.prepareBinders()
+		keys := make([]incremental.Key, 0, len(prepared)+len(preparedBinders))
 		for key := range prepared {
+			keys = append(keys, key)
+		}
+		for key := range preparedBinders {
 			keys = append(keys, key)
 		}
 		sort.Slice(keys, func(i, j int) bool {
@@ -208,12 +222,20 @@ func (reads *lexicalReadInvocation) publish(session *IncrementalAnalysisSession)
 			return keys[i].Name < keys[j].Name
 		})
 		for _, key := range keys {
-			publications = append(publications, prepared[key].publication)
+			if binder, ok := preparedBinders[key]; ok {
+				publications = append(publications, binder.publication)
+			} else {
+				publications = append(publications, prepared[key].publication)
+			}
 		}
 		return publications, nil
 	})
 	session.stats.LexicalReadsObserved += reads.observed
 	session.stats.LexicalReadsDropped += reads.dropped
+	session.stats.LexicalBinderReadsObserved += reads.bindersObserved
+	session.stats.LexicalBinderReadsDropped += reads.bindersDropped
+	session.stats.LexicalCapturedObservations += uint64(len(reads.observations) + len(reads.binders))
+	session.stats.LexicalCapturedFrames += uint64(reads.frames)
 	if err != nil {
 		session.stats.LexicalPublicationFailures++
 		return
@@ -236,6 +258,19 @@ func (reads *lexicalReadInvocation) publish(session *IncrementalAnalysisSession)
 			continue
 		}
 		session.stats.LexicalSelectionsVerified++
+	}
+	binderSnapshot := lexicalBinderSnapshot{revision: published.Revision, requests: preparedBinders}
+	for key, observation := range expectedBinders {
+		if skipped[key] {
+			continue
+		}
+		value, found, err := binderSnapshot.lookup(context.Background(), key)
+		if err != nil || !sameLexicalBinderValue(value, observation.expected) || found != observation.found {
+			session.stats.LexicalVerificationFailures++
+			verificationFailed = true
+			continue
+		}
+		session.stats.LexicalBinderSelectionsVerified++
 	}
 	if verificationFailed {
 		// A differential failure revokes the complete published universe.
