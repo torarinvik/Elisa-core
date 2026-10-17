@@ -6,6 +6,26 @@ import (
 	"elisacore/src/backend"
 )
 
+func TestRuntimeObjectCacheKeysCodegenEnvironment(t *testing.T) {
+	for _, name := range []string{"ELISACORE_TARGET_CPU", "ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISA_LINEAR_MUTATION"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "0")
+			before, err := runtimeObjectCacheArtifactFor(backend.DefaultPackedLoweringProfile(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(name, "1")
+			after, err := runtimeObjectCacheArtifactFor(backend.DefaultPackedLoweringProfile(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.key == after.key || before.object == after.object {
+				t.Fatal("changed codegen environment reused runtime object identity")
+			}
+		})
+	}
+}
+
 // The runtime-object cache key must be stable for identical inputs and must change when any
 // input that affects the emitted object changes. Key incompleteness is the only real
 // correctness risk (a stale object served for changed inputs), so pin the sensitivity here.

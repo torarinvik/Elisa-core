@@ -78,7 +78,10 @@ func compilerSourceStamp() (string, error) {
 
 func runtimeObjectCacheArtifactFor(packedProfile backend.PackedLoweringProfile, targetTriple string) (runtimeObjectCacheArtifact, error) {
 	hash := sha256.New()
-	testRunnerCacheWriteString(hash, "runtime-object-v1")
+	testRunnerCacheWriteString(hash, "runtime-object-v2-environment")
+	for _, entry := range buildCacheEnvKey() {
+		testRunnerCacheWriteString(hash, "environment="+entry)
+	}
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
