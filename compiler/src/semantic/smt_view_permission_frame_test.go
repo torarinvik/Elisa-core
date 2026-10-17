@@ -113,3 +113,32 @@ func TestSMTViewFrameBorrowedHeaderConstruction(t *testing.T) {
 		t.Fatalf("borrowed header must not invalidate bytes: %s", allDiagnostics(r))
 	}
 }
+
+func TestSMTViewFrameDefaultArgumentEffects(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		arguments := ""
+		if explicit {
+			arguments = "0.usize()"
+		}
+		r := analyzeContractStrict(t, "default_argument_frame.elisa", permissionFrameReader+`extern mutate() -> usize
+def helper(index: usize = mutate()) -> usize can[Unsafe.RawExtern]:
+    return index
+def stale(view: sview) -> usize:
+    requires view.len > 0
+    ensure result == read_byte(view, 0.usize())
+    before: usize = read_byte(view, 0.usize())
+    can Unsafe.RawExtern:
+        ignored: usize = helper(`+arguments+`)
+    return before
+`)
+		rejected := ensureFailuresFor(r.Errors(), "stale") != 0
+		if rejected == explicit {
+			t.Fatalf("explicit=%v rejected=%v: %s", explicit, rejected, allDiagnostics(r))
+		}
+		for _, diagnostic := range r.Errors() {
+			if !strings.Contains(diagnostic, `ensure postcondition of "stale"`) {
+				t.Fatalf("unrelated error: %s", allDiagnostics(r))
+			}
+		}
+	}
+}

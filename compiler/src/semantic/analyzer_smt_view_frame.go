@@ -361,7 +361,10 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			}
 		}
 		callee, ok := g.a.classifierFrameCallDecl(n)
-		if !ok || callee == nil || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
+		// A default/forwarded argument can execute code absent from n.Args.
+		// Apply this guard before every callee classification, including pure
+		// equations: purity of the body says nothing about argument evaluation.
+		if !ok || callee == nil || callee.Variadic || n.HasArgForward || len(n.Args) != len(callee.Params) || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
 			return false
 		}
 		for _, arg := range n.Args {
