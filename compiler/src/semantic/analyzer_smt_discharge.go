@@ -4227,11 +4227,22 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				}
 				return eq, true
 			}
+			if n.LoweredCall != nil {
+				// A user equality operator compares values, not pointer identity.
+				return tr.boolTerm(n.LoweredCall, env)
+			}
 			// Pointer-null test (`p == null` / `p != null`). Model null-ness as a Bool predicate keyed by
 			// the pointer's syntactic path, so the same pointer's null-ness is consistent between a branch
 			// guard and the obligation. This lets `ensure (p != null) or (result == false)` discharge: the
 			// fall-through guard `p != null` and the disjunct refer to the same predicate.
 			if ptr := nullComparePointer(n); ptr != nil {
+				if tr.a != nil && tr.a.shadowingActive() {
+					return "", false
+				}
+				ptr = tr.pointerLiteralOperand(ptr, env, 0)
+				if _, null := stripOptimizationParens(ptr).(*ast.NullLit); null {
+					return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
+				}
 				if tr.calleeFreeProjection(ptr, env) {
 					return "", false
 				}
@@ -4249,16 +4260,19 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				leftType := tr.a.exprTypes[n.Left]
 				rightType := tr.a.exprTypes[n.Right]
 				if tr.a.exprIsPointerLike(leftType) && tr.a.exprIsPointerLike(rightType) {
-					if smtEnvHasQuantifierBinder(env) || tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
+					if tr.a.shadowingActive() || smtEnvHasQuantifierBinder(env) || tr.calleeFreeProjection(n.Left, env) || tr.calleeFreeProjection(n.Right, env) {
 						return "", false
 					}
-					if left, ok := stripOptimizationParens(n.Left).(*ast.Ident); ok {
-						if right, ok := stripOptimizationParens(n.Right).(*ast.Ident); ok && left.Name == right.Name {
-							return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
-						}
+					left := tr.pointerLiteralOperand(n.Left, env, 0)
+					right := tr.pointerLiteralOperand(n.Right, env, 0)
+					if tr.calleeFreeProjection(left, env) || tr.calleeFreeProjection(right, env) {
+						return "", false
 					}
-					lPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Left))
-					rPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Right))
+					if !tr.a.shadowingActive() && sideEffectFreeExpr(left, 0) && sideEffectFreeExpr(right, 0) && tr.a.sameExprText(left, right) {
+						return strconv.FormatBool(n.Op == lexer.TOKEN_EQEQ), true
+					}
+					lPred := "isnull_" + smtProjectionName(left)
+					rPred := "isnull_" + smtProjectionName(right)
 					tr.boolDecls[lPred] = true
 					tr.boolDecls[rPred] = true
 					if rPred < lPred {
