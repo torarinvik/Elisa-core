@@ -40,7 +40,8 @@ func sliceImmutableLocalHypotheses(localHyps, context string) string {
 		blocks = append(blocks, block{sym: sym, lines: []string{line}})
 	}
 	reached := map[string]bool{}
-	for _, tok := range smtTokens(context) {
+	scan := smtTokenScanner{text: context}
+	for tok, ok := scan.next(); ok; tok, ok = scan.next() {
 		reached[tok] = true
 	}
 	keep := make([]bool, len(blocks))
@@ -53,7 +54,8 @@ func sliceImmutableLocalHypotheses(localHyps, context string) string {
 			keep[i] = true
 			changed = true
 			for _, line := range blk.lines {
-				for _, tok := range smtTokens(line) {
+				scan := smtTokenScanner{text: line}
+				for tok, ok := scan.next(); ok; tok, ok = scan.next() {
 					reached[tok] = true
 				}
 			}
@@ -103,7 +105,8 @@ func smtPreambleContext(preamble string) string {
 		}
 		symbols := 0
 		seen := map[string]bool{}
-		for _, tok := range smtTokens(line) {
+		scan := smtTokenScanner{text: line}
+		for tok, ok := scan.next(); ok; tok, ok = scan.next() {
 			if smtOperatorOrNumeral(tok) || seen[tok] {
 				continue
 			}
@@ -125,7 +128,31 @@ func smtOperatorOrNumeral(tok string) bool {
 	return tok != "" && tok[0] >= '0' && tok[0] <= '9'
 }
 
-// smtTokens splits SMT-LIB text into its atoms (symbols, numerals, operators).
+// smtTokenScanner preserves smtTokens' FieldsFunc delimiters exactly. Unlike
+// smtAtomScanner it does not interpret quotes or split carriage returns.
+type smtTokenScanner struct {
+	text   string
+	offset int
+}
+
+func smtTokenDelimiter(c byte) bool {
+	return c == ' ' || c == '(' || c == ')' || c == '\n' || c == '\t'
+}
+func (scan *smtTokenScanner) next() (string, bool) {
+	for scan.offset < len(scan.text) && smtTokenDelimiter(scan.text[scan.offset]) {
+		scan.offset++
+	}
+	start := scan.offset
+	for scan.offset < len(scan.text) && !smtTokenDelimiter(scan.text[scan.offset]) {
+		scan.offset++
+	}
+	if start == scan.offset {
+		return "", false
+	}
+	return scan.text[start:scan.offset], true
+}
+
+// smtTokens collects tokens only when the caller needs a retained work queue.
 func smtTokens(text string) []string {
 	return strings.FieldsFunc(text, func(r rune) bool {
 		return r == ' ' || r == '(' || r == ')' || r == '\n' || r == '\t'

@@ -2090,3 +2090,50 @@ failure-reporting race checks passed in 9.189 s. The standalone focused semantic
 checks passed in 0.726 s. The existing unrelated-SMT overlay was used throughout;
 the combined dirty tree, historical root failures and successful Stage1 build
 are not claimed green.
+
+
+### Streaming local-hypothesis tokens
+
+The remaining local-hypothesis and preamble token consumers now use a cursor
+instead of disposable FieldsFunc token arrays. This is a separate cursor from
+SMT atom parsing: its delimiter set remains exactly space, parentheses, newline
+and tab. Carriage returns, quotes, non-ASCII and invalid UTF-8 bytes preserve the
+previous FieldsFunc behavior. This distinction matters for keeping symbol
+reachability and proof query text unchanged. Boolean-local reachability also
+streams context tokens; macro expansion appends body tokens directly into its
+existing queue. The initial retained macro queue still uses the bulk collector.
+
+Differential coverage compares the cursor to the prior FieldsFunc contract over
+fixed edge cases and 2,000 deterministic random byte strings. Existing Boolean
+macro/local-hypothesis tests remain the semantic controls. Sequential ABBA
+component runs on M5/GOMAXPROCS=4 used two repetitions and 1,000 iterations per
+run. A 128-local dependency chain slice went from 44.921 us to 36.324 us (19.1%
+less time), 67,792 to 55,440 bytes and 299 to 170 allocations. Preamble filtering
+went from 21.582 us to 12.495 us (42.1% less time), 27,104 to 14,816 bytes and 139
+to 11 allocations. The fixture and output checks were identical across runs.
+These are component measurements; full compiler-build speedup and broader
+incremental body reuse are not established by them. No attempt is made to equate
+the profile's entire FieldsFunc allocation total with the allocations removed.
+
+Logs: `/tmp/elisa-smt-token-abba.log`, `/tmp/elisa-smt-token-focused.log`,
+`/tmp/elisa-smt-token-full.log` and `/tmp/elisa-smt-token-race.log`. Baseline runs
+restore only the two token consumer files on top of the existing unrelated-SMT
+overlay. All work stayed local, preserving unrelated edits and the proof stash.
+
+
+Macro queue checks used a 16-definition chain with four or 128 references per
+body, under the same sequential ABBA/1,000-iteration/two-repetition protocol.
+Small expansion median went from 3.234 us to 2.579 us (20.3% less time), 7,056
+to 6,848 bytes and 34 to 19 allocations. Large expansion went from 55.662 us to
+36.941 us (33.6% less time), 284,499 to 135,073 bytes and 86 to 27 allocations.
+The large case specifically checks the queue-growth tradeoff of streaming body
+tokens rather than building and bulk-appending a temporary token array.
+Log: `/tmp/elisa-smt-token-macro-abba.log`.
+
+Validation: isolated full semantic suite passed in 73.509 s and incremental in
+0.338 s. Focused tests passed in 0.644 s and focused races in 2.156 s. Archived
+baseline source/overlay backing files and logs are in Stage1's ignored
+`build/verification/smt-token-streaming-20261017`. No combined dirty SMT tree,
+historical root failure resolution, complete incremental compiler or full-build
+throughput claim follows from these component checks. Broader normal body reuse
+and real edit/compile latency remain the priority after these measured reductions.

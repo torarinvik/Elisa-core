@@ -41,7 +41,10 @@ func smtBoolMacroContext(tr *smtTranslator, context string) string {
 		}
 		b.WriteString(value)
 		b.WriteByte('\n')
-		pending = append(pending, smtTokens(value)...)
+		scan := smtTokenScanner{text: value}
+		for token, ok := scan.next(); ok; token, ok = scan.next() {
+			pending = append(pending, token)
+		}
 	}
 	return b.String()
 }
@@ -55,7 +58,8 @@ func (a *Analyzer) smtImmutableBoolLocalHypotheses(tr *smtTranslator, context st
 		return ""
 	}
 	reached := make(map[string]bool)
-	for _, symbol := range smtTokens(context) {
+	scan := smtTokenScanner{text: context}
+	for symbol, ok := scan.next(); ok; symbol, ok = scan.next() {
 		reached[symbol] = true
 	}
 	emitted := make(map[string]bool)
