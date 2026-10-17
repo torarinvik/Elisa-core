@@ -17,13 +17,13 @@ import (
 //     rebinding such a slot writes no shared memory;
 //   - assignments `x <- v` / `x += v` only to those mutable scalar/view locals;
 //   - if/elif/else, while (condition and body write-free), return, read-only contracts, and
-//     Abort.Panic / Unsafe.UncheckedIndex / Unsafe.AssumeProgress blocks, with their bodies
-//     still checked for writes and unknown calls;
+//     Abort.Panic and selected Unsafe permission blocks, with their bodies still
+//     checked for writes and unknown calls (a grant alone performs no operation);
 //   - expressions: identifiers, literals, operators without overloads, ternaries, non-optional
 //     field reads, view slices and indexing, plain integer casts, tuples, noncapturing
 //     value blocks checked under these same rules, and calls to callees
 //     classified write-free, or completed non-generic bodies checked by this gate;
-//   - the function has no mutable parameters and uses only those read-only permissions.
+//   - the function has no mutable parameters and uses only those inspectable permissions.
 //
 // Anything else declines (the caller keeps the conservative per-read modeling).
 func (a *Analyzer) sviewFrameWriteFree(decl *ast.FuncDecl) bool {
@@ -52,7 +52,7 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 	}
 	readOnly := func(permissions []ast.PermissionRef) bool {
 		for _, permission := range permissions {
-			if !sviewFrameReadPermission(permission) {
+			if !sviewFrameInspectablePermission(permission) {
 				return false
 			}
 		}
@@ -64,9 +64,18 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 	if decl == a.currentFuncDecl && !readOnly(a.currentFunctionUsedPermissionRefs) {
 		return false
 	}
-	g := &sviewFrameGate{a: a, rebindable: map[string]bool{}}
-	for _, param := range decl.Params {
+	g := &sviewFrameGate{a: a, rebindable: map[string]bool{}, types: map[string]Type{}}
+	sym, _ := a.symbolForFuncDecl(decl)
+	var fn *FuncType
+	if sym != nil {
+		fn, _ = sym.Type.(*FuncType)
+	}
+	for i, param := range decl.Params {
 		g.rebindable[param.Name] = false
+		g.types[param.Name] = nil
+		if fn != nil && i < len(fn.Params) {
+			g.types[param.Name] = fn.Params[i]
+		}
 	}
 	return g.stmts(decl.Body)
 }
@@ -76,14 +85,19 @@ type sviewFrameGate struct {
 	// rebindable records parameters and locals, with true only for safe local
 	// assignments. Keeping immutable names also preserves builtin shadowing.
 	rebindable map[string]bool
+	types      map[string]Type
 }
 
-func sviewFrameReadPermission(permission ast.PermissionRef) bool {
+// These capabilities may enclose read-only code. They do not classify an
+// operation or callee as read-only: every body, assignment and call must still
+// pass the structural gate. In particular RawExtern never admits an extern call.
+func sviewFrameInspectablePermission(permission ast.PermissionRef) bool {
 	if len(permission.TypeArgs) != 0 || len(permission.Via) != 0 {
 		return false
 	}
 	return (permission.Name == "Abort" && permission.Member == "Panic") ||
-		(permission.Name == "Unsafe" && (permission.Member == "UncheckedIndex" || permission.Member == "AssumeProgress"))
+		(permission.Name == "Unsafe" && (permission.Member == "UncheckedIndex" || permission.Member == "AssumeProgress" ||
+			permission.Member == "PointerArithmetic" || permission.Member == "PointerCast" || permission.Member == "RawExtern"))
 }
 
 func sviewFrameRebindableType(te ast.TypeExpr) bool {
@@ -115,6 +129,13 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		if n == nil || n.Owner != nil || n.Value == nil || n.Ghost || !g.expr(n.Value, 0) {
 			return false
 		}
+		typ := g.receiverType(n.Value, 0)
+		if named, ok := n.Type.(*ast.NamedType); ok && named != nil {
+			if declared, _, found := g.a.lookupVisibleType(named.Name); found {
+				typ = declared
+			}
+		}
+		g.types[n.Name] = typ
 		if n.Mutable {
 			if !sviewFrameRebindableType(n.Type) && !g.plainRecordLocalType(n.Type) {
 				// Runtime quantifiers introduce inferred mutable Boolean temps.
@@ -159,12 +180,16 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 			return false
 		}
 		outer, bound := g.rebindable[n.Name]
+		outerType := g.types[n.Name]
+		g.types[n.Name] = g.receiverType(n.Start, 0)
 		g.rebindable[n.Name] = false
 		ok := g.scoped(n.Body)
 		if bound {
 			g.rebindable[n.Name] = outer
+			g.types[n.Name] = outerType
 		} else {
 			delete(g.rebindable, n.Name)
+			delete(g.types, n.Name)
 		}
 		return ok
 	case *ast.BreakStmt, *ast.ContinueStmt:
@@ -218,7 +243,7 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 			return false
 		}
 		for _, permission := range n.Permissions {
-			if !sviewFrameReadPermission(permission) {
+			if !sviewFrameInspectablePermission(permission) {
 				return false
 			}
 		}
@@ -229,6 +254,8 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 
 // scoped checks a nested block; its declarations go out of scope at the end.
 func (g *sviewFrameGate) scoped(body []ast.Stmt) bool {
+	savedTypes := g.cloneTypes()
+	defer func() { g.types = savedTypes }()
 	saved := make(map[string]bool, len(g.rebindable))
 	for k, v := range g.rebindable {
 		saved[k] = v
@@ -248,9 +275,9 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 	case *ast.ParenExpr:
 		return g.expr(n.Inner, depth+1)
 	case *ast.BinaryExpr:
-		return n.LoweredCall == nil && g.expr(n.Left, depth+1) && g.expr(n.Right, depth+1)
+		return n.LoweredCall == nil && g.binaryHasNoOverload(n) && g.expr(n.Left, depth+1) && g.expr(n.Right, depth+1)
 	case *ast.UnaryExpr:
-		return n.LoweredCall == nil && (n.Op == lexer.TOKEN_NOT || n.Op == lexer.TOKEN_MINUS) && g.expr(n.Operand, depth+1)
+		return n.LoweredCall == nil && (n.Op == lexer.TOKEN_NOT || (n.Op == lexer.TOKEN_MINUS && g.unaryHasNoOverload(n))) && g.expr(n.Operand, depth+1)
 	case *ast.TernaryExpr:
 		return g.expr(n.Cond, depth+1) && g.expr(n.Value, depth+1) && g.expr(n.Alt, depth+1)
 	case *ast.FieldExpr:
@@ -258,9 +285,9 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 	case *ast.SliceExpr:
 		return n.Start != nil && n.End != nil && g.expr(n.Object, depth+1) && g.expr(n.Start, depth+1) && g.expr(n.End, depth+1)
 	case *ast.IndexExpr:
-		return n.Index2 == nil && n.Fallback == nil && n.AsOverlayCall == nil && g.expr(n.Object, depth+1) && g.expr(n.Index, depth+1)
+		return n.Index2 == nil && n.Fallback == nil && n.AsOverlayCall == nil && g.builtinIndex(n.Object) && g.expr(n.Object, depth+1) && g.expr(n.Index, depth+1)
 	case *ast.CastExpr:
-		return isPureNumericValueCast(n) && g.expr(n.Operand, depth+1)
+		return isPureNumericValueCast(n) && IsNumericType(valueContextOperandType(g.receiverType(n.Operand, 0))) && g.expr(n.Operand, depth+1)
 	case *ast.TupleExpr:
 		for _, elem := range n.Elems {
 			if !g.expr(elem, depth+1) {
@@ -273,7 +300,7 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			return false
 		}
 		typ, _, found := g.a.lookupVisibleType(n.Name)
-		if !found || !plainFrameRecordType(typ, map[*StructType]bool{}) {
+		if !found || (!plainFrameRecordType(typ, map[*StructType]bool{}) && !sviewFrameHeaderType(typ)) {
 			return false
 		}
 		st := StripAggregateStateType(typ).(*StructType)
@@ -295,14 +322,15 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 			return false
 		}
 		saved := g.rebindable
+		savedTypes := g.cloneTypes()
 		g.rebindable = make(map[string]bool, len(saved))
 		for name, rebindable := range saved {
 			g.rebindable[name] = rebindable
 		}
-		defer func() { g.rebindable = saved }()
+		defer func() { g.rebindable = saved; g.types = savedTypes }()
 		return g.stmts(n.Stmts) && g.expr(n.Value, depth+1)
 	case *ast.QuantifierExpr:
-		return (n.In == nil || g.expr(n.In, depth+1)) && g.expr(n.Body, depth+1)
+		return g.quantifier(n, depth)
 	case *ast.MembershipRangeExpr:
 		return g.expr(n.Start, depth+1) && g.expr(n.End, depth+1)
 	case *ast.MatchExpr:
@@ -439,7 +467,7 @@ func (a *Analyzer) sviewFrameCallBodyWriteFree(decl *ast.FuncDecl, argCount int)
 		return false
 	}
 	for _, permission := range fn.PermissionRefs {
-		if !sviewFrameReadPermission(permission) {
+		if !sviewFrameInspectablePermission(permission) {
 			return false
 		}
 	}
