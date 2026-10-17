@@ -2475,8 +2475,9 @@ type smtTranslator struct {
 	// enumPinnedBinders is set only while rendering one `is` path fact (see enumIsFactTerm).
 	enumPinnedBinders map[string]*Symbol
 	// sviewArgCount numbers the fresh length-only sview bindings (see bindSMTSViewLengthArg).
-	sviewArgCount    int
-	sviewSliceArrays map[smtSViewSliceKey]string
+	sviewArgCount          int
+	sviewSliceArrays       map[smtSViewSliceKey]string
+	runtimeQuantifierCount int
 	// lengthOnly marks env tokens that carry a container length but no element array
 	// (see bindSMTLengthOnlyArg); array-term lookups that hit one decline.
 	lengthOnly map[string]bool
@@ -3934,6 +3935,8 @@ func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
 // `env` maps an Elisa identifier (notably the law's `self`) to a pre-built SMT term.
 func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string, bool) {
 	switch n := expr.(type) {
+	case *ast.ExprBlock:
+		return tr.runtimeRangeQuantifierTerm(n, env)
 	case *ast.TernaryExpr:
 		// A bool-valued conditional `v if c else w` (the folded form of guard-return chains).
 		if n == nil || n.Cond == nil || n.Value == nil || n.Alt == nil {

@@ -263,9 +263,13 @@ func (a *Analyzer) smtImmutableBoolLocalHypotheses(tr *smtTranslator, context st
 
 // smtBoolInitializerStable is intentionally narrower than boolTerm. It allows
 // pure scalar expressions and immutable by-value record projections, while
-// rejecting calls, indexing, reference roots, and mutable or reference-bearing
-// records before replaying an initializer at a later proof point.
+// admitting scalar predicates, stable view reads, and recognized range quantifiers.
+// Reference roots and mutable records remain excluded when replaying an initializer.
 func (a *Analyzer) smtBoolInitializerStable(expr ast.Expr, walkedNodes *int, identifiers map[string]bool, depth int) bool {
+	return a.smtBoolInitializerStableWithBinders(expr, walkedNodes, identifiers, depth, nil)
+}
+
+func (a *Analyzer) smtBoolInitializerStableWithBinders(expr ast.Expr, walkedNodes *int, identifiers map[string]bool, depth int, binders map[string]bool) bool {
 	if expr == nil || a == nil {
 		return false
 	}
@@ -278,9 +282,58 @@ func (a *Analyzer) smtBoolInitializerStable(expr ast.Expr, walkedNodes *int, ide
 	switch n := expr.(type) {
 	case *ast.BoolLit:
 		return true
+	case *ast.ExprBlock:
+		loop, predicate, _, ok := runtimeRangeQuantifierParts(n)
+		if !ok || !a.smtScalarInitializerStableWithBinders(loop.Start, walkedNodes, identifiers, depth+1, binders) ||
+			!a.smtScalarInitializerStableWithBinders(loop.End, walkedNodes, identifiers, depth+1, binders) {
+			return false
+		}
+		scoped := make(map[string]bool, len(binders)+1)
+		for name := range binders {
+			scoped[name] = true
+		}
+		scoped[loop.Name] = true
+		return a.smtBoolInitializerStableWithBinders(predicate, walkedNodes, identifiers, depth+1, scoped)
+	case *ast.QuantifierExpr:
+		// Numeric range sugar is already a guarded integer quantifier. Collection-valued
+		// binders need their own element-stability model and remain outside this visitor.
+		if n.In != nil || len(n.Vars) == 0 {
+			return false
+		}
+		scoped := make(map[string]bool, len(binders)+len(n.Vars))
+		for name := range binders {
+			scoped[name] = true
+		}
+		for _, name := range n.Vars {
+			scoped[name] = true
+		}
+		return a.smtBoolInitializerStableWithBinders(n.Body, walkedNodes, identifiers, depth+1, scoped)
+	case *ast.CallExpr:
+		callee, ok := stripOptimizationParens(n.Func).(*ast.Ident)
+		if !ok || n.Safe || n.SafeReceiver != nil || n.HasArgForward {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || !a.smtStableScalarPredicate(decl, len(n.Args)) {
+			return false
+		}
+		args := proofCallArgs(n)
+		if len(args) != len(decl.Params) {
+			return false
+		}
+		identifiers[callee.Name] = true
+		for _, arg := range args {
+			if !a.smtScalarInitializerStableWithBinders(arg, walkedNodes, identifiers, depth+1, binders) {
+				return false
+			}
+		}
+		return true
 	case *ast.ParenExpr:
-		return a.smtBoolInitializerStable(n.Inner, walkedNodes, identifiers, depth+1)
+		return a.smtBoolInitializerStableWithBinders(n.Inner, walkedNodes, identifiers, depth+1, binders)
 	case *ast.Ident:
+		if binders[n.Name] {
+			return true
+		}
 		identifiers[n.Name] = true
 		if _, ok := a.evalConstBoolExpr(n); ok {
 			return true
@@ -292,23 +345,23 @@ func (a *Analyzer) smtBoolInitializerStable(expr ast.Expr, walkedNodes *int, ide
 		}
 		return a.smtImmutableScalarProjection(n)
 	case *ast.UnaryExpr:
-		return n != nil && n.LoweredCall == nil && n.Op == lexer.TOKEN_NOT && a.smtBoolInitializerStable(n.Operand, walkedNodes, identifiers, depth+1)
+		return n != nil && n.LoweredCall == nil && n.Op == lexer.TOKEN_NOT && a.smtBoolInitializerStableWithBinders(n.Operand, walkedNodes, identifiers, depth+1, binders)
 	case *ast.TernaryExpr:
-		return n != nil && a.smtBoolInitializerStable(n.Cond, walkedNodes, identifiers, depth+1) && a.smtBoolInitializerStable(n.Value, walkedNodes, identifiers, depth+1) && a.smtBoolInitializerStable(n.Alt, walkedNodes, identifiers, depth+1)
+		return n != nil && a.smtBoolInitializerStableWithBinders(n.Cond, walkedNodes, identifiers, depth+1, binders) && a.smtBoolInitializerStableWithBinders(n.Value, walkedNodes, identifiers, depth+1, binders) && a.smtBoolInitializerStableWithBinders(n.Alt, walkedNodes, identifiers, depth+1, binders)
 	case *ast.BinaryExpr:
 		if n == nil || n.LoweredCall != nil {
 			return false
 		}
 		switch n.Op {
 		case lexer.TOKEN_AND, lexer.TOKEN_OR:
-			return a.smtBoolInitializerStable(n.Left, walkedNodes, identifiers, depth+1) && a.smtBoolInitializerStable(n.Right, walkedNodes, identifiers, depth+1)
+			return a.smtBoolInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtBoolInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
 			if IsBoolType(a.exprTypes[n.Left]) && IsBoolType(a.exprTypes[n.Right]) {
-				return a.smtBoolInitializerStable(n.Left, walkedNodes, identifiers, depth+1) && a.smtBoolInitializerStable(n.Right, walkedNodes, identifiers, depth+1)
+				return a.smtBoolInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtBoolInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 			}
-			return a.smtScalarInitializerStable(n.Left, walkedNodes, identifiers, depth+1) && a.smtScalarInitializerStable(n.Right, walkedNodes, identifiers, depth+1)
+			return a.smtScalarInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtScalarInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 		case lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ:
-			return a.smtScalarInitializerStable(n.Left, walkedNodes, identifiers, depth+1) && a.smtScalarInitializerStable(n.Right, walkedNodes, identifiers, depth+1)
+			return a.smtScalarInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtScalarInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 		default:
 			return false
 		}
@@ -317,7 +370,7 @@ func (a *Analyzer) smtBoolInitializerStable(expr ast.Expr, walkedNodes *int, ide
 	}
 }
 
-func (a *Analyzer) smtScalarInitializerStable(expr ast.Expr, walkedNodes *int, identifiers map[string]bool, depth int) bool {
+func (a *Analyzer) smtScalarInitializerStableWithBinders(expr ast.Expr, walkedNodes *int, identifiers map[string]bool, depth int, binders map[string]bool) bool {
 	if expr == nil || a == nil {
 		return false
 	}
@@ -331,17 +384,35 @@ func (a *Analyzer) smtScalarInitializerStable(expr ast.Expr, walkedNodes *int, i
 	case *ast.IntLit, *ast.CharLit:
 		return true
 	case *ast.ParenExpr:
-		return a.smtScalarInitializerStable(n.Inner, walkedNodes, identifiers, depth+1)
+		return a.smtScalarInitializerStableWithBinders(n.Inner, walkedNodes, identifiers, depth+1, binders)
 	case *ast.Ident:
+		if binders[n.Name] {
+			return true
+		}
 		identifiers[n.Name] = true
 		return a.smtImmutableScalarIdent(n)
 	case *ast.FieldExpr:
 		if root, ok := rootIdentName(n); ok {
 			identifiers[root] = true
 		}
+		if n.Field == "len" && !n.Safe {
+			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && !binders[id.Name] && a.immutableSviewParameter(id) {
+				return true
+			}
+		}
 		return a.smtImmutableScalarProjection(n)
+	case *ast.IndexExpr:
+		tr := &smtTranslator{a: a}
+		view, _, ok := tr.stableSviewByteIndexRoot(n, nil)
+		if !ok || binders[view.Name] {
+			return false
+		}
+		identifiers[view.Name] = true
+		return a.smtScalarInitializerStableWithBinders(n.Index, walkedNodes, identifiers, depth+1, binders)
+	case *ast.CastExpr:
+		return isPureNumericValueCast(n) && a.smtScalarInitializerStableWithBinders(n.Operand, walkedNodes, identifiers, depth+1, binders)
 	case *ast.UnaryExpr:
-		return n != nil && n.LoweredCall == nil && n.Op == lexer.TOKEN_MINUS && a.smtScalarInitializerStable(n.Operand, walkedNodes, identifiers, depth+1)
+		return n != nil && n.LoweredCall == nil && n.Op == lexer.TOKEN_MINUS && a.smtScalarInitializerStableWithBinders(n.Operand, walkedNodes, identifiers, depth+1, binders)
 	case *ast.BinaryExpr:
 		if n == nil || n.LoweredCall != nil {
 			return false
@@ -349,13 +420,61 @@ func (a *Analyzer) smtScalarInitializerStable(expr ast.Expr, walkedNodes *int, i
 		switch n.Op {
 		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 			lexer.TOKEN_AMPERSAND, lexer.TOKEN_PIPE, lexer.TOKEN_CARET, lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
-			return a.smtScalarInitializerStable(n.Left, walkedNodes, identifiers, depth+1) && a.smtScalarInitializerStable(n.Right, walkedNodes, identifiers, depth+1)
+			return a.smtScalarInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtScalarInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 		default:
 			return false
 		}
 	default:
 		return false
 	}
+}
+
+// A saved predicate call can be expanded only when its value depends on scalar arguments
+// and constants. Write-freedom alone would still admit reads through captured pointers.
+func (a *Analyzer) smtStableScalarPredicate(decl *ast.FuncDecl, argCount int) bool {
+	if !a.sviewFrameCallBodyWriteFree(decl, argCount) {
+		return false
+	}
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || !IsBoolType(fn.Return) || len(fn.Params) != len(decl.Params) {
+		return false
+	}
+	params := make(map[string]bool, len(decl.Params))
+	for i, param := range decl.Params {
+		typ := fn.Params[i]
+		if isDirectRefType(typ) || (!IsBoolType(typ) && (!IsNumericType(typ) || IsFloatType(typ))) {
+			return false
+		}
+		params[param.Name] = true
+	}
+	body, ok := a.typedPureReturnExpr(decl)
+	if !ok {
+		return false
+	}
+	return !a.walkStaticExpr(body, func(expr ast.Expr) bool {
+		switch n := expr.(type) {
+		case *ast.BoolLit, *ast.IntLit, *ast.CharLit, *ast.ParenExpr, *ast.TernaryExpr:
+			return false
+		case *ast.Ident:
+			if params[n.Name] {
+				return false
+			}
+			_, constant := a.resolvedPrimitiveConstant(n)
+			return !constant
+		case *ast.BinaryExpr:
+			return n.LoweredCall != nil
+		case *ast.UnaryExpr:
+			return n.LoweredCall != nil || (n.Op != lexer.TOKEN_NOT && n.Op != lexer.TOKEN_MINUS)
+		case *ast.CastExpr:
+			return !isPureNumericValueCast(n)
+		default:
+			return true
+		}
+	})
 }
 
 // smtBoolLocalDefinitionBindings resolves dependencies once after the stable-expression visitor
