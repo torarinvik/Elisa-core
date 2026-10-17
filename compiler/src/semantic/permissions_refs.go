@@ -40,6 +40,11 @@ func clonePermissionRef(ref ast.PermissionRef) ast.PermissionRef {
 }
 
 func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	for _, ref := range refs {
+		if len(ref.TypeArgs) != 0 || len(ref.Via) != 0 {
+			return canonicalizeInstantiatedPermissionRefs(refs)
+		}
+	}
 	if len(refs) == 0 {
 		return nil
 	}
@@ -477,6 +482,13 @@ func samePermissionRefs(left []ast.PermissionRef, right []ast.PermissionRef) boo
 	for i := range left {
 		if left[i].Name != right[i].Name || left[i].Member != right[i].Member {
 			return false
+		}
+		if len(left[i].TypeArgs) != 0 || len(left[i].Via) != 0 || len(right[i].TypeArgs) != 0 || len(right[i].Via) != 0 {
+			l, lok := permissionInstantiation(left[i])
+			r, rok := permissionInstantiation(right[i])
+			if !lok || !rok || l != r {
+				return sameUnorderedPermissionRows(left, right)
+			}
 		}
 	}
 	return true

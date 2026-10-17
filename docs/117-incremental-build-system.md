@@ -697,6 +697,37 @@ call chain:
 
 These synthetic semantic workloads exclude LLVM emission/linking and do not
 establish a real-project incremental speedup. The implementation continues to use
-the existing permission-row equations/comparators; stronger TypeArgs/Via identity,
+the permission-row equations; resolved type/environment identity,
 converged effect-law validation, lossless exported semantic summaries and actual
 persistent call/module queries remain required work.
+
+### Typed effect-row identity
+
+Permission-row canonicalization and equality now retain abstract type arguments
+and recursive `via` realization metadata. `Writer[i64]` and `Writer[sview]`, or
+the same abstract effect realized through different concrete capabilities, no
+longer overwrite or compare equal solely because their family/member match.
+Family-wide row suppression applies within the same instantiation/realization.
+Authorization keys remain family/member based, preserving existing family grants.
+Plain rows keep the existing map/sort path without syntax hashing.
+
+Instantiated rows use the bounded position-independent syntax fingerprint for
+TypeArgs/Via. This is conservative syntax identity, not resolved nominal-type or
+alias equivalence; a persistent semantic product must additionally validate the
+current environment, global/type/lookup inputs and compiler schema. No retained
+effect result is admitted across compilations by this checkpoint.
+
+If a descriptor exceeds fingerprint limits, exact invocation-local structural
+comparison still bounds row union. Duplicate oversized effects in recursive or
+diamond graphs therefore do not multiply on every inference round. Equality of
+those local values supplies no durable digest: permissionInstantiation reports
+failure and a future persistent cache must decline admission. Tied opaque row
+order follows local encounter order; no portable canonical key is claimed.
+
+Tests cover specialization/realization edits propagating through unchanged
+caller graphs, two Writer specializations surviving source analysis, position
+relocation, family/member authorization, permutation of encodable rows, and
+oversized cyclic/diamond plus duplicate-self-call union bounds. These preserve
+the distinctions a retained dependency value will need; persistent row hydration
+(including nested lambda writes), complete semantic input recipes and real-project
+incremental performance remain unfinished.
