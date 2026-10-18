@@ -32,3 +32,32 @@ source hashes are recorded under `build/verification/trap-type-reuse-20261018/`.
 The intended comparison uses identical completed-cache body-edit requests, fixed
 iteration counts, and reversed before/after order. This checkpoint is isolated;
 no broad compiler speedup is claimed.
+
+## Fixed-workload comparison
+
+Three before/after pairs, reversing order in the middle pair, ran 20 novel
+fixed-width body edits each on pinned binaries. Both paths enabled the completed
+object cache, reran semantic analysis, emitted one changed shard and reused seven
+per edit. All benchmark assertions passed; no other compiler/solver job was
+observed before each arm. Host scheduling variation remains visible.
+
+| Median per edited request | Before | After |
+| --- | ---: | ---: |
+| Whole request | 46.037 ms | 46.032 ms |
+| LLVM IR build | 8.480 ms | 7.054 ms |
+| Allocated bytes | 11,467,070 | 8,635,894 |
+| Allocations | 57,227 | 53,037 |
+
+Allocated volume fell 24.7% (2.83 MB/request), allocation count fell 7.3%, and
+IR phase median fell 16.8%. Whole-request medians are effectively unchanged;
+there is no demonstrated total latency gain. Individual before times ranged
+45.411–51.728 ms and after 40.446–49.202 ms. This qualifies an allocation reduction
+with neutral measured request throughput on the fixed overflow-heavy fixture,
+not a project/compiler rebuild speed claim or a reduction in peak RSS.
+
+Raw six-arm logs, comparison script and binary hashes are in
+`build/verification/trap-type-reuse-20261018/comparison.json` and adjacent files.
+Candidate source is `1706a8c0`; baseline binary was built at `e474122f`, with
+no production backend changes between that baseline and candidate parent
+`c70db789`. The candidate contains the single production trap-lowering change
+plus focused tests/documentation. Shared integration is still pending.
