@@ -272,7 +272,7 @@ func SameType(a, b Type) bool {
 		return ok && sameAggregateStateLists(aggregateStateStates(ta), aggregateStateStates(tb)) && SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || ta.ReturnRegion != tb.ReturnRegion || funcTypeExplicitParamCount(ta) != funcTypeExplicitParamCount(tb) || len(ta.ExplicitParamNames) != len(tb.ExplicitParamNames) || len(ta.ImplicitParamNames) != len(tb.ImplicitParamNames) || len(ta.GenericParams) != len(tb.GenericParams) || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || ta.ReturnRegion != tb.ReturnRegion || funcTypeExplicitParamCount(ta) != funcTypeExplicitParamCount(tb) || len(ta.ExplicitParamNames) != len(tb.ExplicitParamNames) || len(ta.ImplicitParamNames) != len(tb.ImplicitParamNames) || len(ta.GenericParams) != len(tb.GenericParams) || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.InferredRegionParams) != len(tb.InferredRegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
 		}
 		for i := range ta.ExplicitParamNames {
@@ -297,6 +297,11 @@ func SameType(a, b Type) bool {
 		}
 		for i := range ta.RegionParams {
 			if ta.RegionParams[i] != tb.RegionParams[i] {
+				return false
+			}
+		}
+		for i := range ta.InferredRegionParams {
+			if ta.InferredRegionParams[i] != tb.InferredRegionParams[i] {
 				return false
 			}
 		}

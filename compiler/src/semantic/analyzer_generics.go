@@ -80,12 +80,34 @@ func genericParamsForStructType(base *StructType) []ast.GenericParam {
 }
 
 func genericParamsForFuncType(base *FuncType) []ast.GenericParam {
-	if len(base.GenericParams) != 0 {
-		return base.GenericParams
+	inferredRegions := make(map[string]bool, len(base.InferredRegionParams))
+	for _, name := range base.InferredRegionParams {
+		inferredRegions[name] = true
 	}
-	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	if len(base.GenericParams) != 0 {
+		params := append([]ast.GenericParam(nil), base.GenericParams...)
+		seenRegion := map[string]bool{}
+		for _, param := range params {
+			if param.Kind == ast.GenericParamRegion {
+				seenRegion[param.Name] = true
+			}
+		}
+		for _, name := range base.RegionParams {
+			if !inferredRegions[name] && !seenRegion[name] {
+				params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+				seenRegion[name] = true
+			}
+		}
+		return params
+	}
+	params := make([]ast.GenericParam, 0, len(base.TypeParams)+len(base.RegionParams))
 	for _, name := range base.TypeParams {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	for _, name := range base.RegionParams {
+		if !inferredRegions[name] {
+			params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+		}
 	}
 	return params
 }
@@ -124,7 +146,10 @@ func genericBindingsForStructInstance(base *StructType, args []Type) map[string]
 }
 
 func regionBindingsForStructInstance(base *StructType, args []Type) map[string]string {
-	params := genericParamsForStructType(base)
+	return regionBindingsForParams(genericParamsForStructType(base), args)
+}
+
+func regionBindingsForParams(params []ast.GenericParam, args []Type) map[string]string {
 	if len(params) == 0 || len(args) == 0 {
 		return nil
 	}

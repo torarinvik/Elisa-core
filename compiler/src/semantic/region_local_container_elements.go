@@ -992,10 +992,8 @@ func (a *Analyzer) callArgFillsWritableParam(call *ast.CallExpr, index int) bool
 	if !ok || decl == nil || index >= len(decl.Params) || funcHasArenaParam(decl) {
 		return false
 	}
-	for _, rp := range decl.RegionParams {
-		if !strings.HasPrefix(rp, "__rg_") {
-			return false
-		}
+	if !functionHasOnlyInferredRegionParams(decl) {
+		return false
 	}
 	// Trusted only once the callee's body was checked and nothing it can put in the container was
 	// allocated in a caller's arena (a void grower adopts its container's; a forwarded parameter
@@ -1022,6 +1020,22 @@ func (a *Analyzer) callArgFillsWritableParam(call *ast.CallExpr, index int) bool
 		return false
 	}
 	return a.returnBorrowWritableParam(fnType.Params[index])
+}
+
+func functionHasOnlyInferredRegionParams(decl *ast.FuncDecl) bool {
+	if decl == nil {
+		return false
+	}
+	inferred := make(map[string]bool, len(decl.InferredRegionParams))
+	for _, name := range decl.InferredRegionParams {
+		inferred[name] = true
+	}
+	for _, name := range decl.RegionParams {
+		if !inferred[name] {
+			return false
+		}
+	}
+	return true
 }
 
 // recordCallFilledElementStates merges, for each tracked local container a call may fill, the

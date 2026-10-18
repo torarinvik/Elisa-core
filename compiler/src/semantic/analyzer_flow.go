@@ -239,7 +239,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// A synthesized (function-local) ambient auto region must not capture a value
 		// stored into a global — it dies at function return. A USER-written region or
 		// `in <owner>:` scope is explicit intent and is respected.
-		ambientIsSynthesized := isSynthesizedAutoRegion(a.activeContainerRegionName())
+		ambientIsSynthesized := a.isCompilerGeneratedAutoRegion(a.activeContainerRegionName())
 		if isGlobalTarget && (a.currentAllocExpr == nil || ambientIsSynthesized) &&
 			(a.currentFuncType == nil || !a.currentFuncType.RegionPolymorphic) {
 			a.currentAllocExpr = &ast.Ident{Position: n.Value.Pos(), Name: "perm"}
@@ -1107,11 +1107,16 @@ func (a *Analyzer) checkIndexedElementStoreEscape(target, value ast.Expr, valueT
 			// local region, so name it the same way the grown form is named for the check.
 			if name := a.indexedStoreParamRoot(idx.Object); name != "" {
 				copied := *ct
-				copied.Region = "__rg_" + name
+				copied.Region = inferredRegionParamName(a.currentFuncDecl, name)
 				ct = &copied
-				// Scope the synthetic name as a caller-owned region param for this check only.
+				// This parameter's storage is caller-owned, but its lifetime is unrelated
+				// to every source-declared or inferred region parameter in the function.
 				a.regionParamScopes = append(a.regionParamScopes, map[string]bool{copied.Region: true})
-				defer func() { a.regionParamScopes = a.regionParamScopes[:len(a.regionParamScopes)-1] }()
+				a.regionUnrelatedParamScopes = append(a.regionUnrelatedParamScopes, map[string]bool{copied.Region: true})
+				defer func() {
+					a.regionParamScopes = a.regionParamScopes[:len(a.regionParamScopes)-1]
+					a.regionUnrelatedParamScopes = a.regionUnrelatedParamScopes[:len(a.regionUnrelatedParamScopes)-1]
+				}()
 			}
 		}
 		if ct != nil {

@@ -32,7 +32,8 @@ type incrementalObjectEntry struct {
 
 type IncrementalObjectStats struct {
 	Builds, PartitionsEmitted, PartitionsReused, SerialFallbacks, Evictions uint64
-	IRTime, PartitionTime, NativeTime, MergeTime                            time.Duration
+	OwnerMapBuilds                                                          uint64
+	IRTime, OwnerMapTime, PartitionTime, NativeTime, MergeTime              time.Duration
 	// CloneTime includes restriction, dead-prototype pruning and verification.
 	// BitcodeTime includes serialization and exact-key hashing, plus an owned-key
 	// copy on misses.

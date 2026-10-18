@@ -96,9 +96,28 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	namespace := C.CString(hex.EncodeToString(unitID[:]))
 	defer C.free(unsafe.Pointer(namespace))
 	parts := make([]string, s.partitions)
+	var ownerCount C.size_t
+	ownerMapStart := time.Now()
+	owners := C.elisacoreStableObjectOwners(g.module, C.int(s.partitions), &ownerCount)
+	ownerMapDuration := time.Since(ownerMapStart)
+	s.recordStats(func(stats *IncrementalObjectStats) {
+		stats.OwnerMapTime += ownerMapDuration
+		stats.PartitionTime += ownerMapDuration
+		if owners != nil {
+			stats.OwnerMapBuilds++
+		}
+	})
+	if owners == nil {
+		return s.emitDirectObject(g, outputPath)
+	}
+	// The C owner array is indexed by the optimized module's function order. Each
+	// clone consumes it synchronously without retaining it; keep the source module
+	// unchanged until all partitions have been cloned, then free it once here.
+	defer C.free(unsafe.Pointer(owners))
 	for part := range parts {
 		partitionStart := time.Now()
-		module := C.elisacoreCloneObjectPartition(g.module, C.int(s.partitions), C.int(part), namespace)
+		module := C.elisacoreCloneObjectPartitionWithOwners(
+			g.module, C.int(s.partitions), C.int(part), namespace, owners, ownerCount)
 		if module == nil {
 			return s.emitDirectObject(g, outputPath)
 		}

@@ -118,6 +118,7 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	}
 	// A range fact already recorded in this scope under the name belongs to the binding it shadows.
 	forgetShadowedRangeFact(a.currentScope, sym.Name)
+	a.registerSMTLocalDefinition(a.currentScope, sym)
 	a.trackAffineValueSymbol(sym)
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
@@ -132,6 +133,7 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 	}
 	// A range fact already recorded in this scope under the name belongs to the binding it shadows.
 	forgetShadowedRangeFact(scope, sym.Name)
+	a.registerSMTLocalDefinition(scope, sym)
 	a.trackAffineValueSymbol(sym)
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }

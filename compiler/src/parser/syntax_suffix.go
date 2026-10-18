@@ -9,14 +9,16 @@ type syntaxSuffixReplay struct {
 	previous *SyntaxTrace
 	first    int
 	copy     func(int) (*ast.File, error)
+	accepted func(int)
 }
 
 // SetSyntaxSuffixReplay accepts a certificate that tokens from matchingStart to
 // EOF match the old immutable lexical stream, including exact source positions.
 // Token counts must match. Inspected backward reads and parser-state changes
-// reject replay, as do incomplete/recovery traces. The callback returns private
-// pristine declarations after the supplied old declaration count.
-func (p *Parser) SetSyntaxSuffixReplay(previous *SyntaxTrace, matchingStart int, copySuffix func(int) (*ast.File, error)) {
+// reject replay, as do incomplete/recovery traces. copySuffix returns private
+// pristine declarations after the supplied old declaration count. onAccepted,
+// when non-nil, runs after a copied suffix passes validation and is appended.
+func (p *Parser) SetSyntaxSuffixReplay(previous *SyntaxTrace, matchingStart int, copySuffix func(int) (*ast.File, error), onAccepted func(int)) {
 	if previous == nil || !previous.complete || previous.invalid || previous.tokenCount != len(p.tokens) || len(previous.checkpoints) == 0 || matchingStart < 0 || matchingStart >= len(p.tokens) || copySuffix == nil {
 		return
 	}
@@ -42,7 +44,7 @@ func (p *Parser) SetSyntaxSuffixReplay(previous *SyntaxTrace, matchingStart int,
 	if first < 0 {
 		return
 	}
-	p.suffixReplay = &syntaxSuffixReplay{previous: previous, first: first, copy: copySuffix}
+	p.suffixReplay = &syntaxSuffixReplay{previous: previous, first: first, copy: copySuffix, accepted: onAccepted}
 	if p.trace == nil {
 		p.trace = &SyntaxTrace{tokenCount: len(p.tokens)}
 		p.observeToken(p.pos)
@@ -98,5 +100,8 @@ func (p *Parser) trySyntaxSuffix(file *ast.File) bool {
 	p.readThrough = max(p.readThrough, last.readThrough)
 	p.readLength = p.readLength || last.readLength
 	p.readFrom = last.pos
+	if replay.accepted != nil {
+		replay.accepted(len(suffix.Decls))
+	}
 	return true
 }

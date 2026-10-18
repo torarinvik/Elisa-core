@@ -79,7 +79,7 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStmt, knownValueType Type
 			// scratch:`) is never region-polymorphic and always errors.
 			regionPoly := a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic
 			prepassPoly := regionPoly
-			if isSynthesizedAutoRegion(region.Name) && a.currentFuncType != nil {
+			if a.isCompilerGeneratedAutoRegion(region.Name) && a.currentFuncType != nil {
 				// Belt-and-suspenders: the pre-pass already set this from a syntactic scan, but
 				// keep the flow-based confirmation so the classification never under-reports.
 				a.currentFuncType.RegionPolymorphic = true
@@ -125,7 +125,7 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStmt, knownValueType Type
 			// ours — a `region NAME(...):` block, or a region taken over by `return move` —
 			// is freed before the caller can read the result, and returning it dangles.
 			escapesLocalRegionBlock := false
-			if !a.lookupRegionParam(region.Name) && !isSynthesizedAutoRegion(region.Name) {
+			if !a.lookupRegionParam(region.Name) && !a.isCompilerGeneratedAutoRegion(region.Name) {
 				if sym, state := a.lookupRegionState(region.Name); sym != nil && !state.Destroyed && state.DeclScope != nil {
 					escapesLocalRegionBlock = true
 				}

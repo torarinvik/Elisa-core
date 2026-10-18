@@ -2306,9 +2306,10 @@ func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
 
 // castOperandResolvedType returns the operand type of a cast, falling back — when the per-node
 // exprTypes entry is unset (a synthetic/cloned node from measure substitution) — to resolving a
-// field-read operand from its struct type or a bare-identifier operand from the scope. This mirrors
-// the array/scalar field-read fallbacks so a `field.usize()` cast in a cloned measure resolves the
-// same way its analyzed twin does.
+// field-read operand from its struct type, a bare-identifier operand from the scope, or an immutable
+// SView byte read from its root. This mirrors the array/scalar field-read fallbacks so a
+// `field.usize()` or `view[index].u8()` cast in a cloned expression resolves the same way its
+// analyzed twin does.
 func (a *Analyzer) castOperandResolvedType(n *ast.CastExpr) Type {
 	if n == nil || n.Operand == nil {
 		return nil
@@ -2326,6 +2327,17 @@ func (a *Analyzer) castOperandResolvedType(n *ast.CastExpr) Type {
 			if sym, ok := a.currentScope.Lookup(op.Name); ok && sym != nil {
 				return sym.Type
 			}
+		}
+	case *ast.IndexExpr:
+		// Cloned immutable-local equations do not carry per-node expression types. Recover the
+		// source type only for the same stable SView reads admitted by the SMT byte model: checked
+		// `view[i]` produces char, while raw `view.data[i]` loads u8. In particular, do not infer
+		// that an arbitrary index expression is byte-sized.
+		if _, raw, ok := (&smtTranslator{a: a}).stableSviewByteIndexRoot(op, nil); ok {
+			if raw {
+				return &BuiltinType{Name: "u8"}
+			}
+			return &BuiltinType{Name: "char"}
 		}
 	case *ast.ParenExpr:
 		return a.castOperandResolvedType(&ast.CastExpr{Operand: op.Inner})

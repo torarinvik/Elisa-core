@@ -327,19 +327,34 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 // instead of creating its own arena. When true the region allocates nothing, frees nothing, and is
 // NOT added to s.regions (the caller owns it) — `new[auto]` in its body lands in the caller's arena.
 func (s *functionState) regionPolyAutoAdopts(n *ast.RegionStmt) bool {
-	if s == nil || s.fnType == nil || n == nil || !n.Lazy || !backendIsSynthesizedAutoRegion(n.Name) || s.regionPolyOwner.arenaRef == nil {
+	if s == nil {
+		return false
+	}
+	return backendRegionPolyAutoAdopts(s.fnType, s.regionPolyOwner.arenaRef != nil, s.ambientGrownContainerRegion, n)
+}
+
+func backendRegionPolyAutoAdopts(fnType *semantic.FuncType, hasArenaOwner bool, ambientGrownContainerRegion string, n *ast.RegionStmt) bool {
+	if fnType == nil || !backendIsCompilerGeneratedAutoRegion(n) || !hasArenaOwner {
 		return false
 	}
 	// A region-polymorphic function adopts the threaded caller region. So does a VOID GROWER whose
 	// ambient region was bound to a grown caller-owned container's arena (AmbientGrownContainerRegion):
 	// its synthesized `__auto_*` region must route inserted region-poly values into that arena, not a
 	// per-call arena freed on return.
-	return s.fnType.RegionPolymorphic || s.ambientGrownContainerRegion != ""
+	return fnType.RegionPolymorphic || ambientGrownContainerRegion != ""
+}
+
+func backendSynthesizedAutoRegionActive(parentActive bool, n *ast.RegionStmt) bool {
+	return parentActive || backendIsCompilerGeneratedAutoRegion(n)
 }
 
 func backendIsSynthesizedAutoRegion(name string) bool {
 	const prefix = "__auto_"
 	return len(name) > len(prefix) && name[:len(prefix)] == prefix
+}
+
+func backendIsCompilerGeneratedAutoRegion(n *ast.RegionStmt) bool {
+	return n != nil && n.Lazy && !n.UserAuto && backendIsSynthesizedAutoRegion(n.Name)
 }
 
 // backendTypeCarriesRegionStorage mirrors the semantic lifetime predicate for the backend's one
@@ -881,9 +896,7 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	defer s.popScope()
 	savedTreeOwner := s.treeAllocOwner
 	savedSynthesizedAutoRegion := s.activeSynthesizedAutoRegion
-	if backendIsSynthesizedAutoRegion(n.Name) {
-		s.activeSynthesizedAutoRegion = true
-	}
+	s.activeSynthesizedAutoRegion = backendSynthesizedAutoRegionActive(savedSynthesizedAutoRegion, n)
 	// docs/74: the implicit region-backed packed stores are region-scoped — a store built in this
 	// region must not leak out to (or into) an enclosing region. Clone on entry, restore on exit, so
 	// each `in auto:` owns its own stores and a long-lived outer tree keeps its store across inner

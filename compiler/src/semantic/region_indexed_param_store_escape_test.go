@@ -34,3 +34,12 @@ func TestIndexedParamStoreOfParamOrLiteralAccepted(t *testing.T) {
 		}
 	}
 }
+
+func TestIndexedParamStoreSyntheticRegionDoesNotCollideWithDeclaredRegion(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "indexed_store_region_name_collision.elisa", `def keep[@__rg_diags](diags: mutable darray[sview]&, value: sview @__rg_diags) -> void:
+    diags[0] <- value
+`).Errors(), " | ")
+	if !strings.Contains(errs, `is stored into longer-lived region "__rg_diags_1"`) {
+		t.Fatalf("indexed store must not treat a declared region binder as the container's synthetic region, got: %q", errs)
+	}
+}

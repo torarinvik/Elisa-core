@@ -509,7 +509,7 @@ func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Ty
 		// region frees at block exit — the same UAF as construction-into-a-local-region, but the
 		// region rode in via field growth rather than a construction-call argument.
 		taint := a.returnedAggregateTaintRegion(value)
-		if taint == "" || isSynthesizedAutoRegion(taint) {
+		if taint == "" || a.isCompilerGeneratedAutoRegion(taint) {
 			return
 		}
 		if sym, state := a.lookupRegionState(taint); sym == nil || state.Destroyed || state.DeclScope == nil {
@@ -517,7 +517,7 @@ func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Ty
 		}
 		region = taint
 	}
-	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", regionDisplayName(region), regionDisplayName(region))
+	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", a.regionDisplayName(region), a.regionDisplayName(region))
 }
 
 // typeCarriesRegionStorage reports whether a value of type t can transitively hold
@@ -756,10 +756,10 @@ func (a *Analyzer) checkStoredRegionContainerEscapeInto(valueExpr ast.Expr, valu
 }
 
 // exprIsRegionPolyResultCarryingRegionData reports whether an expression is a call to a
-// region-polymorphic function whose result transitively holds region-allocated data. Such a
-// result lives in the ambient (threaded) region even though its type is region-less, so a store
-// of it into longer-lived storage dangles once that region is freed (the ref-param / global-store
-// soundness case). A pure-scalar result (no container/ref/nested region) can never dangle.
+// region-polymorphic function whose RETURN is proven to allocate in the caller's threaded arena
+// and whose result carries region storage. Region-polymorphism can also be required solely by an
+// out-parameter write; that does not transfer the hidden arena's ownership to an unrelated return
+// value (which may instead borrow a caller parameter or be static).
 func (a *Analyzer) exprIsRegionPolyResultCarryingRegionData(valueExpr ast.Expr, valueType Type) bool {
 	if a == nil || valueExpr == nil {
 		return false
@@ -769,7 +769,7 @@ func (a *Analyzer) exprIsRegionPolyResultCarryingRegionData(valueExpr ast.Expr, 
 		return false
 	}
 	ft := a.regionPolyCalleeFuncType(call)
-	if ft == nil || !ft.RegionPolymorphic {
+	if ft == nil || !ft.RegionPolymorphic || !a.regionPolyReturnsCallerArena[ft] {
 		return false
 	}
 	return typeCarriesRegionStorage(valueType)
@@ -810,7 +810,7 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 		return // caller-owned region — fine.
 	}
 	if sym, _ := a.lookupRegionState(region); sym != nil {
-		if isSynthesizedAutoRegion(region) {
+		if a.isCompilerGeneratedAutoRegion(region) {
 			// Build-local-return (region-return-inference Stage 1): in a region-polymorphic
 			// function the synthesized `__auto_*` region is threaded from the caller (the hidden
 			// `__region_auto` Arena&) and the backend adopts it (regionPolyAutoAdopts), so a value
@@ -866,6 +866,36 @@ func isSynthesizedAutoRegion(name string) bool {
 	return len(name) > len(prefix) && name[:len(prefix)] == prefix
 }
 
+// isCompilerGeneratedAutoRegionStmt identifies the parser/semantic pass' lazy
+// auto scopes. The reserved-looking name is not sufficient provenance: source
+// code may declare a region with the same prefix.
+func isCompilerGeneratedAutoRegionStmt(region *ast.RegionStmt) bool {
+	return region != nil && region.Lazy && !region.UserAuto && isSynthesizedAutoRegion(region.Name)
+}
+
+func isCompilerGeneratedAutoRegionSymbol(sym *Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	region, ok := sym.Node.(*ast.RegionStmt)
+	return ok && isCompilerGeneratedAutoRegionStmt(region)
+}
+
+// isCompilerGeneratedAutoRegion resolves a live region name back to its AST
+// declaration before applying auto-region lifetime exemptions. Source-declared
+// regions and source `in auto:` blocks never adopt a caller arena.
+func (a *Analyzer) isCompilerGeneratedAutoRegion(name string) bool {
+	if a == nil || a.currentScope == nil || !isSynthesizedAutoRegion(name) {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || sym.Kind != SymbolRegion {
+		return false
+	}
+	region, ok := sym.Node.(*ast.RegionStmt)
+	return ok && isCompilerGeneratedAutoRegionStmt(region)
+}
+
 // regionDisplayName is the name a region is allowed to APPEAR UNDER in a user-facing
 // diagnostic. A compiler-synthesized auto region has no name the programmer wrote, and
 // synthesizedAutoRegionName builds it from the declaration's BUFFER OFFSET -- so printing
@@ -875,8 +905,8 @@ func isSynthesizedAutoRegion(name string) bool {
 // asserted by any test and tells the reader nothing, so the inferred region reports under a
 // fixed placeholder that no identifier can collide with. Every region the programmer named
 // renders exactly as before.
-func regionDisplayName(name string) string {
-	if isSynthesizedAutoRegion(name) {
+func (a *Analyzer) regionDisplayName(name string) string {
+	if a.isCompilerGeneratedAutoRegion(name) {
 		return "<inferred>"
 	}
 	return name
@@ -990,10 +1020,24 @@ func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 	}
 	_, targetTracked := a.regionLifetimeOrdinal(targetRegion)
 	_, valueTracked := a.regionLifetimeOrdinal(valueRegion)
-	valueIsParam := a.lookupRegionParam(valueRegion)
+	// The hidden region-polymorphic arena is caller-owned, but it has no proven
+	// identity relation with a separate destination region parameter. A generated
+	// auto RegionStmt inside a region-polymorphic function uses that same arena.
+	regionPolyCallerArena := a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic &&
+		(valueRegion == regionPolymorphicImplicitParamName || a.isCompilerGeneratedAutoRegion(valueRegion))
+	valueIsParam := a.lookupRegionParam(valueRegion) || regionPolyCallerArena
 	targetIsParam := a.lookupRegionParam(targetRegion)
 	if valueIsParam {
 		if targetIsParam {
+			// The region-polymorphic hidden caller arena is not a proof that a
+			// distinct inferred destination binder names the same arena. The
+			// equality fast path above is the only identity proof available here.
+			if regionPolyCallerArena {
+				return true
+			}
+			if a.isUnrelatedRegionParam(valueRegion) || a.isUnrelatedRegionParam(targetRegion) {
+				return true
+			}
 			// Distinct source-declared region parameters are independently supplied
 			// by the caller. Neither is known to outlive the other, so storing a
 			// borrowed payload across them is unsafe unless the signature ties them
@@ -1025,6 +1069,18 @@ func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 	// target. Otherwise (target ancestor of value, OR disjoint siblings) it is
 	// not provably safe → reject.
 	return !a.regionIsAncestor(valueRegion, targetRegion)
+}
+
+func (a *Analyzer) isUnrelatedRegionParam(region string) bool {
+	if a == nil || region == "" {
+		return false
+	}
+	for i := len(a.regionUnrelatedParamScopes) - 1; i >= 0; i-- {
+		if a.regionUnrelatedParamScopes[i][region] {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) isSourceDeclaredRegionParam(region string) bool {
@@ -1086,7 +1142,7 @@ func (a *Analyzer) checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr ast
 					continue
 				}
 				if a.regionStoreEscapes(targetRegion, valueRegion) {
-					a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+					a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 				}
 			}
 		}
@@ -1105,7 +1161,7 @@ func (a *Analyzer) checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr ast
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 	}
 }
 
@@ -1150,7 +1206,7 @@ func (a *Analyzer) checkUnannotatedParamViewStore(targetExpr ast.Expr, targetReg
 			name = a.currentFuncDecl.Params[index].Name
 		}
 		reported = true
-		a.errorf(targetExpr.Pos(), "parameter %q is borrowed from the caller with no region, so it is not known to outlive region %q; storing it there may leave a dangling reference. Annotate the parameter `@%s`", name, regionDisplayName(targetRegion), targetRegion)
+		a.errorf(targetExpr.Pos(), "parameter %q is borrowed from the caller with no region, so it is not known to outlive region %q; storing it there may leave a dangling reference. Annotate the parameter `@%s`", name, a.regionDisplayName(targetRegion), targetRegion)
 	})
 }
 
@@ -1167,7 +1223,7 @@ func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regio
 	for _, conflict := range a.callRegionBindingConflicts {
 		first, second := conflict[1], conflict[2]
 		if len(args) > 0 && args[0] != nil && (a.regionStoreEscapes(first, second) || a.regionStoreEscapes(second, first)) {
-			a.errorf(args[0].Pos(), "region parameter %q of %q is bound to both %q and %q; the callee may store a value of one into the other, and they do not share a lifetime. Pass values of the same region", conflict[0], ft.Name, regionDisplayName(first), regionDisplayName(second))
+			a.errorf(args[0].Pos(), "region parameter %q of %q is bound to both %q and %q; the callee may store a value of one into the other, and they do not share a lifetime. Pass values of the same region", conflict[0], ft.Name, a.regionDisplayName(first), a.regionDisplayName(second))
 			break
 		}
 	}
@@ -1189,7 +1245,7 @@ func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regio
 		// A region parameter or program region outlives this call's frame: a borrow of a
 		// function-local value (a local string's view) cannot be passed into it.
 		if a.lookupRegionParam(bound) || a.isProgramRegion(bound) {
-			a.checkAggregateBorrowEscapesLocal(args[index], "argument for a parameter in region "+strconv.Quote(regionDisplayName(bound))+" borrows function-local storage")
+			a.checkAggregateBorrowEscapesLocal(args[index], "argument for a parameter in region "+strconv.Quote(a.regionDisplayName(bound))+" borrows function-local storage")
 		}
 		state, ok := a.regionRefStateForExpr(args[index])
 		if !ok {
@@ -1201,7 +1257,7 @@ func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regio
 				continue
 			}
 			if a.regionStoreEscapes(bound, valueRegion) {
-				a.errorf(args[index].Pos(), "argument in region %q is passed where region %q is required; region %q is freed first, so the callee may keep a dangling reference. Copy it into region %q first", regionDisplayName(valueRegion), regionDisplayName(bound), regionDisplayName(valueRegion), regionDisplayName(bound))
+				a.errorf(args[index].Pos(), "argument in region %q is passed where region %q is required; region %q is freed first, so the callee may keep a dangling reference. Copy it into region %q first", a.regionDisplayName(valueRegion), a.regionDisplayName(bound), a.regionDisplayName(valueRegion), a.regionDisplayName(bound))
 				break
 			}
 		}
@@ -1274,11 +1330,11 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 				// A synthesized auto region that ADOPTS the caller's arena (regionPolyAutoAdopts)
 				// frees nothing, so a borrow of its storage is caller-owned: the same sanction the
 				// fresh-enum-payload path below grants.
-				if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+				if a.isCompilerGeneratedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
 					return
 				}
 				if a.regionStoreEscapes(targetRegion, region) {
-					a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+					a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(region), a.regionDisplayName(targetRegion), a.regionDisplayName(region), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 				}
 				return
 			}
@@ -1310,12 +1366,12 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		// Sanctioned adopted cases (mirrors the backend's regionPolyAutoAdopts): the function's
 		// synthesized auto region ADOPTS a caller-provided arena, so the wrapped payload actually
 		// lands in caller-owned storage and nothing dangles.
-		if a.autoRegionAdoptsCallerArena(targetRegion) {
+		if a.isCompilerGeneratedAutoRegion(valueRegion) && a.autoRegionAdoptsCallerArena(targetRegion) {
 			return
 		}
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 	}
 }
 
@@ -1470,7 +1526,7 @@ func (a *Analyzer) checkNestedRegionBulkStoreEscape(sourceExpr, receiverExpr ast
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(sourceExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+		a.errorf(sourceExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 	}
 }
 
@@ -1608,7 +1664,7 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 // region param the caller owns, a destroyed/unknown region, or an untainted argument.
 func (a *Analyzer) argInteriorLocalRegion(arg ast.Expr) string {
 	taint := a.structInteriorTaintRegion(arg)
-	if taint == "" || isSynthesizedAutoRegion(taint) {
+	if taint == "" || a.isCompilerGeneratedAutoRegion(taint) {
 		return ""
 	}
 	if sym, state := a.lookupRegionState(taint); sym == nil || state.Destroyed || state.DeclScope == nil {
@@ -1649,7 +1705,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 			if tj == storeTargetGlobal {
 				// The callee stores the argument into program-lifetime storage (a global/perm
 				// container, or relayed there) — that outlives every local region unconditionally.
-				a.errorf(arg.Pos(), "value in region %q is stored by the callee into program-lifetime storage, which outlives the region; region %q is freed first, leaving a dangling reference. Build the value into a program-lifetime region (e.g. `perm`) before passing it", regionDisplayName(srcRegion), regionDisplayName(srcRegion))
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into program-lifetime storage, which outlives the region; region %q is freed first, leaving a dangling reference. Build the value into a program-lifetime region (e.g. `perm`) before passing it", a.regionDisplayName(srcRegion), a.regionDisplayName(srcRegion))
 				continue
 			}
 			if tj < 0 || tj >= len(orderedArgs) {
@@ -1662,7 +1718,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 				continue
 			}
 			if a.regionOutlives(targetRegion, srcRegion) {
-				a.errorf(arg.Pos(), "value in region %q is stored by the callee into a longer-lived argument in region %q; region %q is freed first, leaving a dangling reference. Build the value into region %q (or a region that outlives it) before passing it", regionDisplayName(srcRegion), regionDisplayName(targetRegion), regionDisplayName(srcRegion), regionDisplayName(targetRegion))
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into a longer-lived argument in region %q; region %q is freed first, leaving a dangling reference. Build the value into region %q (or a region that outlives it) before passing it", a.regionDisplayName(srcRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(srcRegion), a.regionDisplayName(targetRegion))
 			}
 		}
 	}
@@ -1767,7 +1823,7 @@ func (a *Analyzer) checkStructCopyInteriorRegionEscape(targetExpr ast.Expr, targ
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 	}
 }
 
@@ -1809,7 +1865,7 @@ func (a *Analyzer) checkRegionlessTargetStoreEscapeInScope(targetExpr ast.Expr, 
 	if a == nil || targetExpr == nil {
 		return
 	}
-	if isSynthesizedAutoRegion(valueRegion) && !a.isUserAutoRegion(valueRegion) {
+	if a.isCompilerGeneratedAutoRegion(valueRegion) {
 		return
 	}
 	regionSym, state := a.lookupRegionState(valueRegion)
@@ -1826,7 +1882,7 @@ func (a *Analyzer) checkRegionlessTargetStoreEscapeInScope(targetExpr ast.Expr, 
 	if !scopeStrictlyEncloses(targetScope, state.DeclScope) {
 		return
 	}
-	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", regionDisplayName(valueRegion), root.Name, regionDisplayName(valueRegion), regionDisplayName(valueRegion), root.Name)
+	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", a.regionDisplayName(valueRegion), root.Name, a.regionDisplayName(valueRegion), a.regionDisplayName(valueRegion), root.Name)
 }
 
 // isFreshContainerProducer reports whether an expression CONSTRUCTS a fresh value whose interior may
@@ -1938,19 +1994,15 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 	// value's synthesized `__auto_*` interior actually lives in the caller's arena — the backend's
 	// regionPolyAutoAdopts routes it there — so nothing dangles. Mirrors the enum-ctor element
 	// check; keeps `out.push(Holder{items: make_vals(10)})` consistent with the enum-ctor form.
-	if a.currentFuncDecl != nil && targetRegion != "" && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
-		a.noteAmbientFillFresh()
+	if a.isCompilerGeneratedAutoRegion(valueRegion) && a.autoRegionAdoptsCallerArena(targetRegion) {
 		return
-	}
-	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic && targetRegion != "" && !a.isProgramRegion(targetRegion) {
-		return // region-poly fn: the synthesized auto region adopts the caller's arena (regionPolyAutoAdopts).
 	}
 	if targetRegion == "" {
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), via, regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), via, a.regionDisplayName(valueRegion), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 	}
 }
 
@@ -2159,11 +2211,14 @@ func liveLocalRegionDependencyName(state regionRefState) string {
 	return name
 }
 
-// autoRegionAdoptsCallerArena mirrors the backend's regionPolyAutoAdopts: in a region-polymorphic
-// function, or a void grower whose ambient region is bound to targetRegion's container, every
-// synthesized `__auto_*` region allocates into the caller-provided arena instead of its own.
+// autoRegionAdoptsCallerArena mirrors the backend's ambient-grown-target path.
+// Region-polymorphic functions instead use their distinct hidden caller arena,
+// even if an ambient grown target is also recorded on the declaration.
 func (a *Analyzer) autoRegionAdoptsCallerArena(targetRegion string) bool {
 	if a == nil {
+		return false
+	}
+	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
 		return false
 	}
 	// docs/128: the caller's arena does not outlive a program-lived region, so adopting into
@@ -2175,7 +2230,7 @@ func (a *Analyzer) autoRegionAdoptsCallerArena(targetRegion string) bool {
 		a.noteAmbientFillFresh()
 		return true
 	}
-	return a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic
+	return false
 }
 
 // checkCallArgumentRegionStoreEscape: a call whose `mutable C&` parameter receives a container
@@ -2263,11 +2318,11 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 				state = elemState
 			}
 			for _, region := range liveLocalRegionDependencyNames(state) {
-				if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+				if a.isCompilerGeneratedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
 					continue
 				}
 				if a.regionStoreEscapes(targetRegion, region) {
-					a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived region %q through argument %d; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before the call", regionDisplayName(region), regionDisplayName(targetRegion), index+1, regionDisplayName(region), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+					a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived region %q through argument %d; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before the call", a.regionDisplayName(region), a.regionDisplayName(targetRegion), index+1, a.regionDisplayName(region), a.regionDisplayName(targetRegion), a.regionDisplayName(targetRegion))
 					break
 				}
 			}
@@ -2347,10 +2402,10 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			regions = a.storeCallArgRegions(arg, mode)
 		}
 		for _, region := range regions {
-			if region == targetRegion || a.lookupRegionParam(region) {
+			if region == targetRegion || (targetRegion == "" && a.lookupRegionParam(region)) {
 				continue
 			}
-			if isSynthesizedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
+			if a.isCompilerGeneratedAutoRegion(region) && a.autoRegionAdoptsCallerArena(targetRegion) {
 				continue
 			}
 			if targetRegion == "" || a.regionStoreEscapes(targetRegion, region) {
@@ -2358,7 +2413,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 					_, tracked := a.trackedElementStateOfLocal(arg)
 					fmt.Fprintf(os.Stderr, "STORECALL at %s mode=%d tracked=%v nobytes=%v argType=%s region=%s\n", arg.Pos(), mode, tracked, typeHoldsNoBytes(stripRefForBounds(a.exprTypes[arg]), map[Type]bool{}), typeString(a.exprTypes[arg]), region)
 				}
-				a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived storage through argument %d; region %q is freed first, leaving a dangling reference. Copy it into the target's region (or a region that outlives it) before the call", regionDisplayName(region), index+1, regionDisplayName(region))
+				a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived storage through argument %d; region %q is freed first, leaving a dangling reference. Copy it into the target's region (or a region that outlives it) before the call", a.regionDisplayName(region), index+1, a.regionDisplayName(region))
 				break
 			}
 		}

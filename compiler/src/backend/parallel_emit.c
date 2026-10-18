@@ -231,7 +231,6 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 // to erase it. Ownership and final linkage still use the shared partition rules.
 extern LLVMModuleRef elisacoreCloneSelectedDefinitions(LLVMModuleRef m,
     const long long *owners, size_t count, int part, const char *unit_namespace);
-extern long long *elisacoreStableObjectOwners(LLVMModuleRef m, int jobs, size_t *count);
 extern void elisacorePruneObjectDeclarations(LLVMModuleRef m);
 
 long long elisacoreObjectPartitionWeight(LLVMModuleRef m) {
@@ -241,16 +240,13 @@ long long elisacoreObjectPartitionWeight(LLVMModuleRef m) {
 	return total;
 }
 
-LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part, const char *unit_namespace) {
-	if (m == NULL || jobs < 1 || part < 0 || part >= jobs) return NULL;
-	long long *owners = NULL;
-	size_t count = 0;
-	owners = elisacoreStableObjectOwners(m, jobs, &count);
-	if (owners == NULL) return NULL;
+LLVMModuleRef elisacoreCloneObjectPartitionWithOwners(
+	LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
+	const long long *owners, size_t count) {
+	if (m == NULL || jobs < 1 || part < 0 || part >= jobs || owners == NULL) return NULL;
 	LLVMModuleRef clone = elisacoreCloneSelectedDefinitions(m, owners, count, part, unit_namespace);
-	if (clone == NULL) { free(owners); return NULL; }
+	if (clone == NULL) return NULL;
 	int ok = part_restrict_module(clone, owners, count, part, 0, m);
-	free(owners);
 	if (ok) elisacorePruneObjectDeclarations(clone);
 	char *message = NULL;
 	if (!ok || LLVMVerifyModule(clone, LLVMReturnStatusAction, &message)) {
@@ -259,6 +255,17 @@ LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part,
 		return NULL;
 	}
 	if (message) LLVMDisposeMessage(message);
+	return clone;
+}
+
+LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part, const char *unit_namespace) {
+	if (m == NULL || jobs < 1 || part < 0 || part >= jobs) return NULL;
+	size_t count = 0;
+	long long *owners = elisacoreStableObjectOwners(m, jobs, &count);
+	if (owners == NULL) return NULL;
+	LLVMModuleRef clone = elisacoreCloneObjectPartitionWithOwners(
+		m, jobs, part, unit_namespace, owners, count);
+	free(owners);
 	return clone;
 }
 

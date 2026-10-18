@@ -209,7 +209,7 @@ func (a *Analyzer) checkAggregateBorrowEscapesLocal(value ast.Expr, message stri
 	// reports only when that one did not (a region value can still hold a borrow of a stack local).
 	regionDependent := false
 	if refState, ok := a.regionRefStateForExpr(value); ok {
-		if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil && !isSynthesizedAutoRegion(region.Name) {
+		if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil && !isCompilerGeneratedAutoRegionSymbol(region) {
 			regionDependent = true
 		}
 	}
@@ -319,7 +319,7 @@ func (a *Analyzer) checkBorrowEscapesLocal(value ast.Expr, valueType Type, messa
 	if refState, ok := a.regionRefStateForExpr(value); ok {
 		// A function-body auto region is no scope of the user's: nothing reports a borrow into it
 		// leaving the function, so the storage class decides below.
-		if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil && !isSynthesizedAutoRegion(region.Name) {
+		if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil && !isCompilerGeneratedAutoRegionSymbol(region) {
 			return
 		}
 	}

@@ -575,7 +575,7 @@ func collectSynthesizedRegions(root []ast.Stmt) []*ast.RegionStmt {
 				return
 			}
 			seen[node] = struct{}{}
-			if rs, ok := v.Interface().(*ast.RegionStmt); ok && rs.Lazy && isSynthesizedAutoRegion(rs.Name) {
+			if rs, ok := v.Interface().(*ast.RegionStmt); ok && isCompilerGeneratedAutoRegionStmt(rs) {
 				out = append(out, rs)
 			}
 			rec(v.Elem())

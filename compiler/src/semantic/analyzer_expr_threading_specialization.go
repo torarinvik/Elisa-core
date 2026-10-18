@@ -345,7 +345,7 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 		if !dep.Valid || region == nil {
 			continue
 		}
-		if isSynthesizedAutoRegion(region.Name) && (joinPool != nil || callName == "parallel for" || returnTypeIsScalarValue(argType)) {
+		if isCompilerGeneratedAutoRegionSymbol(region) && (joinPool != nil || callName == "parallel for" || returnTypeIsScalarValue(argType)) {
 			// The function's own auto region outlives a scope that joins its workers, and a scalar
 			// value carries no borrow the worker could dereference through the type system.
 			continue

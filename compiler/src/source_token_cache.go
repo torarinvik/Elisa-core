@@ -258,22 +258,20 @@ func (c *sourceTokenCache) configureSuffixReplay(p *parser.Parser, candidate sou
 	if matching == 0 {
 		return
 	}
-	p.SetSyntaxSuffixReplay(candidate.trace, len(tokens)-matching, func(declarations int) (*ast.File, error) {
-		file, err := candidate.parsed.CopySuffix(declarations)
-		if err != nil {
-			return nil, err
-		}
-		c.mu.Lock()
-		c.suffixParsedDeclarations += uint64(len(file.Decls))
-		c.clock++
-		for key, entry := range c.entries {
-			if entry.parsed == candidate.parsed {
-				entry.lastUse = c.clock
-				c.entries[key] = entry
-				break
+	p.SetSyntaxSuffixReplay(candidate.trace, len(tokens)-matching,
+		func(declarations int) (*ast.File, error) {
+			return candidate.parsed.CopySuffix(declarations)
+		}, func(declarations int) {
+			c.mu.Lock()
+			c.suffixParsedDeclarations += uint64(declarations)
+			c.clock++
+			for key, entry := range c.entries {
+				if entry.parsed == candidate.parsed {
+					entry.lastUse = c.clock
+					c.entries[key] = entry
+					break
+				}
 			}
-		}
-		c.mu.Unlock()
-		return file, nil
-	})
+			c.mu.Unlock()
+		})
 }

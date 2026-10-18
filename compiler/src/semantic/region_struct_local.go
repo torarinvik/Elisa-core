@@ -1,10 +1,6 @@
 package semantic
 
-import (
-	"strings"
-
-	"elisacore/src/ast"
-)
+import "elisacore/src/ast"
 
 // Locally-constructed structs that own region-allocated container fields need a region
 // identity so a call site can thread that region into a callee's struct-ref region param
@@ -226,7 +222,7 @@ func (a *Analyzer) structLocalRegionIsLive(region string) bool {
 		return false
 	}
 	// Function-scoped / program-lifetime synthesized regions: always live.
-	if region == "perm" || strings.HasPrefix(region, "__auto_") {
+	if region == "perm" || a.isCompilerGeneratedAutoRegion(region) {
 		return true
 	}
 	// Named region: live iff still a region owner in scope and not destroyed. Once the

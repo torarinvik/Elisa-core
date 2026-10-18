@@ -133,7 +133,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
-		if !ok || p.Variadic != a.Variadic || funcTypeExplicitParamCount(p) != funcTypeExplicitParamCount(a) || len(p.ImplicitParamNames) != len(a.ImplicitParamNames) || len(p.RegionParams) != len(a.RegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
+		if !ok || p.Variadic != a.Variadic || p.ReturnRegion != a.ReturnRegion || funcTypeExplicitParamCount(p) != funcTypeExplicitParamCount(a) || len(p.ImplicitParamNames) != len(a.ImplicitParamNames) || len(p.RegionParams) != len(a.RegionParams) || len(p.InferredRegionParams) != len(a.InferredRegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
 			return false
 		}
 		if len(p.ExplicitParamNames) != 0 {
@@ -153,6 +153,11 @@ func matchTypePattern(pattern, actual Type) bool {
 		}
 		for i := range p.RegionParams {
 			if p.RegionParams[i] != a.RegionParams[i] {
+				return false
+			}
+		}
+		for i := range p.InferredRegionParams {
+			if p.InferredRegionParams[i] != a.InferredRegionParams[i] {
 				return false
 			}
 		}

@@ -1258,17 +1258,43 @@ decline suffix replay; there is no AST position rebasing or body-level syntax
 slicing. A relocation implementation must account for `lexer.Pos` start/end
 offsets, lines and columns, shifted token/checkpoint indices, suffix-local reads
 of token-stream length, and position-derived names such as `__auto_<offset>`.
+The simplest relocation slice can keep token count and indexes fixed, require
+all non-position token fields plus file/line/column coordinates to match, and
+accept only one uniform delta for every suffix token's start/end byte offsets.
+Then a suffix-only generated AST copy path adds that delta to `Pos.Offset` and
+`Pos.EndOffset`, declining if any copied source span reaches before the suffix
+boundary. This covers length changes confined to an earlier line while keeping
+the current position mapping intact. A broader mapper can use fresh-lexer
+start/end positions per token; `#line` can reset logical file and line attribution,
+so one global line or column delta is unsafe. Keep the exact-position copy path
+unchanged. General token insertions/deletions need a separate design for
+checkpoint indexes and parser reads.
+An intermediate case is a token-count change with unchanged byte positions from
+the suffix onward. Its certificate needs old and new suffix starts and a constant
+token-index delta; translate checkpoint positions and read ranges, reject traces
+that observed total token length, and resume at the current EOF index. This can
+reuse stable-position syntax before adding source-position rebasing for edits that
+also shift bytes.
 The targeted early-edit benchmark changes a six-digit literal to another
 six-digit literal in a 513-function source. One captured three-sample run on
 Apple M5 measured median 2.672 ms with token reuse and fresh parsing versus
 2.318 ms with suffix replay (13% lower). Allocations fell from 7,765 to 6,827
 per operation, while allocated bytes rose from 4.44 MB to 5.50 MB. The suffix
 samples ranged 2.303–2.780 ms, so this is narrow synthetic evidence, not a
-whole-project performance claim. The command used `GOMAXPROCS=1 go test ./src
+whole-project performance claim. The benchmark times and counts the changed
+source construction (`strings.Replace` and formatting) along with each parse;
+its allocation totals are not parse-only costs. The command used `GOMAXPROCS=1 go test ./src
 -run '^$' -bench '^BenchmarkSourceSyntaxCacheEarlyEditSuffix$' -benchtime=200ms
 -count=3 -cpu=1`; the captured output is in
 `compiler/build/verification/syntax-suffix-20261018/benchmark.txt`. Insert/delete and
 multiline position parity still need qualification before broadening reuse.
+
+The suffix copy still duplicates every reused AST node because semantic passes
+can mutate request-owned trees. A larger allocation win needs an immutable syntax
+representation (for example, shared green nodes with current-revision position
+views) or copy-on-write nodes, together with semantic passes that stop mutating
+shared syntax. Sharing the current mutable AST pointers would violate the cache's
+ownership boundary.
 
 Final local throughput measurements (M5, Go1.27.2, GOMAXPROCS=4, three
 100-iteration runs) use 2,048 simple functions and distinct edits to the last

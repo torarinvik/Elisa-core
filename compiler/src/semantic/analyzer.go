@@ -174,8 +174,14 @@ type Analyzer struct {
 	// returns the struct, hiding the region-poly constructor. Region-poly-ness is read
 	// live from the FuncType during the fixpoint. Nil outside the pre-pass.
 	regionPolyCandidateFnTypes map[string][]*FuncType
-	extensionMethodsByName     map[string][]*ExtensionMethod
-	ufcsFunctionsByName        map[string][]*Symbol
+	// regionPolyReturnsCallerArena records the narrower fact that a function's
+	// returned value is actually allocated in the threaded caller arena. A
+	// function may be region-polymorphic solely because it writes a packed
+	// handle through an out parameter; that does not make an unrelated return
+	// value caller-arena-owned.
+	regionPolyReturnsCallerArena map[*FuncType]bool
+	extensionMethodsByName       map[string][]*ExtensionMethod
+	ufcsFunctionsByName          map[string][]*Symbol
 	// returnBorrowAliasFrames/Journal undo a return-borrow branch's writes to its alias
 	// environment (analyzer_return_borrow_alias_journal.go).
 	returnBorrowAliasFrames  []returnBorrowAliasFrame
@@ -365,31 +371,32 @@ type Analyzer struct {
 	// currentDropLocals is the declaration-ordered list of drop-typed locals in the
 	// function being analyzed. Reset per function; walked backwards at each exit edge
 	// so drops run in reverse declaration order (docs/126 §2).
-	currentDropLocals        []dropLocalBinding
-	lexicalReads             *lexicalReadInvocation
-	lexicalBinders           *lexicalBinderOwnership
-	typeParamScopes          []map[string]Type
-	typeParamInterfaceScopes []map[string]*StaticInterface
-	interfaceAssocTypeScopes []map[string]Type
-	constParamScopes         []map[string]Type
-	constEvalScopes          []map[string]ConstValue
-	constEvalDepth           int
-	constInitDepth           int
-	staticContextDepth       int
-	staticCallDepth          int
-	shapeParamScopes         []map[string]Shape
-	regionParamScopes        []map[string]bool
-	permissionParamScopes    []map[string]bool
-	errorSetParamScopes      []map[string]bool
-	freshShapeCounter        int
-	returnFreshShapeStatus   map[string]freshReturnStatus
-	annotatedFuncs           []*AnnotatedFunc
-	lawFuzzObligations       []*LawFuzzObligation
-	exportedTypes            []*ExportedType
-	exportedFuncs            []*ExportedFunc
-	exportedGlobals          []*ExportedGlobal
-	currentScope             *Scope
-	currentReturn            Type
+	currentDropLocals          []dropLocalBinding
+	lexicalReads               *lexicalReadInvocation
+	lexicalBinders             *lexicalBinderOwnership
+	typeParamScopes            []map[string]Type
+	typeParamInterfaceScopes   []map[string]*StaticInterface
+	interfaceAssocTypeScopes   []map[string]Type
+	constParamScopes           []map[string]Type
+	constEvalScopes            []map[string]ConstValue
+	constEvalDepth             int
+	constInitDepth             int
+	staticContextDepth         int
+	staticCallDepth            int
+	shapeParamScopes           []map[string]Shape
+	regionParamScopes          []map[string]bool
+	regionUnrelatedParamScopes []map[string]bool
+	permissionParamScopes      []map[string]bool
+	errorSetParamScopes        []map[string]bool
+	freshShapeCounter          int
+	returnFreshShapeStatus     map[string]freshReturnStatus
+	annotatedFuncs             []*AnnotatedFunc
+	lawFuzzObligations         []*LawFuzzObligation
+	exportedTypes              []*ExportedType
+	exportedFuncs              []*ExportedFunc
+	exportedGlobals            []*ExportedGlobal
+	currentScope               *Scope
+	currentReturn              Type
 	// lambdaErrorAccumulate is true while analyzing the body of a bare expr-lambda with no annotated
 	// or contextual error-union return (docs/64 Phase 5b). In that mode `try`-without-else and `raise`
 	// UNION their operand's error set into lambdaErrorAccum instead of checking it against

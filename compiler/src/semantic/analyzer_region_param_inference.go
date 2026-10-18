@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
@@ -239,7 +240,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		}
 		// Param names are unique within a function, so the per-param suffix yields a unique,
 		// deterministic region-param name (no Date/random — must stay resume-stable).
-		name := "__rg_" + p.Name
+		name := inferredRegionParamName(fn, p.Name)
 		stamp(name)
 		fn.RegionParams = append(fn.RegionParams, name)
 		fn.InferredRegionParams = append(fn.InferredRegionParams, name)
@@ -255,7 +256,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 	if ambientGrownParam != "" {
 		// Recorded on the AST FuncDecl (like RegionParams) — symbol/FuncType resolution is not reliably
 		// available at this pre-pass, and the backend reads the FuncDecl directly.
-		fn.AmbientGrownContainerRegion = "__rg_" + ambientGrownParam
+		fn.AmbientGrownContainerRegion = inferred[ambientGrownParam]
 		// Callers' stack assignment must know which arg position feeds the ambient region: a
 		// container forwarded here gets adopted payload allocations interleaved into its arena,
 		// so its stack cannot be tail-only reserve_commit (see assignRegionStacks).
@@ -269,6 +270,32 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		}
 	}
 	return changed
+}
+
+// inferredRegionParamName reserves a deterministic region binder that cannot
+// shadow a source-declared generic parameter. Region names participate in
+// specialization bindings, so a synthesized __rg_* name must be distinct from
+// every declared type, region, permission, value, or state generic parameter.
+func inferredRegionParamName(fn *ast.FuncDecl, parameter string) string {
+	base := "__rg_" + parameter
+	used := make(map[string]bool, len(fn.TypeParams)+len(fn.RegionParams)+len(fn.PermissionParams)+len(fn.GenericParams))
+	for _, name := range fn.TypeParams {
+		used[name] = true
+	}
+	for _, name := range fn.RegionParams {
+		used[name] = true
+	}
+	for _, name := range fn.PermissionParams {
+		used[name] = true
+	}
+	for _, param := range fn.GenericParams {
+		used[param.Name] = true
+	}
+	name := base
+	for suffix := 1; used[name]; suffix++ {
+		name = base + "_" + strconv.Itoa(suffix)
+	}
+	return name
 }
 
 // calleeReturnTypeIsRegionValued resolves a callee's declared return type for the
@@ -796,7 +823,7 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 			case *ast.InStoreStmt:
 				return
 			case *ast.RegionStmt:
-				if !isSynthesizedAutoRegion(s.Name) {
+				if !isCompilerGeneratedAutoRegionStmt(s) {
 					return
 				}
 				// fall through to descend into the synthesized wrap's body
@@ -1028,7 +1055,7 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 			case *ast.InStoreStmt:
 				return
 			case *ast.RegionStmt:
-				if !isSynthesizedAutoRegion(n.Name) {
+				if !isCompilerGeneratedAutoRegionStmt(n) {
 					return
 				}
 			case *ast.VarDeclStmt:

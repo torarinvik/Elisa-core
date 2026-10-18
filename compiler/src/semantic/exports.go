@@ -313,7 +313,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 	}
 	return &FuncType{
 		Name:       specialized.Name,
-		TypeParams: nil, RegionParams: append([]string(nil), specialized.RegionParams...),
+		TypeParams: nil, RegionParams: append([]string(nil), specialized.RegionParams...), InferredRegionParams: append([]string(nil), specialized.InferredRegionParams...),
 		GenericParams:               nil,
 		Permissions:                 append([]string(nil), specialized.Permissions...),
 		ShapeParams:                 append([]string(nil), specialized.ShapeParams...),

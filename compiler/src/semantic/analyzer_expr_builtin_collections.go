@@ -52,7 +52,7 @@ func (a *Analyzer) checkContainerGrowthStoreEscape(receiver ast.Expr, operation 
 		return false
 	}
 	storeRegion := storeRegionRootName(a.currentAllocExpr)
-	if storeRegion == "" || isSynthesizedAutoRegion(storeRegion) || !a.activeStoreIsLocalRegion(storeRegion) {
+	if storeRegion == "" || a.isCompilerGeneratedAutoRegion(storeRegion) || !a.activeStoreIsLocalRegion(storeRegion) {
 		return false
 	}
 	receiverType := a.exprTypes[receiver]
@@ -63,7 +63,7 @@ func (a *Analyzer) checkContainerGrowthStoreEscape(receiver ast.Expr, operation 
 	if storeRegion == containerRegion || (!a.containerReceiverStorageOutlivesFunction(receiver) && !a.regionOutlives(containerRegion, storeRegion)) {
 		return false
 	}
-	a.errorf(receiver.Pos(), "%s allocates into function-scoped region %q while growing non-local storage in region %q; this would leave the container pointing at freed memory", operation, storeRegion, regionDisplayName(containerRegion))
+	a.errorf(receiver.Pos(), "%s allocates into function-scoped region %q while growing non-local storage in region %q; this would leave the container pointing at freed memory", operation, storeRegion, a.regionDisplayName(containerRegion))
 	return true
 }
 
@@ -257,7 +257,7 @@ func (a *Analyzer) ambientArenaLocalValueName() (string, bool) {
 	// inside `in NAME:` are rejected before their backing can dangle on block exit.
 	if sym.Kind == SymbolRegion {
 		region, isRegion := sym.Node.(*ast.RegionStmt)
-		if isRegion && region != nil && (region.UserAuto || !isSynthesizedAutoRegion(region.Name)) {
+		if isRegion && region != nil && !isCompilerGeneratedAutoRegionStmt(region) {
 			return ident.Name, true
 		}
 		// A compiler-generated auto-region is eligible for region-return adoption; treating it as an

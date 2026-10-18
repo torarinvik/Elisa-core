@@ -144,6 +144,26 @@ func (a *Analyzer) analyzeVariableDeclaration(n *ast.VarDeclStmt) {
 	// `in <region>:` scope carries that region in its type; escape checks and
 	// codegen arena routing consult it (see REGION_CONTAINERS_DESIGN.md).
 	bindingType = a.stampContainerRegion(bindingType)
+	// A region-polymorphic call's result is allocated in the caller's threaded
+	// arena even though its declared return type is regionless. Preserve that
+	// owner on a local container binding so a later store through the local does
+	// not lose the hidden `__region_auto` dependency.
+	if n.Value != nil && containerOrEntryRegion(bindingType) == "" && a.exprIsRegionPolyResultCarryingRegionData(n.Value, valueType) {
+		region := ""
+		if call, ok := unwrapParenForRegionPoly(n.Value).(*ast.CallExpr); ok && call != nil && a.destinationAllocated != nil {
+			region = a.destinationAllocated[call]
+		}
+		if region == "" {
+			if regionArg, found := a.regionPolymorphicCallerRegionArg(); found {
+				if ident, ok := stripParenExpr(regionArg).(*ast.Ident); ok && ident != nil {
+					region = ident.Name
+				}
+			}
+		}
+		if stamped, applied := stampContainerRegion(bindingType, region); applied {
+			bindingType = stamped
+		}
+	}
 	if a.hasMutableBorrowCapability(bindingType) && !a.suppressDiagnostics {
 		if refs := a.mutableGlobalBorrowTransferRefs(n.Value, bindingType); len(refs) != 0 {
 			if a.mutableGlobalBorrowRefs == nil {

@@ -482,6 +482,13 @@ type Scope struct {
 	// store environment's binder census, analyzer_return_borrow_store_env.go).
 	defineHook func(*Symbol)
 	Symbols    map[string]*Symbol
+	// SMT immutable-local reverse indexes are populated by the analyzer only after a real local
+	// definition succeeds. Candidates keep nil-root invalidation scoped to immutable VarDeclStmt
+	// bindings; the name buckets let finite-root invalidation avoid scanning unrelated locals.
+	// Registration is append-only because declarations can be added after the first write.
+	smtLocalDefinitionCandidates []*Symbol
+	smtLocalDefinitionsByName    map[string][]*Symbol
+	smtLocalDefinitionIndexBuilt bool
 	// symbolsVersion changes whenever Symbols gains, loses or replaces an entry, or an entry's
 	// Type is reassigned; caches derived from a scope's symbols are valid while it is unchanged.
 	symbolsVersion uint64

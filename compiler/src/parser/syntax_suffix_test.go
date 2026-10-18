@@ -41,7 +41,7 @@ func TestSyntaxSuffixRejectsStateChangesAndBackwardReads(t *testing.T) {
 			}
 			calls := 0
 			replay := NewWithSyntaxTrace(tokens)
-			replay.SetSyntaxSuffixReplay(trace, start, func(n int) (*ast.File, error) { calls++; return snapshot.CopySuffix(n) })
+			replay.SetSyntaxSuffixReplay(trace, start, func(n int) (*ast.File, error) { calls++; return snapshot.CopySuffix(n) }, nil)
 			got := replay.ParseFile("certificate.elisa")
 			fresh := New(lexer.New("certificate.elisa", []byte(changed)).Tokenize())
 			want := fresh.ParseFile("certificate.elisa")

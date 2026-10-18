@@ -3,6 +3,7 @@
 
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
+#include <stddef.h>
 
 // Parent side. Returns 0 when the module's partitioned instruction weight is below
 // `min_weight` (nothing written; use the serial path), 1 after writing the module's
@@ -16,6 +17,12 @@ void elisacoreEnsureO3UnrollThreshold(int threshold);
 // caller owns the returned module, in the original context. No original IR is
 // mutated. A null result declines partitioning; callers can emit serially.
 LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part, const char *unit_namespace);
+// Build the stable, module-order owner map once, then borrow it across clones.
+// The caller owns and must free the returned array. Clone calls do not retain it.
+long long *elisacoreStableObjectOwners(LLVMModuleRef m, int jobs, size_t *count);
+LLVMModuleRef elisacoreCloneObjectPartitionWithOwners(
+    LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
+    const long long *owners, size_t count);
 long long elisacoreObjectPartitionWeight(LLVMModuleRef m);
 
 int elisacorePartitionPrepare(LLVMModuleRef m, int jobs, long long min_weight, const char *bitcode_path);

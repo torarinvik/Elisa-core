@@ -67,12 +67,13 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		}
 	}
 	defer func() { a.regionPolyCandidateFnTypes = nil }()
+	a.regionPolyReturnsCallerArena = map[*FuncType]bool{}
 	changed := true
 	for changed {
 		changed = false
 		for _, fn := range funcs {
 			fnType := a.funcTypeForRegionPoly(fn)
-			if fnType == nil || fnType.RegionPolymorphic {
+			if fnType == nil {
 				continue
 			}
 			// A function that threads an allocator (`Arena&` param) manages its own
@@ -84,7 +85,12 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			a.regionPolyFn = fn
 			sc := fnScope[fn]
 			isPoly := false
+			returnsCallerArena := false
 			a.withResolutionContext(sc.Namespace, sc.Usings, func() {
+				returnsRegionAllocated := a.functionReturnsRegionAllocatedValue(fn)
+				buildsLocalContainer := functionBuildsAndReturnsLocalContainer(fn)
+				buildsLocalStruct := functionBuildsAndReturnsLocalStruct(fn, fnType)
+				returnsCallerArena = !funcHasArenaParam(fn) && (returnsRegionAllocated || buildsLocalContainer || buildsLocalStruct)
 				// docs/125: a function that WRITES a region-backed packed handle-enum through a scalar
 				// `mutable T&` out-param (`out <- (Ast::Expr.Foo(...))`) is region-polymorphic, exactly as
 				// one that RETURNS such a node. Threading `__region_auto` makes its node builders allocate
@@ -93,12 +99,16 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 				// Composes with an existing `__rg_parser` struct-region param (they thread DIFFERENT
 				// regions — the tree store vs. the Parser's field arena), so no RegionParams gate needed.
 				// Over-triggering is sound: a handle built in the caller ignores the threaded region.
-				isPoly = (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) ||
-					functionBuildsAndReturnsLocalContainer(fn) ||
-					functionBuildsAndReturnsLocalStruct(fn, fnType) ||
+				isPoly = (returnsRegionAllocated && !funcHasArenaParam(fn)) ||
+					buildsLocalContainer ||
+					buildsLocalStruct ||
 					(!funcHasArenaParam(fn) && a.functionWritesHandleToScalarOutParam(fn))
 			})
-			if isPoly {
+			if returnsCallerArena && !a.regionPolyReturnsCallerArena[fnType] {
+				a.regionPolyReturnsCallerArena[fnType] = true
+				changed = true
+			}
+			if isPoly && !fnType.RegionPolymorphic {
 				fnType.RegionPolymorphic = true
 				changed = true
 			}
@@ -137,7 +147,7 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		// opposite of the asserted static lifetime). Look through it and replace it.
 		body := fn.Body
 		if len(body) == 1 {
-			if rs, isRegion := body[0].(*ast.RegionStmt); isRegion && rs != nil && isSynthesizedAutoRegion(rs.Name) {
+			if rs, isRegion := body[0].(*ast.RegionStmt); isRegion && isCompilerGeneratedAutoRegionStmt(rs) {
 				body = rs.Body
 			}
 		}
@@ -741,7 +751,7 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 				// values inside are exactly the ones a region-polymorphic caller adopts, so
 				// the classifier must see through it. Explicit named regions stay opaque
 				// (their values die with the region — returning them is a separate error).
-				if isSynthesizedAutoRegion(s.Name) {
+				if isCompilerGeneratedAutoRegionStmt(s) {
 					collect(s.Body)
 				}
 			case *ast.MatchStmt:
@@ -881,7 +891,7 @@ func functionBuildsAndReturnsLocalContainer(fn *ast.FuncDecl) bool {
 				collect(s.Body)
 			case *ast.RegionStmt:
 				// Only a synthesized auto region threads+adopts; an explicit `region NAME:` does not.
-				if isSynthesizedAutoRegion(s.Name) {
+				if isCompilerGeneratedAutoRegionStmt(s) {
 					collect(s.Body)
 				}
 			}
@@ -990,7 +1000,7 @@ func functionBuildsAndReturnsLocalStruct(fn *ast.FuncDecl, fnType *FuncType) boo
 				collect(s.Body, inAuto)
 			case *ast.RegionStmt:
 				// Only a synthesized auto region threads+adopts; an explicit `region NAME:` does not.
-				if isSynthesizedAutoRegion(s.Name) {
+				if isCompilerGeneratedAutoRegionStmt(s) {
 					hasAuto = true
 					collect(s.Body, true)
 				}
@@ -1048,7 +1058,7 @@ func functionBuildsAndReturnsLocalStruct(fn *ast.FuncDecl, fnType *FuncType) boo
 			case *ast.CanStmt:
 				walk(s.Body)
 			case *ast.RegionStmt:
-				if isSynthesizedAutoRegion(s.Name) {
+				if isCompilerGeneratedAutoRegionStmt(s) {
 					walk(s.Body)
 				}
 			}
@@ -1283,7 +1293,7 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 		}
 		return false
 	case *ast.CallExpr:
-		if ft := a.regionPolyCalleeFuncType(e); ft != nil && ft.RegionPolymorphic {
+		if ft := a.regionPolyCalleeFuncType(e); ft != nil && a.regionPolyReturnsCallerArena[ft] {
 			return true
 		}
 		// A bare constructor of a region-backed (recursive-plain) enum is an implicit new[auto]
@@ -1298,7 +1308,7 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 		// the CallExpr case. Resolve the name: a region-poly function makes the value
 		// region-allocated.
 		if sym, _, ok := a.lookupVisibleGlobal(e.Name); ok && sym != nil {
-			if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil && ft.RegionPolymorphic {
+			if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil && a.regionPolyReturnsCallerArena[ft] {
 				return true
 			}
 		}
@@ -1346,7 +1356,7 @@ func (a *Analyzer) regionPolyConstructorIsRegionAllocated(name string) bool {
 	}
 	simple := simpleTypeNameSegment(name)
 	for _, ft := range a.regionPolyCandidateFnTypes[simple] {
-		if ft != nil && ft.RegionPolymorphic && funcTypeReturnTypeNamed(ft, simple) {
+		if ft != nil && a.regionPolyReturnsCallerArena[ft] && funcTypeReturnTypeNamed(ft, simple) {
 			return true
 		}
 	}

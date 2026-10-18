@@ -200,31 +200,85 @@ func (a *Analyzer) markLocalDefinitionsStale(roots map[string]bool) {
 	if a == nil {
 		return
 	}
-	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		for _, sym := range sc.Symbols {
-			if sym == nil || sym.Mutable || sym.Kind != SymbolLocal || a.smtStaleLocalDefs[sym] {
-				continue
-			}
-			vd, ok := sym.Node.(*ast.VarDeclStmt)
-			if !ok || vd == nil || vd.Value == nil {
-				continue
-			}
-			hit := roots == nil
-			if !hit {
-				for _, name := range a.smtLocalDefinitionDeps(sym, vd) {
-					if roots[name] {
-						hit = true
-						break
-					}
-				}
-			}
-			if hit {
-				if a.smtStaleLocalDefs == nil {
-					a.smtStaleLocalDefs = map[*Symbol]bool{}
-				}
-				a.smtStaleLocalDefs[sym] = true
+	if roots != nil {
+		hasChangedRoot := false
+		for _, changed := range roots {
+			if changed {
+				hasChangedRoot = true
+				break
 			}
 		}
+		if !hasChangedRoot {
+			return
+		}
+	}
+	markStale := func(sym *Symbol) {
+		if sym == nil || a.smtStaleLocalDefs[sym] {
+			return
+		}
+		if a.smtStaleLocalDefs == nil {
+			a.smtStaleLocalDefs = map[*Symbol]bool{}
+		}
+		a.smtStaleLocalDefs[sym] = true
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		if roots == nil {
+			for _, sym := range sc.smtLocalDefinitionCandidates {
+				markStale(sym)
+			}
+			continue
+		}
+		if !sc.smtLocalDefinitionIndexBuilt {
+			for _, sym := range sc.smtLocalDefinitionCandidates {
+				a.indexSMTLocalDefinition(sc, sym)
+			}
+			sc.smtLocalDefinitionIndexBuilt = true
+		}
+		for name, changed := range roots {
+			if !changed {
+				continue
+			}
+			for _, sym := range sc.smtLocalDefinitionsByName[name] {
+				markStale(sym)
+			}
+		}
+	}
+}
+
+// registerSMTLocalDefinition adds a successfully defined immutable variable declaration to its
+// owning scope's stale-definition indexes. Keep this at the Analyzer definition boundary rather
+// than Scope.Define: syntax prepasses and synthetic binders also define symbols in scopes, but are
+// not local initializer equations that the SMT lane can retain.
+func (a *Analyzer) registerSMTLocalDefinition(scope *Scope, sym *Symbol) {
+	if a == nil || scope == nil || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+		return
+	}
+	vd, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok || vd == nil || vd.Value == nil {
+		return
+	}
+
+	scope.smtLocalDefinitionCandidates = append(scope.smtLocalDefinitionCandidates, sym)
+	if scope.smtLocalDefinitionIndexBuilt {
+		a.indexSMTLocalDefinition(scope, sym)
+	}
+}
+
+// indexSMTLocalDefinition fills a scope's name buckets after the first finite-root invalidation.
+// Later declarations are added here as they arrive, so a lazily built index is never partial.
+func (a *Analyzer) indexSMTLocalDefinition(scope *Scope, sym *Symbol) {
+	if a == nil || scope == nil || sym == nil {
+		return
+	}
+	vd, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok || vd == nil || vd.Value == nil {
+		return
+	}
+	for _, name := range a.smtLocalDefinitionDeps(sym, vd) {
+		if scope.smtLocalDefinitionsByName == nil {
+			scope.smtLocalDefinitionsByName = map[string][]*Symbol{}
+		}
+		scope.smtLocalDefinitionsByName[name] = append(scope.smtLocalDefinitionsByName[name], sym)
 	}
 }
 

@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"math/bits"
 	"reflect"
 	"runtime"
 )
@@ -108,7 +109,15 @@ func (s *SyntaxSnapshot) replayCopier(declarations int) *syntaxFastCopier {
 		if total == 0 || declarations >= total {
 			return count
 		}
-		return (count / total) * declarations
+		// Multiply before dividing so partial copies retain a useful estimate even
+		// when there are fewer captured nodes than declarations. The product can
+		// exceed int, so use the 128-bit helpers; the quotient is at most count.
+		hi, lo := bits.Mul64(uint64(count), uint64(declarations))
+		capacity, remainder := bits.Div64(hi, lo, uint64(total))
+		if remainder != 0 && capacity < uint64(count) {
+			capacity++
+		}
+		return int(capacity)
 	}
 	return &syntaxFastCopier{nodes: make(map[any]any, estimate(s.nodes)), slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: make(map[syntaxFastMap]any, estimate(s.maps))}
 }

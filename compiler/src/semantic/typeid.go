@@ -306,6 +306,8 @@ func appendTypeIDKey(b *strings.Builder, t Type, active *typeIDActive, nextCycle
 		appendGenericParamSlice(b, tt.GenericParams)
 		appendKeyStringSlice(b, tt.TypeParams)
 		appendKeyStringSlice(b, tt.RegionParams)
+		appendKeyStringSlice(b, tt.InferredRegionParams)
+		appendKeyString(b, tt.ReturnRegion)
 		appendKeyStringSlice(b, tt.PermissionParams)
 		appendKeyStringSlice(b, tt.UsedPermissionParams)
 		appendKeyStringSlice(b, tt.Permissions)

@@ -43,21 +43,32 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 		a.errorf(expr.Pos(), "function %q expects %d %s, got %d", ident.Name, len(params), genericArgLabel(params), len(expr.TypeArgs))
 	}
 	bindings := make(map[string]Type, len(params))
+	resolvedArgs := make([]Type, len(params))
 	limit := len(expr.TypeArgs)
 	if len(params) < limit {
 		limit = len(params)
 	}
 	for i := 0; i < limit; i++ {
-		bindings[params[i].Name] = a.resolveGenericArgForParam(expr.TypeArgs[i], params[i])
+		resolved := a.resolveGenericArgForParam(expr.TypeArgs[i], params[i])
+		bindings[params[i].Name] = resolved
+		resolvedArgs[i] = resolved
 	}
 	for i := limit; i < len(expr.TypeArgs); i++ {
 		a.resolveType(expr.TypeArgs[i])
 	}
-	specialized, _ := a.substituteType(fnType, bindings, nil, nil, nil).(*FuncType)
+	regionBindings := regionBindingsForParams(params, resolvedArgs)
+	specialized, _ := a.substituteType(fnType, bindings, nil, regionBindings, nil).(*FuncType)
 	if specialized == nil {
 		return invalidType
 	}
 	specialized.TypeParams = nil
+	remainingRegions := make([]string, 0, len(specialized.RegionParams))
+	for _, name := range specialized.RegionParams {
+		if _, explicitlyBound := regionBindings[name]; !explicitlyBound {
+			remainingRegions = append(remainingRegions, name)
+		}
+	}
+	specialized.RegionParams = remainingRegions
 	specialized.GenericParams = nil
 	return specialized
 }
