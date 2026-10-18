@@ -32,7 +32,7 @@ def source_snapshot():
     listed = subprocess.check_output(
         ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', 'compiler'],
         cwd=root).split(b'\0')
-    suffixes = {'.go', '.c', '.cc', '.cpp', '.h', '.hpp', '.elisa', '.mod', '.sum', '.s', '.S'}
+    suffixes = {'.go', '.c', '.cc', '.cpp', '.h', '.hpp', '.elisa', '.mod', '.sum', '.s', '.S', '.txt'}
     paths = sorted({os.fsdecode(p) for p in listed if p and Path(os.fsdecode(p)).suffix in suffixes})
     return {path: sha(root / path) for path in paths}
 

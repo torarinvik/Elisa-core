@@ -173,3 +173,21 @@ Smoke samples were 42.823 ms/request for shards and 44.952 ms/request with the
 completed cache enabled; these sequential two-request samples do not establish
 an overhead regression or a gain. Paired v2 measurements remain pending.
 This supersedes the earlier prepared/untested status; promotion is still pending.
+
+## V2 paired measurements: body-edit concern
+
+On one pinned v2 binary, three fixed ten-request order-reversed pairs passed
+all assertions. No-op medians were 55.549 ms (shards) versus 10.601 ms (completed),
+with 9,636,704 versus 6,239,184 allocated bytes/request. Body-edit medians were
+45.149 ms versus 61.620 ms, a 36.5% increase; allocated bytes were 11,350,905
+versus 11,467,892. IR phase medians also shifted (8.395 versus 11.127 ms), so
+these results do not isolate key preparation as the cause. Promotion is held
+pending investigation, and the existing integrated v1 needs the same cost audit.
+Each edited request rebuilt one shard, reused seven, reran analysis, and missed
+the completed cache. No broad iteration-speed improvement is claimed.
+
+Raw manifests/logs: `build/verification/server-native-v2-noop-20261018/` and
+`build/verification/server-native-v2-body-20261018/`. The latter also fingerprints
+`.txt` assets, including the sole Go embed `frontendir/schema_registry.txt`;
+that embed was omitted from the earlier suffix-filtered source manifest, while
+the pinned binary hash still identifies the measured executable.
