@@ -147,3 +147,13 @@ the future delta API. Raw local output:
 Command: `go -C compiler test ./src/incremental -run '^$' -bench
 '^BenchmarkSessionOneCellEditPublication$' -benchmem -benchtime=200ms -count=3
 -cpu=1` (shown across lines for readability).
+
+A separate two-second 8,192-query profile attributes approximately 99.8% of
+sampled allocated bytes directly to PublishPrepared (6,820.51 MiB across the
+profiled benchmark process, not per operation). Growing selected/planned maps
+and rebuilding final inventory/authority maps dominate; database snapshot
+application accounts for approximately 4.26 MiB cumulatively. This supports
+changing publication ownership/update structure before optimizing evaluator
+lookup. CPU samples include substantial runtime kevent/madvise activity, so
+this profile does not establish a precise mutator CPU breakdown. CPU, memory,
+benchmark log and matching test executable are retained with the local evidence.
