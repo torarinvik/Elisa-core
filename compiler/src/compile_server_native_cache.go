@@ -321,15 +321,23 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 		return serverNativeIdentity{}, false
 	}
 	environmentStamp := sha256.Sum256(environmentBytes)
+	// Runtime-carrier diagnostics distinguish a synthetic bare filename from
+	// an existing source path. Inline source alone does not capture this input.
+	bareFilenameExists := false
+	if !strings.Contains(filepath.ToSlash(program.filename), "/") {
+		_, pathErr := os.Stat(program.filename)
+		bareFilenameExists = pathErr == nil
+	}
 	fields := req
 	fields.Source = ""
 	fields.IR = ""
 	config, err := json.Marshal(struct {
 		Schema, Build, Cwd, Unit, MergerStamp, MergerExecutable string
 		Environment                                             [32]byte
+		BareFilenameExists                                      bool
 		Merger                                                  []string
 		Request                                                 compileServerRequest
-	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, command, fields})
+	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, bareFilenameExists, command, fields})
 	if err != nil {
 		return serverNativeIdentity{}, false
 	}
