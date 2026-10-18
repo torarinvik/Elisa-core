@@ -588,11 +588,20 @@ func storeScanNameIsRefParam(decl *ast.FuncDecl, name string, idx *storeScanDecl
 		if p.Name != name {
 			continue
 		}
-		switch p.Type.(type) {
-		case *ast.RefType:
-			return true
+		t := p.Type
+		for {
+			switch tt := t.(type) {
+			case *ast.MutableType:
+				if tt == nil {
+					return false
+				}
+				t = tt.Elem
+			case *ast.RefType:
+				return true
+			default:
+				return p.Type == nil || p.Mutable
+			}
 		}
-		return p.Type == nil || p.Mutable
 	}
 	return false
 }

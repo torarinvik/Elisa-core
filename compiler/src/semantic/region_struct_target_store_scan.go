@@ -100,7 +100,7 @@ func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int,
 	if mode, ok := a.storeScanReuseProvisional(key); ok {
 		return mode
 	}
-	if a.storeScanSummaryNeverReaches(decl, other, index) {
+	if a.storeScanSummaryNeverReaches(decl, other, index) && !a.declParamMayEncodeAddress(decl, other) {
 		// The (completed, least-fixpoint) store-flow summary proves no flow from other into
 		// index at all -- the same proof the call-site gate accepts. Final.
 		a.cacheStoreScan(key, storeNone)
@@ -163,25 +163,25 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			return maxStoreMode(valueMode(choice.Value), valueMode(choice.Alt))
 		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
-		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
+		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
 			return storeNone
 		}
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
 		// declared type (`scope.deferred.count` is a usize).
 		if _, known := a.exprTypes[inner]; !known {
 			if t, ok := a.storeScanDeclTypeOf(decl, inner); ok && t != nil && !containsTypeParam(t) {
-				if a.storeScanHoldsNoRegionStorage(t) {
+				if a.storeScanHoldsNoRegionStorage(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
 					return storeNone
 				}
 				// docs/128: a declared program-lived type (an element of a
 				// `darray[sview @source]` parameter row) reaches only program-region storage.
-				if len(a.programRegions) != 0 && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
+				if a.storeScanTypeIsProgramLivedForStoreProof(t) {
 					return storeNone
 				}
 			}
 			// A by-value loop binder copies one element, not the container's backing storage.
 			if id, isIdent := inner.(*ast.Ident); isIdent {
-				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !containsTypeParam(t) && (a.storeScanHoldsNoRegionStorage(t) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(t))) {
+				if t, ok := a.storeScanLoopBinderElemType(decl, id); ok && t != nil && !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(t) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(t))) {
 					return storeNone
 				}
 			}
@@ -197,7 +197,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		// docs/128: a value whose declared type is program-lived (a `darray[T] @source` field)
 		// reaches only program-region storage, whatever holds it.
-		if t, known := a.exprTypes[inner]; known && t != nil && len(a.programRegions) != 0 && !containsTypeParam(t) && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
+		if t, known := a.exprTypes[inner]; known && a.storeScanTypeIsProgramLivedForStoreProof(t) {
 			return storeNone
 		}
 		// A local declared `sview @source` (every declaration) views only program-region bytes.
@@ -244,7 +244,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				mode := storeNone
 				for i, arg := range returnBorrowCallArgs(call) {
 					argMode := valueMode(arg)
-					if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
+					if argMode == storeNone || (!a.declParamCarriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
 						continue
 					}
 					mode = maxStoreMode(mode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
@@ -295,7 +295,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					// argument (a directed scan of its return statements).
 					for i, arg := range returnBorrowCallArgs(call) {
 						argMode := valueMode(arg)
-						if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
+						if argMode == storeNone || (!a.declParamCarriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
 							continue
 						}
 						inner := narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen))
@@ -380,8 +380,8 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 					continue
 				}
 				for _, s := range taintedArgs {
-					if s.index != ti && !a.declParamCarriesStorage(callee, s.index) {
-						continue // a scalar parameter (`first: uintptr`, a size) transmits none
+					if s.index != ti && !a.declParamCarriesStorage(callee, s.index) && !a.declParamMayEncodeAddress(callee, s.index) {
+						continue // only plain non-address scalars (such as a size) are skipped
 					}
 					if ti == s.index {
 						// One argument derived from both sides (`f(table.types[id])`) is not a
@@ -525,10 +525,22 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 					continue
 				}
 				for _, si := range sourceArgs {
-					if si == ti || !a.declParamCarriesStorage(callee, si) {
+					if si == ti {
 						continue
 					}
 					mode := a.calleeStoreModeIntoSeen(callee, si, ti, seen)
+					if mode == storeNone {
+						continue
+					}
+					if !a.declParamCarriesStorage(callee, si) {
+						// Scalar arguments usually cannot retain region dependencies, but pointer-width
+						// integers can encode an address. Do not drop those tainted call paths.
+						if !a.storeScanStoredElementExprProgramLived(decl, args[si], views) {
+							proof = false
+							return
+						}
+						continue
+					}
 					if (mode != storeViews && mode != storeElements) || !a.calleeStoresProgramLivedElements(callee, si, ti, seen) {
 						proof = false
 						return
@@ -1161,7 +1173,7 @@ func (a *Analyzer) storeScanCallResultDropsTarget(arg ast.Expr, targets map[stri
 		return false
 	}
 	for i, inner := range returnBorrowCallArgs(call) {
-		if !storeScanMentions(inner, targets) || !a.declParamCarriesStorage(callee, i) {
+		if !storeScanMentions(inner, targets) || (!a.declParamCarriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
 			continue
 		}
 		// A provisional (open-cycle) answer proves nothing dropped: settled counts it as header.
@@ -1327,6 +1339,27 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 	return !a.storeScanHoldsNoRegionStorage(param)
 }
 
+func (a *Analyzer) declParamMayEncodeAddress(decl *ast.FuncDecl, index int) bool {
+	sym := a.funcDeclSymbols[decl]
+	if sym == nil {
+		return true
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || index < 0 || index >= len(fnType.Params) {
+		return true
+	}
+	return a.storeScanTypeMayEncodeAddress(fnType.Params[index], map[Type]bool{})
+}
+
+// storeScanTypeIsProgramLivedForStoreProof permits an early-out only when the complete value
+// cannot encode an address and all of its region-bearing parts are program-lived. A source-lived
+// view sibling must not make a uintptr field disappear from the sink scan.
+func (a *Analyzer) storeScanTypeIsProgramLivedForStoreProof(t Type) bool {
+	return t != nil && len(a.programRegions) != 0 && !containsTypeParam(t) &&
+		!a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) &&
+		a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t)
+}
+
 // storeScanTaint computes, to a fixpoint over the body, which names may hold the WHOLE source
 // parameter (header) or something read out of it (content), and which names may alias the
 // target place (targetName; "" for none). Locals become tainted by binding (decl/assign of the
@@ -1384,7 +1417,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 					} else if idx.mentions(arg, content) {
 						argMode = storeElements
 					}
-					if argMode == storeNone || !a.declParamCarriesStorage(callee, i) {
+					if argMode == storeNone || (!a.declParamCarriesStorage(callee, i) && !a.declParamMayEncodeAddress(callee, i)) {
 						continue
 					}
 					returned := a.storeScanSettled(func() storeMode { return a.calleeReturnModeOf(callee, i, seen) })
@@ -1596,7 +1629,7 @@ func (a *Analyzer) storeScanTypeExprIsOpaque(t ast.TypeExpr) bool {
 			}
 			// A named value type that can hold no region reference (`ValueType`, a struct of
 			// scalars) carries nothing either.
-			return resolved != nil && !containsTypeParam(resolved) && a.storeScanHoldsNoRegionStorage(resolved)
+			return resolved != nil && !containsTypeParam(resolved) && !a.storeScanTypeMayEncodeAddress(resolved, map[Type]bool{}) && a.storeScanHoldsNoRegionStorage(resolved)
 		}
 		return false
 	}
@@ -1727,7 +1760,7 @@ func (a *Analyzer) storeScanCallWritePlan(decl *ast.FuncDecl, call *ast.CallExpr
 			continue
 		}
 		for j, other := range args {
-			if j == i || (resolved && !a.declParamCarriesStorage(callee, j)) {
+			if j == i || (resolved && !a.declParamCarriesStorage(callee, j) && !a.declParamMayEncodeAddress(callee, j)) {
 				continue
 			}
 			w := storeScanCallWrite{local: root.Name, value: other, arg: stripAddrAndParens(arg)}
@@ -1791,7 +1824,7 @@ func (a *Analyzer) storeScanTaintBinders(decl *ast.FuncDecl, idx *storeScanDeclI
 		// A by-value loop capture whose element type cannot contain region storage does
 		// not inherit taint from the container's header or contents. Opaque foreign
 		// handles such as LLVMValueRef are copied values, not Elisa borrows.
-		if elem, ok := a.storeScanLoopBinderElemType(decl, &ast.Ident{Name: name}); ok && elem != nil && !containsTypeParam(elem) && a.storeScanHoldsNoRegionStorage(elem) {
+		if elem, ok := a.storeScanLoopBinderElemType(decl, &ast.Ident{Name: name}); ok && elem != nil && !containsTypeParam(elem) && !a.storeScanTypeMayEncodeAddress(elem, map[Type]bool{}) && a.storeScanHoldsNoRegionStorage(elem) {
 			continue
 		}
 		if add(content, name) {
@@ -1853,7 +1886,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 			if !known {
 				t, known = a.storeScanDeclTypeOf(decl, value)
 			}
-			if known && t != nil && !containsTypeParam(t) && a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t) {
+			if known && a.storeScanTypeIsProgramLivedForStoreProof(t) {
 				return
 			}
 		}
@@ -2909,7 +2942,7 @@ func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode
 		t, known = a.storeScanDeclTypeOf(decl, storeScanUnwrap(arg))
 	}
 	if known && t != nil && !containsTypeParam(t) {
-		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && (a.storeScanHoldsNoRegionStorage(da.Elem) || (len(a.programRegions) != 0 && a.typeIsProgramLivedCached(da.Elem))) {
+		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && !a.storeScanTypeMayEncodeAddress(da.Elem, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(da.Elem) || a.storeScanTypeIsProgramLivedForStoreProof(da.Elem)) {
 			return storeNone
 		}
 	}
@@ -3026,5 +3059,5 @@ func (a *Analyzer) declParamIsProgramLived(decl *ast.FuncDecl, index int) bool {
 		return false
 	}
 	elem := stripRefForBounds(t)
-	return a.typeCanContainRegionRefs(elem, map[string]bool{}) && a.typeIsProgramLivedCached(elem)
+	return a.storeScanTypeIsProgramLivedForStoreProof(elem)
 }

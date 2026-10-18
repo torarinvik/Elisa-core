@@ -235,6 +235,16 @@ struct Source:
 struct Table:
     entries: mutable darray[SafeEntry] = []
 
+struct DefaultPayload:
+    text: sview @source
+    address: uintptr = 0
+
+struct DefaultSource:
+    text: sview @source
+
+struct DefaultTable:
+    entries: mutable darray[DefaultPayload] = []
+
 def keep_safe(table: mutable Table&, state: Source&) -> void:
     can Memory.Allocate, Abort.Panic:
         table.entries.push(state.safe[0])
@@ -243,11 +253,15 @@ def keep_unsafe(table: mutable Table&, state: Source&) -> void:
     can Memory.Allocate, Abort.Panic:
         table.entries.push(state.unsafe[0])
 
+def keep_with_omitted_address(table: mutable DefaultTable&, state: DefaultSource&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.entries.push(DefaultPayload{text: state.text})
+
 `, AnalyzeOptions{})
 	for _, tc := range []struct {
 		name string
 		want bool
-	}{{"keep_safe", true}, {"keep_unsafe", false}} {
+	}{{"keep_safe", true}, {"keep_unsafe", false}, {"keep_with_omitted_address", false}} {
 		decl := storeScanFindFunc(t, result, tc.name)
 		got := result.analyzer.calleeStoresProgramLivedElements(decl, 1, 0, map[storeScanKey]bool{})
 		if got != tc.want {
@@ -273,5 +287,50 @@ func TestStorePayloadAddressIntegersFailClosed(t *testing.T) {
 	}
 	if !a.storeScanTypeMayEncodeAddress(&RefType{Elem: withAddress}, map[Type]bool{}) {
 		t.Fatal("reference wrapping uintptr may encode an address")
+	}
+}
+
+func TestStoreElementsMixedViewAndAddressHelperFailsClosed(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_elements_mixed_address.elisa", `global region source
+struct Payload:
+    text: sview @source
+    address: uintptr
+
+struct Source:
+    values: darray[Payload]
+
+struct Table:
+    views: mutable darray[sview] = []
+    addresses: mutable darray[uintptr] = []
+
+def record_address(table: mutable Table&, address: uintptr) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.addresses.push(address)
+
+def inspect_address(address: uintptr) -> bool:
+    return address != 0
+
+def keep_safe_with_address_read(table: mutable Table&, state: Source&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        value: Payload = state.values[0]
+        table.views.push(value.text)
+        _ = inspect_address(value.address)
+
+def keep_mixed(table: mutable Table&, state: Source&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        value: Payload = state.values[0]
+        table.views.push(value.text)
+        record_address(table, value.address)
+
+`, AnalyzeOptions{})
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{{"keep_mixed", false}, {"keep_safe_with_address_read", true}} {
+		decl := storeScanFindFunc(t, result, tc.name)
+		got := result.analyzer.calleeStoresProgramLivedElements(decl, 1, 0, map[storeScanKey]bool{})
+		if got != tc.want {
+			t.Errorf("%s: program-lived stored payload proof = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
