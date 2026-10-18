@@ -49,7 +49,15 @@ func deltaQueryCost(p Publication, count, limit int) (int, error) {
 // shared assertions), apart from occasional bounded-debt compaction. It never
 // scans unrelated publications in the ordinary update path. All preparation
 // failures invalidate old handles but leave retained DB/ownership data intact.
-func (s *Session) PublishDelta(ctx context.Context, delta Delta) (result Published, err error) {
+func (s *Session) PublishDelta(ctx context.Context, delta Delta) (Published, error) {
+	return s.PublishDeltaPrepared(ctx, func() (Delta, error) { return delta, nil })
+}
+
+// PublishDeltaPrepared invalidates the old generation before constructing current
+// inputs, including when preparation fails. The callback runs under the session
+// gate and must not call back into this session. It must publish the complete set
+// of changed/removed owners for its current environment before a handle is served.
+func (s *Session) PublishDeltaPrepared(ctx context.Context, prepare func() (Delta, error)) (result Published, err error) {
 	select {
 	case s.gate <- struct{}{}:
 	case <-ctx.Done():
@@ -67,6 +75,16 @@ func (s *Session) PublishDelta(ctx context.Context, delta Delta) (result Publish
 			s.stats.Rejected++
 		}
 	}()
+	if prepare == nil {
+		return result, fmt.Errorf("nil delta preparation")
+	}
+	delta, err := prepare()
+	if err != nil {
+		return result, err
+	}
+	if err = ctx.Err(); err != nil {
+		return result, err
+	}
 	if len(delta.Upsert) > max(1024, s.limits.Queries*4) || len(delta.Remove) > max(1024, s.limits.Queries*4)-len(delta.Upsert) {
 		return result, fmt.Errorf("delta query work budget exceeded")
 	}

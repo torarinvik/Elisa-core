@@ -315,3 +315,49 @@ func TestSessionDeltaReservationOnlyChangeEvictsMemo(t *testing.T) {
 	w = publishDelta(t, s, Delta{Upsert: []Publication{leaf}})
 	sessionValue(t, w.Revision, parent.Key, "payload")
 }
+
+func TestSessionDeltaPreparedInvalidatesBeforeConstruction(t *testing.T) {
+	s := smallSession(t, map[string]Evaluator{"read": sessionRead}, testLimits())
+	p := readPublication("x", "original", false)
+	w := publishDelta(t, s, Delta{Upsert: []Publication{p}})
+	failed := errors.New("unsupported current frame")
+	before := s.db.revision
+	called := false
+	_, err := s.PublishDeltaPrepared(context.Background(), func() (Delta, error) {
+		called = true
+		if s.ready || s.epoch == w.Revision.epoch {
+			t.Fatal("preparation started before old generation invalidated")
+		}
+		return Delta{}, failed
+	})
+	if !called || !errors.Is(err, failed) {
+		t.Fatal(err)
+	}
+	if s.db.revision != before || s.inputs[p.Inputs[0].Key].Value != "original" {
+		t.Fatal("failed preparation mutated retained data")
+	}
+	if _, err := w.Revision.Evaluate(context.Background(), p.Key); !errors.Is(err, ErrStaleRevision) {
+		t.Fatal("old environment survived failed preparation", err)
+	}
+	w = publishDelta(t, s, Delta{})
+	sessionValue(t, w.Revision, p.Key, "original")
+	if _, err := s.PublishDeltaPrepared(context.Background(), nil); err == nil {
+		t.Fatal("nil preparation accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err = s.PublishDeltaPrepared(ctx, func() (Delta, error) { cancel(); return Delta{Remove: []Key{p.Key}}, nil })
+	if !errors.Is(err, context.Canceled) || s.Stats().Ready || len(s.live) != 1 {
+		t.Fatal("post-preparation cancellation committed", err, s.Stats())
+	}
+}
+
+func TestSessionDeltaBootstrapsEmptyFullWorld(t *testing.T) {
+	s := smallSession(t, map[string]Evaluator{"read": sessionRead}, testLimits())
+	old := publishSession(t, s)
+	p := readPublication("x", "current", false)
+	w := publishDelta(t, s, Delta{Upsert: []Publication{p}})
+	sessionValue(t, w.Revision, p.Key, "current")
+	if _, err := old.Revision.Evaluate(context.Background(), p.Key); !errors.Is(err, ErrStaleRevision) {
+		t.Fatal(err)
+	}
+}

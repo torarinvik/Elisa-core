@@ -208,3 +208,25 @@ caller-array ownership, reservation-only memo/parent invalidation, and determini
 including shared-input batch updates. Raw benchmark/race logs, complete package
 source copies, SHA-256 manifest and exact commands are retained locally under
 `build/verification/incremental-session-owner-delta-20261018/`.
+
+## Preparation boundary
+
+`PublishDeltaPrepared(ctx, prepare)` invalidates the previous session generation
+before constructing current catalog inputs. Its callback runs under the session
+gate and must not reenter that session. Nil/failed preparation and cancellation
+after construction leave the retained database unchanged and old handles stale.
+Use this entry point when catalog validation itself can fail; constructing a
+Delta before calling PublishDelta cannot invalidate handles on an earlier
+construction failure. Plain PublishDelta is a wrapper for already prepared data.
+
+An empty full-publication world may bootstrap delta ownership without Reset;
+there are no retained inputs or owners to reinterpret. Nonempty full worlds
+still require explicit Reset. Both cases have regression coverage.
+
+The incremental race suite passes with preparation-failure, cancellation and
+empty-world bootstrap checks. A separate unpaired throughput run measured
+2.02–3.08 us/op across these world sizes with unchanged 1,016 B and six
+allocations per operation; concurrent host load differs from the earlier paired
+run, so this is not evidence of a speedup or a controlled regression comparison.
+Exact commands, source hashes, raw race and benchmark logs are under
+`build/verification/incremental-delta-preparation-20261018/`.
