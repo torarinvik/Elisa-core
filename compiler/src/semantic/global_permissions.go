@@ -753,6 +753,23 @@ func (a *Analyzer) typeContainsMutableBorrowCapability(typ Type, seen map[Type]b
 		// without its mandatory Global.Write effect.
 		return true
 	}
+	// These cases are terminal for this query. Avoid writing them to the cycle
+	// map: they cannot lead back to an ancestor, and their result does not depend
+	// on any child type. Keep the depth check above this fast path so oversized
+	// paths still report the same conservative diagnostic.
+	switch t := typ.(type) {
+	case *BuiltinType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *OpaqueType:
+		return false
+	case *TypeParamType:
+		// Until specialization, an opaque type parameter may carry a mutable
+		// borrow. Conservatively require the effect at transfer boundaries.
+		return !seen[typ]
+	case *StoreRowsViewType:
+		// Row views are writable proxies into backing store columns.
+		return t != nil && !seen[typ]
+	case *StoreRowViewType:
+		return t != nil && !seen[typ]
+	}
 	if seen[typ] {
 		return false
 	}
@@ -897,10 +914,6 @@ func (a *Analyzer) typeContainsMutableBorrowCapability(typ Type, seen map[Type]b
 		}
 	case *PackedEnumStoreType:
 		return t != nil && (contains(t.Enum) || contains(t.State))
-	case *TypeParamType:
-		// Until specialization, an opaque type parameter may carry a mutable
-		// borrow. Conservatively require the effect at transfer boundaries.
-		return true
 	}
 	return false
 }
