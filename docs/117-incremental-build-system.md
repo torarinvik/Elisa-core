@@ -114,8 +114,10 @@ are diagnostic samples on a shared host, not paired speedup claims. Existing
 `PartitionTime` remains the sum of those phases. Raw logs are retained under
 `build/verification/incremental-preparation-breakdown-20261018/`.
 
-A merged-output cache experiment passed native tests but regressed the paired
-unchanged and structural-edit workloads. It serialized the full module and
+A merged-output cache experiment passed native tests. Three paired samples
+improved the unchanged median from 82.45 to 56.92 ms, but regressed growth from
+107.31 to 141.05 ms and insertion from 108.06 to 122.07 ms. One unchanged sample
+also regressed (79.03 to 104.81 ms). It serialized the full module and
 fingerprinted the host linker on each request; Apple's tool-selection query
 alone measured 13–15 ms, comparable to an entire relocatable merge. A variant
 keyed from validated native partition bytes avoided extra bitcode serialization,
