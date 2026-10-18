@@ -1,0 +1,508 @@
+{
+  "schema": "elisa.component-benchmark.v1",
+  "date": "2026-10-18",
+  "host_from_raw_output": {
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cpu": "Apple M5"
+  },
+  "measurement_limits": [
+    "Component microbenchmarks, not end-to-end compiler or program-runtime timings.",
+    "Sequential samples without randomized interleaving or a recorded load gate; contention affects timings.",
+    "Hardware counters were not collected.",
+    "Source hashes identify measured implementations; no release-binary performance claim."
+  ],
+  "parameter_store_solver": {
+    "source_commit_with_identical_solver": "aa42a54e06c825e2d75a27ecc754039e312df51c",
+    "source_sha256": {
+      "src/semantic/analyzer_param_store_targets.go": "23a471b6968e36ccc5897e67f58734f1e76466dfd62c1ff953f7c72e7c48a447",
+      "src/semantic/param_store_worklist_oracle_test.go": "7f39c8c866a1511e760c4c80e9a4c691877dd8242aa191a637e71aacc3e76c32",
+      "src/semantic/param_store_worklist_bench_test.go": "8869474e287c19fd61252d44acf5d44ccb765094c74b75f1a5d1865227c56145"
+    },
+    "fixture": "256 preconstructed typed functions; parsing, full semantic analysis, lowering, emission and linking excluded. Fixed-point oracle shares the transfer rules, so this does not qualify alias completeness.",
+    "historical_command": "go test -overlay=/tmp/elisa-store-worklist-controls/lazy-overlay.json ./src/semantic -run 'TestParamStore|TestInterprocStore|TestStoreFlow' -bench '^BenchmarkReviewerStoreWorklistControls$' -benchtime=20x -count=3 -timeout=60s",
+    "reproduce_from_compiler": "go test ./src/semantic -run '^$' -bench '^BenchmarkParamStoreTargetsControls$' -benchtime=20x -count=3 -timeout=60s",
+    "evidence": {
+      "raw_output": "goos: darwin\ngoarch: arm64\npkg: elisacore/src/semantic\ncpu: Apple M5\nBenchmarkReviewerStoreWorklistControls/independent-readonly/worklist-10         \t      20\t    479252 ns/op\t  263432 B/op\t    1834 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-readonly/worklist-10         \t      20\t    436356 ns/op\t  263432 B/op\t    1834 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-readonly/worklist-10         \t      20\t    356594 ns/op\t  263432 B/op\t    1834 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint-10       \t      20\t    361694 ns/op\t  263437 B/op\t    1834 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint-10       \t      20\t    413496 ns/op\t  263432 B/op\t    1834 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint-10       \t      20\t    428781 ns/op\t  263443 B/op\t    1834 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-store/worklist-10            \t      20\t    536602 ns/op\t  300296 B/op\t    2090 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-store/worklist-10            \t      20\t    414158 ns/op\t  300301 B/op\t    2090 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-store/worklist-10            \t      20\t    587825 ns/op\t  300312 B/op\t    2090 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint-10          \t      20\t    535742 ns/op\t  306462 B/op\t    2346 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint-10          \t      20\t    513140 ns/op\t  306456 B/op\t    2346 allocs/op\nBenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint-10          \t      20\t    554238 ns/op\t  306451 B/op\t    2346 allocs/op\nBenchmarkReviewerStoreWorklistControls/callee-first/worklist-10                 \t      20\t    898302 ns/op\t  376475 B/op\t    3125 allocs/op\nBenchmarkReviewerStoreWorklistControls/callee-first/worklist-10                 \t      20\t    775365 ns/op\t  376492 B/op\t    3125 allocs/op\nBenchmarkReviewerStoreWorklistControls/callee-first/worklist-10                 \t      20\t   3375665 ns/op\t  376475 B/op\t    3125 allocs/op\nBenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint-10               \t      20\t   1363294 ns/op\t  322765 B/op\t    3366 allocs/op\nBenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint-10               \t      20\t   5387121 ns/op\t  322771 B/op\t    3366 allocs/op\nBenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint-10               \t      20\t   1211235 ns/op\t  322765 B/op\t    3366 allocs/op\nBenchmarkReviewerStoreWorklistControls/caller-first/worklist-10                 \t      20\t   1858208 ns/op\t  412112 B/op\t    3906 allocs/op\nBenchmarkReviewerStoreWorklistControls/caller-first/worklist-10                 \t      20\t   1564938 ns/op\t  412135 B/op\t    3906 allocs/op\nBenchmarkReviewerStoreWorklistControls/caller-first/worklist-10                 \t      20\t   1019631 ns/op\t  412107 B/op\t    3906 allocs/op\nBenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint-10               \t      20\t  88148112 ns/op\t 3970336 B/op\t  198696 allocs/op\nBenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint-10               \t      20\t  93594348 ns/op\t 3970646 B/op\t  198697 allocs/op\nBenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint-10               \t      20\t 102128515 ns/op\t 3970380 B/op\t  198696 allocs/op\nPASS\nok  \telisacore/src/semantic\t7.633s\n",
+      "raw_sha256": "71794870ba10df509e4d318e3dcdadc865b76b4ba28352b08f7854150facbff4",
+      "samples": [
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-readonly/worklist",
+          "iterations": 20,
+          "ns_per_op": 479252.0,
+          "bytes_per_op": 263432.0,
+          "allocs_per_op": 1834
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-readonly/worklist",
+          "iterations": 20,
+          "ns_per_op": 436356.0,
+          "bytes_per_op": 263432.0,
+          "allocs_per_op": 1834
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-readonly/worklist",
+          "iterations": 20,
+          "ns_per_op": 356594.0,
+          "bytes_per_op": 263432.0,
+          "allocs_per_op": 1834
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 361694.0,
+          "bytes_per_op": 263437.0,
+          "allocs_per_op": 1834
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 413496.0,
+          "bytes_per_op": 263432.0,
+          "allocs_per_op": 1834
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 428781.0,
+          "bytes_per_op": 263443.0,
+          "allocs_per_op": 1834
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-store/worklist",
+          "iterations": 20,
+          "ns_per_op": 536602.0,
+          "bytes_per_op": 300296.0,
+          "allocs_per_op": 2090
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-store/worklist",
+          "iterations": 20,
+          "ns_per_op": 414158.0,
+          "bytes_per_op": 300301.0,
+          "allocs_per_op": 2090
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-store/worklist",
+          "iterations": 20,
+          "ns_per_op": 587825.0,
+          "bytes_per_op": 300312.0,
+          "allocs_per_op": 2090
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 535742.0,
+          "bytes_per_op": 306462.0,
+          "allocs_per_op": 2346
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 513140.0,
+          "bytes_per_op": 306456.0,
+          "allocs_per_op": 2346
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 554238.0,
+          "bytes_per_op": 306451.0,
+          "allocs_per_op": 2346
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/callee-first/worklist",
+          "iterations": 20,
+          "ns_per_op": 898302.0,
+          "bytes_per_op": 376475.0,
+          "allocs_per_op": 3125
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/callee-first/worklist",
+          "iterations": 20,
+          "ns_per_op": 775365.0,
+          "bytes_per_op": 376492.0,
+          "allocs_per_op": 3125
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/callee-first/worklist",
+          "iterations": 20,
+          "ns_per_op": 3375665.0,
+          "bytes_per_op": 376475.0,
+          "allocs_per_op": 3125
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 1363294.0,
+          "bytes_per_op": 322765.0,
+          "allocs_per_op": 3366
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 5387121.0,
+          "bytes_per_op": 322771.0,
+          "allocs_per_op": 3366
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 1211235.0,
+          "bytes_per_op": 322765.0,
+          "allocs_per_op": 3366
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/caller-first/worklist",
+          "iterations": 20,
+          "ns_per_op": 1858208.0,
+          "bytes_per_op": 412112.0,
+          "allocs_per_op": 3906
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/caller-first/worklist",
+          "iterations": 20,
+          "ns_per_op": 1564938.0,
+          "bytes_per_op": 412135.0,
+          "allocs_per_op": 3906
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/caller-first/worklist",
+          "iterations": 20,
+          "ns_per_op": 1019631.0,
+          "bytes_per_op": 412107.0,
+          "allocs_per_op": 3906
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 88148112.0,
+          "bytes_per_op": 3970336.0,
+          "allocs_per_op": 198696
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 93594348.0,
+          "bytes_per_op": 3970646.0,
+          "allocs_per_op": 198697
+        },
+        {
+          "case": "BenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint",
+          "iterations": 20,
+          "ns_per_op": 102128515.0,
+          "bytes_per_op": 3970380.0,
+          "allocs_per_op": 198696
+        }
+      ],
+      "medians": {
+        "BenchmarkReviewerStoreWorklistControls/independent-readonly/worklist": {
+          "ns_per_op": 436356.0,
+          "bytes_per_op": 263432.0,
+          "allocs_per_op": 1834
+        },
+        "BenchmarkReviewerStoreWorklistControls/independent-readonly/fixedpoint": {
+          "ns_per_op": 413496.0,
+          "bytes_per_op": 263437.0,
+          "allocs_per_op": 1834
+        },
+        "BenchmarkReviewerStoreWorklistControls/independent-store/worklist": {
+          "ns_per_op": 536602.0,
+          "bytes_per_op": 300301.0,
+          "allocs_per_op": 2090
+        },
+        "BenchmarkReviewerStoreWorklistControls/independent-store/fixedpoint": {
+          "ns_per_op": 535742.0,
+          "bytes_per_op": 306456.0,
+          "allocs_per_op": 2346
+        },
+        "BenchmarkReviewerStoreWorklistControls/callee-first/worklist": {
+          "ns_per_op": 898302.0,
+          "bytes_per_op": 376475.0,
+          "allocs_per_op": 3125
+        },
+        "BenchmarkReviewerStoreWorklistControls/callee-first/fixedpoint": {
+          "ns_per_op": 1363294.0,
+          "bytes_per_op": 322765.0,
+          "allocs_per_op": 3366
+        },
+        "BenchmarkReviewerStoreWorklistControls/caller-first/worklist": {
+          "ns_per_op": 1564938.0,
+          "bytes_per_op": 412112.0,
+          "allocs_per_op": 3906
+        },
+        "BenchmarkReviewerStoreWorklistControls/caller-first/fixedpoint": {
+          "ns_per_op": 93594348.0,
+          "bytes_per_op": 3970380.0,
+          "allocs_per_op": 198696
+        }
+      }
+    }
+  },
+  "parser_region_scan": {
+    "baseline_commit": "aa42a54e06c825e2d75a27ecc754039e312df51c",
+    "baseline_parser_sha256": "9e4ef3d5e9121f005b7d74fba7e3431be8b290adb81d0445429912f259648906",
+    "target_parser_sha256": "4a78a36e411c68fd7d759268d33d6dbb5331da1dc5d343d4d7bf6dcbf7f048ff",
+    "target_harness_sha256": "39f632b5724ce181eab53026ff7dc542677ea80ef7cb036cdbc9c9d03052c79a",
+    "baseline_reproduction_from_compiler": "go test ./src/parser -run '^$' -bench '^BenchmarkAutoRegionNestedStatements$' -benchtime=100x -count=3 -timeout=60s",
+    "target_reproduction_from_compiler": "go test ./src/parser -run '^$' -bench '^BenchmarkAutoRegion(NestedStatements|ShadowedConstructors)$' -benchtime=100x -count=3 -timeout=60s",
+    "baseline_method": "Overlay restored the baseline commit parser and parser benchmark files; other parser package inputs match that commit.",
+    "fixture": "Preconstructed ASTs. Ordinary nested statements contain no constructed locals. ShadowedConstructors has a call-produced same-name local at each enclosing scope and a forwarded literal at the leaf.",
+    "remaining_limit": "Forwarding-heavy shadowed constructors still rescan overlapping subtrees and remain superlinear; the ordinary-statement improvement does not imply all deep scans are linear.",
+    "baseline": {
+      "raw_output": "goos: darwin\ngoarch: arm64\npkg: elisacore/src/parser\ncpu: Apple M5\nBenchmarkAutoRegionNestedStatements/depth16-10         \t     100\t     86681 ns/op\t    1224 B/op\t      51 allocs/op\nBenchmarkAutoRegionNestedStatements/depth16-10         \t     100\t     80310 ns/op\t    1224 B/op\t      51 allocs/op\nBenchmarkAutoRegionNestedStatements/depth16-10         \t     100\t     84378 ns/op\t    1224 B/op\t      51 allocs/op\nBenchmarkAutoRegionNestedStatements/depth32-10         \t     100\t    253546 ns/op\t    2376 B/op\t      99 allocs/op\nBenchmarkAutoRegionNestedStatements/depth32-10         \t     100\t    262521 ns/op\t    2376 B/op\t      99 allocs/op\nBenchmarkAutoRegionNestedStatements/depth32-10         \t     100\t    228555 ns/op\t    2376 B/op\t      99 allocs/op\nBenchmarkAutoRegionNestedStatements/depth64-10         \t     100\t    856552 ns/op\t    4680 B/op\t     195 allocs/op\nBenchmarkAutoRegionNestedStatements/depth64-10         \t     100\t   1013721 ns/op\t    4680 B/op\t     195 allocs/op\nBenchmarkAutoRegionNestedStatements/depth64-10         \t     100\t   1478485 ns/op\t    4680 B/op\t     195 allocs/op\nPASS\nok  \telisacore/src/parser\t0.766s\n",
+      "raw_sha256": "fdcb2a745ebd75a589c4f245cfad09eaaeca45287762013c12cfeee8f35f22e6",
+      "samples": [
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth16",
+          "iterations": 100,
+          "ns_per_op": 86681.0,
+          "bytes_per_op": 1224.0,
+          "allocs_per_op": 51
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth16",
+          "iterations": 100,
+          "ns_per_op": 80310.0,
+          "bytes_per_op": 1224.0,
+          "allocs_per_op": 51
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth16",
+          "iterations": 100,
+          "ns_per_op": 84378.0,
+          "bytes_per_op": 1224.0,
+          "allocs_per_op": 51
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth32",
+          "iterations": 100,
+          "ns_per_op": 253546.0,
+          "bytes_per_op": 2376.0,
+          "allocs_per_op": 99
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth32",
+          "iterations": 100,
+          "ns_per_op": 262521.0,
+          "bytes_per_op": 2376.0,
+          "allocs_per_op": 99
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth32",
+          "iterations": 100,
+          "ns_per_op": 228555.0,
+          "bytes_per_op": 2376.0,
+          "allocs_per_op": 99
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth64",
+          "iterations": 100,
+          "ns_per_op": 856552.0,
+          "bytes_per_op": 4680.0,
+          "allocs_per_op": 195
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth64",
+          "iterations": 100,
+          "ns_per_op": 1013721.0,
+          "bytes_per_op": 4680.0,
+          "allocs_per_op": 195
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth64",
+          "iterations": 100,
+          "ns_per_op": 1478485.0,
+          "bytes_per_op": 4680.0,
+          "allocs_per_op": 195
+        }
+      ],
+      "medians": {
+        "BenchmarkAutoRegionNestedStatements/depth16": {
+          "ns_per_op": 84378.0,
+          "bytes_per_op": 1224.0,
+          "allocs_per_op": 51
+        },
+        "BenchmarkAutoRegionNestedStatements/depth32": {
+          "ns_per_op": 253546.0,
+          "bytes_per_op": 2376.0,
+          "allocs_per_op": 99
+        },
+        "BenchmarkAutoRegionNestedStatements/depth64": {
+          "ns_per_op": 1013721.0,
+          "bytes_per_op": 4680.0,
+          "allocs_per_op": 195
+        }
+      }
+    },
+    "target": {
+      "raw_output": "goos: darwin\ngoarch: arm64\npkg: elisacore/src/parser\ncpu: Apple M5\nBenchmarkAutoRegionNestedStatements/depth16-10         \t     100\t     10955 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth16-10         \t     100\t     10330 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth16-10         \t     100\t      9707 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth32-10         \t     100\t     18334 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth32-10         \t     100\t     21088 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth32-10         \t     100\t     17935 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth64-10         \t     100\t     27575 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth64-10         \t     100\t     34865 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionNestedStatements/depth64-10         \t     100\t     28282 ns/op\t      72 B/op\t       3 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth16-10     \t     100\t    288893 ns/op\t    3980 B/op\t     107 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth16-10     \t     100\t    295739 ns/op\t    3976 B/op\t     107 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth16-10     \t     100\t    262170 ns/op\t    3978 B/op\t     107 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth32-10     \t     100\t    961484 ns/op\t   13320 B/op\t     236 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth32-10     \t     100\t   1062954 ns/op\t   13320 B/op\t     236 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth32-10     \t     100\t    977023 ns/op\t   13322 B/op\t     236 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth64-10     \t     100\t   4164915 ns/op\t   48520 B/op\t     525 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth64-10     \t     100\t   5487585 ns/op\t   48520 B/op\t     525 allocs/op\nBenchmarkAutoRegionShadowedConstructors/depth64-10     \t     100\t   3809452 ns/op\t   48522 B/op\t     525 allocs/op\nPASS\nok  \telisacore/src/parser\t1.927s\n",
+      "raw_sha256": "53fae85d2bfda33316bb32fc8995b85efa73ee72af58a06fd5ee6d1ec8d7a888",
+      "samples": [
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth16",
+          "iterations": 100,
+          "ns_per_op": 10955.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth16",
+          "iterations": 100,
+          "ns_per_op": 10330.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth16",
+          "iterations": 100,
+          "ns_per_op": 9707.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth32",
+          "iterations": 100,
+          "ns_per_op": 18334.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth32",
+          "iterations": 100,
+          "ns_per_op": 21088.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth32",
+          "iterations": 100,
+          "ns_per_op": 17935.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth64",
+          "iterations": 100,
+          "ns_per_op": 27575.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth64",
+          "iterations": 100,
+          "ns_per_op": 34865.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionNestedStatements/depth64",
+          "iterations": 100,
+          "ns_per_op": 28282.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth16",
+          "iterations": 100,
+          "ns_per_op": 288893.0,
+          "bytes_per_op": 3980.0,
+          "allocs_per_op": 107
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth16",
+          "iterations": 100,
+          "ns_per_op": 295739.0,
+          "bytes_per_op": 3976.0,
+          "allocs_per_op": 107
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth16",
+          "iterations": 100,
+          "ns_per_op": 262170.0,
+          "bytes_per_op": 3978.0,
+          "allocs_per_op": 107
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth32",
+          "iterations": 100,
+          "ns_per_op": 961484.0,
+          "bytes_per_op": 13320.0,
+          "allocs_per_op": 236
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth32",
+          "iterations": 100,
+          "ns_per_op": 1062954.0,
+          "bytes_per_op": 13320.0,
+          "allocs_per_op": 236
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth32",
+          "iterations": 100,
+          "ns_per_op": 977023.0,
+          "bytes_per_op": 13322.0,
+          "allocs_per_op": 236
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth64",
+          "iterations": 100,
+          "ns_per_op": 4164915.0,
+          "bytes_per_op": 48520.0,
+          "allocs_per_op": 525
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth64",
+          "iterations": 100,
+          "ns_per_op": 5487585.0,
+          "bytes_per_op": 48520.0,
+          "allocs_per_op": 525
+        },
+        {
+          "case": "BenchmarkAutoRegionShadowedConstructors/depth64",
+          "iterations": 100,
+          "ns_per_op": 3809452.0,
+          "bytes_per_op": 48522.0,
+          "allocs_per_op": 525
+        }
+      ],
+      "medians": {
+        "BenchmarkAutoRegionNestedStatements/depth16": {
+          "ns_per_op": 10330.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        "BenchmarkAutoRegionNestedStatements/depth32": {
+          "ns_per_op": 18334.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        "BenchmarkAutoRegionNestedStatements/depth64": {
+          "ns_per_op": 28282.0,
+          "bytes_per_op": 72.0,
+          "allocs_per_op": 3
+        },
+        "BenchmarkAutoRegionShadowedConstructors/depth16": {
+          "ns_per_op": 288893.0,
+          "bytes_per_op": 3978.0,
+          "allocs_per_op": 107
+        },
+        "BenchmarkAutoRegionShadowedConstructors/depth32": {
+          "ns_per_op": 977023.0,
+          "bytes_per_op": 13320.0,
+          "allocs_per_op": 236
+        },
+        "BenchmarkAutoRegionShadowedConstructors/depth64": {
+          "ns_per_op": 4164915.0,
+          "bytes_per_op": 48520.0,
+          "allocs_per_op": 525
+        }
+      }
+    }
+  },
+  "validation": {
+    "semantic_gate": "Shared parser source 4a78a36e411c68fd7d759268d33d6dbb5331da1dc5d343d4d7bf6dcbf7f048ff passed full semantic suite in 83.574s with an unchanged source manifest; elapsed time is not a speedup claim.",
+    "runtime_return_gate_raw": "# elisacore/src.test\nld: warning: ignoring duplicate libraries: '-lLLVM'\nok  \telisacore/src\t2.443s\n",
+    "runtime_gate_scope": "Actual standard arena runtime, returned tuple/conditional tuple/explicit aggregate and field region/struct values read after intervening local arena churn; unsafe local tuple admission remains rejected."
+  }
+}
