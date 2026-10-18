@@ -200,8 +200,7 @@ func (a *Analyzer) contractVarianceObligation(premises []ast.Expr, goal ast.Expr
 			return true
 		}
 	}
-	solver := a.openSMT()
-	if solver == nil {
+	if !a.smtEnabled || a.smtUnavailable {
 		// No solver available: fall back to syntactic entailment only (already checked above).
 		// Decline (return false) on anything non-syntactic so the rule stays SOUND — a missed
 		// proof becomes a (conservative) variance error rather than an unsound acceptance.

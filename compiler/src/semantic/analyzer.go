@@ -907,6 +907,9 @@ type Analyzer struct {
 	regionRefsMemo map[Type]bool
 	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
 	containerRegionMemo map[Type]string
+	// storeScanAddressMemo caches root store-scan address reachability once type shapes freeze.
+	// Recursive child results are never memoized under a partial cycle traversal.
+	storeScanAddressMemo map[Type]bool
 	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
 	symbolTypeEpoch uint64
 	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for

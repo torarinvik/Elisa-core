@@ -290,6 +290,46 @@ func TestStorePayloadAddressIntegersFailClosed(t *testing.T) {
 	}
 }
 
+func TestStoreScanAddressMemoFreezesAndCachesOnlyRoots(t *testing.T) {
+	a := &Analyzer{}
+	uintptrType := &BuiltinType{Name: "uintptr"}
+	first := &StructType{Name: "First", Fields: map[string]Field{}}
+	second := &StructType{Name: "Second", Fields: map[string]Field{}}
+	first.Fields["next"] = Field{Name: "next", Type: second}
+	second.Fields["next"] = Field{Name: "next", Type: first}
+
+	if a.storeScanTypeMayEncodeAddress(first, map[Type]bool{}) {
+		t.Fatal("struct without an address-bearing field must be classified as safe")
+	}
+	if a.storeScanAddressMemo != nil {
+		t.Fatal("type traversal must not be memoized before typeShapesFrozen")
+	}
+	first.Fields["address"] = Field{Name: "address", Type: uintptrType}
+	if !a.storeScanTypeMayEncodeAddress(first, map[Type]bool{}) {
+		t.Fatal("before the freeze, a struct populated later must be re-walked")
+	}
+	if a.storeScanAddressMemo != nil {
+		t.Fatal("updated type shapes must not have been memoized before the freeze")
+	}
+
+	a.typeShapesFrozen = true
+	if !a.storeScanTypeMayEncodeAddress(first, map[Type]bool{}) {
+		t.Fatal("frozen root should remain address-bearing")
+	}
+	if got, ok := a.storeScanAddressMemo[first]; !ok || !got {
+		t.Fatalf("root result was not memoized: got %v, present %v", got, ok)
+	}
+	if _, ok := a.storeScanAddressMemo[second]; ok {
+		t.Fatal("recursive child result must not be cached under the parent's partial seen set")
+	}
+	if !a.storeScanTypeMayEncodeAddress(second, map[Type]bool{}) {
+		t.Fatal("a later root walk must discover the address through the cycle")
+	}
+	if got, ok := a.storeScanAddressMemo[second]; !ok || !got {
+		t.Fatalf("independent root result was not memoized: got %v, present %v", got, ok)
+	}
+}
+
 func TestStoreElementsMixedViewAndAddressHelperFailsClosed(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_elements_mixed_address.elisa", `global region source
 struct Payload:

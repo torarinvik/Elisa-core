@@ -138,8 +138,7 @@ func (a *Analyzer) closeSMT() {
 // linear tier declines, so the subject is genuinely outside the affine fragment (e.g. a var*var
 // product) — precisely where the solver earns its keep.
 func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
-	solver := a.openSMT()
-	if solver == nil || decl == nil || len(decl.Params) == 0 {
+	if !a.smtEnabled || a.smtUnavailable || decl == nil || len(decl.Params) == 0 {
 		return false
 	}
 	tr := a.newSMTTranslator(nil)
@@ -641,48 +640,49 @@ func (a *Analyzer) smtDischargeFormulaWithHyps(tr *smtTranslator, goal vcFormula
 	return a.smtCheckQuery(tr, hyps, emitVCFormula(goal))
 }
 
+// recordSMTAttempt preserves profile and trace accounting for cache hits and solver calls.
+func (a *Analyzer) recordSMTAttempt(query string) {
+	a.smtStats.Attempts++
+	if smtQueryTrace {
+		fmt.Fprintf(os.Stderr, "=== SMT query (%s)\n%s", a.currentFuncName(), query)
+	}
+}
+
 // smtCheckQuery is the innermost discharge primitive: given the full hypothesis block (already built
-// from `tr`) and an `obligation`, it lays out `factPreamble + hyps + (assert (not obligation))`, asks
-// the solver, updates the stats, and returns proven (only on `unsat`) plus a counterexample on `sat`.
+// from `tr`) and an `obligation`, it lays out `factPreamble + hyps + (assert (not obligation))`, checks
+// exact verdict caches before starting the solver, updates the stats, and returns proven (only on
+// `unsat`) plus a counterexample on `sat`.
 // smtCheckVC layers the standard hypothesis set on top; the loop-preservation prover uses this directly
 // with its OWN hypothesis set (loop variables free, no ambient facts) — so the check protocol itself is
 // shared while each site keeps control of which facts it assumes. `factPreamble()` is emitted last so
 // every symbol the hypotheses and obligation introduced is declared.
 func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation string) (bool, string) {
-	solver := a.openSMT()
-	if solver == nil || tr == nil {
+	return a.smtCheckQueryWithLogLabel(tr, hyps, obligation, "query", obligation)
+}
+
+func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obligation string, label string, logObligation string) (bool, string) {
+	if !a.smtEnabled || a.smtUnavailable {
 		return false, ""
 	}
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
-	a.smtStats.Attempts++
-	if smtQueryTrace {
-		fmt.Fprintf(os.Stderr, "=== SMT query (%s)\n%s", a.currentFuncName(), query)
+	if tr == nil {
+		// Preserve the legacy availability probe for an invalid translator, which
+		// previously happened before this nil check.
+		_ = a.openSMT()
+		return false, ""
 	}
-	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
-	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
-	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
-	// solver run", so a cached proof does NOT bump it.
-	if hit, ok := a.smtQueryCache[query]; ok {
-		a.smtStats.CacheHits++
-		if hit.proven {
-			a.smtStats.Proven++
-		} else {
-			a.smtStats.Declined++
-		}
+	// A cached verdict still means the SMT tier handled this obligation, even when
+	// no long-lived solver process needs to be started for the query.
+	a.smtStats.Enabled = true
+	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
+	if hit, ok := a.smtCachedQuery(query); ok {
 		return hit.proven, hit.ce
 	}
-	if !a.smtProofCacheInitialized {
-		a.smtProofCacheInitialized = true
-		a.smtProofCache = newSMTProofCache(os.Getenv("ELISACORE_SMT_CACHE_DIR"), a.smtBinary)
+	solver := a.openSMT()
+	if solver == nil {
+		return false, ""
 	}
-	if a.smtProofCache.contains(query) {
-		a.smtStats.CacheHits++
-		a.smtStats.PersistentCacheHits++
-		a.smtStats.Proven++
-		a.cacheSMTQuery(query, smtQueryResult{proven: true})
-		return true, ""
-	}
-	a.smtSetLogLabelForQuery(solver, "query", obligation, query)
+	a.recordSMTAttempt(query)
+	a.smtSetLogLabelForQuery(solver, label, logObligation, query)
 	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
@@ -700,6 +700,74 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 	// `unknown` (timeout / incompleteness) is NOT cached: it is not a stable verdict — a later identical
 	// query is free to try again (e.g. the solver's internal state differs), and caching it would lock in
 	// a decline that a retry might resolve. Only the definitive unsat/sat answers memoize.
+	return false, ""
+}
+
+// smtCachedQuery returns a cached exact verdict, if available. Query layout is part of the cache key, so
+// callers may use this for the historical raw-query form as well as the standard negate-and-check form.
+func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool) {
+	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
+	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
+	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
+	// solver run", so a cached proof does NOT bump it.
+	if hit, ok := a.smtQueryCache[query]; ok {
+		a.recordSMTAttempt(query)
+		a.smtStats.CacheHits++
+		if hit.proven {
+			a.smtStats.Proven++
+		} else {
+			a.smtStats.Declined++
+		}
+		return hit, true
+	}
+	if !a.smtProofCacheInitialized {
+		a.smtProofCacheInitialized = true
+		a.smtProofCache = newSMTProofCache(os.Getenv("ELISACORE_SMT_CACHE_DIR"), a.smtBinary)
+	}
+	if a.smtProofCache.contains(query) {
+		a.recordSMTAttempt(query)
+		a.smtStats.CacheHits++
+		a.smtStats.PersistentCacheHits++
+		a.smtStats.Proven++
+		result := smtQueryResult{proven: true}
+		a.cacheSMTQuery(query, result)
+		return result, true
+	}
+	return smtQueryResult{}, false
+}
+
+// smtCheckRawQueryWithLogLabel preserves checks whose historical query was a satisfiability test rather
+// than a negated obligation. It shares the exact-query caches and accounting but calls Solver.Check
+// directly, so special checks such as requires-vacuity retain their original query and resource budget.
+func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logObligation string) (bool, string) {
+	if !a.smtEnabled || a.smtUnavailable {
+		return false, ""
+	}
+	a.smtStats.Enabled = true
+	if hit, ok := a.smtCachedQuery(query); ok {
+		return hit.proven, hit.ce
+	}
+	solver := a.openSMT()
+	if solver == nil {
+		return false, ""
+	}
+	a.recordSMTAttempt(query)
+	a.smtSetLogLabel(solver, label, logObligation)
+	res, _ := solver.Check(query)
+	if res == smt.Unsat {
+		a.smtStats.Proven++
+		a.smtStats.SolverProven++
+		a.cacheSMTQuery(query, smtQueryResult{proven: true})
+		a.smtProofCache.publish(query)
+		return true, ""
+	}
+	if res == smt.Sat {
+		a.smtStats.Declined++
+		// Raw-query SAT checks do not collect a model. Do not cache this decline: the same SMT-LIB
+		// text can also be a regular negated obligation whose diagnostic needs a counterexample.
+		return false, ""
+	}
+	a.smtStats.Declined++
 	return false, ""
 }
 
@@ -755,8 +823,7 @@ func (a *Analyzer) trySMTProveRequiresCore(clause ast.Expr, subst map[string]ast
 }
 
 func (a *Analyzer) trySMTProveRequiresCoreWithCallee(clause ast.Expr, subst map[string]ast.Expr, path ast.Expr, callee *ast.FuncDecl, formalParamSets ...[]ast.ParamDecl) (bool, string, bool) {
-	solver := a.openSMT()
-	if solver == nil || clause == nil {
+	if !a.smtEnabled || a.smtUnavailable || clause == nil {
 		return false, "", false
 	}
 	tr := a.newSMTTranslator(nil)
@@ -1197,8 +1264,7 @@ func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string, subst map[
 }
 
 func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
-	solver := a.openSMT()
-	if solver == nil || clause == nil || call == nil {
+	if !a.smtEnabled || a.smtUnavailable || clause == nil || call == nil {
 		return false
 	}
 	decl, ok := a.resolveDirectCallFuncDecl(call)
@@ -1656,12 +1722,8 @@ func (a *Analyzer) seedRequiresAsAssertFacts(fn *ast.FuncDecl) {
 // dropped from the conjunction (a weaker assertion can only become MORE satisfiable, never less), so a
 // partial translation can lose a true contradiction but can never fabricate one.
 func (a *Analyzer) checkRequiresVacuity(fn *ast.FuncDecl) {
-	if a == nil || fn == nil || len(fn.Requires) == 0 {
+	if a == nil || !a.smtEnabled || a.smtUnavailable || fn == nil || len(fn.Requires) == 0 {
 		return
-	}
-	solver := a.openSMT()
-	if solver == nil {
-		return // SMT off / unavailable — decline, exactly like the discharge tier.
 	}
 	tr := a.newSMTTranslator(nil)
 	var b strings.Builder
@@ -1683,9 +1745,8 @@ func (a *Analyzer) checkRequiresVacuity(fn *ast.FuncDecl) {
 		return // nothing translatable to contradict.
 	}
 	query := tr.factPreamble() + b.String()
-	a.smtSetLogLabel(solver, "requires-vacuity", fn.Name)
-	res, _ := solver.Check(query)
-	if res != smt.Unsat {
+	proven, _ := a.smtCheckRawQueryWithLogLabel(query, "requires-vacuity", fn.Name)
+	if !proven {
 		return // sat / unknown / error → not proven contradictory → do NOT flag.
 	}
 	a.proofLint(fn.Position, "the `requires` preconditions of %q are contradictory (their conjunction is unsatisfiable); the function can never be called and its body can vacuously prove any `ensure`", fn.Name)

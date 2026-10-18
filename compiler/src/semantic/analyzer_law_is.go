@@ -1130,7 +1130,7 @@ func (a *Analyzer) tryProveEnsureNullnessCastDisjunct(clause ast.Expr, subst map
 	if !ok || bin == nil || bin.Op != lexer.TOKEN_OR {
 		return false
 	}
-	if a.openSMT() == nil {
+	if !a.smtEnabled || a.smtUnavailable {
 		return false
 	}
 	tr := a.newSMTTranslator(nil)

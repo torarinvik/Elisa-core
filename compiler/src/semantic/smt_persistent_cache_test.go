@@ -67,6 +67,8 @@ func TestSMTProofCacheProcessHelper(t *testing.T) {
 		t.Fatal(allDiagnostics(r))
 	}
 	fmt.Printf("persistent-hits=%d\n", r.SMTProfile.PersistentCacheHits)
+	fmt.Printf("session-spawn-ns=%d\n", r.SMTProfile.SpawnTime.Nanoseconds())
+	fmt.Printf("solver-proven=%d\n", r.SMTProfile.SolverProven)
 }
 
 func TestSMTProofCacheAcrossProcesses(t *testing.T) {
@@ -78,9 +80,17 @@ func TestSMTProofCacheAcrossProcesses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("child: %v\n%s", err, output)
 		}
-		zero := strings.Contains(string(output), "persistent-hits=0\n")
+		result := string(output)
+		zero := strings.Contains(result, "persistent-hits=0\n")
 		if zero == warm {
 			t.Fatalf("warm=%v: %s", warm, output)
+		}
+		if warm {
+			if !strings.Contains(result, "session-spawn-ns=0\n") || !strings.Contains(result, "solver-proven=0\n") {
+				t.Fatalf("warm persistent proofs opened or queried a solver session: %s", output)
+			}
+		} else if strings.Contains(result, "solver-proven=0\n") {
+			t.Fatalf("cold persistent-cache baseline did not prove with the solver: %s", output)
 		}
 	}
 	// The same names with a changed obligation must not inherit a previous proof.
