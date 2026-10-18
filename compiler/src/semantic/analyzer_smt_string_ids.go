@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -59,6 +60,25 @@ func (tr *smtTranslator) stringIDTerm(expr ast.Expr, env map[string]string) (str
 	case *ast.CallExpr:
 		return tr.stringCallID(n, env)
 	case *ast.FieldExpr:
+		if n == nil {
+			return "", false
+		}
+		if env != nil {
+			if term, ok := env[smtStringIDEnvPrefix+smtProjectionName(n)]; ok {
+				return term, true
+			}
+		}
+		// A view read from a stable darray[struct] field is identified by the same
+		// (container, field path, index) triple as its header. Keep an indexed
+		// quantifier binder inside an uninterpreted function application so two
+		// reads at the same element remain congruent without assuming bounds or
+		// byte contents.
+		if base, index, ok := tr.containerViewIndex(n, env); ok {
+			return tr.containerViewStringID(base, index), true
+		}
+		if term, ok := tr.stableStringFieldID(n, env); ok {
+			return term, true
+		}
 		// `(lit, scalar).wasm_type`: a projection of a tuple/struct literal whose component may be
 		// re-evaluated in place of the constructed value (literal re-evaluation rules).
 		if n == nil || tr.a == nil || depthOfStringIDField(n) > 32 {
@@ -79,6 +99,51 @@ func (tr *smtTranslator) stringIDTerm(expr ast.Expr, env map[string]string) (str
 		}
 	}
 	return "", false
+}
+
+func (tr *smtTranslator) stableStringFieldID(field *ast.FieldExpr, env map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || field == nil || tr.a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 ||
+		tr.envBindsRoot(field, env) || (!classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) && !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl)) {
+		return "", false
+	}
+	t := tr.a.exprTypes[field]
+	if t == nil {
+		if resolved, ok := tr.a.fieldReadResolvedType(field); ok {
+			t = resolved
+		}
+	}
+	if !isStringViewType(t) {
+		return "", false
+	}
+	root, _ := projectionChain(field)
+	id, ok := root.(*ast.Ident)
+	if !ok || id == nil || tr.a.currentScope == nil {
+		return "", false
+	}
+	if smtEnvHasQuantifierBinder(env) {
+		return "", false
+	}
+	sym, found := tr.a.currentScope.Lookup(id.Name)
+	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
+		return "", false
+	}
+	if ref, ok := StripAggregateStateType(sym.Type).(*RefType); ok && (ref.Mutable || ref.Linear) {
+		return "", false
+	}
+	key, ok := tr.fieldProjectionKey(field, env)
+	if !ok {
+		return "", false
+	}
+	if tr.stringFieldIDs == nil {
+		tr.stringFieldIDs = map[string]string{}
+	}
+	if term, found := tr.stringFieldIDs[key]; found {
+		return term, true
+	}
+	term := "|@string_field_" + hex.EncodeToString([]byte(key)) + "|"
+	tr.stringFieldIDs[key] = term
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+term+" Int)\n")
+	return term, true
 }
 
 func depthOfStringIDField(n *ast.FieldExpr) int {
@@ -134,6 +199,14 @@ func (tr *smtTranslator) stringLocalCallID(id *ast.Ident, env map[string]string)
 func (tr *smtTranslator) stringCallID(call *ast.CallExpr, env map[string]string) (string, bool) {
 	a := tr.a
 	if a == nil || call == nil || a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 {
+		return "", false
+	}
+	// SView calls currently receive query-local result constants keyed by their
+	// argument terms. If an argument term contains a quantifier binder, that
+	// result must vary with the binder; a free constant would erase that
+	// dependency. Until this path has a binder-parameterized result UF, decline
+	// it rather than hoisting a call result out of the quantifier.
+	if smtEnvHasQuantifierBinder(env) {
 		return "", false
 	}
 	if !classifierStringFrameStable(a, a.currentFuncDecl) {

@@ -37,9 +37,15 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 			eq := "(= " + length + " 0)"
 			// String dispatch uses literal identity terms. Keep its empty identity
 			// consistent with this header-only equality when both models are available.
+			// This is a top-level auxiliary fact, so never emit a quantified binder
+			// from either term outside its quantifier. In that case, omitting the
+			// optional correlation only loses precision.
 			if identity, ok := tr.stringIDTerm(value, env); ok {
 				emptyID := smtInt(tr.classifierStringLiteralInt(""))
-				tr.auxDecls = append(tr.auxDecls, "(assert (= (= "+identity+" "+emptyID+") "+eq+"))\n")
+				correlation := "(= (= " + identity + " " + emptyID + ") " + eq + ")"
+				if !smtTermMentionsQuantifierBinder(correlation) {
+					tr.auxDecls = append(tr.auxDecls, "(assert "+correlation+")\n")
+				}
 			}
 			if n.Op == lexer.TOKEN_BANGEQ {
 				eq = "(not " + eq + ")"

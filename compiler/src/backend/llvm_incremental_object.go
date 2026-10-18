@@ -79,6 +79,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
+	configKey := string(config)
 	dir, err := os.MkdirTemp(filepath.Dir(outputPath), ".elisa-object-parts-")
 	if err != nil {
 		return err
@@ -109,7 +110,16 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 			C.LLVMDisposeModule(module)
 			return s.emitDirectObject(g, outputPath)
 		}
-		input := C.GoStringN(C.LLVMGetBufferStart(bitcode), C.int(C.LLVMGetBufferSize(bitcode)))
+		inputData := C.LLVMGetBufferStart(bitcode)
+		inputSize := int(C.LLVMGetBufferSize(bitcode))
+		inputBytes := unsafe.Slice((*byte)(unsafe.Pointer(inputData)), inputSize)
+		object := s.lookupObjectBytes(inputBytes, configKey)
+		var retainedInput string
+		if object == nil {
+			// A miss needs an owned exact snapshot for the bounded cache. Cache hits
+			// hash and compare the LLVM buffer in place without copying it into Go.
+			retainedInput = C.GoStringN(inputData, C.int(inputSize))
+		}
 		C.LLVMDisposeMemoryBuffer(bitcode)
 		bitcodeDuration := time.Since(bitcodeStart)
 		s.recordStats(func(stats *IncrementalObjectStats) {
@@ -117,7 +127,6 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 			stats.BitcodeTime += bitcodeDuration
 			stats.PartitionTime += cloneDuration + bitcodeDuration
 		})
-		object := s.lookupObject(input, string(config))
 		if object == nil {
 			nativeStart := time.Now()
 			var buffer C.LLVMMemoryBufferRef
@@ -139,7 +148,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 				stats.NativeTime += nativeDuration
 				stats.PartitionsEmitted++
 			})
-			s.retainObject(input, string(config), object)
+			s.retainObject(retainedInput, configKey, object)
 		}
 		C.LLVMDisposeModule(module)
 		parts[part] = filepath.Join(dir, fmt.Sprintf("part%d.o", part))

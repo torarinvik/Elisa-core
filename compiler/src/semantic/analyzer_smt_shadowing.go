@@ -211,15 +211,7 @@ func (a *Analyzer) markLocalDefinitionsStale(roots map[string]bool) {
 			}
 			hit := roots == nil
 			if !hit {
-				for name := range smtFactDeps(vd.Value) {
-					if roots[name] {
-						hit = true
-						break
-					}
-				}
-			}
-			if !hit {
-				for _, name := range exprIdentNames(vd.Value) {
+				for _, name := range a.smtLocalDefinitionDeps(sym, vd) {
 					if roots[name] {
 						hit = true
 						break
@@ -234,4 +226,37 @@ func (a *Analyzer) markLocalDefinitionsStale(roots map[string]bool) {
 			}
 		}
 	}
+}
+
+// smtLocalDefinitionDeps preserves the full syntactic dependency union used by stale-definition
+// invalidation. Compute it once per immutable local: this path runs after many different writes,
+// while the initializer AST stays fixed for the lifetime of the Analyzer.
+func (a *Analyzer) smtLocalDefinitionDeps(sym *Symbol, vd *ast.VarDeclStmt) []string {
+	if a == nil || sym == nil || vd == nil {
+		return nil
+	}
+	if deps, ok := a.smtLocalDefDeps[sym]; ok {
+		return deps
+	}
+	depSet := smtFactDeps(vd.Value)
+	allNames := exprIdentNames(vd.Value)
+	deps := make([]string, 0, len(depSet)+len(allNames))
+	for name := range depSet {
+		deps = append(deps, name)
+	}
+	for _, name := range allNames {
+		if depSet[name] {
+			continue
+		}
+		if depSet == nil {
+			depSet = map[string]bool{}
+		}
+		depSet[name] = true
+		deps = append(deps, name)
+	}
+	if a.smtLocalDefDeps == nil {
+		a.smtLocalDefDeps = map[*Symbol][]string{}
+	}
+	a.smtLocalDefDeps[sym] = deps
+	return deps
 }

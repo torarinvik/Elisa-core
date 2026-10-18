@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -172,7 +173,7 @@ type functionSyntaxEncoder struct {
 	depth, work  int
 	failure      error
 	seen         map[functionSyntaxPointer]uint64
-	structFields map[reflect.Type][]string
+	structFields map[reflect.Type][]functionSyntaxField
 	nodes        []PositionedFunctionNode
 	// Optional explicit derived-cache exclusions for nominal fingerprints.
 	// Source syntax fingerprints leave this nil and remain fully structural.
@@ -182,6 +183,29 @@ type functionSyntaxEncoder struct {
 }
 
 var functionPositionType = reflect.TypeOf(lexer.Pos{})
+
+type functionSyntaxField struct {
+	name  string
+	index int
+}
+
+// Reflection metadata is immutable for the lifetime of the process. Keeping
+// declaration-order field metadata here avoids rebuilding the same schema
+// maps for every function fingerprint in a compile-server edit. The key set
+// is bounded by the compiler's Go types, not by source input.
+var functionSyntaxStructFieldsCache sync.Map // map[reflect.Type][]functionSyntaxField
+
+func functionSyntaxStructFields(typ reflect.Type) []functionSyntaxField {
+	if cached, ok := functionSyntaxStructFieldsCache.Load(typ); ok {
+		return cached.([]functionSyntaxField)
+	}
+	fields := make([]functionSyntaxField, typ.NumField())
+	for index := range fields {
+		fields[index] = functionSyntaxField{name: typ.Field(index).Name, index: index}
+	}
+	actual, _ := functionSyntaxStructFieldsCache.LoadOrStore(typ, fields)
+	return actual.([]functionSyntaxField)
+}
 
 func functionSyntaxFingerprint(value any) ([32]byte, []PositionedFunctionNode, error) {
 	encoder := &functionSyntaxEncoder{seen: map[functionSyntaxPointer]uint64{}}
@@ -263,21 +287,22 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 		e.marker(0)
 		return nil
 	}
+	typ := value.Type()
 	// Position changes are rebound inputs, not declaration or body identity.
-	if value.Type() == functionPositionType {
+	if typ == functionPositionType {
 		e.marker(1)
 		return nil
 	}
-	e.text(value.Type().String())
+	e.text(typ.String())
 	if e.failure != nil {
 		return e.failure
 	}
-	if e.validateSemanticFunction != nil && value.Type() == reflect.TypeOf((*FuncType)(nil)) && !value.IsNil() {
+	if e.validateSemanticFunction != nil && typ == reflect.TypeOf((*FuncType)(nil)) && !value.IsNil() {
 		if err := e.validateSemanticFunction(value.Interface().(*FuncType)); err != nil {
 			return err
 		}
 	}
-	if e.semanticBitSets && value.Type() == reflect.TypeOf(IntBitSet{}) {
+	if e.semanticBitSets && typ == reflect.TypeOf(IntBitSet{}) {
 		return e.encodeSemanticIntBitSet(value.Interface().(IntBitSet))
 	}
 	switch value.Kind() {
@@ -293,7 +318,7 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 			e.marker(0)
 			return nil
 		}
-		key := functionSyntaxPointer{value.Type(), value.Pointer()}
+		key := functionSyntaxPointer{typ, value.Pointer()}
 		if ordinal, ok := e.seen[key]; ok {
 			e.marker(2)
 			e.number(ordinal)
@@ -306,27 +331,23 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 		}
 		return e.encode(value.Elem())
 	case reflect.Struct:
-		typ := value.Type()
 		fields, known := e.structFields[typ]
 		if !known {
-			fields = make([]string, typ.NumField())
-			for i := range fields {
-				fields[i] = typ.Field(i).Name
-			}
+			fields = functionSyntaxStructFields(typ)
 			if e.structFields == nil {
-				e.structFields = make(map[reflect.Type][]string)
+				e.structFields = make(map[reflect.Type][]functionSyntaxField)
 			}
 			e.structFields[typ] = fields
 		}
-		for i, name := range fields {
-			if e.skipFields[typ][name] {
+		for _, fieldInfo := range fields {
+			if e.skipFields[typ][fieldInfo.name] {
 				continue
 			}
-			field := value.Field(i)
+			field := value.Field(fieldInfo.index)
 			if !field.CanInterface() {
-				return fmt.Errorf("unpublished function syntax field %s.%s", typ, name)
+				return fmt.Errorf("unpublished function syntax field %s.%s", typ, fieldInfo.name)
 			}
-			e.text(name)
+			e.text(fieldInfo.name)
 			if err := e.encode(field); err != nil {
 				return err
 			}
@@ -354,8 +375,8 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 			return nil
 		}
 		e.marker(1)
-		if value.Type().Key().Kind() != reflect.String {
-			return fmt.Errorf("unsupported function syntax map key %s", value.Type().Key())
+		if typ.Key().Kind() != reflect.String {
+			return fmt.Errorf("unsupported function syntax map key %s", typ.Key())
 		}
 		if value.Len() > functionSyntaxMaxWork-e.work {
 			return ErrFunctionSyntaxBudget

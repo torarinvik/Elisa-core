@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // IncrementalObjectSession retains native object partitions across analyzed
@@ -31,7 +32,8 @@ type IncrementalObjectStats struct {
 	Builds, PartitionsEmitted, PartitionsReused, SerialFallbacks, Evictions uint64
 	IRTime, PartitionTime, NativeTime, MergeTime                            time.Duration
 	// CloneTime includes restriction, dead-prototype pruning and verification.
-	// BitcodeTime includes serialization and copying the owned cache key.
+	// BitcodeTime includes serialization and exact-key hashing, plus an owned-key
+	// copy on misses.
 	CloneTime, BitcodeTime            time.Duration
 	RetainedBytes, RetainedPartitions int
 }
@@ -69,21 +71,33 @@ func (s *IncrementalObjectSession) recordStats(update func(*IncrementalObjectSta
 }
 
 func incrementalObjectKey(bitcode, target string) [32]byte {
+	return incrementalObjectKeyBytes(unsafe.Slice(unsafe.StringData(bitcode), len(bitcode)), target)
+}
+
+func incrementalObjectKeyBytes(bitcode []byte, target string) [32]byte {
 	h := sha256.New()
-	h.Write([]byte(target))
-	h.Write([]byte{0})
-	h.Write([]byte(bitcode))
+	_, _ = h.Write(unsafe.Slice(unsafe.StringData(target), len(target)))
+	separator := [1]byte{0}
+	_, _ = h.Write(separator[:])
+	_, _ = h.Write(bitcode)
 	var key [32]byte
 	copy(key[:], h.Sum(nil))
 	return key
 }
 
 func (s *IncrementalObjectSession) lookupObject(bitcode, target string) []byte {
-	key := incrementalObjectKey(bitcode, target)
+	return s.lookupObjectBytes(unsafe.Slice(unsafe.StringData(bitcode), len(bitcode)), target)
+}
+
+// lookupObjectBytes borrows bitcode only for this call. In particular, callers may
+// pass a view of an LLVM-owned memory buffer; the cache retains only its own copies.
+func (s *IncrementalObjectSession) lookupObjectBytes(bitcode []byte, target string) []byte {
+	key := incrementalObjectKeyBytes(bitcode, target)
+	input := unsafe.String(unsafe.SliceData(bitcode), len(bitcode))
 	s.mu.Lock()
 	entry := s.entries[key]
 	// Exact input comparison makes the digest an index, not reuse authority.
-	if entry == nil || entry.bitcode != bitcode || entry.target != target {
+	if entry == nil || entry.bitcode != input || entry.target != target {
 		s.mu.Unlock()
 		return nil
 	}

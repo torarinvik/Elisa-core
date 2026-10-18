@@ -2427,6 +2427,7 @@ type smtTranslator struct {
 	// and exclusivity against known literals without modeling arbitrary string contents.
 	stringParamInts      map[smtStringParameterKey]string
 	stringLiteralInts    map[string]int64
+	stringFieldIDs       map[string]string
 	nextStringLiteralInt int64
 	a                    *Analyzer
 	decls                map[string]bool // Elisa ident -> declared as an SMT Int const

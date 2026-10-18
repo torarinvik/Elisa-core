@@ -96,7 +96,10 @@ type Analyzer struct {
 	capabilityQueries        *capabilityQueryInvocation
 	// smtStaleLocalDefs marks immutable locals whose initializer read a binding that has since been
 	// written (analyzer_smt_shadowing.go); their defining equation no longer holds.
-	smtStaleLocalDefs                    map[*Symbol]bool
+	smtStaleLocalDefs map[*Symbol]bool
+	// smtLocalDefDeps caches the syntactic dependency names of immutable local initializers.
+	// These AST-derived sets are reused by mutation-driven SMT fact invalidation.
+	smtLocalDefDeps                      map[*Symbol][]string
 	smtBoolLocalInitCache                map[*Symbol]smtBoolLocalInitCacheEntry
 	sviewFrameWriteFreeCache             map[*ast.FuncDecl]bool
 	programRegions                       map[string]bool

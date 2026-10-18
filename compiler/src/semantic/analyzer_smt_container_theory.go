@@ -1,6 +1,9 @@
 package semantic
 
 import (
+	"encoding/hex"
+	"strings"
+
 	"elisacore/src/ast"
 )
 
@@ -162,27 +165,95 @@ func (tr *smtTranslator) containerElementType(expr ast.Expr) Type {
 // containerViewIndex recognizes `xs[k]` on a stable container of views and returns its base and
 // index term.
 func (tr *smtTranslator) containerViewIndex(expr ast.Expr, env map[string]string) (string, string, bool) {
-	idx, ok := stripOptimizationParens(expr).(*ast.IndexExpr)
-	if !ok || idx == nil || idx.Index2 != nil || idx.Fallback != nil || idx.LegacyElseFallback ||
-		idx.AsSpecialize != nil || idx.AsOverlayCall != nil || idx.AsBuiltinDictGet != nil {
+	e := stripOptimizationParens(expr)
+	if idx, ok := e.(*ast.IndexExpr); ok {
+		if !validContainerViewIndex(idx) {
+			return "", "", false
+		}
+		elem := tr.containerElementType(idx.Object)
+		if elem == nil {
+			return "", "", false
+		}
+		if _, isView := stripRefForBounds(elem).(*SViewType); !isView {
+			return "", "", false
+		}
+		return tr.containerViewIndexTerm(idx, "", env)
+	}
+	field, ok := e.(*ast.FieldExpr)
+	if !ok || field == nil || tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil ||
+		!tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
 		return "", "", false
 	}
-	elem := tr.containerElementType(idx.Object)
-	if elem == nil {
+	root, path := projectionChain(field)
+	if id, ok := root.(*ast.Ident); ok && id != nil {
+		if value, found := tr.immutableIndexedRecordLocal(id, env); found {
+			return tr.containerViewIndex(rerootProjection(field, value, tr.a), env)
+		}
+	}
+	idx, ok := root.(*ast.IndexExpr)
+	if !ok || !validContainerViewIndex(idx) || path == "" {
 		return "", "", false
 	}
-	if _, isView := stripRefForBounds(elem).(*SViewType); !isView {
+	record, ok := StripAggregateStateType(tr.containerElementType(idx.Object)).(*StructType)
+	if !ok || record == nil {
+		return "", "", false
+	}
+	var leaf Type = record
+	for _, name := range strings.Split(strings.TrimPrefix(path, smtFieldSeparator), smtFieldSeparator) {
+		st, ok := StripAggregateStateType(leaf).(*StructType)
+		if !ok || st == nil {
+			return "", "", false
+		}
+		field, found := st.Fields[name]
+		if !found {
+			return "", "", false
+		}
+		leaf = field.Type
+	}
+	if _, isView := stripRefForBounds(leaf).(*SViewType); !isView {
+		return "", "", false
+	}
+	return tr.containerViewIndexTerm(idx, path, env)
+}
+
+func validContainerViewIndex(idx *ast.IndexExpr) bool {
+	return idx != nil && idx.Index2 == nil && idx.Fallback == nil && !idx.LegacyElseFallback &&
+		idx.AsSpecialize == nil && idx.AsOverlayCall == nil && idx.AsBuiltinDictGet == nil
+}
+
+func (tr *smtTranslator) containerViewIndexTerm(idx *ast.IndexExpr, path string, env map[string]string) (string, string, bool) {
+	if !validContainerViewIndex(idx) {
 		return "", "", false
 	}
 	base, ok := tr.containerBase(idx.Object, env)
 	if !ok {
 		return "", "", false
 	}
+	if path != "" {
+		base += "$field_" + hex.EncodeToString([]byte(path))
+	}
 	k, ok := tr.termEnv(idx.Index, env)
 	if !ok {
 		return "", "", false
 	}
 	return base, k, true
+}
+
+// containerViewStringID is the classifier identity of a view stored in a stable
+// container element. Keep the selected index as a function argument: turning a
+// quantified index into a free constant would make distinct elements spuriously
+// share identity, while the UF preserves congruence for repeated reads at the
+// same index.
+func (tr *smtTranslator) containerViewStringID(base, index string) string {
+	name := "|@container_sview_sid_" + hex.EncodeToString([]byte(base)) + "|"
+	if tr.ghostUFDecls == nil {
+		tr.ghostUFDecls = map[string]bool{}
+	}
+	if !tr.ghostUFDecls[name] {
+		tr.ghostUFDecls[name] = true
+		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+name+" (Int) Int)\n")
+	}
+	return "(" + name + " " + index + ")"
 }
 
 // containerViewElement is the view stored at index k of a container: its byte array, start offset

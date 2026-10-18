@@ -2,7 +2,12 @@
 
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"elisacore/src/ast"
+)
 
 func TestSMTEmptyViewEqualityUsesLength(t *testing.T) {
 	for _, expression := range []string{`view == ""`, `"" == view`, `not (view != "")`} {
@@ -27,6 +32,49 @@ def empty(values: darray[sview @source]&, index: usize) -> bool:
 	result := analyzeContractStrict(t, "indexed_empty_view.elisa", source)
 	if len(result.Errors()) != 0 {
 		t.Fatal(result.Errors())
+	}
+}
+
+func TestSMTQuantifiedEmptyNestedRecordViewEqualityKeepsBinderScoped(t *testing.T) {
+	source := `struct Metadata:
+    text: sview
+struct Item:
+    metadata: Metadata
+
+def is_empty(items: darray[Item], index: usize) -> bool:
+    return items[index].metadata.text == ""
+`
+	result := analyzeFunctionAnalysisTestSource(t, "quantified_empty_nested_view.elisa", source)
+	fnSymbol, ok := result.GlobalScope.Lookup("is_empty")
+	if !ok || fnSymbol == nil {
+		t.Fatal("is_empty function is missing")
+	}
+	fn, ok := fnSymbol.Node.(*ast.FuncDecl)
+	if !ok || fn == nil {
+		t.Fatal("is_empty declaration is not a function")
+	}
+	fnType, ok := fnSymbol.Type.(*FuncType)
+	if !ok || fnType == nil || len(fnType.Params) != 2 {
+		t.Fatal("is_empty function signature is missing its parameters")
+	}
+	ret, ok := fn.Body[len(fn.Body)-1].(*ast.ReturnStmt)
+	if !ok || ret == nil || ret.Value == nil {
+		t.Fatal("is_empty return expression is missing")
+	}
+	analyzer := result.analyzer
+	analyzer.currentFuncDecl = fn
+	analyzer.currentScope = NewScope(analyzer.globalScope)
+	analyzer.currentScope.Define(&Symbol{Name: "items", Kind: SymbolParam, Type: fnType.Params[0], Node: fn, ParamIndex: 0})
+	analyzer.currentScope.Define(&Symbol{Name: "index", Kind: SymbolParam, Type: fnType.Params[1], Node: fn, ParamIndex: 1})
+	tr := analyzer.newSMTTranslator(nil)
+	term, ok := tr.boolTerm(ret.Value, map[string]string{"index": "q_field_index"})
+	if !ok || !strings.Contains(term, "q_field_index") {
+		t.Fatalf("expected empty-view equality to retain the quantified index in its term, got %q (ok=%v)", term, ok)
+	}
+	for _, aux := range tr.auxDecls {
+		if smtTermMentionsQuantifierBinder(aux) {
+			t.Fatalf("quantifier binder escaped into a top-level auxiliary declaration: %s", aux)
+		}
 	}
 }
 
