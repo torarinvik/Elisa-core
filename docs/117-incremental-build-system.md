@@ -114,6 +114,19 @@ are diagnostic samples on a shared host, not paired speedup claims. Existing
 `PartitionTime` remains the sum of those phases. Raw logs are retained under
 `build/verification/incremental-preparation-breakdown-20261018/`.
 
+A merged-output cache experiment passed native tests but regressed the paired
+unchanged and structural-edit workloads. It serialized the full module and
+fingerprinted the host linker on each request; Apple's tool-selection query
+alone measured 13–15 ms, comparable to an entire relocatable merge. A variant
+keyed from validated native partition bytes avoided extra bitcode serialization,
+but did not eliminate that tool-selection overhead. The experimental backend
+changes included by concurrent commit `59dba92c` were removed; unrelated verifier
+fixes in that commit were preserved. Raw paired timings, test logs and the final
+experimental source variant are retained under
+`build/verification/incremental-merged-rejected-20261018/`. No merged-cache speedup
+is qualified. Moving unchanged-build detection above LLVM lowering remains the
+more useful direction for eliminating repeat work.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification

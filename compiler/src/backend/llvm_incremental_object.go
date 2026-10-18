@@ -23,8 +23,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"strings"
 	"time"
 	"unsafe"
@@ -94,27 +92,6 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		return err
 	}
 	unitID := sha256.Sum256([]byte(origin))
-	// Whole-module reuse still checks current optimized IR. Unit identity and
-	// merger selection are separate inputs because partitioning rewrites private
-	// names and the final artifact is produced by the selected host linker.
-	mergedConfig := incrementalMergedObjectConfig(string(config), origin, s.partitions)
-	fullInput := ""
-	if mergedConfig != "" {
-		fullBitcode := C.LLVMWriteBitcodeToMemoryBuffer(g.module)
-		if uint64(C.LLVMGetBufferSize(fullBitcode)) <= 1<<31-1 {
-			fullInput = C.GoStringN(C.LLVMGetBufferStart(fullBitcode), C.int(C.LLVMGetBufferSize(fullBitcode)))
-		}
-		C.LLVMDisposeMemoryBuffer(fullBitcode)
-	}
-	if fullInput != "" {
-		if object := s.lookupCacheObject(fullInput, mergedConfig, true); object != nil {
-			cached := filepath.Join(dir, "merged.o")
-			if err := os.WriteFile(cached, object, 0600); err != nil {
-				return err
-			}
-			return os.Rename(cached, outputPath)
-		}
-	}
 	namespace := C.CString(hex.EncodeToString(unitID[:]))
 	defer C.free(unsafe.Pointer(namespace))
 	parts := make([]string, s.partitions)
@@ -180,13 +157,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if out, err := exec.Command(linker[0], args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("merge incremental objects: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	// Retention is optional; a successful linker result remains usable even if
-	// reading it for the in-memory cache fails.
-	mergedObject, _ := os.ReadFile(merged)
 	err = os.Rename(merged, outputPath)
-	if err == nil && fullInput != "" && len(mergedObject) != 0 {
-		s.retainCacheObject(fullInput, mergedConfig, mergedObject, true)
-	}
 	mergeDuration := time.Since(mergeStart)
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.MergeTime += mergeDuration })
 	return err
@@ -201,39 +172,4 @@ func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath
 		stats.SerialFallbacks++
 	})
 	return err
-}
-
-// Arbitrary custom linker commands may invoke untracked scripts or tools; retain
-// partition reuse for those, but run their merger on every request. For the host
-// linker, fingerprint the executable and its environment. Apple's /usr/bin/ld is
-// a tool-selection shim, so fingerprint the selected developer tool as well.
-func incrementalMergedObjectConfig(target, origin string, partitions int) string {
-	if strings.TrimSpace(os.Getenv("ELISA_LD")) != "" {
-		return ""
-	}
-	path, err := exec.LookPath("ld")
-	if err != nil {
-		return ""
-	}
-	tool, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	identity := []string{path, fmt.Sprintf("%x", sha256.Sum256(tool))}
-	if runtime.GOOS == "darwin" && path == "/usr/bin/ld" {
-		selected, err := exec.Command("/usr/bin/xcrun", "--find", "ld").Output()
-		if err != nil {
-			return ""
-		}
-		selectedPath := strings.TrimSpace(string(selected))
-		tool, err = os.ReadFile(selectedPath)
-		if err != nil {
-			return ""
-		}
-		identity = append(identity, selectedPath, fmt.Sprintf("%x", sha256.Sum256(tool)))
-	}
-	environment := os.Environ()
-	sort.Strings(environment)
-	encoded, _ := json.Marshal([]any{"merged-object-v1", target, origin, partitions, identity, environment})
-	return string(encoded)
 }

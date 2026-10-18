@@ -25,7 +25,6 @@ type incrementalObjectEntry struct {
 	bitcode, target string
 	object          []byte
 	lastUse         uint64
-	merged          bool
 }
 
 type IncrementalObjectStats struct {
@@ -34,8 +33,6 @@ type IncrementalObjectStats struct {
 	// CloneTime includes restriction, dead-prototype pruning and verification.
 	// BitcodeTime includes serialization and copying the owned cache key.
 	CloneTime, BitcodeTime            time.Duration
-	MergedObjectsReused               uint64
-	RetainedMergedObjects             int
 	RetainedBytes, RetainedPartitions int
 }
 
@@ -60,14 +57,7 @@ func (s *IncrementalObjectSession) Stats() IncrementalObjectStats {
 	stats := s.stats
 	s.statsMu.Unlock()
 	s.mu.Lock()
-	stats.RetainedBytes = s.bytes
-	for _, entry := range s.entries {
-		if entry.merged {
-			stats.RetainedMergedObjects++
-		} else {
-			stats.RetainedPartitions++
-		}
-	}
+	stats.RetainedBytes, stats.RetainedPartitions = s.bytes, len(s.entries)
 	s.mu.Unlock()
 	return stats
 }
@@ -89,15 +79,11 @@ func incrementalObjectKey(bitcode, target string) [32]byte {
 }
 
 func (s *IncrementalObjectSession) lookupObject(bitcode, target string) []byte {
-	return s.lookupCacheObject(bitcode, target, false)
-}
-
-func (s *IncrementalObjectSession) lookupCacheObject(bitcode, target string, merged bool) []byte {
 	key := incrementalObjectKey(bitcode, target)
 	s.mu.Lock()
 	entry := s.entries[key]
 	// Exact input comparison makes the digest an index, not reuse authority.
-	if entry == nil || entry.bitcode != bitcode || entry.target != target || entry.merged != merged {
+	if entry == nil || entry.bitcode != bitcode || entry.target != target {
 		s.mu.Unlock()
 		return nil
 	}
@@ -105,22 +91,11 @@ func (s *IncrementalObjectSession) lookupCacheObject(bitcode, target string, mer
 	entry.lastUse = s.clock
 	object := entry.object
 	s.mu.Unlock()
-	s.recordStats(func(stats *IncrementalObjectStats) {
-		if merged {
-			stats.MergedObjectsReused++
-			stats.PartitionsReused += uint64(s.partitions)
-		} else {
-			stats.PartitionsReused++
-		}
-	})
+	s.recordStats(func(stats *IncrementalObjectStats) { stats.PartitionsReused++ })
 	return object
 }
 
 func (s *IncrementalObjectSession) retainObject(bitcode, target string, object []byte) {
-	s.retainCacheObject(bitcode, target, object, false)
-}
-
-func (s *IncrementalObjectSession) retainCacheObject(bitcode, target string, object []byte, merged bool) {
 	cost := len(bitcode) + len(target) + len(object)
 	if cost > s.maxBytes {
 		return
@@ -146,7 +121,7 @@ func (s *IncrementalObjectSession) retainCacheObject(bitcode, target string, obj
 		evictions++
 	}
 	s.clock++
-	s.entries[key] = &incrementalObjectEntry{bitcode: bitcode, target: target, object: object, lastUse: s.clock, merged: merged}
+	s.entries[key] = &incrementalObjectEntry{bitcode: bitcode, target: target, object: object, lastUse: s.clock}
 	s.bytes += cost
 	s.mu.Unlock()
 	if evictions > 0 {

@@ -70,9 +70,6 @@ func assertNativeFunctionsInDifferentShards(t *testing.T, session *IncrementalOb
 	owners := map[string]int{}
 	index := 0
 	for _, entry := range session.entries {
-		if entry.merged {
-			continue
-		}
 		path := filepath.Join(t.TempDir(), "part.o")
 		if err := os.WriteFile(path, entry.object, 0600); err != nil {
 			t.Fatal(err)
