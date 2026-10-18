@@ -43,3 +43,29 @@ func TestSnapshotExplicitRegionFactory(t *testing.T) {
 		t.Fatal(result.Errors())
 	}
 }
+
+func TestSnapshotFactoryByValueCanonicalizer(t *testing.T) {
+	data, err := os.ReadFile("testdata/snapshot_region_canonicalizer.elisa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []bool{false, true} {
+		source := string(data)
+		if bad {
+			// Replacing one owned pool with the borrowed source descriptor must
+			// invalidate the output-region contract even though all others are copied.
+			start := strings.Index(source, "def clone_borrow")
+			if start < 0 {
+				t.Fatal("missing borrowed canonicalizer")
+			}
+			source = source[:start] + strings.Replace(source[start:], "bytes: bytes, source_path_start:", "bytes: snapshot.bytes, source_path_start:", 1)
+		}
+		r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "canonicalizer.elisa", source, AnalyzeOptions{})
+		if !bad && len(r.Errors()) != 0 {
+			t.Fatal(r.Errors())
+		}
+		if bad && !strings.Contains(strings.Join(r.Errors(), "\n"), "independent region parameter") {
+			t.Fatalf("borrowed pool escaped fresh canonicalizer: %v", r.Errors())
+		}
+	}
+}

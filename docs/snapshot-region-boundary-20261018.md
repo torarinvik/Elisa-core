@@ -97,3 +97,14 @@ factory insertion used in the earlier failing gate experiment. It now passes
 `TestSnapshotExplicitRegionFactory` against the integrated semantic analyzer.
 The combined region/factory/snapshot suite passes (0.545 seconds). This pins the
 full aggregate boundary independently of ongoing shared Stage1 source edits.
+
+Canonicalizer boundary confirmation: the original complete nine-buffer snapshot
+fixture now passes when a factory result is passed by value to a helper that
+allocates and copies fresh destination-owned buffers, then inserted into the
+generic destination array. A borrowed-source variant is analyzed as well.
+Replacing only that variant's returned byte pool with `snapshot.bytes` rejects
+the independent input region. This guards against treating a shallow descriptor
+copy as a rehome. Fixture: `testdata/snapshot_region_canonicalizer.elisa`; test:
+`TestSnapshotFactoryByValueCanonicalizer`. Combined region/factory/snapshot suite
+passes (1.011 seconds); verbose evidence is saved in the ignored verification
+directory. No full compiler build or rebuild-time claim is attached.
