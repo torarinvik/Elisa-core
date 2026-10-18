@@ -252,6 +252,22 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 		return nil, nil, fmt.Errorf("specialize expects a function, got %s", sym.Type.String())
 	}
 	params := functionSpecializationParams(baseType)
+	regionOnly := len(params) == 0
+	if regionOnly {
+		// Pure lifetime arguments select runtime arenas without changing layout.
+		for _, name := range baseType.RegionParams {
+			inferred := false
+			for _, implicit := range baseType.InferredRegionParams {
+				if name == implicit {
+					inferred = true
+					break
+				}
+			}
+			if !inferred {
+				params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+			}
+		}
+	}
 	if len(params) == 0 {
 		return nil, nil, fmt.Errorf("function %q is not generic", ident.Name)
 	}
@@ -267,6 +283,16 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 		bindings[params[i].Name] = resolved
 	}
 	specialized := specializeFuncType(baseType, bindings, s.g.result.StaticImpls)
+	if regionOnly {
+		// Keep the original code/ABI and expose the current owner's hidden-argument
+		// names to this call. Do not cache one caller's arena names for later calls.
+		name := baseType.Name
+		if name == "" {
+			name = ident.Name
+		}
+		value, err := s.g.ensureFunctionDeclared(name, baseType)
+		return value, specialized, err
+	}
 	if decl, ok := sym.Node.(*ast.FuncDecl); ok {
 		value, lowered, err := s.g.ensureSpecializedFunction(decl, baseType, bindings)
 		return value, lowered, err

@@ -162,3 +162,17 @@ compile-and-run test grows a Packet buffer through a stack descriptor and prints
 7 (1.848 s), preserving actual allocation and hidden-argument behavior. Selected
 backend generic/specialization regressions pass. Unrelated dirty SMT test changes
 in the checkout were preserved and excluded from these commits.
+
+Pure region-only explicit calls: factories such as `make[@r]() -> Packet @r`
+(with a nominally region-less Packet) also need explicit lifetime application.
+`emitSpecializeExpr` now recognizes their source-declared region parameters while
+excluding inferred allocation parameters. It reuses the original function code
+and ABI and returns a per-call signature with the selected arena names, rather
+than caching a caller's region names or emitting layout-identical clones.
+
+The compile-and-run regression passes for one owner and two sequential distinct
+owners, printing 7 for each. Four selected root runtime cases pass, with no skips.
+An initial backend-package test build failed to import encoding/binary (`open :
+no such file or directory`); a standalone retry succeeds with eight generic/
+specialization tests and no skips. The root runtime results were already green;
+no global Go cache cleaning or source workaround was used.

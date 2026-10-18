@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExplicitBufferRegionIndependentOfStackDescriptorRuns(t *testing.T) {
 	status, out := s4CompileRun(t, `struct Packet[@storage]:
@@ -21,5 +24,35 @@ def main() -> int:
 `)
 	if status != "RAN" || out != "7" {
 		t.Fatalf("explicit buffer owner lost across stack descriptor borrow: %s %q", status, out)
+	}
+}
+
+func TestExplicitRegionOnlyFactoryRuns(t *testing.T) {
+	source := `struct Packet:
+    bytes: mutable darray[u8]
+
+def make[@r]() -> Packet @r:
+    can Memory.Allocate, Abort.Panic:
+        bytes: mutable darray[u8] @r = []
+        bytes.push(7)
+        return Packet{bytes: bytes}
+
+def main() -> int:
+    can Memory.Allocate, Abort.Panic, Console.Write, Console.Format, Global.Read, Global.Write:
+        region owner:
+            packet: Packet = make[owner]()
+            print(packet.bytes[0].i64())
+            return 0
+`
+	for _, two := range []bool{false, true} {
+		current, want := source, "7"
+		if two {
+			current = strings.Replace(current, "            return 0", "        region other:\n            second: Packet = make[other]()\n            print(second.bytes[0].i64())\n            return 0", 1)
+			want = "7\n7"
+		}
+		status, out := s4CompileRun(t, current)
+		if status != "RAN" || out != want {
+			t.Fatalf("region-only factory (two owners=%v) failed: %s %q", two, status, out)
+		}
 	}
 }
