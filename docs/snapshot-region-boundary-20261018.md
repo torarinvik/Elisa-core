@@ -24,3 +24,12 @@ while `regionRefStateForExpr` represents declared call-return regions using
 exactly such dependencies. This is a hypothesis pending instrumentation and
 negative controls for mixed, shorter-lived, and stale dependencies. Do not
 suppress the escape diagnostic solely on the nominal return annotation.
+
+Instrumentation refinement: a focused semantic-package test on this integrated
+Core revision reproduces the same two errors (0.01 seconds of test execution).
+At the failing call, `valueInteriorRegion` returns `__auto_305`,
+`regionRefStateForExpr` reports no state, and `declaredCallReturnRegions` has
+no entry. Consequently the hypothesized rejection of an existing named-region
+dependency is not the immediate cause in this example. Investigate call-return
+metadata creation/specialization first. Temporary tracing and the intentionally
+failing probe were removed after recording this observation.
