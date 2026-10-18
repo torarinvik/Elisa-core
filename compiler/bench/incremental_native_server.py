@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Measure novel source edits through a real local compile-server executable.
 
-Includes HTTP, parsing, analysis, lowering and object generation. Excludes final
-executable linking/execution. This synthetic workload is not project qualification.
+Includes HTTP, parsing, analysis, lowering and object generation. With --execute,
+link/run checks follow each measured object and single-edit end-to-end latency
+is reported separately. Concurrent batch timing remains compile-only. This
+synthetic workload is not project qualification.
 """
 import argparse
 import base64
@@ -14,6 +16,8 @@ from pathlib import Path
 import platform
 import socket
 import statistics
+import shutil
+import tempfile
 import subprocess
 import time
 import urllib.request
@@ -27,9 +31,15 @@ def main():
     parser.add_argument("--samples", type=int, default=9)
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--batches", type=int, default=5)
+    parser.add_argument("--execute", action="store_true", help="link and execute each measured object; report single-edit end-to-end latency")
+    parser.add_argument("--clang", default=os.getenv("ELISA_CLANG", "clang"))
     args = parser.parse_args()
     if min(args.functions, args.samples, args.concurrency, args.batches) < 1:
         parser.error("workload sizes must be positive")
+    if args.execute:
+        args.clang = shutil.which(args.clang)
+        if not args.clang:
+            parser.error("native execution requires an available clang")
     compiler = args.compiler.resolve(strict=True)
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output.resolve()
@@ -47,7 +57,7 @@ def main():
         "linker_env": os.getenv("ELISA_LD", ""),
         "parallel_opt_env": os.getenv("ELISACORE_PARALLEL_OPT", ""),
         "parallel_opt_import_env": os.getenv("ELISACORE_PARALLEL_OPT_IMPORT", ""),
-        "limitations": ["synthetic O0 source-to-object workload", "no final link/execution", "short shared-host samples"],
+        "limitations": ["synthetic O0 source-to-object workload", "native execution verified" if args.execute else "no final link/execution", "short shared-host samples"],
     }
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -67,6 +77,8 @@ def main():
             if i == 0:
                 expression = expression.replace("value0 * 2", f"value0 * {factor}", 1)
             functions.append(f"def work{i}(value{i}: int, delta{i}: int) -> int:\n    return {expression}\n\n")
+        if args.execute:
+            functions.append("def main() -> int:\n    return work0(1, 1)\n")
         return json.dumps({"mode": "obj", "filename": filename,
                            "source": "".join(functions), "incremental": incremental}).encode()
 
@@ -74,13 +86,43 @@ def main():
         request = urllib.request.Request(url + "/api/v1/compile", data, {"Content-Type": "application/json"})
         with urllib.request.urlopen(request, timeout=90) as response:
             body = json.load(response)
-        if not body.get("ok") or not base64.b64decode(body.get("object", "")):
+        if not body.get("ok"):
             raise RuntimeError(body)
+        artifact = base64.b64decode(body.get("object", ""), validate=True)
+        if not artifact:
+            raise RuntimeError("compiler returned an empty object")
+        return artifact
 
-    def timed(data):
+    def qualify(artifact, factor):
+        # All sixteen terms use (1 * 2 + 1 * 3), except the first edited
+        # multiplication. Native process exit status retains the low byte.
+        expected = (factor + 78) % 256
+        with tempfile.TemporaryDirectory(prefix="native-", dir=output) as directory:
+            obj = Path(directory) / "edit.o"
+            executable = Path(directory) / "edit"
+            obj.write_bytes(artifact)
+            start = time.perf_counter()
+            linked = subprocess.run([args.clang, str(obj), "-o", str(executable)],
+                                    capture_output=True, timeout=90)
+            link_ms = (time.perf_counter() - start) * 1000
+            if linked.returncode:
+                raise RuntimeError("native link failed: " + linked.stderr.decode(errors="replace"))
+            start = time.perf_counter()
+            executed = subprocess.run([str(executable)], capture_output=True, timeout=90)
+            execute_ms = (time.perf_counter() - start) * 1000
+            if executed.returncode != expected:
+                (output / "failed-native-object.o").write_bytes(artifact)
+                raise RuntimeError(f"native result {executed.returncode}, expected {expected}, factor {factor}")
+            return {"link_ms": link_ms, "execute_ms": execute_ms, "expected_exit": expected}
+
+    def timed(data, factor):
         start = time.perf_counter()
-        send(data)
-        return (time.perf_counter() - start) * 1000
+        artifact = send(data)
+        compile_ms = (time.perf_counter() - start) * 1000
+        native = qualify(artifact, factor) if args.execute else {}
+        if native:
+            native["end_to_end_ms"] = (time.perf_counter() - start) * 1000
+        return compile_ms, native
 
     try:
         deadline = time.monotonic() + 20
@@ -96,17 +138,24 @@ def main():
             raise RuntimeError("compile server startup timeout")
         filename = "benchmark-single.elisa"
         send(payload(2, False, filename))  # initialize LLVM and ordinary worker path
-        result["cold_incremental_ms"] = timed(payload(2, True, filename))
+        result["cold_incremental_ms"], result["cold_native"] = timed(payload(2, True, filename), 2)
         samples = []
         for i in range(args.samples):
             row = {"factor": i + 4}
             for retained in ([False, True] if i % 2 == 0 else [True, False]):
-                row["incremental_ms" if retained else "fresh_ms"] = timed(payload(i + 4, retained, filename))
+                mode = "incremental" if retained else "fresh"
+                row[mode + "_ms"], native = timed(payload(i + 4, retained, filename), i + 4)
+                row.update({mode + "_" + key: value for key, value in native.items()})
             samples.append(row)
             print(json.dumps({"single": row}), flush=True)
         result["single"] = samples
         result["fresh_median_ms"] = statistics.median(x["fresh_ms"] for x in samples)
         result["incremental_median_ms"] = statistics.median(x["incremental_ms"] for x in samples)
+
+        if args.execute:
+            for mode in ("fresh", "incremental"):
+                result[mode + "_end_to_end_median_ms"] = statistics.median(x[mode + "_end_to_end_ms"] for x in samples)
+            result["clang"] = args.clang
 
         batches = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
@@ -120,8 +169,13 @@ def main():
                     data = [payload(100 + batch * args.concurrency + i, retained,
                                     f"benchmark-concurrent-{i}.elisa") for i in range(args.concurrency)]
                     start = time.perf_counter()
-                    list(executor.map(send, data))
-                    row["incremental_ms" if retained else "fresh_ms"] = (time.perf_counter() - start) * 1000
+                    artifacts = list(executor.map(send, data))
+                    mode = "incremental" if retained else "fresh"
+                    row[mode + "_ms"] = (time.perf_counter() - start) * 1000
+                    if args.execute:
+                        factors = [100 + batch * args.concurrency + i for i in range(args.concurrency)]
+                        list(executor.map(qualify, artifacts, factors))
+                        row[mode + "_native_verified"] = len(artifacts)
                 batches.append(row)
                 print(json.dumps({"concurrent": row}), flush=True)
         result["concurrency"] = args.concurrency
