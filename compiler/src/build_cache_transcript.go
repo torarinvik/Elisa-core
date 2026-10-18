@@ -13,16 +13,19 @@ import (
 const buildCacheStreamLimit = 1 << 20
 
 type buildCacheCapture struct {
-	bytes.Buffer
+	buffer   bytes.Buffer
 	overflow bool
 }
+
+func (c *buildCacheCapture) Len() int      { return c.buffer.Len() }
+func (c *buildCacheCapture) Bytes() []byte { return c.buffer.Bytes() }
 
 func (c *buildCacheCapture) Write(p []byte) (int, error) {
 	if c.overflow || len(p) > buildCacheStreamLimit-c.Len() {
 		c.overflow = true
 		return len(p), nil
 	}
-	return c.Buffer.Write(p)
+	return c.buffer.Write(p)
 }
 
 type buildCacheTranscript struct {

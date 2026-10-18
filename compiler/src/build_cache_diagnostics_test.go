@@ -56,6 +56,15 @@ func TestBuildCacheTranscriptIntegrityAndCaptureBound(t *testing.T) {
 	if !valid || !bytes.Equal(got.Stdout, want.Stdout) || !bytes.Equal(got.Stderr, want.Stderr) {
 		t.Fatal("transcript did not preserve exact bytes")
 	}
+	if err := os.Remove(artifact.object); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishCachedBuildObject(artifact, built, want); err != nil {
+		t.Fatal(err)
+	}
+	if !usableCachedFile(artifact.object, false) {
+		t.Fatal("valid transcript with missing object was not repaired")
+	}
 	got.Stderr = []byte("corrupted")
 	data, err := json.Marshal(got)
 	if err != nil {
@@ -160,5 +169,81 @@ func TestBuildObjectCachePathCreationRejectsPriorSuccess(t *testing.T) {
 	}
 	if rc, stderr := run(); rc != 0 {
 		t.Fatalf("removed path failed recovery: rc=%d %s", rc, stderr)
+	}
+}
+
+type buildCacheShortWriter struct{}
+
+func (buildCacheShortWriter) Write([]byte) (int, error) { return 0, nil }
+
+func TestBuildObjectCacheReplayIOFailureDoesNotRebuild(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	program := &loadedProgram{filename: filepath.Join(dir, "unit.elisa"), source: []byte("def main() -> i64:\n    return 0\n")}
+	options := cliOptions{filename: program.filename, emit: emitObject, output: filepath.Join(dir, "result.o")}
+	artifact, ok := buildCacheObjectArtifactForProgram(options, program)
+	if !ok {
+		t.Fatal("fixture cache identity unavailable")
+	}
+	built := filepath.Join(dir, "built.o")
+	if err := os.WriteFile(built, []byte("object"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishCachedBuildObject(artifact, built, buildCacheTranscript{Stdout: []byte("stdout"), Stderr: []byte("stderr")}); err != nil {
+		t.Fatal(err)
+	}
+	load := func(string, io.Writer) (*loadedProgram, bool) { return program, true }
+	build := func(cliOptions, *loadedProgram, io.Writer, io.Writer) int {
+		t.Fatal("replay I/O failure fell through into compilation")
+		return 0
+	}
+	for _, stderrFails := range []bool{false, true} {
+		var stdout, stderr io.Writer = io.Discard, io.Discard
+		if stderrFails {
+			stderr = buildCacheShortWriter{}
+		} else {
+			stdout = buildCacheShortWriter{}
+		}
+		if rc, handled := tryBuildObjectCacheWith(options, stdout, stderr, load, build); !handled || rc == 0 {
+			t.Fatalf("short replay reported success: rc=%d handled=%v", rc, handled)
+		}
+	}
+}
+
+func TestBuildObjectCacheOversizedTranscriptNeverPublishes(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	program := &loadedProgram{filename: filepath.Join(dir, "unit.elisa"), source: []byte("def main() -> i64:\n    return 0\n")}
+	options := cliOptions{filename: program.filename, emit: emitObject, output: filepath.Join(dir, "result.o")}
+	load := func(string, io.Writer) (*loadedProgram, bool) { return program, true }
+	payload := strings.Repeat("x", buildCacheStreamLimit+1)
+	builds := 0
+	build := func(opts cliOptions, _ *loadedProgram, _ io.Writer, stderr io.Writer) int {
+		builds++
+		if _, err := io.WriteString(stderr, payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(opts.output, []byte("object"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	for i := 0; i < 2; i++ {
+		var stderr bytes.Buffer
+		if rc, handled := tryBuildObjectCacheWith(options, io.Discard, &stderr, load, build); !handled || rc != 0 || stderr.String() != payload {
+			t.Fatal("oversized diagnostics changed compiler output")
+		}
+	}
+	if builds != 2 {
+		t.Fatal("oversized transcript became a cache hit")
+	}
+	artifact, ok := buildCacheObjectArtifactForProgram(options, program)
+	if !ok {
+		t.Fatal("fixture key unavailable")
+	}
+	if _, err := os.Stat(artifact.object); !os.IsNotExist(err) {
+		t.Fatal("oversized transcript published an artifact", err)
 	}
 }

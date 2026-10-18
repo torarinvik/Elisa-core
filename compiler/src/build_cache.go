@@ -173,7 +173,7 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string, t
 	}
 	// Missing/corrupt metadata cannot authorize a hit. Remove only this cache
 	// entry so the atomic directory publication can repair it.
-	if _, valid := readBuildCacheTranscript(artifact); !valid {
+	if _, valid := readBuildCacheTranscript(artifact); !valid || !usableCachedFile(artifact.object, false) {
 		_ = os.RemoveAll(artifact.dir)
 	}
 	if err := os.Rename(stagingDir, artifact.dir); err != nil {
