@@ -34,6 +34,14 @@ def unsignedCount(n: usize) -> usize:
         count <- count + 1
     return count
 
+def unsignedStartMayBeEmpty(n: usize) -> usize:
+    ensure result == n
+    count: mutable usize = 5
+    for i in 5..<n |count|:
+        invariant count == i
+        count <- i + 1
+    return count
+
 def cntbad(n: i64) -> i64:
     requires n >= 0 and n < 1000
     ensure result == n + 1
@@ -53,6 +61,9 @@ def cntbad(n: i64) -> i64:
 	}
 	if n := ensureFailuresFor(result.Errors(), "unsignedCount"); n != 0 {
 		t.Fatalf("unsignedCount: expected unsigned zero-based range exit facts to prove ensure, got %v", result.Errors())
+	}
+	if ensureFailuresFor(result.Errors(), "unsignedStartMayBeEmpty") == 0 {
+		t.Fatalf("unsignedStartMayBeEmpty: empty-range false ensure must remain unproven, got %v", result.Errors())
 	}
 	if ensureFailuresFor(result.Errors(), "cntbad") == 0 {
 		t.Fatalf("cntbad: false ensure must stay unproven; got %v", result.Errors())
