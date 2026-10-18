@@ -48,3 +48,40 @@ def use_gate() -> i64:
 		t.Fatalf("expected SharedGate specialization of ctx_concurrency_work1_new call inside run_pair__SharedGate__i64, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRSharesTypeSpecializationAcrossExplicitLifetimes(t *testing.T) {
+	source := `def make[T, @r](value: T) -> darray[T] @r:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable darray[T] @r = []
+        values.push(value)
+        return values
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        total: mutable i64 = 0
+        region first:
+            values: darray[i64] @first = make[i64, first](7)
+            total <- total + values[0]
+        region second:
+            values: darray[i64] @second = make[i64, second](9)
+            total <- total + values[0]
+        return total
+`
+	result := parseAndAnalyzeBackendTest(t, "mixed_explicit_lifetime.elisa", source)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions, calls := 0, 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "define ") && strings.Contains(line, "@make__") {
+			definitions++
+		}
+		if strings.Contains(line, "call ") && strings.Contains(line, "@make__i64(") {
+			calls++
+		}
+	}
+	if definitions != 1 || calls != 2 {
+		t.Fatalf("expected one type-specialized body shared by two lifetime applications, got definitions=%d calls=%d", definitions, calls)
+	}
+}

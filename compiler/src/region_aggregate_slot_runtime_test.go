@@ -56,3 +56,25 @@ def main() -> int:
 		}
 	}
 }
+
+func TestExplicitTypeAndLifetimeFactoryDistinctOwnersRuns(t *testing.T) {
+	status, out := s4CompileRun(t, `def make[T, @r](value: T) -> darray[T] @r:
+    can Memory.Allocate, Abort.Panic:
+        values: mutable darray[T] @r = []
+        values.push(value)
+        return values
+
+def main() -> int:
+    can Memory.Allocate, Abort.Panic, Console.Write, Console.Format, Global.Read, Global.Write:
+        region first:
+            values: darray[i64] @first = make[i64, first](7)
+            print(values[0])
+        region second:
+            values: darray[i64] @second = make[i64, second](9)
+            print(values[0])
+        return 0
+`)
+	if status != "RAN" || out != "7\n9" {
+		t.Fatalf("mixed type/lifetime factory reused wrong owner: %s %q", status, out)
+	}
+}

@@ -124,6 +124,27 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 	return value, specializedType, err
 }
 
+// explicitFunctionApplicationParams mirrors the source application surface:
+// ordinary generics and every explicitly declared region, including lifetimes
+// that do not affect layout. Inferred allocation regions are never source args.
+func explicitFunctionApplicationParams(base *semantic.FuncType) []ast.GenericParam {
+	params := append([]ast.GenericParam(nil), funcGenericParams(base)...)
+	seen := map[string]bool{}
+	for _, param := range params {
+		seen[param.Name] = true
+	}
+	for _, name := range base.InferredRegionParams {
+		seen[name] = true
+	}
+	for _, name := range base.RegionParams {
+		if !seen[name] {
+			params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+			seen[name] = true
+		}
+	}
+	return params
+}
+
 // functionSpecializationParams includes ordinary type/value generics plus region
 // parameters that occur in a region-indexed nominal type. Region-polymorphic
 // functions may also carry inferred allocation regions (for example __rg_out)

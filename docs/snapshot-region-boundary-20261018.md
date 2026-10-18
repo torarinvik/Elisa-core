@@ -176,3 +176,17 @@ An initial backend-package test build failed to import encoding/binary (`open :
 no such file or directory`); a standalone retry succeeds with eight generic/
 specialization tests and no skips. The root runtime results were already green;
 no global Go cache cleaning or source workaround was used.
+
+Mixed type/lifetime application: `make[T, @r](value: T) -> darray[T] @r`
+previously accepted two source arguments semantically but LLVM lowering expected
+only T. `explicitFunctionApplicationParams` now supplies the complete source
+argument surface; `functionSpecializationParams` continues to supply only code
+layout/type specialization inputs. The emitter derives the call signature from
+all bindings, while generating/caching a body using only layout bindings. Thus
+a caller arena label is not retained in a reusable T-only body.
+
+Three runtime tests pass, including mixed applications in two sequential distinct
+owner scopes (outputs 7 and 9). Nine selected backend tests pass, including an
+IR regression requiring exactly one make__i64 body and two calls to it. No skips
+or timing improvement claims are attached; this fixes accepted-source lowering
+and preserves code sharing.
