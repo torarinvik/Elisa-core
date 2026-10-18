@@ -451,7 +451,7 @@ func (a *Analyzer) rewriteEffectValue(value reflect.Value, context effectRewrite
 			a.rewriteEffectValue(value.Index(i), context)
 		}
 	case reflect.Struct:
-		for i := 0; i < value.NumField(); i++ {
+		for _, i := range syntaxWalkFields(value.Type()) {
 			field := value.Field(i)
 			if field.CanInterface() {
 				a.rewriteEffectValue(field, context)

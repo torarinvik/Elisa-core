@@ -178,6 +178,23 @@ optional death-time reporting rather than code generation. This is a correctness
 gain; no compilation speedup is claimed. Evidence is retained under
 `build/verification/incremental-retention-duplicate-args-20261018/`.
 
+The normal effect-handler rewrite now uses the existing immutable
+`syntaxWalkFields` plans, avoiding scalar/source-position traversal while
+preserving pointer/composite callback order, handler capture evaluation,
+forwarding contexts and lowered expression links. Existing syntax-walk contract,
+effect-handler and incremental tests passed in 2.066 s; the same isolated
+regression lane also passed with the race detector.
+
+Three alternating ten-edit pairs (Apple M5, GOGC=1200, parsing excluded) improved
+integer-return semantic edit medians from 76.72 to 71.13 ms (7%) and retained
+local-initializer edits from 3.36 to 2.31 ms (31%). Integer-edit allocations fell
+from roughly 556,000 to 212,000 per edit and bytes from 56.1 to 39.6 MB. Reuse
+counters remain one body checked/255 reused and one initializer checked/127
+reused. One integer sample was slower, and these synthetic analysis-only results
+do not establish whole-project or edit-to-executable speed. Raw samples, source
+snapshot and isolation overlays are retained under
+`build/verification/incremental-effect-walk-20261018/`.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification
