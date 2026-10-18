@@ -1715,8 +1715,10 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		receiver := a.storeFlowArgNames(fn.Object, handled)
 		c.link(receiver)
 		retNames := append([]string(nil), receiver...)
-		// main: a pointer-free element type cannot retain the source, so no edge at all.
-		if !a.storeFlowDarrayElementPointerFree(fn.Object) {
+		// Either the receiver's element type or the argument itself can prove
+		// there is no retained storage. Names used to compute a scalar must not
+		// enter the receiver, result, or pure-source equivalence classes.
+		if !a.storeFlowDarrayElementPointerFree(fn.Object) && !storeFlowPointerFreeReturn(a.exprTypes[call.Args[argumentIndex]], map[Type]bool{}) {
 			group := a.storeFlowArgNames(call.Args[argumentIndex], handled)
 			c.link(group)
 			if a.storeFlowPushedElemMayShare(fn.Object, call.Args[argumentIndex]) {
