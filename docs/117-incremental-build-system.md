@@ -2741,3 +2741,21 @@ avoided. These single samples do not establish a stable whole-project throughput
 gain. SMT remains off, parsing/warmup excluded, existing errors remain 980.
 Exact sources/logs are under
 `build/verification/incremental-scalar-summaries-20261018/`.
+
+
+### Restore caller interior-region taint after callee analysis
+
+Review of the repeated summary path found that ordinary function analysis and
+both lazy return-summary passes reset `currentStructInteriorRegionTaint` without
+restoring the caller's map. A failing regression proves lazy provenance inference
+loses a seeded caller binding. Both lazy summary paths now preserve it; normal
+function entry uses the same save/reset/restore protocol. Callee-local state
+remains isolated from the caller. This is a correctness prerequisite for broader
+summary reuse, not a measured throughput improvement.
+
+The regression plus scalar-summary/incremental/provenance/borrowed-owner/region/
+lifetime selections pass under the race detector (18.153 s). Before this repair,
+the complete semantic suite passed on the prior scalar-summary source (101.278 s);
+that full-suite result is qualification for the prior change, not full-suite
+coverage of this repair. Source, failing reproduction and logs are retained in
+`build/verification/incremental-summary-caller-state-20261018/`.

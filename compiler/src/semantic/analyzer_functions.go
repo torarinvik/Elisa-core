@@ -103,6 +103,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
 	savedStructLocalAllocRegion := a.currentStructLocalAllocRegion
+	savedStructInteriorRegionTaint := a.currentStructInteriorRegionTaint
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
@@ -356,6 +357,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
 	a.currentStructLocalAllocRegion = savedStructLocalAllocRegion
+	a.currentStructInteriorRegionTaint = savedStructInteriorRegionTaint
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
@@ -427,6 +429,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
 	savedStructLocalAllocRegion := a.currentStructLocalAllocRegion
+	savedStructInteriorRegionTaint := a.currentStructInteriorRegionTaint
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
@@ -573,6 +576,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
 	a.currentStructLocalAllocRegion = savedStructLocalAllocRegion
+	a.currentStructInteriorRegionTaint = savedStructInteriorRegionTaint
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
@@ -626,6 +630,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
 	savedStructLocalAllocRegion := a.currentStructLocalAllocRegion
+	savedStructInteriorRegionTaint := a.currentStructInteriorRegionTaint
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
@@ -759,6 +764,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
 	a.currentStructLocalAllocRegion = savedStructLocalAllocRegion
+	a.currentStructInteriorRegionTaint = savedStructInteriorRegionTaint
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
