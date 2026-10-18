@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -119,34 +120,85 @@ func toolchainFileFingerprint(info os.FileInfo) (string, bool) {
 	if !stat.IsValid() || stat.Kind() != reflect.Struct {
 		return "", false
 	}
-	var fields []string
-	hasDevice, hasInode, hasChangeTime := false, false, false
-	for index := 0; index < stat.NumField(); index++ {
-		fieldInfo := stat.Type().Field(index)
-		name := fieldInfo.Name
-		lower := strings.ToLower(name)
-		// Access time can change simply because another process executed the tool. It is
-		// irrelevant to the file contents and would defeat memoization on atime-enabled FSs.
-		if strings.Contains(lower, "atim") || strings.Contains(lower, "accesstime") {
-			continue
-		}
-		field := stat.Field(index)
-		if !field.CanInterface() {
-			continue
-		}
-		fields = append(fields, name+"="+fmt.Sprint(field.Interface()))
-		switch name {
-		case "Dev", "Device":
-			hasDevice = true
-		case "Ino", "Inode":
-			hasInode = true
-		}
-		if strings.Contains(lower, "ctim") || strings.Contains(lower, "changetime") {
-			hasChangeTime = true
-		}
+	planValue, ok := toolchainFingerprintPlans.Load(stat.Type())
+	if !ok {
+		planValue, _ = toolchainFingerprintPlans.LoadOrStore(stat.Type(), makeToolchainFingerprintPlan(stat.Type()))
 	}
-	if !hasDevice || !hasInode || !hasChangeTime {
+	plan := planValue.(toolchainFingerprintPlan)
+	if !plan.stable {
 		return "", false
 	}
-	return fmt.Sprintf("mode=%s|size=%d|mtime=%d|%s", info.Mode(), info.Size(), info.ModTime().UnixNano(), strings.Join(fields, "|")), true
+	data := make([]byte, 0, 256)
+	data = append(data, plan.typeName...)
+	data = append(data, 0)
+	data = binary.LittleEndian.AppendUint64(data, uint64(info.Mode()))
+	data = binary.LittleEndian.AppendUint64(data, uint64(info.Size()))
+	data = binary.LittleEndian.AppendUint64(data, uint64(info.ModTime().UnixNano()))
+	for _, index := range plan.fields {
+		var valid bool
+		data, valid = appendToolchainFingerprintValue(data, stat.Field(index))
+		if !valid {
+			return "", false
+		}
+	}
+	return string(data), true
+}
+
+type toolchainFingerprintPlan struct {
+	fields   []int
+	typeName string
+	stable   bool
+}
+
+var toolchainFingerprintPlans sync.Map // reflect.Type -> immutable field plan
+
+func makeToolchainFingerprintPlan(kind reflect.Type) toolchainFingerprintPlan {
+	plan := toolchainFingerprintPlan{typeName: kind.PkgPath() + "/" + kind.String()}
+	device, inode, change := false, false, false
+	for index := 0; index < kind.NumField(); index++ {
+		field := kind.Field(index)
+		lower := strings.ToLower(field.Name)
+		// Match the prior full-stat identity: retain every accessible field
+		// except access time, which may change when another process runs it.
+		if field.PkgPath != "" || strings.Contains(lower, "atim") || strings.Contains(lower, "accesstime") {
+			continue
+		}
+		plan.fields = append(plan.fields, index)
+		device = device || field.Name == "Dev" || field.Name == "Device"
+		inode = inode || field.Name == "Ino" || field.Name == "Inode"
+		change = change || strings.Contains(lower, "ctim") || strings.Contains(lower, "changetime")
+	}
+	plan.stable = device && inode && change
+	return plan
+}
+
+// Fixed-width scalar encoding avoids Interface boxing and per-field formatting.
+// Unsupported metadata keeps the fresh-hash fallback rather than weakening it.
+func appendToolchainFingerprintValue(data []byte, value reflect.Value) ([]byte, bool) {
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return binary.LittleEndian.AppendUint64(data, uint64(value.Int())), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return binary.LittleEndian.AppendUint64(data, value.Uint()), true
+	case reflect.Struct:
+		for index := 0; index < value.NumField(); index++ {
+			var valid bool
+			data, valid = appendToolchainFingerprintValue(data, value.Field(index))
+			if !valid {
+				return data, false
+			}
+		}
+		return data, true
+	case reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			var valid bool
+			data, valid = appendToolchainFingerprintValue(data, value.Index(index))
+			if !valid {
+				return data, false
+			}
+		}
+		return data, true
+	default:
+		return data, false
+	}
 }
