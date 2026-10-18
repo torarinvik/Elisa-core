@@ -281,3 +281,17 @@ func (s *SourceTokens) MatchingTokenPrefix(tokens []Token) int {
 	}
 	return count
 }
+
+// MatchingTokenSuffix includes exact source positions and EOF. It does not
+// relocate cached syntax when edits shift following diagnostic locations.
+func (s *SourceTokens) MatchingTokenSuffix(tokens []Token) int {
+	if s == nil || len(s.tokens) != len(tokens) {
+		return 0
+	}
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if s.tokens[i] != tokens[i] {
+			return len(tokens) - 1 - i
+		}
+	}
+	return len(tokens)
+}

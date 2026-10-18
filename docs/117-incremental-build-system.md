@@ -1233,15 +1233,42 @@ actual nonzero declaration replay across unique edits and semantic/lowered/LLVM/
 transitions after default-argument mutation. A deterministic publication-order
 regression covers the untraced/traced concurrent admission race.
 
-This remains prefix replay from an admitted revision. There is no unchanged-suffix
-replay after an earlier edit, source relocation, declaration-body slicing, or
-persistent general semantic/module/object dependency reuse yet. First-use and
-unsupported revisions remain cold; early edits may have no reusable boundary.
-A revision with parser notices cannot become a retained prefix provider; changed
-suffix diagnostics are still produced fresh.
+Prefix replay still requires an admitted revision. There is no source relocation,
+declaration-body slicing, or persistent general semantic/module/object dependency
+reuse yet. First-use and unsupported revisions remain cold; early edits may have
+no reusable boundary. A revision with parser notices cannot become a retained
+prefix or suffix provider; changed suffix diagnostics are still produced fresh.
 Token comparison, prefix graph cloning and some metadata work remain linear, and
 snapshot admission still requires amortization. The complete professional
 incremental compiler goal and whole-project performance qualification remain open.
+
+### Edited-source declaration-suffix replay
+
+The parser can also reuse an unchanged declaration suffix after parsing an edit.
+It admits only a prior diagnostic-free syntax snapshot with the same token count,
+and only checkpoints whose old suffix reads never reach into the changed prefix.
+The matching tokens must retain their exact source positions; parser counters,
+visibility state, and other boundary state must also match. The suffix AST is
+deep-copied from the pristine snapshot before it is appended, preserving the
+existing rule that semantic passes receive private mutable syntax trees.
+
+This currently covers equal-width edits that preserve token count and all suffix
+positions. Insertions, deletions, and other edits that shift suffix positions
+decline suffix replay; there is no AST position rebasing or body-level syntax
+slicing. A relocation implementation must account for `lexer.Pos` start/end
+offsets, lines and columns, shifted token/checkpoint indices, suffix-local reads
+of token-stream length, and position-derived names such as `__auto_<offset>`.
+The targeted early-edit benchmark changes a six-digit literal to another
+six-digit literal in a 513-function source. One captured three-sample run on
+Apple M5 measured median 2.672 ms with token reuse and fresh parsing versus
+2.318 ms with suffix replay (13% lower). Allocations fell from 7,765 to 6,827
+per operation, while allocated bytes rose from 4.44 MB to 5.50 MB. The suffix
+samples ranged 2.303–2.780 ms, so this is narrow synthetic evidence, not a
+whole-project performance claim. The command used `GOMAXPROCS=1 go test ./src
+-run '^$' -bench '^BenchmarkSourceSyntaxCacheEarlyEditSuffix$' -benchtime=200ms
+-count=3 -cpu=1`; the captured output is in
+`compiler/build/verification/syntax-suffix-20261018/benchmark.txt`. Insert/delete and
+multiline position parity still need qualification before broadening reuse.
 
 Final local throughput measurements (M5, Go1.27.2, GOMAXPROCS=4, three
 100-iteration runs) use 2,048 simple functions and distinct edits to the last
@@ -2774,7 +2801,15 @@ A 4,096-product benchmark changes one body input per revision and validates the
 whole batch. Five single-CPU 300ms samples show median 879,673 to 363,298 ns/op
 (about 59% lower), bytes 1,770,160 to 132,160 and allocations 8,198 to 8 per batch.
 This is query-engine validation throughput, not whole-compiler throughput. The
-full incremental-engine race suite passes (1.586 s). Source and exact logs are in
+current benchmark source checks every root's error and expected value. The
+archived timing runs predate that full-result check and measured the earlier
+root-0 assertion, so they are not a matched before/after measurement of the
+current validation. A fresh five-sample run with the full check measured median
+370,050 ns/op (346,446–408,877), with 132,160 B/op and 8 allocations; this remains
+query-engine validation throughput, not whole-compiler throughput. The captured
+run is in `build/verification/incremental-batch-full-results-20261018/`. The full
+incremental-engine race suite passed in 1.586 s on the earlier revision.
+Source and earlier logs are in
 `build/verification/incremental-batch-active-20261018/`.
 
 Semantic incremental race regressions pass (18.096 s). The frozen-project

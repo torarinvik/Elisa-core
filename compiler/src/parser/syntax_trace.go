@@ -18,6 +18,7 @@ type SyntaxTrace struct {
 	complete, invalid bool
 }
 type PrefixCheckpoint struct {
+	readFrom                                int
 	index, pos, decls, readThrough          int
 	readLength                              bool
 	rebindCounter, nurseryCounter, byParSeq int
@@ -81,7 +82,8 @@ func (p *Parser) recordSyntaxBoundary(file *ast.File) {
 		copy(grown, points)
 		points = grown
 	}
-	p.trace.checkpoints = append(points, PrefixCheckpoint{index: len(points), pos: p.pos, decls: len(file.Decls), readThrough: p.readThrough, readLength: p.readLength, rebindCounter: p.rebindCounter, nurseryCounter: p.nurseryCounter, byParSeq: p.byParSeq, foreignEnumErrorSetEmitted: p.foreignEnumErrorSetEmitted, visibility: strings.Clone(p.currentVisibility)})
+	p.trace.checkpoints = append(points, PrefixCheckpoint{index: len(points), pos: p.pos, decls: len(file.Decls), readThrough: p.readThrough, readFrom: p.readFrom, readLength: p.readLength, rebindCounter: p.rebindCounter, nurseryCounter: p.nurseryCounter, byParSeq: p.byParSeq, foreignEnumErrorSetEmitted: p.foreignEnumErrorSetEmitted, visibility: strings.Clone(p.currentVisibility)})
+	p.readFrom = p.pos
 }
 
 // ParseFileFromPrefix requires a private pristine prefix and a checkpoint chosen
@@ -102,6 +104,7 @@ func (p *Parser) ParseFileFromPrefix(filename string, prefix *ast.File, previous
 		p.declVisibility = map[ast.Decl]string{}
 		prefix.DeclVisibility = p.declVisibility
 	}
+	p.readFrom = cp.pos
 	p.readThrough = cp.readThrough
 	p.readLength = cp.readLength
 	if p.trace != nil {

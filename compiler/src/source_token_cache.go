@@ -33,6 +33,7 @@ type sourceTokenCache struct {
 	prefixReusedTokens          uint64
 	parseHits                   uint64
 	prefixParsedDeclarations    uint64
+	suffixParsedDeclarations    uint64
 }
 
 func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
@@ -247,4 +248,32 @@ func (c *sourceTokenCache) parsePrefix(candidate sourceTokenEntry, tokens []lexe
 	}
 	c.mu.Unlock()
 	return file, checkpoint, true
+}
+
+func (c *sourceTokenCache) configureSuffixReplay(p *parser.Parser, candidate sourceTokenEntry, tokens []lexer.Token) {
+	if candidate.trace == nil || candidate.parsed == nil || candidate.lexed == nil {
+		return
+	}
+	matching := candidate.lexed.MatchingTokenSuffix(tokens)
+	if matching == 0 {
+		return
+	}
+	p.SetSyntaxSuffixReplay(candidate.trace, len(tokens)-matching, func(declarations int) (*ast.File, error) {
+		file, err := candidate.parsed.CopySuffix(declarations)
+		if err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		c.suffixParsedDeclarations += uint64(len(file.Decls))
+		c.clock++
+		for key, entry := range c.entries {
+			if entry.parsed == candidate.parsed {
+				entry.lastUse = c.clock
+				c.entries[key] = entry
+				break
+			}
+		}
+		c.mu.Unlock()
+		return file, nil
+	})
 }

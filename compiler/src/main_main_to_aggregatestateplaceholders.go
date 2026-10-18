@@ -154,6 +154,7 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 	}
 	var file *ast.File
 	if cache != nil {
+		cache.configureSuffixReplay(p, previous, tokens)
 		if prefix, checkpoint, ok := cache.parsePrefix(previous, tokens); ok {
 			file = p.ParseFileFromPrefix(filename, prefix, previous.trace, checkpoint)
 		}

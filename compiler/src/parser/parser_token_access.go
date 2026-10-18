@@ -8,6 +8,9 @@ func (p *Parser) observeToken(index int) {
 	if p.trace == nil {
 		return
 	}
+	if index < p.readFrom {
+		p.readFrom = index
+	}
 	if index >= p.readThrough {
 		p.readThrough = index + 1
 	}
@@ -31,6 +34,7 @@ func (p *Parser) tokenCount() int {
 }
 func (p *Parser) tokenSpan(start, end int) []lexer.Token {
 	if end > start {
+		p.observeToken(start)
 		p.observeToken(end - 1)
 	}
 	return p.tokens[start:end]

@@ -11,8 +11,9 @@ import (
 // Capture requires a stable input graph; overlapping interior/partial views are
 // declined rather than silently changing their alias semantics.
 type SyntaxSnapshot struct {
-	file  *File
-	bytes int
+	file                *File
+	bytes               int
+	nodes, slices, maps int
 }
 
 // RetainedBytes estimates retained graph payload, including container overhead; it is not an RSS bound.
@@ -35,7 +36,7 @@ func NewSyntaxSnapshot(file *File, limit int) (*SyntaxSnapshot, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
-	return &SyntaxSnapshot{file: value, bytes: c.bytes}, nil
+	return &SyntaxSnapshot{file: value, bytes: c.bytes, nodes: len(c.nodes), slices: len(c.slices), maps: len(c.maps)}, nil
 }
 func (s *SyntaxSnapshot) CopyFile() (*File, error) {
 	if s == nil || s.file == nil {
@@ -44,7 +45,9 @@ func (s *SyntaxSnapshot) CopyFile() (*File, error) {
 	if !syntaxFastSchemaValid {
 		return nil, fmt.Errorf("syntax replay schema requires regeneration")
 	}
-	file, err := copyFastSyntaxFile(s.file)
+	c := s.replayCopier(len(s.file.Decls))
+	file := copyFastSyntaxFileInto(c, s.file)
+	err := c.err
 	runtime.KeepAlive(s)
 	if err != nil {
 		return nil, err
@@ -56,13 +59,25 @@ func (s *SyntaxSnapshot) CopyFile() (*File, error) {
 // rebound only to declarations reachable from that prefix. Its strings remain
 // backed by the immutable owned snapshot and carry their unchanged positions.
 func (s *SyntaxSnapshot) CopyPrefix(declarations int) (*File, error) {
-	if s == nil || s.file == nil || !syntaxFastSchemaValid || declarations < 0 || declarations > len(s.file.Decls) {
+	return s.copyDeclarationRange(0, declarations)
+}
+
+// CopySuffix owns the remaining declarations and rebinds their visibility keys.
+func (s *SyntaxSnapshot) CopySuffix(declarations int) (*File, error) {
+	if s == nil || s.file == nil {
+		return nil, fmt.Errorf("invalid syntax suffix")
+	}
+	return s.copyDeclarationRange(declarations, len(s.file.Decls))
+}
+
+func (s *SyntaxSnapshot) copyDeclarationRange(start, end int) (*File, error) {
+	if s == nil || s.file == nil || !syntaxFastSchemaValid || start < 0 || end < start || end > len(s.file.Decls) {
 		return nil, fmt.Errorf("invalid syntax prefix")
 	}
 	header := *s.file
-	header.Decls = header.Decls[:declarations:declarations]
+	header.Decls = header.Decls[start:end:end]
 	header.DeclVisibility = nil
-	c := &syntaxFastCopier{nodes: map[any]any{}, slices: map[syntaxFastSlice]any{}, maps: map[syntaxFastMap]any{}}
+	c := s.replayCopier(end - start)
 	file := copyFastSyntaxFileInto(c, &header)
 	if s.file.DeclVisibility != nil {
 		file.DeclVisibility = map[Decl]string{}
@@ -82,4 +97,18 @@ func (s *SyntaxSnapshot) CopyPrefix(declarations int) (*File, error) {
 		return nil, c.err
 	}
 	return file, nil
+}
+
+// Replay reserves temporary identity tables from capture statistics. Partial
+// ranges use a conservative average per declaration; this is a capacity hint
+// only and does not authorize skipping any graph traversal or alias checks.
+func (s *SyntaxSnapshot) replayCopier(declarations int) *syntaxFastCopier {
+	estimate := func(count int) int {
+		total := len(s.file.Decls)
+		if total == 0 || declarations >= total {
+			return count
+		}
+		return (count / total) * declarations
+	}
+	return &syntaxFastCopier{nodes: make(map[any]any, estimate(s.nodes)), slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: make(map[syntaxFastMap]any, estimate(s.maps))}
 }

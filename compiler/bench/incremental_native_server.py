@@ -78,7 +78,11 @@ def main():
                 expression = expression.replace("value0 * 2", f"value0 * {factor}", 1)
             functions.append(f"def work{i}(value{i}: int, delta{i}: int) -> int:\n    return {expression}\n\n")
         if args.execute:
-            functions.append("def main() -> int:\n    return work0(1, 1)\n")
+            checks = "".join(
+                f"    if work{i}(1, 1) != 80:\n        return 1\n"
+                for i in range(1, args.functions)
+            )
+            functions.append(f"def main() -> int:\n{checks}    return work0(1, 1)\n")
         return json.dumps({"mode": "obj", "filename": filename,
                            "source": "".join(functions), "incremental": incremental}).encode()
 
@@ -94,8 +98,9 @@ def main():
         return artifact
 
     def qualify(artifact, factor):
-        # All sixteen terms use (1 * 2 + 1 * 3), except the first edited
-        # multiplication. Native process exit status retains the low byte.
+        # main checks each unchanged function's exact result. work0 returns
+        # factor + 78; process status retains the low byte, so compare modulo
+        # 256 (the benchmark factors keep this value within one byte).
         expected = (factor + 78) % 256
         with tempfile.TemporaryDirectory(prefix="native-", dir=output) as directory:
             obj = Path(directory) / "edit.o"
@@ -113,7 +118,8 @@ def main():
             if executed.returncode != expected:
                 (output / "failed-native-object.o").write_bytes(artifact)
                 raise RuntimeError(f"native result {executed.returncode}, expected {expected}, factor {factor}")
-            return {"link_ms": link_ms, "execute_ms": execute_ms, "expected_exit": expected}
+            return {"link_ms": link_ms, "execute_ms": execute_ms,
+                    "expected_exit": expected, "functions_checked": args.functions}
 
     def timed(data, factor):
         start = time.perf_counter()

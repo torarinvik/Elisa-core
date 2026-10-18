@@ -28,8 +28,14 @@ func BenchmarkBatchValidationOneBodyEdit(b *testing.B) {
 		}
 		db.Apply(Change{Key: changes[0].Key, Value: value})
 		results := db.EvaluateBatch(context.Background(), keys)
-		if results[0].Err != nil || results[0].Value != value {
-			b.Fatal("edited result missing")
+		for index, result := range results {
+			want := "initial"
+			if index == 0 {
+				want = value
+			}
+			if result.Err != nil || result.Value != want {
+				b.Fatalf("root %d: got (%q, %v), want (%q, nil)", index, result.Value, result.Err, want)
+			}
 		}
 	}
 }

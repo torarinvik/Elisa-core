@@ -68,9 +68,11 @@ type Parser struct {
 	// Innermost loop's simple yielded accumulator, or "" for a statement loop.
 	loopBreakTargets []string
 	// Keep the original hot parser fields at their previous offsets.
-	trace       *SyntaxTrace
-	readThrough int
-	readLength  bool
+	trace        *SyntaxTrace
+	readThrough  int
+	readLength   bool
+	readFrom     int
+	suffixReplay *syntaxSuffixReplay
 }
 
 // takeStmtGuard consumes a recorded postfix statement guard, if any, wrapping the finished
@@ -294,6 +296,9 @@ func (p *Parser) parseFile(filename string, file *ast.File) *ast.File {
 		p.skipNewlines()
 		if p.trace != nil {
 			p.recordSyntaxBoundary(file)
+			if p.trySyntaxSuffix(file) {
+				break
+			}
 		}
 	}
 	return file

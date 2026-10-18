@@ -189,6 +189,9 @@ func TestSyntaxTraceTokenReadChannelsAreClosed(t *testing.T) {
 			allowed["estimateCommaSeparatedCount"] = true
 		case "syntax_trace.go":
 			allowed["ParseFileFromPrefix"] = true
+		case "syntax_suffix.go":
+			// These inspect stream length and jump to a certified EOF only.
+			allowed["SetSyntaxSuffixReplay"] = true
 		}
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*goast.FuncDecl)
@@ -208,7 +211,7 @@ func TestSyntaxTraceTokenReadChannelsAreClosed(t *testing.T) {
 				case *goast.UnaryExpr:
 					positionWrite = node.Op == token.AND && isPos(node.X)
 				}
-				if positionWrite && !(path == "parser_token_access.go" && (fn.Name.Name == "seek" || fn.Name.Name == "advance")) && !(path == "syntax_trace.go" && fn.Name.Name == "ParseFileFromPrefix") {
+				if positionWrite && !(path == "parser_token_access.go" && (fn.Name.Name == "seek" || fn.Name.Name == "advance")) && !(path == "syntax_trace.go" && fn.Name.Name == "ParseFileFromPrefix") && !(path == "syntax_suffix.go" && fn.Name.Name == "trySyntaxSuffix") {
 					t.Errorf("unobserved cursor write at %s", fset.Position(n.Pos()))
 				}
 
@@ -220,7 +223,7 @@ func TestSyntaxTraceTokenReadChannelsAreClosed(t *testing.T) {
 		}
 	}
 	// A new parser field needs an explicit checkpoint/quiescence audit.
-	want := strings.Fields("trace readThrough readLength tokens pos errors notices exprBlockDepth nestDepth rebindCounter poolScopes nurseryGroupByPool nurseryCounter declVisibility currentVisibility allowInMembership allowTernary allowWhereExpr allowQuantifiers disallowIsComparison staticFunctionDepth pendingStmts byParSeq pendingDecls foreignEnumErrorSetEmitted pendingStateDecls stmtGuardArmed stmtGuardCond stmtGuardBlockEnd loopBreakTargets")
+	want := strings.Fields("trace readThrough readLength readFrom suffixReplay tokens pos errors notices exprBlockDepth nestDepth rebindCounter poolScopes nurseryGroupByPool nurseryCounter declVisibility currentVisibility allowInMembership allowTernary allowWhereExpr allowQuantifiers disallowIsComparison staticFunctionDepth pendingStmts byParSeq pendingDecls foreignEnumErrorSetEmitted pendingStateDecls stmtGuardArmed stmtGuardCond stmtGuardBlockEnd loopBreakTargets")
 	typ := reflect.TypeOf(Parser{})
 	if typ.NumField() != len(want) {
 		t.Fatal("Parser state changed; audit syntax checkpoint coverage")
