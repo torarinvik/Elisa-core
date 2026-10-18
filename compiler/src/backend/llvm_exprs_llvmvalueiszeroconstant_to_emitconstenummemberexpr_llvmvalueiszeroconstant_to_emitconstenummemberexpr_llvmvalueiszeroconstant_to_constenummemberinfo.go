@@ -344,7 +344,16 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		return C.LLVMGetUndef(llvmType), actualType, nil
 	case *ast.Ident:
 		if s.isUnboundImplicitPackedStoreIdent(n) {
-			value, actualType, err = s.emitImplicitPackedStoreIdent(n, actualType)
+			storeType := actualType
+			if _, typed := semantic.StripAggregateStateType(storeType).(*semantic.PackedEnumStoreType); !typed {
+				// Backend-recovered implicit arguments have no expression-type entry.
+				// The callee parameter retains the exact enum identity; the synthetic
+				// spelling is sanitized and cannot safely recover qualified names.
+				if _, expectedStore := semantic.StripAggregateStateType(expected).(*semantic.PackedEnumStoreType); expectedStore {
+					storeType = expected
+				}
+			}
+			value, actualType, err = s.emitImplicitPackedStoreIdent(n, storeType)
 		} else {
 			value, actualType, err = s.emitIdent(n)
 		}
