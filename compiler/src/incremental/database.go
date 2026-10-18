@@ -182,8 +182,11 @@ func (db *Database) EvaluateBatch(ctx context.Context, keys []Key) []EvaluationR
 		return results
 	}
 	defer func() { <-db.gate }()
+	// Evaluation removes every active key on return, including errors. Reuse
+	// this invocation-local stack across the serial roots in one snapshot.
+	active := map[Key]bool{}
 	for i, key := range keys {
-		results[i].Value, results[i].Err = db.evaluate(ctx, key, map[Key]bool{})
+		results[i].Value, results[i].Err = db.evaluate(ctx, key, active)
 		if err := ctx.Err(); err != nil {
 			for remaining := i + 1; remaining < len(results); remaining++ {
 				results[remaining].Err = err

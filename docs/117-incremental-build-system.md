@@ -2759,3 +2759,25 @@ the complete semantic suite passed on the prior scalar-summary source (101.278 s
 that full-suite result is qualification for the prior change, not full-suite
 coverage of this repair. Source, failing reproduction and logs are retained in
 `build/verification/incremental-summary-caller-state-20261018/`.
+
+
+### Share temporary cycle detection across a query batch
+
+`Database.EvaluateBatch` now allocates one active-query stack per serial batch,
+instead of one per root query. Recursive evaluation already removes active keys
+on every return, including error paths; the database gate holds a single input
+snapshot for the entire batch. No persistent query/dependency state is shared
+differently. The new regression checks cyclic roots followed by memoized valid
+roots, repeatedly, to guard against error-path contamination.
+
+A 4,096-product benchmark changes one body input per revision and validates the
+whole batch. Five single-CPU 300ms samples show median 879,673 to 363,298 ns/op
+(about 59% lower), bytes 1,770,160 to 132,160 and allocations 8,198 to 8 per batch.
+This is query-engine validation throughput, not whole-compiler throughput. The
+full incremental-engine race suite passes (1.586 s). Source and exact logs are in
+`build/verification/incremental-batch-active-20261018/`.
+
+Semantic incremental race regressions pass (18.096 s). The frozen-project
+retained-edit check preserves 72 bodies/2,837 nodes and the established complete
+2,279-diagnostic digest. Its concurrently loaded sample took 10.527 s and is
+retained for parity evidence only; no project timing improvement is inferred.
