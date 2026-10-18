@@ -41,8 +41,24 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 		}
 		idx[fn] = m
 	}
-	locals := map[*ast.FuncDecl]map[string]bool{}
+	// Every emitted relationship passes markTarget's source-storage gate. If
+	// no expanded parameter can carry storage, no body syntax or callee summary
+	// can add an edge for this function. Derive eligibility from current types
+	// each analysis; never replay it across type changes.
+	active := make([]*ast.FuncDecl, 0, len(funcs))
 	for _, fn := range funcs {
+		if fn == nil {
+			continue
+		}
+		for i := range params[fn] {
+			if typeCarriesRegionStorage(a.paramStorageType(fn, i)) {
+				active = append(active, fn)
+				break
+			}
+		}
+	}
+	locals := map[*ast.FuncDecl]map[string]bool{}
+	for _, fn := range active {
 		if fn == nil {
 			continue
 		}
@@ -50,7 +66,7 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 	}
 	for {
 		changed := false
-		for _, fn := range funcs {
+		for _, fn := range active {
 			pidx := idx[fn]
 			// markTarget records that source param `srcName` is stored into target index `ti`
 			// (a sibling param index, or the sentinel storeTargetGlobal for program-lifetime storage).

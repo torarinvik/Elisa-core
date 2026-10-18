@@ -146,6 +146,25 @@ regressions, including the returned-lambda remedy, passed with the race detector
 in 15.807 s. Logs and relevant source hashes are
 in `build/verification/incremental-statement-walk-20261018/`.
 
+The interprocedural parameter store-target pass now avoids local-declaration and
+body scans when no expanded source parameter can carry region storage. This
+uses the same current resolved-type predicate as the existing edge-recording
+guard. Eligibility is recomputed on each analysis; storage-carrying functions
+retain the original monotone fixpoint and output shapes are preserved.
+
+Three alternating ten-edit benchmark pairs (Apple M5, GOGC=1200, parsing outside
+timing) improved integer-return edit medians from 89.15 to 78.68 ms (12%) and
+retained local-initializer edits from 2.42 to 2.29 ms (6%). Counters remain one
+body checked/255 reused and one initializer checked/127 reused respectively.
+One integer sample regressed, so these are synthetic workload medians on a
+shared host, not a whole-project speed guarantee. Region/store/retention/escape
+and incremental regression tests passed in 16.266 s; the isolated race run
+passed in 19.587 s. Two uncommitted prototype tests were excluded alongside the
+unrelated source edits they require, keeping the qualification on the committed
+region/SMT implementation plus this optimization. Source snapshot, isolation
+overlays and raw samples are retained under
+`build/verification/incremental-storage-summary-gate-20261018/`.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification
