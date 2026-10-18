@@ -191,3 +191,20 @@ Raw manifests/logs: `build/verification/server-native-v2-noop-20261018/` and
 `.txt` assets, including the sole Go embed `frontendir/schema_registry.txt`;
 that embed was omitted from the earlier suffix-filtered source manifest, while
 the pinned binary hash still identifies the measured executable.
+
+## Miss-path cost investigation
+
+A direct 100-iteration identity benchmark measured 230.234 microseconds,
+29,083 B and 402 allocations per identity (same fixed fixture, one logical CPU).
+Two identity passes therefore cost roughly 0.46 ms in this isolated microbenchmark;
+this does not explain the earlier 16.47 ms whole-request median difference.
+Log: `/tmp/elisa-native-identity-cost.txt`. Identity is worth reducing, but a
+large speed claim from removing its second pass would not be supported.
+
+CPU-profiled 30-edit runs on the pinned v2 binary measured 49.552 ms/request
+completed versus 43.883 ms shards, with IR phase 9.028 versus 8.023 ms. Profiles
+included warmups; identity accounted for 50 ms sampled CPU across that completed
+run. Profiles are diagnostic, not paired qualification, and show timing shifts
+outside identity as well. Logs: `/tmp/elisa-body-{completed,shards}-profile.txt`;
+profiles: `/tmp/elisa-body-{completed,shards}.cpu`. Retain publication revalidation
+until a replacement proves the same mutable-input closure.

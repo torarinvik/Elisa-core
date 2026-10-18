@@ -335,3 +335,27 @@ func BenchmarkCompileServerNativeBodyEdit(b *testing.B) {
 		})
 	}
 }
+
+// Isolate identity preparation from parsing, analysis, LLVM and object I/O.
+// The ordinary miss path currently computes this identity twice.
+func BenchmarkCompileServerNativeIdentity(b *testing.B) {
+	cache := newCompileServerSessionCache(4)
+	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "identity.elisa"), Source: serverNativeArtifactSource(), Incremental: true}
+	requireServerNativeIdentity(b, request, cache)
+	program, err := loadedProgramFromRequest(request)
+	if err != nil {
+		b.Fatal(err)
+	}
+	first, ok := serverNativeObjectIdentity(request, program, cache)
+	if !ok {
+		b.Fatal("identity declined")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		identity, ok := serverNativeObjectIdentity(request, program, cache)
+		if !ok || identity.config != first.config || identity.source != first.source {
+			b.Fatal("identity changed")
+		}
+	}
+}
