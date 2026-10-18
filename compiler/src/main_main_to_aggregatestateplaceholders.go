@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"elisacore/src/ast"
 	"elisacore/src/backend"
 	"elisacore/src/lexer"
@@ -112,10 +113,12 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 }
 
 func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, cache *sourceTokenCache) (*ast.File, bool) {
+	var key sourceTokenKey
 	wantTrace := false
 	if cache != nil {
 		replayStart := time.Now()
-		file, ok, trace := cache.parsedFile(filename, src)
+		key = sourceTokenKey{filename, sha256.Sum256(src)}
+		file, ok, trace := cache.parsedFileWithKey(key, src)
 		wantTrace = trace
 		if ok {
 			frontendTimingLog("parse", replayStart)
@@ -134,7 +137,7 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 		tokens = l.Tokenize()
 		errs = l.Errors()
 	} else {
-		tokens, errs = cache.lex(filename, src)
+		tokens, errs = cache.lexWithKey(key, src)
 	}
 	frontendTimingLog("lex", lexStart)
 	if len(errs) > 0 {
@@ -179,7 +182,7 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 		return nil, false
 	}
 	if cache != nil {
-		cache.rememberParsed(filename, src, file, p.SyntaxTrace(), len(p.Notices()) == 0)
+		cache.rememberParsedWithKey(key, file, p.SyntaxTrace(), len(p.Notices()) == 0)
 	}
 	return file, true
 }

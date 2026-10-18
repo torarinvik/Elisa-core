@@ -51,7 +51,12 @@ func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
 // zero-copy views. Pristine AST snapshots may also be retained. Lexer.New runs on every invocation so
 // parity source registration and failure cleanup retain their normal lifecycle.
 func (c *sourceTokenCache) lex(filename string, source []byte) ([]lexer.Token, []string) {
-	key := sourceTokenKey{filename, sha256.Sum256(source)}
+	return c.lexWithKey(sourceTokenKey{filename, sha256.Sum256(source)}, source)
+}
+
+// The request key names these exact immutable source bytes.
+func (c *sourceTokenCache) lexWithKey(key sourceTokenKey, source []byte) ([]lexer.Token, []string) {
+	filename := key.filename
 	c.mu.Lock()
 	c.clock++
 	if entry, ok := c.entries[key]; ok {
@@ -121,7 +126,10 @@ func (c *sourceTokenCache) lex(filename string, source []byte) ([]lexer.Token, [
 // no options; filename and source bytes determine the syntax and its positions.
 // The third result requests tracing only when this retained revision can admit a snapshot.
 func (c *sourceTokenCache) parsedFile(filename string, source []byte) (*ast.File, bool, bool) {
-	key := sourceTokenKey{filename, sha256.Sum256(source)}
+	return c.parsedFileWithKey(sourceTokenKey{filename, sha256.Sum256(source)}, source)
+}
+func (c *sourceTokenCache) parsedFileWithKey(key sourceTokenKey, source []byte) (*ast.File, bool, bool) {
+	filename := key.filename
 	c.mu.Lock()
 	entry, exists := c.entries[key]
 	snapshot := entry.parsed
@@ -157,7 +165,12 @@ func (c *sourceTokenCache) rememberParsed(filename string, source []byte, file *
 	if trace == nil && diagnosticFree {
 		return
 	}
-	key := sourceTokenKey{filename, sha256.Sum256(source)}
+	c.rememberParsedWithKey(sourceTokenKey{filename, sha256.Sum256(source)}, file, trace, diagnosticFree)
+}
+func (c *sourceTokenCache) rememberParsedWithKey(key sourceTokenKey, file *ast.File, trace *parser.SyntaxTrace, diagnosticFree bool) {
+	if trace == nil && diagnosticFree {
+		return
+	}
 	c.mu.Lock()
 	entry, exists := c.entries[key]
 	if !exists || entry.parsed != nil || entry.parseDeclined || entry.parseRequests == 0 {
