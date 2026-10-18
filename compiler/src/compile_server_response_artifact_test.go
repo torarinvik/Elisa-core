@@ -218,3 +218,43 @@ func BenchmarkCompileServerResponseNoop(b *testing.B) {
 		})
 	}
 }
+
+// Failed edits must be diagnosed against the current source, including after a
+// successful response is warm and after another failed revision of that unit.
+func TestCompileServerResponseFailedEditDiagnosticsMatchFresh(t *testing.T) {
+	cache := newCompileServerSessionCache(4)
+	req := compileServerRequest{Mode: "obj", Filename: filepath.Join(t.TempDir(), "diagnostic_edits.elisa"), Incremental: true}
+	valid := "def main() -> i64:\n    return 7\n"
+	req.Source = valid
+	requireServerNativeIdentity(t, req, cache)
+	for index, source := range []string{
+		valid,
+		valid,
+		"def main() -> i64:\n    return absent_alpha\n",
+		"def main() -> i64:\n    return absent_alpha\n",
+		"\n\ndef main() -> i64:\n    return absent_beta\n",
+		valid,
+	} {
+		req.Source = source
+		before := cache.native.Stats().ResponseHits
+		session := cache.session(req.Filename, emitObject)
+		analyses := session.Stats().Analyses
+		got, status := executeCompileServerRequestWithSessions(req, cache)
+		fresh, freshStatus := executeCompileServerRequestWithSessions(req, newCompileServerSessionCache(4))
+		if status != freshStatus || got != fresh {
+			t.Fatalf("revision %d differs from fresh: status=%d/%d retained=%+v fresh=%+v", index, status, freshStatus, got, fresh)
+		}
+		if strings.Contains(source, "absent_") {
+			if status != http.StatusBadRequest || got.OK || got.Object != "" || !strings.Contains(got.Stderr, "absent_") {
+				t.Fatalf("revision %d missing current failure: %+v", index, got)
+			}
+			if cache.native.Stats().ResponseHits != before || session.Stats().Analyses != analyses+1 {
+				t.Fatalf("revision %d reused a failed completed response", index)
+			}
+		} else if index != 0 {
+			if cache.native.Stats().ResponseHits != before+1 || session.Stats().Analyses != analyses {
+				t.Fatalf("revision %d lost successful replay after failed edits", index)
+			}
+		}
+	}
+}
