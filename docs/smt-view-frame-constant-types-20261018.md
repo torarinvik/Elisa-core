@@ -7,3 +7,5 @@ The extracted production annotation pair hash probe confirms its whole-body gate
 Focused controls cover pre-analysis numeric conversion, non-numeric and mutable constants, caller namespace collisions, unknown inspected declarations, local shadows, and existing view-frame proof rejection cases. See the saved verification log for the terminal result.
 
 Verification: 14 top-level focused tests passed, no skips, package time 0.592 s. Raw evidence: `build/verification/view-frame-constant-types-20261018/`.
+
+A permanent production-shaped regression now covers all three loops with explicit nonnegative signed-index bounds. The complete folds prove; removing all three lower bounds yields exactly three invariant failures; replacing the row accumulator update with zero is rejected. All three cases passed (9.765 seconds package time). Self-hosted source commit ca55b4b7a supplies the missing bounds. This qualifies the combined local proof behavior, not a full Stage1 product.

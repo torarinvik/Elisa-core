@@ -1,0 +1,77 @@
+# FNV-1a byte fold for the enum-annotation owner buckets. The hash is only a candidate key:
+# consumers compare the original owner/name strings before accepting a row.
+module Backend:
+    private:
+        const ANNOTATION_INDEX_HASH_OFFSET: u64 = 14695981039346656037
+        const ANNOTATION_INDEX_HASH_PRIME: u64 = 1099511628211
+
+        # Hash the prefix before INDEX, starting from HASH.
+        ghost def annotation_index_hash_prefix(text: sview, index: usize, hash: u64) -> u64:
+            requires index <= text.len
+            decreases index
+            ensure index == 0 implies result == hash
+            ensure index > 0 implies result == (annotation_index_hash_prefix(text, index - 1.usize(), hash) ^ text[index - 1.usize()].u64()) * ANNOTATION_INDEX_HASH_PRIME
+            return hash if index == 0
+            return (annotation_index_hash_prefix(text, index - 1.usize(), hash) ^ text[index - 1.usize()].u64()) * ANNOTATION_INDEX_HASH_PRIME
+
+        def annotation_index_hash(text: sview) -> u64:
+            ensure result == annotation_index_hash_prefix(text, text.len, ANNOTATION_INDEX_HASH_OFFSET)
+            hash: mutable u64 = ANNOTATION_INDEX_HASH_OFFSET
+            for offset in 0..<text.len |hash, text|:
+                invariant 0 <= offset
+                invariant offset <= text.len
+                invariant hash == annotation_index_hash_prefix(text, offset, ANNOTATION_INDEX_HASH_OFFSET)
+                assert annotation_index_hash_prefix(text, offset + 1.usize(), ANNOTATION_INDEX_HASH_OFFSET) == ((hash ^ text[offset].u64()) * ANNOTATION_INDEX_HASH_PRIME)
+                hash <- (hash ^ text[offset].u64()) * ANNOTATION_INDEX_HASH_PRIME
+            assert hash == annotation_index_hash_prefix(text, text.len, ANNOTATION_INDEX_HASH_OFFSET)
+            return hash
+
+# Stage1 backend — the bounded bucket hash for exact (owner, name) annotation keys.
+# The hash only selects candidates; annotation_pair_find compares both source fields.
+# Part of `module Backend` (see codegen.elisa).
+extend Backend:
+    private:
+        const ANNOTATION_PAIR_BUCKETS: usize = 65536
+        const ANNOTATION_PAIR_HASH_OFFSET: u64 = 14695981039346656037
+        const ANNOTATION_PAIR_HASH_PRIME: u64 = 1099511628211
+
+        ghost def annotation_pair_hash_prefix(text: sview, index: usize, hash: u64) -> u64:
+            requires index <= text.len
+            decreases index
+            ensure index == 0 implies result == hash
+            ensure index > 0 implies result == (annotation_pair_hash_prefix(text, index - 1.usize(), hash) ^ text[index - 1.usize()].u64()) * ANNOTATION_PAIR_HASH_PRIME
+            return hash if index == 0
+            return (annotation_pair_hash_prefix(text, index - 1.usize(), hash) ^ text[index - 1.usize()].u64()) * ANNOTATION_PAIR_HASH_PRIME
+
+        ghost def annotation_pair_hash_spec(owner: sview, name: sview) -> u64:
+            return annotation_pair_hash_prefix(name, name.len, (annotation_pair_hash_prefix(owner, owner.len, ANNOTATION_PAIR_HASH_OFFSET) ^ 255.u64()) * ANNOTATION_PAIR_HASH_PRIME)
+
+        def annotation_pair_bucket(owner: sview, name: sview) -> usize can[Abort.Panic]:
+            ensure result == (annotation_pair_hash_spec(owner, name) % ANNOTATION_PAIR_BUCKETS.u64()).usize()
+            ensure result < ANNOTATION_PAIR_BUCKETS
+            hash: mutable u64 = ANNOTATION_PAIR_HASH_OFFSET
+            for offset in 0..<owner.len |hash, owner|:
+                invariant 0 <= offset
+                invariant offset <= owner.len
+                invariant hash == annotation_pair_hash_prefix(owner, offset, ANNOTATION_PAIR_HASH_OFFSET)
+                assert annotation_pair_hash_prefix(owner, offset + 1.usize(), ANNOTATION_PAIR_HASH_OFFSET) == ((hash ^ owner[offset].u64()) * ANNOTATION_PAIR_HASH_PRIME)
+                hash <- (hash ^ owner[offset].u64()) * ANNOTATION_PAIR_HASH_PRIME
+            assert hash == annotation_pair_hash_prefix(owner, owner.len, ANNOTATION_PAIR_HASH_OFFSET)
+            owner_hash: u64 = hash
+            assert owner_hash == annotation_pair_hash_prefix(owner, owner.len, ANNOTATION_PAIR_HASH_OFFSET)
+            delimited_hash: u64 = (owner_hash ^ 255.u64()) * ANNOTATION_PAIR_HASH_PRIME
+            assert delimited_hash == ((annotation_pair_hash_prefix(owner, owner.len, ANNOTATION_PAIR_HASH_OFFSET) ^ 255.u64()) * ANNOTATION_PAIR_HASH_PRIME)
+            hash <- delimited_hash
+            assert hash == annotation_pair_hash_prefix(name, 0.usize(), delimited_hash)
+            for offset in 0..<name.len |hash, name, delimited_hash|:
+                invariant 0 <= offset
+                invariant offset <= name.len
+                invariant hash == annotation_pair_hash_prefix(name, offset, delimited_hash)
+                assert annotation_pair_hash_prefix(name, offset + 1.usize(), delimited_hash) == ((hash ^ name[offset].u64()) * ANNOTATION_PAIR_HASH_PRIME)
+                hash <- (hash ^ name[offset].u64()) * ANNOTATION_PAIR_HASH_PRIME
+            assert hash == annotation_pair_hash_prefix(name, name.len, delimited_hash)
+            assert hash == annotation_pair_hash_spec(owner, name)
+            return (hash % ANNOTATION_PAIR_BUCKETS.u64()).usize()
+
+def main() -> i64:
+    return 0
