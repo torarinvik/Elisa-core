@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	"elisacore/src/ast"
@@ -75,6 +76,7 @@ type incrementalBodyInvocation struct {
 	config, safety                             string
 	safetyPrepared                             bool
 	tracking                                   bool
+	expressionNodesRemaining                   int
 	localInitializers                          map[*ast.VarDeclStmt]*primitiveLocalInitializer
 	bindingReservedBytes, bindingReservedEdges int
 	bindingBytes, bindingEdges                 int
@@ -244,7 +246,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		return coldFallback()
 	}
 	digest := sha256.Sum256(config)
-	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, localInitializers: map[*ast.VarDeclStmt]*primitiveLocalInitializer{}, config: hex.EncodeToString(digest[:])}
+	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, localInitializers: map[*ast.VarDeclStmt]*primitiveLocalInitializer{}, expressionNodesRemaining: primitiveAnalysisExpressionNodeBudget, config: hex.EncodeToString(digest[:])}
 	if session.auditLexicalReads {
 		invocation.lexical = &lexicalReadInvocation{indexes: map[*ast.FuncDecl]*FunctionSourceIndex{}}
 	}
@@ -264,8 +266,15 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if !ownerPointers.scanDeclarations(file.Decls, 0) {
 		return coldFallback()
 	}
-	candidates, candidatesReady := preparePrimitiveOwnerCandidates(file.Decls, origin, session.previous, primitiveOwnerCandidateLimit, invocation.lexical != nil)
-	partialCandidates := !candidatesReady
+	coldSession := len(session.previous) == 0
+	var candidates []primitiveOwnerCandidate
+	partialCandidates := false
+	expressionBudgetExhausted := false
+	if !coldSession {
+		var candidatesReady bool
+		candidates, candidatesReady = preparePrimitiveOwnerCandidates(file.Decls, origin, session.previous, primitiveOwnerCandidateLimit, invocation.lexical != nil)
+		partialCandidates = !candidatesReady
+	}
 	if partialCandidates {
 		hasRetainedPrefix := false
 		for _, candidate := range candidates {
@@ -278,6 +287,36 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			return coldFallback()
 		}
 	}
+	if partialCandidates {
+		// Preserve prior inputs only for owners beyond the discovered prefix. Do
+		// this before admission so unknown suffix entries still count against the
+		// tracked-key cap; scanned-prefix owners are handled by admission and the
+		// normal retirement pass below.
+		scannedPrefixOwners := make(map[string]struct{}, len(candidates))
+		for _, candidate := range candidates {
+			if !candidate.identityValid {
+				continue
+			}
+			name := candidate.name
+			if name == "" {
+				name = primitiveOwnerCandidateName(candidate.identity)
+			}
+			scannedPrefixOwners[name] = struct{}{}
+		}
+		for key := range session.previous {
+			if key.Kind != "function-source" {
+				current[key] = true
+				continue
+			}
+			ownerName := key.Name
+			if localOwner, _, isLocal := strings.Cut(key.Name, "/local-name-v2/"); isLocal {
+				ownerName = localOwner
+			}
+			if _, scanned := scannedPrefixOwners[ownerName]; !scanned {
+				current[key] = true
+			}
+		}
+	}
 	skipped := 0
 	var pendingLocals []*primitiveLocalInitializer
 	trimPending := func() {
@@ -288,126 +327,170 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			pendingLocals = pendingLocals[:available]
 		}
 	}
-	collect := func(retainedOnly bool) {
-		for _, candidate := range candidates {
-			fn, qualifiedName := candidate.function, candidate.qualifiedName
-			if retainedOnly != candidate.retained {
-				continue
+	collectCandidate := func(candidate primitiveOwnerCandidate, retainedOnly bool) {
+		fn, qualifiedName := candidate.function, candidate.qualifiedName
+		if retainedOnly != candidate.retained {
+			return
+		}
+		name := ""
+		var key incremental.Key
+		if candidate.identityValid {
+			name = candidate.name
+			if name == "" {
+				name = primitiveOwnerCandidateName(candidate.identity)
 			}
-			name := ""
-			var key incremental.Key
-			if candidate.identityValid {
-				name = candidate.name
-				if name == "" {
-					name = primitiveOwnerCandidateName(candidate.identity)
-				}
-				key = primitiveInput("function-source", name)
-				if current[key] {
-					continue
-				}
+			key = primitiveInput("function-source", name)
+			if current[key] {
+				return
 			}
-			expressions, primitiveReturn := primitiveReturnExpressions(fn)
-			ok := primitiveReturn
-			if reads := invocation.lexical; reads != nil {
-				if _, exists := reads.indexes[fn]; !exists && len(reads.indexes) < lexicalReadMaxFunctions {
-					readFree := primitiveReturn && len(fn.EnsureValues) == 0 && len(fn.EnsureProofs) == 0
-					for _, expr := range expressions {
-						if _, ident := expr.(*ast.Ident); ident {
-							readFree = false
-							break
-						}
-					}
-					var index *FunctionSourceIndex
-					if !readFree {
-						index, _ = IndexFunctionSource(fn, FunctionIdentityContext{Origin: origin, QualifiedName: qualifiedName})
-						if index != nil {
-							if len(index.ordinals) > lexicalReadMaxSourceNodes-invocation.lexical.indexNodes {
-								index = nil
-							} else {
-								invocation.lexical.indexNodes += len(index.ordinals)
-								session.stats.LexicalSourceIndexesBuilt++
-							}
-						}
-					}
-					invocation.lexical.indexes[fn] = index
-				}
-			}
-			if !candidate.identityValid {
-				continue
-			}
-			var locals []*primitiveLocalInitializer
-			if !ok {
-				locals, ok = primitiveLocalInitializers(fn)
-				if !ok {
-					continue
-				}
-			}
-			needed := 1
-			if len(locals) > 0 {
-				needed = 2
-			} // owner context plus at least one initializer
-			if len(current)+needed > session.trackedBodyLimit() {
-				skipped += 1 + len(locals)
-				continue
-			}
-			invocation.keys[fn] = name
-			current[key] = true
-			trimPending()
-			for _, input := range locals {
-				identity := sha256.Sum256([]byte(input.declaration.Name))
-				input.key = name + "/local-name-v2/" + hex.EncodeToString(identity[:])
-				localKey := primitiveInput("function-source", input.key)
-				if retainedOnly && !session.previous[localKey] {
-					// Reserve space for all other retained owners before new locals.
-					if len(current)+len(pendingLocals) >= session.trackedBodyLimit() {
-						skipped++
-						continue
-					}
-					pendingLocals = append(pendingLocals, input)
-					continue
-				}
-				if len(current) >= session.trackedBodyLimit() {
-					skipped++
-					continue
-				}
-				if !invocation.reserveBinding(input) {
-					skipped++
-					continue
-				}
-				invocation.localInitializers[input.declaration] = input
-				current[localKey] = true
-				trimPending()
-			}
-			if len(locals) > 0 {
-				admitted := false
-				for _, input := range locals {
-					if input.bindingBytes > 0 {
-						admitted = true
+		}
+		auditLexical := invocation.lexical != nil && candidate.auditLexical
+		if !candidate.identityValid && !auditLexical {
+			// Unsupported owners cannot be cached, so avoid spending the shared
+			// return-expression budget on syntax with no remaining admission use.
+			return
+		}
+		if candidate.identityValid && len(current) >= session.trackedBodyLimit() && !auditLexical {
+			// No owner slot remains, and this candidate needs no lexical-read
+			// observation. Avoid walking its return syntax when it cannot be admitted.
+			skipped++
+			return
+		}
+		budgetExhausted := false
+		expressions, primitiveReturn := primitiveReturnExpressionsWithNodeBudget(fn, &invocation.expressionNodesRemaining, &budgetExhausted)
+		if budgetExhausted {
+			// Candidate discovery must not turn an incomplete owner set into a
+			// retirement set. Fall back before publishing any session changes.
+			expressionBudgetExhausted = true
+			return
+		}
+		ok := primitiveReturn
+		if reads := invocation.lexical; reads != nil && candidate.auditLexical {
+			if _, exists := reads.indexes[fn]; !exists && len(reads.indexes) < lexicalReadMaxFunctions {
+				readFree := primitiveReturn && len(fn.EnsureValues) == 0 && len(fn.EnsureProofs) == 0
+				for _, expr := range expressions {
+					if _, ident := expr.(*ast.Ident); ident {
+						readFree = false
 						break
 					}
 				}
-				if !admitted {
-					delete(invocation.keys, fn)
-					delete(current, key)
-					skipped++
-					kept := pendingLocals[:0]
-					for _, pending := range pendingLocals {
-						if pending.owner == fn {
-							skipped++
+				var index *FunctionSourceIndex
+				if !readFree {
+					index, _ = IndexFunctionSource(fn, FunctionIdentityContext{Origin: origin, QualifiedName: qualifiedName})
+					if index != nil {
+						if len(index.ordinals) > lexicalReadMaxSourceNodes-invocation.lexical.indexNodes {
+							index = nil
 						} else {
-							kept = append(kept, pending)
+							invocation.lexical.indexNodes += len(index.ordinals)
+							session.stats.LexicalSourceIndexesBuilt++
 						}
 					}
-					clear(pendingLocals[len(kept):])
-					pendingLocals = kept
+				}
+				invocation.lexical.indexes[fn] = index
+			}
+		}
+		if !candidate.identityValid {
+			return
+		}
+		remaining := session.trackedBodyLimit() - len(current)
+		if remaining <= 0 || (!ok && remaining < 2) {
+			// A successful local-initializer plan always contains at least one
+			// local. If it needs two slots, don't build that plan when only one
+			// owner slot remains.
+			skipped++
+			return
+		}
+		var locals []*primitiveLocalInitializer
+		if !ok {
+			if invocation.expressionNodesRemaining == 0 {
+				expressionBudgetExhausted = true
+				return
+			}
+			budgetExhausted = false
+			locals, ok = primitiveLocalInitializersWithNodeBudget(fn, &invocation.expressionNodesRemaining, &budgetExhausted)
+			if !ok {
+				if budgetExhausted {
+					expressionBudgetExhausted = true
+				}
+				return
+			}
+		}
+		needed := 1
+		if len(locals) > 0 {
+			needed = 2
+		} // owner context plus at least one initializer
+		if len(current)+needed > session.trackedBodyLimit() {
+			skipped += 1 + len(locals)
+			return
+		}
+		invocation.keys[fn] = name
+		current[key] = true
+		trimPending()
+		for _, input := range locals {
+			identity := sha256.Sum256([]byte(input.declaration.Name))
+			input.key = name + "/local-name-v2/" + hex.EncodeToString(identity[:])
+			localKey := primitiveInput("function-source", input.key)
+			if retainedOnly && !session.previous[localKey] {
+				// Reserve space for all other retained owners before new locals.
+				if len(current)+len(pendingLocals) >= session.trackedBodyLimit() {
+					skipped++
+					continue
+				}
+				pendingLocals = append(pendingLocals, input)
+				continue
+			}
+			if len(current) >= session.trackedBodyLimit() {
+				skipped++
+				continue
+			}
+			if !invocation.reserveBinding(input) {
+				skipped++
+				continue
+			}
+			invocation.localInitializers[input.declaration] = input
+			current[localKey] = true
+			trimPending()
+		}
+		if len(locals) > 0 {
+			admitted := false
+			for _, input := range locals {
+				if input.bindingBytes > 0 {
+					admitted = true
+					break
 				}
 			}
+			if !admitted {
+				delete(invocation.keys, fn)
+				delete(current, key)
+				skipped++
+				kept := pendingLocals[:0]
+				for _, pending := range pendingLocals {
+					if pending.owner == fn {
+						skipped++
+					} else {
+						kept = append(kept, pending)
+					}
+				}
+				clear(pendingLocals[len(kept):])
+				pendingLocals = kept
+			}
+		}
+	}
+	collect := func(retainedOnly bool) {
+		for _, candidate := range candidates {
+			if expressionBudgetExhausted {
+				return
+			}
+			collectCandidate(candidate, retainedOnly)
 		}
 	}
 	// Budget pressure must not turn a large request entirely cold. Retain
 	// existing owners first, then fill available slots in declaration order.
 	if len(session.previous) > 0 {
 		collect(true)
+		if expressionBudgetExhausted {
+			return coldFallback()
+		}
 	}
 	for _, input := range pendingLocals {
 		if len(current) >= session.trackedBodyLimit() {
@@ -438,16 +521,76 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			skipped++
 		}
 	}
-	if partialCandidates && len(invocation.keys) == 0 {
-		return coldFallback()
-	}
-	if !partialCandidates {
-		collect(false)
-	} else {
+	if coldSession {
+		// There are no prior owners to prioritize, so prepare and admit new
+		// owners directly in occurrence order without retaining a candidate list.
+		// The pointer inventory already validated the full tree; normal semantic
+		// analysis still checks any declarations beyond these admission caps.
+		workBytes := 0
+		cacheableRecords := 0
+		lexicalOccurrences := 0
+		complete := walkPrimitiveOwnerDeclarations(file.Decls, "", 0, len(origin), &workBytes, nil, func(fn *ast.FuncDecl, qualifiedName string) bool {
+			if expressionBudgetExhausted {
+				return false
+			}
+			auditLexical := invocation.lexical != nil && lexicalOccurrences < lexicalReadMaxFunctions
+			if invocation.lexical != nil {
+				lexicalOccurrences++
+			}
+			if len(current) >= session.trackedBodyLimit() {
+				if !auditLexical {
+					return false
+				}
+				// Preserve the bounded lexical prefix without preparing owner
+				// identities that cannot be admitted after capacity is full.
+				collectCandidate(primitiveOwnerCandidate{
+					function: fn, qualifiedName: qualifiedName, auditLexical: true,
+				}, false)
+				return true
+			}
+			identity, name, retained, identityValid, ready := preparePrimitiveOwnerCandidateWithBudget(fn, qualifiedName, origin, session.previous, func(amount int) bool {
+				return reservePrimitiveOwnerCandidateBytes(&workBytes, amount, primitiveOwnerCandidateWorkBudget)
+			})
+			if !ready {
+				return false
+			}
+			if identityValid {
+				if cacheableRecords >= primitiveOwnerCandidateLimit {
+					return false
+				}
+				cacheableRecords++
+			} else if !auditLexical {
+				return true
+			}
+			if !auditLexical {
+				qualifiedName = ""
+			}
+			collectCandidate(primitiveOwnerCandidate{
+				function: fn, qualifiedName: qualifiedName, name: name,
+				identity: identity, identityValid: identityValid, retained: retained, auditLexical: auditLexical,
+			}, false)
+			return true
+		})
+		if expressionBudgetExhausted {
+			return coldFallback()
+		}
+		if !complete {
+			session.stats.CapacityFallbackAnalyses++
+		}
+	} else if partialCandidates {
+		if len(invocation.keys) == 0 {
+			return coldFallback()
+		}
 		// The undiscovered suffix may contain retained owners, so admit only
 		// the known retained prefix. The semantic analyzer still visits the full
-		// file, and the current-set retirement below removes omitted old owners.
+		// file; previous keys for the unknown suffix were preserved before
+		// admission and remain until a complete census can establish they're dead.
 		session.stats.CapacityFallbackAnalyses++
+	} else {
+		collect(false)
+		if expressionBudgetExhausted {
+			return coldFallback()
+		}
 	}
 	if session.db == nil {
 		session.resetDatabase()
@@ -606,10 +749,17 @@ const primitiveSourceByteBudget = 1024 * 1024
 var primitiveSeenPool = sync.Pool{New: func() any { return make(map[ast.Expr]bool, 256) }}
 
 func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
-	if nodes, ok := primitiveI64ReturnExpressions(fn); ok {
+	return primitiveReturnExpressionsWithNodeBudget(fn, nil, nil)
+}
+
+func primitiveReturnExpressionsWithNodeBudget(fn *ast.FuncDecl, remainingNodes *int, budgetExhausted *bool) ([]ast.Expr, bool) {
+	if nodes, ok := primitiveI64ReturnExpressionsWithNodeBudget(fn, remainingNodes, budgetExhausted); ok {
 		return nodes, true
 	}
-	return predicateReturnExpressions(fn)
+	if budgetExhausted != nil && *budgetExhausted {
+		return nil, false
+	}
+	return predicateReturnExpressionsWithNodeBudget(fn, remainingNodes, budgetExhausted)
 }
 
 // Only return-expression typing is retained here. Plain value postconditions
@@ -650,6 +800,10 @@ func primitiveReturnTypingHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 }
 
 func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
+	return primitiveI64ReturnExpressionsWithNodeBudget(fn, nil, nil)
+}
+
+func primitiveI64ReturnExpressionsWithNodeBudget(fn *ast.FuncDecl, remainingNodes *int, budgetExhausted *bool) ([]ast.Expr, bool) {
 	stmt, ok := primitiveReturnTypingHeader(fn)
 	if !ok || len(fn.Name) > primitiveSourceByteBudget {
 		return nil, false
@@ -666,7 +820,7 @@ func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	if sourceBytes > primitiveSourceByteBudget {
 		return nil, false
 	}
-	nodes, _, ok := primitiveI64ExpressionNodes(stmt.Value, parameters, sourceBytes)
+	nodes, _, ok := primitiveI64ExpressionNodesWithNodeBudget(stmt.Value, parameters, sourceBytes, remainingNodes, budgetExhausted)
 	return nodes, ok
 }
 
@@ -676,6 +830,10 @@ func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 // containing every preceding local. It returns the updated spelling-byte count
 // so a multi-initializer plan can enforce one cumulative function budget.
 func primitiveI64ExpressionNodes(root ast.Expr, parameters map[string]bool, sourceBytes int) ([]ast.Expr, int, bool) {
+	return primitiveI64ExpressionNodesWithNodeBudget(root, parameters, sourceBytes, nil, nil)
+}
+
+func primitiveI64ExpressionNodesWithNodeBudget(root ast.Expr, parameters map[string]bool, sourceBytes int, remainingNodes *int, budgetExhausted *bool) ([]ast.Expr, int, bool) {
 	if root == nil || sourceBytes > primitiveSourceByteBudget {
 		return nil, sourceBytes, false
 	}
@@ -689,6 +847,15 @@ func primitiveI64ExpressionNodes(root ast.Expr, parameters map[string]bool, sour
 		}
 		if seen[expr] {
 			return false
+		}
+		if remainingNodes != nil {
+			if *remainingNodes <= 0 {
+				if budgetExhausted != nil {
+					*budgetExhausted = true
+				}
+				return false
+			}
+			(*remainingNodes)--
 		}
 		seen[expr] = true
 		nodes = append(nodes, expr)
@@ -844,7 +1011,8 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		invocation.prepareAnalyzer(a)
 	} // validate current lookup absence at the reuse boundary
 	currentReturn, returnOK := a.currentReturn.(*BuiltinType)
-	nodes, eligible := primitiveReturnExpressions(fn)
+	budgetExhausted := false
+	nodes, eligible := primitiveReturnExpressionsWithNodeBudget(fn, &invocation.expressionNodesRemaining, &budgetExhausted)
 	predicate := predicateBuiltinSyntaxName(fn.ReturnType) == "bool"
 	returnName := predicateBuiltinSyntaxName(fn.ReturnType)
 	bindingsReady := primitiveCurrentParameterBindings(a, fn)
@@ -859,19 +1027,21 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 				safety = predicateOperatorAbsence
 			}
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("predicate-safety", key), Value: safety})
-		} else {
+		} else if !budgetExhausted {
 			bindingsReady, safetyReady = false, false
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("predicate-safety", key), Remove: true})
+		} else {
+			bindingsReady, safetyReady = false, false
 		}
-	} else {
+	} else if !budgetExhausted {
 		invocation.session.db.Apply(incremental.Change{Key: primitiveInput("predicate-safety", key), Remove: true})
 	}
 	if !eligible || !bindingsReady || !safetyReady || !returnOK || currentReturn.Name != returnName || currentReturn != a.namedTypes[returnName] {
-		if indexed && !eligible {
+		if indexed && !eligible && !budgetExhausted {
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-source", key), Remove: true}, incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
 			invocation.session.forgetPrimitiveProduct(key)
 			invocation.session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: key})
-		} else if predicate && (!bindingsReady || !safetyReady) {
+		} else if predicate && (!bindingsReady || !safetyReady) && !budgetExhausted {
 			invocation.session.db.Apply(incremental.Change{Key: primitiveInput("function-product", key), Remove: true})
 			invocation.session.forgetPrimitiveProduct(key)
 			invocation.session.db.EvictQuery(incremental.Key{Kind: "primitive-return", Name: key})
@@ -911,7 +1081,8 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	if predicate && !safetyReady {
 		return
 	}
-	currentNodes, valid := primitiveReturnExpressions(fn)
+	budgetExhausted = false
+	currentNodes, valid := primitiveReturnExpressionsWithNodeBudget(fn, &invocation.expressionNodesRemaining, &budgetExhausted)
 	if !valid || primitiveExpressionDigest(fn, currentNodes) != source {
 		return
 	}

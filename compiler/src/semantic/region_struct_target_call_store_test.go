@@ -97,6 +97,44 @@ def same_scope() -> usize:
 	}
 }
 
+func TestNullOptionalStructTargetDoesNotEscape(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_call_null.elisa", `struct Holder:
+    xs: mutable darray[i64] = []
+
+def stash_if_present(h: mutable Holder&?, xs: darray[i64]) -> void:
+    if h != null:
+        h.xs <- xs
+
+def run() -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        stash_if_present(null, local)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a null optional struct reference has no storage target, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestNullableStructTargetVariableStillChecksEscape(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "struct_target_call_nullable_variable.elisa", `struct Holder:
+    xs: mutable darray[i64] = []
+
+def stash_if_present(h: mutable Holder&?, xs: darray[i64]) -> void:
+    if h != null:
+        h.xs <- xs
+
+def run(h: mutable Holder&?) -> void:
+    can Memory.Allocate, Abort.Panic:
+        local: mutable darray[i64] = []
+        local.push(1)
+        stash_if_present(h, local)
+`)
+	if errs := result.Errors(); len(errs) == 0 {
+		t.Fatal("a nullable reference variable may be non-null and must remain an escape destination")
+	}
+}
+
 // A by-value darray parameter is a header copy that SHARES its element buffer with the caller:
 // `put0(h.rows, xs)` with `rows[0] <- xs` writes into h's buffer, so a local-region xs must be
 // rejected exactly like a store through a reference (runtime-verified UAF when exempted).

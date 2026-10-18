@@ -57,13 +57,6 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 			}
 		}
 	}
-	locals := map[*ast.FuncDecl]map[string]bool{}
-	for _, fn := range active {
-		if fn == nil {
-			continue
-		}
-		locals[fn] = collectLocalDeclNames(fn.Body)
-	}
 	for {
 		changed := false
 		for _, fn := range active {
@@ -97,9 +90,6 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 					add(srcName, tgtName)
 					return
 				}
-				if locals[fn][tgtName] {
-					return // stored into a callee-local: dies with the callee, cannot dangle a caller value
-				}
 				markTarget(srcName, storeTargetGlobal)
 			}
 			markGlobal := func(srcName string) { markTarget(srcName, storeTargetGlobal) }
@@ -117,51 +107,51 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 // every local region, so a region-tainted by-value argument stored there always dangles.
 const storeTargetGlobal = -1
 
-// collectLocalDeclNames returns the set of names introduced by `let`/typed var declarations anywhere in
-// a function body, used to tell a callee-local store target (safe — dies with the callee) from a
-// global/captured one (program-lifetime — a region-tainted value stored there dangles).
-func collectLocalDeclNames(body []ast.Stmt) map[string]bool {
-	names := map[string]bool{}
-	var walk func(v reflect.Value)
-	walk = func(v reflect.Value) {
-		if !v.IsValid() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer, reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			if d, ok := v.Interface().(*ast.VarDeclStmt); ok && d != nil {
-				names[d.Name] = true
-			}
-			walk(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				if v.Field(i).CanInterface() {
-					walk(v.Field(i))
-				}
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i))
-			}
-		}
-	}
-	for _, s := range body {
-		walk(reflect.ValueOf(s))
-	}
-	return names
-}
-
 // walkParamStores finds, in a function body, the param→param store relationships:
 //   - a container-mutation `tgtParam.push(srcParam)` / put / add / insert / append / push_{front,back}
 //   - a reassignment `tgtParam <- srcParam`, or a field store `tgtParam.field <- srcParam`
 //   - a relayed store: a resolved callee that maps its position-p param into its position-q param,
 //     where the call passes srcParam at p and tgtParam at q.
 func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map[*ast.FuncDecl][]map[int]bool, addStore func(src, tgt string), markGlobal func(src string)) {
-	add := addStore
+	locals := map[string]int{}
+	aliases := map[string]int{}
+	add := func(src, tgt string) {
+		if aliases[tgt] > 0 {
+			// An iterator binding can write through to storage outside this
+			// function. Its spelling must not select a shadowed parameter.
+			markGlobal(src)
+		} else if locals[tgt] == 0 {
+			addStore(src, tgt)
+		}
+	}
+	// A local source can copy the same-named outer parameter in its initializer.
+	// Keep source-name matching conservative until source alias provenance is known.
+	global := markGlobal
 	var walk func(v reflect.Value)
+	list := func(stmts []ast.Stmt, tail ast.Expr) {
+		var introduced []struct {
+			name    string
+			aliases int
+		}
+		for _, stmt := range stmts {
+			walk(reflect.ValueOf(stmt))
+			// A declaration's initializer sees the previous binding.
+			if decl, ok := stmt.(*ast.VarDeclStmt); ok && decl != nil && decl.Name != "" {
+				introduced = append(introduced, struct {
+					name    string
+					aliases int
+				}{decl.Name, aliases[decl.Name]})
+				locals[decl.Name]++
+				aliases[decl.Name] = 0
+			}
+		}
+		walk(reflect.ValueOf(tail))
+		for i := len(introduced) - 1; i >= 0; i-- {
+			binding := introduced[i]
+			locals[binding.name]--
+			aliases[binding.name] = binding.aliases
+		}
+	}
 	walk = func(v reflect.Value) {
 		if !v.IsValid() {
 			return
@@ -172,6 +162,32 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 				return
 			}
 			switch n := v.Interface().(type) {
+			case *ast.IterForStmt:
+				walk(reflect.ValueOf(n.Source))
+				names := parallelForMoveBindNames(n.Pattern)
+				names = append(names, parallelForMatchArmPatternNames(n.PatternFilter)...)
+				previousAliases := make([]int, len(names))
+				for i, name := range names {
+					previousAliases[i] = aliases[name]
+					locals[name]++
+					aliases[name] = 0
+					if n.Mode == ast.IterBindMutableRef {
+						aliases[name] = 1
+					}
+				}
+				walk(reflect.ValueOf(n.PatternFilter))
+				walk(reflect.ValueOf(n.WhereFilter))
+				walk(reflect.ValueOf(n.Filter))
+				list(n.Body, nil)
+				for i := len(names) - 1; i >= 0; i-- {
+					locals[names[i]]--
+					aliases[names[i]] = previousAliases[i]
+				}
+				return
+			case *ast.ExprBlock:
+				// Locals declared in the block remain visible in its tail value.
+				list(n.Stmts, n.Value)
+				return
 			case *ast.CallExpr:
 				// Direct container-mutation store: tgt.push(src)
 				if fe, ok := n.Func.(*ast.FieldExpr); ok && fe != nil && retainingMethods[fe.Field] {
@@ -186,7 +202,7 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 				// Relayed store through a resolved callee.
 				if callee, ok := a.resolveCalleeFuncDecl(n); ok && callee != nil {
 					if ctargets, ok := out[callee]; ok {
-						a.relayParamStores(n, ctargets, addStore, markGlobal)
+						a.relayParamStores(n, ctargets, add, global)
 					}
 				}
 			case *ast.AssignStmt:
@@ -204,14 +220,16 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 				}
 			}
 		case reflect.Slice, reflect.Array:
+			if v.Type() == storeScanStmtListType {
+				list(v.Interface().([]ast.Stmt), nil)
+				return
+			}
 			for i := 0; i < v.Len(); i++ {
 				walk(v.Index(i))
 			}
 		}
 	}
-	for _, s := range body {
-		walk(reflect.ValueOf(s))
-	}
+	walk(reflect.ValueOf(body))
 }
 
 // relayParamStores propagates a callee's param→param store relationships back to the caller's params:

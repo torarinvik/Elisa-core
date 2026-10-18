@@ -2263,6 +2263,13 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		if index >= len(args) {
 			continue
 		}
+		// A literal null passed to an optional writable reference has no destination.
+		// Nullable variables can still hold a real destination and must be analyzed.
+		if ref, isNullableRef := paramType.(*RefType); isNullableRef && ref != nil && ref.State == RefStateNullable {
+			if _, isNull := stripOptimizationParens(args[index]).(*ast.NullLit); isNull {
+				continue
+			}
+		}
 		// A mutable reference to a struct holding region storage (owned containers included,
 		// which returnBorrowWritableParam does not count): the callee may replace a field with
 		// another argument's storage.
