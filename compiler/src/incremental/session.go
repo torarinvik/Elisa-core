@@ -37,6 +37,8 @@ type publicationPlan struct {
 }
 
 type Session struct {
+	delta *deltaOwnership
+
 	gate                       chan struct{}
 	limits                     Limits
 	evaluators                 map[string]Evaluator
@@ -346,6 +348,7 @@ func (s *Session) PublishPrepared(ctx context.Context, prepare func() ([]Publica
 			s.debtBytes += keyCost(key)
 		}
 	}
+	s.delta = nil // A full snapshot does not retain delta ownership metadata.
 	s.live = live
 	s.inputs = inputs
 	s.inputKeys = inputKeys

@@ -1,8 +1,9 @@
 # Bounded frame-catalog publication for tracked name resolution
 
 Design proposal, inspected against Go Core `ff7656f4` on 2026-10-18.
-This is not an implemented optimization or a measured speedup. Self-hosted
-Elisa query handles have a separate integration path.
+The owner-delta foundation is now implemented as described below; production
+name-resolution integration remains pending. No end-to-end compiler speedup has
+been measured. Self-hosted Elisa query handles have a separate integration path.
 
 ## Current evidence
 
@@ -119,11 +120,10 @@ after a successful current binding rebind or certified negative result.
 
 ## Implementation ownership
 
-Analyzer/Scope and parser/AST are actively edited by other owners. This proposal
-does not change those files or Session. Coordinate the session API owner and
-final Core source freeze before implementation. The next implementable slice is
-owner/input-delta accounting with atomic failure semantics; production lookup
-integration follows only once current catalog completeness is authoritative.
+Analyzer/Scope and parser/AST are actively edited by other owners. The initial proposal
+left those files and Session unchanged. The assigned Session API slice is now
+implemented below; production lookup integration follows only once current
+catalog completeness is authoritative and integration ownership is assigned.
 
 ## Measured baseline
 
@@ -157,3 +157,54 @@ changing publication ownership/update structure before optimizing evaluator
 lookup. CPU samples include substantial runtime kevent/madvise activity, so
 this profile does not establish a precise mutator CPU breakdown. CPU, memory,
 benchmark log and matching test executable are retained with the local evidence.
+
+## Implemented owner-delta API
+
+`Session.PublishDelta(ctx, Delta{Upsert, Remove, Reset})` now uses publication
+query keys as ownership units. An upsert replaces that owner's input assertions;
+an omitted owner remains live. This first API is a patch of owners, not an
+in-place patch of a large frame: production catalog callers must choose small
+name-cell owners or batch frame replacement once per coherent revision.
+Analyzer/Scope integration is still pending; no production lookup uses it yet.
+
+The ordinary path stages touched owner inputs and affected shared assertions,
+subtracts all replaced reservations before adding replacements, rejects the
+whole transaction on conflict/budget failure, clones admitted strings and
+commits through the atomic database primitive. Existing full Publish admission
+behavior is retained. Switching a nonempty full-publication world into delta
+mode requires explicit Reset; full Publish discards delta metadata on success.
+Invalid preparation invalidates handles without mutating retained data;
+pre-gate cancellation does not invalidate the current world.
+
+Shared assertions must agree, including absent inputs. Last-owner removal
+retires input authority; one-owner removal preserves still-shared cells.
+Queries may still read other admitted inputs, as with full publication.
+Ownership storage has a separate logical reservation (128 bytes/query plus
+96 bytes/edge, alongside result/dependency/key/input costs), so admission is
+intentionally more conservative than the existing full-publication policy.
+Logical accounting is not allocator capacity or RSS. Discarded ownership edges
+and retired keys accrue debt. Occasional compaction rebuilds the DB and every
+session inventory/authority/ownership map, including inner reverse-owner maps,
+so resetting debt also releases deleted-entry map capacity.
+
+Paired publication-only run, three 300 ms samples, one CPU, same Apple M5:
+
+| Queries | Full publication median | Owner delta median | Full bytes/op | Delta bytes/op |
+| --- | ---: | ---: | ---: | ---: |
+| 64 | 56.197 us | 1.510 us | 163,400 | 1,016 |
+| 1,024 | 1.407565 ms | 1.645 us | 2,711,344 | 1,016 |
+| 8,192 | 10.952000 ms | 1.642 us | 21,707,120 | 1,016 |
+
+Delta allocations are six per edit at all sizes. Setup/initial admission and
+query evaluation are outside both timers. These measurements establish the
+publication component's edit-size scaling for a one-cell owner replacement,
+not an end-to-end compiler or production resolver speedup.
+
+The full incremental package passed race checking (1.662 s). Coverage includes
+shared-owner conflicts, explicit negatives, last/shared owner retirement,
+rejection atomicity and stale handles, mode changes, canceled publication,
+exact-fit input-to-result reservation transfers, map rebuilding on compaction,
+caller-array ownership, reservation-only memo/parent invalidation, and deterministic fresh/full versus delta histories
+including shared-input batch updates. Raw benchmark/race logs, complete package
+source copies, SHA-256 manifest and exact commands are retained locally under
+`build/verification/incremental-session-owner-delta-20261018/`.

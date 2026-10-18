@@ -48,3 +48,44 @@ func BenchmarkSessionOneCellEditPublication(b *testing.B) {
 		})
 	}
 }
+
+// The same one-cell edit through owner deltas. The entire world is admitted once;
+// each timed call replaces one small owner, independent of unrelated owners.
+func BenchmarkSessionOneCellDeltaPublication(b *testing.B) {
+	for _, count := range []int{64, 1024, 8192} {
+		b.Run(fmt.Sprintf("queries=%d", count), func(b *testing.B) {
+			ctx := context.Background()
+			publications := make([]Publication, count)
+			for i := range publications {
+				publications[i] = readPublication(fmt.Sprint(i), "value", false)
+			}
+			owner, err := NewSession(map[string]Evaluator{"read": sessionRead}, DefaultLimits())
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := owner.PublishDelta(ctx, Delta{Upsert: publications}); err != nil {
+				b.Fatal(err)
+			}
+			patch := Delta{Upsert: publications[:1]}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if i%2 == 0 {
+					patch.Upsert[0].Inputs[0].Value = "edited"
+				} else {
+					patch.Upsert[0].Inputs[0].Value = "value"
+				}
+				if _, err := owner.PublishDelta(ctx, patch); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			stats := owner.Stats()
+			if stats.RetainedQueries != count || stats.RetainedInputs != count {
+				b.Fatal(stats)
+			}
+			b.ReportMetric(float64(count), "world-queries")
+			b.ReportMetric(1, "changed-cells/op")
+		})
+	}
+}
