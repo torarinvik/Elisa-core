@@ -33,6 +33,7 @@ type primitiveOwnerCandidate struct {
 	identity      [32]byte
 	identityValid bool
 	retained      bool
+	auditLexical  bool
 }
 
 // primitiveOwnerCandidateRecord is the compact record used by the legacy
@@ -377,20 +378,24 @@ func primitiveOwnerCandidateName(identity [32]byte) string {
 	return primitiveOwnerCandidateNamePrefix + hex.EncodeToString(identity[:])
 }
 
-// preparePrimitiveOwnerCandidates performs the owner walk before Analyze
-// mutates session state. It materializes an occurrence-ordered list for the
-// retained-first and new-owner admission passes. ready is false when a record
-// or work cap stops the walk; the returned prefix is still fully prepared and
-// can support retained-only admission after the pointer inventory succeeds.
+// preparePrimitiveOwnerCandidates performs the warm-session owner walk before
+// Analyze mutates session state. It materializes an occurrence-ordered list
+// for retained-first and new-owner admission. The record cap counts only
+// identities that can become owner keys; a separate lexical prefix retains
+// context for the first bounded audit-function set. ready is false when a
+// record or work cap stops the walk.
 func preparePrimitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incremental.Key]bool, limit int, keepQualifiedNames bool) ([]primitiveOwnerCandidate, bool) {
 	if limit <= 0 {
 		return nil, false
 	}
 	workBytes := 0
 	candidates := make([]primitiveOwnerCandidate, 0)
+	cacheableRecords := 0
+	lexicalOccurrences := 0
 	complete := walkPrimitiveOwnerDeclarations(decls, "", 0, len(origin), &workBytes, nil, func(fn *ast.FuncDecl, qualified string) bool {
-		if len(candidates) >= limit {
-			return false
+		auditLexical := keepQualifiedNames && lexicalOccurrences < lexicalReadMaxFunctions
+		if keepQualifiedNames {
+			lexicalOccurrences++
 		}
 		identity, name, retained, identityValid, ready := preparePrimitiveOwnerCandidateWithBudget(fn, qualified, origin, previous, func(amount int) bool {
 			return reservePrimitiveOwnerCandidateBytes(&workBytes, amount, primitiveOwnerCandidateWorkBudget)
@@ -398,12 +403,20 @@ func preparePrimitiveOwnerCandidates(decls []ast.Decl, origin string, previous m
 		if !ready {
 			return false
 		}
-		if !keepQualifiedNames {
+		if identityValid {
+			if cacheableRecords >= limit {
+				return false
+			}
+			cacheableRecords++
+		} else if !auditLexical {
+			return true
+		}
+		if !auditLexical {
 			qualified = ""
 		}
 		candidates = append(candidates, primitiveOwnerCandidate{
 			function: fn, qualifiedName: qualified, name: name,
-			identity: identity, identityValid: identityValid, retained: retained,
+			identity: identity, identityValid: identityValid, retained: retained, auditLexical: auditLexical,
 		})
 		return true
 	})
@@ -424,7 +437,7 @@ func primitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incr
 			if !keepQualifiedNames {
 				qualified = ""
 			}
-			return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, identityValid: identityValid, retained: retained})
+			return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, identityValid: identityValid, retained: retained, auditLexical: keepQualifiedNames})
 		})
 	}
 	if len(previous) == 0 || limit <= 0 || keepQualifiedNames {
@@ -451,7 +464,7 @@ func primitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incr
 		prefixLength := prefixOccurrences
 		return func(yield func(primitiveOwnerCandidate) bool) {
 			for _, record := range candidates {
-				candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, identityValid: record.identityValid, retained: record.retained}
+				candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, identityValid: record.identityValid, retained: record.retained, auditLexical: keepQualifiedNames}
 				if !yield(candidate) {
 					return
 				}
@@ -462,13 +475,13 @@ func primitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incr
 				if !keepQualifiedNames {
 					qualified = ""
 				}
-				return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, identityValid: identityValid, retained: retained})
+				return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, identityValid: identityValid, retained: retained, auditLexical: keepQualifiedNames})
 			})
 		}
 	}
 	return func(yield func(primitiveOwnerCandidate) bool) {
 		for _, record := range candidates {
-			candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, identityValid: record.identityValid, retained: record.retained}
+			candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, identityValid: record.identityValid, retained: record.retained, auditLexical: keepQualifiedNames}
 			if !yield(candidate) {
 				return
 			}

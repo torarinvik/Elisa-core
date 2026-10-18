@@ -276,8 +276,12 @@ def main() -> i64:
 					retained := filepath.Join(dir, "retained.o")
 					fresh := filepath.Join(dir, "fresh.o")
 					options := LLVMObjectEmitOptions{OptLevel: level}
+					before := session.Stats()
 					if err := session.WriteObject(result, retained, options); err != nil {
 						t.Fatal(err)
+					}
+					if revision == 2 && session.Stats().PartitionsReused == before.PartitionsReused {
+						t.Fatal("reverting to the original source did not exercise native cache reuse")
 					}
 					if err := WriteLLVMObjectFileWithOptions(result, fresh, options); err != nil {
 						t.Fatal(err)

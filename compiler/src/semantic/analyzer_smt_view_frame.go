@@ -236,7 +236,7 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		// A compiler-generated lazy wrapper owns no storage until its body
 		// allocates. Inspect that body; explicit/user regions stay outside the
 		// frame model, as do all allocation calls and writes within a wrapper.
-		return n != nil && n.Lazy && !n.UserAuto && isSynthesizedAutoRegion(n.Name) &&
+		return isCompilerGeneratedAutoRegionStmt(n) &&
 			n.Capacity == nil && n.OwnerName == "" && n.Allocator == "" && g.scoped(n.Body)
 	case *ast.CanStmt:
 		if n == nil || n.HandlerName != "" || len(n.HandlerArgs) != 0 || n.As != "" || len(n.Permissions) == 0 {

@@ -5,40 +5,100 @@ retained owners before filling free slots with new owners. Previously both
 passes walked declarations, reconstructed qualified owner names and hashed the
 same identities, including functions whose bodies could not be cached.
 
-The invocation-local preflight prepares every candidate identity and retained
-classification once, then reuses that occurrence-ordered list for both
-retained-first and new-owner admission. It preserves previous-owner authority,
-duplicate-key first-wins behavior, 4,096 tracked-body admission and subsequent
-retirement. Owner identity is intentionally versioned: new keys use the
-`primitive-v2:` name prefix and v3 hash domain with ordered parameter-type tags,
-so the former arity-only function-source key bytes are not preserved. The
-collector still checks current admission state on each pass. No AST pointer or
+For warm sessions, an invocation-local preflight prepares owner identities and
+retained classification once, then reuses that occurrence-ordered list for
+retained-first and new-owner admission. A cold session has no retained owners to
+prioritize, so it prepares and admits candidates directly from one declaration
+walk without building a candidate list. Both paths preserve duplicate-key
+first-wins behavior, 4,096 tracked-body admission and subsequent retirement.
+Owner identity is intentionally versioned: new keys use the `primitive-v2:`
+name prefix and v3 hash domain with ordered parameter-type tags, so the former
+arity-only function-source key bytes are not preserved. No AST pointer or
 candidate record is retained in the persistent Session.
 
 The production list stores an approximately 80-byte candidate header per entry
 on 64-bit targets, plus its precomputed owner-key string and, during lexical-read
-auditing, its qualified name. The preflight caps candidate discovery at 16,384
-candidate occurrences and 8 MiB of charged preparation work for cold sessions
-and warm sessions with retained local names. The charge covers namespace and
+auditing, its qualified name. The owner record cap is 16,384 supported,
+cacheable candidate occurrences (including duplicate owner keys), with up to
+4,096 additional bounded lexical-audit contexts for
+unsupported signatures. Cold sessions use the same owner and 8 MiB preparation
+work caps but do not retain a candidate list. The charge covers namespace and
 qualified-name construction and retention, signature validation and tags, key
-construction, retained-local classification, and candidate storage. It does
-not cover the later `IndexFunctionSource` construction during Analyze collection.
+construction, retained-local classification, and a per-candidate storage
+allowance for warm sessions. It does not cover the later `IndexFunctionSource`
+construction during Analyze collection. Return screening and local-initializer
+expression planning share a cumulative
+cap of 262,144 expression-node visits per Analyze call, including preflight,
+reuse-boundary validation, and post-analysis publication checks. It counts
+expression-node visits per bounded traversal, not distinct AST nodes across the
+whole Analyze call. A warm owner can be screened during admission and again at
+the analyzer reuse boundary; a cold-analyzed body can be screened again before
+product publication. Each pass charges its visits to the same counter.
+The per-expression 4,096-node and depth-128 limits remain. This counter does not
+include `IndexFunctionSource` construction. Candidates that cannot fit the
+remaining owner/local slots skip local planning; lexical-audit candidates still
+receive their lexical observation before this gate. If owner preflight screening
+exhausts the counter, Analyze falls back before changing the database,
+prior-owner map, or retained products. If screening exhausts after the analyzer
+has begun a body, that body is analyzed normally; incomplete screening does not
+evict its old product or publish a new one, so no cached return-body typing is
+used or published for that body on that request. Local initializer typing may
+still be reused after its own validation. Each later Analyze call starts with a
+fresh visit budget.
+In a cold session, once tracked-body capacity fills, owner identity preparation
+stops; when lexical auditing is enabled, the walk continues with lexical-only
+candidates through its 4,096-function prefix. These work limits are not a peak
+heap memory guarantee.
+Unsupported signatures do not consume the owner-record cap, but validating them
+still consumes the work budget. A sufficiently large unsupported prefix can
+exhaust that budget before a later retained owner is discovered; a warm request
+then uses only any retained candidates already prepared or falls back cold if
+there are none.
 Lexical indexing has separate limits of 4,096 functions and
-`lookupTraceMaxEntries * 4` total source nodes (262,144); when those limits are
-reached, the affected functions receive no index and their lexical observations
-are dropped. If either owner-preflight bound is exceeded, Analyze uses only the
-fully prepared prefix's retained owners and admits no new owner candidates,
-because an unseen suffix may contain additional retained owners. The semantic
-analysis still walks the full file, and the normal `current`-set retirement
-removes prior owner/query/product entries omitted from that prefix; those bodies
-are checked without session reuse and can be admitted again on a later analysis.
-If the prefix has no retained candidate, or none survives normal admission,
-Analyze calls `AnalyzeWithOptions` before changing the session database,
-prior-owner map, or retained products. Invalid pointer aliases and exhaustion
-of the separate 65,536-node pointer-alias preflight still force whole-request
-cold analysis. These are work and temporary-record limits, not a hard RSS
-guarantee. The partial-prefix policy trades reuse for bounded discovery work
-when a file crosses either owner-preflight cap.
+`lookupTraceMaxEntries * 4` retained source ordinals (262,144); Analyze builds
+an index before checking whether that aggregate ordinal cap would be exceeded.
+The ordinal cap therefore limits retained indexes, not temporary construction
+work or peak memory for one index. Each syntax fingerprint has its own limits of
+1,000,000 visits, 16 MiB encoded bytes, and depth 2,048, but an index can still
+temporarily allocate its full node list and ordinal map before the aggregate
+check. When the function-count or retained-ordinal limit is reached, affected
+functions receive no index and their lexical observations are dropped. When a
+warm-session owner preflight reaches a cap, Analyze uses only its fully prepared
+prefix and admits retained candidates from it because
+the unseen suffix may contain additional retained owners. Prior owner, query,
+and product entries for owners outside that prefix are preserved in the session
+but are not admitted or consulted by that partial request. Entries for scanned
+prefix owners with the same origin, qualified name, and parameter signature
+are handled by normal admission and retirement, including removed local keys
+when local classification completes. The local-name classifier skips functions
+with more than 257 top-level statements, so an identity-matched owner on that
+path can lose prior local keys without enumerating the full local set; this
+reduces possible reuse but those keys are not admitted by the partial request.
+Renames, signature changes, and deletions do not match the old owner identity,
+and unsupported signatures have no matching prepared identity, so their prior
+key groups can be indistinguishable from truly undiscovered suffix entries.
+Those groups remain dormant until a complete census or session reset, and they
+count toward the tracked-key cap; repeated partial requests can therefore leave
+less room for new prefix admission. A cold session instead prepares and admits
+candidates directly in declaration occurrence order until a cap stops it. In
+both cases, normal semantic analysis still walks the full file. For a stable
+over-cap file in fixed declaration order, suffix owners are not newly admitted
+on partial requests; new suffix entries become reusable only when preflight
+completes under the cap, or after a session reset or an explicit rotation
+policy is added.
+
+Functions beyond the admitted owner prefix have no owner/session reuse, and
+lexical-read auditing creates no `IndexFunctionSource` entry or observations for
+them during that request. A warm partial request also skips lexical indexing for
+non-retained candidates inside the prepared prefix because it runs only the
+retained pass. If a warm prefix has no retained candidate or none survives
+normal admission, or if a cold path admits no owner, Analyze calls
+`AnalyzeWithOptions` before changing the session database, prior-owner map, or
+retained products. Invalid pointer aliases and exhaustion of the separate
+65,536-node pointer-alias preflight still force whole-request cold analysis.
+These are work and temporary-record limits, not a hard RSS guarantee. The
+capped-prefix policy trades reuse and lexical-read coverage for bounded discovery
+work when a file crosses either owner cap.
 
 The isolated candidate-discovery qualification below does not add support for
 aliased source ASTs throughout Analyze: its pre-existing pointer-keyed invocation

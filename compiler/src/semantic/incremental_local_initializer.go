@@ -13,6 +13,11 @@ import (
 	"strconv"
 )
 
+// Bound incremental return screening and local-expression planning across one
+// Analyze call. The per-expression limit remains in place; this cap prevents
+// many near-limit functions from multiplying that work without bound.
+const primitiveAnalysisExpressionNodeBudget = 262144
+
 type primitiveLocalBinding struct {
 	name      string
 	parameter int
@@ -37,6 +42,10 @@ type primitiveLocalInitializer struct {
 // Consumed bindings include transitive value syntax, not merely scalar types:
 // constant/range diagnostics can depend on those values.
 func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer, bool) {
+	return primitiveLocalInitializersWithNodeBudget(fn, nil, nil)
+}
+
+func primitiveLocalInitializersWithNodeBudget(fn *ast.FuncDecl, remainingNodes *int, budgetExhausted *bool) ([]*primitiveLocalInitializer, bool) {
 	if !primitiveLocalSchemaValid || fn == nil || len(fn.Body) < 2 || len(fn.Body) > 257 {
 		return nil, false
 	}
@@ -89,7 +98,7 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 			return nil, false
 		}
 		var nodes []ast.Expr
-		nodes, sourceBytes, ok = primitiveI64ExpressionNodes(decl.Value, names, sourceBytes)
+		nodes, sourceBytes, ok = primitiveI64ExpressionNodesWithNodeBudget(decl.Value, names, sourceBytes, remainingNodes, budgetExhausted)
 		if !ok {
 			return nil, false
 		}

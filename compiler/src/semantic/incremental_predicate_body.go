@@ -320,6 +320,10 @@ func predicateBuiltinSyntaxName(input ast.TypeExpr) string {
 }
 
 func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
+	return predicateReturnExpressionsWithNodeBudget(fn, nil, nil)
+}
+
+func predicateReturnExpressionsWithNodeBudget(fn *ast.FuncDecl, remainingNodes *int, budgetExhausted *bool) ([]ast.Expr, bool) {
 	if fn == nil || len(fn.Params) > primitiveParameterLimit || len(fn.Body) != 1 || len(fn.Name) > primitiveSourceByteBudget || predicateBuiltinSyntaxName(fn.ReturnType) != "bool" {
 		return nil, false
 	}
@@ -357,6 +361,15 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	visit = func(expr ast.Expr, depth int) bool {
 		if expr == nil || (reflect.ValueOf(expr).Kind() == reflect.Ptr && reflect.ValueOf(expr).IsNil()) || depth > 128 || len(nodes) >= 4096 || seen[expr] || bytes > primitiveSourceByteBudget {
 			return false
+		}
+		if remainingNodes != nil {
+			if *remainingNodes <= 0 {
+				if budgetExhausted != nil {
+					*budgetExhausted = true
+				}
+				return false
+			}
+			(*remainingNodes)--
 		}
 		seen[expr] = true
 		nodes = append(nodes, expr)

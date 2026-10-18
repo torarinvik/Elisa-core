@@ -346,7 +346,8 @@ func TestReservePrimitiveOwnerCandidateBytesIsOverflowSafe(t *testing.T) {
 var benchmarkOwnerCandidateSink int
 
 // This compares the legacy streaming and prefix-buffered iterator helpers plus
-// both admission filters. Production Analyze uses the complete capped preflight.
+// both admission filters. Production Analyze streams on cold sessions and
+// buffers a capped candidate prefix on warm sessions.
 func BenchmarkPrimitiveOwnerCandidatePasses(b *testing.B) {
 	for _, count := range []int{16, 512, 4096, primitiveOwnerCandidateLimit - 1, primitiveOwnerCandidateLimit + 1} {
 		decls := make([]ast.Decl, count)

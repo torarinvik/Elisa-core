@@ -1644,7 +1644,9 @@ func storeFlowDefaultCallArgIsIndependent(param ast.ParamDecl) bool {
 
 func (a *Analyzer) storeFlowCallee(call *ast.CallExpr) *ast.FuncDecl {
 	ident, ok := call.Func.(*ast.Ident)
-	if !ok || ident == nil || a.storeFlowParams[ident.Name] {
+	// Locals are a function-wide conservative set. A possible local callable
+	// must not borrow a same-named global function's precise store summary.
+	if !ok || ident == nil || a.storeFlowParams[ident.Name] || a.storeFlowLocals[ident.Name] {
 		return nil
 	}
 	// The resolver may have qualified the callee (`Module.name`): match by last segment, and

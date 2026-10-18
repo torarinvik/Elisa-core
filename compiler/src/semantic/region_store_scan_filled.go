@@ -29,7 +29,10 @@ func (a *Analyzer) storeScanFilledLocals(decl *ast.FuncDecl, content, views map[
 	candidates := map[string]bool{}
 	var order []string // a fixed visiting order: summary cycles make the checks order-sensitive
 	for name := range idx.decls {
-		if !params[name] && !idx.otherBound[name] {
+		// This index is keyed by spelling rather than lexical binding identity. If a name is
+		// declared more than once, the body scan can mix writes to shadowed locals, so do not
+		// use that name as a proof candidate.
+		if len(idx.decls[name]) == 1 && !params[name] && !idx.otherBound[name] {
 			candidates[name] = true
 			order = append(order, name)
 		}
