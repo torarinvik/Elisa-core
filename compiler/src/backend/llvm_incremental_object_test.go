@@ -136,6 +136,9 @@ func TestIncrementalObjectBoundedRetentionAndFailedMerge(t *testing.T) {
 	if stats := session.Stats(); stats.RetainedBytes != 0 || stats.PartitionsReused != 0 {
 		t.Fatalf("budget bypassed: %+v", stats)
 	}
+	if got := incrementalObjectNativeStatus(t, out); got != 30 {
+		t.Fatalf("nonretaining object status %d, want 30", got)
+	}
 	previous, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)

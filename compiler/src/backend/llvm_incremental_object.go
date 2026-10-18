@@ -133,10 +133,17 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		inputData := C.LLVMGetBufferStart(bitcode)
 		inputSize := int(C.LLVMGetBufferSize(bitcode))
 		inputBytes := unsafe.Slice((*byte)(unsafe.Pointer(inputData)), inputSize)
-		object := s.lookupObjectBytes(inputBytes, configKey)
+		// An entry's budget includes its exact bitcode and target key. An
+		// oversized input cannot hit either, so avoid hashing it as well.
+		retainInput := inputSize <= s.maxBytes-len(configKey)
+		var object []byte
+		if retainInput {
+			object = s.lookupObjectBytes(inputBytes, configKey)
+		}
 		var retainedInput string
-		if object == nil {
-			// A miss needs an owned exact snapshot for the bounded cache. Cache hits
+		if object == nil && retainInput {
+			// An admissible miss needs an owned exact snapshot. Reject oversized
+			// keys before allocating a copy that cannot enter the cache. Cache hits
 			// hash and compare the LLVM buffer in place without copying it into Go.
 			retainedInput = C.GoStringN(inputData, C.int(inputSize))
 		}
@@ -168,7 +175,9 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 				stats.NativeTime += nativeDuration
 				stats.PartitionsEmitted++
 			})
-			s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
+			if retainInput {
+				s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
+			}
 		}
 		C.LLVMDisposeModule(module)
 		parts[part] = filepath.Join(dir, fmt.Sprintf("part%d.o", part))
