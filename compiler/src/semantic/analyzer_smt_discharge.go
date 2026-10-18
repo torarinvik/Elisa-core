@@ -4132,7 +4132,15 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			for k, v := range env {
 				qenv[k] = v
 			}
-			qenv[n.Vars[0]] = "(select " + arr + " " + idxSym + ")"
+			inputType := tr.arrayReadOperandType(n.In)
+			if inputType == nil {
+				return "", false
+			}
+			element := "(select " + arr + " " + idxSym + ")"
+			if smtBooleanArrayType(inputType) {
+				element = "(not (= " + element + " 0))"
+			}
+			qenv[n.Vars[0]] = element
 			body, ok := tr.boolTerm(n.Body, qenv)
 			if !ok {
 				return "", false

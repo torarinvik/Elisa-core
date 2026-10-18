@@ -183,3 +183,55 @@ func TestSMTBooleanArrayUntypedCalleeCannotBorrowCallerType(t *testing.T) {
 		t.Fatalf("unbound callee array borrowed caller identity: %s", term)
 	}
 }
+
+func TestSMTBooleanArrayElementQuantifier(t *testing.T) {
+	source := `def all_flags(flags: darray[bool]&) -> bool:
+    requires forall flag in flags: flag
+    ensure forall flag in flags: flag == true
+    return true
+`
+	r := analyzeContractStrict(t, "bool_element_quantifier.elisa", source)
+	if es := r.Errors(); len(es) != 0 {
+		t.Fatal(es)
+	}
+	for _, tc := range []struct {
+		name, source string
+		pass         bool
+	}{
+		{"exists", `def exists_flag(flags: darray[bool]&) -> bool:
+    requires exists flag in flags: flag
+    ensure exists flag in flags: flag == true
+    return true
+`, true},
+		{"false_forall", `def all_flags(flags: darray[bool]&) -> bool:
+    ensure forall flag in flags: flag
+    return true
+`, false},
+		{"false_exists", `def exists_flag(flags: darray[bool]&) -> bool:
+    requires flags.count == 0
+    ensure exists flag in flags: flag
+    return true
+`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := analyzeContractStrict(t, "bool_element_quantifier.elisa", tc.source)
+			if tc.pass && len(result.Errors()) != 0 {
+				t.Fatal(result.Errors())
+			}
+			if !tc.pass && !strings.Contains(strings.Join(result.Errors(), "\n"), "could not be proven") {
+				t.Fatalf("false quantified claim accepted or wrong error: %v", result.Errors())
+			}
+		})
+	}
+
+	scope := NewScope(nil)
+	scope.Define(&Symbol{Name: "flags", Kind: SymbolParam, Type: &DArrayType{Elem: &BuiltinType{Name: "bool"}}})
+	a := &Analyzer{currentScope: scope, exprTypes: map[ast.Expr]Type{}}
+	tr := a.newSMTTranslator(nil)
+	root := &ast.Ident{Name: "flags"}
+	q := &ast.QuantifierExpr{Vars: []string{"flag"}, In: root, Body: &ast.Ident{Name: "flag"}}
+	term, ok := tr.boolTerm(q, nil)
+	if !ok || !strings.Contains(term, "(not (= (select v_flags q_flag_idx) 0))") {
+		t.Fatalf("boolean element bound as Int: %q %v", term, ok)
+	}
+}
