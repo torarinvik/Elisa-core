@@ -66,8 +66,18 @@ eight reused native shards per baseline request, and no native builds on
 completed-object hits. Allocation and backend IR/native phase metrics accompany
 total request latency. This is not network round-trip or cold-start latency.
 
-No latency result has been measured for this implementation. Run paired,
-interleaved fixed-iteration arms only after the shared exact-source compiler
-gate is quiet, recording source and binary hashes. Cold-start/key setup cost and
+A two-iteration correctness smoke passed on Darwin/arm64 Apple M5 with
+`GOMAXPROCS=1 GOMEMLIMIT=256MiB`, after no compiler/solver processes were observed.
+Log: `/tmp/elisa-native-noop-bench-smoke.txt`. It reported 42.270 ms/request,
+9,648,784 B/request and 56,099 allocations for shards versus 8.270 ms/request,
+6,247,512 B/request and 32,795 allocations for completed objects. Both arms passed
+the analysis/output/native-counter invariants. These sequential two-iteration
+samples are exploratory, not qualified performance evidence.
+
+Ordinary subbenchmark calibration runs arms sequentially with independent N.
+For qualification, select each arm separately on one pinned test executable with
+an explicit fixed iteration count, alternate/reverse order across repeated pairs,
+and record source/binary hashes. Run only after the shared exact-source compiler
+gate is quiet. Cold-start/key setup cost and
 changed-body behavior need separate measurements before broad performance claims.
 The isolated branch is not yet promoted into shared main.
