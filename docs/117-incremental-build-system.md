@@ -2781,3 +2781,31 @@ Semantic incremental race regressions pass (18.096 s). The frozen-project
 retained-edit check preserves 72 bodies/2,837 nodes and the established complete
 2,279-diagnostic digest. Its concurrently loaded sample took 10.527 s and is
 retained for parity evidence only; no project timing improvement is inferred.
+
+
+### Resolve the default macOS merger once per native session
+
+When PATH selects Apple's `/usr/bin/ld` dispatcher and ELISA_LD is unset, native
+object sessions now resolve the selected linker once with `/usr/bin/xcrun --find
+ld` and invoke that executable directly for subsequent merges. The default
+toolchain is pinned for that session: start a new session to change developer
+toolchain selection. First use pays discovery cost. Explicit ELISA_LD commands
+and their arguments remain current per request; custom PATH linkers are not
+bypassed. Discovery failure keeps the ordinary `ld` fallback. Non-macOS behavior
+is unchanged. No artifact identity or semantic-reuse admission changes.
+
+Override/current-argument and custom-PATH controls accompany the change. Selected
+merger/incremental-object tests pass under the race detector (27.870 s), including
+existing object execution/parity and failed-merge preservation controls.
+
+An initial three-by-three direct-tool comparison reduced median merge time
+19.90 to 11.42 ms, but a reverse three-edit sample regressed 18.04 to 24.45 ms.
+Both are retained rather than selecting favorable samples. The longer same-binary
+comparison uses explicit `/usr/bin/ld` versus the resolved default: two ten-edit
+samples each show merge averages 18.71/18.56 versus 14.17/14.62 ms. Total
+lowering/native emission averages are 239.19/247.25 versus 227.81/231.24 ms.
+Each novel body edit emits one partition and reuses seven; parsing/analysis and
+first-use prewarm are outside timing. This supports removing repeated tool
+dispatch overhead, not a stable whole-project speedup claim.
+Exact source, race logs and all timing samples are retained under
+`build/verification/incremental-merger-resolution-20261018/`.

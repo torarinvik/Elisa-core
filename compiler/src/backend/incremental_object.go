@@ -11,15 +11,17 @@ import (
 // revisions. It owns bytes, never LLVM or semantic handles. This is an in-process
 // cache; it does not trust externally supplied native artifacts.
 type IncrementalObjectSession struct {
-	mu         sync.Mutex // protects the bounded partition map and LRU metadata
-	statsMu    sync.Mutex
-	partitions int
-	minWeight  int64
-	maxBytes   int
-	bytes      int
-	clock      uint64
-	entries    map[[32]byte]*incrementalObjectEntry
-	stats      IncrementalObjectStats
+	mu            sync.Mutex // protects the bounded partition map and LRU metadata
+	statsMu       sync.Mutex
+	mergerOnce    sync.Once
+	defaultMerger string
+	partitions    int
+	minWeight     int64
+	maxBytes      int
+	bytes         int
+	clock         uint64
+	entries       map[[32]byte]*incrementalObjectEntry
+	stats         IncrementalObjectStats
 }
 
 type incrementalObjectEntry struct {
@@ -41,6 +43,8 @@ type IncrementalObjectStats struct {
 // NewIncrementalObjectSession bounds the complete retained bitcode and objects.
 // Zero values select eight partitions and a 256 MiB budget. Modules below
 // 2,000 partitionable instructions use direct emission to avoid merge overhead.
+// On macOS, the default merger toolchain is resolved once per session; explicit
+// ELISA_LD overrides are read for each merge.
 func NewIncrementalObjectSession(partitions, maxBytes int) *IncrementalObjectSession {
 	if partitions <= 0 {
 		partitions = 8

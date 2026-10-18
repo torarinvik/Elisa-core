@@ -157,10 +157,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		}
 	}
 	mergeStart := time.Now()
-	linker := strings.Fields(strings.TrimSpace(os.Getenv("ELISA_LD")))
-	if len(linker) == 0 {
-		linker = []string{"ld"}
-	}
+	linker := s.objectMergerCommand()
 	merged := filepath.Join(dir, "merged.o")
 	args := append(append(append([]string{}, linker[1:]...), "-r", "-o", merged), parts...)
 	if out, err := exec.Command(linker[0], args...).CombinedOutput(); err != nil {
