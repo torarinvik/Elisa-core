@@ -42,4 +42,3 @@ ghost def bad(n: i64, state: i64) -> i64:
 		t.Fatalf("an immutable local must not hide a nondecreasing recursive argument, got: %v", r.Errors())
 	}
 }
-

@@ -466,6 +466,7 @@ func (a *Analyzer) analyzeCountMatchPattern(pattern *ast.MatchStructPattern, exp
 	}
 	return true
 }
+
 // RestViewTypeForSequence is the type a docs/122 §5.3 bound list rest (`[x, ...rest]`)
 // gives `rest`: a read-only view over the source sequence's elements, mirroring what
 // analyzeSliceExpr returns for `xs[i:]` (region threaded through from the source).

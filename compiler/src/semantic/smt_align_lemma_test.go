@@ -8,12 +8,15 @@ import (
 )
 
 // AlignUp is the nonlinear alignment shape from the shadPS4 port:
-//   result = ((value + alignment - 1) / alignment) * alignment
+//
+//	result = ((value + alignment - 1) / alignment) * alignment
+//
 // relating `/`, `%`, and `*` over the SAME divisor. When the operands are bounded so the intermediate
 // `value + alignment - 1` and the product `q*alignment` cannot overflow the type, BOTH postconditions
 // discharge:
 //   - `result >= value`           (rounding up never goes below the input)
 //   - `(result % alignment) == 0` (the result is a true multiple of the divisor)
+//
 // The ground Euclidean lemmas (q*r+rem==l, 0<=rem<r, (q*r)%r==0, l-r < q*r <= l) supply the closed
 // form of the nonlinear product q*r so the solver reasons linearly about the rounding bracket.
 func TestSMTAlignUpBoundedDischarges(t *testing.T) {

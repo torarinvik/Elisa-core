@@ -484,6 +484,35 @@ func TestIncrementalSessionIneligibleOwnerLosesProduct(t *testing.T) {
 	}
 }
 
+func TestIncrementalSessionAliasedImplOwnerFallsBackBeforePublication(t *testing.T) {
+	session := NewIncrementalAnalysisSession()
+	const source = "def work() -> i64:\n    return 20 + 1\n"
+	session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
+	previous := make(map[incremental.Key]bool, len(session.previous))
+	for key, present := range session.previous {
+		previous[key] = present
+	}
+	inputsBefore, queriesBefore := session.db.EntryCounts()
+	dbStatsBefore := session.db.Stats()
+	statsBefore := session.Stats()
+
+	file := parseIncrementalSessionFile(t, source)
+	fn := file.Decls[0].(*ast.FuncDecl)
+	file.Decls = append(file.Decls, &ast.ImplDecl{Members: []ast.ImplMember{fn}})
+	session.Analyze(file, AnalyzeOptions{})
+
+	if session.Stats().ColdFallbackAnalyses != statsBefore.ColdFallbackAnalyses+1 {
+		t.Fatal("aliased impl owner did not fall back to cold analysis")
+	}
+	if !reflect.DeepEqual(session.previous, previous) {
+		t.Fatal("aliased owner changed the retained inventory before cold fallback")
+	}
+	inputsAfter, queriesAfter := session.db.EntryCounts()
+	if inputsAfter != inputsBefore || queriesAfter != queriesBefore || session.db.Stats() != dbStatsBefore {
+		t.Fatalf("aliased owner published cache state before cold fallback: before=(%d,%d,%+v) after=(%d,%d,%+v)", inputsBefore, queriesBefore, dbStatsBefore, inputsAfter, queriesAfter, session.db.Stats())
+	}
+}
+
 func TestIncrementalSessionStrictProfilesAndColdFallback(t *testing.T) {
 	source := "def work() -> i64:\n    return (20 + 1) * 2\n"
 	options := AnalyzeOptions{EnforceUnsafePermissions: true, EnforceGlobalPermissions: true, EnforceProgressSafety: true, EnforceStrictConcurrency: true, EnforcePerfLints: true, FlowLintMode: FlowLintStrict, EnforceStrictProofs: true, RequireExternContracts: true, RecordDeathTimeCohorts: true}

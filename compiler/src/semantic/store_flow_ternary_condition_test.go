@@ -38,7 +38,7 @@ def main() -> i32:
 
 func TestStoreFlowTernaryBranchesStillFlow(t *testing.T) {
 	cases := map[string]string{
-		"branch":    `struct Out:
+		"branch": `struct Out:
     refs: mutable darray[i64&] = []
 
 def put(out: mutable Out&, a: i64&, b: i64&, flag: bool) -> void:

@@ -51,4 +51,3 @@ func underlyingConstEnum(t Type) (*ConstEnumType, bool) {
 	ce, ok := t.(*ConstEnumType)
 	return ce, ok
 }
-

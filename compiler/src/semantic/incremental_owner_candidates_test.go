@@ -3,6 +3,8 @@
 package semantic
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"strings"
@@ -14,11 +16,13 @@ import (
 	"elisacore/src/parser"
 )
 
-// This stresses traversal occurrence order only. Analyze retains its existing
-// pointer-keyed invocation maps; this does not add support for aliased source ASTs.
-func TestIncrementalOwnerCandidatesPreserveTraversalOccurrencesAndFallback(t *testing.T) {
+func TestIncrementalOwnerCandidatesPreserveOccurrencesAndFallback(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "work"}
 	decls := []ast.Decl{fn, &ast.NamespaceDecl{Name: "outer", Decls: []ast.Decl{fn}}, fn}
+	var pointerInventory primitiveOwnerPointerInventory
+	if !pointerInventory.add(fn) || pointerInventory.add(fn) {
+		t.Fatal("pointer-aliased owner occurrences must use cold analysis")
+	}
 	firstIdentity, _, _ := preparePrimitiveOwnerCandidate(fn, "work", "owner-test.elisa", nil)
 	previous := map[incremental.Key]bool{primitiveInput("function-source", primitiveOwnerCandidateName(firstIdentity)): true}
 	for _, limit := range []int{0, 1, 3, primitiveOwnerCandidateLimit} {
@@ -38,6 +42,69 @@ func TestIncrementalOwnerCandidatesPreserveTraversalOccurrencesAndFallback(t *te
 		if candidates[0].identity != candidates[2].identity || candidates[0].identity == candidates[1].identity || !candidates[0].retained || candidates[1].retained || !candidates[2].retained {
 			t.Fatal("namespace or duplicate occurrence identity lost", limit, candidates)
 		}
+	}
+}
+
+func TestPrimitiveOwnerPointerInventoryFindsAliasesInDeclarationContainers(t *testing.T) {
+	fn := &ast.FuncDecl{Name: "work"}
+	longNamespaceAlias := &ast.FuncDecl{Name: "hidden"}
+	sharedLocal := &ast.VarDeclStmt{Name: "local"}
+	tests := []struct {
+		name  string
+		decls []ast.Decl
+	}{
+		{
+			name: "static-if then",
+			decls: []ast.Decl{fn, &ast.StaticIfDecl{
+				Then: []ast.Decl{fn},
+			}},
+		},
+		{
+			name: "static-if elif",
+			decls: []ast.Decl{fn, &ast.StaticIfDecl{
+				Elifs: []ast.StaticElifDecl{{Body: []ast.Decl{fn}}},
+			}},
+		},
+		{
+			name: "static-if else",
+			decls: []ast.Decl{fn, &ast.StaticIfDecl{
+				Else: []ast.Decl{fn},
+			}},
+		},
+		{
+			name: "impl method",
+			decls: []ast.Decl{fn, &ast.ImplDecl{
+				Members: []ast.ImplMember{fn},
+			}},
+		},
+		{
+			name: "interface default method",
+			decls: []ast.Decl{fn, &ast.InterfaceDecl{
+				Members: []ast.InterfaceMember{fn},
+			}},
+		},
+		{
+			name: "overlong namespace owner",
+			decls: []ast.Decl{longNamespaceAlias, &ast.NamespaceDecl{
+				Name:  strings.Repeat("n", primitiveSourceByteBudget+1),
+				Decls: []ast.Decl{longNamespaceAlias},
+			}},
+		},
+		{
+			name: "shared local initializer",
+			decls: []ast.Decl{
+				&ast.FuncDecl{Name: "first", Body: []ast.Stmt{sharedLocal}},
+				&ast.FuncDecl{Name: "second", Body: []ast.Stmt{sharedLocal}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var inventory primitiveOwnerPointerInventory
+			if inventory.scanDeclarations(tt.decls, 0) {
+				t.Fatal("pointer alias across declaration contexts was accepted")
+			}
+		})
 	}
 }
 
@@ -63,6 +130,102 @@ func TestIncrementalOwnerCandidatesFallBackBeforeAggregateWorkBudget(t *testing.
 		if count != len(decls) {
 			t.Fatalf("pass %d visited %d owners, want %d", pass, count, len(decls))
 		}
+	}
+}
+
+func TestIncrementalOwnerCandidatesLocalClassificationBudgetPreservesRetainedOwners(t *testing.T) {
+	const localNameBytes = 900 * 1024
+	localName := strings.Repeat("l", localNameBytes)
+	decls := make([]ast.Decl, 10)
+	previous := make(map[incremental.Key]bool, len(decls)*2)
+	localDigest := sha256.Sum256([]byte(localName))
+	for i := range decls {
+		fn := &ast.FuncDecl{
+			Name: fmt.Sprintf("work%d", i),
+			Body: []ast.Stmt{
+				&ast.VarDeclStmt{Name: localName},
+				&ast.ReturnStmt{},
+			},
+		}
+		decls[i] = fn
+		identity, _, _ := preparePrimitiveOwnerCandidate(fn, fn.Name, "owner-test.elisa", nil)
+		name := primitiveOwnerCandidateName(identity)
+		previous[primitiveInput("function-source", name)] = true
+		localName := name + "/local-name-v2/" + hex.EncodeToString(localDigest[:])
+		previous[primitiveInput("function-source", localName)] = true
+	}
+	sequence := primitiveOwnerCandidates(decls, "owner-test.elisa", previous, primitiveOwnerCandidateLimit, false)
+	for pass := 0; pass < 2; pass++ {
+		var candidates []primitiveOwnerCandidate
+		for candidate := range sequence {
+			candidates = append(candidates, candidate)
+		}
+		if len(candidates) != len(decls) {
+			t.Fatalf("pass %d visited %d owners, want %d", pass, len(candidates), len(decls))
+		}
+		for i, candidate := range candidates {
+			fn := decls[i].(*ast.FuncDecl)
+			identity, name, retained := preparePrimitiveOwnerCandidate(fn, fn.Name, "owner-test.elisa", previous)
+			if candidate.function != fn || candidate.identity != identity || candidate.retained != retained || !candidate.retained || name != primitiveOwnerCandidateName(candidate.identity) {
+				t.Fatalf("pass %d candidate %d lost retained identity/order: %+v", pass, i, candidate)
+			}
+		}
+	}
+}
+
+var benchmarkOwnerPointerInventorySink bool
+
+func BenchmarkPrimitiveOwnerPointerInventory(b *testing.B) {
+	cases := []struct {
+		name                                      string
+		functions, bodyStatements, namespaceGroup int
+		admitted                                  bool
+	}{
+		{name: "small", functions: 512, bodyStatements: 1, namespaceGroup: 64, admitted: true},
+		{name: "large-near-cap", functions: 20000, bodyStatements: 2, namespaceGroup: 64, admitted: true},
+		{name: "over-cap-cold-fallback", functions: 21800, bodyStatements: 2, namespaceGroup: 64, admitted: false},
+	}
+	for _, test := range cases {
+		decls := make([]ast.Decl, 0, test.functions/test.namespaceGroup+1)
+		group := make([]ast.Decl, 0, test.namespaceGroup)
+		for i := 0; i < test.functions; i++ {
+			body := make([]ast.Stmt, test.bodyStatements)
+			for j := range body {
+				body[j] = &ast.VarDeclStmt{Name: fmt.Sprintf("local%d_%d", i, j)}
+			}
+			group = append(group, &ast.FuncDecl{Name: fmt.Sprintf("work%d", i), Body: body})
+			if len(group) == test.namespaceGroup {
+				decls = append(decls, &ast.NamespaceDecl{Name: fmt.Sprintf("module%d", i/test.namespaceGroup), Decls: group})
+				group = make([]ast.Decl, 0, test.namespaceGroup)
+			}
+		}
+		if len(group) > 0 {
+			decls = append(decls, &ast.NamespaceDecl{Name: "tail", Decls: group})
+		}
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				var inventory primitiveOwnerPointerInventory
+				ok := inventory.scanDeclarations(decls, 0)
+				if ok != test.admitted {
+					b.Fatalf("scan accepted=%t, want %t", ok, test.admitted)
+				}
+				benchmarkOwnerPointerInventorySink = ok
+			}
+		})
+	}
+}
+
+func TestPrimitiveOwnerPointerInventoryNodeLimit(t *testing.T) {
+	fn := &ast.FuncDecl{Name: "work", Body: []ast.Stmt{&ast.VarDeclStmt{Name: "local"}}}
+	inventory := primitiveOwnerPointerInventory{visited: primitiveOwnerPointerCheckNodeLimit - 2}
+	if !inventory.scanDeclarations([]ast.Decl{fn}, 0) || inventory.visited != primitiveOwnerPointerCheckNodeLimit {
+		t.Fatal("scan reaching the exact node limit should succeed")
+	}
+	inventory = primitiveOwnerPointerInventory{visited: primitiveOwnerPointerCheckNodeLimit - 1}
+	if inventory.scanDeclarations([]ast.Decl{fn}, 0) {
+		t.Fatal("scan exceeding the node limit should fail closed")
 	}
 }
 

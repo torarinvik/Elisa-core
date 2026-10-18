@@ -14,6 +14,7 @@ import (
 //     now treats view parameters as borrows of the viewed storage; strict, like `&buf[0]`);
 //   - F12: a closure moving a captured affine value is one-shot (analyzer_one_shot_closure.go);
 //   - F16: `move xs` (a callee or a drain) leaves earlier views/refs into xs stale (strict).
+//
 // F1 (a returned view of a local darray / struct field) is NOT a stage0 hole: see
 // view_return_adopted.pos.elisa.
 // EXPECT rows: file, mode (default | strict), wanted diagnostic substring.

@@ -296,6 +296,7 @@ func (a *Analyzer) lawEffectiveShapes(name string, visited map[string]bool) []st
 // are final). It handles effect, shape, and composite laws uniformly via their effective obligation:
 //   - effect forbid-set (own + transitively included) ∩ the function's effect set must be empty;
 //   - each required built-in shape (own + transitively included) must hold.
+//
 // Frame/value `fulfills` are handled in expandFulfills; an unknown law was already diagnosed there.
 // SOUNDNESS: PermissionRefs is the transitive effect set the whole effect system trusts, and the
 // shape audit counts every access that would emit a check — both over-report at worst (safe FP).

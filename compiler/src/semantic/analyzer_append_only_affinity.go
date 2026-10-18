@@ -1,6 +1,6 @@
 package semantic
 
-import 	"elisacore/src/ast"
+import "elisacore/src/ast"
 
 // induceAppendOnlyAffinity: a struct that holds an @append_only store by value anywhere inside it
 // is affine. Two header copies of a store would append into the same spare capacity, so one copy

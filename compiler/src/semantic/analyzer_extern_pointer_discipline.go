@@ -9,14 +9,16 @@ import (
 // Extern POINTER discipline (docs/127 §3.7, D1 and D12), enforced only under -strict-externs.
 //
 // D1: an extern parameter or return typed `void&` / `void&?` (any mutability) is an UNTYPED
-//     pointer: any handle passes for any other, and no contract can name what it points at. The
-//     extern must instead use an opaque handle (`extern Name`) or be `@trusted("reason")`.
+//
+//	pointer: any handle passes for any other, and no contract can name what it points at. The
+//	extern must instead use an opaque handle (`extern Name`) or be `@trusted("reason")`.
 //
 // D12: an extern that carries a contract must name EVERY pointer parameter in it; a pointer the
-//     contract never mentions has nothing documented about the memory it hands over. Presence is
-//     not coverage: `extern memcpy(dst: mutable u8&, src: u8&, n: usize) requires n > 0` must not
-//     pass the gate, and it is reported once per uncovered parameter, at the parameter. A pointer parameter is any ref, optional ref, or `cstr`; opaque handles and bounded
-//     views are typed on their own and do not count as uncovered.
+//
+//	contract never mentions has nothing documented about the memory it hands over. Presence is
+//	not coverage: `extern memcpy(dst: mutable u8&, src: u8&, n: usize) requires n > 0` must not
+//	pass the gate, and it is reported once per uncovered parameter, at the parameter. A pointer parameter is any ref, optional ref, or `cstr`; opaque handles and bounded
+//	views are typed on their own and do not count as uncovered.
 func (a *Analyzer) checkExternPointerDiscipline(fn *ast.ExternFuncDecl, fnType *FuncType) {
 	if a == nil || fn == nil || fnType == nil || !a.requireExternContracts || externHasTrustedAnnotation(fn) {
 		return
@@ -97,7 +99,6 @@ func isExternPointerParamType(t Type) bool {
 	}
 	return false
 }
-
 
 // unboundedScalarRefParam reports a `T&` / `mutable T&` (optionally nullable) whose referent is a
 // scalar builtin: the shape C uses for a buffer whose length travels separately.

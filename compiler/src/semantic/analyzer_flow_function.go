@@ -278,6 +278,7 @@ func stmtIsMatch(stmt ast.Stmt) bool {
 // Two spellings qualify, both genuine new bindings:
 //   - `x = <compute>`            → *ast.VarDeclStmt
 //   - `rebind a, b = <destr>`    → *ast.TupleBindStmt with Declare (a declaring destructure)
+//
 // A reassignment (`x <- y`, a non-declaring TupleBindStmt/AssignStmt) does NOT qualify: it is
 // postfix-guardable (`x <- y if COND`), so a block of only reassignments stays flagged.
 func bodyBindsLocal(stmts []ast.Stmt) bool {

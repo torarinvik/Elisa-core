@@ -634,9 +634,9 @@ const (
 )
 
 type FuncType struct {
-	Name                   string
-	TypeParams             []string
-	RegionParams           []string
+	Name         string
+	TypeParams   []string
+	RegionParams []string
 	// InferredRegionParams are call-inferred region binders (for example grown-container
 	// plumbing). They are part of the callable signature, but callers do not spell them in
 	// explicit generic specialization arguments.

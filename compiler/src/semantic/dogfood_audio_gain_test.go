@@ -8,7 +8,9 @@ import "testing"
 // exercises the SMT tier's headline case (a var*var PRODUCT the affine prover cannot bound) and shows
 // the engine ELIDE the return-refinement runtime check that a real mixer would otherwise pay per
 // sample. With the inputs carrying refinement bounds, `(s * g) / 256` is provably in [0, 255]:
-//   s ∈ [0,255], g ∈ [0,256] ⟹ s*g ∈ [0,65280] ⟹ (s*g)/256 ∈ [0,255].
+//
+//	s ∈ [0,255], g ∈ [0,256] ⟹ s*g ∈ [0,65280] ⟹ (s*g)/256 ∈ [0,255].
+//
 // This is the "measure checks elided" half of the adoption story: the contract turns a per-sample
 // debug check into a static proof.
 func TestDogfoodAudioGainProvenNoRuntimeCheck(t *testing.T) {

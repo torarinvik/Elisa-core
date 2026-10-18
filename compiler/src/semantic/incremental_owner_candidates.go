@@ -11,6 +11,7 @@ import (
 )
 
 const primitiveOwnerCandidateLimit = 16384
+const primitiveOwnerPointerCheckNodeLimit = 65536
 
 // Bound namespace and owner-key construction plus retained-local name hashing
 // during buffered discovery. Over-budget discovery reuses its prefix and
@@ -36,9 +37,124 @@ type primitiveOwnerCandidateRecord struct {
 	retained bool
 }
 
+// The production admission maps use AST pointers as keys. Keep the inventory
+// invocation-local, bound its work, and fail closed on repeated syntax nodes.
+type primitiveOwnerPointerInventory struct {
+	functions map[*ast.FuncDecl]struct{}
+	locals    map[*ast.VarDeclStmt]struct{}
+	visited   int
+}
+
+func (inventory *primitiveOwnerPointerInventory) add(fn *ast.FuncDecl) bool {
+	if inventory == nil || fn == nil || !inventory.visitNode() {
+		return false
+	}
+	if inventory.functions == nil {
+		inventory.functions = make(map[*ast.FuncDecl]struct{})
+	}
+	if _, exists := inventory.functions[fn]; exists {
+		return false
+	}
+	inventory.functions[fn] = struct{}{}
+	for _, stmt := range fn.Body {
+		if !inventory.visitNode() {
+			return false
+		}
+		local, ok := stmt.(*ast.VarDeclStmt)
+		if !ok || local == nil {
+			continue
+		}
+		if inventory.locals == nil {
+			inventory.locals = make(map[*ast.VarDeclStmt]struct{})
+		}
+		if _, exists := inventory.locals[local]; exists {
+			return false
+		}
+		inventory.locals[local] = struct{}{}
+	}
+	return true
+}
+
+func (inventory *primitiveOwnerPointerInventory) visitNode() bool {
+	if inventory == nil || inventory.visited >= primitiveOwnerPointerCheckNodeLimit {
+		return false
+	}
+	inventory.visited++
+	return true
+}
+
+// scanDeclarations covers every declaration container from which semantic
+// analysis can reach a FuncDecl, including containers that owner admission
+// does not currently cache. A repeated pointer across those roles is unsafe
+// even when one occurrence would not become a candidate.
+func (inventory *primitiveOwnerPointerInventory) scanDeclarations(decls []ast.Decl, depth int) bool {
+	if depth > 128 {
+		return false
+	}
+	for _, decl := range decls {
+		switch node := decl.(type) {
+		case *ast.NamespaceDecl:
+			if node == nil || !inventory.visitNode() || !inventory.scanDeclarations(node.Decls, depth+1) {
+				return false
+			}
+		case *ast.StaticIfDecl:
+			if node == nil || !inventory.visitNode() || !inventory.scanDeclarations(node.Then, depth+1) {
+				return false
+			}
+			for _, clause := range node.Elifs {
+				if !inventory.visitNode() || !inventory.scanDeclarations(clause.Body, depth+1) {
+					return false
+				}
+			}
+			if !inventory.scanDeclarations(node.Else, depth+1) {
+				return false
+			}
+		case *ast.ImplDecl:
+			if node == nil || !inventory.visitNode() {
+				return false
+			}
+			for _, member := range node.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					if !inventory.add(fn) {
+						return false
+					}
+				} else if !inventory.visitNode() {
+					return false
+				}
+			}
+		case *ast.InterfaceDecl:
+			if node == nil || !inventory.visitNode() {
+				return false
+			}
+			for _, member := range node.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					if !inventory.add(fn) {
+						return false
+					}
+				} else if !inventory.visitNode() {
+					return false
+				}
+			}
+		case *ast.FuncDecl:
+			if node == nil {
+				if !inventory.visitNode() {
+					return false
+				}
+			} else if !inventory.add(node) {
+				return false
+			}
+		default:
+			if !inventory.visitNode() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // walkPrimitiveOwnerDeclarations preserves declaration occurrence order,
-// including aliased AST pointers in distinct namespaces. Its guards match owner
-// admission.
+// including aliased AST pointers in distinct namespaces. Analyze's admission
+// layer must validate pointer uniqueness before using candidates.
 func walkPrimitiveOwnerDeclarations(decls []ast.Decl, namespace string, depth int, originBytes int, preparedBytes *int, skipCandidates *int, yield func(*ast.FuncDecl, string) bool) bool {
 	if depth > 128 {
 		return true

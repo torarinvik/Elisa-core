@@ -85,7 +85,6 @@ func TestPointerDisciplineOffByDefault(t *testing.T) {
 	}
 }
 
-
 // D5: a scalar reference beside an integer parameter is a pointer with no bounds.
 func TestStrictExternsRejectsUnboundedScalarRef(t *testing.T) {
 	src := `extern read(fd: i32, buf: mutable u8&, count: usize) -> isize requires buf != null`

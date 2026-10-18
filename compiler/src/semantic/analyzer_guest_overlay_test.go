@@ -450,7 +450,6 @@ func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
 	return AnalyzeWithOptions(file, AnalyzeOptions{OverlayLayouts: []*easm.Layout{orbisProcParamLayout()}})
 }
 
-
 // elf64SymTableLayout is the docs/108 example: a 24-byte-stride table of Elf64_Sym entries. `value`
 // is the u64 at offset 8 of each entry; the indexed accessor reads entry i at base + i*24 + 8.
 func elf64SymTableLayout() *easm.Layout {

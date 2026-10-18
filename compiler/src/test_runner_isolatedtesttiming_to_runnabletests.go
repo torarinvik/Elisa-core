@@ -1252,6 +1252,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 	}
 	// Analysis, selection, generated source and publication share one snapshot.
 	// Harness construction owns a copy so append operations cannot mutate it.
+	writeTestPhaseLine(stderr, "selected_tests", "read_source")
 	source := append([]byte(nil), program.source...)
 	writeTestPhaseLine(stderr, "selected_tests", "select_cases")
 	source = appendLawFuzzHarnessSource(source, result)

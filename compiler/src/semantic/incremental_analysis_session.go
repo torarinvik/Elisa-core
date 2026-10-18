@@ -260,6 +260,13 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if absolute, err := filepath.Abs(origin); err == nil {
 		origin = absolute
 	}
+	// The semantic walker can visit declarations that owner admission skips
+	// (for example, a too-long qualified name). Scan the raw declaration tree
+	// so pointer aliases across eligible and skipped occurrences also fail closed.
+	ownerPointers := primitiveOwnerPointerInventory{}
+	if !ownerPointers.scanDeclarations(file.Decls, 0) {
+		return coldFallback()
+	}
 	skipped := 0
 	var pendingLocals []*primitiveLocalInitializer
 	trimPending := func() {
