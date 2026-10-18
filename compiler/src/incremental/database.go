@@ -211,18 +211,43 @@ type Reader struct {
 	maxDependencies     int
 }
 
-func (r *Reader) remember(dependency dependency) bool {
+// Most compiler queries read only a few dependencies. Keep their ordered slice
+// as the deduplication set, allocating a hash index only for larger closures.
+const smallDependencySet = 8
+
+func (r *Reader) hasDependency(dep dependency) bool {
+	if r.seen != nil {
+		return r.seen[dep]
+	}
+	for _, previous := range r.dependencies {
+		if previous == dep {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Reader) remember(dep dependency) bool {
 	if r.failure != nil {
 		return false
 	}
-	if !r.seen[dependency] {
-		if r.boundedDependencies && len(r.dependencies) >= r.maxDependencies {
-			r.failure = ErrDependencyBudget
-			return false
-		}
-		r.seen[dependency] = true
-		r.dependencies = append(r.dependencies, dependency)
+	if r.hasDependency(dep) {
+		return true
 	}
+	if r.boundedDependencies && len(r.dependencies) >= r.maxDependencies {
+		r.failure = ErrDependencyBudget
+		return false
+	}
+	if r.seen == nil && len(r.dependencies) >= smallDependencySet {
+		r.seen = make(map[dependency]bool, 2*smallDependencySet)
+		for _, previous := range r.dependencies {
+			r.seen[previous] = true
+		}
+	}
+	if r.seen != nil {
+		r.seen[dep] = true
+	}
+	r.dependencies = append(r.dependencies, dep)
 	return true
 }
 func (r *Reader) Input(key Key) (string, bool) {
@@ -256,7 +281,7 @@ func (r *Reader) Query(key Key) (string, error) {
 		}
 		key = canonical
 	}
-	if r.boundedDependencies && !r.seen[dependency{key: key, query: true}] && len(r.dependencies) >= r.maxDependencies {
+	if r.boundedDependencies && !r.hasDependency(dependency{key: key, query: true}) && len(r.dependencies) >= r.maxDependencies {
 		r.failure = ErrDependencyBudget
 		return "", r.failure
 	}
@@ -330,7 +355,7 @@ func (db *Database) evaluate(ctx context.Context, key Key, active map[Key]bool) 
 	if !ok || evaluator == nil {
 		return "", fmt.Errorf("unknown incremental query kind %q", key.Kind)
 	}
-	reader := &Reader{db: db, context: ctx, active: active, seen: map[dependency]bool{}}
+	reader := &Reader{db: db, context: ctx, active: active}
 	db.stats.Executed++
 	value, err := evaluator(reader, key.Name)
 	if reader.failure != nil {
