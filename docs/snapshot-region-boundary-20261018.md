@@ -108,3 +108,23 @@ copy as a rehome. Fixture: `testdata/snapshot_region_canonicalizer.elisa`; test:
 `TestSnapshotFactoryByValueCanonicalizer`. Combined region/factory/snapshot suite
 passes (1.011 seconds); verbose evidence is saved in the ignored verification
 directory. No full compiler build or rebuild-time claim is attached.
+
+## Integration with committed Core 25f2d4e9
+
+Merge cbc15c3a incorporates current committed Core without conflicts or edits to
+the shared checkout. A broader test selection spans root runtime/build-cache,
+parser, and semantic region/factory/snapshot tests. It records 468 passed test
+cases, 12 failed runtime cases, and four skipped server-response subcases. All
+12 failures report missing Global grants on print; one representative
+`TestS4Stage2ByValueSameRegionCohortRuns` was rerun at unmodified 25f2d4e9 and
+reproduced that failure. This establishes baseline behavior for that representative
+only, not all twelve tests. Parser and semantic package selections pass.
+
+The four server-response subcases declined because inherited
+`ELISACORE_PGO_HOT_FUNCTIONS` disables whole-object memoization. Clearing only
+that variable and rerunning `TestCompileServerResponseTracksBareFilenameExistence`
+passes all four subcases (five cases including parent), with no skips (0.594 s).
+JSON evidence for the combined run, baseline comparison, and clean-environment
+rerun is saved under `build/verification/factory-contract-safety-20261018/`.
+The broader integration selection is not a wholly green gate; full Stage1
+qualification remains outstanding.
