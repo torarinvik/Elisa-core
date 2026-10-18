@@ -11,11 +11,13 @@ import (
 )
 
 func TestCompileServerResponseTracksBareFilenameExistence(t *testing.T) {
-	t.Run("request_filename", func(t *testing.T) { testCompileServerResponsePathExistence(t, false) })
-	t.Run("line_directive", func(t *testing.T) { testCompileServerResponsePathExistence(t, true) })
+	t.Run("request_filename", func(t *testing.T) { testCompileServerResponsePathExistence(t, false, false) })
+	t.Run("line_directive", func(t *testing.T) { testCompileServerResponsePathExistence(t, true, false) })
+	t.Run("request_hard_error", func(t *testing.T) { testCompileServerResponsePathExistence(t, false, true) })
+	t.Run("directive_hard_error", func(t *testing.T) { testCompileServerResponsePathExistence(t, true, true) })
 }
 
-func testCompileServerResponsePathExistence(t *testing.T, directive bool) {
+func testCompileServerResponsePathExistence(t *testing.T, directive, reject bool) {
 	f, err := os.CreateTemp(".", "response-path-state-*.elisa")
 	if err != nil {
 		t.Fatal(err)
@@ -29,6 +31,9 @@ func testCompileServerResponsePathExistence(t *testing.T, directive bool) {
 		t.Fatal(err)
 	}
 	source := "def build(owner: Arena) -> void:\n    pass\n\ndef main() -> i64:\n    return 0\n"
+	if reject {
+		source = strings.ReplaceAll(source, "Arena", "StringView")
+	}
 	req := compileServerRequest{Mode: "obj", Filename: name, Source: source, Incremental: true}
 	if directive {
 		req.Filename = filepath.Join(t.TempDir(), "inline.elisa")
@@ -63,7 +68,18 @@ func testCompileServerResponsePathExistence(t *testing.T, directive bool) {
 	if status != freshStatus || retained != fresh {
 		t.Fatalf("file creation changed diagnostics without invalidating response: retained stderr=%q fresh stderr=%q", retained.Stderr, fresh.Stderr)
 	}
-	assertReplay(retained)
+	if reject {
+		if status != http.StatusBadRequest || retained.OK || retained.Object != "" {
+			t.Fatalf("path creation did not reject carrier: status=%d stderr=%q", status, retained.Stderr)
+		}
+		hits := cache.native.Stats().ResponseHits
+		repeated, repeatedStatus := executeCompileServerRequestWithSessions(req, cache)
+		if repeatedStatus != status || repeated != retained || cache.native.Stats().ResponseHits != hits {
+			t.Fatal("failed path state was cached or changed diagnostics")
+		}
+	} else {
+		assertReplay(retained)
+	}
 	if err := os.Remove(name); err != nil {
 		t.Fatal(err)
 	}
