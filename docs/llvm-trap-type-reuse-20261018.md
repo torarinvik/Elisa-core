@@ -60,4 +60,7 @@ Raw six-arm logs, comparison script and binary hashes are in
 Candidate source is `1706a8c0`; baseline binary was built at `e474122f`, with
 no production backend changes between that baseline and candidate parent
 `c70db789`. The candidate contains the single production trap-lowering change
-plus focused tests/documentation. Shared integration is still pending.
+plus focused tests/documentation. Shared Core integrated this gain by fast-forward to `74a9e3bf`. SHA256 checks
+verified all seven unrelated dirty/untracked files were preserved byte-for-byte.
+The repository hook retained the installed compiler. Raw comparison and test
+logs plus `integration.json` were copied into the shared verification directory.
