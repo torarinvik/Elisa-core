@@ -148,6 +148,19 @@ func TestCompileServerNativeArtifactOwnerAndPayloadDeclines(t *testing.T) {
 	if !ok {
 		t.Fatal("base identity")
 	}
+	const secret = "native-cache-credential-must-not-be-retained-20261018"
+	t.Setenv("NATIVE_CACHE_TEST_CREDENTIAL", secret)
+	withCredential, ok := serverNativeObjectIdentity(request, program, cache)
+	if !ok || withCredential.config == first.config || strings.Contains(withCredential.config, secret) {
+		t.Fatal("environment identity missing or retains credential text")
+	}
+	t.Setenv("NATIVE_CACHE_TEST_CREDENTIAL", secret+"-changed")
+	changedCredential, ok := serverNativeObjectIdentity(request, program, cache)
+	if !ok || changedCredential.config == withCredential.config {
+		t.Fatal("environment change did not invalidate identity")
+	}
+	// Compare filename changes under the same current environment.
+	first = changedCredential
 	otherRequest := request
 	otherRequest.Filename = "different.elisa"
 	otherProgram, err := loadedProgramFromRequest(otherRequest)

@@ -128,3 +128,20 @@ one emitted shard and seven reused shards per edit, changed nonempty object
 bytes, and no completed-object hits. The generated source formatting cost is
 included equally in both arms. This benchmark has been prepared but not run;
 there is no changed-body latency or overhead claim yet.
+
+## Environment retention hardening (prepared, v2)
+
+The isolated v2 follow-up fingerprints the sorted, complete JSON environment with
+SHA-256 before embedding it in retained configuration. It drops no environment
+input, but avoids retaining plaintext credential copies for the LRU lifetime.
+Environment collision resistance now uses SHA-256, like the existing compiler
+and tool content identities; exact comparison remains for source/configuration
+and outer hash buckets. A regression checks credential text is absent and a
+credential change changes identity. This follow-up is not yet tested or promoted;
+the measured and integrated implementation above remains v1.
+
+Shared-tree focused tests completed successfully (3.369s, no skips), log
+`/tmp/elisa-native-cache-shared.txt`. This ran with concurrent owners' dirty
+parser/StoreFlow sources, and is supplemental integration evidence, not a new
+exact-source performance qualification. The isolated v2/body-edit validation
+remains pending while other compiler/Z3 processes are active.

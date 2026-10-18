@@ -190,14 +190,22 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 		}
 	}
 	sort.Strings(environment)
+	// The complete environment affects admission/identity, but credentials do
+	// not need to remain copied in every retained configuration string.
+	environmentBytes, err := json.Marshal(environment)
+	if err != nil {
+		return serverNativeIdentity{}, false
+	}
+	environmentStamp := sha256.Sum256(environmentBytes)
 	fields := req
 	fields.Source = ""
 	fields.IR = ""
 	config, err := json.Marshal(struct {
 		Schema, Build, Cwd, Unit, MergerStamp, MergerExecutable string
-		Environment, Merger                                     []string
+		Environment                                             [32]byte
+		Merger                                                  []string
 		Request                                                 compileServerRequest
-	}{"server-native-noop-v1", artifact.key, cwd, absolute, mergerStamp, executable, environment, command, fields})
+	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, command, fields})
 	if err != nil {
 		return serverNativeIdentity{}, false
 	}
