@@ -30,7 +30,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
 		backend.OptimizationLevel0,
 		backend.DefaultPackedLoweringProfile(),
 		"x86_64-apple-darwin",
-	)
+		false)
 	if err != nil {
 		t.Fatalf("first artifact key: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
 		backend.OptimizationLevel0,
 		backend.DefaultPackedLoweringProfile(),
 		"x86_64-apple-darwin",
-	)
+		false)
 	if err != nil {
 		t.Fatalf("second artifact key: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludesFromIncludeDirs(t 
 		backend.OptimizationLevel0,
 		backend.DefaultPackedLoweringProfile(),
 		"x86_64-apple-darwin",
-	)
+		false)
 	if err != nil {
 		t.Fatalf("first artifact key: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludesFromIncludeDirs(t 
 		backend.OptimizationLevel0,
 		backend.DefaultPackedLoweringProfile(),
 		"x86_64-apple-darwin",
-	)
+		false)
 	if err != nil {
 		t.Fatalf("second artifact key: %v", err)
 	}

@@ -45,8 +45,9 @@ func earlyTestCacheEnabled() bool {
 // earlyTestCacheKey hashes everything that determines the built test executable for a
 // given entry: the same build inputs the inner cache uses, but with the *source* and
 // *filter* (which determine the generated runner) plus the debug/trace flags.
-func earlyTestCacheKey(source []byte, filter string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, error) {
+func earlyTestCacheKey(source []byte, filter string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, enableSMT bool) (string, error) {
 	hash := sha256.New()
+	testRunnerCacheWriteString(hash, fmt.Sprintf("runner-smt=%t", enableSMT))
 	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple); err != nil {
 		return "", err
 	}
@@ -124,11 +125,11 @@ func publishEarlyTestCache(key string, executable string, cases []cachedTestCase
 // Early lookup and publication must identify the same original loaded snapshot,
 // before law/property harnesses are appended. Include semantic source authority,
 // since identical text analyzed with different trusted origins is not equivalent.
-func earlyTestCacheKeyForProgram(program *loadedProgram, filter string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, error) {
+func earlyTestCacheKeyForProgram(program *loadedProgram, filter string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, enableSMT bool) (string, error) {
 	if program == nil || program.file != nil {
 		return "", fmt.Errorf("early test cache requires a loaded source snapshot")
 	}
-	base, err := earlyTestCacheKey(program.source, filter, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo)
+	base, err := earlyTestCacheKey(program.source, filter, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, enableSMT)
 	if err != nil {
 		return "", err
 	}

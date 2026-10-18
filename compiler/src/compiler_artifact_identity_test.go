@@ -194,7 +194,7 @@ func TestTestRunnerUnavailableCompilerIdentityCompilesCold(t *testing.T) {
 	nativeCompilerArtifactErr = errors.New("forced unavailable compiler identity")
 	t.Cleanup(func() { nativeCompilerArtifactErr = previous })
 	var diagnostics bytes.Buffer
-	executable, cleanup, timing, _, _, err := compileTestRunnerExecutableWithShim(clang, "def main() -> int:\n\treturn 0\n", "", nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false, &diagnostics)
+	executable, cleanup, timing, _, _, err := compileTestRunnerExecutableWithShim(clang, "def main() -> int:\n\treturn 0\n", "", nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false, &diagnostics, false)
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("identity failure prevented cold compilation: %v\n%s", err, diagnostics.String())

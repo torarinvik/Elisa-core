@@ -14,7 +14,7 @@ import (
 
 func snapshotTestKey(t *testing.T, program *loadedProgram) string {
 	t.Helper()
-	key, err := earlyTestCacheKeyForProgram(program, "", nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false)
+	key, err := earlyTestCacheKeyForProgram(program, "", nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func testSelectedTestsSnapshotAfterDeletion(t *testing.T, source string) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	rc := executeSelectedTests(program, result, "", nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false, &output, &diagnostics)
+	rc := executeSelectedTests(program, result, "", nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false, false, &output, &diagnostics, false)
 	if rc != 0 {
 		t.Fatalf("snapshot compilation failed: rc%d\n%s\n%s", rc, output.String(), diagnostics.String())
 	}

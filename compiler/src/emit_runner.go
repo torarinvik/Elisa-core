@@ -25,7 +25,7 @@ func tryEarlyCachedTestRun(program *loadedProgram, options cliOptions, stdout io
 		return 0, false
 	}
 	keyStart := time.Now()
-	key, err := earlyTestCacheKeyForProgram(program, options.filter, program.easm, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace)
+	key, err := earlyTestCacheKeyForProgram(program, options.filter, program.easm, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, options.enableSMT)
 	frontendTimingLog("early-key", keyStart)
 	if err != nil {
 		return 0, false
@@ -328,7 +328,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		writeTestPhaseLine(stderr, "emit_test", "selected_test_execution")
-		return executeSelectedTests(program, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stdout, stderr)
+		return executeSelectedTests(program, result, options.filter, options.foreignFiles, options.linkFlags, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace, stdout, stderr, options.enableSMT)
 	case emitInterpret:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)

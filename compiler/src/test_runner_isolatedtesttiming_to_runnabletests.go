@@ -1244,7 +1244,7 @@ func runTestExecutableCases(exePath string, cases []cachedTestCase, targetTriple
 	return passed, skipped, failed, runTotal
 }
 
-func executeSelectedTests(program *loadedProgram, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer) int {
+func executeSelectedTests(program *loadedProgram, result *semantic.Result, filter string, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stdout io.Writer, stderr io.Writer, enableSMT bool) int {
 	suiteStart := time.Now()
 	if program == nil {
 		fmt.Fprintln(stderr, "error: missing loaded test program")
@@ -1304,7 +1304,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 		var nativeTiming nativeBuildTiming
 		var analyzeTime time.Duration
 		var shimWriteTime time.Duration
-		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr)
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr, enableSMT)
 		compileTotal = time.Since(compileStart)
 		analyzeTotal = analyzeTime
 		nativeObjectTotal = nativeTiming.ObjectWrite
@@ -1345,7 +1345,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 	// Publish the early (source-level) cache so the next unchanged run skips the
 	// whole front-end (parse+analyze) and jumps straight to running this binary.
 	if exePath != "" && earlyTestCacheEnabled() {
-		if key, keyErr := earlyTestCacheKeyForProgram(program, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo); keyErr == nil {
+		if key, keyErr := earlyTestCacheKeyForProgram(program, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, enableSMT); keyErr == nil {
 			publishEarlyTestCache(key, exePath, cachedCases)
 		}
 	}

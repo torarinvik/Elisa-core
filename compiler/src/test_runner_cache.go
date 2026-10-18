@@ -58,8 +58,8 @@ func usableCachedFile(path string, executable bool) bool {
 	return !executable || info.Mode().Perm()&0o111 != 0
 }
 
-func locateCachedTestRunner(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, bool, error) {
-	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
+func locateCachedTestRunner(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, enableSMT bool) (testRunnerCacheArtifact, bool, error) {
+	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, enableSMT)
 	if err != nil {
 		return testRunnerCacheArtifact{}, false, err
 	}
@@ -196,8 +196,9 @@ func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module
 	return nil
 }
 
-func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, error) {
+func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, enableSMT bool) (testRunnerCacheArtifact, error) {
 	hash := sha256.New()
+	testRunnerCacheWriteString(hash, fmt.Sprintf("runner-smt=%t", enableSMT))
 	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple); err != nil {
 		return testRunnerCacheArtifact{}, err
 	}
