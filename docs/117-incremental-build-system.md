@@ -97,6 +97,15 @@ Insertion measured 42.52/43.02/31.08/20.15 ms respectively (153.32 ms total).
 These are single diagnostic samples, not a new paired speedup claim; partition
 preparation is a material remaining cost alongside full-module lowering.
 
+A follow-up experiment shared ownership computation and unsupported-IR admission
+across all shards, retaining per-shard verification. Native regression tests and
+C++ rejection fixtures passed, but three alternating ten-edit benchmark pairs
+were too variable to establish a throughput gain. The candidate was discarded;
+patch sources and raw results are retained under
+`build/verification/incremental-admission-experiment-20261018/`. Repeated admission
+has not been established as the dominant preparation cost. Isolate cloning and
+bitcode serialization before introducing more preparation machinery.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification
