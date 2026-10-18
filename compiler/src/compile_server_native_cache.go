@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"container/list"
 	"crypto/sha256"
 	"encoding/json"
@@ -15,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"elisacore/src/backend"
-	"elisacore/src/lexer"
 )
 
 const serverNativeCacheBytes = 128 << 20
@@ -323,61 +321,18 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 		return serverNativeIdentity{}, false
 	}
 	environmentStamp := sha256.Sum256(environmentBytes)
-	diagnosticPaths := serverDiagnosticPathInputs(program.filename, program.source)
 	fields := req
 	fields.Source = ""
 	fields.IR = ""
 	config, err := json.Marshal(struct {
 		Schema, Build, Cwd, Unit, MergerStamp, MergerExecutable string
 		Environment                                             [32]byte
-		DiagnosticPaths                                         []serverDiagnosticPathState
 		Merger                                                  []string
 		Request                                                 compileServerRequest
-	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, diagnosticPaths, command, fields})
+	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, command, fields})
 	if err != nil {
 		return serverNativeIdentity{}, false
 	}
 	// The build key hashes the exact source; retain and compare those bytes too.
 	return serverNativeIdentity{digest: sha256.Sum256(config), unitHint: sha256.Sum256([]byte(absolute)), source: req.Source, config: string(config)}, true
-}
-
-// Runtime-carrier diagnostics distinguish synthetic bare names from existing
-// source paths. #line attribution can select names other than the request name.
-type serverDiagnosticPathState struct {
-	Path   string
-	Exists bool
-}
-
-func serverDiagnosticPathInputs(filename string, source []byte) []serverDiagnosticPathState {
-	names := map[string]bool{}
-	add := func(name string) {
-		if name != "" && name != "<unknown>" && !strings.Contains(filepath.ToSlash(name), "/") {
-			names[name] = true
-		}
-	}
-	add(filename)
-	// Ordinary source needs no tokenization for response admission. For possible
-	// attribution directives use the actual lexer, keeping comment/string syntax
-	// and directive parsing identical to the compiler rather than duplicating it.
-	if bytes.Contains(source, []byte("#line")) {
-		scanner := lexer.New(filename, source)
-		for {
-			token := scanner.NextToken()
-			add(token.Pos.File)
-			if token.Kind == lexer.TOKEN_EOF {
-				break
-			}
-		}
-	}
-	paths := make([]string, 0, len(names))
-	for name := range names {
-		paths = append(paths, name)
-	}
-	sort.Strings(paths)
-	states := make([]serverDiagnosticPathState, 0, len(paths))
-	for _, path := range paths {
-		_, err := os.Stat(path)
-		states = append(states, serverDiagnosticPathState{Path: path, Exists: err == nil})
-	}
-	return states
 }

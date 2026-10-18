@@ -105,7 +105,7 @@ func BenchmarkServerDiagnosticPathInputs(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = serverDiagnosticPathInputs("/virtual/unit.elisa", data)
+				_ = diagnosticPathInputs("/virtual/unit.elisa", data)
 			}
 		})
 	}

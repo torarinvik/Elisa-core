@@ -1,0 +1,164 @@
+package main
+
+import (
+	"bytes"
+	"elisacore/src/semantic"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestBuildObjectCacheReplaysDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "0")
+	source := filepath.Join(dir, "warning.elisa")
+	if err := os.WriteFile(source, []byte("@deprecated(\"cache-warning-marker\")\ndef old() -> i64:\n    return 0\n\ndef main() -> i64:\n    return old()\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var first, second bytes.Buffer
+	for index, stderr := range []*bytes.Buffer{&first, &second} {
+		var stdout bytes.Buffer
+		if rc := runCLI([]string{"-emit", "obj", "-o", filepath.Join(dir, "result.o"), source}, &stdout, stderr); rc != 0 {
+			t.Fatalf("build%d: rc=%d stderr=%s", index, rc, stderr)
+		}
+	}
+	if !strings.Contains(first.String(), "cache-warning-marker") {
+		t.Fatalf("fixture did not warn: %s", first.String())
+	}
+	if first.String() != second.String() {
+		t.Fatalf("cache changed diagnostics: cold=%q warm=%q", first.String(), second.String())
+	}
+	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "1")
+	var suppressed, output bytes.Buffer
+	if rc := runCLI([]string{"-emit", "obj", "-o", filepath.Join(dir, "result.o"), source}, &output, &suppressed); rc != 0 || strings.Contains(suppressed.String(), "cache-warning-marker") {
+		t.Fatalf("changed warning policy reused prior transcript: rc=%d stderr=%s", rc, &suppressed)
+	}
+
+}
+
+func TestBuildCacheTranscriptIntegrityAndCaptureBound(t *testing.T) {
+	dir := t.TempDir()
+	built := filepath.Join(dir, "built.o")
+	if err := os.WriteFile(built, []byte("object"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifact := buildCacheArtifact{key: "test-key", dir: filepath.Join(dir, "entry"), object: filepath.Join(dir, "entry", "out.o")}
+	want := buildCacheTranscript{Stdout: []byte{0xff, 0, 1}, Stderr: []byte("warning\n")}
+	if err := publishCachedBuildObject(artifact, built, want); err != nil {
+		t.Fatal(err)
+	}
+	got, valid := readBuildCacheTranscript(artifact)
+	if !valid || !bytes.Equal(got.Stdout, want.Stdout) || !bytes.Equal(got.Stderr, want.Stderr) {
+		t.Fatal("transcript did not preserve exact bytes")
+	}
+	got.Stderr = []byte("corrupted")
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifact.dir, "transcript.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, valid := readBuildCacheTranscript(artifact); valid {
+		t.Fatal("corrupted transcript admitted")
+	}
+	if err := publishCachedBuildObject(artifact, built, want); err != nil {
+		t.Fatal(err)
+	}
+	if _, valid := readBuildCacheTranscript(artifact); !valid {
+		t.Fatal("corrupt entry was not repaired")
+	}
+	if err := os.Remove(filepath.Join(artifact.dir, "transcript.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, valid := readBuildCacheTranscript(artifact); valid {
+		t.Fatal("missing transcript admitted")
+	}
+	var capture buildCacheCapture
+	chunk := bytes.Repeat([]byte{'x'}, buildCacheStreamLimit)
+	if n, err := capture.Write(chunk); err != nil || n != len(chunk) {
+		t.Fatal("capture rejected limit-sized write")
+	}
+	if n, err := capture.Write([]byte("overflow")); err != nil || n != 8 || !capture.overflow || capture.Len() != buildCacheStreamLimit {
+		t.Fatal("capture overflow was not bounded and transparent")
+	}
+}
+
+func TestBuildObjectCacheDeclinesRequestObservers(t *testing.T) {
+	for _, name := range []string{"ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "observer")
+			if _, handled := tryBuildObjectCacheWith(cliOptions{emit: emitObject}, nil, nil, nil, nil); handled {
+				t.Fatal("request observer satisfied by replay")
+			}
+		})
+	}
+}
+
+func TestBuildObjectCachePathCreationRejectsPriorSuccess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	f, err := os.CreateTemp(".", "disk-diagnostic-path-*.elisa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Base(f.Name())
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(name) })
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "source.elisa")
+	text := "#line 1 " + name + "\ndef build(owner: StringView) -> void:\n    pass\n\ndef main() -> i64:\n    return 0\n"
+	if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exercise raw loaded snapshots through the cache seam; the CLI include
+	// expander canonicalizes source attribution before this API receives it.
+	options := cliOptions{emit: emitObject, filename: source, output: filepath.Join(dir, "result.o")}
+	load := func(string, io.Writer) (*loadedProgram, bool) {
+		return &loadedProgram{filename: source, source: []byte(text)}, true
+	}
+	build := func(opts cliOptions, program *loadedProgram, _ io.Writer, stderr io.Writer) int {
+		if _, _, ok := analyzeLoadedProgramWithOptions(program, stderr, semantic.AnalyzeOptions{}); !ok {
+			return 1
+		}
+		if err := os.WriteFile(opts.output, []byte("analyzed object placeholder"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	run := func() (int, string) {
+		var out, stderr bytes.Buffer
+		rc, handled := tryBuildObjectCacheWith(options, &out, &stderr, load, build)
+		if !handled {
+			t.Fatal("cache declined raw snapshot")
+		}
+		return rc, stderr.String()
+	}
+
+	if rc, stderr := run(); rc != 0 {
+		t.Fatalf("initial build: rc=%d %s", rc, stderr)
+	}
+	if err := os.WriteFile(name, []byte("exists"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if rc, stderr := run(); rc == 0 || !strings.Contains(stderr, "internal runtime carrier") {
+		t.Fatalf("stale cached success after path creation: rc=%d stderr=%s", rc, stderr)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	if rc, stderr := run(); rc != 0 {
+		t.Fatalf("removed path failed recovery: rc=%d %s", rc, stderr)
+	}
+}
