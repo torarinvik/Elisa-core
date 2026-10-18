@@ -106,6 +106,14 @@ patch sources and raw results are retained under
 has not been established as the dominant preparation cost. Isolate cloning and
 bitcode serialization before introducing more preparation machinery.
 
+Preparation statistics now separate clone/restrict/prune/verify work from bitcode
+serialization and copying. Three ten-edit samples measured growth medians of
+23.04 ms cloning and 10.97 ms bitcode, with insertion medians of 22.88 and
+11.33 ms respectively. Full native-pipeline medians were 125.69/121.58 ms; these
+are diagnostic samples on a shared host, not paired speedup claims. Existing
+`PartitionTime` remains the sum of those phases. Raw logs are retained under
+`build/verification/incremental-preparation-breakdown-20261018/`.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification

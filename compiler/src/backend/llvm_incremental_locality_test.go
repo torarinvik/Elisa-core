@@ -137,7 +137,7 @@ func BenchmarkIncrementalNativeStructuralEdit(b *testing.B) {
 			}
 			b.StopTimer()
 			after := session.Stats()
-			for name, elapsed := range map[string]time.Duration{"ir-ms/edit": after.IRTime - before.IRTime, "partition-ms/edit": after.PartitionTime - before.PartitionTime, "native-ms/edit": after.NativeTime - before.NativeTime, "merge-ms/edit": after.MergeTime - before.MergeTime} {
+			for name, elapsed := range map[string]time.Duration{"ir-ms/edit": after.IRTime - before.IRTime, "partition-ms/edit": after.PartitionTime - before.PartitionTime, "clone-ms/edit": after.CloneTime - before.CloneTime, "bitcode-ms/edit": after.BitcodeTime - before.BitcodeTime, "native-ms/edit": after.NativeTime - before.NativeTime, "merge-ms/edit": after.MergeTime - before.MergeTime} {
 				b.ReportMetric(float64(elapsed)/float64(time.Millisecond)/float64(b.N), name)
 			}
 			b.ReportMetric(float64(after.PartitionsEmitted-before.PartitionsEmitted)/float64(b.N), "emitted-parts/edit")

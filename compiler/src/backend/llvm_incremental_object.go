@@ -101,6 +101,8 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		if module == nil {
 			return s.emitDirectObject(g, outputPath)
 		}
+		cloneDuration := time.Since(partitionStart)
+		bitcodeStart := time.Now()
 		bitcode := C.LLVMWriteBitcodeToMemoryBuffer(module)
 		if uint64(C.LLVMGetBufferSize(bitcode)) > 1<<31-1 {
 			C.LLVMDisposeMemoryBuffer(bitcode)
@@ -109,7 +111,12 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		}
 		input := C.GoStringN(C.LLVMGetBufferStart(bitcode), C.int(C.LLVMGetBufferSize(bitcode)))
 		C.LLVMDisposeMemoryBuffer(bitcode)
-		s.recordStats(func(stats *IncrementalObjectStats) { stats.PartitionTime += time.Since(partitionStart) })
+		bitcodeDuration := time.Since(bitcodeStart)
+		s.recordStats(func(stats *IncrementalObjectStats) {
+			stats.CloneTime += cloneDuration
+			stats.BitcodeTime += bitcodeDuration
+			stats.PartitionTime += cloneDuration + bitcodeDuration
+		})
 		object := s.lookupObject(input, string(config))
 		if object == nil {
 			nativeStart := time.Now()

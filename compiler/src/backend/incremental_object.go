@@ -30,7 +30,10 @@ type incrementalObjectEntry struct {
 type IncrementalObjectStats struct {
 	Builds, PartitionsEmitted, PartitionsReused, SerialFallbacks, Evictions uint64
 	IRTime, PartitionTime, NativeTime, MergeTime                            time.Duration
-	RetainedBytes, RetainedPartitions                                       int
+	// CloneTime includes restriction, dead-prototype pruning and verification.
+	// BitcodeTime includes serialization and copying the owned cache key.
+	CloneTime, BitcodeTime            time.Duration
+	RetainedBytes, RetainedPartitions int
 }
 
 // NewIncrementalObjectSession bounds the complete retained bitcode and objects.
