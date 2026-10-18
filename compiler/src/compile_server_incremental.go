@@ -29,6 +29,7 @@ type compileServerSessionCache struct {
 	// Native artifacts share one bounded cache across source paths. Exact current
 	// bitcode/target keys prevent cross-request confusion and keep total storage
 	// bounded independently of the number of semantic sessions.
+	native     *compileServerNativeCache
 	objects    *backend.IncrementalObjectSession
 	mu         sync.Mutex
 	maxEntries int
@@ -40,10 +41,12 @@ func newCompileServerSessionCache(maxEntries int) *compileServerSessionCache {
 	if maxEntries <= 0 {
 		maxEntries = defaultCompileServerSessionCacheEntries
 	}
+	objects := backend.NewIncrementalObjectSession(0, 0)
 	return &compileServerSessionCache{
+		native:     newCompileServerNativeCache(objects, 8, serverNativeCacheBytes),
 		maxEntries: maxEntries,
 		tokens:     newSourceTokenCache(maxEntries, defaultSourceTokenCacheBytes),
-		objects:    backend.NewIncrementalObjectSession(0, 0),
+		objects:    objects,
 		entries:    make(map[compileServerSessionKey]compileServerSessionEntry),
 	}
 }

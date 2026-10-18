@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,4 +38,31 @@ func (s *IncrementalObjectSession) objectMergerCommand() []string {
 		}
 	})
 	return []string{s.defaultMerger}
+}
+
+// ObjectMergerCacheInputs describes the actual command and executable used by
+// this session. The executable path is canonical for content stamping; command
+// keeps the original argv (including argv[0], which can affect linker behavior).
+// These are identity inputs, not replacement execution arguments.
+func (s *IncrementalObjectSession) ObjectMergerCacheInputs() ([]string, string, error) {
+	if s == nil {
+		return nil, "", fmt.Errorf("no native object session")
+	}
+	command := s.objectMergerCommand()
+	if len(command) == 0 {
+		return nil, "", fmt.Errorf("no object merger")
+	}
+	selected, err := exec.LookPath(command[0])
+	if err != nil {
+		return nil, "", err
+	}
+	selected, err = filepath.Abs(selected)
+	if err != nil {
+		return nil, "", err
+	}
+	selected, err = filepath.EvalSymlinks(selected)
+	if err != nil {
+		return nil, "", err
+	}
+	return append([]string(nil), command...), selected, nil
 }

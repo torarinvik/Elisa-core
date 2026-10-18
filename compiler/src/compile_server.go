@@ -206,6 +206,13 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
+		identity, cacheable := serverNativeObjectIdentity(req, program, sessions)
+		if cacheable {
+			if object, hit := sessions.native.lookup(identity); hit {
+				response.Object = object
+				break
+			}
+		}
 		dir, err := os.MkdirTemp("", "elisac-server-object-")
 		if err != nil {
 			return compileServerResponse{OK: false, Error: err.Error()}, http.StatusInternalServerError
@@ -232,6 +239,13 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 			return compileServerResponse{OK: false, Error: err.Error()}, http.StatusInternalServerError
 		}
 		response.Object = base64.StdEncoding.EncodeToString(object)
+		if cacheable {
+			// Never publish under a context that changed during this synchronous build.
+			current, ok := serverNativeObjectIdentity(req, program, sessions)
+			if ok && current.config == identity.config && current.source == identity.source {
+				sessions.native.retain(identity, response.Object)
+			}
+		}
 	case emitInterpret:
 		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {

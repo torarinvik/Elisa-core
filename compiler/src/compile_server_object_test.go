@@ -61,6 +61,7 @@ func TestCompileServerIncrementalNativeObjects(t *testing.T) {
 			request.Source = strings.Replace(request.Source, "return value + 1 +", "return value + 2 +", 1)
 		}
 		before := cache.objects.Stats()
+		beforeNative := cache.native.Stats()
 		response, status := postCompileServerRequest(t, handler, request)
 		if status != http.StatusOK || !response.OK {
 			t.Fatalf("retained object: %+v", response)
@@ -75,7 +76,14 @@ func TestCompileServerIncrementalNativeObjects(t *testing.T) {
 			wantEmitted = 1
 			wantStatus = 55
 		}
-		if after.PartitionsEmitted-before.PartitionsEmitted != wantEmitted || after.PartitionsReused-before.PartitionsReused != 8-wantEmitted {
+		wantReused := 8 - wantEmitted
+		if index == 1 && cache.native.Stats().Hits-beforeNative.Hits == 1 {
+			wantReused = 0
+			if after.Builds != before.Builds || after.IRTime != before.IRTime {
+				t.Fatal("completed-object hit entered LLVM")
+			}
+		}
+		if after.PartitionsEmitted-before.PartitionsEmitted != wantEmitted || after.PartitionsReused-before.PartitionsReused != wantReused {
 			t.Fatalf("wrong native reuse at revision%d: before=%+v after=%+v", index, before, after)
 		}
 		native(response, wantStatus)
@@ -145,6 +153,7 @@ func TestCompileServerConcurrentNativeObjects(t *testing.T) {
 	}
 	for round := 0; round < 2; round++ {
 		before := cache.objects.Stats()
+		beforeNative := cache.native.Stats()
 		type result struct {
 			response compileServerResponse
 			status   int
@@ -170,7 +179,11 @@ func TestCompileServerConcurrentNativeObjects(t *testing.T) {
 		if round == 0 && after.PartitionsEmitted-before.PartitionsEmitted != 32 {
 			t.Fatalf("concurrent cold admission: %+v", after)
 		}
-		if round == 1 && (after.PartitionsEmitted != before.PartitionsEmitted || after.PartitionsReused-before.PartitionsReused != 32) {
+		completedHits := cache.native.Stats().Hits - beforeNative.Hits
+		if completedHits > 4 {
+			t.Fatal("invalid completed-hit count")
+		}
+		if round == 1 && (after.PartitionsEmitted != before.PartitionsEmitted || after.PartitionsReused-before.PartitionsReused != 8*(4-completedHits) || after.Builds-before.Builds != 4-completedHits) {
 			t.Fatalf("concurrent warm reuse: %+v", after)
 		}
 	}
