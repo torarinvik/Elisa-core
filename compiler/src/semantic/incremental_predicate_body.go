@@ -280,7 +280,7 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 		parameters[param.Name] = true
 		parameterTypes[param.Name] = name
 	}
-	ret, ok := primitiveReturnHeader(&header)
+	ret, ok := primitiveReturnTypingHeader(&header)
 	if !ok {
 		return nil, false
 	}

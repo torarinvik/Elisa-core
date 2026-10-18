@@ -309,7 +309,9 @@ has its own syntax and current-binding checks; unsupported bodies and
 initializers stay on ordinary analysis. Plain namespace/module functions have
 qualified identities; parameter arity separates admitted overload owners.
 Other declarations, conditional declaration containers, mutable/defaulted
-parameters, calls, contracts and generics stay cold.
+parameters, calls, preconditions, scoped contract proof blocks and generics stay cold.
+Plain value postconditions are reanalyzed and discharged on every invocation;
+only their closed scalar return-expression typing may be reused.
 The original Analyze/AnalyzeWithOptions APIs retain the cold path.
 
 Each query reads a position-independent, versioned closed-grammar source digest,
@@ -2507,3 +2509,39 @@ these allocation optimizations as completion, remains necessary.
 Raw samples, census, source snapshot, benchmark source, source isolation backing
 files and binary hashes are retained in
 `build/verification/incremental-real-project-edits-20261018/`.
+
+
+### Scalar return typing with independently checked postconditions
+
+Closed scalar return products now admit plain value `ensure` clauses. This
+retains only return-expression typing: normal contract analysis still runs
+before the reuse boundary and `analyzeReturnStatement` discharges the current
+postconditions after replay. Contract syntax/proof results are not replayed or
+included in that typing product. The strict shared header gate remains intact
+for local-initializer products. `requires`, scoped proof blocks and other
+unsupported declaration features still select ordinary analysis. The source
+read-free shortcut is disabled when postconditions are present.
+
+A regression first reproduced the missing reuse. The expanded matrix checks
+integer, predicate and literal bodies with SMT both disabled and enabled,
+including adding a contract, editing it to false or referencing an undefined
+name, recovery, and changing the body. Complete semantic Result parity is
+checked against fresh analysis for every revision. Existing lexical audits
+report no verification/publication failures. Contract and incremental
+regressions passed normally in 3.001 s and with the race detector in 12.329 s.
+A second race qualification froze the complete current committed semantic
+package at `6e524118` plus the owned changes, excluding unrelated unfinished
+prototype work, and passed in 14.331 s.
+
+On the same frozen parser-project novel-body edit workload, return admission
+rose from one to seven declarations, including five predicate returns. Warm
+analysis reused seven bodies and checked 1,951 invocations (previously one and
+1,957). Every one of the 2,279 diagnostic messages matched the established
+`65396690155f7ad6ae758f9b9e337ee217eafbd96a98474262676748ce08a955`
+multiset digest. The single retained sample took 6.37 s; it does not qualify a
+speedup against the earlier variable samples. This expands verified reuse
+coverage; most project bodies and the overall incremental goal remain pending.
+
+Sources, frozen qualification backing files, regression logs and project/census
+output are retained in
+`build/verification/incremental-contract-return-reuse-20261018/`.

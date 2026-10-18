@@ -186,6 +186,7 @@ func TestIncrementalSessionEligibilityIsClosed(t *testing.T) {
     return value + 1
 `,
 		`def work() -> i64:
+    requires true
     ensure result > 0
     return 1
 `,

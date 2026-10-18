@@ -330,7 +330,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			ok = primitiveReturn
 			if reads := invocation.lexical; reads != nil {
 				if _, exists := reads.indexes[fn]; !exists && len(reads.indexes) < lexicalReadMaxFunctions {
-					readFree := primitiveReturn
+					readFree := primitiveReturn && len(fn.EnsureValues) == 0 && len(fn.EnsureProofs) == 0
 					for _, expr := range expressions {
 						if _, ident := expr.(*ast.Ident); ident {
 							readFree = false
@@ -616,8 +616,27 @@ func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	return predicateReturnExpressions(fn)
 }
 
+// Only return-expression typing is retained here. Plain value postconditions
+// are analyzed before this boundary and discharged again by analyzeReturnStatement
+// after replay. Their syntax/proof results are never part of the body product.
+// Keep scoped proof blocks and every other header feature on the cold path.
+func primitiveReturnTypingHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
+	if fn == nil || len(fn.EnsureProofs) > len(fn.EnsureValues) {
+		return nil, false
+	}
+	for _, proof := range fn.EnsureProofs {
+		if proof != nil {
+			return nil, false
+		}
+	}
+	header := *fn
+	header.EnsureValues = nil
+	header.EnsureProofs = nil
+	return primitiveReturnHeader(&header)
+}
+
 func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
-	stmt, ok := primitiveReturnHeader(fn)
+	stmt, ok := primitiveReturnTypingHeader(fn)
 	if !ok || len(fn.Name) > primitiveSourceByteBudget {
 		return nil, false
 	}
