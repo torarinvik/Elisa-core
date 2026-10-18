@@ -17,9 +17,17 @@ execution and race qualification were not pursued after the performance result.
 
 Three alternating baseline/candidate pairs used separate test binaries and five
 requests per sample. Parsing/semantic analysis were untimed. The workload has
-128 stable function names at O0, with either unchanged source or a novel work0
-body on every request. Each run asserts 8 reused/0 emitted shards for unchanged
+128 function names at O0, with either unchanged source or a novel work0 body on
+each edit request. Each run asserts 8 reused/0 emitted shards for unchanged
 requests and 7 reused/1 emitted shard for edits.
+
+**Retrospective benchmark caveat:** the archived body-edit loop generated
+`nativeLocalityFixture(64 + i*16)`, increasing work0 by sixteen terms per
+iteration. The recorded pairs explicitly used five iterations, so they compare
+the same finite growth history. They are not steady-state latency evidence;
+default Go calibration would additionally choose different average workload
+sizes. The body-edit columns below remain raw archived values only. The
+unchanged arm is stationary but noisy across the three pairs.
 
 | Median ms/request | Unchanged baseline | Unchanged plan | Body edit baseline | Body edit plan |
 |---|---:|---:|---:|---:|
@@ -31,8 +39,13 @@ requests and 7 reused/1 emitted shard for edits.
 
 Timing swung sharply between pairs and unrelated phases changed too. The plan
 has no demonstrated consistent throughput gain. No runtime changes were kept.
-The new generic `BenchmarkIncrementalNativeRequests` preserves the controlled
-no-op/edit workload and phase/locality checks for subsequent experiments.
+The current `BenchmarkIncrementalNativeRequests` keeps all 128 functions and
+their operation counts fixed, varying one fixed-width hexadecimal literal in
+work0. Every timed revision is unique, preserving one emitted/seven reused
+shards without turning calibration into old-revision hits. The separate
+structural growth benchmark intentionally varies body size and is not a
+steady-state workload. A two-iteration smoke run passed both locality checks;
+its timings are not a new performance claim.
 
 The prototype separately measured complete plan preparation and owner hashing
 (the latter is a subset, not an additional cost to sum). Existing OwnerMapTime

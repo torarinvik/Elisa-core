@@ -6,15 +6,23 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"elisacore/src/semantic"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 // Includes lowering, partition preparation, cloning, exact bitcode
 // keys, native generation and merging. Parsing and semantic analysis are untimed.
+func nativeRequestFixture(revision uint64) string {
+	// Vary one fixed-width literal, not the number of operations in work0.
+	// Revision zero is the prewarm; every timed revision remains novel.
+	return strings.Replace(nativeLocalityFixture(32), "(value + 1)", fmt.Sprintf("(value + 0x%016x)", revision+1), 1)
+}
+
 func BenchmarkIncrementalNativeRequests(b *testing.B) {
-	base := nativeLocalityFixture(32)
+	base := nativeRequestFixture(0)
 	analyze := func(source string) *semantic.Result {
 		l := lexer.New("clone_plan_bench.elisa", []byte(source))
 		p := parser.New(l.Tokenize())
@@ -47,7 +55,7 @@ func BenchmarkIncrementalNativeRequests(b *testing.B) {
 				b.StopTimer()
 				source := base
 				if edited {
-					source = nativeLocalityFixture(64 + i*16)
+					source = nativeRequestFixture(uint64(i) + 1)
 				}
 				result := analyze(source)
 				b.StartTimer()
