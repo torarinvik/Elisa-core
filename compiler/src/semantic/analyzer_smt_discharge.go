@@ -2612,9 +2612,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
-				// A container-theory base is not a flat integer array: its elements are read
-				// through the container theory only.
-				if tr.lengthOnly[bound] || tr.stableContainers[bound] {
+				// A container identity alone does not declare a flat array. An actual
+				// array already declared in this query can retain both representations.
+				if tr.lengthOnly[bound] || (tr.stableContainers[bound] && !tr.declaredFlatArrayTerm(bound)) {
 					return "", false
 				}
 				return bound, true

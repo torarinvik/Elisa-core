@@ -1,0 +1,28 @@
+# Membership for the high-bit side-table row that marks a generic function bound.
+module SemanticAssocIndexBoundMarker:
+    public:
+        ghost def contains_from(lines: darray[u32]&, target_line: u32, index: usize) -> bool:
+            requires index <= lines.count
+            decreases lines.count - index
+            return false if index == lines.count
+            return true if lines[index] == target_line
+            return contains_from(lines, target_line, index + 1)
+
+        def contains(lines: darray[u32]&, target_line: u32) -> bool:
+            ensure result == contains_from(lines, target_line, 0)
+            found: mutable bool = false
+            for index in 0..<lines.count |found|:
+                invariant index <= lines.count
+                invariant contains_from(lines, target_line, 0) == (found or contains_from(lines, target_line, index))
+                assert contains_from(lines, target_line, index) == (
+                    lines[index] == target_line or contains_from(lines, target_line, index + 1.usize())
+                )
+                if lines[index] == target_line:
+                    found <- true
+                assert contains_from(lines, target_line, 0) == (found or contains_from(lines, target_line, index + 1.usize()))
+            assert contains_from(lines, target_line, lines.count) == false
+            assert contains_from(lines, target_line, 0) == found
+            return found
+
+def main() -> i64:
+    return 0

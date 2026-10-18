@@ -1,0 +1,29 @@
+# Exact semantic model for whether any implementation of an associated-index
+# method drops its refinement. A missing parallel refinement row fails closed.
+# Kept isolated so its scan can be source-proved.
+module SemanticAssocIndex:
+    public:
+        ghost def method_unproven_from(method_names: darray[sview]&, method_refined: darray[bool]&, method: sview, remaining: usize) -> bool:
+            decreases remaining
+            ensure remaining == 0 implies result == false
+            ensure remaining > 0 and remaining <= method_names.count implies result == ((method_names[method_names.count - remaining] == method and not (method_names.count - remaining < method_refined.count and method_refined[method_names.count - remaining])) or method_unproven_from(method_names, method_refined, method, remaining - 1))
+            return false if:
+                remaining == 0
+                remaining > method_names.count
+            return (
+                method_names[method_names.count - remaining] == method
+                and not (method_names.count - remaining < method_refined.count and method_refined[method_names.count - remaining])
+            ) or method_unproven_from(method_names, method_refined, method, remaining - 1)
+
+        def method_unproven(method_names: darray[sview]&, method_refined: darray[bool]&, method: sview) -> bool:
+            ensure result == method_unproven_from(method_names, method_refined, method, method_names.count)
+            for index in 0 ..< method_names.count |method_names, method_refined, method|:
+                invariant index <= method_names.count
+                invariant method_unproven_from(method_names, method_refined, method, method_names.count) == method_unproven_from(method_names, method_refined, method, method_names.count - index)
+                return true if method_names[index] == method and not (index < method_refined.count and method_refined[index])
+            assert method_unproven_from(method_names, method_refined, method, 0) == false
+            assert method_unproven_from(method_names, method_refined, method, method_names.count) == false
+            return false
+
+def main() -> i64:
+    return 0
