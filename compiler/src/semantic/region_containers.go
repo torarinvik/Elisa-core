@@ -228,6 +228,7 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 	if a.checkUnannotatedSViewParamReturn(valueExpr) {
 		return
 	}
+	a.checkDeclaredAggregateReturnParamRegions(valueExpr, valueType)
 	// The returned value's region: its own type's region if it carries one (a returned container /
 	// view), else the region it BORROWS from — peeling `&`/index/slice/field down to the underlying
 	// region-carrying base (catches `return &m.bits[0]`, a ref INTO the @r field, whose `u8&` type
@@ -247,6 +248,51 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 		return // the return type carries the same @r — sound, and checked at the call site
 	}
 	a.errorf(valueExpr.Pos(), "value tied to region parameter %q cannot be returned with a region-less type (its lifetime is the caller's %q region); annotate the return type with `@%s` (e.g. `-> view[u8] @%s`) so the borrow stays tied to the caller's region", region, region, region, region)
+}
+
+// checkDeclaredAggregateReturnParamRegions checks interior provenance as well as
+// the nominal result type: a struct literal may have been contextualized as
+// Packet[r] even though a field still borrows an independent input region s.
+func (a *Analyzer) checkDeclaredAggregateReturnParamRegions(value ast.Expr, valueType Type) {
+	if a.currentFuncType == nil || a.currentFuncType.ReturnRegion == "" || !typeCarriesRegionStorage(valueType) {
+		return
+	}
+	target := a.currentFuncType.ReturnRegion
+	state, known := a.regionRefStateForExpr(value)
+	if !known {
+		return
+	}
+	checked := map[string]bool{}
+	check := func(source string) {
+		if source == "" || checked[source] || !a.isSourceDeclaredRegionParam(source) {
+			return
+		}
+		checked[source] = true
+		if a.regionStoreEscapes(target, source) {
+			a.errorf(value.Pos(), "return contract @%s cannot carry storage tied to independent region parameter %q", target, source)
+		}
+	}
+	var visit func(regionRefState)
+	visit = func(state regionRefState) {
+		param := func(index int) {
+			if index >= 0 && index < len(a.currentFuncType.Params) {
+				check(regionParamReturnTypeRegion(a.currentFuncType.Params[index]))
+			}
+		}
+		if state.HasDirectParamDep {
+			param(state.DirectParamDep)
+		}
+		state.ParamDeps.ForEach(param)
+		for owner := range state.Deps {
+			if owner != nil {
+				check(owner.Name)
+			}
+		}
+		for _, field := range state.Fields {
+			visit(field)
+		}
+	}
+	visit(state)
 }
 
 // checkUnannotatedSViewParamReturn rejects explicitly region-bound sview parameters when a

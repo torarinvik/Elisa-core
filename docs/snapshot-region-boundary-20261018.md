@@ -59,3 +59,17 @@ contract. Its patch and test are saved under ignored
 `build/verification/factory-contract-safety-20261018/`. No semantic production
 change remains. Next fix must enforce independent region constraints on aggregate
 construction/return before enabling precise call-owner reuse.
+
+## Enforce independent input regions on aggregate returns
+
+`checkDeclaredAggregateReturnParamRegions` now visits interior reference
+provenance for an explicit return-region contract. Value-parameter dependencies,
+named region dependencies, and nested field states must not retain an independent
+source-declared region that cannot outlive the contract region. The nominal
+aggregate type alone is insufficient because contextual checking may already
+name the target region. Existing local-region checks remain in place.
+
+Regression cases reject direct, aliased, and nested independent-input aggregates;
+the matching input/return region passes. The semantic `Test.*(Region|Factory)`
+suite passes (0.677 seconds). Precise call-owner candidate remains withdrawn
+pending additional review; no full Stage1 build was run.
