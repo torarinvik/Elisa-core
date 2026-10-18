@@ -153,3 +153,12 @@ owned buffer, verifies no extra inferred region, and rejects an explicit claim
 that the stack slot lives in the buffer region. Region/factory/snapshot tests
 pass. End-to-end lowering uncovered a separate explicit specialization issue
 recorded below.
+
+Explicit nominal-region specialization lowering: `emitSpecializeExpr` now uses
+`functionSpecializationParams`, matching the existing declaration/call machinery
+and including region parameters that occur in nominal type arguments. Using
+`funcGenericParams` alone rejected `append[output]` as non-generic. The new
+compile-and-run test grows a Packet buffer through a stack descriptor and prints
+7 (1.848 s), preserving actual allocation and hidden-argument behavior. Selected
+backend generic/specialization regressions pass. Unrelated dirty SMT test changes
+in the checkout were preserved and excluded from these commits.

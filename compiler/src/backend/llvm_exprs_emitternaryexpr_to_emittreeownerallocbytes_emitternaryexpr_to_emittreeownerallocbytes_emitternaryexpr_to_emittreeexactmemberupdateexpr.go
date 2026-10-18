@@ -251,7 +251,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 	if !ok {
 		return nil, nil, fmt.Errorf("specialize expects a function, got %s", sym.Type.String())
 	}
-	params := funcGenericParams(baseType)
+	params := functionSpecializationParams(baseType)
 	if len(params) == 0 {
 		return nil, nil, fmt.Errorf("function %q is not generic", ident.Name)
 	}
