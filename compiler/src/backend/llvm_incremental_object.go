@@ -80,6 +80,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
 	configKey := string(config)
+	targetID := sha256.Sum256(config)
 	dir, err := os.MkdirTemp(filepath.Dir(outputPath), ".elisa-object-parts-")
 	if err != nil {
 		return err
@@ -167,7 +168,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 				stats.NativeTime += nativeDuration
 				stats.PartitionsEmitted++
 			})
-			s.retainObject(retainedInput, configKey, object)
+			s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
 		}
 		C.LLVMDisposeModule(module)
 		parts[part] = filepath.Join(dir, fmt.Sprintf("part%d.o", part))
