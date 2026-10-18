@@ -2759,7 +2759,7 @@ func smtSViewLengthSymbol(projection string) string {
 }
 
 // isAnyArrayLike reports whether t is an array or darray of ANY element type (unlike
-// smtTranslator.isArrayLike, which restricts to integer elements for the element-select theory). A
+// smtTranslator.isArrayLike, which restricts to integer/bool elements for the element-select theory). A
 // length read needs only that the value is a sized container, so the element type is irrelevant.
 func isAnyArrayLike(t Type) bool {
 	switch stripRefForBounds(t).(type) {
@@ -2777,14 +2777,14 @@ func (tr *smtTranslator) recordFixedArrayLen(arr string, t Type) {
 	tr.lenConsts[arr+smtArrayLenSuffix] = at.ConstSize
 }
 
-// isArrayLike reports whether a type is an integer-element array/darray we can model as (Array Int
+// isArrayLike reports whether a type is an integer/bool-element array/darray we can model as (Array Int
 // Int). Non-integer elements decline (sound: we only model integer element theory).
 func (tr *smtTranslator) isArrayLike(t Type) bool {
 	switch at := stripRefForBounds(t).(type) {
 	case *ArrayType:
-		return at != nil && IsNumericType(at.Elem) && !IsFloatType(at.Elem)
+		return at != nil && ((IsNumericType(at.Elem) && !IsFloatType(at.Elem)) || IsBoolType(at.Elem))
 	case *DArrayType:
-		return at != nil && IsNumericType(at.Elem) && !IsFloatType(at.Elem)
+		return at != nil && ((IsNumericType(at.Elem) && !IsFloatType(at.Elem)) || IsBoolType(at.Elem))
 	}
 	return false
 }
@@ -4037,6 +4037,8 @@ func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
 // `env` maps an Elisa identifier (notably the law's `self`) to a pre-built SMT term.
 func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string, bool) {
 	switch n := expr.(type) {
+	case *ast.IndexExpr:
+		return tr.booleanArrayIndexTerm(n, env)
 	case *ast.ExprBlock:
 		return tr.runtimeRangeQuantifierTerm(n, env)
 	case *ast.TernaryExpr:

@@ -1,0 +1,11 @@
+# Boolean array read terms
+
+The SMT translator now admits built-in fixed/dynamic boolean arrays into the existing Int-valued array identity/substitution model. A boolean read is represented as `select(array, index) != 0`. Every actual boolean array has the 0/1 interpretation, so additional integer encodings add models rather than exclude actual source states. Source typing still rejects numeric arithmetic on boolean elements. Numeric equality of raw reads also agrees with boolean equality on the actual 0/1 states.
+
+Admission requires a boolean element type and a plain built-in index. Unsupported fallback, alternate indexing, specialized/overlay/dictionary reads, wrong element types, non-arrays, and length-only bindings decline. Original analyzed callee object types remain authoritative. Untyped synthetic callee nodes decline rather than borrow a same-named caller type. Explicit callee actual bindings retain the existing arrayTermEnv unbound-root guard.
+
+Boolean stores remain conservative: unsupported boolean RHS terms cannot be inserted into the Int-valued store model and preservation declines. Regression controls reject direct/callee writes, mutation through a potentially aliasing second mutable parameter, literal writes, and repeated read calls across a write. Positive controls cover identity and callee substitution. Admission controls cover alias identity, different indices/arrays, wrong result annotations, non-array/unknown roots, fallback reads, length-only bindings, and callee shadow-name hygiene.
+
+The associated-index membership probe demonstrates the missing boolean-read support but its complete loop invariant still does not prove. This change does not qualify that helper, a Stage1 product, or incremental compilation speed. No shared Core or self-hosted source was modified by this isolated change.
+
+Verification: 38 top-level focused tests passed with 0 skips, package time 15.199 seconds, including array quantifier/store controls, quantified call soundness, complete annotation fold induction and enum-tag step contracts. Static review found no blocker in numeric equality, loop store propagation, or analyzed callee substitution; its synthetic-callee hardening suggestion is implemented and regression-tested. Raw evidence: `build/verification/smt-bool-array-20261018/hardened-regressions.txt`.
