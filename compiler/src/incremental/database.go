@@ -160,7 +160,7 @@ func (db *Database) Evaluate(ctx context.Context, key Key) (string, error) {
 		return "", ctx.Err()
 	}
 	defer func() { <-db.gate }()
-	return db.evaluate(ctx, key, map[Key]bool{})
+	return db.evaluate(ctx, key, nil)
 }
 
 // EvaluateBatch validates each requested dependency closure while holding one
@@ -294,6 +294,11 @@ func (db *Database) evaluate(ctx context.Context, key Key, active map[Key]bool) 
 	if known && old.verified == db.revision {
 		db.stats.MemoHits++
 		return old.value, nil
+	}
+	// Root memo hits need no cycle-detection storage. Nested calls and batch
+	// roots already carry their invocation-local active set.
+	if active == nil {
+		active = map[Key]bool{}
 	}
 	active[key] = true
 	defer delete(active, key)

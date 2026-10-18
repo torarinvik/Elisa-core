@@ -2809,3 +2809,27 @@ first-use prewarm are outside timing. This supports removing repeated tool
 dispatch overhead, not a stable whole-project speedup claim.
 Exact source, race logs and all timing samples are retained under
 `build/verification/incremental-merger-resolution-20261018/`.
+
+
+### Defer root cycle storage until a query needs evaluation
+
+Single-query `Evaluate` now passes an absent active set; recursive evaluation
+creates it only after checking cancellation, active-cycle membership and the
+current-revision memo. Batch evaluation retains its one shared invocation-local
+set. Actual dependency validation/evaluator execution still installs the active
+key and removes it on every exit. Thus memo hits avoid allocating unused storage
+without changing graph validation or revision rules.
+
+A current-revision memo microbenchmark eliminates its 48-byte allocation entirely
+(1 to 0 allocations). Five single-CPU samples after the change span 64.32–76.23
+ns/op; before samples span 84.87–423.9 ns/op, with obvious shared-host variation.
+The allocation result is repeatable, but those timing samples do not qualify a
+stable speedup percentage or whole-compiler latency improvement. The new
+regression verifies cancellation even for a memo hit and invalidation after an
+input edit. The complete incremental-engine suite passes under race detection
+(1.939 s). Exact source and logs are in
+`build/verification/incremental-root-memo-20261018/`.
+
+Semantic incremental integration also passes under the race detector; its exact
+terminal result is retained in `elisa-root-memo-semantic-race.txt` in that evidence
+directory. The pre-existing uncommitted batch-benchmark edit was preserved.
