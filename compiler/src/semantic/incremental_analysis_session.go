@@ -773,6 +773,9 @@ func primitiveExpressionDigest(fn *ast.FuncDecl, nodes []ast.Expr) string {
 			data = append(data, 'C')
 			data = binary.LittleEndian.AppendUint64(data, uint64(len(node.Value)))
 			data = append(data, node.Value...)
+		case *ast.MembershipRangeExpr:
+			data = append(data, 'R')
+			data = binary.LittleEndian.AppendUint64(data, uint64(node.Op))
 		case *ast.ParenExpr:
 			data = append(data, 'P')
 		case *ast.UnaryExpr:
@@ -870,7 +873,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	query := incremental.Key{Kind: "primitive-return", Name: key}
 	encoded, err := session.db.Evaluate(context.Background(), query)
 	if err == nil && encoded != "" {
-		if len(encoded) == len(nodes) && ((!predicate && validPrimitiveTyping(encoded)) || (predicate && validPredicateTyping(encoded))) {
+		if len(encoded) == len(nodes) && ((!predicate && validPrimitiveTyping(encoded)) || (predicate && predicateTypingMatchesNodes(nodes, encoded))) {
 			restored := replayPrimitiveParameterNodes(a, nodes, encoded)
 			session.stats.PrimaryBodiesReused++
 			session.stats.ReusedExpressionNodes += uint64(restored)
@@ -900,6 +903,17 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	}
 	types := make([]byte, len(nodes))
 	for i, expr := range nodes {
+		if _, rangeNode := expr.(*ast.MembershipRangeExpr); predicate && rangeNode {
+			// The marker means exactly "no standalone semantic contribution".
+			// Decline if a later analyzer adds one instead of silently losing it.
+			_, typed := a.exprTypes[expr]
+			_, facts := a.exprFacts[expr]
+			if typed || facts {
+				return
+			}
+			types[i] = predicateRangeTypeTag
+			continue
+		}
 		typ, ok := a.exprTypes[expr].(*BuiltinType)
 		_, parameter := expr.(*ast.Ident)
 		if !ok || (!parameter && a.exprFacts[expr].HasAnyFacts()) || typ != a.namedTypes[typ.Name] {
@@ -926,7 +940,10 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	if predicate {
 		value.Class = "predicate-v1"
 		value.Safety = predicateOperatorAbsence
-		if !validPredicateTyping(value.Types) {
+		if validRangePredicateTyping(value.Types) {
+			value.Class = "predicate-range-v1"
+		}
+		if !predicateTypingMatchesNodes(nodes, value.Types) {
 			return
 		}
 	}

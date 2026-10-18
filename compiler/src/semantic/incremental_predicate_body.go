@@ -90,6 +90,68 @@ func validPredicateTyping(types string) bool {
 	return true
 }
 
+// Range containers have no standalone semantic ExprType. Their children are
+// typed scalars; the normalized candidate-list type is rebuilt on current ASTs.
+const predicateRangeTypeTag byte = 'R'
+
+func validRangePredicateTyping(types string) bool {
+	if len(types) == 0 || len(types) > 4096 || types[0] != 'b' {
+		return false
+	}
+	found := false
+	for i := range types {
+		if types[i] == predicateRangeTypeTag {
+			found = true
+			continue
+		}
+		if predicateTypeName(types[i]) == "" {
+			return false
+		}
+	}
+	return found
+}
+
+func predicateTypingMatchesNodes(nodes []ast.Expr, types string) bool {
+	if len(nodes) != len(types) {
+		return false
+	}
+	ranges := false
+	for i, node := range nodes {
+		_, rangeNode := node.(*ast.MembershipRangeExpr)
+		if rangeNode != (types[i] == predicateRangeTypeTag) {
+			return false
+		}
+		ranges = ranges || rangeNode
+	}
+	if ranges {
+		return validRangePredicateTyping(types)
+	}
+	return validPredicateTyping(types)
+}
+
+// Cold analysis wraps direct ranges in a one-element candidate list. Both
+// spellings have the same source protocol; retain the current wrapper, never a
+// prior invocation's AST or ArrayType. Other list shapes remain unsupported.
+func predicateMembershipRange(expr ast.Expr) (*ast.MembershipRangeExpr, *ast.ListLitExpr, bool) {
+	switch node := expr.(type) {
+	case *ast.MembershipRangeExpr:
+		return node, nil, node != nil
+	case *ast.ListLitExpr:
+		if node == nil || len(node.Elems) != 1 {
+			return nil, nil, false
+		}
+		copy := *node
+		copy.Position = lexer.Pos{}
+		copy.Elems = nil
+		if !reflect.ValueOf(copy).IsZero() {
+			return nil, nil, false
+		}
+		rangeNode, ok := node.Elems[0].(*ast.MembershipRangeExpr)
+		return rangeNode, node, ok && rangeNode != nil
+	}
+	return nil, nil, false
+}
+
 func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes []ast.Expr) bool {
 	if a == nil || fn == nil || len(fn.Params) > 256 || len(fn.Params) != 0 && a.currentScope == nil {
 		return false
@@ -207,7 +269,7 @@ func predicateExprBuiltinTypeName(expr ast.Expr, parameterTypes map[string]strin
 			return predicateExprBuiltinTypeName(node.Operand, parameterTypes)
 		}
 	case *ast.BinaryExpr:
-		if node.Op == lexer.TOKEN_AND || node.Op == lexer.TOKEN_OR || predicateComparisonOperator(node.Op) {
+		if node.Op == lexer.TOKEN_AND || node.Op == lexer.TOKEN_OR || node.Op == lexer.TOKEN_IN || predicateComparisonOperator(node.Op) {
 			return "bool"
 		}
 	}
@@ -290,6 +352,7 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	}
 	var nodes []ast.Expr
 	seen := map[ast.Expr]bool{}
+	var activeRange *ast.MembershipRangeExpr
 	var visit func(ast.Expr, int) bool
 	visit = func(expr ast.Expr, depth int) bool {
 		if expr == nil || (reflect.ValueOf(expr).Kind() == reflect.Ptr && reflect.ValueOf(expr).IsNil()) || depth > 128 || len(nodes) >= 4096 || seen[expr] || bytes > primitiveSourceByteBudget {
@@ -342,6 +405,23 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 			// type-only replay cannot reconstruct.
 			admissible := node.Op == lexer.TOKEN_NOT || node.Op == lexer.TOKEN_MINUS && predicateUnaryMinusIsIntrinsic(node.Operand, parameterTypes)
 			return admissible && reflect.ValueOf(copy).IsZero() && visit(node.Operand, depth+1)
+		case *ast.MembershipRangeExpr:
+			if node != activeRange {
+				return false
+			}
+			activeRange = nil
+			copy := *node
+			copy.Position = lexer.Pos{}
+			copy.Start, copy.End, copy.Op = nil, nil, 0
+			if !reflect.ValueOf(copy).IsZero() {
+				return false
+			}
+			switch node.Op {
+			case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_RANGE_LE:
+			default:
+				return false
+			}
+			return visit(node.Start, depth+1) && visit(node.End, depth+1)
 		case *ast.BinaryExpr:
 			copy := *node
 			copy.Position = lexer.Pos{}
@@ -350,6 +430,17 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 			copy.Right = nil
 			if !reflect.ValueOf(copy).IsZero() {
 				return false
+			}
+			if node.Op == lexer.TOKEN_IN {
+				rangeNode, _, ok := predicateMembershipRange(node.Right)
+				if !ok || !visit(node.Left, depth+1) {
+					return false
+				}
+				prior := activeRange
+				activeRange = rangeNode
+				accepted := visit(rangeNode, depth+1)
+				activeRange = prior
+				return accepted
 			}
 			switch node.Op {
 			case lexer.TOKEN_AND, lexer.TOKEN_OR, lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:

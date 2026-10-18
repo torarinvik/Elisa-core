@@ -108,10 +108,10 @@ func evaluatePrimitiveProduct(reader *incremental.Reader, name, source string, a
 	}
 	safetyKey := primitiveSafetyKey
 	expected := primitiveOperatorAbsence
-	if product.Class == "predicate-v1" && allowPredicate {
+	if (product.Class == "predicate-v1" || product.Class == "predicate-range-v1") && allowPredicate {
 		safetyKey = primitiveInput("predicate-safety", name)
 		expected = predicateOperatorAbsence
-		if !validPredicateTyping(product.Types) {
+		if product.Class == "predicate-v1" && !validPredicateTyping(product.Types) || product.Class == "predicate-range-v1" && !validRangePredicateTyping(product.Types) {
 			return "", errPrimitiveProductMiss
 		}
 	} else if product.Class != "" || !validPrimitiveTyping(product.Types) {

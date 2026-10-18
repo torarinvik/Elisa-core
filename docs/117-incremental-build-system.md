@@ -303,7 +303,8 @@ live-analyzer hydration and actual body-cache integration remain unfinished.
 freshly parsed complete program on each call. Keep one session per expanded
 program/root. Primary body products reuse closed canonical-scalar single-return
 functions, including the original integer arithmetic grammar and a guarded
-boolean predicate grammar. The separate local-initializer product reuses eligible
+boolean predicate grammar, including intrinsic scalar range membership. The
+separate local-initializer product reuses eligible
 straight-line canonical-i64 initializers before a plain final return. Each path
 has its own syntax and current-binding checks; unsupported bodies and
 initializers stay on ordinary analysis. Plain namespace/module functions have
@@ -2545,3 +2546,50 @@ coverage; most project bodies and the overall incremental goal remain pending.
 Sources, frozen qualification backing files, regression logs and project/census
 output are retained in
 `build/verification/incremental-contract-return-reuse-20261018/`.
+
+
+### Intrinsic scalar range-predicate reuse
+
+The predicate grammar now admits canonical scalar `in` ranges, including their
+combinations with comparisons and logical operators. The dedicated
+`predicate-range-v1` product records a non-type marker for range containers:
+cold analysis does not assign those nodes an ExprType. Replay restores current
+scalar children, performs the normal affine-consumption hooks, recreates the
+current one-candidate list wrapper when needed, and rebuilds its ArrayType and
+optimization facts. No AST or semantic type handle is retained across analyses.
+The source protocol includes range operators and bounds; wrapper normalization
+is canonicalized for hashing. Operator/type binding checks remain current.
+
+Range/List AST schemas are pinned. The non-type marker is allowed only at range
+container positions, and publication declines if a range acquires a standalone
+type or optimization-fact entry. Other candidate-list forms and non-scalar
+parameter types remain outside this cache path. The legacy predicate format
+still rejects range-only markers.
+
+The regression first reproduced missing reuse. Full Result parity now covers
+character, signed/narrow integer and parameter bounds, composed predicates,
+source relocation, operator/bound changes, invalid-bound rejection/recovery,
+and current postcondition checking with SMT on/off. Strict postcondition tests
+use directly decidable arithmetic clauses to separate cache behavior from
+existing range-formula prover limitations. Native execution tests exercise
+cached inclusive/exclusive ranges and changed boundary behavior.
+
+Frozen committed semantic/backend packages at `d458be49` plus owned range changes
+passed selected incremental/membership/contract regressions under the race
+detector: semantic 12.261 s, backend 29.688 s. On the matched frozen parser-project
+novel-body edit workload, body reuse increased from 7 to 68, checks fell from
+1,951 to 1,890, and restored expression nodes increased from 19 to 2,667. The
+source census agrees: 68 return bodies admitted, including 66 predicates.
+All 2,279 diagnostics preserved digest
+`65396690155f7ad6ae758f9b9e337ee217eafbd96a98474262676748ce08a955`.
+
+The single before/after retained samples were 4.948/4.961 s: this establishes
+coverage and diagnostic parity, not a measured whole-project speedup. Parsing,
+prewarming and diagnostic comparison were excluded, SMT was off, and settings
+were GOMAXPROCS=4/GOGC=1200/GOMEMLIMIT=8GiB. The snapshot still has its 980
+existing errors and does not reach LLVM generation. Most project bodies remain
+outside reuse; the full incremental compilation goal is unfinished.
+
+Sources, exact qualification backing files, binary hashes, native/race logs and
+project/census results are retained under
+`build/verification/incremental-predicate-ranges-20261018/`.
