@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"sort"
 	"testing"
 )
@@ -49,6 +50,69 @@ func TestLocalIncrementalBodyAdmissionCensus(t *testing.T) {
 				}
 			case *ast.FuncDecl:
 				counts["functions"]++
+				// This is a syntax opportunity census, not authorization to reuse.
+				// Inspect top-level scalar locals independently of return types,
+				// unused non-scalar parameters and unrelated sibling statements.
+				scalarNames := map[string]bool{}
+				for _, param := range fn.Params {
+					name := predicateBuiltinSyntaxName(param.Type)
+					if (name == "int" || name == "i64") && !param.Mutable && param.DefaultValue == nil {
+						scalarNames[param.Name] = true
+					}
+				}
+				prospectiveLocals, multiNodeLocals := 0, 0
+				for _, stmt := range fn.Body {
+					decl, ok := stmt.(*ast.VarDeclStmt)
+					if !ok || decl == nil || decl.Value == nil {
+						continue
+					}
+					counts["direct-local-declarations"]++
+					counts["direct-local-value-shape/"+fmt.Sprintf("%T", decl.Value)]++
+					declared := decl.Type
+					_, mutableType := declared.(*ast.MutableType)
+					if wrapped, ok := declared.(*ast.MutableType); ok {
+						declared = wrapped.Elem
+					}
+					name := predicateBuiltinSyntaxName(declared)
+					if name != "int" && name != "i64" {
+						continue
+					}
+					counts["direct-scalar-locals/value-shape/"+fmt.Sprintf("%T", decl.Value)]++
+					if decl.Mutable || mutableType {
+						counts["direct-mutable-scalar-locals"]++
+					} else {
+						counts["direct-immutable-scalar-locals"]++
+					}
+					copy := *decl
+					copy.Position, copy.Name, copy.Type, copy.Value = lexer.Pos{}, "", nil, nil
+					copy.BindingExplicit = false
+					copy.Mutable = false // target mutability is counted, not authorized for reuse
+					if !reflect.ValueOf(copy).IsZero() {
+						continue
+					}
+					if nodes, _, eligible := primitiveI64ExpressionNodes(decl.Value, scalarNames, 0); eligible {
+						prospectiveLocals++
+						if len(nodes) > 1 {
+							multiNodeLocals++
+						}
+					}
+					if !decl.Mutable && !mutableType {
+						scalarNames[decl.Name] = true
+					}
+				}
+				if prospectiveLocals > 0 {
+					counts["prospective-top-level-scalar-locals"] += prospectiveLocals
+					counts["prospective-multi-node-scalar-locals"] += multiNodeLocals
+					if _, admitted := primitiveLocalInitializers(fn); !admitted {
+						counts["functions-with-excluded-scalar-locals"]++
+						counts["excluded-top-level-scalar-locals"] += prospectiveLocals
+						counts["excluded-multi-node-scalar-locals"] += multiNodeLocals
+						if multiNodeLocals > 0 {
+							t.Logf("excluded multi-node local candidate: %s locals=%d multi-node=%d", fn.Name, prospectiveLocals, multiNodeLocals)
+						}
+					}
+				}
+
 				if _, ok := predicateReturnExpressions(fn); ok {
 					counts["predicate-return-syntax"]++
 					t.Logf("predicate syntax candidate: %s", fn.Name)

@@ -2617,3 +2617,29 @@ count or speedup. Main incremental work remains incomplete.
 
 Sources and logs are retained under
 `build/verification/incremental-inline-typing-20261018/`.
+
+
+### Local initializer opportunity census (18 October)
+
+The opt-in body census now measures direct local initializer shapes independently
+of the enclosing function's return type and unrelated sibling statements. This
+is syntax instrumentation only: it does not authorize reuse, analyze nested
+statement blocks, or establish dependency validity. Mutable targets and explicit
+binding syntax are counted separately from production cache admission.
+
+On the frozen parser-project snapshot (SHA-256
+`86e7b5e6520848f6083217b40ac7ede1b09336dfe232f64c31d544e8bda94bd1`),
+there are 1,022 direct local initializers. Calls account for 309, field reads
+108, effect-granted expressions 88, and binary expressions 90. Only 40 locals
+are explicitly int/i64 (13 immutable, 27 mutable). Relaxing the whole-function
+header and target restrictions would expose 27 closed scalar syntax candidates
+in 26 functions: 26 integer literals and one unary expression, in
+`line_map_cache_best`. Multi-node counts include unary and parenthesized
+expressions; they do not imply expensive work.
+
+This rejects scalar-local broadening as the immediate throughput priority.
+General dependency-aware call/field reuse has a much larger measured syntax
+frontier, but needs current symbol/type, effect, ownership and diagnostic
+validation before any replay is safe. No production behavior or speedup is
+claimed by this census. The selected census test passes; exact source and log
+are retained under `build/verification/incremental-local-census-20261018/`.
