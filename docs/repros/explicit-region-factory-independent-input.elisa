@@ -1,0 +1,5 @@
+struct Packet[@r]:
+    bytes: mutable darray[u8] @r
+
+def wrong[@r, @s](bytes: mutable darray[u8] @s) -> Packet[r] @r:
+    return Packet[r]{bytes: bytes}

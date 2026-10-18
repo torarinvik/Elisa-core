@@ -41,3 +41,21 @@ parser suite passes (1.044 seconds). This correction alone, and together with an
 experimental already-substituted return-region lookup, did not eliminate the
 Packet insertion errors. The experimental semantic edit was removed. Further
 semantic tracing is required; this commit does not claim to fix Stage1.
+
+## Safety control blocks trusting the return contract
+
+An experimental semantic candidate retained a live already-substituted call
+return owner and consulted that owner before ambient-region fallbacks. It made
+the Packet positive pass and rejected scratch factory/field controls. Existing
+`Test.*(Region|Factory)` tests passed (0.451 seconds). However, the new
+`docs/repros/explicit-region-factory-independent-input.elisa` control was accepted:
+a factory declares return `@r` while returning its independent `@s` argument as
+the owned field of `Packet[r]`. A focused semantic-package test confirmed this
+acceptance also occurs with all experimental semantic edits removed (0.368
+seconds). This is an existing contract-enforcement gap in the integrated tree.
+
+The candidate was withdrawn rather than allowing callers to trust an unchecked
+contract. Its patch and test are saved under ignored
+`build/verification/factory-contract-safety-20261018/`. No semantic production
+change remains. Next fix must enforce independent region constraints on aggregate
+construction/return before enabling precise call-owner reuse.
