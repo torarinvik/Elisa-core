@@ -137,3 +137,19 @@ zero skips (5.281 seconds). This restores end-to-end coverage that previously
 stopped at the effect checker; compiler effect enforcement was not relaxed.
 The earlier combined run's twelve failures and four skips are now individually
 resolved by targeted reruns, rather than repeating unaffected cases.
+
+## Separate buffer ownership from descriptor-slot borrowing
+
+A new focused example exposed an inference gap: growing the explicitly owned
+`bytes @storage` field through `mutable Packet[storage]&` synthesized an extra
+`__rg_packet` region for the stack descriptor. The call could not infer it.
+The inference pass now omits that extra region only when resolved fields are
+known builtin scalars or explicit-region containers/views and at least one
+backing field exists. Type/permission-generic functions and unknown/indirect
+field shapes retain conservative inference.
+
+The semantic regression accepts a stack-local descriptor with an independently
+owned buffer, verifies no extra inferred region, and rejects an explicit claim
+that the stack slot lives in the buffer region. Region/factory/snapshot tests
+pass. End-to-end lowering uncovered a separate explicit specialization issue
+recorded below.

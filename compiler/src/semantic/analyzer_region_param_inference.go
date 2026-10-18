@@ -210,7 +210,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 					ambientGrownParam = p.Name
 				}
 			}
-		} else if sstamp, ok := regionlessRefStruct(p.Type); ok && !a.paramStructIsProgramLivedIn(funcScopes[fn], p.Type) {
+		} else if sstamp, ok := regionlessRefStruct(p.Type); ok && !a.paramStructIsProgramLivedIn(funcScopes[fn], p.Type) && !a.paramStructHasExplicitBackingIn(funcScopes[fn], fn, p.Type) {
 			// docs/91 S4 Stage 1: a region-less by-ref STRUCT param whose CONTAINER FIELD is grown
 			// (`def fill(m: mutable Mod&): m.bits.push(..)`), or which is forwarded to a region-
 			// requiring callee. Stamp the inferred region onto the struct ref (`Mod& @r`): the
@@ -1755,4 +1755,41 @@ func (a *Analyzer) paramStructIsProgramLived(typ ast.TypeExpr) bool {
 		return false
 	}
 	return a.typeCanContainRegionRefs(elem, map[string]bool{}) && a.typeIsProgramLivedCached(elem)
+}
+
+// paramStructHasExplicitBackingIn avoids assigning the descriptor slot's borrow
+// lifetime to buffers that already name their own allocation region. Unknown or
+// indirect field shapes retain the existing conservative inference.
+func (a *Analyzer) paramStructHasExplicitBackingIn(scoped scopedDecl, fn *ast.FuncDecl, typ ast.TypeExpr) bool {
+	if fn == nil || len(fn.TypeParams) != 0 || len(fn.PermissionParams) != 0 {
+		return false
+	}
+	result := false
+	saved := a.suppressDiagnostics
+	a.suppressDiagnostics = true
+	defer func() { a.suppressDiagnostics = saved }()
+	a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+		a.withRegionParams(fn.RegionParams, func() {
+			resolved := stripRefForBounds(a.resolveType(typ))
+			fields, ok := a.resolvedStructFields(resolved)
+			if !ok || len(fields) == 0 {
+				return
+			}
+			hasBacking := false
+			for _, field := range fields {
+				switch t := field.Type.(type) {
+				case *BuiltinType, *BitIntType:
+				case *DArrayType, *DictType, *SetType, *CStrType, *SViewType, *ViewType:
+					if containerRegion(t) == "" {
+						return
+					}
+					hasBacking = true
+				default:
+					return
+				}
+			}
+			result = hasBacking
+		})
+	})
+	return result
 }
