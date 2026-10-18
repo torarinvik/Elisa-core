@@ -90,6 +90,13 @@ and final executable linking. Full backend/server checks and focused race checks
 passed. Raw logs and relevant source hashes are saved under
 `build/verification/incremental-stable-shards-20261018/`.
 
+The structural-edit benchmark also reports per-phase time. A five-edit local
+sample measured growth at 31.09 ms IR, 30.81 ms partition preparation, 22.04 ms
+native emission and 14.87 ms merging (110.36 ms total including other overhead).
+Insertion measured 42.52/43.02/31.08/20.15 ms respectively (153.32 ms total).
+These are single diagnostic samples, not a new paired speedup claim; partition
+preparation is a material remaining cost alongside full-module lowering.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification
