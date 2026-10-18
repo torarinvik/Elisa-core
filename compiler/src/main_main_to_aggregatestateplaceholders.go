@@ -1074,6 +1074,15 @@ func parseIncludeDirective(line string) (string, bool) {
 	return "", false
 }
 func parseIncludeDirectiveBytes(line []byte) (string, bool) {
+	// Most source lines are not include directives. Avoid allocating their
+	// string copies; preserve the canonical parser for all possible forms.
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) != 0 && trimmed[0] == '#' {
+		trimmed = bytes.TrimSpace(trimmed[1:])
+	}
+	if !bytes.HasPrefix(trimmed, []byte("include ")) && !bytes.HasPrefix(line, []byte("{$")) {
+		return "", false
+	}
 	return parseIncludeDirective(string(line))
 }
 func printFile(w io.Writer, f *ast.File) {
