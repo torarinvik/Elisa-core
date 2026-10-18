@@ -21,24 +21,106 @@ const serverNativeEntryOverhead = 512
 
 type serverNativeIdentity struct {
 	digest         [32]byte
+	unitHint       [32]byte // Replacement hint only; never authorizes a cache hit.
 	source, config string
 }
 type serverNativeEntry struct {
 	identity serverNativeIdentity
 	object   string
 	bytes    int
+	response *serverCachedResponse
 }
 type serverNativeStats struct {
-	Hits, Misses, Evictions uint64
-	Bytes, Entries          int
+	Hits, Misses, Evictions      uint64
+	ResponseHits, ResponseMisses uint64
+	Bytes, Entries               int
 }
 
-// Only completed native bytes are retained. Semantic results and LLVM handles
-// never enter this cache; analysis and diagnostics run before every lookup.
+type serverCachedResponse struct {
+	response compileServerResponse
+	status   int
+}
+
+func (c *compileServerNativeCache) lookupResponse(id serverNativeIdentity) (compileServerResponse, int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, element := range c.buckets[id.digest] {
+		entry := element.Value.(*serverNativeEntry)
+		if entry.identity.config == id.config && entry.identity.source == id.source && entry.response != nil {
+			c.lru.MoveToFront(element)
+			c.stats.ResponseHits++
+			return entry.response.response, entry.response.status, true
+		}
+	}
+	c.stats.ResponseMisses++
+	return compileServerResponse{}, 0, false
+}
+
+// Share the object string and the existing LRU/byte budget with artifact reuse.
+// Only finalized successful responses can authorize skipping frontend analysis.
+func (c *compileServerNativeCache) retainResponse(id serverNativeIdentity, response compileServerResponse, status int) bool {
+	if status != 200 || !response.OK || response.Object == "" {
+		return false
+	}
+	extra := 0
+	for _, value := range []string{response.Output, response.IR, response.Value, response.Stderr, response.Error, response.ErrorCode} {
+		if len(value) > c.maxBytes-extra {
+			return false
+		}
+		extra += len(value)
+	}
+	if !c.retain(id, response.Object) {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, element := range c.buckets[id.digest] {
+		entry := element.Value.(*serverNativeEntry)
+		if entry.identity.config != id.config || entry.identity.source != id.source {
+			continue
+		}
+		if entry.response != nil {
+			return true
+		}
+		if entry.object != response.Object {
+			return false // Never silently substitute bytes in a finalized response.
+		}
+		if extra > c.maxBytes-entry.bytes {
+			return false // Preserve the object-only fallback when diagnostics are too large.
+		}
+		c.lru.MoveToFront(element)
+		for c.bytes > c.maxBytes-extra {
+			victim := c.evictionCandidate([32]byte{}, element)
+			if victim == nil {
+				return false
+			}
+			c.remove(victim)
+		}
+		response.Object = entry.object
+		response.Output = strings.Clone(response.Output)
+		response.IR = strings.Clone(response.IR)
+		response.Value = strings.Clone(response.Value)
+		response.Stderr = strings.Clone(response.Stderr)
+		response.Error = strings.Clone(response.Error)
+		response.ErrorCode = strings.Clone(response.ErrorCode)
+		entry.response = &serverCachedResponse{response: response, status: status}
+		entry.bytes += extra
+		c.bytes += extra
+		return true
+	}
+	return false // Another request may have evicted the object between locks.
+}
+
+// Completed native bytes and optionally their finalized successful response are
+// retained. Semantic results and LLVM handles never enter this cache. An exact
+// response hit skips analysis; object-only hits still validate and emit current
+// diagnostics before looking up the artifact.
 type compileServerNativeCache struct {
 	mu                          sync.Mutex
 	owner                       *backend.IncrementalObjectSession
 	buckets                     map[[32]byte][]*list.Element
+	unitCounts                  map[[32]byte]int
+	historyEntries              int
 	lru                         list.List
 	maxEntries, maxBytes, bytes int
 	stats                       serverNativeStats
@@ -63,6 +145,14 @@ func (c *compileServerNativeCache) lookup(id serverNativeIdentity) (string, bool
 }
 func (c *compileServerNativeCache) remove(element *list.Element) {
 	entry := element.Value.(*serverNativeEntry)
+	if unit := entry.identity.unitHint; unit != ([32]byte{}) {
+		if c.unitCounts[unit] <= 1 {
+			delete(c.unitCounts, unit)
+		} else {
+			c.historyEntries--
+			c.unitCounts[unit]--
+		}
+	}
 	bucket := c.buckets[entry.identity.digest]
 	for i, e := range bucket {
 		if e == element {
@@ -80,6 +170,31 @@ func (c *compileServerNativeCache) remove(element *list.Element) {
 	c.bytes -= entry.bytes
 	c.lru.Remove(element)
 	c.stats.Evictions++
+}
+
+// Prefer LRU history over another unit's sole response. An incoming revision
+// makes its prior revision history too. Unknown hints keep ordinary LRU behavior;
+// collisions can affect replacement quality, never exact reuse authority.
+// protected is the object whose finalized response is being attached.
+func (c *compileServerNativeCache) evictionCandidate(incoming [32]byte, protected *list.Element) *list.Element {
+	last := c.lru.Back()
+	if last == protected && last != nil {
+		last = last.Prev()
+	}
+	// Distinct-unit streaming remains O(1) when no history can be preferred.
+	if c.historyEntries == 0 && (incoming == ([32]byte{}) || c.unitCounts[incoming] == 0) {
+		return last
+	}
+	for element := c.lru.Back(); element != nil; element = element.Prev() {
+		if element == protected {
+			continue
+		}
+		unit := element.Value.(*serverNativeEntry).identity.unitHint
+		if unit != ([32]byte{}) && (unit == incoming || c.unitCounts[unit] > 1) {
+			return element
+		}
+	}
+	return last
 }
 func (c *compileServerNativeCache) retain(id serverNativeIdentity, object string) bool {
 	remaining := c.maxBytes - serverNativeEntryOverhead
@@ -103,10 +218,19 @@ func (c *compileServerNativeCache) retain(id serverNativeIdentity, object string
 		}
 	}
 	for c.lru.Len() >= c.maxEntries || c.bytes > c.maxBytes-size {
-		c.remove(c.lru.Back())
+		c.remove(c.evictionCandidate(id.unitHint, nil))
 	}
-	entry := &serverNativeEntry{identity: serverNativeIdentity{digest: id.digest, source: strings.Clone(id.source), config: strings.Clone(id.config)}, object: strings.Clone(object), bytes: size}
+	entry := &serverNativeEntry{identity: serverNativeIdentity{digest: id.digest, unitHint: id.unitHint, source: strings.Clone(id.source), config: strings.Clone(id.config)}, object: strings.Clone(object), bytes: size}
 	element := c.lru.PushFront(entry)
+	if id.unitHint != ([32]byte{}) {
+		if c.unitCounts == nil {
+			c.unitCounts = make(map[[32]byte]int)
+		}
+		if c.unitCounts[id.unitHint] > 0 {
+			c.historyEntries++
+		}
+		c.unitCounts[id.unitHint]++
+	}
 	c.buckets[id.digest] = append(c.buckets[id.digest], element)
 	c.bytes += size
 	return true
@@ -210,5 +334,5 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 		return serverNativeIdentity{}, false
 	}
 	// The build key hashes the exact source; retain and compare those bytes too.
-	return serverNativeIdentity{digest: sha256.Sum256(config), source: req.Source, config: string(config)}, true
+	return serverNativeIdentity{digest: sha256.Sum256(config), unitHint: sha256.Sum256([]byte(absolute)), source: req.Source, config: string(config)}, true
 }

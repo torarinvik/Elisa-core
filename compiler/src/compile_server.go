@@ -104,6 +104,18 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 	if mode == "" {
 		mode = emitAST
 	}
+	var responseIdentity serverNativeIdentity
+	responseCacheable := false
+	var artifactIdentity serverNativeIdentity
+	publishNative := false
+	if mode == emitObject && sessions != nil && sessions.replayResponses {
+		responseIdentity, responseCacheable = serverNativeObjectIdentity(req, program, sessions)
+		if responseCacheable {
+			if cached, status, hit := sessions.native.lookupResponse(responseIdentity); hit {
+				return cached, status
+			}
+		}
+	}
 	var session *semantic.IncrementalAnalysisSession
 	if sessions != nil && req.Incremental && compileServerModeAnalyzes(mode) {
 		session = sessions.session(program.filename, mode)
@@ -206,7 +218,11 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
+		// Analysis may outlive an environment/toolchain change. Re-establish
+		// current artifact authority rather than looking up with the early key.
 		identity, cacheable := serverNativeObjectIdentity(req, program, sessions)
+		artifactIdentity = identity
+		responseCacheable = responseCacheable && cacheable && identity.config == responseIdentity.config && identity.source == responseIdentity.source
 		if cacheable {
 			if object, hit := sessions.native.lookup(identity); hit {
 				response.Object = object
@@ -239,13 +255,7 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 			return compileServerResponse{OK: false, Error: err.Error()}, http.StatusInternalServerError
 		}
 		response.Object = base64.StdEncoding.EncodeToString(object)
-		if cacheable {
-			// Never publish under a context that changed during this synchronous build.
-			current, ok := serverNativeObjectIdentity(req, program, sessions)
-			if ok && current.config == identity.config && current.source == identity.source {
-				sessions.native.retain(identity, response.Object)
-			}
-		}
+		publishNative = cacheable
 	case emitInterpret:
 		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {
@@ -264,6 +274,19 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 	}
 	if trimmed := strings.TrimSpace(stderr.String()); trimmed != "" {
 		response.Stderr = trimmed
+	}
+	if responseCacheable || publishNative {
+		// Never publish an artifact or response under a context that changed
+		// during this build. Both tiers share one final context validation.
+		current, ok := serverNativeObjectIdentity(req, program, sessions)
+		if ok && current.config == artifactIdentity.config && current.source == artifactIdentity.source {
+			if publishNative {
+				sessions.native.retain(artifactIdentity, response.Object)
+			}
+			if responseCacheable {
+				sessions.native.retainResponse(artifactIdentity, response, http.StatusOK)
+			}
+		}
 	}
 	return response, http.StatusOK
 }

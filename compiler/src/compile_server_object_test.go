@@ -14,7 +14,7 @@ import (
 )
 
 func TestCompileServerIncrementalNativeObjects(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	var source strings.Builder
 	for i := 0; i < 32; i++ {
@@ -100,7 +100,7 @@ func TestCompileServerIncrementalNativeObjects(t *testing.T) {
 }
 
 func TestCompileServerAnonymousObjectsUseDirectEmission(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	objects := make([]string, 2)
 	dir := t.TempDir()
@@ -141,7 +141,7 @@ func TestCompileServerAnonymousObjectsUseDirectEmission(t *testing.T) {
 }
 
 func TestCompileServerConcurrentNativeObjects(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	var source strings.Builder
 	for i := 0; i < 32; i++ {
 		fmt.Fprintf(&source, "def work%d(value: i64) -> i64:\n    return value + %d + %s\n\n", i, i+1, strings.Repeat("(value * 2 - value * 2) + ", 15)+"(value * 2 - value * 2)")

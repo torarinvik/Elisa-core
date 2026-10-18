@@ -720,8 +720,7 @@ func loopIntIdentName(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
 // The invariants may be assumed as hypotheses because establishment (checked separately) covers the
 // base case, so at the top of an arbitrary iteration every invariant holds.
 func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr, arrayStores []loopArrayStore, outerInvs []*ast.ContractStmt) (bool, string) {
-	solver := a.openSMT()
-	if solver == nil || target == nil {
+	if !a.smtEnabled || a.smtUnavailable || target == nil {
 		return false, ""
 	}
 	savedRangeFacts := cloneScopeRangeFacts(a.currentScope)

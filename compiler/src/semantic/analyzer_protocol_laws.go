@@ -112,10 +112,7 @@ func (a *Analyzer) dischargeOneProtocolLaw(iface *StaticInterface, impl *StaticI
 // Returns true only on a sound proof. Any failure (unsupported body, declined solver) returns false,
 // which routes the law to the fuzz fallback.
 func (a *Analyzer) tryProveProtocolLaw(law *ast.FuncDecl, body ast.Expr, st *StructType, methodBodies map[string]*ast.FuncDecl) bool {
-	if !a.smtEnabled {
-		return false
-	}
-	if a.openSMT() == nil {
+	if !a.smtEnabled || a.smtUnavailable {
 		return false
 	}
 	inlined, ok := inlineLawMethodCalls(body, methodBodies)

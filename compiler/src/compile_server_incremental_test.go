@@ -32,7 +32,7 @@ func compileServerResponsesEqual(left, right compileServerResponse) bool {
 }
 
 func TestCompileServerReusesBodiesAcrossRequestsAndInvalidatesEdits(t *testing.T) {
-	cache := newCompileServerSessionCache(8)
+	cache := newCompileServerArtifactOnlyTestCache(8)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	filename := filepath.Join(t.TempDir(), "server_incremental.elisa")
 	source := "def value() -> i64:\n    return 20 + 1\n"
@@ -69,7 +69,7 @@ func TestCompileServerReusesBodiesAcrossRequestsAndInvalidatesEdits(t *testing.T
 }
 
 func TestCompileServerIncrementalReuseRequiresOptIn(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	request := compileServerRequest{
 		Mode:     "semantic",
@@ -113,7 +113,7 @@ func TestCompileServerIncrementalReuseRequiresOptIn(t *testing.T) {
 }
 
 func TestCompileServerInspectionModesReuseWithoutChangingOutput(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	request := compileServerRequest{
 		Mode:        "ast",
@@ -144,7 +144,7 @@ func TestCompileServerInspectionModesReuseWithoutChangingOutput(t *testing.T) {
 }
 
 func TestCompileServerBackendOutputParityAndReuse(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	directory := t.TempDir()
 	for _, mode := range []string{"ir", "llvm"} {
@@ -184,7 +184,7 @@ func TestCompileServerBackendOutputParityAndReuse(t *testing.T) {
 
 func TestCompileServerConcurrentRequestsShareSessionSafely(t *testing.T) {
 	const requestCount = 8
-	cache := newCompileServerSessionCache(2)
+	cache := newCompileServerArtifactOnlyTestCache(2)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	request := compileServerRequest{
 		Mode:        "semantic",
@@ -221,7 +221,7 @@ func TestCompileServerConcurrentRequestsShareSessionSafely(t *testing.T) {
 }
 
 func TestCompileServerSessionsSeparateFilenamesAndAnalysisProfiles(t *testing.T) {
-	cache := newCompileServerSessionCache(8)
+	cache := newCompileServerArtifactOnlyTestCache(8)
 	handler := newCompileServerMuxWithSessions(nil, nil, cache)
 	filename := filepath.Join(t.TempDir(), "profile.elisa")
 	request := compileServerRequest{
@@ -271,7 +271,7 @@ func TestCompileServerSessionsSeparateFilenamesAndAnalysisProfiles(t *testing.T)
 }
 
 func TestCompileServerSessionCacheEvictsLeastRecentlyUsedEntries(t *testing.T) {
-	cache := newCompileServerSessionCache(2)
+	cache := newCompileServerArtifactOnlyTestCache(2)
 	first := cache.session("first.elisa", emitSemantic)
 	second := cache.session("second.elisa", emitSemantic)
 	if cache.session("first.elisa", emitSemantic) != first {

@@ -26,15 +26,16 @@ type compileServerSessionEntry struct {
 // many one-off filenames from retaining every session for its entire lifetime.
 type compileServerSessionCache struct {
 	tokens *sourceTokenCache
-	// Native artifacts share one bounded cache across source paths. Exact current
-	// bitcode/target keys prevent cross-request confusion and keep total storage
-	// bounded independently of the number of semantic sessions.
-	native     *compileServerNativeCache
-	objects    *backend.IncrementalObjectSession
-	mu         sync.Mutex
-	maxEntries int
-	clock      uint64
-	entries    map[compileServerSessionKey]compileServerSessionEntry
+	// Completed objects/responses share the configured session entry limit and
+	// a separate fixed byte budget. A smaller hardcoded entry limit would thrash
+	// on project-wide no-op passes that fit the configured working set.
+	native          *compileServerNativeCache
+	replayResponses bool
+	objects         *backend.IncrementalObjectSession
+	mu              sync.Mutex
+	maxEntries      int
+	clock           uint64
+	entries         map[compileServerSessionKey]compileServerSessionEntry
 }
 
 func newCompileServerSessionCache(maxEntries int) *compileServerSessionCache {
@@ -43,11 +44,12 @@ func newCompileServerSessionCache(maxEntries int) *compileServerSessionCache {
 	}
 	objects := backend.NewIncrementalObjectSession(0, 0)
 	return &compileServerSessionCache{
-		native:     newCompileServerNativeCache(objects, 8, serverNativeCacheBytes),
-		maxEntries: maxEntries,
-		tokens:     newSourceTokenCache(maxEntries, defaultSourceTokenCacheBytes),
-		objects:    objects,
-		entries:    make(map[compileServerSessionKey]compileServerSessionEntry),
+		replayResponses: true,
+		native:          newCompileServerNativeCache(objects, maxEntries, serverNativeCacheBytes),
+		maxEntries:      maxEntries,
+		tokens:          newSourceTokenCache(maxEntries, defaultSourceTokenCacheBytes),
+		objects:         objects,
+		entries:         make(map[compileServerSessionKey]compileServerSessionEntry),
 	}
 }
 

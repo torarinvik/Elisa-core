@@ -14,7 +14,7 @@ import (
 
 func TestCompileServerSuffixReplayUsesCurrentDefaultArguments(t *testing.T) {
 	source := "def first(x: i64 = 41) -> i64:\n    return x + 1\n\ndef main() -> i64:\n    return first()\n"
-	cache := newCompileServerSessionCache(2)
+	cache := newCompileServerArtifactOnlyTestCache(2)
 	request := compileServerRequest{Filename: "suffix_defaults.elisa", Source: source, Incremental: true}
 	for _, mode := range []string{"semantic", "lowered", "llvm"} {
 		request.Mode = mode
@@ -56,7 +56,7 @@ func TestCompileServerSuffixReplayNativeEdits(t *testing.T) {
 	}
 	text.WriteString("def main() -> i64:\n    return first()\n")
 	source := text.String()
-	cache := newCompileServerSessionCache(2)
+	cache := newCompileServerArtifactOnlyTestCache(2)
 	request := compileServerRequest{Mode: "obj", Filename: "suffix_native.elisa", Source: source, Incremental: true}
 	for i := 0; i < 2; i++ {
 		got, _ := executeCompileServerRequestWithSessions(request, cache)

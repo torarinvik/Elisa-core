@@ -51,7 +51,7 @@ func requireServerNativeIdentity(t testing.TB, request compileServerRequest, cac
 }
 
 func TestCompileServerNativeArtifactKeepsAnalysisAndSkipsLLVM(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(t.TempDir(), "native_noop.elisa"), Source: serverNativeArtifactSource(), Incremental: true}
 	requireServerNativeIdentity(t, request, cache)
 	run := func() compileServerResponse {
@@ -118,7 +118,7 @@ func TestCompileServerNativeArtifactKeepsAnalysisAndSkipsLLVM(t *testing.T) {
 
 func TestCompileServerNativeArtifactWarningsAndDeclines(t *testing.T) {
 	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "0")
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(t.TempDir(), "warnings.elisa"), Source: "@deprecated(\"use newer\")\ndef old() -> i64:\n    return 3\n\ndef main() -> i64:\n    return old()\n", Incremental: true}
 	requireServerNativeIdentity(t, request, cache)
 	first, status := executeCompileServerRequestWithSessions(request, cache)
@@ -138,7 +138,7 @@ func TestCompileServerNativeArtifactWarningsAndDeclines(t *testing.T) {
 }
 
 func TestCompileServerNativeArtifactOwnerAndPayloadDeclines(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	request := compileServerRequest{Mode: "obj", Filename: "identity.elisa", Source: "def main() -> i64:\n    return 1\n", Incremental: true}
 	program, err := loadedProgramFromRequest(request)
 	if err != nil {
@@ -192,7 +192,7 @@ func TestCompileServerNativeArtifactOwnerAndPayloadDeclines(t *testing.T) {
 }
 
 func TestCompileServerNativeArtifactConcurrentSameIdentity(t *testing.T) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(t.TempDir(), "same.elisa"), Source: serverNativeArtifactSource(), Incremental: true}
 	requireServerNativeIdentity(t, request, cache)
 	first, status := executeCompileServerRequestWithSessions(request, cache)
@@ -237,7 +237,7 @@ func BenchmarkCompileServerNativeNoop(b *testing.B) {
 			name = "completed"
 		}
 		b.Run(name, func(b *testing.B) {
-			cache := newCompileServerSessionCache(4)
+			cache := newCompileServerArtifactOnlyTestCache(4)
 			request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "fixed.elisa"), Source: serverNativeArtifactSource(), Incremental: true}
 			requireServerNativeIdentity(b, request, cache)
 			if !enabled {
@@ -292,7 +292,7 @@ func BenchmarkCompileServerNativeBodyEdit(b *testing.B) {
 			name = "completed"
 		}
 		b.Run(name, func(b *testing.B) {
-			cache := newCompileServerSessionCache(4)
+			cache := newCompileServerArtifactOnlyTestCache(4)
 			request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "edits.elisa"), Incremental: true}
 			fixture := strings.Replace(serverNativeArtifactSource(), "return value + 1 +", "return value + 0x%016x +", 1)
 			request.Source = fmt.Sprintf(fixture, 1)
@@ -340,7 +340,7 @@ func BenchmarkCompileServerNativeBodyEdit(b *testing.B) {
 // Isolate identity preparation from parsing, analysis, LLVM and object I/O.
 // The ordinary miss path currently computes this identity twice.
 func BenchmarkCompileServerNativeIdentity(b *testing.B) {
-	cache := newCompileServerSessionCache(4)
+	cache := newCompileServerArtifactOnlyTestCache(4)
 	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "identity.elisa"), Source: serverNativeArtifactSource(), Incremental: true}
 	requireServerNativeIdentity(b, request, cache)
 	program, err := loadedProgramFromRequest(request)
@@ -364,7 +364,7 @@ func BenchmarkCompileServerNativeIdentity(b *testing.B) {
 // Interleaving controls process initialization and short-term host drift. It
 // shares process-wide LLVM/GC state, so it complements independent-process arms.
 func BenchmarkCompileServerNativeBodyEditInterleaved(b *testing.B) {
-	caches := [2]*compileServerSessionCache{newCompileServerSessionCache(4), newCompileServerSessionCache(4)}
+	caches := [2]*compileServerSessionCache{newCompileServerArtifactOnlyTestCache(4), newCompileServerArtifactOnlyTestCache(4)}
 	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "paired.elisa"), Incremental: true}
 	fixture := strings.Replace(serverNativeArtifactSource(), "return value + 1 +", "return value + 0x%016x +", 1)
 	request.Source = fmt.Sprintf(fixture, 1)

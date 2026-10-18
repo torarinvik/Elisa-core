@@ -651,6 +651,18 @@ func (a *Analyzer) storeScanTypeMayEncodeAddress(t Type, seen map[Type]bool) boo
 	if t == nil || seen[t] {
 		return false
 	}
+	if len(seen) == 0 {
+		return a.memoTypePredicate(&a.storeScanAddressMemo, t, func() bool {
+			return a.storeScanTypeMayEncodeAddressWalk(t, map[Type]bool{})
+		})
+	}
+	return a.storeScanTypeMayEncodeAddressWalk(t, seen)
+}
+
+func (a *Analyzer) storeScanTypeMayEncodeAddressWalk(t Type, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
 	seen[t] = true
 	switch tt := t.(type) {
 	case *BuiltinType:

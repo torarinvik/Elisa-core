@@ -26,13 +26,20 @@ object. The caller supplies final linking. A stable, unique filename identifies
 the translation unit. Anonymous/virtual units use direct emission so separately
 compiled snippets do not share temporary private-symbol namespaces.
 
-The server still parses and analyzes current source, rebuilds the whole LLVM
-module, verifies it, and performs current global optimization. It reuses native
-partitions only after comparing complete current partition bitcode and actual
-target triple/CPU/features. SHA256 indexes entries; exact byte comparison
-provides reuse authority. Selective definition cloning avoids copying every
-foreign function body. The cache owns bytes rather than AST or LLVM handles,
-accepts no supplied native artifacts, and shares a 256 MiB payload budget across
+Eligible exact successful inline object requests can replay their finalized
+response, including diagnostics and status, before parsing or semantic analysis.
+Admission uses the audited exact source/request, environment, compiler, and tool
+identity. Completed responses and whole objects share one bounded 128 MiB cache;
+diagnostics count toward its budget. Failed responses are not retained. An
+object-only hit still runs current frontend validation, then skips LLVM work.
+
+On other misses and edits, the partition path rebuilds the current LLVM module,
+verifies it, and performs current global optimization. It reuses native partitions
+only after comparing complete current partition bitcode and actual target
+triple/CPU/features. SHA256 indexes entries; exact byte comparison provides reuse
+authority. Selective definition cloning avoids copying every foreign function
+body. This separate partition cache owns bytes rather than AST or LLVM handles,
+accepts no supplied native artifacts, and has a 256 MiB payload budget across
 server filenames. The library exposes `NewIncrementalObjectSession` and
 `WriteObject`, plus counters and phase timings.
 

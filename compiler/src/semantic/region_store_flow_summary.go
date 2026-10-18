@@ -1738,6 +1738,21 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		// receiver borrow edge.
 		return a.storeFlowArgNames(call.Func.(*ast.FieldExpr).Object, handled), true
 	}
+	if a.storeFlowBuiltinDarrayReserve(call) {
+		// Inner calls are processed first. If one is unresolved, leave this
+		// outer call conservative so handling reserve cannot hide its effects.
+		var nested []reflect.Value
+		var capacityCalls []*ast.CallExpr
+		a.storeFlowMentions(reflect.ValueOf(call.Args[0]), 0, nil, &nested, &capacityCalls, false)
+		for _, inner := range capacityCalls {
+			if _, ok := handled[inner]; !ok {
+				return nil, false
+			}
+		}
+		// Capacity controls allocation, but is never stored as an element.
+		// reserve returns its mutable receiver, including its existing contents.
+		return a.storeFlowArgNames(call.Func.(*ast.FieldExpr).Object, handled), true
+	}
 	callee := a.storeFlowCallee(call)
 	if callee == nil {
 		if !a.storeFlowOpaqueExternCall(call) {
@@ -1967,7 +1982,7 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 		if fn == nil {
 			return
 		}
-		if a.storeFlowBuiltinDarrayTruncate(call) {
+		if a.storeFlowBuiltinDarrayTruncate(call) || a.storeFlowBuiltinDarrayReserve(call) {
 			mark(fn.Object)
 			return
 		}
@@ -2027,6 +2042,17 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 // storeFlowDarrayGrowthMethods are builtin darray methods that store their arguments into the
 // receiver without writing through them.
 var storeFlowDarrayGrowthMethods = map[string]bool{"push": true, "insert": true, "extend": true}
+
+// reserve can grow the receiver without retaining its capacity argument. Keep
+// this separate from the payload-storing growth methods. Argument type errors
+// are diagnosed by builtin call analysis; they cannot turn capacity into payload.
+func (a *Analyzer) storeFlowBuiltinDarrayReserve(call *ast.CallExpr) bool {
+	if call == nil || call.SafeReceiver != nil || call.HasArgForward || call.NamedArgCount() != 0 || len(call.Args) != 1 {
+		return false
+	}
+	field, ok := call.Func.(*ast.FieldExpr)
+	return ok && field != nil && field.Field == "reserve" && a.storeFlowBuiltinDarrayGrowthReceiver(field)
+}
 
 // storeFlowBuiltinDarrayTruncate recognizes the builtin DArray truncate operation
 // only for a proven DArray receiver and an integer count. In particular, arbitrary
