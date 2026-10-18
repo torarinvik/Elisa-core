@@ -24,3 +24,22 @@ candidate passed without skips in 2.196s (`/tmp/elisa-runner-smt-tests.txt`):
 This checkpoint is isolated. Full parser diagnostic execution and shared Core
 integration remain separate steps; no Stage1 build or speed claim follows from
 this test-framework correctness fix.
+
+
+## Qualified packed-store follow-up
+
+Commit `ea51f519` fixes recovered implicit store arguments for qualified enums.
+If expression metadata is missing, lowering uses the exact store type from the
+callee parameter. Existing expression store types retain priority. Sanitized
+synthetic names are not reversed to guess enum identity.
+
+The focused qualified-store regression and existing independent qualified-store
+capture test pass (0.372s, no skips). With both fixes, the external self-hosted
+parser fixture `test/parity/when_disjoint_diagnostics.elisa` executes both tests:
+diagnostic order/spans and every overlapping pair. The runner reports
+`passed=2 skipped=0 failed=0` (50.622s including test setup/compilation).
+Evidence is retained under `build/verification/qualified-packed-store-20261018/`.
+This used the live external parser source without a full dependency snapshot;
+it is a behavioral check, not a frozen bootstrap gate or a rebuild benchmark.
+The temporary Go adapter was removed after execution. Shared integration remains
+pending coordination with the current Core build owner.
