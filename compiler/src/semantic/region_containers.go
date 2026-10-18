@@ -2302,7 +2302,9 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		// The store-flow summary is undirected between written params; refine it with the
 		// directed scan when the callee's body is visible.
 		mode := storeHeader
+		var storeDecl *ast.FuncDecl
 		if decl, ok := a.resolveReadOnlyScanCallee(call); ok && decl != nil && storeFlowCallFitsParams(decl, call) && !funcHasArenaParam(decl) {
+			storeDecl = decl
 			mode = a.calleeStoreModeInto(decl, other, index)
 			// The summary's edge kind bounds it too: an Elements edge stores only element
 			// values copied out of the argument, never its storage.
@@ -2311,6 +2313,10 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 					mode = storeElements
 				}
 			}
+		}
+		storedElementsProgramLived := false
+		if storeDecl != nil && len(a.programRegions) != 0 && (mode == storeElements || mode == storeViews) {
+			storedElementsProgramLived = a.calleeStoresProgramLivedElements(storeDecl, other, index, map[storeScanKey]bool{})
 		}
 		if mode == storeNone {
 			continue
@@ -2329,8 +2335,13 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// docs/128: only element values are stored, and every element is program-lived.
 			continue
 		} else if mode == storeViews && len(a.programRegions) != 0 && a.typeViewsProgramLived(stripRefForBounds(a.exprTypes[arg]), map[Type]bool{}) {
-			// docs/128: view-only values read out of it can point only where its views do,
-			// and every view it holds is program-lived.
+			// docs/128: view-only values read out of it can point only where their views do.
+			// Prefer the directed store summary's exact source projections; only fall back to
+			// the whole argument type when that proves every view program-lived.
+			continue
+		} else if elementLike && storedElementsProgramLived {
+			// The directed summary proves every exact stored payload is region-free or carries
+			// only program-lived region values. The source aggregate's own backing is not stored.
 			continue
 		} else {
 			regions = a.storeCallArgRegions(arg, mode)

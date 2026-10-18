@@ -3,6 +3,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 const storeViewsModeSource = `struct Info:
@@ -127,5 +129,149 @@ def run(table: mutable Table&, other: mutable Table&) -> void:
 	errs = result.Errors()
 	if len(errs) != 2 || !strings.Contains(errs[0], ":24:") || !strings.Contains(errs[1], ":27:") {
 		t.Fatalf("call results carrying a local dstr's view must stay rejected (lines 24, 27), got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestStoreViewsUsesOnlyStoredProgramLivedFieldPath(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_views_field_path.elisa", `global region source
+struct Entry:
+    safe: sview @source
+    unsafe: sview
+
+struct ScopeLike:
+    entries: darray[Entry]
+
+struct Table:
+    names: mutable darray[sview] = []
+
+def keep_safe(table: mutable Table&, state: ScopeLike&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        text: sview = state.entries[0].safe
+        table.names.push(text)
+
+def keep_unannotated(table: mutable Table&, state: ScopeLike&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        text: sview = state.entries[0].unsafe
+        table.names.push(text)
+
+def keep_mutable(table: mutable Table&, state: ScopeLike&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        text: mutable sview = state.entries[0].safe
+        text <- state.entries[0].unsafe
+        table.names.push(text)
+
+def keep_mixed(table: mutable Table&, state: ScopeLike&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        safe_text: sview = state.entries[0].safe
+        unsafe_text: sview = state.entries[0].unsafe
+        table.names.push(safe_text)
+        table.names.push(unsafe_text)
+
+def put_view(table: mutable Table&, text: sview) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.names.push(text)
+
+def keep_via_helper(table: mutable Table&, state: ScopeLike&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        text: sview = state.entries[0].unsafe
+        put_view(table, text)
+
+def select_entry(state: ScopeLike&) -> Entry:
+    return state.entries[0]
+
+def keep_unknown(table: mutable Table&, state: ScopeLike&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        text: sview = select_entry(state).safe
+        table.names.push(text)
+
+`, AnalyzeOptions{})
+	for _, tc := range []struct {
+		name           string
+		wantStoreViews bool
+		want           bool
+	}{
+		{name: "keep_safe", wantStoreViews: true, want: true},
+		{name: "keep_unannotated", wantStoreViews: true, want: false},
+		{name: "keep_mutable", wantStoreViews: true, want: false},
+		{name: "keep_mixed", wantStoreViews: true, want: false},
+		{name: "keep_via_helper", wantStoreViews: true, want: false},
+		{name: "keep_unknown", wantStoreViews: true, want: false},
+	} {
+		decl := storeScanFindFunc(t, result, tc.name)
+		for _, node := range result.analyzer.storeScanIndex(decl).flat {
+			switch n := node.(type) {
+			case *ast.VarDeclStmt:
+				if n != nil && n.Name == "text" {
+					delete(result.analyzer.exprTypes, n.Value)
+				}
+			case *ast.CallExpr:
+				if n != nil && len(n.Args) > 0 {
+					delete(result.analyzer.exprTypes, n.Args[0])
+				}
+			}
+		}
+		if got := result.analyzer.calleeStoreModeInto(decl, 1, 0); (got == storeViews) != tc.wantStoreViews {
+			t.Fatalf("%s: store mode %d, wantStoreViews=%v", tc.name, got, tc.wantStoreViews)
+		}
+		got := result.analyzer.calleeStoresProgramLivedViews(decl, 1, 0, map[storeScanKey]bool{})
+		if got != tc.want {
+			t.Errorf("%s: program-lived stored views = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestStoreElementsUsesOnlyStoredProgramLivedPayload(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "store_elements_payload.elisa", `global region source
+struct SafeEntry:
+    text: sview @source
+
+struct UnsafeEntry:
+    text: sview
+
+struct Source:
+    safe: darray[SafeEntry]
+    unsafe: darray[UnsafeEntry]
+
+struct Table:
+    entries: mutable darray[SafeEntry] = []
+
+def keep_safe(table: mutable Table&, state: Source&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.entries.push(state.safe[0])
+
+def keep_unsafe(table: mutable Table&, state: Source&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        table.entries.push(state.unsafe[0])
+
+`, AnalyzeOptions{})
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{{"keep_safe", true}, {"keep_unsafe", false}} {
+		decl := storeScanFindFunc(t, result, tc.name)
+		got := result.analyzer.calleeStoresProgramLivedElements(decl, 1, 0, map[storeScanKey]bool{})
+		if got != tc.want {
+			t.Errorf("%s: program-lived stored payload = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestStorePayloadAddressIntegersFailClosed(t *testing.T) {
+	a := &Analyzer{}
+	if a.storeScanTypeMayEncodeAddress(&BuiltinType{Name: "i64"}, map[Type]bool{}) {
+		t.Fatal("ordinary integer payload must not be treated as an address")
+	}
+	if !a.storeScanTypeMayEncodeAddress(&BuiltinType{Name: "uintptr"}, map[Type]bool{}) {
+		t.Fatal("uintptr payload may encode an address")
+	}
+	withAddress := &StructType{Fields: map[string]Field{"handle": {Name: "handle", Type: &BuiltinType{Name: "uintptr"}}}}
+	if !a.storeScanTypeMayEncodeAddress(withAddress, map[Type]bool{}) {
+		t.Fatal("aggregate containing uintptr may encode an address")
+	}
+	if !a.storeScanTypeMayEncodeAddress(&DArrayType{Elem: &BuiltinType{Name: "uintptr"}}, map[Type]bool{}) {
+		t.Fatal("container wrapping uintptr may encode an address")
+	}
+	if !a.storeScanTypeMayEncodeAddress(&RefType{Elem: withAddress}, map[Type]bool{}) {
+		t.Fatal("reference wrapping uintptr may encode an address")
 	}
 }
