@@ -619,7 +619,8 @@ func primitiveReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 // Only return-expression typing is retained here. Plain value postconditions
 // are analyzed before this boundary and discharged again by analyzeReturnStatement
 // after replay. Their syntax/proof results are never part of the body product.
-// Keep scoped proof blocks and every other header feature on the cold path.
+// Valid inline hints affect the live function signature, not expression typing.
+// Keep scoped proof blocks and other header features on the cold path.
 func primitiveReturnTypingHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 	if fn == nil || len(fn.EnsureProofs) > len(fn.EnsureValues) {
 		return nil, false
@@ -629,7 +630,24 @@ func primitiveReturnTypingHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 			return nil, false
 		}
 	}
+	if len(fn.Annotations) > 1 {
+		return nil, false
+	}
+	for _, annotation := range fn.Annotations {
+		if annotation.Name != "inline" || len(annotation.Args) != 1 {
+			return nil, false
+		}
+		if _, valid := normalizeInlineAnnotationArg(annotation.Args[0]); !valid {
+			return nil, false
+		}
+		copy := annotation
+		copy.Position, copy.Name, copy.Args = lexer.Pos{}, "", nil
+		if !reflect.ValueOf(copy).IsZero() {
+			return nil, false
+		}
+	}
 	header := *fn
+	header.Annotations = nil
 	header.EnsureValues = nil
 	header.EnsureProofs = nil
 	return primitiveReturnHeader(&header)

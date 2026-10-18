@@ -10,6 +10,7 @@ import (
 // Pin every admitted syntax field, including default-zero fields. Review this
 // manifest when changing syntax or the compact typing/source protocol.
 var primitiveASTSchemas = map[reflect.Type]string{
+	reflect.TypeOf(ast.Annotation{}):          "ada607abbf8a83bf1bd91c093c6785b4c60a2323a50e2cf1b134c6b165a6787f",
 	reflect.TypeOf(ast.ListLitExpr{}):         "e210681a25bf0f37167bdc362fd29115a5e99c03ad29975967f1c6ceeab49668",
 	reflect.TypeOf(ast.MembershipRangeExpr{}): "ba75fa2fec8ad47b0ec26fba14ffa739aba350f46adfe83652f7d81f8005d37e",
 	reflect.TypeOf(ast.BinaryExpr{}):          "92e3d95dc9a0a6526b1f3234e63b451a8e9fa12ef790f47b0055f9bc2f885182",
