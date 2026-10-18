@@ -270,64 +270,23 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			pendingLocals = pendingLocals[:available]
 		}
 	}
-	var collect func([]ast.Decl, string, int, bool)
-	collect = func(decls []ast.Decl, namespace string, depth int, retainedOnly bool) {
-		if depth > 128 {
-			return
-		}
-		for _, decl := range decls {
-			if nested, ok := decl.(*ast.NamespaceDecl); ok {
-				if len(nested.Name) > primitiveSourceByteBudget-len(namespace)-1 {
-					continue
-				}
-				collect(nested.Decls, joinQualifiedName(namespace, nested.Name), depth+1, retainedOnly)
+	candidates := primitiveOwnerCandidates(file.Decls, origin, session.previous, primitiveOwnerCandidateLimit, invocation.lexical != nil)
+	collect := func(retainedOnly bool) {
+		for candidate := range candidates {
+			fn, qualifiedName := candidate.function, candidate.qualifiedName
+			if retainedOnly != candidate.retained {
 				continue
 			}
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn == nil {
-				continue
+			name := candidate.name
+			if name == "" {
+				name = primitiveOwnerCandidateName(candidate.identity)
 			}
-			if fn.Name == "" || len(fn.Name) > primitiveSourceByteBudget {
-				continue
-			}
-			qualifiedName := joinQualifiedName(namespace, fn.Name)
-			if len(qualifiedName) > primitiveSourceByteBudget {
-				continue
-			}
-
-			keyBytes := []byte("primitive/i64-parameters/v2\x00")
-			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
-			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(origin)))
-			keyBytes = append(keyBytes, origin...)
-			keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(qualifiedName)))
-			keyBytes = append(keyBytes, qualifiedName...)
-			identity := sha256.Sum256(keyBytes)
-			name := "primitive-v1:" + hex.EncodeToString(identity[:])
 			key := primitiveInput("function-source", name)
-			retained := session.previous[key]
-			if retained && len(fn.Body) > 1 {
-				// A local-function owner is useful only together with a local
-				// query. A former return-body owner is not a retained local unit.
-				retained = false
-				if len(fn.Body) <= 257 {
-					for _, stmt := range fn.Body {
-						local, ok := stmt.(*ast.VarDeclStmt)
-						if !ok || local == nil || len(local.Name) > primitiveSourceByteBudget {
-							continue
-						}
-						id := sha256.Sum256([]byte(local.Name))
-						if session.previous[primitiveInput("function-source", name+"/local-name-v2/"+hex.EncodeToString(id[:]))] {
-							retained = true
-							break
-						}
-					}
-				}
-			}
-			if retainedOnly != retained || current[key] {
+			if current[key] {
 				continue
 			}
 			expressions, primitiveReturn := primitiveReturnExpressions(fn)
-			ok = primitiveReturn
+			ok := primitiveReturn
 			if reads := invocation.lexical; reads != nil {
 				if _, exists := reads.indexes[fn]; !exists && len(reads.indexes) < lexicalReadMaxFunctions {
 					readFree := primitiveReturn && len(fn.EnsureValues) == 0 && len(fn.EnsureProofs) == 0
@@ -424,7 +383,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	// Budget pressure must not turn a large request entirely cold. Retain
 	// existing owners first, then fill available slots in declaration order.
 	if len(session.previous) > 0 {
-		collect(file.Decls, "", 0, true)
+		collect(true)
 	}
 	for _, input := range pendingLocals {
 		if len(current) >= session.trackedBodyLimit() {
@@ -455,7 +414,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			skipped++
 		}
 	}
-	collect(file.Decls, "", 0, false)
+	collect(false)
 	if skipped > 0 {
 		session.stats.CapacityLimitedAnalyses++
 		session.stats.CapacitySkippedQueries += uint64(skipped)
