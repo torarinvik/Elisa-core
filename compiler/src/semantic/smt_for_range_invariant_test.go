@@ -26,6 +26,14 @@ def quantified(n: i64) -> i64:
         value <- i + 1
     return value
 
+def unsignedCount(n: usize) -> usize:
+    ensure result == n
+    count: mutable usize = 0
+    for i in 0..<n |count|:
+        invariant count == i
+        count <- count + 1
+    return count
+
 def cntbad(n: i64) -> i64:
     requires n >= 0 and n < 1000
     ensure result == n + 1
@@ -42,6 +50,9 @@ def cntbad(n: i64) -> i64:
 	}
 	if n := ensureFailuresFor(result.Errors(), "quantified"); n != 0 {
 		t.Fatalf("quantified: expected quantified exit invariant to prove ensure, got %v", result.Errors())
+	}
+	if n := ensureFailuresFor(result.Errors(), "unsignedCount"); n != 0 {
+		t.Fatalf("unsignedCount: expected unsigned zero-based range exit facts to prove ensure, got %v", result.Errors())
 	}
 	if ensureFailuresFor(result.Errors(), "cntbad") == 0 {
 		t.Fatalf("cntbad: false ensure must stay unproven; got %v", result.Errors())

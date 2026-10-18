@@ -84,10 +84,23 @@ func (a *Analyzer) proveForRangeInvariants(stmt *ast.ForStmt, loopType Type) (pr
 		return proven, nil
 	}
 	// The loop ends with i == E only when it starts at or below E.
-	le := &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LTEQ, Left: stmt.Start, Right: stmt.End}
-	a.exprTypes[le] = &BuiltinType{Name: "bool"}
-	if ok, _ := a.trySMTProveRequires(le, nil); !ok {
-		return proven, nil
+	// For an unsigned range starting at literal zero, this is true by the loop
+	// type's domain. Routing it through a synthesized `0 <= end` expression can
+	// mix an i64 literal with usize and ask the SMT translator to prove the signed
+	// conversion of the entire usize domain (which fails above MaxInt), even
+	// though the range itself compares both bounds as unsigned values.
+	startsBeforeEnd := false
+	if isZeroOptimizationExpr(stmt.Start) {
+		if signed, _, ok := smtIntWidthSign(loopType); ok && !signed {
+			startsBeforeEnd = true
+		}
+	}
+	if !startsBeforeEnd {
+		le := &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LTEQ, Left: stmt.Start, Right: stmt.End}
+		a.exprTypes[le] = &BuiltinType{Name: "bool"}
+		if ok, _ := a.trySMTProveRequires(le, nil); !ok {
+			return proven, nil
+		}
 	}
 	for _, inv := range proven {
 		fact, ok := a.substituteTypedIdents(inv.Cond, map[string]ast.Expr{stmt.Name: stmt.End}, 0)
