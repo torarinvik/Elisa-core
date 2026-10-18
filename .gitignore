@@ -17,6 +17,7 @@ compiler/backend.test
 compiler/src/backend/backend.test
 compiler/src/backend/backend.test
 compiler/src.test
+compiler/semantic.test
 compiler/packed_mlast_medium_current_clean.memprof
 Code/v-master/
 docs/useful_language_features/12-nim-orthogonal-language-and-compiler-ideas.md

@@ -24,7 +24,7 @@ func binderReadFixture(t *testing.T, prefix string) (*ast.FuncDecl, *ast.NamedTy
 }
 
 func TestLexicalBinderReadPointCompositionAndFreshTypes(t *testing.T) {
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	for pass, name := range []string{"i64", "bool"} {
 		prefix := ""
 		if pass != 0 {
@@ -68,7 +68,7 @@ func TestLexicalTypeBinderNilAndNegativeReads(t *testing.T) {
 			if value, found := lookup(); value != nil || found {
 				t.Fatal("empty stack is not a miss")
 			}
-			session := NewIncrementalAnalysisSession()
+			session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 			reads.publish(session)
 			before := session.Stats()
 			// A new current world at the same site adds an owned nil blocker.
@@ -113,7 +113,7 @@ func TestLexicalTypeBinderDeclinesUnownedOrReplacedFrame(t *testing.T) {
 		} else {
 			a.withTypeParams([]string{"T"}, []Type{value}, active)
 		}
-		session := NewIncrementalAnalysisSession()
+		session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 		reads.publish(session)
 		if stats := session.Stats(); stats.LexicalBinderReadsDropped != 1 || stats.LexicalBinderSelectionsVerified != 0 || stats.LexicalVerificationFailures != 0 {
 			t.Fatalf("unowned frame admitted: %+v", stats)
@@ -129,7 +129,7 @@ func TestLexicalTypeBinderConflictingRepeatedVisitDeclines(t *testing.T) {
 		a.withSourceTypeParams(fn.Body[0], []string{"T"}, []Type{inner}, func() { a.lookupTypeParamAt(site) })
 		a.lookupTypeParamAt(site)
 	})
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads.publish(session)
 	if stats := session.Stats(); stats.LexicalBinderSelectionsVerified != 0 || stats.LexicalBinderReadsDropped == 0 || stats.LexicalVerificationFailures != 0 {
 		t.Fatalf("conflicting repeated binder read admitted: %+v", stats)
@@ -141,7 +141,7 @@ func TestIncrementalSessionPublishesActualTypeBinderReads(t *testing.T) {
 		"def work[T](value: T) -> T:\n    copy: T = value\n    return copy\n",
 		"def work(value: i64) -> i64:\n    copy: i64 = value\n    return copy\n",
 	} {
-		session := NewIncrementalAnalysisSession()
+		session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 		for pass, text := range []string{source, "\n\n" + source} {
 			before := session.Stats()
 			result := session.Analyze(parseIncrementalSessionFile(t, text), AnalyzeOptions{})
@@ -170,7 +170,7 @@ func TestLexicalTypedNilBinderPreservesLiveLookup(t *testing.T) {
 			t.Fatal("typed nil lookup changed")
 		}
 	})
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads.publish(session)
 	if stats := session.Stats(); stats.LexicalBinderSelectionsVerified != 1 || stats.LexicalVerificationFailures != 0 {
 		t.Fatalf("typed nil rebinding failed: %+v", stats)

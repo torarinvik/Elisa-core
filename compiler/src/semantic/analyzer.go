@@ -201,7 +201,10 @@ type Analyzer struct {
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                         map[ast.Expr]OptimizationFacts
-	indexBoundsProven                 map[*ast.IndexExpr]bool
+	// Keep identity owners alive until all invocation-local facts are consumed;
+	// a pointer formatted as a string alone does not prevent address reuse by GC.
+	optimizationSymbolIDs map[*Symbol]string
+	indexBoundsProven     map[*ast.IndexExpr]bool
 	// getWrappedIndexExprs records index expressions whose `else` recovery is
 	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
 	// use the explicit `get` head, so they must NOT receive the bare-`else`

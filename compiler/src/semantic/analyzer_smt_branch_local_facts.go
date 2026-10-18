@@ -337,6 +337,52 @@ func (a *Analyzer) substituteTypedIdents(expr ast.Expr, subst map[string]ast.Exp
 		c.Args = args
 		c.ResolvedArgs = resolved
 		out = &c
+	case *ast.QuantifierExpr:
+		// `In` is analyzed outside the quantifier's binder scope, while `Body` is
+		// analyzed with every name in Vars bound. Substitute the source with the
+		// caller's map, then mask shadowed names for the body. Decline a replacement
+		// that would capture one of the body's binders; alpha-renaming here would
+		// also require updating resolved binder references and their type metadata.
+		in, ok := sub(n.In)
+		if !ok {
+			return nil, false
+		}
+		boundNames := make(map[string]bool, len(n.Vars))
+		for _, name := range n.Vars {
+			boundNames[name] = true
+		}
+		bodySubst := make(map[string]ast.Expr, len(subst))
+		for name, value := range subst {
+			if !boundNames[name] {
+				bodySubst[name] = value
+			}
+		}
+		if len(bodySubst) != 0 {
+			bodyNames := make(map[string]bool)
+			for _, name := range exprIdentNames(n.Body) {
+				bodyNames[name] = true
+			}
+			for name, value := range bodySubst {
+				if !bodyNames[name] {
+					continue
+				}
+				replacementNames := exprIdentNames(value)
+				for _, bound := range n.Vars {
+					for _, replacementName := range replacementNames {
+						if replacementName == bound {
+							return nil, false
+						}
+					}
+				}
+			}
+		}
+		body, ok := a.substituteTypedIdents(n.Body, bodySubst, depth+1)
+		if !ok {
+			return nil, false
+		}
+		c := *n
+		c.In, c.Body = in, body
+		out = &c
 	default:
 		return nil, false
 	}

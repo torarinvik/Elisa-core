@@ -40,6 +40,16 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 	if !primitiveLocalSchemaValid || fn == nil || len(fn.Body) < 2 || len(fn.Body) > 257 {
 		return nil, false
 	}
+	// Local products still require the i64 declaration/conversion protocol.
+	// Broadening return-body admission must not silently broaden local replay.
+	if predicateBuiltinSyntaxName(fn.ReturnType) != "i64" {
+		return nil, false
+	}
+	for _, param := range fn.Params {
+		if predicateBuiltinSyntaxName(param.Type) != "i64" {
+			return nil, false
+		}
+	}
 	header := *fn
 	header.Body = fn.Body[len(fn.Body)-1:]
 	if _, ok := primitiveReturnHeader(&header); !ok {
@@ -75,7 +85,7 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		copy.Name = ""
 		copy.Type = nil
 		copy.Value = nil
-		if !reflect.ValueOf(copy).IsZero() || !primitiveParameterSyntax([]ast.ParamDecl{{Name: decl.Name, Type: decl.Type}}) {
+		if !reflect.ValueOf(copy).IsZero() || predicateBuiltinSyntaxName(decl.Type) != "i64" || !primitiveParameterSyntax([]ast.ParamDecl{{Name: decl.Name, Type: decl.Type}}) {
 			return nil, false
 		}
 		var nodes []ast.Expr

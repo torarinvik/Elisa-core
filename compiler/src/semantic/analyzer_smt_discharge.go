@@ -1405,9 +1405,28 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		// Carry the argument's string identity to the callee formal by explicit binding (never by
 		// name), so the callee's literal-equality contracts speak about the caller's string.
 		id, idOK := tr.stringIDTerm(argExpr, argEnv)
+		viewData, viewOffset, viewLength, indexedView := tr.indexedSViewCallTerms(argExpr, argEnv)
+		if !indexedView {
+			if viewID, bare := stripOptimizationParens(argExpr).(*ast.Ident); bare && viewID != nil {
+				viewData, viewOffset, viewLength, indexedView = smtIndexedSViewArgTermsFromEnv(viewID.Name, argEnv)
+			}
+		}
+		if indexedView {
+			bindSMTIndexedSViewArgTerms(env, name, viewData, viewOffset, viewLength)
+		}
 		if arr, length, ok := tr.indexedSViewCallArray(argExpr, argEnv); ok {
 			env[name] = arr
 			env[name+".len"] = length
+			if idOK {
+				bindSMTStringID(env, name, id)
+			}
+			return true
+		}
+		if indexedView {
+			// The content array cannot be globally normalized when its index
+			// mentions a quantifier binder. Preserve the header and call identity
+			// as scoped terms for scalarCallUF instead.
+			env[name+".len"] = viewLength
 			if idOK {
 				bindSMTStringID(env, name, id)
 			}
@@ -4632,9 +4651,17 @@ func isIntegerLiteralExpr(expr ast.Expr) bool {
 // ones referencing a binder, in stable order. Returns nil when there is no array indexing on a binder
 // (a purely arithmetic quantifier), leaving that quantifier patternless for MBQI.
 func (tr *smtTranslator) collectSelectTriggers(body ast.Expr, qenv map[string]string, vars []string) []string {
-	bound := make(map[string]bool, len(vars))
+	bound := make(map[string]string, len(vars))
 	for _, v := range vars {
-		bound["q_"+v] = true
+		bound[v] = "q_" + v
+	}
+	return tr.collectSelectTriggersWithBoundSymbols(body, qenv, bound)
+}
+
+func (tr *smtTranslator) collectSelectTriggersWithBoundSymbols(body ast.Expr, qenv map[string]string, binders map[string]string) []string {
+	bound := make(map[string]bool, len(binders))
+	for _, sym := range binders {
+		bound[sym] = true
 	}
 	seen := map[string]bool{}
 	var triggers []string
@@ -4650,6 +4677,31 @@ func (tr *smtTranslator) collectSelectTriggers(body ast.Expr, qenv map[string]st
 			walk(n.Right)
 		case *ast.QuantifierExpr:
 			walk(n.Body) // nested quantifier: its own binders may still mention ours
+		case *ast.CallExpr:
+			// Calls over indexed sviews model the selected view as a function
+			// application of the container and quantified index. Use its backing
+			// array application as the E-matching trigger; it occurs inside the
+			// scalar-call UF application and keeps the binder in a scoped term.
+			_, callOK := tr.scalarCallUF(n, qenv, "Bool")
+			if !callOK {
+				_, callOK = tr.scalarCallUF(n, qenv, "Int")
+			}
+			if !callOK {
+				for _, arg := range proofCallArgs(n) {
+					walk(arg)
+				}
+				return
+			}
+			for _, arg := range proofCallArgs(n) {
+				if base, index, ok := tr.containerViewIndex(arg, qenv); ok {
+					data, _, _ := tr.containerViewElement(base, index)
+					if termMentionsAnyBinder(data, bound) && !seen[data] {
+						seen[data] = true
+						triggers = append(triggers, data)
+					}
+				}
+				walk(arg)
+			}
 		case *ast.IndexExpr:
 			if term, ok := tr.termEnv(n, qenv); ok && termMentionsAnyBinder(term, bound) && !seen[term] {
 				seen[term] = true
@@ -4760,7 +4812,8 @@ func (tr *smtTranslator) counterexampleLabelForTerm(term string) string {
 // a whole token (so `q_i` does not spuriously match `q_index`).
 func termMentionsAnyBinder(term string, bound map[string]bool) bool {
 	for _, tok := range strings.FieldsFunc(term, func(r rune) bool {
-		return r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
+		return r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == '(' || r == ')' ||
+			r == '|' || r == ';' || r == '=' || r == ','
 	}) {
 		if bound[tok] {
 			return true

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -122,9 +123,17 @@ func (tr *smtTranslator) runtimeRangeQuantifierTerm(block *ast.ExprBlock, env ma
 	}
 	guard := "(and (<= " + lo + " " + name + ") (< " + name + " " + hi + "))"
 	if exists {
-		return "(exists ((" + name + " Int)) (and " + guard + " " + body + "))", true
+		quantBody := "(and " + guard + " " + body + ")"
+		if triggers := tr.collectSelectTriggersWithBoundSymbols(predicate, scoped, map[string]string{loop.Name: name}); len(triggers) > 0 {
+			quantBody = "(! " + quantBody + " :pattern (" + strings.Join(triggers, " ") + "))"
+		}
+		return "(exists ((" + name + " Int)) " + quantBody + ")", true
 	}
-	return "(forall ((" + name + " Int)) (or (not " + guard + ") " + body + "))", true
+	quantBody := "(or (not " + guard + ") " + body + ")"
+	if triggers := tr.collectSelectTriggersWithBoundSymbols(predicate, scoped, map[string]string{loop.Name: name}); len(triggers) > 0 {
+		quantBody = "(! " + quantBody + " :pattern (" + strings.Join(triggers, " ") + "))"
+	}
+	return "(forall ((" + name + " Int)) " + quantBody + ")", true
 }
 
 // Do not use caller-scope range shortcuts for endpoints: an outer quantifier

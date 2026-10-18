@@ -17,6 +17,15 @@ def cnt(n: i64) -> i64:
         c <- c + 1
     return c
 
+def quantified(n: i64) -> i64:
+    requires n >= 0 and n < 1000
+    ensure forall j in 0..<n: result >= j
+    value: mutable i64 = 0
+    for i in 0..<n |value|:
+        invariant forall j in 0..<i: value >= j
+        value <- i + 1
+    return value
+
 def cntbad(n: i64) -> i64:
     requires n >= 0 and n < 1000
     ensure result == n + 1
@@ -30,6 +39,9 @@ def cntbad(n: i64) -> i64:
 	result := analyzeContractStrict(t, "for_range_inv.elisa", src)
 	if n := ensureFailuresFor(result.Errors(), "cnt"); n != 0 {
 		t.Fatalf("cnt: expected proof, got %v", result.Errors())
+	}
+	if n := ensureFailuresFor(result.Errors(), "quantified"); n != 0 {
+		t.Fatalf("quantified: expected quantified exit invariant to prove ensure, got %v", result.Errors())
 	}
 	if ensureFailuresFor(result.Errors(), "cntbad") == 0 {
 		t.Fatalf("cntbad: false ensure must stay unproven; got %v", result.Errors())

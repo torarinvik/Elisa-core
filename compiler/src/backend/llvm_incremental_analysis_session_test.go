@@ -15,16 +15,30 @@ import (
 )
 
 func TestIncrementalSessionNativeAndLLVMParity(t *testing.T) {
-	const source = `def first(value: i64) -> i64:
+	for _, integer := range []string{"i64", "int"} {
+		for _, audit := range []bool{false, true} {
+			name := integer
+			if audit {
+				name += "/audit"
+			}
+			t.Run(name, func(t *testing.T) {
+				testIncrementalIntegerNativeAndLLVMParity(t, integer, audit)
+			})
+		}
+	}
+}
+
+func testIncrementalIntegerNativeAndLLVMParity(t *testing.T, integer string, audit bool) {
+	source := strings.ReplaceAll(`def first(value: Integer) -> Integer:
     return value + 1
 
-def second() -> i64:
+def second() -> Integer:
     return 20 + 1
 
 def main() -> i64:
     return first(20) + second()
-`
-	session := semantic.NewIncrementalAnalysisSession()
+`, "Integer", integer)
+	session := semantic.NewIncrementalAnalysisSessionWithOptions(semantic.IncrementalAnalysisSessionOptions{AuditLexicalReads: audit})
 	analyze := func(src string, useSession bool) *semantic.Result {
 		t.Helper()
 		l := lexer.New("incremental_native.elisa", []byte(src))

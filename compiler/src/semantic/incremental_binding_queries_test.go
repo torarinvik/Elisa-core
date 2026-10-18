@@ -150,8 +150,14 @@ func TestIncrementalBindingQueriesFallbackAndEqualAdmission(t *testing.T) {
 	assertIncrementalResultParity(t, Analyze(parseIncrementalSessionFile(t, edited)), current)
 	// Admitting the producer replaces an inline dependency with a query edge but
 	// preserves its value fingerprint. The existing typing query must not execute.
-	session.maxTrackedBodies = 3
 	query := incremental.Key{Kind: primitiveLocalTypingKind, Name: downstream}
+	// Cold fallback publishes its replacement product lazily. Materialize that
+	// current product before measuring red-green validation; otherwise the memo
+	// still describes the source from before the edit and must execute once.
+	if _, err := session.db.Evaluate(context.Background(), query); err != nil {
+		t.Fatal("current consumer product unavailable:", err)
+	}
+	session.maxTrackedBodies = 3
 	executed := counts[query]
 	before = session.Stats()
 	current = session.Analyze(parseIncrementalSessionFile(t, edited), AnalyzeOptions{})

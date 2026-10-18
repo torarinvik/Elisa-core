@@ -31,7 +31,7 @@ func primitiveParameterSyntax(params []ast.ParamDecl) bool {
 			copy := *typ
 			copy.Position = lexer.Pos{}
 			copy.Name = ""
-			if typ.Name != "i64" || !reflect.ValueOf(copy).IsZero() {
+			if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
 				return false
 			}
 		case *ast.BuiltinTypeExpr:
@@ -46,7 +46,7 @@ func primitiveParameterSyntax(params []ast.ParamDecl) bool {
 			}
 			copy.TypeArgs = nil
 			copy.ValueArgs = nil
-			if typ.Name != "i64" || !reflect.ValueOf(copy).IsZero() {
+			if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
 				return false
 			}
 		default:
@@ -63,11 +63,12 @@ func primitiveCurrentParameterBindings(a *Analyzer, fn *ast.FuncDecl) bool {
 	if a.currentScope == nil {
 		return false
 	}
-	canonical, ok := a.namedTypes["i64"].(*BuiltinType)
-	if !ok || canonical.Name != "i64" {
-		return false
-	}
 	for index, param := range fn.Params {
+		name := predicateBuiltinSyntaxName(param.Type)
+		canonical, ok := a.namedTypes[name].(*BuiltinType)
+		if !ok || (name != "i64" && name != "int") || canonical.Name != name {
+			return false
+		}
 		symbol, found := a.currentScope.Lookup(param.Name)
 		if !found || symbol == nil || symbol.Kind != SymbolParam || symbol.Node != fn || symbol.ParamIndex != index || symbol.Type != canonical || symbol.Mutable || symbol.Ghost || symbol.AliasOf != nil {
 			return false

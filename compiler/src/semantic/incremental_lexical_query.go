@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-const lexicalSelectionKind = "lexical-selection-v1"
+const lexicalSelectionKind = "lexical-selection-v2"
 const lexicalMaxFrames = 256
 
 type lexicalSelectionSpec struct {
@@ -30,44 +30,19 @@ type lexicalFrameValue struct {
 
 // Selection identifies the current binding only. Resolved types, mutable flow
 // facts and live analyzer contributions remain separate dependency domains.
-func lexicalSelectionKey(spec lexicalSelectionSpec) (incremental.Key, error) {
-	if spec.Site.FunctionKey == "" || spec.Site.Tree == ([32]byte{}) || spec.Site.Kind == "" || spec.Role == "" || spec.Name == "" {
-		return incremental.Key{}, fmt.Errorf("lexical lookup requires anchored owner/site/role")
-	}
-	switch spec.Domain {
-	case "symbol", "local-symbol", "type-param", "const-param", "shape-param", "assoc-type", "param-interface", "permission-param", "error-set-param", "region-param":
-	default:
-		return incremental.Key{}, fmt.Errorf("unsupported lexical lookup domain")
-	}
-	bytes := 0
-	for _, s := range []string{spec.Site.FunctionKey, spec.Site.Kind, spec.Role, spec.Domain, spec.Name} {
-		if !utf8.ValidString(s) || len(s) > lookupSelectionMaxBytes/6-bytes {
-			return incremental.Key{}, fmt.Errorf("lexical key budget exceeded")
-		}
-		bytes += len(s)
-	}
-	data, err := json.Marshal(spec)
-	if err != nil || len(data) > lookupSelectionMaxBytes {
-		return incremental.Key{}, fmt.Errorf("invalid lexical key")
-	}
-	return incremental.Key{Kind: lexicalSelectionKind, Name: string(data)}, nil
-}
 func lexicalRecipeInput(key incremental.Key) incremental.Key {
-	return incremental.Key{Kind: "lexical-recipe-v1", Name: key.Name}
+	return incremental.Key{Kind: "lexical-recipe-v2", Name: key.Name}
 }
 func lexicalCellInput(key incremental.Key, frame int) incremental.Key {
-	return incremental.Key{Kind: "lexical-cell-v1", Name: key.Name + "\x00" + strconv.Itoa(frame)}
+	return incremental.Key{Kind: "lexical-cell-v2", Name: key.Name + "\x00" + strconv.Itoa(frame)}
 }
 func lexicalNilFound(domain string) bool { return domain != "param-interface" }
 func evaluateLexicalSelection(r *incremental.Reader, name string) (string, error) {
-	var spec lexicalSelectionSpec
-	if err := decodeLookupSelection(name, &spec); err != nil {
+	spec, err := decodeLexicalSelectionKey(name)
+	if err != nil {
 		return "", err
 	}
-	key, err := lexicalSelectionKey(spec)
-	if err != nil || key.Name != name {
-		return "", fmt.Errorf("noncanonical lexical lookup")
-	}
+	key := incremental.Key{Kind: lexicalSelectionKind, Name: name}
 	encoded, present := r.Input(lexicalRecipeInput(key))
 	if !present {
 		return "", fmt.Errorf("unpublished lexical chain")

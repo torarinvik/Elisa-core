@@ -216,7 +216,7 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 					return facts.base
 				}
 			}
-			return optimizationSymbolIdentity(sym)
+			return a.optimizationSymbolIdentity(sym)
 		}
 	case *ast.AllocExpr:
 		return optimizationExprIdentity(n)
@@ -291,11 +291,19 @@ func (a *Analyzer) lookupOptimizationSymbol(ident *ast.Ident) *Symbol {
 	return nil
 }
 
-func optimizationSymbolIdentity(sym *Symbol) string {
+func (a *Analyzer) optimizationSymbolIdentity(sym *Symbol) string {
 	if sym == nil {
 		return ""
 	}
-	return fmt.Sprintf("symbol@%p", sym)
+	if identity, ok := a.optimizationSymbolIDs[sym]; ok {
+		return identity
+	}
+	if a.optimizationSymbolIDs == nil {
+		a.optimizationSymbolIDs = make(map[*Symbol]string)
+	}
+	identity := fmt.Sprintf("symbol@%p", sym)
+	a.optimizationSymbolIDs[sym] = identity
+	return identity
 }
 
 func optimizationExprIdentity(expr ast.Expr) string {

@@ -37,7 +37,7 @@ func (a *Analyzer) prepareLexicalBinder(request lexicalBinderRequest, batch *lex
 		return result, err
 	}
 	spec := lexicalSelectionSpec{Site: anchor, Role: request.Role, Domain: request.Domain, Name: request.Name}
-	if _, err := lexicalSelectionKey(spec); err != nil {
+	if _, err := validateLexicalSelectionSpec(spec); err != nil {
 		return result, err
 	}
 	count := 0
@@ -174,7 +174,7 @@ func prepareLexicalBinders(a *Analyzer, requests []lexicalBinderRequest) (lexica
 			if err != nil {
 				return nil, err
 			}
-			if _, err := lexicalSelectionKey(lexicalSelectionSpec{Site: anchor, Role: request.Role, Domain: request.Domain, Name: request.Name}); err != nil {
+			if _, err := validateLexicalSelectionSpec(lexicalSelectionSpec{Site: anchor, Role: request.Role, Domain: request.Domain, Name: request.Name}); err != nil {
 				return nil, err
 			}
 			work += len(request.Sources)

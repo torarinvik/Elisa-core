@@ -40,7 +40,7 @@ func TestLexicalReadPointSurvivesLaterScopeMutation(t *testing.T) {
 	// Later changes to Symbol metadata cannot rewrite a previous binding slot.
 	local.Name = "later mutated name"
 	reads := &lexicalReadInvocation{observations: []lexicalSymbolObservation{before, after}}
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads.publish(session)
 	stats := session.Stats()
 	if stats.LexicalSelectionsVerified != 2 || stats.LexicalVerificationFailures != 0 || stats.LexicalReadsDropped != 0 || stats.LexicalQueriesExecuted != 2 {
@@ -54,7 +54,7 @@ func TestIncrementalSessionPublishesActualIdentifierReads(t *testing.T) {
         return value
     return value + 1
 `
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	for i, text := range []string{source, "\n\n" + source} {
 		before := session.Stats()
 		got := session.Analyze(parseIncrementalSessionFile(t, text), AnalyzeOptions{})
@@ -99,7 +99,7 @@ func TestLexicalReadPointConflictingVisitsDecline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads := &lexicalReadInvocation{observations: []lexicalSymbolObservation{first, second, first}}
 	reads.publish(session)
 	if stats := session.Stats(); stats.LexicalSelectionsVerified != 0 || stats.LexicalReadsDropped == 0 || stats.LexicalVerificationFailures != 0 {
@@ -109,7 +109,7 @@ func TestLexicalReadPointConflictingVisitsDecline(t *testing.T) {
 
 func TestLexicalReadFreePrimitiveAvoidsSourceIndex(t *testing.T) {
 	const source = "def work() -> i64:\n    return (10 + 2) * 3\n"
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	for i := 0; i < 2; i++ {
 		result := session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
 		if len(result.Errors()) != 0 {
@@ -127,7 +127,7 @@ func TestLexicalReadFreePrimitiveAvoidsSourceIndex(t *testing.T) {
 
 func TestLexicalParameterReadRemainsLiveDuringPrimitiveReplay(t *testing.T) {
 	const source = "def work(value: i64) -> i64:\n    return value + 1\n"
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
 	before := session.Stats()
 	result := session.Analyze(parseIncrementalSessionFile(t, source), AnalyzeOptions{})
@@ -214,7 +214,7 @@ func TestLexicalPublicationAdmissionOrderIsDeterministic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		session := NewIncrementalAnalysisSession()
+		session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 		session.lexical = owner
 		reads := &lexicalReadInvocation{observations: observations}
 		reads.publish(session)
@@ -236,7 +236,7 @@ func TestLexicalReadVerificationFailureRevokesUniverse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads := &lexicalReadInvocation{observations: []lexicalSymbolObservation{observation}}
 	reads.publish(session)
 	if session.Stats().LexicalVerificationFailures != 1 || session.lexical.Stats().RetainedQueries != 0 {
@@ -268,7 +268,7 @@ func TestLexicalUnsupportedReadDoesNotPoisonOwner(t *testing.T) {
 		}
 		observations = append(observations, observation)
 	}
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads := &lexicalReadInvocation{observations: observations}
 	reads.publish(session)
 	if stats := session.Stats(); stats.LexicalSelectionsVerified != 1 || stats.LexicalReadsDropped != 1 || stats.LexicalVerificationFailures != 0 {
@@ -313,7 +313,7 @@ func TestLexicalRemovedSiteDoesNotPoisonSurvivingSite(t *testing.T) {
 	if _, err := batch.add(index, fn); err == nil {
 		t.Fatal("partial batch not sealed")
 	}
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	reads := &lexicalReadInvocation{observations: observations}
 	reads.publish(session)
 	if stats := session.Stats(); stats.LexicalSelectionsVerified != 1 || stats.LexicalReadsDropped != 1 || stats.LexicalVerificationFailures != 0 {
@@ -342,7 +342,7 @@ func TestLexicalUnsupportedRepeatedVisitRevokesPriorVisit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, observations := range [][]lexicalSymbolObservation{{supported, unsupported, supported}, {unsupported, supported}} {
-		session := NewIncrementalAnalysisSession()
+		session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 		reads := &lexicalReadInvocation{observations: observations}
 		reads.publish(session)
 		if stats := session.Stats(); stats.LexicalSelectionsVerified != 0 || stats.LexicalReadsDropped == 0 || stats.LexicalVerificationFailures != 0 {

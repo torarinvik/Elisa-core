@@ -362,11 +362,7 @@ func (s *Session) PublishPrepared(ctx context.Context, prepare func() ([]Publica
 	} else {
 		s.db.RetireInputs(retired...)
 	}
-	changes := make([]Change, 0, len(inputs))
-	for _, change := range inputs {
-		changes = append(changes, change)
-	}
-	s.db.Apply(changes...)
+	s.db.applySnapshot(inputs)
 	s.ready = true
 	s.stats.Skipped += uint64(len(result.Skipped))
 	result.Revision = Revision{s, s.epoch}

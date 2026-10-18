@@ -4,6 +4,12 @@ import (
 	"elisacore/src/ast"
 )
 
+const smtIndexedSViewArgPrefix = "\x00smt-indexed-sview:"
+
+func smtIndexedSViewArgKey(name, part string) string {
+	return smtIndexedSViewArgPrefix + part + ":" + name
+}
+
 // Container theory: an SMT model of a darray VALUE that is fixed for the whole query.
 //
 // A container value is named by a BASE symbol. Its length is `base$len` (the same symbol the
@@ -180,8 +186,10 @@ func (tr *smtTranslator) containerViewIndex(expr ast.Expr, env map[string]string
 }
 
 // containerViewElement is the view stored at index k of a container: its byte array, start offset
-// and length, as per-base uninterpreted functions of the index. The length is non-negative (a view
-// length); nothing else is assumed, in particular not that k is in bounds.
+// and length, as per-base uninterpreted functions of the index. A non-binder-dependent length is
+// constrained to be non-negative; when k mentions a quantifier binder, that optional fact is
+// dropped instead of leaking the binder into a top-level assertion. Nothing relates an element to
+// the container length, in particular not that k is in bounds.
 func (tr *smtTranslator) containerViewElement(base, k string) (arr, lo, length string) {
 	data := "|" + base + "$edata|"
 	start := "|" + base + "$elo|"
@@ -197,8 +205,47 @@ func (tr *smtTranslator) containerViewElement(base, k string) (arr, lo, length s
 			"(declare-fun "+size+" (Int) Int)\n")
 	}
 	length = "(" + size + " " + k + ")"
-	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+length+" 0))\n")
+	// Keep a quantified binder inside its scope. For a binder-dependent view,
+	// dropping this optional well-formedness fact is a conservative loss of
+	// precision; emitting it as a top-level assertion would leak the binder.
+	if !smtTermMentionsQuantifierBinder(length) {
+		tr.auxDecls = append(tr.auxDecls, "(assert (>= "+length+" 0))\n")
+	}
 	return "(" + data + " " + k + ")", "(" + start + " " + k + ")", length
+}
+
+// indexedSViewCallTerms keeps a view selected from a stable darray[sview] as
+// its backing bytes, offset, and length. These are function arguments rather
+// than global view symbols, so a quantifier binder remains inside the term.
+func (tr *smtTranslator) indexedSViewCallTerms(expr ast.Expr, env map[string]string) (data, offset, length string, ok bool) {
+	if tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+		return "", "", "", false
+	}
+	base, index, ok := tr.containerViewIndex(expr, env)
+	if !ok {
+		return "", "", "", false
+	}
+	data, offset, length = tr.containerViewElement(base, index)
+	return data, offset, length, true
+}
+
+func bindSMTIndexedSViewArgTerms(env map[string]string, name, data, offset, length string) {
+	if env == nil || name == "" || data == "" || offset == "" || length == "" {
+		return
+	}
+	env[smtIndexedSViewArgKey(name, "data")] = data
+	env[smtIndexedSViewArgKey(name, "offset")] = offset
+	env[smtIndexedSViewArgKey(name, "length")] = length
+}
+
+func smtIndexedSViewArgTermsFromEnv(name string, env map[string]string) (data, offset, length string, ok bool) {
+	if env == nil || name == "" {
+		return "", "", "", false
+	}
+	data = env[smtIndexedSViewArgKey(name, "data")]
+	offset = env[smtIndexedSViewArgKey(name, "offset")]
+	length = env[smtIndexedSViewArgKey(name, "length")]
+	return data, offset, length, data != "" && offset != "" && length != ""
 }
 
 // indexedSViewCallArray binds a sview read from a stable container as a

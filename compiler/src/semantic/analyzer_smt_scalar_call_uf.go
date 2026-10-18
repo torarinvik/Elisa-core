@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -56,6 +57,30 @@ func (tr *smtTranslator) scalarCallUF(call *ast.CallExpr, env map[string]string,
 		case isStringViewType(param):
 			if _, exact := param.(*SViewType); !exact {
 				return "", false
+			}
+			if literal, ok := stripOptimizationParens(arg).(*ast.StringLit); ok && literal != nil {
+				// A literal view is immutable and has exact contents. Keep it in
+				// the UF identity so repeated calls on the same literal agree.
+				key.WriteString("|view-literal:")
+				key.WriteString(hex.EncodeToString([]byte(literal.Value)))
+				continue
+			}
+			if id, bare := stripOptimizationParens(arg).(*ast.Ident); bare && id != nil {
+				if data, offset, length, ok := smtIndexedSViewArgTermsFromEnv(id.Name, env); ok {
+					key.WriteString("|view-indexed")
+					sorts = append(sorts, "(Array Int Int)", "Int", "Int")
+					terms = append(terms, data, offset, length)
+					continue
+				}
+			}
+			if data, offset, length, ok := tr.indexedSViewCallTerms(arg, env); ok {
+				// The binder stays in the application arguments. Unlike
+				// sviewWindowArrayTerm, this creates no top-level axiom containing
+				// a free quantified symbol.
+				key.WriteString("|view-indexed")
+				sorts = append(sorts, "(Array Int Int)", "Int", "Int")
+				terms = append(terms, data, offset, length)
+				continue
 			}
 			// Only an authorized immutable byte-array binding names a stable view.
 			// Different view bindings get different functions, conservatively losing

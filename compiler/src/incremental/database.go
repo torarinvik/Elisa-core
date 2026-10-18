@@ -81,6 +81,22 @@ func (db *Database) Apply(changes ...Change) bool {
 	for _, change := range changes {
 		pending[change.Key] = change
 	}
+	return db.applyPending(pending)
+}
+
+// applySnapshot consumes a session's already deduplicated input inventory without
+// constructing another full-size map. The caller owns the map; only its immutable
+// string values are retained. As with Apply's slice, it must stay unchanged during
+// the call. Public Apply still resolves duplicate entries with last-write wins.
+func (db *Database) applySnapshot(changes map[Key]Change) bool {
+	db.gate <- struct{}{}
+	defer func() { <-db.gate }()
+	return db.applyPending(changes)
+}
+
+// applyPending runs under the database gate. Checking the complete inventory
+// before writing preserves one atomic revision and byte-identical no-op batches.
+func (db *Database) applyPending(pending map[Key]Change) bool {
 	modified := false
 	for key, change := range pending {
 		old := db.inputs[key]

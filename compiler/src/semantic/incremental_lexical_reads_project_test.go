@@ -38,7 +38,7 @@ func TestLocalLexicalReadPointProjectProbe(t *testing.T) {
 		}
 		return file
 	}
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	for pass := 0; pass < 2; pass++ {
 		file := parse()
 		before := session.Stats()

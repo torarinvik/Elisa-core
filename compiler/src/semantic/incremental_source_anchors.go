@@ -75,7 +75,7 @@ func (index *FunctionSourceIndex) liveSourceNodes() (map[PositionedFunctionNode]
 	if index == nil {
 		return nil, fmt.Errorf("missing function source index")
 	}
-	_, current, err := functionSyntaxFingerprint(index.root)
+	current, err := functionSyntaxSourceNodes(index.root)
 	if err != nil {
 		return nil, err
 	}

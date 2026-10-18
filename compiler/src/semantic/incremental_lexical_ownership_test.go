@@ -135,7 +135,7 @@ func TestLexicalOwnershipInIncrementalAnalysis(t *testing.T) {
 def work(value: i64) -> i64:
     return identity(value)
 `
-	session := NewIncrementalAnalysisSession()
+	session := NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{AuditLexicalReads: true})
 	for _, text := range []string{source, "\n\n" + source} {
 		reference := AnalyzeWithOptions(parseIncrementalSessionFile(t, text), AnalyzeOptions{})
 		got := session.Analyze(parseIncrementalSessionFile(t, text), AnalyzeOptions{})

@@ -165,10 +165,15 @@ var ErrFunctionSyntaxBudget = errors.New("function product syntax budget exceede
 
 type functionSyntaxEncoder struct {
 	bytes.Buffer
-	depth, work int
-	failure     error
-	seen        map[functionSyntaxPointer]uint64
-	nodes       []PositionedFunctionNode
+	// Liveness needs the same graph validation and node order, but no digest.
+	// Count its logical encoding bytes to preserve the exact byte budget.
+	nodesOnly    bool
+	encodedBytes int
+	depth, work  int
+	failure      error
+	seen         map[functionSyntaxPointer]uint64
+	structFields map[reflect.Type][]string
+	nodes        []PositionedFunctionNode
 	// Optional explicit derived-cache exclusions for nominal fingerprints.
 	// Source syntax fingerprints leave this nil and remain fully structural.
 	skipFields               map[reflect.Type]map[string]bool
@@ -186,12 +191,43 @@ func functionSyntaxFingerprint(value any) ([32]byte, []PositionedFunctionNode, e
 	}
 	return sha256.Sum256(encoder.Bytes()), encoder.nodes, nil
 }
+
+func functionSyntaxSourceNodes(value any) ([]PositionedFunctionNode, error) {
+	encoder := &functionSyntaxEncoder{
+		seen: map[functionSyntaxPointer]uint64{}, nodesOnly: true,
+		encodedBytes: len("elisa-function-syntax-v1\x00"),
+	}
+	if err := encoder.encode(reflect.ValueOf(value)); err != nil {
+		return nil, err
+	}
+	return encoder.nodes, nil
+}
+
+func (e *functionSyntaxEncoder) size() int {
+	if e.nodesOnly {
+		return e.encodedBytes
+	}
+	return e.Len()
+}
+
+func (e *functionSyntaxEncoder) marker(value byte) {
+	if e.nodesOnly {
+		e.encodedBytes++
+		return
+	}
+	e.WriteByte(value)
+}
+
 func (e *functionSyntaxEncoder) number(value uint64) {
 	if e.failure != nil {
 		return
 	}
-	if e.Len() > functionSyntaxMaxBytes-8 {
+	if e.size() > functionSyntaxMaxBytes-8 {
 		e.failure = ErrFunctionSyntaxBudget
+		return
+	}
+	if e.nodesOnly {
+		e.encodedBytes += 8
 		return
 	}
 	var data [8]byte
@@ -202,30 +238,34 @@ func (e *functionSyntaxEncoder) text(value string) {
 	if e.failure != nil {
 		return
 	}
-	if len(value) > functionSyntaxMaxBytes-e.Len()-8 {
+	if len(value) > functionSyntaxMaxBytes-e.size()-8 {
 		e.failure = ErrFunctionSyntaxBudget
 		return
 	}
 	e.number(uint64(len(value)))
+	if e.nodesOnly {
+		e.encodedBytes += len(value)
+		return
+	}
 	e.WriteString(value)
 }
 func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 	if e.failure != nil {
 		return e.failure
 	}
-	if e.depth >= functionSyntaxMaxDepth || e.work >= functionSyntaxMaxWork || e.Len() >= functionSyntaxMaxBytes {
+	if e.depth >= functionSyntaxMaxDepth || e.work >= functionSyntaxMaxWork || e.size() >= functionSyntaxMaxBytes {
 		return ErrFunctionSyntaxBudget
 	}
 	e.depth++
 	e.work++
 	defer func() { e.depth-- }()
 	if !value.IsValid() {
-		e.WriteByte(0)
+		e.marker(0)
 		return nil
 	}
 	// Position changes are rebound inputs, not declaration or body identity.
 	if value.Type() == functionPositionType {
-		e.WriteByte(1)
+		e.marker(1)
 		return nil
 	}
 	e.text(value.Type().String())
@@ -243,47 +283,60 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 	switch value.Kind() {
 	case reflect.Interface:
 		if value.IsNil() {
-			e.WriteByte(0)
+			e.marker(0)
 			return nil
 		}
-		e.WriteByte(1)
+		e.marker(1)
 		return e.encode(value.Elem())
 	case reflect.Pointer:
 		if value.IsNil() {
-			e.WriteByte(0)
+			e.marker(0)
 			return nil
 		}
 		key := functionSyntaxPointer{value.Type(), value.Pointer()}
 		if ordinal, ok := e.seen[key]; ok {
-			e.WriteByte(2)
+			e.marker(2)
 			e.number(ordinal)
 			return nil
 		}
-		e.WriteByte(1)
+		e.marker(1)
 		e.seen[key] = uint64(len(e.seen))
 		if node, ok := value.Interface().(PositionedFunctionNode); ok {
 			e.nodes = append(e.nodes, node)
 		}
 		return e.encode(value.Elem())
 	case reflect.Struct:
-		for i := 0; i < value.NumField(); i++ {
-			if e.skipFields[value.Type()][value.Type().Field(i).Name] {
+		typ := value.Type()
+		fields, known := e.structFields[typ]
+		if !known {
+			fields = make([]string, typ.NumField())
+			for i := range fields {
+				fields[i] = typ.Field(i).Name
+			}
+			if e.structFields == nil {
+				e.structFields = make(map[reflect.Type][]string)
+			}
+			e.structFields[typ] = fields
+		}
+		for i, name := range fields {
+			if e.skipFields[typ][name] {
 				continue
 			}
-			if !value.Field(i).CanInterface() {
-				return fmt.Errorf("unpublished function syntax field %s.%s", value.Type(), value.Type().Field(i).Name)
+			field := value.Field(i)
+			if !field.CanInterface() {
+				return fmt.Errorf("unpublished function syntax field %s.%s", typ, name)
 			}
-			e.text(value.Type().Field(i).Name)
-			if err := e.encode(value.Field(i)); err != nil {
+			e.text(name)
+			if err := e.encode(field); err != nil {
 				return err
 			}
 		}
 	case reflect.Slice:
 		if value.IsNil() {
-			e.WriteByte(0)
+			e.marker(0)
 			return nil
 		}
-		e.WriteByte(1)
+		e.marker(1)
 		fallthrough
 	case reflect.Array:
 		if value.Len() > functionSyntaxMaxWork-e.work {
@@ -297,10 +350,10 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 		}
 	case reflect.Map:
 		if value.IsNil() {
-			e.WriteByte(0)
+			e.marker(0)
 			return nil
 		}
-		e.WriteByte(1)
+		e.marker(1)
 		if value.Type().Key().Kind() != reflect.String {
 			return fmt.Errorf("unsupported function syntax map key %s", value.Type().Key())
 		}
@@ -320,9 +373,9 @@ func (e *functionSyntaxEncoder) encode(value reflect.Value) error {
 		e.text(value.String())
 	case reflect.Bool:
 		if value.Bool() {
-			e.WriteByte(1)
+			e.marker(1)
 		} else {
-			e.WriteByte(0)
+			e.marker(0)
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		e.number(uint64(value.Int()))

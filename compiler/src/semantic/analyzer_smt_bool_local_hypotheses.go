@@ -409,6 +409,11 @@ func (a *Analyzer) smtScalarInitializerStableWithBinders(expr ast.Expr, walkedNo
 		if root, ok := rootIdentName(n); ok {
 			identifiers[root] = true
 		}
+		if n.Field == "count" && !n.Safe {
+			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && !binders[id.Name] && a.smtImmutableIntegerDArrayParameter(id) {
+				return true
+			}
+		}
 		if n.Field == "len" && !n.Safe {
 			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && !binders[id.Name] && a.immutableSviewParameter(id) {
 				return true
@@ -418,10 +423,23 @@ func (a *Analyzer) smtScalarInitializerStableWithBinders(expr ast.Expr, walkedNo
 	case *ast.IndexExpr:
 		tr := &smtTranslator{a: a}
 		view, _, ok := tr.stableSviewByteIndexRoot(n, nil)
-		if !ok || binders[view.Name] {
+		if ok && !binders[view.Name] {
+			identifiers[view.Name] = true
+			return a.smtScalarInitializerStableWithBinders(n.Index, walkedNodes, identifiers, depth+1, binders)
+		}
+		// Ordinary integer-element darray reads are stable only for an immutable,
+		// by-value parameter in a frame that cannot mutate through an alias. The
+		// SMT translator can represent these reads as `(select base index)`; other
+		// element types (views, structs, enums, floats) have different theories and
+		// must keep the conservative runtime-block path.
+		container, ok := stripOptimizationParens(n.Object).(*ast.Ident)
+		if !ok || container == nil || binders[container.Name] ||
+			!a.smtImmutableIntegerDArrayParameter(container) ||
+			n.Index2 != nil || n.Fallback != nil || n.LegacyElseFallback ||
+			n.AsSpecialize != nil || n.AsOverlayCall != nil || n.AsBuiltinDictGet != nil {
 			return false
 		}
-		identifiers[view.Name] = true
+		identifiers[container.Name] = true
 		return a.smtScalarInitializerStableWithBinders(n.Index, walkedNodes, identifiers, depth+1, binders)
 	case *ast.CastExpr:
 		return isPureNumericValueCast(n) && a.smtScalarInitializerStableWithBinders(n.Operand, walkedNodes, identifiers, depth+1, binders)
@@ -441,6 +459,35 @@ func (a *Analyzer) smtScalarInitializerStableWithBinders(expr ast.Expr, walkedNo
 	default:
 		return false
 	}
+}
+
+// smtImmutableIntegerDArrayParameter admits only reads from a by-value,
+// immutable darray parameter whose element type already has the scalar array
+// model. Mutable/reference containers and arrays of aggregates stay opaque.
+// The frame check keeps the collection snapshot stable across the runtime
+// quantifier's iterations, including writes through aliases or helper calls.
+func (a *Analyzer) smtImmutableIntegerDArrayParameter(id *ast.Ident) bool {
+	if a == nil || id == nil || a.currentScope == nil || a.currentFuncDecl == nil {
+		return false
+	}
+	sym, found := a.currentScope.Lookup(id.Name)
+	if !found || sym == nil || sym.Kind != SymbolParam || sym.Node != a.currentFuncDecl ||
+		sym.Mutable || symbolRootMutable(sym) || isDirectRefType(sym.Type) {
+		return false
+	}
+	if _, isRef := StripAggregateStateType(sym.Type).(*RefType); isRef {
+		return false
+	}
+	array, ok := StripAggregateStateType(sym.Type).(*DArrayType)
+	if !ok || array == nil || !IsNumericType(array.Elem) || IsFloatType(array.Elem) {
+		return false
+	}
+	for _, param := range a.currentFuncDecl.Params {
+		if param.Name == id.Name && !param.Mutable && !a.paramIsMutable(param) {
+			return a.sviewFrameWriteFree(a.currentFuncDecl)
+		}
+	}
+	return false
 }
 
 // A saved predicate call can be expanded only when its value depends on scalar arguments

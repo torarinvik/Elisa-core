@@ -52,7 +52,7 @@ func prepareLexicalSymbol(request lexicalSymbolRequest, batch *lexicalAnchorBatc
 		domain = "local-symbol"
 	}
 	spec := lexicalSelectionSpec{Site: anchor, Role: request.Role, Domain: domain, Name: request.Name}
-	if _, err := lexicalSelectionKey(spec); err != nil {
+	if _, err := validateLexicalSelectionSpec(spec); err != nil {
 		return result, err
 	}
 	var frames []lexicalFrameValue
@@ -130,7 +130,7 @@ func prepareLexicalSymbols(requests []lexicalSymbolRequest) (lexicalSymbolSnapsh
 			if request.LocalOnly {
 				domain = "local-symbol"
 			}
-			if _, err := lexicalSelectionKey(lexicalSelectionSpec{Site: anchor, Role: request.Role, Domain: domain, Name: request.Name}); err != nil {
+			if _, err := validateLexicalSelectionSpec(lexicalSelectionSpec{Site: anchor, Role: request.Role, Domain: domain, Name: request.Name}); err != nil {
 				return nil, err
 			}
 			seen := map[*Scope]bool{}

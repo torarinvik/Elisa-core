@@ -20,13 +20,14 @@ import (
 )
 
 // IncrementalAnalysisSession is an opt-in, in-process semantic session. The
-// initial body classes are integer returns with current-bound i64 parameters.
+// initial body classes are integer returns with current-bound int/i64 parameters.
 // It reuses expression typing; parameter reads, return checks, declarations,
 // summaries and CFGs stay fresh. Resolved nongeneric mutable-borrow capability
 // queries also reuse pointer-free products after declaration shapes are frozen.
 // It is not a complete incremental compiler or a persistent whole-body cache.
 type IncrementalAnalysisSession struct {
 	mu                                           sync.Mutex
+	auditLexicalReads                            bool
 	lexical                                      *incremental.Session
 	capabilities                                 *capabilityQueryCache
 	db                                           *incremental.Database
@@ -92,8 +93,21 @@ func primitiveInput(kind, name string) incremental.Key {
 	return incremental.Key{Kind: kind, Name: name}
 }
 
+// IncrementalAnalysisSessionOptions controls development instrumentation. These
+// options do not disable any dependency required to authorize typing replay.
+type IncrementalAnalysisSessionOptions struct {
+	// AuditLexicalReads independently records and verifies ordinary resolver reads.
+	// This shadow query world is not consumed by primitive typing replay. Keep it
+	// available for qualification without charging every production edit for it.
+	AuditLexicalReads bool
+}
+
 func NewIncrementalAnalysisSession() *IncrementalAnalysisSession {
-	session := &IncrementalAnalysisSession{previous: map[incremental.Key]bool{}}
+	return NewIncrementalAnalysisSessionWithOptions(IncrementalAnalysisSessionOptions{})
+}
+
+func NewIncrementalAnalysisSessionWithOptions(options IncrementalAnalysisSessionOptions) *IncrementalAnalysisSession {
+	session := &IncrementalAnalysisSession{previous: map[incremental.Key]bool{}, auditLexicalReads: options.AuditLexicalReads}
 	session.resetDatabase()
 	return session
 }
@@ -234,7 +248,9 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	}
 	digest := sha256.Sum256(config)
 	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, localInitializers: map[*ast.VarDeclStmt]*primitiveLocalInitializer{}, config: hex.EncodeToString(digest[:])}
-	invocation.lexical = &lexicalReadInvocation{indexes: map[*ast.FuncDecl]*FunctionSourceIndex{}}
+	if session.auditLexicalReads {
+		invocation.lexical = &lexicalReadInvocation{indexes: map[*ast.FuncDecl]*FunctionSourceIndex{}}
+	}
 	invocation.changes = append(invocation.changes, incremental.Change{Key: primitiveConfigKey, Value: invocation.config})
 	current := map[incremental.Key]bool{}
 	origin := file.Filename
@@ -312,27 +328,29 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			}
 			expressions, primitiveReturn := primitiveReturnExpressions(fn)
 			ok = primitiveReturn
-			if _, exists := invocation.lexical.indexes[fn]; !exists && len(invocation.lexical.indexes) < lexicalReadMaxFunctions {
-				readFree := primitiveReturn
-				for _, expr := range expressions {
-					if _, ident := expr.(*ast.Ident); ident {
-						readFree = false
-						break
-					}
-				}
-				var index *FunctionSourceIndex
-				if !readFree {
-					index, _ = IndexFunctionSource(fn, FunctionIdentityContext{Origin: origin, QualifiedName: qualifiedName})
-					if index != nil {
-						if len(index.ordinals) > lexicalReadMaxSourceNodes-invocation.lexical.indexNodes {
-							index = nil
-						} else {
-							invocation.lexical.indexNodes += len(index.ordinals)
-							session.stats.LexicalSourceIndexesBuilt++
+			if reads := invocation.lexical; reads != nil {
+				if _, exists := reads.indexes[fn]; !exists && len(reads.indexes) < lexicalReadMaxFunctions {
+					readFree := primitiveReturn
+					for _, expr := range expressions {
+						if _, ident := expr.(*ast.Ident); ident {
+							readFree = false
+							break
 						}
 					}
+					var index *FunctionSourceIndex
+					if !readFree {
+						index, _ = IndexFunctionSource(fn, FunctionIdentityContext{Origin: origin, QualifiedName: qualifiedName})
+						if index != nil {
+							if len(index.ordinals) > lexicalReadMaxSourceNodes-invocation.lexical.indexNodes {
+								index = nil
+							} else {
+								invocation.lexical.indexNodes += len(index.ordinals)
+								session.stats.LexicalSourceIndexesBuilt++
+							}
+						}
+					}
+					invocation.lexical.indexes[fn] = index
 				}
-				invocation.lexical.indexes[fn] = index
 			}
 			var locals []*primitiveLocalInitializer
 			if !ok {
@@ -556,7 +574,7 @@ func primitiveReturnHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 		copy := *typ
 		copy.Position = lexer.Pos{}
 		copy.Name = ""
-		if typ.Name != "i64" || !reflect.ValueOf(copy).IsZero() {
+		if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
 			return nil, false
 		}
 	case *ast.BuiltinTypeExpr:
@@ -568,7 +586,7 @@ func primitiveReturnHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
 		}
 		copy.TypeArgs = nil
 		copy.ValueArgs = nil
-		if typ.Name != "i64" || !reflect.ValueOf(copy).IsZero() {
+		if (typ.Name != "i64" && typ.Name != "int") || !reflect.ValueOf(copy).IsZero() {
 			return nil, false
 		}
 	default:
@@ -792,7 +810,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 	currentReturn, returnOK := a.currentReturn.(*BuiltinType)
 	nodes, eligible := primitiveReturnExpressions(fn)
 	predicate := predicateBuiltinSyntaxName(fn.ReturnType) == "bool"
-	returnName := "i64"
+	returnName := predicateBuiltinSyntaxName(fn.ReturnType)
 	bindingsReady := primitiveCurrentParameterBindings(a, fn)
 	safetyReady := invocation.safety == primitiveOperatorAbsence
 	if predicate {
