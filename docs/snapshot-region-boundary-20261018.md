@@ -33,3 +33,11 @@ no entry. Consequently the hypothesized rejection of an existing named-region
 dependency is not the immediate cause in this example. Investigate call-return
 metadata creation/specialization first. Temporary tracing and the intentionally
 failing probe were removed after recording this observation.
+
+Parser correction: `takeReturnTypeRegion` previously promoted only named and
+tuple return suffixes. Generic aggregate suffixes now receive the same function
+contract treatment; parameter suffixes remain on their type node. The full Go
+parser suite passes (1.044 seconds). This correction alone, and together with an
+experimental already-substituted return-region lookup, did not eliminate the
+Packet insertion errors. The experimental semantic edit was removed. Further
+semantic tracing is required; this commit does not claim to fix Stage1.
