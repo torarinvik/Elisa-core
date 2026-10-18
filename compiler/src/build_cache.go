@@ -168,7 +168,7 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string, t
 	if err := os.MkdirAll(filepath.Dir(artifact.dir), 0o755); err != nil {
 		return err
 	}
-	if _, valid := readBuildCacheTranscript(artifact); valid && usableCachedFile(artifact.object, false) {
+	if existing, valid := readBuildCacheTranscript(artifact); valid && buildCacheObjectMatches(artifact, existing) {
 		return nil
 	}
 	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".elisa-build-object-stage-*")
@@ -180,6 +180,11 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string, t
 	if err := copyExecutableFile(builtObject, stageObject); err != nil {
 		return err
 	}
+	objectHash, err := buildCacheObjectHash(stageObject)
+	if err != nil {
+		return err
+	}
+	transcript.ObjectSHA256 = objectHash
 	transcript.Key = artifact.key
 	transcript.StdoutSHA256 = buildCacheStreamHash(transcript.Stdout)
 	transcript.StderrSHA256 = buildCacheStreamHash(transcript.Stderr)
@@ -192,11 +197,11 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string, t
 	}
 	// Missing/corrupt metadata cannot authorize a hit. Remove only this cache
 	// entry so the atomic directory publication can repair it.
-	if _, valid := readBuildCacheTranscript(artifact); !valid || !usableCachedFile(artifact.object, false) {
+	if existing, valid := readBuildCacheTranscript(artifact); !valid || !buildCacheObjectMatches(artifact, existing) {
 		_ = os.RemoveAll(artifact.dir)
 	}
 	if err := os.Rename(stagingDir, artifact.dir); err != nil {
-		if _, valid := readBuildCacheTranscript(artifact); valid && usableCachedFile(artifact.object, false) {
+		if existing, valid := readBuildCacheTranscript(artifact); valid && buildCacheObjectMatches(artifact, existing) {
 			return nil
 		}
 		return err
@@ -241,7 +246,7 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	transcript, validTranscript := readBuildCacheTranscript(artifact)
 	if validTranscript && usableCachedFile(artifact.object, false) {
 		if err := ensureOutputParentExists(outputPath); err == nil {
-			if err := copyExecutableFile(artifact.object, outputPath); err == nil {
+			if err := restoreBuildCacheObject(artifact, outputPath, transcript); err == nil {
 				if _, err := io.Copy(stdout, bytes.NewReader(transcript.Stdout)); err != nil {
 					return 1, true
 				}

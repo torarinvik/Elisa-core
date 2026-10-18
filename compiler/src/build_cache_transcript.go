@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ func (c *buildCacheCapture) Write(p []byte) (int, error) {
 }
 
 type buildCacheTranscript struct {
+	ObjectSHA256               string
 	Key                        string
 	Stdout, Stderr             []byte
 	StdoutSHA256, StderrSHA256 string
@@ -49,6 +51,59 @@ func readBuildCacheTranscript(artifact buildCacheArtifact) (buildCacheTranscript
 	if err != nil || len(data) > 3*buildCacheStreamLimit || json.Unmarshal(data, &transcript) != nil {
 		return transcript, false
 	}
-	valid := transcript.Key == artifact.key && len(transcript.Stdout) <= buildCacheStreamLimit && len(transcript.Stderr) <= buildCacheStreamLimit && transcript.StdoutSHA256 == buildCacheStreamHash(transcript.Stdout) && transcript.StderrSHA256 == buildCacheStreamHash(transcript.Stderr)
+	valid := len(transcript.ObjectSHA256) == 64 && transcript.Key == artifact.key && len(transcript.Stdout) <= buildCacheStreamLimit && len(transcript.Stderr) <= buildCacheStreamLimit && transcript.StdoutSHA256 == buildCacheStreamHash(transcript.Stdout) && transcript.StderrSHA256 == buildCacheStreamHash(transcript.Stderr)
 	return transcript, valid
+}
+
+func buildCacheObjectHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+func buildCacheObjectMatches(artifact buildCacheArtifact, transcript buildCacheTranscript) bool {
+	if !usableCachedFile(artifact.object, false) {
+		return false
+	}
+	digest, err := buildCacheObjectHash(artifact.object)
+	return err == nil && digest == transcript.ObjectSHA256
+}
+
+// Validate the bytes while copying, then publish the output atomically. Neither
+// corrupt cache bytes nor their diagnostic transcript reach the caller on miss.
+func restoreBuildCacheObject(artifact buildCacheArtifact, output string, transcript buildCacheTranscript) error {
+	in, err := os.Open(artifact.object)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.CreateTemp(filepath.Dir(output), ".elisa-cache-restore-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close(); _ = os.Remove(out.Name()) }()
+	hash := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(out, hash), in); err != nil {
+		return err
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != transcript.ObjectSHA256 {
+		return fmt.Errorf("cached object checksum mismatch")
+	}
+	if err := out.Chmod(info.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(out.Name(), output)
 }

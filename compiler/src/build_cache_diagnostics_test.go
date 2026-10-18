@@ -247,3 +247,65 @@ func TestBuildObjectCacheOversizedTranscriptNeverPublishes(t *testing.T) {
 		t.Fatal("oversized transcript published an artifact", err)
 	}
 }
+
+func TestBuildObjectCacheRepairsCorruptedObject(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	program := &loadedProgram{filename: filepath.Join(dir, "unit.elisa"), source: []byte("def main() -> i64:\n    return 0\n")}
+	options := cliOptions{filename: program.filename, emit: emitObject, output: filepath.Join(dir, "result.o")}
+	load := func(string, io.Writer) (*loadedProgram, bool) { return program, true }
+	builds := 0
+	want := []byte("valid object bytes")
+	build := func(opts cliOptions, _ *loadedProgram, _ io.Writer, stderr io.Writer) int {
+		builds++
+		if _, err := io.WriteString(stderr, "diagnostic\n"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(opts.output, want, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	run := func() {
+		t.Helper()
+		var stderr bytes.Buffer
+		if rc, handled := tryBuildObjectCacheWith(options, io.Discard, &stderr, load, build); !handled || rc != 0 || stderr.String() != "diagnostic\n" {
+			t.Fatalf("cache flow: rc=%d handled=%v stderr=%q", rc, handled, stderr.String())
+		}
+		got, err := os.ReadFile(options.output)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("damaged cache object reached output: got=%q err=%v", got, err)
+		}
+	}
+	run()
+	artifact, ok := buildCacheObjectArtifactForProgram(options, program)
+	if !ok {
+		t.Fatal("fixture key unavailable")
+	}
+	if err := os.WriteFile(artifact.object, []byte("damaged but nonempty"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	transcript, valid := readBuildCacheTranscript(artifact)
+	if !valid {
+		t.Fatal("fixture metadata unavailable")
+	}
+	if err := restoreBuildCacheObject(artifact, options.output, transcript); err == nil {
+		t.Fatal("corrupt object accepted by direct restore")
+	}
+	unchanged, err := os.ReadFile(options.output)
+	if err != nil || !bytes.Equal(unchanged, want) {
+		t.Fatal("failed restore replaced prior output")
+	}
+	if leftovers, err := filepath.Glob(filepath.Join(dir, ".elisa-cache-restore-*")); err != nil || len(leftovers) != 0 {
+		t.Fatal("failed restore leaked staged output", leftovers, err)
+	}
+	run()
+	if builds != 2 {
+		t.Fatal("damaged object did not rebuild")
+	}
+	run()
+	if builds != 2 {
+		t.Fatal("repaired entry did not hit")
+	}
+}
