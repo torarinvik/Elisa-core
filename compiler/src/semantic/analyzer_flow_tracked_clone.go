@@ -35,7 +35,15 @@ func (a *Analyzer) cloneFunctionValueBindings() map[*Symbol]*FuncType {
 }
 
 func (a *Analyzer) cloneTrackedValueType(t Type) Type {
-	return a.cloneTrackedValueTypeWithSeen(t, map[Type]Type{})
+	if t == nil {
+		return nil
+	}
+	switch t.(type) {
+	case *BuiltinType, *TypeParamType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *EnumType, *OpaqueType:
+		return t
+	}
+	var memo trackedCloneMemo
+	return a.cloneTrackedValueTypeWithMemoDepth(t, &memo, 0)
 }
 
 func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Type {
@@ -43,6 +51,11 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 }
 
 func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type, depth int) Type {
+	memo := trackedCloneMemo{large: seen}
+	return a.cloneTrackedValueTypeWithMemoDepth(t, &memo, depth)
+}
+
+func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedCloneMemo, depth int) Type {
 	if t == nil {
 		return nil
 	}
@@ -50,7 +63,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 		a.reportSemanticDepthLimit("tracked-type clone", semanticCloneDepthLimit)
 		return invalidType
 	}
-	if cloned, ok := seen[t]; ok {
+	if cloned, ok := memo.get(t); ok {
 		return cloned
 	}
 	switch tt := t.(type) {
@@ -58,11 +71,11 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 		cloned := *tt
 		cloned.Fields = make(map[string]Field, len(tt.Fields))
 		clonedPtr := &cloned
-		seen[t] = clonedPtr
+		memo.set(t, clonedPtr)
 		for name, field := range tt.Fields {
-			field.Type = a.cloneTrackedValueTypeWithSeenDepth(field.Type, seen, depth+1)
+			field.Type = a.cloneTrackedValueTypeWithMemoDepth(field.Type, memo, depth+1)
 			if IsInvalidType(field.Type) {
-				seen[t] = invalidType
+				memo.set(t, invalidType)
 				return invalidType
 			}
 			cloned.Fields[name] = field
@@ -71,76 +84,76 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 	case *GenericInstanceType:
 		cloned := *tt
 		cloned.Args = make([]Type, len(tt.Args))
-		seen[t] = &cloned
+		memo.set(t, &cloned)
 		for i, arg := range tt.Args {
-			cloned.Args[i] = a.cloneTrackedValueTypeWithSeenDepth(arg, seen, depth+1)
+			cloned.Args[i] = a.cloneTrackedValueTypeWithMemoDepth(arg, memo, depth+1)
 			if IsInvalidType(cloned.Args[i]) {
-				seen[t] = invalidType
+				memo.set(t, invalidType)
 				return invalidType
 			}
 		}
-		cloned.Base = a.cloneTrackedValueTypeWithSeenDepth(tt.Base, seen, depth+1)
+		cloned.Base = a.cloneTrackedValueTypeWithMemoDepth(tt.Base, memo, depth+1)
 		if IsInvalidType(cloned.Base) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *RefType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *ArrayType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *DArrayType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *OptionalType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Value = a.cloneTrackedValueTypeWithSeenDepth(tt.Value, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Value = a.cloneTrackedValueTypeWithMemoDepth(tt.Value, memo, depth+1)
 		if IsInvalidType(cloned.Value) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *ViewType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Elem = a.cloneTrackedValueTypeWithMemoDepth(tt.Elem, memo, depth+1)
 		if IsInvalidType(cloned.Elem) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *DictType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Key = a.cloneTrackedValueTypeWithSeenDepth(tt.Key, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Key = a.cloneTrackedValueTypeWithMemoDepth(tt.Key, memo, depth+1)
 		if IsInvalidType(cloned.Key) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
-		cloned.Value = a.cloneTrackedValueTypeWithSeenDepth(tt.Value, seen, depth+1)
+		cloned.Value = a.cloneTrackedValueTypeWithMemoDepth(tt.Value, memo, depth+1)
 		if IsInvalidType(cloned.Value) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
@@ -149,33 +162,33 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 		if cloned == nil {
 			return nil
 		}
-		seen[t] = cloned
+		memo.set(t, cloned)
 		return cloned
 	case *ErrorUnionType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.Value = a.cloneTrackedValueTypeWithSeenDepth(tt.Value, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.Value = a.cloneTrackedValueTypeWithMemoDepth(tt.Value, memo, depth+1)
 		if IsInvalidType(cloned.Value) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *PackedEnumStoreType:
 		cloned := *tt
-		seen[t] = &cloned
-		cloned.State = a.cloneTrackedValueTypeWithSeenDepth(tt.State, seen, depth+1)
+		memo.set(t, &cloned)
+		cloned.State = a.cloneTrackedValueTypeWithMemoDepth(tt.State, memo, depth+1)
 		if IsInvalidType(cloned.State) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
 		return &cloned
 	case *CStrType:
 		cloned := *tt
-		seen[t] = &cloned
+		memo.set(t, &cloned)
 		return &cloned
 	case *SViewType:
 		cloned := *tt
-		seen[t] = &cloned
+		memo.set(t, &cloned)
 		return &cloned
 	case *BuiltinType, *TypeParamType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *EnumType, *OpaqueType:
 		// These leaves retain identity and cannot recurse. Recording them in the
@@ -184,10 +197,10 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 	default:
 		cloned := a.substituteType(t, nil, nil, nil, nil)
 		if IsInvalidType(cloned) {
-			seen[t] = invalidType
+			memo.set(t, invalidType)
 			return invalidType
 		}
-		seen[t] = cloned
+		memo.set(t, cloned)
 		return cloned
 	}
 }
@@ -331,13 +344,10 @@ func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen m
 	if src == nil {
 		return nil
 	}
-	if seen == nil {
-		// Pre-sized: each root typically contributes several nested types.
-		seen = make(map[Type]Type, 4*len(src))
-	}
+	memo := trackedCloneMemo{large: seen, spillHint: 4 * len(src)}
 	cloned := make(map[*Symbol]Type, len(src))
 	for sym, typ := range src {
-		cloned[sym] = a.cloneTrackedValueTypeWithSeen(typ, seen)
+		cloned[sym] = a.cloneTrackedValueTypeWithMemoDepth(typ, &memo, 0)
 	}
 	return cloned
 }
