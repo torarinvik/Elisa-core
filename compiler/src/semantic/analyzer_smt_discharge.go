@@ -3363,17 +3363,21 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			}
 			return "(mod " + inner + " 256)", true
 		}
-		// A stable SView index is a byte even though its source-level type is
-		// `char`. Widening that byte directly to u64 is therefore the identity;
-		// keep this restricted to the SView byte model, whose term carries the
-		// explicit [0, 256) bound. Arbitrary `char` values remain unsupported here
-		// because a negative char converts to a wrapped u64 value.
-		if source, ok := stripRefForBounds(sourceType).(*BuiltinType); ok && source != nil && source.Name == "char" && dok && !dsign && dbits == 64 {
+		// A char uses the runtime's signed i64 representation. Converting to
+		// u64 preserves those bits, including negative values; it is not an
+		// unbounded integer identity. This also models byte reads inside callee
+		// clauses, where the caller-only stable-view shortcut is unavailable.
+		if source, ok := sourceType.(*BuiltinType); ok && source != nil && source.Name == "char" && isPureNumericValueCast(n) && dok && !dsign && dbits == 64 {
 			if read, ok := stripOptimizationParens(n.Operand).(*ast.IndexExpr); ok {
 				if term, stable := tr.stableSviewByteIndex(read, env); stable {
 					return term, true
 				}
 			}
+			inner, ok := tr.termEnv(n.Operand, env)
+			if !ok {
+				return "", false
+			}
+			return smtSameWidthReinterpret(inner, false, 64), true
 		}
 		// `char` is represented as a signed 64-bit value. Widening it to an
 		// equal-width signed integer is therefore the identity, including inside
