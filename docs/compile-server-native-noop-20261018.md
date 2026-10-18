@@ -80,7 +80,7 @@ an explicit fixed iteration count, alternate/reverse order across repeated pairs
 and record source/binary hashes. Run only after the shared exact-source compiler
 gate is quiet. Cold-start/key setup cost and
 changed-body behavior need separate measurements before broad performance claims.
-The isolated branch is not yet promoted into shared main.
+Shared main integration is recorded below.
 
 ## Paired warm-request result
 
@@ -116,4 +116,4 @@ Pinned test binary SHA256: `8076dad3a803ef2f27ebcad0d7a907ffe8fa0df3b45027df5f03
 Cache source SHA256: `5d3ec50d71493ffaead6ae1182af836f8e8306ce2dd7a1291ec184e12220bdc5`.
 Benchmark source SHA256: `23f491e8f63b9f62fcbae51dbcbfc6b4a5dbe4e3f142ceb44aadd2a073dd8daf`.
 
-Implementation remains isolated pending shared-tree integration review.
+Integrated into shared main by fast-forward to `334d1866`. SHA256 checks verified all five unrelated dirty/untracked files were preserved byte-for-byte; the installed compiler was retained by the repository hook. Integration metadata is in the local evidence directory. Shared-tree focused correctness validation is tracked separately from the isolated performance sample.
