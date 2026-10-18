@@ -1,0 +1,9 @@
+# Enum-tag lookup recursive step contract
+
+A production-shaped extraction of the self-hosted enum-tag lookup reproduces an unproven loop invariant. The original body-local `next_index` has no type when loop assertion purity is inspected before body analysis, so both body models decline. Inlining its pure `index + 1` initializer makes the body modelable but does not discharge the invariant: the preservation query sees the recursive ghost helper as an opaque function.
+
+An explicit guarded postcondition supplies the missing relation: when the current index is inside both arrays and the current name differs, the result equals the recursive call at the next index. The helper's own body proves this contract. No existing invariant, runtime assertion, or postcondition is removed; only the redundant local binding is inlined. Extra index bounds alone did not solve this case.
+
+The permanent regression checks the complete helper, rejects induction when the step contract is removed, and rejects an incorrect `index + 2` step at the ghost helper definition. This is a strict semantic fixture result, not Stage1 qualification or a performance result. The proposed self-hosted source/checker patch is retained in ignored `build/verification/enum-tag-step-contract-20261018/self-hosted-candidate.patch`; shared application is pending the active build's source freeze. The candidate structural source gate passed separately; independent proof-product replay has not run.
+
+Final regression result: candidate, missing-step, and wrong-step cases all passed their expected outcomes; package time 1.131 seconds. Raw log: `build/verification/enum-tag-step-contract-20261018/permanent-controls.txt`.
