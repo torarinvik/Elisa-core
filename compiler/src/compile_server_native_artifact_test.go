@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"elisacore/src/ast"
 	"elisacore/src/backend"
@@ -358,4 +359,58 @@ func BenchmarkCompileServerNativeIdentity(b *testing.B) {
 			b.Fatal("identity changed")
 		}
 	}
+}
+
+// Interleaving controls process initialization and short-term host drift. It
+// shares process-wide LLVM/GC state, so it complements independent-process arms.
+func BenchmarkCompileServerNativeBodyEditInterleaved(b *testing.B) {
+	caches := [2]*compileServerSessionCache{newCompileServerSessionCache(4), newCompileServerSessionCache(4)}
+	request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "paired.elisa"), Incremental: true}
+	fixture := strings.Replace(serverNativeArtifactSource(), "return value + 1 +", "return value + 0x%016x +", 1)
+	request.Source = fmt.Sprintf(fixture, 1)
+	requireServerNativeIdentity(b, request, caches[1])
+	caches[0].native = nil
+	run := func(arm int) compileServerResponse {
+		response, status := executeCompileServerRequestWithSessions(request, caches[arm])
+		if status != http.StatusOK || !response.OK || response.Object == "" {
+			b.Fatalf("arm %d failed: %+v", arm, response)
+		}
+		return response
+	}
+	for round := 0; round < 2; round++ {
+		for arm := range caches {
+			run(arm)
+		}
+	}
+	before := [2]backend.IncrementalObjectStats{caches[0].objects.Stats(), caches[1].objects.Stats()}
+	analyses := [2]uint64{caches[0].session(request.Filename, emitObject).Stats().Analyses, caches[1].session(request.Filename, emitObject).Stats().Analyses}
+	hits := caches[1].native.Stats().Hits
+	var elapsed [2]time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		request.Source = fmt.Sprintf(fixture, uint64(i)+2)
+		var output [2]compileServerResponse
+		for turn := 0; turn < 2; turn++ {
+			arm := (i + turn) % 2
+			started := time.Now()
+			output[arm] = run(arm)
+			elapsed[arm] += time.Since(started)
+		}
+		if output[0].Object != output[1].Object || output[0].Stderr != output[1].Stderr {
+			b.Fatal("paired edit changed object or diagnostics")
+		}
+	}
+	b.StopTimer()
+	for arm, cache := range caches {
+		after := cache.objects.Stats()
+		if after.Builds-before[arm].Builds != uint64(b.N) || after.PartitionsEmitted-before[arm].PartitionsEmitted != uint64(b.N) || after.PartitionsReused-before[arm].PartitionsReused != uint64(7*b.N) || cache.session(request.Filename, emitObject).Stats().Analyses != analyses[arm]+uint64(b.N) {
+			b.Fatal("paired edit bypassed analysis or native shard rebuild")
+		}
+	}
+	if caches[1].native.Stats().Hits != hits {
+		b.Fatal("novel edit reused whole object")
+	}
+	b.ReportMetric(float64(elapsed[0])/float64(b.N), "shards-ns/request")
+	b.ReportMetric(float64(elapsed[1])/float64(b.N), "completed-ns/request")
 }

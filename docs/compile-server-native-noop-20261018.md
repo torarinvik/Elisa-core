@@ -208,3 +208,29 @@ run. Profiles are diagnostic, not paired qualification, and show timing shifts
 outside identity as well. Logs: `/tmp/elisa-body-{completed,shards}-profile.txt`;
 profiles: `/tmp/elisa-body-{completed,shards}.cpu`. Retain publication revalidation
 until a replacement proves the same mutable-input closure.
+
+## Interleaved body-edit control
+
+`BenchmarkCompileServerNativeBodyEditInterleaved` ran three fixed 20-edit blocks
+in one process, alternating first arm per edit. Each arm had independent semantic
+and native sessions, but used exactly the same filename/source. Every paired
+object and diagnostic matched; every edit reran analysis, emitted one shard,
+reused seven, and missed the completed cache. It includes all request work in
+per-arm clocks; fixture formatting is outside those clocks and inside pair time.
+Allocation metrics are for the pair, not either arm individually.
+
+| Run | Shards ms/request | Completed ms/request |
+| --- | ---: | ---: |
+| 1 | 47.826 | 47.083 |
+| 2 | 51.413 | 53.047 |
+| 3 | 47.714 | 48.034 |
+| Median | 47.826 | 48.034 |
+
+The median difference is +0.43%, with individual blocks varying in both
+directions. This does not reproduce a consistent large edit regression, and
+shows the earlier separate-process +36.5% result was sensitive to run timing.
+It does not prove zero overhead: identity microbenchmarks show work is added,
+and shared process-wide LLVM/GC state means these runs complement rather than
+replace independent-process samples. Log `/tmp/elisa-native-body-interleaved.txt`:
+PASS 8.463s. Current v2 correctness and fixture-level edit behavior are qualified;
+shared-tree promotion remains a separate integration step.
