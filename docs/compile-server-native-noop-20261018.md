@@ -153,3 +153,12 @@ or failed runs, records source/binary/environment fingerprints and per-arm logs,
 and checks source/binary stability afterward. It does not build anything.
 The harness CLI parses successfully; its complete paired execution has not yet
 been validated. Avoid concurrent compiler work when using it.
+
+Harness provenance hardening now fingerprints all tracked and untracked compiler
+source files (Go/C/C++/headers/Elisa/assembly/module files), records Git dirty
+state, and rejects source/HEAD/binary drift at completion. A manifest is explicitly
+`incomplete` until every arm and stability check passes. Its occupied-window
+refusal was exercised against the live compiler/Z3 jobs: it fingerprinted 2,138
+source files, retained an incomplete manifest with zero runs, and executed no
+benchmark. These source snapshots describe measurement-time files; the caller
+must still build the pinned binary from the intended exact source beforehand.

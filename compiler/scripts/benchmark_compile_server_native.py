@@ -26,16 +26,26 @@ root = Path(__file__).resolve().parents[2]
 binary = args.binary.resolve(strict=True)
 args.output.mkdir(parents=True, exist_ok=False)
 sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
-source = root / 'compiler/src'
-paths = [source / name for name in ['compile_server_native_artifact_test.go',
-         'compile_server_native_cache.go', 'compile_server.go']]
+def source_snapshot():
+    # Include parser/semantic/backend dependencies and untracked source files,
+    # rather than attributing a binary to just its three benchmark entry files.
+    listed = subprocess.check_output(
+        ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', 'compiler'],
+        cwd=root).split(b'\0')
+    suffixes = {'.go', '.c', '.cc', '.cpp', '.h', '.hpp', '.elisa', '.mod', '.sum', '.s', '.S'}
+    paths = sorted({os.fsdecode(p) for p in listed if p and Path(os.fsdecode(p)).suffix in suffixes})
+    return {path: sha(root / path) for path in paths}
+
 manifest = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root,
-             text=True).strip(), 'source_sha256': {str(p.relative_to(root)): sha(p) for p in paths},
+             text=True).strip(), 'source_sha256': source_snapshot(),
             'binary_sha256': sha(binary), 'iterations': args.iterations,
-            'benchmark': args.benchmark, 'runs': []}
+            'benchmark': args.benchmark, 'status': 'incomplete', 'runs': []}
+manifest['git_status'] = subprocess.check_output(
+    ['git', 'status', '--porcelain'], cwd=root, text=True)
 env = os.environ.copy()
 env.update(GOMAXPROCS='1', GOMEMLIMIT='256MiB')
 manifest['environment_sha256'] = hashlib.sha256(json.dumps(sorted(env.items())).encode()).hexdigest()
+(args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 name = 'BenchmarkCompileServerNative' + args.benchmark
 for pair in range(args.pairs):
     order = ['shards', 'completed'] if pair % 2 == 0 else ['completed', 'shards']
@@ -60,8 +70,9 @@ for pair in range(args.pairs):
         manifest['runs'].append({'pair': pair + 1, 'arm': arm, 'metrics': metrics})
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         print(arm, metrics, flush=True)
-if sha(binary) != manifest['binary_sha256'] or any(sha(p) != manifest['source_sha256'][str(p.relative_to(root))] for p in paths):
+if sha(binary) != manifest['binary_sha256'] or source_snapshot() != manifest['source_sha256'] or subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip() != manifest['head']:
     raise SystemExit('binary/source changed during measurement')
+manifest['status'] = 'complete'
 manifest['medians'] = {arm: {metric: statistics.median(r['metrics'][metric]
     for r in manifest['runs'] if r['arm'] == arm)
     for metric in manifest['runs'][0]['metrics']} for arm in ['shards', 'completed']}
