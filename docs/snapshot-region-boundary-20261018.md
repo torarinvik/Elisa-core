@@ -90,3 +90,10 @@ from independent `s` into an `r` return contract. Safe cases pass and all unsafe
 cases reject. The combined semantic region/factory suite passes (0.660 seconds).
 This is semantic-package evidence; no current Stage1 binary or rebuild timing
 is claimed.
+
+Production-shape confirmation: `testdata/snapshot_region_generic_factory.elisa`
+retains the actual snapshot records, nine owned buffers, and region-generic
+factory insertion used in the earlier failing gate experiment. It now passes
+`TestSnapshotExplicitRegionFactory` against the integrated semantic analyzer.
+The combined region/factory/snapshot suite passes (0.545 seconds). This pins the
+full aggregate boundary independently of ongoing shared Stage1 source edits.

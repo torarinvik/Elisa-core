@@ -30,3 +30,16 @@ func TestSnapshotInlineOwnedPools(t *testing.T) {
 		}
 	}
 }
+
+// Keep the actual nine-pool snapshot schema in this regression: the minimal
+// Packet control alone cannot demonstrate the production aggregate boundary.
+func TestSnapshotExplicitRegionFactory(t *testing.T) {
+	data, err := os.ReadFile("testdata/snapshot_region_generic_factory.elisa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "snapshot_factory.elisa", string(data), AnalyzeOptions{})
+	if len(result.Errors()) != 0 {
+		t.Fatal(result.Errors())
+	}
+}
