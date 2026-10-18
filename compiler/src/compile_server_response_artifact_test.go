@@ -3,12 +3,54 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func TestCompileServerResponseRetainsConfiguredUnitWorkingSet(t *testing.T) {
+	for _, units := range []int{2, 9, defaultCompileServerSessionCacheEntries} {
+		t.Run(fmt.Sprintf("units_%d", units), func(t *testing.T) {
+			cache := newCompileServerSessionCache(units)
+			dir := t.TempDir()
+			requests := make([]compileServerRequest, units)
+			responses := make([]compileServerResponse, units)
+			analyses := make([]uint64, units)
+			for i := range requests {
+				requests[i] = compileServerRequest{Mode: "obj", Filename: filepath.Join(dir, fmt.Sprintf("unit%d.elisa", i)), Source: "def main() -> i64:\n    return 7\n", Incremental: true}
+				if i == 0 {
+					requireServerNativeIdentity(t, requests[i], cache)
+				}
+				var status int
+				responses[i], status = executeCompileServerRequestWithSessions(requests[i], cache)
+				if status != http.StatusOK || !responses[i].OK {
+					t.Fatalf("cold unit %d failed: %d %+v", i, status, responses[i])
+				}
+				analyses[i] = cache.session(requests[i].Filename, emitObject).Stats().Analyses
+			}
+			before, builds := cache.native.Stats(), cache.objects.Stats().Builds
+			for i, req := range requests {
+				response, status := executeCompileServerRequestWithSessions(req, cache)
+				if status != http.StatusOK || response != responses[i] {
+					t.Fatalf("warm unit %d changed response", i)
+				}
+				if cache.session(req.Filename, emitObject).Stats().Analyses != analyses[i] {
+					t.Errorf("configured unit %d was evicted before its next build pass", i)
+				}
+			}
+			after := cache.native.Stats()
+			if after.ResponseHits-before.ResponseHits != uint64(units) || cache.objects.Stats().Builds != builds {
+				t.Fatalf("working set lost exact responses: before=%+v after=%+v", before, after)
+			}
+			if after.Entries > units || after.Bytes > serverNativeCacheBytes {
+				t.Fatalf("configured cache bounds exceeded: %+v", after)
+			}
+		})
+	}
+}
 
 func TestCompileServerResponseReplayEditRevertAndDiagnostics(t *testing.T) {
 	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "0")
