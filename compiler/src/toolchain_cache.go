@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -30,68 +29,81 @@ var (
 )
 
 func toolchainContentStamp(path string) (string, error) {
-	canonical, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", err
-	}
 	toolchainStampMu.Lock()
 	defer toolchainStampMu.Unlock()
-
 	for attempt := 0; attempt < 3; attempt++ {
-		before, err := os.Stat(canonical)
+		// Stat follows the selector in one filesystem lookup. Do not lexically
+		// normalize paths: a symlink followed by /.. has filesystem semantics.
+		before, err := os.Stat(path)
 		if err != nil {
 			return "", err
 		}
 		if !before.Mode().IsRegular() {
-			return "", fmt.Errorf("toolchain %q is not a regular file", canonical)
+			return "", fmt.Errorf("toolchain %q is not a regular file", path)
 		}
 		fingerprint, memoizable := toolchainFileFingerprint(before)
 		if memoizable {
-			if cached, ok := toolchainStampCache[canonical]; ok && cached.fingerprint == fingerprint {
+			if cached, ok := toolchainStampCache[path]; ok && cached.fingerprint == fingerprint {
 				return cached.stamp, nil
 			}
 		}
-
-		stamp, err := hashToolchainFile(canonical)
+		file, err := os.Open(path)
 		if err != nil {
 			return "", err
 		}
-		after, err := os.Stat(canonical)
+		opened, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return "", err
+		}
+		if !sameToolchainFileVersion(before, opened) {
+			file.Close()
+			continue
+		}
+		// Hash the descriptor whose identity was checked, not a newly opened path.
+		stamp, hashErr := hashOpenToolchainFile(file)
+		after, statErr := file.Stat()
+		closeErr := file.Close()
+		if hashErr != nil {
+			return "", hashErr
+		}
+		if statErr != nil {
+			return "", statErr
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		selected, err := os.Stat(path)
 		if err != nil {
 			return "", err
 		}
-		if !after.Mode().IsRegular() || !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		if !sameToolchainFileVersion(opened, after) || !sameToolchainFileVersion(after, selected) {
 			continue
 		}
 		afterFingerprint, afterMemoizable := toolchainFileFingerprint(after)
-		if memoizable && afterMemoizable && fingerprint != afterFingerprint {
-			// A package manager or user replaced the file while it was being hashed.
-			// Retry against one stable file version instead of publishing a mixed stamp.
-			continue
-		}
 		if afterMemoizable {
-			toolchainStampCache[canonical] = toolchainStampCacheEntry{fingerprint: afterFingerprint, stamp: stamp}
+			toolchainStampCache[path] = toolchainStampCacheEntry{fingerprint: afterFingerprint, stamp: stamp}
 		} else {
-			delete(toolchainStampCache, canonical)
+			delete(toolchainStampCache, path)
 		}
 		return stamp, nil
 	}
-	return "", fmt.Errorf("toolchain %q changed repeatedly while hashing", canonical)
+	return "", fmt.Errorf("toolchain %q changed repeatedly while hashing", path)
 }
 
-func hashToolchainFile(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
+func sameToolchainFileVersion(a, b os.FileInfo) bool {
+	if a == nil || b == nil || !a.Mode().IsRegular() || !b.Mode().IsRegular() || !os.SameFile(a, b) || a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime()) {
+		return false
 	}
+	first, firstStable := toolchainFileFingerprint(a)
+	second, secondStable := toolchainFileFingerprint(b)
+	return !firstStable || !secondStable || first == second
+}
+
+func hashOpenToolchainFile(file *os.File) (string, error) {
 	h := sha256.New()
-	_, copyErr := io.Copy(h, file)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return "", copyErr
-	}
-	if closeErr != nil {
-		return "", closeErr
+	if _, err := io.Copy(h, file); err != nil {
+		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
