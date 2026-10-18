@@ -8,6 +8,7 @@ import (
 type Lexer struct {
 	trackReads bool
 	readLimit  int
+	lineEpoch  int // increments on #line attribution resets
 	src        []byte
 	filename   string
 	pos        int
@@ -233,6 +234,7 @@ func (l *Lexer) tryConsumeLineDirective() bool {
 	}
 	l.pos = j
 	l.line = num
+	l.lineEpoch++
 	l.col = 1
 	l.filename = file
 	l.atLineStart = true

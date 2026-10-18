@@ -17,6 +17,8 @@ type sourceCheckpoint struct {
 // SourceTokens owns one immutable source revision and token/checkpoint storage.
 // Only copies of its token/error slices leave this object. It never retains a
 // previous revision: prefix views and checkpoint state are rebound to its source.
+type sourceLineEpoch struct{ token, epoch int }
+
 type SourceTokens struct {
 	filename        string
 	source          []byte
@@ -25,15 +27,18 @@ type SourceTokens struct {
 	checkpoints     []sourceCheckpoint
 	reused          int
 	checkpointBytes int
+	lineEpochs      []sourceLineEpoch
+	suffixReused    int
 }
 
-func (s *SourceTokens) CopyTokens() []Token  { return append([]Token(nil), s.tokens...) }
-func (s *SourceTokens) CopyErrors() []string { return append([]string(nil), s.errors...) }
-func (s *SourceTokens) ReusedTokens() int    { return s.reused }
+func (s *SourceTokens) CopyTokens() []Token     { return append([]Token(nil), s.tokens...) }
+func (s *SourceTokens) CopyErrors() []string    { return append([]string(nil), s.errors...) }
+func (s *SourceTokens) ReusedTokens() int       { return s.reused }
+func (s *SourceTokens) SuffixReusedTokens() int { return s.suffixReused }
 
 // TokenizeSource resumes only a prefix whose complete observed read range is
-// unchanged. The remaining suffix is always freshly lexed, so insertion/deletion
-// and #line changes need no guessed position/error rebasing.
+// unchanged. A compatible lexer checkpoint inside an identical byte suffix can
+// also converge; source-attribution epochs distinguish relative lines from #line resets.
 func TokenizeSource(filename string, source []byte, previous *SourceTokens) *SourceTokens {
 	result := &SourceTokens{filename: strings.Clone(filename), source: copySourceSlice(source)}
 	l := New(result.filename, result.source)
@@ -61,6 +66,12 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 		for _, token := range previous.tokens[:checkpoint.count] {
 			result.tokens = append(result.tokens, rebaseToken(token, previous.source, result.source))
 		}
+		for _, epoch := range previous.lineEpochs {
+			if epoch.token >= checkpoint.count {
+				break
+			}
+			result.lineEpochs = append(result.lineEpochs, epoch)
+		}
 		state := cloneLexerState(checkpoint.state, previous.source, result.source)
 		l = &state
 		result.reused = checkpoint.count
@@ -75,10 +86,15 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 	} else {
 		result.tokens = make([]Token, 0, capacity)
 	}
+	convergence := newSourceConvergence(previous, result)
 	for {
 		token := l.NextToken()
+		result.noteLineEpoch(len(result.tokens), l.lineEpoch)
 		result.tokens = append(result.tokens, token)
 		if token.Kind == TOKEN_EOF {
+			break
+		}
+		if convergence != nil && convergence.replay(result, l) {
 			break
 		}
 		if len(result.tokens)%sourceCheckpointStride == 0 && len(result.checkpoints) < sourceCheckpointLimit {
@@ -169,6 +185,9 @@ func (s *SourceTokens) RetainedBytes(limit int) (int, bool) {
 			}
 		}
 		return true
+	}
+	if cap(s.lineEpochs) > (limit-size)/int(unsafe.Sizeof(sourceLineEpoch{})) || !add(cap(s.lineEpochs)*int(unsafe.Sizeof(sourceLineEpoch{}))) {
+		return 0, false
 	}
 	if !tokenBytes(s.tokens) || !errorBytes(s.errors) {
 		return 0, false

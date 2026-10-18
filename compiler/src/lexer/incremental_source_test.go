@@ -136,7 +136,7 @@ func TestSourceTokensBudgetCountsCapacity(t *testing.T) {
 }
 
 func TestSourceCheckpointLexerFieldInventory(t *testing.T) {
-	expected := []string{"trackReads", "readLimit", "src", "filename", "pos", "line", "col", "indentStack", "atLineStart", "pendingToks", "lastTokenKind", "parenDepth", "pendingGroupedBlock", "pendingPatternBlocks", "groupedBlockContexts", "errors"}
+	expected := []string{"trackReads", "readLimit", "lineEpoch", "src", "filename", "pos", "line", "col", "indentStack", "atLineStart", "pendingToks", "lastTokenKind", "parenDepth", "pendingGroupedBlock", "pendingPatternBlocks", "groupedBlockContexts", "errors"}
 	typ := reflect.TypeOf(Lexer{})
 	var actual []string
 	for i := 0; i < typ.NumField(); i++ {
@@ -154,7 +154,7 @@ func TestSourceSensitiveReadsUseTrackingHelpers(t *testing.T) {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || name == "source_reads.go" || name == "incremental_source.go" {
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || name == "source_reads.go" || name == "incremental_source.go" || name == "incremental_suffix.go" {
 			continue
 		}
 		file, err := goparser.ParseFile(token.NewFileSet(), name, nil, 0)
