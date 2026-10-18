@@ -107,13 +107,13 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // cohort: the modules and the table die together. Runs end-to-end with a PLAIN struct, no annotation.
 func TestS4Stage2ByValueSameRegionCohortRuns(t *testing.T) {
 	t.Parallel()
-	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(8192):
         mods: mutable darray[Mod] = []
         m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         mods.push(m) can Memory.Allocate, Abort.Panic
-        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("same-region by-value struct cohort must run (65), got %s %q", status, out)
@@ -204,11 +204,11 @@ func TestS4Stage3ReborrowCastPreservesRegion(t *testing.T) {
 def caller(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     grow((&self).cast[mutable Mod&])
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(4096):
         m: mutable Mod& @a = new[a] Mod{bits: []}
         caller(m) can Memory.Allocate, Abort.Panic
-        print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("a reborrow-cast forward must preserve the region and run (65), got %s %q", status, out)
@@ -327,13 +327,13 @@ func TestRegionPolyForwardingThreadsRegion(t *testing.T) {
 def mid(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     sink(dst, v) can Memory.Allocate, Abort.Panic
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(8192):
         mods: mutable darray[Mod] = []
         m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         mid(mods, m) can Memory.Allocate, Abort.Panic
-        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("a forwarding wrapper must thread the caller's region and run (65), got %s %q", status, out)
@@ -370,13 +370,13 @@ func TestS4W5InterprocSameRegionCohortRuns(t *testing.T) {
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(8192):
         mods: mutable darray[Mod] = []
         m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         stash(mods, m) can Memory.Allocate, Abort.Panic
-        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("same-region cohort passed to a storing callee must run (65), got %s %q", status, out)
@@ -517,7 +517,7 @@ def add(b: mutable Bag&, n: u32) -> void can[Memory.Allocate, Abort.Panic]:
     e: E = E{v: n}
     b.errs.push(e)
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     total: mutable u64 = 0
     i: mutable i64 = 0
     while i < 2000:
@@ -526,7 +526,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
         add(b, 66) can Memory.Allocate, Abort.Panic
         total <- total + b.errs[0].v.u64() + b.errs[1].v.u64()
         i <- i + 1
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "262000" {
 		t.Fatalf("field growth through a synthesized auto-region wrap must thread the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
@@ -555,14 +555,14 @@ def build() -> Out can[Memory.Allocate, Abort.Panic]:
     add(b, 65) can Memory.Allocate, Abort.Panic
     add(b, 66) can Memory.Allocate, Abort.Panic
     return Out{items: b.errs}
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     total: mutable u64 = 0
     i: mutable i64 = 0
     while i < 2000:
         o: Out = build() can Memory.Allocate, Abort.Panic
         total <- total + o.items[0].v.u64() + o.items[1].v.u64()
         i <- i + 1
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "262000" {
 		t.Fatalf("a region-poly builder returning a grown field inside another struct must thread+adopt the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
@@ -669,11 +669,11 @@ def process(xs: darray[i64]) -> i64 can[Memory.Allocate, Abort.Panic]:
         grow(bound)
         total <- total + bound[0] + bound[1]
     return total
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     xs: mutable darray[i64] = []
     xs.push(1) can Memory.Allocate, Abort.Panic
     xs.push(2) can Memory.Allocate, Abort.Panic
-    print(process(xs).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(process(xs).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "201" {
 		t.Fatalf("loop-local container forwarded to a grower must infer its region with no explicit region; expected RAN 201, got %s %q", status, out)
@@ -700,8 +700,8 @@ func TestModuleScopedRegionPolyGrowerCall(t *testing.T) {
         grow(xs, 1)
         grow(xs, 2)
         return xs[0] + xs[1]
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    print(M::build().i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
+    print(M::build().i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "3" {
 		t.Fatalf("module-scoped region-poly grower call must dispatch directly and thread region args; expected RAN 3, got %s %q", status, out)
@@ -728,14 +728,14 @@ func TestRegionLocalStructFieldReturnedNoUAF(t *testing.T) {
     b.items.push(n)
     b.items.push(n + 1)
     return b.items
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     total: mutable u64 = 0
     i: mutable i64 = 0
     while i < 2000:
         xs: darray[u32] = build(65) can Memory.Allocate, Abort.Panic
         total <- total + xs[0].u64() + xs[1].u64()
         i <- i + 1
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "262000" {
 		t.Fatalf("a bare `return localStruct.containerField` must thread the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
@@ -757,9 +757,9 @@ func TestRegionPolyReturnedContainerHasPrivateScratchStack(t *testing.T) {
         out.push(i.u8())
         i <- i + 1
     return out
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     xs: darray[u8] = build() can Memory.Allocate, Abort.Panic
-    print(xs.count.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(xs.count.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "300" {
 		t.Fatalf("returned region-poly container must not share its caller arena with scratch growth; expected RAN 300, got %s %q", status, out)
@@ -780,9 +780,9 @@ def build() -> darray[Arm] can[Memory.Allocate, Abort.Panic]:
     body.push(41)
     arms.push(Arm{body: body, tag: 1})
     return arms
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     arms: darray[Arm] = build() can Memory.Allocate, Abort.Panic
-    print((arms[0].body[0] + arms[0].tag).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((arms[0].body[0] + arms[0].tag).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "42" {
 		t.Fatalf("returned aggregate must retain nested darray storage; expected RAN 42, got %s %q", status, out)
@@ -808,10 +808,10 @@ def consume(report: mutable darray[u8]&) -> void can[Memory.Allocate, Abort.Pani
     captured: darray[u8] = make_bytes() can Memory.Allocate, Abort.Panic
     for value in captured:
         report.push(value)
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     report: mutable darray[u8] = [0]
     consume(report) can Memory.Allocate, Abort.Panic
-    print(report.count.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(report.count.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "257" {
 		t.Fatalf("an inferred grower must isolate a non-escaping region-poly local; expected RAN 257, got %s %q", status, out)

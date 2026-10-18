@@ -128,3 +128,12 @@ JSON evidence for the combined run, baseline comparison, and clean-environment
 rerun is saved under `build/verification/factory-contract-safety-20261018/`.
 The broader integration selection is not a wholly green gate; full Stage1
 qualification remains outstanding.
+
+Runtime fixture correction: the twelve previously failing region runtime cases
+now explicitly grant Global.Read/Global.Write in their main functions and print
+calls, matching print's checked effects. Their allocation/ownership bodies and
+expected runtime outputs are unchanged. All twelve compile-and-run tests pass,
+zero skips (5.281 seconds). This restores end-to-end coverage that previously
+stopped at the effect checker; compiler effect enforcement was not relaxed.
+The earlier combined run's twelve failures and four skips are now individually
+resolved by targeted reruns, rather than repeating unaffected cases.
