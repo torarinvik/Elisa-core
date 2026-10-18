@@ -129,6 +129,23 @@ experimental source variant are retained under
 is qualified. Moving unchanged-build detection above LLVM lowering remains the
 more useful direction for eliminating repeat work.
 
+A semantic CPU profile identified repeated reflective statement-list searches in
+the reserve-warning pass. A shared, thread-safe type-shape cache now skips
+concrete types incapable of containing statement lists. Interfaces and recursive
+types remain conservative; the shape is derived from current Go fields, so AST
+schema changes do not silently introduce an omitted traversal. A regression test
+checks that an explicit reserve remedy inside a returned lambda is still found.
+
+Three 1,000-iteration component samples reduced the statement-list walk median
+from 151.54 to 119.83 microseconds (21%), and allocation from about 74,270 to
+37,320 bytes per walk (50%). Broader synthetic semantic-edit measurements with
+GOGC=1200 were mixed: integer-return edit medians 67.50 to 70.02 ms and local
+initializer edits 2.04 to 1.99 ms. This is a measured component improvement,
+not a qualified end-to-end compiler speedup. Reserve-warning and incremental
+regressions, including the returned-lambda remedy, passed with the race detector
+in 15.807 s. Logs and relevant source hashes are
+in `build/verification/incremental-statement-walk-20261018/`.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification

@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"reflect"
+	"sync"
 
 	"elisacore/src/ast"
 )
@@ -99,14 +100,52 @@ func (a *Analyzer) findUnreservedCountingFills(stmts []ast.Stmt, outerPrev ast.S
 	}
 }
 
+// The reflective walk must follow interfaces because expressions can contain
+// lambdas and other statement-bearing forms. Concrete scalar/position/literal
+// shapes without such fields cannot contain a statement list. Derive this from
+// the live Go schema rather than maintaining a list of known AST leaf classes.
+var stmtListShapeCache sync.Map // reflect.Type -> bool
+var stmtListReflectType = reflect.TypeOf([]ast.Stmt(nil))
+
+func typeCanContainStmtList(typ reflect.Type, visiting map[reflect.Type]bool) bool {
+	if cached, ok := stmtListShapeCache.Load(typ); ok {
+		return cached.(bool)
+	}
+	if typ == stmtListReflectType || typ.Kind() == reflect.Interface {
+		return true
+	}
+	if visiting == nil {
+		visiting = make(map[reflect.Type]bool)
+	}
+	if visiting[typ] {
+		return true
+	} // Conservative for recursive concrete shapes.
+	visiting[typ] = true
+	defer delete(visiting, typ)
+	possible := false
+	switch typ.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Array:
+		possible = typeCanContainStmtList(typ.Elem(), visiting)
+	case reflect.Struct:
+		for i := 0; i < typ.NumField(); i++ {
+			if typeCanContainStmtList(typ.Field(i).Type, visiting) {
+				possible = true
+				break
+			}
+		}
+	}
+	stmtListShapeCache.Store(typ, possible)
+	return possible
+}
+
 // descendStmtLists visits every []ast.Stmt nested anywhere inside stmt (skipping stmt itself),
 // treating each as its own statement list.
 func (a *Analyzer) descendStmtLists(stmt ast.Stmt, outerPrev ast.Stmt) {
-	stmtListType := reflect.TypeOf([]ast.Stmt(nil))
+	stmtListType := stmtListReflectType
 	seen := map[uintptr]bool{}
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
+		if !v.IsValid() || !v.CanInterface() || !typeCanContainStmtList(v.Type(), nil) {
 			return
 		}
 		switch v.Kind() {
