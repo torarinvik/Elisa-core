@@ -2643,3 +2643,23 @@ frontier, but needs current symbol/type, effect, ownership and diagnostic
 validation before any replay is safe. No production behavior or speedup is
 claimed by this census. The selected census test passes; exact source and log
 are retained under `build/verification/incremental-local-census-20261018/`.
+
+
+### Dependency recording experiment rejected (18 October)
+
+Added a query-engine benchmark that invalidates a product every revision, reads
+1/4/8/64 inputs twice and reports allocations. A reservation regression exercises
+duplicate reads at full budgets (0/1/8/9/64) and rejection of the next unique
+edge. These are infrastructure checks, not an end-to-end compiler benchmark.
+
+An experimental linear dependency list with hash promotion reduced allocations
+for small products, but did not meet the throughput criterion. In five single-CPU
+200ms samples, the four-edge promotion version had before/after median ns/op
+1: 1383/916; 4: 1879/1298; 8: 1890/2054; 64: 18533/23013. Shared-host load makes
+these noisy observations rather than stable performance claims, but they do not
+qualify a general gain. An earlier eight-edge cutoff also regressed. Production
+recording was restored exactly. Do not resurrect this based only on reduced
+allocations; representative workload timing must justify it.
+
+Logs are retained under
+`build/verification/incremental-dependency-recording-20261018/`.
