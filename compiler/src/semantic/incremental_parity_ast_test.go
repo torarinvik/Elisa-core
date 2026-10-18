@@ -9,7 +9,7 @@ import (
 
 // Include syntax outside free functions (protocol/impl declarations and lowered
 // call nodes), so metadata parity cannot silently omit their published keys.
-func mapIncrementalCurrentAST(t *testing.T, cold, warm reflect.Value, mapping map[PositionedFunctionNode]PositionedFunctionNode) {
+func mapIncrementalCurrentAST(t testing.TB, cold, warm reflect.Value, mapping map[PositionedFunctionNode]PositionedFunctionNode) {
 	t.Helper()
 	type pointerKey struct {
 		typ     reflect.Type

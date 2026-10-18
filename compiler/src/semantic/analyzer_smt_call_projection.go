@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -237,7 +239,133 @@ func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]
 	}
 	tr.assumeAggregateCallEnsures(decl, subst, env, token)
 	tr.assumeGuardPrefixReturns(decl, subst, env, token)
+	tr.emitAggregateCallFieldEquations(call, decl, args, env, token, canonKey)
 	return token, true
+}
+
+// emitAggregateCallFieldEquations adds a bounded defining equation for each supported scalar
+// projection of a pure, total record-returning function. The aggregate itself remains an opaque
+// projection token; only direct bool/integer fields are related to the function's pure return tree.
+func (tr *smtTranslator) emitAggregateCallFieldEquations(call *ast.CallExpr, decl *ast.FuncDecl, args []ast.Expr, argEnv map[string]string, token, canonKey string) {
+	if tr == nil || tr.a == nil || call == nil || decl == nil || token == "" {
+		return
+	}
+	if !tr.callEquationEligible(decl) && !tr.a.aggregateRecordDefiningEquationEligible(decl) {
+		return
+	}
+	// Recursive calls in the function currently being proved need a termination certificate at this
+	// exact call site. The ordinary scalar path has a dedicated certificate/IH route; keep this
+	// aggregate projection path conservative there. Calls to an already-verified recursive helper
+	// from another function are unfolded below under the existing depth and unroll bounds.
+	if tr.a.isRecursiveProofCall(decl) {
+		return
+	}
+	fn, ok := tr.a.symbolForFuncDecl(decl)
+	if !ok || fn == nil {
+		return
+	}
+	fnType, ok := fn.Type.(*FuncType)
+	if !ok || fnType == nil || len(fnType.Params) != len(args) {
+		return
+	}
+	st, ok := StripAggregateStateType(stripRefForBounds(fnType.Return)).(*StructType)
+	if !ok || st == nil || !tr.a.smtEquationStructResultType(fnType.Return) {
+		return
+	}
+	body, ok := tr.a.typedPureReturnExpr(decl)
+	if !ok || body == nil {
+		return
+	}
+	// A call without a stable argument key still has a unique token. It may receive one bounded
+	// expansion, but recursive re-entry is stopped by the per-declaration depth cap below.
+	if canonKey == "" {
+		canonKey = token
+	}
+	if tr.callEqInFlight[canonKey] >= tr.callEqMaxUnroll || tr.callEqDeclDepth[decl] >= tr.callEqMaxDeclDepth {
+		return
+	}
+	if tr.callEqInFlight == nil {
+		tr.callEqInFlight = map[string]int{}
+	}
+	if tr.callEqDeclDepth == nil {
+		tr.callEqDeclDepth = map[*ast.FuncDecl]int{}
+	}
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		subst[param.Name] = args[i]
+	}
+	priorBinding := tr.bindingCallee
+	tr.bindingCallee = decl
+	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	tr.bindingCallee = priorBinding
+	if !ok {
+		return
+	}
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.calleeBoolTerm(decl, req, env)
+		if !ok {
+			return
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
+	tr.callEqInFlight[canonKey]++
+	tr.callEqDeclDepth[decl]++
+	priorDecl, priorDepth := tr.calleeBodyDecl, tr.calleeBodyDepth
+	tr.calleeBodyDecl, tr.calleeBodyDepth = decl, priorDepth+1
+	defer func() {
+		tr.calleeBodyDecl, tr.calleeBodyDepth = priorDecl, priorDepth
+		tr.callEqInFlight[canonKey]--
+		tr.callEqDeclDepth[decl]--
+	}()
+	tr.a.exprTypes[body] = fnType.Return
+	type projectedField struct {
+		field Field
+		term  string
+	}
+	projected := make([]projectedField, 0, len(st.Fields))
+	for _, name := range slices.Sorted(maps.Keys(st.Fields)) {
+		field := st.Fields[name]
+		fieldType := stripRefForBounds(field.Type)
+		fieldExpr := &ast.FieldExpr{Position: body.Pos(), Object: body, Field: name}
+		tr.a.exprTypes[fieldExpr] = field.Type
+		var value string
+		if IsBoolType(fieldType) {
+			value, ok = tr.boolTerm(fieldExpr, env)
+		} else {
+			value, ok = tr.termEnv(fieldExpr, env)
+		}
+		if !ok {
+			return
+		}
+		projected = append(projected, projectedField{field: field, term: value})
+	}
+	for _, projection := range projected {
+		field := projection.field
+		fieldType := stripRefForBounds(field.Type)
+		fieldKey := token + smtFieldSeparator + field.Name
+		var result string
+		if IsBoolType(fieldType) {
+			result = smtBoolVar(fieldKey)
+			tr.boolDecls[result] = true
+		} else {
+			result = smtVar(fieldKey)
+			tr.decls[fieldKey] = true
+			tr.markIntVar(fieldKey, field.Type)
+		}
+		equation := "(= " + result + " " + projection.term + ")"
+		if guard != "true" {
+			equation = "(=> " + guard + " " + equation + ")"
+		}
+		tr.auxDecls = append(tr.auxDecls, "(assert "+equation+")\n")
+	}
 }
 
 // assumeAggregateCallEnsures asserts decl's ensures with `result` bound to the projection token.

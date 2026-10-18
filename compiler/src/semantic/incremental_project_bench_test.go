@@ -48,10 +48,12 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 		b.Run(mode, func(b *testing.B) {
 			b.StopTimer()
 			var session *IncrementalAnalysisSession
+			var statsBefore IncrementalAnalysisStats
 			expectedErrors := -1
 			if mode == "retained" {
 				session = NewIncrementalAnalysisSession()
 				expectedErrors = len(session.Analyze(parse(), options).Errors())
+				statsBefore = session.Stats()
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -75,8 +77,11 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 			}
 			if session != nil {
 				stats := session.Stats()
-				b.ReportMetric(float64(stats.PrimaryBodiesReused)/float64(b.N), "body-reuses/op")
-				b.ReportMetric(float64(stats.LexicalQueryMemoHits)/float64(b.N), "lookup-hits/op")
+				b.ReportMetric(float64(stats.PrimaryBodiesReused-statsBefore.PrimaryBodiesReused)/float64(b.N), "body-reuses/op")
+				b.ReportMetric(float64(stats.LocalInitializersReused-statsBefore.LocalInitializersReused)/float64(b.N), "local-init-reuses/op")
+				b.ReportMetric(float64(stats.LocalInitializersChecked-statsBefore.LocalInitializersChecked)/float64(b.N), "local-init-checks/op")
+				b.ReportMetric(float64(stats.ReusedExpressionNodes-statsBefore.ReusedExpressionNodes)/float64(b.N), "expr-nodes-reused/op")
+				b.ReportMetric(float64(stats.LexicalQueryMemoHits-statsBefore.LexicalQueryMemoHits)/float64(b.N), "lookup-hits/op")
 			}
 			b.ReportMetric(float64(expectedErrors), "diagnostics")
 			if options.EnableSMT {

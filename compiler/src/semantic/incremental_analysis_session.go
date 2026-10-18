@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"sync"
 
 	"elisacore/src/ast"
@@ -29,6 +30,8 @@ type IncrementalAnalysisSession struct {
 	lexical                                      *incremental.Session
 	capabilities                                 *capabilityQueryCache
 	db                                           *incremental.Database
+	pendingProductChanges                        []incremental.Change
+	pendingProductEvictions                      []incremental.Key
 	previous                                     map[incremental.Key]bool
 	productBytes                                 map[incremental.Key]int
 	retainedProductBytes                         int
@@ -69,6 +72,7 @@ type incrementalBodyInvocation struct {
 	keys                                       map[*ast.FuncDecl]string
 	changes                                    []incremental.Change
 	config, safety                             string
+	safetyPrepared                             bool
 	tracking                                   bool
 	localInitializers                          map[*ast.VarDeclStmt]*primitiveLocalInitializer
 	bindingReservedBytes, bindingReservedEdges int
@@ -98,6 +102,8 @@ func (session *IncrementalAnalysisSession) resetDatabase() {
 	session.retainedProductBytes = 0
 	session.bindingSourceBytes = 0
 	session.bindingSourceEdges = 0
+	session.pendingProductChanges = nil
+	session.pendingProductEvictions = nil
 	session.db = incremental.New(primitiveQueryEvaluators())
 }
 func (session *IncrementalAnalysisSession) Stats() IncrementalAnalysisStats {
@@ -156,24 +162,63 @@ func (session *IncrementalAnalysisSession) storePrimitiveProduct(name string, en
 	}
 	retained := session.retainedProductBytes - oldSize + len(encoded)
 	if retained > session.productByteLimit() {
-		session.db.Apply(incremental.Change{Key: productKey, Remove: true})
-		session.evictPrimitiveTyping(name)
+		session.pendingProductChanges = append(session.pendingProductChanges, incremental.Change{Key: productKey, Remove: true})
+		session.pendingProductEvictions = append(session.pendingProductEvictions,
+			incremental.Key{Kind: "primitive-return", Name: name},
+			incremental.Key{Kind: primitiveLocalTypingKind, Name: name},
+		)
 		session.forgetPrimitiveProduct(name)
 		session.stats.ProductAdmissionMisses++
 		return false
 	}
-	session.db.Apply(incremental.Change{Key: productKey, Value: encoded})
+	session.pendingProductChanges = append(session.pendingProductChanges, incremental.Change{Key: productKey, Value: encoded})
 	session.productBytes[productKey] = len(encoded)
 	session.retainedProductBytes = retained
 	return true
+}
+
+// publishPrimitiveProducts commits all products produced during one analysis
+// in a single database revision. Their derived queries are intentionally lazy,
+// so no body consumes these inputs before this publication point.
+func (session *IncrementalAnalysisSession) publishPrimitiveProducts() {
+	if len(session.pendingProductChanges) > 0 {
+		// A later fallback can forget a product after an earlier path staged
+		// its value. Coalesce by key and let the retained-product map decide
+		// whether a final Set is still admissible, so publication cannot revive
+		// a product that was evicted during this analysis.
+		latest := make(map[incremental.Key]incremental.Change, len(session.pendingProductChanges))
+		for _, change := range session.pendingProductChanges {
+			latest[change.Key] = change
+		}
+		changes := make([]incremental.Change, 0, len(latest))
+		for key, change := range latest {
+			if !change.Remove {
+				if _, retained := session.productBytes[key]; !retained {
+					change.Remove = true
+					change.Value = ""
+				}
+			}
+			changes = append(changes, change)
+		}
+		session.db.Apply(changes...)
+		session.pendingProductChanges = nil
+	}
+	for _, query := range session.pendingProductEvictions {
+		session.db.EvictQuery(query)
+	}
+	session.pendingProductEvictions = nil
 }
 
 func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options AnalyzeOptions) *Result {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	session.stats.Analyses++
-	if !primitiveResultSchemaValid || !primitiveSchemaValid {
+	coldFallback := func() *Result {
+		session.stats.ColdFallbackAnalyses++
 		return AnalyzeWithOptions(file, options)
+	}
+	if !primitiveResultSchemaValid || !primitiveSchemaValid {
+		return coldFallback()
 	}
 	if session.db == nil {
 		session.resetDatabase()
@@ -185,7 +230,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		OS, Arch       string
 	}{options, os.Getenv("ELISA_LINEAR_MUTATION"), autoReserveDisabledSem, runtime.GOOS, runtime.GOARCH})
 	if err != nil {
-		return AnalyzeWithOptions(file, options)
+		return coldFallback()
 	}
 	digest := sha256.Sum256(config)
 	invocation := &incrementalBodyInvocation{session: session, keys: map[*ast.FuncDecl]string{}, localInitializers: map[*ast.VarDeclStmt]*primitiveLocalInitializer{}, config: hex.EncodeToString(digest[:])}
@@ -194,7 +239,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	current := map[incremental.Key]bool{}
 	origin := file.Filename
 	if len(origin) > primitiveSourceByteBudget {
-		return AnalyzeWithOptions(file, options)
+		return coldFallback()
 	}
 	if absolute, err := filepath.Abs(origin); err == nil {
 		origin = absolute
@@ -434,11 +479,19 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if len(invocation.keys) == 0 {
 		session.stats.ColdFallbackAnalyses++
 	}
+	defer session.publishPrimitiveProducts()
 	result := analyzeWithBodyInvocation(file, options, invocation)
+	session.publishPrimitiveProducts()
 	invocation.lexical.publish(session)
 	return result
 }
 func (invocation *incrementalBodyInvocation) prepareAnalyzer(a *Analyzer) {
+	// Static impls and named builtin types are complete before body analysis.
+	// Local initializer hooks call this for every declaration, so keep the
+	// per-analysis operator proof and its input publication out of that loop.
+	if invocation.safetyPrepared {
+		return
+	}
 	invocation.safety = "blocked"
 	intType, intOK := a.namedTypes["int"].(*BuiltinType)
 	i64Type, i64OK := a.namedTypes["i64"].(*BuiltinType)
@@ -446,6 +499,39 @@ func (invocation *incrementalBodyInvocation) prepareAnalyzer(a *Analyzer) {
 		invocation.safety = primitiveOperatorAbsence
 	}
 	invocation.session.db.Apply(incremental.Change{Key: primitiveSafetyKey, Value: invocation.safety})
+	invocation.safetyPrepared = true
+}
+
+func (invocation *incrementalBodyInvocation) prefetchLocalInitializerQueries() {
+	if invocation == nil || invocation.session == nil || invocation.safety != primitiveOperatorAbsence || len(invocation.localInitializers) == 0 {
+		return
+	}
+	inputs := make([]*primitiveLocalInitializer, 0, len(invocation.localInitializers))
+	for _, input := range invocation.localInitializers {
+		// No stored product means no dependency query can hit. Record that miss
+		// directly; retained products are batched below and revalidated by the
+		// analyzer immediately before consumption.
+		product := primitiveInput("function-product", input.key)
+		if invocation.session.productBytes[product] == 0 {
+			input.queryResult = incremental.EvaluationResult{Err: errPrimitiveProductMiss}
+			input.hasQueryResult = true
+			continue
+		}
+		inputs = append(inputs, input)
+	}
+	if len(inputs) == 0 {
+		return
+	}
+	sort.Slice(inputs, func(i, j int) bool { return inputs[i].key < inputs[j].key })
+	keys := make([]incremental.Key, len(inputs))
+	for i, input := range inputs {
+		keys[i] = incremental.Key{Kind: primitiveLocalTypingKind, Name: input.key}
+	}
+	results := invocation.session.db.EvaluateBatch(context.Background(), keys)
+	for i, input := range inputs {
+		input.queryResult = results[i]
+		input.hasQueryResult = true
+	}
 }
 
 func primitiveReturnHeader(fn *ast.FuncDecl) (*ast.ReturnStmt, bool) {
@@ -529,6 +615,19 @@ func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	if sourceBytes > primitiveSourceByteBudget {
 		return nil, false
 	}
+	nodes, _, ok := primitiveI64ExpressionNodes(stmt.Value, parameters, sourceBytes)
+	return nodes, ok
+}
+
+// primitiveI64ExpressionNodes validates one expression against an already
+// checked set of visible parameter/local names. Local-initializer planning uses
+// this directly so each statement doesn't rebuild a synthetic function header
+// containing every preceding local. It returns the updated spelling-byte count
+// so a multi-initializer plan can enforce one cumulative function budget.
+func primitiveI64ExpressionNodes(root ast.Expr, parameters map[string]bool, sourceBytes int) ([]ast.Expr, int, bool) {
+	if root == nil || sourceBytes > primitiveSourceByteBudget {
+		return nil, sourceBytes, false
+	}
 	var nodes []ast.Expr
 	seen := primitiveSeenPool.Get().(map[ast.Expr]bool)
 	defer func() { clear(seen); primitiveSeenPool.Put(seen) }()
@@ -584,10 +683,10 @@ func primitiveI64ReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 			return false
 		}
 	}
-	if !visit(stmt.Value, 0) {
-		return nil, false
+	if !visit(root, 0) {
+		return nil, sourceBytes, false
 	}
-	return nodes, true
+	return nodes, sourceBytes, true
 }
 
 // The compact source protocol includes every non-position field admitted by
@@ -795,7 +894,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		}
 	}
 	product, _ := json.Marshal(value)
-	if session.storePrimitiveProduct(key, string(product)) {
-		_, _ = session.db.Evaluate(context.Background(), query)
-	}
+	// Keep query evaluation lazy after publishing. Reuse validation runs when a
+	// later analysis requests this product, avoiding work on the cold analysis.
+	session.storePrimitiveProduct(key, string(product))
 }

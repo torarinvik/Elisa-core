@@ -104,6 +104,10 @@ func TestLocalIncrementalBodyAdmissionCensus(t *testing.T) {
 					name = typ.Name
 				}
 				counts["return-type/"+name]++
+				counts["return-expression/"+name+"/"+fmt.Sprintf("%T", ret.Value)]++
+				if binary, ok := ret.Value.(*ast.BinaryExpr); ok {
+					counts["return-binary-op/"+name+"/"+fmt.Sprintf("%v", binary.Op)]++
+				}
 				counts["expression/"+fmt.Sprintf("%T", ret.Value)]++
 				header := *fn
 				header.Params = append([]ast.ParamDecl(nil), fn.Params...)

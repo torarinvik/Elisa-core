@@ -98,6 +98,7 @@ func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes [
 		return false
 	}
 	names := make([]string, 0, len(fn.Params)+2)
+	parameterTypes := make(map[string]string, len(fn.Params))
 	for index, param := range fn.Params {
 		name := predicateBuiltinSyntaxName(param.Type)
 		if name == "" || !predicateCanonicalBuiltin(a, name) {
@@ -108,6 +109,7 @@ func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes [
 			return false
 		}
 		names = append(names, name)
+		parameterTypes[param.Name] = name
 	}
 	for _, node := range nodes {
 		switch node.(type) {
@@ -115,6 +117,15 @@ func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes [
 			names = append(names, "bool")
 		case *ast.CharLit:
 			names = append(names, "char")
+		case *ast.BinaryExpr:
+			binary := node.(*ast.BinaryExpr)
+			if predicateComparisonOperator(binary.Op) {
+				name := predicateComparisonReceiverTypeName(binary, parameterTypes)
+				if name == "" || !predicateCanonicalBuiltin(a, name) {
+					return false
+				}
+				names = append(names, name)
+			}
 		}
 	}
 	return a.incrementalOperators.predicateComparisonsAbsent(a, names)
@@ -123,6 +134,84 @@ func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes [
 func predicateCanonicalBuiltin(a *Analyzer, name string) bool {
 	builtin, ok := a.namedTypes[name].(*BuiltinType)
 	return ok && builtin != nil && builtin.Name == name
+}
+
+func predicateUnaryMinusIsIntrinsic(expr ast.Expr, parameterTypes map[string]string) bool {
+	if expr == nil || reflect.ValueOf(expr).Kind() == reflect.Ptr && reflect.ValueOf(expr).IsNil() {
+		return false
+	}
+	switch node := expr.(type) {
+	case *ast.Ident:
+		return IsNumericType(&BuiltinType{Name: parameterTypes[node.Name]})
+	case *ast.IntLit, *ast.CharLit:
+		return true
+	case *ast.ParenExpr:
+		return predicateUnaryMinusIsIntrinsic(node.Inner, parameterTypes)
+	case *ast.UnaryExpr:
+		return node.Op == lexer.TOKEN_MINUS && predicateUnaryMinusIsIntrinsic(node.Operand, parameterTypes)
+	default:
+		return false
+	}
+}
+
+func predicateComparisonOperator(op lexer.TokenKind) bool {
+	switch op {
+	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		return true
+	default:
+		return false
+	}
+}
+
+// Comparison analysis contextually types an unsuffixed integer literal from
+// the other operand before attempting overload dispatch. The receiver is the
+// left operand, so a literal on the left may dispatch on the right operand's
+// integral type rather than on `int`.
+func predicateComparisonReceiverTypeName(expr *ast.BinaryExpr, parameterTypes map[string]string) string {
+	if expr == nil {
+		return ""
+	}
+	left := predicateExprBuiltinTypeName(expr.Left, parameterTypes)
+	if !isUnsuffixedIntegerValueExpr(expr.Left) {
+		return left
+	}
+	right := predicateExprBuiltinTypeName(expr.Right, parameterTypes)
+	if IsIntegralStorageType(&BuiltinType{Name: right}) {
+		return right
+	}
+	return left
+}
+
+func predicateExprBuiltinTypeName(expr ast.Expr, parameterTypes map[string]string) string {
+	if expr == nil || reflect.ValueOf(expr).Kind() == reflect.Ptr && reflect.ValueOf(expr).IsNil() {
+		return ""
+	}
+	switch node := expr.(type) {
+	case *ast.Ident:
+		return parameterTypes[node.Name]
+	case *ast.IntLit:
+		if node.Suffix == "" {
+			return "int"
+		}
+	case *ast.CharLit:
+		return "char"
+	case *ast.BoolLit:
+		return "bool"
+	case *ast.ParenExpr:
+		return predicateExprBuiltinTypeName(node.Inner, parameterTypes)
+	case *ast.UnaryExpr:
+		if node.Op == lexer.TOKEN_NOT {
+			return "bool"
+		}
+		if node.Op == lexer.TOKEN_MINUS && predicateUnaryMinusIsIntrinsic(node.Operand, parameterTypes) {
+			return predicateExprBuiltinTypeName(node.Operand, parameterTypes)
+		}
+	case *ast.BinaryExpr:
+		if node.Op == lexer.TOKEN_AND || node.Op == lexer.TOKEN_OR || predicateComparisonOperator(node.Op) {
+			return "bool"
+		}
+	}
+	return ""
 }
 
 // Predicate admission is deliberately separate from integer-local planning.
@@ -181,12 +270,15 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 	header.ReturnType = &ast.NamedType{Name: "i64"}
 	header.Params = append([]ast.ParamDecl(nil), fn.Params...)
 	parameters := map[string]bool{}
+	parameterTypes := make(map[string]string, len(fn.Params))
 	for i, param := range fn.Params {
-		if predicateBuiltinSyntaxName(param.Type) == "" {
+		name := predicateBuiltinSyntaxName(param.Type)
+		if name == "" {
 			return nil, false
 		}
 		header.Params[i].Type = &ast.NamedType{Name: "i64"}
 		parameters[param.Name] = true
+		parameterTypes[param.Name] = name
 	}
 	ret, ok := primitiveReturnHeader(&header)
 	if !ok {
@@ -245,7 +337,11 @@ func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
 			copy.Position = lexer.Pos{}
 			copy.Op = 0
 			copy.Operand = nil
-			return (node.Op == lexer.TOKEN_NOT || node.Op == lexer.TOKEN_MINUS) && reflect.ValueOf(copy).IsZero() && visit(node.Operand, depth+1)
+			// Unary minus on a syntactically numeric canonical scalar is intrinsic.
+			// Other receivers may lower to __neg__ and mutate the AST, which a
+			// type-only replay cannot reconstruct.
+			admissible := node.Op == lexer.TOKEN_NOT || node.Op == lexer.TOKEN_MINUS && predicateUnaryMinusIsIntrinsic(node.Operand, parameterTypes)
+			return admissible && reflect.ValueOf(copy).IsZero() && visit(node.Operand, depth+1)
 		case *ast.BinaryExpr:
 			copy := *node
 			copy.Position = lexer.Pos{}

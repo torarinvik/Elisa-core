@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strconv"
 )
 
@@ -23,6 +24,8 @@ type primitiveLocalInitializer struct {
 	syntax                     *ast.FuncDecl
 	nodes                      []ast.Expr
 	bindings                   []primitiveLocalBinding
+	queryResult                incremental.EvaluationResult
+	hasQueryResult             bool
 	source, expression, key    string
 	bindingOwn                 string
 	dependencies               []primitiveBindingDependency
@@ -45,9 +48,16 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 	available := append([]ast.ParamDecl(nil), fn.Params...)
 	names := map[string]bool{}
 	bindings := make([]primitiveLocalBinding, 0, len(fn.Params)+len(fn.Body))
+	bindingIndices := make(map[string]int, len(fn.Params)+len(fn.Body))
+	sourceBytes := len(fn.Name)
 	for i, p := range fn.Params {
 		names[p.Name] = true
+		bindingIndices[p.Name] = i
+		sourceBytes += len(p.Name)
 		bindings = append(bindings, primitiveLocalBinding{name: p.Name, parameter: i})
+	}
+	if sourceBytes > primitiveSourceByteBudget {
+		return nil, false
 	}
 	values := map[string]string{}
 	var inputs []*primitiveLocalInitializer
@@ -56,6 +66,10 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		if !ok || decl == nil || decl.Value == nil || names[decl.Name] || len(available) >= 256 {
 			return nil, false
 		}
+		if len(decl.Name) > primitiveSourceByteBudget-sourceBytes {
+			return nil, false
+		}
+		sourceBytes += len(decl.Name)
 		copy := *decl
 		copy.Position = lexer.Pos{}
 		copy.Name = ""
@@ -64,25 +78,32 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		if !reflect.ValueOf(copy).IsZero() || !primitiveParameterSyntax([]ast.ParamDecl{{Name: decl.Name, Type: decl.Type}}) {
 			return nil, false
 		}
-		syntax := &ast.FuncDecl{Name: fn.Name, Params: append([]ast.ParamDecl(nil), available...), ReturnType: fn.ReturnType, Body: []ast.Stmt{&ast.ReturnStmt{Value: decl.Value}}}
-		nodes, ok := primitiveReturnExpressions(syntax)
+		var nodes []ast.Expr
+		nodes, sourceBytes, ok = primitiveI64ExpressionNodes(decl.Value, names, sourceBytes)
 		if !ok {
 			return nil, false
 		}
-		used := map[string]bool{}
+		used := map[int]bool{}
+		usedIndices := make([]int, 0, len(nodes))
 		for _, node := range nodes {
 			if id, ok := node.(*ast.Ident); ok {
-				used[id.Name] = true
+				index, found := bindingIndices[id.Name]
+				if !found {
+					return nil, false
+				}
+				if !used[index] {
+					used[index] = true
+					usedIndices = append(usedIndices, index)
+				}
 			}
 		}
+		sort.Ints(usedIndices)
 		var consumed []primitiveLocalBinding
 		var params []ast.ParamDecl
 		var parameters, dependencies []primitiveBindingDependency
 		var localDependencies []*ast.VarDeclStmt
-		for i, binding := range bindings {
-			if !used[binding.name] {
-				continue
-			}
+		for _, i := range usedIndices {
+			binding := bindings[i]
 			consumed = append(consumed, binding)
 			params = append(params, available[i])
 			value := values[binding.name]
@@ -98,7 +119,7 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 				localDependencies = append(localDependencies, binding.local)
 			}
 		}
-		syntax.Params = params
+		syntax := &ast.FuncDecl{Name: fn.Name, Params: params, ReturnType: fn.ReturnType, Body: []ast.Stmt{&ast.ReturnStmt{Value: decl.Value}}}
 		expression := primitiveExpressionDigest(syntax, nodes)
 		own := primitiveBindingOwn(decl.Name, expression, parameters)
 		source := primitiveBindingSource(own, dependencies)
@@ -107,13 +128,10 @@ func primitiveLocalInitializers(fn *ast.FuncDecl) ([]*primitiveLocalInitializer,
 		names[decl.Name] = true
 		available = append(available, ast.ParamDecl{Name: decl.Name, Type: decl.Type})
 		bindings = append(bindings, primitiveLocalBinding{name: decl.Name, parameter: -1, local: decl})
+		bindingIndices[decl.Name] = len(bindings) - 1
 	}
-	// A closed final expression excludes calls/control flow or external state.
-	ret := fn.Body[len(fn.Body)-1].(*ast.ReturnStmt)
-	final := &ast.FuncDecl{Name: fn.Name, Params: available, ReturnType: fn.ReturnType, Body: []ast.Stmt{ret}}
-	if _, ok := primitiveReturnExpressions(final); !ok {
-		return nil, false
-	}
+	// The final return is analyzed on the ordinary path. Its expression grammar
+	// does not affect the earlier local initializer products or their bindings.
 	return inputs, true
 }
 
@@ -157,19 +175,28 @@ func (a *Analyzer) analyzeLocalInitializer(n *ast.VarDeclStmt, expected Type) Ty
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	input := invocation.localInitializers[n]
-	if input == nil || expected != a.namedTypes["i64"] || len(a.diagnostics) != 0 {
+	if input == nil || expected != a.namedTypes["i64"] {
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	if !input.currentSyntax() {
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	invocation.prepareAnalyzer(a)
-	if invocation.safety != primitiveOperatorAbsence || !input.currentBindings(a) {
+	if invocation.safety != primitiveOperatorAbsence {
+		return a.analyzeValueExpr(n.Value, expected)
+	}
+	if !input.currentBindings(a) {
 		return a.analyzeValueExpr(n.Value, expected)
 	}
 	session := invocation.session
 	query := incremental.Key{Kind: primitiveLocalTypingKind, Name: input.key}
-	encoded, err := session.db.Evaluate(context.Background(), query)
+	var encoded string
+	var err error
+	if input.hasQueryResult {
+		encoded, err = input.queryResult.Value, input.queryResult.Err
+	} else {
+		encoded, err = session.db.Evaluate(context.Background(), query)
+	}
 	if err == nil && len(encoded) == len(input.nodes)+1 && validPrimitiveTyping(encoded) {
 		restored := replayPrimitiveParameterNodes(a, input.nodes, encoded[:len(input.nodes)])
 		session.stats.LocalInitializersReused++
@@ -200,9 +227,9 @@ func (a *Analyzer) analyzeLocalInitializer(n *ast.VarDeclStmt, expected Type) Ty
 	}
 	tags[len(nodes)] = rootTag // initializer type before declaration conversions/checks
 	product, _ := json.Marshal(primitiveBodyProduct{Source: input.source, Config: invocation.config, Safety: invocation.safety, Types: string(tags)})
-	if session.storePrimitiveProduct(input.key, string(product)) {
-		_, _ = session.db.Evaluate(context.Background(), query)
-	}
+	// Publish the product input now, but leave its derived query lazy. The
+	// next analysis validates this query only if it actually tries to reuse it.
+	session.storePrimitiveProduct(input.key, string(product))
 	return result
 }
 

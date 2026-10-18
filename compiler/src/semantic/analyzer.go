@@ -1435,6 +1435,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	a.typeShapesFrozen = true
 	if a.incrementalBodies != nil {
 		bodies.prepareAnalyzer(a)
+		bodies.prefetchLocalInitializerQueries()
 	}
 	a.analyzeDecls(activeDecls)
 	a.evaluateLateReturnBorrowFrames()

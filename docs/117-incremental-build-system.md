@@ -32,6 +32,11 @@ Cycles and interrupted/failed evaluations never publish partial results, even if
 an evaluator ignores a failed dependency. Interprocedural recursion needs an
 explicit strongly connected summary/fixpoint query. Inputs and evaluation are
 serialized for a consistent snapshot, and queued evaluation can be cancelled.
+`Database.EvaluateBatch` runs an ordered batch under one database snapshot and
+returns position-aligned per-query errors. The semantic session uses it to
+prefetch only local initializer products retained by the session after static
+implementations are collected. Known misses skip the database lookup; each
+initializer still validates its current source and bindings before replay.
 The engine now drives the opt-in closed-integer session described below. General
 function-product reuse, persistent graph storage and parallel query scheduling
 remain separate implementation work.
@@ -115,13 +120,15 @@ live-analyzer hydration and actual body-cache integration remain unfinished.
 
 `semantic.NewIncrementalAnalysisSession().Analyze(freshFile, options)` accepts a
 freshly parsed complete program on each call. Keep one session per expanded
-program/root. Primary body products reuse canonical-i64 single-return functions with no
-parameters or with immutable, non-defaulted canonical-i64 parameters. Expressions
-admit parameter reads, unsuffixed integer literals, parentheses, unary minus and
-binary `+`, `-`, `*`. Plain namespace/module functions have qualified identities;
-parameter arity separates admitted overload owners. Other declarations,
-conditional declaration containers, mutable/defaulted/nonnumeric parameters,
-locals, calls, contracts and generics stay cold.
+program/root. Primary body products reuse closed canonical-scalar single-return
+functions, including the original integer arithmetic grammar and a guarded
+boolean predicate grammar. The separate local-initializer product reuses eligible
+straight-line canonical-i64 initializers before a plain final return. Each path
+has its own syntax and current-binding checks; unsupported bodies and
+initializers stay on ordinary analysis. Plain namespace/module functions have
+qualified identities; parameter arity separates admitted overload owners.
+Other declarations, conditional declaration containers, mutable/defaulted
+parameters, calls, contracts and generics stay cold.
 The original Analyze/AnalyzeWithOptions APIs retain the cold path.
 
 Each query reads a position-independent, versioned closed-grammar source digest,
@@ -145,16 +152,19 @@ product; source shifts reuse without keeping old nodes or positions.
 
 The session serializes analyses and retains only strings/keys between calls.
 Each session indexes at most 4096 admitted owner/initializer keys and retains at
-most 1 MiB of encoded typing products. Above the key budget, retained eligible
+most 1 MiB of encoded typing products. The key limit counts an owner context
+and each admitted local initializer separately; it is an admission budget, not
+a function-body coverage ratio. Above the key budget, retained eligible
 owners and their retained local queries are selected first. Remaining slots go
 to new locals of selected owners, then new owners in declaration order. Every
 unselected body/initializer compiles normally; the request retains available
-hits rather than becoming entirely cold. Unsupported return grammars never
-consume a slot. A local owner needs room for its context and at least one
-initializer, so context alone cannot monopolize a slot. Owners changing from
-return-body products to locals without retained initializer keys join new
-admission rather than displacing existing retained units. Selected plus queued
-new-local plans stay within the key budget;
+hits rather than becoming entirely cold. Unsupported return-body products do
+not consume a body slot; independently eligible local initializers may still
+consume initializer slots. A local owner needs room for its context and at
+least one initializer, so context alone cannot monopolize a slot. Owners
+changing from return-body products to locals without retained initializer keys
+join new admission rather than displacing existing retained units. Selected
+plus queued new-local plans stay within the key budget;
 trimmed pointers are cleared. Products above the byte budget are not admitted.
 CapacityLimitedAnalyses/CapacitySkippedQueries describe partial admission;
 ColdFallbackAnalyses continues to describe whole cold requests. The legacy
@@ -432,11 +442,15 @@ professional incremental compilation.
 ### Sequential scalar local initializer queries
 
 Straight-line canonical-i64 functions may now reuse individual typed, immutable
-i64 local initializers before a final closed return. Each initializer supports
-the arithmetic grammar over parameters and preceding locals. Normal declaration
-analysis creates each current SymbolLocal and runs conversion, value binding,
-range/optimization, ownership, borrow and drop logic. Later identifier reads,
-return typing and whole-function summaries remain fresh.
+i64 local initializers before a plain final return. Each initializer supports
+the arithmetic grammar over parameters and preceding locals. The final return
+expression may use unsupported syntax; it remains on the ordinary analysis
+path and does not block reuse of earlier eligible initializers. Normal
+declaration analysis creates each current SymbolLocal and runs conversion,
+value binding, range/optimization, ownership, borrow and drop logic. Later
+identifier reads, return typing and whole-function summaries remain fresh.
+Planning accounts spelling bytes cumulatively across the owner, parameters,
+local names and all eligible initializer expressions under the 1 MiB bound.
 
 Query identity combines qualified owner/arity with a digest of the unique local
 name. Unrelated insertion/removal therefore preserves existing owners. Inputs
@@ -454,17 +468,77 @@ The hook revalidates current syntax, function owner and symbol ownership before
 lookup. Local symbols must point at current declarations. Products store compact
 expression tags plus the original initializer result type before conversions.
 No AST, symbol or binding fact enters the database. All primitive products use
-a shared publication boundary. Existing diagnostics force cold initializer analysis
-until a broader diagnostic/path-context dependency model is available.
+a shared publication boundary. Earlier unrelated diagnostics do not block reuse;
+the candidate initializer's diagnostic delta is checked before publication.
+Current diagnostic-producing expressions fall outside the closed cache grammar
+and take the cold path; the delta check remains a defensive guard if an admitted
+expression gains a diagnostic path.
 
 LocalInitializersChecked/Reused report actual initializer work separately from
 body counters. ReusedExpressionNodes excludes fresh identifier reads. Tests
 cover metadata parity, consumed/transitive invalidation, unrelated edits,
-removal/readmission, unsupported
-bindings and owner checks. The LLVM/native gate requires identical IR and exits
+removal/readmission, unsupported bindings, owner checks and errorful cold/warm
+parity with a diagnostic-producing candidate kept on its cold path. The LLVM/native gate requires identical IR and exits
 42, then 63 after a consumer edit, then 69 after an upstream-only producer edit. BenchmarkIncrementalLocalInitializers measures fresh
 parsing plus full analysis with 64 warm initializer queries; this is measurement
 coverage, not a broad performance claim.
+
+`BenchmarkIncrementalLocalInitializerEdit` measures a single initializer edit
+in an eight-function fixture with sixteen independent initializers per
+function. Parsing is excluded from both timed paths; the retained session is
+warmed on the base revision, then only the edited revision is timed. Full
+published-Result parity is checked outside the timed region. Operator-safety
+preparation is shared once per analysis, and retained local products are
+prefetched as one query batch. A controlled Apple M5 A/B before the known-miss
+filter used three samples of 200 edits each. Cold analysis averaged 1.332
+ms/op and retained analysis 6.571 ms/op with prefetch; without prefetch, cold
+averaged 1.314 ms/op and retained 6.901 ms/op. This historical comparison
+showed a 4.8% retained-path improvement, with about 70 KB and 525 allocations
+per retained edit. That run reused 127 initializer products and 254 expression
+nodes, checked one initializer, and reused zero whole bodies; it remained 4.9×
+slower than cold. These earlier numbers predate known-miss filtering and lazy
+product publication. This fixture measures semantic analysis only, not
+whole-compiler or edit-to-executable speed.
+
+After known-miss filtering and lazy product publication, three 100-edit samples
+measured fresh cold analysis at 1.629 ms/op, first analysis through a new
+incremental session at 10.467 ms/op, and retained edit analysis at 7.911 ms/op.
+The first session analysis checked all 128 local initializers, reused none, and
+executed zero incremental queries. Against the same benchmark immediately
+before lazy publication, first-session time moved from 10.919 to 10.467 ms/op
+(4.1% faster), allocations from 11.29 to 10.86 MB/op (3.8% fewer), and query
+executions from 256 to zero. Retained edit time moved from 8.348 to 7.911 ms/op
+(5.2% faster). The retained edit reused 127 products and 254 expression nodes,
+checked one initializer, and reused no whole bodies. A subsequent run after
+batching product publication measured first-session analysis at 10.256 ms/op
+and retained edits at 7.724 ms/op; query executions stayed at zero on initial
+analysis and all products were published in one database revision. Against the
+immediately preceding three-sample run, these were 2.0% and 2.4% faster. In
+this latest sample first-session analysis remained 6.62× slower than fresh cold
+analysis, and retained analysis remained 4.99× slower. The local A/B does not
+establish a project-level speedup; planning and semantic checking still
+dominate first-session cost.
+
+A focused 300-iteration CPU/allocation profile of the first-session subbenchmark
+passed the benchmark's cold-result parity check. Runtime scheduling and GC
+dominated sampled CPU time, so the profile does not identify a stable compiler
+CPU hotspot. Allocation data was clearer: `incremental.Session.PublishPrepared`
+accounted for 43% cumulative allocation, lexical read publication for 28%,
+lexical selection key construction for 10%, source-index encoding for 18%, and
+lexical selection evaluation for 16% (cumulative entries overlap). This first
+analysis constructs current lexical observations for later reuse even though it
+has no prior products to consume. Those observations carry invalidation inputs;
+reducing their cost must preserve current-scope and shadowing evidence. No
+coverage reduction is justified by this profile alone.
+
+`BenchmarkPrimitiveLocalInitializerPlanning` isolates plan construction for one
+function with 128 independent local initializers. A direct expression visitor
+now validates each local against the current visible-name set and resolves only
+the identifiers actually used, rather than rebuilding and rescanning a
+synthetic function signature containing every prior local. On the same Apple
+M5, 50 iterations fell from 0.990 ms/op and 2.58 MB/op (4,840 allocations) to
+0.240 ms/op and 0.43 MB/op (3,371 allocations). This is a roughly 4.1× planner
+improvement, not a full semantic-analysis or edit-to-executable improvement.
 
 A run of the initial prefix-invalidation version on Apple M5 (three one-second
 samples, GOMAXPROCS=4) measured median
@@ -2137,3 +2211,74 @@ baseline source/overlay backing files and logs are in Stage1's ignored
 historical root failure resolution, complete incremental compiler or full-build
 throughput claim follows from these component checks. Broader normal body reuse
 and real edit/compile latency remain the priority after these measured reductions.
+
+
+### Current Stage1 seed timing and predicate replay census
+
+On Apple M5 / Go 1.27.2, a fresh Stage0 binary built from the current dirty core
+tree in 22.28 s. Using it to seed Stage1 with GOMAXPROCS=4, GOGC=1200,
+GOMEMLIMIT=10GiB, whole-build cache disabled and a 12 GiB child RSS guard took
+153.92 s. The Stage1 source fingerprint was identical before and after the run
+(`79ad54ae...e90dc58`). Phases were lex 486 ms, parse 2.437 s and analyze
+2m30.21 s. The proof tier reported 4,863 obligations, 3,894 proven, 969
+declined, 591 cached and 56.761 s in solver calls. It exited 1 before codegen or
+linking with 150 non-warning source diagnostic rows and 32,077 warning rows.
+The blockers group into 80 postcondition proofs, 38 invariants, 11 decreases
+proofs, five loop-invariant-entry failures, 14 region-storage escapes and two
+precondition failures. The largest file groups are `easm_compose_text.elisa`
+(14), `iterator_alias_resolution.elisa` (13), `easm_operand_scan.elisa` and
+`deprecated_message_lookup.elisa` (10 each), and `project.elisa` (9).
+Including the separate Stage0 rebuild, the elapsed work from Go compiler sources
+to this failed Stage1 seed was 176.20 s. These are times to a diagnostic failure,
+not a successful compiler build or a speed comparison with earlier runs. An
+earlier 130.22 s attempt saw a Stage1 source edit during the run and is excluded.
+The current source/log/fingerprint artifacts are under
+`/tmp/elisa-local-compile-timing/current`.
+
+A later seed attempt on a different source snapshot (`seed-local-99`) used
+Stage0 SHA-256 `18c33056b927a9bda79d0c00ce240206368959cc1311656faac16701b1c4c214`
+and source SHA-256 `652514e619553f9c2826496b0dc00e525775bfa4b0c98eb86ca51aada4671677`.
+It exited 1 after 118.76 s with 9,996,075,008 bytes peak RSS and 84 non-warning
+proof diagnostic rows across 26 files. This is a separate, non-comparable
+snapshot; the count must not be read as a reduction from the controlled run
+above. Its log and run metadata are also under
+`/tmp/elisa-local-compile-timing/current/seed-local-99.*`.
+
+The same frozen parser snapshot (`86e7b5e6...bda94bd1`) was remeasured with
+SMT disabled, GOMAXPROCS=4, GOGC=1200 and GOMEMLIMIT=10GiB. One-shot analysis
+was 5.387 s fresh and 6.969 s retained, with 4.56 GB and 6.07 GB allocated.
+The retained run reused one body and two expression nodes, with no local
+initializer reuse or lexical lookup hits; both paths produced 980 diagnostics.
+The retained path was about 29% slower on this workload. The syntax census
+found 1,937 functions, 170 boolean-return functions and 110 boolean binary
+returns, but only one body admitted by the current closed predicate grammar.
+This remains an analysis-only sample, not edit-to-executable latency.
+
+A CPU profile of the retained benchmark showed ordinary function-body and flow
+analysis still dominating; `withSourcePermissionParams` and
+`visitFunctionBodyWithElementScan` were among the largest cumulative paths.
+The useful next step is broad function-product reuse with complete dependencies,
+current-node rebinding and live analyzer hydration. The two-node predicate replay
+does not establish a project throughput gain. The retained path remains about
+29% slower than fresh analysis on this workload, so it is not evidence of an
+incremental throughput improvement.
+
+A follow-up safety guard now infers the receiver type of every comparison in an
+admitted predicate, including nested comparisons whose result is `bool`. The
+regression warms `(left < right) == (other_left < other_right)`, then adds a
+`BoolEquality for bool` implementation and verifies replay is rejected, cold
+lowering occurs, and the outer AST receives its lowered call. The focused
+predicate tests and the full semantic package pass; the full package took
+51.826 s (the earlier 63.533 s run was after the unary-minus guard). A focused
+race run also passes. The broader retained-project benchmark remains the honest
+throughput result until realistic edit-to-executable measurements improve.
+
+On the Stage1 error-reduction track, the latest controlled local seed used a
+stable source snapshot and exited before code generation with 126 non-warning
+diagnostics and 32,078 warnings in 130.54 s; peak RSS was 8,797,274,112 bytes.
+Source content and stat fingerprints matched before, after and at the subsequent
+current-tree check (`c0dca754…`, `bc46cf7a…`). The count is down from the prior
+controlled 137-row seed, but the source changed between snapshots, so the full
+delta should not be attributed to one fix. The log is
+`/tmp/elisa-local-compile-timing/current/seed-local-18.log`. No successful
+Stage1 compiler product has been produced yet.

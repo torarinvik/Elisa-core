@@ -50,6 +50,98 @@ func TestIndependentBodyEditAndMemo(t *testing.T) {
 	}
 }
 
+func TestEvaluateBatchPreservesOrderAndIsolatesErrors(t *testing.T) {
+	db := New(map[string]Evaluator{
+		"read": func(r *Reader, name string) (string, error) {
+			value, ok := r.Input(Key{"value", name})
+			if !ok {
+				return "", fmt.Errorf("missing input %q", name)
+			}
+			return value, nil
+		},
+	})
+	db.Apply(Change{Key: Key{"value", "first"}, Value: "one"}, Change{Key: Key{"value", "last"}, Value: "three"})
+	keys := []Key{{"read", "first"}, {"unknown", "middle"}, {"read", "last"}}
+	results := db.EvaluateBatch(context.Background(), keys)
+	if len(results) != len(keys) {
+		t.Fatalf("batch returned %d results for %d keys", len(results), len(keys))
+	}
+	if results[0].Err != nil || results[0].Value != "one" {
+		t.Fatalf("first result = %+v", results[0])
+	}
+	if results[1].Err == nil {
+		t.Fatal("unsupported middle query did not return its error")
+	}
+	if results[2].Err != nil || results[2].Value != "three" {
+		t.Fatalf("later independent query did not run: %+v", results[2])
+	}
+	if got := db.Stats().Executed; got != 2 {
+		t.Fatalf("batch executed %d supported queries, want 2", got)
+	}
+}
+
+func TestEvaluateBatchCancellationAndEmptyInput(t *testing.T) {
+	db := New(map[string]Evaluator{"read": func(r *Reader, _ string) (string, error) {
+		value, _ := r.Input(Key{"value", "one"})
+		return value, nil
+	}})
+	if got := db.EvaluateBatch(context.Background(), nil); got != nil {
+		t.Fatalf("empty batch = %#v, want nil", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results := db.EvaluateBatch(ctx, []Key{{"read", "a"}, {"read", "b"}})
+	if len(results) != 2 || results[0].Err != context.Canceled || results[1].Err != context.Canceled {
+		t.Fatalf("canceled batch results = %+v", results)
+	}
+}
+
+func TestEvaluateBatchHoldsOneRevisionSnapshot(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	db := New(map[string]Evaluator{"snapshot": func(r *Reader, name string) (string, error) {
+		if name == "pause" {
+			close(entered)
+			<-release
+		}
+		value, _ := r.Input(Key{"generation", "current"})
+		return value, nil
+	}})
+	db.Apply(Change{Key: Key{"generation", "current"}, Value: "old"})
+	batchDone := make(chan []EvaluationResult, 1)
+	go func() {
+		batchDone <- db.EvaluateBatch(context.Background(), []Key{{"snapshot", "pause"}, {"snapshot", "second"}})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("batch evaluator did not enter")
+	}
+	applyStarted := make(chan struct{})
+	applyDone := make(chan struct{})
+	go func() {
+		close(applyStarted)
+		db.Apply(Change{Key: Key{"generation", "current"}, Value: "new"})
+		close(applyDone)
+	}()
+	<-applyStarted
+	select {
+	case <-applyDone:
+		t.Fatal("Apply interleaved between batch keys")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	results := <-batchDone
+	<-applyDone
+	if len(results) != 2 || results[0].Err != nil || results[1].Err != nil || results[0].Value != "old" || results[1].Value != "old" {
+		t.Fatalf("batch did not use one old revision: %+v", results)
+	}
+	value, err := db.Evaluate(context.Background(), Key{"snapshot", "second"})
+	if err != nil || value != "new" {
+		t.Fatalf("post-batch evaluation = %q, %v; want new", value, err)
+	}
+}
+
 func TestUnchangedInterfacePrunesCallerInvalidation(t *testing.T) {
 	db := New(map[string]Evaluator{
 		"interface": func(r *Reader, name string) (string, error) {

@@ -28,7 +28,7 @@ func parseIncrementalSessionFile(t *testing.T, source string) *ast.File {
 	}
 	return file
 }
-func assertIncrementalResultParity(t *testing.T, cold, warm *Result) {
+func assertIncrementalResultParity(t testing.TB, cold, warm *Result) {
 	t.Helper()
 	// Re-key public source-node maps onto the current invocation, then compare
 	// every published field except invocation objects/costs. No output inventory

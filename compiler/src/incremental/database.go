@@ -31,6 +31,12 @@ type result struct {
 // Stats distinguishes work executed from queries reused after dependency checks.
 type Stats struct{ Executed, MemoHits, Validated, DependencyChecks, InputReads uint64 }
 
+// EvaluationResult is one position-preserving result from EvaluateBatch.
+type EvaluationResult struct {
+	Value string
+	Err   error
+}
+
 // Database serializes revisions and evaluation, giving each query a consistent
 // input snapshot. Evaluators are immutable for the database lifetime. They must
 // read all changing data through Reader, including failed name lookups.
@@ -139,6 +145,37 @@ func (db *Database) Evaluate(ctx context.Context, key Key) (string, error) {
 	}
 	defer func() { <-db.gate }()
 	return db.evaluate(ctx, key, map[Key]bool{})
+}
+
+// EvaluateBatch validates each requested dependency closure while holding one
+// database snapshot. Results preserve key order; one query error does not
+// prevent independent later queries from running. This is useful when an
+// analysis phase discovers many independent unit products at once.
+func (db *Database) EvaluateBatch(ctx context.Context, keys []Key) []EvaluationResult {
+	if len(keys) == 0 {
+		return nil
+	}
+	results := make([]EvaluationResult, len(keys))
+	select {
+	case db.gate <- struct{}{}:
+	case <-ctx.Done():
+		err := ctx.Err()
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
+	defer func() { <-db.gate }()
+	for i, key := range keys {
+		results[i].Value, results[i].Err = db.evaluate(ctx, key, map[Key]bool{})
+		if err := ctx.Err(); err != nil {
+			for remaining := i + 1; remaining < len(results); remaining++ {
+				results[remaining].Err = err
+			}
+			break
+		}
+	}
+	return results
 }
 
 // Reader is scoped to one evaluator. Never retain it or use it concurrently.
