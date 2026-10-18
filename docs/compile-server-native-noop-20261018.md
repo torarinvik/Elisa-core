@@ -81,3 +81,39 @@ and record source/binary hashes. Run only after the shared exact-source compiler
 gate is quiet. Cold-start/key setup cost and
 changed-body behavior need separate measurements before broad performance claims.
 The isolated branch is not yet promoted into shared main.
+
+## Paired warm-request result
+
+Three fixed ten-request pairs on one pinned test executable, in
+shards/completed, completed/shards, shards/completed order, passed every output,
+diagnostic, analysis-count and native-counter assertion. Each arm independently
+prewarmed twice. Process inventory was checked before every arm and contained no
+other compiler/solver/test process matched by the harness. This guards ordinary
+contention, not system-wide scheduling noise.
+
+| Median per request | Shard reuse | Completed object |
+| --- | ---: | ---: |
+| Whole request | 46.370 ms | 9.678 ms |
+| Allocation volume | 9,639,017 B | 6,241,992 B |
+| Allocations | 56,067 | 32,785 |
+| Backend IR build | 9.799 ms | 0 |
+
+For this fixed 32-function unchanged-source fixture, median latency improved
+4.79x (79.1% lower); allocation volume fell 35.2%. Individual shard samples were
+38.707–46.403 ms and completed-object samples 9.533–10.213 ms. Key preparation,
+parsing, fresh semantic analysis and response construction are all included.
+This does not establish changed-body, project-scale, network, or cold-start gains.
+
+Raw logs, the harness and manifest are retained locally under
+`build/verification/server-native-noop-20261018/`. Reproduce with Homebrew Python;
+Apple's `/usr/bin/python3` injected SDKROOT and correctly caused admission to
+skip. Those skipped attempts were rejected by the harness and are excluded.
+The successful run removed no environment inputs. Tool resource settings were
+GOMAXPROCS=1 and GOMEMLIMIT=256MiB.
+
+Measured source commit: `b55aa41f7dd35c6d22b16671b3ab21c92ea778c6`.
+Pinned test binary SHA256: `8076dad3a803ef2f27ebcad0d7a907ffe8fa0df3b45027df5f0389afa5bf9c25`.
+Cache source SHA256: `5d3ec50d71493ffaead6ae1182af836f8e8306ce2dd7a1291ec184e12220bdc5`.
+Benchmark source SHA256: `23f491e8f63b9f62fcbae51dbcbfc6b4a5dbe4e3f142ceb44aadd2a073dd8daf`.
+
+Implementation remains isolated pending shared-tree integration review.
