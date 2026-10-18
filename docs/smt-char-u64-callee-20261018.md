@@ -18,7 +18,9 @@ wrong-byte and different-view rejection, char -1 converting to u64.max, rejectio
 of a false zero result, and existing conversion/view/quantifier controls. Logs
 are in `build/verification/smt-char-u64-callee-20261018/`.
 
-The XOR/FNV prefix identity still declines with the default solver budget.
+At this initial checkpoint the XOR/FNV prefix identity still declined with the
+default solver budget. The later XOR-congruence checkpoint proves the one-byte
+identity; the full production loops remain unproved.
 This checkpoint fixes the conversion model; it does not claim that the FNV loop
 invariants, full Stage1 bootstrap, or compiler incremental latency are solved.
 No standalone Stage0 build or benchmark was performed for this checkpoint.

@@ -12,8 +12,8 @@ import (
 // eager and expensive: on `hash & (capacity - 1) < capacity` the integer core (the AND bound
 // lemma, `mask = capacity - 1`, `capacity >= 1`) is unsat in ~2k rlimit, but with the bridge
 // present z3 spends its whole budget. smtAbstractBitvectorReads replaces each distinct
-// `(bv2nat …)` term by a fresh Int constant everywhere (the guarded AND bound lemmas are carried
-// over onto that constant). That is a WEAKENING of the query — any model of the original gives a
+// `(bv2nat …)` term by a fresh Int constant (the guarded AND bound lemmas are carried
+// over), or by a per-width XOR function retaining equality of its Int operands. That is a WEAKENING of the query — any model of the original gives a
 // model of the abstraction by assigning each constant its term's value — so an unsat abstraction
 // proves the original. A sat or unknown abstraction proves nothing and the original query runs.
 
@@ -61,7 +61,9 @@ func smtAbstractBitvectorReads(query string) (string, bool) {
 	if !strings.Contains(query, "(bv2nat ") {
 		return "", false
 	}
+	quantified := strings.Contains(query, "(forall") || strings.Contains(query, "(exists")
 	names := map[string]string{}
+	functions := map[string]bool{}
 	var b strings.Builder
 	i := 0
 	for {
@@ -78,7 +80,16 @@ func smtAbstractBitvectorReads(query string) (string, bool) {
 		term := query[start:end]
 		name, seen := names[term]
 		if !seen {
-			name = smtBVAbstractPrefix + strconv.Itoa(len(names))
+			if application, declaration, ok := smtAbstractXorRead(term); ok {
+				name = application
+				functions[declaration] = true
+			} else {
+				// A fresh constant cannot represent a binder-dependent term.
+				if quantified {
+					return "", false
+				}
+				name = smtBVAbstractPrefix + strconv.Itoa(len(names))
+			}
 			names[term] = name
 		}
 		b.WriteString(query[i:start])
@@ -90,17 +101,36 @@ func smtAbstractBitvectorReads(query string) (string, bool) {
 		return "", false
 	}
 	decls := make([]string, 0, len(names))
+	var applicationBounds []string
 	for term, name := range names {
+		// Applications remain inside their binder; do not hoist range facts.
+		if quantified && strings.HasPrefix(name, "(") {
+			continue
+		}
 		// bv2nat of a W-bit vector lies in [0, 2^W): keep that range on the fresh constant. It
 		// holds for the original term, so the abstraction stays a weakening.
-		decl := "(declare-const " + name + " Int)\n(assert (<= 0 " + name + "))\n"
+		decl := ""
+		if !strings.HasPrefix(name, "(") {
+			decl = "(declare-const " + name + " Int)\n"
+		}
+		decl += "(assert (<= 0 " + name + "))\n"
 		if w, ok := smtBitvectorReadWidth(term); ok {
 			decl += "(assert (< " + name + " " + smtPow2(w) + "))\n"
 		}
-		decls = append(decls, decl)
+		if strings.HasPrefix(name, "(") {
+			applicationBounds = append(applicationBounds, decl)
+		} else {
+			decls = append(decls, decl)
+		}
 	}
 	sort.Strings(decls)
-	return strings.Join(decls, "") + body, true
+	sort.Strings(applicationBounds)
+	headers := make([]string, 0, len(functions))
+	for declaration := range functions {
+		headers = append(headers, declaration)
+	}
+	sort.Strings(headers)
+	return strings.Join(headers, "") + strings.Join(decls, "") + body + strings.Join(applicationBounds, ""), true
 }
 
 // smtBitvectorReadWidth returns W for a `(bv2nat …)` read-back whose bit-vector is built only

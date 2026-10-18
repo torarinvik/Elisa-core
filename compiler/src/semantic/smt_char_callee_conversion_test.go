@@ -79,3 +79,31 @@ func TestSMTCharToU64PreservesNegativeBits(t *testing.T) {
 		t.Fatalf("negative char must not prove zero: %v", r.Errors())
 	}
 }
+
+func TestSMTCharCalleeXorPrefixStep(t *testing.T) {
+	source := strings.ReplaceAll(clonedBytePrefixStep, " + ", " ^ ")
+	// Keep the index increment arithmetic rather than changing it to XOR.
+	source = strings.ReplaceAll(source, "index ^ 1.usize()", "index + 1.usize()")
+	r := analyzeContractStrict(t, "xor_byte_prefix.elisa", source)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("recursive XOR prefix step must prove: %v", errs)
+	}
+}
+
+func TestSMTCharCalleeXorPrefixRejectsDifferentByteOrView(t *testing.T) {
+	for _, other := range []bool{false, true} {
+		source := strings.ReplaceAll(clonedBytePrefixStep, " + ", " ^ ")
+		source = strings.ReplaceAll(source, "index ^ 1.usize()", "index + 1.usize()")
+		if other {
+			source = strings.Replace(source, "prefix_step(text: sview, index: usize)", "prefix_step(text: sview, other: sview, index: usize)", 1)
+			source = strings.Replace(source, "            requires index < text.len", "            requires index < text.len\n            requires index < other.len", 1)
+			source = strings.Replace(source, "^ text[index].u64()", "^ other[index].u64()", 1)
+		} else {
+			source = strings.Replace(source, "^ text[index].u64()", "^ text[0].u64()", 1)
+		}
+		r := analyzeContractStrict(t, "xor_prefix_false.elisa", source)
+		if !strings.Contains(strings.Join(r.Errors(), "\n"), "ensure postcondition of \"prefix_step\"") {
+			t.Fatalf("false XOR prefix must not prove (other=%v): %v", other, r.Errors())
+		}
+	}
+}
