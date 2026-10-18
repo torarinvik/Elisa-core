@@ -19,6 +19,9 @@ func TestIncrementalTypingPreservesCurrentInlineMode(t *testing.T) {
 		{"@inline(force)\n", FuncInlineModeAlways, true, false},
 		{"@inline(unknown)\n", FuncInlineModeDefault, false, true},
 		{"@inline()\n", FuncInlineModeDefault, false, true},
+		{"@inline(never)\n", FuncInlineModeNever, false, false},
+		{"@inline(never)\n", FuncInlineModeNever, true, false},
+		{"", FuncInlineModeDefault, true, false},
 	}
 	for _, tc := range cases {
 		source := tc.prefix + body
@@ -34,7 +37,7 @@ func TestIncrementalTypingPreservesCurrentInlineMode(t *testing.T) {
 			t.Fatal("missing step symbol")
 		}
 		signature, ok := symbol.Type.(*FuncType)
-		if !ok || signature.InlineMode != tc.mode {
+		if !ok || signature.InlineMode != tc.mode || signature.HasInlineMode != (tc.mode != FuncInlineModeDefault) {
 			t.Fatalf("stale inline signature for %q: %+v", tc.prefix, signature)
 		}
 		after := session.Stats()

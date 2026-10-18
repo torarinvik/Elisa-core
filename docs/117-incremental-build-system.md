@@ -2593,3 +2593,27 @@ outside reuse; the full incremental compilation goal is unfinished.
 Sources, exact qualification backing files, binary hashes, native/race logs and
 project/census results are retained under
 `build/verification/incremental-predicate-ranges-20261018/`.
+
+
+### Inline metadata independent of return typing
+
+Validated single `@inline` hints no longer disqualify closed scalar return
+products. Annotation validation and signature updates still run normally before
+body analysis; only typing eligibility ignores the recognized hint. Unsupported,
+malformed or multiple annotations stay outside this path. The Annotation schema
+is pinned so future fields cannot silently enter the retained grammar.
+
+The regression reproduced missing reuse, then checks fresh Result parity while
+adding/removing hints, switching always/never, accepting the existing `force`
+alias, rejecting invalid modes/arity, and recovering. It explicitly checks the
+current FuncType's InlineMode and HasInlineMode; an LLVM regression proves cached
+typing still emits current alwaysinline/noinline attributes. Selected
+incremental/annotation/contract regressions passed with the race detector:
+semantic 13.906 s and backend 32.011 s. Code was included by concurrent commit
+`6bf97c2e`; the final recovery/removal controls and qualification are recorded
+separately. Existing source census admission rises from 68 to 72 return bodies
+(70 predicates). This is syntax admission, not a measured project runtime reuse
+count or speedup. Main incremental work remains incomplete.
+
+Sources and logs are retained under
+`build/verification/incremental-inline-typing-20261018/`.
