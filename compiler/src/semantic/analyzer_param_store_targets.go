@@ -17,9 +17,11 @@ import (
 // available after collectValueSymbols) to skip pointer-free params — no dependency on exprTypes, so it
 // can run BEFORE body analysis, while the call-site check that consumes it (checkInterprocStoreEscape)
 // runs DURING analysis when the interior-taint side-table is live. Monotone fixpoint over the call
-// graph (targets only grow), so it terminates. Sibling-param targets only: a callee that instead
-// RETURNS the value, or stores it into a GLOBAL, is covered by the existing return / stored-container
-// escape checks, so this stays precise (zero over-rejection of same-region passes).
+// graph (targets only grow), so it terminates. Changed summaries requeue only
+// their direct callers; body traversal order does not require whole-program rescans.
+// Targets include sibling parameters and storeTargetGlobal. Returned values are
+// handled by the separate return-borrow analysis. This scheduler preserves the
+// existing structural transfer rules; it does not establish alias completeness.
 func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.FuncDecl][]map[int]bool {
 	out := map[*ast.FuncDecl][]map[int]bool{}
 	params := map[*ast.FuncDecl][]ast.ParamDecl{}
@@ -57,46 +59,90 @@ func (a *Analyzer) computeParamStoreTargets(funcs []*ast.FuncDecl) map[*ast.Func
 			}
 		}
 	}
-	for {
-		changed := false
-		for _, fn := range active {
-			pidx := idx[fn]
-			// markTarget records that source param `srcName` is stored into target index `ti`
-			// (a sibling param index, or the sentinel storeTargetGlobal for program-lifetime storage).
-			markTarget := func(srcName string, ti int) {
-				si, sok := pidx[srcName]
-				if !sok || out[fn][si][ti] {
-					return
-				}
-				if !typeCarriesRegionStorage(a.paramStorageType(fn, si)) {
-					return
-				}
-				out[fn][si][ti] = true
-				changed = true
+	if len(active) == 0 {
+		return out
+	}
+	// Discover reverse edges during the initial transfer pass. Allocate pending
+	// work only when a changed callee has an already-observed caller; independent
+	// functions need neither a queue nor per-function scheduling metadata.
+	var dependents map[*ast.FuncDecl]map[*ast.FuncDecl]bool
+	var queued map[*ast.FuncDecl]bool
+	var queue []*ast.FuncDecl
+	head, tail, pending := 0, 0, 0
+	enqueueCallers := func(fn *ast.FuncDecl) {
+		for caller := range dependents[fn] {
+			if queued[caller] {
+				continue
 			}
-			add := func(srcName, tgtName string) {
-				if ti, ok := pidx[tgtName]; ok {
-					if si, sok := pidx[srcName]; !sok || si == ti {
-						return
-					}
-					markTarget(srcName, ti)
-				}
+			if queue == nil {
+				queue = make([]*ast.FuncDecl, len(active))
+				queued = make(map[*ast.FuncDecl]bool)
 			}
-			// addStore classifies a store of `srcName` into the lvalue rooted at `tgtName`: a sibling
-			// param is a precise region-comparable target; a body-local dies with the callee (safe,
-			// ignored); anything else is a program-lifetime global/captured target — sound to reject.
-			addStore := func(srcName, tgtName string) {
-				if _, isParam := pidx[tgtName]; isParam {
-					add(srcName, tgtName)
-					return
-				}
-				markTarget(srcName, storeTargetGlobal)
-			}
-			markGlobal := func(srcName string) { markTarget(srcName, storeTargetGlobal) }
-			a.walkParamStores(fn.Body, pidx, out, addStore, markGlobal)
+			queue[tail] = caller
+			tail = (tail + 1) % len(queue)
+			pending++
+			queued[caller] = true
 		}
-		if !changed {
-			break
+	}
+	scan := func(fn *ast.FuncDecl, observe func(*ast.FuncDecl)) bool {
+		changed := false
+		pidx := idx[fn]
+		// markTarget records that source param `srcName` is stored into target index `ti`
+		// (a sibling param index, or the sentinel storeTargetGlobal for program-lifetime storage).
+		markTarget := func(srcName string, ti int) {
+			si, sok := pidx[srcName]
+			if !sok || out[fn][si][ti] {
+				return
+			}
+			if !typeCarriesRegionStorage(a.paramStorageType(fn, si)) {
+				return
+			}
+			out[fn][si][ti] = true
+			changed = true
+		}
+		add := func(srcName, tgtName string) {
+			if ti, ok := pidx[tgtName]; ok {
+				if si, sok := pidx[srcName]; !sok || si == ti {
+					return
+				}
+				markTarget(srcName, ti)
+			}
+		}
+		// addStore classifies a store of `srcName` into the lvalue rooted at `tgtName`: a sibling
+		// param is a precise region-comparable target; a body-local dies with the callee (safe,
+		// ignored); anything else is a program-lifetime global/captured target — sound to reject.
+		addStore := func(srcName, tgtName string) {
+			if _, isParam := pidx[tgtName]; isParam {
+				add(srcName, tgtName)
+				return
+			}
+			markTarget(srcName, storeTargetGlobal)
+		}
+		markGlobal := func(srcName string) { markTarget(srcName, storeTargetGlobal) }
+		a.walkParamStores(fn.Body, pidx, out, addStore, markGlobal, observe)
+		return changed
+	}
+	for _, fn := range active {
+		observe := func(callee *ast.FuncDecl) {
+			if dependents == nil {
+				dependents = make(map[*ast.FuncDecl]map[*ast.FuncDecl]bool)
+			}
+			if dependents[callee] == nil {
+				dependents[callee] = make(map[*ast.FuncDecl]bool)
+			}
+			dependents[callee][fn] = true
+		}
+		if scan(fn, observe) {
+			enqueueCallers(fn)
+		}
+	}
+	for pending > 0 {
+		fn := queue[head]
+		head = (head + 1) % len(queue)
+		pending--
+		queued[fn] = false
+		if scan(fn, nil) {
+			enqueueCallers(fn)
 		}
 	}
 	return out
@@ -112,7 +158,7 @@ const storeTargetGlobal = -1
 //   - a reassignment `tgtParam <- srcParam`, or a field store `tgtParam.field <- srcParam`
 //   - a relayed store: a resolved callee that maps its position-p param into its position-q param,
 //     where the call passes srcParam at p and tgtParam at q.
-func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map[*ast.FuncDecl][]map[int]bool, addStore func(src, tgt string), markGlobal func(src string)) {
+func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map[*ast.FuncDecl][]map[int]bool, addStore func(src, tgt string), markGlobal func(src string), observe func(*ast.FuncDecl)) {
 	locals := map[string]int{}
 	aliases := map[string]int{}
 	add := func(src, tgt string) {
@@ -201,6 +247,9 @@ func (a *Analyzer) walkParamStores(body []ast.Stmt, pidx map[string]int, out map
 				}
 				// Relayed store through a resolved callee.
 				if callee, ok := a.resolveCalleeFuncDecl(n); ok && callee != nil {
+					if observe != nil {
+						observe(callee)
+					}
 					if ctargets, ok := out[callee]; ok {
 						a.relayParamStores(n, ctargets, add, global)
 					}
