@@ -110,26 +110,31 @@ func (a *Analyzer) callRetainsArg(call *ast.CallExpr, name string, retained map[
 			}
 		}
 	}
-	// Find name's storage-carrying argument position.
-	argPos := -1
+	// The same source may occupy several positions. Any retaining position is
+	// sufficient; an earlier read-only occurrence must not hide a later escape.
+	var rv []bool
+	resolved := false
 	for j, arg := range call.Args {
-		if base, ok := aliasSourceName(arg); ok && base == name && typeCarriesRegionStorage(a.exprTypes[arg]) {
-			argPos = j
-			break
+		base, ok := aliasSourceName(arg)
+		if !ok || base != name || !typeCarriesRegionStorage(a.exprTypes[arg]) {
+			continue
+		}
+		if !resolved {
+			callee, ok := a.resolveCalleeFuncDecl(call)
+			if !ok || callee == nil {
+				return true // unresolved / external: conservatively retained
+			}
+			rv, ok = retained[callee]
+			if !ok {
+				return true
+			}
+			resolved = true
+		}
+		if j >= len(rv) || rv[j] {
+			return true
 		}
 	}
-	if argPos < 0 {
-		return false // name is not a direct storage argument of this call
-	}
-	callee, ok := a.resolveCalleeFuncDecl(call)
-	if !ok || callee == nil {
-		return true // unresolved / external: conservatively retained
-	}
-	rv, ok := retained[callee]
-	if !ok || argPos >= len(rv) {
-		return true // can't map the position: conservative
-	}
-	return rv[argPos]
+	return false
 }
 
 // paramRetainedInBody reports whether parameter `name` may be retained by fn's body, using the

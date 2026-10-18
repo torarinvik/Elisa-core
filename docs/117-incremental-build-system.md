@@ -165,6 +165,19 @@ region/SMT implementation plus this optimization. Source snapshot, isolation
 overlays and raw samples are retained under
 `build/verification/incremental-storage-summary-gate-20261018/`.
 
+Retention qualification found a duplicate-argument bug before attempting faster
+propagation: `keep_second(value, value)` inspected only the first matched
+argument, missing a retained second position. The helper now checks every
+storage-carrying matching argument while resolving the callee only once. A
+regression reproduced the failure, then checks the corrected result, a read-only
+duplicate negative control, and transitive caller propagation. Selected
+region/store/escape/death-time/incremental regressions passed normally (3.958 s)
+and with the expanded controls under the race detector (17.023 s), using the
+same isolated committed-source lane. These retention summaries currently feed
+optional death-time reporting rather than code generation. This is a correctness
+gain; no compilation speedup is claimed. Evidence is retained under
+`build/verification/incremental-retention-duplicate-args-20261018/`.
+
 Type/global/debug metadata can still invalidate additional shards. Avoiding full
 LLVM regeneration/optimization, general semantic result reuse, persistence,
 normal CLI integration and representative edit-to-executable qualification
