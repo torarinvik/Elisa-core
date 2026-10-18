@@ -5,23 +5,40 @@ retained owners before filling free slots with new owners. Previously both
 passes walked declarations, reconstructed qualified owner names and hashed the
 same identities, including functions whose bodies could not be cached.
 
-The new invocation-local candidate inventory prepares that identity and retained
-classification once. It preserves declaration occurrence order and the existing
-function-source key bytes, previous-owner authority, duplicate-key first-wins
-behavior, 4,096 tracked-body admission and subsequent retirement. The collector
-still checks current admission state on each pass. No AST pointer or candidate
-record is retained in the persistent Session.
+The invocation-local preflight prepares every candidate identity and retained
+classification once, then reuses that occurrence-ordered list for both
+retained-first and new-owner admission. It preserves previous-owner authority,
+duplicate-key first-wins behavior, 4,096 tracked-body admission and subsequent
+retirement. Owner identity is intentionally versioned: new keys use the
+`primitive-v2:` name prefix and v3 hash domain with ordered parameter-type tags,
+so the former arity-only function-source key bytes are not preserved. The
+collector still checks current admission state on each pass. No AST pointer or
+candidate record is retained in the persistent Session.
 
-Records contain a function pointer, a 32-byte identity and a retained flag
-(approximately 48 bytes per record on this target). They retain no qualified
-name strings. The inventory stops at 16,384 records or an 8 MiB preparation-work
-estimate covering namespace/owner-key construction and retained-local name
-classification. A saturated inventory reuses its prepared prefix and streams the
-unprepared suffix on both passes, skipping prefix occurrences without rehashing
-them. Cold worlds stream; lexical auditing also streams to preserve its required
-qualified source context. Streamed records reuse their already encoded name;
-buffered names are encoded only after matching the current admission pass.
-These are bounded temporary records/work estimates, not a hard RSS guarantee.
+The production list stores an approximately 80-byte candidate header per entry
+on 64-bit targets, plus its precomputed owner-key string and, during lexical-read
+auditing, its qualified name. The preflight caps candidate discovery at 16,384
+candidate occurrences and 8 MiB of charged preparation work for cold sessions
+and warm sessions with retained local names. The charge covers namespace and
+qualified-name construction and retention, signature validation and tags, key
+construction, retained-local classification, and candidate storage. It does
+not cover the later `IndexFunctionSource` construction during Analyze collection.
+Lexical indexing has separate limits of 4,096 functions and
+`lookupTraceMaxEntries * 4` total source nodes (262,144); when those limits are
+reached, the affected functions receive no index and their lexical observations
+are dropped. If either owner-preflight bound is exceeded, Analyze uses only the
+fully prepared prefix's retained owners and admits no new owner candidates,
+because an unseen suffix may contain additional retained owners. The semantic
+analysis still walks the full file, and the normal `current`-set retirement
+removes prior owner/query/product entries omitted from that prefix; those bodies
+are checked without session reuse and can be admitted again on a later analysis.
+If the prefix has no retained candidate, or none survives normal admission,
+Analyze calls `AnalyzeWithOptions` before changing the session database,
+prior-owner map, or retained products. Invalid pointer aliases and exhaustion
+of the separate 65,536-node pointer-alias preflight still force whole-request
+cold analysis. These are work and temporary-record limits, not a hard RSS
+guarantee. The partial-prefix policy trades reuse for bounded discovery work
+when a file crosses either owner-preflight cap.
 
 The isolated candidate-discovery qualification below does not add support for
 aliased source ASTs throughout Analyze: its pre-existing pointer-keyed invocation
@@ -49,11 +66,13 @@ Component benchmark, Go 1.27.2, Apple M5 Darwin arm64, one CPU:
 
 The first two rows use three 200 ms samples. A short over-cap run was noisy and
 inconclusive, so the last row uses three one-second samples to check the fallback
-cliff. This benchmark includes candidate-inventory construction, both admission
-iterations, pass filtering and production owner-name/key materialization, while
-excluding semantic body work and the separate raw-AST pointer guard. At large
-counts it trades more allocation bytes for less identity preparation; fewer
-allocator calls are made in all these cases.
+cliff. This isolated iterator benchmark includes candidate-inventory construction,
+both admission iterations, pass filtering and owner-name/key materialization,
+while excluding semantic body work and the separate raw-AST pointer guard. It
+predates the complete Analyze preflight described above and does not qualify that
+path's cold-fallback threshold or latency. At large counts it trades more
+allocation bytes for less identity preparation; fewer allocator calls are made
+in all these cases.
 
 A separate 512-function retained Analyze benchmark alternates one body edit and
 requires exactly 511 reused bodies and one checked body each iteration. Parsing
@@ -90,11 +109,10 @@ aliases across mutually exclusive branches may cause a cold fallback.
 The shared-tree tests add top-level aliases into static-if then/elif/else branches,
 impl/interface members, an overlong namespace, shared direct local declarations,
 and an integration assertion that an impl alias falls back before retained keys
-or database state change. Boundary tests cover the exact pointer-check node limit
-and aggregate retained-local classification work crossing the 8 MiB candidate
-budget while preserving retained-owner order across both passes. The full
-`go test ./src/semantic -count=1` passed on the shared dirty worktree (54.667 s);
-the focused owner/session suite passed again after the final test additions.
+or database state change. Earlier boundary tests covered the pointer-check node
+limit and the then-prefix-based candidate budget; those tests do not exercise the
+complete preflight described above. This total-budget change has received source
+review only; no tests were added or run for it.
 
 The separate `BenchmarkPrimitiveOwnerPointerInventory` measures only this
 unconditional guard, not a before/after speedup. Two short Apple M5 Darwin arm64
@@ -113,32 +131,21 @@ build.
 The pointer audit covers the current invocation maps keyed by `*ast.FuncDecl`
 and `*ast.VarDeclStmt`: local-initializer admission only accepts direct
 `fn.Body` declaration statements, and nested statements without an admitted
-direct entry fall back before a query hit. The main optimization opportunity is
-to share work with owner candidate preparation: Analyze currently scans the raw
-declaration tree for pointer aliases, then candidate preparation traverses it
-again (and retained-prefix/suffix preparation can add another walk). A shared
-preflight can carry namespace/candidate eligibility while validating every
-function and direct local pointer, preparing candidate records only for the
-existing root/namespace candidates. It must still scan skipped declaration
-contexts, including overlong namespace owners and static-if/impl/interface
-members, after candidate count or preparation-work limits are reached; stopping
-with candidate admission would lose the guard's fail-closed guarantee. Return
-separate scan validity and prefix completeness: duplicate pointers or scan-limit
-failure require cold fallback before collection/publication, while a valid but
-incomplete prefix should keep the current occurrence-ordered suffix replay.
-Suffix replay may still traverse again to avoid retaining unbounded candidate
-records. The current scan also treats aliases in mutually exclusive static-if
-branches as unsafe and falls back conservatively. These are performance and
-admission-coverage tradeoffs; no fused traversal has been implemented or
-qualified.
+direct entry fall back before a query hit. Analyze still makes two declaration
+walks: the raw-tree pointer-alias scan, then the capped owner-candidate preflight.
+The latter now prepares all root/namespace candidates once, while the pointer
+scan continues through skipped contexts such as overlong namespace owners and
+static-if/impl/interface members. A future fused preflight could share these
+walks, but must keep scanning skipped contexts and fail closed on duplicate
+pointers or scan-limit exhaustion. The current pointer scan also treats aliases
+in mutually exclusive static-if branches as unsafe and falls back conservatively.
 
-The retained Analyze timing earlier in this note predates this shared-tree
-preflight, so it does not include the new per-request scan. The isolated guard
-cost reaches several milliseconds near the node cap and allocates megabytes in
-large cases; current end-to-end retained-edit latency with this guard is
-unknown. Re-run the paired Analyze workload with the guard in place and compare
-it against the same revision with only the guard disabled before deciding that
-the correctness protection is affordable or that owner discovery improved.
+The retained Analyze timing earlier in this note predates both the pointer scan
+and the total owner-candidate preflight, so it does not include their per-request
+cost. The isolated guard cost reaches several milliseconds near the node cap and
+allocates megabytes in large cases; current end-to-end retained-edit latency with
+these guards is unknown. Re-run the paired Analyze workload with both in place
+before making latency claims.
 
 ## Remaining work
 

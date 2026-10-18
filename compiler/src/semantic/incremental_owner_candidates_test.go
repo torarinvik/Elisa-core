@@ -45,6 +45,106 @@ func TestIncrementalOwnerCandidatesPreserveOccurrencesAndFallback(t *testing.T) 
 	}
 }
 
+func TestIncrementalOwnerCandidateParameterTypesRetainIndependently(t *testing.T) {
+	parameter := func(typeName string) ast.ParamDecl {
+		return ast.ParamDecl{Name: "receiver", Type: &ast.NamedType{Name: typeName}}
+	}
+	initialI64 := &ast.FuncDecl{Name: "work", Params: []ast.ParamDecl{parameter("i64")}}
+	initialInt := &ast.FuncDecl{Name: "work", Params: []ast.ParamDecl{parameter("int")}}
+	identityI64, _, _ := preparePrimitiveOwnerCandidate(initialI64, "work", "owner-overload-test.elisa", nil)
+	identityInt, _, _ := preparePrimitiveOwnerCandidate(initialInt, "work", "owner-overload-test.elisa", nil)
+	if identityI64 == identityInt {
+		t.Fatal("same-name, same-arity parameter types must have distinct owner identities")
+	}
+
+	// Editing either body must keep its owner key stable. Seed both old owner
+	// keys, then make sure the production preflight recovers both independently.
+	updatedI64 := &ast.FuncDecl{
+		Name:   "work",
+		Params: []ast.ParamDecl{parameter("i64")},
+		Body:   []ast.Stmt{&ast.ReturnStmt{Value: &ast.IntLit{Value: "1"}}},
+	}
+	updatedInt := &ast.FuncDecl{
+		Name:   "work",
+		Params: []ast.ParamDecl{parameter("int")},
+		Body:   []ast.Stmt{&ast.ReturnStmt{Value: &ast.IntLit{Value: "2"}}},
+	}
+	if got, _, _ := preparePrimitiveOwnerCandidate(updatedI64, "work", "owner-overload-test.elisa", nil); got != identityI64 {
+		t.Fatal("i64 owner identity changed after a body edit")
+	}
+	if got, _, _ := preparePrimitiveOwnerCandidate(updatedInt, "work", "owner-overload-test.elisa", nil); got != identityInt {
+		t.Fatal("int owner identity changed after a body edit")
+	}
+	decls := []ast.Decl{updatedI64, updatedInt}
+	ownerKey := func(identity [32]byte) incremental.Key {
+		return primitiveInput("function-source", primitiveOwnerCandidateName(identity))
+	}
+	previous := map[incremental.Key]bool{ownerKey(identityI64): true, ownerKey(identityInt): true}
+	both, ready := preparePrimitiveOwnerCandidates(decls, "owner-overload-test.elisa", previous, primitiveOwnerCandidateLimit, false)
+	if !ready {
+		t.Fatal("production owner preflight declined the overloads")
+	}
+	if len(both) != 2 || both[0].identity != identityI64 || both[1].identity != identityInt || !both[0].retained || !both[1].retained {
+		t.Fatal("same-arity overload owners were not retained independently", both)
+	}
+
+	// Reordering and adding/removing another overload must not transfer the
+	// retained fact from one parameter signature to another.
+	updatedI8 := &ast.FuncDecl{Name: "work", Params: []ast.ParamDecl{parameter("i8")}}
+	identityI8, _, _ := preparePrimitiveOwnerCandidate(updatedI8, "work", "owner-overload-test.elisa", nil)
+	for _, scenario := range []struct {
+		name       string
+		decls      []ast.Decl
+		identities [][32]byte
+		retained   []bool
+	}{
+		{
+			name:       "reordered",
+			decls:      []ast.Decl{updatedInt, updatedI64},
+			identities: [][32]byte{identityInt, identityI64},
+			retained:   []bool{true, true},
+		},
+		{
+			name:       "added overload",
+			decls:      []ast.Decl{updatedI64, updatedInt, updatedI8},
+			identities: [][32]byte{identityI64, identityInt, identityI8},
+			retained:   []bool{true, true, false},
+		},
+		{
+			name:       "removed overload",
+			decls:      []ast.Decl{updatedInt},
+			identities: [][32]byte{identityInt},
+			retained:   []bool{true},
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			candidates, ready := preparePrimitiveOwnerCandidates(scenario.decls, "owner-overload-test.elisa", previous, primitiveOwnerCandidateLimit, false)
+			if !ready {
+				t.Fatal("production owner preflight declined the scenario")
+			}
+			if len(candidates) != len(scenario.identities) {
+				t.Fatalf("got %d candidates, want %d", len(candidates), len(scenario.identities))
+			}
+			for i, candidate := range candidates {
+				if candidate.identity != scenario.identities[i] || candidate.retained != scenario.retained[i] {
+					t.Fatalf("candidate %d retained another overload's owner: %+v", i, candidate)
+				}
+			}
+		})
+	}
+
+	for _, retainedIdentity := range [][32]byte{identityI64, identityInt} {
+		onlyOne := map[incremental.Key]bool{ownerKey(retainedIdentity): true}
+		candidates, ready := preparePrimitiveOwnerCandidates(decls, "owner-overload-test.elisa", onlyOne, primitiveOwnerCandidateLimit, false)
+		if !ready {
+			t.Fatal("production owner preflight declined one-owner retention")
+		}
+		if len(candidates) != 2 || candidates[0].retained != (retainedIdentity == identityI64) || candidates[1].retained != (retainedIdentity == identityInt) {
+			t.Fatal("one overload owner retained the other owner's query", retainedIdentity, candidates)
+		}
+	}
+}
+
 func TestPrimitiveOwnerPointerInventoryFindsAliasesInDeclarationContainers(t *testing.T) {
 	fn := &ast.FuncDecl{Name: "work"}
 	longNamespaceAlias := &ast.FuncDecl{Name: "hidden"}
@@ -245,9 +345,8 @@ func TestReservePrimitiveOwnerCandidateBytesIsOverflowSafe(t *testing.T) {
 
 var benchmarkOwnerCandidateSink int
 
-// This isolates the actual production candidate preparation plus both admission
-// iterations. Streaming is the prior repeated identity/classification work;
-// buffered mode includes building and discarding its invocation-local slice.
+// This compares the legacy streaming and prefix-buffered iterator helpers plus
+// both admission filters. Production Analyze uses the complete capped preflight.
 func BenchmarkPrimitiveOwnerCandidatePasses(b *testing.B) {
 	for _, count := range []int{16, 512, 4096, primitiveOwnerCandidateLimit - 1, primitiveOwnerCandidateLimit + 1} {
 		decls := make([]ast.Decl, count)
@@ -281,7 +380,7 @@ func BenchmarkPrimitiveOwnerCandidatePasses(b *testing.B) {
 							total += len(key.Name)
 						}
 					}
-					if total != count*(len("primitive-v1:")+64) {
+					if total != count*(primitiveOwnerCandidateNameBytes) {
 						b.Fatal("owner iteration lost records", total)
 					}
 					benchmarkOwnerCandidateSink = total

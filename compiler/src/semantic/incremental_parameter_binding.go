@@ -6,13 +6,15 @@ import (
 	"reflect"
 )
 
+const primitiveParameterLimit = 256
+
 // Parameter bindings belong to the current analyzer. Products retain names and
 // compact type tags, never symbols, scopes or parameter declaration pointers.
 func primitiveParameterSyntax(params []ast.ParamDecl) bool {
 	if len(params) == 0 {
 		return true
 	}
-	if !primitiveParameterSchemaValid || len(params) > 256 {
+	if !primitiveParameterSchemaValid || len(params) > primitiveParameterLimit {
 		return false
 	}
 	names := map[string]bool{}

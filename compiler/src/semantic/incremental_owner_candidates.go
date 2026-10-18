@@ -13,28 +13,35 @@ import (
 const primitiveOwnerCandidateLimit = 16384
 const primitiveOwnerPointerCheckNodeLimit = 65536
 
-// Bound namespace and owner-key construction plus retained-local name hashing
-// during buffered discovery. Over-budget discovery reuses its prefix and
-// streams the suffix.
+// Cap total owner-candidate preparation work for one Analyze call. The charge
+// covers declaration qualification, parameter validation/signature work,
+// owner-key construction, retained-local classification, and candidate storage.
 const primitiveOwnerCandidateWorkBudget = 8 * 1024 * 1024
-const primitiveOwnerCandidateNameBytes = len("primitive-v1:") + sha256.Size*2
+
+// v2 owner names intentionally cannot match the former arity-only v1 keys.
+const primitiveOwnerCandidateNamePrefix = "primitive-v2:"
+const primitiveOwnerCandidateNameBytes = len(primitiveOwnerCandidateNamePrefix) + sha256.Size*2
 const primitiveOwnerLocalNameWorkOverhead = 256
+const primitiveOwnerParameterMapEntryWorkOverhead = 64
+const primitiveOwnerParameterStepWorkOverhead = 32
+const primitiveOwnerParameterTypeNameMaxBytes = 8
 
 type primitiveOwnerCandidate struct {
 	function      *ast.FuncDecl
-	qualifiedName string // populated only when lexical-read auditing streams candidates
-	name          string // streamed records reuse the name already encoded for retention lookup
+	qualifiedName string // populated when lexical-read auditing needs source context
+	name          string // precomputed owner-key segment used by both admission passes
 	identity      [32]byte
+	identityValid bool
 	retained      bool
 }
 
-// primitiveOwnerCandidateRecord is the bounded inventory representation. Its
-// 64-bit pointer, 256-bit identity, and retained bit occupy about 48 bytes on
-// 64-bit targets; it retains no qualified-name or key strings.
+// primitiveOwnerCandidateRecord is the compact record used by the legacy
+// prefix-iterator comparison helper. It retains no qualified-name or key strings.
 type primitiveOwnerCandidateRecord struct {
-	function *ast.FuncDecl
-	identity [32]byte
-	retained bool
+	function      *ast.FuncDecl
+	identity      [32]byte
+	identityValid bool
+	retained      bool
 }
 
 // The production admission maps use AST pointers as keys. Keep the inventory
@@ -191,9 +198,8 @@ func walkPrimitiveOwnerDeclarations(decls []ast.Decl, namespace string, depth in
 			*skipCandidates = *skipCandidates - 1
 			continue
 		}
-		// The name is copied once for qualification and again into keyBytes;
-		// include both copies, the origin, and fixed key metadata before doing
-		// either allocation. The subtraction form is overflow-safe.
+		// Reserve qualification and key materialization before constructing the
+		// qualified name. Parameter work is charged by candidate preparation.
 		candidateWork, ok := primitiveOwnerCandidatePreparationBytes(originBytes, qualifiedBytes)
 		if !ok {
 			return false
@@ -211,7 +217,7 @@ func walkPrimitiveOwnerDeclarations(decls []ast.Decl, namespace string, depth in
 
 func primitiveOwnerCandidatePreparationBytes(originBytes, qualifiedBytes int) (int, bool) {
 	maxInt := int(^uint(0) >> 1)
-	fixedBytes := 64 + primitiveOwnerCandidateNameBytes
+	fixedBytes := 128 + primitiveOwnerCandidateNameBytes
 	if originBytes < 0 || qualifiedBytes < 0 || originBytes > maxInt-fixedBytes {
 		return 0, false
 	}
@@ -231,34 +237,44 @@ func reservePrimitiveOwnerCandidateBytes(used *int, amount, budget int) bool {
 }
 
 func preparePrimitiveOwnerCandidate(fn *ast.FuncDecl, qualifiedName, origin string, previous map[incremental.Key]bool) (identity [32]byte, name string, retained bool) {
-	identity, name, retained, _ = preparePrimitiveOwnerCandidateWithBudget(fn, qualifiedName, origin, previous, nil)
+	identity, name, retained, _, _ = preparePrimitiveOwnerCandidateWithBudget(fn, qualifiedName, origin, previous, nil)
 	return identity, name, retained
 }
 
-func preparePrimitiveOwnerCandidateWithBudget(fn *ast.FuncDecl, qualifiedName, origin string, previous map[incremental.Key]bool, reserveLocalWork func(int) bool) (identity [32]byte, name string, retained bool, ready bool) {
-	keyBytes := []byte("primitive/i64-parameters/v2\x00")
+func preparePrimitiveOwnerCandidateWithBudget(fn *ast.FuncDecl, qualifiedName, origin string, previous map[incremental.Key]bool, reserveWork func(int) bool) (identity [32]byte, name string, retained, identityValid, ready bool) {
+	parameterTags, supported, ready := primitiveOwnerParameterTags(fn, reserveWork)
+	if !ready {
+		return identity, "", false, false, false
+	}
+	if !supported {
+		return identity, "", false, false, true
+	}
+	keyBytes := []byte("primitive/parameter-signature/v3\x00")
 	keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(fn.Params)))
 	keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(origin)))
 	keyBytes = append(keyBytes, origin...)
 	keyBytes = binary.LittleEndian.AppendUint64(keyBytes, uint64(len(qualifiedName)))
 	keyBytes = append(keyBytes, qualifiedName...)
+	keyBytes = append(keyBytes, parameterTags[:len(fn.Params)]...)
 	identity = sha256.Sum256(keyBytes)
 	name = primitiveOwnerCandidateName(identity)
+	identityValid = true
 	key := primitiveInput("function-source", name)
 	retained = previous[key]
 	if retained && len(fn.Body) > 1 {
 		retained = false
 		if len(fn.Body) <= 257 {
-			if reserveLocalWork != nil {
-				workBytes, ok := primitiveOwnerLocalClassificationBytes(fn)
-				if !ok || !reserveLocalWork(workBytes) {
-					return identity, name, false, false
-				}
+			if reserveWork != nil && !reserveWork(len(fn.Body)*8) {
+				return identity, name, false, identityValid, false
 			}
 			for _, stmt := range fn.Body {
 				local, ok := stmt.(*ast.VarDeclStmt)
 				if !ok || local == nil || len(local.Name) > primitiveSourceByteBudget {
 					continue
+				}
+				workBytes := len(local.Name) + primitiveOwnerLocalNameWorkOverhead
+				if reserveWork != nil && !reserveWork(workBytes) {
+					return identity, name, false, identityValid, false
 				}
 				id := sha256.Sum256([]byte(local.Name))
 				if previous[primitiveInput("function-source", name+"/local-name-v2/"+hex.EncodeToString(id[:]))] {
@@ -268,46 +284,147 @@ func preparePrimitiveOwnerCandidateWithBudget(fn *ast.FuncDecl, qualifiedName, o
 			}
 		}
 	}
-	return identity, name, retained, true
+	return identity, name, retained, identityValid, true
 }
 
-func primitiveOwnerLocalClassificationBytes(fn *ast.FuncDecl) (int, bool) {
-	maxInt := int(^uint(0) >> 1)
-	workBytes := 0
-	for _, stmt := range fn.Body {
-		local, ok := stmt.(*ast.VarDeclStmt)
-		if !ok || local == nil || len(local.Name) > primitiveSourceByteBudget {
-			continue
-		}
-		amount := len(local.Name)
-		if amount > maxInt-primitiveOwnerLocalNameWorkOverhead {
-			return 0, false
-		}
-		amount += primitiveOwnerLocalNameWorkOverhead
-		if amount > maxInt-workBytes {
-			return 0, false
-		}
-		workBytes += amount
+func primitiveOwnerParameterTypeTag(typeName string) (byte, bool) {
+	switch typeName {
+	case "bool":
+		return 1, true
+	case "char":
+		return 2, true
+	case "int":
+		return 3, true
+	case "i64":
+		return 4, true
+	case "i8":
+		return 5, true
+	case "i16":
+		return 6, true
+	case "i32":
+		return 7, true
+	case "u8":
+		return 8, true
+	case "u16":
+		return 9, true
+	case "u32":
+		return 10, true
+	case "u64":
+		return 11, true
+	case "isize":
+		return 12, true
+	case "usize":
+		return 13, true
+	case "uintptr":
+		return 14, true
+	default:
+		return 0, false
 	}
-	return workBytes, true
+}
+
+// primitiveOwnerParameterTags validates one supported signature, constructs
+// its compact tags, and charges the shared work budget before each bounded scan
+// and name-map operation.
+func primitiveOwnerParameterTags(fn *ast.FuncDecl, reserveWork func(int) bool) (tags [primitiveParameterLimit]byte, supported, ready bool) {
+	if fn == nil || !primitiveParameterSchemaValid || len(fn.Params) > primitiveParameterLimit || len(fn.Name) > primitiveSourceByteBudget {
+		return tags, false, true
+	}
+	mapBytes := len(fn.Params) * primitiveOwnerParameterMapEntryWorkOverhead
+	if reserveWork != nil && !reserveWork(mapBytes) {
+		return tags, false, false
+	}
+	parameterNames := make(map[string]struct{}, len(fn.Params))
+	sourceBytes := len(fn.Name)
+	maxInt := int(^uint(0) >> 1)
+	for i, param := range fn.Params {
+		nameBytes := len(param.Name)
+		if nameBytes > (maxInt-primitiveOwnerParameterStepWorkOverhead-primitiveOwnerParameterTypeNameMaxBytes-1)/2 {
+			return tags, false, false
+		}
+		workBytes := nameBytes*2 + primitiveOwnerParameterStepWorkOverhead + primitiveOwnerParameterTypeNameMaxBytes + 1
+		if reserveWork != nil && !reserveWork(workBytes) {
+			return tags, false, false
+		}
+		if param.Name == "" || param.Mutable || param.DefaultValue != nil {
+			return tags, false, true
+		}
+		typeName := predicateBuiltinSyntaxName(param.Type)
+		if typeName == "" {
+			return tags, false, true
+		}
+		if len(param.Name) > primitiveSourceByteBudget-sourceBytes {
+			return tags, false, true
+		}
+		sourceBytes += len(param.Name)
+		if len(typeName) > primitiveSourceByteBudget-sourceBytes {
+			return tags, false, true
+		}
+		sourceBytes += len(typeName)
+		if _, exists := parameterNames[param.Name]; exists {
+			return tags, false, true
+		}
+		parameterNames[param.Name] = struct{}{}
+		tag, ok := primitiveOwnerParameterTypeTag(typeName)
+		if !ok {
+			return tags, false, true
+		}
+		tags[i] = tag
+	}
+	return tags, true, true
 }
 
 func primitiveOwnerCandidateName(identity [32]byte) string {
-	return "primitive-v1:" + hex.EncodeToString(identity[:])
+	return primitiveOwnerCandidateNamePrefix + hex.EncodeToString(identity[:])
 }
 
-// primitiveOwnerCandidates lives only across this Analyze call's two admission
-// passes, before semantic mutation. No AST pointers or records enter Session.
-// Cold worlds stream as before; over-cap worlds keep the bounded prepared prefix
-// and stream the unprepared suffix on each pass. previous remains the authority.
+// preparePrimitiveOwnerCandidates performs the owner walk before Analyze
+// mutates session state. It materializes an occurrence-ordered list for the
+// retained-first and new-owner admission passes. ready is false when a record
+// or work cap stops the walk; the returned prefix is still fully prepared and
+// can support retained-only admission after the pointer inventory succeeds.
+func preparePrimitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incremental.Key]bool, limit int, keepQualifiedNames bool) ([]primitiveOwnerCandidate, bool) {
+	if limit <= 0 {
+		return nil, false
+	}
+	workBytes := 0
+	candidates := make([]primitiveOwnerCandidate, 0)
+	complete := walkPrimitiveOwnerDeclarations(decls, "", 0, len(origin), &workBytes, nil, func(fn *ast.FuncDecl, qualified string) bool {
+		if len(candidates) >= limit {
+			return false
+		}
+		identity, name, retained, identityValid, ready := preparePrimitiveOwnerCandidateWithBudget(fn, qualified, origin, previous, func(amount int) bool {
+			return reservePrimitiveOwnerCandidateBytes(&workBytes, amount, primitiveOwnerCandidateWorkBudget)
+		})
+		if !ready {
+			return false
+		}
+		if !keepQualifiedNames {
+			qualified = ""
+		}
+		candidates = append(candidates, primitiveOwnerCandidate{
+			function: fn, qualifiedName: qualified, name: name,
+			identity: identity, identityValid: identityValid, retained: retained,
+		})
+		return true
+	})
+	if !complete {
+		return candidates, false
+	}
+	return candidates, true
+}
+
+// primitiveOwnerCandidates is the legacy prefix-iterator comparison helper
+// used by candidate tests and benchmarks. Production Analyze uses
+// preparePrimitiveOwnerCandidates to cap and materialize the whole walk before
+// touching session state.
 func primitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incremental.Key]bool, limit int, keepQualifiedNames bool) iter.Seq[primitiveOwnerCandidate] {
 	stream := func(yield func(primitiveOwnerCandidate) bool) {
 		walkPrimitiveOwnerDeclarations(decls, "", 0, len(origin), nil, nil, func(fn *ast.FuncDecl, qualified string) bool {
-			identity, name, retained := preparePrimitiveOwnerCandidate(fn, qualified, origin, previous)
+			identity, name, retained, identityValid, _ := preparePrimitiveOwnerCandidateWithBudget(fn, qualified, origin, previous, nil)
 			if !keepQualifiedNames {
 				qualified = ""
 			}
-			return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, retained: retained})
+			return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, identityValid: identityValid, retained: retained})
 		})
 	}
 	if len(previous) == 0 || limit <= 0 || keepQualifiedNames {
@@ -315,41 +432,43 @@ func primitiveOwnerCandidates(decls []ast.Decl, origin string, previous map[incr
 	}
 	var candidates []primitiveOwnerCandidateRecord
 	preparedBytes := 0
+	prefixOccurrences := 0
 	complete := walkPrimitiveOwnerDeclarations(decls, "", 0, len(origin), &preparedBytes, nil, func(fn *ast.FuncDecl, qualified string) bool {
 		if len(candidates) >= limit {
 			return false
 		}
-		identity, _, retained, ready := preparePrimitiveOwnerCandidateWithBudget(fn, qualified, origin, previous, func(amount int) bool {
+		identity, _, retained, identityValid, ready := preparePrimitiveOwnerCandidateWithBudget(fn, qualified, origin, previous, func(amount int) bool {
 			return reservePrimitiveOwnerCandidateBytes(&preparedBytes, amount, primitiveOwnerCandidateWorkBudget)
 		})
 		if !ready {
 			return false
 		}
-		candidates = append(candidates, primitiveOwnerCandidateRecord{function: fn, identity: identity, retained: retained})
+		prefixOccurrences++
+		candidates = append(candidates, primitiveOwnerCandidateRecord{function: fn, identity: identity, identityValid: identityValid, retained: retained})
 		return true
 	})
 	if !complete {
-		prefixLength := len(candidates)
+		prefixLength := prefixOccurrences
 		return func(yield func(primitiveOwnerCandidate) bool) {
 			for _, record := range candidates {
-				candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, retained: record.retained}
+				candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, identityValid: record.identityValid, retained: record.retained}
 				if !yield(candidate) {
 					return
 				}
 			}
 			skip := prefixLength
 			walkPrimitiveOwnerDeclarations(decls, "", 0, len(origin), nil, &skip, func(fn *ast.FuncDecl, qualified string) bool {
-				identity, name, retained := preparePrimitiveOwnerCandidate(fn, qualified, origin, previous)
+				identity, name, retained, identityValid, _ := preparePrimitiveOwnerCandidateWithBudget(fn, qualified, origin, previous, nil)
 				if !keepQualifiedNames {
 					qualified = ""
 				}
-				return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, retained: retained})
+				return yield(primitiveOwnerCandidate{function: fn, qualifiedName: qualified, name: name, identity: identity, identityValid: identityValid, retained: retained})
 			})
 		}
 	}
 	return func(yield func(primitiveOwnerCandidate) bool) {
 		for _, record := range candidates {
-			candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, retained: record.retained}
+			candidate := primitiveOwnerCandidate{function: record.function, identity: record.identity, identityValid: record.identityValid, retained: record.retained}
 			if !yield(candidate) {
 				return
 			}

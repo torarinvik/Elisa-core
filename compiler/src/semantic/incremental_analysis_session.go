@@ -234,9 +234,6 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if !primitiveResultSchemaValid || !primitiveSchemaValid {
 		return coldFallback()
 	}
-	if session.db == nil {
-		session.resetDatabase()
-	}
 	config, err := json.Marshal(struct {
 		Options        AnalyzeOptions
 		LinearMutation string
@@ -267,6 +264,20 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	if !ownerPointers.scanDeclarations(file.Decls, 0) {
 		return coldFallback()
 	}
+	candidates, candidatesReady := preparePrimitiveOwnerCandidates(file.Decls, origin, session.previous, primitiveOwnerCandidateLimit, invocation.lexical != nil)
+	partialCandidates := !candidatesReady
+	if partialCandidates {
+		hasRetainedPrefix := false
+		for _, candidate := range candidates {
+			if candidate.retained {
+				hasRetainedPrefix = true
+				break
+			}
+		}
+		if !hasRetainedPrefix {
+			return coldFallback()
+		}
+	}
 	skipped := 0
 	var pendingLocals []*primitiveLocalInitializer
 	trimPending := func() {
@@ -277,20 +288,23 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			pendingLocals = pendingLocals[:available]
 		}
 	}
-	candidates := primitiveOwnerCandidates(file.Decls, origin, session.previous, primitiveOwnerCandidateLimit, invocation.lexical != nil)
 	collect := func(retainedOnly bool) {
-		for candidate := range candidates {
+		for _, candidate := range candidates {
 			fn, qualifiedName := candidate.function, candidate.qualifiedName
 			if retainedOnly != candidate.retained {
 				continue
 			}
-			name := candidate.name
-			if name == "" {
-				name = primitiveOwnerCandidateName(candidate.identity)
-			}
-			key := primitiveInput("function-source", name)
-			if current[key] {
-				continue
+			name := ""
+			var key incremental.Key
+			if candidate.identityValid {
+				name = candidate.name
+				if name == "" {
+					name = primitiveOwnerCandidateName(candidate.identity)
+				}
+				key = primitiveInput("function-source", name)
+				if current[key] {
+					continue
+				}
 			}
 			expressions, primitiveReturn := primitiveReturnExpressions(fn)
 			ok := primitiveReturn
@@ -317,6 +331,9 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 					}
 					invocation.lexical.indexes[fn] = index
 				}
+			}
+			if !candidate.identityValid {
+				continue
 			}
 			var locals []*primitiveLocalInitializer
 			if !ok {
@@ -421,7 +438,20 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 			skipped++
 		}
 	}
-	collect(false)
+	if partialCandidates && len(invocation.keys) == 0 {
+		return coldFallback()
+	}
+	if !partialCandidates {
+		collect(false)
+	} else {
+		// The undiscovered suffix may contain retained owners, so admit only
+		// the known retained prefix. The semantic analyzer still visits the full
+		// file, and the current-set retirement below removes omitted old owners.
+		session.stats.CapacityFallbackAnalyses++
+	}
+	if session.db == nil {
+		session.resetDatabase()
+	}
 	if skipped > 0 {
 		session.stats.CapacityLimitedAnalyses++
 		session.stats.CapacitySkippedQueries += uint64(skipped)

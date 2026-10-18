@@ -153,7 +153,7 @@ func predicateMembershipRange(expr ast.Expr) (*ast.MembershipRangeExpr, *ast.Lis
 }
 
 func predicateCurrentBindingsAndOperators(a *Analyzer, fn *ast.FuncDecl, nodes []ast.Expr) bool {
-	if a == nil || fn == nil || len(fn.Params) > 256 || len(fn.Params) != 0 && a.currentScope == nil {
+	if a == nil || fn == nil || len(fn.Params) > primitiveParameterLimit || len(fn.Params) != 0 && a.currentScope == nil {
 		return false
 	}
 	if !predicateCanonicalBuiltin(a, "bool") {
@@ -320,7 +320,7 @@ func predicateBuiltinSyntaxName(input ast.TypeExpr) string {
 }
 
 func predicateReturnExpressions(fn *ast.FuncDecl) ([]ast.Expr, bool) {
-	if fn == nil || len(fn.Params) > 256 || len(fn.Body) != 1 || len(fn.Name) > primitiveSourceByteBudget || predicateBuiltinSyntaxName(fn.ReturnType) != "bool" {
+	if fn == nil || len(fn.Params) > primitiveParameterLimit || len(fn.Body) != 1 || len(fn.Name) > primitiveSourceByteBudget || predicateBuiltinSyntaxName(fn.ReturnType) != "bool" {
 		return nil, false
 	}
 	if ret, ok := fn.Body[0].(*ast.ReturnStmt); !ok || ret == nil {
