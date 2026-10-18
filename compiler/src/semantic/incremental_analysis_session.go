@@ -288,10 +288,11 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		}
 	}
 	if partialCandidates {
-		// Preserve prior inputs only for owners beyond the discovered prefix. Do
-		// this before admission so unknown suffix entries still count against the
-		// tracked-key cap; scanned-prefix owners are handled by admission and the
-		// normal retirement pass below.
+		// Carry prior keys whose owner identity is unmatched in this prefix. They
+		// may belong to live suffix owners or to renamed/deleted owners; this
+		// bounded census cannot distinguish those cases. Carry them before
+		// admission so they still count against the tracked-key cap. Such stale
+		// keys may retain capacity until a complete census can retire them.
 		scannedPrefixOwners := make(map[string]struct{}, len(candidates))
 		for _, candidate := range candidates {
 			if !candidate.identityValid {
@@ -581,10 +582,11 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 		if len(invocation.keys) == 0 {
 			return coldFallback()
 		}
-		// The undiscovered suffix may contain retained owners, so admit only
-		// the known retained prefix. The semantic analyzer still visits the full
-		// file; previous keys for the unknown suffix were preserved before
-		// admission and remain until a complete census can establish they're dead.
+		// Admit only known retained prefix owners on a partial census. This is
+		// separate from carrying unmatched prior keys: new owners stay cold even
+		// if capacity is available. The semantic analyzer still visits the full
+		// file; carried unmatched keys do not authorize suffix replay, and may
+		// remain until a complete census can establish that they are dead.
 		session.stats.CapacityFallbackAnalyses++
 	} else {
 		collect(false)
