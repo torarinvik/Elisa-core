@@ -359,17 +359,42 @@ func testRunnerCacheHashFile(hash testRunnerCacheHashWriter, path string) error 
 	return nil
 }
 
+// Typed, length-prefixed records keep arbitrary source bytes from moving field
+// boundaries. Changing this format intentionally invalidates old cache keys.
 func testRunnerCacheWriteBytes(hash testRunnerCacheHashWriter, label string, content []byte) {
-	testRunnerCacheWriteString(hash, label)
+	_, _ = hash.Write(testRunnerCacheFramingBytes[2:3])
+	testRunnerCacheWriteLength(hash, uint64(len(label)))
+	testRunnerCacheWriteRawString(hash, label)
+	testRunnerCacheWriteLength(hash, uint64(len(content)))
 	_, _ = hash.Write(content)
-	_, _ = hash.Write(testRunnerCacheSeparator[:])
 }
 
-var testRunnerCacheSeparator = [1]byte{0}
+// Immutable byte views avoid a temporary escaping buffer for each small length.
+// io.Writer implementations may neither modify nor retain the provided bytes.
+var testRunnerCacheFramingBytes = func() (values [256]byte) {
+	for i := range values {
+		values[i] = byte(i)
+	}
+	return
+}()
+
+func testRunnerCacheWriteLength(hash testRunnerCacheHashWriter, length uint64) {
+	for length >= 128 {
+		index := int(length&127) | 128
+		_, _ = hash.Write(testRunnerCacheFramingBytes[index : index+1])
+		length >>= 7
+	}
+	index := int(length)
+	_, _ = hash.Write(testRunnerCacheFramingBytes[index : index+1])
+}
+
+func testRunnerCacheWriteRawString(hash testRunnerCacheHashWriter, value string) {
+	_, _ = hash.Write(unsafe.Slice(unsafe.StringData(value), len(value)))
+}
 
 func testRunnerCacheWriteString(hash testRunnerCacheHashWriter, value string) {
-	// Hash writers follow io.Writer's contract: they neither modify nor retain
-	// the input slice. Borrow immutable string bytes for this synchronous call.
-	_, _ = hash.Write(unsafe.Slice(unsafe.StringData(value), len(value)))
-	_, _ = hash.Write(testRunnerCacheSeparator[:])
+	_, _ = hash.Write(testRunnerCacheFramingBytes[1:2])
+	testRunnerCacheWriteLength(hash, uint64(len(value)))
+	// Borrow immutable string bytes only for this synchronous writer call.
+	testRunnerCacheWriteRawString(hash, value)
 }

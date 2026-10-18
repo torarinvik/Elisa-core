@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"math/rand"
 	"strings"
 	"testing"
@@ -19,8 +20,9 @@ func TestCacheKeyStringEncodingMatchesCopyingReference(t *testing.T) {
 	got, want := sha256.New(), sha256.New()
 	for _, value := range values {
 		testRunnerCacheWriteString(got, value)
+		want.Write([]byte{1})
+		want.Write(binary.AppendUvarint(nil, uint64(len(value))))
 		want.Write([]byte(value))
-		want.Write([]byte{0})
 	}
 	if !bytes.Equal(got.Sum(nil), want.Sum(nil)) {
 		t.Fatal("string key encoding changed")
@@ -29,8 +31,14 @@ func TestCacheKeyStringEncodingMatchesCopyingReference(t *testing.T) {
 	for _, value := range values {
 		testRunnerCacheWriteString(&output, value)
 	}
-	if output.String() != strings.Join(values, "\x00")+"\x00" {
-		t.Fatal("string writer changed literal key bytes")
+	var reference bytes.Buffer
+	for _, value := range values {
+		reference.WriteByte(1)
+		reference.Write(binary.AppendUvarint(nil, uint64(len(value))))
+		reference.WriteString(value)
+	}
+	if !bytes.Equal(output.Bytes(), reference.Bytes()) {
+		t.Fatal("string framing differs from independent reference")
 	}
 }
 
