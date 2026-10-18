@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"elisacore/src/smt"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -130,6 +131,24 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		testRunnerCacheWriteString(hash, "clang=none")
 	}
 
+	// SMT can change proof diagnostics and strict-proof acceptance even when
+	// source and command spelling are unchanged. Never execute a cached query
+	// closure under an unstamped replacement solver.
+	if options.enableSMT {
+		solver := smt.ResolveBinary("")
+		testRunnerCacheWriteString(hash, "smt-selector="+solver)
+		if selected, err := exec.LookPath(solver); err == nil {
+			stamp, err := toolchainContentStamp(selected)
+			if err != nil {
+				return buildCacheArtifact{}, false
+			}
+			testRunnerCacheWriteString(hash, "smt-executable="+selected)
+			testRunnerCacheWriteString(hash, "smt-content="+stamp)
+		} else {
+			testRunnerCacheWriteString(hash, "smt-executable=unavailable")
+		}
+	}
+
 	root, err := buildCacheRoot()
 	if err != nil {
 		return buildCacheArtifact{}, false
@@ -252,9 +271,9 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	return rc, true
 }
 
-// buildCacheEnvIgnored lists ELISA*/ELISACORE_* variables that provably do not change the
-// emitted object: cache control, timing/profiling/debug output, and test-harness knobs.
-// Everything else with those prefixes is folded into the object-cache key.
+// buildCacheEnvIgnored lists controls that do not change the supported pure-object
+// result or its semantic transcript. Per-request observers bypass cache admission.
+// Warning policy and every other compiler variable remain part of the key.
 var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_BUILD_CACHE":                   true,
 	"ELISAC_BUILD_CACHE_DIR":                  true,
