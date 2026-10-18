@@ -2,6 +2,7 @@ package backend
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"sync"
 	"time"
 	"unsafe"
@@ -21,6 +22,8 @@ type IncrementalObjectSession struct {
 	bytes         int
 	clock         uint64
 	entries       map[[32]byte]*incrementalObjectEntry
+	slotCounts    map[[32]byte]int
+	historyGroups int
 	stats         IncrementalObjectStats
 }
 
@@ -28,6 +31,7 @@ type incrementalObjectEntry struct {
 	bitcode, target string
 	object          []byte
 	lastUse         uint64
+	slot            [32]byte
 }
 
 type IncrementalObjectStats struct {
@@ -114,34 +118,81 @@ func (s *IncrementalObjectSession) lookupObjectBytes(bitcode []byte, target stri
 	return object
 }
 
+// Slot identity influences eviction only. Exact optimized bitcode and target
+// remain the complete authority for a hit.
+func incrementalObjectSlot(unit, target [32]byte, part int) [32]byte {
+	var input [72]byte
+	copy(input[:32], unit[:])
+	binary.LittleEndian.PutUint64(input[32:40], uint64(part))
+	copy(input[40:], target[:])
+	return sha256.Sum256(input[:])
+}
+
 func (s *IncrementalObjectSession) retainObject(bitcode, target string, object []byte) {
+	s.retainObjectForSlot(bitcode, target, object, [32]byte{})
+}
+
+func (s *IncrementalObjectSession) removeObjectLocked(key [32]byte) {
+	old := s.entries[key]
+	s.bytes -= len(old.bitcode) + len(old.target) + len(old.object)
+	delete(s.entries, key)
+	if old.slot != ([32]byte{}) {
+		count := s.slotCounts[old.slot]
+		if count == 2 {
+			s.historyGroups--
+		}
+		if count <= 1 {
+			delete(s.slotCounts, old.slot)
+		} else {
+			s.slotCounts[old.slot] = count - 1
+		}
+	}
+}
+
+func (s *IncrementalObjectSession) retainObjectForSlot(bitcode, target string, object []byte, slot [32]byte) {
 	cost := len(bitcode) + len(target) + len(object)
 	if cost > s.maxBytes {
 		return
 	}
 	key := incrementalObjectKey(bitcode, target)
 	s.mu.Lock()
-	if old := s.entries[key]; old != nil {
-		s.bytes -= len(old.bitcode) + len(old.target) + len(old.object)
-		delete(s.entries, key)
+	if s.entries[key] != nil {
+		s.removeObjectLocked(key)
 	}
 	var evictions uint64
+	// Preserve unique current slots before retaining extra revisions of a slot.
+	// Spare capacity still keeps history for edit/revert reuse.
 	for s.bytes+cost > s.maxBytes {
-		var oldest [32]byte
-		oldestUse := ^uint64(0)
-		for key, entry := range s.entries {
+		var oldest, history [32]byte
+		oldestUse, historyUse := ^uint64(0), ^uint64(0)
+		foundHistory := false
+		preferHistory := s.historyGroups > 0 || s.slotCounts[slot] > 0
+		for candidate, entry := range s.entries {
 			if entry.lastUse < oldestUse {
-				oldest, oldestUse = key, entry.lastUse
+				oldest, oldestUse = candidate, entry.lastUse
+			}
+			if preferHistory && entry.slot != ([32]byte{}) && (entry.slot == slot || s.slotCounts[entry.slot] > 1) && entry.lastUse < historyUse {
+				history, historyUse, foundHistory = candidate, entry.lastUse, true
 			}
 		}
-		old := s.entries[oldest]
-		s.bytes -= len(old.bitcode) + len(old.target) + len(old.object)
-		delete(s.entries, oldest)
+		if foundHistory {
+			oldest = history
+		}
+		s.removeObjectLocked(oldest)
 		evictions++
 	}
 	s.clock++
-	s.entries[key] = &incrementalObjectEntry{bitcode: bitcode, target: target, object: object, lastUse: s.clock}
+	s.entries[key] = &incrementalObjectEntry{bitcode: bitcode, target: target, object: object, lastUse: s.clock, slot: slot}
 	s.bytes += cost
+	if slot != ([32]byte{}) {
+		if s.slotCounts == nil {
+			s.slotCounts = make(map[[32]byte]int)
+		}
+		if s.slotCounts[slot] == 1 {
+			s.historyGroups++
+		}
+		s.slotCounts[slot]++
+	}
 	s.mu.Unlock()
 	if evictions > 0 {
 		s.recordStats(func(stats *IncrementalObjectStats) { stats.Evictions += evictions })
