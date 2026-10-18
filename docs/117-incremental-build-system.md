@@ -19,69 +19,67 @@ same local trust boundary as compiler object artifacts, rather than serving as
 an independently checked proof certificate. Currently the solver is still
 started before the first persistent lookup.
 
-The compile server also has an opt-in, bounded **native partition-object cache**
-for `mode=obj` requests with `incremental=true`. It still parses/analyzes the
-current source and rebuilds and optimizes the whole LLVM module. It then reuses
-native object partitions only when the exact post-optimization partition bitcode
-and resolved target-machine configuration match. The cache is in-process and
-bounded; small modules, cross-target output, and modules with unsupported
-partition constructs use ordinary serial emission. This avoids some native
-code-generation work for a changed body, but is not semantic-body reuse or
-module-granular compilation. A paired, alternating benchmark through the real
-compile-server executable measured a synthetic 256-function source-to-object
-workload. The first nine-sample record measured 335.5 ms fresh versus 263.6 ms
-incremental median, with 507.4 ms for a cold incremental request. A later
-nine-sample record measured 469.4 ms fresh versus 360.4 ms incremental median,
-with 1,577.6 ms cold. The later samples are highly variable on the shared host;
-both records exclude final linking and execution. The later benchmark also
-predates the cache-map lock split and one-time LLVM target initialization, so
-neither record qualifies the current concurrency changes for performance.
-Machine-readable and text results are retained under
-`build/verification/incremental-native-object-20261018/`. These synthetic
-measurements do not establish a general compiler speedup; representative project
-builds and larger sample sets are still needed.
+The compile server also has an opt-in **native partition-object cache**. Send
+`{"mode":"obj","filename":"example.elisa","source":"...","incremental":true}`
+to `/api/v1/compile`; `object` in a successful response is a base64 native O0
+object. The caller supplies final linking. A stable, unique filename identifies
+the translation unit. Anonymous/virtual units use direct emission so separately
+compiled snippets do not share temporary private-symbol namespaces.
 
-A separate pre-lock source-edit benchmark included parsing, retained semantic
-analysis, LLVM lowering and object emission for a new body edit on every sample.
-Across three five-sample rounds, median source-to-object time was 484.3 ms fresh
-and 306.2 ms with retained semantic and native-object caches; the retained path
-reported 255 reused function bodies and seven of eight reused object partitions
-per edit. A focused three-sample body-edit benchmark timed
-`WriteLLVMObjectFile` or `IncrementalObjectSession.WriteObject`, excluding
-parsing and semantic analysis but including LLVM generation, optimization,
-partitioning, native emission and merge. Its medians were 405.1 ms fresh and
-209.4 ms retained. These runs preceded the stats-lock split,
-one-time LLVM target initialization and virtual-source fallback, and do not
-qualify current code. They are synthetic O0 workloads and exclude final linking
-and process startup. Raw output and the benchmark source are archived in the
-verification directory above.
+The server still parses and analyzes current source, rebuilds the whole LLVM
+module, verifies it, and performs current global optimization. It reuses native
+partitions only after comparing complete current partition bitcode and actual
+target triple/CPU/features. SHA256 indexes entries; exact byte comparison
+provides reuse authority. Selective definition cloning avoids copying every
+foreign function body. The cache owns bytes rather than AST or LLVM handles,
+accepts no supplied native artifacts, and shares a 256 MiB payload budget across
+server filenames. The library exposes `NewIncrementalObjectSession` and
+`WriteObject`, plus counters and phase timings.
 
-After the cache lock split and virtual-source fallback, the backend and compile
-server suites passed, along with focused race runs for concurrent backend cache
-access and anonymous/concurrent server object requests. The captured outputs are
-in the same verification directory. This is correctness evidence for the current
-tree, not a post-change performance measurement.
+Private symbols receive a stable translation-unit namespace while partitions
+are merged. Address-significant constants have one owner; only globally unnamed
+private constants may be duplicated. Ownership comes from pristine IR, including
+when selective cloning has already removed foreign initializers. Modules below
+instruction weight 2,000, cross targets, aliases, ifuncs, assembly, address-taken
+blocks, and appending globals (including constructor/destructor registrations)
+use direct emission. Failed partition merges preserve the previous output.
+Cache/LRU locks cover only cache operations; independent O0 lowering/codegen can
+run concurrently. Target registration runs once. The known unsafe LLVM default
+optimization pipeline remains serialized within a process.
 
-Send `{"mode":"obj","filename":"example.elisa","source":"...",
-"incremental":true}` to `/api/v1/compile`. A successful response contains
-`object`, the base64-encoded native O0 object; the caller supplies final linking.
-Requests without `incremental` use ordinary object emission. One shared 256 MiB
-payload budget bounds retained partition bitcode and native bytes across all
-server filenames. The backend library exposes
-`NewIncrementalObjectSession(partitions, maxBytes)` and `WriteObject` for analyzed
-results, with reuse/emission counters and phase timings.
+A source-matched local Apple M5 run used the real server executable, eight fresh
+workers and eight cache partitions, 256 integer arithmetic functions, nine novel
+constant body edits, and alternating request order. Median source-to-object HTTP
+time fell from **338.24 to 280.01 ms** (17%). Four-request warm batches measured
+**930.60 versus 558.22 ms** median over five batches, or **4.30 versus 7.17
+requests/second**. The first cached build took **576.30 ms**. Results varied,
+including one slower incremental single-edit sample. These short synthetic O0
+measurements exclude final executable linking/execution and do not qualify
+representative project or compiler self-build performance.
 
-SHA256 indexes the cache, but reuse also compares exact input bytes and actual
-triple/CPU/features. Global optimization runs before this comparison, so changed
-inlining decisions enter the inputs. Selective LLVM definition cloning avoids
-copying and stripping all foreign bodies for every partition. The cache owns no
-LLVM or AST handles and accepts no externally supplied native artifacts. Modules
-below instruction weight 2,000 use direct emission, as do cross targets and
-modules with aliases, ifuncs, module/inline assembly, address-taken blocks, or appending
-globals such as constructor/destructor arrays. Successful partition merging
-atomically replaces output; a failed merge preserves the previous object.
-General semantic reuse, avoiding LLVM regeneration/optimization, persistence,
-and normal CLI incremental build integration remain unfinished.
+The full backend and compile-server suites, focused concurrent/race checks,
+native exit-status parity at O0/O2/O3, debug relocation, ABI/CPU changes, virtual
+units, and LLVM boundary guards passed. A native constant-address regression
+failed before the ownership fix and passes afterward. Qualification used
+read-only overlays to exclude unrelated loop-proof edits. The 17 relevant source
+hashes match Core commit `1cb75ef0d05d`; that commit also contains verifier work
+not qualified by these isolated checks. Raw samples, compiler/script hashes,
+source snapshots and overlays are in
+`build/verification/incremental-native-final-20261018/`.
+
+Reproduce the HTTP workload from the repository root with:
+
+```sh
+go build -o /tmp/elisac ./compiler/src
+python3 compiler/bench/incremental_native_server.py /tmp/elisac /tmp/native-bench
+```
+
+The current contiguous, instruction-weight partition assignment can move
+unchanged functions after a large body edit. Added/removed declarations also
+change partition inputs. Stable placement, narrower native dependencies,
+avoiding full LLVM regeneration/optimization, general semantic result reuse,
+persistence, normal CLI integration and representative edit-to-executable
+qualification remain unfinished. These gains do not complete Stage 2.
 
 The in-memory tracked-query engine in `compiler/src/incremental` is a second
 foundation. It commits input batches as revisions, records query and input reads
