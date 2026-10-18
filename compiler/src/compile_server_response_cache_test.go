@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unsafe"
 )
 
 // Existing artifact and semantic-session tests deliberately exercise validation
@@ -153,5 +154,46 @@ func TestServerResponseCacheDoesNotRewriteFinalizedObject(t *testing.T) {
 	}
 	if _, _, hit := c.lookupResponse(id); hit {
 		t.Fatal("mismatched response became eligible for replay")
+	}
+}
+
+// The byte budget counts field lengths, so retained substrings must not pin a
+// caller's much larger backing allocation. Object and response tiers should
+// nevertheless share the cache-owned object allocation.
+func TestServerResponseCacheOwnsRetainedStringStorage(t *testing.T) {
+	parent := strings.Repeat("abcdefghijklmnopqrstuvwxyz", 1<<16)
+	field := func(index int) string { return parent[index*32 : index*32+16] }
+	id := serverNativeIdentity{source: field(0), config: field(1)}
+	want := compileServerResponse{OK: true, Object: field(2), Output: field(3), IR: field(4), Value: field(5), Stderr: field(6), Error: field(7), ErrorCode: field(8)}
+	c := newCompileServerNativeCache(nil, 1, 4096)
+	if !c.retainResponse(id, want, http.StatusOK) {
+		t.Fatal("response not admitted")
+	}
+	got, status, hit := c.lookupResponse(id)
+	if !hit || status != http.StatusOK || got != want {
+		t.Fatal("retained response changed")
+	}
+	entry := c.lru.Front().Value.(*serverNativeEntry)
+	for _, pair := range []struct{ name, original, retained string }{
+		{"source", id.source, entry.identity.source},
+		{"config", id.config, entry.identity.config},
+		{"object", want.Object, got.Object},
+		{"output", want.Output, got.Output},
+		{"IR", want.IR, got.IR},
+		{"value", want.Value, got.Value},
+		{"stderr", want.Stderr, got.Stderr},
+		{"error", want.Error, got.Error},
+		{"error code", want.ErrorCode, got.ErrorCode},
+	} {
+		if pair.original != pair.retained {
+			t.Errorf("%s contents changed", pair.name)
+		}
+		if unsafe.StringData(pair.original) == unsafe.StringData(pair.retained) {
+			t.Errorf("%s still borrows caller storage", pair.name)
+		}
+	}
+	object, hit := c.lookup(id)
+	if !hit || unsafe.StringData(object) != unsafe.StringData(got.Object) {
+		t.Fatal("response did not share cache-owned object storage")
 	}
 }
