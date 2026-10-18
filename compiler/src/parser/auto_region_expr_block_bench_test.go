@@ -128,3 +128,63 @@ func BenchmarkAutoRegionNestedStatements(b *testing.B) {
 		})
 	}
 }
+
+// The memo stores an ExprBlock's statement result, not the result of its tail
+// under a particular surrounding expression. A list tail is region-polymorphic
+// directly, but requires an ambient region in a tuple/conditional value.
+func TestAutoRegionMemoPreservesTailContext(t *testing.T) {
+	for _, contextualFirst := range []bool{false, true} {
+		block := &ast.ExprBlock{Value: &ast.ListLitExpr{}}
+		var scan autoRegionScan
+		for _, nested := range []bool{contextualFirst, !contextualFirst, contextualFirst} {
+			if got := scan.exprTailNeedsAutoRegion(block, nested); got != nested {
+				t.Fatalf("contextualFirst=%v nested=%v got=%v", contextualFirst, nested, got)
+			}
+		}
+	}
+}
+
+// A negative whole-body forwarding check is not sufficient to suppress checks
+// inside a shadowing scope: an outer call-produced value and an inner literal
+// can have the same spelling but different forwarding rules.
+func TestAutoRegionForwardingKeepsShadowedConstructors(t *testing.T) {
+	body := []ast.Stmt{
+		&ast.VarDeclStmt{Name: "item", Type: &ast.NamedType{Name: "Record"}, Value: &ast.CallExpr{Func: &ast.Ident{Name: "make_record"}}},
+		&ast.IfStmt{Then: []ast.Stmt{
+			&ast.VarDeclStmt{Name: "item", Value: &ast.StructLitExpr{}},
+			&ast.ExprStmt{Expr: &ast.CallExpr{Func: &ast.Ident{Name: "consume"}, Args: []ast.Expr{&ast.Ident{Name: "item"}}}},
+		}},
+	}
+	if bodyForwardsConstructedStructLocal(body) {
+		t.Fatal("control must exercise a negative whole-body forwarding result")
+	}
+	if !functionBodyNeedsAutoRegion(body) {
+		t.Fatal("nested literal forwarding lost its ambient region")
+	}
+}
+
+// Each scope's call-produced item shadows a literal construction deeper in the
+// tree. The root's negative forwarding result cannot suppress descendant checks.
+func BenchmarkAutoRegionShadowedConstructors(b *testing.B) {
+	for _, depth := range []int{16, 32, 64} {
+		b.Run(fmt.Sprintf("depth%d", depth), func(b *testing.B) {
+			body := []ast.Stmt{
+				&ast.VarDeclStmt{Name: "item", Value: &ast.StructLitExpr{}},
+				&ast.ExprStmt{Expr: &ast.CallExpr{Func: &ast.Ident{Name: "consume"}, Args: []ast.Expr{&ast.Ident{Name: "item"}}}},
+			}
+			for i := 0; i < depth; i++ {
+				body = []ast.Stmt{
+					&ast.VarDeclStmt{Name: "item", Type: &ast.NamedType{Name: "Record"}, Value: &ast.CallExpr{Func: &ast.Ident{Name: "make_record"}}},
+					&ast.IfStmt{Then: body},
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if !functionBodyNeedsAutoRegion(body) {
+					b.Fatal("nested literal forwarding lost its ambient region")
+				}
+			}
+		})
+	}
+}

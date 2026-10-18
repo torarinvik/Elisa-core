@@ -511,19 +511,33 @@ func typeMentionsArena(typ ast.TypeExpr) bool {
 // Results belong to one read-only scan; no AST or result survives a parse.
 // Scalar bodies do not allocate a memo.
 type autoRegionScan struct {
-	exprBlocks map[*ast.ExprBlock]bool
+	exprBlocks      map[*ast.ExprBlock]bool
+	exprBlockBodies map[*ast.ExprBlock]bool
 }
 
-// functionBodyNeedsAutoRegion reports whether a statement list contains a region-less
-// allocation. It recurses through control flow but NOT into nested region scopes
-// (`region NAME:` / `in <owner>:`), whose allocations already have an ambient owner.
+// functionBodyNeedsAutoRegion reports whether a statement list contains an allocation that
+// needs an ambient region. The structural walk skips nested region scopes, while the
+// conservative whole-body expression prepass may still see allocations inside one; wrapping
+// those twice is a harmless lazy no-op.
 func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	var scan autoRegionScan
 	return scan.functionBodyNeedsAutoRegion(stmts)
 }
 
+func (scan *autoRegionScan) exprBlockBodyNeedsAutoRegion(block *ast.ExprBlock) bool {
+	if value, ok := scan.exprBlockBodies[block]; ok {
+		return value
+	}
+	value := scan.functionBodyNeedsAutoRegion(block.Stmts)
+	if scan.exprBlockBodies == nil {
+		scan.exprBlockBodies = make(map[*ast.ExprBlock]bool)
+	}
+	scan.exprBlockBodies[block] = value
+	return value
+}
+
 func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
-	if bodyContainsAutoAlloc(stmts) {
+	if scan.bodyContainsAutoRegionAllocation(stmts) {
 		return true
 	}
 	// Value blocks (docs/119): a loop EXPRESSION (`for … |acc| -> acc:`), a multi-line
@@ -533,18 +547,31 @@ func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	// with no ambient region at all ("push has no region to grow into", NoGrowthRegionMessage).
 	// Statement-position loop headers desugar to IfStmt/WhileStmt and are walked
 	// directly; this covers the value forms. Over-wrap (a block nested inside its own
-	// region scope) is a harmless lazy no-op region, same as bodyContainsAutoAlloc.
+	// region scope) is a harmless lazy no-op region, same as the whole-body prepass above.
 	if scan.exprBlocksNeedAutoRegion(stmts) {
 		return true
 	}
+	return scan.statementBodyNeedsAutoRegion(stmts, true)
+}
+
+// The allocation and expression-block prepasses already cover every descendant
+// of this statement list. Repeating them at every statement nesting level is
+// quadratic for deep nonallocating control flow.
+func (scan *autoRegionScan) statementBodyNeedsAutoRegion(stmts []ast.Stmt, checkForwarding bool) bool {
 	// A struct-constructed local whose address is forwarded to a call (`x = T(...)`/`x = Builder()`;
 	// `grow(&x)`) has its region-less container fields grown INTERPROCEDURALLY by a (region-poly)
 	// callee. The growth is invisible to the syntactic allocation checks above, so without an ambient
 	// auto region the call site has no region to thread into the callee's `@r` struct-ref param —
 	// the "cannot infer region parameter" gap. Synthesizing the region lets recordStructLocalAllocRegion
 	// bind the local to it and the call thread it through; the escape checker remains the hard backstop.
-	if bodyForwardsConstructedStructLocal(stmts) {
-		return true
+	if checkForwarding {
+		forwards, hasConstructed := bodyForwardsConstructedStructLocalInfo(stmts)
+		if forwards {
+			return true
+		}
+		// If no construction exists anywhere in this subtree, no descendant
+		// statement list can have a forwarding candidate either.
+		checkForwarding = hasConstructed
 	}
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
@@ -555,15 +582,15 @@ func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 		case *ast.InStoreStmt:
 			continue // `in <owner>:` establishes an ambient owner
 		case *ast.CanStmt:
-			if scan.functionBodyNeedsAutoRegion(s.Body) {
+			if scan.statementBodyNeedsAutoRegion(s.Body, checkForwarding) {
 				return true
 			}
 		case *ast.IfStmt:
-			if scan.functionBodyNeedsAutoRegion(s.Then) || scan.functionBodyNeedsAutoRegion(s.Else) {
+			if scan.statementBodyNeedsAutoRegion(s.Then, checkForwarding) || scan.statementBodyNeedsAutoRegion(s.Else, checkForwarding) {
 				return true
 			}
 		case *ast.ForStmt:
-			if scan.functionBodyNeedsAutoRegion(s.Body) {
+			if scan.statementBodyNeedsAutoRegion(s.Body, checkForwarding) {
 				return true
 			}
 		case *ast.IterForStmt:
@@ -571,20 +598,20 @@ func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			// the loop tightener leaves untightened (e.g. it forwards the container to a grower, so
 			// it isn't iteration-local) still needs the function-body auto region as its home, just
 			// like a ForStmt body. Missing this case left such a container with NO region at all.
-			if scan.functionBodyNeedsAutoRegion(s.Body) {
+			if scan.statementBodyNeedsAutoRegion(s.Body, checkForwarding) {
 				return true
 			}
 		case *ast.WhileStmt:
-			if scan.functionBodyNeedsAutoRegion(s.Body) {
+			if scan.statementBodyNeedsAutoRegion(s.Body, checkForwarding) {
 				return true
 			}
 		case *ast.ScopeStmt:
-			if scan.functionBodyNeedsAutoRegion(s.Body) {
+			if scan.statementBodyNeedsAutoRegion(s.Body, checkForwarding) {
 				return true
 			}
 		case *ast.MatchStmt:
 			for _, arm := range s.Arms {
-				if scan.functionBodyNeedsAutoRegion(arm.Body) {
+				if scan.statementBodyNeedsAutoRegion(arm.Body, checkForwarding) {
 					return true
 				}
 			}
@@ -592,16 +619,16 @@ func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			// `static if`/`static else` branches are selected after parsing, so a container
 			// built in any branch needs the function-body region exactly like a runtime `if`.
 			// Over-wrapping a branch that is later discarded is a harmless lazy no-op region.
-			if scan.functionBodyNeedsAutoRegion(s.Then) || scan.functionBodyNeedsAutoRegion(s.Else) {
+			if scan.statementBodyNeedsAutoRegion(s.Then, checkForwarding) || scan.statementBodyNeedsAutoRegion(s.Else, checkForwarding) {
 				return true
 			}
 			for _, elif := range s.Elifs {
-				if scan.functionBodyNeedsAutoRegion(elif.Body) {
+				if scan.statementBodyNeedsAutoRegion(elif.Body, checkForwarding) {
 					return true
 				}
 			}
 		case *ast.StaticBlockStmt:
-			if scan.functionBodyNeedsAutoRegion(s.Body) {
+			if scan.statementBodyNeedsAutoRegion(s.Body, checkForwarding) {
 				return true
 			}
 		case *ast.VarDeclStmt:
@@ -611,44 +638,23 @@ func (scan *autoRegionScan) functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			// false positives on inspection/forwarding code. Some builders (`[x for ...]`,
 			// `each`) infer their darray result type from the expression itself, so they
 			// should synthesize an auto region even when the local has no type annotation.
-			if (s.Type == nil && (isInferredDArrayBuilder(s.Value) || blockLaterUsesUntypedListLiteralAsDArray(stmts, s.Name))) || (isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value)) {
+			if (s.Type == nil && (isInferredDArrayBuilder(s.Value) || blockLaterUsesUntypedListLiteralAsDArray(stmts, s.Name))) || (isRegionlessContainerType(s.Type) && scan.isAllocatingLiteral(s.Value)) {
 				return true
 			}
 			// A struct constructed with container-literal field arguments (`Bag([], [])`) allocates
 			// those fields region-lessly exactly like a bare container local, so it likewise needs an
 			// ambient auto region — both so the fields have a home and so a call site can thread that
 			// region into a callee's struct-ref region param.
-			if structLiteralAllocatesContainerArg(s.Value) {
+			if scan.structLiteralAllocatesContainerArg(s.Value) {
 				return true
 			}
 		case *ast.ReturnStmt:
-			// A function that directly `return`s a region-less COMPREHENSION
-			// (`return [x for x in xs]`) or an allocating `each` QUERY
-			// (`return X{...} for each v in src`) needs a synthesized auto region so the
-			// builder has an active scope — without it the scope check rejects the body
-			// before the region-poly classifier (which adopts the region into the caller)
-			// ever runs. A directly-returned plain list LITERAL (`return [a, ...rest]`)
-			// does NOT need this: it allocates region-poly without a scope check, and
-			// wrapping it would only change its parse shape, so it is deliberately
-			// excluded here.
-			if rv := s.Value; rv != nil {
-				for {
-					paren, ok := rv.(*ast.ParenExpr)
-					if !ok {
-						break
-					}
-					rv = paren.Inner
-				}
-				switch lit := rv.(type) {
-				case *ast.ListComprehensionExpr:
-					if lit.Owner == nil {
-						return true
-					}
-				case *ast.QueryExpr:
-					if lit.Kind == ast.QueryExprEach && lit.Owner == nil {
-						return true
-					}
-				}
+			// A directly returned comprehension, `each` query, allocating struct
+			// construction, ownerless allocation, or composite tail containing a
+			// contextual list literal needs an ambient region. A plain top-level list
+			// literal remains region-polymorphic without this scope.
+			if scan.exprBlockTailNeedsAutoRegion(s.Value) {
+				return true
 			}
 		}
 	}
@@ -701,6 +707,11 @@ func typeExprIsNamedAggregate(typ ast.TypeExpr) bool {
 }
 
 func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
+	found, _ := bodyForwardsConstructedStructLocalInfo(stmts)
+	return found
+}
+
+func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 	constructed := map[string]bool{}
 	callConstructed := map[string]bool{}
 	var declarations []*ast.VarDeclStmt
@@ -763,7 +774,7 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 		}
 	}
 	if len(constructed) == 0 {
-		return false
+		return false, false
 	}
 	argForwardsConstructed := func(args []ast.Expr) bool {
 		for _, arg := range args {
@@ -874,7 +885,7 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 		}
 	}
 	scan(reflect.ValueOf(stmts))
-	return found
+	return found, true
 }
 
 // isAutoAllocValue reports whether an initializer is a `new[auto] T(...)` allocation — a fresh
@@ -893,10 +904,17 @@ func isAutoAllocValue(value ast.Expr) bool {
 	return ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil)
 }
 
-// bodyContainsAutoAlloc reports whether any statement in the body contains a `new[auto]` allocation
-// anywhere. Used to trigger the function-scope auto region (an over-wrap — e.g. a new[auto] nested
-// in its own region — is a harmless lazy no-op outer region).
-func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
+// bodyContainsAutoRegionAllocation reports whether any expression in the body contains an
+// ownerless `new` or a struct construction with allocating container fields.
+// Comprehensions and `each` queries need their statement/tail context: an expected
+// region on the declared result type can supply their owner without an outer scope. Used to trigger the function-scope auto region; an over-wrap around a nested
+// explicit owner is a harmless lazy no-op.
+func bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
+	var scan autoRegionScan
+	return scan.bodyContainsAutoRegionAllocation(stmts)
+}
+
+func (scan *autoRegionScan) bodyContainsAutoRegionAllocation(stmts []ast.Stmt) bool {
 	found := false
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
@@ -909,6 +927,10 @@ func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
 				return
 			}
 			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil) {
+				found = true
+				return
+			}
+			if literal, ok := v.Interface().(*ast.StructLitExpr); ok && scan.structLiteralAllocatesContainerArg(literal) {
 				found = true
 				return
 			}
@@ -935,7 +957,7 @@ func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
 // exprBlocksNeedAutoRegion reports whether any value-position ExprBlock nested anywhere
 // in stmts needs an ambient auto region. ExprBlocks live in EXPRESSION position (a
 // decl/assign RHS, an ExprStmt, a match-expression arm), so the reflect walk mirrors
-// bodyContainsAutoAlloc: find every block wherever it hides, scan its statement list,
+// bodyContainsAutoRegionAllocation: find every block wherever it hides, scan its statement list,
 // then check its tail expression and any nested blocks.
 func exprBlocksNeedAutoRegion(stmts []ast.Stmt) bool {
 	var scan autoRegionScan
@@ -962,11 +984,11 @@ func (scan *autoRegionScan) exprBlocksNeedAutoRegion(stmts []ast.Stmt) bool {
 				if scan.exprBlocks == nil {
 					scan.exprBlocks = make(map[*ast.ExprBlock]bool)
 				}
-				found = scan.functionBodyNeedsAutoRegion(eb.Stmts)
+				found = scan.exprBlockBodyNeedsAutoRegion(eb)
 				if !found {
 					// Stmts were checked above; the tail can itself be a scope-requiring
 					// comprehension/query or a struct literal with allocating fields.
-					found = exprBlockTailNeedsAutoRegion(eb.Value)
+					found = scan.exprBlockTailNeedsAutoRegion(eb.Value)
 					if !found {
 						rec(reflect.ValueOf(eb.Value))
 					}
@@ -994,12 +1016,27 @@ func (scan *autoRegionScan) exprBlocksNeedAutoRegion(stmts []ast.Stmt) bool {
 	return found
 }
 
-// exprBlockTailNeedsAutoRegion mirrors the direct return-value cases in
-// functionBodyNeedsAutoRegion for an ExprBlock's final value. A comprehension
-// or `each` query needs an active scope when it has no explicit owner; a plain
-// list literal remains region-polymorphic. Struct literals with container
-// literal fields also need an ambient owner.
+// exprBlockTailNeedsAutoRegion classifies a direct return value or an ExprBlock
+// tail that needs an ambient owner. A comprehension or `each` query needs an
+// active scope when it has no explicit owner. A plain top-level list literal
+// remains region-polymorphic, but a list literal nested in a tuple or branch
+// may need a region for its contextual container type. Struct literals with
+// allocating container fields need an ambient owner as well.
 func exprBlockTailNeedsAutoRegion(value ast.Expr) bool {
+	var scan autoRegionScan
+	return scan.exprBlockTailNeedsAutoRegion(value)
+}
+
+func (scan *autoRegionScan) exprBlockTailNeedsAutoRegion(value ast.Expr) bool {
+	return scan.exprTailNeedsAutoRegion(value, false)
+}
+
+func exprTailNeedsAutoRegion(value ast.Expr, nested bool) bool {
+	var scan autoRegionScan
+	return scan.exprTailNeedsAutoRegion(value, nested)
+}
+
+func (scan *autoRegionScan) exprTailNeedsAutoRegion(value ast.Expr, nested bool) bool {
 	for {
 		paren, ok := value.(*ast.ParenExpr)
 		if !ok {
@@ -1008,23 +1045,63 @@ func exprBlockTailNeedsAutoRegion(value ast.Expr) bool {
 		value = paren.Inner
 	}
 	switch tail := value.(type) {
+	case *ast.ListLitExpr:
+		return nested && tail != nil && tail.Owner == nil
 	case *ast.ListComprehensionExpr:
 		return tail != nil && tail.Owner == nil
 	case *ast.QueryExpr:
 		return tail != nil && tail.Kind == ast.QueryExprEach && tail.Owner == nil
 	case *ast.StructLitExpr:
-		return structLiteralAllocatesContainerArg(tail)
+		return scan.structLiteralAllocatesContainerArg(tail)
 	case *ast.AllocExpr:
 		return tail != nil && (tail.AutoRegion || tail.Owner == nil)
+	case *ast.TupleExpr:
+		if tail != nil {
+			for _, elem := range tail.Elems {
+				if scan.exprTailNeedsAutoRegion(elem, true) {
+					return true
+				}
+			}
+		}
+	case *ast.TernaryExpr:
+		return tail != nil && (scan.exprTailNeedsAutoRegion(tail.Value, true) || scan.exprTailNeedsAutoRegion(tail.Alt, true))
+	case *ast.MatchExpr:
+		if tail != nil {
+			for _, arm := range tail.Arms {
+				if scan.exprTailNeedsAutoRegion(matchArmValueTail(arm.Body), true) {
+					return true
+				}
+			}
+		}
+	case *ast.ExprBlock:
+		if tail != nil {
+			return scan.exprBlockBodyNeedsAutoRegion(tail) || scan.exprTailNeedsAutoRegion(tail.Value, nested)
+		}
 	}
 	return false
 }
 
+func matchArmValueTail(body []ast.Stmt) ast.Expr {
+	if len(body) == 0 {
+		return nil
+	}
+	stmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || stmt == nil {
+		return nil
+	}
+	return stmt.Expr
+}
+
 // structLiteralAllocatesContainerArg reports whether value is a struct construction
-// (`Bag([], [])`) one of whose arguments is an allocating container literal. Such a struct
-// allocates region-less container fields and needs an ambient auto region, the same as a bare
-// container local.
+// (`Bag([], [])`) with an allocating container literal in one of its immediate arguments.
+// The body-level reflection scan visits nested struct literals independently, avoiding a
+// recursive rescan of the same constructor subtree for every enclosing literal.
 func structLiteralAllocatesContainerArg(value ast.Expr) bool {
+	var scan autoRegionScan
+	return scan.structLiteralAllocatesContainerArg(value)
+}
+
+func (scan *autoRegionScan) structLiteralAllocatesContainerArg(value ast.Expr) bool {
 	for {
 		paren, ok := value.(*ast.ParenExpr)
 		if !ok {
@@ -1037,19 +1114,54 @@ func structLiteralAllocatesContainerArg(value ast.Expr) bool {
 		return false
 	}
 	for _, arg := range lit.Args {
-		if isAllocatingLiteral(arg) {
+		if scan.isAllocatingLiteral(arg) {
 			return true
 		}
 	}
 	return false
 }
 
-// isAllocatingLiteral reports whether an initializer is a container literal or
-// builder — the forms that actually allocate a backing buffer.
+// isAllocatingLiteral is a syntax-level approximation for whether a value is or
+// contains a container literal or builder that may allocate. Tuple fields carry
+// their element values, so a tuple used as a struct field can allocate through one
+// of its elements.
 func isAllocatingLiteral(value ast.Expr) bool {
-	switch value.(type) {
+	var scan autoRegionScan
+	return scan.isAllocatingLiteral(value)
+}
+
+func (scan *autoRegionScan) isAllocatingLiteral(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	switch literal := value.(type) {
 	case *ast.ListLitExpr, *ast.ListComprehensionExpr:
 		return true
+	case *ast.TupleExpr:
+		if literal == nil {
+			return false
+		}
+		for _, elem := range literal.Elems {
+			if scan.isAllocatingLiteral(elem) {
+				return true
+			}
+		}
+	case *ast.TernaryExpr:
+		return literal != nil && (scan.isAllocatingLiteral(literal.Value) || scan.isAllocatingLiteral(literal.Alt))
+	case *ast.MatchExpr:
+		if literal != nil {
+			for _, arm := range literal.Arms {
+				if scan.isAllocatingLiteral(matchArmValueTail(arm.Body)) {
+					return true
+				}
+			}
+		}
+	case *ast.ExprBlock:
+		return literal != nil && (scan.exprBlockBodyNeedsAutoRegion(literal) || scan.isAllocatingLiteral(literal.Value))
 	}
 	return isInferredDArrayBuilder(value)
 }
