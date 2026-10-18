@@ -268,3 +268,57 @@ func BenchmarkCompileServerNativeNoop(b *testing.B) {
 		})
 	}
 }
+
+// Novel fixed-width edits must continue through native shard reuse. This control
+// measures the completed-cache lookup/publication cost when no whole object hits.
+func BenchmarkCompileServerNativeBodyEdit(b *testing.B) {
+	for _, enabled := range []bool{false, true} {
+		name := "shards"
+		if enabled {
+			name = "completed"
+		}
+		b.Run(name, func(b *testing.B) {
+			cache := newCompileServerSessionCache(4)
+			request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "edits.elisa"), Incremental: true}
+			fixture := strings.Replace(serverNativeArtifactSource(), "return value + 1 +", "return value + 0x%016x +", 1)
+			request.Source = fmt.Sprintf(fixture, 1)
+			requireServerNativeIdentity(b, request, cache)
+			if !enabled {
+				cache.native = nil
+			}
+			previous := ""
+			for i := 0; i < 2; i++ {
+				response, status := executeCompileServerRequestWithSessions(request, cache)
+				if status != http.StatusOK || !response.OK {
+					b.Fatalf("warmup: %+v", response)
+				}
+				previous = response.Object
+			}
+			before := cache.objects.Stats()
+			analyses := cache.session(request.Filename, emitObject).Stats().Analyses
+			var hits uint64
+			if enabled {
+				hits = cache.native.Stats().Hits
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				request.Source = fmt.Sprintf(fixture, uint64(i)+2)
+				response, status := executeCompileServerRequestWithSessions(request, cache)
+				if status != http.StatusOK || !response.OK || response.Object == "" || response.Object == previous {
+					b.Fatal("edit failed to produce a changed object")
+				}
+				previous = response.Object
+			}
+			b.StopTimer()
+			after := cache.objects.Stats()
+			if cache.session(request.Filename, emitObject).Stats().Analyses != analyses+uint64(b.N) || after.Builds-before.Builds != uint64(b.N) || after.PartitionsEmitted-before.PartitionsEmitted != uint64(b.N) || after.PartitionsReused-before.PartitionsReused != uint64(7*b.N) {
+				b.Fatal("novel edits did not rebuild exactly one shard per request")
+			}
+			if enabled && cache.native.Stats().Hits != hits {
+				b.Fatal("novel edit hit whole-object cache")
+			}
+			b.ReportMetric(float64(after.IRTime-before.IRTime)/float64(b.N), "IR-ns/op")
+		})
+	}
+}

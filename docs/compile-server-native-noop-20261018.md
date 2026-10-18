@@ -117,3 +117,14 @@ Cache source SHA256: `5d3ec50d71493ffaead6ae1182af836f8e8306ce2dd7a1291ec184e122
 Benchmark source SHA256: `23f491e8f63b9f62fcbae51dbcbfc6b4a5dbe4e3f142ceb44aadd2a073dd8daf`.
 
 Integrated into shared main by fast-forward to `334d1866`. SHA256 checks verified all five unrelated dirty/untracked files were preserved byte-for-byte; the installed compiler was retained by the repository hook. Integration metadata is in the local evidence directory. Shared-tree focused correctness validation is tracked separately from the isolated performance sample.
+
+## Novel body-edit control (prepared)
+
+`BenchmarkCompileServerNativeBodyEdit` uses a fixed 16-digit hexadecimal literal
+and changes only that literal on each timed request. Both arms retain semantic
+and native shard sessions; only the completed-object cache differs. Two warmups
+precede timing. Assertions require one fresh analysis and native build per edit,
+one emitted shard and seven reused shards per edit, changed nonempty object
+bytes, and no completed-object hits. The generated source formatting cost is
+included equally in both arms. This benchmark has been prepared but not run;
+there is no changed-body latency or overhead claim yet.
