@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"elisacore/src/smt"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -89,7 +92,7 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	if err := writeNativeCacheTarget(hash, options.targetTriple); err != nil {
 		return buildCacheArtifact{}, false
 	}
-	testRunnerCacheWriteString(hash, "build-object-v2-source-snapshot")
+	testRunnerCacheWriteString(hash, "build-object-v3-transcript")
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
@@ -98,6 +101,11 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		testRunnerCacheWriteString(hash, "env="+entry)
 	}
 
+	pathInputs, err := json.Marshal(diagnosticPathInputs(program.filename, program.source))
+	if err != nil {
+		return buildCacheArtifact{}, false
+	}
+	testRunnerCacheWriteBytes(hash, "diagnostic-path-inputs", pathInputs)
 	testRunnerCacheWriteBytes(hash, "program-source", program.source)
 	testRunnerCacheWriteString(hash, "program-filename="+program.filename)
 	origins := append([]string(nil), program.sourceFiles...)
@@ -123,6 +131,24 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		testRunnerCacheWriteString(hash, "clang=none")
 	}
 
+	// SMT can change proof diagnostics and strict-proof acceptance even when
+	// source and command spelling are unchanged. Never execute a cached query
+	// closure under an unstamped replacement solver.
+	if options.enableSMT {
+		solver := smt.ResolveBinary("")
+		testRunnerCacheWriteString(hash, "smt-selector="+solver)
+		if selected, err := exec.LookPath(solver); err == nil {
+			stamp, err := toolchainContentStamp(selected)
+			if err != nil {
+				return buildCacheArtifact{}, false
+			}
+			testRunnerCacheWriteString(hash, "smt-executable="+selected)
+			testRunnerCacheWriteString(hash, "smt-content="+stamp)
+		} else {
+			testRunnerCacheWriteString(hash, "smt-executable=unavailable")
+		}
+	}
+
 	root, err := buildCacheRoot()
 	if err != nil {
 		return buildCacheArtifact{}, false
@@ -135,14 +161,14 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 // publishCachedBuildObject atomically installs a freshly built object into the
 // cache (stage into a temp dir, then rename into place). A concurrent publisher
 // that already won the race leaves the object present, which we treat as success.
-func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string) error {
+func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string, transcript buildCacheTranscript) error {
 	if artifact.dir == "" || artifact.object == "" || strings.TrimSpace(builtObject) == "" {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(artifact.dir), 0o755); err != nil {
 		return err
 	}
-	if usableCachedFile(artifact.object, false) {
+	if existing, valid := readBuildCacheTranscript(artifact); valid && buildCacheObjectMatches(artifact, existing) {
 		return nil
 	}
 	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".elisa-build-object-stage-*")
@@ -154,8 +180,28 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string) e
 	if err := copyExecutableFile(builtObject, stageObject); err != nil {
 		return err
 	}
+	objectHash, err := buildCacheObjectHash(stageObject)
+	if err != nil {
+		return err
+	}
+	transcript.ObjectSHA256 = objectHash
+	transcript.Key = artifact.key
+	transcript.StdoutSHA256 = buildCacheStreamHash(transcript.Stdout)
+	transcript.StderrSHA256 = buildCacheStreamHash(transcript.Stderr)
+	metadata, err := json.Marshal(transcript)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stagingDir, "transcript.json"), metadata, 0600); err != nil {
+		return err
+	}
+	// Missing/corrupt metadata cannot authorize a hit. Remove only this cache
+	// entry so the atomic directory publication can repair it.
+	if existing, valid := readBuildCacheTranscript(artifact); !valid || !buildCacheObjectMatches(artifact, existing) {
+		_ = os.RemoveAll(artifact.dir)
+	}
 	if err := os.Rename(stagingDir, artifact.dir); err != nil {
-		if usableCachedFile(artifact.object, false) {
+		if existing, valid := readBuildCacheTranscript(artifact); valid && buildCacheObjectMatches(artifact, existing) {
 			return nil
 		}
 		return err
@@ -184,7 +230,7 @@ func tryBuildObjectCache(options cliOptions, stdout io.Writer, stderr io.Writer)
 
 // The callbacks make snapshot ownership testable without running a native tool.
 func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load func(string, io.Writer) (*loadedProgram, bool), build func(cliOptions, *loadedProgram, io.Writer, io.Writer) int) (int, bool) {
-	if !buildCacheEnabled() || !isPureObjectEmit(options) {
+	if !buildCacheEnabled() || !isPureObjectEmit(options) || buildCacheRequestObserverEnabled() {
 		return 0, false
 	}
 	program, okLoad := load(options.filename, stderr)
@@ -197,9 +243,16 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	}
 	outputPath := outputPathForEmit(options.filename, options.output, ".o")
 
-	if usableCachedFile(artifact.object, false) {
+	transcript, validTranscript := readBuildCacheTranscript(artifact)
+	if validTranscript && usableCachedFile(artifact.object, false) {
 		if err := ensureOutputParentExists(outputPath); err == nil {
-			if err := copyExecutableFile(artifact.object, outputPath); err == nil {
+			if err := restoreBuildCacheObject(artifact, outputPath, transcript); err == nil {
+				if _, err := io.Copy(stdout, bytes.NewReader(transcript.Stdout)); err != nil {
+					return 1, true
+				}
+				if _, err := io.Copy(stderr, bytes.NewReader(transcript.Stderr)); err != nil {
+					return 1, true
+				}
 				debugBuildCache(stderr, "hit", artifact)
 				return 0, true
 			}
@@ -207,9 +260,14 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 		// Any copy/parent failure: fall back to a normal build below.
 	}
 
-	rc := build(options, program, stdout, stderr)
-	if rc == 0 {
-		if err := publishCachedBuildObject(artifact, outputPath); err != nil {
+	var capturedOut, capturedErr buildCacheCapture
+	rc := build(options, program, io.MultiWriter(stdout, &capturedOut), io.MultiWriter(stderr, &capturedErr))
+	if rc == 0 && !capturedOut.overflow && !capturedErr.overflow {
+		current, valid := buildCacheObjectArtifactForProgram(options, program)
+		if !valid || current.key != artifact.key {
+			return rc, true
+		}
+		if err := publishCachedBuildObject(artifact, outputPath, buildCacheTranscript{Stdout: capturedOut.Bytes(), Stderr: capturedErr.Bytes()}); err != nil {
 			debugBuildCache(stderr, "store-failed", artifact)
 		} else {
 			debugBuildCache(stderr, "miss-store", artifact)
@@ -218,9 +276,9 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	return rc, true
 }
 
-// buildCacheEnvIgnored lists ELISA*/ELISACORE_* variables that provably do not change the
-// emitted object: cache control, timing/profiling/debug output, and test-harness knobs.
-// Everything else with those prefixes is folded into the object-cache key.
+// buildCacheEnvIgnored lists controls that do not change the supported pure-object
+// result or its semantic transcript. Per-request observers bypass cache admission.
+// Warning policy and every other compiler variable remain part of the key.
 var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_BUILD_CACHE":                   true,
 	"ELISAC_BUILD_CACHE_DIR":                  true,
@@ -233,7 +291,6 @@ var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_TEST_CACHE_DEBUG":              true,
 	"ELISACORE_TEST_PHASE_DEBUG":              true,
 	"ELISACORE_TEST_TIMING":                   true,
-	"ELISACORE_SUPPRESS_DEPRECATED_WARNINGS":  true,
 	"ELISACORE_NO_LINK_BINDING_CHECK":         true,
 	"ELISACORE_NO_OBJCACHE":                   true,
 	"ELISACORE_RUNTIME_OBJECT_CACHE":          true,
@@ -266,4 +323,15 @@ func buildCacheEnvKey() []string {
 	}
 	sort.Strings(entries)
 	return entries
+}
+
+// These modes observe this invocation or publish files outside the object
+// artifact. Replaying an earlier invocation cannot satisfy those effects.
+func buildCacheRequestObserverEnabled() bool {
+	for _, name := range []string{"ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
+		if os.Getenv(name) != "" {
+			return true
+		}
+	}
+	return false
 }

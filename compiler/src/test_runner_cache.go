@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"elisacore/src/backend"
 )
@@ -361,10 +362,14 @@ func testRunnerCacheHashFile(hash testRunnerCacheHashWriter, path string) error 
 func testRunnerCacheWriteBytes(hash testRunnerCacheHashWriter, label string, content []byte) {
 	testRunnerCacheWriteString(hash, label)
 	_, _ = hash.Write(content)
-	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(testRunnerCacheSeparator[:])
 }
 
+var testRunnerCacheSeparator = [1]byte{0}
+
 func testRunnerCacheWriteString(hash testRunnerCacheHashWriter, value string) {
-	_, _ = hash.Write([]byte(value))
-	_, _ = hash.Write([]byte{0})
+	// Hash writers follow io.Writer's contract: they neither modify nor retain
+	// the input slice. Borrow immutable string bytes for this synchronous call.
+	_, _ = hash.Write(unsafe.Slice(unsafe.StringData(value), len(value)))
+	_, _ = hash.Write(testRunnerCacheSeparator[:])
 }
