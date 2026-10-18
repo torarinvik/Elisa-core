@@ -3,6 +3,7 @@
 package semantic
 
 import (
+	"context"
 	"crypto/sha256"
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -10,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/pprof"
 	"slices"
 	"sort"
 	"strings"
@@ -96,14 +98,18 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				file := parse(i)
-				b.StartTimer()
 				var result *Result
-				if session != nil {
-					result = session.Analyze(file, options)
-				} else {
-					result = AnalyzeWithOptions(file, options)
-				}
-				b.StopTimer()
+				// Go's CPU profiler also samples code outside benchmark timers.
+				// Labels isolate edited analysis from parsing, prewarm and parity checks.
+				pprof.Do(context.Background(), pprof.Labels("phase", "project-analysis", "analysis-mode", mode), func(context.Context) {
+					b.StartTimer()
+					if session != nil {
+						result = session.Analyze(file, options)
+					} else {
+						result = AnalyzeWithOptions(file, options)
+					}
+					b.StopTimer()
+				})
 				checkDiagnostics(b, result)
 				errors := len(result.Errors())
 				if expectedErrors < 0 {

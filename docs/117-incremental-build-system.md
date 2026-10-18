@@ -2663,3 +2663,28 @@ allocations; representative workload timing must justify it.
 
 Logs are retained under
 `build/verification/incremental-dependency-recording-20261018/`.
+
+
+### Isolating edited analysis in CPU profiles (18 October)
+
+The real-project benchmark labels only its timed semantic invocation with
+`phase=project-analysis` and `analysis-mode=fresh|retained`. Label installation
+and removal stay outside the timer. CPU profiling otherwise includes parsing,
+retained-session prewarm and diagnostic comparisons even though those operations
+are excluded from benchmark ns/op. Filter profiles with
+`go tool pprof -tagfocus=phase=project-analysis BINARY PROFILE`. Background runtime
+work may not inherit labels, so filtered samples are not total process CPU.
+
+One labelled retained novel-body edit on the fixed parser snapshot took 5.387 s,
+allocated 4.477 GB in 22.052 million allocations, reused 72 bodies/2,837 expression
+nodes, and checked 1,886 bodies. Its full 2,279-diagnostic multiset preserved the
+established digest (980 existing errors). This is analysis-only, SMT off, not
+edit-to-executable latency or a before/after speedup.
+
+The filtered profile still attributes 0.85 s to memory clearing and 0.93 s to
+page reclamation; tracked-value type cloning has 0.52 s cumulative CPU and return
+provenance inference 0.69 s (overlapping call trees, not additive). This makes
+flow-state/type cloning a measured investigation target before adding speculative
+field-expression cache protocols. The unfiltered profile exaggerated these
+costs by including warmup and parsing. Exact profile/source/logs are retained in
+`build/verification/incremental-labelled-profile-20261018/`.
