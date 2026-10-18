@@ -16,8 +16,8 @@ import (
 )
 
 // BenchmarkIncrementalEditPipeline includes fresh parsing and native object emission.
-// Stage metrics expose costs hidden by analysis-only benchmarks. It alternates an
-// actual body edit, rather than repeatedly compiling an unchanged input. Linking
+// Stage metrics expose costs hidden by analysis-only benchmarks. It makes a
+// novel body edit each iteration, preventing whole-revision cache hits. Linking
 // and process startup are deliberately excluded; this is a synthetic workload.
 func BenchmarkIncrementalEditPipeline(b *testing.B) {
 	var source strings.Builder
@@ -26,7 +26,6 @@ func BenchmarkIncrementalEditPipeline(b *testing.B) {
 		fmt.Fprintf(&source, "def work%d(value%d: int, delta%d: int) -> int:\n    return %s\n\n", i, i, i, strings.Repeat(term+" + ", 15)+term)
 	}
 	base := source.String()
-	edited := strings.Replace(base, "value0 * 2", "value0 * 4", 1)
 	parse := func(src string) *ast.File {
 		l := lexer.New("pipeline_edit.elisa", []byte(src))
 		p := parser.New(l.Tokenize())
@@ -36,7 +35,7 @@ func BenchmarkIncrementalEditPipeline(b *testing.B) {
 		}
 		return f
 	}
-	for _, mode := range []string{"fresh", "retained", "retained-audit"} {
+	for _, mode := range []string{"fresh", "retained", "retained-audit", "incremental-native"} {
 		b.Run(mode, func(b *testing.B) {
 			retained := mode != "fresh"
 			session := semantic.NewIncrementalAnalysisSessionWithOptions(semantic.IncrementalAnalysisSessionOptions{AuditLexicalReads: mode == "retained-audit"})
@@ -46,19 +45,24 @@ func BenchmarkIncrementalEditPipeline(b *testing.B) {
 				}
 				return semantic.Analyze(f)
 			}
-			if r := analyze(parse(edited)); len(r.Errors()) != 0 {
-				b.Fatal(r.Errors())
+			warm := analyze(parse(base))
+			if len(warm.Errors()) != 0 {
+				b.Fatal(warm.Errors())
 			}
 			out := filepath.Join(b.TempDir(), "edit.o")
+			objects := NewIncrementalObjectSession(8, 0)
+			if mode == "incremental-native" {
+				if err := objects.WriteObject(warm, out, LLVMObjectEmitOptions{}); err != nil {
+					b.Fatal(err)
+				}
+			}
+			objectBefore := objects.Stats()
 			var parsing, analysis, lowering, emission time.Duration
 			var reused, checked uint64
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				src := base
-				if i%2 != 0 {
-					src = edited
-				}
+				src := strings.Replace(base, "value0 * 2", fmt.Sprintf("value0 * %d", i+4), 1)
 				before := session.Stats()
 				start := time.Now()
 				f := parse(src)
@@ -68,21 +72,32 @@ func BenchmarkIncrementalEditPipeline(b *testing.B) {
 				if len(r.Errors()) != 0 {
 					b.Fatal(r.Errors())
 				}
-				g, err := compileLLVMModule(r, OptimizationLevel0, DefaultPackedLoweringProfile())
-				lowered := time.Now()
-				if err != nil {
-					b.Fatal(err)
-				}
-				err = g.writeObjectFile(out, OptimizationLevel0)
-				g.dispose()
-				emitted := time.Now()
-				if err != nil {
-					b.Fatal(err)
+				var lowerDuration, objectDuration time.Duration
+				if mode == "incremental-native" {
+					before := objects.Stats()
+					if err := objects.WriteObject(r, out, LLVMObjectEmitOptions{}); err != nil {
+						b.Fatal(err)
+					}
+					lowerDuration = objects.Stats().IRTime - before.IRTime
+					objectDuration = time.Since(analyzed) - lowerDuration
+				} else {
+					g, err := compileLLVMModule(r, OptimizationLevel0, DefaultPackedLoweringProfile())
+					lowered := time.Now()
+					if err != nil {
+						b.Fatal(err)
+					}
+					err = g.writeObjectFile(out, OptimizationLevel0)
+					g.dispose()
+					if err != nil {
+						b.Fatal(err)
+					}
+					lowerDuration = lowered.Sub(analyzed)
+					objectDuration = time.Since(lowered)
 				}
 				parsing += parsed.Sub(start)
 				analysis += analyzed.Sub(parsed)
-				lowering += lowered.Sub(analyzed)
-				emission += emitted.Sub(lowered)
+				lowering += lowerDuration
+				emission += objectDuration
 				after := session.Stats()
 				reused += after.PrimaryBodiesReused - before.PrimaryBodiesReused
 				checked += after.PrimaryBodiesChecked - before.PrimaryBodiesChecked
@@ -90,6 +105,11 @@ func BenchmarkIncrementalEditPipeline(b *testing.B) {
 			b.StopTimer()
 			for key, elapsed := range map[string]time.Duration{"parse-ms/edit": parsing, "analysis-ms/edit": analysis, "lower-ms/edit": lowering, "object-ms/edit": emission} {
 				b.ReportMetric(float64(elapsed)/float64(time.Millisecond)/float64(b.N), key)
+			}
+			if mode == "incremental-native" {
+				after := objects.Stats()
+				b.ReportMetric(float64(after.PartitionsEmitted-objectBefore.PartitionsEmitted)/float64(b.N), "emitted-parts/edit")
+				b.ReportMetric(float64(after.PartitionsReused-objectBefore.PartitionsReused)/float64(b.N), "reused-parts/edit")
 			}
 			if retained {
 				b.ReportMetric(float64(reused)/float64(b.N), "body-reuses/edit")

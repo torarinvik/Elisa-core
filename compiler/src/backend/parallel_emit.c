@@ -16,8 +16,9 @@
 // resolve: a function or mutable/external global with internal or private linkage
 // becomes a HIDDEN external symbol renamed `elisa.part.<name>` (or
 // `elisa.part.anon.<ordinal>` when unnamed), defined only by its owner. Mutable and
-// external globals are owned by partition 0; read-only private constants stay private
-// and are duplicated. linkonce/weak definitions stay in every partition. An alias whose
+// external globals and address-significant constants are owned by partition 0;
+// globally unnamed private constants stay private and are duplicated. linkonce/weak
+// definitions stay in every partition. An alias whose
 // aliasee became a declaration has its uses redirected to the aliasee and turns private.
 //
 // The partitioning is a pure function of the module, so output is deterministic.
@@ -33,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <llvm-c/BitReader.h>
+#include <llvm-c/Analysis.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/Support.h>
@@ -78,7 +80,9 @@ static int part_global_owned(LLVMValueRef g) {
 	if (l == LLVMExternalLinkage) {
 		return 1;
 	}
-	return !LLVMIsGlobalConstant(g);
+	// Only globally unnamed constants may be duplicated. A constant with a
+	// significant address must have one owner, just like mutable storage.
+	return !LLVMIsGlobalConstant(g) || LLVMGetUnnamedAddress(g) != LLVMGlobalUnnamedAddr;
 }
 
 static void part_externalize(LLVMValueRef v, long long ordinal) {
@@ -163,17 +167,23 @@ static long long part_function_owners(LLVMModuleRef m, int jobs, long long **own
 	return total;
 }
 
-static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t count, int part, long long import_weight) {
+static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t count, int part, long long import_weight, LLVMModuleRef source) {
 	long long ordinal = 0;
+	LLVMValueRef original = source ? LLVMGetFirstGlobal(source) : NULL;
 	for (LLVMValueRef g = LLVMGetFirstGlobal(m); g; g = LLVMGetNextGlobal(g), ordinal++) {
-		if (part_global_owned(g)) {
+		// Selective cloning has already removed foreign initializers. Ownership
+		// must therefore come from the pristine module, not its declarations.
+		if (source && original == NULL) return 0;
+		if (part_global_owned(source ? original : g)) {
 			part_externalize(g, ordinal);
 			if (part != 0) {
 				LLVMSetInitializer(g, NULL);
 				LLVMSetLinkage(g, LLVMExternalLinkage);
 			}
 		}
+		if (source) original = LLVMGetNextGlobal(original);
 	}
+	if (source && original != NULL) return 0;
 	size_t idx = 0;
 	for (LLVMValueRef f = LLVMGetFirstFunction(m); f; f = LLVMGetNextFunction(f), idx++, ordinal++) {
 		if (idx >= count) {
@@ -217,6 +227,37 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 }
 
 // Same options as elisacoreRunOptimizationPipeline in llvm_target.go.
+// C++ CloneModule's definition predicate avoids copying every foreign body only
+// to erase it. Ownership and final linkage still use the shared partition rules.
+extern LLVMModuleRef elisacoreCloneSelectedDefinitions(LLVMModuleRef m,
+    const long long *owners, size_t count, int part, const char *unit_namespace);
+
+long long elisacoreObjectPartitionWeight(LLVMModuleRef m) {
+	long long total = 0;
+	for (LLVMValueRef f = LLVMGetFirstFunction(m); f; f = LLVMGetNextFunction(f))
+		if (part_function_owned(f)) total += part_function_weight(f) + 1;
+	return total;
+}
+
+LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part, const char *unit_namespace) {
+	if (m == NULL || jobs < 1 || part < 0 || part >= jobs) return NULL;
+	long long *owners = NULL;
+	size_t count = 0;
+	part_function_owners(m, jobs, &owners, &count);
+	LLVMModuleRef clone = elisacoreCloneSelectedDefinitions(m, owners, count, part, unit_namespace);
+	if (clone == NULL) { free(owners); return NULL; }
+	int ok = part_restrict_module(clone, owners, count, part, 0, m);
+	free(owners);
+	char *message = NULL;
+	if (!ok || LLVMVerifyModule(clone, LLVMReturnStatusAction, &message)) {
+		if (message) LLVMDisposeMessage(message);
+		LLVMDisposeModule(clone);
+		return NULL;
+	}
+	if (message) LLVMDisposeMessage(message);
+	return clone;
+}
+
 static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *pipeline, char **error) {
 	LLVMPassBuilderOptionsRef options = LLVMCreatePassBuilderOptions();
 	LLVMPassBuilderOptionsSetLoopInterleaving(options, 1);
@@ -282,7 +323,7 @@ int elisacorePartitionWorker(const char *bitcode_path, int jobs, int part, const
 	long long *owners = NULL;
 	size_t count = 0;
 	part_function_owners(m, jobs, &owners, &count);
-	int ok = part_restrict_module(m, owners, count, part, import_weight);
+	int ok = part_restrict_module(m, owners, count, part, import_weight, NULL);
 	free(owners);
 	if (!ok) {
 		return part_fail(error_out, "partition function list does not match the source module");

@@ -104,6 +104,102 @@ def count_up(n: usize) -> usize:
 	}
 }
 
+// A pure builtin assertion must not make the sequential loop-body model decline. The body-local
+// step forces this through that model instead of the simpler simultaneous-substitution capture.
+func TestLoopInvariantSequentialModelAllowsPureAssert(t *testing.T) {
+	src := `
+ghost def below(x: i64, bound: i64) -> bool:
+    return x < bound
+
+def count_up(n: i64) -> i64:
+    requires n >= 0
+    i: mutable i64 = 0
+    while i < n:
+        invariant i <= n
+        step: i64 = 1
+        assert(below(i, n))
+        i <- i + step
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_seq_assert.elisa", src, false)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 1 {
+		t.Fatalf("expected the invariant to be proven through the sequential model, got %d: %+v", got, result.ProofReport)
+	}
+}
+
+// Runtime assertions are erased in optimized builds, so the loop prover must not use their
+// conditions as hypotheses. At i=4, the loop condition and invariant permit the next value 5,
+// which disproves `i < 5` even though the assertion below says `i < 4`.
+func TestLoopInvariantSequentialModelDoesNotAssumePureAssert(t *testing.T) {
+	src := `
+def count_up(n: i64) -> i64:
+    requires n >= 0
+    i: mutable i64 = 0
+    while i < n:
+        invariant i < 5
+        step: i64 = 1
+        assert(i < 4)
+        i <- i + step
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_seq_assert_not_assumed.elisa", src, false)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 0 {
+		t.Fatalf("the loop prover must not assume a runtime assertion condition: %+v", result.ProofReport)
+	}
+	if got := countLoopInvariantProof(result, "preserve", ProofRuntime); got != 1 {
+		t.Fatalf("expected the non-inductive invariant to fall back to runtime preservation, got %d: %+v", got, result.ProofReport)
+	}
+}
+
+// The proof-only treatment is restricted to the builtin assertion spelling resolved by the
+// analyzer. A user function that shadows `assert` remains an ordinary call and must decline.
+func TestLoopInvariantSequentialModelDoesNotIgnoreShadowedAssert(t *testing.T) {
+	src := `
+def assert(condition: bool) -> void:
+    pass
+
+def count_up(n: i64) -> i64:
+    requires n >= 0
+    i: mutable i64 = 0
+    while i < n:
+        invariant i <= n
+        step: i64 = 1
+        assert(i < n)
+        i <- i + step
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_seq_shadowed_assert.elisa", src, false)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 0 {
+		t.Fatalf("the loop prover must not skip a user-defined shadowing call: %+v", result.ProofReport)
+	}
+}
+
+// Assertions containing an ordinary call are not proof-model no-ops, even when the callee has no
+// mutable parameters: it may read or write global state, and the assertion can be erased.
+func TestLoopInvariantSequentialModelDoesNotIgnoreNonGhostAssertCall(t *testing.T) {
+	src := `
+def below(x: i64, bound: i64) -> bool:
+    return x < bound
+
+def count_up(n: i64) -> i64:
+    requires n >= 0
+    i: mutable i64 = 0
+    while i < n:
+        invariant i <= n
+        step: i64 = 1
+        assert(below(i, n))
+        i <- i + step
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_seq_non_ghost_assert_call.elisa", src, false)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 0 {
+		t.Fatalf("the loop prover must not skip an assertion containing an ordinary call: %+v", result.ProofReport)
+	}
+}
+
 // Soundness: a FALSE invariant `i < 5` under the loop condition `i < n` must NOT be proven
 // preserved — `i + 1 < 5` does not follow from `i < n ∧ i < 5` (take i = 4). The SMT tier must
 // decline, leaving the runtime check.

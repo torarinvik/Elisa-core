@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"elisacore/src/backend"
@@ -22,7 +24,7 @@ type compileServerRequest struct {
 	Filename string `json:"filename,omitempty"`
 	Source   string `json:"source,omitempty"`
 	IR       string `json:"ir,omitempty"`
-	// Incremental opts into a bounded, server-local semantic session for this request.
+	// Incremental opts into bounded server-local semantic and native artifact reuse.
 	Incremental bool `json:"incremental,omitempty"`
 }
 
@@ -30,6 +32,7 @@ type compileServerResponse struct {
 	OK        bool   `json:"ok"`
 	Output    string `json:"output,omitempty"`
 	IR        string `json:"ir,omitempty"`
+	Object    string `json:"object,omitempty"` // base64 native O0 object, mode=obj
 	Value     string `json:"value,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
 	Error     string `json:"error,omitempty"`
@@ -198,6 +201,37 @@ func executeCompileServerRequestWithSessions(req compileServerRequest, sessions 
 			return compileServerResponse{OK: false, Error: err.Error(), Stderr: strings.TrimSpace(stderr.String())}, http.StatusInternalServerError
 		}
 		response.Output = output
+	case emitObject:
+		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
+		if !ok {
+			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		dir, err := os.MkdirTemp("", "elisac-server-object-")
+		if err != nil {
+			return compileServerResponse{OK: false, Error: err.Error()}, http.StatusInternalServerError
+		}
+		defer os.RemoveAll(dir)
+		path := filepath.Join(dir, "output.o")
+		options := backend.LLVMObjectEmitOptions{OptLevel: backend.OptimizationLevel0, Serial: strings.TrimSpace(req.Filename) == ""}
+		// Partition emission externalizes private definitions as hidden symbols and
+		// namespaces them by the source filename. The request loader substitutes
+		// "request.elisa" when Filename is omitted, which is not a unique unit
+		// identity across independently compiled server requests. Keep those
+		// requests on direct serial emission so returned objects remain safe to
+		// link together.
+		if sessions != nil && req.Incremental && strings.TrimSpace(req.Filename) != "" {
+			err = sessions.objects.WriteObject(result, path, options)
+		} else {
+			err = backend.WriteLLVMObjectFileWithOptions(result, path, options)
+		}
+		if err != nil {
+			return compileServerResponse{OK: false, Error: err.Error(), Stderr: strings.TrimSpace(stderr.String())}, http.StatusInternalServerError
+		}
+		object, err := os.ReadFile(path)
+		if err != nil {
+			return compileServerResponse{OK: false, Error: err.Error()}, http.StatusInternalServerError
+		}
+		response.Object = base64.StdEncoding.EncodeToString(object)
 	case emitInterpret:
 		_, result, ok := analyzeLoadedProgramWithSession(program, &stderr, semantic.AnalyzeOptions{}, session)
 		if !ok {

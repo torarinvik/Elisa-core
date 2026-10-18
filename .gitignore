@@ -53,3 +53,4 @@ compiler/vr_probe.lowered.elisa
 !.github/
 compiler/compiler/bin/elisac-local
 compiler/compiler/bin/elisac
+/build

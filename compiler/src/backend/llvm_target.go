@@ -84,6 +84,29 @@ import (
 	"elisacore/src/semantic"
 )
 
+var llvmTargetInitOnce sync.Once
+var llvmTargetInitErr error
+
+// LLVM's default optimization pipeline is not safe to run concurrently in this
+// embedding (the existing parallel backend uses worker processes for it). Keep
+// only that pipeline serialized; independent O0 lowering/codegen remains parallel.
+var llvmOptimizationMu sync.Mutex
+
+func ensureLLVMTargetRegistry() error {
+	llvmTargetInitOnce.Do(func() {
+		if C.elisacoreInitializeNativeTarget() != 0 {
+			llvmTargetInitErr = fmt.Errorf("failed to initialize native LLVM target")
+			return
+		}
+		if C.elisacoreInitializeNativeAsmPrinter() != 0 {
+			llvmTargetInitErr = fmt.Errorf("failed to initialize native LLVM asm printer")
+			return
+		}
+		C.elisacoreInitializeAllTargetsForCrossEmission()
+	})
+	return llvmTargetInitErr
+}
+
 // optimizationAAPipeline is LLVM's default alias-analysis stack plus scev-aa. scev-aa proves
 // `a[i]` and `a[j]` disjoint from their index recurrences (j in i+1..<n with known trip counts),
 // so the a[i] fields of a pairwise loop are promoted to registers instead of being reloaded and
@@ -172,6 +195,7 @@ type LLVMObjectEmitOptions struct {
 	TargetTriple  string
 	DebugInfo     bool
 	Trace         bool
+	Serial        bool // preserve local symbol binding without partition externalization
 }
 
 func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
@@ -186,6 +210,15 @@ func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, 
 		return err
 	}
 	defer g.dispose()
+	if options.Serial {
+		if err := g.ensureTargetMachine(); err != nil {
+			return err
+		}
+		if err := g.optimizeModule(options.OptLevel); err != nil {
+			return err
+		}
+		return g.emitNativeObjectFile(outputPath)
+	}
 	return g.writeObjectFile(outputPath, options.OptLevel)
 }
 
@@ -224,6 +257,13 @@ func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel Optimization
 		}
 	}
 
+	return g.emitNativeObjectFile(outputPath)
+}
+
+// emitNativeObjectFile emits an already configured/optimized module directly.
+// Incremental fallbacks use this to avoid the host partition merger for cross
+// targets or modules that cannot safely be partitioned.
+func (g *llvmGenerator) emitNativeObjectFile(outputPath string) error {
 	pathC := cString(outputPath)
 	defer C.free(unsafe.Pointer(pathC))
 
@@ -248,6 +288,8 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		return err
 	}
 
+	llvmOptimizationMu.Lock()
+	defer llvmOptimizationMu.Unlock()
 	ensureO3UnrollThreshold(optLevel)
 	passPipeline := cString(fmt.Sprintf("default<O%d>", int(optLevel)))
 	defer C.free(unsafe.Pointer(passPipeline))
@@ -269,13 +311,9 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	if g.targetMachine != nil && g.targetData != nil && g.targetTriple != nil {
 		return nil
 	}
-	if C.elisacoreInitializeNativeTarget() != 0 {
-		return fmt.Errorf("failed to initialize native LLVM target")
+	if err := ensureLLVMTargetRegistry(); err != nil {
+		return err
 	}
-	if C.elisacoreInitializeNativeAsmPrinter() != 0 {
-		return fmt.Errorf("failed to initialize native LLVM asm printer")
-	}
-	C.elisacoreInitializeAllTargetsForCrossEmission()
 
 	tripleOwnedByLLVM := false
 	var triple *C.char

@@ -194,6 +194,21 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 			for i := range frontier {
 				frontier[i].exited = true
 			}
+		case *ast.ExprStmt:
+			if !a.loopBodyAssertIsPure(n) {
+				return nil, false
+			}
+			// Body-local immutable names are tracked per path. A local named `assert` or `ASSERT`
+			// shadows the builtin on that path even though it is not in the enclosing scope used by
+			// assertedCondition; decline rather than misclassifying a user call as a proof-only check.
+			for _, frag := range frontier {
+				if _, shadowed := frag.lets["assert"]; shadowed {
+					return nil, false
+				}
+				if _, shadowed := frag.lets["ASSERT"]; shadowed {
+					return nil, false
+				}
+			}
 		case *ast.PassStmt:
 		default:
 			return nil, false

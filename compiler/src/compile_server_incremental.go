@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"elisacore/src/backend"
 	"elisacore/src/semantic"
 )
 
@@ -24,7 +25,11 @@ type compileServerSessionEntry struct {
 // source path and analysis profile. The bound prevents an HTTP server that sees
 // many one-off filenames from retaining every session for its entire lifetime.
 type compileServerSessionCache struct {
-	tokens     *sourceTokenCache
+	tokens *sourceTokenCache
+	// Native artifacts share one bounded cache across source paths. Exact current
+	// bitcode/target keys prevent cross-request confusion and keep total storage
+	// bounded independently of the number of semantic sessions.
+	objects    *backend.IncrementalObjectSession
 	mu         sync.Mutex
 	maxEntries int
 	clock      uint64
@@ -38,13 +43,14 @@ func newCompileServerSessionCache(maxEntries int) *compileServerSessionCache {
 	return &compileServerSessionCache{
 		maxEntries: maxEntries,
 		tokens:     newSourceTokenCache(maxEntries, defaultSourceTokenCacheBytes),
+		objects:    backend.NewIncrementalObjectSession(0, 0),
 		entries:    make(map[compileServerSessionKey]compileServerSessionEntry),
 	}
 }
 
 func compileServerModeAnalyzes(mode string) bool {
 	switch mode {
-	case emitAST, emitDoc, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitIR, emitLLVM, emitInterpret:
+	case emitAST, emitDoc, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitIR, emitLLVM, emitObject, emitInterpret:
 		return true
 	default:
 		return false

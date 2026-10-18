@@ -19,6 +19,70 @@ same local trust boundary as compiler object artifacts, rather than serving as
 an independently checked proof certificate. Currently the solver is still
 started before the first persistent lookup.
 
+The compile server also has an opt-in, bounded **native partition-object cache**
+for `mode=obj` requests with `incremental=true`. It still parses/analyzes the
+current source and rebuilds and optimizes the whole LLVM module. It then reuses
+native object partitions only when the exact post-optimization partition bitcode
+and resolved target-machine configuration match. The cache is in-process and
+bounded; small modules, cross-target output, and modules with unsupported
+partition constructs use ordinary serial emission. This avoids some native
+code-generation work for a changed body, but is not semantic-body reuse or
+module-granular compilation. A paired, alternating benchmark through the real
+compile-server executable measured a synthetic 256-function source-to-object
+workload. The first nine-sample record measured 335.5 ms fresh versus 263.6 ms
+incremental median, with 507.4 ms for a cold incremental request. A later
+nine-sample record measured 469.4 ms fresh versus 360.4 ms incremental median,
+with 1,577.6 ms cold. The later samples are highly variable on the shared host;
+both records exclude final linking and execution. The later benchmark also
+predates the cache-map lock split and one-time LLVM target initialization, so
+neither record qualifies the current concurrency changes for performance.
+Machine-readable and text results are retained under
+`build/verification/incremental-native-object-20261018/`. These synthetic
+measurements do not establish a general compiler speedup; representative project
+builds and larger sample sets are still needed.
+
+A separate pre-lock source-edit benchmark included parsing, retained semantic
+analysis, LLVM lowering and object emission for a new body edit on every sample.
+Across three five-sample rounds, median source-to-object time was 484.3 ms fresh
+and 306.2 ms with retained semantic and native-object caches; the retained path
+reported 255 reused function bodies and seven of eight reused object partitions
+per edit. A focused three-sample body-edit benchmark timed
+`WriteLLVMObjectFile` or `IncrementalObjectSession.WriteObject`, excluding
+parsing and semantic analysis but including LLVM generation, optimization,
+partitioning, native emission and merge. Its medians were 405.1 ms fresh and
+209.4 ms retained. These runs preceded the stats-lock split,
+one-time LLVM target initialization and virtual-source fallback, and do not
+qualify current code. They are synthetic O0 workloads and exclude final linking
+and process startup. Raw output and the benchmark source are archived in the
+verification directory above.
+
+After the cache lock split and virtual-source fallback, the backend and compile
+server suites passed, along with focused race runs for concurrent backend cache
+access and anonymous/concurrent server object requests. The captured outputs are
+in the same verification directory. This is correctness evidence for the current
+tree, not a post-change performance measurement.
+
+Send `{"mode":"obj","filename":"example.elisa","source":"...",
+"incremental":true}` to `/api/v1/compile`. A successful response contains
+`object`, the base64-encoded native O0 object; the caller supplies final linking.
+Requests without `incremental` use ordinary object emission. One shared 256 MiB
+payload budget bounds retained partition bitcode and native bytes across all
+server filenames. The backend library exposes
+`NewIncrementalObjectSession(partitions, maxBytes)` and `WriteObject` for analyzed
+results, with reuse/emission counters and phase timings.
+
+SHA256 indexes the cache, but reuse also compares exact input bytes and actual
+triple/CPU/features. Global optimization runs before this comparison, so changed
+inlining decisions enter the inputs. Selective LLVM definition cloning avoids
+copying and stripping all foreign bodies for every partition. The cache owns no
+LLVM or AST handles and accepts no externally supplied native artifacts. Modules
+below instruction weight 2,000 use direct emission, as do cross targets and
+modules with aliases, ifuncs, module/inline assembly, address-taken blocks, or appending
+globals such as constructor/destructor arrays. Successful partition merging
+atomically replaces output; a failed merge preserves the previous object.
+General semantic reuse, avoiding LLVM regeneration/optimization, persistence,
+and normal CLI incremental build integration remain unfinished.
+
 The in-memory tracked-query engine in `compiler/src/incremental` is a second
 foundation. It commits input batches as revisions, records query and input reads
 (including missing inputs), validates only requested dependency closures, and

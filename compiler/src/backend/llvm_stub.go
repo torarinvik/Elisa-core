@@ -79,6 +79,7 @@ type LLVMObjectEmitOptions struct {
 	OptLevel      OptimizationLevel
 	PackedProfile PackedLoweringProfile
 	TargetTriple  string
+	Serial        bool
 }
 
 func WriteLLVMObjectFileWithOptions(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {

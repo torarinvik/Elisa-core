@@ -28,7 +28,7 @@ func postCompileServerRequest(t *testing.T, handler http.Handler, request compil
 }
 
 func compileServerResponsesEqual(left, right compileServerResponse) bool {
-	return left.OK == right.OK && left.Output == right.Output && left.IR == right.IR && left.Value == right.Value && left.Stderr == right.Stderr && left.Error == right.Error && left.ErrorCode == right.ErrorCode
+	return left.OK == right.OK && left.Output == right.Output && left.IR == right.IR && left.Object == right.Object && left.Value == right.Value && left.Stderr == right.Stderr && left.Error == right.Error && left.ErrorCode == right.ErrorCode
 }
 
 func TestCompileServerReusesBodiesAcrossRequestsAndInvalidatesEdits(t *testing.T) {

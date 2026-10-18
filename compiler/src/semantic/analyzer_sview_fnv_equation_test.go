@@ -53,7 +53,6 @@ def main() -> i32:
 		t.Fatalf("expected the wrapper's exact model equation to be discharged by SMT, got: %+v", result.ProofReport)
 	}
 }
-
 func TestSMTModelsSViewByteCharToU64WithoutWideningArbitraryChar(t *testing.T) {
 	positive := `def view_byte_u64(view: sview, index: usize) -> u64:
     requires index < view.len.usize()

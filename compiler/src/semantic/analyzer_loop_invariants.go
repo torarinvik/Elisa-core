@@ -913,6 +913,13 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 	storedArrays := map[string]bool{}
 	for _, s := range body {
 		switch n := s.(type) {
+		case *ast.ExprStmt:
+			// A pure builtin assertion has no effect on the loop state. Its condition is deliberately
+			// not added as a proof hypothesis here: optimized builds may erase the runtime assertion,
+			// so loop preservation must hold even when that condition is false.
+			if !a.loopBodyAssertIsPure(n) {
+				return nil, nil, false
+			}
 		case *ast.ContractStmt:
 			// Leading `invariant` / `decreases` clauses are specifications, not body effects — skip them.
 			if n.Kind != ast.ContractInvariant && n.Kind != ast.ContractDecreases {
@@ -1064,6 +1071,92 @@ func exprIsSideEffectFreeForTermination(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+// loopBodyAssertIsPure recognizes only an unshadowed builtin `assert(cond)` whose condition is
+// side-effect-free. Loop proof models may ignore such a statement because it does not mutate the
+// modeled state. They must not assume cond: optimized builds can erase the runtime assertion, so
+// treating it as a path guard could make a false loop invariant appear proven.
+func (a *Analyzer) loopBodyAssertIsPure(stmt *ast.ExprStmt) bool {
+	if a == nil || stmt == nil {
+		return false
+	}
+	cond, ok := a.assertedCondition(stmt.Expr)
+	return ok && a.loopAssertConditionIsSideEffectFree(cond)
+}
+
+// loopAssertConditionIsSideEffectFree admits the ordinary read-only expression forms used by
+// loop assertions and also direct ghost-function calls. Ghost calls are erased from runtime code;
+// ordinary calls stay rejected because they may have observable effects even when their result is
+// used only by an assertion.
+func (a *Analyzer) loopAssertConditionIsSideEffectFree(expr ast.Expr) bool {
+	operatorGate := a.loopAssertOperatorGate()
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit:
+		return true
+	case *ast.Ident:
+		return n != nil
+	case *ast.ParenExpr:
+		return n != nil && a.loopAssertConditionIsSideEffectFree(n.Inner)
+	case *ast.FieldExpr:
+		return n != nil && !n.Safe && a.loopAssertConditionIsSideEffectFree(n.Object)
+	case *ast.IndexExpr:
+		return n != nil && n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback &&
+			n.AsSpecialize == nil && n.AsOverlayCall == nil && n.AsBuiltinDictGet == nil &&
+			a.loopAssertConditionIsSideEffectFree(n.Object) &&
+			a.loopAssertConditionIsSideEffectFree(n.Index)
+	case *ast.SliceExpr:
+		return n != nil && a.loopAssertConditionIsSideEffectFree(n.Object) &&
+			(n.Start == nil || a.loopAssertConditionIsSideEffectFree(n.Start)) &&
+			(n.End == nil || a.loopAssertConditionIsSideEffectFree(n.End))
+	case *ast.UnaryExpr:
+		return n != nil && n.LoweredCall == nil && n.Op != lexer.TOKEN_AMPERSAND && operatorGate.unaryHasNoOverload(n) &&
+			a.loopAssertConditionIsSideEffectFree(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && n.LoweredCall == nil && operatorGate.binaryHasNoOverload(n) &&
+			a.loopAssertConditionIsSideEffectFree(n.Left) &&
+			a.loopAssertConditionIsSideEffectFree(n.Right)
+	case *ast.CastExpr:
+		return n != nil && isPureNumericValueCast(n) && a.loopAssertConditionIsSideEffectFree(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil && a.loopAssertConditionIsSideEffectFree(n.Cond) &&
+			a.loopAssertConditionIsSideEffectFree(n.Value) && a.loopAssertConditionIsSideEffectFree(n.Alt)
+	case *ast.CallExpr:
+		if n == nil || n.Safe {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil || !decl.IsGhost {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.loopAssertConditionIsSideEffectFree(arg) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// loopAssertOperatorGate resolves visible name types without analyzing body expressions. The
+// analyzer checks loop invariants before analyzing the body, so unresolved or body-local operand
+// types must make overloadable operators decline rather than treating a nil LoweredCall as proof
+// that the operator is primitive.
+func (a *Analyzer) loopAssertOperatorGate() *sviewFrameGate {
+	types := map[string]Type{}
+	if a != nil {
+		for scope := a.currentScope; scope != nil; scope = scope.Parent {
+			for name, sym := range scope.Symbols {
+				if _, alreadySeen := types[name]; alreadySeen || sym == nil {
+					continue
+				}
+				types[name] = sym.Type
+			}
+		}
+	}
+	return &sviewFrameGate{a: a, types: types}
 }
 
 // loopStoreTargetBaseKey returns the normalized base key of an array-element store target
