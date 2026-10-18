@@ -64,7 +64,7 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 	if decl == a.currentFuncDecl && !readOnly(a.currentFunctionUsedPermissionRefs) {
 		return false
 	}
-	g := &sviewFrameGate{a: a, rebindable: map[string]bool{}, types: map[string]Type{}}
+	g := &sviewFrameGate{a: a, decl: decl, rebindable: map[string]bool{}, types: map[string]Type{}}
 	sym, _ := a.symbolForFuncDecl(decl)
 	var fn *FuncType
 	if sym != nil {
@@ -81,7 +81,8 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 }
 
 type sviewFrameGate struct {
-	a *Analyzer
+	a    *Analyzer
+	decl *ast.FuncDecl
 	// rebindable records parameters and locals, with true only for safe local
 	// assignments. Keeping immutable names also preserves builtin shadowing.
 	rebindable map[string]bool

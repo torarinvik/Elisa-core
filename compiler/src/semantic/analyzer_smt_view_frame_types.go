@@ -29,6 +29,18 @@ func (g *sviewFrameGate) receiverType(expr ast.Expr, depth int) Type {
 	if typ := g.a.exprTypes[expr]; typ != nil {
 		return typ
 	}
+	if id, ok := expr.(*ast.Ident); ok && g.decl != nil {
+		// Resolve only the inspected function's own immutable constant. Its
+		// declaration symbol, not the caller scope, identifies the namespace.
+		if fn := g.a.funcDeclSymbols[g.decl]; fn != nil && fn.Node == g.decl && g.a.globalScope != nil {
+			name := joinQualifiedName(privateOwnerNamespace(fn.Name), id.Name)
+			if sym, found := g.a.globalScope.Lookup(name); found && sym != nil && sym.Kind == SymbolConst && !sym.Mutable && shortCircuitPrimitiveType(sym.Type) {
+				return sym.Type
+			}
+		}
+		return nil
+	}
+
 	switch n := expr.(type) {
 	case *ast.IntLit:
 		if n.Suffix != "" {
