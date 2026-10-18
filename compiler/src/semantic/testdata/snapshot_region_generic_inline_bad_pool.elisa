@@ -1,0 +1,147 @@
+module Ast:
+    struct Pos:
+        line: mutable u32
+        column: mutable u32
+        offset: mutable u32
+        end_line: mutable u32
+        end_column: mutable u32
+        end_offset: mutable u32
+
+
+
+
+
+module Semantic:
+    public:
+        const enum IncrementalFactKind of u8:
+            DirectCall
+            GlobalRead
+            GlobalWrite
+            CanGrant
+            TrustedGrant
+            PanicSite
+
+
+        const enum IncrementalGrantKind of u8:
+            Can
+            Trusted
+
+
+        const enum IncrementalRejectReason of u8:
+            None
+            MissingStablePath
+            NonUniqueOrGenericFunction
+            MissingBlockBody
+            UnsupportedBodySyntax
+            MissingSourceAnchor
+            InvalidTokenSpan
+            UnsupportedSignature
+
+
+        struct IncrementalFunctionFactRecord:
+            key_start: usize
+            key_length: usize
+            body_start: usize
+            body_length: usize
+            body_hash: u64
+            direct_fact_start: mutable usize
+            direct_fact_count: mutable usize
+            cacheable: mutable bool
+            matched_previous: mutable bool
+            reject_reason: mutable IncrementalRejectReason
+
+
+        struct IncrementalFunctionSourceAnchor:
+            definition_offset: u32
+            body_token_start: usize
+            body_token_end: usize
+
+
+        struct IncrementalDirectFact:
+            owner: usize
+            kind: IncrementalFactKind
+            subject_start: usize
+            subject_length: usize
+            anchor_token: u32
+            active_grant_start: usize
+            active_grant_count: usize
+
+
+        struct IncrementalActiveGrant:
+            kind: IncrementalGrantKind
+            name_start: usize
+            name_length: usize
+
+
+        struct IncrementalSelfAssignmentFactRange:
+            start: usize
+            count: usize
+            complete: mutable bool
+            reused_previous: mutable bool
+
+
+        struct IncrementalSelfAssignmentFact:
+            target_anchor_token: u32
+            statement_anchor_token: u32
+            name_body_offset: mutable usize
+            name_length: mutable usize
+
+
+        struct IncrementalSelfAssignmentAnchor:
+            target_position: Ast::Pos
+            statement_line: u32
+
+
+        struct IncrementalSemanticSnapshot:
+            schema_version: mutable u32
+            semantic_fingerprint: mutable u64
+            # Fast prefilter; collisions never authorize reuse.
+            options_fingerprint: mutable u64
+            # Exact versioned semantic-options identity.
+            options_key: mutable darray[u8]
+            bytes: mutable darray[u8]
+            source_path_start: mutable usize
+            source_path_length: mutable usize
+            declaration_surface_start: mutable usize
+            declaration_surface_length: mutable usize
+            declaration_surface_hash: mutable u64
+            functions: mutable darray[IncrementalFunctionFactRecord]
+            current_anchors: mutable darray[IncrementalFunctionSourceAnchor]
+            direct_facts: mutable darray[IncrementalDirectFact]
+            active_grants: mutable darray[IncrementalActiveGrant]
+            self_assignment_ranges: mutable darray[IncrementalSelfAssignmentFactRange]
+            self_assignment_facts: mutable darray[IncrementalSelfAssignmentFact]
+            current_self_assignment_anchors: mutable darray[IncrementalSelfAssignmentAnchor]
+            bodies_visited: mutable u32
+            bodies_matched: mutable u32
+            bodies_rejected: mutable u32
+            self_assignment_bodies_scanned: mutable u32
+            self_assignment_bodies_reused: mutable u32
+            # Invocation/session-only proof that the exact declaration surface was
+            # completely encoded. Omitted from the sidecar codec.
+            declaration_surface_valid: mutable bool
+            surface_compatible: mutable bool
+
+
+        def build[@r](target: mutable darray[IncrementalSemanticSnapshot]& @r) -> void:
+            can Memory.Allocate, Abort.Panic:
+                region scratch:
+                    options_key: mutable darray[u8] @r = []
+                    bytes: mutable darray[u8] @scratch = []
+                    bytes.push(7)
+                    functions: mutable darray[IncrementalFunctionFactRecord] @r = []
+                    current_anchors: mutable darray[IncrementalFunctionSourceAnchor] @r = []
+                    direct_facts: mutable darray[IncrementalDirectFact] @r = []
+                    active_grants: mutable darray[IncrementalActiveGrant] @r = []
+                    self_assignment_ranges: mutable darray[IncrementalSelfAssignmentFactRange] @r = []
+                    self_assignment_facts: mutable darray[IncrementalSelfAssignmentFact] @r = []
+                    current_self_assignment_anchors: mutable darray[IncrementalSelfAssignmentAnchor] @r = []
+                    target.push(IncrementalSemanticSnapshot{schema_version: 0, semantic_fingerprint: 0, options_fingerprint: 0, options_key: options_key, bytes: bytes, source_path_start: 0, source_path_length: 0, declaration_surface_start: 0, declaration_surface_length: 0, declaration_surface_hash: 0, functions: functions, current_anchors: current_anchors, direct_facts: direct_facts, active_grants: active_grants, self_assignment_ranges: self_assignment_ranges, self_assignment_facts: self_assignment_facts, current_self_assignment_anchors: current_self_assignment_anchors, bodies_visited: 0, bodies_matched: 0, bodies_rejected: 0, self_assignment_bodies_scanned: 0, self_assignment_bodies_reused: 0, declaration_surface_valid: false, surface_compatible: false})
+
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region output:
+            snapshots: mutable darray[Semantic::IncrementalSemanticSnapshot] @output = []
+            Semantic::build[output](snapshots)
+            return snapshots.count.i64()
