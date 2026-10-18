@@ -11,6 +11,45 @@
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/IPO/StripDeadPrototypes.h>
+#include <cstdint>
+#include <cstdlib>
+#include <iterator>
+
+// Incremental shards use symbol identity rather than body weight. Editing one
+// body must not migrate unrelated definitions across shard boundaries. Ordinary
+// one-shot parallel emission retains its instruction-balanced assignment.
+extern "C" long long *elisacoreStableObjectOwners(
+    LLVMModuleRef module, int jobs, size_t *count) {
+  auto &source = *llvm::unwrap(module);
+  *count = std::distance(source.begin(), source.end());
+  auto *owners = static_cast<long long *>(std::malloc((*count ? *count : 1) * sizeof(long long)));
+  if (!owners) return nullptr;
+  size_t index = 0;
+  for (const auto &function : source) {
+    bool owned = !function.isDeclaration() &&
+        (function.hasExternalLinkage() || function.hasLocalLinkage());
+    uint64_t hash = 14695981039346656037ULL;
+    for (unsigned char byte : function.getName()) {
+      hash ^= byte;
+      hash *= 1099511628211ULL;
+    }
+    // Avalanche before reducing to a small power-of-two shard count.
+    hash ^= hash >> 33; hash *= 0xff51afd7ed558ccdULL;
+    hash ^= hash >> 33; hash *= 0xc4ceb9fe1a85ec53ULL;
+    hash ^= hash >> 33;
+    owners[index++] = owned ? static_cast<long long>(hash % jobs) : -1;
+  }
+  return owners;
+}
+
+// Foreign declarations with no uses cannot affect emitted code. Removing them
+// makes unrelated declaration insertion/removal invisible to a shard's exact
+// bitcode key. Referenced prototypes and their ABI/attributes remain inputs.
+extern "C" void elisacorePruneObjectDeclarations(LLVMModuleRef module) {
+  llvm::ModuleAnalysisManager analyses;
+  llvm::StripDeadPrototypesPass().run(*llvm::unwrap(module), analyses);
+}
 
 extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitions(
     LLVMModuleRef module, const long long *owners, size_t count, int part,

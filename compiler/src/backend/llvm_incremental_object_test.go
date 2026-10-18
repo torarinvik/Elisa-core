@@ -532,14 +532,14 @@ func TestIncrementalObjectVirtualUnitsUseDirectEmission(t *testing.T) {
 func TestIncrementalObjectPreservesPrivateConstantAddress(t *testing.T) {
 	source := `const XS = [10, 20, 30]
 
-def first(index: usize) -> usize:
+def left(index: usize) -> usize:
     return (&XS[index]).cast[usize]
 
-def second(index: usize) -> usize:
+def right(index: usize) -> usize:
     return (&XS[index]).cast[usize]
 
 def main() -> i64:
-    if first(1) == second(1):
+    if left(1) == right(1):
         return 42
     return 1
 `
@@ -555,6 +555,7 @@ def main() -> i64:
 	if err := session.WriteObject(result, out, LLVMObjectEmitOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	assertNativeFunctionsInDifferentShards(t, session, "left", "right")
 	if got := incrementalObjectNativeStatus(t, out); got != 42 {
 		t.Fatalf("one private constant acquired different partition addresses: %d", got)
 	}

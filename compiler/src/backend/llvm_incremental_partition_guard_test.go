@@ -115,7 +115,7 @@ define i32 @main() {
 	}
 	helper := filepath.Join(filepath.Dir(testFile), "incremental_clone.cpp")
 	args := append(flags("--cxxflags"), source, helper, "-o", binary)
-	args = append(args, flags("--ldflags", "--libs", "core", "asmparser", "transformutils", "--system-libs")...)
+	args = append(args, flags("--ldflags", "--libs", "core", "asmparser", "transformutils", "ipo", "--system-libs")...)
 	if out, err := exec.Command(clang, args...).CombinedOutput(); err != nil {
 		t.Fatalf("build partition boundary fixture: %v\n%s", err, out)
 	}

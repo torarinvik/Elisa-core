@@ -74,12 +74,26 @@ go build -o /tmp/elisac ./compiler/src
 python3 compiler/bench/incremental_native_server.py /tmp/elisac /tmp/native-bench
 ```
 
-The current contiguous, instruction-weight partition assignment can move
-unchanged functions after a large body edit. Added/removed declarations also
-change partition inputs. Stable placement, narrower native dependencies,
-avoiding full LLVM regeneration/optimization, general semantic result reuse,
-persistence, normal CLI integration and representative edit-to-executable
-qualification remain unfinished. These gains do not complete Stage 2.
+Incremental native partitions now assign functions by stable symbol identity
+and strip unused foreign prototypes before computing exact bitcode keys. Five
+isolated edit histories (small/large body growth, front/middle insertion and
+removal) each emit one of eight partitions and reuse seven, versus eight misses
+before this change. Tests link and execute the results, preserve cross-shard
+constant pointer identity, and check live callee ABI changes still invalidate
+callers. Ordinary one-shot emission retains instruction-balanced partitions.
+
+Three alternating synthetic benchmark pairs (five edits per sample, Apple M5)
+measured median native pipeline time falling from 163.21 to 104.37 ms for growth
+and 215.74 to 98.03 ms for insertion. These timings include LLVM regeneration,
+native emission and partition merging, but exclude parsing, semantic analysis
+and final executable linking. Full backend/server checks and focused race checks
+passed. Raw logs and relevant source hashes are saved under
+`build/verification/incremental-stable-shards-20261018/`.
+
+Type/global/debug metadata can still invalidate additional shards. Avoiding full
+LLVM regeneration/optimization, general semantic result reuse, persistence,
+normal CLI integration and representative edit-to-executable qualification
+remain unfinished. These gains do not complete Stage 2.
 
 The in-memory tracked-query engine in `compiler/src/incremental` is a second
 foundation. It commits input batches as revisions, records query and input reads

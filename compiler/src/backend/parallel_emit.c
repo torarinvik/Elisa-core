@@ -231,6 +231,8 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 // to erase it. Ownership and final linkage still use the shared partition rules.
 extern LLVMModuleRef elisacoreCloneSelectedDefinitions(LLVMModuleRef m,
     const long long *owners, size_t count, int part, const char *unit_namespace);
+extern long long *elisacoreStableObjectOwners(LLVMModuleRef m, int jobs, size_t *count);
+extern void elisacorePruneObjectDeclarations(LLVMModuleRef m);
 
 long long elisacoreObjectPartitionWeight(LLVMModuleRef m) {
 	long long total = 0;
@@ -243,11 +245,13 @@ LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part,
 	if (m == NULL || jobs < 1 || part < 0 || part >= jobs) return NULL;
 	long long *owners = NULL;
 	size_t count = 0;
-	part_function_owners(m, jobs, &owners, &count);
+	owners = elisacoreStableObjectOwners(m, jobs, &count);
+	if (owners == NULL) return NULL;
 	LLVMModuleRef clone = elisacoreCloneSelectedDefinitions(m, owners, count, part, unit_namespace);
 	if (clone == NULL) { free(owners); return NULL; }
 	int ok = part_restrict_module(clone, owners, count, part, 0, m);
 	free(owners);
+	if (ok) elisacorePruneObjectDeclarations(clone);
 	char *message = NULL;
 	if (!ok || LLVMVerifyModule(clone, LLVMReturnStatusAction, &message)) {
 		if (message) LLVMDisposeMessage(message);
