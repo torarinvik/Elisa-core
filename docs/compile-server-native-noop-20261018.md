@@ -54,7 +54,7 @@ and byte limits, four warmed concurrent requests for one identity, four distinct
 identities, and unchanged native counters on completed-artifact hits.
 The local log is `/tmp/elisa-native-cache-current-race.txt`.
 
-## Performance qualification pending
+## Performance qualification protocol
 
 `BenchmarkCompileServerNativeNoop` compares the full in-process request path:
 `shards` disables only the completed-object cache; `completed` enables it. Both
@@ -162,3 +162,14 @@ refusal was exercised against the live compiler/Z3 jobs: it fingerprinted 2,138
 source files, retained an incomplete manifest with zero runs, and executed no
 benchmark. These source snapshots describe measurement-time files; the caller
 must still build the pinned binary from the intended exact source beforehand.
+
+## V2 focused verification
+
+Focused cache/native identity/concurrency tests and the two-iteration body-edit
+smoke passed without skips in 1.692s (`/tmp/elisa-native-v2-body-smoke.txt`). The
+credential absence and environment invalidation regression ran on the fingerprint
+implementation. Novel edits passed one-emitted/seven-reused shard assertions.
+Smoke samples were 42.823 ms/request for shards and 44.952 ms/request with the
+completed cache enabled; these sequential two-request samples do not establish
+an overhead regression or a gain. Paired v2 measurements remain pending.
+This supersedes the earlier prepared/untested status; promotion is still pending.

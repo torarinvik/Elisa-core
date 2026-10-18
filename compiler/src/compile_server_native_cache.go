@@ -130,7 +130,7 @@ func serverNativeEnvironmentAllowed(environment []string) bool {
 		}
 		name, _, _ := strings.Cut(entry, "=")
 		// This audited frontend-only policy is recomputed before every lookup and
-		// also remains in the exact environment identity below.
+		// also remains in the fingerprinted environment identity below.
 		if name == "ELISACORE_SUPPRESS_DEPRECATED_WARNINGS" {
 			continue
 		}
