@@ -1,0 +1,78 @@
+module Ast:
+    struct Pos:
+        line: mutable u32
+        column: mutable u32
+        offset: mutable u32
+        end_line: mutable u32
+        end_column: mutable u32
+        end_offset: mutable u32
+
+
+
+
+    struct EnumAnnotation:
+        owner: sview @source
+        name: sview @source
+        line: u32
+        # A SECOND line, for the annotations whose `line` is a sentinel tag rather than a
+        # source position (`3900000076` and friends -- the tag IS the table key). Those had
+        # no way to name where in the file they came from, and the one diagnostic that
+        # reported such an annotation printed the sentinel itself as its line number.
+        detail_line: u32 = 0
+        # Module that owns the annotation. Storage metadata is keyed by module as well as
+        # enum/field because two modules may declare the same packed hierarchy names.
+        module: sview @source = ""
+        # Stable declaration identity for effect/handler metadata. Raw owner/name remain
+        # intentionally available for diagnostics and for older metadata consumers; this
+        # numeric key prevents same-spelled declarations in different modules from aliasing.
+        identity_id: u32 = 0
+        # The annotated token's byte offset (§4.2): a line is not unique once `#line` directives
+        # restart numbering per included file, so consumers that ORDER or MATCH annotations use
+        # this when it is set. 0 = not recorded (the 231 creation sites default to it).
+        offset: u32 = 0
+        # The decorator NAME, and its ARGUMENT SLICE of `File.annotation_args`, for the
+        # validation rows a struct/enum decorator leaves behind. A decorator is ERASED into
+        # this side table before the semantic layer sees it, so without these a check can see
+        # that something was annotated but not with what, nor with which arguments.
+        #
+        # The row's own `name` is a MARKER (`__struct_annotation` / `__enum_annotation`) and
+        # the decorator's spelling lives here, deliberately: consumers keyed on a raw
+        # decorator name — `annotation.name == "c_bind"` in check_cbind_requires_c_layout —
+        # would otherwise see two rows per decorator and report twice.
+        detail_name: sview @source = ""
+        arg_start: u32 = 0
+        arg_count: u32 = 0
+        # The annotated NAME's own source extent, for rows that exist to carry one. Names held
+        # in a bare `darray[sview]` field (a loop's `variables`, a `can` clause's effect refs)
+        # have no position anywhere in the tree, and stage0 reports at the name: a row here is
+        # how the semantic layer recovers it. Defaulted for the same reason `Diagnostic.pos` is.
+        pos: Pos = Pos{line: 0, column: 0, offset: 0, end_line: 0, end_column: 0, end_offset: 0}
+
+
+
+
+
+# Source-line recognition for impl scopes. This annotation scan determines which
+# scoped declarations supply method refinements to the associated-index checker.
+
+module SemanticAssocIndexScope:
+    public:
+        ghost def line_is_impl_scope_from(annotations: darray[Ast::EnumAnnotation]&, line: u32, index: usize) -> bool:
+            requires index <= annotations.count
+            decreases annotations.count - index
+            ensure index == annotations.count implies result == false
+            ensure index < annotations.count implies result == ((annotations[index].owner == "__impl_scope" and annotations[index].line == line) or line_is_impl_scope_from(annotations, line, index + 1))
+            return false if index == annotations.count
+            return true if annotations[index].owner == "__impl_scope" and annotations[index].line == line
+            return line_is_impl_scope_from(annotations, line, index + 1)
+
+        def line_is_impl_scope(annotations: darray[Ast::EnumAnnotation]&, line: u32) -> bool:
+            ensure result == line_is_impl_scope_from(annotations, line, 0)
+            for index in 0..<annotations.count |annotations, line|:
+                invariant index <= annotations.count
+                invariant line_is_impl_scope_from(annotations, line, 0) == line_is_impl_scope_from(annotations, line, index)
+                return true if annotations[index].owner == "__impl_scope" and annotations[index].line == line
+            return false
+
+def main() -> i64:
+    return 0

@@ -36,8 +36,8 @@ func (a *Analyzer) sviewFrameWriteFree(decl *ast.FuncDecl) bool {
 	if a.sviewFrameWriteFreeCache == nil {
 		a.sviewFrameWriteFreeCache = map[*ast.FuncDecl]bool{}
 	}
-	// Decline recursive call cycles while inspecting their bodies. A recursive
-	// callee must never make a partially checked frame look write-free.
+	// Decline indirect recursive cycles while inspecting bodies. Direct self calls
+	// are handled by the whole-body gate, which checks every other operation.
 	a.sviewFrameWriteFreeCache[decl] = false
 	result := a.computeSViewFrameWriteFree(decl)
 	a.sviewFrameWriteFreeCache[decl] = result
@@ -365,7 +365,10 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 		// A default/forwarded argument can execute code absent from n.Args.
 		// Apply this guard before every callee classification, including pure
 		// equations: purity of the body says nothing about argument evaluation.
-		if !ok || callee == nil || callee.Variadic || n.HasArgForward || len(n.Args) != len(callee.Params) || !(g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
+		// A direct self call introduces no new body operations: this same gate
+		// checks the complete body, including every other call and write. Its
+		// explicit arguments still pass the effect-free checks below.
+		if !ok || callee == nil || callee.Variadic || n.HasArgForward || len(n.Args) != len(callee.Params) || !(g.directSelfCallEligible(callee) || g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
 			return false
 		}
 		for _, arg := range n.Args {
@@ -476,4 +479,59 @@ func (a *Analyzer) sviewFrameCallBodyWriteFree(decl *ast.FuncDecl, argCount int)
 		}
 	}
 	return a.sviewFrameWriteFree(decl)
+}
+
+// directSelfCallEligible is only a signature check inside the whole-body gate.
+// Generic self calls may infer a different specialization and remain outside it.
+func (g *sviewFrameGate) directSelfCallEligible(decl *ast.FuncDecl) bool {
+	if g == nil || g.a == nil || decl == nil || decl != g.decl || decl.Variadic ||
+		len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 ||
+		len(decl.RegionParams) != 0 || len(decl.PermissionParams) != 0 {
+		return false
+	}
+	sym := g.a.funcDeclSymbols[decl]
+	if sym == nil || sym.Node != decl {
+		return false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil || (!fn.ReturnBorrowedOwnerRefsKnown && !sviewFrameBuiltinBoolReturn(fn.Return)) || len(fn.Params) != len(decl.Params) ||
+		len(fn.TypeParams) != 0 || len(fn.GenericParams) != 0 || len(fn.RegionParams) != 0 || len(fn.PermissionParams) != 0 ||
+		len(fn.MutableGlobalPermissionRefs) != 0 || len(fn.MutableGlobalSourceNames) != 0 {
+		return false
+	}
+	for i, paramType := range fn.Params {
+		if paramType == nil || decl.Params[i].Mutable || g.a.paramIsMutable(decl.Params[i]) {
+			return false
+		}
+		if !sviewFrameSelfParamType(paramType) {
+			return false
+		}
+	}
+	for _, permission := range fn.PermissionRefs {
+		if !sviewFrameInspectablePermission(permission) {
+			return false
+		}
+	}
+	return true
+}
+
+// A builtin bool return cannot carry a borrowed owner, even while its body's
+// borrowed-return summary is unfinished. Other return types need that summary.
+func sviewFrameBuiltinBoolReturn(typ Type) bool {
+	builtin, ok := typ.(*BuiltinType)
+	return ok && builtin != nil && builtin.Name == "bool"
+}
+
+// Do not infer no-writes across implicit ownership transfer/drop of by-value
+// aggregates. Borrowed aggregates and primitive/view values have no such drop.
+func sviewFrameSelfParamType(typ Type) bool {
+	switch t := StripAggregateStateType(typ).(type) {
+	case *RefType:
+		return t != nil && !t.Mutable && !t.Linear
+	case *BuiltinType:
+		return t != nil && (IsNumericType(t) || IsBoolType(t))
+	case *SViewType:
+		return t != nil
+	}
+	return false
 }
