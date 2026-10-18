@@ -11,6 +11,11 @@ import (
 )
 
 func TestCompileServerResponseTracksBareFilenameExistence(t *testing.T) {
+	t.Run("request_filename", func(t *testing.T) { testCompileServerResponsePathExistence(t, false) })
+	t.Run("line_directive", func(t *testing.T) { testCompileServerResponsePathExistence(t, true) })
+}
+
+func testCompileServerResponsePathExistence(t *testing.T, directive bool) {
 	f, err := os.CreateTemp(".", "response-path-state-*.elisa")
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +30,10 @@ func TestCompileServerResponseTracksBareFilenameExistence(t *testing.T) {
 	}
 	source := "def build(owner: Arena) -> void:\n    pass\n\ndef main() -> i64:\n    return 0\n"
 	req := compileServerRequest{Mode: "obj", Filename: name, Source: source, Incremental: true}
+	if directive {
+		req.Filename = filepath.Join(t.TempDir(), "inline.elisa")
+		req.Source = "#line 1 " + name + "\n" + source
+	}
 	cache := newCompileServerSessionCache(4)
 	requireServerNativeIdentity(t, req, cache)
 	before, status := executeCompileServerRequestWithSessions(req, cache)

@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"elisacore/src/backend"
+	"elisacore/src/lexer"
 )
 
 const serverNativeCacheBytes = 128 << 20
@@ -321,26 +322,56 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 		return serverNativeIdentity{}, false
 	}
 	environmentStamp := sha256.Sum256(environmentBytes)
-	// Runtime-carrier diagnostics distinguish a synthetic bare filename from
-	// an existing source path. Inline source alone does not capture this input.
-	bareFilenameExists := false
-	if !strings.Contains(filepath.ToSlash(program.filename), "/") {
-		_, pathErr := os.Stat(program.filename)
-		bareFilenameExists = pathErr == nil
-	}
+	diagnosticPaths := serverDiagnosticPathInputs(program.filename, program.source)
 	fields := req
 	fields.Source = ""
 	fields.IR = ""
 	config, err := json.Marshal(struct {
 		Schema, Build, Cwd, Unit, MergerStamp, MergerExecutable string
 		Environment                                             [32]byte
-		BareFilenameExists                                      bool
+		DiagnosticPaths                                         []serverDiagnosticPathState
 		Merger                                                  []string
 		Request                                                 compileServerRequest
-	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, bareFilenameExists, command, fields})
+	}{"server-native-noop-v2", artifact.key, cwd, absolute, mergerStamp, executable, environmentStamp, diagnosticPaths, command, fields})
 	if err != nil {
 		return serverNativeIdentity{}, false
 	}
 	// The build key hashes the exact source; retain and compare those bytes too.
 	return serverNativeIdentity{digest: sha256.Sum256(config), unitHint: sha256.Sum256([]byte(absolute)), source: req.Source, config: string(config)}, true
+}
+
+// Runtime-carrier diagnostics distinguish synthetic bare names from existing
+// source paths. #line attribution can select names other than the request name.
+type serverDiagnosticPathState struct {
+	Path   string
+	Exists bool
+}
+
+func serverDiagnosticPathInputs(filename string, source []byte) []serverDiagnosticPathState {
+	names := map[string]bool{}
+	add := func(name string) {
+		if name != "" && name != "<unknown>" && !strings.Contains(filepath.ToSlash(name), "/") {
+			names[name] = true
+		}
+	}
+	add(filename)
+	// Ordinary source needs no tokenization for response admission. For possible
+	// attribution directives use the actual lexer, keeping comment/string syntax
+	// and directive parsing identical to the compiler rather than duplicating it.
+	if strings.Contains(string(source), "#line") {
+		for _, token := range lexer.New(filename, source).Tokenize() {
+			add(token.Pos.File)
+		}
+	}
+	paths := make([]string, 0, len(names))
+	for name := range names {
+		paths = append(paths, name)
+	}
+	sort.Strings(paths)
+	states := make([]serverDiagnosticPathState, 0, len(paths))
+	for _, path := range paths {
+		_, err := os.Stat(path)
+		states = append(states, serverDiagnosticPathState{Path: path, Exists: err == nil})
+	}
+	return states
 }
