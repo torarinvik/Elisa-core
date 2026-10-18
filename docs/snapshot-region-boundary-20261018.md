@@ -7,3 +7,20 @@ Constructing the nine pools directly in that generic caller's region and inserti
 A separate Global-axis-shaped StoreFlow control decodes snapshot-owned names into local edge arrays, computes flags, and publishes rows using independent AST/input names. It has no snapshot-to-table retention edge. A deliberate direct push of a snapshot view into table storage does retain that edge. Both programs are well-typed; the negative control tests retention summaries rather than relying on a syntax/type failure. This does not prove the complete production checker has no escape; it narrows one candidate explanation.
 
 Both permanent regression tests pass on the combined Core tree (package 0.384 seconds). Gate CLI inputs, diagnostic logs and identity are retained under `build/verification/snapshot-factory-boundary-20261018/`. The gate binary SHA is recorded in `gate-identity.json`; it was the same old Stage0 used by the source owner. No shared source or installed compiler was changed, and no full build was started. The source owner's inline workaround still requires its complete source-qualified Stage1 run.
+
+## Minimal explicit-region factory reproduction
+
+`docs/repros/explicit-region-factory-packet.elisa` reduces the factory boundary
+to a single `darray[u8]` field. Running the pinned gate compiler with
+`-emit semantic docs/repros/explicit-region-factory-packet.elisa` exits 1
+and reports inferred-region by-value escape at line 12. Gate binary SHA256:
+`563cae3a6d621ebffe4a82e00a62246c33ffa44996c46da4823b107991d0f058`.
+Rechecked locally on 2026-10-18; this is diagnostic evidence, not a fix.
+
+The factory declares both `Packet[r]` and return `@r`. The caller explicitly
+instantiates it with its destination region. A likely precision boundary is
+`currentParamRegionFromRefState`: it rejects every named region dependency,
+while `regionRefStateForExpr` represents declared call-return regions using
+exactly such dependencies. This is a hypothesis pending instrumentation and
+negative controls for mixed, shorter-lived, and stale dependencies. Do not
+suppress the escape diagnostic solely on the nominal return annotation.

@@ -1,0 +1,19 @@
+struct Packet[@r]:
+    bytes: mutable darray[u8] @r
+
+def make_packet[@r]() -> Packet[r] @r:
+    can Memory.Allocate, Abort.Panic:
+        bytes: mutable darray[u8] @r = []
+        bytes.push(7)
+        return Packet[r]{bytes: bytes}
+
+def append_packet[@r](out: mutable darray[Packet[r]]& @r) -> void:
+    can Memory.Allocate, Abort.Panic:
+        out.push(make_packet[r]())
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region owner:
+            out: mutable darray[Packet[owner]] @owner = []
+            append_packet[owner](out)
+            return out[0].bytes[0].i64()
