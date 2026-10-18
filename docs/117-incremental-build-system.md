@@ -2463,3 +2463,47 @@ controlled 137-row seed, but the source changed between snapshots, so the full
 delta should not be attributed to one fix. The log is
 `/tmp/elisa-local-compile-timing/current/seed-local-18.log`. No successful
 Stage1 compiler product has been produced yet.
+
+
+### Real parser-project edits and diagnostic-content qualification
+
+`BenchmarkIncrementalProjectAnalysis` now checks the complete diagnostic
+multiset (all position, severity and message fields), outside timed work, across
+fresh analysis, session prewarming and retained analysis. Set
+`ELISA_PROJECT_BENCH_EDITS=1` to append a unique scalar function and change its
+body on each iteration; prewarming uses a different body. Original project
+positions remain unchanged. The benchmark reports body checks as well as reuse.
+Unchanged and novel-edit smoke modes also passed repeated-iteration checks.
+
+Three alternating one-edit pairs on the frozen 2.5 MB Elisa parser snapshot
+`86e7b5e6520848f6083217b40ac7ede1b09336dfe232f64c31d544e8bda94bd1`
+compared the statement-list pruning, impossible store-summary scan gate and
+effect-field traversal plan together against their earlier implementations.
+Other committed code was held equal, with unrelated edits isolated by overlays.
+Apple M5 settings were GOMAXPROCS=4, GOGC=1200, GOMEMLIMIT=8GiB; SMT was disabled.
+Parsing, diagnostics comparison and session prewarming were outside timing.
+
+Observed fresh medians fell from 8.34 to 6.58 s, and retained medians from 11.35
+to 7.57 s. Samples were very variable: before fresh 12.66/7.49/8.34 s and retained
+7.47/17.27/11.35 s; after fresh 5.70/6.58/15.29 s and retained 6.08/7.57/9.40 s.
+These shared-host samples are not a stable throughput guarantee. Retained
+allocation was roughly 4.50 to 4.39 GB and 24.1 to 22.0 million allocations.
+
+Every run preserved 2,279 diagnostics, including the frozen snapshot's existing
+980 errors. The sorted diagnostic digest was
+`65396690155f7ad6ae758f9b9e337ee217eafbd96a98474262676748ce08a955`
+for both binaries, both modes and every warmup. This is diagnostic-content
+parity, not a comparison of every semantic side table or a successful compiler
+build: no LLVM generation, linking or executable was produced by this benchmark.
+
+The key remaining gap is coverage: each retained edit reuses one body and checks
+1,957 body invocations. A source census found 1,937 declarations and only one
+admitted return body in the original snapshot; unsupported headers, calls,
+fields, enums and structured bodies dominate. The appended changing probe is
+checked rather than replayed. Retained analysis remains slower than fresh on
+this workload. Expanding verified body/dependency reuse, rather than treating
+these allocation optimizations as completion, remains necessary.
+
+Raw samples, census, source snapshot, benchmark source, source isolation backing
+files and binary hashes are retained in
+`build/verification/incremental-real-project-edits-20261018/`.

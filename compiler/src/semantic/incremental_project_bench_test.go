@@ -3,11 +3,16 @@
 package semantic
 
 import (
+	"crypto/sha256"
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"encoding/json"
+	"fmt"
 	"os"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -35,14 +40,44 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 		b.Fatal("empty frozen project")
 	}
 	options := AnalyzeOptions{EnableSMT: os.Getenv("ELISA_PROJECT_BENCH_SMT") == "1"}
-	parse := func() *ast.File {
-		lex := lexer.New(snapshot.Filename, []byte(snapshot.Source))
+	edits := os.Getenv("ELISA_PROJECT_BENCH_EDITS") == "1"
+	if edits && strings.Contains(snapshot.Source, "__incremental_project_edit_probe") {
+		b.Fatal("frozen source already declares the edit probe")
+	}
+	parse := func(revision int) *ast.File {
+		source := snapshot.Source
+		if edits {
+			// Appending preserves all original diagnostic positions. Each timed
+			// iteration gets a novel scalar body; the prewarm uses revision -1.
+			source += fmt.Sprintf("\ndef __incremental_project_edit_probe() -> int:\n    return %d\n", revision+1)
+		}
+		lex := lexer.New(snapshot.Filename, []byte(source))
 		p := parser.New(lex.Tokenize())
 		file := p.ParseFile(snapshot.Filename)
 		if len(lex.Errors()) != 0 || len(p.Errors()) != 0 {
 			b.Fatal("frozen syntax changed")
 		}
 		return file
+	}
+	var expectedDiagnostics []string
+	checkDiagnostics := func(b *testing.B, result *Result) {
+		b.Helper()
+		current := make([]string, len(result.Diagnostics))
+		for i, diagnostic := range result.Diagnostics {
+			encoded, err := json.Marshal(diagnostic)
+			if err != nil {
+				b.Fatal(err)
+			}
+			current[i] = string(encoded)
+		}
+		sort.Strings(current)
+		if expectedDiagnostics == nil {
+			expectedDiagnostics = current
+		} else if !slices.Equal(expectedDiagnostics, current) {
+			b.Fatal("complete diagnostic multiset changed between project analyses")
+		}
+		encoded, _ := json.Marshal(current)
+		b.Logf("diagnostic-multiset-sha256=%x entries=%d", sha256.Sum256(encoded), len(current))
 	}
 	for _, mode := range []string{"fresh", "retained"} {
 		b.Run(mode, func(b *testing.B) {
@@ -52,13 +87,15 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 			expectedErrors := -1
 			if mode == "retained" {
 				session = NewIncrementalAnalysisSession()
-				expectedErrors = len(session.Analyze(parse(), options).Errors())
+				warm := session.Analyze(parse(-1), options)
+				expectedErrors = len(warm.Errors())
+				checkDiagnostics(b, warm)
 				statsBefore = session.Stats()
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				file := parse()
+				file := parse(i)
 				b.StartTimer()
 				var result *Result
 				if session != nil {
@@ -67,6 +104,7 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 					result = AnalyzeWithOptions(file, options)
 				}
 				b.StopTimer()
+				checkDiagnostics(b, result)
 				errors := len(result.Errors())
 				if expectedErrors < 0 {
 					expectedErrors = errors
@@ -77,6 +115,7 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 			}
 			if session != nil {
 				stats := session.Stats()
+				b.ReportMetric(float64(stats.PrimaryBodiesChecked-statsBefore.PrimaryBodiesChecked)/float64(b.N), "body-checks/op")
 				b.ReportMetric(float64(stats.PrimaryBodiesReused-statsBefore.PrimaryBodiesReused)/float64(b.N), "body-reuses/op")
 				b.ReportMetric(float64(stats.LocalInitializersReused-statsBefore.LocalInitializersReused)/float64(b.N), "local-init-reuses/op")
 				b.ReportMetric(float64(stats.LocalInitializersChecked-statsBefore.LocalInitializersChecked)/float64(b.N), "local-init-checks/op")
@@ -84,6 +123,11 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 				b.ReportMetric(float64(stats.LexicalQueryMemoHits-statsBefore.LexicalQueryMemoHits)/float64(b.N), "lookup-hits/op")
 			}
 			b.ReportMetric(float64(expectedErrors), "diagnostics")
+			if edits {
+				b.ReportMetric(1, "novel-body-edits/op")
+			} else {
+				b.ReportMetric(0, "novel-body-edits/op")
+			}
 			if options.EnableSMT {
 				b.ReportMetric(1, "smt-enabled")
 			} else {
