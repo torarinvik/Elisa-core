@@ -2688,3 +2688,28 @@ flow-state/type cloning a measured investigation target before adding speculativ
 field-expression cache protocols. The unfiltered profile exaggerated these
 costs by including warmup and parsing. Exact profile/source/logs are retained in
 `build/verification/incremental-labelled-profile-20261018/`.
+
+
+### Avoid recording identity-preserving clone leaves (18 October)
+
+Tracked flow-type cloning now omits cycle-map insertion for the existing
+identity-preserving terminal cases (builtin/type parameters, never/null/invalid,
+error sets, enums and opaque types). The prior map lookup remains, respecting
+caller-supplied substitutions. Recursive/mutable descriptors still get distinct
+clones and cycle entries. This does not introduce cross-revision type sharing.
+
+Three single-CPU 200ms component samples cloning records with distinct enum
+fields show median before/after 8 fields: 827/483 ns; 64: 8185/3352 ns; 256:
+31035/14357 ns. The 64-field allocation falls 19104 to 10072 bytes and 14 to
+5 allocations. This benchmark stresses the removed map growth; it does not
+represent the whole compiler. Clone/depth/incremental regressions pass under
+the race detector (13.542 s).
+
+A sequential frozen-project retained-edit pair preserves 72 reused bodies,
+2,837 restored expression nodes and the full diagnostic digest. Allocated bytes
+fall 4,475,007,704 to 4,459,585,864, with allocations 22,054,570 to 22,046,290.
+Times are 5.674/5.777 s, so no project throughput improvement is established.
+An earlier concurrently loaded sample took 11.308 s and is not a matched timing
+comparison. This commit claims a component clone improvement and reduced project
+allocation work, not a stable end-to-end speedup. Sources and exact logs are in
+`build/verification/incremental-clone-leaves-20261018/`.

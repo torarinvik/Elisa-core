@@ -178,7 +178,8 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 		seen[t] = &cloned
 		return &cloned
 	case *BuiltinType, *TypeParamType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *EnumType, *OpaqueType:
-		seen[t] = t
+		// These leaves retain identity and cannot recurse. Recording them in the
+		// cycle map adds work without providing a clone or closing a cycle.
 		return t
 	default:
 		cloned := a.substituteType(t, nil, nil, nil, nil)
