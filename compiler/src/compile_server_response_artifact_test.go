@@ -48,6 +48,26 @@ func TestCompileServerResponseRetainsConfiguredUnitWorkingSet(t *testing.T) {
 			if after.Entries > units || after.Bytes > serverNativeCacheBytes {
 				t.Fatalf("configured cache bounds exceeded: %+v", after)
 			}
+			// A new revision must not let the old revision displace another
+			// unit's only current response and trigger a project-wide miss chain.
+			last := units - 1
+			requests[last].Source = strings.Replace(requests[last].Source, "return 7", "return 8", 1)
+			var status int
+			responses[last], status = executeCompileServerRequestWithSessions(requests[last], cache)
+			if status != http.StatusOK || !responses[last].OK {
+				t.Fatal("unit edit failed")
+			}
+			analyses[last] = cache.session(requests[last].Filename, emitObject).Stats().Analyses
+			before, builds = cache.native.Stats(), cache.objects.Stats().Builds
+			for i, req := range requests {
+				response, status := executeCompileServerRequestWithSessions(req, cache)
+				if status != http.StatusOK || response != responses[i] || cache.session(req.Filename, emitObject).Stats().Analyses != analyses[i] {
+					t.Errorf("unit %d lost its current response after another unit's edit", i)
+				}
+			}
+			if cache.native.Stats().ResponseHits-before.ResponseHits != uint64(units) || cache.objects.Stats().Builds != builds {
+				t.Fatal("retained history evicted current project working set")
+			}
 		})
 	}
 }

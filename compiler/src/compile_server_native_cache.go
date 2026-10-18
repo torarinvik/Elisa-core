@@ -21,6 +21,7 @@ const serverNativeEntryOverhead = 512
 
 type serverNativeIdentity struct {
 	digest         [32]byte
+	unitHint       [32]byte // Replacement hint only; never authorizes a cache hit.
 	source, config string
 }
 type serverNativeEntry struct {
@@ -89,7 +90,11 @@ func (c *compileServerNativeCache) retainResponse(id serverNativeIdentity, respo
 		}
 		c.lru.MoveToFront(element)
 		for c.bytes > c.maxBytes-extra {
-			c.remove(c.lru.Back())
+			victim := c.evictionCandidate([32]byte{}, element)
+			if victim == nil {
+				return false
+			}
+			c.remove(victim)
 		}
 		response.Object = entry.object
 		response.Output = strings.Clone(response.Output)
@@ -114,6 +119,8 @@ type compileServerNativeCache struct {
 	mu                          sync.Mutex
 	owner                       *backend.IncrementalObjectSession
 	buckets                     map[[32]byte][]*list.Element
+	unitCounts                  map[[32]byte]int
+	historyEntries              int
 	lru                         list.List
 	maxEntries, maxBytes, bytes int
 	stats                       serverNativeStats
@@ -138,6 +145,14 @@ func (c *compileServerNativeCache) lookup(id serverNativeIdentity) (string, bool
 }
 func (c *compileServerNativeCache) remove(element *list.Element) {
 	entry := element.Value.(*serverNativeEntry)
+	if unit := entry.identity.unitHint; unit != ([32]byte{}) {
+		if c.unitCounts[unit] <= 1 {
+			delete(c.unitCounts, unit)
+		} else {
+			c.historyEntries--
+			c.unitCounts[unit]--
+		}
+	}
 	bucket := c.buckets[entry.identity.digest]
 	for i, e := range bucket {
 		if e == element {
@@ -155,6 +170,31 @@ func (c *compileServerNativeCache) remove(element *list.Element) {
 	c.bytes -= entry.bytes
 	c.lru.Remove(element)
 	c.stats.Evictions++
+}
+
+// Prefer LRU history over another unit's sole response. An incoming revision
+// makes its prior revision history too. Unknown hints keep ordinary LRU behavior;
+// collisions can affect replacement quality, never exact reuse authority.
+// protected is the object whose finalized response is being attached.
+func (c *compileServerNativeCache) evictionCandidate(incoming [32]byte, protected *list.Element) *list.Element {
+	last := c.lru.Back()
+	if last == protected && last != nil {
+		last = last.Prev()
+	}
+	// Distinct-unit streaming remains O(1) when no history can be preferred.
+	if c.historyEntries == 0 && (incoming == ([32]byte{}) || c.unitCounts[incoming] == 0) {
+		return last
+	}
+	for element := c.lru.Back(); element != nil; element = element.Prev() {
+		if element == protected {
+			continue
+		}
+		unit := element.Value.(*serverNativeEntry).identity.unitHint
+		if unit != ([32]byte{}) && (unit == incoming || c.unitCounts[unit] > 1) {
+			return element
+		}
+	}
+	return last
 }
 func (c *compileServerNativeCache) retain(id serverNativeIdentity, object string) bool {
 	remaining := c.maxBytes - serverNativeEntryOverhead
@@ -178,10 +218,19 @@ func (c *compileServerNativeCache) retain(id serverNativeIdentity, object string
 		}
 	}
 	for c.lru.Len() >= c.maxEntries || c.bytes > c.maxBytes-size {
-		c.remove(c.lru.Back())
+		c.remove(c.evictionCandidate(id.unitHint, nil))
 	}
-	entry := &serverNativeEntry{identity: serverNativeIdentity{digest: id.digest, source: strings.Clone(id.source), config: strings.Clone(id.config)}, object: strings.Clone(object), bytes: size}
+	entry := &serverNativeEntry{identity: serverNativeIdentity{digest: id.digest, unitHint: id.unitHint, source: strings.Clone(id.source), config: strings.Clone(id.config)}, object: strings.Clone(object), bytes: size}
 	element := c.lru.PushFront(entry)
+	if id.unitHint != ([32]byte{}) {
+		if c.unitCounts == nil {
+			c.unitCounts = make(map[[32]byte]int)
+		}
+		if c.unitCounts[id.unitHint] > 0 {
+			c.historyEntries++
+		}
+		c.unitCounts[id.unitHint]++
+	}
 	c.buckets[id.digest] = append(c.buckets[id.digest], element)
 	c.bytes += size
 	return true
@@ -285,5 +334,5 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 		return serverNativeIdentity{}, false
 	}
 	// The build key hashes the exact source; retain and compare those bytes too.
-	return serverNativeIdentity{digest: sha256.Sum256(config), source: req.Source, config: string(config)}, true
+	return serverNativeIdentity{digest: sha256.Sum256(config), unitHint: sha256.Sum256([]byte(absolute)), source: req.Source, config: string(config)}, true
 }

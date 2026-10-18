@@ -25,7 +25,7 @@ func TestServerResponseCacheConcurrentRetentionAndEviction(t *testing.T) {
 			for i := 0; i < 100; i++ {
 				// Every entry deliberately shares a digest bucket.
 				name := strings.Repeat(string(rune('a'+worker)), i%4+1)
-				id := serverNativeIdentity{source: name, config: "config"}
+				id := serverNativeIdentity{source: name, config: "config", unitHint: [32]byte{byte(worker + 1)}}
 				want := compileServerResponse{OK: true, Object: name, Stderr: "warning:" + name}
 				c.retainResponse(id, want, http.StatusOK)
 				if got, status, hit := c.lookupResponse(id); hit && (got != want || status != http.StatusOK) {
@@ -37,6 +37,62 @@ func TestServerResponseCacheConcurrentRetentionAndEviction(t *testing.T) {
 	wg.Wait()
 	if s := c.Stats(); s.Bytes > 4096 || s.Entries > 4 {
 		t.Fatalf("concurrent shared bounds exceeded: %+v", s)
+	}
+	count := 0
+	for _, n := range c.unitCounts {
+		count += n
+	}
+	if count != c.lru.Len() || c.historyEntries != count-len(c.unitCounts) {
+		t.Fatal("unit history accounting drifted during concurrent eviction")
+	}
+}
+
+func TestServerResponseCacheEvictsHistoryBeforeUniqueUnits(t *testing.T) {
+	c := newCompileServerNativeCache(nil, 3, 4096)
+	id := func(unit byte, source string) serverNativeIdentity {
+		return serverNativeIdentity{source: source, config: "config", unitHint: [32]byte{unit}}
+	}
+	a0, a1, b0, c0 := id(1, "a0"), id(1, "a1"), id(2, "b0"), id(3, "c0")
+	for _, key := range []serverNativeIdentity{a0, a1, b0} {
+		c.retain(key, key.source)
+	}
+	c.lookup(a0) // a0 is the most recently requested revision of its unit.
+	c.retain(c0, c0.source)
+	if _, hit := c.lookup(a1); hit {
+		t.Fatal("older revision retained instead of another unit's sole result")
+	}
+	for _, key := range []serverNativeIdentity{a0, b0, c0} {
+		if _, hit := c.lookup(key); !hit {
+			t.Fatal("unique current unit evicted while history was available")
+		}
+	}
+	a2 := id(1, "a2")
+	c.retain(a2, a2.source)
+	for _, key := range []serverNativeIdentity{a2, b0, c0} {
+		if _, hit := c.lookup(key); !hit {
+			t.Fatal("new revision displaced another current unit")
+		}
+	}
+	if c.historyEntries != 0 || len(c.unitCounts) != 3 {
+		t.Fatal("history metadata not retired")
+	}
+}
+
+func TestServerResponseCacheProtectsObjectWhileAttachingDiagnostics(t *testing.T) {
+	c := newCompileServerNativeCache(nil, 3, 2200)
+	a := serverNativeIdentity{source: "a", config: "config", unitHint: [32]byte{1}}
+	b := serverNativeIdentity{source: "b", config: "config", unitHint: [32]byte{2}}
+	c.retain(a, "a")
+	c.retain(b, "b")
+	want := compileServerResponse{OK: true, Object: "b", Stderr: strings.Repeat("w", 1400)}
+	if !c.retainResponse(b, want, http.StatusOK) {
+		t.Fatal("bounded diagnostic attachment declined")
+	}
+	if got, _, hit := c.lookupResponse(b); !hit || got != want {
+		t.Fatal("diagnostic attachment evicted its own object")
+	}
+	if _, hit := c.lookup(a); hit || c.Stats().Bytes > 2200 {
+		t.Fatal("byte pressure did not evict another entry safely")
 	}
 }
 
