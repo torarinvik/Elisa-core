@@ -833,6 +833,9 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 		region = a.returnBorrowedRegion(valueExpr)
 	}
 	if region == "" {
+		region = a.declaredCallValueRegion(valueExpr)
+	}
+	if region == "" {
 		// A region-polymorphic call's result is allocated in the AMBIENT region even though its
 		// type carries no region (region-poly returns are region-less by convention — the region
 		// rides the threaded arena, not the type). If the result transitively holds region-allocated
@@ -1599,6 +1602,18 @@ func (a *Analyzer) structInteriorTaintRegion(expr ast.Expr) string {
 // value carries: a container/view's own stamped region, or — for a region-less
 // aggregate — the interior-field taint recorded for its source local. Only
 // lattice-comparable (tracked-local) regions are reported; "" otherwise.
+// declaredCallValueRegion recovers only a live, resolved return contract.
+func (a *Analyzer) declaredCallValueRegion(expr ast.Expr) string {
+	if call, ok := stripParenExpr(expr).(*ast.CallExpr); ok {
+		if region := a.declaredCallReturnRegions[call]; region != "" {
+			if owner, state := a.lookupRegionState(region); owner != nil && !state.Destroyed {
+				return region
+			}
+		}
+	}
+	return ""
+}
+
 func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 	if r := containerRegion(valueType); r != "" {
 		if _, ok := a.regionLifetimeOrdinal(r); ok {
@@ -1614,6 +1629,11 @@ func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 	}
 	if r := a.innerRegion(a.structInteriorTaintRegion(expr), a.ownedExtractionRegion(expr)); r != "" {
 		return r
+	}
+	// An explicit return contract names the result's owner even when the
+	// aggregate has no nominal container-region stamp.
+	if region := a.declaredCallValueRegion(expr); region != "" {
+		return region
 	}
 	// A region-polymorphic call result is region-less by type but lives in the AMBIENT
 	// (threaded) region. Storing it into an interior container/view field of a region-less

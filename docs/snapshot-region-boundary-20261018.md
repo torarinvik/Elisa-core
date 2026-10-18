@@ -73,3 +73,20 @@ Regression cases reject direct, aliased, and nested independent-input aggregates
 the matching input/return region passes. The semantic `Test.*(Region|Factory)`
 suite passes (0.677 seconds). Precise call-owner candidate remains withdrawn
 pending additional review; no full Stage1 build was run.
+
+## Preserve resolved factory call owners after contract enforcement
+
+The call-owner candidate is now restored on top of the independent-input
+contract check. A specialized function's return region may already be the caller
+owner; if no formal binding remains, record that exact live owner. Both value
+interior storage checks and auto-scope escape checks consult the recorded owner
+before using the ambient allocation fallback. Dead/unresolved owners do not
+receive this precision.
+
+Tests cover the original generic Packet factory insertion, a generic forwarding
+helper with a differently named region parameter, scratch-owner insertion,
+scratch backing returned from the factory, and a region-less aggregate forwarded
+from independent `s` into an `r` return contract. Safe cases pass and all unsafe
+cases reject. The combined semantic region/factory suite passes (0.660 seconds).
+This is semantic-package evidence; no current Stage1 binary or rebuild timing
+is claimed.

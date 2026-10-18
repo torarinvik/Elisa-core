@@ -968,7 +968,14 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		return a.namedTypes["void"]
 	}
 	if appliedType.ReturnRegion != "" {
-		if region := regionBindings[appliedType.ReturnRegion]; region != "" {
+		region := regionBindings[appliedType.ReturnRegion]
+		// Explicit specialization may already have substituted the return owner.
+		if region == "" {
+			if owner, state := a.lookupRegionState(appliedType.ReturnRegion); owner != nil && !state.Destroyed {
+				region = appliedType.ReturnRegion
+			}
+		}
+		if region != "" {
 			if a.declaredCallReturnRegions == nil {
 				a.declaredCallReturnRegions = map[*ast.CallExpr]string{}
 			}
