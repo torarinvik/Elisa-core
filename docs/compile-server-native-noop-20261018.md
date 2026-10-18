@@ -145,3 +145,11 @@ Shared-tree focused tests completed successfully (3.369s, no skips), log
 parser/StoreFlow sources, and is supplemental integration evidence, not a new
 exact-source performance qualification. The isolated v2/body-edit validation
 remains pending while other compiler/Z3 processes are active.
+
+The reusable `compiler/scripts/benchmark_compile_server_native.py` harness takes
+an existing `--binary`, a fresh `--output` directory, `--benchmark Noop|BodyEdit`,
+`--iterations`, and `--pairs`. It reverses arm order each pair, rejects skipped
+or failed runs, records source/binary/environment fingerprints and per-arm logs,
+and checks source/binary stability afterward. It does not build anything.
+The harness CLI parses successfully; its complete paired execution has not yet
+been validated. Avoid concurrent compiler work when using it.
