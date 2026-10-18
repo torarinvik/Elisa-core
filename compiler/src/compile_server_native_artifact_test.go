@@ -25,7 +25,7 @@ func serverNativeArtifactSource() string {
 	return source.String()
 }
 
-func requireServerNativeIdentity(t *testing.T, request compileServerRequest, cache *compileServerSessionCache) {
+func requireServerNativeIdentity(t testing.TB, request compileServerRequest, cache *compileServerSessionCache) {
 	t.Helper()
 	program, err := loadedProgramFromRequest(request)
 	if err != nil {
@@ -211,5 +211,60 @@ func TestCompileServerNativeArtifactConcurrentSameIdentity(t *testing.T) {
 	}
 	if cache.native.Stats().Hits != hits+4 || cache.session(request.Filename, emitObject).Stats().Analyses != analyses+4 {
 		t.Fatal("concurrent reuse skipped validation or missed artifact")
+	}
+}
+
+// Both arms run the complete request path, including fresh analysis and key
+// preparation. Only completed-object memoization differs; shard reuse stays on.
+func BenchmarkCompileServerNativeNoop(b *testing.B) {
+	for _, enabled := range []bool{false, true} {
+		name := "shards"
+		if enabled {
+			name = "completed"
+		}
+		b.Run(name, func(b *testing.B) {
+			cache := newCompileServerSessionCache(4)
+			request := compileServerRequest{Mode: "obj", Filename: filepath.Join(b.TempDir(), "fixed.elisa"), Source: serverNativeArtifactSource(), Incremental: true}
+			requireServerNativeIdentity(b, request, cache)
+			if !enabled {
+				cache.native = nil
+			}
+			var expected compileServerResponse
+			for i := 0; i < 2; i++ {
+				response, status := executeCompileServerRequestWithSessions(request, cache)
+				if status != http.StatusOK || !response.OK {
+					b.Fatalf("warmup: %+v", response)
+				}
+				expected = response
+			}
+			before := cache.objects.Stats()
+			analyses := cache.session(request.Filename, emitObject).Stats().Analyses
+			var hits uint64
+			if enabled {
+				hits = cache.native.Stats().Hits
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				response, status := executeCompileServerRequestWithSessions(request, cache)
+				if status != http.StatusOK || !response.OK || response.Object != expected.Object || response.Stderr != expected.Stderr {
+					b.Fatal("request changed object or diagnostics")
+				}
+			}
+			b.StopTimer()
+			after := cache.objects.Stats()
+			if cache.session(request.Filename, emitObject).Stats().Analyses != analyses+uint64(b.N) {
+				b.Fatal("analysis skipped")
+			}
+			if enabled {
+				if cache.native.Stats().Hits != hits+uint64(b.N) || after.Builds != before.Builds || after.IRTime != before.IRTime {
+					b.Fatal("completed object was not reused")
+				}
+			} else if after.Builds-before.Builds != uint64(b.N) || after.PartitionsReused-before.PartitionsReused != uint64(8*b.N) || after.PartitionsEmitted != before.PartitionsEmitted {
+				b.Fatal("baseline did not reuse native shards")
+			}
+			b.ReportMetric(float64(after.IRTime-before.IRTime)/float64(b.N), "IR-ns/op")
+			b.ReportMetric(float64(after.NativeTime-before.NativeTime)/float64(b.N), "native-ns/op")
+		})
 	}
 }
