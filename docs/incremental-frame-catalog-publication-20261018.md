@@ -49,6 +49,19 @@ maps, ASTs, Scopes, Types, Symbols or source views. Apply all accepted changes
 under the session gate and advance the database revision once. Use explicit
 negative inputs for admitted absence. Unpublished absence remains an error.
 
+## Deterministic admission policy
+
+For the first delta API, admission is all-or-nothing: explicit removals are
+accounted before upserts, then the complete projected transaction must fit every
+reservation. If it does not, reject the entire transaction and leave the new
+revision unavailable; the caller runs cold or constructs a smaller explicit
+transaction. Do not silently omit touched queries, evict untouched owners or
+choose winners by map iteration. Already-live touched queries do not outrank
+new cells because both must fit together. Reordering equivalent patches must
+produce identical admission and current-input authority. A future partial
+admission policy requires a separately specified stable total ordering and
+explicit skipped ownership units; it cannot split a frame's completeness proof.
+
 ## Frame and binding contract
 
 Frame identity contains canonical unit identity, a supported source anchor,
@@ -111,3 +124,26 @@ does not change those files or Session. Coordinate the session API owner and
 final Core source freeze before implementation. The next implementable slice is
 owner/input-delta accounting with atomic failure semantics; production lookup
 integration follows only once current catalog completeness is authoritative.
+
+## Measured baseline
+
+`BenchmarkSessionOneCellEditPublication` alternates one existing input value in
+otherwise unchanged snapshots, after initial admission. Three 200 ms samples,
+one CPU, Apple M5 Darwin arm64, Go 1.27.2, runtime source ff7656f4:
+
+| Admitted queries/inputs | Median publication time | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| 64 | 65.692 us | 163,400 | 123 |
+| 1,024 | 1.498940 ms | 2,711,343 | 1,140 |
+| 8,192 | 10.432087 ms | 21,707,120 | 8,662 |
+
+The benchmark checks complete admission and final retained inventory. It excludes
+initial setup, query evaluation, scope construction, parsing and native output.
+It demonstrates world-size publication cost for a one-cell edit, not a compiler
+speedup or production resolver workload. Retain this baseline for comparison with
+the future delta API. Raw local output:
+`build/verification/incremental-publication-scaling-20261018/benchmark.txt`.
+
+Command: `go -C compiler test ./src/incremental -run '^$' -bench
+'^BenchmarkSessionOneCellEditPublication$' -benchmem -benchtime=200ms -count=3
+-cpu=1` (shown across lines for readability).
