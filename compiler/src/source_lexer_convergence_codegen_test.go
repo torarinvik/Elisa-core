@@ -25,7 +25,7 @@ func TestCompileServerLexerConvergenceNativeShiftedEdits(t *testing.T) {
 	}
 	code.WriteString("def main() -> i64:\n    return first()\n")
 	source := code.String()
-	cache := newCompileServerSessionCache(2)
+	cache := newCompileServerArtifactOnlyTestCache(2)
 	request := compileServerRequest{Mode: "obj", Filename: "lexer_convergence_native.elisa", Source: source, Incremental: true}
 	for i := 0; i < 2; i++ {
 		got, _ := executeCompileServerRequestWithSessions(request, cache)

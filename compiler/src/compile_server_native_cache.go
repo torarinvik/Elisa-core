@@ -27,14 +27,89 @@ type serverNativeEntry struct {
 	identity serverNativeIdentity
 	object   string
 	bytes    int
+	response *serverCachedResponse
 }
 type serverNativeStats struct {
-	Hits, Misses, Evictions uint64
-	Bytes, Entries          int
+	Hits, Misses, Evictions      uint64
+	ResponseHits, ResponseMisses uint64
+	Bytes, Entries               int
 }
 
-// Only completed native bytes are retained. Semantic results and LLVM handles
-// never enter this cache; analysis and diagnostics run before every lookup.
+type serverCachedResponse struct {
+	response compileServerResponse
+	status   int
+}
+
+func (c *compileServerNativeCache) lookupResponse(id serverNativeIdentity) (compileServerResponse, int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, element := range c.buckets[id.digest] {
+		entry := element.Value.(*serverNativeEntry)
+		if entry.identity.config == id.config && entry.identity.source == id.source && entry.response != nil {
+			c.lru.MoveToFront(element)
+			c.stats.ResponseHits++
+			return entry.response.response, entry.response.status, true
+		}
+	}
+	c.stats.ResponseMisses++
+	return compileServerResponse{}, 0, false
+}
+
+// Share the object string and the existing LRU/byte budget with artifact reuse.
+// Only finalized successful responses can authorize skipping frontend analysis.
+func (c *compileServerNativeCache) retainResponse(id serverNativeIdentity, response compileServerResponse, status int) bool {
+	if status != 200 || !response.OK || response.Object == "" {
+		return false
+	}
+	extra := 0
+	for _, value := range []string{response.Output, response.IR, response.Value, response.Stderr, response.Error, response.ErrorCode} {
+		if len(value) > c.maxBytes-extra {
+			return false
+		}
+		extra += len(value)
+	}
+	if !c.retain(id, response.Object) {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, element := range c.buckets[id.digest] {
+		entry := element.Value.(*serverNativeEntry)
+		if entry.identity.config != id.config || entry.identity.source != id.source {
+			continue
+		}
+		if entry.response != nil {
+			return true
+		}
+		if entry.object != response.Object {
+			return false // Never silently substitute bytes in a finalized response.
+		}
+		if extra > c.maxBytes-entry.bytes {
+			return false // Preserve the object-only fallback when diagnostics are too large.
+		}
+		c.lru.MoveToFront(element)
+		for c.bytes > c.maxBytes-extra {
+			c.remove(c.lru.Back())
+		}
+		response.Object = entry.object
+		response.Output = strings.Clone(response.Output)
+		response.IR = strings.Clone(response.IR)
+		response.Value = strings.Clone(response.Value)
+		response.Stderr = strings.Clone(response.Stderr)
+		response.Error = strings.Clone(response.Error)
+		response.ErrorCode = strings.Clone(response.ErrorCode)
+		entry.response = &serverCachedResponse{response: response, status: status}
+		entry.bytes += extra
+		c.bytes += extra
+		return true
+	}
+	return false // Another request may have evicted the object between locks.
+}
+
+// Completed native bytes and optionally their finalized successful response are
+// retained. Semantic results and LLVM handles never enter this cache. An exact
+// response hit skips analysis; object-only hits still validate and emit current
+// diagnostics before looking up the artifact.
 type compileServerNativeCache struct {
 	mu                          sync.Mutex
 	owner                       *backend.IncrementalObjectSession
