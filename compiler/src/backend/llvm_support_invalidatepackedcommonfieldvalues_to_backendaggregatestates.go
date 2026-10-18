@@ -242,10 +242,9 @@ func (s *functionState) emitTrapUnreachable(name string) error {
 	if err != nil {
 		return err
 	}
-	trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
-	if err != nil {
-		return err
-	}
+	// The intrinsic is already declared in this module. Reuse its LLVM type
+	// instead of retaining a fresh semantic signature for every trap site.
+	trapType := C.LLVMGlobalGetValueType(trapFn)
 	s.buildCall(trapType, trapFn, nil, "")
 	C.LLVMBuildUnreachable(s.builder)
 	return nil
