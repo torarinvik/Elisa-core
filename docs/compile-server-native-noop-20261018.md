@@ -18,11 +18,13 @@ and diagnostics are recomputed on every request.
 
 Identity covers exact source, all request fields, working directory and absolute
 unit path, the existing compiler/target/clang build-artifact key, original merger
-arguments, resolved merger executable contents, and the sorted exact environment.
+arguments, resolved merger executable contents, and a SHA-256 fingerprint of the complete sorted environment.
 Malformed UTF-8 configuration declines instead of JSON normalizing it. Hash
 buckets compare exact source and configuration bytes, including under collisions.
-The complete environment is retained in memory as part of that exact comparison;
-entries must not be logged or persisted. Compiler and loaded LLVM code belong to
+The complete environment is encoded transiently and fingerprinted before retention,
+so credentials are not copied into retained configuration strings. Environment
+equality relies on SHA-256 collision resistance; source and outer configuration
+comparisons remain exact. Entries are process-local and must not be persisted. Compiler and loaded LLVM code belong to
 the same process lifetime; this cache imports no artifacts from other processes.
 
 Only successful builds publish, after identity is recomputed and matches the
@@ -118,7 +120,7 @@ Benchmark source SHA256: `23f491e8f63b9f62fcbae51dbcbfc6b4a5dbe4e3f142ceb44aadd2
 
 Integrated into shared main by fast-forward to `334d1866`. SHA256 checks verified all five unrelated dirty/untracked files were preserved byte-for-byte; the installed compiler was retained by the repository hook. Integration metadata is in the local evidence directory. Shared-tree focused correctness validation is tracked separately from the isolated performance sample.
 
-## Novel body-edit control (prepared)
+## Novel body-edit control
 
 `BenchmarkCompileServerNativeBodyEdit` uses a fixed 16-digit hexadecimal literal
 and changes only that literal on each timed request. Both arms retain semantic
@@ -126,8 +128,8 @@ and native shard sessions; only the completed-object cache differs. Two warmups
 precede timing. Assertions require one fresh analysis and native build per edit,
 one emitted shard and seven reused shards per edit, changed nonempty object
 bytes, and no completed-object hits. The generated source formatting cost is
-included equally in both arms. This benchmark has been prepared but not run;
-there is no changed-body latency or overhead claim yet.
+included equally in both arms. Its subsequent smoke and paired results appear below; it supports only the
+fixture-level conclusions described there.
 
 ## Environment retention hardening (prepared, v2)
 
@@ -234,3 +236,19 @@ and shared process-wide LLVM/GC state means these runs complement rather than
 replace independent-process samples. Log `/tmp/elisa-native-body-interleaved.txt`:
 PASS 8.463s. Current v2 correctness and fixture-level edit behavior are qualified;
 shared-tree promotion remains a separate integration step.
+
+## Current shared integration
+
+Shared Core fast-forwarded from `4a28d6f3` to `447974b6`, including the tested v2
+environment fingerprint, body-edit controls, and paired harness. SHA256 checks
+proved all nine unrelated dirty/untracked files were preserved byte-for-byte.
+The repository hook retained the installed compiler; no standalone compiler or
+Stage1 validation gate was started. This supersedes earlier historical pending
+promotion notes. Evidence and copied logs are under
+`build/verification/server-native-v2-integration-20261018/`; raw paired manifests
+are under the two v2 benchmark directories named above.
+
+This feature accelerates exact no-op object requests. It does not remove fresh
+semantic analysis, implement dependency-directed changed-body lowering, or
+establish faster project/compiler rebuilds. Those remain part of the active
+incremental compilation work.
