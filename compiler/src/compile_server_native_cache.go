@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"container/list"
 	"crypto/sha256"
 	"encoding/json"
@@ -358,9 +359,14 @@ func serverDiagnosticPathInputs(filename string, source []byte) []serverDiagnost
 	// Ordinary source needs no tokenization for response admission. For possible
 	// attribution directives use the actual lexer, keeping comment/string syntax
 	// and directive parsing identical to the compiler rather than duplicating it.
-	if strings.Contains(string(source), "#line") {
-		for _, token := range lexer.New(filename, source).Tokenize() {
+	if bytes.Contains(source, []byte("#line")) {
+		scanner := lexer.New(filename, source)
+		for {
+			token := scanner.NextToken()
 			add(token.Pos.File)
+			if token.Kind == lexer.TOKEN_EOF {
+				break
+			}
 		}
 	}
 	paths := make([]string, 0, len(names))

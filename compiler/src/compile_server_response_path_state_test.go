@@ -74,3 +74,23 @@ func testCompileServerResponsePathExistence(t *testing.T, directive bool) {
 	assertReplay(before)
 
 }
+
+func BenchmarkServerDiagnosticPathInputs(b *testing.B) {
+	source := serverNativeArtifactSource()
+	for _, directive := range []bool{false, true} {
+		name := "ordinary"
+		text := source
+		if directive {
+			name = "attributed"
+			text = "#line 1 synthetic.elisa\n" + source
+		}
+		b.Run(name, func(b *testing.B) {
+			data := []byte(text)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = serverDiagnosticPathInputs("/virtual/unit.elisa", data)
+			}
+		})
+	}
+}
