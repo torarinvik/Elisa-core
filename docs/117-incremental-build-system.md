@@ -2713,3 +2713,31 @@ An earlier concurrently loaded sample took 11.308 s and is not a matched timing
 comparison. This commit claims a component clone improvement and reduced project
 allocation work, not a stable end-to-end speedup. Sources and exact logs are in
 `build/verification/incremental-clone-leaves-20261018/`.
+
+
+### Type-derived empty scalar return summaries (18 October)
+
+Lazy region-provenance and borrowed-owner summary inference no longer walk a
+callee's whole body merely to establish an empty summary when its resolved
+return is a recognized builtin scalar. Normal body checking remains unchanged.
+The whitelist excludes aggregates, generic/type-parameter results, references,
+unknown builtin names and explicit return-region contracts. Existing known
+summaries still take precedence. This reduces duplicated within-invocation work
+for retained edits; it does not cache summaries across revisions.
+
+Regression coverage verifies calls before callee definitions, valid and invalid
+scalar callee bodies, both published empty summary flags, and conservative
+non-scalar/region boundaries. Selected scalar/incremental/provenance/borrowed-owner/
+region/lifetime semantic checks pass under the race detector (18.965 s).
+Selected incremental/borrow/region/callback/permission backend tests also pass
+(27.363 s).
+
+On the unchanged frozen parser novel-body edit workload, all 2,279 diagnostics
+retain their established digest. One candidate sample took 5.401 s, allocated
+4,404,047,360 bytes in 21,391,770 allocations, and retained 72 bodies/2,837 nodes.
+The previous measured leaf-clone build allocated 4,459,585,864 bytes in
+22,046,290 allocations (5.777 s): about 55.5 MB and 654,520 allocation operations
+avoided. These single samples do not establish a stable whole-project throughput
+gain. SMT remains off, parsing/warmup excluded, existing errors remain 980.
+Exact sources/logs are under
+`build/verification/incremental-scalar-summaries-20261018/`.

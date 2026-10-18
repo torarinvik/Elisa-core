@@ -387,8 +387,31 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentRegionFactTransforms = savedRegionFactTransforms
 }
 
+// Scalar results cannot carry region or borrowed-owner references. Answer their
+// lazy summary query from the resolved type; the ordinary body pass still checks
+// all statements and diagnostics. Keep aggregates and generic results conservative.
+func scalarReturnHasNoReferenceProvenance(fnType *FuncType) bool {
+	if fnType == nil || fnType.ReturnRegion != "" {
+		return false
+	}
+	typ, ok := fnType.Return.(*BuiltinType)
+	if !ok || typ == nil {
+		return false
+	}
+	switch typ.Name {
+	case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f16", "f32", "f64":
+		return true
+	}
+	return false
+}
+
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
+		return
+	}
+	if scalarReturnHasNoReferenceProvenance(fnType) {
+		fnType.ReturnProvenance = regionRefState{}
+		fnType.ReturnProvenanceKnown = true
 		return
 	}
 	if a.returnProvenanceInProgress[fn] {
@@ -577,6 +600,11 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown {
+		return
+	}
+	if scalarReturnHasNoReferenceProvenance(fnType) {
+		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+		fnType.ReturnBorrowedOwnerRefsKnown = true
 		return
 	}
 	if a.returnBorrowedOwnerRefInProgress[fn] {
