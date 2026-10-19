@@ -1089,37 +1089,42 @@ func (a *Analyzer) loopBodyAssertIsPure(stmt *ast.ExprStmt) bool {
 // ordinary calls stay rejected because they may have observable effects even when their result is
 // used only by an assertion.
 func (a *Analyzer) loopAssertConditionIsSideEffectFree(expr ast.Expr) bool {
-	operatorGate := a.loopAssertOperatorGate()
+	return a.loopAssertConditionIsSideEffectFreeWithGate(expr, a.loopAssertOperatorGate())
+}
+
+// The scope stays fixed while walking a condition. Reuse its visible types instead of
+// rebuilding the entire scope map for every expression node.
+func (a *Analyzer) loopAssertConditionIsSideEffectFreeWithGate(expr ast.Expr, operatorGate *sviewFrameGate) bool {
 	switch n := expr.(type) {
 	case *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit:
 		return true
 	case *ast.Ident:
 		return n != nil
 	case *ast.ParenExpr:
-		return n != nil && a.loopAssertConditionIsSideEffectFree(n.Inner)
+		return n != nil && a.loopAssertConditionIsSideEffectFreeWithGate(n.Inner, operatorGate)
 	case *ast.FieldExpr:
-		return n != nil && !n.Safe && a.loopAssertConditionIsSideEffectFree(n.Object)
+		return n != nil && !n.Safe && a.loopAssertConditionIsSideEffectFreeWithGate(n.Object, operatorGate)
 	case *ast.IndexExpr:
 		return n != nil && n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback &&
 			n.AsSpecialize == nil && n.AsOverlayCall == nil && n.AsBuiltinDictGet == nil &&
-			a.loopAssertConditionIsSideEffectFree(n.Object) &&
-			a.loopAssertConditionIsSideEffectFree(n.Index)
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Object, operatorGate) &&
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Index, operatorGate)
 	case *ast.SliceExpr:
-		return n != nil && a.loopAssertConditionIsSideEffectFree(n.Object) &&
-			(n.Start == nil || a.loopAssertConditionIsSideEffectFree(n.Start)) &&
-			(n.End == nil || a.loopAssertConditionIsSideEffectFree(n.End))
+		return n != nil && a.loopAssertConditionIsSideEffectFreeWithGate(n.Object, operatorGate) &&
+			(n.Start == nil || a.loopAssertConditionIsSideEffectFreeWithGate(n.Start, operatorGate)) &&
+			(n.End == nil || a.loopAssertConditionIsSideEffectFreeWithGate(n.End, operatorGate))
 	case *ast.UnaryExpr:
 		return n != nil && n.LoweredCall == nil && n.Op != lexer.TOKEN_AMPERSAND && operatorGate.unaryHasNoOverload(n) &&
-			a.loopAssertConditionIsSideEffectFree(n.Operand)
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Operand, operatorGate)
 	case *ast.BinaryExpr:
 		return n != nil && n.LoweredCall == nil && operatorGate.binaryHasNoOverload(n) &&
-			a.loopAssertConditionIsSideEffectFree(n.Left) &&
-			a.loopAssertConditionIsSideEffectFree(n.Right)
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Left, operatorGate) &&
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Right, operatorGate)
 	case *ast.CastExpr:
-		return n != nil && isPureNumericValueCast(n) && a.loopAssertConditionIsSideEffectFree(n.Operand)
+		return n != nil && isPureNumericValueCast(n) && a.loopAssertConditionIsSideEffectFreeWithGate(n.Operand, operatorGate)
 	case *ast.TernaryExpr:
-		return n != nil && a.loopAssertConditionIsSideEffectFree(n.Cond) &&
-			a.loopAssertConditionIsSideEffectFree(n.Value) && a.loopAssertConditionIsSideEffectFree(n.Alt)
+		return n != nil && a.loopAssertConditionIsSideEffectFreeWithGate(n.Cond, operatorGate) &&
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Value, operatorGate) && a.loopAssertConditionIsSideEffectFreeWithGate(n.Alt, operatorGate)
 	case *ast.CallExpr:
 		if n == nil || n.Safe {
 			return false
@@ -1129,7 +1134,7 @@ func (a *Analyzer) loopAssertConditionIsSideEffectFree(expr ast.Expr) bool {
 			return false
 		}
 		for _, arg := range n.Args {
-			if !a.loopAssertConditionIsSideEffectFree(arg) {
+			if !a.loopAssertConditionIsSideEffectFreeWithGate(arg, operatorGate) {
 				return false
 			}
 		}
