@@ -1577,6 +1577,11 @@ func (a *Analyzer) currentParamRegionFromRefState(state regionRefState) (string,
 			} else if fieldRegion != region {
 				valid = false
 			}
+			// A known field recursively proves at least one parameter dependency.
+			// Preserve that evidence when the aggregate has no root dependency.
+			if fieldKnown && valid {
+				seenParam = true
+			}
 		}
 	}
 	return region, valid && seenParam
