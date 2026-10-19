@@ -483,13 +483,13 @@ func (tr *smtTranslator) mixedSignCompare(n *ast.BinaryExpr, l, r string) string
 	}
 	var other string
 	if wrap := tr.mixedSignWrapModulus(n); wrap != "" {
-		other = smtCompare(n.Op, l, "(+ "+r+" "+wrap+")")
+		other = smtCompare(n.Op, l, smtArith("+", r, wrap))
 	} else if conv, ok := tr.mixedSignConvertedRight(n, r); ok {
 		other = smtCompare(n.Op, l, conv)
 	} else {
 		other = tr.freshBoolAux()
 	}
-	return "(ite " + guard + " " + cmp + " " + other + ")"
+	return smtIteTerm(guard, cmp, other)
 }
 
 // mixedSignConvertedRight is the right operand exactly as codegen converts it to the left type
@@ -508,12 +508,12 @@ func (tr *smtTranslator) mixedSignConvertedRight(n *ast.BinaryExpr, r string) (s
 		return "", false
 	}
 	mod := new(big.Int).Lsh(big.NewInt(1), uint(lbits)).String()
-	m := "(mod " + r + " " + mod + ")"
+	m := smtModTerm(r, mod)
 	if !lsign {
 		return m, true
 	}
 	half := new(big.Int).Lsh(big.NewInt(1), uint(lbits-1)).String()
-	return "(ite (>= " + m + " " + half + ") (- " + m + " " + mod + ") " + m + ")", true
+	return smtIteTerm(smtCompare(lexer.TOKEN_GTEQ, m, half), smtArith("-", m, mod), m), true
 }
 
 // mixedSignWrapModulus returns 2^bits when the left operand is unsigned with at least the right

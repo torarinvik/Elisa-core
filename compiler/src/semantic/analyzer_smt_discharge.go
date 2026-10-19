@@ -3422,7 +3422,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if !ok {
 				return "", false
 			}
-			return "(mod " + inner + " 256)", true
+			return smtModTerm(inner, "256"), true
 		}
 		// A char uses the runtime's signed i64 representation. Converting to
 		// u64 preserves those bits, including negative values; it is not an
@@ -3552,9 +3552,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// hypothesis and a later `value % alignment` obligation refer to the same term.
 			if tr.a.provablyNonNeg(n.Left) && tr.a.provablyPositive(n.Right) {
 				if n.Op == lexer.TOKEN_PERCENT {
-					return "(mod " + l + " " + r + ")", true
+					return smtModTerm(l, r), true
 				}
-				return "(div " + l + " " + r + ")", true
+				return smtDivTerm(l, r), true
 			}
 			// SOUNDNESS: signed `INT_MIN / -1` (and `INT_MIN % -1`) OVERFLOWS — the true result -INT_MIN is
 			// not representable. On the arm64 target it wraps to INT_MIN (no hardware trap), so the exact
@@ -3567,7 +3567,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			}
 			if n.Op == lexer.TOKEN_PERCENT {
 				q := smtTruncDiv(l, r)
-				return "(- " + l + " (* " + r + " " + q + "))", true
+				return smtArith("-", l, smtArith("*", r, q)), true
 			}
 			return smtTruncDiv(l, r), true
 		case lexer.TOKEN_AMPERSAND, lexer.TOKEN_PIPE, lexer.TOKEN_CARET,
@@ -3601,7 +3601,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 // `(mod raw 2^W)` for unsigned (Euclidean mod == unsigned wrap), and a recentered mod for signed. The
 // prover only ever concludes on `unsat`, so a wrap can never fabricate a proof — at worst it declines.
 func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) string {
-	raw := "(" + op + " " + l + " " + r + ")"
+	raw := smtArith(op, l, r)
 	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
 	if !ok || bits <= 0 || bits > 64 {
 		return raw
@@ -3623,7 +3623,7 @@ func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) st
 	// Unsigned wraps modulo 2^W with well-defined two's-complement semantics (and is frequently an
 	// intentional idiom), so it is modeled exactly: `(mod raw 2^W)` is the wrapped value. This is what
 	// keeps `ensure result <= total; return total - usage` honest (declines without a guard).
-	return "(mod " + raw + " " + smtPow2(bits) + ")"
+	return smtModTerm(raw, smtPow2(bits))
 }
 
 // smtSignedWrap renders the two's-complement wrap of a `bits`-wide signed result: the machine value of
@@ -3631,7 +3631,7 @@ func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) st
 func smtSignedWrap(raw string, bits int) string {
 	half := smtPow2(bits - 1)
 	full := smtPow2(bits)
-	return "(- (mod (+ " + raw + " " + half + ") " + full + ") " + half + ")"
+	return smtArith("-", smtModTerm(smtArith("+", raw, half), full), half)
 }
 
 // bitwiseTerm models a fixed-width bitwise/shift operator (`&`, `|`, `^`, `<<`, `>>`) by bridging the
@@ -4992,11 +4992,11 @@ func (tr *smtTranslator) shiftRightBoundAux(bits, k int) string {
 // int2bv/bv2nat round trip per occurrence, which made termination proofs over view lengths exceed the
 // per-query budget.
 func smtSameWidthReinterpret(inner string, signed bool, bits int) string {
-	m := "(mod " + inner + " " + smtPow2(bits) + ")"
+	m := smtModTerm(inner, smtPow2(bits))
 	if !signed {
 		return m
 	}
-	return "(- " + m + " (ite (>= " + m + " " + smtPow2(bits-1) + ") " + smtPow2(bits) + " 0))"
+	return smtArith("-", m, smtIteTerm(smtCompare(lexer.TOKEN_GTEQ, m, smtPow2(bits-1)), smtPow2(bits), "0"))
 }
 
 func smtBitvectorRead(bvExpr string, signed bool, bits int) string {
@@ -6318,6 +6318,9 @@ func smtCounterexampleExprVar(label string) string {
 }
 
 func smtCompare(op lexer.TokenKind, l, r string) string {
+	if folded, ok := smtFoldCompare(op, l, r); ok {
+		return folded
+	}
 	switch op {
 	case lexer.TOKEN_GT:
 		return "(> " + l + " " + r + ")"
@@ -6352,6 +6355,10 @@ func smtAbs(term string) string {
 // smtTruncDiv renders Elisa/C-style integer division, which truncates toward zero. SMT-LIB `div` is
 // Euclidean, so for negative operands we divide absolute values and restore the quotient sign.
 func smtTruncDiv(left, right string) string {
+	if l, r, ok := smtIntPair(left, right); ok && r.Sign() != 0 {
+		// big.Int.Quo truncates toward zero, exactly the modeled semantics.
+		return smtBigInt(l.Quo(l, r))
+	}
 	absLeft := smtAbs(left)
 	absRight := smtAbs(right)
 	quot := "(div " + absLeft + " " + absRight + ")"
