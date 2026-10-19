@@ -41,6 +41,10 @@ func (p *Parser) tokenSpan(start, end int) []lexer.Token {
 }
 func (p *Parser) rewriteTokenKind(index int, kind lexer.TokenKind) {
 	p.observeToken(index)
+	if p.borrowedTokens {
+		p.tokens = append([]lexer.Token(nil), p.tokens...)
+		p.borrowedTokens = false
+	}
 	p.tokens[index].Kind = kind
 	// Recovery mutates the token stream. No transition containing it is reusable.
 	if p.trace != nil {

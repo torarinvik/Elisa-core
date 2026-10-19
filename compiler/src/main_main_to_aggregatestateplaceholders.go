@@ -137,7 +137,7 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 		tokens = l.Tokenize()
 		errs = l.Errors()
 	} else {
-		tokens, errs = cache.lexWithKey(key, src)
+		tokens, errs = cache.lexBorrowedWithKey(key, src)
 	}
 	frontendTimingLog("lex", lexStart)
 	if len(errs) > 0 {
@@ -150,10 +150,12 @@ func parseProgramWithTokenCache(filename string, src []byte, stderr io.Writer, c
 
 	parseStart := time.Now()
 	var p *parser.Parser
-	if wantTrace {
-		p = parser.NewWithSyntaxTrace(tokens)
-	} else {
+	if cache == nil {
 		p = parser.New(tokens)
+	} else if wantTrace {
+		p = parser.NewWithBorrowedTokensAndSyntaxTrace(tokens)
+	} else {
+		p = parser.NewWithBorrowedTokens(tokens)
 	}
 	var file *ast.File
 	if cache != nil {

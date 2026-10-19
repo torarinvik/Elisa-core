@@ -46,16 +46,22 @@ func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
 	return &sourceTokenCache{entries: map[sourceTokenKey]sourceTokenEntry{}, maxEntries: maxEntries, maxBytes: maxBytes}
 }
 
-// Every parser owns its token slice: contextual keyword handling rewrites token
-// kinds. A cold entry lexes an owned source copy because token strings are
-// zero-copy views. Pristine AST snapshots may also be retained. Lexer.New runs on every invocation so
-// parity source registration and failure cleanup retain their normal lifecycle.
+// Slice callers receive their own token storage. Parsers use immutable views and
+// detach on recovery. Cold entries own source bytes because token strings are
+// zero-copy views. Lexer.New preserves parity registration on every request.
 func (c *sourceTokenCache) lex(filename string, source []byte) ([]lexer.Token, []string) {
 	return c.lexWithKey(sourceTokenKey{filename, sha256.Sum256(source)}, source)
 }
 
 // The request key names these exact immutable source bytes.
 func (c *sourceTokenCache) lexWithKey(key sourceTokenKey, source []byte) ([]lexer.Token, []string) {
+	tokens, errors := c.lexBorrowedWithKey(key, source)
+	return append([]lexer.Token(nil), tokens...), errors
+}
+
+// Cache entries remain immutable. Parsers borrow a read-only slice and detach on the
+// exceptional token-kind rewrite; legacy slice callers still receive a copy.
+func (c *sourceTokenCache) lexBorrowedWithKey(key sourceTokenKey, source []byte) ([]lexer.Token, []string) {
 	filename := key.filename
 	c.mu.Lock()
 	c.clock++
@@ -64,7 +70,7 @@ func (c *sourceTokenCache) lexWithKey(key sourceTokenKey, source []byte) ([]lexe
 		entry.lastUse = c.clock
 		c.entries[key] = entry
 		c.mu.Unlock()
-		tokens := entry.lexed.CopyTokens()
+		tokens := entry.lexed.BorrowReadOnlyTokens()
 		errors := entry.lexed.CopyErrors()
 		_ = lexer.New(filename, source)
 		return tokens, errors
@@ -84,7 +90,7 @@ func (c *sourceTokenCache) lexWithKey(key sourceTokenKey, source []byte) ([]lexe
 		return l.Tokenize(), l.Errors()
 	}
 	lexed := lexer.TokenizeSource(filename, source, previous)
-	tokens, errors := lexed.CopyTokens(), lexed.CopyErrors()
+	tokens, errors := lexed.BorrowReadOnlyTokens(), lexed.CopyErrors()
 	key.filename = strings.Clone(filename)
 	overhead := int(unsafe.Sizeof(sourceTokenEntry{})) + len(filename) + 32
 	if overhead > c.maxBytes {

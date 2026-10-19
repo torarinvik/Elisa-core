@@ -223,7 +223,7 @@ func TestSyntaxTraceTokenReadChannelsAreClosed(t *testing.T) {
 		}
 	}
 	// A new parser field needs an explicit checkpoint/quiescence audit.
-	want := strings.Fields("trace readThrough readLength readFrom suffixReplay tokens pos errors notices exprBlockDepth nestDepth rebindCounter poolScopes nurseryGroupByPool nurseryCounter declVisibility currentVisibility allowInMembership allowTernary allowWhereExpr allowQuantifiers disallowIsComparison staticFunctionDepth pendingStmts byParSeq pendingDecls foreignEnumErrorSetEmitted pendingStateDecls stmtGuardArmed stmtGuardCond stmtGuardBlockEnd loopBreakTargets")
+	want := strings.Fields("trace readThrough readLength readFrom suffixReplay borrowedTokens tokens pos errors notices exprBlockDepth nestDepth rebindCounter poolScopes nurseryGroupByPool nurseryCounter declVisibility currentVisibility allowInMembership allowTernary allowWhereExpr allowQuantifiers disallowIsComparison staticFunctionDepth pendingStmts byParSeq pendingDecls foreignEnumErrorSetEmitted pendingStateDecls stmtGuardArmed stmtGuardCond stmtGuardBlockEnd loopBreakTargets")
 	typ := reflect.TypeOf(Parser{})
 	if typ.NumField() != len(want) {
 		t.Fatal("Parser state changed; audit syntax checkpoint coverage")

@@ -32,6 +32,11 @@ func NewWithSyntaxTrace(tokens []lexer.Token) *Parser {
 	p.observeToken(p.pos)
 	return p
 }
+func NewWithBorrowedTokensAndSyntaxTrace(tokens []lexer.Token) *Parser {
+	p := NewWithSyntaxTrace(tokens)
+	p.borrowedTokens = true
+	return p
+}
 func (p *Parser) SyntaxTrace() *SyntaxTrace {
 	if p.trace == nil || !p.trace.complete || p.trace.invalid {
 		return nil

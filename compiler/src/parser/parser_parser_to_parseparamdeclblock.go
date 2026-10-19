@@ -68,11 +68,12 @@ type Parser struct {
 	// Innermost loop's simple yielded accumulator, or "" for a statement loop.
 	loopBreakTargets []string
 	// Keep the original hot parser fields at their previous offsets.
-	trace        *SyntaxTrace
-	readThrough  int
-	readLength   bool
-	readFrom     int
-	suffixReplay *syntaxSuffixReplay
+	trace          *SyntaxTrace
+	readThrough    int
+	readLength     bool
+	readFrom       int
+	suffixReplay   *syntaxSuffixReplay
+	borrowedTokens bool
 }
 
 // takeStmtGuard consumes a recorded postfix statement guard, if any, wrapping the finished
@@ -100,6 +101,14 @@ func (p *Parser) stmtEndAhead() bool {
 
 func New(tokens []lexer.Token) *Parser {
 	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, nurseryGroupByPool: map[string]string{}, allowInMembership: true, allowTernary: true, allowWhereExpr: true}
+}
+
+// NewWithBorrowedTokens borrows a read-only slice for the duration of parsing.
+// The owner must keep it immutable. Recovery detaches before the first write.
+func NewWithBorrowedTokens(tokens []lexer.Token) *Parser {
+	p := New(tokens)
+	p.borrowedTokens = true
+	return p
 }
 
 // nurseryGroupForActivePool returns the implicit task-group variable name for the innermost

@@ -15,8 +15,9 @@ type sourceCheckpoint struct {
 }
 
 // SourceTokens owns one immutable source revision and token/checkpoint storage.
-// Only copies of its token/error slices leave this object. It never retains a
-// previous revision: prefix views and checkpoint state are rebound to its source.
+// Slice consumers get copies unless they explicitly borrow read-only tokens.
+// It never retains a previous revision: prefix views and checkpoint state are
+// rebound to its source.
 type sourceLineEpoch struct{ token, epoch int }
 
 type SourceTokens struct {
