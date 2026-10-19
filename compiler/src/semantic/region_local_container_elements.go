@@ -902,7 +902,7 @@ func (a *Analyzer) resolveReadOnlyScanCallee(call *ast.CallExpr) (*ast.FuncDecl,
 		return nil, false
 	}
 	sym, _, ok := a.lookupVisibleGlobal(ident.Name)
-	if !ok || sym == nil {
+	if !ok || sym == nil || sym.Kind != SymbolFunc {
 		return nil, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)

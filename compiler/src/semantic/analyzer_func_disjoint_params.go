@@ -80,7 +80,9 @@ func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl,
 		}
 		sym = global
 	}
-	if a.currentScope == nil && sym.Kind != SymbolFunc {
+	// Parameters can carry their enclosing FuncDecl as source metadata.
+	// That node does not turn an indirect callback into a direct function.
+	if sym.Kind != SymbolFunc {
 		return nil, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
