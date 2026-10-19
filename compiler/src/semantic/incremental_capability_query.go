@@ -412,7 +412,8 @@ func capabilityTypeProjectionBounded(root Type, maxNodes int, graph *capabilityD
 
 func (a *Analyzer) hasMutableBorrowCapability(typ Type) bool {
 	compute := func() bool {
-		return a.typeContainsMutableBorrowCapability(typ, map[Type]bool{}, map[*StructType][][]Type{}, 0)
+		var visits mutableBorrowVisitSet
+		return a.typeContainsMutableBorrowCapabilityWithVisits(typ, &visits, map[*StructType][][]Type{}, 0)
 	}
 	switch t := typ.(type) {
 	case *BuiltinType, *NeverType, *NullType, *InvalidType, *OpaqueType, *ConstEnumType, *FuncType, *SViewType, *CStrType, *ErrorSetType, *ConstParamType, *ConstValueType, *RegionParamType, *RegionValueType, *RefStorageValueType, *TypeParamType:

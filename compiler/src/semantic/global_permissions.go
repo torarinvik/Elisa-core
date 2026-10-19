@@ -743,6 +743,11 @@ func mutableBorrowStorageType(t Type) bool {
 // by-value field makes its global storage writable, but copying that aggregate
 // does not transfer a borrow capability.
 func (a *Analyzer) typeContainsMutableBorrowCapability(typ Type, seen map[Type]bool, genericSeen map[*StructType][][]Type, depth int) bool {
+	state := mutableBorrowVisitSet{large: seen}
+	return a.typeContainsMutableBorrowCapabilityWithVisits(typ, &state, genericSeen, depth)
+}
+
+func (a *Analyzer) typeContainsMutableBorrowCapabilityWithVisits(typ Type, seen *mutableBorrowVisitSet, genericSeen map[*StructType][][]Type, depth int) bool {
 	if typ == nil {
 		return false
 	}
@@ -763,19 +768,19 @@ func (a *Analyzer) typeContainsMutableBorrowCapability(typ Type, seen map[Type]b
 	case *TypeParamType:
 		// Until specialization, an opaque type parameter may carry a mutable
 		// borrow. Conservatively require the effect at transfer boundaries.
-		return !seen[typ]
+		return !seen.has(typ)
 	case *StoreRowsViewType:
 		// Row views are writable proxies into backing store columns.
-		return t != nil && !seen[typ]
+		return t != nil && !seen.has(typ)
 	case *StoreRowViewType:
-		return t != nil && !seen[typ]
+		return t != nil && !seen.has(typ)
 	}
-	if seen[typ] {
+	if seen.has(typ) {
 		return false
 	}
-	seen[typ] = true
+	seen.add(typ)
 	contains := func(child Type) bool {
-		return a.typeContainsMutableBorrowCapability(child, seen, genericSeen, depth+1)
+		return a.typeContainsMutableBorrowCapabilityWithVisits(child, seen, genericSeen, depth+1)
 	}
 	fieldContains := func(field Field) bool {
 		if field.Ghost || field.Phantom {
