@@ -1089,6 +1089,24 @@ func (a *Analyzer) aggregateRecordDefiningEquationEligible(decl *ast.FuncDecl) b
 	if a == nil || decl == nil || !decl.IsGhost || decl.IsLemma || decl.DecreasesWild != "" {
 		return false
 	}
+	// The verdict reads the callee's typed body and resolves its calls in the current resolution
+	// context; memoize per context so each call site does not re-walk the callee's call graph.
+	if a.lookupTrace != nil {
+		return a.aggregateRecordDefiningEquationEligibleUncached(decl)
+	}
+	key := a.resolutionContextKey(decl)
+	if eligible, ok := a.aggregateEquationEligibleMemo[key]; ok {
+		return eligible
+	}
+	eligible := a.aggregateRecordDefiningEquationEligibleUncached(decl)
+	if a.aggregateEquationEligibleMemo == nil {
+		a.aggregateEquationEligibleMemo = map[recursiveProofKey]bool{}
+	}
+	a.aggregateEquationEligibleMemo[key] = eligible
+	return eligible
+}
+
+func (a *Analyzer) aggregateRecordDefiningEquationEligibleUncached(decl *ast.FuncDecl) bool {
 	sym, ok := a.symbolForFuncDecl(decl)
 	if !ok || sym == nil {
 		return false

@@ -753,6 +753,13 @@ type Analyzer struct {
 	// smtDeclIDs gives each declaration a run-stable identity for SMT symbol names (smtStableDeclID).
 	smtDeclIDs        map[*ast.FuncDecl]string
 	smtDeclIDOrdinals map[string]int
+	// recursiveProofMemo caches recursiveProofMembers per resolution context.
+	recursiveProofMemo map[recursiveProofKey]map[*ast.FuncDecl]bool
+	// aggregateEquationEligibleMemo caches aggregateRecordDefiningEquationEligible likewise.
+	aggregateEquationEligibleMemo map[recursiveProofKey]bool
+	// pinnedRelationalEdges is the edge snapshot for a batch of read-only range lookups.
+	pinnedRelationalEdges      []relationalEdge
+	pinnedRelationalEdgesValid bool
 	// smtDeadPathCache memoizes cone-of-influence dead-path verdicts by the dropped text.
 	smtDeadPathCache map[string]smtVerdict
 	// recursiveCertInProgress holds the recursive calls whose termination certificate or callee

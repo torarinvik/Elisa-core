@@ -6016,12 +6016,58 @@ func (a *Analyzer) isRecursiveProofCall(decl *ast.FuncDecl) bool {
 	if decl == a.currentFuncDecl {
 		return true
 	}
-	for _, edge := range a.collectRecursiveSCCEdges(a.currentFuncDecl) {
-		if edge.Caller == decl || edge.Callee == decl {
-			return true
-		}
+	return a.recursiveProofMembers()[decl]
+}
+
+// recursiveProofKey is everything direct-call resolution reads (resolveDirectCallFuncDecl): the
+// lexical scope chain (by identity and symbol versions) and the name-visibility context, plus the
+// declaration the memoized fact is about.
+type recursiveProofKey struct {
+	root          *ast.FuncDecl
+	scope         *Scope
+	scopeVersions uint64
+	globalVersion uint64
+	namespace     string
+	usings        string
+	funcType      *FuncType
+}
+
+func (a *Analyzer) resolutionContextKey(root *ast.FuncDecl) recursiveProofKey {
+	key := recursiveProofKey{root: root, scope: a.currentScope, namespace: a.currentNamespace, usings: strings.Join(a.currentUsings, "\x00"), funcType: a.currentFuncType}
+	for cur := a.currentScope; cur != nil; cur = cur.Parent {
+		key.scopeVersions += cur.symbolsVersion + 1
 	}
-	return false
+	if a.globalScope != nil {
+		key.globalVersion = a.globalScope.symbolsVersion
+	}
+	return key
+}
+
+// recursiveProofMembers returns the functions on a call cycle through the current function. The
+// set is memoized while its resolution inputs are unchanged; a lookup-recording analysis always
+// recomputes so every resolver read is still recorded.
+func (a *Analyzer) recursiveProofMembers() map[*ast.FuncDecl]bool {
+	compute := func() map[*ast.FuncDecl]bool {
+		members := map[*ast.FuncDecl]bool{}
+		for _, edge := range a.collectRecursiveSCCEdges(a.currentFuncDecl) {
+			members[edge.Caller] = true
+			members[edge.Callee] = true
+		}
+		return members
+	}
+	if a.lookupTrace != nil {
+		return compute()
+	}
+	key := a.resolutionContextKey(a.currentFuncDecl)
+	if members, ok := a.recursiveProofMemo[key]; ok {
+		return members
+	}
+	members := compute()
+	if a.recursiveProofMemo == nil {
+		a.recursiveProofMemo = map[recursiveProofKey]map[*ast.FuncDecl]bool{}
+	}
+	a.recursiveProofMemo[key] = members
+	return members
 }
 
 func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.CallExpr) bool {
@@ -6090,31 +6136,38 @@ func (tr *smtTranslator) factPreamble() string {
 	for _, name := range names {
 		b.WriteString("(declare-const " + smtVar(name) + " Int)\n")
 	}
-	for _, name := range names {
-		v := smtVar(name)
-		if r, ok := tr.a.lookupRangeFact(name); ok {
-			b.WriteString(strings.Join(tr.rangeBoundHypotheses(name, r), ""))
-		}
-		if c, ok := tr.a.writtenConstInt(name); ok {
-			if term, ok := tr.varConstTerm(name, c); ok {
-				b.WriteString("(assert (= " + v + " " + term + "))\n")
+	rangeFacts := func() {
+		for _, name := range names {
+			v := smtVar(name)
+			if r, ok := tr.a.lookupRangeFact(name); ok {
+				b.WriteString(strings.Join(tr.rangeBoundHypotheses(name, r), ""))
+			}
+			if c, ok := tr.a.writtenConstInt(name); ok {
+				if term, ok := tr.varConstTerm(name, c); ok {
+					b.WriteString("(assert (= " + v + " " + term + "))\n")
+				}
+			}
+			if tr.nonNegDecls[name] {
+				b.WriteString("(assert (>= " + v + " 0))\n")
+			}
+			if bits, ok := tr.unsignedBits[name]; ok && bits > 0 && bits <= 64 {
+				// True type bound: an unsigned value lives in [0, 2^width). Pinning the upper bound makes
+				// the wraparound model exact for in-range computations (so divisibility through
+				// `value - value%alignment` proves) and still sound (it can only remove counterexamples).
+				b.WriteString("(assert (< " + v + " " + smtPow2(bits) + "))\n")
+			}
+			if bits, ok := tr.signedBits[name]; ok && bits > 0 && bits <= 64 {
+				// True type bound: a signed value lives in [-2^(width-1), 2^(width-1)).
+				bias := smtPow2(bits - 1)
+				b.WriteString("(assert (>= " + v + " (- " + bias + ")))\n")
+				b.WriteString("(assert (< " + v + " " + bias + "))\n")
 			}
 		}
-		if tr.nonNegDecls[name] {
-			b.WriteString("(assert (>= " + v + " 0))\n")
-		}
-		if bits, ok := tr.unsignedBits[name]; ok && bits > 0 && bits <= 64 {
-			// True type bound: an unsigned value lives in [0, 2^width). Pinning the upper bound makes
-			// the wraparound model exact for in-range computations (so divisibility through
-			// `value - value%alignment` proves) and still sound (it can only remove counterexamples).
-			b.WriteString("(assert (< " + v + " " + smtPow2(bits) + "))\n")
-		}
-		if bits, ok := tr.signedBits[name]; ok && bits > 0 && bits <= 64 {
-			// True type bound: a signed value lives in [-2^(width-1), 2^(width-1)).
-			bias := smtPow2(bits - 1)
-			b.WriteString("(assert (>= " + v + " (- " + bias + ")))\n")
-			b.WriteString("(assert (< " + v + " " + bias + "))\n")
-		}
+	}
+	if tr.a != nil {
+		tr.a.withPinnedRelationalEdges(rangeFacts)
+	} else {
+		rangeFacts()
 	}
 	// Array declarations (docs/90 brick 90-5): each integer-element array/darray modeled as an SMT
 	// (Array Int Int). Deterministic order.

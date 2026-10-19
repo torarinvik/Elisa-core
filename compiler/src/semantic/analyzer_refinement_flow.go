@@ -621,6 +621,31 @@ type relationalEdge struct {
 //
 // Only the four ordering operators (<=, <, >=, >) are admitted; == and != are not monotone
 // chains and are skipped (sound).
+// relationalEdgesForLookup returns the current relational edges, reusing the batch snapshot
+// while one is pinned (withPinnedRelationalEdges) instead of re-walking every scope.
+func (a *Analyzer) relationalEdgesForLookup() []relationalEdge {
+	if a.pinnedRelationalEdgesValid {
+		return a.pinnedRelationalEdges
+	}
+	return a.collectRelationalEdges()
+}
+
+// withPinnedRelationalEdges runs read-only range lookups against one edge snapshot. Callers must
+// not change scope facts or bindings inside run.
+func (a *Analyzer) withPinnedRelationalEdges(run func()) {
+	if a == nil || a.pinnedRelationalEdgesValid {
+		run()
+		return
+	}
+	a.pinnedRelationalEdges = a.collectRelationalEdges()
+	a.pinnedRelationalEdgesValid = true
+	defer func() {
+		a.pinnedRelationalEdges = nil
+		a.pinnedRelationalEdgesValid = false
+	}()
+	run()
+}
+
 func (a *Analyzer) collectRelationalEdges() []relationalEdge {
 	if a == nil || a.currentScope == nil {
 		return nil
@@ -689,7 +714,7 @@ func (a *Analyzer) collectRelationalEdges() []relationalEdge {
 // Only bounds that reach a variable with a known direct range (or written-const) are
 // admitted — a chain that terminates in another un-anchored variable stays open (fail-closed).
 func (a *Analyzer) transitiveRangeFact(name string) (numRange, bool) {
-	edges := a.collectRelationalEdges()
+	edges := a.relationalEdgesForLookup()
 	if len(edges) == 0 {
 		return numRange{}, false
 	}

@@ -98,6 +98,9 @@ type smtAtomScanner struct {
 	offset int
 }
 
+// smtAtomDelimiter marks the bytes that end a plain atom: `() \n\t\r|"`.
+var smtAtomDelimiter = [256]bool{'(': true, ')': true, ' ': true, '\n': true, '\t': true, '\r': true, '|': true, '"': true}
+
 func (scan *smtAtomScanner) next() (string, bool) {
 	sexpr := scan.text
 	for scan.offset < len(sexpr) {
@@ -122,7 +125,7 @@ func (scan *smtAtomScanner) next() (string, bool) {
 			scan.offset = j + 1
 		default:
 			j := i
-			for j < len(sexpr) && !strings.ContainsRune("() \n\t\r|\"", rune(sexpr[j])) {
+			for j < len(sexpr) && !smtAtomDelimiter[sexpr[j]] {
 				j++
 			}
 			scan.offset = j
@@ -297,6 +300,11 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 		}
 	}
 	query = smtStripAbstractionOnly(query)
+	// Weakening and slicing only act on quantified hypotheses. Text without a quantifier
+	// spelling has no quantifier atom, so both would decline after re-parsing every command.
+	if !strings.Contains(query, "forall") && !strings.Contains(query, "exists") {
+		return check(query)
+	}
 	// Related quantified callee clauses can overwhelm an otherwise simple
 	// arithmetic proof. Try a bounded weakening first, accepting UNSAT only.
 	if canBudget {
