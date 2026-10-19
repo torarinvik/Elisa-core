@@ -3,12 +3,14 @@
 package backend
 
 /*
+#include <stdlib.h>
 #include <llvm-c/Core.h>
 */
 import "C"
 
 import (
 	"fmt"
+	"unsafe"
 
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
@@ -32,7 +34,10 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if base.Name != "" {
 		specializationBase = base.Name
 	}
-	specializedName := mangleGenericType(specializationBase, orderedArgs)
+	specializedName, err := g.mangleGenericType(specializationBase, orderedArgs)
+	if err != nil {
+		return nil, nil, err
+	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
@@ -59,7 +64,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 // ensureSpecializedFunction: mangle a per-binding name, specialize the signature, and emit
 // the body with the bindings in scope so references to T resolve. Returns the specialized
 // symbol name so callers can declare/call it.
-func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *semantic.FuncType, implTypeParams []string, typeBindings map[string]semantic.Type) (C.LLVMValueRef, string, *semantic.FuncType, error) {
+func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *semantic.FuncType, implTypeParams []string, owner *semantic.StaticImpl, methodName string, typeBindings map[string]semantic.Type) (C.LLVMValueRef, string, *semantic.FuncType, error) {
 	if decl == nil || base == nil {
 		return nil, "", nil, fmt.Errorf("impl-method specialization requires a function declaration and type")
 	}
@@ -75,7 +80,16 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 	if base.Name != "" {
 		specializationBase = base.Name
 	}
-	specializedName := mangleGenericType(specializationBase, orderedArgs)
+	var err error
+	specializationBase, err = genericImplSpecializationBase(specializationBase, owner, methodName)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	specializedName, err := g.mangleGenericType(specializationBase, orderedArgs)
+	if err != nil {
+		return nil, "", nil, err
+	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
@@ -114,13 +128,21 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 	if base.Name != "" {
 		specializationBase = base.Name
 	}
-	specializedName := mangleGenericType(specializationBase, orderedArgs)
+	specializedName, err := g.mangleGenericType(specializationBase, orderedArgs)
+	if err != nil {
+		return nil, nil, err
+	}
+	symbolName := legacyGenericExternName(specializationBase, orderedArgs)
+
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
-	value, err := g.ensureFunctionDeclared(specializedName, specializedType)
+	if err := g.checkGenericExternABI(symbolName, specializedType); err != nil {
+		return nil, nil, err
+	}
+	value, err := g.ensureFunctionDeclared(symbolName, specializedType)
 	return value, specializedType, err
 }
 
@@ -556,4 +578,66 @@ func orderedGenericTypeArgs(fnType *semantic.FuncType, decl *ast.FuncDecl, bindi
 		return nil
 	}
 	return args
+}
+
+// Legacy external spellings remain ABI names, not specialization authority.
+// Distinct structural arguments may share one spelling only when the current
+// lowered signature, calling convention and ABI parameter attributes agree.
+func (g *llvmGenerator) checkGenericExternABI(name string, fn *semantic.FuncType) error {
+	cname := C.CString(g.llvmSymbolName(name))
+	defer C.free(unsafe.Pointer(cname))
+	existing := C.LLVMGetNamedFunction(g.module, cname)
+	if existing == nil {
+		return nil
+	}
+	if err := g.ensureDeclaredFunctionType(name, existing, fn); err != nil {
+		return err
+	}
+	cc, _ := g.llvmCallConvForFunc(fn)
+	if C.LLVMGetFunctionCallConv(existing) != cc {
+		return fmt.Errorf("generic extern ABI calling convention conflict for %s", name)
+	}
+	typ, err := g.lowerFunctionTypeForSymbol(name, fn)
+	if err != nil {
+		return err
+	}
+	probeName := C.CString(".elisa.generic.abi.probe")
+	defer C.free(unsafe.Pointer(probeName))
+	probe := C.LLVMAddFunction(g.module, probeName, typ)
+	defer C.LLVMDeleteFunction(probe)
+	g.applyAggregateAbiAttrs(probe, fn)
+	for index := C.LLVMAttributeIndex(0); index <= C.LLVMAttributeIndex(C.LLVMCountParams(probe)); index++ {
+		count := C.LLVMGetAttributeCountAtIndex(existing, index)
+		if count != C.LLVMGetAttributeCountAtIndex(probe, index) {
+			return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
+		}
+		if count == 0 {
+			continue
+		}
+		left := make([]C.LLVMAttributeRef, int(count))
+		right := make([]C.LLVMAttributeRef, int(count))
+		C.LLVMGetAttributesAtIndex(existing, index, &left[0])
+		C.LLVMGetAttributesAtIndex(probe, index, &right[0])
+		have := make(map[C.LLVMAttributeRef]bool, len(left))
+		for _, attr := range left {
+			have[attr] = true
+		}
+		for _, attr := range right {
+			if !have[attr] {
+				return fmt.Errorf("generic extern ABI attribute conflict for %s", name)
+			}
+		}
+	}
+	return nil
+}
+
+func genericImplSpecializationBase(base string, owner *semantic.StaticImpl, method string) (string, error) {
+	if owner == nil {
+		return "", fmt.Errorf("missing generic impl owner")
+	}
+	receiver, err := semantic.TypeSymbolKey(owner.Receiver)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d:%s|%d:%s|%d:%s|%s", len(owner.InterfaceName), owner.InterfaceName, len(receiver), receiver, len(method), method, base), nil
 }

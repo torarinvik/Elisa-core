@@ -124,7 +124,7 @@ def kernel(buf: view[i32]) -> void:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	if strings.Contains(output, "call void @arena_da_copy_exact__i32(") {
+	if strings.Contains(output, `call void @"arena_da_copy_exact$generic_v1$`) {
 		return
 	}
 	if strings.Contains(output, "call ptr @arena_memcpy(") {
@@ -151,7 +151,7 @@ def kernel(buf: view[i32]) -> bool:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	if strings.Contains(output, "call i1 @arena_da_eq_exact__i32(") {
+	if strings.Contains(output, `call i1 @"arena_da_eq_exact$generic_v1$`) {
 		return
 	}
 	if strings.Contains(output, "call i64 @memcmp(") || strings.Contains(output, "call i32 @memcmp(") {
@@ -210,7 +210,7 @@ def kernel(buf: view[u8]) -> void:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	if strings.Contains(output, "call void @arena_da_fill__u8(") {
+	if strings.Contains(output, `call void @"arena_da_fill$generic_v1$`) {
 		return
 	}
 	if strings.Contains(output, "call ptr @memset(") {

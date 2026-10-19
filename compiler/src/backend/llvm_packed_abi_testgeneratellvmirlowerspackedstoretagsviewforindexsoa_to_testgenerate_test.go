@@ -65,7 +65,7 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
-	for _, check := range []string{"@__parallel_for_0_worker", "@pool_submit1__", "@task_group_add__", "@task_group_wait_all(", "call i64 @ctx_packed_store_count(", "call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word("} {
+	for _, check := range []string{"@__parallel_for_0_worker", `@"pool_submit1$generic_v1$`, `@"task_group_add$generic_v1$`, "@task_group_wait_all(", "call i64 @ctx_packed_store_count(", "call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word("} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}

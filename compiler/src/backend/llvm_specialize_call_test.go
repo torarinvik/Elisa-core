@@ -3,6 +3,8 @@
 package backend
 
 import (
+	"elisacore/src/semantic"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -35,16 +37,22 @@ def use_gate() -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	if !strings.Contains(output, "define i64 @run_pair__i64__i64(ptr %0, i64 %1)") {
+	i64type := &semantic.BuiltinType{Name: "i64"}
+	gateType := &semantic.StructType{Name: "SharedGate"}
+	pairInt := genericIRSymbolForTest(t, "run_pair", i64type, i64type)
+	callInt := genericIRSymbolForTest(t, "ctx_concurrency_work1_new", i64type, i64type)
+	pairGate := genericIRSymbolForTest(t, "run_pair", gateType, i64type)
+	callGate := genericIRSymbolForTest(t, "ctx_concurrency_work1_new", gateType, i64type)
+	if !strings.Contains(output, fmt.Sprintf("define i64 @%s(ptr %%0, i64 %%1)", pairInt)) {
 		t.Fatalf("expected i64 specialization of run_pair, got:\n%s", output)
 	}
-	if !strings.Contains(output, "call i64 @ctx_concurrency_work1_new__i64__i64(ptr %fn1, i64 %arg2)") {
+	if !strings.Contains(output, fmt.Sprintf("call i64 @%s(ptr %%fn1, i64 %%arg2)", callInt)) {
 		t.Fatalf("expected i64 specialization of ctx_concurrency_work1_new call inside run_pair__i64__i64, got:\n%s", output)
 	}
-	if !strings.Contains(output, "define i64 @run_pair__SharedGate__i64(ptr %0, %SharedGate %1)") {
+	if !strings.Contains(output, fmt.Sprintf("define i64 @%s(ptr %%0, %%SharedGate %%1)", pairGate)) {
 		t.Fatalf("expected SharedGate specialization of run_pair, got:\n%s", output)
 	}
-	if !strings.Contains(output, "call i64 @ctx_concurrency_work1_new__SharedGate__i64(ptr %fn1, %SharedGate %arg2)") {
+	if !strings.Contains(output, fmt.Sprintf("call i64 @%s(ptr %%fn1, %%SharedGate %%arg2)", callGate)) {
 		t.Fatalf("expected SharedGate specialization of ctx_concurrency_work1_new call inside run_pair__SharedGate__i64, got:\n%s", output)
 	}
 }
@@ -72,12 +80,13 @@ def main() -> i64:
 	if err != nil {
 		t.Fatal(err)
 	}
+	makeSymbol := genericIRSymbolForTest(t, "make", &semantic.BuiltinType{Name: "i64"})
 	definitions, calls := 0, 0
 	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, "define ") && strings.Contains(line, "@make__") {
+		if strings.HasPrefix(line, "define ") && strings.Contains(line, `@"make$generic_v1$`) {
 			definitions++
 		}
-		if strings.Contains(line, "call ") && strings.Contains(line, "@make__i64(") {
+		if strings.Contains(line, "call ") && strings.Contains(line, "@"+makeSymbol+"(") {
 			calls++
 		}
 	}

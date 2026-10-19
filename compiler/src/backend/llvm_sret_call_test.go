@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,8 @@ def read_generic_large() -> i64:
 	if !strings.Contains(output, "call void @pass_large(ptr sret(%LargeResult)") || !strings.Contains(output, "ptr byval(%LargeResult)") {
 		t.Fatalf("large aggregate parameter/return call must use the memory-class ABI, got IR:\n%s", output)
 	}
-	genericCallStart := strings.Index(output, "call void @identity__LargeResult(")
+	identitySymbol := genericIRSymbolForTest(t, "identity", &semantic.StructType{Name: "LargeResult"})
+	genericCallStart := strings.Index(output, "call void @"+identitySymbol+"(")
 	if genericCallStart < 0 {
 		t.Fatalf("generic large aggregate call must use the specialized sret ABI, got IR:\n%s", output)
 	}

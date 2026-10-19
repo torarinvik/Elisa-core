@@ -30,8 +30,11 @@ static char* elisacorePrintType(LLVMTypeRef Type) {
 import "C"
 
 import (
+	"crypto/sha256"
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
+	"encoding/hex"
+	"fmt"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -211,8 +214,20 @@ func substituteRegionName(region string, subst map[string]semantic.Type) string 
 	}
 	return region
 }
-func runtimeDynArrayName(elem semantic.Type) string {
-	return mangleGenericType("DynArray", []semantic.Type{elem})
+func (g *llvmGenerator) runtimeDynArrayName(elem semantic.Type) (string, error) {
+	// Preserve established builtin carrier names, which are also consumed by
+	// runtime IR. Nominal/compound elements use the tagged structural identity.
+	if builtin, ok := elem.(*semantic.BuiltinType); ok && builtin != nil && builtin.Name != "" && sanitizeIdentifier(builtin.Name) == builtin.Name {
+		return "DynArray__" + builtin.Name, nil
+	}
+	switch elem.(type) {
+	case *semantic.SViewType:
+		return "DynArray__sview", nil
+	case *semantic.CStrType:
+		return "DynArray__cstr", nil
+	}
+
+	return g.mangleGenericLayoutType("DynArray", []semantic.Type{elem})
 }
 func structGenericParams(base *semantic.StructType) []ast.GenericParam {
 	if base == nil {
@@ -274,7 +289,56 @@ func genericBindingsForArgs(params []ast.GenericParam, args []semantic.Type) map
 	}
 	return bindings
 }
-func mangleGenericType(base string, args []semantic.Type) string {
+func genericInstantiationKey(base string, args []semantic.Type, layout bool) (string, error) {
+	var key strings.Builder
+	fmt.Fprintf(&key, "%d:%s|%d|", len(base), base, len(args))
+	var identity string
+	var err error
+	if layout {
+		key.WriteString("nominal-layout-v1|")
+		identity, err = semantic.TypeSymbolKeysForNominalLayout(args)
+	} else {
+		key.WriteString("specialization-v1|")
+		identity, err = semantic.TypeSymbolKeys(args)
+	}
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&key, "%d:%s|", len(identity), identity)
+
+	return key.String(), nil
+}
+
+func (g *llvmGenerator) mangleGenericType(base string, args []semantic.Type) (string, error) {
+	return g.mangleGenericSymbol(base, args, false)
+}
+
+func (g *llvmGenerator) mangleGenericLayoutType(base string, args []semantic.Type) (string, error) {
+	return g.mangleGenericSymbol(base, args, true)
+}
+
+func (g *llvmGenerator) mangleGenericSymbol(base string, args []semantic.Type, layout bool) (string, error) {
+	key, err := genericInstantiationKey(base, args, layout)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256([]byte(key))
+	prefix := sanitizeIdentifier(base)
+	if len(prefix) > 48 {
+		prefix = prefix[:48]
+	}
+	name := prefix + "$generic_v1$" + hex.EncodeToString(digest[:])
+	if g.genericSymbolKeys == nil {
+		g.genericSymbolKeys = make(map[string]string)
+	}
+	if previous, exists := g.genericSymbolKeys[name]; exists && previous != key {
+		return "", fmt.Errorf("generic symbol digest collision for %s", prefix)
+	}
+	g.genericSymbolKeys[name] = key
+	return name, nil
+}
+
+func legacyGenericExternName(base string, args []semantic.Type) string {
 	parts := make([]string, 0, len(args))
 	for _, arg := range args {
 		parts = append(parts, sanitizeIdentifier(arg.String()))

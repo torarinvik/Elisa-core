@@ -3,6 +3,8 @@
 package backend
 
 import (
+	"elisacore/src/semantic"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -52,9 +54,10 @@ def has_imported(value: Flags[RoutineFlag]&) -> bool:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
+	flagsType := genericIRLayoutNameForTest(t, "Flags", &semantic.ConstEnumType{Name: "RoutineFlag"})
 	for _, check := range []string{
-		"%Flags__RoutineFlag = type { i64 }",
-		"define %Flags__RoutineFlag @build_flags",
+		fmt.Sprintf("%%%s = type { i64 }", flagsType),
+		fmt.Sprintf("define %%%s @build_flags", flagsType),
 		"define i1 @has_imported",
 		"flags.has",
 	} {

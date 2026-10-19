@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,8 @@ def main() -> i64:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	start := strings.Index(output, "@map__i64__i64(")
+	symbol := genericIRSymbolForTest(t, "map", &semantic.BuiltinType{Name: "i64"}, &semantic.BuiltinType{Name: "i64"})
+	start := strings.Index(output, "@"+symbol+"(")
 	if start < 0 {
 		t.Fatalf("expected i64 optional specialization, got:\n%s", output)
 	}

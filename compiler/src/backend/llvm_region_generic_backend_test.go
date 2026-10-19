@@ -45,7 +45,7 @@ def main() -> i64:
 	if strings.Contains(output, "<null operand!") {
 		t.Fatalf("region-generic calls must carry the matching Arena argument, got invalid LLVM IR:\n%s", output)
 	}
-	if !strings.Contains(output, "@extract__arena") {
+	if !strings.Contains(output, `@"extract$generic_v1$`) {
 		t.Fatalf("region-generic function should be specialized for the concrete result region:\n%s", output)
 	}
 }

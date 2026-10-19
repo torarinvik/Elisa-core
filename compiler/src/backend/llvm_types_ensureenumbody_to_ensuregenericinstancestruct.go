@@ -391,7 +391,10 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 	return payloadType, nil
 }
 func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef, error) {
-	name := runtimeDynArrayName(elem)
+	name, err := g.runtimeDynArrayName(elem)
+	if err != nil {
+		return nil, err
+	}
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err
@@ -548,7 +551,14 @@ func (g *llvmGenerator) ensureOptionalType(optionalType *semantic.OptionalType) 
 	return ty, nil
 }
 func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstanceType) (C.LLVMTypeRef, error) {
-	name := mangleGenericType(inst.Name, inst.Args)
+	qualifiedBase := inst.Name
+	if base, ok := inst.Base.(*semantic.StructType); ok && base.Namespace != "" {
+		qualifiedBase = base.Namespace + "::" + base.Name
+	}
+	name, err := g.mangleGenericLayoutType(qualifiedBase, inst.Args)
+	if err != nil {
+		return nil, err
+	}
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err

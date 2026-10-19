@@ -82,7 +82,7 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 		if !ok || methodDecl == nil {
 			return nil, nil, true, fmt.Errorf("parametric impl method %s.%s has no body to specialize", ref.InterfaceName, ref.MethodName)
 		}
-		_, specializedName, specializedType, err := s.g.ensureSpecializedImplMethod(methodDecl, fnType, impl.TypeParams, subst)
+		_, specializedName, specializedType, err := s.g.ensureSpecializedImplMethod(methodDecl, fnType, impl.TypeParams, impl, ref.MethodName, subst)
 		if err != nil {
 			return nil, nil, true, err
 		}

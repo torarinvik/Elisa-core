@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"elisacore/src/semantic"
 	"strings"
 	"testing"
 )
@@ -68,7 +69,8 @@ def reuse_lexical_pool() -> i64:
 	}
 	body := functionBodyForDeferTest(t, output, "reuse_lexical_pool")
 	newIndex := strings.Index(body, "call %ThreadPool @pool_new")
-	submitIndex := strings.Index(body, "@pool_submit1__i64__i64(ptr %workers")
+	submitSymbol := genericIRSymbolForTest(t, "pool_submit1", &semantic.BuiltinType{Name: "i64"}, &semantic.BuiltinType{Name: "i64"})
+	submitIndex := strings.Index(body, "@"+submitSymbol+"(ptr %workers")
 	waitIndex := strings.Index(body, "call void @task_group_wait_all")
 	shutdownIndex := strings.Index(body, "call void @pool_shutdown")
 	returnIndex := strings.Index(body, "ret i64 17")

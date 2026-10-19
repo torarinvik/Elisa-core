@@ -181,7 +181,7 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 
 type llvmGenerator struct {
 	// panicReportFn is the module's outlined panic reporter (llvm_panic_report.go), created lazily.
-	panicReportFn C.LLVMValueRef
+	panicReportFn             C.LLVMValueRef
 	sameNameWrapperDecisions  map[*semantic.ExportedFunc]bool
 	result                    *semantic.Result
 	optLevel                  OptimizationLevel
@@ -206,6 +206,7 @@ type llvmGenerator struct {
 	packedVariantPayloadTypes map[*semantic.EnumVariant]C.LLVMTypeRef
 	commonFieldLayouts        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
 	specializedFuncTypes      map[string]*semantic.FuncType
+	genericSymbolKeys         map[string]string
 	functions                 map[string]C.LLVMValueRef
 	globals                   map[string]C.LLVMValueRef
 	constEvalScopes           []map[string]semantic.ConstValue

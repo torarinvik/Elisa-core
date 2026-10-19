@@ -39,7 +39,7 @@ def main() -> i64 can[Memory.Allocate, Abort.Panic]:
 	if strings.Contains(output, "<null operand!") {
 		t.Fatalf("generic sview region must lower with valid hidden arena operands, got invalid LLVM IR:\n%s", output)
 	}
-	if !strings.Contains(output, "call %StringView @unwrap_view__r") {
+	if !strings.Contains(output, `call %StringView @"unwrap_view$generic_v1$`) {
 		t.Fatalf("generic view accessor should receive the borrowed region:\n%s", output)
 	}
 	if !strings.Contains(output, "call ptr @arena_alloc(ptr %1,") || !strings.Contains(output, "call ptr @arena_realloc(ptr %1,") {
