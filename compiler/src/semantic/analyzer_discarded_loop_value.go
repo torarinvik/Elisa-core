@@ -69,7 +69,7 @@ func (a *Analyzer) checkDiscardedLoopValues(fn *ast.FuncDecl) {
 			}
 			walk(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range syntaxWalkFields(v.Type()) {
 				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
