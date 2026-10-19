@@ -133,9 +133,6 @@ func (p *Parser) activePoolName() string {
 	}
 	return p.poolScopes[len(p.poolScopes)-1]
 }
-func (p *Parser) peek() lexer.TokenKind {
-	return p.cur().Kind
-}
 func (p *Parser) expect(kind lexer.TokenKind) lexer.Token {
 	tok := p.cur()
 	if tok.Kind != kind {

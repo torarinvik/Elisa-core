@@ -181,7 +181,7 @@ func TestSyntaxTraceTokenReadChannelsAreClosed(t *testing.T) {
 		allowed := map[string]bool{}
 		switch path {
 		case "parser_token_access.go":
-			for _, name := range strings.Fields("observeToken hasToken tokenAt tokenCount tokenSpan rewriteTokenKind tokenAtOrLast cur peekAt advance seek") {
+			for _, name := range strings.Fields("observeToken hasToken tokenAt tokenCount tokenSpan rewriteTokenKind tokenAtOrLast cur peek peekAt advance seek") {
 				allowed[name] = true
 			}
 		case "parser_estimate.go":

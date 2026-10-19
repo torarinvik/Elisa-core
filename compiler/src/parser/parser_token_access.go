@@ -70,6 +70,12 @@ func (p *Parser) cur() lexer.Token {
 	}
 	return p.tokens[p.pos]
 }
+func (p *Parser) peek() lexer.TokenKind {
+	if p.pos >= len(p.tokens) {
+		return lexer.TOKEN_EOF
+	}
+	return p.tokens[p.pos].Kind
+}
 func (p *Parser) peekAt(offset int) lexer.TokenKind {
 	i := p.pos + offset
 	p.observeToken(i)
