@@ -121,6 +121,16 @@ func BenchmarkIncrementalProjectAnalysis(b *testing.B) {
 			}
 			if session != nil {
 				stats := session.Stats()
+				// These distinguish missing reuse coverage from bounded-cache pressure.
+				// Counters are deltas after prewarm, while retained bytes are a gauge.
+				b.ReportMetric(float64(stats.ColdFallbackAnalyses-statsBefore.ColdFallbackAnalyses)/float64(b.N), "cold-fallbacks/op")
+				b.ReportMetric(float64(stats.CapacityLimitedAnalyses-statsBefore.CapacityLimitedAnalyses)/float64(b.N), "capacity-limited/op")
+				b.ReportMetric(float64(stats.CapacitySkippedQueries-statsBefore.CapacitySkippedQueries)/float64(b.N), "capacity-skips/op")
+				b.ReportMetric(float64(stats.ProductAdmissionMisses-statsBefore.ProductAdmissionMisses)/float64(b.N), "product-misses/op")
+				b.ReportMetric(float64(stats.BindingSpecAdmissionMisses-statsBefore.BindingSpecAdmissionMisses)/float64(b.N), "binding-misses/op")
+				b.ReportMetric(float64(stats.RetainedProductBytes), "retained-product-bytes")
+				b.ReportMetric(float64(stats.CapabilityProductsReused-statsBefore.CapabilityProductsReused)/float64(b.N), "capability-reuses/op")
+				b.ReportMetric(float64(stats.CapabilityProjectionDeclines-statsBefore.CapabilityProjectionDeclines)/float64(b.N), "capability-declines/op")
 				b.ReportMetric(float64(stats.PrimaryBodiesChecked-statsBefore.PrimaryBodiesChecked)/float64(b.N), "body-checks/op")
 				b.ReportMetric(float64(stats.PrimaryBodiesReused-statsBefore.PrimaryBodiesReused)/float64(b.N), "body-reuses/op")
 				b.ReportMetric(float64(stats.LocalInitializersReused-statsBefore.LocalInitializersReused)/float64(b.N), "local-init-reuses/op")
