@@ -968,11 +968,13 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		return a.namedTypes["void"]
 	}
 	if appliedType.ReturnRegion != "" {
-		region := regionBindings[appliedType.ReturnRegion]
-		// Explicit specialization may already have substituted the return owner.
-		if region == "" {
-			if owner, state := a.lookupRegionState(appliedType.ReturnRegion); owner != nil && !state.Destroyed {
-				region = appliedType.ReturnRegion
+		// appliedType already contains simultaneous caller-region substitution.
+		// Looking this name up in the callee bindings again would turn a->b,
+		// b->c into an incorrect a->c return owner.
+		region := appliedType.ReturnRegion
+		if !a.lookupRegionParam(region) {
+			if owner, state := a.lookupRegionState(region); owner == nil || state.Destroyed {
+				region = ""
 			}
 		}
 		if region != "" {
@@ -983,7 +985,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		}
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
-	resultType := a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+	resultType := a.substituteType(ft.Return, bindings, shapeBindings, regionBindings, permissionBindings)
 	if callback, ok := resultType.(*FuncType); ok {
 		callback = a.cloneFunctionValueType(callback)
 		callback.FunctionReturnSourceNames = mergePermissionFamilies(callback.FunctionReturnSourceNames, []string{ft.Name})

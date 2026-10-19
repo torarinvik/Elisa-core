@@ -1713,6 +1713,9 @@ func (a *Analyzer) structInteriorTaintRegion(expr ast.Expr) string {
 func (a *Analyzer) declaredCallValueRegion(expr ast.Expr) string {
 	if call, ok := stripParenExpr(expr).(*ast.CallExpr); ok {
 		if region := a.declaredCallReturnRegions[call]; region != "" {
+			if a.lookupRegionParam(region) {
+				return region
+			}
 			if owner, state := a.lookupRegionState(region); owner != nil && !state.Destroyed {
 				return region
 			}
