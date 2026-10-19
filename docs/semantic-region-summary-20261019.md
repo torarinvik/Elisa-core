@@ -1,0 +1,9 @@
+# Common-region summary optimization (2026-10-19)
+
+The common explicit-region helper now retains one region string. Empty information or a second distinct region makes the final answer unknown, so traversal can stop. It no longer builds and iterates a region-name set. Cycle handling and query-local type-evidence memoization from 3ae27ae6 remain intact.
+
+Validation: 370 selected production semantic tests passed, with one existing skip, using `Test.*(Region|SView|Container)`. Candidate and semantic source hashes remained unchanged during the overlay test. Independent carrier tests include 36,000 cyclic-root comparisons and every handled type branch. Permanent order/cycle regressions are in common_region_order_regression_test.go.
+
+A single real-Type benchmark binary embedded both the committed 3ae27ae6 helper and the candidate. Baseline/candidate/candidate/baseline arms supplied six samples per implementation, 150 ms per sample. Production structs used map-backed fields. Median changes: leaf -28.79%, recursive struct -12.75%, shared-reference struct -0.77%, sixteen nested references -0.63%, negative cycle -2.63%. Mixed-region input improved 96.12% because a conflict avoided a later wide subtree; its allocation fell from 3208 to zero bytes. Other cases retained their allocation counts. Near-zero differences should be treated as noise.
+
+These are component observations on an Apple M5, not a whole-compiler speedup or a fully isolated host result. The initial mutable-baseline run was invalidated and excluded. Private receipts, frozen implementations, commands and logs are under /private/tmp/elisa-common-region-summary-20261019; real-bench-receipt.json binds source and binary hashes, and real-bench-summary.json holds medians. Private temporary evidence is not a portable benchmark archive.

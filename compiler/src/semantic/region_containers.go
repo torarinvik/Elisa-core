@@ -127,20 +127,17 @@ func containerRegion(t Type) string {
 }
 
 type explicitTypeRegionSummary struct {
-	regions map[string]struct{}
+	region  string
 	unknown bool
 }
 
 func commonExplicitTypeRegion(typ Type) string {
-	summary := explicitTypeRegionSummary{regions: make(map[string]struct{})}
+	summary := explicitTypeRegionSummary{}
 	collectExplicitTypeRegions(typ, &summary, map[Type]bool{}, map[Type]uint8{}, map[Type]bool{})
-	if summary.unknown || len(summary.regions) != 1 {
+	if summary.unknown {
 		return ""
 	}
-	for region := range summary.regions {
-		return region
-	}
-	return ""
+	return summary.region
 }
 
 func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, seen map[Type]bool, infoMemo map[Type]uint8, infoActive map[Type]bool) {
@@ -153,7 +150,11 @@ func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, se
 			summary.unknown = true
 			return
 		}
-		summary.regions[region] = struct{}{}
+		if summary.region == "" {
+			summary.region = region
+		} else if summary.region != region {
+			summary.unknown = true
+		}
 	}
 	visit := func(child Type) { collectExplicitTypeRegions(child, summary, seen, infoMemo, infoActive) }
 	switch value := typ.(type) {
