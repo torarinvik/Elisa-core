@@ -199,3 +199,40 @@ func TestSourceConvergenceCertifiesBackwardLineIndentReads(t *testing.T) {
 	changed := strings.Replace(source, "    and leftlong", "        and left", 1)
 	assertSourceTokensCold(t, changed, old)
 }
+
+func TestSourceDeferredPrefixFailedSuffixReplay(t *testing.T) {
+	source := []byte(convergenceFixture())
+	previous := TokenizeSource("rollback.elisa", source, nil)
+	cp := previous.checkpoints[1]
+	out := &SourceTokens{filename: previous.filename, source: copySourceSlice(source)}
+	builder := sourceTokenBuilder{out: out, prefix: previous.tokens[:cp.count], oldSource: previous.source}
+	current := cloneLexerState(cp.state, previous.source, out.source)
+	// A suffix token with a view before the converged boundary cannot be rebased.
+	// Fail after copying some suffix tokens, exercising rollback after the prefix
+	// has already moved into the new revision's independent backing.
+	previous.tokens[len(previous.tokens)-1].Text = bytesToStringView(previous.source[:1])
+	convergence := sourceConvergence{old: previous}
+	if convergence.copySuffix(&builder, &current, cp) {
+		t.Fatal("invalid suffix view unexpectedly accepted")
+	}
+	if len(out.tokens) != cp.count || builder.count() != cp.count || len(builder.prefix) != 0 || builder.oldSource != nil {
+		t.Fatal("failed replay left partial suffix or double-counted prefix")
+	}
+	if len(out.checkpoints) != 0 || out.suffixReused != 0 {
+		t.Fatal("failed replay published suffix metadata")
+	}
+	expected := append([]Token(nil), New("rollback.elisa", source).Tokenize()[:cp.count]...)
+	for i := range previous.source {
+		previous.source[i] = '?'
+	}
+	for i := range previous.tokens {
+		previous.tokens[i] = Token{}
+	}
+	if !reflect.DeepEqual(out.tokens, expected) {
+		t.Fatal("materialized prefix retained prior revision storage")
+	}
+	builder.materialize(builder.count())
+	if !reflect.DeepEqual(out.tokens, expected) {
+		t.Fatal("EOF materialization duplicated the prefix after failed replay")
+	}
+}

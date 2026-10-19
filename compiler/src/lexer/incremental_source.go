@@ -36,6 +36,31 @@ func (s *SourceTokens) CopyErrors() []string    { return append([]string(nil), s
 func (s *SourceTokens) ReusedTokens() int       { return s.reused }
 func (s *SourceTokens) SuffixReusedTokens() int { return s.suffixReused }
 
+// sourceTokenBuilder borrows a prefix only during construction. Materialization
+// creates independent backing and rebinds its views before the result escapes.
+type sourceTokenBuilder struct {
+	out       *SourceTokens
+	prefix    []Token
+	oldSource []byte
+}
+
+func (b *sourceTokenBuilder) count() int { return len(b.prefix) + len(b.out.tokens) }
+func (b *sourceTokenBuilder) materialize(capacity int) {
+	count := b.count()
+	capacity = max(capacity, count)
+	if len(b.prefix) == 0 && cap(b.out.tokens) >= capacity {
+		return
+	}
+	tokens := make([]Token, count, capacity)
+	for i, token := range b.prefix {
+		tokens[i] = rebaseToken(token, b.oldSource, b.out.source)
+	}
+	copy(tokens[len(b.prefix):], b.out.tokens)
+	b.out.tokens = tokens
+	b.prefix = nil
+	b.oldSource = nil
+}
+
 // TokenizeSource resumes only a prefix whose complete observed read range is
 // unchanged. A compatible lexer checkpoint inside an identical byte suffix can
 // also converge; source-attribution epochs distinguish relative lines from #line resets.
@@ -44,6 +69,10 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 	l := New(result.filename, result.source)
 	l.trackReads = true
 	capacity := max(16, len(source)/4)
+	if previous == nil || previous.filename != filename {
+		return tokenizeFreshSource(result, l, capacity)
+	}
+	builder := sourceTokenBuilder{out: result}
 	var checkpoint *sourceCheckpoint
 	if previous != nil && previous.filename == filename {
 		common := 0
@@ -58,14 +87,8 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 		}
 	}
 	if checkpoint != nil {
-		capacity = max(capacity, checkpoint.count+(len(source)-checkpoint.state.pos)/4)
-		if checkpoint.count >= len(previous.tokens)/2 {
-			capacity = max(capacity, len(previous.tokens)+max(0, len(source)-len(previous.source))*2)
-		}
-		result.tokens = make([]Token, 0, capacity)
-		for _, token := range previous.tokens[:checkpoint.count] {
-			result.tokens = append(result.tokens, rebaseToken(token, previous.source, result.source))
-		}
+		builder.prefix = previous.tokens[:checkpoint.count]
+		builder.oldSource = previous.source
 		for _, epoch := range previous.lineEpochs {
 			if epoch.token >= checkpoint.count {
 				break
@@ -83,18 +106,63 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 				break
 			}
 		}
-	} else {
+	}
+	var convergence *sourceConvergence
+	if checkpoint == nil || len(previous.tokens)-checkpoint.count >= sourceCheckpointStride {
+		convergence = newSourceConvergence(previous, result)
+	}
+	// Small revisions and edits without a viable suffix use direct output.
+	// Deferring a long dirty tail would otherwise grow a scratch buffer and then
+	// copy it again at EOF, adding work to edits that cannot converge.
+	deferTokens := convergence != nil && len(previous.tokens) > 8*sourceCheckpointStride
+	if checkpoint != nil && deferTokens {
+		result.tokens = make([]Token, 0, 2*sourceCheckpointStride)
+	}
+	if checkpoint != nil && !deferTokens {
+		capacity = max(capacity, checkpoint.count+(len(source)-checkpoint.state.pos)/4)
+		if checkpoint.count >= len(previous.tokens)/2 {
+			capacity = max(capacity, len(previous.tokens)+max(0, len(source)-len(previous.source))*2)
+		}
+		builder.materialize(capacity)
+	}
+	if checkpoint == nil {
+		if deferTokens {
+			capacity = min(capacity, 2*sourceCheckpointStride)
+		}
 		result.tokens = make([]Token, 0, capacity)
 	}
-	convergence := newSourceConvergence(previous, result)
+	count := builder.count()
+	for {
+		token := l.NextToken()
+		result.noteLineEpoch(count, l.lineEpoch)
+		result.tokens = append(result.tokens, token)
+		count++
+		if token.Kind == TOKEN_EOF {
+			break
+		}
+		if convergence != nil && convergence.replay(&builder, l) {
+			break
+		}
+		if count%sourceCheckpointStride == 0 && len(result.checkpoints) < sourceCheckpointLimit {
+			result.addCheckpoint(*l, result.source, result.source, count, l.readLimit)
+		}
+	}
+	builder.materialize(builder.count())
+	if cap(result.tokens) > 2*len(result.tokens) {
+		result.tokens = copySourceSlice(result.tokens)
+	}
+	result.errors = copySourceSlice(l.Errors())
+	return result
+}
+
+// Initial tokenization has no convergence or borrowed prefix to manage.
+func tokenizeFreshSource(result *SourceTokens, l *Lexer, capacity int) *SourceTokens {
+	result.tokens = make([]Token, 0, capacity)
 	for {
 		token := l.NextToken()
 		result.noteLineEpoch(len(result.tokens), l.lineEpoch)
 		result.tokens = append(result.tokens, token)
 		if token.Kind == TOKEN_EOF {
-			break
-		}
-		if convergence != nil && convergence.replay(result, l) {
 			break
 		}
 		if len(result.tokens)%sourceCheckpointStride == 0 && len(result.checkpoints) < sourceCheckpointLimit {

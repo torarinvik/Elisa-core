@@ -56,7 +56,8 @@ func compatibleConvergence(old, current *Lexer) bool {
 	return old.trackReads && current.trackReads && old.filename == current.filename && old.col == current.col && old.atLineStart == current.atLineStart && old.lastTokenKind == current.lastTokenKind && old.parenDepth == 0 && current.parenDepth == 0 && !old.pendingGroupedBlock && !current.pendingGroupedBlock && len(old.pendingToks) == 0 && len(current.pendingToks) == 0 && len(old.pendingPatternBlocks) == 0 && len(current.pendingPatternBlocks) == 0 && len(old.groupedBlockContexts) == 0 && len(current.groupedBlockContexts) == 0 && len(old.errors) == 0 && len(current.errors) == 0 && slices.Equal(old.indentStack, current.indentStack)
 }
 
-func (c *sourceConvergence) replay(out *SourceTokens, current *Lexer) bool {
+func (c *sourceConvergence) replay(builder *sourceTokenBuilder, current *Lexer) bool {
+	out := builder.out
 	for c.candidate < len(c.old.checkpoints) && c.old.checkpoints[c.candidate].state.pos+c.delta < current.pos {
 		c.candidate++
 	}
@@ -76,7 +77,7 @@ func (c *sourceConvergence) replay(out *SourceTokens, current *Lexer) bool {
 		if oldLine < c.tailStart || newLine != oldLine+c.delta {
 			continue
 		}
-		return c.copySuffix(out, current, cp)
+		return c.copySuffix(builder, current, cp)
 	}
 	return false
 }
@@ -167,15 +168,12 @@ func (c *sourceTailCopier) state(old Lexer, required int) (Lexer, bool) {
 	return result, true
 }
 
-func (c *sourceConvergence) copySuffix(out *SourceTokens, current *Lexer, cp sourceCheckpoint) bool {
+func (c *sourceConvergence) copySuffix(builder *sourceTokenBuilder, current *Lexer, cp sourceCheckpoint) bool {
+	out := builder.out
 	copier := sourceTailCopier{old: c.old.source, new: out.source, offsetDelta: c.delta, lineDelta: current.line - cp.state.line, epochDelta: current.lineEpoch - cp.state.lineEpoch, baseEpoch: cp.state.lineEpoch, baseOffset: cp.state.pos, filenames: map[string]string{}}
-	start, epochs := len(out.tokens), len(out.lineEpochs)
+	start, epochs := builder.count(), len(out.lineEpochs)
 	total := start + len(c.old.tokens) - cp.count
-	if cap(out.tokens) < total {
-		grown := make([]Token, start, total)
-		copy(grown, out.tokens)
-		out.tokens = grown
-	}
+	builder.materialize(total)
 	epochIndex := sort.Search(len(c.old.lineEpochs), func(i int) bool { return c.old.lineEpochs[i].token > cp.count })
 	epoch := c.old.epochAt(cp.count)
 	for index := cp.count; index < len(c.old.tokens); index++ {
