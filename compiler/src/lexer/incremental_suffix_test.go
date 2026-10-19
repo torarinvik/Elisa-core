@@ -98,22 +98,21 @@ func TestSourceConvergenceChainedAttributionHistories(t *testing.T) {
 
 func BenchmarkSourceConvergenceEarlyShift(b *testing.B) {
 	source := convergenceFixture()
+	revisions := make([][]byte, 16)
+	for i := range revisions {
+		revisions[i] = []byte(strings.Replace(source, "seed <- 1", fmt.Sprintf("seed <- %d\n\n", 10000+i), 1))
+	}
 	previous := TokenizeSource("convergence.elisa", []byte(source), nil)
 	for _, retained := range []bool{false, true} {
 		b.Run(fmt.Sprint(retained), func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				changed := []byte(strings.Replace(source, "seed <- 1", fmt.Sprintf("seed <- %d\n\n", 10000+i), 1))
-				var old *SourceTokens
-				if retained {
-					old = previous
-				}
-				current := TokenizeSource("convergence.elisa", changed, old)
-				if retained && current.SuffixReusedTokens() == 0 {
-					b.Fatal("no convergence")
+			if retained {
+				for _, source := range revisions {
+					if TokenizeSource("convergence.elisa", source, previous).SuffixReusedTokens() == 0 {
+						b.Fatal("early-shift fixture did not reuse its suffix")
+					}
 				}
 			}
+			benchmarkSourceRevisions(b, "convergence.elisa", previous, revisions, retained)
 		})
 	}
 }
