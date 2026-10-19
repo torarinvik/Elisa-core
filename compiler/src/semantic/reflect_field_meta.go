@@ -16,7 +16,8 @@ import (
 // returned metadata is exactly what reflect would return.
 
 type reflectTypeMeta struct {
-	fields []reflect.StructField
+	fields          []reflect.StructField
+	compositeFields []int
 	// byName maps every name t.FieldByName resolves (direct or promoted, unambiguous) to its
 	// Index. Built eagerly from VisibleFields, so it is immutable once published.
 	byName map[string][]int
@@ -58,6 +59,13 @@ func reflectMetaSlow(t reflect.Type) *reflectTypeMeta {
 	meta := &reflectTypeMeta{fields: make([]reflect.StructField, t.NumField()), byName: map[string][]int{}}
 	for i := range meta.fields {
 		meta.fields[i] = t.Field(i)
+		f := meta.fields[i]
+		if f.IsExported() && f.Type != syntaxWalkPositionType {
+			switch f.Type.Kind() {
+			case reflect.Pointer, reflect.Interface, reflect.Struct, reflect.Slice, reflect.Array, reflect.Map:
+				meta.compositeFields = append(meta.compositeFields, i)
+			}
+		}
 	}
 	for _, vf := range reflect.VisibleFields(t) {
 		if f, ok := t.FieldByName(vf.Name); ok {
@@ -93,3 +101,7 @@ func reflectFieldByName(v reflect.Value, name string) reflect.Value {
 	}
 	return v.FieldByIndex(index)
 }
+
+// reflectCompositeFields preserves exported composite fields, including maps,
+// for walkers that never act on scalar values or source positions.
+func reflectCompositeFields(t reflect.Type) []int { return reflectMetaOf(t).compositeFields }

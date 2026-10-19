@@ -170,11 +170,8 @@ func returnElementWalk(v reflect.Value, visit func(*ast.ReturnStmt), seen map[ui
 			returnElementWalk(v.Elem(), visit, seen)
 		}
 	case reflect.Struct:
-		rfs := reflectFields(v.Type())
-		for i := 0; i < v.NumField(); i++ {
-			if rfs[i].IsExported() {
-				returnElementWalk(v.Field(i), visit, seen)
-			}
+		for _, i := range reflectCompositeFields(v.Type()) {
+			returnElementWalk(v.Field(i), visit, seen)
 		}
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
