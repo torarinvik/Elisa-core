@@ -98,7 +98,13 @@ func localHypothesisSymbol(line string) (string, bool) {
 // single-symbol bound assertions (`(assert (< v_x 256))`) only constrain one symbol, so they must not
 // make every declared local look reachable.
 func smtPreambleContext(preamble string) string {
-	var b strings.Builder
+	b := smtTextPool.Get().(*smtTextBuilder)
+	defer func() {
+		if cap(b.buf) <= smtTextBuilderMaxRetained {
+			b.buf = b.buf[:0]
+			smtTextPool.Put(b)
+		}
+	}()
 	for _, line := range strings.SplitAfter(preamble, "\n") {
 		if strings.HasPrefix(line, "(declare-") || strings.HasPrefix(line, "(define-fun ") || strings.HasPrefix(line, ";") {
 			continue

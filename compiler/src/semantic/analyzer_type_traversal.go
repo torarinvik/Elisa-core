@@ -49,7 +49,19 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		return false
 	}
 	return a.memoTypePredicate(&a.affineHandleMemo, t, func() bool {
-		return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+		seen := a.typeSeenScratch
+		if seen == nil || a.typeSeenScratchBusy {
+			seen = map[Type]bool{}
+		} else {
+			clear(seen)
+			a.typeSeenScratchBusy = true
+			defer func() { a.typeSeenScratchBusy = false }()
+		}
+		result := a.containsAffineHandleValuesWithSeen(t, seen, 0)
+		if a.typeSeenScratch == nil && len(seen) <= 1024 {
+			a.typeSeenScratch = seen
+		}
+		return result
 	})
 }
 

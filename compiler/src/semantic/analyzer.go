@@ -742,6 +742,7 @@ type Analyzer struct {
 	smtSolver      smtSolverHandle
 	smtUnavailable bool
 	smtStats       SMTStats
+	smtTextFree    []*smtTextBuilder // recycled SMT text buffers; see smt_text_scratch.go
 	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
 	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
@@ -911,6 +912,9 @@ type Analyzer struct {
 	typeShapesFrozen bool
 	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
 	affineHandleMemo map[Type]bool
+	// typeSeenScratch is a reused visited set for containsAffineHandleValues traversals.
+	typeSeenScratch     map[Type]bool
+	typeSeenScratchBusy bool
 	// borrowedOwnerRefMemo caches containsBorrowedOwnerRefValues likewise.
 	borrowedOwnerRefMemo map[Type]bool
 	// regionRefsMemo caches typeCanContainRegionRefs likewise.

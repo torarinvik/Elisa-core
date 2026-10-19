@@ -368,9 +368,14 @@ func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extr
 	locals := a.smtImmutableLocalHypotheses(tr)
 	others := a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
-		context := smtPreambleContext(tr.factPreamble()) + requires + others + obligation
+		preamble := tr.factPreamble()
+		context := smtPreambleContext(preamble) + requires + others + obligation
 		queryLocals := locals
-		if len(tr.boolLocalRefs) != 0 {
+		if len(tr.boolLocalRefs) == 0 {
+			// Nothing below mutates tr or the analyzer's facts before smtCheckQuery renders the
+			// preamble again, so hand it the text already built (it is GBs of allocation per seed).
+			tr.reusePreamble, tr.reusePreambleOK = preamble, true
+		} else {
 			context = smtBoolMacroContext(tr, context)
 			boolDemandContext := context + sliceImmutableLocalHypotheses(locals, context)
 			queryLocals += a.smtImmutableBoolLocalHypotheses(tr, boolDemandContext)
@@ -673,7 +678,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	// A cached verdict still means the SMT tier handled this obligation, even when
 	// no long-lived solver process needs to be started for the query.
 	a.smtStats.Enabled = true
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
+	query := tr.takeFactPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
 	if hit, ok := a.smtCachedQuery(query); ok {
 		return hit.proven, hit.ce
 	}
@@ -2503,7 +2508,9 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 // smtTranslator lowers the integer/bool expression fragment to SMT-LIB2, collecting the free
 // variables it declares so their flow facts can be asserted as hypotheses.
 type smtTranslator struct {
-	stringBindings map[string]smtConstantStringBinding // immutable bindings selected by each substitution environment
+	reusePreamble   string // single-use handoff from smtCheckVCMulti; see takeFactPreamble
+	reusePreambleOK bool
+	stringBindings  map[string]smtConstantStringBinding // immutable bindings selected by each substitution environment
 	// String-view classifier params are represented by fresh, unconstrained Ints. Each
 	// literal observed in this query gets a distinct integer ID, preserving exact equality
 	// and exclusivity against known literals without modeling arbitrary string contents.
@@ -6132,13 +6139,32 @@ func (tr *smtTranslator) callEquationEligible(decl *ast.FuncDecl) bool {
 // factPreamble emits the declarations for every free variable the translation touched, plus the
 // integer flow facts known about them (range bounds, written-constant equalities) as hypotheses. The
 // facts are a SOUND SUBSET of what holds, which is why only an `unsat` result concludes a proof.
+// takeFactPreamble returns the preamble a caller already rendered for this exact translator state
+// (see smtCheckVCMulti), else renders it. The handoff is single-use.
+func (tr *smtTranslator) takeFactPreamble() string {
+	if !tr.reusePreambleOK {
+		return tr.factPreamble()
+	}
+	preamble := tr.reusePreamble
+	tr.reusePreamble, tr.reusePreambleOK = "", false
+	if smtPreambleShadow {
+		if fresh := tr.factPreamble(); fresh != preamble {
+			panic("smt preamble reuse: stale preamble")
+		}
+	}
+	return preamble
+}
+
+var smtPreambleShadow = os.Getenv("ELISA_SMT_PREAMBLE_SHADOW") != ""
+
 func (tr *smtTranslator) factPreamble() string {
 	names := make([]string, 0, len(tr.decls))
 	for name := range tr.decls {
 		names = append(names, name)
 	}
 	sort.Strings(names) // deterministic query text (stable across runs / cache-friendly)
-	var b strings.Builder
+	b := tr.a.borrowSMTText()
+	defer tr.a.releaseSMTText(b)
 	if tr.a != nil && tr.a.currentClosedWorldTheory != "" {
 		b.WriteString("; closed-world theory: " + tr.a.currentClosedWorldTheory + "\n")
 	}
