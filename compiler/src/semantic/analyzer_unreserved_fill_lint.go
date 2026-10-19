@@ -161,7 +161,7 @@ func (a *Analyzer) descendStmtLists(stmt ast.Stmt, outerPrev ast.Stmt) {
 			}
 			walk(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range syntaxWalkFields(v.Type()) {
 				walk(v.Field(i))
 			}
 		case reflect.Slice:
