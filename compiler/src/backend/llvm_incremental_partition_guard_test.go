@@ -51,6 +51,7 @@ func TestIncrementalObjectPartitionDefinitionGuards(t *testing.T) {
 #include <llvm/Support/SourceMgr.h>
 #include <string>
 extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitions(LLVMModuleRef, const long long *, size_t, int, const char *);
+extern "C" void elisacorePruneObjectDeclarations(LLVMModuleRef);
 int main() {
  const std::string base = R"(
 @count = private global i32 0
@@ -103,6 +104,28 @@ define i32 @main() {
   }
   if (llvm::verifyModule(*module)) return 50+i;
  }
+ // Pruning is narrower than GlobalDCE: preserve owned/address-significant
+ // definitions, initializer closure, and globals referenced only by metadata.
+ llvm::LLVMContext pruneContext;
+ llvm::SMDiagnostic pruneError;
+ auto pruneModule = llvm::parseAssemblyString(R"(
+@unused = private unnamed_addr constant i32 41
+@address_significant = private constant i32 42
+@public = constant i32 43
+@leaf = private unnamed_addr constant i32 44
+@root = global ptr @leaf
+@metadata_only = private unnamed_addr constant i32 45
+@section_root = private unnamed_addr constant i32 46, section "special"
+@externally_initialized = private unnamed_addr externally_initialized constant i32 47
+!keep = !{!0}
+!0 = !{ptr @metadata_only}
+)", pruneError, pruneContext);
+ if (!pruneModule || llvm::verifyModule(*pruneModule)) return 80;
+ elisacorePruneObjectDeclarations(llvm::wrap(pruneModule.get()));
+ if (pruneModule->getNamedGlobal("unused")) return 81;
+ for (const char *name : {"address_significant", "public", "leaf", "root", "metadata_only", "section_root", "externally_initialized"})
+   if (!pruneModule->getNamedGlobal(name)) return 82;
+ if (llvm::verifyModule(*pruneModule)) return 83;
  return 0;
 }
 `

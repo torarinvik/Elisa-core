@@ -47,8 +47,22 @@ extern "C" long long *elisacoreStableObjectOwners(
 // makes unrelated declaration insertion/removal invisible to a shard's exact
 // bitcode key. Referenced prototypes and their ABI/attributes remain inputs.
 extern "C" void elisacorePruneObjectDeclarations(LLVMModuleRef module) {
+  auto &shard = *llvm::unwrap(module);
+  // Globally unnamed local constants are duplicated rather than assigned an
+  // external owner. Once other function bodies are removed, an unused copy
+  // cannot affect this shard's native object. Keep referenced initializers,
+  // metadata roots, address-significant constants and externally owned globals.
+  // A single pass is deliberately conservative for dead initializer chains.
+  for (auto it = shard.global_begin(); it != shard.global_end();) {
+    llvm::GlobalVariable &global = *it++;
+    if (!global.hasLocalLinkage() || !global.isConstant() ||
+        global.getUnnamedAddr() != llvm::GlobalValue::UnnamedAddr::Global ||
+        global.isUsedByMetadata() || global.hasSection() || global.hasComdat() ||
+        global.isExternallyInitialized()) continue;
+    if (global.use_empty()) global.eraseFromParent();
+  }
   llvm::ModuleAnalysisManager analyses;
-  llvm::StripDeadPrototypesPass().run(*llvm::unwrap(module), analyses);
+  llvm::StripDeadPrototypesPass().run(shard, analyses);
 }
 
 extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitions(
