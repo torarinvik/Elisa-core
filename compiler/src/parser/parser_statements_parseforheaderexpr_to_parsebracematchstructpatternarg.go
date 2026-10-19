@@ -745,7 +745,7 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 			}
 			collect(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range autoRegionChildFields(v.Type()) {
 				collect(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
@@ -875,7 +875,7 @@ func bodyForwardsConstructedStructLocalInfo(stmts []ast.Stmt) (bool, bool) {
 			}
 			scan(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range autoRegionChildFields(v.Type()) {
 				scan(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
@@ -941,7 +941,7 @@ func (scan *autoRegionScan) bodyContainsAutoRegionAllocation(stmts []ast.Stmt) b
 			}
 			rec(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range autoRegionChildFields(v.Type()) {
 				rec(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
@@ -1003,7 +1003,7 @@ func (scan *autoRegionScan) exprBlocksNeedAutoRegion(stmts []ast.Stmt) bool {
 			}
 			rec(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range autoRegionChildFields(v.Type()) {
 				rec(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
