@@ -428,7 +428,12 @@ func (a *Analyzer) hasMutableBorrowCapability(typ Type) bool {
 		}
 	}
 	invocation := a.capabilityQueries
-	if invocation == nil || !a.typeShapesFrozen || typ == nil {
+	if invocation == nil {
+		// Without a retained session, still reuse the root result within this analysis once
+		// type shapes are final instead of re-walking the whole type graph per query.
+		return a.memoTypePredicate(&a.mutableBorrowCapabilityMemo, typ, compute)
+	}
+	if !a.typeShapesFrozen || typ == nil {
 		return compute()
 	}
 	stats := &invocation.session.stats

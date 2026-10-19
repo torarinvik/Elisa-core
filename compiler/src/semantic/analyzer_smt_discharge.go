@@ -6760,7 +6760,7 @@ func (tr *smtTranslator) assertGhostCallCongruenceSort(decl *ast.FuncDecl, args 
 		return
 	}
 	var name strings.Builder
-	fmt.Fprintf(&name, "%p", decl)
+	name.WriteString(tr.a.smtStableDeclID(decl))
 	sorts := make([]string, 0, len(args))
 	terms := make([]string, 0, len(args))
 	for i, arg := range args {
@@ -7077,4 +7077,25 @@ func (a *Analyzer) callResultStateIndependent(decl *ast.FuncDecl) bool {
 		}
 	}
 	return true
+}
+
+// smtStableDeclID names a declaration inside solver text without its heap address, so identical
+// programs produce byte-identical queries across runs (persistent proof-cache keys depend on it).
+// Distinct declarations stay distinct: declarations that share a name and source position (for
+// example clones of one source declaration) get ordinals in first-use order.
+func (a *Analyzer) smtStableDeclID(decl *ast.FuncDecl) string {
+	if id, ok := a.smtDeclIDs[decl]; ok {
+		return id
+	}
+	if a.smtDeclIDs == nil {
+		a.smtDeclIDs = map[*ast.FuncDecl]string{}
+		a.smtDeclIDOrdinals = map[string]int{}
+	}
+	pos := decl.Pos()
+	base := fmt.Sprintf("%s@%s:%d:%d", decl.Name, pos.File, pos.Offset, pos.EndOffset)
+	ordinal := a.smtDeclIDOrdinals[base]
+	a.smtDeclIDOrdinals[base] = ordinal + 1
+	id := base + "#" + strconv.Itoa(ordinal)
+	a.smtDeclIDs[decl] = id
+	return id
 }

@@ -750,6 +750,9 @@ type Analyzer struct {
 	smtQueryCache            map[string]smtQueryResult
 	smtProofCache            *smtProofCache
 	smtProofCacheInitialized bool
+	// smtDeclIDs gives each declaration a run-stable identity for SMT symbol names (smtStableDeclID).
+	smtDeclIDs        map[*ast.FuncDecl]string
+	smtDeclIDOrdinals map[string]int
 	// smtDeadPathCache memoizes cone-of-influence dead-path verdicts by the dropped text.
 	smtDeadPathCache map[string]smtVerdict
 	// recursiveCertInProgress holds the recursive calls whose termination certificate or callee
@@ -905,6 +908,9 @@ type Analyzer struct {
 	borrowedOwnerRefMemo map[Type]bool
 	// regionRefsMemo caches typeCanContainRegionRefs likewise.
 	regionRefsMemo map[Type]bool
+	// mutableBorrowCapabilityMemo caches hasMutableBorrowCapability likewise when no
+	// incremental session supplies its own capability cache.
+	mutableBorrowCapabilityMemo map[Type]bool
 	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
 	containerRegionMemo map[Type]string
 	// storeScanAddressMemo caches root store-scan address reachability once type shapes freeze.

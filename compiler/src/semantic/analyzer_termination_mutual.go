@@ -27,48 +27,59 @@ func (a *Analyzer) collectRecursiveSCCEdges(root *ast.FuncDecl) []recursionEdge 
 	if root == nil {
 		return nil
 	}
-	visited := map[*ast.FuncDecl]bool{}
+	// Resolve each reachable body's direct calls once. Recomputing them per reachability
+	// probe re-walked every reachable body for every reachable function.
+	type resolvedCall struct {
+		call   *ast.CallExpr
+		callee *ast.FuncDecl
+	}
+	calls := map[*ast.FuncDecl][]resolvedCall{}
 	var order []*ast.FuncDecl
 	var walk func(*ast.FuncDecl)
 	walk = func(fn *ast.FuncDecl) {
-		if fn == nil || visited[fn] {
+		if fn == nil {
 			return
 		}
-		visited[fn] = true
+		if _, visited := calls[fn]; visited {
+			return
+		}
+		calls[fn] = nil
 		order = append(order, fn)
+		var resolved []resolvedCall
 		for _, call := range a.collectDirectFunctionCalls(fn) {
 			callee, ok := a.resolveDirectCallFuncDecl(call)
 			if !ok || callee == nil {
 				continue
 			}
-			walk(callee)
+			resolved = append(resolved, resolvedCall{call, callee})
+		}
+		calls[fn] = resolved
+		for _, rc := range resolved {
+			walk(rc.callee)
 		}
 	}
 	walk(root)
 	if len(order) == 0 {
 		return nil
 	}
-	reachesRoot := map[*ast.FuncDecl]bool{}
-	var reaches func(*ast.FuncDecl, map[*ast.FuncDecl]bool) bool
-	reaches = func(fn *ast.FuncDecl, seen map[*ast.FuncDecl]bool) bool {
-		if fn == root {
-			return true
-		}
-		if seen[fn] {
-			return false
-		}
-		seen[fn] = true
-		for _, call := range a.collectDirectFunctionCalls(fn) {
-			callee, ok := a.resolveDirectCallFuncDecl(call)
-			if ok && callee != nil && visited[callee] && reaches(callee, seen) {
-				return true
-			}
-		}
-		return false
-	}
+	// reachesRoot: the reachable functions with a call path back to root, found by one
+	// backward search from root over the reachable call graph.
+	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
 	for _, fn := range order {
-		if reaches(fn, map[*ast.FuncDecl]bool{}) {
-			reachesRoot[fn] = true
+		for _, rc := range calls[fn] {
+			callers[rc.callee] = append(callers[rc.callee], fn)
+		}
+	}
+	reachesRoot := map[*ast.FuncDecl]bool{root: true}
+	work := []*ast.FuncDecl{root}
+	for len(work) > 0 {
+		fn := work[len(work)-1]
+		work = work[:len(work)-1]
+		for _, caller := range callers[fn] {
+			if !reachesRoot[caller] {
+				reachesRoot[caller] = true
+				work = append(work, caller)
+			}
 		}
 	}
 	var edges []recursionEdge
@@ -76,10 +87,9 @@ func (a *Analyzer) collectRecursiveSCCEdges(root *ast.FuncDecl) []recursionEdge 
 		if !reachesRoot[caller] {
 			continue
 		}
-		for _, call := range a.collectDirectFunctionCalls(caller) {
-			callee, ok := a.resolveDirectCallFuncDecl(call)
-			if ok && reachesRoot[callee] {
-				edges = append(edges, recursionEdge{Caller: caller, Callee: callee, Call: call})
+		for _, rc := range calls[caller] {
+			if reachesRoot[rc.callee] {
+				edges = append(edges, recursionEdge{Caller: caller, Callee: rc.callee, Call: rc.call})
 			}
 		}
 	}
