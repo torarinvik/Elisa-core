@@ -33,15 +33,26 @@ func smtWithoutQuantifiedHypotheses(query, goalAssert string) (string, bool) {
 	if goalIndex < 0 {
 		return "", false
 	}
-	var out strings.Builder
+	drop := make([]bool, goalIndex)
 	dropped := false
-	for i, command := range commands {
-		if i < goalIndex && smtCommandHead(command) == "assert" && containsQuantifier(command) {
+	for i := 0; i < goalIndex; i++ {
+		if smtCommandHead(commands[i]) == "assert" && containsQuantifier(commands[i]) {
+			drop[i] = true
 			dropped = true
+		}
+	}
+	if !dropped {
+		// Nothing to weaken: callers only use the text when a hypothesis was dropped.
+		return "", false
+	}
+	var out strings.Builder
+	out.Grow(len(query))
+	for i, command := range commands {
+		if i < goalIndex && drop[i] {
 			continue
 		}
 		out.WriteString(command)
 		out.WriteByte('\n')
 	}
-	return out.String(), dropped
+	return out.String(), true
 }

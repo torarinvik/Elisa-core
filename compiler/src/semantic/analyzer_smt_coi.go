@@ -145,6 +145,12 @@ func smtCommandHead(sexpr string) string {
 // hypotheses outside the goal's cone; dropped holds the declarations plus those hypotheses. ok is
 // false when slicing does not apply (nothing to drop, or a shape the analysis does not model).
 func smtSliceQuery(query, goalAssert string) (sliced, dropped string, ok bool) {
+	return smtSliceQueryFiltered(query, goalAssert, false)
+}
+
+// smtSliceQueryFiltered is smtSliceQuery; with requireQuantifiedDrop it declines before
+// assembling any text when the dropped part would contain no `(forall ` / `(exists `.
+func smtSliceQueryFiltered(query, goalAssert string, requireQuantifiedDrop bool) (sliced, dropped string, ok bool) {
 	exprs, balanced := smtSplitTopLevel(query)
 	if !balanced {
 		return "", "", false
@@ -235,6 +241,20 @@ func smtSliceQuery(query, goalAssert string) (sliced, dropped string, ok bool) {
 	for _, s := range goalSyms {
 		goalRoots[find(s)] = true
 	}
+	if requireQuantifiedDrop {
+		quantified := false
+		for i, c := range cmds {
+			hypothesis := c.head == "assert" && i < goalIndex
+			dropped := hypothesis && len(c.syms) > 0 && !goalRoots[find(c.syms[0])]
+			if (dropped || c.head != "assert") && (strings.Contains(c.text, "(forall ") || strings.Contains(c.text, "(exists ")) {
+				quantified = true
+				break
+			}
+		}
+		if !quantified {
+			return "", "", false
+		}
+	}
 	var keep, drop strings.Builder
 	droppedAny := false
 	for i, c := range cmds {
@@ -317,7 +337,7 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 			a.smtSetLogLabelForQuery(solver, "query", goalAssert, query)
 		}
 	}
-	sliced, dropped, ok := smtSliceQuery(query, goalAssert)
+	sliced, dropped, ok := smtSliceQueryFiltered(query, goalAssert, true)
 	// Slice only when the dropped part carries quantifiers: quantifier instantiation is what burns
 	// the budget on irrelevant facts. A quantifier-free remainder is cheap inside the full query,
 	// and slicing it would only add a second solver round trip.

@@ -190,3 +190,83 @@ func (b *smtProofVersionOutput) Write(payload []byte) (int, error) {
 	}
 	return b.Buffer.Write(payload)
 }
+
+// Declined verdicts (sat with its counterexample text, or unknown) are cached only on explicit
+// opt-in (ELISACORE_SMT_CACHE_DECLINED=1) and under their own schema. A declined verdict never
+// proves anything, so reusing one cannot accept a program; it can only keep declining an
+// obligation that a fresh solver run might still decide. Identical query text can already get
+// different declined verdicts across runs (solver history in the shared push/pop process), so
+// this trades that run-to-run variation for speed on unchanged obligations.
+const smtDeclineCacheSchema = "elisa-exact-smt-decline-v1"
+
+var smtDeclineCacheEnabled = os.Getenv("ELISACORE_SMT_CACHE_DECLINED") == "1"
+
+type smtDeclineCacheRecord struct{ Schema, Key, Verdict, Counterexample, Checksum string }
+
+func smtDeclineChecksum(key, verdict, counterexample string) string {
+	hash := sha256.Sum256([]byte(smtDeclineCacheSchema + "\x00" + key + "\x00" + verdict + "\x00" + counterexample))
+	return hex.EncodeToString(hash[:])
+}
+
+func (c *smtProofCache) declinePath(key string) string {
+	return filepath.Join(c.directory, "declined", key[:2], key+".json")
+}
+
+// declined returns a cached declined verdict's counterexample text.
+func (c *smtProofCache) declined(query string) (string, bool) {
+	if c == nil || !smtDeclineCacheEnabled {
+		return "", false
+	}
+	key := c.key(query)
+	f, err := os.Open(c.declinePath(key))
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	payload, err := io.ReadAll(io.LimitReader(f, 1<<20+1))
+	if err != nil || len(payload) > 1<<20 {
+		return "", false
+	}
+	var record smtDeclineCacheRecord
+	if json.Unmarshal(payload, &record) != nil {
+		return "", false
+	}
+	if record.Schema != smtDeclineCacheSchema || record.Key != key || (record.Verdict != "sat" && record.Verdict != "unknown") ||
+		record.Checksum != smtDeclineChecksum(key, record.Verdict, record.Counterexample) {
+		return "", false
+	}
+	return record.Counterexample, true
+}
+
+func (c *smtProofCache) publishDeclined(query string, res smt.Result, counterexample string) {
+	if c == nil || !smtDeclineCacheEnabled || res == smt.Unsat {
+		return
+	}
+	verdict := "unknown"
+	if res == smt.Sat {
+		verdict = "sat"
+	}
+	key := c.key(query)
+	path := c.declinePath(key)
+	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
+		return
+	}
+	payload, err := json.Marshal(smtDeclineCacheRecord{smtDeclineCacheSchema, key, verdict, counterexample, smtDeclineChecksum(key, verdict, counterexample)})
+	if err != nil || len(payload) > 1<<20 {
+		return
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".decline-*")
+	if err != nil {
+		return
+	}
+	temporary := f.Name()
+	defer os.Remove(temporary)
+	if _, err = f.Write(payload); err != nil {
+		f.Close()
+		return
+	}
+	if err = f.Close(); err != nil {
+		return
+	}
+	_ = os.Rename(temporary, path)
+}

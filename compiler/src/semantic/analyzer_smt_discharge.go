@@ -695,9 +695,11 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	if res == smt.Sat {
 		ce := tr.counterexample(model)
 		a.cacheSMTQuery(query, smtQueryResult{proven: false, ce: ce})
+		a.smtProofCache.publishDeclined(query, res, ce)
 		return false, ce
 	}
-	// `unknown` (timeout / incompleteness) is NOT cached: it is not a stable verdict — a later identical
+	a.smtProofCache.publishDeclined(query, res, "")
+	// `unknown` (timeout / incompleteness) is NOT cached in memory: it is not a stable verdict — a later identical
 	// query is free to try again (e.g. the solver's internal state differs), and caching it would lock in
 	// a decline that a retry might resolve. Only the definitive unsat/sat answers memoize.
 	return false, ""
@@ -732,6 +734,13 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool) {
 		result := smtQueryResult{proven: true}
 		a.cacheSMTQuery(query, result)
 		return result, true
+	}
+	if ce, ok := a.smtProofCache.declined(query); ok {
+		a.recordSMTAttempt(query)
+		a.smtStats.CacheHits++
+		a.smtStats.PersistentCacheHits++
+		a.smtStats.Declined++
+		return smtQueryResult{proven: false, ce: ce}, true
 	}
 	return smtQueryResult{}, false
 }
