@@ -23,11 +23,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"runtime/debug"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"time"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 	"elisacore/src/semantic"
 )
 
@@ -44,7 +49,13 @@ type retainedResponse struct {
 	Stderr string `json:"stderr"`
 }
 
+// retainedGCPercent is the server's GC percent; see serveRetained.
+const retainedGCPercent = 200
+
 // activeRetained is non-nil only inside the retained server process.
+// retainedRequests numbers requests for ELISACORE_RETAINED_PROFILE_DIR profiles.
+var retainedRequests int
+
 var activeRetained *retainedRuntime
 
 type retainedRuntime struct {
@@ -57,6 +68,9 @@ type retainedRuntime struct {
 
 	key   string
 	state *semantic.RetainedAnalysis
+
+	tokensFor []byte
+	tokens    []lexer.Token
 }
 
 func (rt *retainedRuntime) noteSource(filename string, src []byte, file *ast.File) {
@@ -66,8 +80,21 @@ func (rt *retainedRuntime) noteSource(filename string, src []byte, file *ast.Fil
 	rt.filename, rt.src, rt.file = filename, src, file
 }
 
+// parse returns a private parse of the current source. The tokens are lexed
+// once per source; parser.New copies them, so parses never share state.
 func (rt *retainedRuntime) parse() (*ast.File, bool) {
-	return parseProgramWithTokenCache(rt.filename, rt.src, io.Discard, nil)
+	if rt.tokensFor == nil || !bytes.Equal(rt.tokensFor, rt.src) {
+		l := lexer.New(rt.filename, rt.src)
+		rt.tokens = l.Tokenize()
+		if len(l.Errors()) != 0 {
+			rt.tokensFor = nil
+			return nil, false
+		}
+		rt.tokensFor = rt.src
+	}
+	p := parser.New(rt.tokens)
+	file := p.ParseFile(rt.filename)
+	return file, len(p.Errors()) == 0
 }
 
 func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
@@ -116,6 +143,14 @@ func serveRetained(socket string, log io.Writer) error {
 		return err
 	}
 	defer os.Remove(socket)
+	if _, set := os.LookupEnv("GOGC"); !set {
+		// A one-shot compile trades memory for speed with a generous GC percent
+		// (defaultGCPercent). The server keeps ~2.5 GB live across requests, so the
+		// same percent would grow it past the soft memory limit, and the scavenger
+		// would hand pages back that the next request faults in again. Collecting
+		// at 3x live keeps the heap resident and warm.
+		debug.SetGCPercent(retainedGCPercent)
+	}
 	activeRetained = &retainedRuntime{log: log}
 	var mu sync.Mutex
 	mux := http.NewServeMux()
@@ -134,6 +169,16 @@ func serveRetained(socket string, log io.Writer) error {
 		defer mu.Unlock()
 		resp := runRetainedRequest(req)
 		_ = json.NewEncoder(w).Encode(resp)
+		// Collect while the user edits: the next request then allocates from
+		// memory this process already touched instead of faulting in fresh pages
+		// (the default GC percent lets a retained heap grow for a long time).
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		fmt.Fprintf(log, "[retained] heap live %d MB, idle %d MB, released %d MB, sys %d MB\n", ms.HeapAlloc>>20, ms.HeapIdle>>20, ms.HeapReleased>>20, ms.Sys>>20)
 	})
 	fmt.Fprintf(log, "[retained] serving on %s\n", socket)
 	return http.Serve(listener, mux)
@@ -152,6 +197,14 @@ func runRetainedRequest(req retainedRequest) retainedResponse {
 		return retainedResponse{Code: 1, Stderr: fmt.Sprintf("error: %s\n", err)}
 	}
 	start := time.Now()
+	if dir := os.Getenv("ELISACORE_RETAINED_PROFILE_DIR"); dir != "" {
+		retainedRequests++
+		if f, err := os.Create(fmt.Sprintf("%s/retained-%d.pprof", dir, retainedRequests)); err == nil {
+			if pprof.StartCPUProfile(f) == nil {
+				defer func() { pprof.StopCPUProfile(); f.Close() }()
+			}
+		}
+	}
 	code := runCLI(req.Args, &stdout, &stderr)
 	fmt.Fprintf(activeRetained.log, "[retained] %s -> %d in %v\n", strings.Join(req.Args, " "), code, time.Since(start).Round(time.Millisecond))
 	return retainedResponse{Code: code, Stdout: stdout.String(), Stderr: stderr.String()}
