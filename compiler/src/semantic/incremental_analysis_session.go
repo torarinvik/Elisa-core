@@ -37,6 +37,7 @@ type IncrementalAnalysisSession struct {
 	previous                                     map[incremental.Key]bool
 	productBytes                                 map[incremental.Key]int
 	retainedProductBytes                         int
+	ensureProofs                                 map[string]struct{}
 	maxTrackedBodies                             int // zero selects the production default; tests may lower it
 	maxRetainedProductBytes                      int // zero selects the production default; tests may lower it
 	maxBindingSourceBytes, maxBindingSourceEdges int
@@ -59,6 +60,7 @@ type IncrementalAnalysisStats struct {
 	CapacityFallbackAnalyses, ProductAdmissionMisses, RetainedProductBytes                                                                                   uint64
 	CapacityLimitedAnalyses, CapacitySkippedQueries                                                                                                          uint64
 	BindingSpecAdmissionMisses, RetainedBindingSourceBytes, RetainedBindingSourceEdges                                                                       uint64
+	EnsureProofMemoHits, EnsureProofMemoPublished                                                                                                            uint64
 	Queries                                                                                                                                                  incremental.Stats
 	CapabilityReads, CapabilityLocalHits, CapabilityComputed, CapabilityProductsReused, CapabilityProductsPublished, CapabilityProjectionDeclines            uint64
 	CapabilityRetainedBytes                                                                                                                                  uint64
@@ -80,6 +82,9 @@ type incrementalBodyInvocation struct {
 	localInitializers                          map[*ast.VarDeclStmt]*primitiveLocalInitializer
 	bindingReservedBytes, bindingReservedEdges int
 	bindingBytes, bindingEdges                 int
+	ensureProofInputs                          map[*ast.FuncDecl]incrementalEnsureProofInput
+	ensureProofHits                            map[*ast.FuncDecl]map[int]bool
+	pendingEnsureProofs                        map[*ast.FuncDecl]map[int]string
 }
 
 var primitiveConfigKey = incremental.Key{Kind: "semantic-config", Name: "primitive-return-v1"}
@@ -109,7 +114,7 @@ func NewIncrementalAnalysisSession() *IncrementalAnalysisSession {
 }
 
 func NewIncrementalAnalysisSessionWithOptions(options IncrementalAnalysisSessionOptions) *IncrementalAnalysisSession {
-	session := &IncrementalAnalysisSession{previous: map[incremental.Key]bool{}, auditLexicalReads: options.AuditLexicalReads}
+	session := &IncrementalAnalysisSession{previous: map[incremental.Key]bool{}, ensureProofs: map[string]struct{}{}, auditLexicalReads: options.AuditLexicalReads}
 	session.resetDatabase()
 	return session
 }
@@ -641,6 +646,7 @@ func (session *IncrementalAnalysisSession) Analyze(file *ast.File, options Analy
 	defer session.publishPrimitiveProducts()
 	result := analyzeWithBodyInvocation(file, options, invocation)
 	session.publishPrimitiveProducts()
+	invocation.publishEnsureProofs()
 	invocation.lexical.publish(session)
 	return result
 }
@@ -1053,6 +1059,9 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		return
 	}
 	session := invocation.session
+	if !predicate {
+		invocation.prepareEnsureProofMemo(a, fn, key)
+	}
 	source := primitiveExpressionDigest(fn, nodes)
 	sourceChange := incremental.Change{Key: primitiveInput("function-source", key), Value: source}
 	session.db.Apply(sourceChange)

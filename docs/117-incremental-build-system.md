@@ -16,8 +16,15 @@ This avoids solver work; it does not skip function analysis, query construction,
 parsing, IR construction, or optimization. It therefore supports the larger
 incremental-compilation goal without completing Stage 2. Cache storage has the
 same local trust boundary as compiler object artifacts, rather than serving as
-an independently checked proof certificate. Currently the solver is still
-started before the first persistent lookup.
+an independently checked proof certificate. In-memory and persistent verdict
+lookups happen before opening the long-lived solver, so a warm persistent hit
+avoids solver-session startup. The first persistent lookup still computes the
+cache identity by hashing the running compiler and solver artifacts and running
+a bounded `z3 --version` probe; that setup cost is separate from interactive
+solver startup and query time. Treat `ELISACORE_SMT_CACHE_DIR` as an opt-in
+trusted local directory: every process that can write it must be trusted. The
+record checksum detects accidental corruption but does not authenticate entries;
+a writer could forge an `unsat` result and bypass a Z3 check.
 
 The compile server also has an opt-in **native partition-object cache**. Send
 `{"mode":"obj","filename":"example.elisa","source":"...","incremental":true}`
