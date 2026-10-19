@@ -3,7 +3,9 @@
 package semantic
 
 import (
+	"context"
 	"fmt"
+	"runtime/pprof"
 	"strings"
 	"testing"
 
@@ -32,32 +34,52 @@ func BenchmarkIncrementalIntReturnBodyEdit(b *testing.B) {
 		}
 		return file
 	}
-	session := NewIncrementalAnalysisSession()
-	if result := session.Analyze(parse(base), AnalyzeOptions{}); len(result.Errors()) != 0 {
-		b.Fatal(result.Errors())
+	for _, mode := range []string{"fresh", "retained"} {
+		b.Run(mode, func(b *testing.B) {
+			session := NewIncrementalAnalysisSession()
+			if result := session.Analyze(parse(base), AnalyzeOptions{}); len(result.Errors()) != 0 {
+				b.Fatal(result.Errors())
+			}
+			assertIncrementalResultParity(b, Analyze(parse(edited)), session.Analyze(parse(edited), AnalyzeOptions{}))
+			b.ReportAllocs()
+			b.ResetTimer()
+			var reused, checked uint64
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				current := base
+				if i%2 != 0 {
+					current = edited
+				}
+				file := parse(current)
+				before := session.Stats()
+				var result *Result
+				// Profile labels exclude parsing, prewarm and parity work even
+				// though the Go profiler samples outside benchmark timers.
+				b.StartTimer()
+				pprof.Do(context.Background(), pprof.Labels("phase", "int-body-edit-analysis", "analysis-mode", mode), func(context.Context) {
+					if mode == "retained" {
+						result = session.Analyze(file, AnalyzeOptions{})
+					} else {
+						result = Analyze(file)
+					}
+				})
+				b.StopTimer()
+				if len(result.Errors()) != 0 {
+					b.Fatal(result.Errors())
+				}
+				if mode == "retained" {
+					after := session.Stats()
+					if after.PrimaryBodiesChecked-before.PrimaryBodiesChecked != 1 || after.PrimaryBodiesReused-before.PrimaryBodiesReused != 255 {
+						b.Fatalf("edit did not recheck exactly one body and reuse 255: before=%+v after=%+v", before, after)
+					}
+					reused += after.PrimaryBodiesReused - before.PrimaryBodiesReused
+					checked += after.PrimaryBodiesChecked - before.PrimaryBodiesChecked
+				}
+			}
+			if mode == "retained" {
+				b.ReportMetric(float64(reused)/float64(b.N), "body-reuses/edit")
+				b.ReportMetric(float64(checked)/float64(b.N), "body-checks/edit")
+			}
+		})
 	}
-	assertIncrementalResultParity(b, Analyze(parse(edited)), session.Analyze(parse(edited), AnalyzeOptions{}))
-	b.ReportAllocs()
-	b.ResetTimer()
-	var reused, checked uint64
-	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		current := base
-		if i%2 != 0 {
-			current = edited
-		}
-		file := parse(current)
-		before := session.Stats()
-		b.StartTimer()
-		result := session.Analyze(file, AnalyzeOptions{})
-		b.StopTimer()
-		if len(result.Errors()) != 0 {
-			b.Fatal(result.Errors())
-		}
-		after := session.Stats()
-		reused += after.PrimaryBodiesReused - before.PrimaryBodiesReused
-		checked += after.PrimaryBodiesChecked - before.PrimaryBodiesChecked
-	}
-	b.ReportMetric(float64(reused)/float64(b.N), "body-reuses/edit")
-	b.ReportMetric(float64(checked)/float64(b.N), "body-checks/edit")
 }
