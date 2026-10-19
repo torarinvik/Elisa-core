@@ -9,6 +9,9 @@ import (
 )
 
 func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
+	if a.retained != nil {
+		defer func() { a.retained.bodyEnd = len(a.diagnostics) }()
+	}
 	// TaskGroup join proofs affect interprocedural store-flow summaries. Record
 	// them for the whole declaration set before source-order body analysis can ask
 	// for a summary of a later-declared function.

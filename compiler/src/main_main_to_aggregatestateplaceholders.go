@@ -25,7 +25,10 @@ func main() {
 	applyDefaultGCPercent()
 	stop := startCPUProfile()
 	stopMem := startMemProfile()
-	code := runCLI(os.Args[1:], os.Stdout, os.Stderr)
+	code, forwarded := forwardToRetainedServer(os.Args[1:], os.Stdout, os.Stderr)
+	if !forwarded {
+		code = runCLI(os.Args[1:], os.Stdout, os.Stderr)
+	}
 	stopMem()
 	stop()
 	os.Exit(code)
@@ -77,6 +80,13 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	if err := os.Setenv("ELISACORE_PGO_HOT_FUNCTIONS", strings.Join(profileNames, "\n")); err != nil {
 		fmt.Fprintf(stderr, "error: cannot configure optimization profile: %s\n", err)
 		return 1
+	}
+	if options.emit == emitRetainedServe {
+		if err := serveRetained(options.addr, stderr); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		return 0
 	}
 	if options.emit == emitServe {
 		if err := serveCompileServer(options.addr, stdout, stderr); err != nil {
@@ -205,6 +215,7 @@ func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.
 	if !ok {
 		return nil, nil, false
 	}
+	activeRetained.noteSource(filename, src, file)
 
 	analyzeStart := time.Now()
 	result := analyze(file, options)
@@ -265,34 +276,36 @@ func shouldSuppressDeprecatedWarningsForTests(warning string) bool {
 }
 
 const (
-	emitAST        = "ast"
-	emitLowered    = "lowered"
-	emitSemantic   = "semantic"
-	emitFacts      = "facts"
-	emitUnsafe     = "unsafe"
-	emitProgress   = "progress"
-	emitFmt        = "fmt"
-	emitDoc        = "doc"
-	emitInterface  = "iface"
-	emitDeps       = "deps"
-	emitDepsJSON   = "deps-json"
-	emitIR         = "ir"
-	emitInterpret  = "interpret"
-	emitServe      = "serve"
-	emitTests      = "tests"
-	emitBenches    = "benches"
-	emitFixtures   = "fixtures"
-	emitTest       = "test"
-	emitTestRunner = "test-runner"
-	emitLLVM       = "llvm"
-	emitPacked     = "packed"
-	emitCBindCheck = "c-bind-check"
-	emitCBindJSON  = "c-bind-check-json"
-	emitHeader     = "header"
-	emitBitcode    = "bc"
-	emitObject     = "obj"
-	emitCArchive   = "c-archive"
-	emitTokens     = "tokens"
+	emitAST       = "ast"
+	emitLowered   = "lowered"
+	emitSemantic  = "semantic"
+	emitFacts     = "facts"
+	emitUnsafe    = "unsafe"
+	emitProgress  = "progress"
+	emitFmt       = "fmt"
+	emitDoc       = "doc"
+	emitInterface = "iface"
+	emitDeps      = "deps"
+	emitDepsJSON  = "deps-json"
+	emitIR        = "ir"
+	emitInterpret = "interpret"
+	emitServe     = "serve"
+	// emitRetainedServe keeps one whole-program analysis alive behind a unix socket (retained_server.go).
+	emitRetainedServe = "retained-serve"
+	emitTests         = "tests"
+	emitBenches       = "benches"
+	emitFixtures      = "fixtures"
+	emitTest          = "test"
+	emitTestRunner    = "test-runner"
+	emitLLVM          = "llvm"
+	emitPacked        = "packed"
+	emitCBindCheck    = "c-bind-check"
+	emitCBindJSON     = "c-bind-check-json"
+	emitHeader        = "header"
+	emitBitcode       = "bc"
+	emitObject        = "obj"
+	emitCArchive      = "c-archive"
+	emitTokens        = "tokens"
 )
 
 type cliOptions struct {
@@ -756,7 +769,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	if options.emit == "" {
 		return cliOptions{}, fmt.Errorf("emit mode cannot be empty")
 	}
-	if options.filename == "" && options.emit != emitServe {
+	if options.filename == "" && options.emit != emitServe && options.emit != emitRetainedServe {
 		return cliOptions{}, fmt.Errorf("missing input file")
 	}
 	if options.addr == "" {
@@ -777,7 +790,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive, emitTokens}
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitRetainedServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive, emitTokens}
 	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O1|-O2|-O3] [-fprofile-use <profile>] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
@@ -845,6 +858,8 @@ func normalizeEmitMode(value string) string {
 		return emitInterpret
 	case emitServe, "server":
 		return emitServe
+	case emitRetainedServe:
+		return emitRetainedServe
 	case emitTests, "test-list":
 		return emitTests
 	case emitBenches, "bench-list":

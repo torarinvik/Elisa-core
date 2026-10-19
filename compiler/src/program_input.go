@@ -97,6 +97,9 @@ func analyzeSemanticWithSession(file *ast.File, options semantic.AnalyzeOptions,
 	if session != nil {
 		return session.Analyze(file, options)
 	}
+	if activeRetained != nil {
+		return activeRetained.analyze(file, options)
+	}
 	return semantic.AnalyzeWithOptions(file, options)
 }
 

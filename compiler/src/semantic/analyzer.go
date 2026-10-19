@@ -912,6 +912,8 @@ type Analyzer struct {
 	typeShapesFrozen bool
 	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
 	affineHandleMemo map[Type]bool
+	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
+	retained *RetainedAnalysis
 	// typeSeenScratch is a reused visited set for containsAffineHandleValues traversals.
 	typeSeenScratch     map[Type]bool
 	typeSeenScratchBusy bool
@@ -1243,6 +1245,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		parallelForCapacity = 4
 	}
 	a := &Analyzer{
+		retained:                          takePendingRetained(),
 		lookupTrace:                       recorder,
 		trustedRuntimeSourceFiles:         trustedRuntimeSourceFileSet(options.TrustedRuntimeSourceFiles),
 		file:                              file,
@@ -1471,30 +1474,39 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		bodies.prefetchLocalInitializerQueries()
 	}
 	a.analyzeDecls(activeDecls)
-	a.evaluateLateReturnBorrowFrames()
-	// A4: discharge each protocol default method's own contract against its own body (the default
-	// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
-	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
-	a.checkProtocolDefaultMethodContracts(activeDecls)
-	if solver == nil {
-		a.inferFunctionPermissionEffects(activeDecls)
-	} else {
-		solver(a, activeDecls)
+	postPhases := func() {
+		if a.retained != nil {
+			a.retained.lateFrames = append(a.retained.lateFrames[:0], a.returnBorrowLateFrames...)
+		}
+		a.evaluateLateReturnBorrowFrames()
+		// A4: discharge each protocol default method's own contract against its own body (the default
+		// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
+		// after foldInterfaceBases so an inherited member/law the default uses is in scope.
+		a.checkProtocolDefaultMethodContracts(activeDecls)
+		if solver == nil {
+			a.inferFunctionPermissionEffects(activeDecls)
+		} else {
+			solver(a, activeDecls)
+		}
+		a.validateDeferredBorrowedNurseryShutdownCalls()
+		for _, check := range a.deferredImplEffectChecks {
+			check()
+		}
+		a.deferredImplEffectChecks = nil
+		if options.EnforceProgressSafety {
+			a.validateProgressBlocking(activeDecls)
+			a.validateProgressRecursion(activeDecls)
+		}
+		a.validatePermissionUsage(activeDecls)
+		a.analyzeExports(activeDecls)
+		a.finalizeCallArgDisjoint()
+		a.finalizeFuncDisjointParams(activeDecls)
+		a.lintHotKernelsForDisjointness()
 	}
-	a.validateDeferredBorrowedNurseryShutdownCalls()
-	for _, check := range a.deferredImplEffectChecks {
-		check()
+	postPhases()
+	if a.retained != nil {
+		a.retained.capture(a, activeDecls, postPhases)
 	}
-	a.deferredImplEffectChecks = nil
-	if options.EnforceProgressSafety {
-		a.validateProgressBlocking(activeDecls)
-		a.validateProgressRecursion(activeDecls)
-	}
-	a.validatePermissionUsage(activeDecls)
-	a.analyzeExports(activeDecls)
-	a.finalizeCallArgDisjoint()
-	a.finalizeFuncDisjointParams(activeDecls)
-	a.lintHotKernelsForDisjointness()
 	// docs/91 G0: death-time cohort + interprocedural arg-retention analysis. Runs AFTER body
 	// analysis so exprTypes is complete and the whole-program retention fixpoint can be computed.
 	// Read-only observability (surfaced on Result; dumped under ELISA_DUMP_DEATHTIME); no codegen.

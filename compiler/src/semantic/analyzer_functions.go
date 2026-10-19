@@ -51,6 +51,14 @@ func (a *Analyzer) visitFunctionBodyWithElementScan(body []ast.Stmt, visit func(
 // analyzeFunc analyzes a function body with its type parameters left OPAQUE (the
 // template pass). See analyzeFuncWithTypeArgs for the monomorphized re-analysis.
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
+	if r := a.retained; r != nil && fn != nil && r.depth == 0 {
+		r.depth++
+		before := len(a.diagnostics)
+		defer func() {
+			r.depth--
+			r.windows[fn] = [2]int{before, len(a.diagnostics)}
+		}()
+	}
 	if fn != nil && !a.suppressDiagnostics && a.convergeDepth == 0 && !a.ambientFillAnalyzed[fn] && a.summaryAnalyzable(fn) && a.summaryRelevant(fn) && a.funcIsCyclic(fn) {
 		a.convergeSummaries(fn)
 	}
