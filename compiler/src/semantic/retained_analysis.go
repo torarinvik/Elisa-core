@@ -35,6 +35,14 @@ type RetainedAnalysis struct {
 	bodyEnd    int                      // len(diagnostics) when analyzeDecls returned
 	lateFrames []returnBorrowLateFrame  // evaluateLateReturnBorrowFrames consumes them; keep a copy
 
+	// Late return-borrow pass reuse (retained_return_borrow.go).
+	rbStack     []*ast.FuncDecl
+	rbDeps      map[*ast.FuncDecl]map[*ast.FuncDecl]bool // owner -> summaries it consulted
+	rbSummaries map[*ast.FuncDecl]returnBorrowFlow       // final summaries of the last late pass
+	frameDiags  map[*ast.FuncDecl][]Diagnostic           // each late frame's diagnostics
+	rbInvalid   map[*ast.FuncDecl]bool                   // owners to recompute in this update
+	rbUpdating  bool
+
 	LastStats RetainedUpdateStats
 }
 
@@ -46,6 +54,8 @@ type RetainedUpdateStats struct {
 	Bodies   time.Duration
 	Total    time.Duration
 	Fallback string
+	// Invalidated counts functions whose late return-borrow results were recomputed.
+	Invalidated int
 }
 
 var (
@@ -63,7 +73,7 @@ func takePendingRetained() *RetainedAnalysis {
 // pristine must be a separate parse of the same source that analysis never
 // touches. Calls are serialized; do not run other analyses concurrently.
 func AnalyzeRetained(file, pristine *ast.File, src []byte, options AnalyzeOptions) (*Result, *RetainedAnalysis) {
-	r := &RetainedAnalysis{pristine: pristine, src: src, windows: map[*ast.FuncDecl][2]int{}}
+	r := &RetainedAnalysis{pristine: pristine, src: src, windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}, frameDiags: map[*ast.FuncDecl][]Diagnostic{}}
 	pendingRetainedMu.Lock()
 	pendingRetained = r
 	result := AnalyzeWithOptions(file, options)
@@ -210,12 +220,15 @@ func (r *RetainedAnalysis) Update(file, pristine *ast.File, src []byte) (*Result
 	// Windows index into the diagnostics list, which was just compacted; the
 	// changed functions get fresh windows below, the rest are re-based.
 	r.rebaseWindows(drop)
+	r.invalidateReturnBorrow(changed, marks)
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
 	bodies := time.Now()
 	a.analyzeDecls(changed)
 	r.LastStats.Bodies = time.Since(bodies)
+	r.rbUpdating = true
 	r.post()
+	r.rbUpdating = false
 	a.closeSMT()
 	r.pristine, r.src = pristine, src
 	r.result.Diagnostics = a.diagnostics

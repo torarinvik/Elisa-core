@@ -1033,6 +1033,9 @@ func (a *Analyzer) returnBorrowFlowForFunc(fn *ast.FuncDecl, active map[*ast.Fun
 	if fn == nil {
 		return returnBorrowFlow{}
 	}
+	if r := a.retained; r != nil {
+		r.noteReturnBorrowDep(fn)
+	}
 	if summary, ok := a.returnBorrowFuncSummaries[fn]; ok {
 		return summary
 	}
@@ -1058,7 +1061,13 @@ func (a *Analyzer) returnBorrowFlowForFunc(fn *ast.FuncDecl, active map[*ast.Fun
 		return a.allBorrowedParamFlow(fn)
 	}
 	logStart := len(a.returnBorrowCutLog)
+	if r := a.retained; r != nil {
+		r.pushReturnBorrowOwner(fn)
+	}
 	summary := a.computeReturnBorrowFlowForFunc(fn, active)
+	if r := a.retained; r != nil {
+		r.popReturnBorrowOwner()
+	}
 	entry := returnBorrowQueryEntry{flow: summary}
 	seen := map[*ast.FuncDecl]bool{fn: true} // a cut on fn itself is resolved inside this summary
 	for _, cut := range a.returnBorrowCutLog[logStart:] {

@@ -111,7 +111,7 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 			result, err := rt.state.Update(spliced, pristine, rt.src)
 			st := rt.state.LastStats
 			if err == nil {
-				fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted; diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
+				fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
 				if len(result.Errors()) != 0 {
 					return result
 				}

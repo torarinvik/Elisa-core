@@ -122,3 +122,44 @@ func TestRetainedAnalysisReanalyzesFunctionsWhoseLinesMoved(t *testing.T) {
 		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+const retainedBorrowBefore = `struct BorrowedBox:
+    value: i64&
+
+global stable: i64 = 2
+
+def pack(value: i64&) -> BorrowedBox:
+    return BorrowedBox{value: value}
+
+def escapes_local() -> BorrowedBox:
+    local: i64 = 3
+    return pack(&local)
+
+def keeps_param(value: i64&) -> BorrowedBox:
+    return pack(value)
+`
+
+// pack stops returning its parameter: the unchanged caller's escape error must
+// go, which only happens if the caller's return-borrow results are recomputed.
+var retainedBorrowAfter = strings.Replace(retainedBorrowBefore, "return BorrowedBox{value: value}", "return BorrowedBox{value: &stable}", 1)
+
+func TestRetainedAnalysisRecomputesCallersOfChangedReturnBorrowSummaries(t *testing.T) {
+	options := AnalyzeOptions{}
+	before, retained := AnalyzeRetained(retainedParse(t, retainedBorrowBefore), retainedParse(t, retainedBorrowBefore), []byte(retainedBorrowBefore), options)
+	if !strings.Contains(retainedDiagnostics(before), "function-local storage") {
+		t.Fatalf("fixture lost its escape error:\n%s", retainedDiagnostics(before))
+	}
+	if strings.Contains(retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, retainedBorrowAfter), options)), "function-local storage") {
+		t.Fatal("fixture edit does not change the caller's diagnostics")
+	}
+	for i, src := range []string{retainedBorrowAfter, retainedBorrowBefore, retainedBorrowAfter} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("step %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
+		}
+	}
+}

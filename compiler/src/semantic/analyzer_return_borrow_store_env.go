@@ -149,6 +149,10 @@ func (a *Analyzer) evaluateLateReturnBorrowFrames() {
 	a.returnBorrowFuncSummaries = nil
 	a.returnBorrowRootMemos = nil
 	a.returnBorrowRootMemosFor = nil
+	r := a.retained
+	if r != nil {
+		a.returnBorrowFuncSummaries = r.reusableReturnBorrowSummaries()
+	}
 	// A function analyzed more than once keeps only its last analysis's checks.
 	last := make(map[*ast.FuncDecl]int, len(frames))
 	for index, late := range frames {
@@ -161,9 +165,23 @@ func (a *Analyzer) evaluateLateReturnBorrowFrames() {
 		if last[late.frame.fn] != index {
 			continue
 		}
+		if r != nil && r.replayLateFrame(a, late.frame.fn) {
+			continue
+		}
 		a.currentFuncDecl, a.currentFuncType = late.frame.fn, late.fnType
 		a.currentNamespace, a.currentUsings = late.namespace, late.usings
+		if r == nil {
+			a.evaluateReturnBorrowDeferFrame(late.frame.fn, late.frame)
+			continue
+		}
+		before := len(a.diagnostics)
+		r.pushReturnBorrowOwner(late.frame.fn)
 		a.evaluateReturnBorrowDeferFrame(late.frame.fn, late.frame)
+		r.popReturnBorrowOwner()
+		r.recordLateFrame(late.frame.fn, a.diagnostics[before:])
+	}
+	if r != nil {
+		r.keepReturnBorrowSummaries(a.returnBorrowFuncSummaries)
 	}
 	a.currentFuncDecl, a.currentFuncType = savedFuncDecl, savedFuncType
 	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
