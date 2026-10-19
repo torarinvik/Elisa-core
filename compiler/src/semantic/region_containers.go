@@ -133,7 +133,7 @@ type explicitTypeRegionSummary struct {
 
 func commonExplicitTypeRegion(typ Type) string {
 	summary := explicitTypeRegionSummary{regions: make(map[string]struct{})}
-	collectExplicitTypeRegions(typ, &summary, map[Type]bool{})
+	collectExplicitTypeRegions(typ, &summary, map[Type]bool{}, map[Type]uint8{}, map[Type]bool{})
 	if summary.unknown || len(summary.regions) != 1 {
 		return ""
 	}
@@ -143,8 +143,8 @@ func commonExplicitTypeRegion(typ Type) string {
 	return ""
 }
 
-func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, seen map[Type]bool) {
-	if typ == nil || summary == nil || seen[typ] {
+func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, seen map[Type]bool, infoMemo map[Type]uint8, infoActive map[Type]bool) {
+	if typ == nil || summary == nil || summary.unknown || seen[typ] {
 		return
 	}
 	seen[typ] = true
@@ -155,7 +155,7 @@ func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, se
 		}
 		summary.regions[region] = struct{}{}
 	}
-	visit := func(child Type) { collectExplicitTypeRegions(child, summary, seen) }
+	visit := func(child Type) { collectExplicitTypeRegions(child, summary, seen, infoMemo, infoActive) }
 	switch value := typ.(type) {
 	case *DArrayType:
 		addRegion(value.Region)
@@ -180,12 +180,15 @@ func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, se
 			visit(value.Elem)
 			return
 		}
-		before := len(summary.regions)
-		unknownBefore := summary.unknown
-		visit(value.Elem)
-		if before == len(summary.regions) && unknownBefore == summary.unknown {
+		// Determine whether this pointee type carries region information on its own.
+		// Aggregate-set cardinality cannot answer that: another field may already have
+		// contributed the same region. The memoized type-local predicate keeps this
+		// independent of sibling order without rescanning the full subtree per ref.
+		pointeeCarriesRegionInfo, _ := explicitTypeCarriesRegionInfo(value.Elem, infoMemo, infoActive)
+		if !pointeeCarriesRegionInfo {
 			addRegion("")
 		}
+		visit(value.Elem)
 	case *GenericInstanceType:
 		if value.Region != "" {
 			addRegion(value.Region)
@@ -210,6 +213,109 @@ func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, se
 			visit(field.Type)
 		}
 	}
+}
+
+// explicitTypeCarriesRegionInfo reports whether collecting this type can add a
+// concrete region or uncertainty. An empty-region RefType contributes uncertainty
+// only when its pointee is regionless and acyclic; a pointee cycle must leave that
+// decision to the outer collector. State 1 memoizes a regionless acyclic type and
+// state 2 memoizes a positive one; cycle-dependent negative results are left uncached.
+func explicitTypeCarriesRegionInfo(typ Type, memo map[Type]uint8, active map[Type]bool) (bool, bool) {
+	if typ == nil {
+		return false, false
+	}
+	if state, ok := memo[typ]; ok {
+		return state == 2, false
+	}
+	if active[typ] {
+		return false, true
+	}
+	active[typ] = true
+	defer delete(active, typ)
+
+	var carries bool
+	var cycle bool
+	visit := func(child Type) {
+		childCarries, childCycle := explicitTypeCarriesRegionInfo(child, memo, active)
+		carries = carries || childCarries
+		cycle = cycle || childCycle
+	}
+	switch value := typ.(type) {
+	case *DArrayType:
+		carries = value != nil
+	case *DictType:
+		carries = value != nil
+	case *SetType:
+		carries = value != nil
+	case *CStrType:
+		carries = value != nil
+	case *SViewType:
+		carries = value != nil
+	case *ViewType:
+		carries = value != nil
+	case *RefType:
+		if value != nil {
+			if value.Region != "" {
+				carries = true
+			} else {
+				pointeeCarries, pointeeCycle := explicitTypeCarriesRegionInfo(value.Elem, memo, active)
+				carries = pointeeCarries || !pointeeCycle
+				cycle = pointeeCycle
+			}
+		}
+	case *GenericInstanceType:
+		if value != nil {
+			carries = value.Region != ""
+			if !carries {
+				for _, argument := range value.Args {
+					visit(argument)
+					if carries {
+						break
+					}
+				}
+			}
+		}
+	case *TupleType:
+		if value != nil {
+			for _, field := range value.Fields {
+				visit(field.Type)
+				if carries {
+					break
+				}
+			}
+		}
+	case *OptionalType:
+		if value != nil {
+			visit(value.Value)
+		}
+	case *ErrorUnionType:
+		if value != nil {
+			visit(value.Value)
+		}
+	case *ArrayType:
+		if value != nil {
+			visit(value.Elem)
+		}
+	case *AggregateStateType:
+		if value != nil {
+			visit(value.Base)
+		}
+	case *StructType:
+		if value != nil {
+			for _, field := range value.Fields {
+				visit(field.Type)
+				if carries {
+					break
+				}
+			}
+		}
+	}
+	if carries {
+		memo[typ] = 2
+	} else if !cycle {
+		memo[typ] = 1
+	}
+	return carries, cycle
 }
 
 // checkRegionParamReturnEscape rejects returning a value tied to a function REGION PARAMETER's
