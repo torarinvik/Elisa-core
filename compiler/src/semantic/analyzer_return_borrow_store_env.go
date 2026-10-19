@@ -1319,8 +1319,26 @@ func (a *Analyzer) returnBorrowCallArgStoreFlow(call *ast.CallExpr, index int) r
 	// A summarized callee states which arguments' contents may reach the written parameter; the
 	// others cannot be stored through it.
 	keep := func(other int) bool { return !a.callArgNeverReaches(call, other, index) }
-	flow := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, keep, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+	contentsOnly := a.returnBorrowCallContentsOnly(call, index)
+	flow := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, keep, contentsOnly, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 	return flow
+}
+
+// returnBorrowCallContentsOnly refines only settled element-copy edges.
+// Unknown calls and disabled kind refinement retain address provenance.
+func (a *Analyzer) returnBorrowCallContentsOnly(call *ast.CallExpr, index int) func(int) bool {
+	if a.storeFlowKindsOff {
+		return nil
+	}
+	decl, ok := a.resolveReadOnlyScanCallee(call)
+	if !ok || decl == nil || !storeFlowCallFitsParams(decl, call) || funcHasArenaParam(decl) {
+		return nil
+	}
+	summary := a.storeFlowKindsFor(decl)
+	if summary == nil {
+		return nil
+	}
+	return func(other int) bool { return a.storeFlowReachKind(summary, other, index) == storeFlowEdgeElements }
 }
 
 // traceLocalBorrowStoreArgs (trace only): which other argument's flow is frame-local.
@@ -1330,11 +1348,12 @@ func (a *Analyzer) traceLocalBorrowStoreArgs(call *ast.CallExpr, index int) {
 		return
 	}
 	args := returnBorrowCallArgs(call)
+	contentsOnly := a.returnBorrowCallContentsOnly(call, index)
 	for other := range args {
 		if other == index || a.callArgNeverReaches(call, other, index) {
 			continue
 		}
-		f := a.returnBorrowCallOtherArgsFlowWhere(args, index, fnType.Params, func(k int) bool { return k == other }, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+		f := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, func(k int) bool { return k == other }, contentsOnly, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
 		fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d local=%v arg=%s type=%s\n", call.Pos(), index+1, other+1, f.Local, args[other].Pos(), typeString(a.exprTypes[args[other]]))
 		if f.Local {
 			a.traceLocalFlowExplain(args[other], 3, "  ")

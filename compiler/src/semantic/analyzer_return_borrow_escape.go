@@ -1802,6 +1802,10 @@ func (a *Analyzer) returnBorrowCallOtherArgsFlow(args []ast.Expr, skip int, para
 // returnBorrowCallOtherArgsFlowWhere is returnBorrowCallOtherArgsFlow restricted to the arguments
 // keep admits (nil admits all).
 func (a *Analyzer) returnBorrowCallOtherArgsFlowWhere(args []ast.Expr, skip int, params []Type, keep func(int) bool, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
+	return a.returnBorrowCallOtherArgsFlowWhereKinds(args, skip, params, keep, nil, aliases, active, localBindings)
+}
+
+func (a *Analyzer) returnBorrowCallOtherArgsFlowWhereKinds(args []ast.Expr, skip int, params []Type, keep func(int) bool, contentsOnly func(int) bool, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
 	flow := returnBorrowFlow{}
 	for other, arg := range args {
 		if other == skip || (keep != nil && !keep(other)) {
@@ -1811,6 +1815,10 @@ func (a *Analyzer) returnBorrowCallOtherArgsFlowWhere(args []ast.Expr, skip int,
 			if ref, isRef := params[other].(*RefType); isRef {
 				if outlivesFrameStorage(ref.Storage) {
 					// A `heap`/`static` parameter only accepts frame-outliving storage.
+					continue
+				}
+				if contentsOnly != nil && contentsOnly(other) {
+					flow = mergeReturnBorrowFlow(flow, a.returnBorrowReferentContentsFlow(arg, aliases, active, localBindings))
 					continue
 				}
 				var writable Type

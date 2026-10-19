@@ -141,7 +141,11 @@ func TestStoreFlowCanExprPreservesReturnDependencies(t *testing.T) {
 		}
 		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "can_return_flow.elisa", body, AnalyzeOptions{})
 		errors := strings.Join(result.Errors(), "\n")
-		if borrowed && !strings.Contains(errors, "dangles once the function returns") {
+		// Arena-backed local view contents are rejected by region checking;
+		// they must not be confused with the State descriptor's frame address.
+		frameEscape := strings.Contains(errors, "dangles once the function returns")
+		regionEscape := strings.Contains(errors, "can_return_flow.elisa:30:") && strings.Contains(errors, "call may store a value in region") && strings.Contains(errors, "through argument 2") && strings.Contains(errors, "freed first, leaving a dangling reference")
+		if borrowed && !frameEscape && !regionEscape {
 			t.Fatalf("borrowed return must retain dependency: %s", errors)
 		}
 		if !borrowed && errors != "" {
