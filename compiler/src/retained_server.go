@@ -103,22 +103,24 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	}
 	key := rt.filename + "\x00" + fmt.Sprintf("%#v", options)
 	if rt.state != nil && rt.key == key {
-		// Splice into a private parse: the driver's file must stay untouched in
-		// case the fresh path below has to analyze it for code generation.
-		spliced, ok1 := rt.parse()
-		pristine, ok2 := rt.parse()
-		if ok1 && ok2 {
-			result, err := rt.state.Update(spliced, pristine, rt.src)
-			st := rt.state.LastStats
-			if err == nil {
-				fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
-				if len(result.Errors()) != 0 {
-					return result
-				}
-				fmt.Fprintf(rt.log, "[retained] no errors; analyzing fresh for code generation\n")
-			} else {
-				fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
+		result, err := rt.state.Update(file, rt.src)
+		st := rt.state.LastStats
+		if err != nil {
+			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
+		} else {
+			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
+			if len(result.Errors()) != 0 {
+				return result
 			}
+			// No errors: code generation follows, and it must see a fresh
+			// analysis. Update consumed file, so analyze a new parse; the driver
+			// takes the analyzed file from Result.File.
+			fmt.Fprintf(rt.log, "[retained] no errors; analyzing fresh for code generation\n")
+			fresh, ok := rt.parse()
+			if !ok {
+				return result
+			}
+			file = fresh
 		}
 	}
 	rt.state = nil // release the old analysis before building the next one

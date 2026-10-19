@@ -27,8 +27,9 @@ type RetainedAnalysis struct {
 	result   *Result
 	decls    []scopedDecl
 	post     func()
-	pristine *ast.File // an unanalyzed parse of src, for comparison
-	src      []byte    // the expanded source pristine was parsed from
+	pristine *ast.File                            // a parse of src, for comparison; see texts
+	texts    map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
+	src      []byte                               // the expanded source pristine was parsed from
 
 	depth      int
 	windows    map[*ast.FuncDecl][2]int // body-phase diagnostics emitted by each top-level analyzeFunc
@@ -90,11 +91,13 @@ func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func())
 	r.a, r.decls, r.post = a, decls, post
 }
 
-// Update applies an edit given two fresh parses of the edited source: file,
-// whose function bodies are spliced into the retained AST, and pristine,
-// kept for the next comparison. A non-nil error names why the edit is not a
-// body-only change; the retained state is then unchanged and must be rebuilt.
-func (r *RetainedAnalysis) Update(file, pristine *ast.File, src []byte) (*Result, error) {
+// Update applies an edit given a fresh, unanalyzed parse of the edited source.
+// Changed function bodies move from file into the retained AST, and file
+// becomes the base the next edit is compared against, so the caller must not
+// analyze file afterwards. A non-nil error names why the edit is not a
+// body-only change; the retained state and file are then untouched, and the
+// caller should start over with a full analysis.
+func (r *RetainedAnalysis) Update(file *ast.File, src []byte) (*Result, error) {
 	start := time.Now()
 	r.LastStats = RetainedUpdateStats{}
 	fail := func(format string, args ...any) (*Result, error) {
@@ -131,6 +134,7 @@ func (r *RetainedAnalysis) Update(file, pristine *ast.File, src []byte) (*Result
 	}
 	var splices []splice
 	var shifted []ast.Decl
+	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
 	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
 	oldSpans := retainedSpans(oldDecls, r.src)
@@ -174,16 +178,18 @@ func (r *RetainedAnalysis) Update(file, pristine *ast.File, src []byte) (*Result
 			}
 			continue
 		}
-		if retainedNormalized(retainedHeader(ofn)) != retainedNormalized(retainedHeader(nfn)) {
+		oldText, newText := r.comparisonText(ofn), retainedText(nfn)
+		if oldText.header != newText.header {
 			return fail("signature of %s changed", ofn.Name)
 		}
-		if retainedSharedGensyms(unparse.FormatDecl(ofn)) != retainedSharedGensyms(unparse.FormatDecl(nfn)) {
+		if oldText.gensyms != newText.gensyms {
 			return fail("%s mentions renamed synthesized declarations", ofn.Name)
 		}
 		if _, known := scoped[live]; !known {
 			return fail("%s is not a top-level analyzed function", ofn.Name)
 		}
 		splices = append(splices, splice{live, nfn.Body})
+		newTexts[nfn] = newText
 	}
 	// Past this point the edit is accepted; mutate the retained state.
 	var changed []scopedDecl
@@ -230,7 +236,9 @@ func (r *RetainedAnalysis) Update(file, pristine *ast.File, src []byte) (*Result
 	r.post()
 	r.rbUpdating = false
 	a.closeSMT()
-	r.pristine, r.src = pristine, src
+	// file is the next comparison base. Its spliced bodies now belong to the
+	// analyzed AST and get rewritten there, so keep their text from before.
+	r.pristine, r.src, r.texts = file, src, newTexts
 	r.result.Diagnostics = a.diagnostics
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)
@@ -260,6 +268,26 @@ func (r *RetainedAnalysis) rebaseWindows(drop map[int]bool) {
 		}
 		r.windows[fn] = [2]int{remap(w[0]), remap(w[1])}
 	}
+}
+
+// funcComparisonText is what Update compares for a function whose source changed.
+type funcComparisonText struct {
+	header  string // signature, gensyms normalized
+	gensyms string // offset-named identifiers the function mentions
+}
+
+func retainedText(fn *ast.FuncDecl) funcComparisonText {
+	return funcComparisonText{
+		header:  retainedNormalized(retainedHeader(fn)),
+		gensyms: retainedSharedGensyms(unparse.FormatDecl(fn)),
+	}
+}
+
+func (r *RetainedAnalysis) comparisonText(fn *ast.FuncDecl) funcComparisonText {
+	if text, ok := r.texts[fn]; ok {
+		return text
+	}
+	return retainedText(fn)
 }
 
 // The parser names synthesized declarations and auto arenas after their byte

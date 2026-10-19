@@ -235,6 +235,10 @@ func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.
 		}
 		return nil, nil, false
 	}
+	if result.File != nil {
+		// The retained server may have analyzed its own parse of the same source.
+		file = result.File
+	}
 
 	return file, result, true
 }
