@@ -390,6 +390,9 @@ func (a *Analyzer) typedPureReturnExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 
 // smtTermMentionsQuantifierBinder reports whether an SMT term names a quantifier binder (`q_…`).
 func smtTermMentionsQuantifierBinder(term string) bool {
+	if !strings.Contains(term, "q_") {
+		return false
+	}
 	// Binders introduced INSIDE the term (`(forall ((q_k Int)) ...)`) are bound there; only a
 	// binder with no enclosing quantifier in the term is free. Binder names carry a unique counter
 	// suffix, so a name bound anywhere in the term is bound at all of its occurrences.
@@ -416,7 +419,7 @@ func smtTermMentionsQuantifierBinder(term string) bool {
 			}
 		}
 	}
-	for _, tok := range strings.FieldsFunc(term, func(r rune) bool {
+	for tok := range strings.FieldsFuncSeq(term, func(r rune) bool {
 		return r == ' ' || r == '(' || r == ')' || r == '|' || r == ';' || r == '=' || r == ','
 	}) {
 		if strings.HasPrefix(tok, "q_") && !bound[tok] {
