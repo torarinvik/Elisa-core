@@ -880,6 +880,19 @@ func (a *Analyzer) localContainerElementState(n *ast.IndexExpr) (regionRefState,
 // function, or a module-visible one whose name has no overload set a later receiver
 // rewrite could pick a different callee from.
 func (a *Analyzer) resolveReadOnlyScanCallee(call *ast.CallExpr) (*ast.FuncDecl, bool) {
+	// `f[r1, r2](args)` binds only region parameters: the body, and so its store summary, is
+	// the same for every region instantiation. Resolve through the plain name and keep the
+	// result only for a callee with no type parameters.
+	if spec, ok := call.Func.(*ast.SpecializeExpr); ok && spec != nil {
+		plain := *call
+		plain.Func = spec.Operand
+		decl, ok := a.resolveReadOnlyScanCallee(&plain)
+		if !ok || decl == nil || len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 ||
+			len(spec.TypeArgs) != len(decl.RegionParams) {
+			return nil, false
+		}
+		return decl, true
+	}
 	ident, ok := call.Func.(*ast.Ident)
 	if !ok || ident == nil || a.currentScope == nil || len(a.ufcsFunctionsByName[ident.Name]) > 1 {
 		return nil, false
