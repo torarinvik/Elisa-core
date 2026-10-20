@@ -310,21 +310,8 @@ func (s *functionState) lookupVisibleNamedType(name string) (semantic.Type, stri
 		}
 	}
 	if !strings.Contains(name, ".") && !strings.Contains(name, "::") {
-		suffix := "." + strings.TrimSpace(name)
-		var resolvedName string
-		var resolved semantic.Type
-		for candidate, t := range s.g.result.NamedTypes {
-			if !strings.HasSuffix(candidate, suffix) || t == nil {
-				continue
-			}
-			if resolved != nil {
-				return nil, "", false
-			}
-			resolvedName = candidate
-			resolved = t
-		}
-		if resolved != nil {
-			return resolved, resolvedName, true
+		if matches := s.g.namedTypeSuffixIndex()[strings.TrimSpace(name)]; len(matches) == 1 {
+			return s.g.result.NamedTypes[matches[0]], matches[0], true
 		}
 	}
 	return nil, "", false
@@ -340,21 +327,8 @@ func (s *functionState) lookupVisibleGlobalSymbol(name string) (*semantic.Symbol
 		}
 	}
 	if !strings.Contains(name, ".") && !strings.Contains(name, "::") {
-		suffix := "." + strings.TrimSpace(name)
-		var resolvedName string
-		var resolvedSym *semantic.Symbol
-		for candidate, sym := range s.g.result.GlobalScope.Symbols {
-			if !strings.HasSuffix(candidate, suffix) || sym == nil {
-				continue
-			}
-			if resolvedSym != nil {
-				return nil, "", false
-			}
-			resolvedName = candidate
-			resolvedSym = sym
-		}
-		if resolvedSym != nil {
-			return resolvedSym, resolvedName, true
+		if matches := s.g.globalSuffixIndex()[strings.TrimSpace(name)]; len(matches) == 1 {
+			return s.g.result.GlobalScope.Symbols[matches[0]], matches[0], true
 		}
 	}
 	return nil, "", false
@@ -1400,4 +1374,39 @@ func blockReachableFromEntry(fn C.LLVMValueRef, target C.LLVMBasicBlockRef) bool
 		}
 	}
 	return false
+}
+
+// suffixIndex maps the text after the last '.' of every key with a non-nil value
+// to those keys. A dot-free name has a unique `"." + name` suffix match exactly
+// when its entry holds one key.
+func suffixIndex[V comparable](entries map[string]V) map[string][]string {
+	var zero V
+	index := map[string][]string{}
+	for key, value := range entries {
+		if value == zero {
+			continue
+		}
+		if dot := strings.LastIndex(key, "."); dot >= 0 {
+			last := key[dot+1:]
+			index[last] = append(index[last], key)
+		}
+	}
+	return index
+}
+
+func (g *llvmGenerator) namedTypeSuffixIndex() map[string][]string {
+	if g.namedTypeSuffixes == nil || g.namedTypeSuffixesSize != len(g.result.NamedTypes) {
+		g.namedTypeSuffixes = suffixIndex(g.result.NamedTypes)
+		g.namedTypeSuffixesSize = len(g.result.NamedTypes)
+	}
+	return g.namedTypeSuffixes
+}
+
+func (g *llvmGenerator) globalSuffixIndex() map[string][]string {
+	symbols := g.result.GlobalScope.Symbols
+	if g.globalSuffixes == nil || g.globalSuffixesSize != len(symbols) {
+		g.globalSuffixes = suffixIndex(symbols)
+		g.globalSuffixesSize = len(symbols)
+	}
+	return g.globalSuffixes
 }

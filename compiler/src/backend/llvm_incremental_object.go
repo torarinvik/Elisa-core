@@ -75,10 +75,17 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	}
 	// Fixed codegen/relocation/code-model settings are shared with writeObjectFile.
 	// Actual resolved machine strings, rather than environment spellings, are keys.
+	// An unoptimized build has no use for the optimizing instruction selector;
+	// FastISel emits the same semantics several times faster.
+	fastCodegen := options.OptLevel == OptimizationLevel0
+	codegenLevel := "default-codegen"
+	if fastCodegen {
+		codegenLevel = "none-codegen"
+	}
 	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
 	cpu := C.LLVMGetTargetMachineCPU(g.targetMachine)
 	features := C.LLVMGetTargetMachineFeatureString(g.targetMachine)
-	config, _ := json.Marshal([]string{"incremental-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), "default-codegen", "default-reloc", "default-code-model"})
+	config, _ := json.Marshal([]string{"incremental-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model"})
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
@@ -161,7 +168,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		go func() {
 			defer wg.Done()
 			for part := range next {
-				objects[part], declined[part], errs[part] = s.buildPartition(part, wholeData, wholeSize, namespace, owners, ownerCount, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
+				objects[part], declined[part], errs[part] = s.buildPartition(part, fastCodegen, wholeData, wholeSize, namespace, owners, ownerCount, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
 			}
 		}()
 	}
@@ -211,7 +218,7 @@ func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath
 // buildPartition loads one partition into a private context, looks its exact
 // bitcode up in the session and compiles it on a miss. declined reports a
 // partition the loader cannot split; the caller then emits the module directly.
-func (s *IncrementalObjectSession) buildPartition(part int, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
+func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
 	partitionStart := time.Now()
 	context := C.LLVMContextCreate()
 	defer C.LLVMContextDispose(context)
@@ -256,7 +263,7 @@ func (s *IncrementalObjectSession) buildPartition(part int, wholeData *C.char, w
 	}
 	nativeStart := time.Now()
 	var buffer C.LLVMMemoryBufferRef
-	if C.elisacoreEmitPartitionObject(module, triple, cpu, features, &buffer, &message) == 0 {
+	if C.elisacoreEmitPartitionObject(module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
 		text := "native emission failed"
 		if message != nil {
 			text = C.GoString(message)
@@ -279,4 +286,11 @@ func (s *IncrementalObjectSession) buildPartition(part int, wholeData *C.char, w
 		s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
 	}
 	return object, false, nil
+}
+
+func cBool(b bool) C.int {
+	if b {
+		return 1
+	}
+	return 0
 }

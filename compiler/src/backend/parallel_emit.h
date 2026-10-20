@@ -29,7 +29,7 @@ LLVMModuleRef elisacoreLoadObjectPartition(LLVMContextRef context, const char *d
     int jobs, int part, const char *unit_namespace, const long long *owners, size_t count,
     char **error_out);
 int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char *cpu,
-    const char *features, LLVMMemoryBufferRef *out, char **error_out);
+    const char *features, int fast, LLVMMemoryBufferRef *out, char **error_out);
 LLVMModuleRef elisacoreCloneObjectPartitionPrechecked(
     LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
     const long long *owners, size_t count);

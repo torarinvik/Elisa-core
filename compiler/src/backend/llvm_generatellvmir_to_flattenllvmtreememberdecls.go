@@ -21,6 +21,7 @@ import "C"
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
 	"maps"
@@ -180,6 +181,14 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 }
 
 type llvmGenerator struct {
+	// Last-segment indexes for the unique-suffix name fallbacks (see
+	// namedTypeSuffixIndex); rebuilt when the indexed map's size changes.
+	namedTypeSuffixes     map[string][]string
+	namedTypeSuffixesSize int
+	globalSuffixes        map[string][]string
+	globalSuffixesSize    int
+	provenIndexSpans      map[lexer.Pos]bool
+	provenIndexSpansSize  int
 	// panicReportFn is the module's outlined panic reporter (llvm_panic_report.go), created lazily.
 	panicReportFn             C.LLVMValueRef
 	sameNameWrapperDecisions  map[*semantic.ExportedFunc]bool

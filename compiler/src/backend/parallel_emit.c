@@ -324,7 +324,7 @@ LLVMModuleRef elisacoreLoadObjectPartition(LLVMContextRef context, const char *d
 // Native object for a loaded partition, with the same target machine settings
 // as the serial path. Each call builds its own target machine.
 int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char *cpu,
-	const char *features, LLVMMemoryBufferRef *out, char **error_out) {
+	const char *features, int fast, LLVMMemoryBufferRef *out, char **error_out) {
 	*error_out = NULL;
 	LLVMTargetRef target;
 	char *msg = NULL;
@@ -334,7 +334,7 @@ int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char
 		return 0;
 	}
 	LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features,
-		LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+		fast ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
 	if (tm == NULL) {
 		*error_out = strdup("failed to create partition target machine");
 		return 0;

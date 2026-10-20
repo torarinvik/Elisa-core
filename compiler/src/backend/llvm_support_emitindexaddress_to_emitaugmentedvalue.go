@@ -70,12 +70,24 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 	// semantic proof map is pointer-keyed because that is exact for the original tree, but a
 	// rebuilt node must not lose a proof and regain a redundant watchdog. Match only an exact
 	// source span; a shared line or column is insufficient because two accesses can be adjacent.
-	for provenExpr, proven := range s.g.result.IndexBoundsProven {
-		if proven && provenExpr != nil && provenExpr.Position == expr.Position {
-			return true
+	return s.g.provenIndexPositions()[expr.Position]
+}
+
+// provenIndexPositions indexes IndexBoundsProven by source span, rebuilt when
+// the proof map's size changes, so a rebuilt node's lookup is a map hit instead
+// of a scan of every proof.
+func (g *llvmGenerator) provenIndexPositions() map[lexer.Pos]bool {
+	proofs := g.result.IndexBoundsProven
+	if g.provenIndexSpans == nil || g.provenIndexSpansSize != len(proofs) {
+		g.provenIndexSpans = make(map[lexer.Pos]bool, len(proofs))
+		for provenExpr, proven := range proofs {
+			if proven && provenExpr != nil {
+				g.provenIndexSpans[provenExpr.Position] = true
+			}
 		}
+		g.provenIndexSpansSize = len(proofs)
 	}
-	return false
+	return g.provenIndexSpans
 }
 
 // emitIndexAddress computes the address of an indexed element. userFacing marks
