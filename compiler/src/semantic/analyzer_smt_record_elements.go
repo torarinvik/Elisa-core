@@ -72,7 +72,7 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 	}
 	if index.Index2 != nil || index.Fallback != nil || index.LegacyElseFallback ||
 		index.AsSpecialize != nil || index.AsOverlayCall != nil || index.AsBuiltinDictGet != nil ||
-		!tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+		(!tr.loopFrameContainerRead(index.Object, env) && !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl)) {
 		return "", true, false
 	}
 	var leaf Type = typ
@@ -115,7 +115,51 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 	if sort == "Int" {
 		term = smtSameWidthReinterpret(term, signed, bits)
 	}
+	if overlay, ok := tr.recordOverlayFor(index.Object, env); ok {
+		// The post-body element at the stored index is the stored value; every other element is
+		// the pre-body one. The value and index read pre-body state.
+		tr.recordOverlayActive = false
+		var stored, at string
+		var okValue, okIndex bool
+		var projection ast.Expr = rerootProjection(n, overlay.value, tr.a)
+		if field, ok := structLiteralFieldPath(overlay.value, path); ok {
+			projection = field
+		}
+		if sort == "Bool" {
+			stored, okValue = tr.boolTerm(projection, nil)
+		} else {
+			stored, okValue = tr.termEnv(projection, nil)
+			if okValue {
+				stored = smtSameWidthReinterpret(stored, signed, bits)
+			}
+		}
+		at, okIndex = tr.termEnv(overlay.index, nil)
+		tr.recordOverlayActive = true
+		if !okValue || !okIndex {
+			return "", true, false
+		}
+		term = "(ite (= " + k + " " + at + ") " + stored + " " + term + ")"
+	}
 	return term, true, true
+}
+
+// loopFrameContainerRead reports a read of an array a loop-preservation query fixes at the loop
+// head (an unbound root name in loopFrameContainers).
+func (tr *smtTranslator) loopFrameContainerRead(object ast.Expr, env map[string]string) bool {
+	id, ok := stripOptimizationParens(object).(*ast.Ident)
+	if !ok || id == nil || tr.calleeBodyDepth != 0 || !tr.loopFrameContainers[id.Name] {
+		return false
+	}
+	_, bound := env[id.Name]
+	return !bound
+}
+
+func (tr *smtTranslator) recordOverlayFor(object ast.Expr, env map[string]string) (loopArrayStore, bool) {
+	if !tr.recordOverlayActive || !tr.loopFrameContainerRead(object, env) {
+		return loopArrayStore{}, false
+	}
+	overlay, ok := tr.recordOverlays[stripOptimizationParens(object).(*ast.Ident).Name]
+	return overlay, ok
 }
 
 // Fields of a read-only aggregate parameter can contain mutable arrays. They
@@ -237,4 +281,27 @@ func recordFieldContainerElementModeled(element Type) bool {
 		return true
 	}
 	return false
+}
+
+// structLiteralFieldPath reads the field path `.a.b` of a named-field struct literal through its
+// field initializers, when every hop is such a literal.
+func structLiteralFieldPath(value ast.Expr, path string) (ast.Expr, bool) {
+	current := value
+	for _, name := range strings.Split(strings.TrimPrefix(path, smtFieldSeparator), smtFieldSeparator) {
+		lit, ok := stripOptimizationParens(current).(*ast.StructLitExpr)
+		if !ok || lit == nil || len(lit.Spreads) != 0 || lit.CopyBase != nil || len(lit.ArgNames) != len(lit.Args) {
+			return nil, false
+		}
+		found := false
+		for i, argName := range lit.ArgNames {
+			if argName == name {
+				current, found = lit.Args[i], true
+				break
+			}
+		}
+		if !found {
+			return nil, false
+		}
+	}
+	return current, true
 }

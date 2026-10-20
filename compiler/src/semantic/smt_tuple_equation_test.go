@@ -216,3 +216,163 @@ def count_nonnegative(xs: darray[i64]&) -> usize:
 		})
 	}
 }
+
+// A whole-record store into an array element is read field by field: the stored index reads the
+// stored value's fields, every other index the pre-body element's. A store that breaks the
+// quantified invariant (a wrong value, or the wrong index) is still rejected.
+func TestLoopRecordElementStorePreservesFieldInvariant(t *testing.T) {
+	const decls = `
+struct F:
+    id: u32
+    known: bool
+
+def mk(id: u32) -> F:
+    ensure not result.known
+    return F{id: id, known: false}
+`
+	for _, tc := range []struct {
+		name, store string
+		proven      bool
+	}{
+		{"call", "facts[index] <- mk(fact.id)", true},
+		{"literal", "facts[index] <- F{id: fact.id, known: false}", true},
+		{"wrong_value", "facts[index] <- F{id: fact.id, known: true}", false},
+		{"wrong_index", "facts[0] <- mk(fact.id)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + `
+def clear(facts: mutable darray[F]&) -> void can[Abort.Panic]:
+    n: usize = facts.count
+    for index in 0..<n |facts, n|:
+        invariant facts.count == n
+        invariant forall k in 0..<index: not facts[k].known
+        fact: F = facts[index]
+        ` + tc.store + `
+`
+			r := analyzeContractStrict(t, "record_store_"+tc.name+".elisa", src)
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the record-store invariant to prove: %s", es)
+			}
+			if !tc.proven && es == "" {
+				t.Fatal("a store breaking the invariant was accepted")
+			}
+		})
+	}
+}
+
+// A path that continues past an element read `table.pos[index]` had the index in bounds, so an
+// invariant bounding a later-recorded index by that container's count preserves. Reading a
+// different element gives no such bound.
+func TestLoopElementReadBoundsLaterPath(t *testing.T) {
+	const src = `struct Owner:
+    value: u32
+
+struct Id:
+    owner: Owner
+    serial: u32
+
+struct Pos:
+    offset: u32
+    end_offset: u32
+
+struct Table:
+    ids: darray[Id]
+    pos: darray[Pos]
+
+def ids_equal(a: Id, b: Id) -> bool:
+    return a.owner.value == b.owner.value and a.serial == b.serial
+
+def find(table: Table&, owner: Owner, position: Pos) -> usize:
+    lookup_valid: mutable bool = true
+    found: mutable bool = false
+    result_index: mutable usize = 0
+    for index in 0..<table.ids.count |index, table, owner, position, found, result_index|:
+        invariant not found or (
+            result_index < table.pos.count and
+            result_index < table.ids.count and
+            table.ids[result_index].owner.value == owner.value and
+            table.pos[result_index].offset == position.offset)
+        id: Id = table.ids[index]
+        continue if id.owner.value != owner.value
+        recorded: Pos = table.pos[index]
+        continue if recorded.offset != position.offset
+        if found and not ids_equal(table.ids[result_index], id):
+            lookup_valid <- false
+        if not found:
+            result_index <- index
+            found <- true
+            assert table.ids[result_index].owner.value == owner.value
+            assert table.pos[result_index].offset == position.offset
+    return result_index if lookup_valid else 0
+`
+	for _, tc := range []struct {
+		name, from, to string
+		proven         bool
+	}{
+		{"read_bounds", "", "", true},
+		{"other_element", "recorded: Pos = table.pos[index]", "recorded: Pos = table.pos[0]", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := src
+			if tc.from != "" {
+				body = strings.Replace(body, tc.from, tc.to, 1)
+			}
+			r := analyzeContractStrict(t, "read_bounds_"+tc.name+".elisa", body)
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the invariant to prove: %s", es)
+			}
+			if !tc.proven && es == "" {
+				t.Fatal("an invariant without a read bound was accepted")
+			}
+		})
+	}
+}
+
+// A void-exit postcondition holds when an assert spelled the same way (a range quantifier in
+// either its quantifier or its lowered runtime-loop form) was proven and nothing has written its
+// roots since. A write or a push after the assert retires it. A quantified assert in the loop
+// body changes no state, so the record-store body is still captured.
+func TestVoidEnsureFromLiveAssertFact(t *testing.T) {
+	const decls = `
+struct F:
+    id: u32
+    known: bool
+
+def mk(id: u32) -> F:
+    ensure not result.known
+    return F{id: id, known: false}
+`
+	for _, tc := range []struct {
+		name, after string
+		proven      bool
+	}{
+		{"assert_live", "", true},
+		{"stored_after", "    if facts.count > 0:\n        facts[0] <- F{id: 0, known: true}\n", false},
+		{"pushed_after", "    facts.push(F{id: 0, known: true})\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + `
+def clear(facts: mutable darray[F]&) -> void can[Abort.Panic]:
+    ensure facts.count == 0 or (forall k in 0..<facts.count: not facts[k].known)
+    n: usize = facts.count
+    for index in 0..<n |facts, n|:
+        invariant facts.count == n
+        invariant forall k in 0..<index: not facts[k].known
+        fact: F = facts[index]
+        facts[index] <- mk(fact.id)
+        assert forall k in 0..<(index + 1.usize()): not facts[k].known
+    assert facts.count == 0 or (forall k in 0..<facts.count: not facts[k].known)
+` + tc.after
+			r := analyzeContractStrict(t, "assert_fact_ensure_"+tc.name+".elisa", src)
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the postcondition to prove: %s", es)
+			}
+			if !tc.proven && !strings.Contains(es, "ensure postcondition") {
+				t.Fatalf("a postcondition retired by a later write was accepted: %s", es)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"elisacore/src/lexer"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 )
 
@@ -242,6 +243,150 @@ func (a *Analyzer) assertFactLive(expr ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// assertFactSpellingLive reports a live flow assert-fact structurally equal to expr (source
+// positions aside). Facts are recorded conjunct by conjunct, so each conjunct of expr must match.
+func (a *Analyzer) assertFactSpellingLive(expr ast.Expr) bool {
+	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin != nil && bin.Op == lexer.TOKEN_AND && bin.LoweredCall == nil {
+		return a.assertFactSpellingLive(bin.Left) && a.assertFactSpellingLive(bin.Right)
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if astEqualIgnoringPositions(reflect.ValueOf(fact.Expr), reflect.ValueOf(expr)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var lexerPosType = reflect.TypeOf(lexer.Pos{})
+
+// rangeQuantifierShape is `forall/exists name in lo..<hi: predicate`, whether written as a
+// quantifier (the guard desugared into the body) or lowered to a runtime flag-and-loop block.
+type rangeQuantifierShape struct {
+	exists            bool
+	name              string
+	lo, hi, predicate ast.Expr
+}
+
+func (q rangeQuantifierShape) equal(o rangeQuantifierShape) bool {
+	return q.exists == o.exists && q.name == o.name &&
+		astEqualIgnoringPositions(reflect.ValueOf(q.lo), reflect.ValueOf(o.lo)) &&
+		astEqualIgnoringPositions(reflect.ValueOf(q.hi), reflect.ValueOf(o.hi)) &&
+		astEqualIgnoringPositions(reflect.ValueOf(q.predicate), reflect.ValueOf(o.predicate))
+}
+
+func rangeQuantifierShapeOf(node any) (rangeQuantifierShape, bool) {
+	switch n := node.(type) {
+	case *ast.ExprBlock:
+		loop, predicate, exists, ok := runtimeRangeQuantifierParts(n)
+		if !ok {
+			return rangeQuantifierShape{}, false
+		}
+		return rangeQuantifierShape{exists: exists, name: loop.Name, lo: loop.Start, hi: loop.End, predicate: predicate}, true
+	case *ast.QuantifierExpr:
+		if n.In != nil || len(n.Vars) != 1 {
+			return rangeQuantifierShape{}, false
+		}
+		body, ok := stripOptimizationParens(n.Body).(*ast.BinaryExpr)
+		if !ok || body.LoweredCall != nil {
+			return rangeQuantifierShape{}, false
+		}
+		guardExpr, predicate := body.Left, body.Right
+		if n.Exists {
+			if body.Op != lexer.TOKEN_AND {
+				return rangeQuantifierShape{}, false
+			}
+		} else {
+			not, ok := stripOptimizationParens(body.Left).(*ast.UnaryExpr)
+			if body.Op != lexer.TOKEN_OR || !ok || not.Op != lexer.TOKEN_NOT || not.LoweredCall != nil {
+				return rangeQuantifierShape{}, false
+			}
+			guardExpr = not.Operand
+		}
+		guard, ok := stripOptimizationParens(guardExpr).(*ast.BinaryExpr)
+		if !ok || guard.Op != lexer.TOKEN_AND {
+			return rangeQuantifierShape{}, false
+		}
+		low, okLow := stripOptimizationParens(guard.Left).(*ast.BinaryExpr)
+		high, okHigh := stripOptimizationParens(guard.Right).(*ast.BinaryExpr)
+		if !okLow || !okHigh || low.Op != lexer.TOKEN_LTEQ || high.Op != lexer.TOKEN_LT ||
+			!isIdentNamed(low.Right, n.Vars[0]) || !isIdentNamed(high.Left, n.Vars[0]) {
+			return rangeQuantifierShape{}, false
+		}
+		return rangeQuantifierShape{exists: n.Exists, name: n.Vars[0], lo: low.Left, hi: high.Right, predicate: predicate}, true
+	}
+	return rangeQuantifierShape{}, false
+}
+
+// astEqualIgnoringPositions compares two AST values field by field, skipping source positions.
+func astEqualIgnoringPositions(x, y reflect.Value) bool {
+	if x.IsValid() != y.IsValid() {
+		return false
+	}
+	if !x.IsValid() {
+		return true
+	}
+	if x.Type() != y.Type() {
+		// A range quantifier and its lowered runtime loop have different node types.
+		if x.Kind() == reflect.Pointer && y.Kind() == reflect.Pointer && !x.IsNil() && !y.IsNil() {
+			if left, ok := rangeQuantifierShapeOf(x.Interface()); ok {
+				if right, ok := rangeQuantifierShapeOf(y.Interface()); ok {
+					return left.equal(right)
+				}
+			}
+		}
+		return false
+	}
+	if x.Type() == lexerPosType {
+		return true
+	}
+	if x.Kind() == reflect.Pointer && !x.IsNil() && !y.IsNil() {
+		if left, ok := rangeQuantifierShapeOf(x.Interface()); ok {
+			right, ok := rangeQuantifierShapeOf(y.Interface())
+			return ok && left.equal(right)
+		}
+	}
+	switch x.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if x.IsNil() || y.IsNil() {
+			return x.IsNil() == y.IsNil()
+		}
+		return astEqualIgnoringPositions(x.Elem(), y.Elem())
+	case reflect.Struct:
+		for i := 0; i < x.NumField(); i++ {
+			if !astEqualIgnoringPositions(x.Field(i), y.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Slice, reflect.Array:
+		if x.Len() != y.Len() {
+			return false
+		}
+		for i := 0; i < x.Len(); i++ {
+			if !astEqualIgnoringPositions(x.Index(i), y.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if x.Len() != y.Len() {
+			return false
+		}
+		for _, key := range x.MapKeys() {
+			if !astEqualIgnoringPositions(x.MapIndex(key), y.MapIndex(key)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Func, reflect.Chan, reflect.UnsafePointer:
+		return x.IsNil() && y.IsNil()
+	default:
+		return x.Equal(y)
+	}
 }
 
 // requiresClauseUpperBound extracts a constant upper bound on `name` from a `name <= K` / `name < K`

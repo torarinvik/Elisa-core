@@ -717,6 +717,12 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "written field", ProofProvenSMT)
 			continue
 		}
+		// A live assert fact spelled exactly like the clause was proven at an earlier point and not
+		// retired by any later write to its roots, so it holds at this exit.
+		if a.assertFactSpellingLive(clause) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "assert fact", ProofProvenSMT)
+			continue
+		}
 		// WP transport relates the param's EXIT value to `old(p)` (its entry value), proving e.g.
 		// `ensure p >= old(p)` when the body keeps/raises p. The trySMTProveRequires fallback models
 		// `old(p)` as an unconstrained fresh symbol — sound but always declining an old() postcondition.

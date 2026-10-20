@@ -115,6 +115,11 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 					return nil, false
 				}
 				frontier[i].lets[n.Name] = v
+				// A path that continues past the read was in bounds: every element read is proven
+				// in bounds or checked at run time.
+				if bound, ok := a.seqLoopReadBound(n.Value, v); ok {
+					frontier[i].conds = append(frontier[i].conds, bound)
+				}
 			}
 		case *ast.AssignStmt:
 			target, ok := n.Target.(*ast.Ident)
@@ -450,4 +455,28 @@ func (a *Analyzer) callsAreStateIndependent(expr ast.Expr) bool {
 		return true
 	})
 	return ok
+}
+
+// seqLoopReadBound returns `index < container.count` over the pre-state for a binding whose value
+// is a plain element read of a dynamic array.
+func (a *Analyzer) seqLoopReadBound(value, preState ast.Expr) (ast.Expr, bool) {
+	read, ok := stripOptimizationParens(value).(*ast.IndexExpr)
+	if !ok || read == nil || read.Index2 != nil || read.Fallback != nil || read.LegacyElseFallback ||
+		read.AsSpecialize != nil || read.AsOverlayCall != nil || read.AsBuiltinDictGet != nil {
+		return nil, false
+	}
+	t := a.containerArgType(read.Object)
+	if t == nil {
+		t = a.newSMTTranslator(nil).placeStaticType(read.Object)
+	}
+	if t == nil || !isDArrayTypeMaybeRef(t) {
+		return nil, false
+	}
+	pre, ok := stripOptimizationParens(preState).(*ast.IndexExpr)
+	if !ok || pre == nil {
+		return nil, false
+	}
+	pos := read.Pos()
+	count := &ast.FieldExpr{Position: pos, Object: pre.Object, Field: "count"}
+	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LT, Left: pre.Index, Right: count}, true
 }

@@ -774,6 +774,16 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	// term. This faithfully models `arr[i] <- a; arr[i+1] <- b` as `(store (store arr i a) (i+1) b)`,
 	// which z3's array theory reads element-wise correctly for the inductive step.
 	for _, st := range arrayStores {
+		if st.record {
+			// A record store leaves the array value unchanged in env: its element reads go through
+			// the overlay, active only while the obligation (post-body state) is translated.
+			tr.admitLoopFrameContainer(st.arrayName)
+			if tr.recordOverlays == nil {
+				tr.recordOverlays = map[string]loopArrayStore{}
+			}
+			tr.recordOverlays[st.arrayName] = st
+			continue
+		}
 		// Base: if a prior store to this array already built a composed term, use it; otherwise start
 		// from the free pre-body array constant.
 		var baseTerm string
@@ -803,6 +813,7 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	// any goal the folder does not touch (behavior-preserving). When the target is outside the IR
 	// fragment (quantifiers, array selects, …) lowering declines and we fall back to the opaque boolTerm
 	// translation — the identical pre-IR path.
+	tr.recordOverlayActive = len(tr.recordOverlays) != 0
 	goal, lowered := tr.lowerVCFormula(target, env)
 	var obligation string
 	if lowered {
@@ -811,9 +822,11 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 		var ok bool
 		obligation, ok = tr.boolTerm(target, env)
 		if !ok {
+			tr.recordOverlayActive = false
 			return false, ""
 		}
 	}
+	tr.recordOverlayActive = false
 	// Hypotheses are translated with an identity environment, so a loop variable `i` in a hypothesis
 	// and the `i` inside a substituted term (`i + 1`) resolve to the SAME free SMT constant.
 	identEnv := map[string]string{}
@@ -880,6 +893,10 @@ type loopArrayStore struct {
 	array     ast.Expr
 	index     ast.Expr
 	value     ast.Expr
+	// record marks a whole-record store into an array of records. Its value is not a scalar term:
+	// field reads of the stored element read the value's fields at the stored index and the
+	// pre-body element's fields elsewhere (recordElementFieldTerm's overlay).
+	record bool
 }
 
 // captureLoopBodyEffect models a straight-line loop body as a simultaneous substitution: each assigned
@@ -923,6 +940,21 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 	var order []string
 	var stores []loopArrayStore
 	storedArrays := map[string]bool{}
+	// Immutable body locals (strict path): their definitions read only pre-body state, so a record
+	// store's value reads them through their definitions. Nothing else may read them.
+	locals := map[string]ast.Expr{}
+	readsLocal := func(exprs ...ast.Expr) bool {
+		for _, e := range exprs {
+			refs := map[string]bool{}
+			collectExprIdentNames(e, refs)
+			for r := range refs {
+				if _, hit := locals[r]; hit {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	for _, s := range body {
 		switch n := s.(type) {
 		case *ast.ExprStmt:
@@ -953,8 +985,11 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 				if assigned[target.Name] || storedArrays[target.Name] {
 					return nil, nil, false // multiple writes: simultaneous substitution would be wrong
 				}
-				if !exprIsPureArith(n.Value) {
+				if !exprIsPureArith(n.Value) || readsLocal(n.Value) {
 					return nil, nil, false // calls / address-of / non-arithmetic: possible side effects
+				}
+				if _, isLocal := locals[target.Name]; isLocal {
+					return nil, nil, false
 				}
 				subst[target.Name] = n.Value
 				assigned[target.Name] = true
@@ -993,7 +1028,19 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 				if assigned[arrKey] || (forTermination && storedArrays[arrKey]) {
 					return nil, nil, false
 				}
-				if !storeOperandPure(target.Index) || !storeOperandPure(n.Value) {
+				if readsLocal(target.Index) {
+					return nil, nil, false
+				}
+				if !forTermination && !storeOperandPure(n.Value) {
+					value, ok := a.loopRecordStoreValue(target, n.Value, locals, assigned, storedArrays)
+					if !ok {
+						return nil, nil, false
+					}
+					stores = append(stores, loopArrayStore{arrayName: arrKey, array: target.Object, index: target.Index, value: value, record: true})
+					storedArrays[arrKey] = true
+					continue
+				}
+				if !storeOperandPure(target.Index) || !storeOperandPure(n.Value) || readsLocal(n.Value) {
 					return nil, nil, false
 				}
 				refs := map[string]bool{}
@@ -1003,6 +1050,9 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 					if assigned[r] {
 						return nil, nil, false
 					}
+				}
+				if a.loopRecordStored(stores, arrKey) {
+					return nil, nil, false
 				}
 				// The termination prover proves only the scalar measure and discards stores, so recording
 				// them is unnecessary there; on the invariant path each store is appended in body order so
@@ -1015,6 +1065,13 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 				return nil, nil, false
 			}
 		case *ast.VarDeclStmt:
+			if !forTermination {
+				if !a.loopRecordLocalAdmissible(n, locals, assigned, storedArrays) {
+					return nil, nil, false
+				}
+				locals[n.Name] = n.Value
+				continue
+			}
 			// TERMINATION path only: a body-local declaration (`d: i64 = digit(text[i])`) cannot
 			// change a measure variable unless it shadows one or its initializer could write one.
 			// Its name joins ignoredAssigned so a measure update that READS it is still declined
@@ -1049,6 +1106,143 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 		}
 	}
 	return subst, stores, true
+}
+
+// loopRecordLocalAdmissible admits an immutable body local whose definition reads only pre-body
+// state: no variable or array the body already wrote, no other local, and no name the loop state
+// or the enclosing scope already binds (shadowing would change what later reads mean).
+func (a *Analyzer) loopRecordLocalAdmissible(n *ast.VarDeclStmt, locals map[string]ast.Expr, assigned, storedArrays map[string]bool) bool {
+	if n == nil || n.Name == "" || n.Mutable || n.Ghost || n.Value == nil || n.Owner != nil {
+		return false
+	}
+	if _, dup := locals[n.Name]; dup || assigned[n.Name] || storedArrays[n.Name] {
+		return false
+	}
+	if sym, found := a.currentScope.Lookup(n.Name); found && sym != nil {
+		return false
+	}
+	if !a.seqLoopValueAdmissible(n.Value) {
+		return false
+	}
+	refs := map[string]bool{}
+	collectExprIdentNames(n.Value, refs)
+	for r := range refs {
+		if _, isLocal := locals[r]; isLocal || assigned[r] || storedArrays[r] {
+			return false
+		}
+	}
+	return true
+}
+
+// loopRecordStoreValue admits `array[index] <- value` storing a whole record into a bare array of
+// records. The value is a read-only expression of pre-body state (locals read through their
+// definitions); the array is stored once and never read by its own index or value after a write.
+func (a *Analyzer) loopRecordStoreValue(target *ast.IndexExpr, value ast.Expr, locals map[string]ast.Expr, assigned, storedArrays map[string]bool) (ast.Expr, bool) {
+	arr, ok := stripOptimizationParens(target.Object).(*ast.Ident)
+	if !ok || arr == nil || storedArrays[arr.Name] {
+		return nil, false
+	}
+	sym, found := a.currentScope.Lookup(arr.Name)
+	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || !isDArrayTypeMaybeRef(sym.Type) {
+		return nil, false
+	}
+	element := darrayElementTypeMaybeRef(sym.Type)
+	if _, record := StripAggregateStateType(element).(*StructType); !record {
+		return nil, false
+	}
+	if !exprIsPureArith(target.Index) {
+		return nil, false
+	}
+	refs := map[string]bool{}
+	collectArithIdents(target.Index, refs)
+	for r := range refs {
+		if assigned[r] {
+			return nil, false
+		}
+	}
+	if !a.loopRecordValueAdmissible(value) {
+		return nil, false
+	}
+	refs = map[string]bool{}
+	collectExprIdentNames(value, refs)
+	for r := range refs {
+		if definition, isLocal := locals[r]; isLocal {
+			collectExprIdentNames(definition, refs)
+		}
+	}
+	for r := range refs {
+		if assigned[r] || storedArrays[r] {
+			return nil, false
+		}
+	}
+	value, ok = a.loopRecordValueOverPreState(value, locals)
+	if !ok {
+		return nil, false
+	}
+	// The body is captured before it is analyzed: type the pre-state value so the translator can
+	// bind its record and bool arguments.
+	a.typeSequentialPathsQuietly([]loopBodyPath{{subst: map[string]ast.Expr{"": value}}})
+	return value, true
+}
+
+// loopRecordValueAdmissible admits a stored record value: an admissible read or call, or a
+// named-field literal of admissible values.
+func (a *Analyzer) loopRecordValueAdmissible(value ast.Expr) bool {
+	lit, ok := stripOptimizationParens(value).(*ast.StructLitExpr)
+	if !ok {
+		return a.seqLoopValueAdmissible(value)
+	}
+	if lit == nil || len(lit.Spreads) != 0 || lit.CopyBase != nil || len(lit.ArgNames) != len(lit.Args) {
+		return false
+	}
+	for _, arg := range lit.Args {
+		if !a.loopRecordValueAdmissible(arg) {
+			return false
+		}
+	}
+	return true
+}
+
+// loopRecordValueOverPreState reads body locals through their definitions. A named-field literal
+// is rebuilt field by field.
+func (a *Analyzer) loopRecordValueOverPreState(value ast.Expr, locals map[string]ast.Expr) (ast.Expr, bool) {
+	if len(locals) == 0 {
+		return value, true
+	}
+	lit, isLiteral := stripOptimizationParens(value).(*ast.StructLitExpr)
+	if !isLiteral {
+		substituted, ok := a.substituteTypedIdents(value, locals, 0)
+		return substituted, ok && substituted != nil
+	}
+	rebuilt := *lit
+	rebuilt.Args = make([]ast.Expr, len(lit.Args))
+	for i, arg := range lit.Args {
+		field, ok := a.loopRecordValueOverPreState(arg, locals)
+		if !ok {
+			return nil, false
+		}
+		rebuilt.Args[i] = field
+	}
+	return &rebuilt, true
+}
+
+func darrayElementTypeMaybeRef(t Type) Type {
+	if r, ok := t.(*RefType); ok {
+		t = r.Elem
+	}
+	if d, ok := StripAggregateStateType(t).(*DArrayType); ok && d != nil {
+		return d.Elem
+	}
+	return nil
+}
+
+func (a *Analyzer) loopRecordStored(stores []loopArrayStore, name string) bool {
+	for _, st := range stores {
+		if st.record && st.arrayName == name {
+			return true
+		}
+	}
+	return false
 }
 
 func exprIsSideEffectFreeForTermination(expr ast.Expr) bool {
@@ -1152,6 +1346,16 @@ func (a *Analyzer) loopAssertConditionIsSideEffectFreeWithGate(expr ast.Expr, op
 			}
 		}
 		return true
+	case *ast.QuantifierExpr:
+		return n != nil && n.Body != nil && (n.In == nil || a.loopAssertConditionIsSideEffectFreeWithGate(n.In, operatorGate)) &&
+			a.loopAssertConditionIsSideEffectFreeWithGate(n.Body, operatorGate)
+	case *ast.ExprBlock:
+		// A range quantifier the parser lowered to a flag-and-loop block evaluates its bounds and
+		// predicate and writes only its own flag.
+		loop, predicate, _, ok := runtimeRangeQuantifierParts(n)
+		return ok && a.loopAssertConditionIsSideEffectFreeWithGate(loop.Start, operatorGate) &&
+			a.loopAssertConditionIsSideEffectFreeWithGate(loop.End, operatorGate) &&
+			a.loopAssertConditionIsSideEffectFreeWithGate(predicate, operatorGate)
 	default:
 		return false
 	}

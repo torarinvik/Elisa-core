@@ -2628,6 +2628,14 @@ type smtTranslator struct {
 	// Container theory (analyzer_smt_container_theory.go): bases whose value is fixed for the query,
 	// and the callee whose formals are being bound.
 	stableContainers map[string]bool
+	// loopFrameContainers names arrays a loop-preservation query reads at the loop head: the
+	// query's pre-state is one free snapshot, and the captured body writes them only through
+	// recordOverlays, which apply while recordOverlayActive (the post-body obligation).
+	loopFrameContainers map[string]bool
+	// opaqueQuantifierBodies numbers the fresh predicates opaqueGuardedQuantifierBody declares.
+	opaqueQuantifierBodies int
+	recordOverlays         map[string]loopArrayStore
+	recordOverlayActive    bool
 	// stableRecordRoots holds the datatype tokens a callee formal is bound to when the caller passed
 	// a stable record root; the callee's container fields of that formal are the caller's.
 	stableRecordRoots map[string]bool
@@ -4304,7 +4312,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		body, ok := tr.boolTerm(n.Body, qenv)
 		if !ok {
-			return "", false
+			if body, ok = tr.opaqueGuardedQuantifierBody(n, qenv); !ok {
+				return "", false
+			}
 		}
 		q := "forall"
 		if n.Exists {
@@ -7280,4 +7290,31 @@ func (a *Analyzer) ternaryBranchType(expr ast.Expr) Type {
 		}
 	}
 	return nil
+}
+
+// opaqueGuardedQuantifierBody keeps the range guard of `forall k in lo..<hi: P` (parsed as
+// `not (lo <= k and k < hi) or P`) when P itself has no translation, and reads P as a fresh
+// uninterpreted predicate of k. The predicate is unconstrained, so any query decided with it
+// is decided for every P: an empty range proves the quantifier, and as a hypothesis it adds
+// nothing about P.
+func (tr *smtTranslator) opaqueGuardedQuantifierBody(n *ast.QuantifierExpr, qenv map[string]string) (string, bool) {
+	if n == nil || n.Exists || len(n.Vars) != 1 {
+		return "", false
+	}
+	or, ok := stripOptimizationParens(n.Body).(*ast.BinaryExpr)
+	if !ok || or == nil || or.Op != lexer.TOKEN_OR {
+		return "", false
+	}
+	not, ok := stripOptimizationParens(or.Left).(*ast.UnaryExpr)
+	if !ok || not == nil || not.Op != lexer.TOKEN_NOT {
+		return "", false
+	}
+	guard, ok := tr.boolTerm(not.Operand, qenv)
+	if !ok {
+		return "", false
+	}
+	tr.opaqueQuantifierBodies++
+	name := "|@quantified_body_" + strconv.Itoa(tr.opaqueQuantifierBodies) + "|"
+	tr.auxDecls = append(tr.auxDecls, "(declare-fun "+name+" (Int) Bool)\n")
+	return "(or (not " + guard + ") (" + name + " " + qenv[n.Vars[0]] + "))", true
 }

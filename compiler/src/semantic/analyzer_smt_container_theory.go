@@ -54,6 +54,11 @@ func (tr *smtTranslator) containerBase(expr ast.Expr, env map[string]string) (st
 	if tr.calleeBodyDepth != 0 || tr.a.currentScope == nil {
 		return "", false
 	}
+	if tr.loopFrameContainers[id.Name] {
+		base := smtVar(id.Name)
+		tr.markStableContainer(base)
+		return base, true
+	}
 	sym, found := tr.a.currentScope.Lookup(id.Name)
 	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
 		return "", false
@@ -67,6 +72,13 @@ func (tr *smtTranslator) containerBase(expr ast.Expr, env map[string]string) (st
 	base := smtVar(id.Name)
 	tr.markStableContainer(base)
 	return base, true
+}
+
+func (tr *smtTranslator) admitLoopFrameContainer(name string) {
+	if tr.loopFrameContainers == nil {
+		tr.loopFrameContainers = map[string]bool{}
+	}
+	tr.loopFrameContainers[name] = true
 }
 
 func (tr *smtTranslator) markStableContainer(base string) {
