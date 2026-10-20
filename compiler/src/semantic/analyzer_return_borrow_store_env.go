@@ -152,6 +152,12 @@ func (a *Analyzer) evaluateLateReturnBorrowFrames() {
 	r := a.retained
 	if r != nil {
 		a.returnBorrowFuncSummaries = r.reusableReturnBorrowSummaries()
+		if r.rbUpdating {
+			if a.returnBorrowFuncSummaries == nil {
+				a.returnBorrowFuncSummaries = map[*ast.FuncDecl]returnBorrowFlow{}
+			}
+			r.narrowReturnBorrowInvalidation(a)
+		}
 	}
 	// A function analyzed more than once keeps only its last analysis's checks.
 	last := make(map[*ast.FuncDecl]int, len(frames))

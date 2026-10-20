@@ -172,7 +172,7 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 		if err != nil {
 			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
 		} else {
-			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v, compare %v, diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
+			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v, compare %v, diff %v, bodies %v, post %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Post.Round(time.Millisecond), st.Total.Round(time.Millisecond))
 			// ELISACORE_RETAINED_SPLICED_CODEGEN=1 (from the request environment)
 			// lets code generation consume the updated analysis directly; its
 			// LLVM IR has matched a fresh analysis byte for byte on the stage1

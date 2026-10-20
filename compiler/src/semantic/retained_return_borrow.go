@@ -1,6 +1,10 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"reflect"
+
+	"elisacore/src/ast"
+)
 
 // Reuse for evaluateLateReturnBorrowFrames in a retained analysis.
 //
@@ -87,25 +91,19 @@ func (r *RetainedAnalysis) invalidateReturnBorrow(changed []scopedDecl, marks ma
 			callers[dep] = append(callers[dep], owner)
 		}
 	}
-	r.rbInvalid = map[*ast.FuncDecl]bool{}
-	var work []*ast.FuncDecl
+	r.rbChanged = r.rbChanged[:0]
 	for _, sd := range changed {
-		if fn, ok := sd.Decl.(*ast.FuncDecl); ok && !r.rbInvalid[fn] {
-			r.rbInvalid[fn] = true
-			work = append(work, fn)
+		if fn, ok := sd.Decl.(*ast.FuncDecl); ok {
+			r.rbChanged = append(r.rbChanged, fn)
 		}
 	}
-	for len(work) > 0 {
-		fn := work[len(work)-1]
-		work = work[:len(work)-1]
-		for _, caller := range callers[fn] {
-			if !r.rbInvalid[caller] {
-				r.rbInvalid[caller] = true
-				work = append(work, caller)
-			}
-		}
-	}
+	r.rbCallers = callers
+	r.rbInvalid = returnBorrowCallerClosure(r.rbChanged, callers)
+	// The pre-update deps of the transitive callers stay until the late pass
+	// narrows the set; only the changed functions' deps are recorded afresh now.
+	r.rbStaleDeps = map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}
 	for fn := range r.rbInvalid {
+		r.rbStaleDeps[fn] = r.rbDeps[fn]
 		delete(r.rbDeps, fn) // recorded afresh when recomputed
 	}
 	if len(marks) != 0 {
@@ -116,4 +114,95 @@ func (r *RetainedAnalysis) invalidateReturnBorrow(changed []scopedDecl, marks ma
 		}
 	}
 	r.LastStats.Invalidated = len(r.rbInvalid)
+}
+
+// returnBorrowCallerClosure is roots plus every function that transitively
+// consulted one of them.
+func returnBorrowCallerClosure(roots []*ast.FuncDecl, callers map[*ast.FuncDecl][]*ast.FuncDecl) map[*ast.FuncDecl]bool {
+	out := map[*ast.FuncDecl]bool{}
+	work := make([]*ast.FuncDecl, 0, len(roots))
+	for _, fn := range roots {
+		if !out[fn] {
+			out[fn] = true
+			work = append(work, fn)
+		}
+	}
+	for len(work) > 0 {
+		fn := work[len(work)-1]
+		work = work[:len(work)-1]
+		for _, caller := range callers[fn] {
+			if !out[caller] {
+				out[caller] = true
+				work = append(work, caller)
+			}
+		}
+	}
+	return out
+}
+
+// narrowReturnBorrowInvalidation is the late pass's early cutoff. A caller's
+// summary and frame depend on a callee only through the callee's summary, so
+// a changed function whose recomputed cut-free summary equals its previous one
+// invalidates nothing beyond itself. Each changed function's summary is
+// recomputed first; callers are then invalidated only from those whose summary
+// differs or could not be cached. Any diagnostic from the probe abandons the
+// cutoff and keeps the conservative set.
+func (r *RetainedAnalysis) narrowReturnBorrowInvalidation(a *Analyzer) {
+	if !r.rbCutoff || len(r.rbChanged) == 0 {
+		return
+	}
+	before := len(a.diagnostics)
+	savedFn := a.currentFuncDecl
+	a.currentFuncDecl = nil
+	for _, fn := range r.rbChanged {
+		a.returnBorrowFlowForFunc(fn, map[*ast.FuncDecl]bool{})
+	}
+	a.currentFuncDecl = savedFn
+	if len(a.diagnostics) != before {
+		return
+	}
+	var dirty []*ast.FuncDecl
+	for _, fn := range r.rbChanged {
+		fresh, cached := a.returnBorrowFuncSummaries[fn]
+		old, had := r.rbSummaries[fn]
+		if !cached || !had || !reflect.DeepEqual(normalizedReturnBorrowFlow(fresh), normalizedReturnBorrowFlow(old)) {
+			dirty = append(dirty, fn)
+		}
+	}
+	narrowed := returnBorrowCallerClosure(dirty, r.rbCallers)
+	for _, fn := range r.rbChanged {
+		narrowed[fn] = true
+	}
+	for fn := range r.rbInvalid {
+		if narrowed[fn] {
+			continue
+		}
+		// Valid again: its previous deps and final summary still hold.
+		if deps := r.rbStaleDeps[fn]; deps != nil {
+			if cur := r.rbDeps[fn]; cur != nil {
+				for d := range deps {
+					cur[d] = true
+				}
+			} else {
+				r.rbDeps[fn] = deps
+			}
+		}
+		if flow, ok := r.rbSummaries[fn]; ok {
+			if _, fresh := a.returnBorrowFuncSummaries[fn]; !fresh {
+				a.returnBorrowFuncSummaries[fn] = flow
+			}
+		}
+	}
+	r.rbInvalid = narrowed
+	r.LastStats.Invalidated = len(narrowed)
+}
+
+func normalizedReturnBorrowFlow(f returnBorrowFlow) returnBorrowFlow {
+	if len(f.Params) == 0 {
+		f.Params = nil
+	}
+	if len(f.Contents) == 0 {
+		f.Contents = nil
+	}
+	return f
 }

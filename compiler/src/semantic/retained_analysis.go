@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -42,6 +43,10 @@ type RetainedAnalysis struct {
 	rbSummaries map[*ast.FuncDecl]returnBorrowFlow       // final summaries of the last late pass
 	frameDiags  map[*ast.FuncDecl][]Diagnostic           // each late frame's diagnostics
 	rbInvalid   map[*ast.FuncDecl]bool                   // owners to recompute in this update
+	rbChanged   []*ast.FuncDecl                          // functions whose bodies this update replaced
+	rbCallers   map[*ast.FuncDecl][]*ast.FuncDecl        // consulted -> consulting owners, pre-update
+	rbStaleDeps map[*ast.FuncDecl]map[*ast.FuncDecl]bool // pre-update deps of rbInvalid
+	rbCutoff    bool                                     // the late pass may narrow rbInvalid
 	rbUpdating  bool
 	perms       retainedPermissions
 
@@ -57,6 +62,7 @@ type RetainedUpdateStats struct {
 	Shifted                   int
 	Diff                      time.Duration
 	Bodies                    time.Duration
+	Post                      time.Duration
 	Total                     time.Duration
 	Fallback                  string
 	Added                     int
@@ -435,6 +441,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	// changed functions get fresh windows below, the rest are re-based.
 	r.rebaseWindows(drop)
 	r.invalidateReturnBorrow(changed, marks)
+	r.rbCutoff = len(added) == 0 && len(removed) == 0 && os.Getenv("ELISACORE_RETAINED_RB_CUTOFF") != "0"
 	r.perms.beginUpdate(changed, len(added) == 0 && len(removed) == 0, marks)
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
@@ -442,7 +449,9 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	a.analyzeDecls(changed)
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
+	postStart := time.Now()
 	r.post(r.decls)
+	r.LastStats.Post = time.Since(postStart)
 	r.rbUpdating = false
 	a.closeSMT()
 	// file is the next comparison base. Its spliced bodies now belong to the
@@ -463,15 +472,21 @@ func (r *RetainedAnalysis) rebaseWindows(drop map[int]bool) {
 	if len(drop) == 0 {
 		return
 	}
-	remap := func(k int) int {
-		n := 0
-		for d := range drop {
-			if d < k {
-				n++
-			}
+	maxK := 0
+	for _, w := range r.windows {
+		if w[1] > maxK {
+			maxK = w[1]
 		}
-		return k - n
 	}
+	// below[k] counts dropped indices smaller than k.
+	below := make([]int, maxK+1)
+	for k := 1; k <= maxK; k++ {
+		below[k] = below[k-1]
+		if drop[k-1] {
+			below[k]++
+		}
+	}
+	remap := func(k int) int { return k - below[k] }
 	for fn, w := range r.windows {
 		if drop[w[0]] {
 			delete(r.windows, fn)
