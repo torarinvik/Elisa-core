@@ -183,7 +183,9 @@ func serveRetained(socket string, log io.Writer) error {
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		restoreGC := suspendRetainedGC()
 		resp := runRetainedRequest(req)
+		restoreGC()
 		_ = json.NewEncoder(w).Encode(resp)
 		// Collect while the user edits: the next request then allocates from
 		// memory this process already touched instead of faulting in fresh pages
@@ -292,4 +294,28 @@ func retainedBinaryIdentity() string {
 		return path
 	}
 	return fmt.Sprintf("%s|%d|%d", path, info.Size(), info.ModTime().UnixNano())
+}
+
+// retainedRequestHeadroom is how far a request may grow the heap past what the
+// server keeps live before the collector runs at all. An incremental update
+// allocates a few GB on top of a ~2.5 GB live heap; marking that heap mid-request
+// cost more wall time than the update's own analysis.
+const retainedRequestHeadroom = 8 << 30
+
+// suspendRetainedGC turns proportional collection off for one request and leaves a
+// memory limit as the only trigger, so a request that allocates far more than an
+// update (the first full analysis) still collects instead of exhausting memory.
+// The handler collects after responding.
+func suspendRetainedGC() func() {
+	if _, set := os.LookupEnv("GOGC"); set {
+		return func() {}
+	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	prevLimit := debug.SetMemoryLimit(int64(ms.HeapAlloc) + retainedRequestHeadroom)
+	prevPercent := debug.SetGCPercent(-1)
+	return func() {
+		debug.SetGCPercent(prevPercent)
+		debug.SetMemoryLimit(prevLimit)
+	}
 }

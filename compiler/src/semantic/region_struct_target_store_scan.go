@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -889,11 +890,33 @@ func walkStoreScanNodes(stmts []ast.Stmt, visit func(any)) {
 	// Desugaring shares subtrees (a nested guard chain reuses its operands), so an unmemoized
 	// walk is exponential in nesting depth. Each node is visited once. The generated typed walker
 	// (ast_scan_walk_gen.go) visits exactly what storeScanWalkReflect does, without reflection.
-	seen := map[uintptr]bool{}
+	seen := borrowStoreScanSeen()
+	defer releaseStoreScanSeen(seen)
 	if storeScanWalkTyped(stmts, visit, seen) {
 		return
 	}
 	storeScanWalkReflect(reflect.ValueOf(stmts), visit, seen)
+}
+
+// The pre-body passes walk every function body dozens of times; a fresh visited set
+// per walk regrew a map to the body's node count each time (map growth was a
+// quarter of a retained update). Walks nest through visit callbacks, so the sets
+// come from a pool rather than one shared map. A set grown by a very large body is
+// dropped: clearing it costs its capacity, not its use, on every later small walk.
+var storeScanSeenPool = sync.Pool{New: func() any { return make(map[uintptr]bool, 256) }}
+
+const storeScanSeenKeepLimit = 1 << 14
+
+func borrowStoreScanSeen() map[uintptr]bool {
+	return storeScanSeenPool.Get().(map[uintptr]bool)
+}
+
+func releaseStoreScanSeen(seen map[uintptr]bool) {
+	if len(seen) > storeScanSeenKeepLimit {
+		return
+	}
+	clear(seen)
+	storeScanSeenPool.Put(seen)
 }
 
 // storeScanWalkReflect is the reflective store-scan walk, the specification the generated walker
