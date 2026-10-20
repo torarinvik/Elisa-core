@@ -40,8 +40,14 @@ func (a *Analyzer) projectionConditionStable(expr ast.Expr, depth int) bool {
 
 func (tr *smtTranslator) ternaryProjectionBool(n *ast.FieldExpr, tern *ast.TernaryExpr, env map[string]string) (string, bool) {
 	// This stability check uses the caller's lexical bindings. An inlined callee
-	// has a different formal namespace and needs its own argument-snapshot proof.
-	if tr.calleeBodyDepth != 0 || !tr.a.projectionConditionStable(tern.Cond, 0) {
+	// has a different formal namespace and needs its own argument-snapshot proof,
+	// except a ghost body admitted by the aggregate equation gate: every call in it
+	// is pure and its formals are immutable, so no arm can change what the condition reads.
+	if tr.calleeBodyDepth != 0 {
+		if !tr.inlinedPureGhostRecordBody() {
+			return "", false
+		}
+	} else if !tr.a.projectionConditionStable(tern.Cond, 0) {
 		return "", false
 	}
 	cond, ok := tr.boolTerm(tern.Cond, env)
@@ -64,4 +70,9 @@ func (tr *smtTranslator) ternaryProjectionBool(n *ast.FieldExpr, tern *ast.Terna
 		return "", false
 	}
 	return "(ite " + cond + " " + left + " " + right + ")", true
+}
+
+func (tr *smtTranslator) inlinedPureGhostRecordBody() bool {
+	decl := tr.calleeBodyDecl
+	return decl != nil && decl.IsGhost && tr.a.aggregateRecordDefiningEquationEligible(decl)
 }

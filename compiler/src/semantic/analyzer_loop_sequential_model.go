@@ -199,7 +199,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 			// condition may call functions whose only possible effect is to abort.
 			if !a.loopBodyAssertIsPure(n) {
 				cond, isAssert := a.assertedCondition(n.Expr)
-				if !isAssert || !a.seqLoopValueAdmissible(cond) || !a.callsAreStateIndependent(cond) {
+				if !isAssert || !a.seqLoopAssertAdmissible(cond) || !a.callsAreStateIndependent(cond) {
 					return nil, false
 				}
 			}
@@ -329,6 +329,30 @@ func (a *Analyzer) seqLoopValueAdmissible(expr ast.Expr) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// seqLoopAssertAdmissible extends seqLoopValueAdmissible with quantifiers, including a runtime
+// range quantifier the parser lowered to a flag-and-loop block. An assert condition is only
+// checked, never substituted into the path state, so bound variables need no capture-avoiding
+// substitution; the quantifier's range and predicate must still be admissible reads.
+func (a *Analyzer) seqLoopAssertAdmissible(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.QuantifierExpr:
+		return n != nil && n.Body != nil && (n.In == nil || a.seqLoopAssertAdmissible(n.In)) && a.seqLoopAssertAdmissible(n.Body)
+	case *ast.ExprBlock:
+		loop, predicate, _, ok := runtimeRangeQuantifierParts(n)
+		return ok && a.seqLoopAssertAdmissible(loop.Start) && a.seqLoopAssertAdmissible(loop.End) && a.seqLoopAssertAdmissible(predicate)
+	case *ast.ParenExpr:
+		return n != nil && a.seqLoopAssertAdmissible(n.Inner)
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.seqLoopAssertAdmissible(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && a.seqLoopAssertAdmissible(n.Left) && a.seqLoopAssertAdmissible(n.Right)
+	case *ast.TernaryExpr:
+		return n != nil && a.seqLoopAssertAdmissible(n.Cond) && a.seqLoopAssertAdmissible(n.Value) && a.seqLoopAssertAdmissible(n.Alt)
+	default:
+		return a.seqLoopValueAdmissible(expr)
 	}
 }
 

@@ -1,6 +1,10 @@
 package semantic
 
 import (
+	"maps"
+	"slices"
+	"strings"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/unparse"
@@ -140,6 +144,7 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 func (a *Analyzer) forgetEquationEligibility() {
 	clear(a.definingEquationCache)
 	clear(a.viewEquationCache)
+	clear(a.aggregateEquationEligibleMemo)
 }
 
 // typeLoopSubstCastsForSMT quietly populates exprTypes for any value-form numeric CastExpr appearing
@@ -1121,6 +1126,42 @@ func (a *Analyzer) smtEquationStructResultType(t Type) bool {
 	return len(st.Fields) != 0
 }
 
+// smtEquationRecordFields returns the scalar fields of a plain record result, or of a named tuple
+// whose fields are uniquely named and scalar, sorted by name. A named tuple is projected by field
+// name exactly like a record (tupleLiteralFieldValue), so it shares the record equation path.
+func (a *Analyzer) smtEquationRecordFields(t Type) ([]TupleField, bool) {
+	if a.smtEquationStructResultType(t) {
+		st := StripAggregateStateType(stripRefForBounds(t)).(*StructType)
+		out := make([]TupleField, 0, len(st.Fields))
+		for _, name := range slices.Sorted(maps.Keys(st.Fields)) {
+			out = append(out, TupleField{Name: name, Type: st.Fields[name].Type})
+		}
+		return out, true
+	}
+	tt, ok := StripAggregateStateType(stripRefForBounds(t)).(*TupleType)
+	if !ok || tt == nil || len(tt.Fields) == 0 {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	out := make([]TupleField, 0, len(tt.Fields))
+	for _, field := range tt.Fields {
+		if field.Name == "" || seen[field.Name] || field.Type == nil {
+			return nil, false
+		}
+		seen[field.Name] = true
+		ft := stripRefForBounds(field.Type)
+		if !IsBoolType(ft) {
+			_, bits, integer := smtIntWidthSign(ft)
+			if !integer || bits <= 0 || bits > 64 {
+				return nil, false
+			}
+		}
+		out = append(out, field)
+	}
+	slices.SortFunc(out, func(x, y TupleField) int { return strings.Compare(x.Name, y.Name) })
+	return out, true
+}
+
 // aggregateRecordDefiningEquationEligible admits a ghost record-returning function whose body is a
 // pure, total return tree, even when that tree projects results from ghost tuple/sview helpers that
 // the scalar SMT equation fragment cannot inline. Such helpers remain opaque at the call site; this
@@ -1152,7 +1193,10 @@ func (a *Analyzer) aggregateRecordDefiningEquationEligibleUncached(decl *ast.Fun
 		return false
 	}
 	fnType, ok := sym.Type.(*FuncType)
-	if !ok || fnType == nil || !a.smtEquationStructResultType(fnType.Return) {
+	if !ok || fnType == nil {
+		return false
+	}
+	if _, ok := a.smtEquationRecordFields(fnType.Return); !ok {
 		return false
 	}
 	for _, param := range fnType.Params {
@@ -1172,6 +1216,16 @@ func (a *Analyzer) exprIsPureForAggregateEquation(expr ast.Expr, owner *ast.Func
 	case *ast.MatchExpr:
 		return pureScalarMatchEquation(n)
 	case *ast.IntLit, *ast.BoolLit:
+		return true
+	case *ast.TupleExpr:
+		if n == nil {
+			return false
+		}
+		for _, elem := range n.Elems {
+			if !a.exprIsPureForAggregateEquation(elem, owner) {
+				return false
+			}
+		}
 		return true
 	case *ast.StructLitExpr:
 		if n == nil || n.CopyBase != nil || len(n.Spreads) != 0 {

@@ -1,8 +1,7 @@
 package semantic
 
 import (
-	"maps"
-	"slices"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -241,7 +240,62 @@ func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]
 	tr.assumeAggregateCallEnsures(decl, subst, env, token)
 	tr.assumeGuardPrefixReturns(decl, subst, env, token)
 	tr.emitAggregateCallFieldEquations(call, decl, args, env, token, canonKey)
+	tr.emitProjectionCongruence(call, decl, env, token)
 	return token, true
+}
+
+// aggregateEquationMaxDeclDepth unfolds a record-returning function once per query. Its nested
+// calls stay projection tokens, related to other calls through congruence; a second level
+// multiplies the query by the body's call fan-out without adding facts a single step needs.
+const aggregateEquationMaxDeclDepth = 1
+
+// emitProjectionCongruence reads each scalar field of a record-result token through an
+// uninterpreted function of the call's argument terms, one function per callee, argument
+// identity and field. Two calls whose argument terms the solver proves equal then have equal
+// fields, e.g. a recursive call exposed by unfolding a definition and the same call written at
+// the proof point. A call is deterministic in its arguments (the premise of canonical tokens),
+// so the equation is sound; it costs one assertion per field.
+func (tr *smtTranslator) emitProjectionCongruence(call *ast.CallExpr, decl *ast.FuncDecl, env map[string]string, token string) {
+	sym, ok := tr.a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil || len(fnType.Params) != len(proofCallArgs(call)) || len(decl.Params) != len(fnType.Params) {
+		return
+	}
+	fields, ok := tr.a.smtEquationRecordFields(fnType.Return)
+	if !ok {
+		return
+	}
+	identity, sorts, terms, ok := tr.scalarCallArgTerms(call, decl, fnType, env)
+	if !ok || len(terms) == 0 {
+		return
+	}
+	if tr.scalarCallUFNames == nil {
+		tr.scalarCallUFNames = map[string]string{}
+	}
+	args := strings.Join(terms, " ")
+	for _, field := range fields {
+		name := token + smtFieldSeparator + field.Name
+		var result, sort string
+		if IsBoolType(stripRefForBounds(field.Type)) {
+			result, sort = smtBoolVar(name), "Bool"
+			tr.boolDecls[result] = true
+		} else {
+			result, sort = smtVar(name), "Int"
+			tr.decls[name] = true
+			tr.markIntVar(name, field.Type)
+		}
+		key := fmt.Sprintf("%p|proj|%s|", decl, field.Name) + identity
+		fn, declared := tr.scalarCallUFNames[key]
+		if !declared {
+			fn = "|@proj_call_" + strconv.Itoa(len(tr.scalarCallUFNames)) + "_" + sort + "|"
+			tr.scalarCallUFNames[key] = fn
+			tr.auxDecls = append(tr.auxDecls, "(declare-fun "+fn+" ("+strings.Join(sorts, " ")+") "+sort+")\n")
+		}
+		tr.auxDecls = append(tr.auxDecls, "(assert (= "+result+" ("+fn+" "+args+")))\n")
+	}
 }
 
 // emitAggregateCallFieldEquations adds a bounded defining equation for each supported scalar
@@ -269,8 +323,8 @@ func (tr *smtTranslator) emitAggregateCallFieldEquations(call *ast.CallExpr, dec
 	if !ok || fnType == nil || len(fnType.Params) != len(args) {
 		return
 	}
-	st, ok := StripAggregateStateType(stripRefForBounds(fnType.Return)).(*StructType)
-	if !ok || st == nil || !tr.a.smtEquationStructResultType(fnType.Return) {
+	fields, ok := tr.a.smtEquationRecordFields(fnType.Return)
+	if !ok {
 		return
 	}
 	body, ok := tr.a.typedPureReturnExpr(decl)
@@ -282,7 +336,7 @@ func (tr *smtTranslator) emitAggregateCallFieldEquations(call *ast.CallExpr, dec
 	if canonKey == "" {
 		canonKey = token
 	}
-	if tr.callEqInFlight[canonKey] >= tr.callEqMaxUnroll || tr.callEqDeclDepth[decl] >= tr.callEqMaxDeclDepth {
+	if tr.callEqInFlight[canonKey] >= tr.callEqMaxUnroll || tr.callEqDeclDepth[decl] >= aggregateEquationMaxDeclDepth {
 		return
 	}
 	if tr.callEqInFlight == nil {
@@ -328,12 +382,12 @@ func (tr *smtTranslator) emitAggregateCallFieldEquations(call *ast.CallExpr, dec
 	}()
 	tr.a.exprTypes[body] = fnType.Return
 	type projectedField struct {
-		field Field
+		field TupleField
 		term  string
 	}
-	projected := make([]projectedField, 0, len(st.Fields))
-	for _, name := range slices.Sorted(maps.Keys(st.Fields)) {
-		field := st.Fields[name]
+	projected := make([]projectedField, 0, len(fields))
+	for _, field := range fields {
+		name := field.Name
 		fieldType := stripRefForBounds(field.Type)
 		fieldExpr := &ast.FieldExpr{Position: body.Pos(), Object: body, Field: name}
 		tr.a.exprTypes[fieldExpr] = field.Type
