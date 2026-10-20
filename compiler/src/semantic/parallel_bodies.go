@@ -30,8 +30,16 @@ func parallelBodyWorkers() int {
 func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	var bodies []scopedDecl
 	for _, scoped := range decls {
-		switch scoped.Decl.(type) {
-		case *ast.FuncDecl, *ast.ImplDecl:
+		switch n := scoped.Decl.(type) {
+		case *ast.FuncDecl:
+			// Laws are read through refinement types and aliases the call graph does
+			// not see; they are small and pure, so they are settled before the fork.
+			if n.IsLaw {
+				a.analyzeScopedDecl(scoped)
+				continue
+			}
+			bodies = append(bodies, scoped)
+		case *ast.ImplDecl:
 			bodies = append(bodies, scoped)
 		default:
 			a.analyzeScopedDecl(scoped)
@@ -44,9 +52,19 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	reportCrossDeclSharing(bodies)
 	t0 := time.Now()
 	reportBodyGraph(bodies)
-	a.precomputeSharedCalleeFacts(bodies)
-	tp := time.Now()
 	sched := planBodySchedule(bodies, workers)
+	// Callee-first, as the serial pass reaches each callee from its callers.
+	var ordered []scopedDecl
+	for _, unit := range sched.units {
+		for _, b := range unit {
+			ordered = append(ordered, bodies[b])
+		}
+	}
+	a.precomputeSharedCalleeFacts(ordered)
+	// Per-return element states are scratch for the body analysis that owns them; a
+	// precompute pass that met a return must not leave a merged-into prior behind.
+	a.returnElementStmtStates, a.returnElementStmtUnknown = nil, nil
+	tp := time.Now()
 	tsnap := time.Now()
 	at := map[*ast.FuncDecl][2]int{}
 	slots := make([]atomic.Int32, len(bodies))
@@ -77,14 +95,17 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			}
 		}
 	}
-	fmt.Fprintf(os.Stderr, "[parallel-bodies] snapshots %v (%d declined)\n", time.Since(tsnap).Round(time.Millisecond), declined)
+	if parallelReport {
+		fmt.Fprintf(os.Stderr, "[parallel-bodies] snapshots %v (%d declined)\n", time.Since(tsnap).Round(time.Millisecond), declined)
+	}
 	base := deepCloneValue(reflect.ValueOf(a).Elem())
 	clones := make([]*Analyzer, workers)
+	smtFlights := &sync.Map{}
 	for i := range clones {
 		w := new(Analyzer)
 		settable(reflect.ValueOf(w).Elem()).Set(deepCloneValue(reflect.ValueOf(a).Elem()))
 		isolateWorkerScopes(a, w)
-		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, frozen: frozen, at: at, slots: slots, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
+		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, frozen: frozen, at: at, slots: slots, smtFlights: smtFlights, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)
@@ -130,7 +151,9 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 				sched.exportUnit(w, u)
 				sched.finish(u)
 			}
-			fmt.Fprintf(os.Stderr, "[parallel-bodies] worker %d: %d decls %v (blocked %v, importing %v)\n", i, n, time.Since(ts).Round(time.Millisecond), blocked.Round(time.Millisecond), (waited - blocked).Round(time.Millisecond))
+			if parallelReport {
+				fmt.Fprintf(os.Stderr, "[parallel-bodies] worker %d: %d decls %v (blocked %v, importing %v)\n", i, n, time.Since(ts).Round(time.Millisecond), blocked.Round(time.Millisecond), (waited - blocked).Round(time.Millisecond))
+			}
 		}(clones[i], i)
 	}
 	wg.Wait()
@@ -144,6 +167,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w.globalScope, w.currentScope, w.smtTextFree = a.globalScope, a.currentScope, a.smtTextFree
 		p := w.parallel
 		w.parallel = nil
+		mergeRequiresReport(a, w, base)
 		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base, p)
 		p.publishFuncTypes()
 	}
@@ -153,7 +177,9 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			a.appendDiagnostic(d)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "[parallel-bodies] precompute %v, clone %v, bodies %v, merge %v\n", tp.Sub(t0).Round(time.Millisecond), t1.Sub(tp).Round(time.Millisecond), t2.Sub(t1).Round(time.Millisecond), time.Since(t2).Round(time.Millisecond))
+	if parallelReport {
+		fmt.Fprintf(os.Stderr, "[parallel-bodies] precompute %v, clone %v, bodies %v, merge %v\n", tp.Sub(t0).Round(time.Millisecond), t1.Sub(tp).Round(time.Millisecond), t2.Sub(t1).Round(time.Millisecond), time.Since(t2).Round(time.Millisecond))
+	}
 }
 
 // settable makes an unexported field writable through reflection.
@@ -268,11 +294,44 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 		} else if w.Len() > base.Len() || (w.Pointer() != base.Pointer() && w.Len() != base.Len()) {
 			dst.Set(w)
 		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		// Counters: every worker's increments survive.
+		dst.SetInt(dst.Int() + w.Int() - base.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		dst.SetUint(dst.Uint() + w.Uint() - base.Uint())
 	default:
 		if !sameValue(base, w) {
 			dst.Set(w)
 		}
 	}
+}
+
+// mergeRequiresReport folds a worker's requires-report aggregation into a's: the
+// entries are per-worker pointers keyed by clause, so equal keys are summed. The
+// worker's copy is reset to the base so the generic merge leaves it alone.
+func mergeRequiresReport(a, w *Analyzer, base reflect.Value) {
+	for _, key := range w.requiresReportOrder {
+		entry := w.requiresReportData[key]
+		if entry == nil {
+			continue
+		}
+		if a.requiresReportData == nil {
+			a.requiresReportData = map[requiresReportKey]*RequiresReportEntry{}
+		}
+		have := a.requiresReportData[key]
+		switch {
+		case have == nil:
+			copied := *entry
+			a.requiresReportData[key] = &copied
+			a.requiresReportOrder = append(a.requiresReportOrder, key)
+		case have != entry:
+			have.Provable += entry.Provable
+			have.Unprovable += entry.Unprovable
+			have.UnprovableSites = append(have.UnprovableSites, entry.UnprovableSites...)
+		}
+	}
+	b := base.Interface().(Analyzer)
+	w.requiresReportData, w.requiresReportOrder = b.requiresReportData, b.requiresReportOrder
 }
 
 // sameValue reports whether a worker left a value unchanged: equal for
@@ -364,3 +423,5 @@ func isolateWorkerScopes(a, w *Analyzer) {
 	}
 	w.smtTextFree = nil
 }
+
+var parallelReport = os.Getenv("ELISA_PARALLEL_GRAPH_REPORT") != ""

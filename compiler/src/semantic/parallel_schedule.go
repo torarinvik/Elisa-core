@@ -41,17 +41,34 @@ func bodyDefinedNames(d ast.Decl) []string {
 func bodyStmts(d ast.Decl) []ast.Stmt {
 	switch n := d.(type) {
 	case *ast.FuncDecl:
-		return n.Body
+		return funcScanStmts(n)
 	case *ast.ImplDecl:
 		var stmts []ast.Stmt
 		for _, m := range n.Members {
 			if fn, ok := m.(*ast.FuncDecl); ok {
-				stmts = append(stmts, fn.Body...)
+				stmts = append(stmts, funcScanStmts(fn)...)
 			}
 		}
 		return stmts
 	}
 	return nil
+}
+
+// funcScanStmts is a function's body plus its contract clauses, which name
+// callees too (a ghost spec unfolded in an `ensure`).
+func funcScanStmts(fn *ast.FuncDecl) []ast.Stmt {
+	stmts := append([]ast.Stmt(nil), fn.Body...)
+	for _, group := range [][]ast.Expr{fn.Requires, fn.EnsureValues, fn.Decreases} {
+		for _, e := range group {
+			stmts = append(stmts, &ast.ExprStmt{Position: e.Pos(), Expr: e})
+		}
+	}
+	for _, group := range [][]*ast.ProofBlockStmt{fn.RequiresProofs, fn.EnsureProofs} {
+		for _, p := range group {
+			stmts = append(stmts, p)
+		}
+	}
+	return stmts
 }
 
 func buildBodyGraph(bodies []scopedDecl) *bodyGraph {
@@ -212,6 +229,8 @@ type bodySchedule struct {
 	exported []map[int]reflect.Value // per unit: map path index -> map of decl entries
 	funcs    [][]*ast.FuncDecl       // function declarations per unit
 	took     []time.Duration
+	nodes    [][]reflect.Value // per unit: node-keyed entries of its bodies
+	stmts    [][]ast.Stmt
 	rdeps    [][]int // units waiting on each unit
 	priority []int   // estimated remaining path weight through each unit
 	mu       sync.Mutex
@@ -290,7 +309,7 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	}
 	s := &bodySchedule{units: units, unitOf: make([]int, len(bodies)), worker: make([]int, len(units)),
 		deps: make([][]int, len(units)), done: make([]chan struct{}, len(units)),
-		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units))}
+		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units)), nodes: make([][]reflect.Value, len(units)), stmts: make([][]ast.Stmt, len(units))}
 	for u, unit := range units {
 		for _, b := range unit {
 			s.unitOf[b] = u
@@ -302,6 +321,7 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 		w := 0
 		seen := map[int]bool{u: true}
 		for _, b := range unit {
+			s.stmts[u] = append(s.stmts[u], bodyStmts(bodies[b].Decl)...)
 			w += g.weight[b] + 50
 			for _, d := range g.deps[b] {
 				if du := s.unitOf[d]; !seen[du] && sccOf[du] != sccOf[u] {
@@ -356,7 +376,7 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 func (s *bodySchedule) exportUnit(a *Analyzer, u int) {
 	out := map[int]reflect.Value{}
 	root := settable(reflect.ValueOf(a).Elem())
-	for pi, path := range funcDeclKeyedMapPaths() {
+	for pi, path := range exportDeclMapPaths() {
 		v := root
 		for _, i := range path {
 			v = settable(v.Field(i))
@@ -378,12 +398,13 @@ func (s *bodySchedule) exportUnit(a *Analyzer, u int) {
 		}
 	}
 	s.exported[u] = out
-	if p := a.parallel; p != nil {
+	s.nodes[u] = exportNodeEntries(a, s.stmts[u])
+	if p := a.parallel; p != nil && os.Getenv("ELISA_PARALLEL_NO_PUBLISH") == "" {
 		for _, fn := range s.funcs[u] {
 			if sym, ok := a.symbolForFuncDecl(fn); ok && sym != nil {
 				if shared, _ := sym.Type.(*FuncType); shared != nil {
 					if private := p.funcTypes[shared]; private != nil && p.funcTypeOwned[shared] {
-						*shared = *private
+						publishChangedFields(shared, private)
 					}
 				}
 			}
@@ -398,7 +419,7 @@ func (s *bodySchedule) importUnit(a *Analyzer, u int) time.Duration {
 	<-s.done[u]
 	waited := time.Since(tw)
 	root := settable(reflect.ValueOf(a).Elem())
-	paths := funcDeclKeyedMapPaths()
+	paths := exportDeclMapPaths()
 	for pi, m := range s.exported[u] {
 		v := root
 		for _, i := range paths[pi] {
@@ -412,6 +433,7 @@ func (s *bodySchedule) importUnit(a *Analyzer, u int) time.Duration {
 			v.SetMapIndex(iter.Key(), deepCloneValue(iter.Value()))
 		}
 	}
+	importNodeEntries(a, s.nodes[u])
 	p := a.parallel
 	if p.imported == nil {
 		p.imported = map[*ast.FuncDecl]bool{}
@@ -468,4 +490,141 @@ func firstName(fns []*ast.FuncDecl) string {
 		return "-"
 	}
 	return fns[0].Name
+}
+
+
+// nodeKeyedMap is an Analyzer map keyed by AST nodes other than declarations:
+// expression types, name resolutions, call facts. A finished unit exports the
+// entries of its own bodies' nodes, which callers read when they unfold a callee.
+type nodeKeyedMap struct {
+	path  []int
+	iface bool // keyed by an interface: try every node
+}
+
+var nodeKeyedMapPaths = sync.OnceValue(func() []nodeKeyedMap {
+	var out []nodeKeyedMap
+	var walk func(t reflect.Type, prefix []int)
+	walk = func(t reflect.Type, prefix []int) {
+		for i := 0; i < t.NumField(); i++ {
+			ft := t.Field(i).Type
+			path := append(append([]int(nil), prefix...), i)
+			switch ft.Kind() {
+			case reflect.Map:
+				k := ft.Key()
+				if k == funcDeclPtrType || !k.Implements(astNodeType) || holdsLazyCache(ft.Elem()) {
+					continue
+				}
+				out = append(out, nodeKeyedMap{path: path, iface: k.Kind() == reflect.Interface})
+			case reflect.Struct:
+				if typeHoldsMapInline(ft) {
+					walk(ft, path)
+				}
+			}
+		}
+	}
+	walk(reflect.TypeOf(Analyzer{}), nil)
+	return out
+})
+
+// exportNodeEntries copies the node-keyed entries of a unit's bodies.
+func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) []reflect.Value {
+	paths := nodeKeyedMapPaths()
+	maps := make([]reflect.Value, len(paths))
+	out := make([]reflect.Value, len(paths))
+	root := settable(reflect.ValueOf(a).Elem())
+	for pi, m := range paths {
+		v := root
+		for _, i := range m.path {
+			v = settable(v.Field(i))
+		}
+		if !v.IsNil() && v.Len() > 0 {
+			maps[pi] = v
+		}
+	}
+	walkStoreScanNodes(stmts, func(node any) {
+		nv := reflect.ValueOf(node)
+		for pi, v := range maps {
+			if !v.IsValid() {
+				continue
+			}
+			kt := v.Type().Key()
+			if kt.Kind() == reflect.Interface {
+				if !nv.Type().Implements(kt) {
+					continue
+				}
+			} else if nv.Type() != kt {
+				continue
+			}
+			key := nv.Convert(kt)
+			if val := v.MapIndex(key); val.IsValid() {
+				if !out[pi].IsValid() {
+					out[pi] = reflect.MakeMap(v.Type())
+				}
+				out[pi].SetMapIndex(key, deepCloneValue(val))
+			}
+		}
+	})
+	return out
+}
+
+func importNodeEntries(a *Analyzer, entries []reflect.Value) {
+	paths := nodeKeyedMapPaths()
+	root := settable(reflect.ValueOf(a).Elem())
+	for pi, m := range entries {
+		if !m.IsValid() {
+			continue
+		}
+		v := root
+		for _, i := range paths[pi].path {
+			v = settable(v.Field(i))
+		}
+		if v.IsNil() {
+			v.Set(reflect.MakeMap(v.Type()))
+		}
+		iter := m.MapRange()
+		for iter.Next() {
+			if !v.MapIndex(iter.Key()).IsValid() {
+				v.SetMapIndex(iter.Key(), deepCloneValue(iter.Value()))
+			}
+		}
+	}
+}
+
+// exportDeclMapPaths lists every declaration-keyed map, including those whose
+// values refer to declarations: exporting copies entries under the same key, so
+// nothing is rekeyed.
+var exportDeclMapPaths = sync.OnceValue(func() [][]int {
+	var paths [][]int
+	var walk func(t reflect.Type, prefix []int)
+	walk = func(t reflect.Type, prefix []int) {
+		for i := 0; i < t.NumField(); i++ {
+			ft := t.Field(i).Type
+			path := append(append([]int(nil), prefix...), i)
+			switch ft.Kind() {
+			case reflect.Map:
+				if ft.Key() == funcDeclPtrType && !holdsLazyCache(ft.Elem()) {
+					paths = append(paths, path)
+				}
+			case reflect.Struct:
+				if typeHoldsMapInline(ft) {
+					walk(ft, path)
+				}
+			}
+		}
+	}
+	walk(reflect.TypeOf(Analyzer{}), nil)
+	return paths
+})
+
+// publishChangedFields writes only the fields a worker's analysis changed: other
+// workers may read the rest of a shared function type at any time.
+func publishChangedFields(shared, private *FuncType) {
+	dst := settable(reflect.ValueOf(shared).Elem())
+	src := reflect.ValueOf(private).Elem()
+	for i := 0; i < dst.NumField(); i++ {
+		d, s := settable(dst.Field(i)), settable(src.Field(i))
+		if !reflect.DeepEqual(d.Interface(), s.Interface()) {
+			d.Set(s)
+		}
+	}
 }

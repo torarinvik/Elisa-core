@@ -31,6 +31,10 @@ type parallelWorkerState struct {
 	// imported marks foreign declarations whose finished facts this worker holds.
 	imported      map[*ast.FuncDecl]bool
 	importedUnits map[int]bool
+	// smtFlights shares solver verdicts between workers: the first worker to ask a
+	// query solves it and the others wait for its verdict.
+	smtFlights *sync.Map
+	leading    map[string]*smtFlight
 }
 
 var funcDeclPtrType = reflect.TypeOf((*ast.FuncDecl)(nil))
@@ -278,4 +282,56 @@ func (p *parallelWorkerState) ownerOf(decl *ast.FuncDecl) (int, bool) {
 		return 0, false
 	}
 	return int(p.slots[loc[0]].Load()), true
+}
+
+type smtFlight struct {
+	done   chan struct{}
+	result smtQueryResult
+	ok     bool
+}
+
+// awaitSharedSMTQuery returns another worker's verdict for query, waiting while it
+// is being solved. On a miss the caller becomes the query's leader and must
+// resolve or release it.
+func (a *Analyzer) awaitSharedSMTQuery(query string) (smtQueryResult, bool) {
+	p := a.parallel
+	if p == nil || p.smtFlights == nil {
+		return smtQueryResult{}, false
+	}
+	if p.leading[query] != nil {
+		return smtQueryResult{}, false
+	}
+	fresh := &smtFlight{done: make(chan struct{})}
+	if v, loaded := p.smtFlights.LoadOrStore(query, fresh); loaded {
+		f := v.(*smtFlight)
+		<-f.done
+		return f.result, f.ok
+	}
+	if p.leading == nil {
+		p.leading = map[string]*smtFlight{}
+	}
+	p.leading[query] = fresh
+	return smtQueryResult{}, false
+}
+
+func (a *Analyzer) resolveSMTFlight(query string, result smtQueryResult) {
+	if p := a.parallel; p != nil {
+		if f := p.leading[query]; f != nil {
+			delete(p.leading, query)
+			f.result, f.ok = result, true
+			close(f.done)
+		}
+	}
+}
+
+// releaseSMTFlight ends a leadership that produced no stable verdict, so waiters
+// solve for themselves and later askers start a new flight.
+func (a *Analyzer) releaseSMTFlight(query string) {
+	if p := a.parallel; p != nil {
+		if f := p.leading[query]; f != nil {
+			delete(p.leading, query)
+			p.smtFlights.CompareAndDelete(query, f)
+			close(f.done)
+		}
+	}
 }

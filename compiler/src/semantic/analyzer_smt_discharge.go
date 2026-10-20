@@ -682,6 +682,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	if hit, ok := a.smtCachedQuery(query); ok {
 		return hit.proven, hit.ce
 	}
+	defer a.releaseSMTFlight(query)
 	solver := a.openSMT()
 	if solver == nil {
 		return false, ""
@@ -727,6 +728,17 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool) {
 		}
 		return hit, true
 	}
+	if hit, ok := a.awaitSharedSMTQuery(query); ok {
+		a.recordSMTAttempt(query)
+		a.smtStats.CacheHits++
+		if hit.proven {
+			a.smtStats.Proven++
+		} else {
+			a.smtStats.Declined++
+		}
+		a.cacheSMTQuery(query, hit)
+		return hit, true
+	}
 	if !a.smtProofCacheInitialized {
 		a.smtProofCacheInitialized = true
 		a.smtProofCache = newSMTProofCache(os.Getenv("ELISACORE_SMT_CACHE_DIR"), a.smtBinary)
@@ -761,6 +773,7 @@ func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logO
 	if hit, ok := a.smtCachedQuery(query); ok {
 		return hit.proven, hit.ce
 	}
+	defer a.releaseSMTFlight(query)
 	solver := a.openSMT()
 	if solver == nil {
 		return false, ""
@@ -797,6 +810,7 @@ func (a *Analyzer) cacheSMTQuery(query string, result smtQueryResult) {
 		a.smtQueryCache = map[string]smtQueryResult{}
 	}
 	a.smtQueryCache[query] = result
+	a.resolveSMTFlight(query, result)
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover
