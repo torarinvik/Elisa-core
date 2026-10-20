@@ -492,7 +492,6 @@ func firstName(fns []*ast.FuncDecl) string {
 	return fns[0].Name
 }
 
-
 // nodeKeyedMap is an Analyzer map keyed by AST nodes other than declarations:
 // expression types, name resolutions, call facts. A finished unit exports the
 // entries of its own bodies' nodes, which callers read when they unfold a callee.
