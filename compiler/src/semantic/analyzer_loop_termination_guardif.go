@@ -67,7 +67,7 @@ func (a *Analyzer) enumPaths(stmts []ast.Stmt, depth int) ([]pathFrag, bool) {
 		return nil, false
 	}
 	frontier := []pathFrag{{}}
-	for _, s := range stmts {
+	for _, s := range inlinePermissionBlocks(stmts) {
 		if len(frontier) > maxLoopBodyPaths {
 			return nil, false
 		}

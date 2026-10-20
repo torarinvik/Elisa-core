@@ -88,7 +88,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 	if depth > seqLoopMaxDepth {
 		return nil, false
 	}
-	for _, s := range stmts {
+	for _, s := range inlinePermissionBlocks(stmts) {
 		if len(frontier) > seqLoopMaxPaths {
 			return nil, false
 		}
@@ -479,4 +479,41 @@ func (a *Analyzer) seqLoopReadBound(value, preState ast.Expr) (ast.Expr, bool) {
 	pos := read.Pos()
 	count := &ast.FieldExpr{Position: pos, Object: pre.Object, Field: "count"}
 	return &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LT, Left: pre.Index, Right: count}, true
+}
+
+// inlinePermissionBlocks splices the body of each handler-free `can P:` block into the statement
+// list. Such a block only grants permissions to its statements; it changes no state itself. A
+// block that declares a local keeps its scope and stays a block (inlining could let the local
+// shadow a later read of an outer name).
+func inlinePermissionBlocks(stmts []ast.Stmt) []ast.Stmt {
+	var out []ast.Stmt
+	for i, s := range stmts {
+		block, ok := s.(*ast.CanStmt)
+		if !ok || !permissionOnlyBlock(block) {
+			if out != nil {
+				out = append(out, s)
+			}
+			continue
+		}
+		if out == nil {
+			out = append(make([]ast.Stmt, 0, len(stmts)+len(block.Body)), stmts[:i]...)
+		}
+		out = append(out, inlinePermissionBlocks(block.Body)...)
+	}
+	if out == nil {
+		return stmts
+	}
+	return out
+}
+
+func permissionOnlyBlock(block *ast.CanStmt) bool {
+	if block == nil || block.HandlerName != "" || len(block.HandlerArgs) != 0 || block.As != "" || len(block.Permissions) == 0 {
+		return false
+	}
+	for _, s := range block.Body {
+		if _, declares := s.(*ast.VarDeclStmt); declares {
+			return false
+		}
+	}
+	return true
 }

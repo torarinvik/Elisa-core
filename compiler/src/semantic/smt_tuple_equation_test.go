@@ -403,3 +403,37 @@ def sbad(xs: darray[i8]&, i: usize) -> bool:
 		t.Fatalf("an element claim beyond the type range was accepted: %s", es)
 	}
 }
+
+// A handler-free `can` block only grants permissions: the loop models read through it, so its
+// writes are modeled. A write inside it that breaks the invariant is still rejected.
+func TestLoopModelsReadThroughPermissionBlocks(t *testing.T) {
+	const src = `def f(n: usize) -> i64:
+    i: mutable usize = 0
+    k: mutable i64 = 0
+    while i < n |i, n, k|:
+        invariant k >= 0
+        if i == 3:
+            can Abort.Panic:
+                k <- 1
+        i <- i + 1
+    return k
+`
+	for _, tc := range []struct {
+		name, store string
+		proven      bool
+	}{
+		{"preserved", "k <- 1", true},
+		{"broken", "k <- -1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeContractStrict(t, "can_block_"+tc.name+".elisa", strings.Replace(src, "k <- 1", tc.store, 1))
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the invariant to prove: %s", es)
+			}
+			if !tc.proven && es == "" {
+				t.Fatal("a write breaking the invariant inside a can block was accepted")
+			}
+		})
+	}
+}

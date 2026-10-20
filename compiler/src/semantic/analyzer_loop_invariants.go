@@ -955,7 +955,7 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 		}
 		return false
 	}
-	for _, s := range body {
+	for _, s := range inlinePermissionBlocks(body) {
 		switch n := s.(type) {
 		case *ast.ExprStmt:
 			// A pure builtin assertion has no effect on the loop state. Its condition is deliberately
