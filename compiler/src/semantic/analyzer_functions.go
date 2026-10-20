@@ -417,6 +417,7 @@ func scalarReturnHasNoReferenceProvenance(fnType *FuncType) bool {
 }
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
+	fn = a.readDecl(fn)
 	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
 		return
 	}
@@ -612,6 +613,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 }
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
+	fn = a.readDecl(fn)
 	if fn == nil || fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown {
 		return
 	}

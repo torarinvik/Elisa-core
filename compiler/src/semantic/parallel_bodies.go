@@ -283,15 +283,17 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 	}
 	infer := func(fn *ast.FuncDecl) {
 		sym := a.funcDeclSymbols[fn]
-		if sym == nil || fn.IsContract || len(fn.GenericParams) != 0 {
+		if sym == nil || fn.IsContract {
 			return
 		}
 		fnType, ok := sym.Type.(*FuncType)
 		if !ok {
 			return
 		}
-		a.inferFuncReturnProvenance(fn, fnType)
-		a.inferFuncReturnBorrowedOwnerRefs(fn, fnType)
+		if len(fn.GenericParams) == 0 {
+			a.inferFuncReturnProvenance(fn, fnType)
+			a.inferFuncReturnBorrowedOwnerRefs(fn, fnType)
+		}
 		if !fnType.SinkParamsKnown {
 			a.inferFuncSinkParams(fn, fnType)
 		}
