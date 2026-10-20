@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -45,15 +46,15 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	reportBodyGraph(bodies)
 	a.precomputeSharedCalleeFacts(bodies)
 	tp := time.Now()
-	const block = 8
+	sched := planBodySchedule(bodies, workers)
 	tsnap := time.Now()
 	at := map[*ast.FuncDecl][2]int{}
-	owner := map[*ast.FuncDecl]int{}
+	slots := make([]atomic.Int32, len(bodies))
 	snapshots := make([]*ast.SyntaxSnapshot, len(bodies))
 	frozen := make([]ast.Decl, len(bodies)) // pristine copies where the snapshot declines
 	declined := 0
 	for i, scoped := range bodies {
-		w := (i / block) % workers
+		slots[i].Store(-1)
 		// One snapshot per declaration: the capture budget is per graph, and a
 		// worker only ever needs a single declaration back.
 		if snap, err := ast.NewSyntaxSnapshot(&ast.File{Decls: []ast.Decl{scoped.Decl}}, 1<<40); err == nil {
@@ -68,12 +69,10 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		switch n := scoped.Decl.(type) {
 		case *ast.FuncDecl:
 			at[n] = [2]int{i, -1}
-			owner[n] = w
 		case *ast.ImplDecl:
 			for m, member := range n.Members {
 				if fn, ok := member.(*ast.FuncDecl); ok {
 					at[fn] = [2]int{i, m}
-					owner[fn] = w
 				}
 			}
 		}
@@ -85,7 +84,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w := new(Analyzer)
 		settable(reflect.ValueOf(w).Elem()).Set(deepCloneValue(reflect.ValueOf(a).Elem()))
 		isolateWorkerScopes(a, w)
-		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, frozen: frozen, at: at, owner: owner, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
+		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, frozen: frozen, at: at, slots: slots, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)
@@ -101,19 +100,42 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			defer wg.Done()
 			ts := time.Now()
 			n := 0
-			for first := i * block; first < len(bodies); first += workers * block {
-				for d := first; d < first+block && d < len(bodies); d++ {
+			var waited, blocked time.Duration
+			for {
+				u := sched.claim(i)
+				if u < 0 {
+					break
+				}
+				for _, d := range sched.units[u] {
+					slots[d].Store(int32(i))
+				}
+				tw := time.Now()
+				for _, du := range sched.deps[u] {
+					if sched.worker[du] != i && !w.parallel.importedUnit(du) {
+						blocked += sched.importUnit(w, du)
+					}
+				}
+				waited += time.Since(tw)
+				tu := time.Now()
+				for _, d := range sched.units[u] {
 					from := len(w.diagnostics)
 					w.analyzeScopedDecl(bodies[d])
 					spans[d] = span{worker: i, from: from, to: len(w.diagnostics)}
 					n++
 				}
+				sched.took[u] = time.Since(tu)
+				if el := time.Since(tu); el > 300*time.Millisecond && os.Getenv("ELISA_PARALLEL_GRAPH_REPORT") != "" {
+					fmt.Fprintf(os.Stderr, "[parallel-unit] worker %d unit %d: %d bodies %v (first %T)\n", i, u, len(sched.units[u]), el.Round(time.Millisecond), bodies[sched.units[u][0]].Decl)
+				}
+				sched.exportUnit(w, u)
+				sched.finish(u)
 			}
-			fmt.Fprintf(os.Stderr, "[parallel-bodies] worker %d: %d decls %v\n", i, n, time.Since(ts).Round(time.Millisecond))
+			fmt.Fprintf(os.Stderr, "[parallel-bodies] worker %d: %d decls %v (blocked %v, importing %v)\n", i, n, time.Since(ts).Round(time.Millisecond), blocked.Round(time.Millisecond), (waited - blocked).Round(time.Millisecond))
 		}(clones[i], i)
 	}
 	wg.Wait()
 	t2 := time.Now()
+	sched.reportMeasured()
 	workerDiags := make([][]Diagnostic, workers)
 	for i, w := range clones {
 		workerDiags[i] = w.diagnostics

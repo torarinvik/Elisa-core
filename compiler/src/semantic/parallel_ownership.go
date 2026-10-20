@@ -3,6 +3,7 @@ package semantic
 import (
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"elisacore/src/ast"
 )
@@ -17,15 +18,19 @@ type parallelWorkerState struct {
 	frozen    []ast.Decl            // pristine reflective copies where a snapshot declined
 	// at locates a body declaration in the snapshot: top-level index, and member
 	// index for an impl method (-1 for a top-level function).
-	at          map[*ast.FuncDecl][2]int
-	owner       map[*ast.FuncDecl]int
+	at map[*ast.FuncDecl][2]int
+	// slots holds each body's owning worker (-1 until a worker claims it).
+	slots       []atomic.Int32
 	shadows     map[*ast.FuncDecl]*ast.FuncDecl
 	readShadows map[*ast.FuncDecl]*ast.FuncDecl
 	// funcTypes maps a shared FuncType to the private copy this worker's analyses
 	// write function facts into; owned copies are written back after the merge.
 	funcTypes     map[*FuncType]*FuncType
 	funcTypeOwned map[*FuncType]bool
-	original    map[*ast.FuncDecl]*ast.FuncDecl
+	original      map[*ast.FuncDecl]*ast.FuncDecl
+	// imported marks foreign declarations whose finished facts this worker holds.
+	imported      map[*ast.FuncDecl]bool
+	importedUnits map[int]bool
 }
 
 var funcDeclPtrType = reflect.TypeOf((*ast.FuncDecl)(nil))
@@ -38,7 +43,7 @@ func (a *Analyzer) quietAnalysisTarget(decl *ast.FuncDecl) (*ast.FuncDecl, func(
 	if p == nil {
 		return decl, func() {}
 	}
-	owner, known := p.owner[decl]
+	owner, known := p.ownerOf(decl)
 	if !known || owner == p.worker {
 		return decl, func() {}
 	}
@@ -149,7 +154,7 @@ func (p *parallelWorkerState) ownsKey(key reflect.Value) bool {
 	if _, shadow := p.original[decl]; shadow {
 		return false
 	}
-	owner, known := p.owner[decl]
+	owner, known := p.ownerOf(decl)
 	return !known || owner == p.worker
 }
 
@@ -165,8 +170,8 @@ func (a *Analyzer) readDecl(decl *ast.FuncDecl) *ast.FuncDecl {
 	if _, isShadow := p.original[decl]; isShadow {
 		return decl
 	}
-	owner, known := p.owner[decl]
-	if !known || owner == p.worker {
+	owner, known := p.ownerOf(decl)
+	if !known || owner == p.worker || p.imported[decl] {
 		return decl
 	}
 	if shadow := p.readShadows[decl]; shadow != nil {
@@ -239,7 +244,7 @@ func (a *Analyzer) privateFuncType(fn *ast.FuncDecl, shared *FuncType) *FuncType
 	decl := fn
 	if orig, isShadow := p.original[fn]; isShadow {
 		decl = orig
-	} else if owner, known := p.owner[decl]; known && owner == p.worker {
+	} else if owner, known := p.ownerOf(decl); known && owner == p.worker {
 		p.funcTypeOwned[shared] = true
 	}
 	return private
@@ -252,4 +257,25 @@ func (p *parallelWorkerState) publishFuncTypes() {
 			*shared = *private
 		}
 	}
+}
+
+func (p *parallelWorkerState) importedUnit(u int) bool {
+	if p.importedUnits == nil {
+		p.importedUnits = map[int]bool{}
+	}
+	if p.importedUnits[u] {
+		return true
+	}
+	p.importedUnits[u] = true
+	return false
+}
+
+// ownerOf returns the worker that owns a body declaration; known reports whether
+// decl is a body at all. An unclaimed body (-1) is foreign to every worker.
+func (p *parallelWorkerState) ownerOf(decl *ast.FuncDecl) (int, bool) {
+	loc, ok := p.at[decl]
+	if !ok {
+		return 0, false
+	}
+	return int(p.slots[loc[0]].Load()), true
 }

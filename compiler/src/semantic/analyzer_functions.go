@@ -97,7 +97,12 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	}
 	wasActive := a.funcAnalysisActive[fn]
 	a.funcAnalysisActive[fn] = true
+	// NUL-termination proofs are keyed by local name, so they belong to one body:
+	// a `path.push(0)` in another function proves nothing about this one's `path`.
+	outerNulTerminated := a.nulTerminatedBuffers
+	a.nulTerminatedBuffers = map[string]bool{}
 	defer func() {
+		a.nulTerminatedBuffers = outerNulTerminated
 		if !wasActive {
 			delete(a.funcAnalysisActive, fn)
 		}
