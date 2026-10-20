@@ -4,6 +4,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/unparse"
+	"reflect"
 )
 
 // ensureGoalIsLiveFact reports whether a postcondition, with `result` replaced by the
@@ -28,7 +29,7 @@ func (a *Analyzer) ensureGoalIsLiveFact(clause ast.Expr, subst map[string]ast.Ex
 	}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		for _, fact := range sc.smtAssertFacts {
-			if fact.Expr == nil || unparse.FormatExpr(fact.Expr) != want {
+			if fact.Expr == nil || (unparse.FormatExpr(fact.Expr) != want && !astEqualModuloParens(reflect.ValueOf(fact.Expr), reflect.ValueOf(goal))) {
 				continue
 			}
 			if a.factNamesResolveAlike(fact.Expr, sc) && a.callsAreStateIndependent(fact.Expr) {
@@ -75,4 +76,69 @@ func posBefore(decl, use lexer.Pos) bool {
 		return false
 	}
 	return decl.Line < use.Line || (decl.Line == use.Line && decl.Col < use.Col)
+}
+
+// astEqualModuloParens is astEqualIgnoringPositions that also looks through grouping parentheses:
+// `implies` desugars to an unparenthesized `(not a) or b` that an assert spells `not (a) or (b)`.
+// Only ensureGoalIsLiveFact uses it, after factNamesResolveAlike pins every name to one symbol.
+func astEqualModuloParens(x, y reflect.Value) bool {
+	x, y = unwrapParenValue(x), unwrapParenValue(y)
+	if x.IsValid() != y.IsValid() {
+		return false
+	}
+	if !x.IsValid() {
+		return true
+	}
+	if x.Type() != y.Type() {
+		return false
+	}
+	if x.Type() == lexerPosType {
+		return true
+	}
+	switch x.Kind() {
+	case reflect.Pointer:
+		if x.IsNil() || y.IsNil() {
+			return x.IsNil() == y.IsNil()
+		}
+		return astEqualModuloParens(x.Elem(), y.Elem())
+	case reflect.Struct:
+		for i := 0; i < x.NumField(); i++ {
+			if !x.Type().Field(i).IsExported() {
+				continue
+			}
+			if !astEqualModuloParens(x.Field(i), y.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Slice, reflect.Array:
+		if x.Len() != y.Len() {
+			return false
+		}
+		for i := 0; i < x.Len(); i++ {
+			if !astEqualModuloParens(x.Index(i), y.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map, reflect.Func, reflect.Chan:
+		return x.IsNil() && y.IsNil()
+	default:
+		return x.CanInterface() && y.CanInterface() && reflect.DeepEqual(x.Interface(), y.Interface())
+	}
+}
+
+func unwrapParenValue(v reflect.Value) reflect.Value {
+	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) && !v.IsNil() {
+		if v.Kind() == reflect.Interface {
+			v = v.Elem()
+			continue
+		}
+		paren, ok := v.Interface().(*ast.ParenExpr)
+		if !ok || paren == nil || paren.Inner == nil {
+			return v
+		}
+		v = reflect.ValueOf(paren.Inner)
+	}
+	return v
 }
