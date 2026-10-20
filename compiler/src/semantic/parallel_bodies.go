@@ -375,11 +375,18 @@ func sameValue(x, y reflect.Value) (same bool) {
 // callee's body, and the fill-may-adopt set walks the whole file. Computed lazily
 // from a worker, each would walk a body another worker is rewriting.
 func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
+	t0 := time.Now()
 	if a.fillMayAdoptSet == nil {
 		a.fillMayAdoptSet = a.computeFillMayAdopt()
 	}
+	t1 := time.Now()
 	// Whole-program body scans read every body; workers rewrite the bodies they own.
 	a.sentinelFuncNames()
+	if parallelReport && a.parallel == nil {
+		defer func(t2 time.Time) {
+			fmt.Fprintf(os.Stderr, "[parallel-bodies] precompute: fillMayAdopt %v, sentinel %v, infer %d bodies %v\n", t1.Sub(t0).Round(time.Millisecond), t2.Sub(t1).Round(time.Millisecond), len(bodies), time.Since(t2).Round(time.Millisecond))
+		}(time.Now())
+	}
 	infer := func(fn *ast.FuncDecl) {
 		sym := a.funcDeclSymbols[fn]
 		if sym == nil || fn.IsContract {

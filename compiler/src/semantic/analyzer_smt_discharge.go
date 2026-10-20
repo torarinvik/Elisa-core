@@ -7202,6 +7202,8 @@ func (a *Analyzer) smtStableDeclID(decl *ast.FuncDecl) string {
 	}
 	if a.smtDeclIDs == nil {
 		a.smtDeclIDs = map[*ast.FuncDecl]string{}
+	}
+	if a.smtDeclIDOrdinals == nil {
 		a.smtDeclIDOrdinals = map[string]int{}
 	}
 	pos := decl.Pos()

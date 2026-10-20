@@ -572,7 +572,11 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 	}
 	if a.storeFlowSummaries == nil {
 		a.storeFlowSummaries = map[*ast.FuncDecl]*storeFlowSummary{}
+	}
+	if a.storeFlowInProgress == nil {
 		a.storeFlowInProgress = map[*ast.FuncDecl]*storeFlowSummary{}
+	}
+	if a.storeFlowActive == nil {
 		a.storeFlowActive = map[*ast.FuncDecl]bool{}
 	}
 	members := a.storeFlowComponent(decl)
