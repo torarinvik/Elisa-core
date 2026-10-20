@@ -663,39 +663,18 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 	}
 
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
-				if valueIsParamSlice(ret.Value) {
-					found = true
-					return
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		if ret, ok := node.(*ast.ReturnStmt); ok && ret != nil {
+			if valueIsParamSlice(ret.Value) {
+				found = true
+				return false
 			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	return found
 }
 
@@ -838,80 +817,59 @@ func (a *Analyzer) refParamIsPackedEnum(typ ast.TypeExpr) bool {
 // threads an unused region param.
 func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+		// A growth nested inside an explicit `in <arena>:` (InStoreStmt) or USER-written
+		// local `region:` (RegionStmt) scope already has its allocation region supplied
+		// lexically — no region param threading is needed (and forcing `@r` would make the
+		// call site demand a region the struct ref doesn't carry). Don't descend into those.
+		// BUT a compiler-SYNTHESIZED `__auto_*` region (the parser's speculative
+		// maybeWrapFunctionBodyInAutoRegion wrap, e.g. when the body forwards a constructed
+		// struct-literal element to a push) is NOT a real allocation region for the param's
+		// field: growing a by-ref struct param's field into a per-call auto arena that frees
+		// on return is a use-after-free. We MUST see through such a wrap so the field growth
+		// stamps `@r` and threads the caller's region. Descend into synthesized regions only.
+		switch s := node.(type) {
+		case *ast.InStoreStmt:
+			return false
+		case *ast.RegionStmt:
+			if !isCompilerGeneratedAutoRegionStmt(s) {
+				return false
 			}
-			// A growth nested inside an explicit `in <arena>:` (InStoreStmt) or USER-written
-			// local `region:` (RegionStmt) scope already has its allocation region supplied
-			// lexically — no region param threading is needed (and forcing `@r` would make the
-			// call site demand a region the struct ref doesn't carry). Don't descend into those.
-			// BUT a compiler-SYNTHESIZED `__auto_*` region (the parser's speculative
-			// maybeWrapFunctionBodyInAutoRegion wrap, e.g. when the body forwards a constructed
-			// struct-literal element to a push) is NOT a real allocation region for the param's
-			// field: growing a by-ref struct param's field into a per-call auto arena that frees
-			// on return is a use-after-free. We MUST see through such a wrap so the field growth
-			// stamps `@r` and threads the caller's region. Descend into synthesized regions only.
-			switch s := v.Interface().(type) {
-			case *ast.InStoreStmt:
-				return
-			case *ast.RegionStmt:
-				if !isCompilerGeneratedAutoRegionStmt(s) {
-					return
+			// fall through to descend into the synthesized wrap's body
+		}
+		if call, ok := node.(*ast.CallExpr); ok {
+			if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && containerGrowthMethods[growth.Field] {
+				// Receiver must be a FIELD/INDEX PATH rooted at the param — `param.f.push(..)`,
+				// `param.a.b.push(..)` (any depth), `param.f[i].push(..)`. A path deeper than the
+				// bare param means the grown container is a (possibly nested) field of the struct
+				// param, so the param carries the region the field backing grows into. (The bare-param
+				// case `param.push` is a CONTAINER param, handled by paramContainerIsGrown.)
+				// IndexExpr as well as FieldExpr: `param.f[i].push(..)` is a path rooted at
+				// the param exactly as `param.f.push(..)` is, and the comment above already
+				// promised that shape. Matching only FieldExpr silently failed it — the
+				// growth fell through to the "has no region to grow into" diagnostic, which reads
+				// as "annotate this" rather than "the compiler missed a case it claims".
+				// rootIdentExpr already walks both, so only this guard was narrow. A bare
+				// `param.push(..)` still does NOT match (it is neither) and stays with
+				// paramContainerIsGrown, which is the container-param case.
+				isPath := false
+				switch growth.Object.(type) {
+				case *ast.FieldExpr, *ast.IndexExpr:
+					isPath = true
 				}
-				// fall through to descend into the synthesized wrap's body
-			}
-			if call, ok := v.Interface().(*ast.CallExpr); ok {
-				if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && containerGrowthMethods[growth.Field] {
-					// Receiver must be a FIELD/INDEX PATH rooted at the param — `param.f.push(..)`,
-					// `param.a.b.push(..)` (any depth), `param.f[i].push(..)`. A path deeper than the
-					// bare param means the grown container is a (possibly nested) field of the struct
-					// param, so the param carries the region the field backing grows into. (The bare-param
-					// case `param.push` is a CONTAINER param, handled by paramContainerIsGrown.)
-					// IndexExpr as well as FieldExpr: `param.f[i].push(..)` is a path rooted at
-					// the param exactly as `param.f.push(..)` is, and the comment above already
-					// promised that shape. Matching only FieldExpr silently failed it — the
-					// growth fell through to the "has no region to grow into" diagnostic, which reads
-					// as "annotate this" rather than "the compiler missed a case it claims".
-					// rootIdentExpr already walks both, so only this guard was narrow. A bare
-					// `param.push(..)` still does NOT match (it is neither) and stays with
-					// paramContainerIsGrown, which is the container-param case.
-					isPath := false
-					switch growth.Object.(type) {
-					case *ast.FieldExpr, *ast.IndexExpr:
-						isPath = true
-					}
-					if isPath {
-						if root := rootIdentExpr(growth.Object); root != nil && root.Name == name {
-							found = true
-							return
-						}
+				if isPath {
+					if root := rootIdentExpr(growth.Object); root != nil && root.Name == name {
+						found = true
+						return false
 					}
 				}
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	return found
 }
 
@@ -1080,55 +1038,31 @@ func (a *Analyzer) hasOtherFreshFieldTarget(fn *ast.FuncDecl, name string) bool 
 func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 	freshLocals := map[string]bool{}
 	var assigns []*ast.AssignStmt
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+	walkPruned(stmts, func(node any) bool {
+		switch n := node.(type) {
+		case *ast.InStoreStmt:
+			return false
+		case *ast.RegionStmt:
+			if !isCompilerGeneratedAutoRegionStmt(n) {
+				return false
 			}
-			switch n := v.Interface().(type) {
-			case *ast.InStoreStmt:
-				return
-			case *ast.RegionStmt:
-				if !isCompilerGeneratedAutoRegionStmt(n) {
-					return
-				}
-			case *ast.VarDeclStmt:
-				if _, isStr := n.Value.(*ast.StringLit); n != nil && n.Name != "" && !isStr && reassignmentAllocatesFreshBacking(n.Value) {
-					freshLocals[n.Name] = true
-				}
-				// A struct-literal local (`local: Inner = Inner{xs: []}`) owns fresh container
-				// fields that the body then grows; storing it (or one of its fields) into the
-				// param must build those fields in the caller's region too.
-				if _, isLit := stripParenExpr(n.Value).(*ast.StructLitExpr); n != nil && n.Name != "" && isLit {
-					freshLocals[n.Name] = true
-				}
-			case *ast.AssignStmt:
-				if n != nil && !n.Optional {
-					assigns = append(assigns, n)
-				}
+		case *ast.VarDeclStmt:
+			if _, isStr := n.Value.(*ast.StringLit); n != nil && n.Name != "" && !isStr && reassignmentAllocatesFreshBacking(n.Value) {
+				freshLocals[n.Name] = true
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
+			// A struct-literal local (`local: Inner = Inner{xs: []}`) owns fresh container
+			// fields that the body then grows; storing it (or one of its fields) into the
+			// param must build those fields in the caller's region too.
+			if _, isLit := stripParenExpr(n.Value).(*ast.StructLitExpr); n != nil && n.Name != "" && isLit {
+				freshLocals[n.Name] = true
 			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		case *ast.AssignStmt:
+			if n != nil && !n.Optional {
+				assigns = append(assigns, n)
 			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	for _, asn := range assigns {
 		field, ok := asn.Target.(*ast.FieldExpr)
 		if !ok || field == nil {
@@ -1181,41 +1115,20 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 // mirroring bodyCallsStoreNeedingOutsideRegion.
 func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if call, ok := v.Interface().(*ast.CallExpr); ok {
-				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-						found = true
-						return
-					}
+		if call, ok := node.(*ast.CallExpr); ok {
+			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+					found = true
+					return false
 				}
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	return found
 }
 
@@ -1653,48 +1566,27 @@ func storeRegionRootName(store ast.Expr) string {
 // so a scoped-arena growth is never silently accepted.
 func paramContainerIsGrownNeedingRegion(stmts []ast.Stmt, name string, permRoots map[string]bool) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			// A growth inside an `in <programLifetimeArena>:` scope already has a program-lifetime
-			// allocation region supplied lexically — don't descend (it needs no threaded region).
-			if in, ok := v.Interface().(*ast.InStoreStmt); ok && in != nil {
-				if permRoots[storeRegionRootName(in.Store)] {
-					return
-				}
-			}
-			if call, ok := v.Interface().(*ast.CallExpr); ok {
-				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-						found = true
-						return
-					}
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		// A growth inside an `in <programLifetimeArena>:` scope already has a program-lifetime
+		// allocation region supplied lexically — don't descend (it needs no threaded region).
+		if in, ok := node.(*ast.InStoreStmt); ok && in != nil {
+			if permRoots[storeRegionRootName(in.Store)] {
+				return false
 			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		if call, ok := node.(*ast.CallExpr); ok {
+			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+					found = true
+					return false
+				}
+			}
+		}
+		return true
+	})
 	return found
 }
 
@@ -1709,39 +1601,18 @@ func paramContainerIsGrownNeedingRegion(stmts []ast.Stmt, name string, permRoots
 // it is conservatively excluded (a false negative just reinstates the old "active scope" error).
 func paramContainerReassignedFromLiteral(stmts []ast.Stmt, name string) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if asn, ok := v.Interface().(*ast.AssignStmt); ok && asn != nil && !asn.Optional {
-				if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name && reassignmentAllocatesFreshBacking(asn.Value) {
-					found = true
-					return
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		if asn, ok := node.(*ast.AssignStmt); ok && asn != nil && !asn.Optional {
+			if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name && reassignmentAllocatesFreshBacking(asn.Value) {
+				found = true
+				return false
 			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	return found
 }
 

@@ -531,6 +531,8 @@ func storeScanWalkTyped(v any, visit func(any), seen map[uintptr]bool) bool {
 		astScanWalkPtr_ast_StructLitExpr(x, visit, seen)
 	case *ast.StructTestExpr:
 		astScanWalkPtr_ast_StructTestExpr(x, visit, seen)
+	case *ast.SyntaxSnapshot:
+		astScanWalkPtr_ast_SyntaxSnapshot(x, visit, seen)
 	case *ast.TailType:
 		astScanWalkPtr_ast_TailType(x, visit, seen)
 	case *ast.TernaryExpr:
@@ -577,6 +579,8 @@ func storeScanWalkTyped(v any, visit func(any), seen map[uintptr]bool) bool {
 		astScanWalkPtr_lexer_Lexer(x, visit, seen)
 	case *lexer.Pos:
 		astScanWalkPtr_lexer_Pos(x, visit, seen)
+	case *lexer.SourceTokens:
+		astScanWalkPtr_lexer_SourceTokens(x, visit, seen)
 	case *lexer.Token:
 		astScanWalkPtr_lexer_Token(x, visit, seen)
 	case []ast.Decl:
@@ -6619,6 +6623,23 @@ func astScanWalkPtr_ast_StructTestExpr(p *ast.StructTestExpr, visit func(any), s
 	astScanWalkVal_ast_StructTestExpr(p, visit, seen)
 }
 
+func astScanWalkVal_ast_SyntaxSnapshot(p *ast.SyntaxSnapshot, visit func(any), seen map[uintptr]bool) {
+	_, _, _ = p, visit, seen
+}
+
+func astScanWalkPtr_ast_SyntaxSnapshot(p *ast.SyntaxSnapshot, visit func(any), seen map[uintptr]bool) {
+	if p == nil {
+		return
+	}
+	k := uintptr(unsafe.Pointer(p))
+	if seen[k] {
+		return
+	}
+	seen[k] = true
+	visit(p)
+	astScanWalkVal_ast_SyntaxSnapshot(p, visit, seen)
+}
+
 func astScanWalkVal_ast_TailType(p *ast.TailType, visit func(any), seen map[uintptr]bool) {
 	astScanWalkVal_lexer_Pos(&p.Position, visit, seen)
 	if p.Elem != nil {
@@ -7100,6 +7121,23 @@ func astScanWalkPtr_lexer_Pos(p *lexer.Pos, visit func(any), seen map[uintptr]bo
 	seen[k] = true
 	visit(p)
 	astScanWalkVal_lexer_Pos(p, visit, seen)
+}
+
+func astScanWalkVal_lexer_SourceTokens(p *lexer.SourceTokens, visit func(any), seen map[uintptr]bool) {
+	_, _, _ = p, visit, seen
+}
+
+func astScanWalkPtr_lexer_SourceTokens(p *lexer.SourceTokens, visit func(any), seen map[uintptr]bool) {
+	if p == nil {
+		return
+	}
+	k := uintptr(unsafe.Pointer(p))
+	if seen[k] {
+		return
+	}
+	seen[k] = true
+	visit(p)
+	astScanWalkVal_lexer_SourceTokens(p, visit, seen)
 }
 
 func astScanWalkVal_lexer_Token(p *lexer.Token, visit func(any), seen map[uintptr]bool) {

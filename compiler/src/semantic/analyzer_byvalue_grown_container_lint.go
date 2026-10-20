@@ -1,8 +1,6 @@
 package semantic
 
 import (
-	"reflect"
-
 	"elisacore/src/ast"
 )
 
@@ -83,38 +81,17 @@ func byValueGrownContainerName(typ ast.TypeExpr) (string, bool) {
 // reverse. Scans structurally via reflection, mirroring paramContainerIsGrown.
 func paramReturnedBare(stmts []ast.Stmt, name string) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
-				if id, ok := ret.Value.(*ast.Ident); ok && id != nil && id.Name == name {
-					found = true
-					return
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		if ret, ok := node.(*ast.ReturnStmt); ok && ret != nil {
+			if id, ok := ret.Value.(*ast.Ident); ok && id != nil && id.Name == name {
+				found = true
+				return false
 			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	return found
 }

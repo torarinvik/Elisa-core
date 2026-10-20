@@ -264,67 +264,46 @@ func (a *Analyzer) typeExprNeedsRegionBackedStore(typeExpr ast.TypeExpr, regionB
 
 func (a *Analyzer) bodyCallsStoreNeedingOutsideRegion(stmts []ast.Stmt, storeNeeds map[*FuncType]map[string]*EnumType, regionBacked map[string]bool) bool {
 	found := false
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(stmts, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+		switch n := node.(type) {
+		case *ast.RegionStmt:
+			if len(n.Body) != 0 {
+				return false // scoped region hosts on-demand stores for its body
 			}
-			switch n := v.Interface().(type) {
-			case *ast.RegionStmt:
-				if len(n.Body) != 0 {
-					return // scoped region hosts on-demand stores for its body
-				}
-			case *ast.InStoreStmt:
-				return // `in <owner>:` establishes an ambient owner
-			case *ast.LambdaExpr:
-				return
-			case *ast.CallExpr:
-				if ft := a.regionPolyCalleeFuncType(n); ft != nil && len(storeNeeds[ft]) != 0 {
-					found = true
-					return
-				}
-				if fieldExpr, ok := unwrapParenForRegionPoly(n.Func).(*ast.FieldExpr); ok {
-					for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
-						if len(storeNeeds[ft]) != 0 {
-							found = true
-							return
-						}
+		case *ast.InStoreStmt:
+			return false // `in <owner>:` establishes an ambient owner
+		case *ast.LambdaExpr:
+			return false
+		case *ast.CallExpr:
+			if ft := a.regionPolyCalleeFuncType(n); ft != nil && len(storeNeeds[ft]) != 0 {
+				found = true
+				return false
+			}
+			if fieldExpr, ok := unwrapParenForRegionPoly(n.Func).(*ast.FieldExpr); ok {
+				for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
+					if len(storeNeeds[ft]) != 0 {
+						found = true
+						return false
 					}
 				}
 			}
-			// A cast can resolve to a user `__cast__` hook — a call in disguise. This pre-pass
-			// runs before bodies are analyzed (resolvedCastHooks is still empty), so detect the
-			// site syntactically: if the cast TARGET type carries region-backed packed handles,
-			// the hook (if any) carries the matching store param and this site synthesizes the
-			// on-demand store just like a CallExpr.
-			if castExpr, isCast := v.Interface().(*ast.CastExpr); isCast {
-				if a.typeExprNeedsRegionBackedStore(castExpr.Target, regionBacked) {
-					found = true
-					return
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		}
+		// A cast can resolve to a user `__cast__` hook — a call in disguise. This pre-pass
+		// runs before bodies are analyzed (resolvedCastHooks is still empty), so detect the
+		// site syntactically: if the cast TARGET type carries region-backed packed handles,
+		// the hook (if any) carries the matching store param and this site synthesizes the
+		// on-demand store just like a CallExpr.
+		if castExpr, isCast := node.(*ast.CastExpr); isCast {
+			if a.typeExprNeedsRegionBackedStore(castExpr.Target, regionBacked) {
+				found = true
+				return false
 			}
 		}
-	}
-	rec(reflect.ValueOf(stmts))
+		return true
+	})
 	return found
 }
 

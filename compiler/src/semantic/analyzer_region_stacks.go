@@ -119,36 +119,12 @@ func (a *Analyzer) collectAmbientForwardedContainers(body []ast.Stmt, candidates
 			}
 		}
 	}
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(body, func(node any) bool {
+		if expr, ok := node.(ast.Expr); ok {
+			checkCall(expr)
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if expr, ok := v.Interface().(ast.Expr); ok {
-				checkCall(expr)
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
-		}
-	}
-	rec(reflect.ValueOf(body))
+		return true
+	})
 	return out
 }
 
@@ -198,36 +174,12 @@ func (a *Analyzer) collectRegionParamForwardedContainers(body []ast.Stmt, candid
 			}
 		}
 	}
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(body, func(node any) bool {
+		if expr, ok := node.(ast.Expr); ok {
+			checkCall(expr)
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if expr, ok := v.Interface().(ast.Expr); ok {
-				checkCall(expr)
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
-		}
-	}
-	rec(reflect.ValueOf(body))
+		return true
+	})
 	return out
 }
 

@@ -81,11 +81,15 @@ type walkMode struct {
 	Reflect  string // reflective fallback (same semantics)
 	Entry    string // typed entry point
 	Describe string
+	// Prune: visit returns whether to descend into the node, and nodes are not
+	// deduplicated -- the shape of the reflective predicate walks it replaces.
+	Prune bool
 }
 
 var modes = []walkMode{
 	{File: "src/semantic/ast_pointer_walk_gen.go", Maps: true, Prefix: "astWalk", Reflect: "fillMayAdoptWalkReflect", Entry: "fillMayAdoptWalkTyped", Describe: "fillMayAdoptWalk"},
 	{File: "src/semantic/ast_scan_walk_gen.go", Maps: false, Prefix: "astScanWalk", Reflect: "storeScanWalkReflect", Entry: "storeScanWalkTyped", Describe: "walkStoreScanNodes"},
+	{File: "src/semantic/ast_prune_walk_gen.go", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "pruneWalkTyped", Describe: "walkPruned", Prune: true},
 }
 
 type gen struct {
@@ -380,6 +384,11 @@ func generate(m walkMode) ([]byte, error) {
 	text = strings.ReplaceAll(text, "astWalk", m.Prefix)
 	text = strings.ReplaceAll(text, "fillMayAdoptWalkReflect", m.Reflect)
 	text = strings.ReplaceAll(text, "fillMayAdoptWalkTyped", m.Entry)
+	if m.Prune {
+		text = strings.ReplaceAll(text, "if p == nil { return }\nk := uintptr(unsafe.Pointer(p))\nif seen[k] { return }\nseen[k] = true\nvisit(p)\n", "if p == nil || !visit(p) { return }\n")
+		text = strings.ReplaceAll(text, "visit func(any), seen map[uintptr]bool", "visit func(any) bool, seen map[uintptr]bool")
+		text = strings.Replace(text, "\t\"unsafe\"\n", "", 1)
+	}
 	src, err := format.Source([]byte(text))
 	if err != nil {
 		return nil, fmt.Errorf("format: %w", err)
