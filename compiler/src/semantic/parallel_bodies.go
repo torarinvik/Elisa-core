@@ -42,6 +42,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 
 	reportCrossDeclSharing(bodies)
 	t0 := time.Now()
+	reportBodyGraph(bodies)
 	a.precomputeSharedCalleeFacts(bodies)
 	tp := time.Now()
 	const block = 8
