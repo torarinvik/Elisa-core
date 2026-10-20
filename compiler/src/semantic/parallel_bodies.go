@@ -2,8 +2,10 @@ package semantic
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -171,6 +173,17 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base, p)
 		p.publishFuncTypes()
 	}
+	// Workers merge their appended work lists in worker order; the late
+	// return-borrow checks report in the order serial analysis queues them.
+	order := func(fn *ast.FuncDecl) int {
+		if loc, ok := at[fn]; ok {
+			return loc[0]<<16 | (loc[1] + 1)
+		}
+		return math.MaxInt
+	}
+	sort.SliceStable(a.returnBorrowLateFrames, func(i, j int) bool {
+		return order(a.returnBorrowLateFrames[i].frame.fn) < order(a.returnBorrowLateFrames[j].frame.fn)
+	})
 	a.diagnostics = a.diagnostics[:baseDiagnostics]
 	for _, s := range spans {
 		for _, d := range workerDiags[s.worker][s.from:s.to] {

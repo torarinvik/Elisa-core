@@ -221,23 +221,27 @@ func reportBodyGraph(bodies []scopedDecl) {
 // list-scheduled by estimated weight, and each worker runs its units in
 // dependency order, waiting for any foreign callee unit before starting.
 type bodySchedule struct {
-	units    [][]int // bodies per unit, dependency order
-	unitOf   []int
-	worker   []int   // per unit
-	deps     [][]int // foreign-or-local units each unit depends on
-	done     []chan struct{}
-	exported []map[int]reflect.Value // per unit: map path index -> map of decl entries
-	funcs    [][]*ast.FuncDecl       // function declarations per unit
-	took     []time.Duration
-	nodes    [][]reflect.Value // per unit: node-keyed entries of its bodies
-	stmts    [][]ast.Stmt
-	rdeps    [][]int // units waiting on each unit
-	priority []int   // estimated remaining path weight through each unit
-	mu       sync.Mutex
-	cond     *sync.Cond
-	pending  []int // indegree per unit
-	ready    readyHeap
-	left     int
+	units      [][]int // bodies per unit, dependency order
+	unitOf     []int
+	worker     []int   // per unit
+	deps       [][]int // foreign-or-local units each unit depends on
+	done       []chan struct{}
+	exported   []map[int]reflect.Value // per unit: map path index -> map of decl entries
+	funcs      [][]*ast.FuncDecl       // function declarations per unit
+	took       []time.Duration
+	nodes      [][]reflect.Value // per unit: node-keyed entries of its bodies
+	stmts      [][]ast.Stmt
+	sccOf      []int
+	sccUnits   map[int][]int
+	sccLeft    map[int]int
+	sccPublish map[int][][2]*FuncType
+	rdeps      [][]int // units waiting on each unit
+	priority   []int   // estimated remaining path weight through each unit
+	mu         sync.Mutex
+	cond       *sync.Cond
+	pending    []int // indegree per unit
+	ready      readyHeap
+	left       int
 }
 
 type readyHeap struct {
@@ -310,11 +314,19 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	s := &bodySchedule{units: units, unitOf: make([]int, len(bodies)), worker: make([]int, len(units)),
 		deps: make([][]int, len(units)), done: make([]chan struct{}, len(units)),
 		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units)), nodes: make([][]reflect.Value, len(units)), stmts: make([][]ast.Stmt, len(units))}
+	s.sccOf = sccOf
+	s.sccUnits = map[int][]int{}
 	for u, unit := range units {
 		for _, b := range unit {
 			s.unitOf[b] = u
 		}
+		s.sccUnits[sccOf[u]] = append(s.sccUnits[sccOf[u]], u)
 	}
+	s.sccLeft = map[int]int{}
+	for c, us := range s.sccUnits {
+		s.sccLeft[c] = len(us)
+	}
+	s.sccPublish = map[int][][2]*FuncType{}
 	weights := make([]int, len(units))
 	for u, unit := range units {
 		s.done[u] = make(chan struct{})
@@ -325,8 +337,13 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 			w += g.weight[b] + 50
 			for _, d := range g.deps[b] {
 				if du := s.unitOf[d]; !seen[du] && sccOf[du] != sccOf[u] {
-					seen[du] = true
-					s.deps[u] = append(s.deps[u], du)
+					// A cycle's function types publish when its last chunk ends.
+					for _, sibling := range s.sccUnits[sccOf[du]] {
+						if !seen[sibling] {
+							seen[sibling] = true
+							s.deps[u] = append(s.deps[u], sibling)
+						}
+					}
 				}
 			}
 			switch n := bodies[b].Decl.(type) {
@@ -399,17 +416,31 @@ func (s *bodySchedule) exportUnit(a *Analyzer, u int) {
 	}
 	s.exported[u] = out
 	s.nodes[u] = exportNodeEntries(a, s.stmts[u])
-	if p := a.parallel; p != nil && os.Getenv("ELISA_PARALLEL_NO_PUBLISH") == "" {
+	var owned [][2]*FuncType
+	if p := a.parallel; p != nil {
 		for _, fn := range s.funcs[u] {
 			if sym, ok := a.symbolForFuncDecl(fn); ok && sym != nil {
 				if shared, _ := sym.Type.(*FuncType); shared != nil {
 					if private := p.funcTypes[shared]; private != nil && p.funcTypeOwned[shared] {
-						publishChangedFields(shared, private)
+						owned = append(owned, [2]*FuncType{shared, private})
 					}
 				}
 			}
 		}
 	}
+	// Sibling chunks of a cycle run side by side and read each other's shared
+	// types, so a cycle publishes once, when its last chunk ends.
+	s.mu.Lock()
+	c := s.sccOf[u]
+	s.sccPublish[c] = append(s.sccPublish[c], owned...)
+	s.sccLeft[c]--
+	if s.sccLeft[c] == 0 {
+		for _, pair := range s.sccPublish[c] {
+			publishChangedFields(pair[0], pair[1])
+		}
+		delete(s.sccPublish, c)
+	}
+	s.mu.Unlock()
 	close(s.done[u])
 }
 
