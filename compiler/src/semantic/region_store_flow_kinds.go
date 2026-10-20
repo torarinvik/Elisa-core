@@ -107,6 +107,7 @@ func storeFlowInitKinds(s *storeFlowSummary) {
 // storeFlowKindsFor: decl's settled summary with its edge kinds solved (on first demand, for
 // its whole component), or nil.
 func (a *Analyzer) storeFlowKindsFor(decl *ast.FuncDecl) *storeFlowSummary {
+	decl = a.readDecl(decl)
 	s := a.storeFlowSummaryFor(decl)
 	if s == nil || a.storeFlowSummaries[decl] != s || s.retKind != nil {
 		return s
@@ -212,6 +213,7 @@ type storeFlowKindValue struct {
 // Each class also records the parameters whose copied ELEMENT values it may hold. It is
 // flow-insensitive and iterated to a local fixpoint over every node.
 func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary) ([]storeFlowEdgeKind, [][]storeFlowEdgeKind) {
+	decl = a.readDecl(decl)
 	n := len(decl.Params)
 	top := func() ([]storeFlowEdgeKind, [][]storeFlowEdgeKind) {
 		ret := make([]storeFlowEdgeKind, n)

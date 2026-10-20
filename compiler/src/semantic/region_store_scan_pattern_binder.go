@@ -14,6 +14,7 @@ import (
 // rebind it at another type), the arm is a direct variant pattern of the match subject, and the
 // subject's own type is declared (a parameter, a typed local or a field chain of one).
 func (a *Analyzer) storeScanPatternBinderType(decl *ast.FuncDecl, name string) (Type, bool) {
+	decl = a.readDecl(decl)
 	if decl == nil || name == "" || name == "_" {
 		return nil, false
 	}
@@ -41,6 +42,7 @@ type storeScanBinderVerdict struct {
 }
 
 func (a *Analyzer) storeScanPatternBinderTypeUncached(decl *ast.FuncDecl, name string) (Type, bool) {
+	decl = a.readDecl(decl)
 	for _, p := range decl.Params {
 		if p.Name == name {
 			return nil, false
@@ -113,6 +115,7 @@ func (a *Analyzer) storeScanPatternBinderTypeUncached(decl *ast.FuncDecl, name s
 // storeScanSubjectDeclType: the declared type of a match subject -- a parameter, an explicitly
 // typed local, or a field chain of either.
 func (a *Analyzer) storeScanSubjectDeclType(decl *ast.FuncDecl, subject ast.Expr) (Type, bool) {
+	decl = a.readDecl(decl)
 	switch e := storeScanUnwrap(subject).(type) {
 	case *ast.Ident:
 		if e == nil {

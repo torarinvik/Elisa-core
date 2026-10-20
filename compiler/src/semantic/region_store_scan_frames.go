@@ -135,6 +135,7 @@ func (a *Analyzer) storeScanSettled(query func() storeMode) storeMode {
 // storeScanSummaryNeverReaches: decl's completed store-flow summary has no edge from parameter
 // other into parameter index. A summary still being solved (an assumption) proves nothing.
 func (a *Analyzer) storeScanSummaryNeverReaches(decl *ast.FuncDecl, other, index int) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || funcHasArenaParam(decl) || a.storeFlowInProgress[decl] != nil || a.storeFlowActive[decl] {
 		return false
 	}

@@ -203,6 +203,7 @@ func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]
 		return "", false
 	}
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
 	if !direct || decl == nil {
 		return "", false
 	}
@@ -436,6 +437,7 @@ func (a *Analyzer) smtAggregateCallLocalEnsures(tr *smtTranslator, declScope *Sc
 		return
 	}
 	decl, direct := a.resolveDirectCallFuncDecl(call)
+	decl = a.readDecl(decl)
 	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
 		return
 	}

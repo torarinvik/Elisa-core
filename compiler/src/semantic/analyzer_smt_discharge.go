@@ -3026,6 +3026,7 @@ func (tr *smtTranslator) dictMethodCall(call *ast.CallExpr, kind string, env map
 		return "", false
 	}
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
 	if !direct || decl == nil {
 		return "", false
 	}
@@ -5042,6 +5043,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
 	if resultType == nil && direct && decl != nil {
 		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
 			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
@@ -5416,6 +5418,7 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
 	if resultType == nil && direct && decl != nil {
 		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
 			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {

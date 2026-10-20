@@ -49,6 +49,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	at := map[*ast.FuncDecl][2]int{}
 	owner := map[*ast.FuncDecl]int{}
 	snapshots := make([]*ast.SyntaxSnapshot, len(bodies))
+	frozen := make([]ast.Decl, len(bodies)) // pristine copies where the snapshot declines
 	declined := 0
 	for i, scoped := range bodies {
 		w := (i / block) % workers
@@ -57,6 +58,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		if snap, err := ast.NewSyntaxSnapshot(&ast.File{Decls: []ast.Decl{scoped.Decl}}, 1<<40); err == nil {
 			snapshots[i] = snap
 		} else {
+			frozen[i] = copyASTDecl(scoped.Decl)
 			declined++
 			if os.Getenv("ELISA_PARALLEL_DECLINE_LOG") != "" {
 				fmt.Fprintf(os.Stderr, "[parallel-decline] %T: %v\n", scoped.Decl, err)
@@ -82,7 +84,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w := new(Analyzer)
 		settable(reflect.ValueOf(w).Elem()).Set(deepCloneValue(reflect.ValueOf(a).Elem()))
 		isolateWorkerScopes(a, w)
-		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, at: at, owner: owner, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
+		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, frozen: frozen, at: at, owner: owner, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)

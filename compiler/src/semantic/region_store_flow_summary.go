@@ -133,6 +133,7 @@ func storeFlowBinderNode(typeName string) bool {
 // declared type (a parameter or local of bool/integer/float type) and that no pattern, loop,
 // lambda or other binder rebinds. Such a name can carry no region reference, so it links nothing.
 func (a *Analyzer) storeFlowScalarNames(decl *ast.FuncDecl) map[string]bool {
+	decl = a.readDecl(decl)
 	idx := a.storeFlowBinderIndexFor(decl)
 	scalars := idx.typedNames(storeFlowScalarTypeExpr)
 	if decl == nil {
@@ -295,6 +296,7 @@ func storeFlowBinderNames(decl *ast.FuncDecl) map[string]bool {
 // storeFlowBinderIndexFor returns decl's binder index, built once per analyzer: the summaries
 // query it with several predicates, and each query used to re-walk the whole body.
 func (a *Analyzer) storeFlowBinderIndexFor(decl *ast.FuncDecl) *storeFlowBinderIndex {
+	decl = a.readDecl(decl)
 	if a.storeFlowBinderIndexes == nil {
 		a.storeFlowBinderIndexes = map[*ast.FuncDecl]*storeFlowBinderIndex{}
 	}
@@ -555,6 +557,7 @@ func (u *nameUnion) unionAll(names []string) {
 // own. Memoizing a member before its component settled made `eb` -> `ea` -> `eb` cache `eb` as
 // "never stores r into out" although `ea` does, letting a local reference escape.
 func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
+	decl = a.readDecl(decl)
 	if !storeFlowSummarizable(decl) {
 		return nil
 	}
@@ -662,6 +665,7 @@ func storeFlowSummarizable(decl *ast.FuncDecl) bool {
 // (iterative Tarjan over callEdgesOf). Every component found on the way is cached, so each
 // function's component is computed once.
 func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
+	decl = a.readDecl(decl)
 	if comp, ok := a.storeFlowSCC[decl]; ok {
 		return comp
 	}
@@ -779,6 +783,7 @@ func storeFlowSummaryJoin(x, y *storeFlowSummary) *storeFlowSummary {
 }
 
 func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
+	decl = a.readDecl(decl)
 	savedFlowDecl := a.storeFlowCurrentDecl
 	a.storeFlowCurrentDecl = decl
 	defer func() { a.storeFlowCurrentDecl = savedFlowDecl }()
@@ -1843,6 +1848,7 @@ func storeFlowChainRoots(expr ast.Expr) ([]string, bool) {
 // everything that aliases one of those. Parameter mutability is only a capability; a settled
 // body summary determines whether the capability is exercised. Every other name is a pure source.
 func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
+	decl = a.readDecl(decl)
 	written := map[string]bool{}
 	var ft *FuncType
 	if sym := a.funcDeclSymbols[decl]; sym != nil {
@@ -1966,6 +1972,7 @@ func storeFlowBaseName(name string) string {
 
 // storeFlowNodes2 runs unit over every statement of decl.
 func (a *Analyzer) storeFlowNodes2(decl *ast.FuncDecl, unit func(stmt reflect.Value) []reflect.Value) {
+	decl = a.readDecl(decl)
 	a.storeFlowEach(reflect.ValueOf(decl.Body), map[uintptr]bool{}, unit)
 }
 

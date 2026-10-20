@@ -63,6 +63,7 @@ type storeScanParamFacts struct {
 
 // storeScanParamMayBeWritten: (decl, index, write) reaches a writing node.
 func (a *Analyzer) storeScanParamMayBeWritten(decl *ast.FuncDecl, index int) bool {
+	decl = a.readDecl(decl)
 	return a.storeScanParamReaches(storeScanParamKey{decl, index, storeScanModeWrite})
 }
 
@@ -137,6 +138,7 @@ func (a *Analyzer) storeScanParamLocalFacts(key storeScanParamKey) storeScanPara
 
 // storeScanMayShare: value's type may share indirect storage (unknown types may).
 func (a *Analyzer) storeScanMayShare(decl *ast.FuncDecl, value ast.Expr) bool {
+	decl = a.readDecl(decl)
 	if value == nil {
 		return false
 	}
@@ -201,6 +203,7 @@ func (a *Analyzer) storeScanCallReturnType(call *ast.CallExpr) Type {
 // storeScanParamAliases: the names that ARE the parameter's storage (alias) and the locals that
 // CONTAIN parts of it (holds).
 func (a *Analyzer) storeScanParamAliases(decl *ast.FuncDecl, idx *storeScanDeclIndex, index, mode int) (map[string]bool, storeScanHolds) {
+	decl = a.readDecl(decl)
 	if mode == storeScanModeDeep {
 		// The parameter itself is only a holder: its parts are the storage.
 		return a.storeScanAliasClosureFrom(decl, idx, map[string]bool{}, map[string]bool{decl.Params[index].Name: true})
@@ -216,12 +219,14 @@ func (a *Analyzer) storeScanParamAliases(decl *ast.FuncDecl, idx *storeScanDeclI
 //     writing the holder itself (`h.push(v)`, `h[0] <- v`) writes nothing of the storage; writing
 //     through a part (`h[0][0] <- v`, `h[0].push(v)`) does.
 func (a *Analyzer) storeScanAliasClosure(decl *ast.FuncDecl, idx *storeScanDeclIndex, alias map[string]bool) (map[string]bool, storeScanHolds) {
+	decl = a.readDecl(decl)
 	return a.storeScanAliasClosureFrom(decl, idx, alias, nil)
 }
 
 // storeScanAliasClosureFrom: storeScanAliasClosure starting from alias names and holder names
 // (holding parts under any projection).
 func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanDeclIndex, alias, startHolds map[string]bool) (map[string]bool, storeScanHolds) {
+	decl = a.readDecl(decl)
 	holds := map[string]bool{}
 	// fields: per holder, the first projections that lead to a part (`entry = E{target: p}`
 	// holds a part under `.target` only; "*" = any projection).
@@ -341,7 +346,7 @@ func (a *Analyzer) storeScanAliasClosureFrom(decl *ast.FuncDecl, idx *storeScanD
 }
 
 func (a *Analyzer) computeStoreScanParamFacts(key storeScanParamKey) storeScanParamFacts {
-	decl, index, mode := key.decl, key.index, key.mode
+	decl, index, mode := a.readDecl(key.decl), key.index, key.mode
 	share := mode >= storeScanModeShareFrom
 	from := mode - storeScanModeShareFrom
 	if decl == nil || index < 0 || index >= len(decl.Params) || len(decl.Body) == 0 {
@@ -610,6 +615,7 @@ func storeScanNameIsRefParam(decl *ast.FuncDecl, name string, idx *storeScanDecl
 // value, converted to the container's element type) may share indirect storage. A `darray[u8]`
 // receiver stores bytes whatever expression produced them.
 func (a *Analyzer) storeScanContainerElemsMayShare(decl *ast.FuncDecl, receiver ast.Expr) bool {
+	decl = a.readDecl(decl)
 	t, ok := a.storeScanStaticType(decl, storeScanUnwrap(receiver))
 	if !ok || t == nil || containsTypeParam(t) {
 		// Declared annotations: every declaration of the name (parameter or local, no other
@@ -653,6 +659,7 @@ func (a *Analyzer) storeScanContainerElemsMayShare(decl *ast.FuncDecl, receiver 
 // storeScanAssignMayStoreShared: the stored value may share indirect storage. An element store
 // (`xs[i] <- v`) stores v as the container's element type, which may share none.
 func (a *Analyzer) storeScanAssignMayStoreShared(decl *ast.FuncDecl, assign *ast.AssignStmt) bool {
+	decl = a.readDecl(decl)
 	if index, isIndex := stripParenExpr(assign.Target).(*ast.IndexExpr); isIndex && index != nil && !a.storeScanContainerElemsMayShare(decl, index.Object) {
 		return false
 	}
@@ -693,6 +700,7 @@ func (a *Analyzer) storeScanTypeExprElemsShareNot(t ast.TypeExpr) bool {
 // comprehension carries it only through a part that does (`remove_name(name, xs)` with
 // `name: sview` aliasing nothing new; `[item for item in xs]` copies sview elements).
 func (a *Analyzer) storeScanFlowsFrom(decl *ast.FuncDecl, idx *storeScanDeclIndex, value ast.Expr, alias map[string]bool) bool {
+	decl = a.readDecl(decl)
 	flows := func(v ast.Expr) bool { return a.storeScanFlowsFrom(decl, idx, v, alias) }
 	{
 		if value == nil || !idx.mentions(value, alias) || !a.storeScanMayShare(decl, value) {
@@ -773,6 +781,7 @@ var storeScanParamWriterOf = map[storeScanParamKey]string{}
 // storeScanIsEnumConstructor: storeFlowEnumVariantConstructor judged inside decl (it consults the
 // current declaration's binders and type parameters).
 func (a *Analyzer) storeScanIsEnumConstructor(decl *ast.FuncDecl, call *ast.CallExpr) bool {
+	decl = a.readDecl(decl)
 	saved := a.storeFlowCurrentDecl
 	a.storeFlowCurrentDecl = decl
 	defer func() { a.storeFlowCurrentDecl = saved }()
@@ -787,6 +796,7 @@ func (a *Analyzer) storeScanIsEnumConstructor(decl *ast.FuncDecl, call *ast.Call
 
 // declNamespace: the namespace decl is declared in ("" at top level or when unknown).
 func (a *Analyzer) declNamespace(decl *ast.FuncDecl) string {
+	decl = a.readDecl(decl)
 	sym := a.funcDeclSymbols[decl]
 	if sym == nil {
 		return a.currentNamespace

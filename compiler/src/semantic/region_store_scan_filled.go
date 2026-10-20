@@ -18,6 +18,7 @@ import (
 // may carry more. content is the store scan's taint set for the source.
 
 func (a *Analyzer) storeScanFilledLocals(decl *ast.FuncDecl, content, views map[string]bool, seen map[storeScanKey]bool) map[string]bool {
+	decl = a.readDecl(decl)
 	if views == nil {
 		return nil // the source holds bytes: a view of it may point into its storage
 	}
@@ -59,6 +60,7 @@ func (a *Analyzer) storeScanFilledLocals(decl *ast.FuncDecl, content, views map[
 // storeScanLocalIsFilled checks every way a value can reach local name, assuming the locals in
 // filled are filled.
 func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, content, views, filled map[string]bool, seen map[storeScanKey]bool) bool {
+	decl = a.readDecl(decl)
 	atMost := func(v ast.Expr) bool { return a.storeScanAtMostViews(decl, v, content, views, filled, seen) }
 	ok := true
 	for _, node := range a.storeScanIndex(decl).nodes[name] {
@@ -209,6 +211,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 
 // storeScanAtMostViews: does value carry, from the source (content), at most views?
 func (a *Analyzer) storeScanAtMostViews(decl *ast.FuncDecl, value ast.Expr, content, views, filled map[string]bool, seen map[storeScanKey]bool) bool {
+	decl = a.readDecl(decl)
 	if value == nil || !a.storeScanIndex(decl).mentions(value, content) {
 		return true
 	}
@@ -316,6 +319,7 @@ type lazyFilledLocalSet struct {
 }
 
 func (a *Analyzer) lazyFilledLocals(decl *ast.FuncDecl, other int, content, views map[string]bool, seen map[storeScanKey]bool) *lazyFilledLocalSet {
+	decl = a.readDecl(decl)
 	return &lazyFilledLocalSet{compute: func() map[string]bool {
 		// content and views depend only on (decl, other); a result computed while a summary
 		// cycle was open is provisional and not cached.

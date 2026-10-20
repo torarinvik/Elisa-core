@@ -57,6 +57,7 @@ func maxStoreMode(x, y storeMode) storeMode {
 // target-rooted receiver, and any call passing both a target-rooted and a tainted argument --
 // recursed into when the callee resolves, assumed a HEADER store otherwise.
 func (a *Analyzer) calleeStoreModeInto(decl *ast.FuncDecl, other, index int) storeMode {
+	decl = a.readDecl(decl)
 	key := storeScanKey{decl, other, index}
 	if mode, ok := a.storeScanCache[key]; ok {
 		return mode
@@ -89,6 +90,7 @@ func (a *Analyzer) cacheStoreScan(key storeScanKey, mode storeMode) {
 // above it (region_store_scan_frames.go): a provisional `none` for an open cycle member is not
 // final for the frames inside it.
 func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
+	decl = a.readDecl(decl)
 	key := storeScanKey{decl, other, index}
 	if mode, ok := a.storeScanCache[key]; ok {
 		return mode
@@ -120,6 +122,7 @@ func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int,
 }
 
 func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
+	decl = a.readDecl(decl)
 	if decl == nil || other < 0 || index < 0 || other >= len(decl.Params) || index >= len(decl.Params) || len(decl.Body) == 0 {
 		return storeHeader
 	}
@@ -413,6 +416,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 // shorter or unknown lifetimes. This proof follows only source-tainted values at actual stores
 // and fails closed for unknown expressions or cycles.
 func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || other < 0 || index < 0 || other >= len(decl.Params) || index >= len(decl.Params) {
 		return false
 	}
@@ -556,6 +560,7 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 
 // calleeStoresProgramLivedViews is the narrower storeViews form used by its focused controls.
 func (a *Analyzer) calleeStoresProgramLivedViews(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) bool {
+	decl = a.readDecl(decl)
 	if a.calleeStoreModeInto(decl, other, index) != storeViews {
 		return false
 	}
@@ -563,10 +568,12 @@ func (a *Analyzer) calleeStoresProgramLivedViews(decl *ast.FuncDecl, other, inde
 }
 
 func (a *Analyzer) storeScanStoredElementExprProgramLived(decl *ast.FuncDecl, expr ast.Expr, views map[string]bool) bool {
+	decl = a.readDecl(decl)
 	return a.storeScanStoredElementExprProgramLivedSeen(decl, expr, views, map[ast.Expr]bool{}, map[string]bool{})
 }
 
 func (a *Analyzer) storeScanStoredElementExprProgramLivedSeen(decl *ast.FuncDecl, expr ast.Expr, views map[string]bool, seenExpr map[ast.Expr]bool, seenNames map[string]bool) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || expr == nil {
 		return false
 	}
@@ -778,6 +785,7 @@ func (a *Analyzer) storeScanTypeMayEncodeAddressWalk(t Type, seen map[Type]bool)
 // parameter or explicitly typed local. Unlike storeScanParamFieldChainType, this handles
 // interleaved paths such as `p.actions[i].names[j]`; any unsupported step remains unknown.
 func (a *Analyzer) storeScanParamProjectionType(decl *ast.FuncDecl, expr ast.Expr) (Type, bool) {
+	decl = a.readDecl(decl)
 	if decl == nil || expr == nil {
 		return nil, false
 	}
@@ -1223,6 +1231,7 @@ func (a *Analyzer) storeScanCallResultDropsTarget(arg ast.Expr, targets map[stri
 // thread slots) and carries from parameter i only read-only parts -- views and scalars, judged by
 // storeScanBundleHasWritableTargetRO over the names derived from that parameter.
 func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int, seen map[storeScanKey]bool) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || i < 0 || i >= len(decl.Params) || len(decl.Body) == 0 || len(decl.LmutThreadSlots) > 0 {
 		return false
 	}
@@ -1254,6 +1263,7 @@ func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int, s
 // storeScanReadOnlyLocals: body locals every declaration of which is annotated as a view
 // (`sview`/`cstr`) or a plain scalar, bound by no other construct. Memoized per function.
 func (a *Analyzer) storeScanReadOnlyLocals(decl *ast.FuncDecl) map[string]bool {
+	decl = a.readDecl(decl)
 	if cached, ok := a.storeScanReadOnlyCache[decl]; ok {
 		return cached
 	}
@@ -1359,6 +1369,7 @@ func (a *Analyzer) storeScanBundleHasWritableTargetRO(arg ast.Expr, targets, rea
 // declParamCarriesStorage reports whether a declared function's parameter type can carry region
 // storage (a container, view, reference or aggregate holding one). Unknown means it can.
 func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
+	decl = a.readDecl(decl)
 	sym := a.funcDeclSymbols[decl]
 	if sym == nil {
 		return true
@@ -1375,6 +1386,7 @@ func (a *Analyzer) declParamCarriesStorage(decl *ast.FuncDecl, index int) bool {
 }
 
 func (a *Analyzer) declParamMayEncodeAddress(decl *ast.FuncDecl, index int) bool {
+	decl = a.readDecl(decl)
 	sym := a.funcDeclSymbols[decl]
 	if sym == nil {
 		return true
@@ -1400,6 +1412,7 @@ func (a *Analyzer) storeScanTypeIsProgramLivedForStoreProof(t Type) bool {
 // target place (targetName; "" for none). Locals become tainted by binding (decl/assign of the
 // local itself) and by receiving a tainted store (`local.f <- v`, `local.xs.push(v)`).
 func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName string, seen map[storeScanKey]bool) (params, header, content, targets, views map[string]bool) {
+	decl = a.readDecl(decl)
 	// Memoized per (decl, source, target): every summary query of the same pair recomputed the
 	// fixpoint. Results are read-only to callers; types learned later only make taint smaller,
 	// so a result computed earlier is conservative (as the scalar / view caches already are).
@@ -1606,6 +1619,7 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 // binds it. Such a local can never carry a reference into a source, whatever it is computed from
 // (`index: int = bound_last_index(bound, name)`). uintptr is excluded: it may encode an address.
 func (a *Analyzer) storeScanScalarLocals(decl *ast.FuncDecl) map[string]bool {
+	decl = a.readDecl(decl)
 	if cached, ok := a.storeScanScalarCache[decl]; ok {
 		return cached
 	}
@@ -1713,6 +1727,7 @@ func storeScanPlainScalarType(t Type) bool {
 // storeScanTaintCallWrites taints each body local passed to call with the call's other
 // arguments when the callee may write that local's parameter.
 func (a *Analyzer) storeScanTaintCallWrites(decl *ast.FuncDecl, call *ast.CallExpr, params, locals map[string]bool, taint func(string, ast.Expr) bool, idx *storeScanDeclIndex, targets, holders map[string]bool, addHolder func(string) bool, content map[string]bool, addContent func(string) bool) bool {
+	decl = a.readDecl(decl)
 	changed := false
 	for _, w := range a.storeScanCallWritePlan(decl, call, params, locals) {
 		// A holder: the callee may store (part of) the target place it is given into the local
@@ -1760,6 +1775,7 @@ type storeScanCallWrite struct {
 // storeScanCallWritePlan: the (local, value) writes a call may perform. It depends only on the
 // declaration and the call (params/locals are the declaration's), so it is computed once.
 func (a *Analyzer) storeScanCallWritePlan(decl *ast.FuncDecl, call *ast.CallExpr, params, locals map[string]bool) []storeScanCallWrite {
+	decl = a.readDecl(decl)
 	if plan, ok := a.storeScanCallWriteCache[call]; ok {
 		return plan
 	}
@@ -1811,6 +1827,7 @@ func (a *Analyzer) storeScanCallWritePlan(decl *ast.FuncDecl, call *ast.CallExpr
 // declParamIsViewOrScalar: decl's parameter index has a view-only or plain scalar type, which
 // no callee can store into.
 func (a *Analyzer) declParamIsViewOrScalar(decl *ast.FuncDecl, index int) bool {
+	decl = a.readDecl(decl)
 	sym := a.funcDeclSymbols[decl]
 	if sym == nil {
 		return false
@@ -1838,6 +1855,7 @@ func (a *Analyzer) declParamIsViewOrScalar(decl *ast.FuncDecl, index int) bool {
 // binders. Pattern binders of a match / `is` test project fields or payloads (content); only
 // other binders (a rebind of a call result, a destructure) may be the whole.
 func (a *Analyzer) storeScanTaintBinders(decl *ast.FuncDecl, idx *storeScanDeclIndex, n ast.Stmt, header, content map[string]bool, add func(map[string]bool, string) bool, changed *bool) {
+	decl = a.readDecl(decl)
 	if n == nil {
 		return
 	}
@@ -1875,6 +1893,7 @@ func (a *Analyzer) storeScanTaintBinders(decl *ast.FuncDecl, idx *storeScanDeclI
 // out of it, or the value itself? Judged on its return statements (and an expression-bodied
 // tail), with calls in a returned expression recursed into. Unknown means the value itself.
 func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[storeScanKey]bool) storeMode {
+	decl = a.readDecl(decl)
 	if decl == nil || other < 0 || other >= len(decl.Params) || len(decl.Body) == 0 {
 		return storeHeader
 	}
@@ -1986,6 +2005,7 @@ func storeScanUnwrap(expr ast.Expr) ast.Expr {
 
 // declReturnsVoid reports whether a declared function's resolved return type is void.
 func (a *Analyzer) declReturnsVoid(decl *ast.FuncDecl) bool {
+	decl = a.readDecl(decl)
 	sym := a.funcDeclSymbols[decl]
 	if sym == nil {
 		return false
@@ -2001,6 +2021,7 @@ func (a *Analyzer) declReturnsVoid(decl *ast.FuncDecl) bool {
 // declParamIsWritableRef reports whether a declared parameter is a mutable reference (including
 // `lmut`), the only way a callee can write into caller-visible storage. Unknown means it is.
 func (a *Analyzer) declParamIsWritableRef(decl *ast.FuncDecl, index int) bool {
+	decl = a.readDecl(decl)
 	sym := a.funcDeclSymbols[decl]
 	if sym == nil {
 		return true
@@ -2148,6 +2169,7 @@ func (a *Analyzer) storeScanLooksLikeTypeName(name string) bool {
 // locals) is spelled `darray[..]` / `dstr`. Anything else answers false (the caller then keeps its
 // conservative mode).
 func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast.Expr) bool {
+	decl = a.readDecl(decl)
 	inner := storeScanUnwrap(recv)
 	if t, known := a.exprTypes[inner]; known && t != nil {
 		_, ok := stripRefForBounds(t).(*DArrayType)
@@ -2186,6 +2208,7 @@ func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast
 // construct rebinds or shadows, from the callee's resolved signature and the struct field
 // types -- usable before the callee's body has been analyzed.
 func (a *Analyzer) storeScanParamFieldChainType(decl *ast.FuncDecl, expr ast.Expr) (Type, bool) {
+	decl = a.readDecl(decl)
 	fields := []string{}
 	cur := expr
 	for {
@@ -2246,6 +2269,7 @@ func storeScanWalkFields(t Type, fields []string) (Type, bool) {
 
 // storeScanBoundNames: every name a body construct of decl binds, memoized per function.
 func (a *Analyzer) storeScanBoundNames(decl *ast.FuncDecl) map[string]bool {
+	decl = a.readDecl(decl)
 	if cached, ok := a.storeScanBoundCache[decl]; ok {
 		return cached
 	}
@@ -2271,6 +2295,7 @@ func (a *Analyzer) storeScanBoundNames(decl *ast.FuncDecl) map[string]bool {
 // literal of one non-generic struct `T{..}` (bound by no other construct), when T names exactly
 // one struct type in the program.
 func (a *Analyzer) storeScanLocalLiteralType(decl *ast.FuncDecl, name string) (Type, bool) {
+	decl = a.readDecl(decl)
 	for _, p := range decl.Params {
 		if p.Name == name {
 			return nil, false
@@ -2368,6 +2393,7 @@ func storeScanTypeExprIsDArray(t ast.TypeExpr) bool {
 // declaration is spelled `sview`/`cstr` and that no other construct binds, or nil when the source
 // is not a non-byte darray (the caller then keeps its conservative header taint).
 func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string]bool {
+	decl = a.readDecl(decl)
 	if !a.storeScanSourceHasNoBytes(decl, other) {
 		return nil
 	}
@@ -2409,6 +2435,7 @@ func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string
 // `return`. From a byte-free source such a local can only ever hold views (its own storage is
 // fresh), so it is a view value for the store scan.
 func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool {
+	decl = a.readDecl(decl)
 	fresh, poisoned := map[string]bool{}, map[string]bool{}
 	for _, p := range decl.Params {
 		poisoned[p.Name] = true
@@ -2540,6 +2567,7 @@ func storeScanIdentCount(node any, name string) int {
 // storeScanViewLocalsCached memoizes the per-function view-local set (it depends on the source
 // parameter only through the non-byte-darray gate).
 func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[string]bool {
+	decl = a.readDecl(decl)
 	if !a.storeScanSourceHasNoBytes(decl, other) {
 		return nil
 	}
@@ -2557,6 +2585,7 @@ func (a *Analyzer) storeScanViewLocalsCached(decl *ast.FuncDecl, other int) map[
 // storeScanValueIsView reports whether a value is a plain `sview`/`cstr` (by analyzed type, or as a
 // view local from storeScanViewLocals). References and `view[T]` slices are not.
 func (a *Analyzer) storeScanValueIsView(decl *ast.FuncDecl, value ast.Expr, views map[string]bool) bool {
+	decl = a.readDecl(decl)
 	inner := storeScanUnwrap(value)
 	if id, ok := inner.(*ast.Ident); ok && id != nil && views[id.Name] {
 		return true
@@ -2586,6 +2615,7 @@ func storeScanTypeIsViewOnly(t Type) bool {
 // storeScanDeclReturnsViewOnly: decl's resolved return type is view-only (and nothing else is
 // returned through lmut thread slots), so whatever it returns is at most a view.
 func (a *Analyzer) storeScanDeclReturnsViewOnly(decl *ast.FuncDecl) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || len(decl.LmutThreadSlots) > 0 {
 		return false
 	}
@@ -2603,6 +2633,7 @@ func (a *Analyzer) storeScanDeclReturnsViewOnly(decl *ast.FuncDecl) bool {
 // storeScanDeclTypeOf types a param field chain `p.f.g`, or an index into one `p.f[i]`, from
 // decl's resolved signature (storeScanParamFieldChainType).
 func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type, bool) {
+	decl = a.readDecl(decl)
 	if decl == nil || expr == nil {
 		return nil, false
 	}
@@ -2647,6 +2678,7 @@ func (a *Analyzer) storeScanDeclTypeOf(decl *ast.FuncDecl, expr ast.Expr) (Type,
 // as a copy of its element type. Only when that loop is the name's ONLY binding in decl (no parameter, no
 // declaration, no other pattern or loop binds it), so every use of the name is that copy.
 func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident) (Type, bool) {
+	decl = a.readDecl(decl)
 	if decl == nil || id == nil {
 		return nil, false
 	}
@@ -2713,6 +2745,7 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 // never bound by a pattern or loop) whose every declaration spells `darray[E]` for the same
 // numeric or bool E.
 func (a *Analyzer) storeScanLocalScalarDArrayElem(decl *ast.FuncDecl, name string) (string, bool) {
+	decl = a.readDecl(decl)
 	for _, p := range decl.Params {
 		if p.Name == name {
 			return "", false
@@ -2827,6 +2860,7 @@ func storeScanTypeExprIsNonByteDArray(t ast.TypeExpr) bool {
 // otherwise the callee's resolved parameter type decides. Type parameters, packed enums and
 // anything unrecognized are treated as possibly holding bytes.
 func (a *Analyzer) storeScanSourceHasNoBytes(decl *ast.FuncDecl, other int) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || other < 0 || other >= len(decl.Params) {
 		return false
 	}
@@ -2922,6 +2956,7 @@ func typeHoldsNoBytes(t Type, seen map[Type]bool) bool {
 // container local whose elements share no storage holds only its own buffer unless its header
 // is rebound -- which a by-value parameter cannot do to the caller's local.
 func (a *Analyzer) storeScanHolderMayAlias(decl *ast.FuncDecl, w storeScanCallWrite) bool {
+	decl = a.readDecl(decl)
 	if w.callee == nil || a.storeScanContainerElemsMayShare(decl, &ast.Ident{Name: w.local}) {
 		return true
 	}
@@ -2967,6 +3002,7 @@ func storeScanPlaceDepth(expr ast.Expr) int {
 // receiver and never retains xs's own header; elements whose type holds no region storage
 // (`darray[u32]`) carry nothing from xs at all.
 func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode storeMode) storeMode {
+	decl = a.readDecl(decl)
 	if mode == storeNone {
 		return mode
 	}
@@ -3054,6 +3090,7 @@ type storeScanTaintResult struct {
 // loop) whose every declaration spells a view type annotated with a program region
 // (`text: sview @source = ...`). Such a value can only view program-lived bytes.
 func (a *Analyzer) storeScanLocalIsProgramView(decl *ast.FuncDecl, name string) bool {
+	decl = a.readDecl(decl)
 	if decl == nil || len(a.programRegions) == 0 {
 		return false
 	}
@@ -3078,6 +3115,7 @@ func (a *Analyzer) storeScanLocalIsProgramView(decl *ast.FuncDecl, name string) 
 // declParamIsProgramLived: decl's parameter index has a resolved type whose every region-carrying
 // part is program-lived.
 func (a *Analyzer) declParamIsProgramLived(decl *ast.FuncDecl, index int) bool {
+	decl = a.readDecl(decl)
 	if len(a.programRegions) == 0 {
 		return false
 	}

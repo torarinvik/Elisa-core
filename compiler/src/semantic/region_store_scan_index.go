@@ -109,6 +109,7 @@ type storeScanDeclIndex struct {
 }
 
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
+	decl = a.readDecl(decl)
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
@@ -349,6 +350,7 @@ func storeScanHeaderTokens(stmt ast.Stmt) []string {
 // storeScanEachNode visits decl's body nodes in walkStoreScanNodes order from the cached flat
 // list (one reflective walk per function instead of one per query).
 func (a *Analyzer) storeScanEachNode(decl *ast.FuncDecl, visit func(node any)) {
+	decl = a.readDecl(decl)
 	for _, node := range a.storeScanIndex(decl).flat {
 		visit(node)
 	}

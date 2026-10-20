@@ -59,6 +59,7 @@ func (a *Analyzer) funcIsCyclic(fn *ast.FuncDecl) bool {
 
 // callEdgesOf returns the declarations fn's body may call, resolved by last name segment.
 func (a *Analyzer) callEdgesOf(decl *ast.FuncDecl) []*ast.FuncDecl {
+	decl = a.readDecl(decl)
 	if edges, ok := a.callEdgeCache[decl]; ok {
 		return edges
 	}
@@ -68,7 +69,7 @@ func (a *Analyzer) callEdgesOf(decl *ast.FuncDecl) []*ast.FuncDecl {
 	if a.callDeclsByName == nil {
 		a.callDeclsByName = map[string][]*ast.FuncDecl{}
 		for d := range a.funcDeclSymbols {
-			if d != nil && d.Body != nil {
+			if d != nil && d.Body != nil && !a.isParallelShadow(d) {
 				name := fillMayAdoptLastSegment(d.Name)
 				a.callDeclsByName[name] = append(a.callDeclsByName[name], d)
 			}
@@ -94,6 +95,7 @@ func (a *Analyzer) callEdgesOf(decl *ast.FuncDecl) []*ast.FuncDecl {
 				name = callee.Field
 			}
 			for _, callee := range a.callDeclsByName[fillMayAdoptLastSegment(name)] {
+				callee = a.readDecl(callee)
 				if !seen[callee] {
 					seen[callee] = true
 					edges = append(edges, callee)
