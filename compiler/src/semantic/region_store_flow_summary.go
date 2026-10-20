@@ -1652,6 +1652,17 @@ func storeFlowDefaultCallArgIsIndependent(param ast.ParamDecl) bool {
 }
 
 func (a *Analyzer) storeFlowCallee(call *ast.CallExpr) *ast.FuncDecl {
+	// A call binding only region parameters (`f[r](...)`) runs the same body for every
+	// region instantiation, so it shares the callee's summary.
+	if spec, ok := call.Func.(*ast.SpecializeExpr); ok && spec != nil {
+		plain := *call
+		plain.Func = spec.Operand
+		decl := a.storeFlowCallee(&plain)
+		if decl == nil || len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 || len(spec.TypeArgs) != len(decl.RegionParams) {
+			return nil
+		}
+		return decl
+	}
 	ident, ok := call.Func.(*ast.Ident)
 	// Locals are a function-wide conservative set. A possible local callable
 	// must not borrow a same-named global function's precise store summary.
