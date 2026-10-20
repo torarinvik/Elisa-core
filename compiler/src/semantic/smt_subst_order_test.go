@@ -27,7 +27,7 @@ def caller(text: sview, i: usize, j: usize, k: usize) -> usize:
 		if err != nil {
 			t.Fatal(err)
 		}
-		os.Stderr, smtQueryTrace = w, true
+		os.Stderr, smtQueryTrace = w, "1"
 		done := make(chan string)
 		go func() {
 			b, _ := io.ReadAll(r)

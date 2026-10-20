@@ -648,7 +648,7 @@ func (a *Analyzer) smtDischargeFormulaWithHyps(tr *smtTranslator, goal vcFormula
 // recordSMTAttempt preserves profile and trace accounting for cache hits and solver calls.
 func (a *Analyzer) recordSMTAttempt(query string) {
 	a.smtStats.Attempts++
-	if smtQueryTrace {
+	if a.smtTraceOn() {
 		fmt.Fprintf(os.Stderr, "=== SMT query (%s)\n%s", a.currentFuncName(), query)
 	}
 }
@@ -913,7 +913,7 @@ func (a *Analyzer) trySMTProveRequiresCoreWithCallee(clause ast.Expr, subst map[
 		env, ok = a.smtEnvForSubst(tr, substForEnv)
 	}
 	if !ok {
-		if smtQueryTrace {
+		if a.smtTraceOn() {
 			fmt.Fprintf(os.Stderr, "=== TRACE env-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
 			for _, k := range slices.Sorted(maps.Keys(substForEnv)) {
 				v := substForEnv[k]
@@ -984,7 +984,7 @@ func (a *Analyzer) trySMTProveRequiresCoreWithCallee(clause ast.Expr, subst map[
 	// known facts that violates the precondition — a concrete witness for the diagnostic.
 	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, extra)
 	if !ok {
-		if smtQueryTrace {
+		if a.smtTraceOn() {
 			fmt.Fprintf(os.Stderr, "=== TRACE goal-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
 		}
 		return false, "", false
@@ -6801,8 +6801,13 @@ func (tr *smtTranslator) calleeBoolTerm(decl *ast.FuncDecl, expr ast.Expr, env m
 	return tr.boolTerm(expr, env)
 }
 
-// smtQueryTrace dumps every solver query to stderr (ELISA_SMT_TRACE=1) for prover debugging.
-var smtQueryTrace = os.Getenv("ELISA_SMT_TRACE") != ""
+// smtQueryTrace dumps solver queries to stderr for prover debugging: ELISA_SMT_TRACE=1 traces
+// every function, any other value traces only the function of that name.
+var smtQueryTrace = os.Getenv("ELISA_SMT_TRACE")
+
+func (a *Analyzer) smtTraceOn() bool {
+	return smtQueryTrace == "1" || (smtQueryTrace != "" && a.currentFuncName() == smtQueryTrace)
+}
 
 func (a *Analyzer) currentFuncName() string {
 	if a.currentFuncDecl == nil {
