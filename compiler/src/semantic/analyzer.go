@@ -742,6 +742,8 @@ type Analyzer struct {
 	smtSolver          smtSolverHandle
 	smtUnavailable     bool
 	smtStats           SMTStats
+	storeScanFillWhy   string               // trace only: last reason storeScanLocalIsFilled rejected a local
+	viewProvWhy        string               // trace only: last view-provenance decline reason
 	parallel           *parallelWorkerState // set only on a parallel body-analysis worker
 	trackedShareChecks []trackedShareRecord // ELISA_TRACKED_SHARE_CHECK; see tracked_share.go
 	smtTextFree        []*smtTextBuilder    // recycled SMT text buffers; see smt_text_scratch.go

@@ -65,7 +65,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 		deps, ok := a.localViewValueDeps(value, name)
 		if !ok {
 			complete = false
-			viewProvWhy = "c36"
+			a.viewProvWhy = "c36"
 			return
 		}
 		regions = append(regions, deps...)
@@ -135,7 +135,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 				if root := rootIdentExpr(stripAddrAndParens(arg)); root != nil && root.Name == name {
 					if xIndex >= 0 {
 						complete = false // X passed twice
-						viewProvWhy = "c95"
+						a.viewProvWhy = "c95"
 						return
 					}
 					xIndex = i
@@ -154,7 +154,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 			}
 			if funcHasArenaParam(callee) {
 				complete = false
-				viewProvWhy = "c113"
+				a.viewProvWhy = "c113"
 				return
 			}
 			if a.storeScanMayAllocateInto(callee, xIndex, map[storeScanKey]bool{}) {
@@ -179,7 +179,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 				if bound == name {
 					if _, isVar := node.(*ast.VarDeclStmt); !isVar {
 						complete = false
-						viewProvWhy = "c137"
+						a.viewProvWhy = "c137"
 					}
 				}
 			}
@@ -187,7 +187,7 @@ func (a *Analyzer) localViewProvenance(arg ast.Expr) ([]string, bool) {
 	})
 	if !complete || declCount != 1 {
 		if storeScanTrace {
-			fmt.Fprintf(os.Stderr, "VIEWPROV %s local=%s incomplete why=%s decls=%d\n", fn.Name, name, viewProvWhy, declCount)
+			fmt.Fprintf(os.Stderr, "VIEWPROV %s local=%s incomplete why=%s decls=%d\n", fn.Name, name, a.viewProvWhy, declCount)
 		}
 		return nil, false
 	}
@@ -498,8 +498,6 @@ func storeScanContainsUserCall(value ast.Expr) bool {
 	return found
 }
 
-// viewProvWhy: trace only -- the last reason localViewProvenance gave up.
-var viewProvWhy string
 
 // walkDeclScope visits the nodes of body in which name refers to decl: from decl to the end of
 // its statement list (nested lists included), until another declaration of the same name in

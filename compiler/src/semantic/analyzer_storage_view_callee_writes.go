@@ -174,6 +174,7 @@ func (w storageViewCalleeWrites) covers(other storageViewCalleeWrites) bool {
 }
 
 func (a *Analyzer) storageViewCalleeWritesForDecl(decl *ast.FuncDecl, param int, solve *storageViewWriteSolve, depth int) (storageViewCalleeWrites, bool) {
+	decl = a.readDecl(decl)
 	if decl == nil || param < 0 || param >= len(decl.Params) || depth > storageViewCalleeWriteDepthLimit {
 		return storageViewCalleeWrites{All: true}, true
 	}

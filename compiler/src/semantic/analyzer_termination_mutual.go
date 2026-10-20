@@ -6,6 +6,7 @@ import (
 )
 
 func (a *Analyzer) collectDirectFunctionCalls(fn *ast.FuncDecl) []*ast.CallExpr {
+	fn = a.readDecl(fn)
 	var calls []*ast.CallExpr
 	if fn == nil {
 		return calls

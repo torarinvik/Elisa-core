@@ -6972,6 +6972,7 @@ func (a *Analyzer) smtCallLocalResultOnlyEnsures(tr *smtTranslator, b *strings.B
 		return
 	}
 	decl, direct := a.resolveDirectCallFuncDecl(call)
+	decl = a.readDecl(decl)
 	if !direct || decl == nil || len(decl.Requires) != 0 || len(decl.EnsureValues) == 0 || decl == a.currentFuncDecl || a.isRecursiveProofCall(decl) {
 		return
 	}

@@ -18,6 +18,7 @@ func (tr *smtTranslator) scalarCallUF(call *ast.CallExpr, env map[string]string,
 		return "", false
 	}
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
 	if !direct || decl == nil || !tr.a.callResultStateIndependent(decl) {
 		return "", false
 	}

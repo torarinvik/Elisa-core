@@ -150,6 +150,7 @@ func (tr *smtTranslator) pointerIdentityCallStable(call *ast.CallExpr, depth int
 		return ok && field != nil && tr.pointerIdentityStableExpr(field.Object, depth+1)
 	}
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
 	if !direct || decl == nil || decl == tr.a.currentFuncDecl || decl.IsLemma || decl.IsGhost ||
 		len(call.Args) != len(decl.Params) || !tr.a.sviewFrameCallBodyWriteFree(decl, len(call.Args)) {
 		return false
