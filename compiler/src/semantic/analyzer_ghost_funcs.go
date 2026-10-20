@@ -46,6 +46,7 @@ func (a *Analyzer) validateGhostFuncDecl(fn *ast.FuncDecl) {
 // (no mutation, loops or effectful statements), the function declares no effects and no mutable
 // parameter, and every call goes to a ghost or to a function that passes this same gate.
 func (a *Analyzer) ghostBodyPureTotal(fn *ast.FuncDecl, inProgress map[*ast.FuncDecl]bool) bool {
+	fn = a.readDecl(fn)
 	if fn == nil || fn.IsLemma || fn.DecreasesWild != "" || len(fn.Permissions) != 0 {
 		return false
 	}

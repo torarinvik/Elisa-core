@@ -1232,6 +1232,7 @@ func (a *Analyzer) pureEquationSViewSlice(slice *ast.SliceExpr, owner *ast.FuncD
 }
 
 func (a *Analyzer) opaqueGhostCallEligible(decl *ast.FuncDecl) bool {
+	decl = a.readDecl(decl)
 	if a == nil || decl == nil || !decl.IsGhost || decl.IsLemma || decl.DecreasesWild != "" {
 		return false
 	}
@@ -1268,6 +1269,7 @@ func (a *Analyzer) opaqueGhostCallEligible(decl *ast.FuncDecl) bool {
 // to pass the existing pure-total equation gate, then require a stored certificate for every member
 // of each recursive SCC.
 func (a *Analyzer) ghostCallGraphPureTotalAndTerminating(root *ast.FuncDecl) bool {
+	root = a.readDecl(root)
 	if a == nil || root == nil {
 		return false
 	}
