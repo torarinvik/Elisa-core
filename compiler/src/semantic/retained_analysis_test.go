@@ -93,15 +93,30 @@ func TestRetainedAnalysisUpdateMatchesFreshAnalysis(t *testing.T) {
 	}
 }
 
-func TestRetainedAnalysisRejectsSignatureEdits(t *testing.T) {
-	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
-	edited := strings.Replace(retainedBefore, "def caller(x: i64) -> i64:", "def caller(x: i32) -> i64:", 1)
-	if _, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited)); err == nil || !strings.Contains(err.Error(), "signature of caller changed") {
-		t.Fatalf("signature edit: err = %v", err)
+func TestRetainedAnalysisAcceptsSignatureEdits(t *testing.T) {
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
+	// A caller's own signature, then a callee's parameter type its callers no longer match.
+	steps := []string{
+		strings.Replace(retainedBefore, "def caller(x: i64) -> i64:", "def caller(x: i32) -> i64:", 1),
 	}
-	added := retainedBefore + "\nconst EXTRA: i64 = 1\n"
+	steps = append(steps, strings.Replace(steps[0], "def helper(x: i64) -> i64:", "def helper(x: bool) -> i64:", 1))
+	for i, src := range steps {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("signature edit %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("signature edit %d disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", i, got, want)
+		}
+		if i == 1 && len(fresh.Errors()) == 0 {
+			t.Fatal("fixture: the callee's new parameter type must reject its callers")
+		}
+	}
+	added := steps[1] + "\nconst EXTRA: i64 = 1\n"
 	if _, err := retained.Update(retainedParse(t, added), retainedParse(t, added), []byte(added)); err == nil {
-		t.Fatal("adding a declaration must fall back")
+		t.Fatal("adding a non-function declaration must fall back")
 	}
 }
 

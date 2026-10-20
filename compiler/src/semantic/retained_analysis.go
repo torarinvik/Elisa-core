@@ -196,6 +196,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	var splices []splice
 	var movedSplices []ast.Decl                    // edited functions that also moved: header shifts, body is replaced
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
+	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
@@ -245,7 +246,16 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		}
 		oldText, newText := r.comparisonText(ofn), retainedText(nfn)
 		if oldText.header != newText.header {
-			return fail("signature of %s changed", ofn.Name)
+			// A new signature is a removal of the old declaration and an addition
+			// of the new one: callers are re-analyzed, the new one is checked
+			// against scratch.
+			if !oldTop[ofn] || !topLevel[nfn] || !retainedPlainFunction(ofn) || !retainedPlainFunction(nfn) {
+				return fail("signature of %s changed", ofn.Name)
+			}
+			removed = append(removed, ofn)
+			added = append(added, nfn)
+			replaced["::"+ofn.Name+"#0"] = true
+			continue
 		}
 		if oldText.gensyms != newText.gensyms {
 			return fail("%s mentions renamed synthesized declarations", ofn.Name)
@@ -268,7 +278,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	r.LastStats.Scratch = time.Since(scratchStart)
 	pendingRetainedMu.Unlock()
 	compareStart := time.Now()
-	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed))
+	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), replaced)
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
@@ -324,6 +334,10 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		}
 		bodies[i] = prepared.Body
 	}
+	// Removals go first: a changed signature re-adds the same name below.
+	if len(removedLive) != 0 {
+		r.removeLiveFunctions(removedLive)
+	}
 	// Added functions are declared in the live analysis as the declaration phase
 	// declared them in scratch; their results must then match scratch's exactly.
 	var addedScoped []scopedDecl
@@ -372,9 +386,6 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 			return out
 		}()...)
 		r.decls = append(r.decls, addedScoped...)
-	}
-	if len(removedLive) != 0 {
-		r.removeLiveFunctions(removedLive)
 	}
 	// Past this point the edit is accepted; mutate the retained state.
 	// Added functions are analyzed first: the edited bodies call them.

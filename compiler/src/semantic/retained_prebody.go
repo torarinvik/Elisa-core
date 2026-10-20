@@ -134,7 +134,7 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 // preBodyDifference names the first body-dependent declaration-phase result
 // that differs, or returns "". Old diagnostics are compared after the edit's
 // line shifts.
-func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added, removed int) string {
+func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added, removed int, replaced map[string]bool) string {
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
@@ -154,8 +154,8 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added,
 	fresh := 0
 	for _, key := range keys {
 		prev, ok := old.fingerprint[key]
-		if !ok {
-			fresh++ // an added function: checked against the live declaration
+		if !ok || replaced[key] {
+			fresh++ // an added or re-declared function: checked against the live declaration
 			continue
 		}
 		if prev != cur.fingerprint[key] {
@@ -167,7 +167,7 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added,
 	}
 	gone := 0
 	for key := range old.fingerprint {
-		if _, ok := cur.fingerprint[key]; !ok {
+		if _, ok := cur.fingerprint[key]; !ok || replaced[key] {
 			gone++
 		}
 	}
