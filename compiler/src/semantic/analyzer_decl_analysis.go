@@ -16,9 +16,10 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 	// them for the whole declaration set before source-order body analysis can ask
 	// for a summary of a later-declared function.
 	a.recordVerifiedTaskGroupSubmitsInDecls(decls)
-	// An incremental session records per-body products as bodies finish; it is
-	// not built for concurrent writers, so sessions keep the serial path.
-	if workers := parallelBodyWorkers(); workers > 1 && a.incrementalBodies == nil && a.lexicalReads == nil {
+	// An incremental session records per-body products as bodies finish, and a
+	// retained analysis records per-function diagnostic windows; neither is built
+	// for concurrent writers, so both keep the serial path.
+	if workers := parallelBodyWorkers(); workers > 1 && a.incrementalBodies == nil && a.lexicalReads == nil && a.retained == nil {
 		a.analyzeDeclsParallel(decls, workers)
 		return
 	}

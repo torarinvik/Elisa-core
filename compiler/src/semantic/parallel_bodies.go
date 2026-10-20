@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -15,14 +16,15 @@ import (
 	"elisacore/src/ast"
 )
 
-// parallelBodyWorkers reads ELISA_PARALLEL_BODIES: the number of workers that
-// analyze function bodies concurrently. Unset or <= 1 keeps the serial path.
+// parallelBodyWorkers is the number of workers that analyze function bodies
+// concurrently: ELISA_PARALLEL_BODIES when set (<= 1 keeps the serial path),
+// otherwise one per CPU up to eight, past which the seed stops scaling.
 func parallelBodyWorkers() int {
-	n, err := strconv.Atoi(os.Getenv("ELISA_PARALLEL_BODIES"))
-	if err != nil {
-		return 0
+	if v, set := os.LookupEnv("ELISA_PARALLEL_BODIES"); set {
+		n, _ := strconv.Atoi(v)
+		return n
 	}
-	return n
+	return min(runtime.NumCPU(), 8)
 }
 
 // analyzeDeclsParallel analyzes non-function declarations serially, then splits
