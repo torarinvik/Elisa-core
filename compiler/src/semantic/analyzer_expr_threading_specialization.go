@@ -620,6 +620,37 @@ func cloneStructFields(fields map[string]Field) map[string]Field {
 }
 
 func (a *Analyzer) lookupResolvedFieldType(actual Type, name string) (Type, bool) {
+	// One field of a struct: resolve just that field instead of building (and
+	// substituting) the whole resolved field list, as resolvedStructFields does.
+	actual = StripAggregateStateType(actual)
+	var base *StructType
+	var inst *GenericInstanceType
+	switch tt := actual.(type) {
+	case *StructType:
+		base = tt
+	case *GenericInstanceType:
+		if sb, ok := tt.Base.(*StructType); ok {
+			base, inst = sb, tt
+		}
+	}
+	if base != nil {
+		if base.Decl == nil {
+			return nil, false
+		}
+		field, ok := base.Fields[name]
+		if !ok || !structDeclHasField(base.Decl, name) {
+			return nil, false
+		}
+		if inst == nil {
+			return field.Type, true
+		}
+		bindings := genericBindingsForStructInstance(base, inst.Args)
+		regionBindings := regionBindingsForStructInstance(base, inst.Args)
+		if len(bindings) != 0 || len(regionBindings) != 0 {
+			return a.substituteType(field.Type, bindings, nil, regionBindings, nil), true
+		}
+		return field.Type, true
+	}
 	fields, ok := a.resolvedStructFields(actual)
 	if !ok {
 		return nil, false
@@ -826,3 +857,4 @@ func (a *Analyzer) joinedPoolScopeForArg(poolArg ast.Expr) *poolScopeState {
 	}
 	return nil
 }
+
