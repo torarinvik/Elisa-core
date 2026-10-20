@@ -48,6 +48,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	for i := range clones {
 		w := new(Analyzer)
 		settable(reflect.ValueOf(w).Elem()).Set(deepCloneValue(reflect.ValueOf(a).Elem()))
+		isolateWorkerScopes(a, w)
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)
@@ -82,6 +83,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		workerDiags[i] = w.diagnostics
 		w.diagnostics = a.diagnostics[:baseDiagnostics:baseDiagnostics]
 		w.reportedDiagnostics = a.reportedDiagnostics
+		w.globalScope, w.currentScope, w.smtTextFree = a.globalScope, a.currentScope, a.smtTextFree
 		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base)
 	}
 	a.diagnostics = a.diagnostics[:baseDiagnostics]
@@ -259,4 +261,20 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 			}
 		})
 	}
+}
+
+// isolateWorkerScopes gives a worker its own global scope. Function scopes hang
+// off it, and flow facts (range facts, SMT assert facts) are saved and restored on
+// every scope of the chain, the global one included. Scratch pools that hand out
+// pointers must not be shared either.
+func isolateWorkerScopes(a, w *Analyzer) {
+	if a.globalScope != nil {
+		g := new(Scope)
+		settable(reflect.ValueOf(g).Elem()).Set(deepCloneValue(reflect.ValueOf(a.globalScope).Elem()))
+		w.globalScope = g
+		if a.currentScope == a.globalScope {
+			w.currentScope = g
+		}
+	}
+	w.smtTextFree = nil
 }
