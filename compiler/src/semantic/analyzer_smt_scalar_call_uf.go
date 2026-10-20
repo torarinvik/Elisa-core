@@ -78,6 +78,15 @@ func (tr *smtTranslator) scalarCallArgTerms(call *ast.CallExpr, decl *ast.FuncDe
 			return "", nil, nil, false
 		}
 		param := fn.Params[i]
+		// A stable record root is one fixed snapshot for the query, identified by its root.
+		if token, ok := tr.stableRecordRootToken(arg, env); ok {
+			if ref, isRef := StripAggregateStateType(param).(*RefType); isRef && (ref.Mutable || ref.Linear) {
+				return "", nil, nil, false
+			}
+			key.WriteString("|record:")
+			key.WriteString(token)
+			continue
+		}
 		if _, ref := StripAggregateStateType(param).(*RefType); ref && !isDArrayTypeMaybeRef(stripRefForBounds(param)) {
 			return "", nil, nil, false
 		}

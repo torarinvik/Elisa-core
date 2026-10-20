@@ -106,3 +106,113 @@ func TestSMTStoreBaseArray(t *testing.T) {
 		}
 	}
 }
+
+// A ghost prefix fold over containers held in an immutable record parameter unfolds at the call
+// site: the callee's container fields are the caller's, a const-enum field is its storage value,
+// and calls with provably equal arguments agree. A wrong claim about the fold still fails.
+func TestSMTRecordContainerPrefixFold(t *testing.T) {
+	const decls = `
+const enum Kind of u8:
+    Struct
+    Other
+
+struct Sym:
+    kind: Kind
+    name: sview
+
+struct Table:
+    symbols: darray[Sym]
+    names: darray[sview]
+
+ghost def count_prefix(table: Table&, name: sview, end: usize) -> u8:
+    requires end <= table.symbols.count
+    decreases end
+    return 0 if end == 0
+    prior_end: usize = end - 1
+    matches_name: bool = table.symbols[prior_end].kind == Kind.Struct and table.symbols[prior_end].name == name
+    return 2 if:
+        count_prefix(table, name, prior_end) == 2
+        count_prefix(table, name, prior_end) == 1 and matches_name
+    return 1 if matches_name
+    return count_prefix(table, name, prior_end)
+
+ghost def member_prefix(table: Table&, name: sview, end: usize) -> bool:
+    requires end <= table.names.count
+    decreases end
+    return false if end == 0
+    prior_end: usize = end - 1
+    return true if table.names[prior_end] == name
+    return member_prefix(table, name, prior_end)
+`
+	for _, tc := range []struct {
+		name, claim string
+		proven      bool
+	}{
+		{"fold", "count_prefix(table, name, table.symbols.count) == 1 and member_prefix(table, name, table.names.count)", true},
+		{"wrong_count", "count_prefix(table, name, table.symbols.count) == 2 and member_prefix(table, name, table.names.count)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := decls + `
+def unique(table: Table&, name: sview) -> bool:
+    ensure result == (` + tc.claim + `)
+    can Abort.Panic:
+        declarations: mutable u8 = 0
+        symbol_count: usize = table.symbols.count
+        for symbol_index in 0..<symbol_count |table, name, symbol_count, declarations|:
+            invariant symbol_count == table.symbols.count
+            invariant symbol_index <= symbol_count
+            invariant declarations == count_prefix(table, name, symbol_index)
+            symbol_matches: bool = table.symbols[symbol_index].kind == Kind.Struct and table.symbols[symbol_index].name == name
+            declarations <- 2 if declarations == 2 or (declarations == 1 and symbol_matches) else (1 if symbol_matches else declarations)
+        registered: mutable bool = false
+        n: usize = table.names.count
+        for i in 0..<n |table, name, n, registered|:
+            invariant n == table.names.count
+            invariant i <= n
+            invariant registered == member_prefix(table, name, i)
+            registered <- registered or table.names[i] == name
+        return declarations == 1 and registered
+`
+			r := analyzeContractStrict(t, "record_prefix_"+tc.name+".elisa", src)
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the record prefix fold to prove: %s", es)
+			}
+			if !tc.proven && !strings.Contains(es, "ensure postcondition") {
+				t.Fatalf("a wrong claim about the fold was accepted: %s", es)
+			}
+		})
+	}
+}
+
+// A `continue` in a range loop returns to the head after the index increment, without the
+// rest of the body: a counter bounded by the index preserves, one claimed equal to it does not.
+func TestRangeLoopContinueIncrementsIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name, inv string
+		proven    bool
+	}{
+		{"bounded", "count <= i", true},
+		{"equal", "count == i", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := `
+def count_nonnegative(xs: darray[i64]&) -> usize:
+    count: mutable usize = 0
+    for i in 0..<xs.count |xs, count|:
+        invariant ` + tc.inv + `
+        continue if xs[i] < 0
+        count <- count + 1
+    return count
+`
+			r := analyzeContractStrict(t, "range_continue_"+tc.name+".elisa", src)
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the invariant to prove: %s", es)
+			}
+			if !tc.proven && es == "" {
+				t.Fatal("an invariant broken by the continue path was accepted")
+			}
+		})
+	}
+}

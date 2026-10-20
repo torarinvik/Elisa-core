@@ -40,9 +40,12 @@ func (a *Analyzer) proveForRangeInvariants(stmt *ast.ForStmt, loopType Type) (pr
 		return nil, nil
 	}
 	invs := leadingInvariants(stmt.Body)
-	if len(invs) == 0 || loopBodyContinues(stmt.Body) {
+	if len(invs) == 0 {
 		return nil, nil
 	}
+	// A `continue` of this loop still increments the index; only the sequential model, which
+	// applies the increment at the `continue` (seqLoopContinueStep), models it.
+	continues := loopBodyContinues(stmt.Body)
 	if !sideEffectFreeExpr(stmt.End, 0) || !sideEffectFreeExpr(stmt.Start, 0) {
 		return nil, nil
 	}
@@ -71,10 +74,14 @@ func (a *Analyzer) proveForRangeInvariants(stmt *ast.ForStmt, loopType Type) (pr
 	body := append(append([]ast.Stmt(nil), stmt.Body...), &ast.AssignStmt{Position: pos, Target: ident(), Value: next})
 	synth := &ast.WhileStmt{Position: pos, Cond: cond, Body: body}
 
-	saved := a.currentScope
+	saved, savedStep := a.currentScope, a.seqLoopContinueStep
 	a.currentScope = scope
+	a.seqLoopContinueStep = nil
+	if continues {
+		a.seqLoopContinueStep = map[string]ast.Expr{stmt.Name: next}
+	}
 	proven, exitSound := a.proveLoopInvariants(synth)
-	a.currentScope = saved
+	a.currentScope, a.seqLoopContinueStep = saved, savedStep
 	// A range-loop invariant the inductive proof could not certify keeps its previous treatment (the
 	// in-place check at the body head); drop the deferred inductive lint the while prover queued.
 	for _, inv := range invs {

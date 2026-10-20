@@ -1578,6 +1578,10 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	if a.smtEquationStructType(a.exprTypes[argExpr]) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
 	}
+	if token, ok := tr.stableRecordRootToken(argExpr, argEnv); ok {
+		env[name] = token
+		return true
+	}
 	// A datatype value (enum, or a struct not modeled field-wise above) has no scalar SMT term; bind a
 	// recoverable projection token so a bool predicate over it canonicalizes to the SAME opaque symbol
 	// as the un-substituted occurrence (structural induction). Tokens only key opaque predicate symbols;
@@ -2624,7 +2628,10 @@ type smtTranslator struct {
 	// Container theory (analyzer_smt_container_theory.go): bases whose value is fixed for the query,
 	// and the callee whose formals are being bound.
 	stableContainers map[string]bool
-	bindingCallee    *ast.FuncDecl
+	// stableRecordRoots holds the datatype tokens a callee formal is bound to when the caller passed
+	// a stable record root; the callee's container fields of that formal are the caller's.
+	stableRecordRoots map[string]bool
+	bindingCallee     *ast.FuncDecl
 	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
 	// `g(n-1)` must remain distinct; only re-entering the exact same ground instance consumes fuel.
 	callEqInFlight map[string]int
@@ -5978,6 +5985,10 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 			}
 		}
 		return dtToken(smtProjectionName(arg)), true
+	}
+	// A stable record root is the same fixed snapshot wherever it is passed.
+	if token, ok := tr.stableRecordRootToken(arg, env); ok {
+		return "record:" + token, true
 	}
 	if tr.a.smtEquationStructType(tr.a.exprTypes[arg]) {
 		st, _ := stripRefForBounds(tr.a.exprTypes[arg]).(*StructType)

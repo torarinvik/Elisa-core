@@ -654,10 +654,13 @@ type Analyzer struct {
 	// this stack to use outer invariants as additional hypotheses when the outer invariant's dependency
 	// variables are disjoint from the inner loop's assigned variables (conservative: if the inner loop
 	// mutates ANY variable the outer invariant depends on, the outer invariant is NOT admitted).
-	activeOuterLoopInvariants         []*ast.ContractStmt
-	implicitIntConvFuncs              map[*ast.FuncDecl]bool
-	rangeFactWriteLogs                [][]rangeFactWrite
-	pendingLoopInvariantLints         map[*ast.ContractStmt]string
+	activeOuterLoopInvariants []*ast.ContractStmt
+	implicitIntConvFuncs      map[*ast.FuncDecl]bool
+	rangeFactWriteLogs        [][]rangeFactWrite
+	pendingLoopInvariantLints map[*ast.ContractStmt]string
+	// seqLoopContinueStep is the index update a `continue` performs in the range loop whose
+	// synthesized while body the sequential model is walking (nil for a while loop).
+	seqLoopContinueStep               map[string]ast.Expr
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int

@@ -1049,7 +1049,14 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr, owner *ast.FuncDecl) boo
 	case *ast.Ident:
 		return a.equationIdentifierIsStable(n, owner)
 	case *ast.FieldExpr:
-		return n != nil && a.exprIsPureForEquation(n.Object, owner)
+		if n == nil {
+			return false
+		}
+		// A constant enum member (`Kind.Struct`) is a fixed value.
+		if _, constant := a.constIntValue(n); constant {
+			return true
+		}
+		return a.exprIsPureForEquation(n.Object, owner)
 	case *ast.IndexExpr:
 		return (a.pureEquationSViewIndex(n, owner) || a.pureEquationContainerIndex(n, owner)) && a.exprIsPureForEquation(n.Index, owner)
 	case *ast.ParenExpr:
@@ -1487,7 +1494,14 @@ func (a *Analyzer) ghostReturnBindingsStable(fn *ast.FuncDecl) bool {
 }
 
 func (a *Analyzer) smtEquationParamType(t Type) bool {
-	t = stripRefForBounds(t)
+	if ref, isRef := StripAggregateStateType(t).(*RefType); isRef && (ref.Mutable || ref.Linear) {
+		param := stripRefForBounds(t)
+		return param != nil && a.smtEquationParamTypeWithoutContainerRecord(param)
+	}
+	return a.smtEquationParamTypeWithoutContainerRecord(stripRefForBounds(t)) || a.smtEquationContainerRecordType(stripRefForBounds(t))
+}
+
+func (a *Analyzer) smtEquationParamTypeWithoutContainerRecord(t Type) bool {
 	if t == nil {
 		return false
 	}
@@ -1506,6 +1520,15 @@ func (a *Analyzer) smtEquationParamType(t Type) bool {
 		return true
 	}
 	return false
+}
+
+// smtEquationContainerRecordType admits a record parameter read through an immutable binding.
+// It enters an equation only through the reads the translator models (a container field is a
+// stable base through recordFieldContainerBase, in a frame that writes no memory); any other
+// read declines the translation, never the soundness of what is translated.
+func (a *Analyzer) smtEquationContainerRecordType(t Type) bool {
+	st, ok := StripAggregateStateType(t).(*StructType)
+	return ok && st != nil && len(st.Fields) != 0
 }
 
 func (a *Analyzer) smtEquationStructType(t Type) bool {
@@ -1586,9 +1609,30 @@ func (a *Analyzer) pureEquationContainerIndex(index *ast.IndexExpr, owner *ast.F
 		index.LegacyElseFallback || index.AsSpecialize != nil || index.AsOverlayCall != nil || index.AsBuiltinDictGet != nil {
 		return false
 	}
-	object, ok := stripOptimizationParens(index.Object).(*ast.Ident)
+	target := stripOptimizationParens(index.Object)
+	viaField := false
+	for {
+		field, isField := target.(*ast.FieldExpr)
+		if !isField || field == nil {
+			break
+		}
+		if field.Safe {
+			return false
+		}
+		viaField = true
+		target = stripOptimizationParens(field.Object)
+	}
+	object, ok := target.(*ast.Ident)
 	if !ok || object == nil || !a.equationIdentifierIsStable(object, owner) {
 		return false
+	}
+	if viaField {
+		// A container field of an immutable parameter is a stable base (recordFieldContainerBase).
+		if t := a.exprTypes[index.Object]; t != nil {
+			if _, isContainer := StripAggregateStateType(stripRefForBounds(t)).(*DArrayType); !isContainer {
+				return false
+			}
+		}
 	}
 	sym, ok := a.symbolForFuncDecl(owner)
 	if !ok || sym == nil {
@@ -1605,6 +1649,9 @@ func (a *Analyzer) pureEquationContainerIndex(index *ast.IndexExpr, owner *ast.F
 		pt := fn.Params[i]
 		if ref, isRef := pt.(*RefType); isRef && (ref.Mutable || ref.Linear) {
 			return false
+		}
+		if viaField {
+			return a.smtEquationContainerRecordType(stripRefForBounds(pt))
 		}
 		_, isContainer := StripAggregateStateType(stripRefForBounds(pt)).(*DArrayType)
 		return isContainer

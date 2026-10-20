@@ -82,6 +82,11 @@ func (tr *smtTranslator) sviewEqualityOperand(expr ast.Expr) bool {
 	if _, ok := stripRefForBounds(tr.a.exprTypes[expr]).(*SViewType); ok {
 		return true
 	}
+	if tr.a.exprTypes[expr] == nil {
+		if _, ok := stripRefForBounds(tr.placeStaticType(expr)).(*SViewType); ok {
+			return true
+		}
+	}
 	switch e := stripOptimizationParens(expr).(type) {
 	case *ast.TernaryExpr:
 		return e != nil && tr.a.ternaryBranchType(e) != nil

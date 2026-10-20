@@ -87,6 +87,10 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 		}
 		leaf = field.Type
 	}
+	// A const-enum field is its integer storage value, as everywhere else in the SMT model.
+	if storage, ok := stripRefForBounds(leaf).(*ConstEnumType); ok && storage != nil && storage.Storage != nil {
+		leaf = storage.Storage
+	}
 	signed, bits, numeric := smtIntWidthSign(leaf)
 	if (sort == "Int" && (!numeric || bits <= 0 || bits > 64)) || (sort == "Bool" && !IsBoolType(leaf)) {
 		return "", true, false
@@ -118,13 +122,31 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 // are a fixed snapshot only in a frame that cannot write memory through any
 // alias or call. Do not use a callee's unbound field spelling as a caller root.
 func (tr *smtTranslator) recordFieldContainerBase(field *ast.FieldExpr, env map[string]string) (string, bool) {
-	if tr.a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 || tr.a.currentScope == nil ||
-		!tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+	if tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
 		return "", false
 	}
 	root, _ := projectionChain(field)
 	id, ok := root.(*ast.Ident)
-	if !ok || tr.envBindsRoot(id, env) {
+	if !ok {
+		return "", false
+	}
+	if bound, isBound := env[id.Name]; isBound {
+		// A formal bound to a stable caller record root reads the caller's container fields.
+		if !tr.stableRecordRoots[bound] {
+			return "", false
+		}
+		if !recordFieldContainerElementModeled(tr.containerElementType(field)) {
+			return "", false
+		}
+		key, ok := tr.fieldProjectionKey(field, env)
+		if !ok {
+			return "", false
+		}
+		base := smtVar(key)
+		tr.markStableContainer(base)
+		return base, true
+	}
+	if tr.calleeBodyDepth != 0 || tr.envBindsRoot(id, env) {
 		return "", false
 	}
 	sym, found := tr.a.currentScope.Lookup(id.Name)
@@ -134,8 +156,7 @@ func (tr *smtTranslator) recordFieldContainerBase(field *ast.FieldExpr, env map[
 	if ref, ok := StripAggregateStateType(sym.Type).(*RefType); ok && (ref.Mutable || ref.Linear) {
 		return "", false
 	}
-	element := tr.containerElementType(field)
-	if _, ok := StripAggregateStateType(element).(*StructType); !ok {
+	if !recordFieldContainerElementModeled(tr.containerElementType(field)) {
 		return "", false
 	}
 	key, ok := tr.fieldProjectionKey(field, env)
@@ -170,4 +191,50 @@ func (tr *smtTranslator) immutableIndexedRecordLocal(id *ast.Ident, env map[stri
 		return index, true
 	}
 	return nil, false
+}
+
+// stableRecordRootToken binds a record argument by the caller's root name when that root is a
+// fixed snapshot for the whole query: an immutable parameter or local, not held through a
+// mutable reference, in a frame that cannot write memory. The callee then reads the caller's
+// container fields through fieldProjectionKey's token rerooting.
+func (tr *smtTranslator) stableRecordRootToken(argExpr ast.Expr, argEnv map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil {
+		return "", false
+	}
+	id, ok := stripOptimizationParens(argExpr).(*ast.Ident)
+	if !ok || id == nil {
+		return "", false
+	}
+	if bound, isBound := argEnv[id.Name]; isBound {
+		return bound, tr.stableRecordRoots[bound]
+	}
+	if tr.calleeBodyDepth != 0 || tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+		return "", false
+	}
+	sym, found := tr.a.currentScope.Lookup(id.Name)
+	if !found || sym == nil || (sym.Kind != SymbolParam && sym.Kind != SymbolLocal) || sym.Mutable || symbolRootMutable(sym) {
+		return "", false
+	}
+	if ref, ok := StripAggregateStateType(sym.Type).(*RefType); ok && (ref.Mutable || ref.Linear) {
+		return "", false
+	}
+	if !tr.a.smtEquationContainerRecordType(stripRefForBounds(sym.Type)) {
+		return "", false
+	}
+	token := dtToken(id.Name)
+	if tr.stableRecordRoots == nil {
+		tr.stableRecordRoots = map[string]bool{}
+	}
+	tr.stableRecordRoots[token] = true
+	return token, true
+}
+
+// recordFieldContainerElementModeled admits the element types the container theory reads through
+// per-base functions of the index: records (recordElementFieldTerm) and views (containerViewElement).
+func recordFieldContainerElementModeled(element Type) bool {
+	switch StripAggregateStateType(stripRefForBounds(element)).(type) {
+	case *StructType, *SViewType:
+		return true
+	}
+	return false
 }

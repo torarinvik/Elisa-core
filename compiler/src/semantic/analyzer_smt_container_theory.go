@@ -151,6 +151,11 @@ func (a *Analyzer) containerArgType(arg ast.Expr) Type {
 func (tr *smtTranslator) containerElementType(expr ast.Expr) Type {
 	t := tr.a.containerArgType(expr)
 	if t == nil {
+		if typed := tr.placeStaticType(expr); typed != nil && isDArrayTypeMaybeRef(typed) {
+			t = typed
+		}
+	}
+	if t == nil {
 		return nil
 	}
 	if r, ok := t.(*RefType); ok {
@@ -158,6 +163,62 @@ func (tr *smtTranslator) containerElementType(expr ast.Expr) Type {
 	}
 	if d, ok := StripAggregateStateType(t).(*DArrayType); ok && d != nil {
 		return d.Elem
+	}
+	return nil
+}
+
+// placeStaticType types an untyped place `root.f.g`. Inside an inlined callee body the root is
+// one of the callee's formals, typed from its signature; the caller's scope never names it.
+func (tr *smtTranslator) placeStaticType(expr ast.Expr) Type {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.Ident:
+		if t := tr.a.exprTypes[n]; t != nil {
+			return t
+		}
+		if tr.calleeBodyDepth != 0 {
+			decl := tr.calleeBodyDecl
+			if decl == nil {
+				return nil
+			}
+			sym, ok := tr.a.symbolForFuncDecl(decl)
+			if !ok || sym == nil {
+				return nil
+			}
+			fn, ok := sym.Type.(*FuncType)
+			if !ok || fn == nil || len(fn.Params) != len(decl.Params) {
+				return nil
+			}
+			for i, param := range decl.Params {
+				if param.Name == n.Name {
+					return fn.Params[i]
+				}
+			}
+			return nil
+		}
+		if tr.a.currentScope != nil {
+			if sym, found := tr.a.currentScope.Lookup(n.Name); found && sym != nil {
+				return sym.Type
+			}
+		}
+	case *ast.IndexExpr:
+		if t := tr.a.exprTypes[n]; t != nil {
+			return t
+		}
+		if !validContainerViewIndex(n) {
+			return nil
+		}
+		return tr.containerElementType(n.Object)
+	case *ast.FieldExpr:
+		if t := tr.a.exprTypes[n]; t != nil {
+			return t
+		}
+		object := tr.placeStaticType(n.Object)
+		if object == nil {
+			return nil
+		}
+		if t, ok := tr.a.lookupResolvedFieldType(peelNamedStateRefs(object), n.Field); ok {
+			return t
+		}
 	}
 	return nil
 }

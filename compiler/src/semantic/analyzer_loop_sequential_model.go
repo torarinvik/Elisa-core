@@ -31,10 +31,15 @@ type seqLoopFrag struct {
 	state  map[string]ast.Expr // assigned scalars, over the pre-state
 	lets   map[string]ast.Expr // body-local immutable bindings, over the pre-state
 	exited bool
+	// continued marks a path that reached `continue`: it returns to the loop head with its state
+	// (after the range loop's increment, applied at the `continue`), so later statements skip it.
+	continued bool
 }
 
+func (f seqLoopFrag) done() bool { return f.exited || f.continued }
+
 func (f seqLoopFrag) clone() seqLoopFrag {
-	out := seqLoopFrag{conds: append([]ast.Expr{}, f.conds...), state: map[string]ast.Expr{}, lets: map[string]ast.Expr{}, exited: f.exited}
+	out := seqLoopFrag{conds: append([]ast.Expr{}, f.conds...), state: map[string]ast.Expr{}, lets: map[string]ast.Expr{}, exited: f.exited, continued: f.continued}
 	for k, v := range f.state {
 		out.state[k] = v
 	}
@@ -99,7 +104,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 				return nil, false
 			}
 			for i := range frontier {
-				if frontier[i].exited {
+				if frontier[i].done() {
 					continue
 				}
 				if _, again := frontier[i].lets[n.Name]; again {
@@ -123,7 +128,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 				return nil, false
 			}
 			for i := range frontier {
-				if frontier[i].exited {
+				if frontier[i].done() {
 					continue
 				}
 				if _, isLet := frontier[i].lets[target.Name]; isLet {
@@ -157,7 +162,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 			}
 			var next []seqLoopFrag
 			for _, f := range frontier {
-				if f.exited {
+				if f.done() {
 					next = append(next, f)
 					continue
 				}
@@ -192,7 +197,25 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 			frontier = next
 		case *ast.BreakStmt, *ast.ReturnStmt:
 			for i := range frontier {
-				frontier[i].exited = true
+				if !frontier[i].continued {
+					frontier[i].exited = true
+				}
+			}
+		case *ast.ContinueStmt:
+			for i := range frontier {
+				if frontier[i].done() {
+					continue
+				}
+				// A range loop increments its index on `continue`; the synthesized while body only
+				// increments at its end, so apply the step here over this path's state.
+				for name, step := range a.seqLoopContinueStep {
+					v, ok := substituteLemmaEnsure(step, frontier[i].env())
+					if !ok {
+						return nil, false
+					}
+					frontier[i].state[name] = v
+				}
+				frontier[i].continued = true
 			}
 		case *ast.ExprStmt:
 			// An assert changes no tracked state: it passes or aborts. Beyond ghost calls, its
