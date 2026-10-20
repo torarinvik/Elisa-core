@@ -194,7 +194,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		edit *ast.FuncDecl // the function in file, found again in the prepared scratch parse
 	}
 	var splices []splice
-	var movedSplices []ast.Decl // edited functions that also moved: header shifts, body is replaced
+	var movedSplices []ast.Decl                    // edited functions that also moved: header shifts, body is replaced
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	var shifted []ast.Decl
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
