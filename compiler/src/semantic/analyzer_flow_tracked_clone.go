@@ -336,8 +336,18 @@ func (a *Analyzer) mergeTrackedNamedStateValueTypes(dst Type, src Type) (Type, b
 	}
 }
 
+// Stored tracked value types are never edited in place (see shareTrackedValueType),
+// so a snapshot of the bindings can share them; deep-copying here was ~1 GB per seed.
 func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
-	return a.cloneTrackedValueTypeMapWithSeen(a.currentSpecializedValueTypes, nil)
+	src := a.currentSpecializedValueTypes
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]Type, len(src))
+	for sym, typ := range src {
+		cloned[sym] = a.shareTrackedValueType(typ)
+	}
+	return cloned
 }
 
 func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen map[Type]Type) map[*Symbol]Type {
