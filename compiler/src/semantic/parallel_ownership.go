@@ -21,6 +21,10 @@ type parallelWorkerState struct {
 	owner       map[*ast.FuncDecl]int
 	shadows     map[*ast.FuncDecl]*ast.FuncDecl
 	readShadows map[*ast.FuncDecl]*ast.FuncDecl
+	// funcTypes maps a shared FuncType to the private copy this worker's analyses
+	// write function facts into; owned copies are written back after the merge.
+	funcTypes     map[*FuncType]*FuncType
+	funcTypeOwned map[*FuncType]bool
 	original    map[*ast.FuncDecl]*ast.FuncDecl
 }
 
@@ -211,4 +215,41 @@ func typeRefersToFuncDecl(t reflect.Type, seen map[reflect.Type]bool) bool {
 		}
 	}
 	return false
+}
+
+// privateFuncType gives a parallel worker's analysis of fn a private copy of its
+// shared FuncType, so publishing the function's facts (return provenance, effects,
+// isolation) never races with other workers reading the shared one. Readers keep
+// seeing the pre-fork facts until the merge writes the owner's copy back.
+func (a *Analyzer) privateFuncType(fn *ast.FuncDecl, shared *FuncType) *FuncType {
+	p := a.parallel
+	if p == nil || shared == nil {
+		return shared
+	}
+	if private := p.funcTypes[shared]; private != nil {
+		return private
+	}
+	private := new(FuncType)
+	settable(reflect.ValueOf(private).Elem()).Set(deepCloneValue(reflect.ValueOf(shared).Elem()))
+	if p.funcTypes == nil {
+		p.funcTypes = map[*FuncType]*FuncType{}
+		p.funcTypeOwned = map[*FuncType]bool{}
+	}
+	p.funcTypes[shared] = private
+	decl := fn
+	if orig, isShadow := p.original[fn]; isShadow {
+		decl = orig
+	} else if owner, known := p.owner[decl]; known && owner == p.worker {
+		p.funcTypeOwned[shared] = true
+	}
+	return private
+}
+
+// publishFuncTypes writes a worker's owned function facts into the shared types.
+func (p *parallelWorkerState) publishFuncTypes() {
+	for shared, private := range p.funcTypes {
+		if p.funcTypeOwned[shared] {
+			*shared = *private
+		}
+	}
 }

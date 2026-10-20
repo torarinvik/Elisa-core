@@ -122,6 +122,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		p := w.parallel
 		w.parallel = nil
 		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base, p)
+		p.publishFuncTypes()
 	}
 	a.diagnostics = a.diagnostics[:baseDiagnostics]
 	for _, s := range spans {

@@ -89,6 +89,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		a.errorf(fn.Pos(), "internal error: function %q does not resolve to a function type", fn.Name)
 		return
 	}
+	fnType = a.privateFuncType(fn, fnType)
 	// Deferred storage-view errors are scoped per function: a nested function resolves its own
 	// pending uses at its checkRegionLifetimes; restore the enclosing function's pending afterward.
 	if a.funcAnalysisActive == nil {
