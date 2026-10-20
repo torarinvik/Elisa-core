@@ -5351,7 +5351,7 @@ func (a *Analyzer) smtEnvForCallSubstOpaque(tr *smtTranslator, decl *ast.FuncDec
 		return nil, false
 	}
 	fnType, ok := sym.Type.(*FuncType)
-	if !ok || fnType == nil || len(fnType.Params) != len(decl.Params) {
+	if !ok || fnType == nil || tr.proofParamCount(fnType) != len(decl.Params) {
 		return nil, false
 	}
 	paramType := map[string]Type{}
@@ -6031,8 +6031,9 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 		}
 		return dtToken(smtProjectionName(arg)), true
 	}
-	// A stable record root is the same fixed snapshot wherever it is passed.
-	if token, ok := tr.stableRecordRootToken(arg, env); ok {
+	// A stable record root is the same fixed snapshot wherever it is passed. Ghost calls write
+	// nothing, so they do not unsettle the snapshot.
+	if token, ok := tr.stableRecordRootTokenGate(arg, env, tr.a.sviewFrameWriteFreeGhostReads); ok {
 		return "record:" + token, true
 	}
 	if tr.a.smtEquationStructType(tr.a.exprTypes[arg]) {
@@ -6091,6 +6092,11 @@ func (tr *smtTranslator) emitDefiningEquationWithEnv(call *ast.CallExpr, decl *a
 		return
 	}
 	if !tr.callEquationEligible(decl) {
+		return
+	}
+	if sym, found := tr.a.symbolForFuncDecl(decl); !found || sym == nil {
+		return
+	} else if fn, isFn := sym.Type.(*FuncType); !isFn || fn == nil || tr.proofParamCount(fn) != len(decl.Params) {
 		return
 	}
 	body, ok := pureReturnBody(decl)
@@ -6971,7 +6977,7 @@ func (tr *smtTranslator) assertGhostCallCongruenceSort(decl *ast.FuncDecl, args 
 	// body (and so before its own argument expressions) is analyzed, so the arguments may be untyped.
 	var paramTypes []Type
 	if sym, ok := tr.a.symbolForFuncDecl(decl); ok && sym != nil {
-		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil && len(fnType.Params) == len(args) {
+		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil && tr.proofParamCount(fnType) == len(args) {
 			paramTypes = fnType.Params
 		}
 	}
@@ -7015,6 +7021,14 @@ func (tr *smtTranslator) assertGhostCallCongruenceSort(decl *ast.FuncDecl, args 
 			}
 			name.WriteString("|container:" + base)
 		default:
+			// A read-only record root that the current function never writes is one
+			// snapshot for the whole query, so it is keyed into the function name.
+			if ref, isRef := paramTypes[i].(*RefType); !isRef || (!ref.Mutable && !ref.Linear) {
+				if token, ok := tr.stableRecordRootTokenGate(arg, env, tr.a.sviewFrameWriteFreeGhostReads); ok {
+					name.WriteString("|record:" + token)
+					continue
+				}
+			}
 			if _, numeric := smtNumericValueType(argType); !numeric {
 				return
 			}

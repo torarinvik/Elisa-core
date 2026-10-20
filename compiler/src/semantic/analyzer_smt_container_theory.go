@@ -254,7 +254,7 @@ func (tr *smtTranslator) containerViewIndex(expr ast.Expr, env map[string]string
 	}
 	field, ok := e.(*ast.FieldExpr)
 	if !ok || field == nil || tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil ||
-		!tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+		!tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) {
 		return "", "", false
 	}
 	root, path := projectionChain(field)
@@ -362,7 +362,7 @@ func (tr *smtTranslator) containerViewElement(base, k string) (arr, lo, length s
 // its backing bytes, offset, and length. These are function arguments rather
 // than global view symbols, so a quantifier binder remains inside the term.
 func (tr *smtTranslator) indexedSViewCallTerms(expr ast.Expr, env map[string]string) (data, offset, length string, ok bool) {
-	if tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+	if tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) {
 		return "", "", "", false
 	}
 	base, index, ok := tr.containerViewIndex(expr, env)
@@ -404,7 +404,7 @@ func (tr *smtTranslator) indexedSViewCallArray(expr ast.Expr, env map[string]str
 	// A stable container preserves its view headers. Also require the caller and
 	// callee bodies to avoid writes while the modeled byte window is in use; a
 	// view header alone does not make its backing bytes immutable.
-	if !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) ||
+	if !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) ||
 		!tr.a.sviewFrameCallBodyWriteFree(tr.bindingCallee, len(tr.bindingCallee.Params)) {
 		return "", "", false
 	}

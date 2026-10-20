@@ -437,3 +437,127 @@ func TestLoopModelsReadThroughPermissionBlocks(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordElementEnumFieldTags(t *testing.T) {
+	const prefix = `enum Kind:
+    A
+    B
+    C
+
+struct Item:
+    kind: Kind
+
+ghost def is_a(xs: darray[Item]&, i: usize) -> bool:
+    requires i < xs.count
+    return xs[i].kind == Kind.A
+
+`
+	for _, tc := range []struct {
+		name, fn string
+		proven   bool
+	}{
+		{"same", `def f(xs: darray[Item]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result == is_a(xs, i)
+    return xs[i].kind == Kind.A
+`, true},
+		{"by_exclusion", `def f(xs: darray[Item]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result == is_a(xs, i)
+    return not (xs[i].kind == Kind.B or xs[i].kind == Kind.C)
+`, true},
+		{"wrong_variant", `def f(xs: darray[Item]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result == is_a(xs, i)
+    return xs[i].kind == Kind.B
+`, false},
+		{"wrong_index", `def f(xs: darray[Item]&, i: usize, j: usize) -> bool:
+    requires i < xs.count and j < xs.count
+    ensure result == is_a(xs, i)
+    return xs[j].kind == Kind.A
+`, false},
+		{"stored_between", `def f(xs: mutable darray[Item]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result == (xs[i].kind == Kind.A)
+    before: bool = xs[i].kind == Kind.A
+    xs[i] <- Item{kind: Kind.B}
+    return before
+`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeContractStrict(t, "enum_tag_"+tc.name+".elisa", prefix+tc.fn)
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the ensure to prove: %s", es)
+			}
+			if !tc.proven && es == "" {
+				t.Fatal("a false ensure over an element's enum field was accepted")
+			}
+		})
+	}
+}
+
+func TestGhostFoldOverRecordRootIsInductive(t *testing.T) {
+	const src = `module Semantic:
+    public:
+        const enum SymbolKind of u8:
+            Struct
+            Other
+
+        struct Symbol:
+            kind: SymbolKind
+            name: sview
+
+        struct SymbolTable:
+            symbols: mutable darray[Symbol]
+
+module Uniq:
+    public:
+        ghost def count_prefix(table: Semantic::SymbolTable&, name: sview, end: usize) -> u8:
+            requires end <= table.symbols.count
+            decreases end
+            return 0 if end == 0
+            prior_end: usize = end - 1
+            matches_name: bool = table.symbols[prior_end].kind == Semantic::SymbolKind.Struct and table.symbols[prior_end].name == name
+            return 2 if:
+                count_prefix(table, name, prior_end) == 2
+                count_prefix(table, name, prior_end) == 1 and matches_name
+            return 1 if matches_name
+            return count_prefix(table, name, prior_end)
+
+        def unique(table: Semantic::SymbolTable&, name: sview) -> bool:
+            ensure result == (count_prefix(table, name, table.symbols.count) == 1)
+            can Abort.Panic:
+                declarations: mutable u8 = 0
+                symbol_count: usize = table.symbols.count
+                assert declarations == count_prefix(table, name, 0.usize())
+                for symbol_index in 0..<symbol_count |table, name, symbol_count, declarations|:
+                    invariant symbol_count == table.symbols.count
+                    invariant symbol_index <= symbol_count
+                    invariant declarations == count_prefix(table, name, symbol_index)
+                    symbol_matches: bool = table.symbols[symbol_index].kind == Semantic::SymbolKind.Struct and table.symbols[symbol_index].name == name
+                    next_declarations: u8 = 2 if declarations == 2 or (declarations == 1 and symbol_matches) else (1 if symbol_matches else declarations)
+                    next_symbol_index: usize = symbol_index + 1
+                    assert count_prefix(table, name, next_symbol_index) == next_declarations
+                    declarations <- STORE
+                return declarations == 1
+`
+	for _, tc := range []struct {
+		name, store string
+		proven      bool
+	}{
+		{"counts", "next_declarations", true},
+		{"skips", "declarations", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeContractStrict(t, "ghost_fold_"+tc.name+".elisa", strings.Replace(src, "STORE", tc.store, 1))
+			es := strings.Join(r.Errors(), "\n")
+			if tc.proven && es != "" {
+				t.Fatalf("expected the fold invariant to prove: %s", es)
+			}
+			if !tc.proven && es == "" {
+				t.Fatal("a loop that does not advance the fold was accepted")
+			}
+		})
+	}
+}

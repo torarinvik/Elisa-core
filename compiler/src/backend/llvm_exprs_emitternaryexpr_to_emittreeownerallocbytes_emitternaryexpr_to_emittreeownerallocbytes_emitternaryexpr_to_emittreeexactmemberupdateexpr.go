@@ -243,7 +243,14 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 	if !ok {
 		return nil, nil, fmt.Errorf("specialize expects a named generic function")
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	// A module-scoped callee is found through the analyzer's canonical name, as in resolveCallTarget.
+	lookupName := ident.Name
+	if s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
+		if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
+			lookupName = canon
+		}
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(lookupName)
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown generic function %q during LLVM lowering", ident.Name)
 	}
@@ -273,7 +280,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 		// names to this call. Do not cache one caller's arena names for later calls.
 		name := baseType.Name
 		if name == "" {
-			name = ident.Name
+			name = lookupName
 		}
 		value, err := s.g.ensureFunctionDeclared(name, baseType)
 		return value, specialized, err
@@ -288,7 +295,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 		value, _, err := s.g.ensureSpecializedFunction(decl, baseType, layoutBindings)
 		return value, specialized, err
 	}
-	value, err := s.g.ensureFunctionDeclared(ident.Name, specialized)
+	value, err := s.g.ensureFunctionDeclared(lookupName, specialized)
 	return value, specialized, err
 }
 func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueRef, semantic.Type, error) {

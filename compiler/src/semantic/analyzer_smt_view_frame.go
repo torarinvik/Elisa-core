@@ -44,7 +44,36 @@ func (a *Analyzer) sviewFrameWriteFree(decl *ast.FuncDecl) bool {
 	return result
 }
 
+// sviewFrameWriteFreeGhostReads is sviewFrameWriteFree that also admits calls to
+// `ghost def`s. A ghost function is pure, total and erased at runtime, so a call
+// to it never writes the frame. It is a separate predicate because admitting
+// ghost calls makes more functions write-free, and the ordinary gate feeds
+// record-element equations into every proof of those functions. Ghost-call
+// congruence uses only this predicate.
+func (a *Analyzer) sviewFrameWriteFreeGhostReads(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || decl.IsLemma || len(decl.Body) == 0 {
+		return false
+	}
+	if a.sviewFrameWriteFree(decl) {
+		return true
+	}
+	if cached, ok := a.sviewFrameGhostReadsCache[decl]; ok {
+		return cached
+	}
+	if a.sviewFrameGhostReadsCache == nil {
+		a.sviewFrameGhostReadsCache = map[*ast.FuncDecl]bool{}
+	}
+	a.sviewFrameGhostReadsCache[decl] = false
+	result := a.computeSViewFrameWriteFreeMode(decl, true)
+	a.sviewFrameGhostReadsCache[decl] = result
+	return result
+}
+
 func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
+	return a.computeSViewFrameWriteFreeMode(decl, false)
+}
+
+func (a *Analyzer) computeSViewFrameWriteFreeMode(decl *ast.FuncDecl, ghostCalls bool) bool {
 	for _, param := range decl.Params {
 		if param.Mutable || a.paramIsMutable(param) {
 			return false
@@ -64,7 +93,7 @@ func (a *Analyzer) computeSViewFrameWriteFree(decl *ast.FuncDecl) bool {
 	if decl == a.currentFuncDecl && !readOnly(a.currentFunctionUsedPermissionRefs) {
 		return false
 	}
-	g := &sviewFrameGate{a: a, decl: decl, rebindable: map[string]bool{}, types: map[string]Type{}}
+	g := &sviewFrameGate{a: a, decl: decl, rebindable: map[string]bool{}, types: map[string]Type{}, ghostCalls: ghostCalls}
 	sym, _ := a.symbolForFuncDecl(decl)
 	var fn *FuncType
 	if sym != nil {
@@ -87,6 +116,8 @@ type sviewFrameGate struct {
 	// assignments. Keeping immutable names also preserves builtin shadowing.
 	rebindable map[string]bool
 	types      map[string]Type
+	// ghostCalls admits calls to ghost functions (see sviewFrameWriteFreeGhostReads).
+	ghostCalls bool
 }
 
 // These capabilities may enclose read-only code. They do not classify an
@@ -368,7 +399,7 @@ func (g *sviewFrameGate) expr(e ast.Expr, depth int) bool {
 		// A direct self call introduces no new body operations: this same gate
 		// checks the complete body, including every other call and write. Its
 		// explicit arguments still pass the effect-free checks below.
-		if !ok || callee == nil || callee.Variadic || n.HasArgForward || len(n.Args) != len(callee.Params) || !(g.directSelfCallEligible(callee) || g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
+		if !ok || callee == nil || callee.Variadic || n.HasArgForward || len(n.Args) != len(callee.Params) || !((g.ghostCalls && callee.IsGhost) || g.directSelfCallEligible(callee) || g.a.functionPureEquationShape(callee) || g.a.classifierCalleeWriteFree(callee) || g.a.sviewFrameCallBodyWriteFree(callee, len(n.Args))) {
 			return false
 		}
 		for _, arg := range n.Args {

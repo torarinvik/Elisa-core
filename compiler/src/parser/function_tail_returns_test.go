@@ -93,3 +93,21 @@ func TestParseTupleFunctionTailAsReturn(t *testing.T) {
 		t.Fatalf("expected two-element tuple, got %#v", ret.Value)
 	}
 }
+
+func TestParseValueFunctionTailThroughCanBlock(t *testing.T) {
+	file, errs := parseSourceFile(t, `def granted(n: usize) -> i64 can[Abort.Panic]:
+    can Abort.Panic:
+        41 + 1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	block, ok := fn.Body[0].(*ast.CanStmt)
+	if !ok {
+		t.Fatalf("expected the body to remain a CanStmt, got %T", fn.Body[0])
+	}
+	if _, ok := block.Body[len(block.Body)-1].(*ast.ReturnStmt); !ok {
+		t.Fatalf("expected the permission block's tail to become ReturnStmt, got %T", block.Body[len(block.Body)-1])
+	}
+}

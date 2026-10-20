@@ -813,6 +813,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 				return err
 			}
 			C.LLVMBuildRet(builder, successValue)
+		} else if block := C.LLVMGetInsertBlock(builder); block != nil && block != C.LLVMGetEntryBasicBlock(fnValue) && !blockReachableFromEntry(fnValue, block) {
+			// Nothing reaches here (the body ends in a `while true` that only leaves by `return`):
+			// the fall-through point is dead code, not a missing return.
+			C.LLVMBuildUnreachable(builder)
 		} else {
 			return fmt.Errorf("function %s may fall through without returning a value", decl.Name)
 		}
@@ -1354,4 +1358,46 @@ func (s *functionState) emitContractCheck(cond ast.Expr, label string) error {
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
 	return nil
+}
+
+// blockReachableFromEntry walks the CFG forward from fn's entry block. A conditional branch on a
+// constant follows only the edge it takes, so the exit of a `while true` that leaves only by
+// `return` is unreachable.
+func blockReachableFromEntry(fn C.LLVMValueRef, target C.LLVMBasicBlockRef) bool {
+	entry := C.LLVMGetEntryBasicBlock(fn)
+	seen := map[C.LLVMBasicBlockRef]bool{entry: true}
+	work := []C.LLVMBasicBlockRef{entry}
+	for len(work) != 0 {
+		block := work[len(work)-1]
+		work = work[:len(work)-1]
+		if block == target {
+			return true
+		}
+		term := C.LLVMGetBasicBlockTerminator(block)
+		if term == nil {
+			continue
+		}
+		successors := int(C.LLVMGetNumSuccessors(term))
+		only := -1
+		if C.LLVMIsABranchInst(term) != nil && C.LLVMIsConditional(term) != 0 {
+			if cond := C.LLVMGetCondition(term); cond != nil && C.LLVMIsAConstantInt(cond) != nil {
+				// Successor 0 is the true destination, successor 1 the false one.
+				only = 1
+				if C.LLVMConstIntGetZExtValue(cond) != 0 {
+					only = 0
+				}
+			}
+		}
+		for i := 0; i < successors; i++ {
+			if only >= 0 && i != only {
+				continue
+			}
+			next := C.LLVMGetSuccessor(term, C.unsigned(i))
+			if next != nil && !seen[next] {
+				seen[next] = true
+				work = append(work, next)
+			}
+		}
+	}
+	return false
 }

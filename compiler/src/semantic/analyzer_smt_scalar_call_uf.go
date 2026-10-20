@@ -27,7 +27,7 @@ func (tr *smtTranslator) scalarCallUF(call *ast.CallExpr, env map[string]string,
 		return "", false
 	}
 	fn, ok := sym.Type.(*FuncType)
-	if !ok || fn == nil || len(proofCallArgs(call)) != len(fn.Params) || len(proofCallArgs(call)) != len(decl.Params) {
+	if !ok || fn == nil || len(proofCallArgs(call)) != tr.proofParamCount(fn) || len(proofCallArgs(call)) != len(decl.Params) {
 		return "", false
 	}
 	if _, ref := StripAggregateStateType(fn.Return).(*RefType); ref {
@@ -217,7 +217,7 @@ func isStableContainerRecordArg(tr *smtTranslator, param Type, arg ast.Expr) boo
 		return false
 	}
 	idx, ok := stripOptimizationParens(arg).(*ast.IndexExpr)
-	if !ok || !validContainerViewIndex(idx) || tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+	if !ok || !validContainerViewIndex(idx) || tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) {
 		return false
 	}
 	_, record := StripAggregateStateType(tr.containerElementType(idx.Object)).(*StructType)
@@ -240,7 +240,7 @@ func (tr *smtTranslator) sviewCallUFTerms(call *ast.CallExpr, env map[string]str
 		return "", "", "", false
 	}
 	fn, isFn := sym.Type.(*FuncType)
-	if !isFn || fn == nil || len(proofCallArgs(call)) != len(fn.Params) || len(proofCallArgs(call)) != len(decl.Params) {
+	if !isFn || fn == nil || len(proofCallArgs(call)) != tr.proofParamCount(fn) || len(proofCallArgs(call)) != len(decl.Params) {
 		return "", "", "", false
 	}
 	if _, exact := fn.Return.(*SViewType); !exact {
@@ -275,4 +275,21 @@ func (tr *smtTranslator) sviewCallUFTerms(call *ast.CallExpr, env map[string]str
 		tr.auxDecls = append(tr.auxDecls, "(assert (>= "+length+" 0))\n")
 	}
 	return apply("data"), apply("lo"), length, true
+}
+
+// proofParamCount is the number of a callee's parameters a proof call models. Trailing implicit
+// parameters (an injected packed store) carry ambient state that no call site spells. Leaving them
+// out of a call's identity is sound only while the current function writes no memory, so the state
+// they carry is one value for the whole query; otherwise every parameter counts and a call site
+// with fewer arguments declines.
+func (tr *smtTranslator) proofParamCount(fn *FuncType) int {
+	if fn == nil {
+		return 0
+	}
+	explicit := funcTypeExplicitParamCount(fn)
+	if explicit == len(fn.Params) || tr == nil || tr.a == nil || tr.a.currentFuncDecl == nil ||
+		!tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) {
+		return len(fn.Params)
+	}
+	return explicit
 }

@@ -103,7 +103,7 @@ func (tr *smtTranslator) stringIDTerm(expr ast.Expr, env map[string]string) (str
 
 func (tr *smtTranslator) stableStringFieldID(field *ast.FieldExpr, env map[string]string) (string, bool) {
 	if tr == nil || tr.a == nil || field == nil || tr.a.currentFuncDecl == nil || tr.calleeBodyDepth != 0 ||
-		tr.envBindsRoot(field, env) || (!classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) && !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl)) {
+		tr.envBindsRoot(field, env) || (!classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) && !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl)) {
 		return "", false
 	}
 	t := tr.a.exprTypes[field]

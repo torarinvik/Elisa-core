@@ -38,6 +38,9 @@ type smtEnumValue struct {
 	ctor *EnumVariant      // non-nil when the expression is a variant constructor
 	args []ast.Expr        // constructor payload arguments (positional)
 	env  map[string]string // environment the constructor arguments translate under
+	// tag, when set, is the Int variant-index term of a payload-free enum read that has no
+	// projection key (a field of a container element, `xs[i].kind`).
+	tag string
 }
 
 type smtEnumBinding struct {
@@ -158,6 +161,12 @@ func (tr *smtTranslator) enumValue(expr ast.Expr, env map[string]string) (smtEnu
 		}
 		id, ok := stripOptimizationParens(root).(*ast.Ident)
 		if !ok || id == nil {
+			// A payload-free enum field of a stable container element is its variant index.
+			if et := tr.enumTypeOf(n); et != nil && enumHasNoPayload(et) {
+				if tag, _, ok := tr.recordElementFieldTerm(n, env, "Int"); ok {
+					return smtEnumValue{et: et, tag: tag}, true
+				}
+			}
 			return smtEnumValue{}, false
 		}
 		if env != nil {
@@ -210,6 +219,9 @@ func (tr *smtTranslator) enumTagTerm(v smtEnumValue) string {
 	if v.ctor != nil {
 		return strconv.Itoa(enumVariantIndex(v.et, v.ctor))
 	}
+	if v.tag != "" {
+		return v.tag
+	}
 	return tr.enumTagSym(v)
 }
 
@@ -225,7 +237,7 @@ func (tr *smtTranslator) enumVariantGuard(v smtEnumValue, variant *EnumVariant) 
 		}
 		return "false"
 	}
-	return "(= " + tr.enumTagSym(v) + " " + strconv.Itoa(idx) + ")"
+	return "(= " + tr.enumTagTerm(v) + " " + strconv.Itoa(idx) + ")"
 }
 
 // enumPayloadValue describes payload field `i` of `variant` for an enum value: either the

@@ -807,7 +807,9 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl, viewResul
 	} else if !a.smtEquationResultType(fnType.Return) {
 		return false
 	}
-	for _, pt := range fnType.Params {
+	// Trailing implicit parameters (an injected packed store) are ambient state, not equation inputs;
+	// emitDefiningEquationWithEnv admits a call without them only while the frame writes no memory.
+	for _, pt := range fnType.Params[:min(funcTypeExplicitParamCount(fnType), len(fnType.Params))] {
 		if !a.smtEquationParamType(pt) {
 			return false
 		}
@@ -1054,6 +1056,10 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr, owner *ast.FuncDecl) boo
 		}
 		// A constant enum member (`Kind.Struct`) is a fixed value.
 		if _, constant := a.constIntValue(n); constant {
+			return true
+		}
+		// A payload-free variant (`Mod::Kind.Struct`) is a fixed value too.
+		if _, variant, ok := a.enumConstructorInfoFromFieldExpr(n); ok && variant != nil && len(variant.Payload) == 0 {
 			return true
 		}
 		return a.exprIsPureForEquation(n.Object, owner)
@@ -1639,7 +1645,8 @@ func (a *Analyzer) pureEquationContainerIndex(index *ast.IndexExpr, owner *ast.F
 		return false
 	}
 	fn, ok := sym.Type.(*FuncType)
-	if !ok || fn == nil || len(fn.Params) != len(owner.Params) {
+	// Trailing implicit parameters (an injected packed store) are never spelled in the body.
+	if !ok || fn == nil || funcTypeExplicitParamCount(fn) != len(owner.Params) || len(fn.Params) < len(owner.Params) {
 		return false
 	}
 	for i, param := range owner.Params {

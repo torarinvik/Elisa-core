@@ -28,7 +28,7 @@ func (tr *smtTranslator) stableContainerSViewByteIndex(read *ast.IndexExpr, env 
 	if tr == nil || tr.a == nil || read == nil || read.Index2 != nil || read.Fallback != nil ||
 		read.LegacyElseFallback || read.AsBuiltinDictGet != nil || read.AsSpecialize != nil ||
 		read.AsOverlayCall != nil || tr.calleeBodyDepth != 0 ||
-		tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+		tr.a.currentFuncDecl == nil || !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) {
 		return "", false
 	}
 	view := stripOptimizationParens(read.Object)

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"encoding/hex"
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
@@ -72,7 +73,7 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 	}
 	if index.Index2 != nil || index.Fallback != nil || index.LegacyElseFallback ||
 		index.AsSpecialize != nil || index.AsOverlayCall != nil || index.AsBuiltinDictGet != nil ||
-		(!tr.loopFrameContainerRead(index.Object, env) && !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl)) {
+		(!tr.loopFrameContainerRead(index.Object, env) && !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl)) {
 		return "", true, false
 	}
 	var leaf Type = typ
@@ -92,6 +93,16 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 		leaf = storage.Storage
 	}
 	signed, bits, numeric := smtIntWidthSign(leaf)
+	// A payload-free enum field is its variant index (enumValue's tag term). It needs no width
+	// reinterpretation, and a stored overlay value is not an integer term, so it declines there.
+	enumTag, variants := false, 0
+	if et, ok := stripRefForBounds(leaf).(*EnumType); ok && et != nil && enumHasNoPayload(et) && sort == "Int" {
+		variants = len(et.Variants)
+		if _, overlay := tr.recordOverlayFor(index.Object, env); overlay {
+			return "", true, false
+		}
+		enumTag, numeric, bits = true, true, 64
+	}
 	if (sort == "Int" && (!numeric || bits <= 0 || bits > 64)) || (sort == "Bool" && !IsBoolType(leaf)) {
 		return "", true, false
 	}
@@ -110,8 +121,16 @@ func (tr *smtTranslator) recordElementFieldTerm(n *ast.FieldExpr, env map[string
 	if !tr.ghostUFDecls[name] {
 		tr.ghostUFDecls[name] = true
 		tr.auxDecls = append(tr.auxDecls, "(declare-fun "+name+" (Int) "+sort+")\n")
+		if enumTag {
+			// Every element's tag names one of the enum's variants.
+			app := "(" + name + " k)"
+			tr.auxDecls = append(tr.auxDecls, "(assert (forall ((k Int)) (! (and (<= 0 "+app+") (< "+app+" "+strconv.Itoa(variants)+")) :pattern ("+app+"))))\n")
+		}
 	}
 	term := "(" + name + " " + k + ")"
+	if enumTag {
+		return term, true, true
+	}
 	if sort == "Int" {
 		term = smtSameWidthReinterpret(term, signed, bits)
 	}
@@ -166,7 +185,7 @@ func (tr *smtTranslator) recordOverlayFor(object ast.Expr, env map[string]string
 // are a fixed snapshot only in a frame that cannot write memory through any
 // alias or call. Do not use a callee's unbound field spelling as a caller root.
 func (tr *smtTranslator) recordFieldContainerBase(field *ast.FieldExpr, env map[string]string) (string, bool) {
-	if tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+	if tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl) {
 		return "", false
 	}
 	root, _ := projectionChain(field)
@@ -245,6 +264,15 @@ func (tr *smtTranslator) stableRecordRootToken(argExpr ast.Expr, argEnv map[stri
 	if tr == nil || tr.a == nil {
 		return "", false
 	}
+	return tr.stableRecordRootTokenGate(argExpr, argEnv, tr.a.sviewFrameWriteFree)
+}
+
+// stableRecordRootTokenGate is stableRecordRootToken with the frame gate that
+// proves the current function never writes the record.
+func (tr *smtTranslator) stableRecordRootTokenGate(argExpr ast.Expr, argEnv map[string]string, writeFree func(*ast.FuncDecl) bool) (string, bool) {
+	if tr == nil || tr.a == nil {
+		return "", false
+	}
 	id, ok := stripOptimizationParens(argExpr).(*ast.Ident)
 	if !ok || id == nil {
 		return "", false
@@ -252,7 +280,7 @@ func (tr *smtTranslator) stableRecordRootToken(argExpr ast.Expr, argEnv map[stri
 	if bound, isBound := argEnv[id.Name]; isBound {
 		return bound, tr.stableRecordRoots[bound]
 	}
-	if tr.calleeBodyDepth != 0 || tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || !tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl) {
+	if tr.calleeBodyDepth != 0 || tr.a.currentFuncDecl == nil || tr.a.currentScope == nil || !writeFree(tr.a.currentFuncDecl) {
 		return "", false
 	}
 	sym, found := tr.a.currentScope.Lookup(id.Name)

@@ -15,7 +15,11 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 		}
 		return invalidType
 	}
-	sym, _, ok := a.lookupVisibleGlobal(ident.Name)
+	sym, canonical, ok := a.lookupVisibleGlobal(ident.Name)
+	if ok && a.resolvedValueNames != nil && canonical != "" && canonical != ident.Name {
+		// The backend finds a module-scoped callee by this name, as for a plain call.
+		a.resolvedValueNames[ident] = canonical
+	}
 	if !ok {
 		a.errorf(expr.Pos(), "undefined generic function %q", ident.Name)
 		for _, arg := range expr.TypeArgs {

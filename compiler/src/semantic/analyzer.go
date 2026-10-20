@@ -106,6 +106,7 @@ type Analyzer struct {
 	smtLocalDefDeps                      map[*Symbol][]string
 	smtBoolLocalInitCache                map[*Symbol]smtBoolLocalInitCacheEntry
 	sviewFrameWriteFreeCache             map[*ast.FuncDecl]bool
+	sviewFrameGhostReadsCache            map[*ast.FuncDecl]bool
 	programRegions                       map[string]bool
 	programRegionNameUse                 int
 	programLivedTypes                    map[Type]bool

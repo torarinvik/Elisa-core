@@ -35,7 +35,8 @@ func (tr *smtTranslator) immutableSviewArrayParameter(id *ast.Ident, env map[str
 		return true
 	}
 	// A body that writes no memory cannot change the view's bytes (analyzer_smt_view_frame.go).
-	return tr.a.sviewFrameWriteFree(tr.a.currentFuncDecl)
+	// Ghost calls write nothing.
+	return tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl)
 }
 
 func (a *Analyzer) immutableSviewParameter(id *ast.Ident) bool {

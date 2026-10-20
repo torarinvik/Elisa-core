@@ -6,7 +6,8 @@ import (
 
 // normalizeFunctionTailReturns gives block-bodied value functions the same tail
 // semantics as an explicit return.  A final expression in the function body is
-// a return value; a final if/match inherits that meaning in each branch/arm.
+// a return value; a final if/match inherits that meaning in each branch/arm, and a
+// final permission-only `can` block (which runs its body once, in place) in its tail.
 // Loops and other nested blocks deliberately do not inherit it: an expression
 // inside a loop is not proof that the function returns after the loop.
 //
@@ -70,6 +71,15 @@ func normalizeFunctionTailStatement(statement ast.Stmt) ast.Stmt {
 		for index := range copy.Arms {
 			copy.Arms[index].Body = normalizeFunctionTailReturnsInBlock(copy.Arms[index].Body)
 		}
+		return &copy
+	case *ast.CanStmt:
+		// A handler block or an `as` binding changes what the body's value means; only a plain
+		// permission grant is transparent.
+		if node == nil || node.HandlerName != "" || len(node.HandlerArgs) != 0 || node.As != "" {
+			return statement
+		}
+		copy := *node
+		copy.Body = normalizeFunctionTailReturnsInBlock(node.Body)
 		return &copy
 	default:
 		return statement
