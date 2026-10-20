@@ -24,6 +24,12 @@ func parallelBodyWorkers() int {
 		n, _ := strconv.Atoi(v)
 		return n
 	}
+	// Body analysis is allocation-bound: workers on efficiency cores slow the
+	// performance-core workers down more than they add (seed, 4P+6E: 4-5 workers
+	// 30-31 s, 8 workers 32-35 s).
+	if p := performanceCores(); p > 0 {
+		return min(p+1, runtime.NumCPU())
+	}
 	return min(runtime.NumCPU(), 8)
 }
 

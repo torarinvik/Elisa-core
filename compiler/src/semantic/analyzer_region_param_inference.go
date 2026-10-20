@@ -493,15 +493,15 @@ func (a *Analyzer) forwardTargetsRequireRegion(targets []regionForwardTarget) bo
 		if callee == nil || target.argPos < 0 || len(callee.RegionParams) == 0 {
 			continue
 		}
-		params := a.expandedFuncDeclParams(callee)
-		if target.argPos >= len(params) {
+		param, ok := a.expandedFuncDeclParamAt(callee, target.argPos)
+		if !ok {
 			continue
 		}
 		regionParams := make(map[string]bool, len(callee.RegionParams))
 		for _, rp := range callee.RegionParams {
 			regionParams[rp] = true
 		}
-		if len(regionParams) != 0 && typeExprCarriesRegionParam(params[target.argPos].Type, regionParams) {
+		if len(regionParams) != 0 && typeExprCarriesRegionParam(param.Type, regionParams) {
 			return true
 		}
 	}

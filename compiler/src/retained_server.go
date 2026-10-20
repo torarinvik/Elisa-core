@@ -156,7 +156,8 @@ func serveRetained(socket string, log io.Writer) error {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
-		_ = os.Remove(socket) // a stale socket would make clients try, fail and print a notice
+		_ = os.Remove(socket)  // a stale socket would make clients try, fail and print a notice
+		pprof.StopCPUProfile() // flush $ELISACORE_CPUPROFILE; a no-op when not profiling
 		os.Exit(0)
 	}()
 	if _, set := os.LookupEnv("GOGC"); !set {

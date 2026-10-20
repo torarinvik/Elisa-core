@@ -54,6 +54,33 @@ func (a *Analyzer) expandedFuncDeclParams(fn *ast.FuncDecl) []ast.ParamDecl {
 	return explicitParamDeclsFromSpecs(a.expandExplicitParamSpecs(fn.Params, fn.Name))
 }
 
+// expandedFuncDeclParamAt is expandedFuncDeclParams(fn)[i] without copying the list
+// when expansion is the identity (every name present and unique), the usual case;
+// region inference asks this for every forwarded argument of every candidate.
+func (a *Analyzer) expandedFuncDeclParamAt(fn *ast.FuncDecl, i int) (ast.ParamDecl, bool) {
+	if fn == nil || i < 0 {
+		return ast.ParamDecl{}, false
+	}
+	for j := range fn.Params {
+		name := fn.Params[j].Name
+		duplicate := name == ""
+		for k := 0; k < j && !duplicate; k++ {
+			duplicate = fn.Params[k].Name == name
+		}
+		if duplicate {
+			params := a.expandedFuncDeclParams(fn)
+			if i >= len(params) {
+				return ast.ParamDecl{}, false
+			}
+			return params[i], true
+		}
+	}
+	if i >= len(fn.Params) {
+		return ast.ParamDecl{}, false
+	}
+	return fn.Params[i], true
+}
+
 func (a *Analyzer) expandedExternFuncDeclParams(fn *ast.ExternFuncDecl) []ast.ParamDecl {
 	if fn == nil {
 		return nil
