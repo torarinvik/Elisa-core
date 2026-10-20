@@ -26,7 +26,7 @@ type RetainedAnalysis struct {
 	a        *Analyzer
 	result   *Result
 	decls    []scopedDecl
-	post     func()
+	post     func([]scopedDecl)
 	pristine *ast.File                            // a parse of src, for comparison; see texts
 	texts    map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
 	src      []byte                               // the expanded source pristine was parsed from
@@ -58,6 +58,7 @@ type RetainedUpdateStats struct {
 	Bodies                    time.Duration
 	Total                     time.Duration
 	Fallback                  string
+	Added                     int
 	Pairing, Scratch, Compare time.Duration
 	// Invalidated counts functions whose late return-borrow results were recomputed.
 	Invalidated int
@@ -91,7 +92,7 @@ func AnalyzeRetained(file, pristine *ast.File, src []byte, options AnalyzeOption
 	return result, r
 }
 
-func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func()) {
+func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func([]scopedDecl)) {
 	r.a, r.decls, r.post = a, decls, post
 }
 
@@ -109,8 +110,44 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		return nil, fmt.Errorf("%s", r.LastStats.Fallback)
 	}
 	a := r.a
+	if a == nil {
+		return fail("retained analysis was discarded by an earlier update")
+	}
 	oldDecls, newDecls := retainedWalkDecls(r.pristine), retainedWalkDecls(file)
-	if len(oldDecls) != len(newDecls) {
+	// Pair declarations in order. A new declaration with no partner is accepted
+	// only as an added top-level function with a fresh name: it is declared in the
+	// live analysis below and checked against the scratch declaration phase.
+	topLevel := make(map[ast.Decl]bool, len(file.Decls))
+	for _, d := range file.Decls {
+		topLevel[d] = true
+	}
+	oldNames := map[string]bool{}
+	for _, d := range oldDecls {
+		if f, ok := d.(*ast.FuncDecl); ok {
+			oldNames[f.Name] = true
+		}
+	}
+	var pairs [][2]int
+	var added []*ast.FuncDecl
+	insertedBefore := map[int]bool{} // pair index preceded by an added declaration
+	for i, j := 0, 0; j < len(newDecls); {
+		if i < len(oldDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
+			pairs = append(pairs, [2]int{i, j})
+			i, j = i+1, j+1
+			continue
+		}
+		nf, ok := newDecls[j].(*ast.FuncDecl)
+		if !ok || !topLevel[nf] || oldNames[nf.Name] || nf.IsLaw || len(nf.TypeParams) != 0 || len(nf.GenericParams) != 0 {
+			return fail("declaration set changed at %s", retainedLineKey(newDecls[j].Pos()))
+		}
+		added = append(added, nf)
+		insertedBefore[len(pairs)] = true
+		j++
+		if j == len(newDecls) && i != len(oldDecls) {
+			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
+		}
+	}
+	if len(pairs) != len(oldDecls) {
 		return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 	}
 	type fnKey struct {
@@ -137,14 +174,16 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		edit *ast.FuncDecl // the function in file, found again in the prepared scratch parse
 	}
 	var splices []splice
+	var movedSplices []ast.Decl // edited functions that also moved: header shifts, body is replaced
 	var shifted []ast.Decl
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
 	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
 	oldSpans := retainedSpans(oldDecls, r.src)
 	newSpans := retainedSpans(newDecls, src)
-	for i := range oldDecls {
-		od, nd := oldDecls[i], newDecls[i]
+	for k, pair := range pairs {
+		i, j := pair[0], pair[1]
+		od, nd := oldDecls[i], newDecls[j]
 		op, np := od.Pos(), nd.Pos()
 		if op.File != np.File || op.Col != np.Col {
 			return fail("declaration %d moved", i)
@@ -152,13 +191,13 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		// Any line movement must come from a declaration whose text changed; the
 		// span compare below makes that declaration a splice.
 		if d := np.Line - op.Line; d != lineDelta[op.File] {
-			if i == 0 || oldSpans[i-1] == newSpans[i-1] || oldDecls[i-1].Pos().File != op.File {
+			if !insertedBefore[k] && (k == 0 || oldSpans[i-1] == newSpans[pairs[k-1][1]] || oldDecls[i-1].Pos().File != op.File) {
 				return fail("lines moved after an unchanged declaration at %s", retainedLineKey(op))
 			}
 			lineDelta[op.File] = d
 			marks[op.File] = append(marks[op.File], [2]int{op.Line, d})
 		}
-		sameText := oldSpans[i] == newSpans[i]
+		sameText := oldSpans[i] == newSpans[j]
 		ofn, isFn := od.(*ast.FuncDecl)
 		if !isFn {
 			// A container's span is its own header up to its first member.
@@ -192,6 +231,9 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		if _, known := scoped[live]; !known {
 			return fail("%s is not a top-level analyzed function", ofn.Name)
 		}
+		if np.Line != op.Line {
+			movedSplices = append(movedSplices, live)
+		}
 		splices = append(splices, splice{live, nfn})
 		newTexts[nfn] = newText
 	}
@@ -204,7 +246,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	r.LastStats.Scratch = time.Since(scratchStart)
 	pendingRetainedMu.Unlock()
 	compareStart := time.Now()
-	diff := preBodyDifference(r.pre, pre, marks)
+	diff := preBodyDifference(r.pre, pre, marks, len(added))
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
@@ -218,9 +260,62 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		}
 		bodies[i] = prepared.Body
 	}
+	// Added functions are declared in the live analysis as the declaration phase
+	// declared them in scratch; their results must then match scratch's exactly.
+	var addedScoped []scopedDecl
+	if len(added) != 0 {
+		var usings []string
+		for _, sd := range r.decls {
+			if sd.Namespace == "" {
+				usings = sd.Usings
+				break
+			}
+		}
+		for _, nf := range added {
+			prepared := pre.prepared[retainedLineKey(nf.Pos())+"|"+nf.Name]
+			if prepared == nil {
+				return fail("prepared form of added %s not found", nf.Name)
+			}
+			addedScoped = append(addedScoped, scopedDecl{Decl: prepared, Usings: usings})
+		}
+		// Declaring mutates the live analysis: from here a mismatch poisons it.
+		a.withResolutionContext("", usings, func() {
+			a.collectValueSymbols(addedScoped)
+		})
+		for _, sd := range addedScoped {
+			fn := sd.Decl.(*ast.FuncDecl)
+			if t, ok := pre.targets[fn]; ok {
+				a.paramStoreTargets[fn] = t
+			}
+			if idx, ok := pre.regionIndex[fn]; ok {
+				a.regionParamCalleeParamIndex[fn.Name] = idx
+			}
+		}
+		a.classifyRegionPolymorphicFunctions(addedScoped)
+		for _, sd := range addedScoped {
+			fn := sd.Decl.(*ast.FuncDecl)
+			want := pre.fingerprint["::"+fn.Name+"#0"]
+			if got := a.preBodyFunctionFingerprint(fn); got != want {
+				r.a = nil
+				return fail("added %s declared differently than a full analysis%s", fn.Name, firstFieldDifference(want, got))
+			}
+		}
+		a.file.Decls = append(a.file.Decls, func() []ast.Decl {
+			out := make([]ast.Decl, len(addedScoped))
+			for i, sd := range addedScoped {
+				out[i] = sd.Decl
+			}
+			return out
+		}()...)
+		r.decls = append(r.decls, addedScoped...)
+	}
 	// Past this point the edit is accepted; mutate the retained state.
-	var changed []scopedDecl
+	// Added functions are analyzed first: the edited bodies call them.
+	changed := append([]scopedDecl(nil), addedScoped...)
 	drop := map[int]bool{}
+	for _, d := range movedSplices {
+		retainedShiftDecl(d, marks)
+	}
 	for i, s := range splices {
 		s.live.Body = bodies[i]
 		changed = append(changed, scoped[s.live])
@@ -260,7 +355,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	a.analyzeDecls(changed)
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
-	r.post()
+	r.post(r.decls)
 	r.rbUpdating = false
 	a.closeSMT()
 	// file is the next comparison base. Its spliced bodies now belong to the
@@ -269,6 +364,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	r.result.Diagnostics = a.diagnostics
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)
+	r.LastStats.Added = len(added)
 	r.LastStats.Shifted = len(shifted)
 	r.LastStats.Total = time.Since(start)
 	return r.result, nil
@@ -473,4 +569,17 @@ func retainedSpans(decls []ast.Decl, src []byte) []string {
 		out[i] = string(src[start:end])
 	}
 	return out
+}
+
+// retainedSameDeclKind reports whether two declarations can be the same one
+// across an edit: the same node type, and for functions the same name.
+func retainedSameDeclKind(a, b ast.Decl) bool {
+	if reflect.TypeOf(a) != reflect.TypeOf(b) {
+		return false
+	}
+	fa, ok := a.(*ast.FuncDecl)
+	if !ok {
+		return true
+	}
+	return fa.Name == b.(*ast.FuncDecl).Name
 }

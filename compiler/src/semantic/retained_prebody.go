@@ -23,6 +23,10 @@ type preBodyState struct {
 	global      string                   // program-wide results (struct flags, table sizes)
 	diags       []Diagnostic             // diagnostics the phase emitted
 	prepared    map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
+	// Per prepared function, the declaration-phase tables an added function
+	// carries into the live analysis (plain values, no analyzer-owned types).
+	targets     map[*ast.FuncDecl][]map[int]bool
+	regionIndex map[*ast.FuncDecl]map[int]bool
 }
 
 var pendingPreBody *preBodyState
@@ -55,6 +59,8 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 		fingerprint: map[string]string{},
 		prepared:    map[string]*ast.FuncDecl{},
 		diags:       append([]Diagnostic(nil), a.diagnostics...),
+		targets:     map[*ast.FuncDecl][]map[int]bool{},
+		regionIndex: map[*ast.FuncDecl]map[int]bool{},
 	}
 	occurrences := map[string]int{}
 	for _, scoped := range decls {
@@ -68,6 +74,12 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 			occurrences[base]++
 			p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
 			p.prepared[retainedLineKey(fn.Pos())+"|"+fn.Name] = fn
+			if t, ok := a.paramStoreTargets[fn]; ok {
+				p.targets[fn] = t
+			}
+			if idx, ok := a.regionParamCalleeParamIndex[fn.Name]; ok {
+				p.regionIndex[fn] = idx
+			}
 		}
 	}
 	p.global = a.preBodyGlobalFingerprint()
@@ -122,14 +134,16 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 // preBodyDifference names the first body-dependent declaration-phase result
 // that differs, or returns "". Old diagnostics are compared after the edit's
 // line shifts.
-func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int) string {
+func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added int) string {
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
 	if old.global != cur.global {
-		return "program-wide declaration results changed" + firstLineDifference(old.global, cur.global)
+		if diff := globalGrowthDifference(old.global, cur.global, added); diff != "" {
+			return "program-wide declaration results changed" + diff
+		}
 	}
-	if len(old.fingerprint) != len(cur.fingerprint) {
+	if len(old.fingerprint)+added != len(cur.fingerprint) {
 		return "function set changed"
 	}
 	keys := make([]string, 0, len(cur.fingerprint))
@@ -137,11 +151,19 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int) string
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	fresh := 0
 	for _, key := range keys {
 		prev, ok := old.fingerprint[key]
-		if !ok || prev != cur.fingerprint[key] {
+		if !ok {
+			fresh++ // an added function: checked against the live declaration
+			continue
+		}
+		if prev != cur.fingerprint[key] {
 			return "declaration results of " + key + " changed" + firstFieldDifference(prev, cur.fingerprint[key])
 		}
+	}
+	if fresh != added {
+		return "function set changed"
 	}
 	render := func(ds []Diagnostic, shift bool) string {
 		out := make([]string, len(ds))
@@ -182,6 +204,39 @@ func firstFieldDifference(a, b string) string {
 	for i := 0; i < len(af) && i < len(bf); i++ {
 		if af[i] != bf[i] {
 			return fmt.Sprintf(" (%s -> %s)", trim(af[i]), trim(bf[i]))
+		}
+	}
+	return ""
+}
+
+// addedFunctionTables are the declaration tables that hold one entry per
+// function; adding k functions grows each by exactly k.
+var addedFunctionTables = map[string]bool{
+	"funcDeclSymbols": true, "funcDeclUsings": true, "functionTypes": true,
+	"paramStoreTargets": true, "ufcsFunctionsByName": true,
+}
+
+// globalGrowthDifference accepts a global fingerprint change only when the sole
+// differences are per-function table sizes grown by added.
+func globalGrowthDifference(old, cur string, added int) string {
+	if added == 0 {
+		return firstLineDifference(old, cur)
+	}
+	ol, cl := strings.Split(old, "\n"), strings.Split(cur, "\n")
+	if len(ol) != len(cl) {
+		return firstLineDifference(old, cur)
+	}
+	for i := range ol {
+		if ol[i] == cl[i] {
+			continue
+		}
+		var name string
+		var before, after int
+		ok1, _ := fmt.Sscanf(strings.Replace(ol[i], "=", " ", 1), "#%s %d", &name, &before)
+		var name2 string
+		ok2, _ := fmt.Sscanf(strings.Replace(cl[i], "=", " ", 1), "#%s %d", &name2, &after)
+		if ok1 != 2 || ok2 != 2 || name != name2 || !addedFunctionTables[name] || after > before+added || after < before {
+			return fmt.Sprintf(" (%s -> %s)", ol[i], cl[i])
 		}
 	}
 	return ""

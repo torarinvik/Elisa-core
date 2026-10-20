@@ -191,3 +191,37 @@ def caller() -> void:
 		t.Fatalf("err = %v, want a declaration-phase fallback", err)
 	}
 }
+
+// Adding a helper and calling it from an existing body is the most common edit;
+// it must update in place and agree with a fresh analysis.
+func TestRetainedAnalysisAcceptsAddedFunction(t *testing.T) {
+	after := strings.Replace(retainedBefore, "def caller(x: i64) -> i64:\n    return helper(x)",
+		"def extra(z: i64) -> i64:\n    v: mutable i64 = z\n    base: uintptr = (&v).cast[uintptr] can Unsafe.PointerCast\n    return z + 1\n\ndef caller(x: i64) -> i64:\n    return extra(helper(x))", 1)
+	if after == retainedBefore {
+		t.Fatal("fixture edit did not apply")
+	}
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
+	if retained == nil {
+		t.Fatal("analysis was not retained")
+	}
+	updated, err := retained.Update(retainedParse(t, after), retainedParse(t, after), []byte(after))
+	if err != nil {
+		t.Fatalf("adding a function fell back: %v", err)
+	}
+	if retained.LastStats.Added != 1 {
+		t.Fatalf("stats = %+v, want 1 added", retained.LastStats)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, after), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("retained update disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", got, want)
+	}
+	if !strings.Contains(retainedDiagnostics(updated), `call to "extra" requires can[Unsafe]`) {
+		t.Fatalf("the added function's effects did not reach its caller:\n%s", retainedDiagnostics(updated))
+	}
+	// A later body edit still works against the extended retained state.
+	again := strings.Replace(after, "return z + 1", "return z + 2", 1)
+	if _, err := retained.Update(retainedParse(t, again), retainedParse(t, again), []byte(again)); err != nil {
+		t.Fatalf("body edit after an added function fell back: %v", err)
+	}
+}

@@ -1489,7 +1489,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		bodies.prefetchLocalInitializerQueries()
 	}
 	a.analyzeDecls(activeDecls)
-	postPhases := func() {
+	postPhases := func(activeDecls []scopedDecl) {
 		if a.retained != nil {
 			a.retained.lateFrames = append(a.retained.lateFrames[:0], a.returnBorrowLateFrames...)
 		}
@@ -1518,7 +1518,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		a.finalizeFuncDisjointParams(activeDecls)
 		a.lintHotKernelsForDisjointness()
 	}
-	postPhases()
+	postPhases(activeDecls)
 	if a.retained != nil {
 		a.retained.capture(a, activeDecls, postPhases)
 	}
