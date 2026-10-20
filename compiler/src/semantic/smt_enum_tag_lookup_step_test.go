@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// A recursive ghost helper needs an explicit step contract when loop induction
-// treats its body as opaque. The contract itself must be checked on every return.
+// A recursive ghost helper's step contract is checked on every return; a false one is
+// rejected at its definition, and a missing one is recovered from the defining equation.
 func TestSMTEnumTagLookupStepContract(t *testing.T) {
 	b, e := os.ReadFile("testdata/smt_enum_tag_lookup.elisa")
 	if e != nil {
@@ -34,8 +34,10 @@ func TestSMTEnumTagLookupStepContract(t *testing.T) {
 			if name == "candidate" && len(es) != 0 {
 				t.Fatal(es)
 			}
-			if name == "missing_step" && !strings.Contains(strings.Join(es, "\n"), "invariant could not be proven") {
-				t.Fatalf("missing step must lose induction proof: %v", es)
+			// The step follows from the helper's own body: its defining equation (verified
+			// termination, guarded by requires) proves the loop without the explicit contract.
+			if name == "missing_step" && len(es) != 0 {
+				t.Fatalf("the step is derivable from the helper's defining equation: %v", es)
 			}
 			if name == "wrong_step" && !strings.Contains(strings.Join(es, "\n"), `ensure postcondition of "enum_tag_count_from" could not be proven`) {
 				t.Fatalf("false step contract must be rejected at its definition: %v", es)

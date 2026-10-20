@@ -53,10 +53,7 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 			return eq, true
 		}
 	}
-	if _, ok := stripRefForBounds(tr.a.exprTypes[n.Left]).(*SViewType); !ok {
-		return "", false
-	}
-	if _, ok := stripRefForBounds(tr.a.exprTypes[n.Right]).(*SViewType); !ok {
+	if !tr.sviewEqualityOperand(n.Left) || !tr.sviewEqualityOperand(n.Right) {
 		return "", false
 	}
 	arrL, loL, lenL, ok := tr.sviewContentParts(n.Left, env)
@@ -79,8 +76,167 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 	return eq, true
 }
 
+// sviewEqualityOperand admits a typed view, or a ternary or pure-function call whose view
+// parts sviewContentParts derives structurally (a merged return value carries no type).
+func (tr *smtTranslator) sviewEqualityOperand(expr ast.Expr) bool {
+	if _, ok := stripRefForBounds(tr.a.exprTypes[expr]).(*SViewType); ok {
+		return true
+	}
+	switch e := stripOptimizationParens(expr).(type) {
+	case *ast.TernaryExpr:
+		return e != nil && tr.a.ternaryBranchType(e) != nil
+	case *ast.CallExpr:
+		decl, ok := tr.sviewEquationCallee(e)
+		return ok && decl != nil
+	}
+	return false
+}
+
+// sviewEquationCallee resolves a direct call to a pure, total function returning a view: its
+// single return expression is its value, so the call's parts are the body's parts.
+func (tr *smtTranslator) sviewEquationCallee(call *ast.CallExpr) (*ast.FuncDecl, bool) {
+	if call == nil || call.Safe || call.SafeReceiver != nil {
+		return nil, false
+	}
+	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	decl = tr.a.readDecl(decl)
+	if !direct || decl == nil || len(proofCallArgs(call)) != len(decl.Params) {
+		return nil, false
+	}
+	sym, ok := tr.a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return nil, false
+	}
+	fn, ok := sym.Type.(*FuncType)
+	if !ok || fn == nil {
+		return nil, false
+	}
+	if _, view := fn.Return.(*SViewType); !view {
+		return nil, false
+	}
+	if !tr.a.viewEquationEligible(decl) {
+		return nil, false
+	}
+	return decl, true
+}
+
+// sviewCallContentParts is the defining equation of a pure view-returning call, read as view
+// parts: the callee body under the call's argument environment, bounded like defining equations.
+func (tr *smtTranslator) sviewCallContentParts(call *ast.CallExpr, env map[string]string) (arr, lo, length string, ok bool) {
+	decl, ok := tr.sviewEquationCallee(call)
+	if !ok {
+		return "", "", "", false
+	}
+	if tr.a.isRecursiveProofCall(decl) || tr.callEqDeclDepth[decl] >= tr.callEqMaxDeclDepth {
+		return "", "", "", false
+	}
+	body, ok := pureReturnBody(decl)
+	if !ok {
+		return "", "", "", false
+	}
+	args := proofCallArgs(call)
+	subst := make(map[string]ast.Expr, len(decl.Params))
+	for i, param := range decl.Params {
+		if args[i] == nil {
+			return "", "", "", false
+		}
+		subst[param.Name] = args[i]
+	}
+	priorBinding := tr.bindingCallee
+	tr.bindingCallee = decl
+	calleeEnv, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, env)
+	tr.bindingCallee = priorBinding
+	if !ok {
+		return "", "", "", false
+	}
+	// The body defines the call only where the callee's requires hold; elsewhere the call is an
+	// opaque function of its arguments.
+	guard := ""
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.calleeBoolTerm(decl, req, calleeEnv)
+		if !ok {
+			return "", "", "", false
+		}
+		if guard == "" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
+	var opaqueArr, opaqueLo, opaqueLen string
+	if guard != "" {
+		if opaqueArr, opaqueLo, opaqueLen, ok = tr.sviewCallUFTerms(call, env); !ok {
+			// Outside its requires the call is simply unknown: fresh, unconstrained parts.
+			name := "@view_opaque_" + strconv.Itoa(tr.sviewArgCount)
+			tr.sviewArgCount++
+			opaqueArr, opaqueLo, opaqueLen = "|"+name+"$data|", "|"+name+"$lo|", "|"+name+"$len|"
+			tr.auxDecls = append(tr.auxDecls,
+				"(declare-const "+opaqueArr+" (Array Int Int))\n",
+				"(declare-const "+opaqueLo+" Int)\n",
+				"(declare-const "+opaqueLen+" Int)\n")
+		}
+	}
+	priorDecl := tr.calleeBodyDecl
+	tr.calleeBodyDecl = decl
+	tr.calleeBodyDepth++
+	if tr.callEqDeclDepth == nil {
+		tr.callEqDeclDepth = map[*ast.FuncDecl]int{}
+	}
+	tr.callEqDeclDepth[decl]++
+	defer func() {
+		tr.callEqDeclDepth[decl]--
+		tr.calleeBodyDepth--
+		tr.calleeBodyDecl = priorDecl
+	}()
+	arr, lo, length, ok = tr.sviewContentParts(body, calleeEnv)
+	if !ok || guard == "" {
+		return arr, lo, length, ok
+	}
+	return "(ite " + guard + " " + arr + " " + opaqueArr + ")", "(ite " + guard + " " + lo + " " + opaqueLo + ")", "(ite " + guard + " " + length + " " + opaqueLen + ")", true
+}
+
 func (tr *smtTranslator) sviewContentParts(expr ast.Expr, env map[string]string) (arr, lo, length string, ok bool) {
 	e := stripOptimizationParens(expr)
+	switch n := e.(type) {
+	case *ast.Ident:
+		if n != nil {
+			if data, offset, length, bound := smtIndexedSViewArgTermsFromEnv(n.Name, env); bound {
+				return data, offset, length, true
+			}
+		}
+	case *ast.TernaryExpr:
+		if n == nil || n.Cond == nil || n.Value == nil || n.Alt == nil {
+			return "", "", "", false
+		}
+		cond, ok := tr.boolTerm(n.Cond, env)
+		if !ok {
+			return "", "", "", false
+		}
+		a1, l1, n1, ok := tr.sviewContentParts(n.Value, env)
+		if !ok {
+			return "", "", "", false
+		}
+		a2, l2, n2, ok := tr.sviewContentParts(n.Alt, env)
+		if !ok {
+			return "", "", "", false
+		}
+		return "(ite " + cond + " " + a1 + " " + a2 + ")", "(ite " + cond + " " + l1 + " " + l2 + ")", "(ite " + cond + " " + n1 + " " + n2 + ")", true
+	case *ast.StringLit:
+		// The empty view has no bytes to compare; its backing array is irrelevant.
+		if n != nil && n.Value == "" {
+			return "((as const (Array Int Int)) 0)", "0", "0", true
+		}
+		return "", "", "", false
+	case *ast.CallExpr:
+		if arr, lo, length, ok := tr.sviewCallContentParts(n, env); ok {
+			return arr, lo, length, true
+		}
+		// A call that cannot be unfolded is still a function of its arguments.
+		return tr.sviewCallUFTerms(n, env)
+	}
 	if id, isIdent := e.(*ast.Ident); isIdent && id != nil {
 		if !tr.envBindsViewRoot(id, env) && tr.calleeBodyDepth == 0 {
 			if init, isSlice := tr.a.immutableSliceLocalInit(id); isSlice {

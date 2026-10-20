@@ -89,6 +89,7 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 					a.terminationVerified[edge.Caller] = true
 					a.terminationVerified[edge.Callee] = true
 				}
+				a.forgetEquationEligibility()
 				a.recordProof(measures[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofProvenLinear)
 			} else {
 				a.recordProof(measures[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofRefuted)
@@ -110,6 +111,8 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 				a.terminationVerified = map[*ast.FuncDecl]bool{}
 			}
 			a.terminationVerified[fn] = true
+			// Callers whose eligibility was decided before this proof may now qualify.
+			a.forgetEquationEligibility()
 		}
 	}()
 	for _, site := range calls {
@@ -129,6 +132,14 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	if a.definingEquationCache != nil {
 		delete(a.definingEquationCache, fn)
 	}
+}
+
+// forgetEquationEligibility drops every memoized equation-eligibility verdict. Eligibility of a
+// function depends on the verified termination of the functions it calls, so a verdict computed
+// before one of those proofs ran may be a stale "no".
+func (a *Analyzer) forgetEquationEligibility() {
+	clear(a.definingEquationCache)
+	clear(a.viewEquationCache)
 }
 
 // typeLoopSubstCastsForSMT quietly populates exprTypes for any value-form numeric CastExpr appearing
@@ -737,12 +748,37 @@ func (a *Analyzer) functionDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	}
 	a.definingEquationInProgress[decl] = true
 	defer delete(a.definingEquationInProgress, decl)
-	ok := a.computeDefiningEquationEligible(decl)
+	ok := a.computeDefiningEquationEligible(decl, false)
 	a.definingEquationCache[decl] = ok
 	return ok
 }
 
-func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
+// viewEquationEligible is functionDefiningEquationEligible for a function returning a view: the
+// same purity, parameter and totality gates, with an sview result read through its byte parts.
+func (a *Analyzer) viewEquationEligible(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil {
+		return false
+	}
+	if v, ok := a.viewEquationCache[decl]; ok {
+		return v
+	}
+	if a.viewEquationCache == nil {
+		a.viewEquationCache = map[*ast.FuncDecl]bool{}
+	}
+	if a.definingEquationInProgress == nil {
+		a.definingEquationInProgress = map[*ast.FuncDecl]bool{}
+	}
+	if a.definingEquationInProgress[decl] {
+		return true
+	}
+	a.definingEquationInProgress[decl] = true
+	defer delete(a.definingEquationInProgress, decl)
+	ok := a.computeDefiningEquationEligible(decl, true)
+	a.viewEquationCache[decl] = ok
+	return ok
+}
+
+func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl, viewResult bool) bool {
 	// A lemma is ghost code with no value-returning body; its IH is handled separately. Never treat it
 	// as a value-producing pure function here. A ghost def, unlike a lemma, is intentionally a
 	// value-producing spec function, so it stays eligible when it passes the same purity/totality gates.
@@ -759,7 +795,11 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	if !ok || fnType == nil {
 		return false
 	}
-	if !a.smtEquationResultType(fnType.Return) {
+	if viewResult {
+		if _, view := fnType.Return.(*SViewType); !view {
+			return false
+		}
+	} else if !a.smtEquationResultType(fnType.Return) {
 		return false
 	}
 	for _, pt := range fnType.Params {
@@ -989,7 +1029,7 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr, owner *ast.FuncDecl) boo
 	switch n := expr.(type) {
 	case *ast.MatchExpr:
 		return pureScalarMatchEquation(n)
-	case *ast.IntLit, *ast.BoolLit:
+	case *ast.IntLit, *ast.BoolLit, *ast.StringLit:
 		return true
 	case *ast.StructLitExpr:
 		if n == nil || n.CopyBase != nil || len(n.Spreads) != 0 {
@@ -1045,7 +1085,7 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr, owner *ast.FuncDecl) boo
 		// Transitive purity: a callee must itself be a pure equation-eligible function. The in-progress
 		// guard in functionDefiningEquationEligible breaks self/mutual recursion (returns true for the
 		// node currently being decided), so this terminates.
-		return a.functionDefiningEquationEligible(decl)
+		return a.functionDefiningEquationEligible(decl) || a.viewEquationEligible(decl)
 	default:
 		return false
 	}

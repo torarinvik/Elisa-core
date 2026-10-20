@@ -78,7 +78,7 @@ func (tr *smtTranslator) scalarCallArgTerms(call *ast.CallExpr, decl *ast.FuncDe
 			return "", nil, nil, false
 		}
 		param := fn.Params[i]
-		if _, ref := StripAggregateStateType(param).(*RefType); ref {
+		if _, ref := StripAggregateStateType(param).(*RefType); ref && !isDArrayTypeMaybeRef(stripRefForBounds(param)) {
 			return "", nil, nil, false
 		}
 		switch {
@@ -118,6 +118,12 @@ func (tr *smtTranslator) scalarCallArgTerms(call *ast.CallExpr, decl *ast.FuncDe
 				terms = append(terms, data, offset, length)
 				continue
 			}
+			if data, offset, length, ok := tr.sviewContentParts(arg, env); ok && !smtTermMentionsQuantifierBinder(data) {
+				key.WriteString("|view-parts")
+				sorts = append(sorts, "(Array Int Int)", "Int", "Int")
+				terms = append(terms, data, offset, length)
+				continue
+			}
 			// Only an authorized immutable byte-array binding names a stable view.
 			// Different view bindings get different functions, conservatively losing
 			// cross-view congruence. A binder-dependent view must never enter the name.
@@ -146,6 +152,22 @@ func (tr *smtTranslator) scalarCallArgTerms(call *ast.CallExpr, decl *ast.FuncDe
 			}
 			sorts = append(sorts, "Bool")
 			terms = append(terms, term)
+		case isDArrayTypeMaybeRef(stripRefForBounds(param)):
+			// An immutable container argument is identified by its stable base, as in ghost-call
+			// congruence: the same container is the same contents within one query.
+			if ref, isRef := param.(*RefType); isRef && (ref.Mutable || ref.Linear) {
+				return "", nil, nil, false
+			}
+			inner := stripOptimizationParens(arg)
+			if addr, isAddr := inner.(*ast.AddrOfExpr); isAddr && addr != nil {
+				inner = addr.Operand
+			}
+			base, ok := tr.containerBase(inner, env)
+			if !ok || smtTermMentionsQuantifierBinder(base) {
+				return "", nil, nil, false
+			}
+			key.WriteString("|container:")
+			key.WriteString(base)
 		case isStableContainerRecordArg(tr, param, arg):
 			// A record read from a stable container is identified by the container and
 			// index, the same identity the container theory gives its field reads.

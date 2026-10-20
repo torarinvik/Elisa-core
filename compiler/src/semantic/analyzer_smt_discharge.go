@@ -1312,10 +1312,24 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 		// An aggregate result has no scalar term: bind it to a projection token so `result.f` in the
 		// caller's obligation and in the callee's ensures both re-root to `@return_call_result.f`.
 		retTerm = dtToken(retSym)
-	} else {
+	} else if _, view := stripRefForBounds(a.exprTypes[call]).(*SViewType); !view {
 		tr.decls[retSym] = true
 	}
 	callerEnv := map[string]string{"result": retTerm}
+	// A view result is its bytes, start and length: fresh parts shared by the caller's
+	// obligation and the callee's ensures.
+	var viewData, viewLo, viewLen string
+	if _, view := stripRefForBounds(a.exprTypes[call]).(*SViewType); view {
+		viewData, viewLo, viewLen = "|@return_call_view$data|", "|@return_call_view$lo|", "|@return_call_view$len|"
+		tr.auxDecls = append(tr.auxDecls,
+			"(declare-const "+viewData+" (Array Int Int))\n",
+			"(declare-const "+viewLo+" Int)\n",
+			"(declare-const "+viewLen+" Int)\n",
+			"(assert (>= "+viewLen+" 0))\n")
+		callerEnv = map[string]string{}
+		bindSMTIndexedSViewArgTerms(callerEnv, "result", viewData, viewLo, viewLen)
+		callerEnv["result.len"] = viewLen
+	}
 	obligation, ok := tr.boolTerm(clause, callerEnv)
 	if !ok {
 		return false
@@ -1336,7 +1350,12 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	if !ok {
 		return false
 	}
-	calleeEnv["result"] = retTerm
+	if viewData != "" {
+		bindSMTIndexedSViewArgTerms(calleeEnv, "result", viewData, viewLo, viewLen)
+		calleeEnv["result.len"] = viewLen
+	} else {
+		calleeEnv["result"] = retTerm
+	}
 	guard := "true"
 	for _, req := range decl.Requires {
 		if req == nil {
@@ -1495,6 +1514,10 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 			}
 		}
 	}
+	if argType == nil {
+		// A merged return value (`a if c else b`) carries no type of its own.
+		argType = a.ternaryBranchType(argExpr)
+	}
 	if _, ok := stripRefForBounds(argType).(*SViewType); ok {
 		// Carry the argument's string identity to the callee formal by explicit binding (never by
 		// name), so the callee's literal-equality contracts speak about the caller's string.
@@ -1503,6 +1526,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		if !indexedView {
 			if viewID, bare := stripOptimizationParens(argExpr).(*ast.Ident); bare && viewID != nil {
 				viewData, viewOffset, viewLength, indexedView = smtIndexedSViewArgTermsFromEnv(viewID.Name, argEnv)
+			}
+		}
+		if !indexedView {
+			switch stripOptimizationParens(argExpr).(type) {
+			case *ast.CallExpr, *ast.TernaryExpr:
+				// A view produced by a pure call or a conditional is bound by its parts, so the
+				// formal reads the same bytes the expression denotes.
+				viewData, viewOffset, viewLength, indexedView = tr.sviewContentParts(argExpr, argEnv)
 			}
 		}
 		if indexedView {
@@ -5960,6 +5991,14 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 		}
 		return "struct{" + strings.Join(parts, ",") + "}", true
 	}
+	// An array-modeled container is the array term the call's env binds it to, so that term
+	// identifies it (contents and length) as a call argument.
+	if tr.isArrayLike(tr.a.exprTypes[arg]) {
+		if arr, ok := tr.arrayTermEnv(arg, env); ok {
+			return "array:" + arr, true
+		}
+		return "", false
+	}
 	return tr.termEnv(arg, env)
 }
 
@@ -7213,4 +7252,21 @@ func (a *Analyzer) smtStableDeclID(decl *ast.FuncDecl) string {
 	id := base + "#" + strconv.Itoa(ordinal)
 	a.smtDeclIDs[decl] = id
 	return id
+}
+
+// ternaryBranchType is the type of a conditional's branches when its own node is untyped.
+func (a *Analyzer) ternaryBranchType(expr ast.Expr) Type {
+	ternary, ok := stripOptimizationParens(expr).(*ast.TernaryExpr)
+	if !ok || ternary == nil {
+		return nil
+	}
+	for _, branch := range []ast.Expr{ternary.Value, ternary.Alt} {
+		if t := a.exprTypes[branch]; t != nil {
+			return t
+		}
+		if t := a.ternaryBranchType(branch); t != nil {
+			return t
+		}
+	}
+	return nil
 }

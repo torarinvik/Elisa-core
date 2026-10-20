@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/unparse"
 )
 
@@ -55,8 +56,23 @@ func (a *Analyzer) factNamesResolveAlike(expr ast.Expr, recorded *Scope) bool {
 		there, foundThere := recorded.Lookup(id.Name)
 		if foundHere != foundThere || here != there {
 			ok = false
+			return false
+		}
+		// A local or parameter must be declared before the fact: a later redeclaration in the
+		// fact's own scope resolves alike from both places but is a different value.
+		if here != nil && (here.Kind == SymbolLocal || here.Kind == SymbolParam) {
+			if here.Node == nil || !posBefore(here.Node.Pos(), expr.Pos()) {
+				ok = false
+			}
 		}
 		return ok
 	})
 	return ok
+}
+
+func posBefore(decl, use lexer.Pos) bool {
+	if decl.File != use.File {
+		return false
+	}
+	return decl.Line < use.Line || (decl.Line == use.Line && decl.Col < use.Col)
 }
