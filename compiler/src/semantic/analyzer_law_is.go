@@ -1018,6 +1018,10 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenSMT)
 			continue
 		}
+		if a.ensureGoalIsLiveFact(clause, subst) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "live fact", ProofProvenSMT)
+			continue
+		}
 		proven, counterexample := a.trySMTProveRequires(clause, subst)
 		if a.incrementalBodies != nil {
 			a.incrementalBodies.recordEnsureProof(a.currentFuncDecl, i, proven)

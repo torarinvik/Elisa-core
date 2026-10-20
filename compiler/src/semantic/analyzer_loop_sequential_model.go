@@ -171,7 +171,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 					taken := f.clone()
 					taken.conds = append(taken.conds, negated...)
 					taken.conds = append(taken.conds, cond)
-					sub, ok := a.seqLoopWalk(arm.body, []seqLoopFrag{taken}, depth+1)
+					sub, ok := a.seqLoopWalkArm(arm.body, taken, depth+1)
 					if !ok {
 						return nil, false
 					}
@@ -180,7 +180,7 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 				}
 				rest := f.clone()
 				rest.conds = append(rest.conds, negated...)
-				sub, ok := a.seqLoopWalk(n.Else, []seqLoopFrag{rest}, depth+1)
+				sub, ok := a.seqLoopWalkArm(n.Else, rest, depth+1)
 				if !ok {
 					return nil, false
 				}
@@ -195,8 +195,13 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 				frontier[i].exited = true
 			}
 		case *ast.ExprStmt:
+			// An assert changes no tracked state: it passes or aborts. Beyond ghost calls, its
+			// condition may call functions whose only possible effect is to abort.
 			if !a.loopBodyAssertIsPure(n) {
-				return nil, false
+				cond, isAssert := a.assertedCondition(n.Expr)
+				if !isAssert || !a.seqLoopValueAdmissible(cond) || !a.callsAreStateIndependent(cond) {
+					return nil, false
+				}
 			}
 			// Body-local immutable names are tracked per path. A local named `assert` or `ASSERT`
 			// shadows the builtin on that path even though it is not in the enclosing scope used by
@@ -215,6 +220,37 @@ func (a *Analyzer) seqLoopWalk(stmts []ast.Stmt, frontier []seqLoopFrag, depth i
 		}
 	}
 	return frontier, true
+}
+
+// seqLoopWalkArm walks one branch of an `if`. A branch that runs straight-line statements
+// and then leaves through `return` or `break` never reaches the next loop head, so its
+// statements cannot affect whether an invariant is preserved; it becomes an exited path
+// without being modeled (its locals and asserts may use forms the model does not admit).
+func (a *Analyzer) seqLoopWalkArm(body []ast.Stmt, frag seqLoopFrag, depth int) ([]seqLoopFrag, bool) {
+	if seqLoopStraightExit(body) {
+		frag.exited = true
+		return []seqLoopFrag{frag}, true
+	}
+	return a.seqLoopWalk(body, []seqLoopFrag{frag}, depth)
+}
+
+func seqLoopStraightExit(body []ast.Stmt) bool {
+	if len(body) == 0 {
+		return false
+	}
+	switch body[len(body)-1].(type) {
+	case *ast.ReturnStmt, *ast.BreakStmt:
+	default:
+		return false
+	}
+	for _, stmt := range body[:len(body)-1] {
+		switch stmt.(type) {
+		case *ast.VarDeclStmt, *ast.ExprStmt, *ast.AssignStmt, *ast.PassStmt:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // seqLoopWritableRoot admits a write target the model tracks exactly: a mutable, non-reference
@@ -347,4 +383,24 @@ func (a *Analyzer) seqLoopSpecsReadNoGlobals(exprs ...ast.Expr) bool {
 		}
 	}
 	return true
+}
+
+// callsAreStateIndependent reports whether every call in expr is a direct call whose result
+// depends only on its arguments and whose only possible effect is to abort.
+func (a *Analyzer) callsAreStateIndependent(expr ast.Expr) bool {
+	ok := true
+	walkPruned(expr, func(node any) bool {
+		if !ok {
+			return false
+		}
+		if call, isCall := node.(*ast.CallExpr); isCall && call != nil {
+			decl, direct := a.resolveDirectCallFuncDecl(call)
+			if !direct || decl == nil || !a.callResultStateIndependent(a.readDecl(decl)) {
+				ok = false
+				return false
+			}
+		}
+		return true
+	})
+	return ok
 }

@@ -182,7 +182,9 @@ def count_up(n: i64) -> i64:
 func TestLoopInvariantSequentialModelDoesNotIgnoreNonGhostAssertCall(t *testing.T) {
 	src := `
 def below(x: i64, bound: i64) -> bool:
-    return x < bound
+    can Memory.Allocate:
+        xs: darray[i64] = [x]
+        return xs[0] < bound
 
 def count_up(n: i64) -> i64:
     requires n >= 0
@@ -190,7 +192,7 @@ def count_up(n: i64) -> i64:
     while i < n:
         invariant i <= n
         step: i64 = 1
-        assert(below(i, n))
+        assert(below(i, n)) can Memory.Allocate
         i <- i + step
     return i
 `
@@ -405,4 +407,65 @@ func parseFileForTest(t *testing.T, filename, src string) *ast.File {
 		t.Fatalf("unexpected parse errors: %v", errs)
 	}
 	return file
+}
+
+// A quantified prefix invariant over records, read through pure helpers, is preserved: the
+// early-return branch never reaches the next loop head, so its locals and asserts are not
+// modeled, and `eq(nm(xs[p]), t)` is a function of the container element and t.
+func TestLoopInvariantQuantifiedRecordHelperPrefix(t *testing.T) {
+	src := `
+struct Ins:
+    op: sview
+    text: sview
+
+def nm(i: Ins) -> sview:
+    return i.text if i.op == "label" else ""
+
+def eq(a: sview, b: sview) -> bool:
+    return a == b
+
+def find(xs: darray[Ins], target: sview) -> i64:
+    ensure result >= 0 implies (forall prior in 0..<result.usize(): xs[prior].op != "label" or not eq(nm(xs[prior]), target))
+    count: usize = xs.count
+    for index in 0..<count |count, xs, target|:
+        invariant forall prior in 0..<index: xs[prior].op != "label" or not eq(nm(xs[prior]), target)
+        if xs[index].op == "label" and eq(nm(xs[index]), target):
+            found: i64 = index.i64()
+            assert found >= 0
+            assert found.usize() == index
+            return found
+        assert xs[index].op != "label" or not eq(nm(xs[index]), target)
+    return -1
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_record_helper_prefix.elisa", src, false)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 1 {
+		t.Fatalf("expected the prefix invariant to be preserved: %+v", result.ProofReport)
+	}
+}
+
+// The same loop searching for a different needle than its invariant names must not prove.
+func TestLoopInvariantQuantifiedRecordHelperPrefixWrongNeedle(t *testing.T) {
+	src := `
+struct Ins:
+    op: sview
+    text: sview
+
+def nm(i: Ins) -> sview:
+    return i.text if i.op == "label" else ""
+
+def eq(a: sview, b: sview) -> bool:
+    return a == b
+
+def find(xs: darray[Ins], target: sview) -> i64:
+    count: usize = xs.count
+    for index in 0..<count |count, xs, target|:
+        invariant forall prior in 0..<index: xs[prior].op != "label" or not eq(nm(xs[prior]), target)
+        if xs[index].op == "label" and eq(nm(xs[index]), "other"):
+            return index.i64()
+    return -1
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_record_helper_prefix_wrong.elisa", src, false)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 0 {
+		t.Fatalf("a prefix invariant for another needle must not be preserved: %+v", result.ProofReport)
+	}
 }
