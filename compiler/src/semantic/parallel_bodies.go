@@ -427,4 +427,3 @@ func isolateWorkerScopes(a, w *Analyzer) {
 }
 
 var parallelReport = os.Getenv("ELISA_PARALLEL_GRAPH_REPORT") != ""
-
