@@ -16,7 +16,17 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 	// them for the whole declaration set before source-order body analysis can ask
 	// for a summary of a later-declared function.
 	a.recordVerifiedTaskGroupSubmitsInDecls(decls)
+	if workers := parallelBodyWorkers(); workers > 1 {
+		a.analyzeDeclsParallel(decls, workers)
+		return
+	}
 	for _, scoped := range decls {
+		a.analyzeScopedDecl(scoped)
+	}
+}
+
+func (a *Analyzer) analyzeScopedDecl(scoped scopedDecl) {
+	{
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			switch n := scoped.Decl.(type) {
 			case *ast.ConstDecl:
