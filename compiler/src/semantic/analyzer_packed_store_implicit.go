@@ -22,47 +22,15 @@ func (a *Analyzer) collectRegionBackedPackedEnums(funcs []*ast.FuncDecl) map[str
 			out[et.Root().Name] = true // docs/77: region-backed by hierarchy root
 		}
 	}
-	var seen map[any]struct{}
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			node := v.Interface()
-			if _, visited := seen[node]; visited {
-				return
-			}
-			seen[node] = struct{}{}
-			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && alloc.AutoRegion {
-				if enumType, _, ok := a.packedAllocConstructorInfo(alloc.Value); ok && enumType != nil && enumType.Packed {
-					out[enumType.Root().Name] = true
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
-		}
-	}
 	for _, fn := range funcs {
 		if fn != nil {
-			seen = make(map[any]struct{})
-			rec(reflect.ValueOf(fn.Body))
+			walkStoreScanNodes(fn.Body, func(node any) {
+				if alloc, ok := node.(*ast.AllocExpr); ok && alloc != nil && alloc.AutoRegion {
+					if enumType, _, ok := a.packedAllocConstructorInfo(alloc.Value); ok && enumType != nil && enumType.Packed {
+						out[enumType.Root().Name] = true
+					}
+				}
+			})
 		}
 	}
 	return out
@@ -134,51 +102,20 @@ func (a *Analyzer) funcConstructsPackedEnumRoots(fn *ast.FuncDecl) map[string]*E
 		return out
 	}
 	// Resolved call arguments can share source nodes; each node contributes once.
-	seen := make(map[any]struct{})
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			node := v.Interface()
-			if _, visited := seen[node]; visited {
-				return
-			}
-			seen[node] = struct{}{}
-			switch n := v.Interface().(type) {
-			case *ast.AllocExpr:
-				if n != nil {
-					if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.Packed {
-						out[enumType.Root().Name] = enumType.Root()
-					}
-				}
-			case *ast.CallExpr:
-				if et, ok := a.regionBackedEnumConstructor(n); ok && et != nil {
-					out[et.Root().Name] = et.Root()
+	walkStoreScanNodes(fn.Body, func(node any) {
+		switch n := node.(type) {
+		case *ast.AllocExpr:
+			if n != nil {
+				if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.Packed {
+					out[enumType.Root().Name] = enumType.Root()
 				}
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+		case *ast.CallExpr:
+			if et, ok := a.regionBackedEnumConstructor(n); ok && et != nil {
+				out[et.Root().Name] = et.Root()
 			}
 		}
-	}
-	rec(reflect.ValueOf(fn.Body))
+	})
 	return out
 }
 
@@ -277,64 +214,33 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 // transitive store-need fixpoint.
 func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]bool) {
 	// Resolved call arguments can share source nodes; each node contributes once.
-	seen := make(map[any]struct{})
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
+	walkStoreScanNodes(body, func(node any) {
+		if call, ok := node.(*ast.CallExpr); ok && call != nil {
+			if ft := a.regionPolyCalleeFuncType(call); ft != nil {
+				out[ft] = true
 			}
-			node := v.Interface()
-			if _, visited := seen[node]; visited {
-				return
-			}
-			seen[node] = struct{}{}
-			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
-				if ft := a.regionPolyCalleeFuncType(call); ft != nil {
+			if fieldExpr, ok := unwrapParenForRegionPoly(call.Func).(*ast.FieldExpr); ok {
+				for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
 					out[ft] = true
 				}
-				if fieldExpr, ok := unwrapParenForRegionPoly(call.Func).(*ast.FieldExpr); ok {
-					for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
-						out[ft] = true
-					}
-					// Extension-method callee: impl methods live in the per-receiver registry, not
-					// the global namespace, so the name-based resolution above misses them. The
-					// receiver type isn't analyzed yet in this pre-pass, so union over every
-					// registered method with this name — the same conservative shape as the
-					// protocol-impl union (extra edges only thread extra store params).
-					for _, candidate := range a.visibleNameCandidates(fieldExpr.Field) {
-						for _, method := range a.extensionMethodsByName[candidate] {
-							if method == nil || method.Symbol == nil {
-								continue
-							}
-							if ft, ok := method.Symbol.Type.(*FuncType); ok && ft != nil {
-								out[ft] = true
-							}
+				// Extension-method callee: impl methods live in the per-receiver registry, not
+				// the global namespace, so the name-based resolution above misses them. The
+				// receiver type isn't analyzed yet in this pre-pass, so union over every
+				// registered method with this name — the same conservative shape as the
+				// protocol-impl union (extra edges only thread extra store params).
+				for _, candidate := range a.visibleNameCandidates(fieldExpr.Field) {
+					for _, method := range a.extensionMethodsByName[candidate] {
+						if method == nil || method.Symbol == nil {
+							continue
+						}
+						if ft, ok := method.Symbol.Type.(*FuncType); ok && ft != nil {
+							out[ft] = true
 						}
 					}
 				}
 			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
-			}
 		}
-	}
-	rec(reflect.ValueOf(body))
+	})
 }
 
 // injectStoreNeeds threads an implicit packed-store parameter for each region-backed enum in `needs`

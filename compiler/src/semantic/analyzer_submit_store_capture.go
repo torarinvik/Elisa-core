@@ -3,7 +3,6 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -128,43 +127,12 @@ func (a *Analyzer) funcBarePackedVariantRoots(fn *ast.FuncDecl) map[string]bool 
 		return out
 	}
 	// Resolved call arguments can revisit the same source variant node.
-	seen := make(map[any]struct{})
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			node := v.Interface()
-			if _, visited := seen[node]; visited {
-				return
-			}
-			seen[node] = struct{}{}
-			if field, ok := v.Interface().(*ast.FieldExpr); ok && field != nil {
-				if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(field); ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
-					out[enumType.Root().Name] = true
-				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+	walkStoreScanNodes(fn.Body, func(node any) {
+		if field, ok := node.(*ast.FieldExpr); ok && field != nil {
+			if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(field); ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
+				out[enumType.Root().Name] = true
 			}
 		}
-	}
-	rec(reflect.ValueOf(fn.Body))
+	})
 	return out
 }

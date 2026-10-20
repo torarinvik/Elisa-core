@@ -4,7 +4,11 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/easm"
 	"elisacore/src/lexer"
+	"fmt"
 	"os"
+	"runtime"
+	"runtime/pprof"
+	"time"
 )
 
 type ConstValueKind int
@@ -1376,6 +1380,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	// self-hosted frontend is converted to the reassignment form. `ELISA_LINEAR_MUTATION=0`
 	// is the explicit off-switch (escape hatch during any residual migration).
 	a.enforceLinearMutation = os.Getenv("ELISA_LINEAR_MUTATION") != "0"
+	declPhaseStart := time.Now()
 	a.registerBuiltins()
 	a.populateTargetConstValues(options.TargetTriple, options.TargetDebug)
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)
@@ -1474,6 +1479,20 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	// structured ParamContracts (removing them from Requires), so the call-site entailment check and
 	// the callee-body assumption can compose value contracts through first-class functions.
 	a.expandHigherOrderContracts(activeDecls)
+	if os.Getenv("ELISA_DECL_TIMING") != "" {
+		fmt.Fprintf(os.Stderr, "[decl-timing] decl phase %v\n", time.Since(declPhaseStart))
+		if os.Getenv("ELISA_DECL_TIMING") == "exit" {
+			pprof.StopCPUProfile()
+			if path := os.Getenv("ELISACORE_MEMPROFILE"); path != "" {
+				if f, err := os.Create(path); err == nil {
+					runtime.GC()
+					_ = pprof.Lookup("allocs").WriteTo(f, 0)
+					f.Close()
+				}
+			}
+			os.Exit(3)
+		}
+	}
 	if probe := a.preBody; probe != nil {
 		// A retained update's scratch run: only the declaration phase is wanted.
 		probe.capture(a, activeDecls)
