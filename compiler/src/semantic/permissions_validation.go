@@ -8,14 +8,25 @@ import (
 )
 
 func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
+	r := a.retained
+	if r != nil && r.perms.diags == nil {
+		r.perms.diags = map[*ast.FuncDecl][]Diagnostic{}
+	}
 	for _, scoped := range permissionFunctionDecls(decls) {
 		fn, ok := scoped.Decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
+		if r != nil && r.perms.replay(a, fn) {
+			continue
+		}
+		from := len(a.diagnostics)
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			a.validateFunctionPermissionUsage(fn)
 		})
+		if r != nil {
+			r.perms.diags[fn] = append([]Diagnostic(nil), a.diagnostics[from:]...)
+		}
 	}
 }
 

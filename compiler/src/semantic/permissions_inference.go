@@ -26,7 +26,16 @@ func permissionFunctionDecls(decls []scopedDecl) []scopedDecl {
 }
 
 func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
-	a.inferFunctionPermissionEffectsWorklist(permissionFunctionDecls(decls))
+	fdecls := permissionFunctionDecls(decls)
+	r := a.retained
+	if r != nil && r.rbUpdating && r.perms.solveIncremental(a, fdecls) {
+		return
+	}
+	a.inferFunctionPermissionEffectsWorklist(fdecls)
+	if r != nil {
+		r.perms.recordGraph(a, fdecls)
+		r.perms.solvedIn = false
+	}
 }
 
 // recomputeFunctionPermissionEffects updates all rows published by one function.

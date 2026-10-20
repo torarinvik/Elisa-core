@@ -1221,6 +1221,19 @@ func analyzeWithEffectInference(file *ast.File, options AnalyzeOptions, bodies *
 	return analyzeWithLookupRecorder(file, options, bodies, solver, nil)
 }
 
+var postTiming = os.Getenv("ELISA_POST_TIMING") != ""
+
+// postTimed runs one post-body phase, reporting its time under ELISA_POST_TIMING.
+func postTimed(name string, phase func()) {
+	if !postTiming {
+		phase()
+		return
+	}
+	start := time.Now()
+	phase()
+	fmt.Fprintf(os.Stderr, "[post-timing] %s %v\n", name, time.Since(start).Round(time.Millisecond))
+}
+
 func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *incrementalBodyInvocation, solver func(*Analyzer, []scopedDecl), recorder *lookupDependencyRecorder) *Result {
 	loweredFile := file
 	activeFile := loweredFile
@@ -1512,17 +1525,19 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		if a.retained != nil {
 			a.retained.lateFrames = append(a.retained.lateFrames[:0], a.returnBorrowLateFrames...)
 		}
-		a.evaluateLateReturnBorrowFrames()
+		postTimed("evaluateLateReturnBorrowFrames", func() { a.evaluateLateReturnBorrowFrames() })
 		// A4: discharge each protocol default method's own contract against its own body (the default
 		// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
 		// after foldInterfaceBases so an inherited member/law the default uses is in scope.
-		a.checkProtocolDefaultMethodContracts(activeDecls)
-		if solver == nil {
-			a.inferFunctionPermissionEffects(activeDecls)
-		} else {
-			solver(a, activeDecls)
-		}
-		a.validateDeferredBorrowedNurseryShutdownCalls()
+		postTimed("checkProtocolDefaultMethodContracts", func() { a.checkProtocolDefaultMethodContracts(activeDecls) })
+		postTimed("inferFunctionPermissionEffects", func() {
+			if solver == nil {
+				a.inferFunctionPermissionEffects(activeDecls)
+			} else {
+				solver(a, activeDecls)
+			}
+		})
+		postTimed("validateDeferredBorrowedNurseryShutdownCalls", func() { a.validateDeferredBorrowedNurseryShutdownCalls() })
 		for _, check := range a.deferredImplEffectChecks {
 			check()
 		}
@@ -1531,11 +1546,11 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 			a.validateProgressBlocking(activeDecls)
 			a.validateProgressRecursion(activeDecls)
 		}
-		a.validatePermissionUsage(activeDecls)
-		a.analyzeExports(activeDecls)
-		a.finalizeCallArgDisjoint()
-		a.finalizeFuncDisjointParams(activeDecls)
-		a.lintHotKernelsForDisjointness()
+		postTimed("validatePermissionUsage", func() { a.validatePermissionUsage(activeDecls) })
+		postTimed("analyzeExports", func() { a.analyzeExports(activeDecls) })
+		postTimed("finalizeCallArgDisjoint", func() { a.finalizeCallArgDisjoint() })
+		postTimed("finalizeFuncDisjointParams", func() { a.finalizeFuncDisjointParams(activeDecls) })
+		postTimed("lintHotKernelsForDisjointness", func() { a.lintHotKernelsForDisjointness() })
 	}
 	postPhases(activeDecls)
 	if a.retained != nil {

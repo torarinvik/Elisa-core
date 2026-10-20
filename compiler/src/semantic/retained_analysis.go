@@ -43,6 +43,7 @@ type RetainedAnalysis struct {
 	frameDiags  map[*ast.FuncDecl][]Diagnostic           // each late frame's diagnostics
 	rbInvalid   map[*ast.FuncDecl]bool                   // owners to recompute in this update
 	rbUpdating  bool
+	perms       retainedPermissions
 
 	options AnalyzeOptions
 	pre     *preBodyState // declaration-phase results the retained state was built from
@@ -434,6 +435,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	// changed functions get fresh windows below, the rest are re-based.
 	r.rebaseWindows(drop)
 	r.invalidateReturnBorrow(changed, marks)
+	r.perms.beginUpdate(changed, len(added) == 0 && len(removed) == 0, marks)
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
