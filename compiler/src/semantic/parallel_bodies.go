@@ -292,12 +292,33 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 		}
 		a.inferFuncReturnProvenance(fn, fnType)
 		a.inferFuncReturnBorrowedOwnerRefs(fn, fnType)
+		if !fnType.SinkParamsKnown {
+			a.inferFuncSinkParams(fn, fnType)
+		}
 	}
 	for _, scoped := range bodies {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			switch n := scoped.Decl.(type) {
 			case *ast.FuncDecl:
 				infer(n)
+			case *ast.ImplDecl:
+				// The same Self and generic binding analyzeScopedDecl gives impl members.
+				if n.IsHandler {
+					return
+				}
+				a.withGenericParams(n.GenericParams, nil, func() {
+					var selfBindings map[string]Type
+					if receiver := a.resolveType(n.ForType); receiver != nil && !IsInvalidType(receiver) {
+						selfBindings = map[string]Type{staticInterfaceSelfName: receiver}
+					}
+					a.withInterfaceAssocTypes(selfBindings, func() {
+						for _, member := range n.Members {
+							if fn, ok := member.(*ast.FuncDecl); ok {
+								infer(fn)
+							}
+						}
+					})
+				})
 			}
 		})
 	}
