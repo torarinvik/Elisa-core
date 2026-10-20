@@ -2832,7 +2832,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 	case *ast.Ident:
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
-				return bound + smtArrayLenSuffix, true
+				return smtArrayLenOf(bound), true
 			}
 		}
 		if tr.calleeFreeProjection(n, env) {
@@ -2857,7 +2857,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 		if isAnyArrayLike(t) {
 			if env != nil {
 				if bound, ok := env[smtProjectionName(n)]; ok {
-					return bound + smtArrayLenSuffix, true
+					return smtArrayLenOf(bound), true
 				}
 			}
 			if tr.calleeFreeProjection(n, env) {
@@ -3391,7 +3391,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				tr.lenDecls[lenSym] = true
 				return lenSym, true
 			}
-			lenSym := arr + smtArrayLenSuffix
+			lenSym := smtArrayLenOf(arr)
 			if c, ok := tr.lenConsts[lenSym]; ok {
 				return smtInt(c), true
 			}
@@ -4268,7 +4268,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			if !ok {
 				return "", false
 			}
-			lenSym := arr + smtArrayLenSuffix
+			lenSym := smtArrayLenOf(arr)
 			tr.lenDecls[lenSym] = true
 			guard := "(and (<= 0 " + idxSym + ") (< " + idxSym + " " + lenSym + "))"
 			// E-matching trigger (docs/90 brick 90-16): a `forall x in xs` / `forall i in xs.indices`

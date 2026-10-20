@@ -75,3 +75,34 @@ def scan(text: sview) -> bool:
 		t.Fatalf("expected the loop measure to prove: %s", es)
 	}
 }
+
+// An element store keeps the array's length, so a loop that writes elements of a mutable
+// array parameter preserves an invariant about its count.
+func TestLoopElementStoreKeepsArrayLength(t *testing.T) {
+	src := `
+def clear(xs: mutable darray[i64]&) -> void can[Abort.Panic]:
+    n: usize = xs.count
+    i: mutable usize = 0
+    while i < n |xs, n, i|:
+        invariant xs.count == n
+        xs[i] <- 0
+        i <- i + 1
+`
+	r := analyzeContractStrict(t, "element_store_length.elisa", src)
+	if es := strings.Join(r.Errors(), "\n"); es != "" {
+		t.Fatalf("expected the count invariant to prove: %s", es)
+	}
+}
+
+func TestSMTStoreBaseArray(t *testing.T) {
+	for in, want := range map[string]string{
+		"v_xs":               "v_xs",
+		"(store v_xs v_i 0)": "v_xs",
+		"(store (store |a b| (+ i 1) 2) i (f x))": "|a b|",
+		"(select v_xs 0)":                         "(select v_xs 0)",
+	} {
+		if got := smtStoreBaseArray(in); got != want {
+			t.Errorf("smtStoreBaseArray(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -36,7 +36,7 @@ func (tr *smtTranslator) bindSMTSViewLengthArg(env map[string]string, name strin
 	tr.sviewArgCount++
 	tr.arrayDecls[fresh] = true
 	arr := smtVar(fresh)
-	lenSym := arr + smtArrayLenSuffix
+	lenSym := smtArrayLenOf(arr)
 	tr.lenDecls[lenSym] = true
 	// "~" sorts after every declaration key in the enum preamble, which follows all declarations.
 	tr.enumDecls["~svarg_len_"+fresh] = "(assert (= " + lenSym + " " + lenTerm + "))\n"
@@ -237,3 +237,59 @@ func (tr *smtTranslator) sviewSliceBoundI64(expr ast.Expr, env map[string]string
 // smtArrayLenSuffix names an array's length in a namespace unavailable to source
 // identifiers or field paths. Elisa identifiers allow $, but do not allow @.
 const smtArrayLenSuffix = "@len"
+
+// smtArrayLenOf names the length of an array term. An element store `(store A i v)` keeps A's
+// length, so the store chain is peeled to its base; naming the composite term itself would
+// declare a symbol that is not a valid SMT identifier.
+func smtArrayLenOf(arr string) string {
+	return smtStoreBaseArray(arr) + smtArrayLenSuffix
+}
+
+// smtStoreBaseArray returns the innermost array of a `(store ...)` chain, or the term itself.
+func smtStoreBaseArray(arr string) string {
+	for strings.HasPrefix(arr, "(store ") {
+		rest := arr[len("(store "):]
+		end := smtFirstTermEnd(rest)
+		if end <= 0 {
+			return arr
+		}
+		arr = rest[:end]
+	}
+	return arr
+}
+
+// smtFirstTermEnd returns the length of the first complete term in s (a parenthesized
+// expression or an atom, `|quoted|` symbols included), or 0 when s does not start with one.
+func smtFirstTermEnd(s string) int {
+	if s == "" {
+		return 0
+	}
+	if s[0] != '(' {
+		quoted := false
+		for i := 0; i < len(s); i++ {
+			switch c := s[i]; {
+			case c == '|':
+				quoted = !quoted
+			case !quoted && (c == ' ' || c == ')' || c == '('):
+				return i
+			}
+		}
+		return len(s)
+	}
+	depth, quoted := 0, false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '|':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return 0
+}
