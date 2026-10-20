@@ -121,3 +121,13 @@ func (s *SyntaxSnapshot) replayCopier(declarations int) *syntaxFastCopier {
 	}
 	return &syntaxFastCopier{nodes: make(map[any]any, estimate(s.nodes)), slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: make(map[syntaxFastMap]any, estimate(s.maps))}
 }
+
+// CopyDeclaration returns a fresh pristine copy of declaration i. The snapshot is
+// immutable, so concurrent copies are safe.
+func (s *SyntaxSnapshot) CopyDeclaration(i int) (Decl, error) {
+	file, err := s.copyDeclarationRange(i, i+1)
+	if err != nil {
+		return nil, err
+	}
+	return file.Decls[0], nil
+}

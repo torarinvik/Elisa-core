@@ -1401,20 +1401,24 @@ func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
 		}
 	}
 	a.currentUsings = append([]string(nil), a.funcDeclUsings[decl]...)
-	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = true, true, decl
+	// Under parallel body analysis a declaration owned by another worker is analyzed
+	// on this worker's private pristine copy; its summaries are published under decl.
+	target, publish := a.quietAnalysisTarget(decl)
+	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = true, true, target
 	a.staticContextDepth = 0
 	proofMark := len(a.proofReport)
-	a.analyzeFuncWithTypeArgs(decl, nil)
+	a.analyzeFuncWithTypeArgs(target, nil)
 	if len(a.proofReport) > proofMark {
 		a.proofReport = a.proofReport[:proofMark] // a quiet pass reports nothing
 	}
 	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
 	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = savedSuppress, savedOpt, savedProvisional
 	a.staticContextDepth = savedStatic
-	returnElementWalk(reflect.ValueOf(decl.Body), func(ret *ast.ReturnStmt) {
+	returnElementWalk(reflect.ValueOf(target.Body), func(ret *ast.ReturnStmt) {
 		delete(a.returnElementStmtStates, ret)
 		delete(a.returnElementStmtUnknown, ret)
 	}, map[uintptr]bool{})
+	publish()
 }
 
 // headerOnlyDarrayElemTypeName reports a `darray[E]` (through a reference) whose element E is

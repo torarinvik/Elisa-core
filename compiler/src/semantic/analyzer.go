@@ -742,6 +742,7 @@ type Analyzer struct {
 	smtSolver          smtSolverHandle
 	smtUnavailable     bool
 	smtStats           SMTStats
+	parallel           *parallelWorkerState // set only on a parallel body-analysis worker
 	trackedShareChecks []trackedShareRecord // ELISA_TRACKED_SHARE_CHECK; see tracked_share.go
 	smtTextFree        []*smtTextBuilder    // recycled SMT text buffers; see smt_text_scratch.go
 	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is

@@ -44,18 +44,50 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	t0 := time.Now()
 	a.precomputeSharedCalleeFacts(bodies)
 	tp := time.Now()
+	const block = 8
+	tsnap := time.Now()
+	at := map[*ast.FuncDecl][2]int{}
+	owner := map[*ast.FuncDecl]int{}
+	snapshots := make([]*ast.SyntaxSnapshot, len(bodies))
+	declined := 0
+	for i, scoped := range bodies {
+		w := (i / block) % workers
+		// One snapshot per declaration: the capture budget is per graph, and a
+		// worker only ever needs a single declaration back.
+		if snap, err := ast.NewSyntaxSnapshot(&ast.File{Decls: []ast.Decl{scoped.Decl}}, 1<<40); err == nil {
+			snapshots[i] = snap
+		} else {
+			declined++
+			if os.Getenv("ELISA_PARALLEL_DECLINE_LOG") != "" {
+				fmt.Fprintf(os.Stderr, "[parallel-decline] %T: %v\n", scoped.Decl, err)
+			}
+		}
+		switch n := scoped.Decl.(type) {
+		case *ast.FuncDecl:
+			at[n] = [2]int{i, -1}
+			owner[n] = w
+		case *ast.ImplDecl:
+			for m, member := range n.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					at[fn] = [2]int{i, m}
+					owner[fn] = w
+				}
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[parallel-bodies] snapshots %v (%d declined)\n", time.Since(tsnap).Round(time.Millisecond), declined)
 	base := deepCloneValue(reflect.ValueOf(a).Elem())
 	clones := make([]*Analyzer, workers)
 	for i := range clones {
 		w := new(Analyzer)
 		settable(reflect.ValueOf(w).Elem()).Set(deepCloneValue(reflect.ValueOf(a).Elem()))
 		isolateWorkerScopes(a, w)
+		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, at: at, owner: owner, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)
 	// Small blocks dealt round-robin balance the expensive stretches of a file
 	// across workers while keeping the assignment independent of timing.
-	const block = 8
 	type span struct{ worker, from, to int }
 	spans := make([]span, len(bodies))
 	t1 := time.Now()
@@ -85,7 +117,9 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w.diagnostics = a.diagnostics[:baseDiagnostics:baseDiagnostics]
 		w.reportedDiagnostics = a.reportedDiagnostics
 		w.globalScope, w.currentScope, w.smtTextFree = a.globalScope, a.currentScope, a.smtTextFree
-		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base)
+		p := w.parallel
+		w.parallel = nil
+		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base, p)
 	}
 	a.diagnostics = a.diagnostics[:baseDiagnostics]
 	for _, s := range spans {
@@ -95,7 +129,6 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	}
 	fmt.Fprintf(os.Stderr, "[parallel-bodies] precompute %v, clone %v, bodies %v, merge %v\n", tp.Sub(t0).Round(time.Millisecond), t1.Sub(tp).Round(time.Millisecond), t2.Sub(t1).Round(time.Millisecond), time.Since(t2).Round(time.Millisecond))
 }
-
 
 // settable makes an unexported field writable through reflection.
 func settable(v reflect.Value) reflect.Value {
@@ -166,11 +199,11 @@ func typeHoldsMapInline(t reflect.Type) bool {
 // mergeValue folds what a worker changed relative to base into dst: new or
 // replaced map entries (nested maps merged entry by entry), slice tails appended
 // past the base length, and changed scalars and pointers.
-func mergeValue(dst, w, base reflect.Value) {
+func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 	switch w.Kind() {
 	case reflect.Struct:
 		for i := 0; i < w.NumField(); i++ {
-			mergeValue(settable(dst.Field(i)), settable(w.Field(i)), settable(base.Field(i)))
+			mergeValue(settable(dst.Field(i)), settable(w.Field(i)), settable(base.Field(i)), p)
 		}
 	case reflect.Map:
 		if w.IsNil() {
@@ -182,6 +215,9 @@ func mergeValue(dst, w, base reflect.Value) {
 		iter := w.MapRange()
 		for iter.Next() {
 			k, v := iter.Key(), iter.Value()
+			if !p.ownsKey(k) {
+				continue
+			}
 			var bv reflect.Value
 			if !base.IsNil() {
 				bv = base.MapIndex(k)
@@ -191,7 +227,7 @@ func mergeValue(dst, w, base reflect.Value) {
 					if !bv.IsValid() {
 						bv = reflect.Zero(v.Type())
 					}
-					mergeValue(dv, v, bv)
+					mergeValue(dv, v, bv, p)
 					continue
 				}
 			}
