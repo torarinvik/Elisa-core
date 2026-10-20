@@ -1172,45 +1172,24 @@ func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name str
 
 	// Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
 	found := false
-	var scan func(v reflect.Value)
-	scan = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
+	walkPruned(fn.Body, func(node any) bool {
+		if found {
+			return false
 		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
-				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-						for _, arg := range call.Args {
-							if argIsRegionValued(arg) {
-								found = true
-								return
-							}
+		if call, ok := node.(*ast.CallExpr); ok && call != nil {
+			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+				if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+					for _, arg := range call.Args {
+						if argIsRegionValued(arg) {
+							found = true
+							return false
 						}
 					}
 				}
 			}
-			scan(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			scan(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				scan(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				scan(v.Index(i))
-			}
 		}
-	}
-	scan(reflect.ValueOf(fn.Body))
+		return true
+	})
 	return found
 }
 
@@ -1230,39 +1209,18 @@ func (a *Analyzer) functionWritesHandleToScalarOutParam(fn *ast.FuncDecl) bool {
 	}
 	assignsTo := func(name string) bool {
 		found := false
-		var scan func(v reflect.Value)
-		scan = func(v reflect.Value) {
-			if found || !v.IsValid() || !v.CanInterface() {
-				return
+		walkPruned(fn.Body, func(node any) bool {
+			if found {
+				return false
 			}
-			switch v.Kind() {
-			case reflect.Pointer:
-				if v.IsNil() {
-					return
-				}
-				if asn, ok := v.Interface().(*ast.AssignStmt); ok && asn != nil {
-					if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name {
-						found = true
-						return
-					}
-				}
-				scan(v.Elem())
-			case reflect.Interface:
-				if v.IsNil() {
-					return
-				}
-				scan(v.Elem())
-			case reflect.Struct:
-				for i := 0; i < v.NumField(); i++ {
-					scan(v.Field(i))
-				}
-			case reflect.Slice, reflect.Array:
-				for i := 0; i < v.Len(); i++ {
-					scan(v.Index(i))
+			if asn, ok := node.(*ast.AssignStmt); ok && asn != nil {
+				if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name {
+					found = true
+					return false
 				}
 			}
-		}
-		scan(reflect.ValueOf(fn.Body))
+			return true
+		})
 		return found
 	}
 	for i := range fn.Params {
@@ -1294,36 +1252,12 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 		}
 	}
 	bindRefinements := func(cond ast.Expr) {
-		var walk func(v reflect.Value)
-		walk = func(v reflect.Value) {
-			if !v.IsValid() || !v.CanInterface() {
-				return
+		walkPruned(cond, func(node any) bool {
+			if ob, ok := node.(*ast.OptionalBindExpr); ok && ob != nil {
+				bind(ob.Name, ob.Value)
 			}
-			switch v.Kind() {
-			case reflect.Pointer:
-				if v.IsNil() {
-					return
-				}
-				if ob, ok := v.Interface().(*ast.OptionalBindExpr); ok && ob != nil {
-					bind(ob.Name, ob.Value)
-				}
-				walk(v.Elem())
-			case reflect.Interface:
-				if v.IsNil() {
-					return
-				}
-				walk(v.Elem())
-			case reflect.Struct:
-				for i := 0; i < v.NumField(); i++ {
-					walk(v.Field(i))
-				}
-			case reflect.Slice, reflect.Array:
-				for i := 0; i < v.Len(); i++ {
-					walk(v.Index(i))
-				}
-			}
-		}
-		walk(reflect.ValueOf(cond))
+			return true
+		})
 	}
 	var collectBindings func(stmts []ast.Stmt)
 	collectBindings = func(stmts []ast.Stmt) {

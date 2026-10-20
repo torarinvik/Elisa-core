@@ -2,19 +2,17 @@ package semantic
 
 import (
 	"reflect"
-
-	"elisacore/src/ast"
 )
 
-// walkPruned visits every non-nil pointer reachable from stmts through exported
+// walkPruned visits every non-nil pointer reachable from root through exported
 // struct fields, slices, arrays and interfaces (not map values), parents before
 // children, descending into a node only when visit returns true. Shared subtrees
 // are visited once per path, as the reflective predicate walks it replaces did.
-func walkPruned(stmts []ast.Stmt, visit func(any) bool) {
-	if pruneWalkTyped(stmts, visit, nil) {
+func walkPruned(root any, visit func(any) bool) {
+	if root == nil || pruneWalkTyped(root, visit, nil) {
 		return
 	}
-	pruneWalkReflect(reflect.ValueOf(stmts), visit, nil)
+	pruneWalkReflect(reflect.ValueOf(root), visit, nil)
 }
 
 // pruneWalkReflect is the reflective specification of walkPruned.
