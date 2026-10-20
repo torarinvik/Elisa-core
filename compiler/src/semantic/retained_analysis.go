@@ -1,10 +1,12 @@
 package semantic
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -231,6 +233,9 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		if !isFn {
 			// A container's span is its own header up to its first member.
 			if !sameText {
+				if os.Getenv("ELISACORE_RETAINED_DEBUG_SPANS") != "" {
+					fmt.Fprintf(os.Stderr, "[span-old %T]\n%q\n[span-new]\n%q\n", od, oldSpans[i], newSpans[j])
+				}
 				return fail("declaration at %s changed", retainedLineKey(op))
 			}
 			continue
@@ -659,20 +664,53 @@ func retainedShiftDecl(decl ast.Decl, marks map[string][][2]int) {
 // A container's span is therefore its own header, and comments and blank lines
 // count as changes, so a declaration whose positions moved is re-analyzed.
 func retainedSpans(decls []ast.Decl, src []byte) []string {
+	// A span runs to the next declaration start in the source, not in walk
+	// order: synthesized declarations (machine expansions) are walked out of
+	// source order, and a walk-order span would cover unrelated edits.
+	starts := make([]int, 0, len(decls))
+	for _, d := range decls {
+		starts = append(starts, d.Pos().Offset)
+	}
+	sort.Ints(starts)
 	out := make([]string, len(decls))
 	for i, d := range decls {
 		start := d.Pos().Offset
 		end := len(src)
-		if i+1 < len(decls) {
-			end = decls[i+1].Pos().Offset
+		if k := sort.SearchInts(starts, start+1); k < len(starts) {
+			end = starts[k]
 		}
 		if start < 0 || start > end || end > len(src) {
 			out[i] = fmt.Sprintf("\x00unordered %d", i) // never equal: forces a fallback or splice
 			continue
 		}
-		out[i] = string(src[start:end])
+		out[i] = retainedWithoutLineDirectives(src[start:end])
 	}
 	return out
+}
+
+// retainedWithoutLineDirectives drops include-splice `#line` directives from a
+// span. They restate positions, which the update tracks per file from the
+// declarations themselves; an edit above an include renumbers the directive
+// that resumes the parent file without changing any declaration.
+func retainedWithoutLineDirectives(span []byte) string {
+	if !bytes.Contains(span, []byte("#line ")) {
+		return string(span)
+	}
+	var b strings.Builder
+	b.Grow(len(span))
+	for len(span) > 0 {
+		line := span
+		if k := bytes.IndexByte(span, '\n'); k >= 0 {
+			line, span = span[:k+1], span[k+1:]
+		} else {
+			span = nil
+		}
+		if bytes.HasPrefix(line, []byte("#line ")) {
+			continue
+		}
+		b.Write(line)
+	}
+	return b.String()
 }
 
 // retainedSameDeclKind reports whether two declarations can be the same one
