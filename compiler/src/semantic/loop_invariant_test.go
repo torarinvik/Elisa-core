@@ -469,3 +469,50 @@ def find(xs: darray[Ins], target: sview) -> i64:
 		t.Fatalf("a prefix invariant for another needle must not be preserved: %+v", result.ProofReport)
 	}
 }
+
+// A fact established before the loop about values the body never writes (here an early-return
+// guard discharging a recursive helper's requires) is available to the preservation step.
+func TestLoopInvariantPreservationUsesFrameFacts(t *testing.T) {
+	src := `
+ghost def g(xs: darray[i64]&, n: usize, step: usize) -> bool:
+    requires n <= xs.count
+    requires step <= n
+    decreases n - step
+    return true if step == n
+    return false if xs[step] == 0
+    return g(xs, n, step + 1)
+
+def f(xs: darray[i64]&, n: usize) -> bool:
+    can Abort.Panic:
+        return true if n > xs.count
+        for step in 0..<n:
+            invariant step <= n
+            invariant g(xs, n, step) == g(xs, n, 0)
+            if xs[step] == 0:
+                return false
+        return true
+`
+	r := analyzeContractStrict(t, "loop_inv_frame_facts.elisa", src)
+	if es := r.Errors(); len(es) != 0 {
+		t.Fatalf("frame facts should let the invariant be preserved: %v", es)
+	}
+}
+
+// A pre-loop fact about a variable the body writes is not a frame fact.
+func TestLoopInvariantFrameFactsExcludeWrittenValues(t *testing.T) {
+	src := `
+def f(n: usize) -> usize:
+    m: mutable usize = n
+    return 0 if m > 5
+    i: mutable usize = 0
+    while i < 10:
+        invariant m <= 5
+        m <- m + 1
+        i <- i + 1
+    return m
+`
+	r := analyzeContractStrict(t, "loop_inv_frame_written.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatal("an invariant broken by the body was accepted")
+	}
+}

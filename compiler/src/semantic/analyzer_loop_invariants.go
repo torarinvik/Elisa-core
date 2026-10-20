@@ -57,6 +57,8 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// excluded (it may have been invalidated). Only identifiers in the substitution keys count as
 	// "assigned" for this purpose; variables the inner loop reads but doesn't write are not excluded.
 	outerSafeInvs := outerLoopInvariantsDisjointFrom(a.activeOuterLoopInvariants, subst)
+	// Preservation may also assume live pre-loop facts about values the loop never writes.
+	preserveHyps := append(outerSafeInvs[:len(outerSafeInvs):len(outerSafeInvs)], a.loopFrameFactHypotheses(stmt.Body, subst)...)
 
 	// Establishment scope: a child of the live pre-loop scope additionally carrying POINT range facts
 	// for any loop variable pinned to a compile-time constant at entry (`n: usize = 0` records the
@@ -219,6 +221,17 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 				invPaths = perInvPaths[inv]
 			}
 			preserved, guardedUse, ce := a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, outerSafeInvs)
+			// Fallbacks, each sound and tried only after the standard query fails (extra
+			// hypotheses can slow a query the standard set already decides):
+			//  - live pre-loop facts about values the body never writes;
+			//  - the invariant alone, since a heavy sibling hypothesis can leave the joint query
+			//    undecided and an invariant preserved under itself is preserved under any superset.
+			if !preserved && len(preserveHyps) > len(outerSafeInvs) {
+				preserved, guardedUse, _ = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, preserveHyps)
+			}
+			if !preserved && len(candidates) > 1 {
+				preserved, guardedUse, _ = a.proveInvariantOnPaths(stmt.Cond, []*ast.ContractStmt{inv}, inv, invPaths, preserveHyps)
+			}
 			if !preserved && seqOK && !sameLoopPathSet(invPaths, seqPaths) {
 				var seqCE string
 				preserved, guardedUse, seqCE = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, seqPaths, outerSafeInvs)
@@ -1566,4 +1579,71 @@ func (a *Analyzer) typeLoopInvariantsQuietly(invs []*ast.ContractStmt) {
 			a.analyzeCondExpr(inv.Cond)
 		}
 	}
+}
+
+// loopFrameFactHypotheses returns the live asserted facts that hold at every iteration of a loop:
+// each names only locals and parameters the body never writes (no mutable references, no loop
+// variables) and calls only functions whose results depend on their arguments alone. They are
+// wrapped as hypotheses for the preservation step, which otherwise sees no ambient facts.
+func (a *Analyzer) loopFrameFactHypotheses(body []ast.Stmt, subst map[string]ast.Expr) []*ast.ContractStmt {
+	if a == nil || a.currentScope == nil {
+		return nil
+	}
+	written := loopWrittenRoots(body)
+	for name := range subst {
+		written[name] = true
+	}
+	var out []*ast.ContractStmt
+	seen := map[ast.Expr]bool{}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Expr == nil || seen[fact.Expr] || len(fact.Binders) != 0 {
+				continue
+			}
+			seen[fact.Expr] = true
+			if a.loopFrameFact(fact.Expr, sc, written) {
+				out = append(out, &ast.ContractStmt{Position: fact.Expr.Pos(), Kind: ast.ContractInvariant, Cond: fact.Expr})
+			}
+		}
+		if sc.closedWorld {
+			break
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) loopFrameFact(expr ast.Expr, recorded *Scope, written map[string]bool) bool {
+	if !a.callsAreStateIndependent(expr) {
+		return false
+	}
+	ok := true
+	walkPruned(expr, func(node any) bool {
+		if !ok {
+			return false
+		}
+		id, isIdent := node.(*ast.Ident)
+		if !isIdent || id == nil {
+			return true
+		}
+		sym, found := a.currentScope.Lookup(id.Name)
+		there, foundThere := recorded.Lookup(id.Name)
+		if !found || !foundThere || sym != there || sym == nil {
+			ok = false
+			return false
+		}
+		switch sym.Kind {
+		case SymbolLocal, SymbolParam:
+			if written[id.Name] {
+				ok = false
+			}
+			if ref, isRef := sym.Type.(*RefType); isRef && (ref.Mutable || ref.Linear) {
+				ok = false
+			}
+		case SymbolFunc:
+		default:
+			ok = false
+		}
+		return ok
+	})
+	return ok
 }
