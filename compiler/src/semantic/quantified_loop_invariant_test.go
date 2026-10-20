@@ -121,3 +121,19 @@ def fill_zero_bad(arr: darray[i64], n: usize):
 		t.Fatalf("expected the false quantified invariant to fall back to a runtime preservation check, got %d: %+v", got, result.ProofReport)
 	}
 }
+
+// A range-quantified ensure over `result` is discharged by the identical asserted fact about the
+// returned local (the assert lowers to a runtime loop block; the ensure stays a quantifier).
+func TestQuantifiedEnsureMatchesAssertedRangeFact(t *testing.T) {
+	src := `
+def all_positive(xs: darray[i64]&, lo: usize, hi: usize, other: darray[i64]&) -> darray[i64]&:
+    ensure forall k in lo..<hi: result[k] > 0
+    requires forall k in lo..<hi: xs[k] > 0
+    assert forall k in lo..<hi: xs[k] > 0
+    return xs
+`
+	result := analyzeLoopInvariantWithSMT(t, "quant_ensure_live_fact.elisa", src, true)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("expected the asserted range fact to discharge the ensure, got %v", result.Errors())
+	}
+}

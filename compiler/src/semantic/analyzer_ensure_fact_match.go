@@ -5,6 +5,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/unparse"
 	"reflect"
+	"strings"
 )
 
 // ensureGoalIsLiveFact reports whether a postcondition, with `result` replaced by the
@@ -27,9 +28,12 @@ func (a *Analyzer) ensureGoalIsLiveFact(clause ast.Expr, subst map[string]ast.Ex
 	if want == "" {
 		return false
 	}
+	textOpaque := strings.Contains(want, "<expr>")
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		for _, fact := range sc.smtAssertFacts {
-			if fact.Expr == nil || (unparse.FormatExpr(fact.Expr) != want && !astEqualModuloParens(reflect.ValueOf(fact.Expr), reflect.ValueOf(goal))) {
+			// The formatter prints unsupported nodes (quantifiers) as `<expr>`, so equal text is
+			// only trusted when it has none; otherwise the trees must match structurally.
+			if fact.Expr == nil || ((textOpaque || unparse.FormatExpr(fact.Expr) != want) && !astEqualModuloParens(reflect.ValueOf(fact.Expr), reflect.ValueOf(goal))) {
 				continue
 			}
 			if a.factNamesResolveAlike(fact.Expr, sc) && a.callsAreStateIndependent(fact.Expr) {
@@ -89,6 +93,13 @@ func astEqualModuloParens(x, y reflect.Value) bool {
 	if !x.IsValid() {
 		return true
 	}
+	if x.Kind() == reflect.Pointer && y.Kind() == reflect.Pointer && !x.IsNil() && !y.IsNil() {
+		// A range quantifier and its lowered runtime flag-and-loop block are the same fact.
+		if left, ok := rangeQuantifierShapeOf(x.Interface()); ok {
+			right, ok := rangeQuantifierShapeOf(y.Interface())
+			return ok && left.equalModuloParens(right)
+		}
+	}
 	if x.Type() != y.Type() {
 		return false
 	}
@@ -141,4 +152,11 @@ func unwrapParenValue(v reflect.Value) reflect.Value {
 		v = reflect.ValueOf(paren.Inner)
 	}
 	return v
+}
+
+func (q rangeQuantifierShape) equalModuloParens(o rangeQuantifierShape) bool {
+	return q.exists == o.exists && q.name == o.name &&
+		astEqualModuloParens(reflect.ValueOf(q.lo), reflect.ValueOf(o.lo)) &&
+		astEqualModuloParens(reflect.ValueOf(q.hi), reflect.ValueOf(o.hi)) &&
+		astEqualModuloParens(reflect.ValueOf(q.predicate), reflect.ValueOf(o.predicate))
 }

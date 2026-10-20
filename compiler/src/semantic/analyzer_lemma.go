@@ -301,6 +301,31 @@ func substituteLemmaEnsureWithBudget(expr ast.Expr, subst map[string]ast.Expr, w
 			return nil, false
 		}
 		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: left, Right: right}, true
+	case *ast.QuantifierExpr:
+		// Capture-avoiding: a bound name that is substituted, or that occurs in a substituted
+		// argument, would change meaning under the binder; decline.
+		for _, name := range n.Vars {
+			if _, shadowed := subst[name]; shadowed {
+				return nil, false
+			}
+			for _, arg := range subst {
+				if staticExprContainsIdent(arg, name) {
+					return nil, false
+				}
+			}
+		}
+		var in ast.Expr
+		if n.In != nil {
+			var ok bool
+			if in, ok = substituteLemmaEnsureWithBudget(n.In, subst, work, depth+1); !ok {
+				return nil, false
+			}
+		}
+		body, ok := substituteLemmaEnsureWithBudget(n.Body, subst, work, depth+1)
+		if !ok {
+			return nil, false
+		}
+		return &ast.QuantifierExpr{Position: n.Position, Exists: n.Exists, Vars: n.Vars, In: in, Body: body}, true
 	case *ast.TernaryExpr:
 		cond, ok := substituteLemmaEnsureWithBudget(n.Cond, subst, work, depth+1)
 		if !ok {
