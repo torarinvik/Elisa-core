@@ -26,6 +26,8 @@ func (a *Analyzer) noteReturnElementState(n *ast.ReturnStmt) {
 	}
 	if a.returnElementStmtStates == nil {
 		a.returnElementStmtStates = map[*ast.ReturnStmt]regionRefState{}
+	}
+	if a.returnElementStmtUnknown == nil {
 		a.returnElementStmtUnknown = map[*ast.ReturnStmt]bool{}
 	}
 	state, ok := a.returnedContainerElementState(n.Value)

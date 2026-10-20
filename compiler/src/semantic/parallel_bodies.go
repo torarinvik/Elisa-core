@@ -363,6 +363,8 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 	if a.fillMayAdoptSet == nil {
 		a.fillMayAdoptSet = a.computeFillMayAdopt()
 	}
+	// Whole-program body scans read every body; workers rewrite the bodies they own.
+	a.sentinelFuncNames()
 	infer := func(fn *ast.FuncDecl) {
 		sym := a.funcDeclSymbols[fn]
 		if sym == nil || fn.IsContract {
@@ -425,3 +427,4 @@ func isolateWorkerScopes(a, w *Analyzer) {
 }
 
 var parallelReport = os.Getenv("ELISA_PARALLEL_GRAPH_REPORT") != ""
+
