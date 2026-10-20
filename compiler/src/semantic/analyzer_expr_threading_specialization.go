@@ -857,4 +857,3 @@ func (a *Analyzer) joinedPoolScopeForArg(poolArg ast.Expr) *poolScopeState {
 	}
 	return nil
 }
-
