@@ -16,6 +16,9 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	if a == nil || fn == nil || fnType == nil {
 		return
 	}
+	if trackedShareCheck {
+		defer a.verifyTrackedShares(fn.Name)
+	}
 	if !fnType.SinkParamsKnown {
 		a.inferFuncSinkParams(fn, fnType)
 	}

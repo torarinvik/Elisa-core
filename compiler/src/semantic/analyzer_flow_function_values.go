@@ -296,5 +296,5 @@ func (a *Analyzer) lookupCurrentSpecializedValueType(sym *Symbol) (Type, bool) {
 	if !ok || valueType == nil {
 		return nil, false
 	}
-	return a.cloneTrackedValueType(valueType), true
+	return a.shareTrackedValueType(valueType), true
 }

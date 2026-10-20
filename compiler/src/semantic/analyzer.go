@@ -737,12 +737,13 @@ type Analyzer struct {
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
-	smtEnabled     bool
-	smtBinary      string
-	smtSolver      smtSolverHandle
-	smtUnavailable bool
-	smtStats       SMTStats
-	smtTextFree    []*smtTextBuilder // recycled SMT text buffers; see smt_text_scratch.go
+	smtEnabled         bool
+	smtBinary          string
+	smtSolver          smtSolverHandle
+	smtUnavailable     bool
+	smtStats           SMTStats
+	trackedShareChecks []trackedShareRecord // ELISA_TRACKED_SHARE_CHECK; see tracked_share.go
+	smtTextFree        []*smtTextBuilder    // recycled SMT text buffers; see smt_text_scratch.go
 	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
 	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
