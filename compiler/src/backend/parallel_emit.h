@@ -24,6 +24,15 @@ LLVMModuleRef elisacoreCloneObjectPartitionWithOwners(
     LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
     const long long *owners, size_t count);
 long long elisacoreObjectPartitionWeight(LLVMModuleRef m);
+int elisacoreSelectiveCloneSupported(LLVMModuleRef m);
+LLVMModuleRef elisacoreLoadObjectPartition(LLVMContextRef context, const char *data, size_t size,
+    int jobs, int part, const char *unit_namespace, const long long *owners, size_t count,
+    char **error_out);
+int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char *cpu,
+    const char *features, LLVMMemoryBufferRef *out, char **error_out);
+LLVMModuleRef elisacoreCloneObjectPartitionPrechecked(
+    LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
+    const long long *owners, size_t count);
 
 int elisacorePartitionPrepare(LLVMModuleRef m, int jobs, long long min_weight, const char *bitcode_path);
 

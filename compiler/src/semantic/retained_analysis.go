@@ -506,8 +506,9 @@ func (r *RetainedAnalysis) comparisonText(fn *ast.FuncDecl) funcComparisonText {
 // them in every later declaration of the expansion without changing it.
 var retainedGensym = regexp.MustCompile(`(__[A-Za-z][A-Za-z0-9_]*?)_[0-9]+\b`)
 
-// Auto arenas are bindings local to the body that declares them.
-var retainedLocalGensym = regexp.MustCompile(`^__auto_[0-9]+$`)
+// Auto arenas and runtime quantifier results are bindings local to the body or
+// expression block that declares them.
+var retainedLocalGensym = regexp.MustCompile(`^__(auto|quantifier)_[0-9]+$`)
 
 func retainedNormalized(text string) string { return retainedGensym.ReplaceAllString(text, "${1}_") }
 

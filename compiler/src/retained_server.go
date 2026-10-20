@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"elisacore/src/ast"
+	"elisacore/src/backend"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"elisacore/src/semantic"
@@ -73,6 +74,14 @@ type retainedRuntime struct {
 
 	tokensFor []byte
 	tokens    []lexer.Token
+
+	// prefetch is a scratch parse of the request's source started before the
+	// driver's own parse, so the two run concurrently; parse consumes it once.
+	prefetch *retainedPrefetch
+
+	// objects retains native object partitions across requests, so an edit
+	// recompiles only the partitions whose bitcode changed.
+	objects *backend.IncrementalObjectSession
 }
 
 func (rt *retainedRuntime) noteSource(filename string, src []byte, file *ast.File) {
@@ -82,9 +91,57 @@ func (rt *retainedRuntime) noteSource(filename string, src []byte, file *ast.Fil
 	rt.filename, rt.src, rt.file = filename, src, file
 }
 
+type retainedPrefetch struct {
+	filename string
+	src      []byte
+	done     chan struct{}
+	tokens   []lexer.Token
+	file     *ast.File
+	ok       bool
+}
+
+// prefetchSource starts a private scratch parse of src. Only the request
+// goroutine touches rt; the worker writes its own prefetch record and closes
+// done before parse reads it.
+func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
+	if rt == nil {
+		return
+	}
+	pf := &retainedPrefetch{filename: filename, src: src, done: make(chan struct{})}
+	rt.prefetch = pf
+	go func() {
+		defer close(pf.done)
+		l := lexer.New(filename, src)
+		pf.tokens = l.Tokenize()
+		if len(l.Errors()) != 0 {
+			return
+		}
+		p := parser.New(pf.tokens)
+		pf.file = p.ParseFile(filename)
+		pf.ok = len(p.Errors()) == 0
+	}()
+}
+
+// dropPrefetch waits for and discards an unconsumed prefetch.
+func (rt *retainedRuntime) dropPrefetch() {
+	if rt == nil || rt.prefetch == nil {
+		return
+	}
+	<-rt.prefetch.done
+	rt.prefetch = nil
+}
+
 // parse returns a private parse of the current source. The tokens are lexed
 // once per source; parser.New copies them, so parses never share state.
 func (rt *retainedRuntime) parse() (*ast.File, bool) {
+	if pf := rt.prefetch; pf != nil {
+		rt.prefetch = nil
+		<-pf.done
+		if pf.filename == rt.filename && bytes.Equal(pf.src, rt.src) && pf.file != nil {
+			rt.tokens, rt.tokensFor = pf.tokens, rt.src
+			return pf.file, pf.ok
+		}
+	}
 	if rt.tokensFor == nil || !bytes.Equal(rt.tokensFor, rt.src) {
 		l := lexer.New(rt.filename, rt.src)
 		rt.tokens = l.Tokenize()
@@ -116,11 +173,15 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
 		} else {
 			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v, compare %v, diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
-			if len(result.Errors()) != 0 {
+			// ELISACORE_RETAINED_SPLICED_CODEGEN=1 (from the request environment)
+			// lets code generation consume the updated analysis directly; its
+			// LLVM IR has matched a fresh analysis byte for byte on the stage1
+			// seed for no-op and body edits.
+			if len(result.Errors()) != 0 || os.Getenv("ELISACORE_RETAINED_SPLICED_CODEGEN") == "1" {
 				return result
 			}
-			// No errors: code generation follows, and it must see a fresh
-			// analysis. Update consumed file, so analyze a new parse; the driver
+			// No errors: code generation follows, and by default it must see a
+			// fresh analysis. Update consumed file, so analyze a new parse; the driver
 			// takes the analyzed file from Result.File.
 			fmt.Fprintf(rt.log, "[retained] no errors; analyzing fresh for code generation\n")
 			fresh, ok := rt.parse()
@@ -168,7 +229,7 @@ func serveRetained(socket string, log io.Writer) error {
 		// at 3x live keeps the heap resident and warm.
 		debug.SetGCPercent(retainedGCPercent)
 	}
-	activeRetained = &retainedRuntime{log: log}
+	activeRetained = &retainedRuntime{log: log, objects: backend.NewIncrementalObjectSession(64, 4<<30)}
 	var mu sync.Mutex
 	mux := http.NewServeMux()
 	mux.HandleFunc("/run", func(w http.ResponseWriter, r *http.Request) {
@@ -186,14 +247,17 @@ func serveRetained(socket string, log io.Writer) error {
 		defer mu.Unlock()
 		restoreGC := suspendRetainedGC()
 		resp := runRetainedRequest(req)
-		restoreGC()
+		// Answer before collection resumes: re-enabling the collector on a heap far
+		// past its goal starts marking at once, and the response encoding (megabytes
+		// of diagnostics) would pay mark assists for it.
 		_ = json.NewEncoder(w).Encode(resp)
-		// Collect while the user edits: the next request then allocates from
-		// memory this process already touched instead of faulting in fresh pages
-		// (the default GC percent lets a retained heap grow for a long time).
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
+		restoreGC()
+		// Collect while the user edits: the next request then allocates from
+		// memory this process already touched instead of faulting in fresh pages
+		// (the default GC percent lets a retained heap grow for a long time).
 		runtime.GC()
 		var ms runtime.MemStats
 		runtime.ReadMemStats(&ms)
@@ -226,6 +290,10 @@ func runRetainedRequest(req retainedRequest) retainedResponse {
 	}
 	code := runCLI(req.Args, &stdout, &stderr)
 	fmt.Fprintf(activeRetained.log, "[retained] %s -> %d in %v\n", strings.Join(req.Args, " "), code, time.Since(start).Round(time.Millisecond))
+	if objects := activeRetained.objects; objects != nil {
+		st := objects.Stats()
+		fmt.Fprintf(activeRetained.log, "[retained] objects: %d emitted, %d reused; ir %v, owners %v, clone %v, bitcode %v, native %v, merge %v\n", st.PartitionsEmitted, st.PartitionsReused, st.IRTime.Round(time.Millisecond), st.OwnerMapTime.Round(time.Millisecond), st.CloneTime.Round(time.Millisecond), st.BitcodeTime.Round(time.Millisecond), st.NativeTime.Round(time.Millisecond), st.MergeTime.Round(time.Millisecond))
+	}
 	return retainedResponse{Code: code, Stdout: stdout.String(), Stderr: stderr.String()}
 }
 

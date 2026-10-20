@@ -62,7 +62,7 @@ func (p *Parser) trySyntaxSuffix(file *ast.File) bool {
 		return false
 	}
 	cp := points[index]
-	if cp.pos != p.pos || p.rebindCounter != cp.rebindCounter || p.nurseryCounter != cp.nurseryCounter || p.byParSeq != cp.byParSeq || p.foreignEnumErrorSetEmitted != cp.foreignEnumErrorSetEmitted || p.currentVisibility != cp.visibility {
+	if cp.pos != p.pos || p.rebindCounter != cp.rebindCounter || p.nurseryCounter != cp.nurseryCounter || p.byParSeq != cp.byParSeq || p.contentNames != cp.contentNames || p.foreignEnumErrorSetEmitted != cp.foreignEnumErrorSetEmitted || p.currentVisibility != cp.visibility {
 		return false
 	}
 	last := replay.previous.checkpoints[len(replay.previous.checkpoints)-1]
@@ -95,6 +95,7 @@ func (p *Parser) trySyntaxSuffix(file *ast.File) bool {
 	p.rebindCounter = last.rebindCounter
 	p.nurseryCounter = last.nurseryCounter
 	p.byParSeq = last.byParSeq
+	p.contentNames = last.contentNames
 	p.foreignEnumErrorSetEmitted = last.foreignEnumErrorSetEmitted
 	p.currentVisibility = last.visibility
 	p.readThrough = max(p.readThrough, last.readThrough)

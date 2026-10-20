@@ -38,6 +38,11 @@ type Parser struct {
 	// byParSeq makes each `for x in xs by par:` lowering's synthesized Slice local unique, so two
 	// such loops in the same block do not collide on the `__by_par_src` name.
 	byParSeq int
+	// contentNames lists the content keys of the machines parsed so far, each
+	// followed by ';'. It numbers machines with identical token text, keeping
+	// content-derived names unique (see contentNameSuffix); a string so syntax
+	// checkpoints copy and compare it like the other counters.
+	contentNames string
 	// pendingDecls buffers extra TOP-LEVEL declarations produced by a single parseDecl call that
 	// desugars to MORE than one decl (the `protocol` typestate sugar, docs/96: one declaration expands
 	// to a state-bearing struct PLUS one free function per transition). ParseFile drains this buffer

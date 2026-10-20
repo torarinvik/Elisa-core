@@ -542,13 +542,21 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			}
 			return 0
 		}
-		if err := backend.WriteLLVMObjectFileWithOptions(result, outputPathForEmit(program.filename, options.output, ".o"), backend.LLVMObjectEmitOptions{
+		objectOptions := backend.LLVMObjectEmitOptions{
 			OptLevel:      effectiveOptimizationLevel(options),
 			PackedProfile: options.packedProfile,
 			TargetTriple:  options.targetTriple,
 			DebugInfo:     options.debugInfo,
 			Trace:         options.recordTrace,
-		}); err != nil {
+		}
+		objectPath := outputPathForEmit(program.filename, options.output, ".o")
+		var err error
+		if activeRetained != nil && activeRetained.objects != nil {
+			err = activeRetained.objects.WriteObject(result, objectPath, objectOptions)
+		} else {
+			err = backend.WriteLLVMObjectFileWithOptions(result, objectPath, objectOptions)
+		}
+		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}

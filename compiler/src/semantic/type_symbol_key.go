@@ -1,13 +1,13 @@
 package semantic
 
 import (
+	"bytes"
 	"elisacore/src/ast"
 	"fmt"
 	"math"
 	"reflect"
 	"sort"
 	"strconv"
-	"strings"
 )
 
 // TypeSymbolKey returns a deterministic structural spelling for emitted generic
@@ -28,7 +28,7 @@ func TypeSymbolKeys(types []Type) (string, error) { return typeSymbolKeys(types,
 func TypeSymbolKeysForNominalLayout(types []Type) (string, error) { return typeSymbolKeys(types, true) }
 
 func typeSymbolKeys(types []Type, layoutRegions bool) (string, error) {
-	var b strings.Builder
+	var b bytes.Buffer
 	b.WriteString("symbol-types-v1|")
 	active := &symbolTypeActive{freshShapes: make(map[int]int), layoutRegions: layoutRegions}
 	next := 1
@@ -47,7 +47,7 @@ type symbolTypeActive struct {
 	layoutRegions bool
 }
 
-func appendSymbolShapeKey(b *strings.Builder, shape Shape, active *symbolTypeActive) bool {
+func appendSymbolShapeKey(b *bytes.Buffer, shape Shape, active *symbolTypeActive) bool {
 	if fresh, ok := shape.(*FreshShape); ok {
 		if fresh == nil || fresh.ID <= 0 {
 			return false
@@ -64,7 +64,7 @@ func appendSymbolShapeKey(b *strings.Builder, shape Shape, active *symbolTypeAct
 	return appendShapeIDKey(b, shape)
 }
 
-func appendSymbolTypeKey(b *strings.Builder, t Type, active *symbolTypeActive, nextCycleID *int) bool {
+func appendSymbolTypeKey(b *bytes.Buffer, t Type, active *symbolTypeActive, nextCycleID *int) bool {
 	if t != nil && (reflect.ValueOf(t).Kind() == reflect.Ptr && reflect.ValueOf(t).IsNil()) {
 		return false
 	}
@@ -375,7 +375,7 @@ func appendSymbolTypeKey(b *strings.Builder, t Type, active *symbolTypeActive, n
 	return true
 }
 
-func appendSymbolTypeSliceKey(b *strings.Builder, types []Type, active *symbolTypeActive, next *int) bool {
+func appendSymbolTypeSliceKey(b *bytes.Buffer, types []Type, active *symbolTypeActive, next *int) bool {
 	appendKeyLen(b, len(types))
 	for _, typ := range types {
 		if !appendSymbolTypeKey(b, typ, active, next) {
@@ -385,7 +385,7 @@ func appendSymbolTypeSliceKey(b *strings.Builder, types []Type, active *symbolTy
 	return true
 }
 
-func appendSymbolConstValue(b *strings.Builder, value ConstValue, depth int) bool {
+func appendSymbolConstValue(b *bytes.Buffer, value ConstValue, depth int) bool {
 	if depth >= semanticTraversalDepthLimit {
 		return false
 	}
@@ -441,7 +441,7 @@ func appendSymbolConstValue(b *strings.Builder, value ConstValue, depth int) boo
 	return true
 }
 
-func appendSymbolGenericParamSlice(b *strings.Builder, params []ast.GenericParam, layout bool) {
+func appendSymbolGenericParamSlice(b *bytes.Buffer, params []ast.GenericParam, layout bool) {
 	appendKeyLen(b, len(params))
 	for _, param := range params {
 		appendKeyInt(b, int(param.Kind))

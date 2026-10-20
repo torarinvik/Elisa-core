@@ -240,11 +240,34 @@ long long elisacoreObjectPartitionWeight(LLVMModuleRef m) {
 	return total;
 }
 
+extern LLVMModuleRef elisacoreCloneSelectedDefinitionsPrechecked(LLVMModuleRef m,
+    const long long *owners, size_t count, int part, const char *unit_namespace);
+
+static LLVMModuleRef part_clone_with_owners(
+	LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
+	const long long *owners, size_t count, int prechecked);
+
 LLVMModuleRef elisacoreCloneObjectPartitionWithOwners(
 	LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
 	const long long *owners, size_t count) {
+	return part_clone_with_owners(m, jobs, part, unit_namespace, owners, count, 0);
+}
+
+// Same as elisacoreCloneObjectPartitionWithOwners for a module the caller has
+// checked once with elisacoreSelectiveCloneSupported.
+LLVMModuleRef elisacoreCloneObjectPartitionPrechecked(
+	LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
+	const long long *owners, size_t count) {
+	return part_clone_with_owners(m, jobs, part, unit_namespace, owners, count, 1);
+}
+
+static LLVMModuleRef part_clone_with_owners(
+	LLVMModuleRef m, int jobs, int part, const char *unit_namespace,
+	const long long *owners, size_t count, int prechecked) {
 	if (m == NULL || jobs < 1 || part < 0 || part >= jobs || owners == NULL) return NULL;
-	LLVMModuleRef clone = elisacoreCloneSelectedDefinitions(m, owners, count, part, unit_namespace);
+	LLVMModuleRef clone = prechecked
+		? elisacoreCloneSelectedDefinitionsPrechecked(m, owners, count, part, unit_namespace)
+		: elisacoreCloneSelectedDefinitions(m, owners, count, part, unit_namespace);
 	if (clone == NULL) return NULL;
 	int ok = part_restrict_module(clone, owners, count, part, 0, m);
 	if (ok) elisacorePruneObjectDeclarations(clone);
@@ -267,6 +290,63 @@ LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part,
 		m, jobs, part, unit_namespace, owners, count);
 	free(owners);
 	return clone;
+}
+
+extern LLVMModuleRef elisacoreLoadSelectedDefinitions(LLVMContextRef context,
+    const char *data, size_t size, const long long *owners, size_t count, int part,
+    const char *unit_namespace, char **error_out);
+
+// Partition `part` of the module serialized as `data`, loaded into `context`
+// with the same restriction, pruning and verification as
+// elisacoreCloneObjectPartitionPrechecked. Distinct contexts may run concurrently.
+LLVMModuleRef elisacoreLoadObjectPartition(LLVMContextRef context, const char *data, size_t size,
+	int jobs, int part, const char *unit_namespace, const long long *owners, size_t count,
+	char **error_out) {
+	*error_out = NULL;
+	if (jobs < 1 || part < 0 || part >= jobs || owners == NULL) return NULL;
+	LLVMModuleRef m = elisacoreLoadSelectedDefinitions(context, data, size, owners, count, part, unit_namespace, error_out);
+	if (m == NULL) return NULL;
+	int ok = part_restrict_module(m, owners, count, part, 0, NULL);
+	if (ok) elisacorePruneObjectDeclarations(m);
+	char *message = NULL;
+	if (!ok || LLVMVerifyModule(m, LLVMReturnStatusAction, &message)) {
+		if (message) {
+			*error_out = strdup(message);
+			LLVMDisposeMessage(message);
+		}
+		LLVMDisposeModule(m);
+		return NULL;
+	}
+	if (message) LLVMDisposeMessage(message);
+	return m;
+}
+
+// Native object for a loaded partition, with the same target machine settings
+// as the serial path. Each call builds its own target machine.
+int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char *cpu,
+	const char *features, LLVMMemoryBufferRef *out, char **error_out) {
+	*error_out = NULL;
+	LLVMTargetRef target;
+	char *msg = NULL;
+	if (LLVMGetTargetFromTriple(triple, &target, &msg) != 0) {
+		*error_out = strdup(msg ? msg : "unknown target");
+		if (msg) LLVMDisposeMessage(msg);
+		return 0;
+	}
+	LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features,
+		LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+	if (tm == NULL) {
+		*error_out = strdup("failed to create partition target machine");
+		return 0;
+	}
+	int failed = LLVMTargetMachineEmitToMemoryBuffer(tm, m, LLVMObjectFile, &msg, out);
+	LLVMDisposeTargetMachine(tm);
+	if (failed) {
+		*error_out = strdup(msg ? msg : "partition object emission failed");
+		if (msg) LLVMDisposeMessage(msg);
+		return 0;
+	}
+	return 1;
 }
 
 static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *pipeline, char **error) {

@@ -22,6 +22,7 @@ type PrefixCheckpoint struct {
 	index, pos, decls, readThrough          int
 	readLength                              bool
 	rebindCounter, nurseryCounter, byParSeq int
+	contentNames                            string
 	foreignEnumErrorSetEmitted              bool
 	visibility                              string
 }
@@ -87,7 +88,7 @@ func (p *Parser) recordSyntaxBoundary(file *ast.File) {
 		copy(grown, points)
 		points = grown
 	}
-	p.trace.checkpoints = append(points, PrefixCheckpoint{index: len(points), pos: p.pos, decls: len(file.Decls), readThrough: p.readThrough, readFrom: p.readFrom, readLength: p.readLength, rebindCounter: p.rebindCounter, nurseryCounter: p.nurseryCounter, byParSeq: p.byParSeq, foreignEnumErrorSetEmitted: p.foreignEnumErrorSetEmitted, visibility: strings.Clone(p.currentVisibility)})
+	p.trace.checkpoints = append(points, PrefixCheckpoint{index: len(points), pos: p.pos, decls: len(file.Decls), readThrough: p.readThrough, readFrom: p.readFrom, readLength: p.readLength, rebindCounter: p.rebindCounter, nurseryCounter: p.nurseryCounter, byParSeq: p.byParSeq, contentNames: p.contentNames, foreignEnumErrorSetEmitted: p.foreignEnumErrorSetEmitted, visibility: strings.Clone(p.currentVisibility)})
 	p.readFrom = p.pos
 }
 
@@ -102,6 +103,7 @@ func (p *Parser) ParseFileFromPrefix(filename string, prefix *ast.File, previous
 	p.rebindCounter = cp.rebindCounter
 	p.nurseryCounter = cp.nurseryCounter
 	p.byParSeq = cp.byParSeq
+	p.contentNames = cp.contentNames
 	p.foreignEnumErrorSetEmitted = cp.foreignEnumErrorSetEmitted
 	p.currentVisibility = cp.visibility
 	p.declVisibility = prefix.DeclVisibility

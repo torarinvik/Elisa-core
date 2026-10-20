@@ -61,8 +61,10 @@ func (p *Parser) looksLikeStartExpr() bool {
 // (`state Bar(baz: usize)`) flow through the existing machine-from payload machinery unchanged.
 func (p *Parser) parseStartExpr() ast.Expr {
 	pos := p.cur().Pos
+	startToken := p.pos
 	p.advance() // start
 	startState := p.expect(lexer.TOKEN_IDENT).Text
+	suffix := p.contentNameSuffix(pos, startToken, p.pos)
 
 	states := p.pendingStateDecls
 	p.pendingStateDecls = nil // consumed: a later `start` in the same function re-declares
@@ -70,7 +72,7 @@ func (p *Parser) parseStartExpr() ast.Expr {
 		p.errorf("`start %s` has no `state` declarations to run over — declare the states first (`state %s`, …) (docs/125 §5)", startState, startState)
 	}
 
-	enumName := "__StartStates_" + machineNameSuffix(pos)
+	enumName := "__StartStates_" + suffix
 	variants := make([]ast.EnumVariantDecl, 0, len(states))
 	payloadless := true
 	for _, st := range states {

@@ -1,8 +1,8 @@
 package semantic
 
 import (
+	"bytes"
 	"strconv"
-	"strings"
 	"sync"
 
 	"elisacore/src/ast"
@@ -47,7 +47,7 @@ func TryCanonicalTypeID(t Type) (TypeID, bool) {
 }
 
 func canonicalTypeIDKey(t Type) (string, bool) {
-	var b strings.Builder
+	var b bytes.Buffer
 	b.Grow(64)
 	active := typeIDActivePool.Get().(*typeIDActive)
 	defer func() {
@@ -99,7 +99,7 @@ func (s *typeIDActive) pop() {
 	s.frames = s.frames[:index]
 }
 
-func appendTypeIDKey(b *strings.Builder, t Type, active *typeIDActive, nextCycleID *int) bool {
+func appendTypeIDKey(b *bytes.Buffer, t Type, active *typeIDActive, nextCycleID *int) bool {
 	if t == nil {
 		appendKeyTag(b, "nil")
 		return true
@@ -322,7 +322,7 @@ func appendTypeIDKey(b *strings.Builder, t Type, active *typeIDActive, nextCycle
 	return true
 }
 
-func appendShapeIDKey(b *strings.Builder, shape Shape) bool {
+func appendShapeIDKey(b *bytes.Buffer, shape Shape) bool {
 	if shape == nil {
 		appendKeyTag(b, "shape:nil")
 		return true
@@ -347,7 +347,7 @@ func appendShapeIDKey(b *strings.Builder, shape Shape) bool {
 	return true
 }
 
-func appendTypeSliceIDKey(b *strings.Builder, types []Type, active *typeIDActive, nextCycleID *int) bool {
+func appendTypeSliceIDKey(b *bytes.Buffer, types []Type, active *typeIDActive, nextCycleID *int) bool {
 	appendKeyLen(b, len(types))
 	for _, typ := range types {
 		if !appendTypeIDKey(b, typ, active, nextCycleID) {
@@ -357,7 +357,7 @@ func appendTypeSliceIDKey(b *strings.Builder, types []Type, active *typeIDActive
 	return true
 }
 
-func appendGenericParamSlice(b *strings.Builder, params []ast.GenericParam) {
+func appendGenericParamSlice(b *bytes.Buffer, params []ast.GenericParam) {
 	appendKeyLen(b, len(params))
 	for _, param := range params {
 		appendKeyInt(b, int(param.Kind))
@@ -368,33 +368,33 @@ func appendGenericParamSlice(b *strings.Builder, params []ast.GenericParam) {
 	}
 }
 
-func appendKeyStringSlice(b *strings.Builder, values []string) {
+func appendKeyStringSlice(b *bytes.Buffer, values []string) {
 	appendKeyLen(b, len(values))
 	for _, value := range values {
 		appendKeyString(b, value)
 	}
 }
 
-func appendKeyRefStateSlice(b *strings.Builder, values []RefState) {
+func appendKeyRefStateSlice(b *bytes.Buffer, values []RefState) {
 	appendKeyLen(b, len(values))
 	for _, value := range values {
 		appendKeyInt(b, int(value))
 	}
 }
 
-func appendKeyTag(b *strings.Builder, tag string) {
+func appendKeyTag(b *bytes.Buffer, tag string) {
 	b.WriteString(tag)
 	b.WriteByte('|')
 }
 
-func appendKeyString(b *strings.Builder, value string) {
-	b.WriteString(strconv.Itoa(len(value)))
+func appendKeyString(b *bytes.Buffer, value string) {
+	b.Write(strconv.AppendInt(b.AvailableBuffer(), int64(len(value)), 10))
 	b.WriteByte(':')
 	b.WriteString(value)
 	b.WriteByte('|')
 }
 
-func appendKeyBool(b *strings.Builder, value bool) {
+func appendKeyBool(b *bytes.Buffer, value bool) {
 	if value {
 		b.WriteByte('1')
 	} else {
@@ -403,17 +403,57 @@ func appendKeyBool(b *strings.Builder, value bool) {
 	b.WriteByte('|')
 }
 
-func appendKeyLen(b *strings.Builder, value int) {
-	b.WriteString(strconv.Itoa(value))
+func appendKeyLen(b *bytes.Buffer, value int) {
+	b.Write(strconv.AppendInt(b.AvailableBuffer(), int64(value), 10))
 	b.WriteByte('#')
 }
 
-func appendKeyInt(b *strings.Builder, value int) {
-	b.WriteString(strconv.Itoa(value))
+func appendKeyInt(b *bytes.Buffer, value int) {
+	b.Write(strconv.AppendInt(b.AvailableBuffer(), int64(value), 10))
 	b.WriteByte('|')
 }
 
-func appendKeyInt64(b *strings.Builder, value int64) {
-	b.WriteString(strconv.FormatInt(value, 10))
+func appendKeyInt64(b *bytes.Buffer, value int64) {
+	b.Write(strconv.AppendInt(b.AvailableBuffer(), value, 10))
 	b.WriteByte('|')
+}
+
+var typeIDKeyBufferPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
+// sameTypeByCanonicalKey decides SameType from canonical keys built in pooled
+// buffers, without materializing either key as a string. When `a` has a key,
+// identical types are the same; when `b` also has one, the keys decide. Otherwise
+// decided is false and the structural comparison runs.
+func sameTypeByCanonicalKey(a, b Type) (same, decided bool) {
+	left := typeIDKeyBufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		left.Reset()
+		typeIDKeyBufferPool.Put(left)
+	}()
+	if !appendCanonicalTypeIDKey(left, a) {
+		return false, false
+	}
+	if a == b {
+		return true, true
+	}
+	right := typeIDKeyBufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		right.Reset()
+		typeIDKeyBufferPool.Put(right)
+	}()
+	if !appendCanonicalTypeIDKey(right, b) {
+		return false, false
+	}
+	return bytes.Equal(left.Bytes(), right.Bytes()), true
+}
+
+func appendCanonicalTypeIDKey(b *bytes.Buffer, t Type) bool {
+	active := typeIDActivePool.Get().(*typeIDActive)
+	defer func() {
+		if cap(active.frames) <= maxTypeIDPooledFrames {
+			typeIDActivePool.Put(active)
+		}
+	}()
+	nextCycleID := 1
+	return appendTypeIDKey(b, t, active, &nextCycleID)
 }

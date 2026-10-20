@@ -10,6 +10,10 @@
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <cstring>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/IPO/StripDeadPrototypes.h>
 #include <cstdint>
@@ -65,24 +69,45 @@ extern "C" void elisacorePruneObjectDeclarations(LLVMModuleRef module) {
   llvm::StripDeadPrototypesPass().run(shard, analyses);
 }
 
+// Aliases, ifuncs, module asm, address-taken blocks and inline asm carry
+// definition dependencies outside ordinary symbol references; such a module
+// keeps serial emission. The scan walks every instruction, so a caller cloning
+// many partitions of one module runs it once and uses the prechecked entry.
+extern "C" int elisacoreSelectiveCloneSupported(LLVMModuleRef module) {
+  using namespace llvm;
+  Module &source = *unwrap(module);
+  if (!source.alias_empty() || !source.ifunc_empty() ||
+      !source.getModuleInlineAsm().empty()) return 0;
+  for (const Function &function : source)
+    for (const BasicBlock &block : function) {
+      if (block.hasAddressTaken()) return 0;
+      for (const Instruction &instruction : block)
+        if (const auto *call = dyn_cast<CallBase>(&instruction))
+          if (call->isInlineAsm()) return 0;
+    }
+  return 1;
+}
+
+extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitionsPrechecked(
+    LLVMModuleRef module, const long long *owners, size_t count, int part,
+    const char *unit_namespace);
+
 extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitions(
+    LLVMModuleRef module, const long long *owners, size_t count, int part,
+    const char *unit_namespace) {
+  if (!elisacoreSelectiveCloneSupported(module)) return nullptr;
+  return elisacoreCloneSelectedDefinitionsPrechecked(module, owners, count, part, unit_namespace);
+}
+
+// The caller has established elisacoreSelectiveCloneSupported for this module.
+extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitionsPrechecked(
     LLVMModuleRef module, const long long *owners, size_t count, int part,
     const char *unit_namespace) {
   using namespace llvm;
   Module &source = *unwrap(module);
-  // These carry definition dependencies outside ordinary symbol references.
-  // Decline before cloning/removing blocks; the caller keeps serial emission.
-  if (!source.alias_empty() || !source.ifunc_empty() ||
-      !source.getModuleInlineAsm().empty()) return nullptr;
   DenseMap<const GlobalValue *, bool> keep;
   size_t index = 0;
   for (const Function &function : source) {
-    for (const BasicBlock &block : function) {
-      if (block.hasAddressTaken()) return nullptr;
-      for (const Instruction &instruction : block)
-        if (const auto *call = dyn_cast<CallBase>(&instruction))
-          if (call->isInlineAsm()) return nullptr;
-    }
     if (index >= count) return nullptr;
     keep[&function] = owners[index] < 0 || owners[index] == part;
     ++index;
@@ -123,4 +148,48 @@ extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitions(
     }
   }
   return wrap(clone.release());
+}
+
+// Loads one partition of a module from its complete bitcode into `context`,
+// materializing only the bodies the partition defines. The result matches what
+// elisacoreCloneSelectedDefinitions produces from the in-memory module: foreign
+// definitions become declarations that keep their original linkage, and local
+// symbols carry the unit namespace, so the shared C restriction step applies the
+// same ownership and final linkage. Each call needs its own context; calls on
+// distinct contexts may run concurrently. The bitcode must outlive the module.
+extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
+    LLVMContextRef context, const char *data, size_t size, const long long *owners,
+    size_t count, int part, const char *unit_namespace, char **error_out) {
+  using namespace llvm;
+  *error_out = nullptr;
+  auto buffer = MemoryBuffer::getMemBuffer(StringRef(data, size), "partition", false);
+  auto loaded = getOwningLazyBitcodeModule(std::move(buffer), *unwrap(context));
+  if (!loaded) {
+    *error_out = strdup(toString(loaded.takeError()).c_str());
+    return nullptr;
+  }
+  std::unique_ptr<Module> module = std::move(*loaded);
+  size_t index = 0;
+  for (Function &function : *module) {
+    if (index >= count) return nullptr;
+    long long owner = owners[index++];
+    if (owner >= 0 && owner != part && !function.isDeclaration()) {
+      GlobalValue::LinkageTypes linkage = function.getLinkage();
+      function.deleteBody();
+      function.setLinkage(linkage);
+    }
+  }
+  if (index != count) return nullptr;
+  if (Error err = module->materializeAll()) {
+    *error_out = strdup(toString(std::move(err)).c_str());
+    return nullptr;
+  }
+  for (Function &function : *module)
+    if (function.hasLocalLinkage())
+      function.setName(Twine(unit_namespace) + "." + function.getName());
+  for (GlobalVariable &global : module->globals())
+    if (global.hasLocalLinkage() && (!global.isConstant() ||
+        global.getUnnamedAddr() != GlobalValue::UnnamedAddr::Global))
+      global.setName(Twine(unit_namespace) + "." + global.getName());
+  return wrap(module.release());
 }

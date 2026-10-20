@@ -1,7 +1,7 @@
 package semantic
 
 import (
-	"strings"
+	"bytes"
 	"sync"
 	"testing"
 )
@@ -9,7 +9,7 @@ import (
 // Preserve the previous workspace implementation as a differential oracle. The
 // encoder is unchanged; these checks target reuse, cycle numbering and ownership.
 func unpooledTypeIDKey(t Type) (string, bool) {
-	var b strings.Builder
+	var b bytes.Buffer
 	b.Grow(64)
 	var stack [16]typeIDActiveFrame
 	active := &typeIDActive{frames: stack[:0]}
@@ -50,7 +50,7 @@ func TestTypeIDScratchMatchesUnpooledAndDropsReferences(t *testing.T) {
 			}
 		}
 		active := &typeIDActive{frames: make([]typeIDActiveFrame, 0, 16)}
-		var builder strings.Builder
+		var builder bytes.Buffer
 		next := 1
 		appendTypeIDKey(&builder, typ, active, &next)
 		if len(active.frames) != 0 {

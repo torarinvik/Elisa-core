@@ -118,13 +118,8 @@ func SameType(a, b Type) bool {
 			return ba.Name == bb.Name
 		}
 	}
-	if aKey, ok := canonicalTypeIDKey(a); ok {
-		if a == b {
-			return true
-		}
-		if bKey, ok := canonicalTypeIDKey(b); ok {
-			return aKey == bKey
-		}
+	if same, decided := sameTypeByCanonicalKey(a, b); decided {
+		return same
 	}
 	switch ta := a.(type) {
 	case *NeverType:

@@ -23,7 +23,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -56,14 +58,15 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if err != nil {
 		return err
 	}
-	defer g.dispose()
+	defer g.disposeInBackground()
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
 	if err := g.optimizeModule(options.OptLevel); err != nil {
 		return err
 	}
-	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += time.Since(irStart) })
+	irDuration := time.Since(irStart)
+	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += irDuration })
 	filename := result.ActiveFile().Filename
 	identity := strings.TrimSpace(filename)
 	virtual := identity == "" || identity == "-" || identity == "/dev/stdin" || (strings.HasPrefix(identity, "<") && strings.HasSuffix(identity, ">"))
@@ -108,80 +111,73 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 			stats.OwnerMapBuilds++
 		}
 	})
-	if owners == nil {
+	if owners == nil || C.elisacoreSelectiveCloneSupported(g.module) == 0 {
+		if owners != nil {
+			C.free(unsafe.Pointer(owners))
+		}
 		return s.emitDirectObject(g, outputPath)
 	}
 	// The C owner array is indexed by the optimized module's function order. Each
 	// clone consumes it synchronously without retaining it; keep the source module
 	// unchanged until all partitions have been cloned, then free it once here.
 	defer C.free(unsafe.Pointer(owners))
+	// The module is serialized once; each worker loads only its partition's bodies
+	// into a private LLVM context, so partitions are prepared, keyed and (on a
+	// miss) compiled concurrently. Cache keys stay the exact partition bitcode.
+	wholeStart := time.Now()
+	whole := C.LLVMWriteBitcodeToMemoryBuffer(g.module)
+	if whole == nil {
+		return s.emitDirectObject(g, outputPath)
+	}
+	defer C.LLVMDisposeMemoryBuffer(whole)
+	wholeData := C.LLVMGetBufferStart(whole)
+	wholeSize := C.size_t(C.LLVMGetBufferSize(whole))
+	wholeDuration := time.Since(wholeStart)
+	s.recordStats(func(stats *IncrementalObjectStats) {
+		stats.BitcodeTime += wholeDuration
+		stats.PartitionTime += wholeDuration
+	})
+	machineTriple := C.LLVMGetTargetMachineTriple(g.targetMachine)
+	machineCPU := C.LLVMGetTargetMachineCPU(g.targetMachine)
+	machineFeatures := C.LLVMGetTargetMachineFeatureString(g.targetMachine)
+	defer C.LLVMDisposeMessage(machineTriple)
+	defer C.LLVMDisposeMessage(machineCPU)
+	defer C.LLVMDisposeMessage(machineFeatures)
+	objects := make([][]byte, len(parts))
+	errs := make([]error, len(parts))
+	declined := make([]bool, len(parts))
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(parts) {
+		workers = len(parts)
+	}
+	next := make(chan int, len(parts))
 	for part := range parts {
-		partitionStart := time.Now()
-		module := C.elisacoreCloneObjectPartitionWithOwners(
-			g.module, C.int(s.partitions), C.int(part), namespace, owners, ownerCount)
-		if module == nil {
+		next <- part
+	}
+	close(next)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for part := range next {
+				objects[part], declined[part], errs[part] = s.buildPartition(part, wholeData, wholeSize, namespace, owners, ownerCount, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
+			}
+		}()
+	}
+	wg.Wait()
+	partitionsWall := time.Since(wholeStart)
+	for part := range parts {
+		if declined[part] {
 			return s.emitDirectObject(g, outputPath)
 		}
-		cloneDuration := time.Since(partitionStart)
-		bitcodeStart := time.Now()
-		bitcode := C.LLVMWriteBitcodeToMemoryBuffer(module)
-		if uint64(C.LLVMGetBufferSize(bitcode)) > 1<<31-1 {
-			C.LLVMDisposeMemoryBuffer(bitcode)
-			C.LLVMDisposeModule(module)
-			return s.emitDirectObject(g, outputPath)
+		if errs[part] != nil {
+			return errs[part]
 		}
-		inputData := C.LLVMGetBufferStart(bitcode)
-		inputSize := int(C.LLVMGetBufferSize(bitcode))
-		inputBytes := unsafe.Slice((*byte)(unsafe.Pointer(inputData)), inputSize)
-		// An entry's budget includes its exact bitcode and target key. An
-		// oversized input cannot hit either, so avoid hashing it as well.
-		retainInput := inputSize <= s.maxBytes-len(configKey)
-		var object []byte
-		if retainInput {
-			object = s.lookupObjectBytes(inputBytes, configKey)
-		}
-		var retainedInput string
-		if object == nil && retainInput {
-			// An admissible miss needs an owned exact snapshot. Reject oversized
-			// keys before allocating a copy that cannot enter the cache. Cache hits
-			// hash and compare the LLVM buffer in place without copying it into Go.
-			retainedInput = C.GoStringN(inputData, C.int(inputSize))
-		}
-		C.LLVMDisposeMemoryBuffer(bitcode)
-		bitcodeDuration := time.Since(bitcodeStart)
-		s.recordStats(func(stats *IncrementalObjectStats) {
-			stats.CloneTime += cloneDuration
-			stats.BitcodeTime += bitcodeDuration
-			stats.PartitionTime += cloneDuration + bitcodeDuration
-		})
-		if object == nil {
-			nativeStart := time.Now()
-			var buffer C.LLVMMemoryBufferRef
-			var message *C.char
-			failed := C.LLVMTargetMachineEmitToMemoryBuffer(g.targetMachine, module, C.LLVMObjectFile, &message, &buffer)
-			if failed != 0 {
-				C.LLVMDisposeModule(module)
-				return fmt.Errorf("incremental object partition %d: %s", part, disposeLLVMMessage(message, "native emission failed"))
-			}
-			if uint64(C.LLVMGetBufferSize(buffer)) > 1<<31-1 {
-				C.LLVMDisposeMemoryBuffer(buffer)
-				C.LLVMDisposeModule(module)
-				return fmt.Errorf("incremental native partition exceeds buffer limit")
-			}
-			object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
-			C.LLVMDisposeMemoryBuffer(buffer)
-			nativeDuration := time.Since(nativeStart)
-			s.recordStats(func(stats *IncrementalObjectStats) {
-				stats.NativeTime += nativeDuration
-				stats.PartitionsEmitted++
-			})
-			if retainInput {
-				s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
-			}
-		}
-		C.LLVMDisposeModule(module)
+	}
+	for part := range parts {
 		parts[part] = filepath.Join(dir, fmt.Sprintf("part%d.o", part))
-		if err := os.WriteFile(parts[part], object, 0600); err != nil {
+		if err := os.WriteFile(parts[part], objects[part], 0600); err != nil {
 			return err
 		}
 	}
@@ -194,6 +190,9 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	}
 	err = os.Rename(merged, outputPath)
 	mergeDuration := time.Since(mergeStart)
+	if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
+		fmt.Fprintf(os.Stderr, "[build-timing] incremental object: ir %v, bitcode+partitions %v (whole bitcode %v), merge %v\n", irDuration.Round(time.Millisecond), partitionsWall.Round(time.Millisecond), wholeDuration.Round(time.Millisecond), mergeDuration.Round(time.Millisecond))
+	}
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.MergeTime += mergeDuration })
 	return err
 }
@@ -207,4 +206,77 @@ func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath
 		stats.SerialFallbacks++
 	})
 	return err
+}
+
+// buildPartition loads one partition into a private context, looks its exact
+// bitcode up in the session and compiles it on a miss. declined reports a
+// partition the loader cannot split; the caller then emits the module directly.
+func (s *IncrementalObjectSession) buildPartition(part int, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
+	partitionStart := time.Now()
+	context := C.LLVMContextCreate()
+	defer C.LLVMContextDispose(context)
+	var message *C.char
+	module := C.elisacoreLoadObjectPartition(context, wholeData, wholeSize, C.int(s.partitions), C.int(part), namespace, owners, ownerCount, &message)
+	if module == nil {
+		if message != nil {
+			text := C.GoString(message)
+			C.free(unsafe.Pointer(message))
+			return nil, false, fmt.Errorf("incremental object partition %d: %s", part, text)
+		}
+		return nil, true, nil
+	}
+	defer C.LLVMDisposeModule(module)
+	cloneDuration := time.Since(partitionStart)
+	bitcodeStart := time.Now()
+	bitcode := C.LLVMWriteBitcodeToMemoryBuffer(module)
+	if uint64(C.LLVMGetBufferSize(bitcode)) > 1<<31-1 {
+		C.LLVMDisposeMemoryBuffer(bitcode)
+		return nil, true, nil
+	}
+	inputData := C.LLVMGetBufferStart(bitcode)
+	inputSize := int(C.LLVMGetBufferSize(bitcode))
+	inputBytes := unsafe.Slice((*byte)(unsafe.Pointer(inputData)), inputSize)
+	retainInput := inputSize <= s.maxBytes-len(configKey)
+	if retainInput {
+		object = s.lookupObjectBytes(inputBytes, configKey)
+	}
+	var retainedInput string
+	if object == nil && retainInput {
+		retainedInput = C.GoStringN(inputData, C.int(inputSize))
+	}
+	C.LLVMDisposeMemoryBuffer(bitcode)
+	bitcodeDuration := time.Since(bitcodeStart)
+	s.recordStats(func(stats *IncrementalObjectStats) {
+		stats.CloneTime += cloneDuration
+		stats.BitcodeTime += bitcodeDuration
+		stats.PartitionTime += cloneDuration + bitcodeDuration
+	})
+	if object != nil {
+		return object, false, nil
+	}
+	nativeStart := time.Now()
+	var buffer C.LLVMMemoryBufferRef
+	if C.elisacoreEmitPartitionObject(module, triple, cpu, features, &buffer, &message) == 0 {
+		text := "native emission failed"
+		if message != nil {
+			text = C.GoString(message)
+			C.free(unsafe.Pointer(message))
+		}
+		return nil, false, fmt.Errorf("incremental object partition %d: %s", part, text)
+	}
+	if uint64(C.LLVMGetBufferSize(buffer)) > 1<<31-1 {
+		C.LLVMDisposeMemoryBuffer(buffer)
+		return nil, false, fmt.Errorf("incremental native partition exceeds buffer limit")
+	}
+	object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
+	C.LLVMDisposeMemoryBuffer(buffer)
+	nativeDuration := time.Since(nativeStart)
+	s.recordStats(func(stats *IncrementalObjectStats) {
+		stats.NativeTime += nativeDuration
+		stats.PartitionsEmitted++
+	})
+	if retainInput {
+		s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
+	}
+	return object, false, nil
 }

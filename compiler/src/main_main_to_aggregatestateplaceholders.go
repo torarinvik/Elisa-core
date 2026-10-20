@@ -211,8 +211,10 @@ func analyzeProgramWithAnalyzer(filename string, src []byte, stderr io.Writer, o
 }
 
 func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, cache *sourceTokenCache, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
+	activeRetained.prefetchSource(filename, src)
 	file, ok := parseProgramWithTokenCache(filename, src, stderr, cache)
 	if !ok {
+		activeRetained.dropPrefetch()
 		return nil, nil, false
 	}
 	activeRetained.noteSource(filename, src, file)

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/binary"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -85,6 +86,7 @@ type machineArm struct {
 	exit              machineExitKind
 	target            string // transition target state
 	targetPos         lexer.Pos
+	nameSuffix        string               // unique per arm; names the arm's transition temporaries
 	args              []ast.Expr           // transition payload args
 	branchTransitions map[lexer.Pos]string // branch-local `-> State` markers, represented as BreakStmt until lowering
 	branchExit        bool                 // the parsed conditional has no paths left for a following arm statement
@@ -122,6 +124,7 @@ func (p *Parser) looksLikeMachineStmt() bool {
 
 func (p *Parser) parseMachineStmt() ast.Stmt {
 	pos := p.cur().Pos
+	startToken := p.pos
 	p.advance() // machine
 	p.expectIdentText("over")
 	// The header expressions are sub-parsed to their clause boundary: a top-level `->`
@@ -196,7 +199,8 @@ func (p *Parser) parseMachineStmt() ast.Stmt {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return p.desugarMachine(pos, input, cond, yield, forHeader, states, startState, startArgs, startSeen, arms)
+	suffix := p.contentNameSuffix(pos, startToken, p.pos)
+	return p.desugarMachine(pos, suffix, input, cond, yield, forHeader, states, startState, startArgs, startSeen, arms)
 }
 
 func (p *Parser) parseMachineForHeader() *machineForHeader {
@@ -769,7 +773,7 @@ func hasMachineBranchMarker(stmt *ast.IfStmt, markers map[lexer.Pos]string) bool
 
 // --- desugar -------------------------------------------------------------------------
 
-func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forHeader *machineForHeader, states []machineState, startState string, startArgs []ast.Expr, startSeen bool, arms []machineArm) ast.Stmt {
+func (p *Parser) desugarMachine(pos lexer.Pos, suffix string, input, cond, yield ast.Expr, forHeader *machineForHeader, states []machineState, startState string, startArgs []ast.Expr, startSeen bool, arms []machineArm) ast.Stmt {
 	stateByName := map[string]*machineState{}
 	for i := range states {
 		st := &states[i]
@@ -959,7 +963,9 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 	}
 
 	// --- construction ---
-	suffix := machineNameSuffix(pos)
+	for i := range arms {
+		arms[i].nameSuffix = fmt.Sprintf("%s_a%d", suffix, i)
+	}
 	enumName := "__MachineMode_" + suffix
 	modeVar := "__machine_mode_" + suffix
 	inputVar := "__machine_input_" + suffix
@@ -1478,7 +1484,7 @@ func lowerMachineTransition(arm *machineArm, target *machineState, enumMember fu
 	if len(arm.args) > 1 {
 		values = make([]ast.Expr, len(arm.args))
 		for i, a := range arm.args {
-			tmp := fmt.Sprintf("__machine_arg_%d_%d", arm.targetPos.Offset, i)
+			tmp := fmt.Sprintf("__machine_arg_%s_%d", arm.nameSuffix, i)
 			out = append(out, &ast.VarDeclStmt{Position: arm.targetPos, Name: tmp, Value: a})
 			values[i] = &ast.Ident{Position: arm.targetPos, Name: tmp}
 		}
@@ -1505,7 +1511,7 @@ func lowerMachineTransitionAfterScope(arm *machineArm, target *machineState, enu
 	captures := make([]ast.Stmt, 0, len(arm.args))
 	values := make([]ast.Expr, len(arm.args))
 	for i, arg := range arm.args {
-		name := fmt.Sprintf("__machine_arg_%s_%d", machineNameSuffix(arm.pos), i)
+		name := fmt.Sprintf("__machine_arg_%s_%d", arm.nameSuffix, i)
 		var typ ast.TypeExpr
 		if i < len(target.fields) {
 			typ = target.fields[i].typ
@@ -1573,13 +1579,34 @@ func buildMachineArmChain(pos lexer.Pos, arms []loweredMachineArm) []ast.Stmt {
 	return []ast.Stmt{ifStmt}
 }
 
-// machineNameSuffix builds a program-unique suffix for the machine's synthesized names:
-// the source offset disambiguates machines within a file, and a short filename hash
-// disambiguates identical offsets across files compiled into one program.
-func machineNameSuffix(pos lexer.Pos) string {
-	h := fnv.New32a()
+// contentNameSuffix builds a program-unique suffix for names synthesized from
+// tokens[from:to]: a hash of the file and of the tokens' kinds and spellings, plus
+// an occurrence number among identical token runs in that file. Unlike a byte
+// offset it does not change when unrelated text before the construct is edited,
+// so the retained analysis can splice the enclosing body instead of re-analyzing.
+func (p *Parser) contentNameSuffix(pos lexer.Pos, from, to int) string {
+	h := fnv.New64a()
 	h.Write([]byte(pos.File))
-	return fmt.Sprintf("%x_%d", h.Sum32(), pos.Offset)
+	h.Write([]byte{0})
+	if from < 0 {
+		from = 0
+	}
+	if count := p.tokenCount(); to > count {
+		to = count
+	}
+	var kind [8]byte
+	for _, tok := range p.tokenSpan(from, to) {
+		binary.LittleEndian.PutUint64(kind[:], uint64(tok.Kind))
+		h.Write(kind[:])
+		h.Write([]byte(tok.Text))
+		h.Write([]byte{0})
+		h.Write([]byte(tok.Suffix))
+		h.Write([]byte{0})
+	}
+	key := fmt.Sprintf("%016x", h.Sum64())
+	n := strings.Count(p.contentNames, key+";")
+	p.contentNames += key + ";"
+	return fmt.Sprintf("%s_n%d", key, n)
 }
 
 // collectMachineCallArgRoots adds every driven-resource root that appears inside a call

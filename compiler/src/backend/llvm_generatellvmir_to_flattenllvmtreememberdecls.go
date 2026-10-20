@@ -359,6 +359,27 @@ func (g *llvmGenerator) dispose() {
 		g.transientCStringLifetime = false
 	}
 }
+// disposeInBackground releases the generator like dispose, but tears the module
+// and its context down on another goroutine: a large module takes hundreds of
+// milliseconds to free and nothing waits on it. The context is private to this
+// generator, so freeing it concurrently with other contexts is safe.
+func (g *llvmGenerator) disposeInBackground() {
+	module, context := g.module, g.context
+	g.module, g.context = nil, nil
+	g.dispose()
+	if module == nil && context == nil {
+		return
+	}
+	go func() {
+		if module != nil {
+			C.LLVMDisposeModule(module)
+		}
+		if context != nil {
+			C.LLVMContextDispose(context)
+		}
+	}()
+}
+
 func (g *llvmGenerator) emitModule() error {
 	if g.emitDebugInfo {
 		g.initDebugInfo()
