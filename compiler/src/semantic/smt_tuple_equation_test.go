@@ -376,3 +376,30 @@ def clear(facts: mutable darray[F]&) -> void can[Abort.Panic]:
 		})
 	}
 }
+
+// Elements of an integer array lie in their type's range: a u8 element is below 256, and
+// nothing more (not below 255, and an i8 element may be negative).
+func TestSMTArrayElementTypeRange(t *testing.T) {
+	r := analyzeContractStrict(t, "array_element_range.elisa", `def ok(xs: darray[u8]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result
+    return xs[i].u32() < 256
+
+def bad(xs: darray[u8]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result
+    return xs[i].u32() < 255
+
+def sbad(xs: darray[i8]&, i: usize) -> bool:
+    requires i < xs.count
+    ensure result
+    return xs[i].i32() >= 0
+`)
+	es := strings.Join(r.Errors(), "\n")
+	if strings.Contains(es, `"ok"`) {
+		t.Fatalf("expected the element range to prove: %s", es)
+	}
+	if !strings.Contains(es, `"bad"`) || !strings.Contains(es, `"sbad"`) {
+		t.Fatalf("an element claim beyond the type range was accepted: %s", es)
+	}
+}

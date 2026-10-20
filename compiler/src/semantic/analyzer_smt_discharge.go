@@ -2632,6 +2632,8 @@ type smtTranslator struct {
 	// query's pre-state is one free snapshot, and the captured body writes them only through
 	// recordOverlays, which apply while recordOverlayActive (the post-body obligation).
 	loopFrameContainers map[string]bool
+	// arrayElementRanges holds each integer-element array's element value range [lo, hi).
+	arrayElementRanges map[string][2]string
 	// opaqueQuantifierBodies numbers the fresh predicates opaqueGuardedQuantifierBody declares.
 	opaqueQuantifierBodies int
 	recordOverlays         map[string]loopArrayStore
@@ -2907,11 +2909,44 @@ func isAnyArrayLike(t Type) bool {
 }
 
 func (tr *smtTranslator) recordFixedArrayLen(arr string, t Type) {
+	tr.recordArrayElementRange(arr, t)
 	at, ok := stripRefForBounds(t).(*ArrayType)
 	if !ok || at == nil || !at.HasConstSize {
 		return
 	}
 	tr.lenConsts[arr+smtArrayLenSuffix] = at.ConstSize
+}
+
+// recordArrayElementRange notes the value range of an integer-element array's elements: every
+// element of a `darray[u32]` is a u32. The range is asserted with the select as its trigger, so
+// it is instantiated only at reads the query already makes.
+func (tr *smtTranslator) recordArrayElementRange(arr string, t Type) {
+	var elem Type
+	switch at := stripRefForBounds(t).(type) {
+	case *ArrayType:
+		if at != nil {
+			elem = at.Elem
+		}
+	case *DArrayType:
+		if at != nil {
+			elem = at.Elem
+		}
+	}
+	if elem == nil || IsBoolType(elem) || IsFloatType(elem) {
+		return
+	}
+	signed, bits, ok := smtIntWidthSign(elem)
+	if !ok || bits <= 0 || bits > 64 {
+		return
+	}
+	lo, hi := "0", smtPow2(bits)
+	if signed {
+		lo, hi = "(- "+smtPow2(bits-1)+")", smtPow2(bits-1)
+	}
+	if tr.arrayElementRanges == nil {
+		tr.arrayElementRanges = map[string][2]string{}
+	}
+	tr.arrayElementRanges[arr] = [2]string{lo, hi}
 }
 
 // isArrayLike reports whether a type is an integer/bool-element array/darray we can model as (Array Int
@@ -6290,6 +6325,13 @@ func (tr *smtTranslator) factPreamble() string {
 	sort.Strings(arrays)
 	for _, name := range arrays {
 		b.WriteString("(declare-const " + smtVar(name) + " (Array Int Int))\n")
+	}
+	for _, name := range arrays {
+		arr := smtVar(name)
+		if r, ok := tr.arrayElementRanges[arr]; ok {
+			sel := "(select " + arr + " k)"
+			b.WriteString("(assert (forall ((k Int)) (! (and (<= " + r[0] + " " + sel + ") (< " + sel + " " + r[1] + ")) :pattern (" + sel + "))))\n")
+		}
 	}
 	// Set declarations: an `(Array <KSort> Bool)` membership function. Deterministic order.
 	sets := make([]string, 0, len(tr.setDecls))
