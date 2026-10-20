@@ -23,11 +23,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"elisacore/src/ast"
@@ -103,12 +105,17 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	}
 	key := rt.filename + "\x00" + fmt.Sprintf("%#v", options)
 	if rt.state != nil && rt.key == key {
-		result, err := rt.state.Update(file, rt.src)
+		scratch, ok := rt.parse()
+		var result *semantic.Result
+		err := fmt.Errorf("scratch parse failed")
+		if ok {
+			result, err = rt.state.Update(file, scratch, rt.src)
+		}
 		st := rt.state.LastStats
 		if err != nil {
 			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
 		} else {
-			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
+			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v, compare %v, diff %v, bodies %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Total.Round(time.Millisecond))
 			if len(result.Errors()) != 0 {
 				return result
 			}
@@ -145,6 +152,13 @@ func serveRetained(socket string, log io.Writer) error {
 		return err
 	}
 	defer os.Remove(socket)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-signals
+		_ = os.Remove(socket) // a stale socket would make clients try, fail and print a notice
+		os.Exit(0)
+	}()
 	if _, set := os.LookupEnv("GOGC"); !set {
 		// A one-shot compile trades memory for speed with a generous GC percent
 		// (defaultGCPercent). The server keeps ~2.5 GB live across requests, so the

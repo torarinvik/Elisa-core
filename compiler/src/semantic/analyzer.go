@@ -914,6 +914,8 @@ type Analyzer struct {
 	affineHandleMemo map[Type]bool
 	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
 	retained *RetainedAnalysis
+	// preBody stops a scratch analysis after the declaration phase (retained_prebody.go).
+	preBody *preBodyState
 	// typeSeenScratch is a reused visited set for containsAffineHandleValues traversals.
 	typeSeenScratch     map[Type]bool
 	typeSeenScratchBusy bool
@@ -1246,6 +1248,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	}
 	a := &Analyzer{
 		retained:                          takePendingRetained(),
+		preBody:                           takePendingPreBody(),
 		lookupTrace:                       recorder,
 		trustedRuntimeSourceFiles:         trustedRuntimeSourceFileSet(options.TrustedRuntimeSourceFiles),
 		file:                              file,
@@ -1467,6 +1470,14 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	// structured ParamContracts (removing them from Requires), so the call-site entailment check and
 	// the callee-body assumption can compose value contracts through first-class functions.
 	a.expandHigherOrderContracts(activeDecls)
+	if probe := a.preBody; probe != nil {
+		// A retained update's scratch run: only the declaration phase is wanted.
+		probe.capture(a, activeDecls)
+		return &Result{File: file}
+	}
+	if a.retained != nil {
+		a.retained.pre = capturePreBody(a, activeDecls)
+	}
 	a.returnBorrowLateEnabled = true
 	a.typeShapesFrozen = true
 	if a.incrementalBodies != nil {

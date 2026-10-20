@@ -72,7 +72,7 @@ func TestRetainedAnalysisUpdateMatchesFreshAnalysis(t *testing.T) {
 	if !strings.Contains(retainedDiagnostics(before), `call to "helper" requires can[Unsafe]`) {
 		t.Fatalf("fixture lost its cross-function warning:\n%s", retainedDiagnostics(before))
 	}
-	updated, err := retained.Update(retainedParse(t, retainedAfter), []byte(retainedAfter))
+	updated, err := retained.Update(retainedParse(t, retainedAfter), retainedParse(t, retainedAfter), []byte(retainedAfter))
 	if err != nil {
 		t.Fatalf("body-only edit fell back: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestRetainedAnalysisUpdateMatchesFreshAnalysis(t *testing.T) {
 		t.Fatalf("retained update diverged from a fresh analysis\n got:\n%s\nwant:\n%s", got, want)
 	}
 	// And back again: the retained state keeps tracking the latest source.
-	reverted, err := retained.Update(retainedParse(t, retainedBefore), []byte(retainedBefore))
+	reverted, err := retained.Update(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore))
 	if err != nil {
 		t.Fatalf("revert fell back: %v", err)
 	}
@@ -96,11 +96,11 @@ func TestRetainedAnalysisUpdateMatchesFreshAnalysis(t *testing.T) {
 func TestRetainedAnalysisRejectsSignatureEdits(t *testing.T) {
 	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
 	edited := strings.Replace(retainedBefore, "def caller(x: i64) -> i64:", "def caller(x: i32) -> i64:", 1)
-	if _, err := retained.Update(retainedParse(t, edited), []byte(edited)); err == nil || !strings.Contains(err.Error(), "signature of caller changed") {
+	if _, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited)); err == nil || !strings.Contains(err.Error(), "signature of caller changed") {
 		t.Fatalf("signature edit: err = %v", err)
 	}
 	added := retainedBefore + "\nconst EXTRA: i64 = 1\n"
-	if _, err := retained.Update(retainedParse(t, added), []byte(added)); err == nil {
+	if _, err := retained.Update(retainedParse(t, added), retainedParse(t, added), []byte(added)); err == nil {
 		t.Fatal("adding a declaration must fall back")
 	}
 }
@@ -110,7 +110,7 @@ func TestRetainedAnalysisReanalyzesFunctionsWhoseLinesMoved(t *testing.T) {
 	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
 	// A comment inside the last function moves only its own statement.
 	edited := strings.Replace(retainedBefore, "def later(y: i64) -> i64:\n", "def later(y: i64) -> i64:\n    # moved\n", 1)
-	updated, err := retained.Update(retainedParse(t, edited), []byte(edited))
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
 	if err != nil {
 		t.Fatalf("comment edit fell back: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestRetainedAnalysisRecomputesCallersOfChangedReturnBorrowSummaries(t *test
 		t.Fatal("fixture edit does not change the caller's diagnostics")
 	}
 	for i, src := range []string{retainedBorrowAfter, retainedBorrowBefore, retainedBorrowAfter} {
-		updated, err := retained.Update(retainedParse(t, src), []byte(src))
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
 		if err != nil {
 			t.Fatalf("step %d fell back: %v", i, err)
 		}
@@ -161,5 +161,33 @@ func TestRetainedAnalysisRecomputesCallersOfChangedReturnBorrowSummaries(t *test
 		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
 			t.Fatalf("step %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
 		}
+	}
+}
+
+// Region-parameter inference reads bodies during the declaration phase: making
+// a body grow its container parameter changes the function's signature. Such an
+// edit must not be applied as a body-only change.
+func TestRetainedAnalysisRejectsBodyEditsThatChangeDeclarationResults(t *testing.T) {
+	before := `def fill(xs: mutable darray[i64]&) -> void:
+    n: i64 = xs.count.i64()
+
+def caller() -> void:
+    items: mutable darray[i64] = []
+    fill(items)
+`
+	after := strings.Replace(before, "    n: i64 = xs.count.i64()", "    xs.push(1)", 1)
+	options := AnalyzeOptions{}
+	header := func(src string) string {
+		file := retainedParse(t, src)
+		AnalyzeWithOptions(file, options)
+		return retainedHeader(file.Decls[0].(*ast.FuncDecl))
+	}
+	if header(before) == header(after) {
+		t.Skip("fixture no longer changes the inferred signature")
+	}
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	_, err := retained.Update(retainedParse(t, after), retainedParse(t, after), []byte(after))
+	if err == nil || !strings.Contains(err.Error(), "declaration") {
+		t.Fatalf("err = %v, want a declaration-phase fallback", err)
 	}
 }

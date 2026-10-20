@@ -44,17 +44,21 @@ type RetainedAnalysis struct {
 	rbInvalid   map[*ast.FuncDecl]bool                   // owners to recompute in this update
 	rbUpdating  bool
 
+	options AnalyzeOptions
+	pre     *preBodyState // declaration-phase results the retained state was built from
+
 	LastStats RetainedUpdateStats
 }
 
 // RetainedUpdateStats describes the last Update.
 type RetainedUpdateStats struct {
-	Changed  int
-	Shifted  int
-	Diff     time.Duration
-	Bodies   time.Duration
-	Total    time.Duration
-	Fallback string
+	Changed                   int
+	Shifted                   int
+	Diff                      time.Duration
+	Bodies                    time.Duration
+	Total                     time.Duration
+	Fallback                  string
+	Pairing, Scratch, Compare time.Duration
 	// Invalidated counts functions whose late return-borrow results were recomputed.
 	Invalidated int
 }
@@ -74,7 +78,7 @@ func takePendingRetained() *RetainedAnalysis {
 // pristine must be a separate parse of the same source that analysis never
 // touches. Calls are serialized; do not run other analyses concurrently.
 func AnalyzeRetained(file, pristine *ast.File, src []byte, options AnalyzeOptions) (*Result, *RetainedAnalysis) {
-	r := &RetainedAnalysis{pristine: pristine, src: src, windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}, frameDiags: map[*ast.FuncDecl][]Diagnostic{}}
+	r := &RetainedAnalysis{options: options, pristine: pristine, src: src, windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}, frameDiags: map[*ast.FuncDecl][]Diagnostic{}}
 	pendingRetainedMu.Lock()
 	pendingRetained = r
 	result := AnalyzeWithOptions(file, options)
@@ -97,7 +101,7 @@ func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func())
 // analyze file afterwards. A non-nil error names why the edit is not a
 // body-only change; the retained state and file are then untouched, and the
 // caller should start over with a full analysis.
-func (r *RetainedAnalysis) Update(file *ast.File, src []byte) (*Result, error) {
+func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result, error) {
 	start := time.Now()
 	r.LastStats = RetainedUpdateStats{}
 	fail := func(format string, args ...any) (*Result, error) {
@@ -130,7 +134,7 @@ func (r *RetainedAnalysis) Update(file *ast.File, src []byte) (*Result, error) {
 	}
 	type splice struct {
 		live *ast.FuncDecl
-		body []ast.Stmt
+		edit *ast.FuncDecl // the function in file, found again in the prepared scratch parse
 	}
 	var splices []splice
 	var shifted []ast.Decl
@@ -188,14 +192,37 @@ func (r *RetainedAnalysis) Update(file *ast.File, src []byte) (*Result, error) {
 		if _, known := scoped[live]; !known {
 			return fail("%s is not a top-level analyzed function", ofn.Name)
 		}
-		splices = append(splices, splice{live, nfn.Body})
+		splices = append(splices, splice{live, nfn})
 		newTexts[nfn] = newText
+	}
+	// Bodies are analyzed in the form the declaration phase leaves them in, and
+	// that phase's body-dependent results must be what the retained state holds.
+	pairing := time.Since(start)
+	pendingRetainedMu.Lock()
+	scratchStart := time.Now()
+	pre := scratchPreBody(scratch, r.options)
+	r.LastStats.Scratch = time.Since(scratchStart)
+	pendingRetainedMu.Unlock()
+	compareStart := time.Now()
+	diff := preBodyDifference(r.pre, pre, marks)
+	r.LastStats.Compare = time.Since(compareStart)
+	r.LastStats.Pairing = pairing
+	if diff != "" {
+		return fail("%s", diff)
+	}
+	bodies := make([][]ast.Stmt, len(splices))
+	for i, s := range splices {
+		prepared := pre.prepared[retainedLineKey(s.edit.Pos())+"|"+s.edit.Name]
+		if prepared == nil {
+			return fail("prepared form of %s not found", s.edit.Name)
+		}
+		bodies[i] = prepared.Body
 	}
 	// Past this point the edit is accepted; mutate the retained state.
 	var changed []scopedDecl
 	drop := map[int]bool{}
-	for _, s := range splices {
-		s.live.Body = s.body
+	for i, s := range splices {
+		s.live.Body = bodies[i]
 		changed = append(changed, scoped[s.live])
 		if w, ok := r.windows[s.live]; ok {
 			for k := w[0]; k < w[1]; k++ {
@@ -229,16 +256,16 @@ func (r *RetainedAnalysis) Update(file *ast.File, src []byte) (*Result, error) {
 	r.invalidateReturnBorrow(changed, marks)
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
-	bodies := time.Now()
+	bodiesStart := time.Now()
 	a.analyzeDecls(changed)
-	r.LastStats.Bodies = time.Since(bodies)
+	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
 	r.post()
 	r.rbUpdating = false
 	a.closeSMT()
 	// file is the next comparison base. Its spliced bodies now belong to the
 	// analyzed AST and get rewritten there, so keep their text from before.
-	r.pristine, r.src, r.texts = file, src, newTexts
+	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre
 	r.result.Diagnostics = a.diagnostics
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)

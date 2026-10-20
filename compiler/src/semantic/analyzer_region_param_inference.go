@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -123,23 +124,61 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		})
 	}
 	forwardingByFunc := collectRegionParamForwarding(cands, funcByName)
-	// Fixpoint: making one function region-polymorphic turns it into a region-REQUIRING callee, so a
-	// caller that merely FORWARDS a container/struct ref param to it must itself become region-poly to
-	// thread the region through. Iterate until no function gains a new region param. Each per-function
-	// pass is idempotent (an already-stamped param's type carries its region, so it no longer matches
-	// the region-LESS predicates), so reprocessing only ever picks up newly-enabled params.
-	for {
-		changed := false
-		for _, fn := range cands {
+	// Worklist fixpoint. A function's verdict reads other functions only through names that
+	// resolve in funcByName (forwarding targets, callee return types), so after the first full
+	// pass only the callers of a function that just changed can gain a param (a recursive
+	// function is its own caller). Each per-function pass is idempotent, so a function that
+	// changed is complete until a callee changes. Rescanning every candidate per round cost ~0.6 s each on the seed.
+	callers := regionInferenceCallers(cands, funcByName)
+	pending := cands
+	for len(pending) != 0 {
+		queued := map[*ast.FuncDecl]bool{}
+		var next []*ast.FuncDecl
+		// A caller still ahead in this round sees the change when its turn comes.
+		ahead := make(map[*ast.FuncDecl]int, len(pending))
+		for i, fn := range pending {
+			ahead[fn] = i
+		}
+		for i, fn := range pending {
 			if fn == nil || arenaManaged[fn] {
 				continue
 			}
-			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn]) {
-				changed = true
+			if !a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn]) {
+				continue
+			}
+			for _, dep := range callers[fn] {
+				if pos, ok := ahead[dep]; ok && pos > i {
+					continue
+				}
+				if !queued[dep] {
+					queued[dep] = true
+					next = append(next, dep)
+				}
 			}
 		}
-		if !changed {
-			break
+		// Keep candidate order: stamping order names nothing, but deterministic rounds keep any
+		// order-sensitive diagnostic stable.
+		if len(next) > 1 {
+			order := make(map[*ast.FuncDecl]int, len(next))
+			for _, fn := range next {
+				order[fn] = -1
+			}
+			kept := next[:0]
+			for _, fn := range cands {
+				if _, ok := order[fn]; ok && order[fn] < 0 {
+					order[fn] = 0
+					kept = append(kept, fn)
+				}
+			}
+			next = kept
+		}
+		pending = next
+	}
+	if os.Getenv("ELISA_REGION_FIXPOINT_SHADOW") != "" {
+		for _, fn := range cands {
+			if fn != nil && !arenaManaged[fn] && a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn]) {
+				panic("region inference worklist missed a dependency of " + fn.Name)
+			}
 		}
 	}
 	// Keep a call-site summary for region-stack assignment. The inference fixpoint above answers
@@ -1792,4 +1831,33 @@ func (a *Analyzer) paramStructHasExplicitBackingIn(scoped scopedDecl, fn *ast.Fu
 		})
 	})
 	return result
+}
+
+// regionInferenceCallers maps each candidate to the candidates whose bodies name it, through any
+// expression funcByName resolves: a call shape or a bare function reference.
+func regionInferenceCallers(cands []*ast.FuncDecl, funcByName map[string]*ast.FuncDecl) map[*ast.FuncDecl][]*ast.FuncDecl {
+	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
+	for _, fn := range cands {
+		if fn == nil || len(fn.Body) == 0 {
+			continue
+		}
+		seen := map[*ast.FuncDecl]bool{}
+		note := func(name string) {
+			if callee := funcByName[name]; callee != nil && !seen[callee] {
+				seen[callee] = true
+				callers[callee] = append(callers[callee], fn)
+			}
+		}
+		walkStoreScanNodes(fn.Body, func(node any) {
+			switch n := node.(type) {
+			case *ast.Ident:
+				note(n.Name)
+			case ast.Expr:
+				if name, _, ok := ast.PrepassCallShape(n); ok {
+					note(name)
+				}
+			}
+		})
+	}
+	return callers
 }
