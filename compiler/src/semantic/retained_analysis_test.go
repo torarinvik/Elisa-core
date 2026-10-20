@@ -225,3 +225,34 @@ func TestRetainedAnalysisAcceptsAddedFunction(t *testing.T) {
 		t.Fatalf("body edit after an added function fell back: %v", err)
 	}
 }
+
+// Removing a function updates in place; a caller left mentioning it, though its
+// own text is unchanged, must report the now-undefined call like a fresh analysis.
+func TestRetainedAnalysisAcceptsRemovedFunction(t *testing.T) {
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
+	if retained == nil {
+		t.Fatal("analysis was not retained")
+	}
+	steps := []string{
+		// later stops calling helper, then helper is removed while caller still calls it.
+		strings.Replace(retainedBefore, "def later(y: i64) -> i64:\n    return helper(y)", "def later(y: i64) -> i64:\n    return y", 1),
+	}
+	steps = append(steps, strings.Replace(steps[0], "def helper(x: i64) -> i64:\n    v: mutable i64 = x\n    base: uintptr = (&v).cast[uintptr] can Unsafe.PointerCast\n    return x\n\n", "", 1))
+	for i, src := range steps {
+		if i > 0 && src == steps[i-1] {
+			t.Fatalf("step %d edit did not apply", i)
+		}
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("step %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", i, got, want)
+		}
+	}
+	if retained.LastStats.Removed != 1 {
+		t.Fatalf("stats = %+v, want 1 removed", retained.LastStats)
+	}
+}

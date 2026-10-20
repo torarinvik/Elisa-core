@@ -134,16 +134,16 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 // preBodyDifference names the first body-dependent declaration-phase result
 // that differs, or returns "". Old diagnostics are compared after the edit's
 // line shifts.
-func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added int) string {
+func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added, removed int) string {
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
 	if old.global != cur.global {
-		if diff := globalGrowthDifference(old.global, cur.global, added); diff != "" {
+		if diff := globalGrowthDifference(old.global, cur.global, added, removed); diff != "" {
 			return "program-wide declaration results changed" + diff
 		}
 	}
-	if len(old.fingerprint)+added != len(cur.fingerprint) {
+	if len(old.fingerprint)+added-removed != len(cur.fingerprint) {
 		return "function set changed"
 	}
 	keys := make([]string, 0, len(cur.fingerprint))
@@ -163,6 +163,15 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added 
 		}
 	}
 	if fresh != added {
+		return "function set changed"
+	}
+	gone := 0
+	for key := range old.fingerprint {
+		if _, ok := cur.fingerprint[key]; !ok {
+			gone++
+		}
+	}
+	if gone != removed {
 		return "function set changed"
 	}
 	render := func(ds []Diagnostic, shift bool) string {
@@ -217,9 +226,9 @@ var addedFunctionTables = map[string]bool{
 }
 
 // globalGrowthDifference accepts a global fingerprint change only when the sole
-// differences are per-function table sizes grown by added.
-func globalGrowthDifference(old, cur string, added int) string {
-	if added == 0 {
+// differences are per-function table sizes moved by the added or removed functions.
+func globalGrowthDifference(old, cur string, added, removed int) string {
+	if added == 0 && removed == 0 {
 		return firstLineDifference(old, cur)
 	}
 	ol, cl := strings.Split(old, "\n"), strings.Split(cur, "\n")
@@ -235,7 +244,7 @@ func globalGrowthDifference(old, cur string, added int) string {
 		ok1, _ := fmt.Sscanf(strings.Replace(ol[i], "=", " ", 1), "#%s %d", &name, &before)
 		var name2 string
 		ok2, _ := fmt.Sscanf(strings.Replace(cl[i], "=", " ", 1), "#%s %d", &name2, &after)
-		if ok1 != 2 || ok2 != 2 || name != name2 || !addedFunctionTables[name] || after > before+added || after < before {
+		if ok1 != 2 || ok2 != 2 || name != name2 || !addedFunctionTables[name] || after > before+added || after < before-removed {
 			return fmt.Sprintf(" (%s -> %s)", ol[i], cl[i])
 		}
 	}

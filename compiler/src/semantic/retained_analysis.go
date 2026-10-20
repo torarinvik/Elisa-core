@@ -59,6 +59,7 @@ type RetainedUpdateStats struct {
 	Total                     time.Duration
 	Fallback                  string
 	Added                     int
+	Removed                   int
 	Pairing, Scratch, Compare time.Duration
 	// Invalidated counts functions whose late return-borrow results were recomputed.
 	Invalidated int
@@ -121,33 +122,52 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	for _, d := range file.Decls {
 		topLevel[d] = true
 	}
-	oldNames := map[string]bool{}
+	oldNames, newNames := map[string]bool{}, map[string]bool{}
 	for _, d := range oldDecls {
 		if f, ok := d.(*ast.FuncDecl); ok {
 			oldNames[f.Name] = true
 		}
 	}
+	for _, d := range newDecls {
+		if f, ok := d.(*ast.FuncDecl); ok {
+			newNames[f.Name] = true
+		}
+	}
+	oldTop := make(map[ast.Decl]bool, len(r.pristine.Decls))
+	for _, d := range r.pristine.Decls {
+		oldTop[d] = true
+	}
+	var removed []*ast.FuncDecl
 	var pairs [][2]int
 	var added []*ast.FuncDecl
 	insertedBefore := map[int]bool{} // pair index preceded by an added declaration
-	for i, j := 0, 0; j < len(newDecls); {
-		if i < len(oldDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
+	for i, j := 0, 0; i < len(oldDecls) || j < len(newDecls); {
+		if i < len(oldDecls) && j < len(newDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
 			pairs = append(pairs, [2]int{i, j})
 			i, j = i+1, j+1
 			continue
 		}
+		// A removed top-level function: its name is gone from the edited source.
+		if i < len(oldDecls) {
+			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && oldTop[of] && !newNames[of.Name] && retainedPlainFunction(of) {
+				removed = append(removed, of)
+				insertedBefore[len(pairs)] = true
+				i++
+				continue
+			}
+		}
+		if j == len(newDecls) {
+			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
+		}
 		nf, ok := newDecls[j].(*ast.FuncDecl)
-		if !ok || !topLevel[nf] || oldNames[nf.Name] || nf.IsLaw || len(nf.TypeParams) != 0 || len(nf.GenericParams) != 0 {
+		if !ok || !topLevel[nf] || oldNames[nf.Name] || !retainedPlainFunction(nf) {
 			return fail("declaration set changed at %s", retainedLineKey(newDecls[j].Pos()))
 		}
 		added = append(added, nf)
 		insertedBefore[len(pairs)] = true
 		j++
-		if j == len(newDecls) && i != len(oldDecls) {
-			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
-		}
 	}
-	if len(pairs) != len(oldDecls) {
+	if len(pairs)+len(removed) != len(oldDecls) {
 		return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 	}
 	type fnKey struct {
@@ -175,6 +195,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	}
 	var splices []splice
 	var movedSplices []ast.Decl // edited functions that also moved: header shifts, body is replaced
+	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	var shifted []ast.Decl
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
@@ -215,6 +236,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 			return fail("%d analyzed candidates for %s at %s", len(cands), ofn.Name, retainedLineKey(op))
 		}
 		live := cands[0]
+		pairedNew[live] = nfn
 		if sameText {
 			if lineDelta[op.File] != 0 {
 				shifted = append(shifted, live)
@@ -246,11 +268,53 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	r.LastStats.Scratch = time.Since(scratchStart)
 	pendingRetainedMu.Unlock()
 	compareStart := time.Now()
-	diff := preBodyDifference(r.pre, pre, marks, len(added))
+	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed))
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
 		return fail("%s", diff)
+	}
+	// A removed function leaves the live analysis; every unchanged function that
+	// mentions its name is re-analyzed from its prepared body, as cold analysis
+	// would now resolve that name differently.
+	var removedLive []*ast.FuncDecl
+	if len(removed) != 0 {
+		gone := map[string]bool{}
+		for _, of := range removed {
+			cands := liveFns[fnKey{retainedLineKey(of.Pos()), of.Name}]
+			if len(cands) != 1 {
+				return fail("%d analyzed candidates for removed %s", len(cands), of.Name)
+			}
+			live := cands[0]
+			sym := a.funcDeclSymbols[live]
+			if sym == nil || a.globalScope.Symbols[live.Name] != sym || len(a.ufcsFunctionsByName[live.Name]) > 1 {
+				return fail("removed %s is not a plain global function", of.Name)
+			}
+			if _, known := scoped[live]; !known {
+				return fail("removed %s is not a top-level analyzed function", of.Name)
+			}
+			removedLive = append(removedLive, live)
+			gone[live.Name] = true
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] || gone[fn.Name] {
+				continue
+			}
+			if !retainedMentionsAny(fn, gone) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil {
+				return fail("%s mentions a removed function but has no edited counterpart", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+		}
 	}
 	bodies := make([][]ast.Stmt, len(splices))
 	for i, s := range splices {
@@ -309,10 +373,20 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 		}()...)
 		r.decls = append(r.decls, addedScoped...)
 	}
+	if len(removedLive) != 0 {
+		r.removeLiveFunctions(removedLive)
+	}
 	// Past this point the edit is accepted; mutate the retained state.
 	// Added functions are analyzed first: the edited bodies call them.
 	changed := append([]scopedDecl(nil), addedScoped...)
 	drop := map[int]bool{}
+	for _, fn := range removedLive {
+		if w, ok := r.windows[fn]; ok {
+			for k := w[0]; k < w[1]; k++ {
+				drop[k] = true
+			}
+		}
+	}
 	for _, d := range movedSplices {
 		retainedShiftDecl(d, marks)
 	}
@@ -365,6 +439,7 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)
 	r.LastStats.Added = len(added)
+	r.LastStats.Removed = len(removed)
 	r.LastStats.Shifted = len(shifted)
 	r.LastStats.Total = time.Since(start)
 	return r.result, nil
@@ -582,4 +657,77 @@ func retainedSameDeclKind(a, b ast.Decl) bool {
 		return true
 	}
 	return fa.Name == b.(*ast.FuncDecl).Name
+}
+
+// retainedPlainFunction is a function an update may add or remove in place: not a
+// law, generic, hook or overload, whose only global registration is its name.
+func retainedPlainFunction(fn *ast.FuncDecl) bool {
+	return !fn.IsLaw && !fn.IsContract && !fn.IsLemma && !fn.IsGhost && len(fn.TypeParams) == 0 &&
+		len(fn.GenericParams) == 0 && !strings.HasPrefix(fn.Name, "__")
+}
+
+// retainedMentionsAny reports whether fn's body or contracts name any of names.
+func retainedMentionsAny(fn *ast.FuncDecl, names map[string]bool) bool {
+	hit := false
+	walkStoreScanNodes(funcScanStmts(fn), func(node any) {
+		if hit {
+			return
+		}
+		switch n := node.(type) {
+		case *ast.Ident:
+			hit = names[n.Name] || names[fillMayAdoptLastSegment(n.Name)]
+		case *ast.FieldExpr:
+			hit = names[n.Field]
+		}
+	})
+	return hit
+}
+
+// removeLiveFunctions drops removed functions from the live analysis: their
+// global registration, per-function tables, diagnostics and late checks.
+func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
+	a := r.a
+	gone := map[*ast.FuncDecl]bool{}
+	for _, fn := range fns {
+		gone[fn] = true
+		sym := a.funcDeclSymbols[fn]
+		delete(a.globalScope.Symbols, fn.Name)
+		delete(a.functionTypes, fn.Name)
+		if sym != nil {
+			delete(a.functionTypes, sym.Name)
+		}
+		delete(a.funcDeclSymbols, fn)
+		delete(a.funcDeclUsings, fn)
+		delete(a.paramStoreTargets, fn)
+		delete(a.regionParamCalleeParamIndex, fn.Name)
+		if list := a.ufcsFunctionsByName[fn.Name]; len(list) <= 1 {
+			delete(a.ufcsFunctionsByName, fn.Name)
+		}
+		a.ufcsByLastSegment = nil
+	}
+	keep := func(d ast.Decl) bool {
+		fn, ok := d.(*ast.FuncDecl)
+		return !ok || !gone[fn]
+	}
+	decls := r.decls[:0]
+	for _, sd := range r.decls {
+		if keep(sd.Decl) {
+			decls = append(decls, sd)
+		}
+	}
+	r.decls = decls
+	fileDecls := a.file.Decls[:0]
+	for _, d := range a.file.Decls {
+		if keep(d) {
+			fileDecls = append(fileDecls, d)
+		}
+	}
+	a.file.Decls = fileDecls
+	frames := r.lateFrames[:0]
+	for _, f := range r.lateFrames {
+		if !gone[f.frame.fn] {
+			frames = append(frames, f)
+		}
+	}
+	r.lateFrames = frames
 }
