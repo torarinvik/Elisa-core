@@ -1074,6 +1074,14 @@ func (p *Parser) checkMachineArmMutations(stmts []ast.Stmt, armLocals map[string
 		switch s := stmt.(type) {
 		case *ast.CanStmt:
 			p.checkMachineArmMutations(s.Body, armLocals, fieldByName, overRoots, mutatedRoots)
+		case *ast.IfStmt:
+			// Arms may branch (validateMachineArmStmt), so rule 3 must see every branch: an
+			// assignment nested in an `if` was never checked and mutated foreign state.
+			p.checkMachineArmMutations(s.Then, armLocals, fieldByName, overRoots, mutatedRoots)
+			for _, clause := range s.Elifs {
+				p.checkMachineArmMutations(clause.Body, armLocals, fieldByName, overRoots, mutatedRoots)
+			}
+			p.checkMachineArmMutations(s.Else, armLocals, fieldByName, overRoots, mutatedRoots)
 		case *ast.VarDeclStmt:
 			armLocals[s.Name] = true
 		case *ast.AssignStmt:

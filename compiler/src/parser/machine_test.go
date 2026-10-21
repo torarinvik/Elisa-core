@@ -964,6 +964,25 @@ func TestMachineRefusalForeignMutation(t *testing.T) {
 	}
 }
 
+// Arms may branch, so the foreign-mutation refusal must look inside every branch: an
+// assignment nested in an `if` or `else` branch used to go unchecked.
+func TestMachineRefusalForeignMutationInBranch(t *testing.T) {
+	for _, body := range []string{
+		"            if lexer.ok:\n                total <- total + 1\n            return 1\n",
+		"            if lexer.ok:\n                seen: i64 = 1\n            else:\n                total <- 3\n            return 1\n",
+	} {
+		src := "def scan(lexer: mutable Lexer&, total: mutable i64&) -> i64:\n" + `    machine over lexer.current_char():
+        state Text
+        start Text
+        Text, _:
+` + body + "\n    return 0\n"
+		_, errs := parseSourceFile(t, src)
+		if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "foreign state") {
+			t.Fatalf("expected foreign-mutation refusal inside a branch, got %v for\n%s", errs, body)
+		}
+	}
+}
+
 // A postfix value cast/ctor (`buf.data[i].char()`) parses as a CastExpr, not a method
 // call. The driven resource is rooted in the cast's operand (`buf`), so an arm mutating
 // `buf` must be allowed — before the CastExpr case in collectExprRootIdents, the base was
