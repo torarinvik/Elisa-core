@@ -223,6 +223,8 @@ func firstFieldDifference(a, b string) string {
 var addedFunctionTables = map[string]bool{
 	"funcDeclSymbols": true, "funcDeclUsings": true, "functionTypes": true,
 	"paramStoreTargets": true, "ufcsFunctionsByName": true,
+	"declVisibility":              true, // a function in a `public:`/`private:` section
+	"regionParamCalleeParamIndex": true, // copied from the scratch phase on add
 }
 
 // globalGrowthDifference accepts a global fingerprint change only when the sole

@@ -157,6 +157,24 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	for _, d := range file.Decls {
 		topLevel[d] = true
 	}
+	// A function directly inside `module`/`extend` blocks is added the same way,
+	// in its block's namespace; memberOf maps it to its innermost block.
+	memberOf := map[ast.Decl]*ast.NamespaceDecl{}
+	namespaceOf := map[*ast.NamespaceDecl]string{}
+	var collectMembers func(decls []ast.Decl, namespace string)
+	collectMembers = func(decls []ast.Decl, namespace string) {
+		for _, d := range decls {
+			if n, ok := d.(*ast.NamespaceDecl); ok && !n.Const {
+				full := joinQualifiedName(namespace, n.Name)
+				namespaceOf[n] = full
+				for _, m := range n.Decls {
+					memberOf[m] = n
+				}
+				collectMembers(n.Decls, full)
+			}
+		}
+	}
+	collectMembers(file.Decls, "")
 	oldNames, newNames := map[string]bool{}, map[string]bool{}
 	for _, d := range oldDecls {
 		if f, ok := d.(*ast.FuncDecl); ok {
@@ -195,7 +213,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 		}
 		nf, ok := newDecls[j].(*ast.FuncDecl)
-		if !ok || !topLevel[nf] || oldNames[nf.Name] || !retainedPlainFunction(nf) {
+		if !ok || !(topLevel[nf] || memberOf[nf] != nil) || oldNames[nf.Name] || !retainedPlainFunction(nf) {
 			return fail("declaration set changed at %s", retainedLineKey(newDecls[j].Pos()))
 		}
 		added = append(added, nf)
@@ -386,25 +404,68 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// Added functions are declared in the live analysis as the declaration phase
 	// declared them in scratch; their results must then match scratch's exactly.
 	var addedScoped []scopedDecl
+	var addedInto []*ast.NamespaceDecl // live block that receives each added member; nil at top level
 	if len(added) != 0 {
-		var usings []string
+		// Usings come from an analyzed declaration in the same block: they are the
+		// block's inherited usings plus its own `using` lines.
+		usingsOf := map[string][]string{}
+		liveBlocks := map[string]*ast.NamespaceDecl{}
 		for _, sd := range r.decls {
-			if sd.Namespace == "" {
-				usings = sd.Usings
-				break
+			if _, seen := usingsOf[sd.Namespace]; !seen {
+				usingsOf[sd.Namespace] = sd.Usings
 			}
 		}
+		var collectLive func(decls []ast.Decl)
+		collectLive = func(decls []ast.Decl) {
+			for _, d := range decls {
+				if n, ok := d.(*ast.NamespaceDecl); ok {
+					liveBlocks[retainedLineKey(n.Position)+"|"+n.Name] = n
+					collectLive(n.Decls)
+				}
+			}
+		}
+		collectLive(a.file.Decls)
 		for _, nf := range added {
 			prepared := pre.prepared[retainedLineKey(nf.Pos())+"|"+nf.Name]
 			if prepared == nil {
 				return fail("prepared form of added %s not found", nf.Name)
 			}
-			addedScoped = append(addedScoped, scopedDecl{Decl: prepared, Usings: usings})
+			sd := scopedDecl{Decl: prepared}
+			var into *ast.NamespaceDecl
+			if block := memberOf[nf]; block != nil && !topLevel[nf] {
+				sd.Namespace = namespaceOf[block]
+				usings, ok := usingsOf[sd.Namespace]
+				if !ok {
+					return fail("added %s is in a block with no analyzed declarations", nf.Name)
+				}
+				sd.Usings = usings
+				// The block itself is unchanged and lines only shift after an
+				// insertion, so it is found again at its own position.
+				if into = liveBlocks[retainedLineKey(block.Position)+"|"+block.Name]; into == nil {
+					return fail("block of added %s not found in the analysis", nf.Name)
+				}
+				switch scratch.DeclVisibility[prepared] {
+				case "private":
+					sd.Private = true
+				case "":
+					if file.DeclVisibility[nf] != "" {
+						return fail("visibility of added %s not found", nf.Name)
+					}
+				}
+				if v := scratch.DeclVisibility[prepared]; v != "" {
+					if a.declVisibility == nil {
+						a.declVisibility = map[ast.Decl]string{}
+					}
+					a.declVisibility[prepared] = v
+				}
+			} else {
+				sd.Usings = usingsOf[""]
+			}
+			addedScoped = append(addedScoped, sd)
+			addedInto = append(addedInto, into)
 		}
 		// Declaring mutates the live analysis: from here a mismatch poisons it.
-		a.withResolutionContext("", usings, func() {
-			a.collectValueSymbols(addedScoped)
-		})
+		a.collectValueSymbols(addedScoped)
 		for _, sd := range addedScoped {
 			fn := sd.Decl.(*ast.FuncDecl)
 			if t, ok := pre.targets[fn]; ok {
@@ -417,19 +478,19 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		a.classifyRegionPolymorphicFunctions(addedScoped)
 		for _, sd := range addedScoped {
 			fn := sd.Decl.(*ast.FuncDecl)
-			want := pre.fingerprint["::"+fn.Name+"#0"]
+			want := pre.fingerprint[sd.Namespace+"::"+fn.Name+"#0"]
 			if got := a.preBodyFunctionFingerprint(fn); got != want {
 				r.a = nil
 				return fail("added %s declared differently than a full analysis%s", fn.Name, firstFieldDifference(want, got))
 			}
 		}
-		a.file.Decls = append(a.file.Decls, func() []ast.Decl {
-			out := make([]ast.Decl, len(addedScoped))
-			for i, sd := range addedScoped {
-				out[i] = sd.Decl
+		for i, sd := range addedScoped {
+			if addedInto[i] != nil {
+				addedInto[i].Decls = append(addedInto[i].Decls, sd.Decl)
+			} else {
+				a.file.Decls = append(a.file.Decls, sd.Decl)
 			}
-			return out
-		}()...)
+		}
 		r.decls = append(r.decls, addedScoped...)
 	}
 	// Past this point the edit is accepted; mutate the retained state.

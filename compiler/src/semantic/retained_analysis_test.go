@@ -271,3 +271,60 @@ func TestRetainedAnalysisAcceptsRemovedFunction(t *testing.T) {
 		t.Fatalf("stats = %+v, want 1 removed", retained.LastStats)
 	}
 }
+
+const retainedModuleBefore = `
+module Tool:
+    public:
+        def base(x: i64) -> i64:
+            return x
+
+extend Tool:
+    private:
+        def twice(x: i64) -> i64:
+            return x + x
+    public:
+        def run(x: i64) -> i64:
+            return twice(base(x))
+
+def outside(x: i64) -> i64:
+    return Tool::run(x)
+`
+
+// A helper added inside an `extend` block's private section updates in place:
+// it lands in the module's namespace with its section's visibility, so a use
+// from outside the module is rejected exactly as a fresh analysis rejects it.
+func TestRetainedAnalysisAcceptsAddedModuleMember(t *testing.T) {
+	added := strings.Replace(retainedModuleBefore, "            return x + x\n",
+		"            return x + x\n        def thrice(x: i64) -> i64:\n            v: mutable i64 = x\n            base: uintptr = (&v).cast[uintptr] can Unsafe.PointerCast\n            return x + x + x\n", 1)
+	used := strings.Replace(added, "return twice(base(x))", "return thrice(twice(base(x)))", 1)
+	leaked := strings.Replace(used, "return Tool::run(x)", "return Tool::thrice(x)", 1)
+	if added == retainedModuleBefore || used == added || leaked == used {
+		t.Fatal("fixture edit did not apply")
+	}
+	options := AnalyzeOptions{}
+	before := AnalyzeWithOptions(retainedParse(t, retainedModuleBefore), options)
+	if d := retainedDiagnostics(before); strings.Contains(d, "error") {
+		t.Fatalf("fixture does not analyze cleanly:\n%s", d)
+	}
+	for _, step := range []string{added, used, leaked} {
+		_, retained := AnalyzeRetained(retainedParse(t, retainedModuleBefore), retainedParse(t, retainedModuleBefore), []byte(retainedModuleBefore), options)
+		if retained == nil {
+			t.Fatal("analysis was not retained")
+		}
+		updated, err := retained.Update(retainedParse(t, step), retainedParse(t, step), []byte(step))
+		if err != nil {
+			t.Fatalf("adding a module member fell back: %v", err)
+		}
+		if retained.LastStats.Added != 1 {
+			t.Fatalf("stats = %+v, want 1 added", retained.LastStats)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, step), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("retained update disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", got, want)
+		}
+	}
+	freshLeak := retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, leaked), options))
+	if !strings.Contains(freshLeak, "thrice") {
+		t.Fatalf("the private-use fixture is not rejected:\n%s", freshLeak)
+	}
+}
