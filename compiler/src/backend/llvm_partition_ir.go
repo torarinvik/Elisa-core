@@ -1,0 +1,377 @@
+//go:build cgo
+
+package backend
+
+/*
+#include <stdlib.h>
+#include <llvm-c/Analysis.h>
+#include <llvm-c/BitWriter.h>
+#include <llvm-c/Core.h>
+#include <llvm-c/TargetMachine.h>
+#include "parallel_emit.h"
+
+extern void elisacorePruneObjectDeclarations(LLVMModuleRef m);
+*/
+import "C"
+
+import (
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unsafe"
+
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
+)
+
+// Partitioned IR generation for incremental object builds.
+//
+// Instead of generating one module and splitting it, each partition gets its
+// own generator, LLVM context and module, and the generators run concurrently
+// over one shared analysis. A partition emits the bodies of the top-level
+// external functions whose symbol name hashes to it; it declares everything
+// else, and emits on demand whatever its own bodies need (specializations,
+// helpers). Symbols are named by mangling, never by creation order, so every
+// partition agrees on them. A definition another partition also emits is
+// made weak_odr, so the linker keeps one copy:
+//   - an external function body is strong only in its owner partition;
+//   - an external global is strong only in partition 0.
+// Every external definition comes from the same generator code over the same
+// analysis, so duplicate copies are identical.
+
+var partitionIRNanos, partitionDefs, partitionOwned, partitionGenNanos, partitionBitcodeNanos, partitionNativeNanos, partitionNativeCount atomic.Int64
+
+func llvmValueName(v C.LLVMValueRef) string {
+	var n C.size_t
+	p := C.LLVMGetValueName2(v, &n)
+	return C.GoStringN(p, C.int(n))
+}
+
+func partitionOwner(name string, parts int) int {
+	h := fnv.New64a()
+	h.Write([]byte(name))
+	return int(h.Sum64() % uint64(parts))
+}
+
+// finishPartitionModule gives the partition's definitions their final
+// linkage. It reports false when a symbol's identity cannot be matched across
+// partitions; the caller then uses the module-split path.
+func finishPartitionModule(m C.LLVMModuleRef, part, parts int, unit string) bool {
+	for f := C.LLVMGetFirstFunction(m); f != nil; f = C.LLVMGetNextFunction(f) {
+		if C.LLVMIsDeclaration(f) != 0 {
+			continue
+		}
+		switch C.LLVMGetLinkage(f) {
+		case C.LLVMExternalLinkage:
+			if partitionOwner(llvmValueName(f), parts) != part {
+				C.LLVMSetLinkage(f, C.LLVMWeakODRLinkage)
+			}
+		case C.LLVMPrivateLinkage, C.LLVMInternalLinkage:
+			if !shareLocalDefinition(f, unit) {
+				return false
+			}
+		}
+	}
+	for g := C.LLVMGetFirstGlobal(m); g != nil; g = C.LLVMGetNextGlobal(g) {
+		if C.LLVMIsDeclaration(g) != 0 {
+			continue
+		}
+		switch C.LLVMGetLinkage(g) {
+		case C.LLVMExternalLinkage:
+			if part != 0 {
+				C.LLVMSetLinkage(g, C.LLVMWeakODRLinkage)
+			}
+		case C.LLVMPrivateLinkage, C.LLVMInternalLinkage:
+			if C.LLVMGetUnnamedAddress(g) == C.LLVMGlobalUnnamedAddr {
+				continue // address-insignificant: a private copy per partition is equivalent
+			}
+			if !shareLocalDefinition(g, unit) {
+				return false
+			}
+		}
+	}
+	// The cache key is the module's bitcode, so it must not depend on what
+	// other partitions do: drop declarations this partition does not use and
+	// name its private constants by their order here, not by the generator's
+	// program-wide counter.
+	C.elisacorePruneObjectDeclarations(m)
+	ordinal := 0
+	for g := C.LLVMGetFirstGlobal(m); g != nil; g = C.LLVMGetNextGlobal(g) {
+		if C.LLVMGetLinkage(g) == C.LLVMPrivateLinkage && C.LLVMGetUnnamedAddress(g) == C.LLVMGlobalUnnamedAddr {
+			name := fmt.Sprintf("elisa.p.%d", ordinal)
+			cname := C.CString(name)
+			C.LLVMSetValueName2(g, cname, C.size_t(len(name)))
+			C.free(unsafe.Pointer(cname))
+			ordinal++
+		}
+	}
+	return true
+}
+
+// shareLocalDefinition turns a module-local definition every partition may
+// emit into one symbol the linker merges, so its address is the same from
+// every partition. Its name must come from the source, not from LLVM's
+// collision suffixes, or two partitions could disagree on it.
+func shareLocalDefinition(v C.LLVMValueRef, unit string) bool {
+	name := llvmValueName(v)
+	if name == "" || numericNameSuffix.MatchString(name) {
+		return false
+	}
+	shared := C.CString("elisa.unit." + unit + "." + name)
+	C.LLVMSetValueName2(v, shared, C.size_t(len("elisa.unit."+unit+"."+name)))
+	C.free(unsafe.Pointer(shared))
+	C.LLVMSetLinkage(v, C.LLVMWeakODRLinkage)
+	C.LLVMSetVisibility(v, C.LLVMHiddenVisibility)
+	return true
+}
+
+var numericNameSuffix = regexp.MustCompile(`\.[0-9]+$`)
+
+func partitionedIREnabled() bool { return os.Getenv("ELISACORE_PARALLEL_IR") != "0" }
+
+// partitionedIRApplies limits partitioned generation to unoptimized builds,
+// where no partition needs another's bodies for inlining, of programs large
+// enough to repay a generator per partition.
+func (s *IncrementalObjectSession) partitionedIRApplies(result *semantic.Result, options LLVMObjectEmitOptions) bool {
+	if !partitionedIREnabled() || options.OptLevel != OptimizationLevel0 {
+		return false
+	}
+	if s.minWeight == 0 {
+		return true
+	}
+	functions := 0
+	for _, decl := range result.ActiveFile().Decls {
+		if _, ok := decl.(*ast.FuncDecl); ok {
+			functions++
+		}
+	}
+	return functions >= 64
+}
+
+// writePartitionedObject is WriteObject with partitioned IR generation. The
+// caller has checked that the target is native and the output is a real file.
+func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions, configKey string, unitID, targetID [32]byte) error {
+	start := time.Now()
+	parts := s.partitions
+	fastCodegen := options.OptLevel == OptimizationLevel0
+	result.PackedLowering = options.PackedProfile.metadata()
+	result.BeginSharedCodegen()
+	defer result.EndSharedCodegen()
+	objects := make([][]byte, parts)
+	errs := make([]error, parts)
+	workers := runtime.GOMAXPROCS(0)
+	if workers > parts {
+		workers = parts
+	}
+	next := make(chan int, parts)
+	for part := 0; part < parts; part++ {
+		next <- part
+	}
+	close(next)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for part := range next {
+				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID)
+			}
+		}()
+	}
+	wg.Wait()
+	for part := range errs {
+		if errs[part] != nil {
+			return errs[part]
+		}
+	}
+	buildDuration := time.Since(start)
+	dir, err := os.MkdirTemp(filepath.Dir(outputPath), ".elisa-object-parts-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	files := make([]string, parts)
+	for part := range objects {
+		files[part] = filepath.Join(dir, fmt.Sprintf("part%d.o", part))
+		if err := os.WriteFile(files[part], objects[part], 0600); err != nil {
+			return err
+		}
+	}
+	mergeStart := time.Now()
+	if err := s.mergeObjects(dir, files, outputPath); err != nil {
+		return err
+	}
+	if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
+		fmt.Fprintf(os.Stderr, "[build-timing] partitioned object: ir+partitions %v, merge %v; ir cpu %v (generate %v), bitcode %v, native %v x%d, defs %d owned %d\n", buildDuration.Round(time.Millisecond), time.Since(mergeStart).Round(time.Millisecond), time.Duration(partitionIRNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionGenNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionBitcodeNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionNativeNanos.Swap(0)).Round(time.Millisecond), partitionNativeCount.Swap(0), partitionDefs.Swap(0), partitionOwned.Swap(0))
+	}
+	return nil
+}
+
+// buildIRPartition generates one partition's module, looks its exact bitcode
+// up in the session and compiles it on a miss.
+var errPartitionDeclined = errors.New("partitioned IR declined")
+
+func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte) ([]byte, error) {
+	unit := hex.EncodeToString(unitID[:8])
+	irStart := time.Now()
+	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
+		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
+		g.sharedResult = true
+	})
+	partitionGenNanos.Add(int64(time.Since(irStart)))
+	if err != nil {
+		return nil, fmt.Errorf("partition %d: %w", part, err)
+	}
+	defer g.disposeInBackground()
+	if !finishPartitionModule(g.module, part, parts, unit) {
+		return nil, errPartitionDeclined
+	}
+	if err := g.verify(); err != nil {
+		return nil, fmt.Errorf("partition %d: %w", part, err)
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return nil, err
+	}
+	irDuration := time.Since(irStart)
+	partitionIRNanos.Add(int64(irDuration))
+	var bodies, defs int64
+	for f := C.LLVMGetFirstFunction(g.module); f != nil; f = C.LLVMGetNextFunction(f) {
+		if C.LLVMIsDeclaration(f) == 0 {
+			defs++
+		}
+		if C.LLVMIsDeclaration(f) == 0 && C.LLVMGetLinkage(f) != C.LLVMWeakODRLinkage {
+			bodies++
+		}
+	}
+	partitionDefs.Add(defs)
+	partitionOwned.Add(bodies)
+	bitcodeStart := time.Now()
+	bitcode := C.LLVMWriteBitcodeToMemoryBuffer(g.module)
+	inputData := C.LLVMGetBufferStart(bitcode)
+	inputSize := int(C.LLVMGetBufferSize(bitcode))
+	inputBytes := unsafe.Slice((*byte)(unsafe.Pointer(inputData)), inputSize)
+	var object []byte
+	retainInput := inputSize <= s.maxBytes-len(configKey)
+	if retainInput {
+		object = s.lookupObjectBytes(inputBytes, configKey)
+	}
+	var retainedInput string
+	if object == nil && retainInput {
+		retainedInput = C.GoStringN(inputData, C.int(inputSize))
+	}
+	C.LLVMDisposeMemoryBuffer(bitcode)
+	bitcodeDuration := time.Since(bitcodeStart)
+	partitionBitcodeNanos.Add(int64(bitcodeDuration))
+	s.recordStats(func(stats *IncrementalObjectStats) {
+		stats.IRTime += irDuration
+		stats.BitcodeTime += bitcodeDuration
+	})
+	if object != nil {
+		return object, nil
+	}
+	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
+	cpu := C.LLVMGetTargetMachineCPU(g.targetMachine)
+	features := C.LLVMGetTargetMachineFeatureString(g.targetMachine)
+	defer C.LLVMDisposeMessage(triple)
+	defer C.LLVMDisposeMessage(cpu)
+	defer C.LLVMDisposeMessage(features)
+	nativeStart := time.Now()
+	var buffer C.LLVMMemoryBufferRef
+	var message *C.char
+	if C.elisacoreEmitPartitionObject(g.module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
+		text := "native emission failed"
+		if message != nil {
+			text = C.GoString(message)
+			C.free(unsafe.Pointer(message))
+		}
+		return nil, fmt.Errorf("partition %d: %s", part, text)
+	}
+	object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
+	C.LLVMDisposeMemoryBuffer(buffer)
+	nativeDuration := time.Since(nativeStart)
+	partitionNativeNanos.Add(int64(nativeDuration))
+	partitionNativeCount.Add(1)
+	s.recordStats(func(stats *IncrementalObjectStats) {
+		stats.NativeTime += nativeDuration
+		stats.PartitionsEmitted++
+	})
+	if retainInput {
+		s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
+	}
+	return object, nil
+}
+
+// Code generation records types for the expressions it synthesizes. A
+// generator that shares its Result with others keeps those records in its own
+// overlay, which its reads consult first; the shared maps stay read-only.
+// ELISACORE_IR_OVERLAY=1 uses the overlay on the serial path too, so serial
+// output can be compared with and without it.
+
+var forceIROverlay = os.Getenv("ELISACORE_IR_OVERLAY") == "1"
+
+func (g *llvmGenerator) usesOverlay() bool { return g.sharedResult || forceIROverlay }
+
+func (g *llvmGenerator) resultExprTypeOK(expr ast.Expr) (semantic.Type, bool) {
+	if g.exprOverlay != nil {
+		if t, ok := g.exprOverlay[expr]; ok {
+			return t, t != nil
+		}
+	}
+	t, ok := g.result.ExprTypes[expr]
+	return t, ok
+}
+
+func (g *llvmGenerator) resultExprType(expr ast.Expr) semantic.Type {
+	t, _ := g.resultExprTypeOK(expr)
+	return t
+}
+
+func (g *llvmGenerator) setResultExprType(expr ast.Expr, t semantic.Type) {
+	if !g.usesOverlay() {
+		g.result.ExprTypes[expr] = t
+		return
+	}
+	if g.exprOverlay == nil {
+		g.exprOverlay = map[ast.Expr]semantic.Type{}
+	}
+	g.exprOverlay[expr] = t
+}
+
+// deleteResultExprType removes a record; in the overlay a nil entry hides the
+// shared one, as a delete would.
+func (g *llvmGenerator) deleteResultExprType(expr ast.Expr) {
+	if !g.usesOverlay() {
+		delete(g.result.ExprTypes, expr)
+		return
+	}
+	if g.exprOverlay == nil {
+		g.exprOverlay = map[ast.Expr]semantic.Type{}
+	}
+	g.exprOverlay[expr] = nil
+}
+
+func (g *llvmGenerator) resultIndexBoundsProven(expr *ast.IndexExpr) bool {
+	if g.boundsOverlay[expr] {
+		return true
+	}
+	return g.result.IndexBoundsProven[expr]
+}
+
+func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven bool) {
+	if !g.usesOverlay() {
+		g.result.IndexBoundsProven[expr] = proven
+		return
+	}
+	if g.boundsOverlay == nil {
+		g.boundsOverlay = map[*ast.IndexExpr]bool{}
+	}
+	g.boundsOverlay[expr] = proven
+}

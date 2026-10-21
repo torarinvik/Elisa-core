@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -52,6 +53,11 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	target, err := ResolveTargetIdentity(strings.TrimSpace(options.TargetTriple))
 	if err != nil {
 		return err
+	}
+	if s.partitionedIRApplies(result, options) && !options.Serial && native.Triple == target.Triple && !virtualObjectSource(result) {
+		if done, err := s.tryPartitionedObject(result, outputPath, options); done {
+			return err
+		}
 	}
 	irStart := time.Now()
 	g, err := compileLLVMModuleWithTargetDebugTrace(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace)
@@ -189,13 +195,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		}
 	}
 	mergeStart := time.Now()
-	linker := s.objectMergerCommand()
-	merged := filepath.Join(dir, "merged.o")
-	args := append(append(append([]string{}, linker[1:]...), "-r", "-o", merged), parts...)
-	if out, err := exec.Command(linker[0], args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("merge incremental objects: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	err = os.Rename(merged, outputPath)
+	err = s.mergeObjects(dir, parts, outputPath)
 	mergeDuration := time.Since(mergeStart)
 	if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
 		fmt.Fprintf(os.Stderr, "[build-timing] incremental object: ir %v, bitcode+partitions %v (whole bitcode %v), merge %v\n", irDuration.Round(time.Millisecond), partitionsWall.Round(time.Millisecond), wholeDuration.Round(time.Millisecond), mergeDuration.Round(time.Millisecond))
@@ -293,4 +293,57 @@ func cBool(b bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+// mergeObjects links the partition objects into one relocatable object.
+func (s *IncrementalObjectSession) mergeObjects(dir string, parts []string, outputPath string) error {
+	linker := s.objectMergerCommand()
+	merged := filepath.Join(dir, "merged.o")
+	args := append(append(append([]string{}, linker[1:]...), "-r", "-o", merged), parts...)
+	if out, err := exec.Command(linker[0], args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("merge incremental objects: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return os.Rename(merged, outputPath)
+}
+
+func virtualObjectSource(result *semantic.Result) bool {
+	identity := strings.TrimSpace(result.ActiveFile().Filename)
+	return identity == "" || identity == "-" || identity == "/dev/stdin" || (strings.HasPrefix(identity, "<") && strings.HasSuffix(identity, ">"))
+}
+
+// tryPartitionedObject resolves the partition cache keys and runs the
+// partitioned IR path. done is false when it does not apply.
+func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) (done bool, err error) {
+	probe, err := newLLVMGenerator(result)
+	if err != nil {
+		return false, nil
+	}
+	probe.optLevel = options.OptLevel
+	probe.requestedTargetTriple = options.TargetTriple
+	if err := probe.ensureTargetMachine(); err != nil {
+		probe.dispose()
+		return false, nil
+	}
+	codegenLevel := "default-codegen"
+	if options.OptLevel == OptimizationLevel0 {
+		codegenLevel = "none-codegen"
+	}
+	triple := C.LLVMGetTargetMachineTriple(probe.targetMachine)
+	cpu := C.LLVMGetTargetMachineCPU(probe.targetMachine)
+	features := C.LLVMGetTargetMachineFeatureString(probe.targetMachine)
+	config, _ := json.Marshal([]string{"partitioned-ir-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model"})
+	C.LLVMDisposeMessage(triple)
+	C.LLVMDisposeMessage(cpu)
+	C.LLVMDisposeMessage(features)
+	probe.dispose()
+	origin, err := filepath.Abs(result.ActiveFile().Filename)
+	if err != nil {
+		return true, err
+	}
+	unitID := sha256.Sum256([]byte(origin))
+	err = s.writePartitionedObject(result, outputPath, options, string(config), unitID, sha256.Sum256(config))
+	if errors.Is(err, errPartitionDeclined) {
+		return false, nil
+	}
+	return true, err
 }

@@ -86,7 +86,7 @@ func assertIncrementalResultParity(t testing.TB, cold, warm *Result) {
 	for i := 0; i < left.NumField(); i++ {
 		name := left.Type().Field(i).Name
 		switch name {
-		case "File", "LoweredFile", "GlobalScope", "SMTProfile", "analyzer":
+		case "File", "LoweredFile", "GlobalScope", "SMTProfile", "analyzer", "shared":
 			continue
 		}
 		a, b := left.Field(i), right.Field(i)

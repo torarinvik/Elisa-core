@@ -403,7 +403,7 @@ func (g *llvmGenerator) exprType(expr ast.Expr) semantic.Type {
 	if g.result == nil || expr == nil {
 		return nil
 	}
-	if t, ok := g.result.ExprTypes[expr]; ok {
+	if t, ok := g.resultExprTypeOK(expr); ok {
 		return t
 	}
 	return nil

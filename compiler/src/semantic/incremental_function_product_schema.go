@@ -90,6 +90,8 @@ var functionProductFieldPolicies = map[string]FunctionProductDisposition{
 	// The pointer is invocation-local, but backend APIs delegate to live
 	// analyzer facts and can trigger specialization; those facts need hydration.
 	"analyzer": FunctionProductInvocation | FunctionProductAnalyzerState,
+	// Set only while concurrent code generators share the result; nil otherwise.
+	"shared": FunctionProductInvocation,
 }
 
 func validateFunctionProductFields(typ reflect.Type, policies map[string]FunctionProductDisposition) error {

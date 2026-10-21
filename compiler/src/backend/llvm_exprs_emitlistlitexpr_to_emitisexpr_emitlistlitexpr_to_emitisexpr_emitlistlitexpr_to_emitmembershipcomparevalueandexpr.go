@@ -334,6 +334,7 @@ func (s *functionState) attachDarrayAndComprehensionScope(inst C.LLVMValueRef, d
 	defer C.free(unsafe.Pointer(noAliasC))
 	C.elisa_coreAttachDarrayAndComprehensionScope(inst, s.g.context, domainC, aliasC, noAliasC)
 }
+
 // darrayLiteralMinCapacity is the minimum element capacity reserved for a darray literal.
 const darrayLiteralMinCapacity = 8
 
@@ -341,7 +342,10 @@ func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType 
 	resultName := s.g.nextSyntheticName("list.spread.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[resultInit] = darrayType
+		{
+			key, value := resultInit, darrayType
+			s.g.setResultExprType(key, value)
+		}
 	}
 	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
 	body := make([]ast.Stmt, 0, len(expr.Elems))
@@ -394,7 +398,10 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 	resultName := s.g.nextSyntheticName("list.comp.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[resultInit] = resultType
+		{
+			key, value := resultInit, resultType
+			s.g.setResultExprType(key, value)
+		}
 	}
 	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
 
@@ -480,7 +487,10 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	srcCount := func() ast.Expr {
 		fe := &ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}
 		if usizeType != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[fe] = usizeType
+			{
+				key, value := fe, usizeType
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return fe
 	}
@@ -488,20 +498,29 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	// has no structural fallback for IndexExpr) can resolve the element binding and the store.
 	registerElemType := func(e ast.Expr) ast.Expr {
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[e] = srcDarray.Elem
+			{
+				key, value := e, srcDarray.Elem
+				s.g.setResultExprType(key, value)
+			}
 			// The synthesized loop is exactly `0..<src.count`, and the result
 			// was resized to that count immediately before it. Both indexed
 			// accesses are therefore proved in bounds; retaining that fact keeps
 			// the mandatory bounds watchdog out of the vectorizable loop.
 			if index, ok := e.(*ast.IndexExpr); ok {
-				s.g.result.IndexBoundsProven[index] = true
+				{
+					key, value := index, true
+					s.g.setResultIndexBoundsProven(key, value)
+				}
 			}
 		}
 		return e
 	}
 	markSynthesizedIndexProof := func(index *ast.IndexExpr) *ast.IndexExpr {
 		if s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven != nil {
-			s.g.result.IndexBoundsProven[index] = true
+			{
+				key, value := index, true
+				s.g.setResultIndexBoundsProven(key, value)
+			}
 		}
 		return index
 	}
@@ -523,7 +542,10 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 
 	startLit := &ast.IntLit{Position: pos, Value: "0"}
 	if usizeType != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[startLit] = usizeType
+		{
+			key, value := startLit, usizeType
+			s.g.setResultExprType(key, value)
+		}
 	}
 	loop := &ast.ForStmt{
 		Position:        pos,
@@ -627,7 +649,10 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	pos := comp.Position
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[e] = t
+			{
+				key, value := e, t
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return e
 	}
@@ -745,7 +770,10 @@ func (s *functionState) fusedDictExtendComprehensionBlock(dstExpr, arg ast.Expr,
 	pos := comp.Position
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[e] = t
+			{
+				key, value := e, t
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return e
 	}
@@ -855,7 +883,10 @@ func (s *functionState) fusedFilteredExtendComprehensionBlock(dstExpr, arg ast.E
 	pos := comp.Position
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[e] = t
+			{
+				key, value := e, t
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return e
 	}
@@ -972,7 +1003,10 @@ func (s *functionState) fusedRangeExtendComprehensionBlock(dstExpr, arg ast.Expr
 	}
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[e] = t
+			{
+				key, value := e, t
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return e
 	}
@@ -1093,7 +1127,10 @@ func (s *functionState) fusedPushExtendComprehensionBlock(dstExpr, arg ast.Expr,
 	}
 	value := ast.Expr(&ast.IntLit{Position: pos, Value: "0"})
 	if usizeType != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[value] = usizeType
+		{
+			key, value := value, usizeType
+			s.g.setResultExprType(key, value)
+		}
 	}
 
 	return &ast.ExprBlock{
@@ -1195,7 +1232,10 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	}
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[e] = t
+			{
+				key, value := e, t
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return e
 	}
@@ -1220,7 +1260,10 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	// For every executed range iteration, end > start and 0 <= loopName-start < end-start;
 	// the clamped resize therefore establishes a real bounds proof for this synthesized store.
 	if s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven != nil {
-		s.g.result.IndexBoundsProven[resultIndex] = true
+		{
+			key, value := resultIndex, true
+			s.g.setResultIndexBoundsProven(key, value)
+		}
 	}
 	store := &ast.AssignStmt{Position: pos, Target: resultIndex, Value: expr.Value}
 	body := append([]ast.Stmt{}, expr.Bindings...)
@@ -1305,7 +1348,10 @@ func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExp
 	resultName := s.g.nextSyntheticName("dict.comp.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position, Brace: true}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[resultInit] = resultType
+		{
+			key, value := resultInit, resultType
+			s.g.setResultExprType(key, value)
+		}
 	}
 	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
 	// `d.put(k, v)` — the frictionless dict-set (parity with darray push: no error
@@ -1337,7 +1383,10 @@ func (s *functionState) emitSetComprehensionExpr(expr *ast.ListComprehensionExpr
 	resultName := s.g.nextSyntheticName("set.comp.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position, Brace: true}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[resultInit] = resultType
+		{
+			key, value := resultInit, resultType
+			s.g.setResultExprType(key, value)
+		}
 	}
 	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
 	addCall := &ast.CallExpr{
@@ -1391,9 +1440,18 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 			patternFilter = nil
 			if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 				boolType := s.g.result.NamedTypes["bool"]
-				s.g.result.ExprTypes[failValue] = boolType
-				s.g.result.ExprTypes[wildcardValue] = boolType
-				s.g.result.ExprTypes[filter] = boolType
+				{
+					key, value := failValue, boolType
+					s.g.setResultExprType(key, value)
+				}
+				{
+					key, value := wildcardValue, boolType
+					s.g.setResultExprType(key, value)
+				}
+				{
+					key, value := filter, boolType
+					s.g.setResultExprType(key, value)
+				}
 			}
 		} else if expr.Filter != nil {
 			filter = &ast.UnaryExpr{Position: expr.Position, Op: lexer.TOKEN_NOT, Operand: expr.Filter}
@@ -1459,7 +1517,10 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 		}
 		init = &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[init] = darrayType
+			{
+				key, value := init, darrayType
+				s.g.setResultExprType(key, value)
+			}
 		}
 		value := expr.Projection
 		if value == nil {
@@ -1482,7 +1543,10 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 		}
 		init = &ast.NullLit{Position: expr.Position}
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[init] = optionalType
+			{
+				key, value := init, optionalType
+				s.g.setResultExprType(key, value)
+			}
 		}
 		nullCheck := &ast.BinaryExpr{Position: expr.Position, Op: lexer.TOKEN_EQEQ, Left: resultIdent, Right: &ast.NullLit{Position: expr.Position}}
 		if expr.Filter != nil {
@@ -1499,7 +1563,10 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 		return nil, nil, fmt.Errorf("unknown query expression kind %d", expr.Kind)
 	}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[init] = resultType
+		{
+			key, value := init, resultType
+			s.g.setResultExprType(key, value)
+		}
 	}
 	pattern := ast.MoveBindPattern(&ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name})
 	if expr.Pattern != nil {

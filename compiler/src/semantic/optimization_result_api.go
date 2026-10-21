@@ -19,6 +19,7 @@ func (r *Result) IsCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bo
 	if r == nil || r.analyzer == nil {
 		return false
 	}
+	defer r.lockAnalyzer()()
 	return r.analyzer.isCompilerBuiltinHelperCall(call, name)
 }
 

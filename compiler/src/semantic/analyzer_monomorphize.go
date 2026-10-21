@@ -33,6 +33,13 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 	if r == nil || r.analyzer == nil || fn == nil || len(typeArgs) == 0 {
 		return nil
 	}
+	if sh := r.shared; sh != nil {
+		return sh.specializedExprTypes(r, fn, typeArgs)
+	}
+	return r.specializedExprTypes(fn, typeArgs)
+}
+
+func (r *Result) specializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast.Expr]Type {
 	a := r.analyzer
 
 	// Re-analysis writes types for expressions in this function. Snapshot only those
@@ -72,7 +79,9 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 			delete(a.exprTypes, expr)
 		}
 	}
-	r.ExprTypes = a.exprTypes
+	if r.shared == nil {
+		r.ExprTypes = a.exprTypes
+	}
 	if len(a.diagnostics) > savedDiagnostics {
 		// The speculative pass's diagnostics are discarded; forget them in the
 		// once-only set too, or a real report of the same text would be swallowed later.

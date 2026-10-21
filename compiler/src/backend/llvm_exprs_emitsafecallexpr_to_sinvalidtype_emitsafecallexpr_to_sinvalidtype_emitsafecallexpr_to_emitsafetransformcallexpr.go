@@ -128,8 +128,11 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 			ResolvedImplicitArgs:      append([]ast.Expr(nil), info.ImplicitArgs...),
 		}
 		if s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[fakeReceiver] = receiverArgType
-			defer delete(s.g.result.ExprTypes, fakeReceiver)
+			{
+				key, value := fakeReceiver, receiverArgType
+				s.g.setResultExprType(key, value)
+			}
+			defer s.g.deleteResultExprType(fakeReceiver)
 		}
 		callee, funcType, err := s.resolveCallTarget(synthetic)
 		if err != nil {
@@ -307,8 +310,11 @@ func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMVal
 		synthetic.Args[receiverArgIndex] = fakeReceiver
 	}
 	if s.g.result.ExprTypes != nil {
-		s.g.result.ExprTypes[fakeReceiver] = receiverArgType
-		defer delete(s.g.result.ExprTypes, fakeReceiver)
+		{
+			key, value := fakeReceiver, receiverArgType
+			s.g.setResultExprType(key, value)
+		}
+		defer s.g.deleteResultExprType(fakeReceiver)
 	}
 	callee, funcType, err := s.resolveCallTarget(synthetic)
 	if err != nil {

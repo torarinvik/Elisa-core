@@ -107,8 +107,14 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 			Args: expr.Args,
 		}
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-			s.g.result.ExprTypes[extendExpr.Func] = s.exprType(expr.Func)
-			s.g.result.ExprTypes[extendExpr] = s.exprType(expr)
+			{
+				key, value := extendExpr.Func, s.exprType(expr.Func)
+				s.g.setResultExprType(key, value)
+			}
+			{
+				key, value := extendExpr, s.exprType(expr)
+				s.g.setResultExprType(key, value)
+			}
 		}
 		return s.emitBuiltinDArrayExtendCall(extendExpr)
 	}

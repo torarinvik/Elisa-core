@@ -160,6 +160,9 @@ type Result struct {
 	// analyzer is retained so a generic body can be RE-ANALYZED per instantiation
 	// (SpecializedExprTypes). Unexported: nothing outside this package may drive it.
 	analyzer *Analyzer
+	// shared is set while several code generators read this result at once
+	// (BeginSharedCodegen); nil otherwise.
+	shared *sharedCodegen
 }
 
 // TaskGroupSubmitInfo is a positive proof attached to one discarded safe submit
@@ -188,6 +191,7 @@ func (r *Result) ActiveStaticStmtBranch(stmt *ast.StaticIfStmt) []ast.Stmt {
 	if r == nil || r.analyzer == nil || stmt == nil {
 		return nil
 	}
+	defer r.lockAnalyzer()()
 	return r.analyzer.activeStmtBranch(stmt)
 }
 

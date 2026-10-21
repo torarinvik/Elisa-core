@@ -572,6 +572,13 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	if C.LLVMCountBasicBlocks(fnValue) != 0 {
 		return nil
 	}
+	if g.bodyDepth == 0 && g.partBody != nil {
+		if C.LLVMGetLinkage(fnValue) == C.LLVMExternalLinkage && !g.partBody(llvmValueName(fnValue)) {
+			return nil
+		}
+	}
+	g.bodyDepth++
+	defer func() { g.bodyDepth-- }()
 
 	builder := C.LLVMCreateBuilderInContext(g.context)
 	defer C.LLVMDisposeBuilder(builder)

@@ -44,14 +44,22 @@ func (a *Analyzer) collectProgramRegions(decls []scopedDecl) {
 // IsProgramRegion reports whether name is a program-lived region, for consumers (the
 // backend's type resolution) that resolve region arguments outside the analyzer.
 func (r *Result) IsProgramRegion(name string) bool {
-	return r != nil && r.analyzer.isProgramRegion(name)
+	if r == nil {
+		return false
+	}
+	defer r.lockAnalyzer()()
+	return r.analyzer.isProgramRegion(name)
 }
 
 // ProgramLivedArgRegion returns the program region a value of type t lives in when t is
 // program-lived and holds region storage (the single declared program region), for the
 // backend to thread that region's arena into a region parameter the analyzer bound to it.
 func (r *Result) ProgramLivedArgRegion(t Type) (string, bool) {
-	if r == nil || r.analyzer == nil || len(r.analyzer.programRegions) != 1 || t == nil {
+	if r == nil || r.analyzer == nil {
+		return "", false
+	}
+	defer r.lockAnalyzer()()
+	if len(r.analyzer.programRegions) != 1 || t == nil {
 		return "", false
 	}
 	a := r.analyzer

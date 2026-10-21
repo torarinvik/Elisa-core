@@ -148,6 +148,8 @@ func BenchmarkIncrementalNativeStructuralEdit(b *testing.B) {
 }
 
 func TestIncrementalObjectRetainsUsedCalleeABI(t *testing.T) {
+	// Pins the module-split path: its owner map places main and work0 apart.
+	t.Setenv("ELISACORE_PARALLEL_IR", "0")
 	base := incrementalObjectFixture(32)
 	base = strings.Replace(base, "work0(value: i64)", "work0(value: i32)", 1)
 	base = base[:strings.Index(base, "def main()")] + `def main() -> i64:

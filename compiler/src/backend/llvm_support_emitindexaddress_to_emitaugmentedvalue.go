@@ -63,7 +63,7 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 	if expr == nil || s == nil || s.g == nil || s.g.result == nil {
 		return false
 	}
-	if s.g.result.IndexBoundsProven[expr] {
+	if s.g.resultIndexBoundsProven(expr) {
 		return true
 	}
 	// Static lowering can rebuild a user statement while preserving its source position. The
@@ -78,14 +78,16 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 // of a scan of every proof.
 func (g *llvmGenerator) provenIndexPositions() map[lexer.Pos]bool {
 	proofs := g.result.IndexBoundsProven
-	if g.provenIndexSpans == nil || g.provenIndexSpansSize != len(proofs) {
+	if g.provenIndexSpans == nil || g.provenIndexSpansSize != len(proofs)+len(g.boundsOverlay) {
 		g.provenIndexSpans = make(map[lexer.Pos]bool, len(proofs))
-		for provenExpr, proven := range proofs {
-			if proven && provenExpr != nil {
-				g.provenIndexSpans[provenExpr.Position] = true
+		for _, set := range []map[*ast.IndexExpr]bool{proofs, g.boundsOverlay} {
+			for provenExpr, proven := range set {
+				if proven && provenExpr != nil {
+					g.provenIndexSpans[provenExpr.Position] = true
+				}
 			}
 		}
-		g.provenIndexSpansSize = len(proofs)
+		g.provenIndexSpansSize = len(proofs) + len(g.boundsOverlay)
 	}
 	return g.provenIndexSpans
 }
@@ -273,7 +275,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 	// (ELISACORE_FORCE_BOUNDS_CHECK) still exists for the dereference guard below.
 	// Watchdog subsumption (docs/85 §9.6, docs/86 86-3): the analyzer proved this index in-bounds,
 	// so the debug guard would be redundant. Skip it — a proven access is never double-instrumented.
-	if expr != nil && s.g.result != nil && s.g.result.IndexBoundsProven[expr] {
+	if expr != nil && s.g.result != nil && s.g.resultIndexBoundsProven(expr) {
 		return true, nil
 	}
 	// A dominating merged guard (consecutive-index check merging) already established

@@ -306,6 +306,10 @@ def main() -> i64:
 }
 
 func TestIncrementalObjectSignatureAndCrossTarget(t *testing.T) {
+	// Pins the module-split path, whose partitions all declare every function;
+	// partitioned IR prunes unused declarations, so an unrelated partition may
+	// correctly be reused (TestPartitionedIR* cover that path).
+	t.Setenv("ELISACORE_PARALLEL_IR", "0")
 	session := NewIncrementalObjectSession(4, 1<<20)
 	session.minWeight = 0
 	source := incrementalObjectFixture(32)

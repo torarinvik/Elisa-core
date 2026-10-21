@@ -254,7 +254,7 @@ func serveRetained(socket string, log io.Writer) error {
 		// at 3x live keeps the heap resident and warm.
 		debug.SetGCPercent(retainedGCPercent)
 	}
-	activeRetained = &retainedRuntime{log: log, objects: backend.NewIncrementalObjectSession(64, 4<<30)}
+	activeRetained = &retainedRuntime{log: log, objects: backend.NewIncrementalObjectSession(runtime.NumCPU(), 4<<30)}
 	var mu sync.Mutex
 	mux := http.NewServeMux()
 	mux.HandleFunc("/run", func(w http.ResponseWriter, r *http.Request) {

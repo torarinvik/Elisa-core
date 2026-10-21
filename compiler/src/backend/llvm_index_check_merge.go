@@ -183,7 +183,7 @@ func (s *functionState) collectIndexMergeGroups(expr ast.Expr) []*indexMergeGrou
 			if !ok || indexMergeContainerType(s.exprType(obj)) == nil {
 				return
 			}
-			if s.g.result.IndexBoundsProven[n] || !semantic.SameType(s.exprType(n.Index), usize) {
+			if s.g.resultIndexBoundsProven(n) || !semantic.SameType(s.exprType(n.Index), usize) {
 				return
 			}
 			base, off, ok := indexMergeBaseOffset(n.Index)

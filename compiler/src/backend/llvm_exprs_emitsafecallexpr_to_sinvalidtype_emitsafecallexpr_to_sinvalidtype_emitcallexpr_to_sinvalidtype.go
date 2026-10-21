@@ -415,7 +415,7 @@ func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, false, nil
 	}
 	if s.g != nil && s.g.result != nil {
-		if _, ok := s.g.result.ExprTypes[expr.Func].(*semantic.FuncType); ok {
+		if _, ok := s.g.resultExprType(expr.Func).(*semantic.FuncType); ok {
 			return nil, nil, false, nil
 		}
 	}

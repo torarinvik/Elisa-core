@@ -350,7 +350,10 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	body = append(body, &ast.WhileStmt{Position: stmt.Position, Hint: ast.BranchHintNone, Cond: condExpr, Body: loopBody})
 	body = append(body, &ast.ReturnStmt{Position: stmt.Position, Value: &ast.IntLit{Position: stmt.Position, Value: "0"}})
 
-	s.g.result.ExprTypes[condExpr] = s.g.result.NamedTypes["bool"]
+	{
+		key, value := condExpr, s.g.result.NamedTypes["bool"]
+		s.g.setResultExprType(key, value)
+	}
 
 	workerDecl := &ast.FuncDecl{
 		Position:   stmt.Position,

@@ -70,7 +70,10 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	capParam := prefix + "_cap"
 	field := func(name string, t semantic.Type) ast.Expr {
 		f := &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: capParam}, Field: name}
-		s.g.result.ExprTypes[f] = t
+		{
+			key, value := f, t
+			s.g.setResultExprType(key, value)
+		}
 		return f
 	}
 	implicitArgs := make([]ast.Expr, len(names))
@@ -84,7 +87,10 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 		ResolvedImplicitArgs:      implicitArgs,
 		ResolvedImplicitArgsValid: true,
 	}
-	s.g.result.ExprTypes[call] = retType
+	{
+		key, value := call, retType
+		s.g.setResultExprType(key, value)
+	}
 	thunkDecl := &ast.FuncDecl{
 		Position:   pos,
 		Name:       thunkName,
@@ -129,7 +135,10 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 		}
 		// Preserve the worker's exact store identity on this synthetic expression.
 		// Its generated name is sanitized and cannot recover a qualified enum name.
-		s.g.result.ExprTypes[ident] = storeType
+		{
+			key, value := ident, storeType
+			s.g.setResultExprType(key, value)
+		}
 		storeValue, _, err := s.emitExpr(ident, storeType)
 		if err != nil {
 			return nil, nil, true, err

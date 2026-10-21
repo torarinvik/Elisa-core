@@ -119,9 +119,18 @@ func compileLLVMModuleWithTargetAndDebug(result *semantic.Result, optLevel Optim
 }
 
 func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (*llvmGenerator, error) {
+	return compileLLVMModuleConfigured(result, optLevel, profile, targetTriple, debugInfo, traceInfo, nil)
+}
+
+// compileLLVMModuleConfigured is compileLLVMModuleWithTargetDebugTrace with a
+// hook that adjusts the generator before any IR is emitted.
+func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, configure func(*llvmGenerator)) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
+	}
+	if configure != nil {
+		configure(g)
 	}
 	g.emitDebugInfo = debugInfo
 	g.emitTrace = traceInfo
@@ -164,7 +173,8 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 		g.dispose()
 		return nil, err
 	}
-	if g.result != nil {
+	if g.result != nil && g.partBody == nil {
+		// Partition generators share the result; their caller records this once.
 		g.result.PackedLowering = profile.metadata()
 	}
 	g.preferPrivateLinkage = optLevel != OptimizationLevel0
@@ -181,6 +191,18 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 }
 
 type llvmGenerator struct {
+	// partBody, when set, limits this generator to one partition of the
+	// program: a top-level external function's body is emitted only when
+	// partBody accepts its symbol name (see llvm_partition_ir.go).
+	partBody func(name string) bool
+	// sharedResult is set when other generators read the same Result
+	// concurrently; this generator then writes only its own overlays.
+	sharedResult bool
+	bodyDepth    int
+	// exprOverlay and boundsOverlay hold this generator's records for the
+	// expressions it synthesizes when the Result is shared (llvm_partition_ir.go).
+	exprOverlay   map[ast.Expr]semantic.Type
+	boundsOverlay map[*ast.IndexExpr]bool
 	// Last-segment indexes for the unique-suffix name fallbacks (see
 	// namedTypeSuffixIndex); rebuilt when the indexed map's size changes.
 	namedTypeSuffixes     map[string][]string
@@ -368,6 +390,7 @@ func (g *llvmGenerator) dispose() {
 		g.transientCStringLifetime = false
 	}
 }
+
 // disposeInBackground releases the generator like dispose, but tears the module
 // and its context down on another goroutine: a large module takes hundreds of
 // milliseconds to free and nothing waits on it. The context is private to this
