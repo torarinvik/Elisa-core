@@ -2,7 +2,10 @@
 
 package semantic
 
-import "testing"
+import (
+	"elisacore/src/ast"
+	"testing"
+)
 
 func TestScalarReturnSummaryStillChecksCalleeBody(t *testing.T) {
 	for _, body := range []string{"return value + 1", "return missing_value"} {
@@ -32,5 +35,44 @@ func TestScalarReturnSummaryDoesNotClassifyReferenceOrGenericResults(t *testing.
 	}
 	if scalarReturnHasNoReferenceProvenance(&FuncType{Return: &BuiltinType{Name: "i64"}, ReturnRegion: "r"}) {
 		t.Fatal("declared return region ignored")
+	}
+}
+
+func TestPointerFreeRecordReturnStillChecksCalleeBody(t *testing.T) {
+	for _, value := range []string{"17", "missing_value"} {
+		source := `const enum Kind of u8:
+    Item = 0
+struct Record:
+    kind: Kind
+    number: i64
+def caller() -> Record:
+    return callee()
+def callee() -> Record:
+    return Record{kind: Kind.Item, number: ` + value + `}
+`
+		result := Analyze(parseIncrementalSessionFile(t, source))
+		if (len(result.Errors()) != 0) != (value == "missing_value") {
+			t.Fatalf("record body diagnostics changed: %v", result.Errors())
+		}
+		symbol, ok := result.GlobalScope.Lookup("caller")
+		if !ok {
+			t.Fatal("missing caller")
+		}
+		fn := symbol.Type.(*FuncType)
+		if !scalarReturnHasNoReferenceProvenance(fn) || hasRegionProvenance(fn.ReturnProvenance) || hasBorrowedOwnerRefSummary(fn.ReturnBorrowedOwnerRefs) {
+			t.Fatal("pointer-free record summary inconsistent")
+		}
+	}
+}
+
+func TestPointerFreeSummaryRejectsReferenceRecordsAndCycles(t *testing.T) {
+	refRecord := &StructType{Decl: &ast.StructDecl{}, Fields: map[string]Field{"value": {Type: &RefType{Elem: &BuiltinType{Name: "i64"}}}}}
+	cycle := &StructType{Decl: &ast.StructDecl{}, Fields: map[string]Field{}}
+	cycle.Fields["self"] = Field{Type: cycle}
+	owning := &StructType{Decl: &ast.StructDecl{}, Affine: true}
+	for _, typ := range []Type{refRecord, cycle, owning} {
+		if scalarReturnHasNoReferenceProvenance(&FuncType{Return: typ}) {
+			t.Fatalf("owning or recursive type accepted: %T", typ)
+		}
 	}
 }

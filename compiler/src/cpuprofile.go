@@ -5,6 +5,9 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
+	"strconv"
+	"sync"
+	"time"
 )
 
 // startCPUProfile writes a pprof CPU profile to $ELISACORE_CPUPROFILE when set.
@@ -22,7 +25,44 @@ func startCPUProfile() func() {
 		f.Close()
 		return func() {}
 	}
-	return func() { pprof.StopCPUProfile(); f.Close() }
+	// A bounded sample is useful when an external timeout stops a slow compile:
+	// flush the profile before that timeout instead of losing the final gzip data.
+	var once sync.Once
+	if os.Getenv("ELISACORE_BLOCKPROFILE") != "" {
+		runtime.SetBlockProfileRate(1)
+	}
+	stop := func() {
+		once.Do(func() {
+			pprof.StopCPUProfile()
+			f.Close()
+			for _, profile := range []struct {
+				name, path string
+				debug      int
+			}{
+				{"goroutine", os.Getenv("ELISACORE_GOROUTINEPROFILE"), 2},
+				{"block", os.Getenv("ELISACORE_BLOCKPROFILE"), 0},
+			} {
+				if profile.path == "" {
+					continue
+				}
+				output, err := os.Create(profile.path)
+				if err == nil {
+					_ = pprof.Lookup(profile.name).WriteTo(output, profile.debug)
+					output.Close()
+				}
+			}
+		})
+	}
+	var timer *time.Timer
+	if seconds, err := strconv.ParseFloat(os.Getenv("ELISACORE_CPUPROFILE_SECONDS"), 64); err == nil && seconds > 0 && seconds <= 86400 {
+		timer = time.AfterFunc(time.Duration(seconds*float64(time.Second)), stop)
+	}
+	return func() {
+		if timer != nil {
+			timer.Stop()
+		}
+		stop()
+	}
 }
 
 // startMemProfile enables full allocation sampling when $ELISACORE_MEMPROFILE is set and returns
@@ -33,14 +73,28 @@ func startMemProfile() func() {
 		return func() {}
 	}
 	runtime.MemProfileRate = 64 * 1024
-	return func() {
-		f, err := os.Create(path)
-		if err != nil {
-			return
-		}
-		_ = pprof.Lookup("allocs").WriteTo(f, 0)
-		f.Close()
+	var once sync.Once
+	write := func() {
+		once.Do(func() {
+			f, err := os.Create(path)
+			if err != nil {
+				return
+			}
+			defer f.Close()
+			_ = pprof.Lookup("allocs").WriteTo(f, 0)
+		})
 	}
+	var timer *time.Timer
+	if seconds, err := strconv.ParseFloat(os.Getenv("ELISACORE_MEMPROFILE_SECONDS"), 64); err == nil && seconds > 0 && seconds <= 86400 {
+		timer = time.AfterFunc(time.Duration(seconds*float64(time.Second)), write)
+	}
+	return func() {
+		if timer != nil {
+			timer.Stop()
+		}
+		write()
+	}
+
 }
 
 // defaultGCPercent trades heap headroom for collector time. The analyzer allocates tens of GB of

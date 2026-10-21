@@ -19,6 +19,8 @@ import (
 
 // This cache stores only definitive UNSAT answers to complete queries. It does
 // not authorize skipping semantic analysis, and never stores timeout decisions.
+// A separate alpha-renamed index reuses definitive proofs after generated symbol
+// locations move; declined verdicts and their counterexamples remain exact-text.
 const smtProofCacheSchema = "elisa-exact-smt-proof-v1"
 
 type smtProofCache struct{ directory, identity string }
@@ -136,7 +138,15 @@ func (c *smtProofCache) contains(query string) bool {
 	if c == nil {
 		return false
 	}
-	key := c.key(query)
+	if c.containsKey(c.key(query)) {
+		return true
+	}
+	if key, ok := c.alphaKey(query); ok {
+		return c.containsKey(key)
+	}
+	return false
+}
+func (c *smtProofCache) containsKey(key string) bool {
 	f, err := os.Open(c.path(key))
 	if err != nil {
 		return false
@@ -156,7 +166,12 @@ func (c *smtProofCache) publish(query string) {
 	if c == nil {
 		return
 	}
-	key := c.key(query)
+	c.publishKey(c.key(query))
+	if key, ok := c.alphaKey(query); ok {
+		c.publishKey(key)
+	}
+}
+func (c *smtProofCache) publishKey(key string) {
 	path := c.path(key)
 	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
 		return

@@ -211,6 +211,51 @@ func (a *Analyzer) typeViewsProgramLived(t Type, seen map[Type]bool) bool {
 		return true
 	}
 	switch tt := t.(type) {
+	case *EnumType:
+		root := tt.Root()
+		if root == nil {
+			return false
+		}
+		if tt.Packed || root.Packed {
+			// A store-backed handle retains the store's ownership requirements.
+			return a.typeIsProgramLived(t, map[Type]bool{})
+		}
+		seen[t], seen[root] = true, true
+		pending := []*EnumType{root}
+		for _, named := range a.namedTypes {
+			if enum, ok := named.(*EnumType); ok && enum.Root() == root {
+				pending = append(pending, enum)
+			}
+		}
+		visited := map[*EnumType]bool{}
+		for len(pending) != 0 {
+			enum := pending[len(pending)-1]
+			pending = pending[:len(pending)-1]
+			if enum == nil || visited[enum] {
+				continue
+			}
+			visited[enum], seen[enum] = true, true
+			if enum.Packed && !a.typeIsProgramLived(enum, map[Type]bool{}) {
+				return false
+			}
+			if containsTypeParam(enum) {
+				return false
+			}
+			for _, field := range enum.Common {
+				if !a.typeViewsProgramLived(field.Type, seen) {
+					return false
+				}
+			}
+			for _, variant := range enum.Variants {
+				for _, payload := range variant.Payload {
+					if !a.typeViewsProgramLived(payload, seen) {
+						return false
+					}
+				}
+			}
+			pending = append(pending, enum.Children...)
+		}
+		return true
 	case *DArrayType:
 		seen[t] = true
 		return a.typeViewsProgramLived(tt.Elem, seen)

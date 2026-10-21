@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"fmt"
 	"os"
 	"reflect"
@@ -226,6 +227,17 @@ var storeScanReadOnlyMethods = map[string]bool{
 func (a *Analyzer) storeScanStaticType(fn *ast.FuncDecl, expr ast.Expr) (Type, bool) {
 	if t, known := a.exprTypes[expr]; known && t != nil {
 		return t, true
+	}
+	// Comparisons and Boolean connectives produce a Boolean, independently of
+	// the storage read by their operands. Read-only callee copies have no body
+	// expression types, but must still distinguish these values from borrows.
+	if binary, ok := storeScanUnwrap(expr).(*ast.BinaryExpr); ok && binary != nil {
+		switch binary.Op {
+		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ, lexer.TOKEN_AND, lexer.TOKEN_OR:
+			if boolean := a.namedTypes["bool"]; boolean != nil {
+				return boolean, true
+			}
+		}
 	}
 	if f, isField := expr.(*ast.FieldExpr); isField && f != nil && (f.Field == "count" || f.Field == "len") {
 		if t, ok := a.storeScanDeclTypeOf(fn, storeScanUnwrap(f.Object)); ok {

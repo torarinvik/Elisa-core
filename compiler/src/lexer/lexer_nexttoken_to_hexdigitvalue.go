@@ -2,6 +2,7 @@ package lexer
 
 import (
 	"fmt"
+	"os"
 	"unicode"
 	"unsafe"
 )
@@ -362,13 +363,20 @@ func (l *Lexer) NextToken() (result Token) {
 
 // Tokenize returns all tokens from the source.
 func (l *Lexer) Tokenize() []Token {
-	tokens := make([]Token, 0, max(16, len(l.src)/4))
+	// Compiler sources include substantial indentation and commentary. The full
+	// driver has 3.14M tokens in 23.1MB: /4 reserved 5.77M entries (574MB).
+	// /7 leaves headroom for that corpus without retaining the unused 2.6M slots.
+	// Denser source still grows normally; this is only an allocation estimate.
+	tokens := make([]Token, 0, max(16, len(l.src)/7))
 	for {
 		tok := l.NextToken()
 		tokens = append(tokens, tok)
 		if tok.Kind == TOKEN_EOF {
 			break
 		}
+	}
+	if len(l.src) >= 1<<20 && os.Getenv("ELISACORE_LEXER_CAPACITY_REPORT") == "1" {
+		fmt.Fprintf(os.Stderr, "[lexer-capacity] bytes=%d tokens=%d capacity=%d\n", len(l.src), len(tokens), cap(tokens))
 	}
 	return tokens
 }

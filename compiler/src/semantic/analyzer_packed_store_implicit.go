@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 )
@@ -493,23 +494,41 @@ func FuncTypeConsumesPackedEnumRoot(ft *FuncType, rootName string) bool {
 // Struct fields and darray/slice elements are walked recursively so that a function whose signature
 // mentions a struct or container holding packed-enum handles (e.g. a parse-result struct wrapping a
 // darray[Stmt]) also receives the implicit store threading it needs.
+// Type graphs are walked repeatedly while checking calls. Reuse the traversal
+// map rather than rebuilding its buckets for every signature. Maps are private
+// to one walk; clear keys before pooling so no AST/type graph is retained.
+var packedTypeSeenPool = sync.Pool{New: func() any { return make(map[Type]int, 32) }}
+
 func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
-	collectPackedEnumsInTypeDepth(t, out, 0)
+	seen := packedTypeSeenPool.Get().(map[Type]int)
+	collectPackedEnumsInTypeDepth(t, out, 0, seen)
+	if len(seen) <= 4096 {
+		clear(seen)
+		packedTypeSeenPool.Put(seen)
+	}
 }
 
 const collectPackedEnumsMaxDepth = 8 // guard against infinite recursion in recursive types
 
-func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) {
+func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int, seen map[Type]int) {
 	if depth > collectPackedEnumsMaxDepth {
 		return
 	}
-	switch tt := StripAggregateStateType(t).(type) {
+	t = StripAggregateStateType(t)
+	// Shared type graphs are DAGs as well as cycles. A revisit at an equal or
+	// greater depth cannot expose another root. Keep the shallowest depth so a
+	// later shorter path still gets the full remaining traversal budget.
+	if previousDepth, visited := seen[t]; visited && previousDepth <= depth {
+		return
+	}
+	seen[t] = depth
+	switch tt := t.(type) {
 	case *RefType:
-		collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1)
+		collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1, seen)
 	case *OptionalType:
-		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1)
+		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1, seen)
 	case *ErrorUnionType:
-		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1)
+		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1, seen)
 	case *EnumType:
 		if tt == nil {
 			break
@@ -535,11 +554,11 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) 
 				continue
 			}
 			for _, payload := range variant.Payload {
-				collectPackedEnumsInTypeDepth(payload, out, depth+1)
+				collectPackedEnumsInTypeDepth(payload, out, depth+1, seen)
 			}
 		}
 		for _, child := range tt.Children {
-			collectPackedEnumsInTypeDepth(child, out, depth+1)
+			collectPackedEnumsInTypeDepth(child, out, depth+1, seen)
 		}
 	case *PackedVariantViewType:
 		if tt != nil && tt.Enum != nil && tt.Enum.Packed {
@@ -548,19 +567,19 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) 
 		}
 	case *DArrayType:
 		if tt != nil {
-			collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1)
+			collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1, seen)
 		}
 	case *StructType:
 		if tt != nil {
 			for _, name := range orderedStructFieldNames(tt) { // map: declaration order so the depth guard cuts the same payloads every run
 				field := tt.Fields[name]
-				collectPackedEnumsInTypeDepth(field.Type, out, depth+1)
+				collectPackedEnumsInTypeDepth(field.Type, out, depth+1, seen)
 			}
 		}
 	case *TupleType:
 		if tt != nil {
 			for _, field := range tt.Fields {
-				collectPackedEnumsInTypeDepth(field.Type, out, depth+1)
+				collectPackedEnumsInTypeDepth(field.Type, out, depth+1, seen)
 			}
 		}
 	}

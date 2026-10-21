@@ -1371,7 +1371,7 @@ func (a *Analyzer) checkUnannotatedParamViewStore(targetExpr ast.Expr, targetReg
 // it -- the callee may store it in that region's storage. A view of a local string passed where
 // `a` is bound to the caller's own region parameter would dangle once the local is freed.
 func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regionBindings map[string]string) {
-	if a == nil || ft == nil || len(ft.RegionParams) == 0 || a.suppressDiagnostics || a.staticContextDepth != 0 {
+	if a == nil || ft == nil || (len(ft.RegionParams) == 0 && len(a.programRegions) == 0) || a.suppressDiagnostics || a.staticContextDepth != 0 {
 		return
 	}
 	// One region parameter bound to two different caller regions: the callee may store a
@@ -1387,6 +1387,7 @@ func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regio
 		if index >= len(args) || args[index] == nil {
 			continue
 		}
+		a.checkProgramViewElementArg(paramType, args[index])
 		region := containerOrEntryRegion(paramType)
 		if region == "" || stripRefForBounds(paramType) == nil {
 			continue
@@ -1395,6 +1396,11 @@ func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regio
 			continue
 		}
 		bound, ok := regionBindings[region]
+		// A concrete program region is already bound by its declaration. It
+		// carries the same caller obligation as an instantiated region parameter.
+		if a.isProgramRegion(region) {
+			bound, ok = region, true
+		}
 		if !ok || bound == "" || bound == region && !a.lookupRegionParam(bound) && !a.isProgramRegion(bound) {
 			continue
 		}
@@ -1418,6 +1424,32 @@ func (a *Analyzer) checkRegionParamViewArgs(ft *FuncType, args []ast.Expr, regio
 			}
 		}
 	}
+}
+
+// checkProgramViewElementArg checks the view elements separately from a darray's
+// backing region. A local buffer can carry program-lived views, but a borrowed
+// element type cannot acquire that promise merely by passing through a call.
+func (a *Analyzer) checkProgramViewElementArg(paramType Type, arg ast.Expr) {
+	param, ok := stripRefForBounds(paramType).(*DArrayType)
+	if !ok || param == nil {
+		return
+	}
+	view, ok := param.Elem.(*SViewType)
+	if !ok || view == nil || !a.isProgramRegion(view.Region) {
+		return
+	}
+	actual, ok := stripRefForBounds(a.exprTypes[arg]).(*DArrayType)
+	if !ok || actual == nil {
+		return
+	} // ordinary type checking owns incompatible arguments
+	actualView, ok := actual.Elem.(*SViewType)
+	if !ok || actualView == nil {
+		return
+	}
+	if a.isProgramRegion(actualView.Region) {
+		return
+	}
+	a.errorf(arg.Pos(), "argument elements must be views in program-lived region %q; the element type does not guarantee that lifetime. Pass a darray[sview @%s] whose elements satisfy the declared region", a.regionDisplayName(view.Region), a.regionDisplayName(view.Region))
 }
 
 func liveRegionDependencyNames(state regionRefState) []string {
@@ -1916,6 +1948,12 @@ func (a *Analyzer) returnedAggregateTaintRegion(expr ast.Expr) string {
 		return ""
 	}
 	switch n := stripParenExpr(expr).(type) {
+	case *ast.MoveExpr:
+		if n == nil {
+			return ""
+		}
+		// Moving ownership does not extend the lifetime of interior buffers.
+		return a.returnedAggregateTaintRegion(n.Operand)
 	case *ast.ListLitExpr:
 		r := ""
 		for i, e := range n.Elems {

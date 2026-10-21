@@ -27,17 +27,18 @@ static void elisacoreInitializeAllTargetsForCrossEmission(void) {
 	LLVMInitializeAllAsmPrinters();
 }
 
-static LLVMTargetMachineRef elisacoreCreateTargetMachineDefault(
+static LLVMTargetMachineRef elisacoreCreateTargetMachineForOpt(
 	LLVMTargetRef Target,
 	char *Triple,
 	char *CPU,
-	char *Features) {
+	char *Features,
+	int Unoptimized) {
 	return LLVMCreateTargetMachine(
 		Target,
 		Triple,
 		CPU,
 		Features,
-		LLVMCodeGenLevelDefault,
+		Unoptimized ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault,
 		LLVMRelocDefault,
 		LLVMCodeModelDefault);
 }
@@ -359,7 +360,13 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 		return err
 	}
 	cpu, features := cString(identity.CPU), cString(identity.Features)
-	tm := C.elisacoreCreateTargetMachineDefault(target, triple, cpu, features)
+	// O0 must also disable machine-code optimization, not only IR passes.
+	// The default machine pipeline spends substantial time on large debug builds.
+	unoptimized := C.int(0)
+	if g.optLevel == OptimizationLevel0 {
+		unoptimized = 1
+	}
+	tm := C.elisacoreCreateTargetMachineForOpt(target, triple, cpu, features, unoptimized)
 	C.free(unsafe.Pointer(cpu))
 	C.free(unsafe.Pointer(features))
 	if tm == nil {

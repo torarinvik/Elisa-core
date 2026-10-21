@@ -173,7 +173,11 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
 		// declared type (`scope.deferred.count` is a usize).
 		if _, known := a.exprTypes[inner]; !known {
-			if t, ok := a.storeScanDeclTypeOf(decl, inner); ok && t != nil && !containsTypeParam(t) {
+			t, ok := a.storeScanDeclTypeOf(decl, inner)
+			if !ok || t == nil {
+				t, ok = a.storeScanParamProjectionType(decl, inner)
+			}
+			if ok && t != nil && !containsTypeParam(t) {
 				if a.storeScanHoldsNoRegionStorage(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
 					return storeNone
 				}
@@ -410,22 +414,75 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 	return mode
 }
 
+// ELISA_STORE_PAYLOAD_TRACE=1 traces failed payload proofs; any other nonempty
+// value filters by declaration-name prefix. Logging reads existing facts only.
+var storePayloadTracePrefix = os.Getenv("ELISA_STORE_PAYLOAD_TRACE")
+
+func (a *Analyzer) traceStorePayloadFailure(decl *ast.FuncDecl, other, index int, reason string, expr ast.Expr) {
+	if storePayloadTracePrefix == "" {
+		return
+	}
+	name, source, target, position := "<unknown>", "?", "?", "<unknown>"
+	if decl != nil {
+		name = decl.Name
+		position = fmt.Sprint(decl.Pos())
+		if other >= 0 && other < len(decl.Params) {
+			source = decl.Params[other].Name
+		}
+		if index >= 0 && index < len(decl.Params) {
+			target = decl.Params[index].Name
+		}
+	}
+	if storePayloadTracePrefix != "1" && !strings.HasPrefix(name, storePayloadTracePrefix) {
+		return
+	}
+	existingType := "<missing>"
+	inner := storeScanUnwrap(expr)
+	if expr != nil {
+		position = fmt.Sprint(expr.Pos())
+	}
+	if t := a.exprTypes[inner]; t != nil {
+		existingType = typeString(t)
+	}
+	fmt.Fprintf(os.Stderr, "STOREPAYLOAD decl=%s source=%s[%d] target=%s[%d] reason=%s at=%s kind=%T existingType=%s\n", name, source, other+1, target, index+1, reason, position, inner, existingType)
+}
+
 // calleeStoresProgramLivedElements proves that every value from source parameter `other` which
 // reaches target parameter `index` is region-free or program-lived. storeMode alone loses the
 // field path: a large state object can contain both source-lived names and unrelated fields with
 // shorter or unknown lifetimes. This proof follows only source-tainted values at actual stores
-// and fails closed for unknown expressions or cycles.
+// and fails closed for unknown expressions. Recursive edges share the active
+// proof: every concrete store in the reachable cycle is still checked.
 func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) bool {
+	return a.calleeStoresProgramLivedElementsActive(decl, other, index, seen, map[storeScanKey]bool{}, map[storeScanKey]bool{})
+}
+
+func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, other, index int, seen, activeProof, completed map[storeScanKey]bool) (result bool) {
 	decl = a.readDecl(decl)
 	if decl == nil || other < 0 || index < 0 || other >= len(decl.Params) || index >= len(decl.Params) {
+		a.traceStorePayloadFailure(decl, other, index, "invalid-input", nil)
 		return false
 	}
 	key := storeScanKey{decl, other, index}
-	if seen[key] {
-		return false
+	if result, known := completed[key]; known {
+		return result
 	}
-	seen[key] = true
-	defer delete(seen, key)
+	if activeProof[key] {
+		// This invocation is already checking every store reachable from the
+		// same source/target pair. Re-entering it adds no new obligation; the
+		// active invocation still rejects any unsafe concrete store or unknown
+		// callee in the cycle before its result can reach the root caller.
+		return true
+	}
+	activeProof[key] = true
+	defer func() {
+		delete(activeProof, key)
+		// Memoization is confined to this root proof. If a recursive
+		// assumption later fails, that failure propagates up its initiating
+		// call chain and rejects the root; tentative successes never escape
+		// into another query.
+		completed[key] = result
+	}()
 	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name, seen)
 	idx := a.storeScanIndex(decl)
 	holders := a.storeScanLastHolders
@@ -450,11 +507,25 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 			// Omitted/default fields can carry region storage too. Accept this literal only
 			// when its complete declared type is program-lived.
 			t, known := a.exprTypes[inner]
-			return known && t != nil && len(a.programRegions) != 0 && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) && a.typeIsProgramLivedCached(t)
+			if !known || t == nil {
+				t = a.storeScanDeclaredStructLiteralType(decl, inner.(*ast.StructLitExpr))
+				known = t != nil
+			}
+			if known && t != nil && len(a.programRegions) != 0 && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) && a.typeIsProgramLivedCached(t) {
+				return true
+			}
+			st, ok := t.(*StructType)
+			return ok && a.storeScanLiteralFieldsProgramLived(decl, inner.(*ast.StructLitExpr), st, views)
 		}
 		return a.storeScanStoredElementExprProgramLived(decl, value, views)
 	}
 	proof := true
+	fail := func(reason string, expr ast.Expr) {
+		if proof {
+			a.traceStorePayloadFailure(decl, other, index, reason, expr)
+		}
+		proof = false
+	}
 	a.storeScanEachNode(decl, func(node any) {
 		if !proof {
 			return
@@ -478,12 +549,19 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 			// the call result itself is not the value written to the target. Its effects are
 			// checked at the CallExpr node below, matching calleeStoreModeIntoBody.
 			if call, ok := storeScanUnwrap(n.Value).(*ast.CallExpr); ok && call != nil {
+				// Builtin push returns this same destination header. The call
+				// node below checks every appended payload independently.
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && field.Field == "push" && len(returnBorrowCallArgs(call)) == len(call.Args) && a.storeScanReceiverIsBuiltinDArray(decl, field.Object) && returnBorrowSamePlace(n.Target, field.Object) {
+					return
+				}
 				if callee, resolved := a.resolveReadOnlyScanCallee(call); resolved && callee != nil && a.declReturnsVoid(callee) {
 					return
 				}
 			}
 			sawStoredPayload = true
-			proof = valueIsProgramLived(n.Value)
+			if !valueIsProgramLived(n.Value) {
+				fail("assignment-payload", n.Value)
+			}
 		case *ast.CallExpr:
 			if n == nil {
 				return
@@ -497,13 +575,19 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 					for _, arg := range n.Args {
 						if idx.mentions(arg, content) {
 							sawStoredPayload = true
-							proof = valueIsProgramLived(arg)
-							if !proof {
+							if !valueIsProgramLived(arg) {
+								fail("receiver-payload", arg)
 								return
 							}
 						}
 					}
 				}
+			}
+			// A builtin push writes only through its receiver, checked above.
+			// Payload subexpressions are separate nodes, so their own writes
+			// remain checked without treating this builtin as an unknown call.
+			if isMethod && field != nil && field.Field == "push" && len(args) == len(n.Args) && a.storeScanReceiverIsBuiltinDArray(decl, field.Object) {
+				return
 			}
 			if len(args) != len(n.Args) {
 				return
@@ -522,7 +606,7 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 			}
 			callee, ok := a.resolveReadOnlyScanCallee(n)
 			if !ok || callee == nil || !storeFlowCallFitsParams(callee, n) || funcHasArenaParam(callee) {
-				proof = false
+				fail("unresolved-or-arena-callee", n)
 				return
 			}
 			for _, ti := range targetArgs {
@@ -541,13 +625,17 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 						// Scalar arguments usually cannot retain region dependencies, but pointer-width
 						// integers can encode an address. Do not drop those tainted call paths.
 						if !a.storeScanStoredElementExprProgramLived(decl, args[si], views) {
-							proof = false
+							fail("scalar-payload", args[si])
 							return
 						}
 						continue
 					}
-					if (mode != storeViews && mode != storeElements) || !a.calleeStoresProgramLivedElements(callee, si, ti, seen) {
-						proof = false
+					if mode != storeViews && mode != storeElements {
+						fail("callee-header", args[si])
+						return
+					}
+					if !a.calleeStoresProgramLivedElementsActive(callee, si, ti, seen, activeProof, completed) {
+						fail("callee-payload", args[si])
 						return
 					}
 					sawStoredPayload = true
@@ -555,6 +643,9 @@ func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, i
 			}
 		}
 	})
+	if proof && !sawStoredPayload {
+		a.traceStorePayloadFailure(decl, other, index, "no-stored-payload", nil)
+	}
 	return proof && sawStoredPayload
 }
 
@@ -606,6 +697,11 @@ func (a *Analyzer) storeScanStoredElementExprProgramLivedSeen(decl *ast.FuncDecl
 				if root := rootIdentExpr(assign.Target); root != nil && root.Name == id.Name {
 					return false
 				}
+			}
+			// The explicit local contract was checked at initialization. Do not
+			// discard it by re-inferring a conditional initializer in a cold body.
+			if named, ok := decls[0].Type.(*ast.NamedType); ok && named != nil && named.Name == "sview" && a.storeScanLocalIsProgramView(decl, id.Name) {
+				return true
 			}
 			if views != nil && views[id.Name] {
 				seenNames[id.Name] = true
@@ -807,6 +903,11 @@ func (a *Analyzer) storeScanParamProjectionType(decl *ast.FuncDecl, expr ast.Exp
 	case *ast.IndexExpr:
 		if e == nil || e.Index2 != nil {
 			return nil, false
+		}
+		if id, ok := storeScanUnwrap(e.Object).(*ast.Ident); ok {
+			if elem, known := a.storeScanLocalDarrayStructElement(decl, id.Name); known {
+				return elem, true
+			}
 		}
 		base, ok := a.storeScanParamProjectionType(decl, e.Object)
 		if !ok {
@@ -1897,6 +1998,25 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	if decl == nil || other < 0 || other >= len(decl.Params) || len(decl.Body) == 0 {
 		return storeHeader
 	}
+	// A scalar/pointer-free result cannot retain any parameter storage. This
+	// applies before body typing as well: reading a container's count must not
+	// make the resulting integer borrow that container. Parameter writes remain
+	// independently visible through calleeStoreModeIntoBody.
+	if symbol := a.funcDeclSymbols[decl]; symbol != nil {
+		if function, ok := symbol.Type.(*FuncType); ok && function != nil {
+			if scalarReturnHasNoReferenceProvenance(function) {
+				return storeNone
+			}
+			// A completely program-lived result (including a record whose fields
+			// carry those contracts) cannot retain shorter-lived parameter storage.
+			// The body pass still validates every field and return independently;
+			// cold read-only copies must preserve the resolved result type.
+			if !returnRegionListContains(function.RegionParams, function.ReturnRegion) &&
+				a.storeScanTypeIsProgramLivedForStoreProof(function.Return) {
+				return storeNone
+			}
+		}
+	}
 	if a.declParamIsProgramLived(decl, other) {
 		return storeNone // docs/128: a program-lived parameter's parts are program-lived
 	}
@@ -1929,23 +2049,27 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		// A value produced without a `return` (an expression tail) is not modelled.
 		mode = storeHeader
 	}
-	a.storeScanEachNode(decl, func(node any) {
-		ret, ok := node.(*ast.ReturnStmt)
-		if !ok || ret == nil || ret.Value == nil || mode == storeHeader {
-			return
+	var returnedMode func(ast.Expr) storeMode
+	returnedMode = func(expr ast.Expr) storeMode {
+		value := storeScanUnwrap(expr)
+		// The selected value carries storage; its predicate only controls the
+		// selection. Store effects of calls in the predicate are scanned by
+		// calleeStoreModeIntoBody independently from this return summary.
+		if choice, ok := value.(*ast.TernaryExpr); ok && choice != nil {
+			return maxStoreMode(returnedMode(choice.Value), returnedMode(choice.Alt))
 		}
-		value := storeScanUnwrap(ret.Value)
 		if len(a.programRegions) != 0 {
 			t, known := a.exprTypes[value]
 			if !known {
 				t, known = a.storeScanDeclTypeOf(decl, value)
 			}
 			if known && a.storeScanTypeIsProgramLivedForStoreProof(t) {
-				return
+				return storeNone
 			}
 		}
 		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
 			if callee, ok := a.resolveReadOnlyScanCallee(call); ok && callee != nil && storeFlowCallFitsParams(callee, call) && !funcHasArenaParam(callee) {
+				callMode := storeNone
 				for i, arg := range returnBorrowCallArgs(call) {
 					argMode := storeNone
 					if storeScanMentionsHeader(arg, header) {
@@ -1953,24 +2077,30 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 					} else if storeScanMentions(arg, content) {
 						argMode = storeElements
 					}
-					if argMode == storeNone {
-						continue
+					if argMode != storeNone {
+						callMode = maxStoreMode(callMode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
 					}
-					mode = maxStoreMode(mode, narrowStoreMode(argMode, a.calleeReturnModeOf(callee, i, seen)))
 				}
-				return
+				return callMode
 			}
 		}
 		if !storeScanMentions(value, content) {
-			return
+			return storeNone
 		}
 		if views != nil && (a.storeScanValueIsView(decl, value, views) || a.storeScanDeclReturnsViewOnly(decl) || storeScanRootedAtFilled(value, filled)) {
-			mode = maxStoreMode(mode, storeViews)
-		} else if storeScanMentionsHeader(value, header) {
-			mode = storeHeader
-		} else {
-			mode = maxStoreMode(mode, storeElements)
+			return storeViews
 		}
+		if storeScanMentionsHeader(value, header) {
+			return storeHeader
+		}
+		return storeElements
+	}
+	a.storeScanEachNode(decl, func(node any) {
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || ret == nil || ret.Value == nil || mode == storeHeader {
+			return
+		}
+		mode = maxStoreMode(mode, returnedMode(ret.Value))
 	})
 	final := a.storeScanPopFrame(key, mark, mode)
 	if final {
@@ -2326,6 +2456,138 @@ func (a *Analyzer) storeScanLocalLiteralType(decl *ast.FuncDecl, name string) (T
 	}
 	st := a.storeScanUniqueStruct(litName)
 	return st, st != nil
+}
+
+// storeScanLocalDarrayStructElement reads only explicit local declarations. All
+// bindings must agree, and ambiguous struct names remain unknown.
+func (a *Analyzer) storeScanLocalDarrayStructElement(decl *ast.FuncDecl, name string) (Type, bool) {
+	decl = a.readDecl(decl)
+	if decl == nil || len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 {
+		return nil, false
+	}
+	for _, p := range decl.Params {
+		if p.Name == name {
+			return nil, false
+		}
+	}
+	idx := a.storeScanIndex(decl)
+	if idx.otherBound[name] {
+		return nil, false
+	}
+	elementName := ""
+	for _, local := range idx.decls[name] {
+		elem, ok := storeFlowDarrayElementTypeExpr(local.Type)
+		if !ok {
+			return nil, false
+		}
+		named, ok := elem.(*ast.NamedType)
+		if !ok || named == nil || named.Region != "" || (elementName != "" && elementName != named.Name) {
+			return nil, false
+		}
+		elementName = named.Name
+	}
+	if elementName == "" {
+		return nil, false
+	}
+	st := a.storeScanUniqueStruct(elementName)
+	// A unique suffix is insufficient: an unrelated module may own that name.
+	// Exact declared names also keep shadowed and ambiguous spellings conservative.
+	declared, exact := a.namedTypes[elementName].(*StructType)
+	return st, st != nil && exact && declared == st
+}
+
+// storeScanLiteralFieldsProgramLived proves this construction, not every value
+// of its type. Omitted unqualified view fields may have static literal defaults.
+func (a *Analyzer) storeScanLiteralFieldsProgramLived(decl *ast.FuncDecl, lit *ast.StructLitExpr, st *StructType, views map[string]bool) bool {
+	fail := func(field, reason string) bool {
+		if decl != nil && lit != nil && storePayloadTracePrefix != "" && (storePayloadTracePrefix == "1" || strings.HasPrefix(decl.Name, storePayloadTracePrefix)) {
+			fmt.Fprintf(os.Stderr, "STORELITERAL decl=%s literal=%s field=%s reason=%s\n", decl.Name, lit.Name, field, reason)
+		}
+		return false
+	}
+	if lit == nil || st == nil || st.Decl == nil || !lit.Brace || len(lit.Spreads) != 0 || lit.CopyBase != nil || len(lit.TypeArgs) != 0 || len(st.TypeParams) != 0 || len(st.GenericParams) != 0 || len(st.RegionParams) != 0 || len(lit.Args) != len(lit.ArgNames) {
+		return fail("", "unsupported-construction")
+	}
+	provided := map[string]ast.Expr{}
+	for i, value := range lit.Args {
+		name := lit.ArgNames[i]
+		if name == "" || value == nil || provided[name] != nil {
+			return fail(name, "invalid-field")
+		}
+		if _, exists := st.Fields[name]; !exists {
+			return fail(name, "unknown-field")
+		}
+		provided[name] = value
+	}
+	for _, fieldDecl := range st.Decl.Fields {
+		field, exists := st.Fields[fieldDecl.Name]
+		if !exists || field.Type == nil || containsTypeParam(field.Type) || a.storeScanTypeMayEncodeAddress(field.Type, map[Type]bool{}) {
+			return fail(fieldDecl.Name, "unknown-or-address-type")
+		}
+		if field.Ghost || field.Phantom {
+			continue
+		}
+		value := provided[fieldDecl.Name]
+		defaulted := value == nil
+		if defaulted {
+			value = fieldDecl.DefaultValue
+		}
+		if value == nil {
+			return fail(fieldDecl.Name, "missing-value")
+		}
+		if a.storeScanHoldsNoRegionStorage(field.Type) {
+			continue
+		}
+		if defaulted {
+			// Defaults resolve in the struct's scope, never the caller's.
+			// Only this static view case needs no declaration-scope inference.
+			if _, isView := field.Type.(*SViewType); isView {
+				if _, literal := storeScanUnwrap(value).(*ast.StringLit); literal {
+					continue
+				}
+			}
+			return fail(fieldDecl.Name, "nonliteral-reference-default")
+		}
+		if len(a.programRegions) != 0 && a.typeIsProgramLivedCached(field.Type) {
+			continue
+		}
+		if _, isView := field.Type.(*SViewType); !isView {
+			return fail(fieldDecl.Name, "nonprogram-field-type")
+		}
+		if _, literal := storeScanUnwrap(value).(*ast.StringLit); literal {
+			continue
+		}
+		if !a.storeScanStoredElementExprProgramLived(decl, value, views) {
+			return fail(fieldDecl.Name, "unproven-value")
+		}
+	}
+	return true
+}
+
+// storeScanDeclaredStructLiteralType reads an exact non-generic declaration in
+// the inspected function's namespace, without resolving or warming body types.
+func (a *Analyzer) storeScanDeclaredStructLiteralType(decl *ast.FuncDecl, lit *ast.StructLitExpr) Type {
+	decl = a.readDecl(decl)
+	if decl == nil || lit == nil || len(lit.TypeArgs) != 0 || len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 {
+		return nil
+	}
+	lookup := func(name string) Type {
+		st, ok := a.namedTypes[name].(*StructType)
+		if !ok || st == nil || len(st.TypeParams) != 0 {
+			return nil
+		}
+		return st
+	}
+	if strings.Contains(lit.Name, ".") {
+		return lookup(lit.Name)
+	}
+	if sym := a.funcDeclSymbols[decl]; sym != nil {
+		name := joinQualifiedName(privateOwnerNamespace(sym.Name), lit.Name)
+		if _, exists := a.namedTypes[name]; exists {
+			return lookup(name)
+		}
+	}
+	return lookup(lit.Name)
 }
 
 // storeScanUniqueStruct: the one struct type whose name is name (unqualified, or its last
@@ -2720,6 +2982,9 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 		if name, ok := a.storeScanLocalScalarDArrayElem(decl, local.Name); ok {
 			return &BuiltinType{Name: name}, true
 		}
+		if elem, ok := a.storeScanLocalProgramViewDarrayElement(decl, local.Name); ok {
+			return elem, true
+		}
 		if t, ok := a.storeScanSubjectDeclType(decl, local); ok && t != nil {
 			if c, ok := stripRefForBounds(t).(*DArrayType); ok && c != nil && c.Elem != nil {
 				return c.Elem, true
@@ -2737,6 +3002,47 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 	}
 	if c, isDArray := stripRefForBounds(t).(*DArrayType); isDArray && c != nil && c.Elem != nil {
 		return c.Elem, true
+	}
+	return nil, false
+}
+
+// storeScanLocalProgramViewDarrayElement reads an explicit local element contract.
+// The buffer itself remains locally owned; only the copied view is program-lived.
+func (a *Analyzer) storeScanLocalProgramViewDarrayElement(decl *ast.FuncDecl, name string) (Type, bool) {
+	decl = a.readDecl(decl)
+	if decl == nil || len(decl.TypeParams) != 0 || len(decl.GenericParams) != 0 {
+		return nil, false
+	}
+	for _, p := range decl.Params {
+		if p.Name == name {
+			return nil, false
+		}
+	}
+	idx := a.storeScanIndex(decl)
+	if idx.otherBound[name] || len(idx.decls[name]) != 1 {
+		return nil, false
+	}
+	elem, ok := storeFlowDarrayElementTypeExpr(idx.decls[name][0].Type)
+	if !ok {
+		return nil, false
+	}
+	named, ok := elem.(*ast.NamedType)
+	if !ok || named == nil || !a.programRegions[named.Region] {
+		return nil, false
+	}
+	for _, region := range decl.RegionParams {
+		if region == named.Region {
+			return nil, false
+		}
+	}
+	for _, node := range idx.flat {
+		if region, ok := node.(*ast.RegionStmt); ok && region != nil && region.Name == named.Region {
+			return nil, false
+		}
+	}
+	switch named.Name {
+	case "sview":
+		return &SViewType{Region: named.Region}, true
 	}
 	return nil, false
 }
@@ -3011,6 +3317,11 @@ func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode
 		// The callee may not be typed yet: a field chain of a parameter or of an explicitly
 		// typed local still has its declared type.
 		t, known = a.storeScanDeclTypeOf(decl, storeScanUnwrap(arg))
+	}
+	if !known || t == nil {
+		// Interleaved projections such as state.rows[i].names have declared
+		// element types too, even before their expression types are populated.
+		t, known = a.storeScanParamProjectionType(decl, storeScanUnwrap(arg))
 	}
 	if known && t != nil && !containsTypeParam(t) {
 		if da, ok := stripRefForBounds(t).(*DArrayType); ok && da.Elem != nil && !containsTypeParam(da.Elem) && !a.storeScanTypeMayEncodeAddress(da.Elem, map[Type]bool{}) && (a.storeScanHoldsNoRegionStorage(da.Elem) || a.storeScanTypeIsProgramLivedForStoreProof(da.Elem)) {

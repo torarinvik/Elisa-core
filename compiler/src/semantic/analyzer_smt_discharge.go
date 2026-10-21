@@ -757,7 +757,9 @@ func (a *Analyzer) smtCachedQuery(query string) (smtQueryResult, bool) {
 		a.smtStats.CacheHits++
 		a.smtStats.PersistentCacheHits++
 		a.smtStats.Declined++
-		return smtQueryResult{proven: false, ce: ce}, true
+		result := smtQueryResult{proven: false, ce: ce}
+		a.cacheSMTQuery(query, result)
+		return result, true
 	}
 	return smtQueryResult{}, false
 }

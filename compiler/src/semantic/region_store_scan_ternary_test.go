@@ -172,3 +172,135 @@ func BenchmarkStoreScanConditionalSharing(b *testing.B) {
 		}
 	}
 }
+
+func TestStoreScanConditionalReturnValue(t *testing.T) {
+	source := `struct Table:
+    lists: mutable darray[darray[sview]] = []
+def literal(names: darray[sview]&) -> sview:
+    return "yes" if names.count > 0 else "no"
+def nested(names: darray[sview]&, flag: bool) -> sview:
+    return ("yes" if names.count > 0 else "no") if flag else "other"
+def view(names: darray[sview]&) -> sview:
+    can Abort.Panic:
+        return names[0] if names.count > 0 else ""
+def header(names: darray[sview]&, flag: bool) -> darray[sview]:
+    return [] if flag else names
+def write(table: mutable Table&, names: darray[sview]&) -> bool:
+    can Memory.Allocate:
+        table.lists.push(names)
+        return true
+def condition_effect(table: mutable Table&, names: darray[sview]&) -> sview:
+    return "yes" if write(table, names) else "no"
+`
+	for _, untyped := range []bool{false, true} {
+		for _, tc := range []struct {
+			name   string
+			source int
+			want   storeMode
+		}{
+			{"literal", 0, storeNone}, {"nested", 0, storeNone}, {"view", 0, storeViews},
+			{"header", 0, storeHeader}, {"condition_effect", 1, storeNone},
+		} {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "returned_ternary.elisa", source, AnalyzeOptions{})
+			if untyped {
+				storeScanUntyped(result)
+			}
+			a := result.analyzer
+			a.currentScope = a.globalScope
+			a.storeScanCache = nil
+			fn := storeScanFindFunc(t, result, tc.name)
+			if got := a.calleeReturnModeOf(fn, tc.source, map[storeScanKey]bool{}); got != tc.want {
+				t.Errorf("%s/untyped=%v return mode = %v, want %v", tc.name, untyped, got, tc.want)
+			}
+			if tc.name == "condition_effect" {
+				a.storeScanCache = nil
+				if got := a.calleeStoreModeInto(fn, 1, 0); got != storeHeader {
+					t.Errorf("condition's independent store lost: %v", got)
+				}
+			}
+		}
+	}
+}
+
+func TestStoreScanScalarReturnDoesNotRetainInput(t *testing.T) {
+	source := `def count_names(names: darray[sview]&) -> usize:
+    return names.count
+
+def choose_count(names: darray[sview]&, flag: bool) -> usize:
+    return names.count if flag else 0
+
+def identity_address(value: uintptr) -> uintptr:
+    return value
+`
+	for _, cold := range []bool{false, true} {
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "scalar_return_store.elisa", source, AnalyzeOptions{})
+		if cold {
+			storeScanUntyped(result)
+		}
+		a := result.analyzer
+		a.currentScope = a.globalScope
+		a.storeScanCache = nil
+		for _, name := range []string{"count_names", "choose_count"} {
+			fn := storeScanFindFunc(t, result, name)
+			if got := a.calleeReturnModeOf(fn, 0, map[storeScanKey]bool{}); got != storeNone {
+				t.Errorf("%s/cold=%v: scalar return mode %v", name, cold, got)
+			}
+		}
+		fn := storeScanFindFunc(t, result, "identity_address")
+		if got := a.calleeReturnModeOf(fn, 0, map[storeScanKey]bool{}); got != storeHeader {
+			t.Errorf("cold=%v address return lost retention: %v", cold, got)
+		}
+
+	}
+}
+
+func TestStoreScanScalarTupleBindBeforeBodyTyping(t *testing.T) {
+	source := `struct Table:
+    counts: mutable darray[usize] = []
+    names: mutable darray[sview] = []
+def probe(names: darray[sview]&) -> (slot: usize, found: bool):
+    return (names.count, true)
+def probe_header(names: darray[sview]&) -> (names: darray[sview], count: usize):
+    return (names, names.count)
+def probe_view(names: darray[sview]&) -> (name: sview, count: usize):
+    can Abort.Panic:
+        return (names[0], names.count)
+def note(table: mutable Table&, names: darray[sview]&) -> void:
+    can Memory.Allocate:
+        slot, found = probe(names)
+        table.counts.push(slot)
+def note_view(table: mutable Table&, names: darray[sview]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        name, count = probe_view(names)
+        table.names.push(name)
+`
+	for _, cold := range []bool{false, true} {
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "scalar_tuple_bind.elisa", source, AnalyzeOptions{})
+		if cold {
+			storeScanUntyped(result)
+		}
+		a := result.analyzer
+		a.currentScope = a.globalScope
+		a.storeScanCache = nil
+		for _, tc := range []struct {
+			name string
+			want storeMode
+		}{{"note", storeNone}, {"note_view", storeViews}} {
+			fn := storeScanFindFunc(t, result, tc.name)
+			got := a.calleeStoreModeInto(fn, 1, 0)
+			if (got == storeNone) != (tc.want == storeNone) {
+				t.Errorf("%s/cold=%v retention mode=%v want-none=%v", tc.name, cold, got, tc.want == storeNone)
+			}
+		}
+		probe := storeScanFindFunc(t, result, "probe")
+		if got := a.calleeReturnModeOf(probe, 0, map[storeScanKey]bool{}); got != storeNone {
+			t.Errorf("cold=%v scalar tuple return retains input: %v", cold, got)
+		}
+
+		header := storeScanFindFunc(t, result, "probe_header")
+		if got := a.calleeReturnModeOf(header, 0, map[storeScanKey]bool{}); got == storeNone {
+			t.Errorf("cold=%v tuple container header retention lost", cold)
+		}
+
+	}
+}

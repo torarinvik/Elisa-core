@@ -1434,6 +1434,13 @@ func unwrapParenForRegionPoly(value ast.Expr) ast.Expr {
 				return value
 			}
 			value = wrapped.Expr
+		case *ast.MoveExpr:
+			if wrapped == nil {
+				return value
+			}
+			// Moving transfers ownership without changing the backing arena.
+			// A moved local return must adopt exactly as its value would.
+			value = wrapped.Operand
 		default:
 			return value
 		}

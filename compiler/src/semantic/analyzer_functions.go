@@ -403,19 +403,47 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentRegionFactTransforms = savedRegionFactTransforms
 }
 
-// Scalar results cannot carry region or borrowed-owner references. Answer their
-// lazy summary query from the resolved type; the ordinary body pass still checks
-// all statements and diagnostics. Keep aggregates and generic results conservative.
+// Pointer-free results need no lazy reference-provenance walk. The ordinary
+// body pass still checks statements and diagnostics. Unresolved, owning and
+// generic types remain conservative; a bounded recursion also rejects cycles.
 func scalarReturnHasNoReferenceProvenance(fnType *FuncType) bool {
-	if fnType == nil || fnType.ReturnRegion != "" {
+	return fnType != nil && fnType.ReturnRegion == "" && returnTypeHasNoReferences(fnType.Return, 0)
+}
+
+func returnTypeHasNoReferences(t Type, depth int) bool {
+	if depth > 16 {
 		return false
 	}
-	typ, ok := fnType.Return.(*BuiltinType)
-	if !ok || typ == nil {
-		return false
-	}
-	switch typ.Name {
-	case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f16", "f32", "f64":
+	switch typ := t.(type) {
+	case *BuiltinType:
+		if typ == nil {
+			return false
+		}
+		switch typ.Name {
+		case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f16", "f32", "f64":
+			return true
+		}
+	case *ConstEnumType:
+		return typ != nil && returnTypeHasNoReferences(typ.Storage, depth+1)
+	case *TupleType:
+		if typ == nil {
+			return false
+		}
+		for _, field := range typ.Fields {
+			if !returnTypeHasNoReferences(field.Type, depth+1) {
+				return false
+			}
+		}
+		return true
+	case *StructType:
+		if typ == nil || typ.Decl == nil || typ.Store || typ.Resource || typ.Affine || typ.DropHook != "" || typ.HasPackedGroups || typ.RegionOwner != "" || len(typ.RegionParams) != 0 || len(typ.GenericParams) != 0 || len(typ.TypeParams) != 0 || len(typ.Fields) < len(typ.Decl.Fields) {
+			return false
+		}
+		for _, field := range typ.Fields {
+			if !returnTypeHasNoReferences(field.Type, depth+1) {
+				return false
+			}
+		}
 		return true
 	}
 	return false

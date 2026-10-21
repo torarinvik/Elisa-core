@@ -663,6 +663,10 @@ func (g *llvmGenerator) addNoUnwindAttribute(fn C.LLVMValueRef) {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "nounwind")
+	// Profiling builds: keep a walkable frame chain so `sample` attributes callers.
+	if os.Getenv("ELISA_KEEP_FRAME_POINTER") != "" {
+		g.addFunctionStringAttribute(fn, "frame-pointer", "all")
+	}
 }
 func (g *llvmGenerator) addHotAttribute(fn C.LLVMValueRef) {
 	if g == nil || g.context == nil || fn == nil {

@@ -497,12 +497,23 @@ func (a *Analyzer) returnBorrowFlowForCall(call *ast.CallExpr, aliases map[strin
 		args = call.ResolvedArgs
 	}
 	if ok && decl != nil {
-		summary := a.returnBorrowFlowForFunc(decl, active)
-		flow := returnBorrowFlow{Local: summary.Local}
 		var calleeType *FuncType
 		if sym := a.funcDeclSymbols[decl]; sym != nil {
 			calleeType, _ = sym.Type.(*FuncType)
 		}
+		// A declared program-lived view cannot retain the caller's stack.
+		// The callee's body still validates its return contract independently.
+		if calleeType != nil && a.isProgramRegion(calleeType.ReturnRegion) &&
+			!returnRegionListContains(calleeType.RegionParams, calleeType.ReturnRegion) {
+			if view, ok := calleeType.Return.(*SViewType); ok && a.isProgramRegion(view.Region) {
+				if a.retained != nil {
+					a.retained.noteReturnBorrowDep(decl)
+				}
+				return returnBorrowFlow{}
+			}
+		}
+		summary := a.returnBorrowFlowForFunc(decl, active)
+		flow := returnBorrowFlow{Local: summary.Local}
 		for index := range summary.Params {
 			if index >= len(args) {
 				continue
