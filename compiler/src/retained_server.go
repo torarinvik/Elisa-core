@@ -78,6 +78,9 @@ type retainedRuntime struct {
 	// prefetch is a scratch parse of the request's source started before the
 	// driver's own parse, so the two run concurrently; parse consumes it once.
 	prefetch *retainedPrefetch
+	// options are the analysis options of the retained state; a prefetch runs the
+	// scratch declaration phase with these options when a retained state exists.
+	options semantic.AnalyzeOptions
 
 	// objects retains native object partitions across requests, so an edit
 	// recompiles only the partitions whose bitcode changed.
@@ -98,6 +101,10 @@ type retainedPrefetch struct {
 	tokens   []lexer.Token
 	file     *ast.File
 	ok       bool
+	// prepared is set when file was analyzed as an update's scratch; such a
+	// file is handed only to the update, never as an unanalyzed parse.
+	prepared *semantic.RetainedScratch
+	key      string
 }
 
 // prefetchSource starts a private scratch parse of src. Only the request
@@ -109,6 +116,8 @@ func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
 	}
 	pf := &retainedPrefetch{filename: filename, src: src, done: make(chan struct{})}
 	rt.prefetch = pf
+	prepare := rt.state != nil && rt.filename == filename && os.Getenv("ELISACORE_RETAINED_PREPARE_SCRATCH") != "0"
+	options, key := rt.options, rt.key
 	go func() {
 		defer close(pf.done)
 		l := lexer.New(filename, src)
@@ -119,6 +128,9 @@ func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
 		p := parser.New(pf.tokens)
 		pf.file = p.ParseFile(filename)
 		pf.ok = len(p.Errors()) == 0
+		if prepare && pf.ok {
+			pf.prepared, pf.key = semantic.PrepareRetainedScratch(pf.file, options), key
+		}
 	}()
 }
 
@@ -134,12 +146,25 @@ func (rt *retainedRuntime) dropPrefetch() {
 // parse returns a private parse of the current source. The tokens are lexed
 // once per source; parser.New copies them, so parses never share state.
 func (rt *retainedRuntime) parse() (*ast.File, bool) {
+	file, ok, _ := rt.parseScratch("")
+	return file, ok
+}
+
+// parseScratch is parse for an update's scratch: with the retained key it may
+// return the prefetched parse with its declaration phase already run.
+func (rt *retainedRuntime) parseScratch(key string) (*ast.File, bool, *semantic.RetainedScratch) {
 	if pf := rt.prefetch; pf != nil {
 		rt.prefetch = nil
 		<-pf.done
 		if pf.filename == rt.filename && bytes.Equal(pf.src, rt.src) && pf.file != nil {
 			rt.tokens, rt.tokensFor = pf.tokens, rt.src
-			return pf.file, pf.ok
+			if pf.prepared == nil {
+				return pf.file, pf.ok, nil
+			}
+			if key != "" && pf.key == key {
+				return pf.file, pf.ok, pf.prepared
+			}
+			// Analyzed as a scratch: not usable as a plain parse.
 		}
 	}
 	if rt.tokensFor == nil || !bytes.Equal(rt.tokensFor, rt.src) {
@@ -147,13 +172,13 @@ func (rt *retainedRuntime) parse() (*ast.File, bool) {
 		rt.tokens = l.Tokenize()
 		if len(l.Errors()) != 0 {
 			rt.tokensFor = nil
-			return nil, false
+			return nil, false, nil
 		}
 		rt.tokensFor = rt.src
 	}
 	p := parser.New(rt.tokens)
 	file := p.ParseFile(rt.filename)
-	return file, len(p.Errors()) == 0
+	return file, len(p.Errors()) == 0, nil
 }
 
 func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
@@ -162,17 +187,17 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	}
 	key := rt.filename + "\x00" + fmt.Sprintf("%#v", options)
 	if rt.state != nil && rt.key == key {
-		scratch, ok := rt.parse()
+		scratch, ok, prepared := rt.parseScratch(key)
 		var result *semantic.Result
 		err := fmt.Errorf("scratch parse failed")
 		if ok {
-			result, err = rt.state.Update(file, scratch, rt.src)
+			result, err = rt.state.UpdatePrepared(file, scratch, rt.src, prepared)
 		}
 		st := rt.state.LastStats
 		if err != nil {
 			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
 		} else {
-			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v, compare %v, diff %v, bodies %v, post %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Post.Round(time.Millisecond), st.Total.Round(time.Millisecond))
+			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v (ahead %v), compare %v, diff %v, bodies %v, post %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.ScratchPrepared, st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Post.Round(time.Millisecond), st.Total.Round(time.Millisecond))
 			// ELISACORE_RETAINED_SPLICED_CODEGEN=1 (from the request environment)
 			// lets code generation consume the updated analysis directly; its
 			// LLVM IR has matched a fresh analysis byte for byte on the stage1
@@ -198,7 +223,7 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	}
 	start := time.Now()
 	result, state := semantic.AnalyzeRetained(file, pristine, rt.src, options)
-	rt.state, rt.key = state, key
+	rt.state, rt.key, rt.options = state, key, options
 	fmt.Fprintf(rt.log, "[retained] full analysis %v\n", time.Since(start).Round(time.Millisecond))
 	return result
 }

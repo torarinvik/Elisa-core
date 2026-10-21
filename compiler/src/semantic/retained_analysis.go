@@ -65,6 +65,7 @@ type RetainedUpdateStats struct {
 	Diff                      time.Duration
 	Bodies                    time.Duration
 	Post                      time.Duration
+	ScratchPrepared           bool // the scratch phase ran ahead, overlapped with the driver's parse
 	Total                     time.Duration
 	Fallback                  string
 	Added                     int
@@ -113,6 +114,31 @@ func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func([]
 // body-only change; the retained state and file are then untouched, and the
 // caller should start over with a full analysis.
 func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result, error) {
+	return r.UpdatePrepared(file, scratch, src, nil)
+}
+
+// RetainedScratch is a scratch parse with its declaration phase already run,
+// so a server can overlap that phase with its own parse of the request.
+type RetainedScratch struct {
+	file    *ast.File
+	pre     *preBodyState
+	elapsed time.Duration
+}
+
+// PrepareRetainedScratch runs Update's scratch declaration phase ahead of time.
+// The scratch file is analyzed in place and must only be passed to
+// UpdatePrepared, with the same options the retained analysis was built with.
+func PrepareRetainedScratch(scratch *ast.File, options AnalyzeOptions) *RetainedScratch {
+	pendingRetainedMu.Lock()
+	defer pendingRetainedMu.Unlock()
+	start := time.Now()
+	pre := scratchPreBody(scratch, options)
+	return &RetainedScratch{file: scratch, pre: pre, elapsed: time.Since(start)}
+}
+
+// UpdatePrepared is Update with an optional prepared scratch phase; it is used
+// only when it was prepared from scratch itself.
+func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, prepared *RetainedScratch) (*Result, error) {
 	start := time.Now()
 	r.LastStats = RetainedUpdateStats{}
 	fail := func(format string, args ...any) (*Result, error) {
@@ -284,11 +310,18 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 	// Bodies are analyzed in the form the declaration phase leaves them in, and
 	// that phase's body-dependent results must be what the retained state holds.
 	pairing := time.Since(start)
-	pendingRetainedMu.Lock()
-	scratchStart := time.Now()
-	pre := scratchPreBody(scratch, r.options)
-	r.LastStats.Scratch = time.Since(scratchStart)
-	pendingRetainedMu.Unlock()
+	var pre *preBodyState
+	if prepared != nil && prepared.file == scratch {
+		pre = prepared.pre
+		r.LastStats.ScratchPrepared = true
+		r.LastStats.Scratch = prepared.elapsed
+	} else {
+		pendingRetainedMu.Lock()
+		scratchStart := time.Now()
+		pre = scratchPreBody(scratch, r.options)
+		r.LastStats.Scratch = time.Since(scratchStart)
+		pendingRetainedMu.Unlock()
+	}
 	compareStart := time.Now()
 	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), replaced)
 	r.LastStats.Compare = time.Since(compareStart)

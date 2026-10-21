@@ -499,10 +499,13 @@ func backendAggregateIdentifierNames(expr ast.Expr) map[string]bool {
 		}
 		switch v.Kind() {
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range astWalkFields(v.Type()) {
 				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
+			if !astTypeMayHoldNodes(v.Type().Elem()) {
+				break
+			}
 			for i := 0; i < v.Len(); i++ {
 				walk(v.Index(i))
 			}
@@ -580,10 +583,13 @@ func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *s
 		}
 		switch v.Kind() {
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range astWalkFields(v.Type()) {
 				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
+			if !astTypeMayHoldNodes(v.Type().Elem()) {
+				break
+			}
 			for i := 0; i < v.Len(); i++ {
 				walk(v.Index(i))
 			}
@@ -671,10 +677,13 @@ func adoptedEscapeNamesForBody(body []ast.Stmt, roots ...string) map[string]bool
 			}
 			switch v.Kind() {
 			case reflect.Struct:
-				for i := 0; i < v.NumField(); i++ {
+				for _, i := range astWalkFields(v.Type()) {
 					collectNames(v.Field(i))
 				}
 			case reflect.Slice, reflect.Array:
+				if !astTypeMayHoldNodes(v.Type().Elem()) {
+					break
+				}
 				for i := 0; i < v.Len(); i++ {
 					collectNames(v.Index(i))
 				}
@@ -764,10 +773,13 @@ func adoptedEscapeNamesForBody(body []ast.Stmt, roots ...string) map[string]bool
 		}
 		switch v.Kind() {
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range astWalkFields(v.Type()) {
 				collectExpr(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
+			if !astTypeMayHoldNodes(v.Type().Elem()) {
+				break
+			}
 			for i := 0; i < v.Len(); i++ {
 				collectExpr(v.Index(i))
 			}
@@ -788,10 +800,13 @@ func adoptedEscapeNamesForBody(body []ast.Stmt, roots ...string) map[string]bool
 		if v.Kind() != reflect.Pointer {
 			switch v.Kind() {
 			case reflect.Struct:
-				for i := 0; i < v.NumField(); i++ {
+				for _, i := range astWalkFields(v.Type()) {
 					walkStmt(v.Field(i))
 				}
 			case reflect.Slice, reflect.Array:
+				if !astTypeMayHoldNodes(v.Type().Elem()) {
+					break
+				}
 				for i := 0; i < v.Len(); i++ {
 					walkStmt(v.Index(i))
 				}
@@ -1253,10 +1268,13 @@ func adoptedRegionEscapingStacks(region *ast.RegionStmt, asn semantic.RegionStac
 			}
 			switch v.Kind() {
 			case reflect.Struct:
-				for i := 0; i < v.NumField(); i++ {
+				for _, i := range astWalkFields(v.Type()) {
 					collectNames(v.Field(i))
 				}
 			case reflect.Slice, reflect.Array:
+				if !astTypeMayHoldNodes(v.Type().Elem()) {
+					break
+				}
 				for i := 0; i < v.Len(); i++ {
 					collectNames(v.Index(i))
 				}
@@ -1329,10 +1347,13 @@ func adoptedRegionEscapingStacks(region *ast.RegionStmt, asn semantic.RegionStac
 				walkExpr(v.Elem())
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range astWalkFields(v.Type()) {
 				walkExpr(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
+			if !astTypeMayHoldNodes(v.Type().Elem()) {
+				break
+			}
 			for i := 0; i < v.Len(); i++ {
 				walkExpr(v.Index(i))
 			}
@@ -1364,10 +1385,13 @@ func adoptedRegionEscapingStacks(region *ast.RegionStmt, asn semantic.RegionStac
 				walkStmt(v.Elem())
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range astWalkFields(v.Type()) {
 				walkStmt(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
+			if !astTypeMayHoldNodes(v.Type().Elem()) {
+				break
+			}
 			for i := 0; i < v.Len(); i++ {
 				walkStmt(v.Index(i))
 			}
@@ -2163,10 +2187,13 @@ func exprNamesAnyOf(expr ast.Expr, names map[string]bool) bool {
 			}
 			walk(v.Elem())
 		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
+			for _, i := range astWalkFields(v.Type()) {
 				walk(v.Field(i))
 			}
 		case reflect.Slice, reflect.Array:
+			if !astTypeMayHoldNodes(v.Type().Elem()) {
+				break
+			}
 			for i := 0; i < v.Len(); i++ {
 				walk(v.Index(i))
 			}
