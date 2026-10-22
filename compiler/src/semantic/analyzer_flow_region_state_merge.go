@@ -154,6 +154,9 @@ func sameReusableRegionRefField(left, right regionRefState) bool {
 			(left.ParamDeps.extra == nil) == (right.ParamDeps.extra == nil) && slices.Equal(left.ParamDeps.extra, right.ParamDeps.extra) &&
 			left.PackedStoreSummary == right.PackedStoreSummary
 	}
+	if reusableParamFieldSuperset(left, right) {
+		return true
+	}
 	for _, state := range []regionRefState{left, right} {
 		if state.Fields != nil || !hasRegionProvenance(state) ||
 			!state.PackedStoreSummaryKnown || !canonicalRegionRefParamDeps(state) ||
@@ -168,6 +171,36 @@ func sameReusableRegionRefField(left, right regionRefState) bool {
 		left.PackedStoreSummary == right.PackedStoreSummary &&
 		(regionDependencyMapIdentity(left.Deps) == regionDependencyMapIdentity(right.Deps) || maps.Equal(left.Deps, right.Deps)) &&
 		(packedStoreDependencyMapIdentity(left.StoreDeps) == packedStoreDependencyMapIdentity(right.StoreDeps) || maps.Equal(left.StoreDeps, right.StoreDeps))
+}
+
+// reusableParamFieldSuperset proves that merging either order leaves left
+// unchanged. Equal direct slots preserve dependency iteration order; canonical
+// bitsets and equal immutable nested fields preserve convergence representation.
+func reusableParamFieldSuperset(left, right regionRefState) bool {
+	if !left.ParamOnlySummary || !right.ParamOnlySummary ||
+		!left.HasDirectParamDep || !right.HasDirectParamDep || left.DirectParamDep != right.DirectParamDep ||
+		!canonicalRegionRefParamDeps(left) || !canonicalRegionRefParamDeps(right) ||
+		left.Deps != nil || right.Deps != nil || left.StoreDeps != nil || right.StoreDeps != nil ||
+		!left.PackedStoreSummaryKnown || !right.PackedStoreSummaryKnown || left.PackedStoreSummary != right.PackedStoreSummary ||
+		(left.Fields != nil && len(left.Fields) == 0) || (right.Fields != nil && len(right.Fields) == 0) ||
+		regionRefFieldsIdentity(left.Fields) != regionRefFieldsIdentity(right.Fields) {
+		return false
+	}
+	subset := true
+	forEachRegionParamDep(right, func(index int) {
+		if index != left.DirectParamDep && !left.ParamDeps.Contains(index) {
+			subset = false
+		}
+	})
+	if !subset {
+		return false
+	}
+	for _, field := range left.Fields {
+		if (field.Fields != nil && len(field.Fields) == 0) || !sameReusableRegionRefField(field, field) {
+			return false
+		}
+	}
+	return true
 }
 
 // A flat merge replays parameter dependencies through appendRegionParamDep.
