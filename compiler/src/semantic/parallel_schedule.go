@@ -668,8 +668,8 @@ func firstName(fns []*ast.FuncDecl) string {
 // expression types, name resolutions, call facts. A finished unit exports the
 // entries of its own bodies' nodes, which callers read when they unfold a callee.
 type nodeKeyedMap struct {
-	path  []int
-	iface bool // keyed by an interface: try every node
+	path []int
+	key  reflect.Type
 }
 
 var nodeKeyedMapPaths = sync.OnceValue(func() []nodeKeyedMap {
@@ -685,7 +685,7 @@ var nodeKeyedMapPaths = sync.OnceValue(func() []nodeKeyedMap {
 				if k == funcDeclPtrType || !k.Implements(astNodeType) || holdsLazyCache(ft.Elem()) {
 					continue
 				}
-				out = append(out, nodeKeyedMap{path: path, iface: k.Kind() == reflect.Interface})
+				out = append(out, nodeKeyedMap{path: path, key: k})
 			case reflect.Struct:
 				if typeHoldsMapInline(ft) {
 					walk(ft, path)
@@ -696,6 +696,24 @@ var nodeKeyedMapPaths = sync.OnceValue(func() []nodeKeyedMap {
 	walk(reflect.TypeOf(Analyzer{}), nil)
 	return out
 })
+
+// Node types and Analyzer map key types are fixed. Share only the compatible
+// path indices; worker maps and their values remain private to each export.
+var nodeKeyedMapDispatch sync.Map // reflect.Type -> []int (immutable)
+
+func nodeKeyedMapIndices(t reflect.Type) []int {
+	if cached, ok := nodeKeyedMapDispatch.Load(t); ok {
+		return cached.([]int)
+	}
+	var indices []int
+	for i, path := range nodeKeyedMapPaths() {
+		if (path.key.Kind() == reflect.Interface && t.Implements(path.key)) || t == path.key {
+			indices = append(indices, i)
+		}
+	}
+	actual, _ := nodeKeyedMapDispatch.LoadOrStore(t, indices)
+	return actual.([]int)
+}
 
 // exportNodeEntries copies the node-keyed entries of a unit's bodies.
 func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) []reflect.Value {
@@ -714,19 +732,12 @@ func exportNodeEntries(a *Analyzer, stmts []ast.Stmt) []reflect.Value {
 	}
 	walkStoreScanNodes(stmts, func(node any) {
 		nv := reflect.ValueOf(node)
-		for pi, v := range maps {
+		for _, pi := range nodeKeyedMapIndices(nv.Type()) {
+			v := maps[pi]
 			if !v.IsValid() {
 				continue
 			}
-			kt := v.Type().Key()
-			if kt.Kind() == reflect.Interface {
-				if !nv.Type().Implements(kt) {
-					continue
-				}
-			} else if nv.Type() != kt {
-				continue
-			}
-			key := nv.Convert(kt)
+			key := nv.Convert(paths[pi].key)
 			if val := v.MapIndex(key); val.IsValid() {
 				if !out[pi].IsValid() {
 					out[pi] = reflect.MakeMap(v.Type())
