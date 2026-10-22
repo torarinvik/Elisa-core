@@ -167,7 +167,8 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 			return maxStoreMode(valueMode(choice.Value), valueMode(choice.Alt))
 		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
-		if t, known := a.exprTypes[inner]; known && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
+		// Probe the cached storage property before walking generic enum payloads.
+		if t, known := a.exprTypes[inner]; known && t != nil && a.storeScanHoldsNoRegionStorage(t) && !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
 			return storeNone
 		}
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
