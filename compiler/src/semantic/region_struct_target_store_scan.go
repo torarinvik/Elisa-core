@@ -270,7 +270,9 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		return storeElements
 	}
 	mode := storeNone
-	a.storeScanEachNode(decl, func(node any) {
+	// Only assignments and calls can contribute to this scan. The cached subset
+	// preserves their flat-walk order, including calls nested inside assignments.
+	scanIdx.eachPayloadNode(func(node any) {
 		if mode == storeHeader {
 			return
 		}
