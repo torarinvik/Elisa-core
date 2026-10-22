@@ -798,12 +798,22 @@ func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
 	return a.storeFlowSCC[decl]
 }
 
+// storeFlowBoolMatrix keeps matrix cells in one allocation. Each row has a
+// bounded capacity so appending to it cannot overwrite the following row.
+func storeFlowBoolMatrix(n int) [][]bool {
+	rows := make([][]bool, n)
+	cells := make([]bool, n*n)
+	for i := range rows {
+		start, end := i*n, (i+1)*n
+		rows[i] = cells[start:end:end]
+	}
+	return rows
+}
+
 // newStoreFlowSummary is the least summary: each parameter reaches only itself.
 func newStoreFlowSummary(n int) *storeFlowSummary {
-	s := &storeFlowSummary{conn: make([][]bool, n), reach: make([][]bool, n), retConn: make([]bool, n), written: make([]bool, n)}
+	s := &storeFlowSummary{conn: storeFlowBoolMatrix(n), reach: storeFlowBoolMatrix(n), retConn: make([]bool, n), written: make([]bool, n)}
 	for i := 0; i < n; i++ {
-		s.conn[i] = make([]bool, n)
-		s.reach[i] = make([]bool, n)
 		s.conn[i][i] = true
 		s.reach[i][i] = true
 	}
@@ -888,8 +898,8 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		anchors[root] = append(anchors[root], e[1])
 	}
 	n := len(decl.Params)
-	conn := make([][]bool, n)
-	reach := make([][]bool, n)
+	conn := storeFlowBoolMatrix(n)
+	reach := storeFlowBoolMatrix(n)
 	retConn := make([]bool, n)
 	// A function that yields a value on a path with no `return` (or threads lmut values back)
 	// is treated as returning something derived from every parameter.
@@ -910,7 +920,6 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		}
 	}
 	for i, pi := range decl.Params {
-		reach[i] = make([]bool, n)
 		iPure := c.isPure(pi.Name)
 		for j, pj := range decl.Params {
 			jPure := c.isPure(pj.Name)
@@ -929,7 +938,6 @@ func (a *Analyzer) computeStoreFlow(decl *ast.FuncDecl) *storeFlowSummary {
 		}
 	}
 	for i, pi := range decl.Params {
-		conn[i] = make([]bool, n)
 		for j := range decl.Params {
 			conn[i][j] = reach[i][j] || reach[j][i]
 		}
