@@ -19,6 +19,29 @@ func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bo
 	return storeScanTokensHit(tokens, names)
 }
 
+// mentionsTwo shares the expression-token lookup when a proof asks whether one
+// value reaches both a source set and a target set. Results still describe each
+// set independently, including empty sets and entries explicitly mapped to false.
+func (idx *storeScanDeclIndex) mentionsTwo(expr ast.Expr, left, right map[string]bool) (bool, bool) {
+	if expr == nil || (len(left) == 0 && len(right) == 0) {
+		return false, false
+	}
+	tokens, ok := idx.exprTokens[expr]
+	if !ok {
+		tokens = storeScanMentionTokens(expr)
+		idx.exprTokens[expr] = tokens
+	}
+	leftHit, rightHit := false, false
+	for _, token := range tokens {
+		leftHit = leftHit || left[token]
+		rightHit = rightHit || right[token]
+		if (leftHit || len(left) == 0) && (rightHit || len(right) == 0) {
+			break
+		}
+	}
+	return leftHit, rightHit
+}
+
 // headerMentions: stmtHeaderMentionsAny(stmt, names), memoized the same way.
 func (idx *storeScanDeclIndex) headerMentions(stmt ast.Stmt, names map[string]bool) bool {
 	if stmt == nil || len(names) == 0 {
@@ -57,7 +80,11 @@ func storeScanMentionTokens(node any) []string {
 			}
 			seen[v.Pointer()] = true
 			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
-				tokens = append(tokens, id.Name, rootNameOfDotted(id.Name))
+				if root := rootNameOfDotted(id.Name); root != id.Name {
+					tokens = append(tokens, id.Name, root)
+				} else {
+					tokens = append(tokens, id.Name)
+				}
 				return
 			}
 			if fe, ok := v.Interface().(*ast.FieldExpr); ok && fe != nil {

@@ -594,10 +594,11 @@ func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, ot
 			}
 			targetArgs, sourceArgs := []int{}, []int{}
 			for i, arg := range args {
-				if idx.mentions(arg, targetsOrHolders) {
+				mentionsTarget, mentionsSource := idx.mentionsTwo(arg, targetsOrHolders, content)
+				if mentionsTarget {
 					targetArgs = append(targetArgs, i)
 				}
-				if idx.mentions(arg, content) {
+				if mentionsSource {
 					sourceArgs = append(sourceArgs, i)
 				}
 			}
