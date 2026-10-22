@@ -40,7 +40,10 @@ func (a *Analyzer) withSourceGenericParams(owner ast.Node, params []ast.GenericP
 	}
 	typeNames := make([]string, 0)
 	typeArgs := make([]Type, 0)
-	typeInterfaces := make(map[string]*StaticInterface)
+	// Most generic declarations have no interface bounds. Keep the nil fast path
+	// through withSourceTypeParamInterfaces instead of allocating an empty map for
+	// every body analysis and specialization.
+	var typeInterfaces map[string]*StaticInterface
 	constNames := make([]string, 0)
 	constArgs := make([]Type, 0)
 	errorSetNames := make([]string, 0)
@@ -54,6 +57,9 @@ func (a *Analyzer) withSourceGenericParams(owner ast.Node, params []ast.GenericP
 			typeNames = append(typeNames, param.Name)
 			typeArgs = append(typeArgs, arg)
 			if param.InterfaceBound != "" {
+				if typeInterfaces == nil {
+					typeInterfaces = make(map[string]*StaticInterface)
+				}
 				iface, _, ok := a.lookupVisibleStaticInterface(param.InterfaceBound)
 				if !ok || iface == nil {
 					a.errorf(param.Position, "%s", UnknownInterfaceMessage(param.InterfaceBound))

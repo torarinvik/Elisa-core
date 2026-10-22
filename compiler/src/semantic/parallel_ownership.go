@@ -13,9 +13,14 @@ import (
 // analyze on another declaration's behalf (a quiet provisional-summary pass) runs
 // on a private copy taken from the immutable snapshot made at fork time.
 type parallelWorkerState struct {
-	worker    int
-	snapshots []*ast.SyntaxSnapshot // per body declaration, taken at fork time
-	frozen    []ast.Decl            // pristine reflective copies where a snapshot declined
+	worker                         int
+	snapshots                      []*ast.SyntaxSnapshot // per body declaration, taken at fork time
+	frozen                         []ast.Decl            // pristine reflective copies where a snapshot declined
+	predicateMemoBases             parallelPredicateMemoBases
+	programLivedTypesBase          map[Type]bool
+	smtLocalDefDepsBase            map[*Symbol][]string
+	resolvedTypeNamesBase          map[ast.TypeExpr]string
+	abstractParamRegionRefMemoBase map[abstractParamRegionRefKey]regionRefState
 	// at locates a body declaration in the snapshot: top-level index, and member
 	// index for an impl method (-1 for a top-level function).
 	at map[*ast.FuncDecl][2]int
@@ -35,6 +40,14 @@ type parallelWorkerState struct {
 	// query solves it and the others wait for its verdict.
 	smtFlights *sync.Map
 	leading    map[string]*smtFlight
+}
+
+type parallelPredicateMemoBases struct {
+	affineHandles             map[Type]bool
+	borrowedOwnerRefs         map[Type]bool
+	regionRefs                map[Type]bool
+	mutableBorrowCapabilities map[Type]bool
+	storeScanAddresses        map[Type]bool
 }
 
 var funcDeclPtrType = reflect.TypeOf((*ast.FuncDecl)(nil))

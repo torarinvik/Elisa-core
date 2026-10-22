@@ -76,6 +76,11 @@ func (a *Analyzer) memoTypePredicate(memo *map[Type]bool, t Type, compute func()
 	if cached, ok := (*memo)[t]; ok {
 		return cached
 	}
+	if base := a.parallelTypePredicateMemoBase(memo); base != nil {
+		if cached, ok := base[t]; ok {
+			return cached
+		}
+	}
 	hits := a.semanticLimitHits
 	result := compute()
 	if a.semanticLimitHits == hits {
@@ -85,6 +90,27 @@ func (a *Analyzer) memoTypePredicate(memo *map[Type]bool, t Type, compute func()
 		(*memo)[t] = result
 	}
 	return result
+}
+
+func (a *Analyzer) parallelTypePredicateMemoBase(memo *map[Type]bool) map[Type]bool {
+	if a == nil || a.parallel == nil {
+		return nil
+	}
+	bases := a.parallel.predicateMemoBases
+	switch memo {
+	case &a.affineHandleMemo:
+		return bases.affineHandles
+	case &a.borrowedOwnerRefMemo:
+		return bases.borrowedOwnerRefs
+	case &a.regionRefsMemo:
+		return bases.regionRefs
+	case &a.mutableBorrowCapabilityMemo:
+		return bases.mutableBorrowCapabilities
+	case &a.storeScanAddressMemo:
+		return bases.storeScanAddresses
+	default:
+		return nil
+	}
 }
 
 func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {
@@ -539,7 +565,77 @@ func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValu
 	return state, hasBorrowedOwnerRefState(state)
 }
 
+func (a *Analyzer) regionRefAnyIndexField(elemState regionRefState, paramIndex int) map[string]regionRefState {
+	// Most container elements abstract to exactly the parameter dependency. Reuse that
+	// immutable singleton map across every occurrence for the same parameter.
+	if elemState.HasDirectParamDep && elemState.DirectParamDep == paramIndex &&
+		len(elemState.Deps) == 0 && len(elemState.StoreDeps) == 0 && elemState.ParamDeps.IsEmpty() &&
+		len(elemState.Fields) == 0 && elemState.ParamOnlySummary {
+		if a.regionRefAnyIndexParamFields == nil {
+			a.regionRefAnyIndexParamFields = map[int]map[string]regionRefState{}
+		}
+		if fields := a.regionRefAnyIndexParamFields[paramIndex]; fields != nil {
+			return fields
+		}
+		fields := map[string]regionRefState{regionAnyIndexFieldKey(): elemState}
+		a.regionRefAnyIndexParamFields[paramIndex] = fields
+		return fields
+	}
+	return map[string]regionRefState{regionAnyIndexFieldKey(): elemState}
+}
+
+type abstractParamRegionRefKey struct {
+	typeOf     Type
+	paramIndex int
+}
+
 func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[string]bool) (regionRefState, bool) {
+	if seen == nil {
+		seen = map[string]bool{}
+	}
+	if len(seen) == 0 && a.typeShapesFrozen && t != nil {
+		key := abstractParamRegionRefKey{typeOf: t, paramIndex: paramIndex}
+		if state, ok := a.abstractParamRegionRefMemo[key]; ok {
+			return cloneRegionRefState(state), true
+		}
+		if a.parallel != nil {
+			if state, ok := a.parallel.abstractParamRegionRefMemoBase[key]; ok {
+				return cloneRegionRefState(state), true
+			}
+		}
+		hits := a.semanticLimitHits
+		state, ok := a.abstractParamRegionRefStateWalk(t, paramIndex, seen)
+		if ok && hits == a.semanticLimitHits {
+			if a.abstractParamRegionRefMemo == nil {
+				a.abstractParamRegionRefMemo = map[abstractParamRegionRefKey]regionRefState{}
+			}
+			a.abstractParamRegionRefMemo[key] = cloneRegionRefState(state)
+		}
+		return state, ok
+	}
+	return a.abstractParamRegionRefStateWalk(t, paramIndex, seen)
+}
+
+// abstractParamRegionRefStateForBinding reads a frozen summary for a new local
+// parameter binding. recordResolvedRegionRefBinding stores the result through
+// copy-on-write transforms, so copying the summary's dependency maps here only
+// creates short-lived clones on every function entry.
+func (a *Analyzer) abstractParamRegionRefStateForBinding(t Type, paramIndex int) (regionRefState, bool) {
+	if a != nil && a.typeShapesFrozen && t != nil {
+		key := abstractParamRegionRefKey{typeOf: t, paramIndex: paramIndex}
+		if state, ok := a.abstractParamRegionRefMemo[key]; ok {
+			return state, true
+		}
+		if a.parallel != nil {
+			if state, ok := a.parallel.abstractParamRegionRefMemoBase[key]; ok {
+				return state, true
+			}
+		}
+	}
+	return a.abstractParamRegionRefState(t, paramIndex, nil)
+}
+
+func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen map[string]bool) (regionRefState, bool) {
 	if t == nil || !a.typeCanContainRegionRefs(t, map[string]bool{}) {
 		return regionRefState{}, false
 	}
@@ -558,19 +654,33 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 	case *RefType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
 			if len(elemState.Fields) != 0 {
-				state.Fields = cloneRegionRefState(elemState).Fields
+				// This recursive result is newly built and its Fields map is immutable once
+				// reachable from a regionRefState. cloneRegionRefState(...).Fields therefore
+				// returned the same map after needlessly cloning Deps, StoreDeps, and ParamDeps.
+				state.Fields = elemState.Fields
 			}
 		}
 		state.PackedStoreSummaryKnown = false
 		return withPackedStoreProvenanceSummary(state), true
 	case *StructType:
+		fieldCapacity := 0
+		if a.typeShapesFrozen {
+			// Most aggregate fields are scalar. Sizing this map to every field
+			// over-allocates hundreds of megabytes while constructing parameter
+			// provenance for the large self-hosted compiler types.
+			for _, field := range tt.Fields {
+				if a.typeCanContainRegionRefs(field.Type, map[string]bool{}) {
+					fieldCapacity++
+				}
+			}
+		}
 		for _, field := range tt.Fields {
 			fieldState, ok := a.abstractParamRegionRefState(field.Type, paramIndex, seen)
 			if !ok {
 				continue
 			}
 			if state.Fields == nil {
-				state.Fields = make(map[string]regionRefState, len(tt.Fields))
+				state.Fields = make(map[string]regionRefState, fieldCapacity)
 			}
 			state.Fields[field.Name] = fieldState
 		}
@@ -634,37 +744,25 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 		}
 	case *ArrayType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): elemState,
-			}
+			state.Fields = a.regionRefAnyIndexField(elemState, paramIndex)
 		}
 	case *DArrayType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): elemState,
-			}
+			state.Fields = a.regionRefAnyIndexField(elemState, paramIndex)
 		}
 	case *ViewType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): elemState,
-			}
+			state.Fields = a.regionRefAnyIndexField(elemState, paramIndex)
 		}
 	case *DictType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Value, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): elemState,
-			}
+			state.Fields = a.regionRefAnyIndexField(elemState, paramIndex)
 		} else if keyState, ok := a.abstractParamRegionRefState(tt.Key, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): keyState,
-			}
+			state.Fields = a.regionRefAnyIndexField(keyState, paramIndex)
 		}
 	case *SetType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
-			state.Fields = map[string]regionRefState{
-				regionAnyIndexFieldKey(): elemState,
-			}
+			state.Fields = a.regionRefAnyIndexField(elemState, paramIndex)
 		}
 	}
 	state.PackedStoreSummaryKnown = false

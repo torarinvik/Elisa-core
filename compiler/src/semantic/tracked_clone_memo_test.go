@@ -6,7 +6,7 @@ import (
 )
 
 func TestTrackedCloneInlineMemoCycleAndSpill(t *testing.T) {
-	for _, length := range []int{1, 8, 9, 32} {
+	for _, length := range []int{1, 8, 16, 17, 32, 33} {
 		t.Run(fmt.Sprint(length), func(t *testing.T) {
 			root := &RefType{}
 			last := root
@@ -17,7 +17,15 @@ func TestTrackedCloneInlineMemoCycleAndSpill(t *testing.T) {
 			}
 			last.Elem = root
 			a := &Analyzer{}
-			clone := a.cloneTrackedValueType(root).(*RefType)
+			var memo trackedCloneMemo
+			memo.sharePointerFree = true
+			clone := a.cloneTrackedValueTypeWithMemoDepth(root, &memo, 0).(*RefType)
+			if length <= len(memo.small) && memo.large != nil {
+				t.Fatal("small type graph spilled its inline memo")
+			}
+			if length > len(memo.small) && memo.large == nil {
+				t.Fatal("large type graph did not spill its memo")
+			}
 			if clone == root {
 				t.Fatal("original graph returned")
 			}

@@ -292,6 +292,11 @@ func (a *Analyzer) smtLocalDefinitionDeps(sym *Symbol, vd *ast.VarDeclStmt) []st
 	if deps, ok := a.smtLocalDefDeps[sym]; ok {
 		return deps
 	}
+	if a.parallel != nil {
+		if deps, ok := a.parallel.smtLocalDefDepsBase[sym]; ok {
+			return deps
+		}
+	}
 	depSet := smtFactDeps(vd.Value)
 	allNames := exprIdentNames(vd.Value)
 	deps := make([]string, 0, len(depSet)+len(allNames))

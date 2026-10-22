@@ -6,6 +6,29 @@ import (
 	"strings"
 )
 
+func (a *Analyzer) resolvedTypeName(expr ast.TypeExpr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
+	if name := a.resolvedTypeNames[expr]; name != "" {
+		return name
+	}
+	if a.parallel != nil {
+		return a.parallel.resolvedTypeNamesBase[expr]
+	}
+	return ""
+}
+
+func (a *Analyzer) recordResolvedTypeName(expr ast.TypeExpr, name string) {
+	if a == nil || expr == nil || name == "" {
+		return
+	}
+	if a.resolvedTypeNames == nil {
+		a.resolvedTypeNames = make(map[ast.TypeExpr]string)
+	}
+	a.resolvedTypeNames[expr] = name
+}
+
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	switch n := expr.(type) {
 	case *ast.RefinementTypeExpr:
@@ -49,7 +72,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			// name so the backend and interpreter consume the analyzer's resolution
 			// instead of re-resolving the bare name without namespace context.
 			if a.resolvedTypeNames != nil && canonical != "" && canonical != n.Name {
-				a.resolvedTypeNames[n] = canonical
+				a.recordResolvedTypeName(n, canonical)
 			}
 			if n.Region != "" {
 				a.errorf(n.Pos(), "region annotation `@%s` is only valid on a function return type; named values do not carry an independent region", n.Region)
@@ -269,7 +292,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return invalidType
 		}
 		if a.resolvedTypeNames != nil && canonical != "" && canonical != lookupName {
-			a.resolvedTypeNames[n] = canonical
+			a.recordResolvedTypeName(n, canonical)
 		}
 		// Use the canonical (namespace-qualified) name for the generic instance so a
 		// reference spelled bare inside the module and one spelled qualified/imported

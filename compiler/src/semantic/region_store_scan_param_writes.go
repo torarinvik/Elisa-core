@@ -78,6 +78,7 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 	parent := map[storeScanParamKey]storeScanParamKey{}
 	queue := []storeScanParamKey{start}
 	result := false
+	var resultKey storeScanParamKey
 	for len(queue) > 0 && !result {
 		key := queue[0]
 		queue = queue[1:]
@@ -85,11 +86,15 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 			if cached && storeScanTrace {
 				storeScanParamWriterOf[start] = storeScanParamWriterOf[key]
 			}
+			if cached {
+				resultKey = key
+			}
 			result = result || cached
 			continue // a cached false already covers everything it reaches
 		}
 		facts := a.storeScanParamLocalFacts(key)
 		if facts.writes {
+			resultKey = key
 			if storeScanTrace {
 				pos := ""
 				if n, ok := facts.at.(ast.Node); ok && n != nil {
@@ -114,7 +119,18 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 		}
 	}
 	if result {
-		a.storeScanParamWriteCache[start] = true
+		// Every node on the discovered path reaches the same writer, not only
+		// the original query. Remember that path so callers that start from an
+		// intermediate callee parameter do not repeat the graph walk.
+		for key := resultKey; ; key = parent[key] {
+			a.storeScanParamWriteCache[key] = true
+			if storeScanTrace {
+				storeScanParamWriterOf[key] = storeScanParamWriterOf[start]
+			}
+			if key == start {
+				break
+			}
+		}
 	} else {
 		// Nothing reachable writes: the same holds for every node visited.
 		for key := range visited {

@@ -4,10 +4,14 @@ package semantic
 // use stack storage; larger graphs spill once to the ordinary identity map.
 // No type graph or clone is retained across analysis operations.
 type trackedCloneMemo struct {
-	small     [8]struct{ key, value Type }
+	small     [32]struct{ key, value Type }
 	count     int
 	large     map[Type]Type
 	spillHint int
+	// Immutable pointer-free value types have no flow state to isolate. Normal
+	// snapshots can share them; explicit seen-map clones keep their historical
+	// deep-copy behavior so callers can still observe memoized replacements.
+	sharePointerFree bool
 }
 
 func (m *trackedCloneMemo) get(key Type) (Type, bool) {
@@ -40,8 +44,8 @@ func (m *trackedCloneMemo) set(key, value Type) {
 		return
 	}
 	hint := m.spillHint
-	if hint < 16 {
-		hint = 16
+	if hint < len(m.small) {
+		hint = len(m.small)
 	}
 	m.large = make(map[Type]Type, hint)
 	for i := 0; i < m.count; i++ {

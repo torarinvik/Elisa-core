@@ -63,6 +63,9 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	t0 := time.Now()
 	reportBodyGraph(bodies)
 	sched := planBodySchedule(bodies, workers)
+	if parallelReport {
+		fmt.Fprintf(os.Stderr, "[parallel-bodies] recursive summary seeds %d of %d bodies\n", len(sched.cyclic), len(bodies))
+	}
 	// Callee-first, as the serial pass reaches each callee from its callers.
 	var ordered []scopedDecl
 	for _, unit := range sched.units {
@@ -70,7 +73,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			ordered = append(ordered, bodies[b])
 		}
 	}
-	a.precomputeSharedCalleeFacts(ordered)
+	a.precomputeSharedCalleeFacts(ordered, sched.cyclic)
 	// Per-return element states are scratch for the body analysis that owns them; a
 	// precompute pass that met a return must not leave a merged-into prior behind.
 	a.returnElementStmtStates, a.returnElementStmtUnknown = nil, nil
@@ -108,14 +111,25 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	if parallelReport {
 		fmt.Fprintf(os.Stderr, "[parallel-bodies] snapshots %v (%d declined)\n", time.Since(tsnap).Round(time.Millisecond), declined)
 	}
-	base := deepCloneValue(reflect.ValueOf(a).Elem())
+	base := cloneAnalyzerValueForParallel(a)
 	clones := make([]*Analyzer, workers)
 	smtFlights := &sync.Map{}
 	for i := range clones {
 		w := new(Analyzer)
-		settable(reflect.ValueOf(w).Elem()).Set(deepCloneValue(reflect.ValueOf(a).Elem()))
+		settable(reflect.ValueOf(w).Elem()).Set(cloneAnalyzerValueForBodyWorker(a))
 		isolateWorkerScopes(a, w)
-		w.parallel = &parallelWorkerState{worker: i, snapshots: snapshots, frozen: frozen, at: at, slots: slots, smtFlights: smtFlights, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
+		w.resolvedTypeNames = make(map[ast.TypeExpr]string)
+		w.parallel = &parallelWorkerState{
+			worker: i, snapshots: snapshots, frozen: frozen, at: at, slots: slots, smtFlights: smtFlights,
+			shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{},
+			predicateMemoBases: parallelPredicateMemoBases{
+				affineHandles: a.affineHandleMemo, borrowedOwnerRefs: a.borrowedOwnerRefMemo,
+				regionRefs: a.regionRefsMemo, mutableBorrowCapabilities: a.mutableBorrowCapabilityMemo,
+				storeScanAddresses: a.storeScanAddressMemo,
+			},
+			programLivedTypesBase: a.programLivedTypes, smtLocalDefDepsBase: a.smtLocalDefDeps,
+			resolvedTypeNamesBase: a.resolvedTypeNames, abstractParamRegionRefMemoBase: a.abstractParamRegionRefMemo,
+		}
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)
@@ -156,7 +170,12 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 				}
 				sched.took[u] = time.Since(tu)
 				if el := time.Since(tu); el > 300*time.Millisecond && os.Getenv("ELISA_PARALLEL_GRAPH_REPORT") != "" {
-					fmt.Fprintf(os.Stderr, "[parallel-unit] worker %d unit %d: %d bodies %v (first %T)\n", i, u, len(sched.units[u]), el.Round(time.Millisecond), bodies[sched.units[u][0]].Decl)
+					first := bodies[sched.units[u][0]].Decl
+					label := fmt.Sprintf("%T", first)
+					if fn, ok := first.(*ast.FuncDecl); ok {
+						label = fn.Name
+					}
+					fmt.Fprintf(os.Stderr, "[parallel-unit] worker %d unit %d: %d bodies %v (%s @ %v)\n", i, u, len(sched.units[u]), el.Round(time.Millisecond), label, first.Pos())
 				}
 				sched.exportUnit(w, u)
 				sched.finish(u)
@@ -200,6 +219,65 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	}
 	if parallelReport {
 		fmt.Fprintf(os.Stderr, "[parallel-bodies] precompute %v, clone %v, bodies %v, merge %v\n", tp.Sub(t0).Round(time.Millisecond), t1.Sub(tp).Round(time.Millisecond), t2.Sub(t1).Round(time.Millisecond), time.Since(t2).Round(time.Millisecond))
+	}
+}
+
+func cloneAnalyzerValueForParallel(a *Analyzer) reflect.Value {
+	return cloneAnalyzerValueForParallelMode(a, false)
+}
+
+func cloneAnalyzerValueForBodyWorker(a *Analyzer) reflect.Value {
+	return cloneAnalyzerValueForParallelMode(a, true)
+}
+
+func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflect.Value {
+	if a == nil {
+		return reflect.Value{}
+	}
+	source := reflect.ValueOf(a).Elem()
+	cloned := reflect.New(source.Type()).Elem()
+	cloned.Set(source)
+	shareDeclarationMaps := a.retained == nil
+	for i := 0; i < source.NumField(); i++ {
+		field := source.Field(i)
+		name := source.Type().Field(i).Name
+		if useMemoOverlays && a.retained == nil && parallelBodyMemoMap(name) {
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
+		if shareDeclarationMaps && field.Kind() == reflect.Map && !field.IsNil() && parallelDeclarationMapIsReadOnly(name) {
+			continue
+		}
+		settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))
+	}
+	return cloned
+}
+
+func parallelBodyMemoMap(field string) bool {
+	switch field {
+	case "affineHandleMemo", "borrowedOwnerRefMemo", "regionRefsMemo", "mutableBorrowCapabilityMemo", "storeScanAddressMemo",
+		"programLivedTypes", "smtLocalDefDeps", "resolvedTypeNames", "abstractParamRegionRefMemo":
+		return true
+	default:
+		return false
+	}
+}
+
+// Declaration indexes are complete before body workers start. Sharing their map
+// headers avoids reflecting over large, nested indexes once per worker; mutable
+// analysis caches and per-body facts still receive isolated maps.
+func parallelDeclarationMapIsReadOnly(field string) bool {
+	switch field {
+	case "namedTypes", "staticInterfaces", "staticImpls", "effectHandlers", "permissions", "capabilityAliases",
+		"extensionMethodsByName", "ufcsFunctionsByName", "ufcsByLastSegment", "functionTypes", "constValues",
+		"ambientGrownCalleeParamIndex", "regionParamCalleeParamIndex", "declVisibility", "declaredFuncNames", "callDeclsByName",
+		"declaredModules", "trustedRuntimeSourceFiles", "storageViewWriteDeclsByName", "aliasRefinements",
+		"parametricAliasRefinements", "externLinkNames", "privateTypeNames", "privateModules", "castHooksByName",
+		"initHooksByName", "dropHooks", "packedStoreBuilders", "regionPolyCandidateFnTypes",
+		"regionPolyReturnsCallerArena":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -376,11 +454,10 @@ func sameValue(x, y reflect.Value) (same bool) {
 	return x.Interface() == y.Interface()
 }
 
-// precomputeSharedCalleeFacts settles, before the fork, the facts a body asks of
-// OTHER functions on demand: return provenance and borrowed-owner refs analyze the
-// callee's body, and the fill-may-adopt set walks the whole file. Computed lazily
-// from a worker, each would walk a body another worker is rewriting.
-func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
+// precomputeSharedCalleeFacts settles recursive summaries before the fork, since
+// mutually recursive bodies cannot be ordered callee-first. The fill-may-adopt set
+// and sentinel names scan the whole file and are also prepared before workers start.
+func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl, cyclic map[*ast.FuncDecl]bool) {
 	t0 := time.Now()
 	if a.fillMayAdoptSet == nil {
 		a.fillMayAdoptSet = a.computeFillMayAdopt()
@@ -394,6 +471,9 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 		}(time.Now())
 	}
 	infer := func(fn *ast.FuncDecl) {
+		if !cyclic[fn] {
+			return
+		}
 		sym := a.funcDeclSymbols[fn]
 		if sym == nil || fn.IsContract {
 			return
@@ -410,7 +490,58 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 			a.inferFuncSinkParams(fn, fnType)
 		}
 	}
+	needsInference := func(fn *ast.FuncDecl) bool {
+		if fn == nil || !cyclic[fn] || fn.IsContract {
+			return false
+		}
+		sym := a.funcDeclSymbols[fn]
+		if sym == nil {
+			return false
+		}
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok || fnType == nil {
+			return false
+		}
+		if len(fn.GenericParams) == 0 && !a.scalarReturnHasNoReferenceProvenance(fnType) {
+			if !fnType.ReturnProvenanceKnown || !fnType.ReturnBorrowedOwnerRefsKnown {
+				return true
+			}
+		}
+		if !fnType.SinkParamsKnown {
+			for _, param := range fnType.Params {
+				if containsTypeParam(param) || a.containsAffineHandleValues(param, map[string]bool{}) {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	for _, scoped := range bodies {
+		switch n := scoped.Decl.(type) {
+		case *ast.FuncDecl:
+			if !needsInference(n) {
+				continue
+			}
+		case *ast.ImplDecl:
+			if n.IsHandler {
+				continue
+			}
+			// needsInference treats type parameters as unknown and conservatively
+			// keeps them, so it is safe to avoid entering generic context for an
+			// impl whose methods already have every required summary.
+			needed := false
+			for _, member := range n.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok && needsInference(fn) {
+					needed = true
+					break
+				}
+			}
+			if !needed {
+				continue
+			}
+		default:
+			continue
+		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			switch n := scoped.Decl.(type) {
 			case *ast.FuncDecl:
@@ -427,7 +558,7 @@ func (a *Analyzer) precomputeSharedCalleeFacts(bodies []scopedDecl) {
 					}
 					a.withInterfaceAssocTypes(selfBindings, func() {
 						for _, member := range n.Members {
-							if fn, ok := member.(*ast.FuncDecl); ok {
+							if fn, ok := member.(*ast.FuncDecl); ok && needsInference(fn) {
 								infer(fn)
 							}
 						}

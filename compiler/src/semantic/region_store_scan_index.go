@@ -98,9 +98,16 @@ type storeScanDeclIndex struct {
 	nodes map[string][]any
 	// flat: every node walkStoreScanNodes visits, in walk order (fixpoints iterate this instead
 	// of re-walking the AST reflectively per iteration).
-	flat []any
+	flat    []any
+	returns []*ast.ReturnStmt
+	// bindingWrites is populated on demand once per function. Pattern binder typing used to
+	// reflectively rescan the entire body for every binder name.
+	bindingWrites      map[string]int
+	bindingWritesReady bool
 	// locals: names declared or bound anywhere in the body.
-	locals map[string]bool
+	locals        map[string]bool
+	iterBinders   map[string][]*ast.IterForStmt
+	nonIterBinder map[string]bool
 	// memoized mention tokens (see mentions / headerMentions)
 	exprTokens   map[ast.Expr][]string
 	headerTokens map[ast.Stmt][]string
@@ -113,7 +120,7 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	if idx, ok := a.storeScanIndexCache[decl]; ok {
 		return idx
 	}
-	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nodes: map[string][]any{}, locals: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
+	idx := &storeScanDeclIndex{decls: map[string][]*ast.VarDeclStmt{}, otherBound: map[string]bool{}, nodes: map[string][]any{}, locals: map[string]bool{}, iterBinders: map[string][]*ast.IterForStmt{}, nonIterBinder: map[string]bool{}, exprTokens: map[ast.Expr][]string{}, headerTokens: map[ast.Stmt][]string{}, bound: map[ast.Stmt][]string{}}
 	// Each name's list is in walk order (one append per node), whatever the map order of names.
 	addNode := func(node any, names map[string]bool) {
 		for name := range names {
@@ -123,6 +130,10 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	walkStoreScanNodes(decl.Body, func(node any) {
 		idx.flat = append(idx.flat, node)
 		switch n := node.(type) {
+		case *ast.ReturnStmt:
+			if n != nil {
+				idx.returns = append(idx.returns, n)
+			}
 		case *ast.VarDeclStmt:
 			if n == nil {
 				return
@@ -162,9 +173,15 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 				return
 			}
 			bound := stmtBoundNames(n)
+			iter, isIter := n.(*ast.IterForStmt)
 			for _, name := range bound {
 				idx.otherBound[name] = true
 				idx.locals[name] = true
+				if isIter && iter != nil {
+					idx.iterBinders[name] = append(idx.iterBinders[name], iter)
+				} else {
+					idx.nonIterBinder[name] = true
+				}
 			}
 			if len(bound) > 0 {
 				addNode(n, storeScanHeaderNames(n))
@@ -176,6 +193,17 @@ func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
 	}
 	a.storeScanIndexCache[decl] = idx
 	return idx
+}
+
+func (idx *storeScanDeclIndex) bindingWriteCount(body []ast.Stmt, name string) int {
+	if idx == nil {
+		return 0
+	}
+	if !idx.bindingWritesReady {
+		idx.bindingWrites = storeScanBindingWriteCounts(body)
+		idx.bindingWritesReady = true
+	}
+	return idx.bindingWrites[name]
 }
 
 // storeScanExprNames: the identifier names mentioned in an expression (field selectors are not

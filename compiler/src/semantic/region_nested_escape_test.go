@@ -61,6 +61,24 @@ func TestNestedRegionViewIntoOuterLocalRejected(t *testing.T) {
 	}
 }
 
+// The tuple's fields can carry a borrowed view even though the tuple itself has no
+// region qualifier. A postfix `can` wrapper must also preserve the expression provenance.
+func TestNestedRegionTupleViewIntoOuterLocalRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "tuple_view_outer_local_escape.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        outer: mutable (known: bool, value: sview) = (false, "")
+        region inner(64):
+            bytes: mutable darray[u8] @inner = []
+            bytes.push(65)
+            view: sview @inner = bytes.as_sview()
+            outer <- (true, view) can Memory.Allocate
+        return i64(outer.value[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "outlives the region") {
+		t.Fatalf("expected tuple view stored into an outer local to be rejected; got: %s", all)
+	}
+}
+
 // Same hole via a struct field: the struct local is region-less and declared
 // outside the region block, so its field store dangles after the block.
 func TestNestedRegionStructFieldIntoOuterLocalRejected(t *testing.T) {

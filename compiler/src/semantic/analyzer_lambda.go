@@ -250,7 +250,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		a.bindActivePackedStoreType(paramType)
 		a.recordValueBinding(sym, nil)
 		a.recordBorrowedOwnerRefParam(sym)
-		if state, ok := a.abstractParamRegionRefState(paramType, i, map[string]bool{}); ok {
+		if state, ok := a.abstractParamRegionRefStateForBinding(paramType, i); ok {
 			a.recordResolvedRegionRefBinding(sym, state)
 		}
 	}

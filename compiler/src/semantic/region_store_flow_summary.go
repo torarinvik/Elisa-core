@@ -194,7 +194,7 @@ func (a *Analyzer) storeFlowPointerFreeTypeExpr(t ast.TypeExpr, active map[Type]
 			return false
 		}
 		name := tt.Name
-		if canonical := a.resolvedTypeNames[tt]; canonical != "" {
+		if canonical := a.resolvedTypeName(tt); canonical != "" {
 			name = canonical
 		}
 		return storeFlowPointerFreeReturn(a.storeFlowNamedType(name), active)
@@ -1393,10 +1393,9 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 	callDepth := 0
 	condDepth := 0 // inside a ternary condition: a bool, so its names reach no value
 	a.storeFlowBinds = false
-	rename := map[string]string{}
-	for name, renamed := range a.storeFlowEnv {
-		rename[name] = renamed
-	}
+	// Scope rename maps are immutable snapshots. Borrow the enclosing environment and
+	// clone only when a comprehension or match arm adds binders.
+	rename := a.storeFlowEnv
 	var walk func(v reflect.Value)
 	walkStructFields := func(v reflect.Value) {
 		for _, i := range storeFlowTypeInfoOf(v.Type()).fields {
@@ -1432,11 +1431,7 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 			if info.isStmt && v.Pointer() != self {
 				*nested = append(*nested, v)
 				if a.storeFlowStmtEnv != nil {
-					env := make(map[string]string, len(rename))
-					for name, renamed := range rename {
-						env[name] = renamed
-					}
-					a.storeFlowStmtEnv[v.Pointer()] = env
+					a.storeFlowStmtEnv[v.Pointer()] = rename
 				}
 				return
 			}
@@ -1446,21 +1441,21 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 			if comp, ok := v.Interface().(*ast.ListComprehensionExpr); ok {
 				// A comprehension binder is scoped to it: distinct comprehensions reusing a name
 				// must not be unified through it.
-				saved := map[string]string{}
+				savedRename := rename
+				if comp.Name != "" || comp.SecondName != "" {
+					scoped := make(map[string]string, len(rename)+2)
+					for name, renamed := range rename {
+						scoped[name] = renamed
+					}
+					rename = scoped
+				}
 				for _, binder := range []string{comp.Name, comp.SecondName} {
 					if binder != "" {
-						saved[binder] = rename[binder]
 						rename[binder] = fmt.Sprintf("%s#%x", binder, v.Pointer())
 					}
 				}
 				walk(v.Elem())
-				for binder, prev := range saved {
-					if prev == "" {
-						delete(rename, binder)
-					} else {
-						rename[binder] = prev
-					}
-				}
+				rename = savedRename
 				return
 			}
 			if tern, ok := v.Interface().(*ast.TernaryExpr); ok && tern != nil && !storeFlowHasBindingExpr(reflect.ValueOf(&tern.Cond).Elem()) {
@@ -1517,24 +1512,20 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 			if arm, ok := v.Interface().(ast.MatchArm); ok {
 				// A match arm's pattern binders are scoped to that arm (its guard and body):
 				// distinct arms and matches reusing a binder name must not be unified through it.
-				saved := map[string]string{}
-				had := map[string]bool{}
-				for _, binder := range storeFlowPatternBinders(arm.Pattern) {
-					if _, done := saved[binder]; done || had[binder] {
-						continue
+				binders := storeFlowPatternBinders(arm.Pattern)
+				savedRename := rename
+				if len(binders) != 0 {
+					scoped := make(map[string]string, len(rename)+len(binders))
+					for name, renamed := range rename {
+						scoped[name] = renamed
 					}
-					prev, ok := rename[binder]
-					saved[binder], had[binder] = prev, ok
-					rename[binder] = fmt.Sprintf("%s#%x", binder, v.Addr().Pointer())
+					for _, binder := range binders {
+						scoped[binder] = fmt.Sprintf("%s#%x", binder, v.Addr().Pointer())
+					}
+					rename = scoped
 				}
 				walkStructFields(v)
-				for binder, prev := range saved {
-					if had[binder] {
-						rename[binder] = prev
-					} else {
-						delete(rename, binder)
-					}
-				}
+				rename = savedRename
 				return
 			}
 			walkStructFields(v)

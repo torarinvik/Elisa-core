@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -10,8 +11,56 @@ import (
 )
 
 func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
+	if len(states) == 1 {
+		state := states[0]
+		if !hasRegionProvenance(state) {
+			return regionRefState{}, false
+		}
+		// There is nothing to merge across fields, so preserve the immutable Fields
+		// map. Clone the mutable dependency maps, and normalize parameter dependencies
+		// exactly as the multi-state path does.
+		merged := cloneRegionRefState(state)
+		merged.DirectParamDep, merged.HasDirectParamDep, merged.ParamDeps = 0, false, IntBitSet{}
+		forEachRegionParamDep(state, func(index int) {
+			appendRegionParamDep(&merged, index)
+		})
+		merged.PackedStoreSummary = summarizePackedStoreProvenance(state)
+		merged.PackedStoreSummaryKnown = true
+		for _, fieldState := range merged.Fields {
+			if fieldState.Fields != nil && len(fieldState.Fields) == 0 {
+				merged.Fields = cloneRegionRefFields(merged.Fields)
+				break
+			}
+		}
+		return merged, true
+	}
+	if merged, ok := shareIdenticalRegionRefStates(states); ok {
+		return merged, true
+	}
+	// Parameter-only field states keep the first value for overlapping keys. If every
+	// later field map is covered by that first map with compatible values, it can be
+	// shared as the exact result instead of allocating and merging another map.
+	fieldSource := -1
+	shareFieldSource := true
+	for i, state := range states {
+		if len(state.Fields) == 0 {
+			continue
+		}
+		if fieldSource < 0 {
+			fieldSource = i
+			continue
+		}
+		base := states[fieldSource].Fields
+		for name, next := range state.Fields {
+			prior, ok := base[name]
+			if !ok || !sameParamOnlyRegionRefSummary(prior, next) {
+				shareFieldSource = false
+				break
+			}
+		}
+	}
 	merged := regionRefState{PackedStoreSummaryKnown: true, ParamOnlySummary: true}
-	for _, state := range states {
+	for i, state := range states {
 		if !hasRegionProvenance(state) {
 			continue
 		}
@@ -54,6 +103,19 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 			appendRegionParamDep(&merged, index)
 		})
 		if len(state.Fields) != 0 {
+			if shareFieldSource {
+				if i != fieldSource {
+					continue
+				}
+				merged.Fields = shareRegionRefFields(state.Fields)
+				for _, fieldState := range merged.Fields {
+					if fieldState.Fields != nil && len(fieldState.Fields) == 0 {
+						merged.Fields = cloneRegionRefFields(merged.Fields)
+						break
+					}
+				}
+				continue
+			}
 			if merged.Fields == nil {
 				merged.Fields = make(map[string]regionRefState, len(state.Fields))
 			}
@@ -74,6 +136,48 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 		return regionRefState{}, false
 	}
 	return merged, true
+}
+
+func shareIdenticalRegionRefStates(states []regionRefState) (regionRefState, bool) {
+	if len(states) < 2 || !hasRegionProvenance(states[0]) {
+		return regionRefState{}, false
+	}
+	base := states[0]
+	depsID := regionDependencyMapIdentity(base.Deps)
+	storeDepsID := packedStoreDependencyMapIdentity(base.StoreDeps)
+	fieldsID := regionRefFieldsIdentity(base.Fields)
+	for _, state := range states[1:] {
+		if state.DirectParamDep != base.DirectParamDep || state.HasDirectParamDep != base.HasDirectParamDep ||
+			!sameRegionParamDeps(state.ParamDeps, base.ParamDeps) ||
+			regionDependencyMapIdentity(state.Deps) != depsID ||
+			packedStoreDependencyMapIdentity(state.StoreDeps) != storeDepsID ||
+			regionRefFieldsIdentity(state.Fields) != fieldsID ||
+			state.PackedStoreSummaryKnown != base.PackedStoreSummaryKnown ||
+			(state.PackedStoreSummaryKnown && state.PackedStoreSummary != base.PackedStoreSummary) ||
+			state.ParamOnlySummary != base.ParamOnlySummary {
+			return regionRefState{}, false
+		}
+	}
+	merged := cloneRegionRefStateSharedFields(base)
+	merged.DirectParamDep, merged.HasDirectParamDep, merged.ParamDeps = 0, false, IntBitSet{}
+	forEachRegionParamDep(base, func(index int) { appendRegionParamDep(&merged, index) })
+	merged.PackedStoreSummary = summarizePackedStoreProvenance(base)
+	merged.PackedStoreSummaryKnown = true
+	return merged, true
+}
+
+func regionDependencyMapIdentity(deps map[*Symbol]regionDependencyState) uintptr {
+	if len(deps) == 0 {
+		return 0
+	}
+	return reflect.ValueOf(deps).Pointer()
+}
+
+func packedStoreDependencyMapIdentity(deps map[*Symbol]packedStoreDependencyState) uintptr {
+	if len(deps) == 0 {
+		return 0
+	}
+	return reflect.ValueOf(deps).Pointer()
 }
 
 func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (regionRefState, bool) {

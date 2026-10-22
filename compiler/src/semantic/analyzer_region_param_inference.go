@@ -124,6 +124,10 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		})
 	}
 	forwardingByFunc := collectRegionParamForwarding(cands, funcByName)
+	// These facts depend only on a function body and parameter name. Bodies stop
+	// changing after prepareCollectionAppends, while the worklist may revisit a
+	// function after a callee gains a region parameter.
+	bodyFacts := make(map[regionParamBodyFactsKey]*regionParamBodyFacts)
 	// Worklist fixpoint. A function's verdict reads other functions only through names that
 	// resolve in funcByName (forwarding targets, callee return types), so after the first full
 	// pass only the callers of a function that just changed can gain a param (a recursive
@@ -143,7 +147,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			if fn == nil || arenaManaged[fn] {
 				continue
 			}
-			if !a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn]) {
+			if !a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn], bodyFacts) {
 				continue
 			}
 			for _, dep := range callers[fn] {
@@ -176,7 +180,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	}
 	if os.Getenv("ELISA_REGION_FIXPOINT_SHADOW") != "" {
 		for _, fn := range cands {
-			if fn != nil && !arenaManaged[fn] && a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn]) {
+			if fn != nil && !arenaManaged[fn] && a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn], bodyFacts) {
 				panic("region inference worklist missed a dependency of " + fn.Name)
 			}
 		}
@@ -210,7 +214,35 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	}
 }
 
-func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl, forwarding regionParamForwarding) bool {
+type regionParamBodyFactsKey struct {
+	fn   *ast.FuncDecl
+	name string
+}
+
+type regionParamBodyFacts struct {
+	containerGrownKnown      bool
+	containerGrown           bool
+	containerReassignedKnown bool
+	containerReassigned      bool
+	fieldGrownKnown          bool
+	fieldGrown               bool
+	fieldAssignedFreshKnown  bool
+	fieldAssignedFresh       bool
+	storesBodyLocalKnown     bool
+	storesBodyLocal          bool
+}
+
+func bodyFactsForParam(cache map[regionParamBodyFactsKey]*regionParamBodyFacts, fn *ast.FuncDecl, name string) *regionParamBodyFacts {
+	key := regionParamBodyFactsKey{fn: fn, name: name}
+	if facts := cache[key]; facts != nil {
+		return facts
+	}
+	facts := &regionParamBodyFacts{}
+	cache[key] = facts
+	return facts
+}
+
+func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl, forwarding regionParamForwarding, bodyFacts map[regionParamBodyFactsKey]*regionParamBodyFacts) bool {
 	if fn == nil || len(fn.Body) == 0 {
 		return false
 	}
@@ -243,7 +275,16 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
 			grownWithRegionValue := a.containerParamGrownWithRegionValue(fn, p.Name, funcByName, funcScopes)
-			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) || grownWithRegionValue {
+			facts := bodyFactsForParam(bodyFacts, fn, p.Name)
+			if !facts.containerGrownKnown {
+				facts.containerGrown = paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots)
+				facts.containerGrownKnown = true
+			}
+			if !facts.containerReassignedKnown {
+				facts.containerReassigned = paramContainerReassignedFromLiteral(fn.Body, p.Name)
+				facts.containerReassignedKnown = true
+			}
+			if facts.containerGrown || facts.containerReassigned || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) || grownWithRegionValue {
 				stamp = cstamp
 				if grownWithRegionValue && ambientGrownParam == "" && containerParamCount == 1 {
 					ambientGrownParam = p.Name
@@ -256,13 +297,22 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// field-region propagation pushes it onto the resolved field container, and the same
 			// return-escape checks that guard the explicit `[@r]` form cover every borrow-out vector
 			// regardless of how the region param was introduced — no new lifetime power.
-			assignedFresh := paramFieldAssignedFreshContainer(fn.Body, p.Name)
-			if assignedFresh || paramFieldContainerIsGrown(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
+			facts := bodyFactsForParam(bodyFacts, fn, p.Name)
+			if !facts.fieldAssignedFreshKnown {
+				facts.fieldAssignedFresh = paramFieldAssignedFreshContainer(fn.Body, p.Name)
+				facts.fieldAssignedFreshKnown = true
+			}
+			if !facts.fieldGrownKnown {
+				facts.fieldGrown = paramFieldContainerIsGrown(fn.Body, p.Name)
+				facts.fieldGrownKnown = true
+			}
+			assignedFresh := facts.fieldAssignedFresh
+			if assignedFresh || facts.fieldGrown || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
 				stamp = sstamp
 				// A body-built value stored into the sole writable struct target adopts the same
 				// way -- but only onto a region this param already threads (never a new region
 				// param just for adoption: that would change the signature callers must infer).
-				if !assignedFresh && containerParamCount == 0 && paramIsWritableStructRef(p) && paramStoresBodyLocal(fn, p.Name) && !a.hasOtherFreshFieldTarget(fn, p.Name) {
+				if !assignedFresh && containerParamCount == 0 && paramIsWritableStructRef(p) && cachedParamStoresBodyLocal(facts, fn, p.Name) && !a.hasOtherFreshFieldTarget(fn, p.Name) {
 					assignedFresh = true
 				}
 			}
@@ -309,6 +359,14 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		}
 	}
 	return changed
+}
+
+func cachedParamStoresBodyLocal(facts *regionParamBodyFacts, fn *ast.FuncDecl, name string) bool {
+	if !facts.storesBodyLocalKnown {
+		facts.storesBodyLocal = paramStoresBodyLocal(fn, name)
+		facts.storesBodyLocalKnown = true
+	}
+	return facts.storesBodyLocal
 }
 
 // inferredRegionParamName reserves a deterministic region binder that cannot

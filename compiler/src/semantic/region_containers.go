@@ -1280,6 +1280,12 @@ func (a *Analyzer) checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr ast
 	valueRegion := containerOrEntryRegion(valueType)
 	targetRegion := containerOrEntryRegion(targetType)
 	if valueRegion == "" {
+		// Only skip the flow query when the type walk proves the value contains no
+		// references. Unknown wrappers, function values, pointers encoded as
+		// integers, and other unresolved shapes stay on the full escape-check path.
+		if a.returnTypeHasNoReferences(valueType, 0) {
+			return
+		}
 		// A borrowed result may have a region-provenance summary without a region in its
 		// nominal type (notably an unannotated `sview` returned from a parameter). Check
 		// every concrete backing dependency at the store boundary; otherwise a call can

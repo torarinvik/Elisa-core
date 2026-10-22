@@ -18,8 +18,27 @@ import (
 // Missing an edge would let a caller read facts a callee's worker is writing, so
 // the match is deliberately generous.
 type bodyGraph struct {
-	deps   [][]int // deps[i]: bodies i depends on
-	weight []int   // AST nodes per body
+	deps          [][]int // deps[i]: bodies i depends on
+	weight        []int   // AST nodes per body
+	functions     []*ast.FuncDecl
+	functionDeps  [][]int // function-level graph, including methods grouped in one impl body
+	funcRecursive []bool  // direct or function-value self-reference
+}
+
+func bodyFunctions(d ast.Decl) []*ast.FuncDecl {
+	switch n := d.(type) {
+	case *ast.FuncDecl:
+		return []*ast.FuncDecl{n}
+	case *ast.ImplDecl:
+		var funcs []*ast.FuncDecl
+		for _, member := range n.Members {
+			if fn, ok := member.(*ast.FuncDecl); ok {
+				funcs = append(funcs, fn)
+			}
+		}
+		return funcs
+	}
+	return nil
 }
 
 func bodyDefinedNames(d ast.Decl) []string {
@@ -79,32 +98,76 @@ func buildBodyGraph(bodies []scopedDecl) *bodyGraph {
 		}
 	}
 	g := &bodyGraph{deps: make([][]int, len(bodies)), weight: make([]int, len(bodies))}
-	for i, scoped := range bodies {
-		seen := map[int]bool{i: true}
-		note := func(name string) {
-			for _, j := range definers[fillMayAdoptLastSegment(name)] {
-				if !seen[j] {
-					seen[j] = true
-					g.deps[i] = append(g.deps[i], j)
-				}
-			}
+	functionIndexByDecl := map[*ast.FuncDecl]int{}
+	functionDefiners := map[string][]int{}
+	for _, scoped := range bodies {
+		for _, fn := range bodyFunctions(scoped.Decl) {
+			functionIndex := len(g.functions)
+			g.functions = append(g.functions, fn)
+			functionIndexByDecl[fn] = functionIndex
+			functionDefiners[fillMayAdoptLastSegment(fn.Name)] = append(functionDefiners[fillMayAdoptLastSegment(fn.Name)], functionIndex)
 		}
-		walkStoreScanNodes(bodyStmts(scoped.Decl), func(node any) {
-			g.weight[i]++
-			switch n := node.(type) {
-			case *ast.Ident:
-				note(n.Name)
-			case *ast.FieldExpr:
-				note(n.Field)
-			case ast.Expr:
-				if name, _, ok := ast.PrepassCallShape(n); ok {
-					note(name)
+	}
+	g.functionDeps = make([][]int, len(g.functions))
+	g.funcRecursive = make([]bool, len(g.functions))
+	for i, scoped := range bodies {
+		seen := map[int]bool{}
+		for _, fn := range bodyFunctions(scoped.Decl) {
+			functionIndex := functionIndexByDecl[fn]
+			seenFunctions := map[int]bool{}
+			note := func(name string) {
+				for _, j := range definers[fillMayAdoptLastSegment(name)] {
+					if j != i && !seen[j] {
+						seen[j] = true
+						g.deps[i] = append(g.deps[i], j)
+					}
+				}
+				for _, target := range functionDefiners[fillMayAdoptLastSegment(name)] {
+					if target == functionIndex {
+						g.funcRecursive[functionIndex] = true
+						continue
+					}
+					if !seenFunctions[target] {
+						seenFunctions[target] = true
+						g.functionDeps[functionIndex] = append(g.functionDeps[functionIndex], target)
+					}
 				}
 			}
-		})
+			walkStoreScanNodes(funcScanStmts(fn), func(node any) {
+				g.weight[i]++
+				switch n := node.(type) {
+				case *ast.Ident:
+					note(n.Name)
+				case *ast.FieldExpr:
+					note(n.Field)
+				case ast.Expr:
+					if name, _, ok := ast.PrepassCallShape(n); ok {
+						note(name)
+					}
+				}
+			})
+			sort.Ints(g.functionDeps[functionIndex])
+		}
 		sort.Ints(g.deps[i])
 	}
 	return g
+}
+
+func (g *bodyGraph) cyclicFunctions() map[*ast.FuncDecl]bool {
+	functionGraph := &bodyGraph{deps: g.functionDeps}
+	cyclic := map[*ast.FuncDecl]bool{}
+	for _, component := range functionGraph.sccs() {
+		isCycle := len(component) > 1
+		if len(component) == 1 {
+			isCycle = g.funcRecursive[component[0]]
+		}
+		if isCycle {
+			for _, index := range component {
+				cyclic[g.functions[index]] = true
+			}
+		}
+	}
+	return cyclic
 }
 
 // sccs returns the strongly connected components in reverse topological order
@@ -228,6 +291,7 @@ type bodySchedule struct {
 	done       []chan struct{}
 	exported   []map[int]reflect.Value // per unit: map path index -> map of decl entries
 	funcs      [][]*ast.FuncDecl       // function declarations per unit
+	cyclic     map[*ast.FuncDecl]bool  // declarations that need recursive summary seeding
 	took       []time.Duration
 	nodes      [][]reflect.Value // per unit: node-keyed entries of its bodies
 	stmts      [][]ast.Stmt
@@ -299,13 +363,14 @@ func (s *bodySchedule) finish(u int) {
 
 func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	g := buildBodyGraph(bodies)
+	components := g.sccs()
 	// Members of a recursive cycle cannot see each other's finished facts in any
 	// order, so a large cycle is dealt in chunks that run side by side; each chunk
 	// still waits for the cycle's outside callees, and callers wait for every chunk.
 	const chunk = 8
 	var units [][]int
 	var sccOf []int
-	for c, comp := range g.sccs() {
+	for c, comp := range components {
 		for from := 0; from < len(comp); from += chunk {
 			units = append(units, comp[from:min(from+chunk, len(comp))])
 			sccOf = append(sccOf, c)
@@ -314,6 +379,7 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	s := &bodySchedule{units: units, unitOf: make([]int, len(bodies)), worker: make([]int, len(units)),
 		deps: make([][]int, len(units)), done: make([]chan struct{}, len(units)),
 		exported: make([]map[int]reflect.Value, len(units)), funcs: make([][]*ast.FuncDecl, len(units)), took: make([]time.Duration, len(units)), nodes: make([][]reflect.Value, len(units)), stmts: make([][]ast.Stmt, len(units))}
+	s.cyclic = g.cyclicFunctions()
 	s.sccOf = sccOf
 	s.sccUnits = map[int][]int{}
 	for u, unit := range units {

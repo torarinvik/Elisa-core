@@ -48,10 +48,10 @@ func (a *Analyzer) storeScanPatternBinderTypeUncached(decl *ast.FuncDecl, name s
 			return nil, false
 		}
 	}
-	if storeScanBindingWrites(decl.Body, name) != 1 {
+	idx := a.storeScanIndex(decl)
+	if idx.bindingWriteCount(decl.Body, name) != 1 {
 		return nil, false
 	}
-	idx := a.storeScanIndex(decl)
 	if len(idx.decls[name]) != 0 {
 		return nil, false
 	}
@@ -178,11 +178,12 @@ func lastNameSegment(name string) string {
 	return name
 }
 
-// storeScanBindingWrites counts the places in body where name is written as a string anywhere
-// other than a plain use (an identifier or a field selector): binders, declarations, loop
-// variables, capture lists. Over-counting only makes the binder typer decline.
-func storeScanBindingWrites(body []ast.Stmt, name string) int {
-	count := 0
+// storeScanBindingWriteCounts counts all places in body where a name is written as a string
+// anywhere other than a plain use (an identifier or a field selector): binders, declarations,
+// loop variables, capture lists. Over-counting only makes the binder typer decline. The index
+// computes this map once per function so asking about multiple binders does not rescan the body.
+func storeScanBindingWriteCounts(body []ast.Stmt) map[string]int {
+	counts := map[string]int{}
 	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value, depth int)
 	rec = func(v reflect.Value, depth int) {
@@ -224,13 +225,11 @@ func storeScanBindingWrites(body []ast.Stmt, name string) int {
 				rec(v.Index(i), depth+1)
 			}
 		case reflect.String:
-			if v.String() == name {
-				count++
-			}
+			counts[v.String()]++
 		}
 	}
 	for _, stmt := range body {
 		rec(reflect.ValueOf(stmt), 0)
 	}
-	return count
+	return counts
 }

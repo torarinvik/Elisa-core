@@ -477,10 +477,13 @@ type StructType struct {
 	CBindName       string
 	CBindPrefix     bool
 	Decl            *ast.StructDecl
-	StoreDecl       *ast.StoreDecl
-	Store           bool
-	StoreFieldOrder []string
-	Builtin         bool
+	// declarationFieldOrder is the immutable flattened source order, including bit-group
+	// members. It avoids rebuilding the same names slice during repeated deterministic walks.
+	declarationFieldOrder []string
+	StoreDecl             *ast.StoreDecl
+	Store                 bool
+	StoreFieldOrder       []string
+	Builtin               bool
 	// GhostFieldOrder lists the verification-only model fields (`ghost name: T`) in declaration
 	// order. They live in Fields (so contract analysis resolves them) but are stripped from
 	// Decl.Fields, so codegen never lays them out — guaranteeing zero impact on the concrete

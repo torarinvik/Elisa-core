@@ -74,6 +74,18 @@ func TestStoreScanShareIsPerSourceParameter(t *testing.T) {
 			t.Errorf("%s share %d <- %d: %v, want %v", c.fn, c.into, c.from, got, c.want)
 		}
 	}
+
+	// A successful multi-function query also proves every node on its discovered path.
+	a.storeScanParamWriteCache = nil
+	a.storeScanParamFactsCache = nil
+	forward := storeScanShareKey(storeScanFindFunc(t, result, "forward"), 2, 1)
+	keepHeader := storeScanShareKey(storeScanFindFunc(t, result, "keep_header"), 2, 1)
+	if !a.storeScanParamReaches(forward) {
+		t.Fatal("forward should reach the keep_header share writer")
+	}
+	if !a.storeScanParamWriteCache[keepHeader] {
+		t.Fatal("successful reachability path should cache its intermediate callee node")
+	}
 }
 
 // The call-site taint follows the per-pair fact: a local the callee fills with names' header

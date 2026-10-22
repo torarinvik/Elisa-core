@@ -20,12 +20,17 @@ type moveBindResolvedVariantField struct {
 }
 
 func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, bool) {
+	actual = StripAggregateStateType(actual)
+	if a != nil && a.typeShapesFrozen && actual != nil {
+		if fields, ok := a.resolvedStructFieldsMemo[actual]; ok {
+			return fields, true
+		}
+	}
 	var (
 		base           *StructType
 		bindings       map[string]Type
 		regionBindings map[string]string
 	)
-	actual = StripAggregateStateType(actual)
 	switch tt := actual.(type) {
 	case *StructType:
 		base = tt
@@ -37,7 +42,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 		for i, field := range tt.Fields {
 			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: field.Type, Mutable: false, Index: i})
 		}
-		return fields, true
+		return a.cacheResolvedStructFields(actual, fields)
 	case *StoreRowViewType:
 		if tt == nil || tt.Store == nil || tt.Store.Decl == nil {
 			return nil, false
@@ -50,7 +55,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			}
 			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: field.Type, Mutable: field.Mutable})
 		}
-		return fields, true
+		return a.cacheResolvedStructFields(actual, fields)
 	case *GenericInstanceType:
 		structBase, ok := tt.Base.(*StructType)
 		if !ok {
@@ -80,6 +85,18 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
 		}
 		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType, Mutable: field.Mutable, Index: i})
+	}
+	return a.cacheResolvedStructFields(actual, fields)
+}
+
+func (a *Analyzer) cacheResolvedStructFields(actual Type, fields []moveBindResolvedField) ([]moveBindResolvedField, bool) {
+	if a != nil && a.typeShapesFrozen && actual != nil {
+		if a.resolvedStructFieldsMemo == nil {
+			a.resolvedStructFieldsMemo = make(map[Type][]moveBindResolvedField)
+		}
+		// Callers only inspect these lists. Types are finalized before this memo is
+		// enabled, and the cached slice is never exposed to mutation.
+		a.resolvedStructFieldsMemo[actual] = fields
 	}
 	return fields, true
 }

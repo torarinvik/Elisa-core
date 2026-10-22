@@ -23,6 +23,10 @@ func (a *Analyzer) mergeSpecializedValueTypesWithSeen(dst Type, src Type, seen m
 	if merged, ok := seen[key]; ok {
 		return merged, true
 	}
+	if a != nil && a.returnTypeHasNoReferences(dst, 0) {
+		seen[key] = dst
+		return dst, true
+	}
 	if dstFunc, ok := dst.(*FuncType); ok {
 		srcFunc, ok := src.(*FuncType)
 		if !ok {

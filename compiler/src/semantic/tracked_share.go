@@ -20,7 +20,8 @@ type trackedShareRecord struct {
 
 func (a *Analyzer) shareTrackedValueType(t Type) Type {
 	if trackedShareCheck && t != nil {
-		a.trackedShareChecks = append(a.trackedShareChecks, trackedShareRecord{shared: t, snapshot: a.cloneTrackedValueType(t)})
+		var memo trackedCloneMemo
+		a.trackedShareChecks = append(a.trackedShareChecks, trackedShareRecord{shared: t, snapshot: a.cloneTrackedValueTypeWithMemoDepth(t, &memo, 0)})
 	}
 	return t
 }

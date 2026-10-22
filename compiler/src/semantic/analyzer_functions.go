@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"reflect"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -247,7 +248,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 						if isOwnedTypeExpr(param.Type) {
 							a.registerOwnedStoreOwner(sym)
 						}
-						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
+						if state, ok := a.abstractParamRegionRefStateForBinding(ptype, i); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 						// docs/126 §2: a drop-typed parameter was MOVED in by the caller,
@@ -406,12 +407,12 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 // Pointer-free results need no lazy reference-provenance walk. The ordinary
 // body pass still checks statements and diagnostics. Unresolved, owning and
 // generic types remain conservative; a bounded recursion also rejects cycles.
-func scalarReturnHasNoReferenceProvenance(fnType *FuncType) bool {
-	return fnType != nil && fnType.ReturnRegion == "" && returnTypeHasNoReferences(fnType.Return, 0)
+func (a *Analyzer) scalarReturnHasNoReferenceProvenance(fnType *FuncType) bool {
+	return a != nil && fnType != nil && fnType.ReturnRegion == "" && a.returnTypeHasNoReferences(fnType.Return, 0)
 }
 
-func returnTypeHasNoReferences(t Type, depth int) bool {
-	if depth > 16 {
+func (a *Analyzer) returnTypeHasNoReferences(t Type, depth int) bool {
+	if a == nil || depth > 16 {
 		return false
 	}
 	switch typ := t.(type) {
@@ -424,23 +425,85 @@ func returnTypeHasNoReferences(t Type, depth int) bool {
 			return true
 		}
 	case *ConstEnumType:
-		return typ != nil && returnTypeHasNoReferences(typ.Storage, depth+1)
+		return typ != nil && a.returnTypeHasNoReferences(typ.Storage, depth+1)
+	case *ArrayType:
+		return typ != nil && a.returnTypeHasNoReferences(typ.Elem, depth+1)
+	case *OptionalType:
+		return typ != nil && a.returnTypeHasNoReferences(typ.Value, depth+1)
 	case *TupleType:
 		if typ == nil {
 			return false
 		}
 		for _, field := range typ.Fields {
-			if !returnTypeHasNoReferences(field.Type, depth+1) {
+			if !a.returnTypeHasNoReferences(field.Type, depth+1) {
 				return false
 			}
 		}
 		return true
+	case *EnumType:
+		// A base enum accepts every refinement case, whose payloads may add references.
+		// Keep hierarchies conservative rather than proving only the base's own variants.
+		if typ == nil || typ.Packed || typ.StoreBackedPlain || typ.Parent != nil || len(typ.Children) != 0 ||
+			(typ.Decl != nil && (typ.Decl.Parent != "" || typ.Decl.StoreRegion != "")) {
+			return false
+		}
+		for _, field := range typ.Common {
+			if !a.returnTypeHasNoReferences(field.Type, depth+1) {
+				return false
+			}
+		}
+		for _, variant := range typ.Variants {
+			if variant == nil {
+				continue
+			}
+			for _, payload := range variant.Payload {
+				if !a.returnTypeHasNoReferences(payload, depth+1) {
+					return false
+				}
+			}
+		}
+		return true
+	case *AggregateStateType:
+		return typ != nil && a.returnTypeHasNoReferences(typ.Base, depth+1)
 	case *StructType:
 		if typ == nil || typ.Decl == nil || typ.Store || typ.Resource || typ.Affine || typ.DropHook != "" || typ.HasPackedGroups || typ.RegionOwner != "" || len(typ.RegionParams) != 0 || len(typ.GenericParams) != 0 || len(typ.TypeParams) != 0 || len(typ.Fields) < len(typ.Decl.Fields) {
 			return false
 		}
 		for _, field := range typ.Fields {
-			if !returnTypeHasNoReferences(field.Type, depth+1) {
+			if !a.returnTypeHasNoReferences(field.Type, depth+1) {
+				return false
+			}
+		}
+		return true
+	case *GenericInstanceType:
+		if typ == nil || typ.Region != "" {
+			return false
+		}
+		base, ok := typ.Base.(*StructType)
+		if !ok || base == nil || base.Decl == nil || base.Store || base.Resource || base.Affine || base.DropHook != "" || base.HasPackedGroups || base.RegionOwner != "" || len(base.Fields) < len(base.Decl.Fields) {
+			return false
+		}
+		params := genericParamsForStructType(base)
+		if len(params) != len(typ.Args) {
+			return false
+		}
+		for _, param := range params {
+			if param.Kind != ast.GenericParamType && param.Kind != ast.GenericParamRegion {
+				return false
+			}
+		}
+		bindings := genericBindingsForStructInstance(base, typ.Args)
+		regionBindings := regionBindingsForStructInstance(base, typ.Args)
+		for _, declaredField := range base.Decl.Fields {
+			field, ok := base.Fields[declaredField.Name]
+			if !ok {
+				return false
+			}
+			fieldType := field.Type
+			if len(bindings) != 0 || len(regionBindings) != 0 {
+				fieldType = a.substituteType(fieldType, bindings, nil, regionBindings, nil)
+			}
+			if !a.returnTypeHasNoReferences(fieldType, depth+1) {
 				return false
 			}
 		}
@@ -449,13 +512,163 @@ func returnTypeHasNoReferences(t Type, depth int) bool {
 	return false
 }
 
+func (a *Analyzer) directParamReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) (regionRefState, bool) {
+	if a == nil || fn == nil || fnType == nil || fnType.ReturnRegion != "" || len(fn.Body) != 1 {
+		return regionRefState{}, false
+	}
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
+	if !ok || ret.Value == nil {
+		return regionRefState{}, false
+	}
+	expr, ok := unwrapReturnProvenanceWrappers(ret.Value)
+	if !ok {
+		return regionRefState{}, false
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return regionRefState{}, false
+	}
+	params := a.expandedFuncDeclParams(fn)
+	for i, param := range params {
+		if param.Name != ident.Name || i >= len(fnType.Params) || !SameType(fnType.Params[i], fnType.Return) {
+			continue
+		}
+		if state, carriesRefs := a.abstractParamRegionRefState(fnType.Params[i], i, map[string]bool{}); carriesRefs {
+			return state, true
+		}
+		if a.returnTypeHasNoReferences(fnType.Return, 0) {
+			return regionRefState{}, true
+		}
+		return regionRefState{}, false
+	}
+	return regionRefState{}, false
+}
+
+func (a *Analyzer) directParamFieldReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) (regionRefState, bool) {
+	if a == nil || fn == nil || fnType == nil || fnType.ReturnRegion != "" || len(fn.Body) != 1 {
+		return regionRefState{}, false
+	}
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
+	if !ok || ret.Value == nil {
+		return regionRefState{}, false
+	}
+	value, ok := unwrapReturnProvenanceWrappers(ret.Value)
+	if !ok {
+		return regionRefState{}, false
+	}
+	field, ok := value.(*ast.FieldExpr)
+	if !ok || field.Safe || field.Object == nil || field.Field == "" {
+		return regionRefState{}, false
+	}
+	object, ok := unwrapReturnProvenanceWrappers(field.Object)
+	if !ok {
+		return regionRefState{}, false
+	}
+	ident, ok := object.(*ast.Ident)
+	if !ok {
+		return regionRefState{}, false
+	}
+	params := a.expandedFuncDeclParams(fn)
+	for i, param := range params {
+		if param.Name != ident.Name || i >= len(fnType.Params) {
+			continue
+		}
+		paramType := fnType.Params[i]
+		structType := StripAggregateStateType(stripRefForBounds(paramType))
+		switch tt := structType.(type) {
+		case *StructType:
+			if tt == nil {
+				return regionRefState{}, false
+			}
+		case *GenericInstanceType:
+			if tt == nil {
+				return regionRefState{}, false
+			}
+			if _, isStruct := tt.Base.(*StructType); !isStruct {
+				return regionRefState{}, false
+			}
+		default:
+			return regionRefState{}, false
+		}
+		fieldType, ok := a.lookupResolvedFieldType(structType, field.Field)
+		if !ok || fieldType == nil || IsInvalidType(fieldType) || !SameType(fieldType, fnType.Return) {
+			return regionRefState{}, false
+		}
+		if state, carriesRefs := a.abstractParamRegionRefState(paramType, i, map[string]bool{}); carriesRefs {
+			if projected, ok := projectRegionFieldState(state, field.Field); ok {
+				return projected, true
+			}
+		}
+		if a.returnTypeHasNoReferences(fnType.Return, 0) {
+			return regionRefState{}, true
+		}
+		return regionRefState{}, false
+	}
+	return regionRefState{}, false
+}
+
+func unwrapReturnProvenanceWrappers(expr ast.Expr) (ast.Expr, bool) {
+	for {
+		switch n := expr.(type) {
+		case *ast.CanExpr:
+			expr = n.Expr
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.MoveExpr:
+			expr = n.Operand
+		default:
+			goto unwrapped
+		}
+		if expr == nil {
+			return nil, false
+		}
+	}
+
+unwrapped:
+	return expr, true
+}
+
+func reusableDeclReturnProvenance(fn *ast.FuncDecl, source, target *FuncType) (regionRefState, bool) {
+	if fn == nil || source == nil || target == nil || source == target || !source.ReturnProvenanceKnown ||
+		len(fn.GenericParams) != 0 || len(fn.TypeParams) != 0 || len(fn.RegionParams) != 0 || len(fn.InferredRegionParams) != 0 || len(fn.PermissionParams) != 0 ||
+		source.Name != target.Name || source.ReturnRegion != target.ReturnRegion || len(source.Params) != len(target.Params) ||
+		source.Return == nil || target.Return == nil || !reflect.DeepEqual(source.Return, target.Return) {
+		return regionRefState{}, false
+	}
+	for i := range source.Params {
+		if source.Params[i] == nil || target.Params[i] == nil || !reflect.DeepEqual(source.Params[i], target.Params[i]) {
+			return regionRefState{}, false
+		}
+	}
+	return cloneRegionRefState(source.ReturnProvenance), true
+}
+
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
 	fn = a.readDecl(fn)
 	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
 		return
 	}
-	if scalarReturnHasNoReferenceProvenance(fnType) {
+	if symbol := a.funcDeclSymbols[fn]; symbol != nil {
+		if sourceType, ok := symbol.Type.(*FuncType); ok {
+			if state, ok := reusableDeclReturnProvenance(fn, sourceType, fnType); ok {
+				fnType.ReturnProvenance = state
+				fnType.ReturnProvenanceKnown = true
+				return
+			}
+		}
+	}
+	if a.scalarReturnHasNoReferenceProvenance(fnType) {
 		fnType.ReturnProvenance = regionRefState{}
+		fnType.ReturnProvenanceKnown = true
+		return
+	}
+	if state, ok := a.directParamReturnProvenance(fn, fnType); ok {
+		fnType.ReturnProvenance = withPackedStoreProvenanceSummary(state)
+		fnType.ReturnProvenanceKnown = true
+		return
+	}
+	if state, ok := a.directParamFieldReturnProvenance(fn, fnType); ok {
+		fnType.ReturnProvenance = withPackedStoreProvenanceSummary(state)
 		fnType.ReturnProvenanceKnown = true
 		return
 	}
@@ -650,7 +863,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	if fn == nil || fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown {
 		return
 	}
-	if scalarReturnHasNoReferenceProvenance(fnType) {
+	if a.scalarReturnHasNoReferenceProvenance(fnType) {
 		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 		fnType.ReturnBorrowedOwnerRefsKnown = true
 		return

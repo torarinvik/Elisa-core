@@ -11,15 +11,29 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	if expr == nil {
 		return regionRefState{}, false
 	}
+	// These wrappers do not change the value's region provenance. Peel them in
+	// place instead of recursively re-entering this large dispatcher (CanExpr is
+	// common in permission-checked code and dominated allocation samples).
+	for {
+		switch n := expr.(type) {
+		case *ast.CanExpr:
+			expr = n.Expr
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.MoveExpr:
+			expr = n.Operand
+		default:
+			goto unwrapped
+		}
+		if expr == nil {
+			return regionRefState{}, false
+		}
+	}
+
+unwrapped:
 	switch n := expr.(type) {
-	case *ast.CanExpr:
-		return a.regionRefStateForExpr(n.Expr)
-	case *ast.ParenExpr:
-		return a.regionRefStateForExpr(n.Inner)
-	case *ast.CastExpr:
-		return a.regionRefStateForExpr(n.Operand)
-	case *ast.MoveExpr:
-		return a.regionRefStateForExpr(n.Operand)
 	case *ast.AddrOfExpr:
 		if state, ok := a.regionRefStateForBufferAddress(n.Operand); ok {
 			return state, true

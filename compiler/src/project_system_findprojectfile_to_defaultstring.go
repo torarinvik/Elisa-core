@@ -478,6 +478,14 @@ func writeSourceWithIncludesWithOptions(out *bytes.Buffer, filename string, seen
 }
 
 func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options sourceExpandOptions) error {
+	return writeSourceWithIncludesWithOptionsPrefixed(out, filename, included, active, options, nil)
+}
+
+// writeSourceWithIncludesWithOptionsPrefixed streams included files into one output
+// buffer. Prefixes reproduce the indentation that each recursive include splice adds
+// to non-#line lines, without materializing and copying a temporary expanded buffer at
+// every include depth.
+func writeSourceWithIncludesWithOptionsPrefixed(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options sourceExpandOptions, prefixes [][]byte) error {
 	abs, err := filepath.Abs(filename)
 	if err != nil {
 		return err
@@ -519,12 +527,11 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 				return err
 			}
 			indent := leadingWhitespaceBytes(line)
-			var includeBuf bytes.Buffer
 			outLenBefore := out.Len()
-			if err := writeSourceWithIncludesWithOptionsActive(&includeBuf, resolved, included, active, options); err != nil {
+			childPrefixes := append(prefixes, indent)
+			if err := writeSourceWithIncludesWithOptionsPrefixed(out, resolved, included, active, options, childPrefixes); err != nil {
 				return err
 			}
-			writeIndentedInclude(out, includeBuf.Bytes(), indent)
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
 				out.WriteByte('\n')
 			}
@@ -536,11 +543,21 @@ func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string
 			// provenance for trusted-runtime compiler proofs.
 			trimmed := bytes.TrimLeft(line, " \t")
 			if bytes.HasPrefix(trimmed, []byte("#line ")) || bytes.HasPrefix(trimmed, []byte("#line\t")) {
+				if len(line) > 0 {
+					for _, prefix := range prefixes {
+						out.Write(prefix)
+					}
+				}
 				indent := len(line) - len(trimmed)
 				out.Write(line[:indent])
 				out.WriteString("# line")
 				out.Write(trimmed[len("#line"):])
 			} else {
+				if len(line) > 0 && !bytes.HasPrefix(line, []byte("#line ")) {
+					for _, prefix := range prefixes {
+						out.Write(prefix)
+					}
+				}
 				out.Write(line)
 			}
 			if hasNewline {

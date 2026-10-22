@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 // Pre-sizing the clone and merge maps must not change what they produce: a nil `seen` gets a
@@ -38,5 +40,42 @@ func TestTrackedCloneAndMergePresizeKeepResults(t *testing.T) {
 	flat, ok := mergeFlatRegionRefStates(regionRefState{Deps: left.Deps}, right)
 	if !ok || len(flat.Deps) != 2 || flat.Deps[p0].Generation != 3 {
 		t.Fatalf("flat merge result changed: %+v", flat)
+	}
+}
+
+func TestTrackedCloneSharesOnlyProvenPointerFreeValues(t *testing.T) {
+	a := &Analyzer{}
+	plain := &StructType{
+		Name:   "Plain",
+		Decl:   &ast.StructDecl{Fields: []ast.FieldDecl{{Name: "n"}}},
+		Fields: map[string]Field{"n": {Name: "n", Type: &BuiltinType{Name: "i64"}}},
+	}
+	if clone := a.cloneTrackedValueType(plain); clone != plain {
+		t.Fatal("pointer-free struct should be shared")
+	}
+	if merged, ok := a.mergeSpecializedValueTypes(plain, plain); !ok || merged != plain {
+		t.Fatal("merging identical pointer-free structs should preserve the immutable value")
+	}
+	withRef := &StructType{
+		Name:   "Borrowed",
+		Decl:   &ast.StructDecl{Fields: []ast.FieldDecl{{Name: "r"}}},
+		Fields: map[string]Field{"r": {Name: "r", Type: &RefType{Elem: &BuiltinType{Name: "i64"}}}},
+	}
+	clone, ok := a.cloneTrackedValueType(withRef).(*StructType)
+	if !ok || clone == withRef || clone.Fields["r"].Type == Type(withRef.Fields["r"].Type) {
+		t.Fatal("reference-bearing struct must retain isolated flow state")
+	}
+}
+
+func TestMergeRegionRefStatesSharesIdenticalDependencyMaps(t *testing.T) {
+	region := &Symbol{Name: "region"}
+	deps := map[*Symbol]regionDependencyState{region: {Valid: true, Generation: 4}}
+	state := regionRefState{Deps: deps}
+	merged, ok := mergeRegionRefStates(state, state)
+	if !ok || regionDependencyMapIdentity(merged.Deps) != regionDependencyMapIdentity(deps) {
+		t.Fatalf("identical states should reuse their immutable dependency map: %+v", merged)
+	}
+	if !merged.PackedStoreSummaryKnown {
+		t.Fatal("merged state must preserve the normalized packed-store summary")
 	}
 }

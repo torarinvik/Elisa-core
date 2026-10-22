@@ -290,6 +290,11 @@ func (a *Analyzer) typeIsProgramLivedCached(t Type) bool {
 	if verdict, ok := a.programLivedTypes[t]; ok {
 		return verdict
 	}
+	if a.parallel != nil {
+		if verdict, ok := a.parallel.programLivedTypesBase[t]; ok {
+			return verdict
+		}
+	}
 	verdict := a.typeIsProgramLived(t, map[Type]bool{})
 	if a.programLivedTypes == nil {
 		a.programLivedTypes = map[Type]bool{}

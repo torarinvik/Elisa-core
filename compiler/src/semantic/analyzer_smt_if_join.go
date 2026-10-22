@@ -49,7 +49,9 @@ func (a *Analyzer) restoreSMTFactFrame(entry smtFactFrame) smtFactFrame {
 	var survivors smtFactFrame
 	for i, sc := range entry.scopes {
 		survivors.scopes = append(survivors.scopes, sc)
-		survivors.facts = append(survivors.facts, append([]smtFact(nil), sc.smtAssertFacts...))
+		// The survivor list is read-only after this point. Restore below always installs
+		// a fresh copy of entry.facts before another branch can append or invalidate facts.
+		survivors.facts = append(survivors.facts, sc.smtAssertFacts)
 		sc.smtAssertFacts = append([]smtFact(nil), entry.facts[i]...)
 	}
 	return survivors

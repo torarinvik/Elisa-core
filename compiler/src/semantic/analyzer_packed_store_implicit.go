@@ -280,7 +280,7 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 		return false
 	}
 	found := false
-	seen := make(map[any]struct{})
+	seen := make(map[uintptr]struct{})
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
 		if found || !v.IsValid() || !v.CanInterface() {
@@ -291,7 +291,7 @@ func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 			if v.IsNil() {
 				return
 			}
-			node := v.Interface()
+			node := v.Pointer()
 			if _, visited := seen[node]; visited {
 				return
 			}

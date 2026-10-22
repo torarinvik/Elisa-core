@@ -258,6 +258,9 @@ func structFieldOrder(t *StructType) []string {
 	if t == nil || t.Decl == nil {
 		return nil
 	}
+	if t.declarationFieldOrder != nil {
+		return t.declarationFieldOrder
+	}
 	names := make([]string, 0, len(t.Decl.Fields))
 	for _, field := range t.Decl.Fields {
 		if field.BitGroup != nil {

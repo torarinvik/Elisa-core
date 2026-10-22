@@ -43,6 +43,7 @@ func (a *Analyzer) cloneTrackedValueType(t Type) Type {
 		return t
 	}
 	var memo trackedCloneMemo
+	memo.sharePointerFree = true
 	return a.cloneTrackedValueTypeWithMemoDepth(t, &memo, 0)
 }
 
@@ -65,6 +66,9 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 	}
 	if cloned, ok := memo.get(t); ok {
 		return cloned
+	}
+	if memo.sharePointerFree && a != nil && a.returnTypeHasNoReferences(t, 0) {
+		return t
 	}
 	switch tt := t.(type) {
 	case *StructType:
@@ -354,7 +358,7 @@ func (a *Analyzer) cloneTrackedValueTypeMapWithSeen(src map[*Symbol]Type, seen m
 	if src == nil {
 		return nil
 	}
-	memo := trackedCloneMemo{large: seen, spillHint: 4 * len(src)}
+	memo := trackedCloneMemo{large: seen, spillHint: 4 * len(src), sharePointerFree: seen == nil}
 	cloned := make(map[*Symbol]Type, len(src))
 	for sym, typ := range src {
 		cloned[sym] = a.cloneTrackedValueTypeWithMemoDepth(typ, &memo, 0)

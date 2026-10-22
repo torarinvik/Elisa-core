@@ -923,6 +923,8 @@ type Analyzer struct {
 	// typeShapesFrozen is set once every declaration's type has its final fields and
 	// affinity (just before body analysis); type-predicate memos are only valid after it.
 	typeShapesFrozen bool
+	// resolvedStructFieldsMemo stores immutable resolved field lists for finalized types.
+	resolvedStructFieldsMemo map[Type][]moveBindResolvedField
 	// affineHandleMemo caches containsAffineHandleValues per type once typeShapesFrozen.
 	affineHandleMemo map[Type]bool
 	// retained is non-nil when this analysis is kept for in-place updates (retained_analysis.go).
@@ -936,6 +938,13 @@ type Analyzer struct {
 	borrowedOwnerRefMemo map[Type]bool
 	// regionRefsMemo caches typeCanContainRegionRefs likewise.
 	regionRefsMemo map[Type]bool
+	// abstractParamRegionRefMemo caches complete parameter-provenance layouts for
+	// frozen types. Recursive walk results depend on the current cycle path, so only
+	// roots entered with an empty seen set are memoized.
+	abstractParamRegionRefMemo map[abstractParamRegionRefKey]regionRefState
+	// regionRefAnyIndexParamFields shares the immutable one-entry wildcard field map for
+	// repeated array-like parameter states during abstract region-reference construction.
+	regionRefAnyIndexParamFields map[int]map[string]regionRefState
 	// mutableBorrowCapabilityMemo caches hasMutableBorrowCapability likewise when no
 	// incremental session supplies its own capability cache.
 	mutableBorrowCapabilityMemo map[Type]bool
@@ -943,7 +952,9 @@ type Analyzer struct {
 	containerRegionMemo map[Type]string
 	// storeScanAddressMemo caches root store-scan address reachability once type shapes freeze.
 	// Recursive child results are never memoized under a partial cycle traversal.
-	storeScanAddressMemo map[Type]bool
+	storeScanAddressMemo     map[Type]bool
+	storeScanAddressSeen     map[Type]bool
+	storeScanAddressSeenBusy bool
 	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
 	symbolTypeEpoch uint64
 	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for

@@ -757,7 +757,19 @@ func (a *Analyzer) storeScanTypeMayEncodeAddress(t Type, seen map[Type]bool) boo
 	}
 	if len(seen) == 0 {
 		return a.memoTypePredicate(&a.storeScanAddressMemo, t, func() bool {
-			return a.storeScanTypeMayEncodeAddressWalk(t, map[Type]bool{})
+			if a.storeScanAddressSeenBusy {
+				return a.storeScanTypeMayEncodeAddressWalk(t, map[Type]bool{})
+			}
+			if a.storeScanAddressSeen == nil {
+				a.storeScanAddressSeen = map[Type]bool{}
+			}
+			a.storeScanAddressSeenBusy = true
+			clear(a.storeScanAddressSeen)
+			defer func() {
+				clear(a.storeScanAddressSeen)
+				a.storeScanAddressSeenBusy = false
+			}()
+			return a.storeScanTypeMayEncodeAddressWalk(t, a.storeScanAddressSeen)
 		})
 	}
 	return a.storeScanTypeMayEncodeAddressWalk(t, seen)
@@ -1343,16 +1355,15 @@ func (a *Analyzer) calleeReturnsNothingWritableFrom(decl *ast.FuncDecl, i int, s
 	_, _, content, _, _ := a.storeScanTaint(decl, i, "", seen)
 	readOnly := a.storeScanReadOnlyLocals(decl)
 	ok, sawReturn := true, false
-	a.storeScanEachNode(decl, func(node any) {
-		ret, isRet := node.(*ast.ReturnStmt)
-		if !isRet || ret == nil || !ok {
-			return
+	for _, ret := range a.storeScanIndex(decl).returns {
+		if ret == nil || !ok {
+			continue
 		}
 		sawReturn = true
 		if ret.Value != nil && a.storeScanBundleHasWritableTargetRO(ret.Value, content, readOnly) {
 			ok = false
 		}
-	})
+	}
 	result := ok && (sawReturn || a.declReturnsVoid(decl))
 	if a.storeScanWritableCache == nil {
 		a.storeScanWritableCache = map[storeScanKey]bool{}
@@ -1368,27 +1379,23 @@ func (a *Analyzer) storeScanReadOnlyLocals(decl *ast.FuncDecl) map[string]bool {
 	if cached, ok := a.storeScanReadOnlyCache[decl]; ok {
 		return cached
 	}
-	readOnly, other := map[string]bool{}, map[string]bool{}
-	a.storeScanEachNode(decl, func(node any) {
-		if v, isVar := node.(*ast.VarDeclStmt); isVar {
-			if v == nil {
-				return
-			}
-			if !other[v.Name] && (storeScanTypeExprIsView(v.Type) || storeScanTypeExprIsPlainScalar(v.Type)) {
-				readOnly[v.Name] = true
-				return
-			}
-			other[v.Name] = true
-			delete(readOnly, v.Name)
-			return
+	idx := a.storeScanIndex(decl)
+	readOnly := map[string]bool{}
+	for name, declarations := range idx.decls {
+		if idx.otherBound[name] || len(declarations) == 0 {
+			continue
 		}
-		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
-			for _, name := range stmtBoundNames(st) {
-				other[name] = true
-				delete(readOnly, name)
+		eligible := true
+		for _, v := range declarations {
+			if v == nil || !(storeScanTypeExprIsView(v.Type) || storeScanTypeExprIsPlainScalar(v.Type)) {
+				eligible = false
+				break
 			}
 		}
-	})
+		if eligible {
+			readOnly[name] = true
+		}
+	}
 	for _, p := range decl.Params {
 		delete(readOnly, p.Name)
 	}
@@ -1724,35 +1731,29 @@ func (a *Analyzer) storeScanScalarLocals(decl *ast.FuncDecl) map[string]bool {
 	if cached, ok := a.storeScanScalarCache[decl]; ok {
 		return cached
 	}
-	scalars, other := map[string]bool{}, map[string]bool{}
+	scalars := map[string]bool{}
 	defer func() {
 		if a.storeScanScalarCache == nil {
 			a.storeScanScalarCache = map[*ast.FuncDecl]map[string]bool{}
 		}
 		a.storeScanScalarCache[decl] = scalars
 	}()
-	a.storeScanEachNode(decl, func(node any) {
-		if v, isVar := node.(*ast.VarDeclStmt); isVar {
-			if v == nil {
-				return
-			}
-			if storeScanTypeExprIsPlainScalar(v.Type) || a.storeScanTypeExprIsOpaque(v.Type) || (v.Type == nil && v.Value != nil && storeScanPlainScalarType(a.exprTypes[v.Value])) {
-				if !other[v.Name] {
-					scalars[v.Name] = true
-				}
-				return
-			}
-			other[v.Name] = true
-			delete(scalars, v.Name)
-			return
+	idx := a.storeScanIndex(decl)
+	for name, declarations := range idx.decls {
+		if idx.otherBound[name] || len(declarations) == 0 {
+			continue
 		}
-		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
-			for _, name := range stmtBoundNames(st) {
-				other[name] = true
-				delete(scalars, name)
+		eligible := true
+		for _, v := range declarations {
+			if v == nil || !(storeScanTypeExprIsPlainScalar(v.Type) || a.storeScanTypeExprIsOpaque(v.Type) || (v.Type == nil && v.Value != nil && storeScanPlainScalarType(a.exprTypes[v.Value]))) {
+				eligible = false
+				break
 			}
 		}
-	})
+		if eligible {
+			scalars[name] = true
+		}
+	}
 	return scalars
 }
 
@@ -2004,7 +2005,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	// independently visible through calleeStoreModeIntoBody.
 	if symbol := a.funcDeclSymbols[decl]; symbol != nil {
 		if function, ok := symbol.Type.(*FuncType); ok && function != nil {
-			if scalarReturnHasNoReferenceProvenance(function) {
+			if a.scalarReturnHasNoReferenceProvenance(function) {
 				return storeNone
 			}
 			// A completely program-lived result (including a record whose fields
@@ -2036,15 +2037,11 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 	saved := a.storeScanCycleHit
 	a.storeScanCycleHit = false
 	mark := a.storeScanPushFrame(key)
+	scanIdx := a.storeScanIndex(decl)
 	_, header, content, _, views := a.storeScanTaint(decl, other, "", seen)
 	filled := a.lazyFilledLocals(decl, other, content, views, seen)
 	mode := storeNone
-	sawReturn := false
-	a.storeScanEachNode(decl, func(node any) {
-		if _, isRet := node.(*ast.ReturnStmt); isRet {
-			sawReturn = true
-		}
-	})
+	sawReturn := len(scanIdx.returns) != 0
 	if !sawReturn && !a.declReturnsVoid(decl) {
 		// A value produced without a `return` (an expression tail) is not modelled.
 		mode = storeHeader
@@ -2095,13 +2092,12 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		}
 		return storeElements
 	}
-	a.storeScanEachNode(decl, func(node any) {
-		ret, ok := node.(*ast.ReturnStmt)
-		if !ok || ret == nil || ret.Value == nil || mode == storeHeader {
-			return
+	for _, ret := range scanIdx.returns {
+		if ret == nil || ret.Value == nil || mode == storeHeader {
+			continue
 		}
 		mode = maxStoreMode(mode, returnedMode(ret.Value))
-	})
+	}
 	final := a.storeScanPopFrame(key, mark, mode)
 	if final {
 		a.cacheStoreScan(key, mode)
@@ -2403,17 +2399,21 @@ func (a *Analyzer) storeScanBoundNames(decl *ast.FuncDecl) map[string]bool {
 	if cached, ok := a.storeScanBoundCache[decl]; ok {
 		return cached
 	}
-	names := map[string]bool{}
-	a.storeScanEachNode(decl, func(node any) {
-		if v, isVar := node.(*ast.VarDeclStmt); isVar && v != nil {
-			names[v.Name] = true
-		}
-		if st, isStmt := node.(ast.Stmt); isStmt && st != nil {
-			for _, name := range stmtBoundNames(st) {
+	// storeScanIndex already records all body-local and non-declaration binder names. The old
+	// walk also called stmtBoundNames on VarDeclStmt nodes, so retain those extra conservative
+	// spellings without rescanning every expression and statement in the body.
+	idx := a.storeScanIndex(decl)
+	names := make(map[string]bool, len(idx.locals))
+	for name := range idx.locals {
+		names[name] = true
+	}
+	for _, declarations := range idx.decls {
+		for _, declaration := range declarations {
+			for _, name := range stmtBoundNames(declaration) {
 				names[name] = true
 			}
 		}
-	})
+	}
 	if a.storeScanBoundCache == nil {
 		a.storeScanBoundCache = map[*ast.FuncDecl]map[string]bool{}
 	}
@@ -2944,32 +2944,16 @@ func (a *Analyzer) storeScanLoopBinderElemType(decl *ast.FuncDecl, id *ast.Ident
 	if decl == nil || id == nil {
 		return nil, false
 	}
+	idx := a.storeScanIndex(decl)
+	if !idx.otherBound[id.Name] || len(idx.decls[id.Name]) != 0 || idx.nonIterBinder[id.Name] || len(idx.iterBinders[id.Name]) != 1 {
+		return nil, false
+	}
 	for _, p := range decl.Params {
 		if p.Name == id.Name {
 			return nil, false
 		}
 	}
-	idx := a.storeScanIndex(decl)
-	if !idx.otherBound[id.Name] || len(idx.decls[id.Name]) != 0 {
-		return nil, false
-	}
-	var loop *ast.IterForStmt
-	for _, node := range idx.flat {
-		stmt, ok := node.(ast.Stmt)
-		if !ok || stmt == nil {
-			continue
-		}
-		for _, name := range stmtBoundNames(stmt) {
-			if name != id.Name {
-				continue
-			}
-			it, isIter := stmt.(*ast.IterForStmt)
-			if !isIter || it == nil || loop != nil {
-				return nil, false
-			}
-			loop = it
-		}
-	}
+	loop := idx.iterBinders[id.Name][0]
 	if loop == nil || loop.Mode != ast.IterBindValue {
 		return nil, false
 	}
