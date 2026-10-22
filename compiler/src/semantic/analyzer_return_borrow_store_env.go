@@ -270,16 +270,26 @@ func (a *Analyzer) deferLocalBorrowCheck(check pendingLocalBorrowStore) bool {
 // snapshotReturnBorrowScope flattens the function-local scope levels into one scope over the global
 // scope, so a name declared later in the same block cannot capture a deferred check's lookups.
 func (a *Analyzer) snapshotReturnBorrowScope() (*Scope, bool) {
-	var levels []*Scope
+	var inlineLevels [8]*Scope
+	levels := inlineLevels[:0]
+	symbolCapacity := 0
 	cur := a.currentScope
 	for cur != nil && cur != a.globalScope {
 		levels = append(levels, cur)
+		if len(cur.Symbols) > symbolCapacity {
+			symbolCapacity = len(cur.Symbols)
+		}
 		cur = cur.Parent
 	}
 	if cur != a.globalScope {
 		return nil, false
 	}
 	flat := NewScope(a.globalScope)
+	if symbolCapacity > 8 {
+		// The largest scope is a lower bound on the unique binding count.
+		// It avoids initial growth without overallocating for shadowed names.
+		flat.Symbols = make(map[string]*Symbol, symbolCapacity)
+	}
 	for _, level := range levels { // innermost first: the first definition wins
 		for name, sym := range level.Symbols {
 			if _, exists := flat.Symbols[name]; !exists {
