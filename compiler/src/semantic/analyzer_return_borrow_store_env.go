@@ -565,6 +565,10 @@ func (a *Analyzer) returnBorrowRecordingIdentFlow(ident *ast.Ident, aliases map[
 		if hasAlias {
 			return mergeReturnBorrowFlow(flow, a.returnBorrowConservativeFlow(ident, nil))
 		}
+		if a.returnBorrowNamesConst(ident.Name) {
+			// A module constant is static storage: it holds no frame borrow.
+			return returnBorrowFlow{}
+		}
 		return a.returnBorrowConservativeFlow(ident, nil)
 	}
 	if sym.Kind != SymbolLocal {
@@ -574,6 +578,20 @@ func (a *Analyzer) returnBorrowRecordingIdentFlow(ident *ast.Ident, aliases map[
 		return mergeReturnBorrowFlow(flow, a.returnBorrowConservativeFlow(ident, sym.Type))
 	}
 	return mergeReturnBorrowFlow(flow, a.returnBorrowDeclRecording[returnBorrowBinderKey{node: sym.Node, name: ident.Name}])
+}
+
+// returnBorrowNamesConst reports whether a name the walk did not bind is a visible module
+// constant (a declared const is stored module-qualified, so the walk's scope misses it).
+func (a *Analyzer) returnBorrowNamesConst(name string) bool {
+	if a.globalScope == nil {
+		return false
+	}
+	for _, candidate := range a.visibleNameCandidates(name) {
+		if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil {
+			return sym.Kind == SymbolConst
+		}
+	}
+	return false
 }
 
 // returnBorrowEnvSymbolFlow is the recorded store union of a trusted local binding. Reference
@@ -1372,7 +1390,10 @@ func (a *Analyzer) returnBorrowCallContentsOnly(call *ast.CallExpr, index int) f
 	if summary == nil {
 		return nil
 	}
-	return func(other int) bool { return a.storeFlowReachKind(summary, other, index) == storeFlowEdgeElements }
+	return func(other int) bool {
+		kind := a.storeFlowReachKind(summary, other, index)
+		return kind == storeFlowEdgeElements || kind == storeFlowEdgeNone
+	}
 }
 
 // traceLocalBorrowStoreArgs (trace only): which other argument's flow is frame-local.

@@ -131,3 +131,55 @@ def main() -> i32:
 	}
 	t.Fatalf("want the stored local lists (line 18) rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
 }
+
+// A binder of a condition (`if a is r`) is bound by an expression the kinds pass does not model;
+// once read outside that expression it must still carry what the condition tests.
+func TestStoreFlowConditionBinderStillStores(t *testing.T) {
+	src := `def keep(out: mutable darray[i64&]&, a: i64&?) -> void can[Memory.Allocate]:
+    can Memory.Allocate:
+        if a is r:
+            out.push(r)
+
+def fill(out: mutable darray[i64&]&) -> void can[Memory.Allocate]:
+    can Memory.Allocate:
+        x: i64 = 3
+        keep(out, &x)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_flow_condition_binder.elisa", src)
+	for _, e := range result.Errors() {
+		if strings.Contains(e, ":9:") && strings.Contains(e, "function-local storage") {
+			return
+		}
+	}
+	t.Fatalf("want the stored local reference (line 9) rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
+}
+
+// A module constant is static storage: passing one where a callee stores it next to a local
+// list's contents makes nothing frame-local.
+func TestStoreFlowModuleConstIsStatic(t *testing.T) {
+	src := `module Tags:
+    const UNKNOWN: sview = "unknown"
+
+    def tag(out: mutable darray[sview]&, label: sview) -> void can[Memory.Allocate]:
+        can Memory.Allocate:
+            out.push(label)
+
+    def fill(out: mutable darray[sview]&) -> void can[Memory.Allocate]:
+        can Memory.Allocate:
+            local: mutable darray[sview] = []
+            tag(local, UNKNOWN)
+            out.push(local[0])
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_flow_module_const.elisa", src)
+	for _, e := range result.Errors() {
+		if strings.Contains(e, "function-local storage") {
+			t.Fatalf("a module constant is not frame-local, got:\n%s", strings.Join(result.Errors(), "\n"))
+		}
+	}
+}

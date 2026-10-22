@@ -19,6 +19,9 @@ type storeFlowKindScopes struct {
 	keys   []string
 	scoped map[string]bool       // names with at least one key
 	first  map[string]*ast.Ident // a use of each key (its type is the binding's)
+	// opaque: names an expression the walk does not model may bind (`r` in `r if a is r else
+	// b`), each with the expressions that hold it. Such a binder may hold anything they mention.
+	opaque map[string][]ast.Expr
 	// sources: what an expression-level binder (a comprehension's, a match-expression arm's)
 	// may hold, keyed by the binder's key. Statement binders are applied with their statement.
 	sources map[string]ast.Expr
@@ -95,6 +98,10 @@ func (a *Analyzer) storeFlowKindScopesFor(decl *ast.FuncDecl, idx *storeScanDecl
 			sc = &storeFlowKindScopes{}
 		}
 	}
+	// A parameter is never bound by an expression.
+	for _, p := range decl.Params {
+		delete(sc.opaque, p.Name)
+	}
 	idx.kindScopes = sc
 	return sc
 }
@@ -102,7 +109,7 @@ func (a *Analyzer) storeFlowKindScopesFor(decl *ast.FuncDecl, idx *storeScanDecl
 // storeFlowResolveKindScopes resolves body's names, skipping excluded ones; bad lists the names
 // the walk found it cannot scope (the caller excludes them and resolves again).
 func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*storeFlowKindScopes, map[string]bool) {
-	sc := &storeFlowKindScopes{use: map[*ast.Ident]string{}, bind: map[any]map[string]string{}, sources: map[string]ast.Expr{}, scoped: map[string]bool{}, first: map[string]*ast.Ident{}}
+	sc := &storeFlowKindScopes{use: map[*ast.Ident]string{}, bind: map[any]map[string]string{}, sources: map[string]ast.Expr{}, scoped: map[string]bool{}, first: map[string]*ast.Ident{}, opaque: map[string][]ast.Expr{}}
 	bad := map[string]bool{}
 	bindings := map[string]bool{} // names some binding scopes (an unresolved use of one is bad)
 	seen := map[uintptr]bool{}
@@ -139,6 +146,10 @@ func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*sto
 		return out
 	}
 	var unresolved []*ast.Ident
+	var owner ast.Expr           // the innermost expression being walked
+	var owners []ast.Expr        // every expression being walked, outermost first
+	escapes := map[string]bool{} // unresolved names used outside the expressions that bind them
+	unresolvedOwners := map[*ast.Ident][]ast.Expr{}
 	var walk func(v reflect.Value, e env, inExpr bool, field string)
 	var walkStmts func(list []ast.Stmt, e env)
 	var walkStmt func(stmt ast.Stmt, e env) env
@@ -252,6 +263,7 @@ func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*sto
 					}
 				} else {
 					unresolved = append(unresolved, n)
+					unresolvedOwners[n] = append([]ast.Expr(nil), owners...)
 				}
 				return
 			case ast.Stmt:
@@ -315,13 +327,18 @@ func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*sto
 				}
 				return
 			}
-			switch v.Interface().(type) {
+			switch n := v.Interface().(type) {
 			case ast.Expr:
 				if seen[v.Pointer()] {
 					return
 				}
 				seen[v.Pointer()] = true
+				saved := owner
+				owner = n
+				owners = append(owners, n)
 				walkFields(v, e, true)
+				owners = owners[:len(owners)-1]
+				owner = saved
 				return
 			}
 			if seen[v.Pointer()] {
@@ -348,14 +365,39 @@ func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*sto
 		case reflect.String:
 			// A string inside an expression that is not a use or a call / literal argument label
 			// may be a binder of that expression: its name is not scoped.
-			if inExpr && !storeScanQualifierFields[field] && field != "ArgNames" {
+			if inExpr && !storeScanQualifierFields[field] && field != "ArgNames" && field != "Captures" {
 				if s := v.String(); s != "" {
 					bad[s] = true
+					if owner != nil {
+						sc.opaque[s] = append(sc.opaque[s], owner)
+					}
 				}
 			}
 		}
 	}
 	walkStmts(body, env{})
+	// An opaque binder read only inside an expression that binds it flows out through that
+	// expression's own value; one read elsewhere needs a class of its own.
+	for _, id := range unresolved {
+		held := sc.opaque[id.Name]
+		if len(held) == 0 {
+			continue
+		}
+		inside := false
+		for _, o := range unresolvedOwners[id] {
+			for _, h := range held {
+				inside = inside || o == h
+			}
+		}
+		if !inside {
+			escapes[id.Name] = true
+		}
+	}
+	for name := range sc.opaque {
+		if !escapes[name] {
+			delete(sc.opaque, name)
+		}
+	}
 	for _, id := range unresolved {
 		if bindings[id.Name] {
 			bad[id.Name] = true

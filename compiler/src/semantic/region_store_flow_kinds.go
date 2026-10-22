@@ -472,6 +472,9 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 	for _, key := range sc.keys {
 		known[key] = true
 	}
+	for name := range sc.opaque {
+		known[name] = true
+	}
 	keyOf := func(id *ast.Ident) string {
 		if id == nil {
 			return ""
@@ -657,7 +660,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		if inner == nil {
 			return out
 		}
-		if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) {
+		if t, ok := a.storeScanStaticType(decl, inner); ok && t != nil && !containsTypeParam(t) && a.storeScanHoldsNoRegionStorage(t) && !a.typeMayHoldFrameBorrow(t, map[Type]bool{}) {
 			return out
 		}
 		switch e := inner.(type) {
@@ -876,6 +879,11 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 	for rounds := 0; rounds < 64; rounds++ {
 		changed = false
 		memo = map[ast.Expr]storeFlowKindValue{}
+		for name, owners := range sc.opaque {
+			for _, owner := range owners {
+				put(name, mentioned(owner))
+			}
+		}
 		for key, source := range sc.sources {
 			if paramProjections[key] && elemKind(sc.binder(key), nil) == storeFlowEdgeElements {
 				put(key, lower(mentioned(source), storeFlowEdgeElements))
