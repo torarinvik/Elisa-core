@@ -97,3 +97,37 @@ def main() -> i32:
 	}
 	t.Fatalf("want the copied local views (line 15) rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
 }
+
+// Binders are keyed per lexical scope: a sibling block's binding of the same name must not hide
+// the block that stores the caller's list.
+func TestStoreFlowScopedBinderStillStores(t *testing.T) {
+	src := `def keep(out: mutable darray[darray[i64&]]&, lists: darray[darray[i64&]]&, other: darray[darray[i64&]]&) -> void can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        if other.count > 0:
+            item: darray[i64&] = other[0]
+            pass
+        else:
+            item: darray[i64&] = lists[0]
+            out.push(item)
+
+def fill(out: mutable darray[darray[i64&]]&) -> void can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        x: i64 = 1
+        local: mutable darray[i64&] = []
+        local.push(&x)
+        lists: mutable darray[darray[i64&]] = []
+        lists.push(local)
+        empty: darray[darray[i64&]] = []
+        keep(out, &lists, &empty)
+
+def main() -> i32:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_flow_scoped_binder.elisa", src)
+	for _, e := range result.Errors() {
+		if strings.Contains(e, ":18:") && strings.Contains(e, "function-local storage") {
+			return
+		}
+	}
+	t.Fatalf("want the stored local lists (line 18) rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
+}

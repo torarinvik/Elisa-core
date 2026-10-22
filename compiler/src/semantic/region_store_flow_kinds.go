@@ -228,7 +228,7 @@ func (a *Analyzer) storeFlowSolveKinds(members []*ast.FuncDecl) {
 // storeFlowKindParamProjections: the loop and match binders that only ever name a part of a
 // parameter -- every binding of the name iterates or matches a parameter, or a projection of one
 // (or of another such binder) -- and that no declaration, assignment or other binder reuses.
-func storeFlowKindParamProjections(flat []any, params map[string]int) map[string]bool {
+func storeFlowKindParamProjections(flat []any, params map[string]int, sc *storeFlowKindScopes) map[string]bool {
 	rooted := func(expr ast.Expr, known map[string]bool) bool {
 		for {
 			switch e := expr.(type) {
@@ -255,7 +255,7 @@ func storeFlowKindParamProjections(flat []any, params map[string]int) map[string
 					return false
 				}
 				_, isParam := params[e.Name]
-				return isParam || known[e.Name]
+				return isParam || known[sc.key(e)]
 			}
 			return false
 		}
@@ -268,7 +268,7 @@ func storeFlowKindParamProjections(flat []any, params map[string]int) map[string
 			return false
 		}
 		_, isParam := params[root]
-		return isParam || known[root]
+		return isParam || known[storeFlowKindProjectionKey(expr, root, sc)]
 	}
 	out := map[string]bool{}
 	for changed := true; changed; {
@@ -283,21 +283,27 @@ func storeFlowKindParamProjections(flat []any, params map[string]int) map[string
 				if n == nil {
 					continue
 				}
-				source, names = n.Source, stmtBoundNames(n)
+				source = n.Source
+				for _, name := range stmtBoundNames(n) {
+					names = append(names, sc.bound(n, name))
+				}
 			case *ast.MatchStmt:
 				if n == nil {
 					continue
 				}
-				source, names = n.Value, stmtBoundNames(n)
+				source = n.Value
+				for _, name := range stmtBoundNames(n) {
+					names = append(names, sc.boundAll(n, name)...)
+				}
 			case *ast.VarDeclStmt:
 				// `name: T = p[i]` binds a part of a parameter just as a loop binder does.
 				if n == nil {
 					continue
 				}
-				if n.Owner == nil && n.Value != nil && rootedProjection(n.Value, out) {
-					candidate[n.Name] = true
+				if key := sc.bound(n, n.Name); n.Owner == nil && n.Value != nil && rootedProjection(n.Value, out) {
+					candidate[key] = true
 				} else {
-					bad[n.Name] = true
+					bad[key] = true
 				}
 				continue
 			case *ast.AssignStmt:
@@ -306,15 +312,17 @@ func storeFlowKindParamProjections(flat []any, params map[string]int) map[string
 				}
 				id, isIdent := returnBorrowStripParens(n.Target).(*ast.Ident)
 				if isIdent && id != nil && !n.WriteThrough && n.AsOverlayCall == nil && n.Value != nil && rootedProjection(n.Value, out) {
-					candidate[id.Name] = true
+					candidate[sc.key(id)] = true
 				} else if root := rootIdentExpr(stripAddrAndParens(n.Target)); root != nil {
-					bad[root.Name] = true
+					bad[sc.key(root)] = true
 				}
 				continue
 			case ast.Stmt:
 				if n != nil {
 					for _, name := range stmtBoundNames(n) {
-						bad[name] = true
+						for _, key := range sc.boundAll(n, name) {
+							bad[key] = true
+						}
 					}
 				}
 				continue
@@ -330,6 +338,14 @@ func storeFlowKindParamProjections(flat []any, params map[string]int) map[string
 				}
 			}
 		}
+		// An expression binder (a comprehension's, a match-expression arm's) reads its source.
+		for key, source := range sc.sources {
+			if rooted(source, out) {
+				candidate[key] = true
+			} else {
+				bad[key] = true
+			}
+		}
 		for name := range candidate {
 			if _, isParam := params[name]; !bad[name] && !isParam && !out[name] {
 				out[name] = true
@@ -338,6 +354,14 @@ func storeFlowKindParamProjections(flat []any, params map[string]int) map[string
 		}
 	}
 	return out
+}
+
+// storeFlowKindProjectionKey: the scoped key of root, the name expr projects out of.
+func storeFlowKindProjectionKey(expr ast.Expr, root string, sc *storeFlowKindScopes) string {
+	if id := rootIdentExpr(stripAddrAndParens(expr)); id != nil && id.Name == root {
+		return sc.key(id)
+	}
+	return root
 }
 
 // storeFlowKindProjectionRoot: expr reads a value stored inside a named place -- one or more
@@ -442,6 +466,19 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 	for name := range idx.locals {
 		known[name] = true
 	}
+	// Names are keyed per lexical binding (see storeFlowKindScopes); scalars and parameter
+	// projections are facts about every binding of a name, read by its base name.
+	sc := a.storeFlowKindScopesFor(decl, idx)
+	for _, key := range sc.keys {
+		known[key] = true
+	}
+	keyOf := func(id *ast.Ident) string {
+		if id == nil {
+			return ""
+		}
+		return sc.key(id)
+	}
+	isScalar := func(key string) bool { return scalars[storeFlowBaseName(key)] }
 	parent := map[string]string{}
 	var find func(x string) string
 	find = func(x string) string {
@@ -454,12 +491,16 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		return r
 	}
 	elem := map[string]map[int]bool{} // class root -> parameters whose copied elements it holds
+	// joined: names in a class some union made (a class of one name never unioned holds only
+	// the copied elements put into it).
+	joined := map[string]bool{}
 	changed := false
 	union := func(x, y string) {
 		rx, ry := find(x), find(y)
 		if rx == ry {
 			return
 		}
+		joined[rx], joined[ry] = true, true
 		parent[rx] = ry
 		if e := elem[rx]; len(e) > 0 {
 			if elem[ry] == nil {
@@ -514,7 +555,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		return out
 	}
 	put := func(name string, v storeFlowKindValue) {
-		if name == "" || scalars[name] || !known[name] {
+		if name == "" || isScalar(name) || !known[name] {
 			return
 		}
 		for h := range v.hdr {
@@ -536,7 +577,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 	headerOf := func(tokens []string) storeFlowKindValue {
 		out := empty()
 		for _, t := range tokens {
-			if known[t] && !scalars[t] && t != retName {
+			if known[t] && !isScalar(t) && t != retName {
 				if out.hdr == nil {
 					out.hdr = map[string]bool{}
 				}
@@ -549,7 +590,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		if expr == nil {
 			return empty()
 		}
-		return headerOf(storeScanMentionTokens(expr))
+		return headerOf(storeScanMentionTokensKeyed(expr, sc))
 	}
 	// elemKind: the kind of an element / field value read out of a container: Elements when its
 	// static type can share no storage (views, scalars), else Header.
@@ -623,10 +664,22 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit:
 			return out
 		case *ast.Ident:
-			if e == nil || scalars[e.Name] || !known[e.Name] {
+			key := keyOf(e)
+			if e == nil || isScalar(key) || !known[key] {
 				return out
 			}
-			return storeFlowKindValue{hdr: map[string]bool{e.Name: true}}
+			// A local whose class only ever received copied elements is those elements: storing
+			// it copies them one way instead of joining every destination into one class.
+			if _, isParam := paramIndex[key]; !isParam && key != retName && !joined[key] && find(key) == key {
+				for i := range elem[key] {
+					if out.el == nil {
+						out.el = map[int]bool{}
+					}
+					out.el[i] = true
+				}
+				return out
+			}
+			return storeFlowKindValue{hdr: map[string]bool{key: true}}
 		case *ast.IndexExpr:
 			if e == nil || e.Index2 != nil {
 				return mentioned(inner)
@@ -713,7 +766,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 	// chain, no call) whose type shares no storage copies a value out: the destination then
 	// holds an element value of the place's class (one way), not a part of its storage. Any
 	// other expression may produce a borrow (`s.view()`) and keeps its header.
-	paramProjections := storeFlowKindParamProjections(idx.flat, paramIndex)
+	paramProjections := storeFlowKindParamProjections(idx.flat, paramIndex, sc)
 	var copied func(expr ast.Expr) storeFlowKindValue
 	copied = func(expr ast.Expr) storeFlowKindValue {
 		switch e := expr.(type) {
@@ -753,11 +806,11 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 			return out
 		}
 		if root, ok := storeFlowKindProjectionRoot(expr); ok {
-			if _, isParam := paramIndex[root]; isParam || paramProjections[root] {
+			if _, isParam := paramIndex[root]; isParam || paramProjections[storeFlowKindProjectionKey(expr, root, sc)] {
 				return lower(eval(expr), elemKind(expr, nil))
 			}
 		}
-		if id, ok := expr.(*ast.Ident); ok && id != nil && paramProjections[id.Name] {
+		if id, ok := expr.(*ast.Ident); ok && id != nil && paramProjections[keyOf(id)] {
 			return lower(eval(expr), elemKind(expr, nil))
 		}
 		return eval(expr)
@@ -776,9 +829,9 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 				}
 				for _, arg := range call.Args {
 					if field.Field == "extend" {
-						put(root.Name, lower(eval(arg), elemKind(&ast.IndexExpr{Object: arg}, arg)))
+						put(keyOf(root), lower(eval(arg), elemKind(&ast.IndexExpr{Object: arg}, arg)))
 					} else {
-						put(root.Name, copied(arg))
+						put(keyOf(root), copied(arg))
 					}
 				}
 				return
@@ -795,7 +848,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 						continue
 					}
 					if kind := sum.reachKindOf(k, m); kind != storeFlowEdgeNone {
-						put(root.Name, through(eval(arg), kind))
+						put(keyOf(root), through(eval(arg), kind))
 					}
 				}
 			}
@@ -807,7 +860,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 		visit := func(e ast.Expr) {
 			merge(&all, mentioned(e))
 			if root := rootIdentExpr(stripAddrAndParens(e)); root != nil {
-				roots = append(roots, root.Name)
+				roots = append(roots, keyOf(root))
 			}
 		}
 		if field, isMethod := call.Func.(*ast.FieldExpr); isMethod && field != nil {
@@ -823,18 +876,25 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 	for rounds := 0; rounds < 64; rounds++ {
 		changed = false
 		memo = map[ast.Expr]storeFlowKindValue{}
+		for key, source := range sc.sources {
+			if paramProjections[key] && elemKind(sc.binder(key), nil) == storeFlowEdgeElements {
+				put(key, lower(mentioned(source), storeFlowEdgeElements))
+				continue
+			}
+			put(key, mentioned(source))
+		}
 		for _, node := range idx.flat {
 			switch nd := node.(type) {
 			case *ast.VarDeclStmt:
 				if nd != nil && nd.Value != nil {
-					put(nd.Name, copied(nd.Value))
+					put(sc.bound(nd, nd.Name), copied(nd.Value))
 				}
 			case *ast.AssignStmt:
 				if nd == nil {
 					continue
 				}
 				if root := rootIdentExpr(stripAddrAndParens(nd.Target)); root != nil {
-					put(root.Name, copied(nd.Value))
+					put(keyOf(root), copied(nd.Value))
 				}
 			case *ast.AugAssignStmt:
 				// `xs += ys` may store the value into the target.
@@ -842,7 +902,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 					continue
 				}
 				if root := rootIdentExpr(stripAddrAndParens(nd.Target)); root != nil {
-					put(root.Name, eval(nd.Value))
+					put(keyOf(root), eval(nd.Value))
 				}
 				if nd.CollectionAppend != nil {
 					callWrites(nd.CollectionAppend)
@@ -852,7 +912,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 					continue
 				}
 				if root := rootIdentExpr(stripAddrAndParens(nd.Target)); root != nil {
-					put(root.Name, eval(nd.Value))
+					put(keyOf(root), eval(nd.Value))
 				}
 			case *ast.ReturnStmt:
 				if nd != nil && nd.Value != nil {
@@ -880,7 +940,7 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 				}
 				bound := lower(eval(nd.Source), elemKind(&ast.IndexExpr{Object: nd.Source}, nd.Source))
 				for _, name := range idx.boundNames(nd) {
-					put(name, bound)
+					put(sc.bound(nd, name), bound)
 				}
 			case ast.Stmt:
 				if nd == nil {
@@ -893,13 +953,15 @@ func (a *Analyzer) computeStoreFlowKinds(decl *ast.FuncDecl, s *storeFlowSummary
 				// Any other binder (match / is patterns, catch, ...): the whole header, at Header
 				// -- except a binder that only ever names a part of a parameter, at a type that
 				// shares no storage: it holds a copied element value of the header.
-				all := headerOf(storeScanHeaderTokens(nd))
+				all := headerOf(storeScanHeaderTokensKeyed(nd, sc))
 				for _, name := range names {
-					if paramProjections[name] && elemKind(&ast.Ident{Name: name}, nil) == storeFlowEdgeElements {
-						put(name, lower(all, storeFlowEdgeElements))
-						continue
+					for _, key := range sc.boundAll(nd, name) {
+						if paramProjections[key] && elemKind(sc.binder(key), nil) == storeFlowEdgeElements {
+							put(key, lower(all, storeFlowEdgeElements))
+							continue
+						}
+						put(key, all)
 					}
-					put(name, all)
 				}
 			}
 		}

@@ -94,6 +94,13 @@ func storeScanTokensHit(tokens []string, names map[string]bool) bool {
 
 // storeScanMentionTokens: every string storeScanMentions would test against its name set.
 func storeScanMentionTokens(node any) []string {
+	return storeScanMentionTokensKeyed(node, nil)
+}
+
+// storeScanMentionTokensKeyed is storeScanMentionTokens with each identifier spelled by its
+// scoped key (when sc is non-nil) instead of its name, and without the bare strings of scoped
+// names (a pattern's binders), which name no single binding.
+func storeScanMentionTokensKeyed(node any, sc *storeFlowKindScopes) []string {
 	var tokens []string
 	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value)
@@ -108,8 +115,13 @@ func storeScanMentionTokens(node any) []string {
 			}
 			seen[v.Pointer()] = true
 			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
+				if sc != nil {
+					tokens = append(tokens, sc.key(id))
+				}
 				if root := rootNameOfDotted(id.Name); root != id.Name {
 					tokens = append(tokens, id.Name, root)
+				} else if sc != nil {
+					return
 				} else {
 					tokens = append(tokens, id.Name)
 				}
@@ -136,7 +148,9 @@ func storeScanMentionTokens(node any) []string {
 				rec(v.Index(i))
 			}
 		case reflect.String:
-			tokens = append(tokens, v.String())
+			if sc == nil || !sc.scoped[v.String()] {
+				tokens = append(tokens, v.String())
+			}
 		}
 	}
 	rec(reflect.ValueOf(node))
@@ -175,6 +189,7 @@ type storeScanDeclIndex struct {
 	bundleCache     map[ast.Expr]bool
 	identCounts     map[ast.Expr]map[string]int
 	bodyIdentCounts map[string]int
+	kindScopes      *storeFlowKindScopes
 }
 
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
@@ -381,6 +396,11 @@ func storeScanHeaderNames(stmt ast.Stmt) map[string]bool {
 
 // storeScanHeaderTokens: every string stmtHeaderMentionsAny would test against its name set.
 func storeScanHeaderTokens(stmt ast.Stmt) []string {
+	return storeScanHeaderTokensKeyed(stmt, nil)
+}
+
+// storeScanHeaderTokensKeyed: storeScanHeaderTokens, spelled as storeScanMentionTokensKeyed.
+func storeScanHeaderTokensKeyed(stmt ast.Stmt, sc *storeFlowKindScopes) []string {
 	var tokens []string
 	v := reflect.ValueOf(stmt)
 	if v.Kind() == reflect.Pointer {
@@ -408,7 +428,7 @@ func storeScanHeaderTokens(stmt ast.Stmt) []string {
 				return
 			}
 			if expr, isExpr := v.Interface().(ast.Expr); isExpr {
-				tokens = append(tokens, storeScanMentionTokens(expr)...)
+				tokens = append(tokens, storeScanMentionTokensKeyed(expr, sc)...)
 				return
 			}
 			rec(v.Elem())
@@ -428,7 +448,9 @@ func storeScanHeaderTokens(stmt ast.Stmt) []string {
 				rec(v.Index(i))
 			}
 		case reflect.String:
-			tokens = append(tokens, v.String())
+			if sc == nil || !sc.scoped[v.String()] {
+				tokens = append(tokens, v.String())
+			}
 		}
 	}
 	for i := 0; i < v.NumField(); i++ {
