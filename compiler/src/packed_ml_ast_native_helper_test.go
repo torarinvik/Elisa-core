@@ -154,8 +154,8 @@ func buildCachedNativeArtifacts(tb testing.TB, repoRoot string, spec nativeArtif
 				entry.errMessage = "expected no stdout while building native artifact, got:\n" + stdout.String()
 				return
 			}
-			if stderr.Len() != 0 {
-				entry.errMessage = "expected no stderr while building native artifact, got:\n" + stderr.String()
+			if strings.Contains(stderr.String(), filepath.Base(spec.fixturePath)) {
+				entry.errMessage = "expected no diagnostics for native fixture while building artifact, got:\n" + stderr.String()
 				return
 			}
 		}

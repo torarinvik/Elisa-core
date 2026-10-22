@@ -13,18 +13,20 @@ struct Handle:
 
 global mutable guard_calls: i64 = 0
 
-def kind_of(value: Handle) -> i64:
-    guard_calls <- guard_calls + 1
-    return value.kind
+def kind_of(value: Handle) -> i64 can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        guard_calls <- guard_calls + 1
+        return value.kind
 
-def validate(condition_value: Handle?, wanted: i64) -> Handle?:
-    validated_condition: Handle? =
-        match condition_value:
-            emitted_condition if kind_of(emitted_condition) != wanted:
-                null
-            _:
-                condition_value
-    return validated_condition
+def validate(condition_value: Handle?, wanted: i64) -> Handle? can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        validated_condition: Handle? =
+            match condition_value:
+                emitted_condition if kind_of(emitted_condition) != wanted:
+                    null
+                _:
+                    condition_value
+        return validated_condition
 
 def describe(value: Handle?) -> i64:
     return match value:
@@ -35,27 +37,28 @@ def describe(value: Handle?) -> i64:
         held:
             held.identity
 
-def check_optional_guard_match() -> i64:
-    absent: Handle? = validate(null, 1)
-    return 1 if absent != null
-    return 2 if guard_calls != 0
-    valid: Handle? = validate(Handle{kind: 1, identity: 42}, 1)
-    if valid is held:
-        return 3 if held.identity != 42 or held.kind != 1
-    else:
-        return 4
-    return 5 if guard_calls != 1
-    invalid: Handle? = validate(Handle{kind: 64, identity: 99}, 1)
-    return 6 if invalid != null
-    return 7 if guard_calls != 2
-    return 8 if describe(null) != -1
-    return 9 if describe(Handle{kind: 0, identity: 142}) != 42
-    return 10 if describe(Handle{kind: 0, identity: 7}) != 7
-    return 0
+def check_optional_guard_match() -> i64 can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        absent: Handle? = validate(null, 1)
+        return 1 if absent != null
+        return 2 if guard_calls != 0
+        valid: Handle? = validate(Handle{kind: 1, identity: 42}, 1)
+        if valid is held:
+            return 3 if held.identity != 42 or held.kind != 1
+        else:
+            return 4
+        return 5 if guard_calls != 1
+        invalid: Handle? = validate(Handle{kind: 64, identity: 99}, 1)
+        return 6 if invalid != null
+        return 7 if guard_calls != 2
+        return 8 if describe(null) != -1
+        return 9 if describe(Handle{kind: 0, identity: 142}) != 42
+        return 10 if describe(Handle{kind: 0, identity: 7}) != 7
+        return 0
 
 @test
 def optional_guard_match() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Global.Read, Global.Write:
         assert check_optional_guard_match() == 0
 `)
 	assertAllPassed(t, exit, stdout, stderr, "optional_guard_match")
