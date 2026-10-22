@@ -61,55 +61,108 @@ func (a *Analyzer) storeScanPatternBinderTypeUncached(decl *ast.FuncDecl, name s
 			continue
 		}
 		for _, arm := range match.Arms {
-			enumName, variantName, args, resolved, ok := storeScanArmVariant(arm.Pattern)
-			if !ok {
-				continue
-			}
-			for i, arg := range args {
-				bind, isBind := arg.Pattern.(*ast.MatchBindPattern)
-				if !isBind || bind == nil || bind.Name != name || bind.Binder != "" {
-					continue
-				}
-				subject, ok := a.storeScanSubjectDeclType(decl, match.Value)
-				if !ok {
-					return nil, false
-				}
-				enum, ok := stripRefForBounds(subject).(*EnumType)
-				if !ok || enum == nil {
-					return nil, false
-				}
-				if enumName != "" && lastNameSegment(enumName) != lastNameSegment(enum.Name) {
-					return nil, false
-				}
-				variant := enum.VariantMap[variantName]
-				if variant == nil {
-					return nil, false
-				}
-				slot := -1
-				if len(resolved) > 0 {
-					// The parser's payload-ordered view of the args (named args resolved).
-					for j, r := range resolved {
-						if r != nil && r.Pattern == arg.Pattern {
-							slot = j
-						}
-					}
-				} else if arg.Name == "" {
-					slot = i
-				} else {
-					for j, payloadName := range variant.PayloadNames {
-						if payloadName == arg.Name {
-							slot = j
-						}
-					}
-				}
-				if slot < 0 || slot >= len(variant.Payload) || variant.Payload[slot] == nil || containsTypeParam(variant.Payload[slot]) {
-					return nil, false
-				}
-				return variant.Payload[slot], true
+			if t, found, ok := a.storeScanArmBinderType(decl, match, arm, name); found {
+				return t, ok
 			}
 		}
 	}
 	return nil, false
+}
+
+// storeScanArmBinderType types name where arm binds it directly in a variant pattern of match's
+// declared-type subject. found reports that arm binds name that way at all; ok that the type is
+// known.
+func (a *Analyzer) storeScanArmBinderType(decl *ast.FuncDecl, match *ast.MatchStmt, arm ast.MatchArm, name string) (Type, bool, bool) {
+	enumName, variantName, args, resolved, ok := storeScanArmVariant(arm.Pattern)
+	if !ok {
+		return nil, false, false
+	}
+	for i, arg := range args {
+		bind, isBind := arg.Pattern.(*ast.MatchBindPattern)
+		if !isBind || bind == nil || bind.Name != name || bind.Binder != "" {
+			continue
+		}
+		subject, ok := a.storeScanSubjectDeclType(decl, match.Value)
+		if !ok {
+			return nil, true, false
+		}
+		enum, ok := stripRefForBounds(subject).(*EnumType)
+		if !ok || enum == nil {
+			return nil, true, false
+		}
+		if enumName != "" && lastNameSegment(enumName) != lastNameSegment(enum.Name) {
+			return nil, true, false
+		}
+		variant := enum.VariantMap[variantName]
+		if variant == nil {
+			return nil, true, false
+		}
+		slot := -1
+		if len(resolved) > 0 {
+			// The parser's payload-ordered view of the args (named args resolved).
+			for j, r := range resolved {
+				if r != nil && r.Pattern == arg.Pattern {
+					slot = j
+				}
+			}
+		} else if arg.Name == "" {
+			slot = i
+		} else {
+			for j, payloadName := range variant.PayloadNames {
+				if payloadName == arg.Name {
+					slot = j
+				}
+			}
+		}
+		if slot < 0 || slot >= len(variant.Payload) || variant.Payload[slot] == nil || containsTypeParam(variant.Payload[slot]) {
+			return nil, true, false
+		}
+		return variant.Payload[slot], true, true
+	}
+	return nil, false, false
+}
+
+// storeScanPatternBindersShareNot reports a name bound only by direct variant patterns of
+// declared-type match subjects, every one at a type that shares no indirect storage, and by
+// declarations of plain view or scalar types. Unlike storeScanPatternBinderType, the name may be
+// bound in several places.
+func (a *Analyzer) storeScanPatternBindersShareNot(decl *ast.FuncDecl, name string) bool {
+	decl = a.readDecl(decl)
+	if decl == nil || name == "" || name == "_" {
+		return false
+	}
+	for _, p := range decl.Params {
+		if p.Name == name {
+			return false
+		}
+	}
+	idx := a.storeScanIndex(decl)
+	typed := 0
+	// A declaration of the name counts when it declares a plain view or scalar type.
+	for _, v := range idx.decls[name] {
+		if v == nil || v.Type == nil || !(storeFlowViewTypeExpr(v.Type) || storeScanTypeExprIsPlainScalar(v.Type)) {
+			return false
+		}
+		typed++
+	}
+	for _, node := range idx.flat {
+		match, ok := node.(*ast.MatchStmt)
+		if !ok || match == nil {
+			continue
+		}
+		for _, arm := range match.Arms {
+			t, found, ok := a.storeScanArmBinderType(decl, match, arm, name)
+			if !found {
+				continue
+			}
+			if !ok || t == nil || a.storeScanSharesCached(t) {
+				return false
+			}
+			typed++
+		}
+	}
+	// Every binding of the name is one of those arms.
+	return typed > 0 && idx.bindingWriteCount(decl.Body, name) == typed
 }
 
 // storeScanSubjectDeclType: the declared type of a match subject -- a parameter, an explicitly
@@ -126,6 +179,15 @@ func (a *Analyzer) storeScanSubjectDeclType(decl *ast.FuncDecl, subject ast.Expr
 		}
 		if t, ok := a.storeScanPatternBinderType(decl, e.Name); ok {
 			return t, true
+		}
+		// A loop binder's source may itself be a loop binder: bound the chain.
+		if a.storeScanLoopDepth < 16 {
+			a.storeScanLoopDepth++
+			t, ok := a.storeScanLoopBinderElemType(decl, e)
+			a.storeScanLoopDepth--
+			if ok && t != nil {
+				return t, true
+			}
 		}
 		if a.storeScanBoundNames(decl)[e.Name] {
 			return nil, false

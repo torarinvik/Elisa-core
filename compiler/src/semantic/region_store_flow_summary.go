@@ -276,8 +276,16 @@ func storeFlowSingleNamedTypes(decl *ast.FuncDecl) map[string]string {
 // of the typed-name predicates: a builtin integer.
 var storeFlowRangeIndexType ast.TypeExpr = &ast.BuiltinTypeExpr{Name: "usize"}
 
-// storeFlowValueNamedTypeExpr reports a by-value named type without a region annotation.
+// storeFlowValueNamedTypeExpr reports a by-value named type without a region annotation, an
+// optional of one, or a view: rebinding such a local replaces its value and stores into nothing
+// it aliased.
 func storeFlowValueNamedTypeExpr(t ast.TypeExpr) bool {
+	if opt, ok := t.(*ast.OptionalTypeExpr); ok && opt != nil {
+		t = opt.Value
+	}
+	if storeFlowViewTypeExpr(t) {
+		return true
+	}
 	nt, ok := t.(*ast.NamedType)
 	return ok && nt != nil && nt.Region == ""
 }
@@ -991,6 +999,21 @@ func storeFlowEndsInReturn(body []ast.Stmt) bool {
 			}
 		}
 		return true
+	case *ast.MatchStmt:
+		// Every arm returns, and an unguarded wildcard arm leaves no value unmatched.
+		if tail == nil || len(tail.Arms) == 0 {
+			return false
+		}
+		catchAll := false
+		for _, arm := range tail.Arms {
+			if !storeFlowEndsInReturn(arm.Body) {
+				return false
+			}
+			if _, wild := arm.Pattern.(*ast.MatchWildcardPattern); wild && arm.Guard == nil {
+				catchAll = true
+			}
+		}
+		return catchAll
 	default:
 		return false
 	}
@@ -1109,6 +1132,17 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 		nested, calls = nil, nil
 		names = a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false)
 	}
+	for _, pair := range a.storeFlowQueryBinderPairs(stmt) {
+		c.link(pair)
+	}
+	if target, roots := a.storeFlowElementCopy(stmt); target != "" {
+		// `v: darray[sview] = [x for x in src]`: the copy's elements are views or scalars read
+		// out of src. They may point where src's elements point, but the copy is fresh storage:
+		// nothing written into it reaches src, and src does not alias it.
+		c.flow(roots, []string{target})
+		c.link([]string{target})
+		return nested
+	}
 	isReturn := false
 	if _, ok := stmt.Interface().(*ast.ReturnStmt); ok {
 		isReturn = true
@@ -1186,6 +1220,15 @@ func (a *Analyzer) storeFlowPointerFreePlace(expr ast.Expr) bool {
 	return ok && a.storeFlowPointerFreeIndexedElement(index.Object)
 }
 
+// storeFlowPointerFreeValue is storeFlowPointerFreePlace, plus the length of a certain builtin
+// darray (`xs.count`), whose type is known even before the chain is type-checked.
+func (a *Analyzer) storeFlowPointerFreeValue(expr ast.Expr) bool {
+	if fe, ok := returnBorrowStripParens(expr).(*ast.FieldExpr); ok && fe != nil && fe.Field == "count" && a.storeFlowDarrayPlace(fe.Object) {
+		return true
+	}
+	return a.storeFlowPointerFreePlace(expr)
+}
+
 func (a *Analyzer) storeFlowPointerFreeIndexedElement(base ast.Expr) bool {
 	base = returnBorrowStripParens(base)
 	id, ok := base.(*ast.Ident)
@@ -1238,6 +1281,32 @@ func storeFlowDarrayElementTypeExpr(t ast.TypeExpr) (ast.TypeExpr, bool) {
 		}
 	}
 	return nil, false
+}
+
+// storeFlowElementCopy recognizes `v: darray[E] = [x for x in src]` where E is a view or
+// scalar type and src is a plain name or field chain: an element-wise copy into fresh storage.
+// It returns the (renamed) target and src's roots, or "" when the statement is not one.
+func (a *Analyzer) storeFlowElementCopy(stmt reflect.Value) (string, []string) {
+	vd, ok := stmt.Interface().(*ast.VarDeclStmt)
+	if !ok || vd == nil || vd.Owner != nil || vd.Value == nil {
+		return "", nil
+	}
+	elem, isDarray := storeFlowDarrayElementTypeExpr(vd.Type)
+	if !isDarray || !(storeFlowViewTypeExpr(elem) || storeFlowScalarTypeExpr(elem)) {
+		return "", nil
+	}
+	comp, ok := returnBorrowStripParens(vd.Value).(*ast.ListComprehensionExpr)
+	if !ok || comp == nil || comp.SecondName != "" || comp.RangeEnd != nil || comp.Key != nil || comp.Filter != nil || comp.Owner != nil || len(comp.Bindings) != 0 || comp.Set || comp.Parallel || comp.Source == nil {
+		return "", nil
+	}
+	if id, ok := comp.Value.(*ast.Ident); !ok || id == nil || id.Name != comp.Name {
+		return "", nil
+	}
+	roots, isChain := storeFlowChainRoots(comp.Source)
+	if !isChain || len(roots) == 0 {
+		return "", nil
+	}
+	return a.storeFlowRenamed(vd.Name), a.storeFlowRenamedAll(roots)
 }
 
 // storeFlowPointerFreeAccessRoots counts roots named only by pointer-free field or
@@ -1344,16 +1413,32 @@ func (a *Analyzer) storeFlowViewTarget(stmt reflect.Value) string {
 }
 
 // storeFlowViewTypeExpr reports a plain immutable byte view type (`sview`, possibly mutable as
-// a binding: rebinding a view never writes through it).
+// a binding: rebinding a view never writes through it), or a tuple whose fields are such views
+// or scalars. A region qualifier (`sview @r`) bounds where the view points, not whether it can
+// be written through, so it is a view all the same.
 func storeFlowViewTypeExpr(t ast.TypeExpr) bool {
 	if mt, ok := t.(*ast.MutableType); ok && mt != nil {
 		t = mt.Elem
 	}
 	switch tt := t.(type) {
 	case *ast.NamedType:
-		return tt != nil && tt.Region == "" && tt.Name == "sview"
+		return tt != nil && tt.Name == "sview"
 	case *ast.BuiltinTypeExpr:
 		return tt != nil && len(tt.TypeArgs) == 0 && len(tt.ValueArgs) == 0 && tt.Name == "sview"
+	case *ast.TupleTypeExpr:
+		if tt == nil || len(tt.Fields) == 0 {
+			return false
+		}
+		views := 0
+		for _, field := range tt.Fields {
+			switch {
+			case storeFlowViewTypeExpr(field.Type):
+				views++
+			case !storeFlowScalarTypeExpr(field.Type):
+				return false
+			}
+		}
+		return views > 0
 	}
 	return false
 }
@@ -1525,6 +1610,15 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				walk(reflect.ValueOf(&tern.Alt).Elem())
 				return
 			}
+			if q, ok := v.Interface().(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
+				// `any/all/count x in src where p`: a bool or a count. Its binder is scoped to the
+				// query and its value holds nothing, so its names are tested, not moved; calls in
+				// it are still recorded.
+				condDepth++
+				walk(v.Elem())
+				condDepth--
+				return
+			}
 			if info.binding {
 				a.storeFlowBinds = true
 			}
@@ -1614,6 +1708,9 @@ func storeFlowHasBindingExpr(v reflect.Value) bool {
 			if v.IsNil() {
 				return
 			}
+			if q, ok := v.Interface().(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
+				return
+			}
 			if storeFlowBindingExprs[v.Type().Elem().Name()] {
 				found = true
 				return
@@ -1683,12 +1780,16 @@ func storeFlowCallFitsParams(decl *ast.FuncDecl, call *ast.CallExpr) bool {
 // storeFlowDefaultCallArgIsIndependent reports defaults that cannot introduce a borrow from
 // this call's arguments. Scalar defaults are always independent. A string literal used for an
 // unregioned sview is also independent: it refers to static literal storage, while an explicitly
-// region-bound view remains conservative.
+// region-bound view remains conservative. So is an empty list literal.
 func storeFlowDefaultCallArgIsIndependent(param ast.ParamDecl) bool {
 	if param.DefaultValue == nil {
 		return false
 	}
 	if storeFlowScalarTypeExpr(param.Type) {
+		return true
+	}
+	// An empty list literal is fresh storage that holds nothing of the caller's.
+	if list, ok := param.DefaultValue.(*ast.ListLitExpr); ok && list != nil && len(list.Elems) == 0 {
 		return true
 	}
 	typ, ok := param.Type.(*ast.NamedType)
@@ -1820,6 +1921,17 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 		// reserve returns its mutable receiver, including its existing contents.
 		return a.storeFlowArgNames(call.Func.(*ast.FieldExpr).Object, handled), true
 	}
+	if a.storeFlowRuntimeDictQuery(call) {
+		// A lowered `d.get(k)` / `d.contains(k)`: the result reads the dict's storage; the key
+		// is only compared, and nothing is stored into either argument.
+		receiver := a.storeFlowArgNames(call.Args[0], handled)
+		c.link(receiver)
+		c.link(a.storeFlowArgNames(call.Args[1], handled))
+		if ident, _ := call.Func.(*ast.Ident); ident != nil && ident.Name == "arena_dict_contains" {
+			return nil, true
+		}
+		return receiver, true
+	}
 	callee := a.storeFlowCallee(call)
 	if callee == nil {
 		if !a.storeFlowOpaqueExternCall(call) {
@@ -1940,29 +2052,54 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 	for _, param := range decl.Params {
 		delete(valueLocals, param.Name)
 	}
-	var groups [][]string
+	var groups, elemGroups [][]string
+	grown := map[string]bool{}
 	a.storeFlowNodes2(decl, func(stmt reflect.Value) []reflect.Value {
 		var nested []reflect.Value
 		var calls []*ast.CallExpr
 		names := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), nil, &nested, &calls, false)
 		binds := a.storeFlowBinds
 		for _, call := range calls {
-			a.storeFlowMarkCall(call, written, markExpr)
+			fn, isMethod := call.Func.(*ast.FieldExpr)
+			grows := isMethod && fn != nil && (a.storeFlowBuiltinDarrayGrowth(fn) || a.storeFlowBuiltinDarrayTruncate(call) || a.storeFlowBuiltinDarrayReserve(call))
+			roots, isChain := []string(nil), false
+			if grows {
+				roots, isChain = storeFlowChainRoots(fn.Object)
+			}
+			if grows && isChain {
+				// Growth (and reserve / truncate) writes the receiver's header, not its
+				// elements: it reaches the receiver's aliases but not the storage of the
+				// elements pushed into it.
+				for _, r := range roots {
+					grown[a.storeFlowRenamed(r)] = true
+				}
+			} else {
+				a.storeFlowMarkCall(call, written, markExpr)
+			}
 			// A pushed element that shares indirect storage aliases the receiver to it: a write
-			// through either is a write of both (applyCallStoreFlow links them the same way).
-			if fn, ok := call.Func.(*ast.FieldExpr); ok && fn != nil && fn.Field == "push" && len(call.Args) == 1 {
+			// through the receiver's elements is a write of the element (applyCallStoreFlow
+			// links them the same way).
+			if isMethod && fn != nil && fn.Field == "push" && len(call.Args) == 1 {
 				if a.storeFlowPushedElemMayShare(fn.Object, call.Args[0]) {
-					groups = append(groups, append(a.storeFlowExprNames(fn.Object), a.storeFlowExprNames(call.Args[0])...))
+					elemGroups = append(elemGroups, append(a.storeFlowExprNames(fn.Object), a.storeFlowExprNames(call.Args[0])...))
 				}
 			}
 		}
 		switch st := stmt.Interface().(type) {
 		case *ast.AssignStmt:
-			if id, ok := returnBorrowStripParens(st.Target).(*ast.Ident); !ok || id == nil || !valueLocals[id.Name] || st.WriteThrough || st.AsOverlayCall != nil {
+			id, isIdent := returnBorrowStripParens(st.Target).(*ast.Ident)
+			switch {
+			case isIdent && id != nil && !st.WriteThrough && st.AsOverlayCall == nil && valueLocals[id.Name]:
+			case isIdent && id != nil && !st.WriteThrough && st.AsOverlayCall == nil && storeFlowVariableName(id.Name):
+				// Rebinding a name overwrites its own slot: a header write, like growth. It
+				// reaches the name's aliases but not storage the name's elements point into.
+				grown[a.storeFlowRenamed(id.Name)] = true
+			default:
 				markExpr(st.Target)
 			}
 			if id, ok := returnBorrowStripParens(st.Target).(*ast.Ident); ok && id != nil {
-				if roots, isChain := storeFlowChainRoots(st.Value); isChain {
+				// A pointer-free value (`n <- xs.count`) copies bits and aliases nothing.
+				if roots, isChain := storeFlowChainRoots(st.Value); isChain && !a.storeFlowPointerFreeValue(st.Value) {
 					groups = append(groups, a.storeFlowRenamedAll(append([]string{id.Name}, roots...)))
 				}
 			}
@@ -1974,7 +2111,7 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 			if st.Owner != nil {
 				markExpr(st.Owner)
 			}
-			if roots, isChain := storeFlowChainRoots(st.Value); isChain && st.Value != nil {
+			if roots, isChain := storeFlowChainRoots(st.Value); isChain && st.Value != nil && !a.storeFlowPointerFreeValue(st.Value) {
 				groups = append(groups, a.storeFlowRenamedAll(append([]string{st.Name}, roots...)))
 			}
 		case *ast.ExprStmt, *ast.ReturnStmt, *ast.IfStmt, *ast.WhileStmt, *ast.DiscardStmt:
@@ -1985,8 +2122,11 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 				written[n] = true
 			}
 		}
+		groups = append(groups, a.storeFlowQueryBinderPairs(stmt)...)
 		if binds && !a.storeFlowScalarDecl(stmt) {
-			groups = append(groups, names)
+			if target, _ := a.storeFlowElementCopy(stmt); target == "" {
+				groups = append(groups, names)
+			}
 		}
 		return nested
 	})
@@ -2000,12 +2140,21 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 		}
 		groups[gi] = kept
 	}
-	for changed := true; changed; {
-		changed = false
-		for _, g := range groups {
+	for gi, g := range elemGroups {
+		var kept []string
+		for _, n := range g {
+			if !scalars[storeFlowBaseName(n)] {
+				kept = append(kept, n)
+			}
+		}
+		elemGroups[gi] = kept
+	}
+	spread := func(set map[string]bool, gs [][]string) bool {
+		changed := false
+		for _, g := range gs {
 			any := false
 			for _, n := range g {
-				if written[n] {
+				if set[n] {
 					any = true
 					break
 				}
@@ -2014,14 +2163,52 @@ func (a *Analyzer) storeFlowWritten(decl *ast.FuncDecl) map[string]bool {
 				continue
 			}
 			for _, n := range g {
-				if !written[n] {
-					written[n] = true
+				if !set[n] {
+					set[n] = true
 					changed = true
 				}
 			}
 		}
+		return changed
+	}
+	// Element writes reach both alias groups and pushed elements; a header write (growth)
+	// reaches only alias groups. A grown parameter is the exception: the caller may write
+	// through the elements pushed into it, so its pushed elements count as written.
+	params := map[string]bool{}
+	for _, param := range decl.Params {
+		params[param.Name] = true
+	}
+	for changed := true; changed; {
+		changed = spread(written, groups)
+		if spread(grown, groups) {
+			changed = true
+		}
+		for n := range grown {
+			if params[n] && !written[n] && storeFlowInGroups(n, elemGroups) {
+				written[n] = true
+				changed = true
+			}
+		}
+		if spread(written, elemGroups) {
+			changed = true
+		}
+	}
+	for n := range grown {
+		written[n] = true
 	}
 	return written
+}
+
+// storeFlowInGroups reports whether name is a member of any of groups.
+func storeFlowInGroups(name string, groups [][]string) bool {
+	for _, g := range groups {
+		for _, n := range g {
+			if n == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // storeFlowBaseName strips a scoped binder's "#scope" suffix.
@@ -2061,6 +2248,14 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 			mark(fn.Object)
 			return
 		}
+		if a.storeFlowBuiltinReadOnlyQuery(fn) {
+			// A builtin container query writes neither its receiver nor its arguments.
+			return
+		}
+		if qualified := a.storeFlowQualifiedCall(call); qualified != nil {
+			a.storeFlowMarkCall(qualified, written, mark)
+			return
+		}
 		if a.isDeclaredFuncName(fn.Field) {
 			mark(fn.Object)
 			for _, arg := range args {
@@ -2075,6 +2270,9 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 			mark(call.SafeReceiver)
 		}
 	case *ast.Ident:
+		if a.storeFlowRuntimeDictQuery(call) {
+			return
+		}
 		if callee := a.storeFlowCallee(call); callee != nil {
 			var ft *FuncType
 			if sym := a.funcDeclSymbols[callee]; sym != nil {
@@ -2106,6 +2304,34 @@ func (a *Analyzer) storeFlowMarkCall(call *ast.CallExpr, written map[string]bool
 			mark(arg)
 		}
 	}
+}
+
+// storeFlowQualifiedCall rewrites a module-qualified call `Module.f(args)` to the plain call
+// `f(args)` with an Ident callee, when Module is not a value in scope and the one declaration
+// that call resolves to is declared in Module; the arguments then bind f's parameters one to one
+// instead of shifting under a UFCS receiver.
+func (a *Analyzer) storeFlowQualifiedCall(call *ast.CallExpr) *ast.CallExpr {
+	fn, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fn == nil {
+		return nil
+	}
+	mod, ok := fn.Object.(*ast.Ident)
+	if !ok || mod == nil || a.storeFlowParams[mod.Name] || a.storeFlowLocals[mod.Name] {
+		return nil
+	}
+	a.callEdgesOf(nil) // builds callDeclsByName
+	for _, decl := range a.callDeclsByName[fn.Field] {
+		ns := a.declNamespace(decl)
+		if decl.Name != fn.Field || (ns != mod.Name && !strings.HasSuffix(ns, "."+mod.Name)) {
+			continue
+		}
+		plain := *call
+		plain.Func = &ast.Ident{Position: mod.Position, Name: decl.Name}
+		if a.storeFlowCallee(&plain) == decl {
+			return &plain
+		}
+	}
+	return nil
 }
 
 // storeFlowDarrayGrowthMethods are builtin darray methods that store their arguments into the
@@ -2221,6 +2447,79 @@ func (a *Analyzer) storeFlowBuiltinDarrayGrowthReceiver(fn *ast.FieldExpr) bool 
 		}
 	}
 	return true
+}
+
+// storeFlowRuntimeDictReadHelpers are the runtime helpers a read-only builtin dict method is
+// lowered to (analyzeBuiltinDictMethodCall): `get`, `get` with a view key, and `contains`. Their
+// `_mut` forms yield a writable alias of the dict and are not listed.
+var storeFlowRuntimeDictReadHelpers = map[string]bool{
+	"arena_dict_get": true, "arena_dict_get_cstr_view": true, "arena_dict_contains": true,
+}
+
+// storeFlowRuntimeDictQuery reports a lowered read-only dict query `helper(dict, key)` that
+// resolves to no user function.
+func (a *Analyzer) storeFlowRuntimeDictQuery(call *ast.CallExpr) bool {
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident == nil || !storeFlowRuntimeDictReadHelpers[ident.Name] || len(call.Args) != 2 || call.NamedArgCount() != 0 || call.SafeReceiver != nil {
+		return false
+	}
+	return a.storeFlowCallee(call) == nil
+}
+
+// storeFlowBuiltinReadOnlyQuery reports a read-only builtin method (`get`, `count`,
+// `contains`, ...) on a receiver that is certainly a builtin darray or dict, where no visible
+// UFCS function of that name could accept such a receiver instead. A same-named function
+// elsewhere in the program (std, synthesized helpers) otherwise makes the call look like a
+// UFCS call that may write every argument.
+func (a *Analyzer) storeFlowBuiltinReadOnlyQuery(fn *ast.FieldExpr) bool {
+	if fn == nil || !storeFlowReadOnlyMethods[fn.Field] {
+		return false
+	}
+	isDict := false
+	if !a.storeFlowDarrayPlace(fn.Object) {
+		t := a.storeFlowPlaceType(fn.Object)
+		if ref, ok := t.(*RefType); ok && ref != nil {
+			t = ref.Elem
+		}
+		if _, ok := t.(*DictType); !ok {
+			return false
+		}
+		isDict = true
+	}
+	for _, sym := range a.ufcsFunctionsWithLastSegment(fn.Field) {
+		if sym == nil {
+			return false
+		}
+		ft, ok := sym.Type.(*FuncType)
+		if !ok || ft == nil {
+			return false
+		}
+		if len(ft.Params) == 0 {
+			continue
+		}
+		if isDict {
+			if storeFlowUFCSMayAcceptDictReceiver(ft.Params[0]) {
+				return false
+			}
+		} else if storeFlowUFCSMayAcceptDarrayReceiver(ft.Params[0]) {
+			return false
+		}
+	}
+	return true
+}
+
+// storeFlowUFCSMayAcceptDictReceiver: the dict analogue of storeFlowUFCSMayAcceptDarrayReceiver.
+func storeFlowUFCSMayAcceptDictReceiver(t Type) bool {
+	switch receiver := t.(type) {
+	case *RefType:
+		return receiver != nil && storeFlowUFCSMayAcceptDictReceiver(receiver.Elem)
+	case *AggregateStateType:
+		return receiver != nil && storeFlowUFCSMayAcceptDictReceiver(receiver.Base)
+	case *DictType, *TypeParamType:
+		return true
+	default:
+		return false
+	}
 }
 
 // storeFlowUFCSMayAcceptDarrayReceiver reports whether a visible UFCS receiver could match a
@@ -2459,11 +2758,134 @@ func (a *Analyzer) storeFlowOpaqueExternCall(call *ast.CallExpr) bool {
 // element is stored as the receiver's element type: a receiver whose element type shares none
 // (`darray[u8]`) stores no alias, whatever (untyped literal) expression produced it.
 func (a *Analyzer) storeFlowPushedElemMayShare(receiver, elem ast.Expr) bool {
+	if a.storeFlowDeclaredViewOrScalarElements(receiver) {
+		return false
+	}
 	if rt := a.exprTypes[receiver]; rt != nil && !containsTypeParam(rt) {
 		if d, ok := StripAggregateStateType(stripRefForBounds(rt)).(*DArrayType); ok && d != nil && d.Elem != nil && !containsTypeParam(d.Elem) && !a.storeScanSharesCached(d.Elem) {
 			return false
 		}
 	}
 	t := a.exprTypes[elem]
+	if t == nil {
+		t = a.storeFlowStructLitType(elem)
+	}
 	return t == nil || containsTypeParam(t) || a.storeScanSharesCached(t)
+}
+
+// storeFlowStructLitType is the declared struct type of a plain, non-generic struct literal
+// (`Diagnostic{...}`), found by name in the current module or at top level; nil when it is
+// anything else or the name does not resolve to exactly that. It lets summaries solved before
+// the body is type-checked still see the literal's field types.
+func (a *Analyzer) storeFlowStructLitType(elem ast.Expr) Type {
+	lit, ok := returnBorrowStripParens(elem).(*ast.StructLitExpr)
+	if !ok || lit == nil || len(lit.TypeArgs) != 0 || len(lit.Spreads) != 0 || lit.CopyBase != nil {
+		return nil
+	}
+	for _, name := range []string{joinQualifiedName(a.currentNamespace, lit.Name), lit.Name} {
+		if st, isStruct := a.namedTypes[name].(*StructType); isStruct && st != nil && len(st.TypeParams) == 0 && len(st.GenericParams) == 0 {
+			return st
+		}
+	}
+	return nil
+}
+
+func storeFlowCallName(call *ast.CallExpr) string {
+	switch f := call.Func.(type) {
+	case *ast.Ident:
+		return f.Name
+	case *ast.FieldExpr:
+		return "." + f.Field
+	}
+	return fmt.Sprintf("%T", call.Func)
+}
+
+// storeFlowDeclaredViewOrScalarElements reports a receiver name every declaration of which in
+// the current function is a darray of views or scalars: its elements share no writable storage.
+// It reads declared types, which exist even before the function's body has been analyzed.
+func (a *Analyzer) storeFlowDeclaredViewOrScalarElements(receiver ast.Expr) bool {
+	id, ok := receiver.(*ast.Ident)
+	if !ok || id == nil || a.storeFlowCurrentDecl == nil {
+		return false
+	}
+	idx := a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl)
+	if idx.untyped[id.Name] {
+		return false
+	}
+	found := false
+	for _, binding := range idx.typed {
+		if binding.name != id.Name {
+			continue
+		}
+		found = true
+		elem, isDarray := storeFlowDarrayElementTypeExpr(binding.t)
+		if !isDarray || !(storeFlowViewTypeExpr(elem) || storeFlowScalarTypeExpr(elem)) {
+			return false
+		}
+	}
+	return found
+}
+
+// storeFlowScalarQuery reports a query whose value is a bool or a count (`any`, `all`, `count`)
+// over a plain name or field chain: its value holds nothing, and its binder stands only for the
+// source's elements (storeFlowQueryBinderPairs links exactly that pair).
+func storeFlowScalarQuery(q *ast.QueryExpr) bool {
+	switch q.Kind {
+	case ast.QueryExprAny, ast.QueryExprAll, ast.QueryExprCount:
+	default:
+		return false
+	}
+	if q.Owner != nil || q.Name == "" || q.PatternFilter != nil {
+		return false
+	}
+	if q.Pattern != nil {
+		if _, plain := q.Pattern.(*ast.MoveBindNamePattern); !plain {
+			return false
+		}
+	}
+	_, isChain := storeFlowChainRoots(q.Source)
+	return isChain
+}
+
+// storeFlowQueryBinderPairs lists, for each scalar query in stmt's own expressions (not nested
+// statements), its binder followed by its source's roots: a write through the binder (a call in
+// the filter storing into it) is a write into the source's elements.
+func (a *Analyzer) storeFlowQueryBinderPairs(stmt reflect.Value) [][]string {
+	var pairs [][]string
+	self := stmt.Pointer()
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
+			if v.IsNil() || !v.CanInterface() {
+				return
+			}
+			info := storeFlowTypeInfoOf(v.Type())
+			if (info.isStmt && v.Pointer() != self) || info.isTypeExpr {
+				return
+			}
+			if q, ok := v.Interface().(*ast.QueryExpr); ok && q != nil && storeFlowScalarQuery(q) {
+				roots, _ := storeFlowChainRoots(q.Source)
+				pairs = append(pairs, append([]string{q.Name}, a.storeFlowRenamedAll(roots)...))
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for _, i := range storeFlowTypeInfoOf(v.Type()).fields {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(stmt)
+	return pairs
 }

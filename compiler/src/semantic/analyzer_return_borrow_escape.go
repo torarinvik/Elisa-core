@@ -1780,7 +1780,11 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 				if root == "" {
 					continue
 				}
-				if flow := otherArgsFlow(index, fnType.Params); !flow.empty() {
+				// The same bound the caller-side store check applies: a summarized callee
+				// states which arguments reach this parameter, and with what of them.
+				keep := func(other int) bool { return !a.callArgNeverReaches(call, other, index) }
+				contentsOnly := a.returnBorrowCallContentsOnly(call, index)
+				if flow := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, keep, contentsOnly, aliases, active, localBindings); !flow.empty() {
 					a.setReturnBorrowAlias(aliases, root, flow, true)
 				}
 			}
