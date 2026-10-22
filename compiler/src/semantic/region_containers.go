@@ -2601,10 +2601,6 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 				}
 			}
 		}
-		storedElementsProgramLived := false
-		if storeDecl != nil && len(a.programRegions) != 0 && (mode == storeElements || mode == storeViews) {
-			storedElementsProgramLived = a.calleeStoresProgramLivedElements(storeDecl, other, index, map[storeScanKey]bool{})
-		}
 		if mode == storeNone {
 			continue
 		}
@@ -2626,9 +2622,10 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// Prefer the directed store summary's exact source projections; only fall back to
 			// the whole argument type when that proves every view program-lived.
 			continue
-		} else if elementLike && storedElementsProgramLived {
-			// The directed summary proves every exact stored payload is region-free or carries
-			// only program-lived region values. The source aggregate's own backing is not stored.
+		} else if elementLike && storeDecl != nil && len(a.programRegions) != 0 && a.calleeStoresProgramLivedElements(storeDecl, other, index, map[storeScanKey]bool{}) {
+			// Run the directed payload proof only after the cheaper provenance and
+			// whole-type checks need it. Every exact stored payload is region-free
+			// or program-lived; the source aggregate's backing is not stored.
 			continue
 		} else {
 			regions = a.storeCallArgRegions(arg, mode)

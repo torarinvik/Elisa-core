@@ -47,7 +47,7 @@ type SMTStats struct {
 	SolverProven        int // == Proven, kept for clarity in the report
 	PersistentCacheHits int
 	CacheHits           int           // obligations answered from the query cache (no solver round-trip)
-	SpawnTime           time.Duration // one-time solver process start
+	SpawnTime           time.Duration // summed solver process startup time
 	SolverTime          time.Duration // wall time inside the solver across all queries
 	Slowest             time.Duration // slowest single query
 }
@@ -116,7 +116,7 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 	}
 	a.smtSolver = solver
 	a.smtStats.Enabled = true
-	a.smtStats.SpawnTime = solver.Stats().SpawnMillis
+	a.smtStats.SpawnTime += solver.Stats().SpawnMillis
 	return solver
 }
 
@@ -126,9 +126,8 @@ func (a *Analyzer) closeSMT() {
 		return
 	}
 	st := a.smtSolver.Stats()
-	a.smtStats.SolverTime = st.Total
-	a.smtStats.Slowest = st.Slowest
-	a.smtStats.SpawnTime = st.SpawnMillis
+	a.smtStats.SolverTime += st.Total
+	a.smtStats.Slowest = max(a.smtStats.Slowest, st.Slowest)
 	_ = a.smtSolver.Close()
 	a.smtSolver = nil
 }
@@ -2010,19 +2009,13 @@ func (a *Analyzer) invalidateSMTAssertFactsForTargetPreservingNullness(target as
 		if len(sc.smtAssertFacts) == 0 {
 			continue
 		}
-		out := sc.smtAssertFacts[:0]
-		for _, fact := range sc.smtAssertFacts {
+		sc.smtAssertFacts = dropSMTFactsCopyOnWrite(sc.smtAssertFacts, func(fact smtFact) bool {
 			if preserve != "" && pointerNullnessFact(fact.Expr, preserve) {
-				out = append(out, fact)
-				continue
+				return false
 			}
 			// Consult the fact's own deps() via the unified predicate, mirroring range-fact invalidation.
-			if factInvalidatedBy(assertHypothesisFact{fact: fact}, rootSet) {
-				continue
-			}
-			out = append(out, fact)
-		}
-		sc.smtAssertFacts = out
+			return factInvalidatedBy(assertHypothesisFact{fact: fact}, rootSet)
+		})
 	}
 }
 

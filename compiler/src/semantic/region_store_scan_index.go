@@ -146,8 +146,9 @@ func storeScanMentionTokens(node any) []string {
 // storeScanDeclIndex: per-function facts the store scan used to recompute with a whole-body walk
 // per query (one walk per call site made the scan quadratic in function size).
 type storeScanDeclIndex struct {
-	decls      map[string][]*ast.VarDeclStmt // every declaration of a name
-	otherBound map[string]bool               // names bound by a non-VarDecl construct
+	decls          map[string][]*ast.VarDeclStmt // every declaration of a name
+	otherBound     map[string]bool               // names bound by a non-VarDecl construct
+	parameterNames map[string]bool               // immutable names, shared by this declaration's taint queries
 	// nodes lists, per name, the VarDecl / Assign / Call / binding-statement nodes whose own
 	// expressions (a statement's header only, not nested statements) mention the name.
 	nodes map[string][]any
@@ -155,6 +156,10 @@ type storeScanDeclIndex struct {
 	// of re-walking the AST reflectively per iteration).
 	flat    []any
 	returns []*ast.ReturnStmt
+	// Payload proofs handle only assignments and calls. Build their ordered
+	// subset on first use, rather than dispatching every AST node per query.
+	payloadNodes      []any
+	payloadNodesReady bool
 	// bindingWrites is populated on demand once per function. Pattern binder typing used to
 	// reflectively rescan the entire body for every binder name.
 	bindingWrites      map[string]int
@@ -437,6 +442,33 @@ func storeScanHeaderTokens(stmt ast.Stmt) []string {
 func (a *Analyzer) storeScanEachNode(decl *ast.FuncDecl, visit func(node any)) {
 	decl = a.readDecl(decl)
 	for _, node := range a.storeScanIndex(decl).flat {
+		visit(node)
+	}
+}
+
+// Parameter names do not depend on a source/target pair. Keep one read-only
+// set in the declaration index; pair-specific taint sets remain independent.
+func (idx *storeScanDeclIndex) parameters(decl *ast.FuncDecl) map[string]bool {
+	if idx.parameterNames == nil {
+		idx.parameterNames = make(map[string]bool, len(decl.Params))
+		for _, param := range decl.Params {
+			idx.parameterNames[param.Name] = true
+		}
+	}
+	return idx.parameterNames
+}
+
+func (idx *storeScanDeclIndex) eachPayloadNode(visit func(any)) {
+	if !idx.payloadNodesReady {
+		for _, node := range idx.flat {
+			switch node.(type) {
+			case *ast.AssignStmt, *ast.CallExpr:
+				idx.payloadNodes = append(idx.payloadNodes, node)
+			}
+		}
+		idx.payloadNodesReady = true
+	}
+	for _, node := range idx.payloadNodes {
 		visit(node)
 	}
 }

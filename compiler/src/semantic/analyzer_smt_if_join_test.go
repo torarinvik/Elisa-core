@@ -20,8 +20,8 @@ func TestRestoreSMTFactFrameKeepsBranchSurvivorsAcrossRestore(t *testing.T) {
 		t.Fatal("restore did not retain the branch survivor slice")
 	}
 
-	// A sibling starts with a fresh copy of the entry facts and may extend it without
-	// overwriting the earlier branch's captured survivors.
+	// A sibling may extend its entry facts without overwriting the earlier
+	// branch's captured survivors.
 	scope.smtAssertFacts = append(scope.smtAssertFacts, secondBranchFact)
 	second := a.restoreSMTFactFrame(entry)
 	if len(first.facts[0]) != 2 || !first.facts[0][1].Deps["first"] {
@@ -114,24 +114,26 @@ func BenchmarkSMTFactFrameRoundTrip(b *testing.B) {
 }
 
 func TestSMTFactFrameRestoresEveryScopeIndependently(t *testing.T) {
-	parentFact := smtFact{Expr: &ast.Ident{Name: "parent"}}
-	childFact := smtFact{Expr: &ast.Ident{Name: "child"}}
+	parentFact := smtFact{Expr: &ast.Ident{Name: "parent"}, Deps: map[string]bool{"parent": true}}
+	childFact := smtFact{Expr: &ast.Ident{Name: "child"}, Deps: map[string]bool{"child": true}}
 	parent := &Scope{smtAssertFacts: []smtFact{parentFact}}
 	child := &Scope{Parent: parent, smtAssertFacts: []smtFact{childFact}}
 	a := &Analyzer{currentScope: child}
 	entry := a.snapshotSMTFactFrame()
-	child.smtAssertFacts[0] = smtFact{}
-	parent.smtAssertFacts = nil
+	// Invalidate through production operations: published frame arrays are
+	// immutable, so direct writes to their elements are no longer permitted.
+	a.invalidateSMTAssertFactsForTarget(&ast.Ident{Name: "child"})
+	a.invalidateSMTAssertFactsForTarget(&ast.Ident{Name: "parent"})
 	survivors := a.restoreSMTFactFrame(entry)
-	if len(survivors.facts[0]) != 1 || survivors.facts[0][0].Expr != nil || len(survivors.facts[1]) != 0 {
-		t.Fatal("lost branch-local invalidation across nested scopes")
+	if len(survivors.facts[0]) != 0 || len(survivors.facts[1]) != 0 {
+		t.Fatal("lost branch invalidation")
 	}
 	if child.smtAssertFacts[0].Expr != childFact.Expr || parent.smtAssertFacts[0].Expr != parentFact.Expr {
-		t.Fatal("failed to restore the entry facts of every scope")
+		t.Fatal("failed to restore every scope")
 	}
-	child.smtAssertFacts[0] = smtFact{}
-	parent.smtAssertFacts[0] = smtFact{}
+	a.invalidateSMTAssertFactsForTarget(&ast.Ident{Name: "child"})
+	a.invalidateSMTAssertFactsForTarget(&ast.Ident{Name: "parent"})
 	if entry.facts[0][0].Expr != childFact.Expr || entry.facts[1][0].Expr != parentFact.Expr {
-		t.Fatal("restored scope lists alias the entry snapshot")
+		t.Fatal("invalidation changed entry snapshot")
 	}
 }

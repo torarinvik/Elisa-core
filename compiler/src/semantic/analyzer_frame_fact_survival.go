@@ -75,18 +75,9 @@ func (a *Analyzer) dropSMTFactsOverlappingWrites(root string, writePaths [][]str
 		if len(sc.smtAssertFacts) == 0 {
 			continue
 		}
-		out := sc.smtAssertFacts[:0]
-		for _, fact := range sc.smtAssertFacts {
-			if fact.Deps == nil || !fact.Deps[root] {
-				out = append(out, fact) // independent of this argument
-				continue
-			}
-			if a.factReadsOverlapWrites(fact.Expr, root, writePaths) {
-				continue // a read of a written place: drop
-			}
-			out = append(out, fact)
-		}
-		sc.smtAssertFacts = out
+		sc.smtAssertFacts = dropSMTFactsCopyOnWrite(sc.smtAssertFacts, func(fact smtFact) bool {
+			return fact.Deps != nil && fact.Deps[root] && a.factReadsOverlapWrites(fact.Expr, root, writePaths)
+		})
 	}
 }
 

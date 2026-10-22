@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"reflect"
@@ -162,6 +163,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		wg.Add(1)
 		go func(w *Analyzer, i int) {
 			defer wg.Done()
+			defer w.closeSMT()
 			ts := time.Now()
 			n := 0
 			var waited, blocked time.Duration
@@ -217,6 +219,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w.parallel = nil
 		mergeRequiresReport(a, w, base)
 		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base, p)
+		mergeParallelSMTStats(&a.smtStats, w.smtStats)
 		p.publishFuncTypes()
 	}
 	// Workers merge their appended work lists in worker order; the late
@@ -271,6 +274,19 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if useMemoOverlays && (name == "smtSolver" || name == "smtStats") {
+			// A parent's live solver serializes all checks behind its mutex.
+			// Workers own lazy solver sessions and account only their own work.
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
+		if useMemoOverlays && name == "storeScanTaintCache" {
+			// Published taint sets are read-only. Only the cache's outer map
+			// receives new entries, so give each worker an independent map
+			// while preserving the settled sets (and their internal sharing).
+			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanTaintCache)))
+			continue
+		}
 		if useMemoOverlays && name == "storeFlowSummaries" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForBodyWorker(a.storeFlowSummaries)))
 			continue
@@ -517,8 +533,11 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 	switch w.Kind() {
 	case reflect.Struct:
 		for i := 0; i < w.NumField(); i++ {
-			if p != nil && parallelBodyWorkerLocalOnlyMap(w.Type().Field(i).Name) {
-				continue
+			if p != nil {
+				name := w.Type().Field(i).Name
+				if parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
+					continue
+				}
 			}
 			mergeValue(settable(dst.Field(i)), settable(w.Field(i)), settable(base.Field(i)), p)
 		}

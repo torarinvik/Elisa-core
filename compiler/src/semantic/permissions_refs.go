@@ -48,6 +48,11 @@ func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 	if len(refs) == 0 {
 		return nil
 	}
+	// A plain singleton is already canonical. Keep an owned output row, as
+	// in the general path, without building maps or sorting one element.
+	if len(refs) == 1 && refs[0].Name != "" {
+		return []ast.PermissionRef{clonePermissionRef(refs[0])}
+	}
 	familyRefs := make(map[string]ast.PermissionRef)
 	memberRefs := make(map[string]ast.PermissionRef)
 	for _, ref := range refs {

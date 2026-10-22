@@ -556,6 +556,8 @@ type Scope struct {
 	// smtAssertFacts holds scoped proof facts known to hold after a branch, proven assertion,
 	// invariant, or exact assignment. They are consumed only by the SMT tier and invalidated when a
 	// later mutation touches one of their dependency roots; calls still clear them conservatively.
+	// Snapshots may share the backing array. Append normally; removals must
+	// use dropSMTFactsCopyOnWrite rather than overwrite array elements.
 	smtAssertFacts []smtFact
 	// closedWorld marks this scope as a proof WALL (docs/99 scoped proof automation). When a fact-
 	// gathering chain walk reaches a closed-world scope it includes that scope's own facts and then

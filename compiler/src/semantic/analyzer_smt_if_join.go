@@ -41,7 +41,8 @@ func (a *Analyzer) snapshotSMTFactFrame() smtFactFrame {
 	frame := smtFactFrame{scopes: make([]*Scope, 0, depth), facts: make([][]smtFact, 0, depth)}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		frame.scopes = append(frame.scopes, sc)
-		frame.facts = append(frame.facts, append([]smtFact(nil), sc.smtAssertFacts...))
+		sc.smtAssertFacts = freezeSMTFactList(sc.smtAssertFacts)
+		frame.facts = append(frame.facts, sc.smtAssertFacts)
 	}
 	return frame
 }
@@ -53,10 +54,10 @@ func (a *Analyzer) restoreSMTFactFrame(entry smtFactFrame) smtFactFrame {
 	// The frame's scope list is immutable; only the fact lists change between branches.
 	survivors := smtFactFrame{scopes: entry.scopes, facts: make([][]smtFact, len(entry.scopes))}
 	for i, sc := range entry.scopes {
-		// The survivor list is read-only after this point. Restore below always installs
-		// a fresh copy of entry.facts before another branch can append or invalidate facts.
-		survivors.facts[i] = sc.smtAssertFacts
-		sc.smtAssertFacts = append([]smtFact(nil), entry.facts[i]...)
+		// Frame lists are immutable. Clipped capacity makes appends private,
+		// and invalidation copies on the first removed fact.
+		survivors.facts[i] = freezeSMTFactList(sc.smtAssertFacts)
+		sc.smtAssertFacts = freezeSMTFactList(entry.facts[i])
 	}
 	return survivors
 }

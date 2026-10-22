@@ -526,7 +526,7 @@ func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, ot
 		}
 		proof = false
 	}
-	a.storeScanEachNode(decl, func(node any) {
+	idx.eachPayloadNode(func(node any) {
 		if !proof {
 			return
 		}
@@ -1536,10 +1536,8 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 		}
 		a.storeScanTaintCache[key] = storeScanTaintResult{params, header, content, targets, views, a.storeScanLastHolders}
 	}()
-	params = map[string]bool{}
-	for _, p := range decl.Params {
-		params[p.Name] = true
-	}
+	idx := a.storeScanIndex(decl)
+	params = idx.parameters(decl)
 	header = map[string]bool{decl.Params[other].Name: true}
 	content = map[string]bool{decl.Params[other].Name: true}
 	targets = map[string]bool{}
@@ -1555,7 +1553,6 @@ func (a *Analyzer) storeScanTaint(decl *ast.FuncDecl, other int, targetName stri
 		return true
 	}
 	views = a.storeScanViewLocalsCached(decl, other)
-	idx := a.storeScanIndex(decl)
 	var taint func(string, ast.Expr) bool
 	taint = func(name string, value ast.Expr) bool {
 		if choice, ok := storeScanUnwrap(value).(*ast.TernaryExpr); ok && choice != nil {
