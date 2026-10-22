@@ -305,12 +305,20 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			// A new signature is a removal of the old declaration and an addition
 			// of the new one: callers are re-analyzed, the new one is checked
 			// against scratch.
-			if !oldTop[ofn] || !topLevel[nfn] || !retainedPlainFunction(ofn) || !retainedPlainFunction(nfn) {
+			// A member of a `module`/`extend` block is replaced in its block the same way.
+			sameScope := oldTop[ofn] && topLevel[nfn]
+			namespace := ""
+			if block := memberOf[nfn]; !sameScope && block != nil && !oldTop[ofn] && !topLevel[nfn] {
+				if sd, known := scoped[live]; known && sd.Namespace == namespaceOf[block] {
+					sameScope, namespace = true, sd.Namespace
+				}
+			}
+			if !sameScope || !retainedPlainFunction(ofn) || !retainedPlainFunction(nfn) {
 				return fail("signature of %s changed", ofn.Name)
 			}
 			removed = append(removed, ofn)
 			added = append(added, nfn)
-			replaced["::"+ofn.Name+"#0"] = true
+			replaced[namespace+"::"+ofn.Name+"#0"] = true
 			continue
 		}
 		if oldText.gensyms != newText.gensyms {
@@ -360,7 +368,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			live := cands[0]
 			sym := a.funcDeclSymbols[live]
-			if sym == nil || a.globalScope.Symbols[live.Name] != sym || len(a.ufcsFunctionsByName[live.Name]) > 1 {
+			if sym == nil || a.globalScope.Symbols[sym.Name] != sym || len(a.ufcsFunctionsByName[sym.Name]) > 1 {
 				return fail("removed %s is not a plain global function", of.Name)
 			}
 			if _, known := scoped[live]; !known {
@@ -890,17 +898,20 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 	for _, fn := range fns {
 		gone[fn] = true
 		sym := a.funcDeclSymbols[fn]
-		delete(a.globalScope.Symbols, fn.Name)
-		delete(a.functionTypes, fn.Name)
+		name := fn.Name
 		if sym != nil {
-			delete(a.functionTypes, sym.Name)
+			// A block member is registered under its qualified name.
+			name = sym.Name
 		}
+		delete(a.globalScope.Symbols, name)
+		delete(a.functionTypes, fn.Name)
+		delete(a.functionTypes, name)
 		delete(a.funcDeclSymbols, fn)
 		delete(a.funcDeclUsings, fn)
 		delete(a.paramStoreTargets, fn)
 		delete(a.regionParamCalleeParamIndex, fn.Name)
-		if list := a.ufcsFunctionsByName[fn.Name]; len(list) <= 1 {
-			delete(a.ufcsFunctionsByName, fn.Name)
+		if list := a.ufcsFunctionsByName[name]; len(list) <= 1 {
+			delete(a.ufcsFunctionsByName, name)
 		}
 		a.ufcsByLastSegment = nil
 	}
@@ -915,13 +926,20 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 		}
 	}
 	r.decls = decls
-	fileDecls := a.file.Decls[:0]
-	for _, d := range a.file.Decls {
-		if keep(d) {
-			fileDecls = append(fileDecls, d)
+	var prune func(decls []ast.Decl) []ast.Decl
+	prune = func(decls []ast.Decl) []ast.Decl {
+		out := decls[:0]
+		for _, d := range decls {
+			if n, ok := d.(*ast.NamespaceDecl); ok {
+				n.Decls = prune(n.Decls)
+			}
+			if keep(d) {
+				out = append(out, d)
+			}
 		}
+		return out
 	}
-	a.file.Decls = fileDecls
+	a.file.Decls = prune(a.file.Decls)
 	frames := r.lateFrames[:0]
 	for _, f := range r.lateFrames {
 		if !gone[f.frame.fn] {

@@ -328,3 +328,42 @@ func TestRetainedAnalysisAcceptsAddedModuleMember(t *testing.T) {
 		t.Fatalf("the private-use fixture is not rejected:\n%s", freshLeak)
 	}
 }
+
+// A member's signature edit replaces it inside its block: callers are re-analyzed
+// against the new signature, exactly as a fresh analysis sees them.
+func TestRetainedAnalysisAcceptsModuleMemberSignatureEdits(t *testing.T) {
+	steps := []string{
+		strings.Replace(retainedModuleBefore, "def twice(x: i64) -> i64:\n            return x + x", "def twice(n: i64) -> i64:\n            return n + n", 1),
+		strings.Replace(retainedModuleBefore, "def run(x: i64) -> i64:", "def run(x: i32) -> i64:", 1),
+		strings.Replace(retainedModuleBefore, "def twice(x: i64) -> i64:", "def twice(x: bool) -> i64:", 1),
+	}
+	options := AnalyzeOptions{}
+	for i, src := range steps {
+		if src == retainedModuleBefore {
+			t.Fatalf("fixture edit %d did not apply", i)
+		}
+		_, retained := AnalyzeRetained(retainedParse(t, retainedModuleBefore), retainedParse(t, retainedModuleBefore), []byte(retainedModuleBefore), options)
+		if retained == nil {
+			t.Fatal("analysis was not retained")
+		}
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("member signature edit %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("member signature edit %d disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", i, got, want)
+		}
+		if i == 2 && len(fresh.Errors()) == 0 {
+			t.Fatal("fixture: the member's new parameter type must reject its caller")
+		}
+		// And back: the block keeps exactly one declaration of the member.
+		reverted, err := retained.Update(retainedParse(t, retainedModuleBefore), retainedParse(t, retainedModuleBefore), []byte(retainedModuleBefore))
+		if err != nil {
+			t.Fatalf("revert of member edit %d fell back: %v", i, err)
+		}
+		if got, want := retainedDiagnostics(reverted), retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, retainedModuleBefore), options)); got != want {
+			t.Fatalf("revert of member edit %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
+		}
+	}
+}
