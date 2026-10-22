@@ -125,10 +125,16 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		// instead is wrong: that string flattens `::` and `.` together, so it printed
 		// `Button::Push` for a source `Button.Push` (an enum variant, legitimately a dot).
 		// The parser knows which separator it consumed; the unparser must not guess.
+		name := n.Name
 		if n.Spelling != "" {
-			return n.Spelling
+			name = n.Spelling
 		}
-		return n.Name
+		// A region-qualified named type (`sview @source`) is part of the signature:
+		// dropping it made two different signatures print identically.
+		if n.Region != "" {
+			name += " @" + n.Region
+		}
+		return name
 	case *ast.RefType:
 		// Storage classes (heap/static/stack) stay as prefixes; region provenance
 		// is emitted as the canonical `@r` suffix (docs/68 §5).
