@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"maps"
@@ -2886,10 +2887,10 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 }
 
 // smtSViewLengthSymbol creates a stable SMT symbol for an immutable view's length.
-// Quoted, hex-encoded names keep these metadata symbols disjoint from Elisa variables
+// Quoted, bijectively encoded names keep these metadata symbols disjoint from Elisa variables
 // and from the ordinary array-length symbols emitted by smtVar.
 func smtSViewLengthSymbol(projection string) string {
-	return "|sview_length_" + hex.EncodeToString([]byte(projection)) + "|"
+	return "|sview_length_" + base64.RawURLEncoding.EncodeToString([]byte(projection)) + "|"
 }
 
 // isAnyArrayLike reports whether t is an array or darray of ANY element type (unlike
