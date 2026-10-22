@@ -84,11 +84,6 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			ordered = append(ordered, bodies[b])
 		}
 	}
-	a.precomputeSharedCalleeFacts(ordered, sched.cyclic)
-	// Per-return element states are scratch for the body analysis that owns them; a
-	// precompute pass that met a return must not leave a merged-into prior behind.
-	a.returnElementStmtStates, a.returnElementStmtUnknown = nil, nil
-	tp := time.Now()
 	tsnap := time.Now()
 	at := map[*ast.FuncDecl][2]int{}
 	slots := make([]atomic.Int32, len(bodies))
@@ -106,6 +101,9 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			declined++
 			if os.Getenv("ELISA_PARALLEL_DECLINE_LOG") != "" {
 				fmt.Fprintf(os.Stderr, "[parallel-decline] %T: %v\n", scoped.Decl, err)
+				if declined <= 3 {
+					fmt.Fprintf(os.Stderr, "[parallel-decline-storage] %v: %s\n", scoped.Decl.Pos(), firstASTStorageOverlap(scoped.Decl))
+				}
 			}
 		}
 		switch n := scoped.Decl.(type) {
@@ -122,6 +120,15 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	if parallelReport {
 		fmt.Fprintf(os.Stderr, "[parallel-bodies] snapshots %v (%d declined)\n", time.Since(tsnap).Round(time.Millisecond), declined)
 	}
+	// Freeze worker syntax before summary inference resolves patterns. Its
+	// ResolvedArgs point into Args elements, which are intentional interior aliases
+	// that the generated syntax snapshot conservatively declines. Workers rebuild
+	// those derived resolutions while analyzing their private pristine bodies.
+	a.precomputeSharedCalleeFacts(ordered, sched.cyclic)
+	// Per-return element states are scratch for the body analysis that owns them; a
+	// precompute pass that met a return must not leave a merged-into prior behind.
+	a.returnElementStmtStates, a.returnElementStmtUnknown = nil, nil
+	tp := time.Now()
 	base := cloneAnalyzerValueForParallel(a)
 	clones := make([]*Analyzer, workers)
 	smtFlights := &sync.Map{}
