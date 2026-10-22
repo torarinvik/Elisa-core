@@ -5,6 +5,7 @@ import (
 	"math/bits"
 	"reflect"
 	"runtime"
+	"sync"
 )
 
 // SyntaxSnapshot owns a pristine parser graph. Copies preserve node/container
@@ -46,7 +47,8 @@ func (s *SyntaxSnapshot) CopyFile() (*File, error) {
 	if !syntaxFastSchemaValid {
 		return nil, fmt.Errorf("syntax replay schema requires regeneration")
 	}
-	c := s.replayCopier(len(s.file.Decls))
+	c, nodeBucket := s.replayCopier(len(s.file.Decls))
+	defer releaseSyntaxReplayNodes(c.nodes, nodeBucket)
 	file := copyFastSyntaxFileInto(c, s.file)
 	err := c.err
 	runtime.KeepAlive(s)
@@ -78,7 +80,8 @@ func (s *SyntaxSnapshot) copyDeclarationRange(start, end int) (*File, error) {
 	header := *s.file
 	header.Decls = header.Decls[start:end:end]
 	header.DeclVisibility = nil
-	c := s.replayCopier(end - start)
+	c, nodeBucket := s.replayCopier(end - start)
+	defer releaseSyntaxReplayNodes(c.nodes, nodeBucket)
 	file := copyFastSyntaxFileInto(c, &header)
 	if s.file.DeclVisibility != nil {
 		file.DeclVisibility = map[Decl]string{}
@@ -103,7 +106,7 @@ func (s *SyntaxSnapshot) copyDeclarationRange(start, end int) (*File, error) {
 // Replay reserves temporary identity tables from capture statistics. Partial
 // ranges use a conservative average per declaration; this is a capacity hint
 // only and does not authorize skipping any graph traversal or alias checks.
-func (s *SyntaxSnapshot) replayCopier(declarations int) *syntaxFastCopier {
+func (s *SyntaxSnapshot) replayCopier(declarations int) (*syntaxFastCopier, int) {
 	estimate := func(count int) int {
 		total := len(s.file.Decls)
 		if total == 0 || declarations >= total {
@@ -119,7 +122,8 @@ func (s *SyntaxSnapshot) replayCopier(declarations int) *syntaxFastCopier {
 		}
 		return int(capacity)
 	}
-	return &syntaxFastCopier{nodes: make(map[any]any, estimate(s.nodes)), slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: make(map[syntaxFastMap]any, estimate(s.maps))}
+	nodes, bucket := borrowSyntaxReplayNodes(estimate(s.nodes))
+	return &syntaxFastCopier{nodes: nodes, slices: make(map[syntaxFastSlice]any, estimate(s.slices)), maps: make(map[syntaxFastMap]any, estimate(s.maps))}, bucket
 }
 
 // CopyDeclaration returns a fresh pristine copy of declaration i. The snapshot is
@@ -130,4 +134,45 @@ func (s *SyntaxSnapshot) CopyDeclaration(i int) (Decl, error) {
 		return nil, err
 	}
 	return file.Decls[0], nil
+}
+
+// Temporary identity tables contain no returned storage. Size buckets avoid
+// repeatedly allocating them without handing a large sparse table to tiny copies.
+// Unusually large graphs keep the ordinary allocation path and are not pooled.
+var syntaxReplayNodePools [12]sync.Pool // capacities 8 through 16K
+
+func syntaxReplayNodeBucket(count int) int {
+	if count < 0 || count > 1<<14 {
+		return -1
+	}
+	if count <= 8 {
+		return 0
+	}
+	return bits.Len(uint(count-1)) - 3
+}
+
+func borrowSyntaxReplayNodes(count int) (map[any]any, int) {
+	bucket := syntaxReplayNodeBucket(count)
+	if bucket < 0 {
+		return make(map[any]any, count), -1
+	}
+	if cached := syntaxReplayNodePools[bucket].Get(); cached != nil {
+		return cached.(map[any]any), bucket
+	}
+	return make(map[any]any, 8<<bucket), bucket
+}
+
+func releaseSyntaxReplayNodes(nodes map[any]any, bucket int) {
+	if bucket < 0 {
+		return
+	}
+	grownBucket := syntaxReplayNodeBucket(len(nodes))
+	if grownBucket < 0 {
+		return
+	}
+	// A partial copy can contain fewer nodes than the estimate. Keep the
+	// original bucket so its potentially large capacity never enters a tiny pool.
+	bucket = max(bucket, grownBucket)
+	clear(nodes)
+	syntaxReplayNodePools[bucket].Put(nodes)
 }

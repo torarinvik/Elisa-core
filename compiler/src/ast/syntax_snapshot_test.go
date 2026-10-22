@@ -110,15 +110,17 @@ func TestSyntaxSnapshotCopyConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			copy, err := snapshot.CopyFile()
-			if err != nil {
-				t.Error(err)
-				return
+			for repeat := 0; repeat < 32; repeat++ {
+				copy, err := snapshot.CopyFile()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if !reflect.DeepEqual(copy, file) {
+					t.Error("copy changed graph")
+				}
+				copy.Decls[0].(*ConstDecl).Name = "changed"
 			}
-			if !reflect.DeepEqual(copy, file) {
-				t.Error("copy changed graph")
-			}
-			copy.Decls[0].(*ConstDecl).Name = "changed"
 		}()
 	}
 	wg.Wait()
@@ -260,5 +262,88 @@ func TestSyntaxSnapshotPrefixOwnsNestedVisibilityAndDropsSuffix(t *testing.T) {
 	node.(*FuncDecl).Name = "changed"
 	if second.Decls[0].(*NamespaceDecl).Decls[0].(*FuncDecl).Name != "same" {
 		t.Fatal("prefix copies shared nested graph")
+	}
+}
+
+func BenchmarkSyntaxReplayNodeTables(b *testing.B) {
+	body := make([]Stmt, 256)
+	for i := range body {
+		body[i] = &ReturnStmt{Value: &BinaryExpr{Left: &Ident{Name: "x"}, Right: &IntLit{Value: "1"}}}
+	}
+	fn := &FuncDecl{Name: "sample", Body: body}
+	snapshot, err := NewSyntaxSnapshot(&File{Decls: []Decl{fn}, DeclVisibility: map[Decl]string{fn: "private"}}, 1<<24)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		copied, err := snapshot.CopyFile()
+		if err != nil || len(copied.Decls[0].(*FuncDecl).Body) != 256 {
+			b.Fatal("invalid replay", err)
+		}
+	}
+}
+
+func TestSyntaxSnapshotReplayTablesDoNotOwnReturnedGraphs(t *testing.T) {
+	shared := &IntLit{Value: "17"}
+	fn := &FuncDecl{Name: "sample", Body: []Stmt{&ReturnStmt{Value: &BinaryExpr{Left: shared, Right: shared}}}}
+	snapshot, err := NewSyntaxSnapshot(&File{Decls: []Decl{fn}, DeclVisibility: map[Decl]string{fn: "private"}}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained []*File
+	for i := 0; i < 64; i++ {
+		file, err := snapshot.CopyFile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		decl := file.Decls[0].(*FuncDecl)
+		value := decl.Body[0].(*ReturnStmt).Value.(*BinaryExpr)
+		if value.Left != value.Right || value.Left == shared || file.DeclVisibility[decl] != "private" {
+			t.Fatal("replay sharing or identity changed")
+		}
+		retained = append(retained, file)
+	}
+	for _, file := range retained {
+		decl := file.Decls[0].(*FuncDecl)
+		value := decl.Body[0].(*ReturnStmt).Value.(*BinaryExpr)
+		if value.Left.(*IntLit).Value != "17" {
+			t.Fatal("later copy changed retained graph")
+		}
+		value.Left.(*IntLit).Value = "changed"
+	}
+}
+
+func BenchmarkSyntaxReplaySmallAndMixed(b *testing.B) {
+	small, err := NewSyntaxSnapshot(&File{Decls: []Decl{&ConstDecl{Name: "x", Value: &IntLit{Value: "1"}}}}, 1<<24)
+	if err != nil {
+		b.Fatal(err)
+	}
+	body := make([]Stmt, 256)
+	for i := range body {
+		body[i] = &ReturnStmt{Value: &BinaryExpr{Left: &Ident{Name: "x"}, Right: &IntLit{Value: "1"}}}
+	}
+	large, err := NewSyntaxSnapshot(&File{Decls: []Decl{&FuncDecl{Name: "large", Body: body}}}, 1<<24)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, mixed := range []bool{false, true} {
+		label := "small"
+		if mixed {
+			label = "mixed"
+		}
+		b.Run(label, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				snapshot := small
+				if mixed && i%32 == 0 {
+					snapshot = large
+				}
+				if _, err := snapshot.CopyFile(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
