@@ -1377,16 +1377,17 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 		prepare()
 	}
 	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
-	snapshot := affineFlowSnapshot{Regions: branchRegions, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	snapshot := affineFlowSnapshot{Regions: branchRegions, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	blockEndRangeFacts(snapshot.RangeFacts, scope)
 	if scope != nil {
 		// Facts over branch-local immutable locals are rewritten through their initializers so they
 		// survive the join (analyzer_smt_branch_local_facts.go).
 		snapshot.SMTFacts = a.projectBranchLocalFacts(scope, append([]smtFact(nil), scope.smtAssertFacts...))
 	}
-	// The branch owns this map from the entry clone. Transfer it to the result
+	// The branch owns these maps from the entry clones. Transfer them to the result
 	// after all branch processing, then restore the parent; no second copy is needed.
 	snapshot.Affine = a.currentAffineValues
+	snapshot.ValueBindings = a.currentValueBindings
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues

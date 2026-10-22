@@ -1,6 +1,11 @@
 package semantic
 
-import "testing"
+import (
+	"elisacore/src/ast"
+	"testing"
+)
+
+var affineCloneSink map[affineValueKey]affineValueState
 
 func TestAffineBranchSnapshotOwnsPrivateState(t *testing.T) {
 	parent := NewScope(nil)
@@ -41,5 +46,52 @@ func BenchmarkAffineBranchSnapshot(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		snapshot := a.analyzeBlockWithAffineClonePrepared(nil, NewScope(parent), nil)
 		affineCloneSink = snapshot.Affine
+	}
+}
+
+func TestAffineSnapshotPathsKeepParentAndSiblingsIndependent(t *testing.T) {
+	paths := []struct {
+		name string
+		run  func(*Analyzer, *Scope) affineFlowSnapshot
+	}{
+		{"block", func(a *Analyzer, s *Scope) affineFlowSnapshot {
+			return a.analyzeBlockWithAffineClonePrepared(nil, s, nil)
+		}},
+		{"expression", func(a *Analyzer, s *Scope) affineFlowSnapshot {
+			_, snapshot := a.analyzeExprInAffineScope(&ast.IntLit{Value: "1"}, s)
+			return snapshot
+		}},
+		{"value", func(a *Analyzer, s *Scope) affineFlowSnapshot {
+			_, snapshot := a.analyzeValueExprInAffineScope(&ast.IntLit{Value: "1"}, nil, s)
+			return snapshot
+		}},
+		{"match", func(a *Analyzer, s *Scope) affineFlowSnapshot {
+			_, snapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(nil, s)
+			return snapshot
+		}},
+		{"sequence", func(a *Analyzer, s *Scope) affineFlowSnapshot {
+			return a.analyzeSequenceRewriteArmBodyWithAffineSnapshot(nil, s)
+		}},
+	}
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			parent := NewScope(nil)
+			a := newAnalyzerWithScope(parent)
+			sym := &Symbol{Name: "owner"}
+			key := affineValueKey{Root: sym}
+			initial := &ast.IntLit{Value: "1"}
+			a.currentAffineValues = map[affineValueKey]affineValueState{key: {ConsumedBy: "entry"}}
+			a.currentValueBindings = map[*Symbol]ast.Expr{sym: initial}
+			first := path.run(a, NewScope(parent))
+			second := path.run(a, NewScope(parent))
+			first.Affine[key] = affineValueState{ConsumedBy: "edited"}
+			first.ValueBindings[sym] = &ast.IntLit{Value: "2"}
+			if a.currentAffineValues[key].ConsumedBy != "entry" || second.Affine[key].ConsumedBy != "entry" {
+				t.Fatal("affine state aliases another path")
+			}
+			if a.currentValueBindings[sym] != initial || second.ValueBindings[sym] != initial {
+				t.Fatal("value bindings alias another path")
+			}
+		})
 	}
 }
