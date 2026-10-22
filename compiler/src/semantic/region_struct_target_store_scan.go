@@ -344,17 +344,29 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 				if scanIdx.mentions(arg, targetsOrHolders) {
 					targetArgs = append(targetArgs, i)
 				}
+			}
+			unrewrittenMethod := isMethod && field != nil && len(args) == len(n.Args)
+			recvTarget := false
+			if unrewrittenMethod {
+				recvTarget = scanIdx.mentions(field.Object, targets)
+				if !recvTarget && len(holders) > 0 && storeScanPlaceDepth(field.Object) >= 1 {
+					recvTarget = scanIdx.mentions(field.Object, holders)
+				}
+			}
+			// No source payload can be retained through this call without a target
+			// operand. Avoid the recursive value/type proofs for its source arguments.
+			// An unrewritten method's receiver is an operand even though absent from args.
+			if len(targetArgs) == 0 && !recvTarget {
+				return
+			}
+			for i, arg := range args {
 				if m := valueMode(arg); m != storeNone {
 					taintedArgs = append(taintedArgs, side{i, m})
 				}
 			}
-			if isMethod && field != nil && len(args) == len(n.Args) {
+			if unrewrittenMethod {
 				// An unrewritten method call: the receiver is an operand too, and the callee is
 				// unresolved. A builtin growth method moves its arguments INTO the receiver only.
-				recvTarget := scanIdx.mentions(field.Object, targets)
-				if !recvTarget && len(holders) > 0 && storeScanPlaceDepth(field.Object) >= 1 {
-					recvTarget = scanIdx.mentions(field.Object, holders)
-				}
 				recvMode := valueMode(field.Object)
 				if containerGrowthMethods[field.Field] && !recvTarget {
 					return
