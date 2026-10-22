@@ -135,6 +135,25 @@ func (a *Analyzer) recordIfJoinSMTFact(branches [][]smtFact) {
 	if a == nil || a.currentScope == nil || len(branches) == 0 {
 		return
 	}
+	if len(branches) == 1 {
+		// A single fall-through branch: its facts hold outright; record them as separate facts.
+		for _, fact := range branches[0] {
+			if fact.Expr == nil || fact.Binders != nil {
+				continue
+			}
+			current := true
+			for name, pinned := range fact.Pins {
+				if now, _ := a.currentScope.Lookup(name); now != pinned {
+					current = false
+					break
+				}
+			}
+			if current {
+				a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, fact)
+			}
+		}
+		return
+	}
 	pins := map[string]*Symbol{}
 	deps := map[string]bool{}
 	var disjuncts []ast.Expr
@@ -186,24 +205,6 @@ func (a *Analyzer) recordIfJoinSMTFact(branches [][]smtFact) {
 			joined = &ast.BinaryExpr{Position: d.Pos(), Op: lexer.TOKEN_OR, Left: joined, Right: d}
 		}
 	}
-	if len(disjuncts) == 1 {
-		// A single fall-through branch: its facts hold outright; record them as separate facts.
-		for _, fact := range branches[0] {
-			if fact.Expr == nil || fact.Binders != nil {
-				continue
-			}
-			current := true
-			for name, pinned := range fact.Pins {
-				if now, _ := a.currentScope.Lookup(name); now != pinned {
-					current = false
-					break
-				}
-			}
-			if current {
-				a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, fact)
-			}
-		}
-		return
-	}
+
 	a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: joined, Deps: deps, Pins: pins})
 }
