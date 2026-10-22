@@ -11,6 +11,13 @@ func TestCallElementBatchMergeMatchesSequential(t *testing.T) {
 	symbols := []*Symbol{{Name: "a"}, {Name: "b"}, {Name: "c"}}
 	var makeState func(int) regionRefState
 	makeState = func(depth int) regionRefState {
+		kind := rng.Intn(6)
+		if kind == 0 {
+			return regionRefState{Fields: map[string]regionRefState{"unknown": {}}}
+		}
+		if kind == 1 {
+			return regionRefState{DirectParamDep: rng.Intn(6), HasDirectParamDep: true, PackedStoreSummaryKnown: true, ParamOnlySummary: true}
+		}
 		state := regionRefStateFromDependency(symbols[rng.Intn(len(symbols))], rng.Intn(4))
 		if rng.Intn(2) == 0 {
 			appendRegionParamDep(&state, rng.Intn(6))
@@ -26,15 +33,16 @@ func TestCallElementBatchMergeMatchesSequential(t *testing.T) {
 			states[i] = makeState(2)
 		}
 		want := states[0]
+		known := true
 		for _, next := range states[1:] {
-			var ok bool
-			want, ok = mergeRegionRefStates(want, next)
-			if !ok {
-				t.Fatal("sequential merge lost real-region provenance")
+			if merged, ok := mergeRegionRefStates(want, next); ok {
+				want = merged
+			} else {
+				known = false
 			}
 		}
-		got, ok := mergeRegionRefStates(states...)
-		if !ok || !reflect.DeepEqual(got, want) {
+		got, ok := mergeCallElementStates(states)
+		if ok != known || !reflect.DeepEqual(got, want) {
 			t.Fatalf("batch merge differs from sequential merge at case %d", iteration)
 		}
 	}
@@ -55,7 +63,7 @@ func BenchmarkCallElementStateMerge(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				var merged regionRefState
 				if batch {
-					merged, _ = mergeRegionRefStates(states...)
+					merged, _ = mergeCallElementStates(states)
 				} else {
 					merged = states[0]
 					for _, state := range states[1:] {

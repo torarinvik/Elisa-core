@@ -278,22 +278,38 @@ func (a *Analyzer) privateFuncType(fn *ast.FuncDecl, shared *FuncType) *FuncType
 		return shared
 	}
 	if private := p.funcTypes[shared]; private != nil {
+		p.maybeOwnFuncType(fn, shared)
 		return private
 	}
 	private := new(FuncType)
 	settable(reflect.ValueOf(private).Elem()).Set(deepCloneValue(reflect.ValueOf(shared).Elem()))
 	if p.funcTypes == nil {
 		p.funcTypes = map[*FuncType]*FuncType{}
-		p.funcTypeOwned = map[*FuncType]bool{}
 	}
 	p.funcTypes[shared] = private
+	p.maybeOwnFuncType(fn, shared)
+	return private
+}
+
+// maybeOwnFuncType promotes a cached worker-local type when its declaration is
+// claimed later. Calls made before the body is claimed still need a private copy,
+// but must not prevent the eventual owner from publishing its completed facts.
+func (p *parallelWorkerState) maybeOwnFuncType(fn *ast.FuncDecl, shared *FuncType) {
+	if p == nil || fn == nil {
+		return
+	}
 	decl := fn
 	if orig, isShadow := p.original[fn]; isShadow {
 		decl = orig
-	} else if owner, known := p.ownerOf(decl); known && owner == p.worker {
+		// A shadow is a foreign read/analysis view and must never publish facts.
+		return
+	}
+	if owner, known := p.ownerOf(decl); known && owner == p.worker {
+		if p.funcTypeOwned == nil {
+			p.funcTypeOwned = map[*FuncType]bool{}
+		}
 		p.funcTypeOwned[shared] = true
 	}
-	return private
 }
 
 // publishFuncTypes writes a worker's owned function facts into the shared types.

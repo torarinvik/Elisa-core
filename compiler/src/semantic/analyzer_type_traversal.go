@@ -686,6 +686,17 @@ func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen 
 		}
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
+			fieldCapacity := len(base.Fields)
+			if a.typeShapesFrozen {
+				fieldCapacity = 0
+				for _, field := range base.Fields {
+					// Exclude only fixed scalar types. Generic parameters and other
+					// unresolved fields may become references after substitution.
+					if !IsNumericType(field.Type) && !IsBoolType(field.Type) {
+						fieldCapacity++
+					}
+				}
+			}
 			bindings := map[string]Type{}
 			for i, name := range base.TypeParams {
 				if i < len(tt.Args) {
@@ -702,7 +713,7 @@ func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen 
 					continue
 				}
 				if state.Fields == nil {
-					state.Fields = make(map[string]regionRefState, len(base.Fields))
+					state.Fields = make(map[string]regionRefState, fieldCapacity)
 				}
 				state.Fields[field.Name] = fieldState
 			}

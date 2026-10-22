@@ -880,9 +880,9 @@ def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
     xs.push(n + 1)
     return xs
 def grow(out: mutable darray[Item]&) -> void can[Memory.Allocate, Abort.Panic]:
-    out.push(Item.Row(make_vals(10)))
+    out.push(Item.Row(make_vals(10) can Memory.Allocate, Abort.Panic))
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nested: mutable darray[Item] = []
     i: mutable i64 = 0
     while i < 2000:
@@ -896,7 +896,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
                     total <- total + x
             Item.Nothing():
                 total <- total + 0
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "42000" {
 		t.Fatalf("inline-enum payload void grower must adopt the payload into the caller's region; expected RAN 42000, got %s %q", status, out)
@@ -919,9 +919,10 @@ def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
     xs.push(n + 1)
     return xs
 def grow(out: mutable darray[Holder]&) -> void can[Memory.Allocate, Abort.Panic]:
-    out.push(Holder{items: make_vals(10), tag: 5})
+    items: darray[i64] = make_vals(10) can Memory.Allocate, Abort.Panic
+    out.push(Holder{items: items, tag: 5})
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nested: mutable darray[Holder] = []
     i: mutable i64 = 0
     while i < 2000:
@@ -931,7 +932,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     for h in nested:
         for x in h.items:
             total <- total + x
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "42000" {
 		t.Fatalf("struct-literal payload single-container grower must adopt; expected RAN 42000, got %s %q", status, out)
@@ -951,9 +952,9 @@ def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
     xs.push(n + 1)
     return xs
 def grow(out: mutable darray[Item]&) -> void can[Memory.Allocate, Abort.Panic]:
-    out.extend([Item.Row(make_vals(10))])
+    out.extend([Item.Row(make_vals(10) can Memory.Allocate, Abort.Panic)])
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nested: mutable darray[Item] = []
     i: mutable i64 = 0
     while i < 2000:
@@ -967,7 +968,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
                     total <- total + x
             Item.Nothing():
                 total <- total + 0
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "42000" {
 		t.Fatalf("single-container extend of an enum-ctor element must adopt; expected RAN 42000, got %s %q", status, out)
@@ -987,10 +988,10 @@ def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
     xs.push(n + 1)
     return xs
 def grow(out: mutable darray[Item]&) -> void can[Memory.Allocate, Abort.Panic]:
-    node: Item = Item.Row(make_vals(10))
+    node: Item = Item.Row(make_vals(10) can Memory.Allocate, Abort.Panic)
     out.push(node)
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nested: mutable darray[Item] = []
     i: mutable i64 = 0
     while i < 2000:
@@ -1004,7 +1005,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
                     total <- total + x
             Item.Nothing():
                 total <- total + 0
-    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "42000" {
 		t.Fatalf("single-container ident-bound ctor must adopt; expected RAN 42000, got %s %q", status, out)

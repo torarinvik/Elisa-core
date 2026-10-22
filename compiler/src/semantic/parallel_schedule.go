@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // bodyGraph is the conservative dependency graph of body declarations used for
@@ -73,6 +74,36 @@ func bodyStmts(d ast.Decl) []ast.Stmt {
 	return nil
 }
 
+// bodyGraphBinaryOperatorMethod returns a possible statically dispatched dunder
+// for an operator before expression analysis has populated LoweredCall. These
+// are body-scheduling edges only: without receiver types, treating them as
+// function-call edges would create false recursive-summary classifications.
+func bodyGraphBinaryOperatorMethod(op lexer.TokenKind) string {
+	switch op {
+	case lexer.TOKEN_PLUS:
+		return "__add__"
+	case lexer.TOKEN_MINUS:
+		return "__sub__"
+	case lexer.TOKEN_STAR:
+		return "__mul__"
+	case lexer.TOKEN_SLASH:
+		return "__div__"
+	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+		return "__eq__"
+	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		return "__cmp__"
+	default:
+		return ""
+	}
+}
+
+func bodyGraphUnaryOperatorMethod(op lexer.TokenKind) string {
+	if op == lexer.TOKEN_MINUS {
+		return "__neg__"
+	}
+	return ""
+}
+
 // funcScanStmts is a function's body plus its contract clauses, which name
 // callees too (a ghost spec unfolded in an `ensure`).
 func funcScanStmts(fn *ast.FuncDecl) []ast.Stmt {
@@ -85,6 +116,19 @@ func funcScanStmts(fn *ast.FuncDecl) []ast.Stmt {
 	for _, group := range [][]*ast.ProofBlockStmt{fn.RequiresProofs, fn.EnsureProofs} {
 		for _, p := range group {
 			stmts = append(stmts, p)
+		}
+	}
+	return stmts
+}
+
+// funcDefaultArgStmts returns defaults as ordering dependencies. They are
+// evaluated at call sites, so references here must not enter recursive-summary
+// classification for the function whose parameter has the default.
+func funcDefaultArgStmts(fn *ast.FuncDecl) []ast.Stmt {
+	var stmts []ast.Stmt
+	for _, param := range fn.Params {
+		if param.DefaultValue != nil {
+			stmts = append(stmts, &ast.ExprStmt{Position: param.DefaultValue.Pos(), Expr: param.DefaultValue})
 		}
 	}
 	return stmts
@@ -133,19 +177,50 @@ func buildBodyGraph(bodies []scopedDecl) *bodyGraph {
 					}
 				}
 			}
-			walkStoreScanNodes(funcScanStmts(fn), func(node any) {
-				g.weight[i]++
-				switch n := node.(type) {
-				case *ast.Ident:
-					note(n.Name)
-				case *ast.FieldExpr:
-					note(n.Field)
-				case ast.Expr:
-					if name, _, ok := ast.PrepassCallShape(n); ok {
-						note(name)
+			noteBodyDependency := func(name string) {
+				for _, j := range definers[fillMayAdoptLastSegment(name)] {
+					if j != i && !seen[j] {
+						seen[j] = true
+						g.deps[i] = append(g.deps[i], j)
 					}
 				}
-			})
+			}
+			scan := func(stmts []ast.Stmt, functionRefs bool) {
+				walkStoreScanNodes(stmts, func(node any) {
+					g.weight[i]++
+					dependency := noteBodyDependency
+					if functionRefs {
+						dependency = note
+					}
+					switch n := node.(type) {
+					case *ast.Ident:
+						dependency(n.Name)
+					case *ast.FieldExpr:
+						dependency(n.Field)
+					case *ast.BinaryExpr:
+						if method := bodyGraphBinaryOperatorMethod(n.Op); method != "" {
+							noteBodyDependency(method)
+						}
+						if n.Op == lexer.TOKEN_PLUS {
+							// Span algebra can also lower `+` to a protocol method or a
+							// visible helper after this pre-analysis graph is built.
+							noteBodyDependency("combine")
+							noteBodyDependency("combine_span")
+							noteBodyDependency("lua_span_union")
+						}
+					case *ast.UnaryExpr:
+						if method := bodyGraphUnaryOperatorMethod(n.Op); method != "" {
+							noteBodyDependency(method)
+						}
+					case ast.Expr:
+						if name, _, ok := ast.PrepassCallShape(n); ok {
+							dependency(name)
+						}
+					}
+				})
+			}
+			scan(funcScanStmts(fn), true)
+			scan(funcDefaultArgStmts(fn), false)
 			sort.Ints(g.functionDeps[functionIndex])
 		}
 		sort.Ints(g.deps[i])

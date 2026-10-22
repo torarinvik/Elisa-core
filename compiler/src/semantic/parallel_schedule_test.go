@@ -77,6 +77,119 @@ def caller(n: i64) -> i64:
 	}
 }
 
+func TestBodyScheduleWaitsForOverloadedOperatorSummary(t *testing.T) {
+	cases := []struct {
+		name    string
+		op      lexer.TokenKind
+		unary   bool
+		methods []string
+	}{
+		{name: "add", op: lexer.TOKEN_PLUS, methods: []string{"__add__", "combine", "combine_span", "lua_span_union"}},
+		{name: "subtract", op: lexer.TOKEN_MINUS, methods: []string{"__sub__"}},
+		{name: "multiply", op: lexer.TOKEN_STAR, methods: []string{"__mul__"}},
+		{name: "divide", op: lexer.TOKEN_SLASH, methods: []string{"__div__"}},
+		{name: "equal", op: lexer.TOKEN_EQEQ, methods: []string{"__eq__"}},
+		{name: "not_equal", op: lexer.TOKEN_BANGEQ, methods: []string{"__eq__"}},
+		{name: "less_than", op: lexer.TOKEN_LT, methods: []string{"__cmp__"}},
+		{name: "greater_equal", op: lexer.TOKEN_GTEQ, methods: []string{"__cmp__"}},
+		{name: "negate", op: lexer.TOKEN_MINUS, unary: true, methods: []string{"__neg__"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var expr ast.Expr
+			left := &ast.Ident{Name: "value"}
+			if tc.unary {
+				expr = &ast.UnaryExpr{Op: tc.op, Operand: left}
+			} else {
+				expr = &ast.BinaryExpr{Op: tc.op, Left: left, Right: &ast.IntLit{Value: "1"}}
+			}
+			caller := &ast.FuncDecl{Name: "caller", Body: []ast.Stmt{&ast.ReturnStmt{Value: expr}}}
+			bodies := []scopedDecl{{Decl: caller}}
+			targets := make([]*ast.FuncDecl, 0, len(tc.methods))
+			for _, method := range tc.methods {
+				var targetExpr ast.Expr = &ast.IntLit{Value: "1"}
+				if tc.name == "add" && method == "__add__" {
+					// This numeric operation must not turn the conservative candidate
+					// edge into a recursive-summary classification for __add__.
+					targetExpr = &ast.BinaryExpr{Op: lexer.TOKEN_PLUS, Left: &ast.IntLit{Value: "1"}, Right: &ast.IntLit{Value: "2"}}
+				}
+				target := &ast.FuncDecl{
+					Name: method,
+					Body: []ast.Stmt{&ast.ReturnStmt{Value: targetExpr}},
+				}
+				targets = append(targets, target)
+				bodies = append(bodies, scopedDecl{Decl: &ast.ImplDecl{Members: []ast.ImplMember{target}}})
+			}
+			schedule := planBodySchedule(bodies, 2)
+			callerUnit := schedule.unitOf[0]
+			targetUnits := make(map[int]bool, len(tc.methods))
+			for body := 1; body < len(bodies); body++ {
+				targetUnits[schedule.unitOf[body]] = true
+			}
+			if schedule.pending[callerUnit] != len(targetUnits) {
+				t.Fatalf("caller has %d dependency units, want all %d possible targets", schedule.pending[callerUnit], len(targetUnits))
+			}
+			for worker := 0; worker < len(targetUnits); worker++ {
+				unit := schedule.claim(worker % 2)
+				if !targetUnits[unit] {
+					t.Fatalf("caller or unrelated unit became runnable before possible targets finished: claimed unit %d", unit)
+				}
+				schedule.finish(unit)
+			}
+			if got := schedule.claim(0); got != callerUnit {
+				t.Fatalf("caller remained blocked after all operator targets finished: got unit %d, want %d", got, callerUnit)
+			}
+			for _, target := range targets {
+				if schedule.cyclic[target] {
+					t.Fatalf("possible operator edge incorrectly classified %s as recursive", target.Name)
+				}
+			}
+		})
+	}
+}
+
+func TestBodyScheduleWaitsForDefaultArgumentSummary(t *testing.T) {
+	reader := &ast.FuncDecl{Name: "reader"}
+	consume := &ast.FuncDecl{
+		Name: "consume",
+		Params: []ast.ParamDecl{{
+			Name:         "callback",
+			DefaultValue: &ast.Ident{Name: "reader"},
+		}},
+	}
+	caller := &ast.FuncDecl{
+		Name: "caller",
+		Body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.CallExpr{Func: &ast.Ident{Name: "consume"}}}},
+	}
+	bodies := []scopedDecl{{Decl: reader}, {Decl: consume}, {Decl: caller}}
+	schedule := planBodySchedule(bodies, 2)
+	readerUnit, consumeUnit, callerUnit := schedule.unitOf[0], schedule.unitOf[1], schedule.unitOf[2]
+	if readerUnit == consumeUnit || consumeUnit == callerUnit || readerUnit == callerUnit {
+		t.Fatalf("default argument dependencies collapsed bodies into one unit: reader=%d consume=%d caller=%d", readerUnit, consumeUnit, callerUnit)
+	}
+	if schedule.pending[consumeUnit] != 1 || schedule.pending[callerUnit] != 1 {
+		t.Fatalf("pending dependencies: consume=%d caller=%d, want one callee each", schedule.pending[consumeUnit], schedule.pending[callerUnit])
+	}
+	for _, want := range []int{readerUnit, consumeUnit, callerUnit} {
+		if got := schedule.claim(0); got != want {
+			t.Fatalf("claimed unit %d, want callee-first unit %d", got, want)
+		}
+		schedule.finish(want)
+	}
+
+	selfDefault := &ast.FuncDecl{
+		Name: "self_default",
+		Params: []ast.ParamDecl{{
+			Name:         "callback",
+			DefaultValue: &ast.Ident{Name: "self_default"},
+		}},
+	}
+	selfSchedule := planBodySchedule([]scopedDecl{{Decl: selfDefault}}, 1)
+	if selfSchedule.cyclic[selfDefault] {
+		t.Fatal("function-valued default reference was incorrectly classified as recursive")
+	}
+}
+
 func TestParallelAnalyzerCloneSharesOnlyFrozenDeclarationMaps(t *testing.T) {
 	identifier := &ast.Ident{Name: "expr"}
 	base := &Analyzer{

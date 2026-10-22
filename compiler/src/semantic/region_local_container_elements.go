@@ -1125,7 +1125,7 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 			}
 		}
 		if len(states) > 1 {
-			merged, known = mergeRegionRefStates(states...)
+			merged, known = mergeCallElementStates(states)
 		}
 		if !known {
 			a.checkElementLoopAssumptions(sym, call, regionRefState{}, false)
@@ -1136,6 +1136,30 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 		a.currentElementStates[sym] = merged
 		a.traceElemState(sym, 1069)
 	}
+}
+
+// Flat direct provenance survives every intermediate union. Nested field merges
+// have order-sensitive normalization and sticky unknown verdicts, so retain their fold.
+func mergeCallElementStates(states []regionRefState) (regionRefState, bool) {
+	if len(states) == 0 {
+		return regionRefState{}, false
+	}
+	direct := len(states) > 1
+	for _, state := range states {
+		direct = direct && state.Fields == nil && (hasRegionDependencies(state) || hasRegionParamDependencies(state))
+	}
+	if direct {
+		return mergeRegionRefStates(states...)
+	}
+	merged, known := states[0], true
+	for _, state := range states[1:] {
+		if next, ok := mergeRegionRefStates(merged, state); ok {
+			merged = next
+		} else {
+			known = false
+		}
+	}
+	return merged, known
 }
 
 // isBuiltinDarrayCopyInCall reports whether call is the builtin `recv.extend(src)` or

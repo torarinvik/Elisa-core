@@ -859,20 +859,26 @@ func retainedPlainFunction(fn *ast.FuncDecl) bool {
 		len(fn.GenericParams) == 0 && !strings.HasPrefix(fn.Name, "__")
 }
 
-// retainedMentionsAny reports whether fn's body or contracts name any of names.
+// retainedMentionsAny reports whether fn's body, contracts, or parameter defaults
+// name any of names. Defaults are scanned separately because they participate in
+// retained invalidation without contributing function-body recursion edges.
 func retainedMentionsAny(fn *ast.FuncDecl, names map[string]bool) bool {
 	hit := false
-	walkStoreScanNodes(funcScanStmts(fn), func(node any) {
-		if hit {
-			return
-		}
-		switch n := node.(type) {
-		case *ast.Ident:
-			hit = names[n.Name] || names[fillMayAdoptLastSegment(n.Name)]
-		case *ast.FieldExpr:
-			hit = names[n.Field]
-		}
-	})
+	check := func(stmts []ast.Stmt) {
+		walkStoreScanNodes(stmts, func(node any) {
+			if hit {
+				return
+			}
+			switch n := node.(type) {
+			case *ast.Ident:
+				hit = names[n.Name] || names[fillMayAdoptLastSegment(n.Name)]
+			case *ast.FieldExpr:
+				hit = names[n.Field]
+			}
+		})
+	}
+	check(funcScanStmts(fn))
+	check(funcDefaultArgStmts(fn))
 	return hit
 }
 

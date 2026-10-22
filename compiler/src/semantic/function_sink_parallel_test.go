@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"elisacore/src/ast"
@@ -40,5 +41,37 @@ func TestParallelWorkersKeepBodylessSinkSummariesPrivate(t *testing.T) {
 	}
 	if shared.SinkParamsKnown || len(shared.SinkParams) != 0 {
 		t.Fatal("worker-local sink inference mutated the shared declaration type")
+	}
+}
+
+func TestParallelFuncTypeCachePromotesOwnershipAfterClaim(t *testing.T) {
+	decl := &ast.FuncDecl{Name: "work"}
+	shared := &FuncType{Name: "work"}
+	p := &parallelWorkerState{
+		worker: 0,
+		at:     map[*ast.FuncDecl][2]int{decl: {0, -1}},
+		slots:  make([]atomic.Int32, 1),
+	}
+	p.slots[0].Store(-1)
+	worker := &Analyzer{parallel: p}
+
+	beforeClaim := worker.privateFuncType(decl, shared)
+	if beforeClaim == shared || p.funcTypeOwned[shared] {
+		t.Fatal("pre-claim read should cache a private, unowned function type")
+	}
+	p.slots[0].Store(0)
+	afterClaim := worker.privateFuncType(decl, shared)
+	if afterClaim != beforeClaim {
+		t.Fatal("ownership promotion replaced the cached worker-local function type")
+	}
+	if !p.funcTypeOwned[shared] {
+		t.Fatal("cached function type did not become publishable after this worker claimed its body")
+	}
+
+	afterClaim.SinkParams = []bool{true}
+	afterClaim.SinkParamsKnown = true
+	p.publishFuncTypes()
+	if !shared.SinkParamsKnown || len(shared.SinkParams) != 1 || !shared.SinkParams[0] {
+		t.Fatal("claimed worker did not publish facts through its cached function type")
 	}
 }

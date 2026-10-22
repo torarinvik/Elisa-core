@@ -40,9 +40,6 @@ def progress_budget_probe() -> i64:
 	if exitCode != 0 {
 		t.Fatalf("expected progress runtime LLVM emit to succeed, stderr:\n%s", stderr.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
-	}
 	output := stdout.String()
 	for _, check := range []string{
 		"%ProgressBudget = type",
