@@ -947,6 +947,8 @@ type Analyzer struct {
 	// frozen types. Recursive walk results depend on the current cycle path, so only
 	// roots entered with an empty seen set are memoized.
 	abstractParamRegionRefMemo map[abstractParamRegionRefKey]regionRefState
+	// Frozen layout classifications for safe reference-element summary reuse.
+	abstractRefRestartMemo map[abstractRefRestartKey]bool
 	// regionRefAnyIndexParamFields shares the immutable one-entry wildcard field map for
 	// repeated array-like parameter states during abstract region-reference construction.
 	regionRefAnyIndexParamFields map[int]map[string]regionRefState

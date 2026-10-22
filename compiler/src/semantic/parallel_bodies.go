@@ -147,6 +147,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			},
 			programLivedTypesBase: a.programLivedTypes, smtLocalDefDepsBase: a.smtLocalDefDeps,
 			resolvedTypeNamesBase: a.resolvedTypeNames, abstractParamRegionRefMemoBase: a.abstractParamRegionRefMemo,
+			abstractRefRestartMemoBase: a.abstractRefRestartMemo,
 		}
 		clones[i] = w
 	}
@@ -348,7 +349,7 @@ func parallelBodyWorkerLocalOnlyMap(field string) bool {
 func parallelBodyMemoMap(field string) bool {
 	switch field {
 	case "affineHandleMemo", "borrowedOwnerRefMemo", "regionRefsMemo", "mutableBorrowCapabilityMemo", "storeScanAddressMemo",
-		"programLivedTypes", "smtLocalDefDeps", "resolvedTypeNames", "abstractParamRegionRefMemo":
+		"programLivedTypes", "smtLocalDefDeps", "resolvedTypeNames", "abstractParamRegionRefMemo", "abstractRefRestartMemo":
 		return true
 	default:
 		return false

@@ -652,7 +652,14 @@ func (a *Analyzer) abstractParamRegionRefStateWalk(t Type, paramIndex int, seen 
 	case *OptionalType:
 		return a.abstractParamRegionRefState(tt.Value, paramIndex, seen)
 	case *RefType:
-		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
+		elementSeen := seen
+		if element, ok := tt.Elem.(*StructType); ok && a.typeShapesFrozen && len(seen) == 1 && len(element.Fields) >= 8 && a.abstractRefElementCanRestart(element, key) {
+			// Removing this sole marker cannot alter the element traversal. An
+			// empty path permits the ordinary frozen root-summary memo to share
+			// its large immutable Fields map across distinct reference wrappers.
+			elementSeen = nil
+		}
+		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, elementSeen); ok {
 			if len(elemState.Fields) != 0 {
 				// This recursive result is newly built and its Fields map is immutable once
 				// reachable from a regionRefState. cloneRegionRefState(...).Fields therefore

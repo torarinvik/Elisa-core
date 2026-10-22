@@ -21,6 +21,7 @@ type parallelWorkerState struct {
 	smtLocalDefDepsBase            map[*Symbol][]string
 	resolvedTypeNamesBase          map[ast.TypeExpr]string
 	abstractParamRegionRefMemoBase map[abstractParamRegionRefKey]regionRefState
+	abstractRefRestartMemoBase     map[abstractRefRestartKey]bool
 	// at locates a body declaration in the snapshot: top-level index, and member
 	// index for an impl method (-1 for a top-level function).
 	at map[*ast.FuncDecl][2]int
