@@ -792,17 +792,18 @@ func (a *Analyzer) funcParamAllowsImplicitSink(funcExpr ast.Expr, fnType *FuncTy
 			a.inferFuncSinkParams(decl, resolvedType)
 		}
 		if resolvedType.SinkParamsKnown {
-			if resolvedType != fnType {
-				fnType.SinkParams = append([]bool(nil), resolvedType.SinkParams...)
-				fnType.SinkParamsKnown = true
-			}
-			return index < len(resolvedType.SinkParams) && resolvedType.SinkParams[index]
+			sinkParams := resolvedType.SinkParams
+			return index < len(sinkParams) && sinkParams[index]
 		}
+		fnType = resolvedType
+	} else if a.parallel != nil {
+		fnType = a.workerLocalSinkFuncType(nil, fnType)
 	}
 	if !fnType.SinkParamsKnown {
 		a.inferFuncSinkParamsForExpr(funcExpr, fnType)
 	}
-	return fnType.SinkParamsKnown && index < len(fnType.SinkParams) && fnType.SinkParams[index]
+	sinkParams := fnType.SinkParams
+	return fnType.SinkParamsKnown && index < len(sinkParams) && sinkParams[index]
 }
 
 // boundsLengthHint completes an arity message for a `@bounds` extern (docs/127 D6): the

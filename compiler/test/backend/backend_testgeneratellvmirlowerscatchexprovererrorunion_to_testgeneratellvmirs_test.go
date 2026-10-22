@@ -297,7 +297,7 @@ def read_view(view: view[i32]) -> i32:
 		"define i32 @read_view(%DynArrayView",
 		"getelementptr inbounds nuw %DynArray__i32",
 		"getelementptr inbounds nuw %DynArrayView",
-		"getelementptr i32, ptr",
+		"getelementptr inbounds i32, ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

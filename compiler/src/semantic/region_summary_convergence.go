@@ -61,6 +61,12 @@ func (a *Analyzer) funcIsCyclic(fn *ast.FuncDecl) bool {
 func (a *Analyzer) callEdgesOf(decl *ast.FuncDecl) []*ast.FuncDecl {
 	decl = a.readDecl(decl)
 	if edges, ok := a.callEdgeCache[decl]; ok {
+		if mapped, changed := a.parallelReadDeclSlice(edges); changed {
+			// The worker owns a cloned cache map. Replace only its entry so later
+			// reads reuse the correctly shadowed edge slice.
+			a.callEdgeCache[decl] = mapped
+			return mapped
+		}
 		return edges
 	}
 	if a.callEdgeCache == nil {

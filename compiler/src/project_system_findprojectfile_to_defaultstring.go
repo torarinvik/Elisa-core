@@ -478,14 +478,14 @@ func writeSourceWithIncludesWithOptions(out *bytes.Buffer, filename string, seen
 }
 
 func writeSourceWithIncludesWithOptionsActive(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options sourceExpandOptions) error {
-	return writeSourceWithIncludesWithOptionsPrefixed(out, filename, included, active, options, nil)
+	return writeSourceWithIncludesPrefixed(out, filename, included, active, &options, nil)
 }
 
-// writeSourceWithIncludesWithOptionsPrefixed streams included files into one output
+// writeSourceWithIncludesPrefixed streams included files into one output
 // buffer. Prefixes reproduce the indentation that each recursive include splice adds
 // to non-#line lines, without materializing and copying a temporary expanded buffer at
 // every include depth.
-func writeSourceWithIncludesWithOptionsPrefixed(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options sourceExpandOptions, prefixes [][]byte) error {
+func writeSourceWithIncludesPrefixed(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool, options *sourceExpandOptions, prefixes [][]byte) error {
 	abs, err := filepath.Abs(filename)
 	if err != nil {
 		return err
@@ -522,14 +522,21 @@ func writeSourceWithIncludesWithOptionsPrefixed(out *bytes.Buffer, filename stri
 		}
 		line := raw[start:end]
 		if includePath, ok := parseIncludeDirectiveBytes(bytes.TrimSpace(line)); ok {
-			resolved, err := resolveExpandedIncludePath(filepath.Dir(abs), includePath, options.includeDirs)
-			if err != nil {
-				return err
+			resolved := includePath
+			if options == nil {
+				if !filepath.IsAbs(resolved) {
+					resolved = filepath.Join(filepath.Dir(abs), resolved)
+				}
+			} else {
+				resolved, err = resolveExpandedIncludePath(filepath.Dir(abs), includePath, options.includeDirs)
+				if err != nil {
+					return err
+				}
 			}
 			indent := leadingWhitespaceBytes(line)
 			outLenBefore := out.Len()
 			childPrefixes := append(prefixes, indent)
-			if err := writeSourceWithIncludesWithOptionsPrefixed(out, resolved, included, active, options, childPrefixes); err != nil {
+			if err := writeSourceWithIncludesPrefixed(out, resolved, included, active, options, childPrefixes); err != nil {
 				return err
 			}
 			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {

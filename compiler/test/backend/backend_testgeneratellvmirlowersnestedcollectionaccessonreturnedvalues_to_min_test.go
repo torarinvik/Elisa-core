@@ -43,7 +43,7 @@ def read_array_view_index() -> i32:
 		"darrayslice.view.len.out = sub i64",
 		"getelementptr i8, ptr",
 		"extractvalue %DynArray__i32",
-		"getelementptr i32, ptr",
+		"getelementptr inbounds i32, ptr",
 		"alloca %DynArray__i32",
 		"alloca %DynArrayView",
 	}
@@ -407,9 +407,13 @@ func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
 	}
-	if !strings.Contains(output, "%ChunksExactView__i32 = type { %DynArrayView, i64, i64 }") {
+	if !strings.Contains(output, "%\"ChunksExactView$generic_v1$") {
 		t.Fatalf("expected output to declare the ChunksExactView carrier type, got:\n%s", output)
 	}
+	chunksType := genericV1Symbol(t, output, `%"ChunksExactView$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		chunksType+" = type { %DynArrayView, i64, i64 }",
+	)
 	ir := functionIR(output, "checksum")
 	if ir == "" {
 		t.Fatalf("expected to find LLVM IR for checksum, got:\n%s", output)
@@ -444,8 +448,8 @@ func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	}
 
 	checks := []string{
-		"%SplitView__i32 = type { %DynArrayView, %DynArrayView }",
-		"%ChunksExactView__i32 = type { %DynArrayView, i64, i64 }",
+		"%\"SplitView$generic_v1$",
+		"%\"ChunksExactView$generic_v1$",
 		"define void @run(%DynArray__i32",
 		"split.left.len.out = sub i64",
 		"chunks.item.len.out = sub i64",
@@ -457,6 +461,12 @@ func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	splitType := genericV1Symbol(t, output, `%"SplitView$generic_v1$`)
+	chunksType := genericV1Symbol(t, output, `%"ChunksExactView$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		splitType+" = type { %DynArrayView, %DynArrayView }",
+		chunksType+" = type { %DynArrayView, i64, i64 }",
+	)
 }
 func TestGenerateLLVMIRLowersReduceSumHelper(t *testing.T) {
 	src := `def add_bias(value: i64, bias: i64) -> i64:

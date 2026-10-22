@@ -1493,7 +1493,7 @@ func (a *Analyzer) defineRegionParamValueSymbols(fn *ast.FuncDecl) {
 		sym := &Symbol{Name: name, Kind: SymbolRegion, Type: arenaRef, Node: fn, Mutable: true}
 		a.defineLocal(sym, fn.Pos())
 		if a.currentRegions != nil {
-			a.currentRegions[sym] = regionState{Backing: normalizeBacking(""), DeclScope: a.currentScope}
+			a.setCurrentRegionState(sym, regionState{Backing: normalizeBacking(""), DeclScope: a.currentScope})
 		}
 	}
 }

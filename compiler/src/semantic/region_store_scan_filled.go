@@ -63,7 +63,8 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 	decl = a.readDecl(decl)
 	atMost := func(v ast.Expr) bool { return a.storeScanAtMostViews(decl, v, content, views, filled, seen) }
 	ok := true
-	for _, node := range a.storeScanIndex(decl).nodes[name] {
+	idx := a.storeScanIndex(decl)
+	for _, node := range idx.nodes[name] {
 		if !ok {
 			break
 		}
@@ -137,7 +138,7 @@ func (a *Analyzer) storeScanLocalIsFilled(decl *ast.FuncDecl, name string, conte
 			}
 			rooted := []int{}
 			for i, arg := range args {
-				if storeScanIdentCount(arg, name) == 0 {
+				if idx.identCount(arg, name) == 0 {
 					continue
 				}
 				if !storeScanRootedAt(arg, name) {
@@ -356,7 +357,6 @@ func storeScanRootedAtFilled(value ast.Expr, lazy *lazyFilledLocalSet) bool {
 	}
 	return lazy.set[root.Name]
 }
-
 
 // storeScanBindsNoStorage: a destructuring bind whose value's type shares no storage (`slot,
 // found = probe(x.slots, ..)` binds two scalars): its binders alias nothing of the header.

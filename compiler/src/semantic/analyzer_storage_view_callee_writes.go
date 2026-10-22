@@ -41,6 +41,14 @@ type storageViewCalleeWriteKey struct {
 
 const storageViewCalleeWriteDepthLimit = 48
 
+// These summaries are tied to declaration bodies and names. Retained analysis
+// may splice bodies in place and add or remove declarations, so clear both lazy
+// indexes before reanalyzing an accepted update.
+func (a *Analyzer) invalidateStorageViewCalleeWriteCaches() {
+	a.storageViewCalleeWriteCache = nil
+	a.storageViewWriteDeclsByName = nil
+}
+
 // storageViewReadOnlyBuiltinMethods never grow, clear or reassign their receiver.
 var storageViewReadOnlyBuiltinMethods = map[string]bool{
 	"count": true, "len": true, "get": true, "contains": true, "is_empty": true, "as_sview": true,
@@ -114,7 +122,16 @@ func storageViewCalleeParamReadOnly(param ast.ParamDecl) bool {
 	return isRef
 }
 
+// The returned summary is immutable; union it into a private receiver before editing.
 func (a *Analyzer) storageViewCalleeWritesFor(decls []*ast.FuncDecl, param int) storageViewCalleeWrites {
+	if len(decls) == 1 {
+		decl := a.readDecl(decls[0])
+		if decl != nil && param >= 0 && param < len(decl.Params) && !storageViewCalleeParamReadOnly(decl.Params[param]) {
+			if cached, ok := a.storageViewCalleeWriteCache[storageViewCalleeWriteKey{decl: decl, param: param}]; ok {
+				return cached
+			}
+		}
+	}
 	solve := &storageViewWriteSolve{prov: map[storageViewCalleeWriteKey]storageViewCalleeWrites{}}
 	var out storageViewCalleeWrites
 	for round := 0; ; round++ {
@@ -200,8 +217,7 @@ func (a *Analyzer) storageViewCalleeWritesForDecl(decl *ast.FuncDecl, param int,
 	// once per (parameter, round).
 	body, cached := solve.bodies[decl]
 	if !cached {
-		fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(node any) { body.nodes = append(body.nodes, node) })
-		body.locals = storageViewDeclLocalNames(decl, body.nodes)
+		body = storageViewScanBody(decl)
 		if solve.bodies == nil {
 			solve.bodies = map[*ast.FuncDecl]storageViewSolveBody{}
 		}
@@ -292,11 +308,11 @@ func (a *Analyzer) storageViewCalleeWritesForDecl(decl *ast.FuncDecl, param int,
 	if !old.covers(writes) {
 		solve.changed = true
 	}
-	merged := storageViewCalleeWrites{}
-	merged.union(old)
-	merged.union(writes)
-	solve.prov[key] = merged
-	return merged, complete
+	// Provisional summaries are owned by this solve and grow monotonically.
+	// Grow their maps in place instead of copying all prior fields each round.
+	old.union(writes)
+	solve.prov[key] = old
+	return old, complete
 }
 
 // storageViewCalleeWriteStmtFields reads a statement's place-bearing fields generically:
@@ -499,7 +515,20 @@ func (a *Analyzer) storageViewCalleeWriteSpare(call *ast.CallExpr, arg ast.Expr)
 			return nil
 		}
 		for _, index := range indices {
-			writes.union(a.storageViewCalleeWritesFor([]*ast.FuncDecl{pair.decl}, index))
+			next := a.storageViewCalleeWritesFor([]*ast.FuncDecl{pair.decl}, index)
+			if next.All {
+				return nil
+			}
+			// Completed summaries are immutable. Reuse a covering set, and
+			// copy only when distinct possible callees add different fields.
+			if next.covers(writes) {
+				writes = next
+			} else if !writes.covers(next) {
+				var joined storageViewCalleeWrites
+				joined.union(writes)
+				joined.union(next)
+				writes = joined
+			}
 		}
 		if writes.All {
 			break
@@ -647,34 +676,53 @@ func storageViewDeclLocalNames(decl *ast.FuncDecl, nodes []any) map[string]bool 
 		out[param.Name] = true
 	}
 	for _, node := range nodes {
-		if _, isIdent := node.(*ast.Ident); isIdent {
-			continue
-		}
-		if _, isField := node.(*ast.FieldExpr); isField {
-			continue
-		}
-		v := reflect.ValueOf(node)
-		for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
-			if v.IsNil() {
-				break
-			}
-			v = v.Elem()
-		}
-		if v.Kind() != reflect.Struct {
-			continue
-		}
-		rfs := reflectFields(v.Type())
-		for i := 0; i < v.NumField(); i++ {
-			info := &rfs[i]
-			if !info.IsExported() {
-				continue
-			}
-			if info.Name == "Names" || info.Name == "Binding" || info.Name == "Bindings" || strings.HasSuffix(info.Name, "Name") {
-				collectStorageViewStrings(v.Field(i), out)
-			}
-		}
+		storageViewCollectLocalNames(node, out)
 	}
 	return out
+}
+
+// Keep only nodes inspected by the write and unhandled-identifier passes.
+// Names still come from every visited node, including type and pattern nodes.
+func storageViewScanBody(decl *ast.FuncDecl) storageViewSolveBody {
+	body := storageViewSolveBody{locals: map[string]bool{}}
+	for _, param := range decl.Params {
+		body.locals[param.Name] = true
+	}
+	fillMayAdoptWalk(reflect.ValueOf(decl.Body), func(node any) {
+		storageViewCollectLocalNames(node, body.locals)
+		switch node.(type) {
+		case ast.Stmt, *ast.CallExpr, *ast.AddrOfExpr, *ast.FieldExpr, *ast.IndexExpr, *ast.Ident:
+			body.nodes = append(body.nodes, node)
+		}
+	})
+	return body
+}
+
+func storageViewCollectLocalNames(node any, out map[string]bool) {
+	switch node.(type) {
+	case *ast.Ident, *ast.FieldExpr:
+		return
+	}
+	v := reflect.ValueOf(node)
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			break
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	rfs := reflectFields(v.Type())
+	for i := 0; i < v.NumField(); i++ {
+		info := &rfs[i]
+		if !info.IsExported() {
+			continue
+		}
+		if info.Name == "Names" || info.Name == "Binding" || info.Name == "Bindings" || strings.HasSuffix(info.Name, "Name") {
+			collectStorageViewStrings(v.Field(i), out)
+		}
+	}
 }
 
 func collectStorageViewStrings(value reflect.Value, out map[string]bool) {

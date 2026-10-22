@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"elisacore/src/ast"
@@ -151,6 +153,114 @@ func TestParallelBodyWorkerMemoOverlaysUseFrozenBases(t *testing.T) {
 	}
 	if worker.affineHandleMemo[other] != true || base.affineHandleMemo[other] {
 		t.Fatal("worker memo miss was not isolated from its frozen base")
+	}
+}
+
+func TestParallelBodyWorkerKeepsShadowableCallGraphCachesLocal(t *testing.T) {
+	fn := &ast.FuncDecl{Name: "owner"}
+	callee := &ast.FuncDecl{Name: "callee"}
+	shadow := &ast.FuncDecl{Name: "callee"}
+	base := &Analyzer{
+		callEdgeCache:   map[*ast.FuncDecl][]*ast.FuncDecl{fn: {callee}},
+		storeFlowSCC:    map[*ast.FuncDecl][]*ast.FuncDecl{fn: {fn, callee}},
+		storeFlowActive: map[*ast.FuncDecl]bool{fn: true},
+	}
+	worker := cloneAnalyzerValueForBodyWorker(base).Addr().Interface().(*Analyzer)
+	if worker.callEdgeCache[fn][0] != callee || worker.storeFlowSCC[fn][1] != callee || worker.storeFlowActive != nil {
+		t.Fatal("body worker lost canonical graph entries or inherited active solver state")
+	}
+	worker.callEdgeCache[fn] = []*ast.FuncDecl{shadow}
+	worker.storeFlowSCC[fn] = append(worker.storeFlowSCC[fn], shadow)
+	if base.callEdgeCache[fn][0] != callee || base.storeFlowSCC[fn][1] != callee || !base.storeFlowActive[fn] {
+		t.Fatal("body-worker clone changed the base analyzer's call-graph state")
+	}
+
+	for _, path := range exportDeclMapPaths() {
+		name := reflect.TypeOf(Analyzer{}).Field(path[0]).Name
+		if parallelBodyWorkerLocalOnlyMap(name) {
+			t.Errorf("worker-private map %s is included in unit exports", name)
+		}
+	}
+
+	slots := make([]atomic.Int32, 2)
+	slots[0].Store(0)
+	slots[1].Store(1)
+	p := &parallelWorkerState{
+		worker:   0,
+		at:       map[*ast.FuncDecl][2]int{fn: {0, -1}, callee: {1, -1}},
+		slots:    slots,
+		original: map[*ast.FuncDecl]*ast.FuncDecl{shadow: callee},
+	}
+	worker = &Analyzer{
+		callEdgeCache:   map[*ast.FuncDecl][]*ast.FuncDecl{fn: {shadow}},
+		storeFlowSCC:    map[*ast.FuncDecl][]*ast.FuncDecl{fn: {fn, shadow}},
+		storeFlowActive: map[*ast.FuncDecl]bool{fn: true},
+	}
+	dst := &Analyzer{}
+	baseValue := reflect.ValueOf(dst).Elem()
+	baseSnapshot := reflect.New(reflect.TypeOf(Analyzer{})).Elem()
+	baseSnapshot.Set(baseValue)
+	mergeValue(baseValue, reflect.ValueOf(worker).Elem(), baseSnapshot, p)
+	if dst.callEdgeCache != nil || dst.storeFlowSCC != nil || dst.storeFlowActive != nil {
+		t.Fatal("worker-private call-graph state leaked into the base analyzer during merge")
+	}
+}
+
+func TestParallelWorkerDoesNotExportShadowCallGraphCaches(t *testing.T) {
+	call := func(name string) ast.Stmt { return &ast.ExprStmt{Expr: &ast.CallExpr{Func: &ast.Ident{Name: name}}} }
+	owner := &ast.FuncDecl{Name: "owner", Body: []ast.Stmt{call("callee")}}
+	callee := &ast.FuncDecl{Name: "callee", Body: []ast.Stmt{call("owner")}}
+	snapshot := func(fn *ast.FuncDecl) *ast.SyntaxSnapshot {
+		s, err := ast.NewSyntaxSnapshot(&ast.File{Decls: []ast.Decl{fn}}, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	slots := make([]atomic.Int32, 2)
+	slots[0].Store(0)
+	slots[1].Store(1)
+	p := &parallelWorkerState{
+		worker: 0, snapshots: []*ast.SyntaxSnapshot{snapshot(owner), snapshot(callee)},
+		at:          map[*ast.FuncDecl][2]int{owner: {0, -1}, callee: {1, -1}},
+		slots:       slots,
+		shadows:     map[*ast.FuncDecl]*ast.FuncDecl{},
+		readShadows: map[*ast.FuncDecl]*ast.FuncDecl{},
+		original:    map[*ast.FuncDecl]*ast.FuncDecl{},
+		imported:    map[*ast.FuncDecl]bool{},
+	}
+	a := &Analyzer{
+		funcDeclSymbols: map[*ast.FuncDecl]*Symbol{owner: {Name: "owner"}, callee: {Name: "callee"}},
+		parallel:        p,
+	}
+	if edges := a.callEdgesOf(owner); len(edges) != 1 || edges[0] == callee || p.original[edges[0]] != callee {
+		t.Fatalf("expected the cold worker call-edge cache to contain a foreign shadow, got %#v", edges)
+	}
+	component := a.storeFlowComponent(owner)
+	foundShadow := false
+	for _, member := range component {
+		if p.original[member] == callee {
+			foundShadow = true
+		}
+	}
+	if !foundShadow {
+		t.Fatalf("expected the store-flow SCC cache to contain the foreign shadow, got %#v", component)
+	}
+
+	s := &bodySchedule{
+		funcs: [][]*ast.FuncDecl{{owner}}, exported: make([]map[int]reflect.Value, 1),
+		nodes: make([][]reflect.Value, 1), stmts: make([][]ast.Stmt, 1),
+		done: []chan struct{}{make(chan struct{})}, sccOf: []int{0},
+		sccLeft: map[int]int{0: 1}, sccPublish: map[int][][2]*FuncType{},
+	}
+	s.exportUnit(a, 0)
+	for pathIndex, path := range exportDeclMapPaths() {
+		name := reflect.TypeOf(Analyzer{}).Field(path[0]).Name
+		if name == "callEdgeCache" || name == "storeFlowSCC" {
+			if _, exported := s.exported[0][pathIndex]; exported {
+				t.Errorf("worker-local shadow cache %s was exported", name)
+			}
+		}
 	}
 }
 

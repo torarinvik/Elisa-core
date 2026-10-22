@@ -124,7 +124,7 @@ func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
 		a.recordResolvedRegionRefBinding(sym, state)
 		return
 	}
-	delete(a.currentRegionRefs, sym)
+	a.deleteCurrentRegionRefState(sym)
 }
 
 // containerRegionDependency derives a region dependency from a binding's declared
@@ -453,7 +453,7 @@ func (a *Analyzer) resolvePackedStoreDependenciesInState(state regionRefState) (
 func (a *Analyzer) canonicalizeStoredRegionRefBinding(sym *Symbol, state regionRefState) regionRefState {
 	nextState, changed := a.resolvePackedStoreDependenciesInState(state)
 	if changed && a.currentRegionRefs != nil && sym != nil {
-		a.currentRegionRefs[sym] = nextState
+		a.setCurrentRegionRefState(sym, nextState)
 	}
 	return nextState
 }
@@ -463,12 +463,12 @@ func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefSt
 		return
 	}
 	if !hasRegionProvenance(state) {
-		delete(a.currentRegionRefs, sym)
+		a.deleteCurrentRegionRefState(sym)
 		return
 	}
 	state, _ = a.resolvePackedStoreDependenciesInState(state)
 	state = withPackedStoreProvenanceSummary(state)
-	a.currentRegionRefs[sym] = cloneRegionRefStateSharedFields(state)
+	a.setCurrentRegionRefState(sym, cloneRegionRefStateSharedFields(state))
 }
 
 func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {
@@ -534,7 +534,7 @@ func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionDep
 	for sym, state := range a.currentRegionRefs {
 		nextState, changed := invalidateRegionDependencyInState(state, region, predicate, reason)
 		if changed {
-			a.currentRegionRefs[sym] = nextState
+			a.setCurrentRegionRefState(sym, nextState)
 		}
 	}
 }

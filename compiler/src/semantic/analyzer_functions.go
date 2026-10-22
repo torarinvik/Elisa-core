@@ -111,16 +111,20 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	savedPending := a.pendingStorageViewErrors
 	a.pendingStorageViewErrors = nil
 	defer func() { a.pendingStorageViewErrors = savedPending }()
+	restoreFreshShapes := a.enterFreshShapeScope(fn, typeArgs, "body")
+	defer restoreFreshShapes()
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl
 	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedStructLocalAllocRegion := a.currentStructLocalAllocRegion
 	savedStructInteriorRegionTaint := a.currentStructInteriorRegionTaint
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedAffineValues := a.currentAffineValues
 	savedDropLocals := a.currentDropLocals
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
@@ -160,8 +164,10 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentAliasCarrierFieldOverrides = nil
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionsBorrowed = false
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentRegionRefsBorrowed = false
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
 	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
@@ -371,10 +377,12 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentStructLocalAllocRegion = savedStructLocalAllocRegion
 	a.currentStructInteriorRegionTaint = savedStructInteriorRegionTaint
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentAffineValues = savedAffineValues
 	a.currentDropLocals = savedDropLocals
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
@@ -678,16 +686,20 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.returnProvenanceInProgress[fn] = true
 	defer delete(a.returnProvenanceInProgress, fn)
 
+	restoreFreshShapes := a.enterFreshShapeScope(fn, nil, "infer-provenance")
+	defer restoreFreshShapes()
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl
 	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedStructLocalAllocRegion := a.currentStructLocalAllocRegion
 	savedStructInteriorRegionTaint := a.currentStructInteriorRegionTaint
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedAffineValues := a.currentAffineValues
 	savedDropLocals := a.currentDropLocals
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
@@ -716,8 +728,10 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFuncType = nil
 	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionsBorrowed = false
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentRegionRefsBorrowed = false
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
 	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
@@ -831,10 +845,12 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentStructLocalAllocRegion = savedStructLocalAllocRegion
 	a.currentStructInteriorRegionTaint = savedStructInteriorRegionTaint
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentAffineValues = savedAffineValues
 	a.currentDropLocals = savedDropLocals
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
@@ -880,16 +896,20 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	restoreExprTypes := a.preserveFunctionExprTypes(fn)
 	defer restoreExprTypes()
 
+	restoreFreshShapes := a.enterFreshShapeScope(fn, nil, "infer-owner")
+	defer restoreFreshShapes()
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl
 	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedStructLocalAllocRegion := a.currentStructLocalAllocRegion
 	savedStructInteriorRegionTaint := a.currentStructInteriorRegionTaint
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedAffineValues := a.currentAffineValues
 	savedDropLocals := a.currentDropLocals
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
@@ -918,8 +938,10 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFuncType = nil
 	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionsBorrowed = false
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentRegionRefsBorrowed = false
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
 	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
@@ -1020,10 +1042,12 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentStructLocalAllocRegion = savedStructLocalAllocRegion
 	a.currentStructInteriorRegionTaint = savedStructInteriorRegionTaint
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentAffineValues = savedAffineValues
 	a.currentDropLocals = savedDropLocals
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs

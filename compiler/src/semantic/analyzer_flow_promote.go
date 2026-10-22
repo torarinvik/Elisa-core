@@ -52,7 +52,7 @@ func (a *Analyzer) analyzePromoteStmt(n *ast.PromoteStmt) {
 	// local binding this re-types the binding in place (it now lives in dst).
 	newState, _ := rebaseRegionDependencyInState(valState, srcSym, dstSym, dstState.Generation)
 	if sym := a.promoteTargetSymbol(n.Value); sym != nil {
-		a.currentRegionRefs[sym] = newState
+		a.setCurrentRegionRefState(sym, newState)
 	}
 }
 

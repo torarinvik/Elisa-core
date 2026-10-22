@@ -417,7 +417,7 @@ func (a *Analyzer) markRegionAllocatedByOwnerExpr(expr ast.Expr) {
 		return
 	}
 	state.Allocated = true
-	a.currentRegions[sym] = state
+	a.setCurrentRegionState(sym, state)
 }
 
 func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVariant, bool) {

@@ -322,6 +322,8 @@ type storeFlowBinderIndex struct {
 	// asks for the full binder set per identifier (~2 s of map building in the q7 stage1 profile).
 	// Callers only read it.
 	allNames map[string]bool
+	// Integer classification is queried per expression; callers only read this set.
+	integerNames map[string]bool
 }
 
 type storeFlowTypedBinder struct {
@@ -354,11 +356,43 @@ func (idx *storeFlowBinderIndex) sets(pred func(ast.TypeExpr) bool) (map[string]
 }
 
 func (idx *storeFlowBinderIndex) typedNames(pred func(ast.TypeExpr) bool) map[string]bool {
-	scalar, other := idx.sets(pred)
-	for n := range other {
-		delete(scalar, n)
+	// A false entry is a permanent veto from a conflicting declaration or
+	// untyped binder. Keep candidates and vetoes in one pre-sized map rather
+	// than growing two maps and then subtracting one from the other.
+	names := make(map[string]bool, len(idx.binderNames()))
+	note := func(name string, accepted bool) {
+		if previous, exists := names[name]; !exists || !accepted || previous {
+			names[name] = accepted
+		}
 	}
-	return scalar
+	for _, binder := range idx.typed {
+		note(binder.name, pred(binder.t))
+	}
+	if pred(storeFlowRangeIndexType) {
+		for _, name := range idx.rangeNames {
+			note(name, true)
+		}
+	} else {
+		for _, name := range idx.rangeOther {
+			note(name, false)
+		}
+	}
+	for _, name := range idx.other {
+		note(name, false)
+	}
+	for name, accepted := range names {
+		if !accepted {
+			delete(names, name)
+		}
+	}
+	return names
+}
+
+func (idx *storeFlowBinderIndex) integerBinderNames() map[string]bool {
+	if idx.integerNames == nil {
+		idx.integerNames = idx.typedNames(storeFlowIntegerTypeExpr)
+	}
+	return idx.integerNames
 }
 
 func (idx *storeFlowBinderIndex) binderNames() map[string]bool {
@@ -580,6 +614,15 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 		a.storeFlowActive = map[*ast.FuncDecl]bool{}
 	}
 	members := a.storeFlowComponent(decl)
+	// A nested query can discover an SCC that overlaps one already being solved
+	// (for example through worker-local declaration shadows). Starting it would
+	// overwrite and then delete the outer solver's in-progress entries. Unknown is
+	// conservative for the caller, so leave the active component untouched.
+	for _, m := range members {
+		if a.storeFlowActive[m] || a.storeFlowInProgress[m] != nil {
+			return nil
+		}
+	}
 	inSCC := map[*ast.FuncDecl]bool{}
 	for _, m := range members {
 		inSCC[m] = true
@@ -610,6 +653,12 @@ func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
 		next := a.computeStoreFlow(m)
 		cur := a.storeFlowInProgress[m]
 		if next == nil {
+			settled = false
+			break
+		}
+		if cur == nil {
+			// A recursive cache alias changed while the component was solving.
+			// Do not panic or publish a partial summary; unknown over-approximates.
 			settled = false
 			break
 		}
@@ -671,6 +720,12 @@ func storeFlowSummarizable(decl *ast.FuncDecl) bool {
 func (a *Analyzer) storeFlowComponent(decl *ast.FuncDecl) []*ast.FuncDecl {
 	decl = a.readDecl(decl)
 	if comp, ok := a.storeFlowSCC[decl]; ok {
+		if mapped, changed := a.parallelReadDeclSlice(comp); changed {
+			// Warm SCCs contain canonical declarations. Translate them into this
+			// worker's read identities and keep the shadow-bearing slice local.
+			a.storeFlowSCC[decl] = mapped
+			return mapped
+		}
 		return comp
 	}
 	if a.storeFlowSCC == nil {
@@ -1065,9 +1120,7 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 		// pointer-free field, but that assignment does not retain the expression's
 		// storage. Keep any call effects on the RHS, while excluding scalar field
 		// reads that would otherwise connect their container roots to the target.
-		var ignoreNested []reflect.Value
-		var ignoreCalls []*ast.CallExpr
-		rhsNames := a.storeFlowMentions(reflect.ValueOf(assign.Value), 0, handled, &ignoreNested, &ignoreCalls, false)
+		rhsNames := a.storeFlowMentions(reflect.ValueOf(assign.Value), 0, handled, nil, nil, false)
 		c.link(storeFlowRemoveNames(rhsNames, a.storeFlowPointerFreeAccessRoots(assign.Value)))
 		return nested
 	}
@@ -1076,17 +1129,13 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 		// initializer mentions may reach v, but nothing flows back into those names, and they
 		// are not joined to each other through it. Every call inside must be summarized, so the
 		// names in its arguments were already placed by the callee's connections.
-		var ignoreNested []reflect.Value
-		var ignoreCalls []*ast.CallExpr
-		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, &ignoreNested, &ignoreCalls, false)
+		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, false)
 		c.flow(outside, []string{binding})
 		c.link([]string{binding})
 	} else if isReturn && !binds && len(handled) == len(calls) {
 		// `return e` with every call summarized: what e mentions reaches the result, but the
 		// return itself stores nothing into those names nor joins them to each other.
-		var ignoreNested []reflect.Value
-		var ignoreCalls []*ast.CallExpr
-		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, &ignoreNested, &ignoreCalls, false)
+		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, false)
 		c.flow(outside, []string{storeFlowRetName})
 	} else if len(handled) == 0 {
 		c.link(names)
@@ -1099,9 +1148,7 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 	} else {
 		// Names inside a handled call were placed by its summary; the rest of the statement
 		// joins with whatever the callee lets reach its result.
-		var ignoreNested []reflect.Value
-		var ignoreCalls []*ast.CallExpr
-		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, &ignoreNested, &ignoreCalls, callsOnly)
+		outside := a.storeFlowMentions(stmt.Elem(), stmt.Pointer(), handled, nil, nil, callsOnly)
 		if isReturn {
 			outside = append(outside, storeFlowRetName)
 		}
@@ -1429,7 +1476,9 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 			}
 			info := storeFlowTypeInfoOf(v.Type())
 			if info.isStmt && v.Pointer() != self {
-				*nested = append(*nested, v)
+				if nested != nil {
+					*nested = append(*nested, v)
+				}
 				if a.storeFlowStmtEnv != nil {
 					a.storeFlowStmtEnv[v.Pointer()] = rename
 				}
@@ -1482,7 +1531,9 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				}
 				callDepth++
 				defer func() { callDepth-- }()
-				*calls = append(*calls, call)
+				if calls != nil {
+					*calls = append(*calls, call)
+				}
 				if retNames, isHandled := handled[call]; isHandled {
 					if condDepth == 0 {
 						names = append(names, retNames...)
@@ -1509,7 +1560,9 @@ func (a *Analyzer) storeFlowMentions(root reflect.Value, self uintptr, handled m
 				walkStructFields(v)
 				return
 			}
-			if arm, ok := v.Interface().(ast.MatchArm); ok {
+			// The arm is addressable: borrow it instead of boxing the entire
+			// struct on every traversal of a store-flow summary.
+			if arm, ok := v.Addr().Interface().(*ast.MatchArm); ok {
 				// A match arm's pattern binders are scoped to that arm (its guard and body):
 				// distinct arms and matches reusing a binder name must not be unified through it.
 				binders := storeFlowPatternBinders(arm.Pattern)
@@ -1587,15 +1640,11 @@ func (a *Analyzer) isDeclaredFuncName(name string) bool {
 // storeFlowArgNames is storeFlowExprNames with the already summarized calls inside the
 // expression standing for what reaches their results.
 func (a *Analyzer) storeFlowArgNames(expr ast.Expr, handled map[*ast.CallExpr][]string) []string {
-	var nested []reflect.Value
-	var calls []*ast.CallExpr
-	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, handled, &nested, &calls, false)
+	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, handled, nil, nil, false)
 }
 
 func (a *Analyzer) storeFlowExprNames(expr ast.Expr) []string {
-	var nested []reflect.Value
-	var calls []*ast.CallExpr
-	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, nil, &nested, &calls, false)
+	return a.storeFlowMentions(reflect.ValueOf(&expr).Elem(), 0, nil, nil, nil, false)
 }
 
 // storeFlowCallee resolves a call to the single declared function it can only mean, or nil.
@@ -1752,9 +1801,8 @@ func (a *Analyzer) applyCallStoreFlow(call *ast.CallExpr, c *storeFlowCtx, handl
 	if a.storeFlowBuiltinDarrayReserve(call) {
 		// Inner calls are processed first. If one is unresolved, leave this
 		// outer call conservative so handling reserve cannot hide its effects.
-		var nested []reflect.Value
 		var capacityCalls []*ast.CallExpr
-		a.storeFlowMentions(reflect.ValueOf(call.Args[0]), 0, nil, &nested, &capacityCalls, false)
+		a.storeFlowMentions(reflect.ValueOf(call.Args[0]), 0, nil, nil, &capacityCalls, false)
 		for _, inner := range capacityCalls {
 			if _, ok := handled[inner]; !ok {
 				return nil, false
@@ -2123,7 +2171,7 @@ func (a *Analyzer) storeFlowIntegerExpr(expr ast.Expr) bool {
 		if e == nil || a.storeFlowCurrentDecl == nil {
 			return false
 		}
-		return a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).typedNames(storeFlowIntegerTypeExpr)[e.Name]
+		return a.storeFlowBinderIndexFor(a.storeFlowCurrentDecl).integerBinderNames()[e.Name]
 	default:
 		return false
 	}

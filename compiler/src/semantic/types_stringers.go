@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -461,6 +462,15 @@ func (s *ShapeParam) String() string    { return s.Name }
 func (s *NamedShape) String() string    { return s.Name }
 func (s *WildcardShape) String() string { return "_" }
 func (s *FreshShape) String() string {
+	if s.Scope != "" {
+		label := s.Label
+		if label == "" {
+			label = "shape"
+		}
+		// Keep the complete scope in identity comparisons, and a bounded stable
+		// spelling in diagnostics and structural string keys.
+		return fmt.Sprintf("%s#%d@%x", label, s.ID, sha256.Sum256([]byte(s.Scope)))
+	}
 	if s.Label != "" {
 		return fmt.Sprintf("%s#%d", s.Label, s.ID)
 	}

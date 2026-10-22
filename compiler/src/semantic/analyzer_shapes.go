@@ -172,7 +172,7 @@ func shapeMismatchNotes(expected Type, actual Type) []string {
 		sameFresh := false
 		for _, lhs := range expectedFresh {
 			for _, rhs := range actualFresh {
-				if lhs != nil && rhs != nil && lhs.ID == rhs.ID {
+				if lhs != nil && rhs != nil && lhs.identity() == rhs.identity() {
 					sameFresh = true
 					break
 				}
@@ -205,13 +205,13 @@ func collectFreshShapesInType(t Type) []*FreshShape {
 	if t == nil {
 		return nil
 	}
-	seen := map[int]bool{}
+	seen := map[freshShapeIdentity]bool{}
 	out := make([]*FreshShape, 0)
 	collectFreshShapesInto(t, seen, &out)
 	return out
 }
 
-func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
+func collectFreshShapesInto(t Type, seen map[freshShapeIdentity]bool, out *[]*FreshShape) {
 	if t == nil {
 		return
 	}
@@ -221,16 +221,16 @@ func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
 	case *ArrayType:
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *DArrayType:
-		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
-			seen[fresh.ID] = true
+		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.identity()] {
+			seen[fresh.identity()] = true
 			*out = append(*out, fresh)
 		}
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *ViewType:
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *CStrType:
-		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
-			seen[fresh.ID] = true
+		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.identity()] {
+			seen[fresh.identity()] = true
 			*out = append(*out, fresh)
 		}
 	case *GenericInstanceType:

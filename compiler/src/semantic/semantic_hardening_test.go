@@ -64,6 +64,16 @@ func TestSubstituteTypeReportsRecursionLimit(t *testing.T) {
 	requireSemanticHardeningError(t, analyzer, "type substitution recursion limit")
 }
 
+func TestCloneTrackedValueTypeAcceptsDepthBoundary(t *testing.T) {
+	for _, depth := range []int{16, 17, semanticCloneDepthLimit - 1, semanticCloneDepthLimit} {
+		analyzer := newSemanticHardeningTestAnalyzer()
+		result := analyzer.cloneTrackedValueType(nestedOptionalType(depth))
+		if IsInvalidType(result) || len(analyzer.diagnostics) != 0 {
+			t.Fatalf("valid tracked graph at depth %d was rejected", depth)
+		}
+	}
+}
+
 func TestCloneTrackedValueTypeReportsRecursionLimit(t *testing.T) {
 	analyzer := newSemanticHardeningTestAnalyzer()
 	result := analyzer.cloneTrackedValueType(nestedOptionalType(semanticCloneDepthLimit + 2))

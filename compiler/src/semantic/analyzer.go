@@ -394,6 +394,8 @@ type Analyzer struct {
 	permissionParamScopes      []map[string]bool
 	errorSetParamScopes        []map[string]bool
 	freshShapeCounter          int
+	freshShapeScope            string
+	freshShapeLambdaCounter    int
 	returnFreshShapeStatus     map[string]freshReturnStatus
 	annotatedFuncs             []*AnnotatedFunc
 	lawFuzzObligations         []*LawFuzzObligation
@@ -438,6 +440,7 @@ type Analyzer struct {
 	// must-consume obligation unsound).
 	currentFuncSawPlainValueReturn bool
 	currentRegions                 map[*Symbol]regionState
+	currentRegionsBorrowed         bool
 	// regionLifetimeOrdinals maps a local region name to a monotonic ordinal
 	// assigned at its `region NAME(...)` declaration. Because regions nest
 	// lexically (LIFO destruction), a LOWER ordinal means a longer-lived region:
@@ -461,6 +464,8 @@ type Analyzer struct {
 	currentRegionMarks      map[*Symbol]regionMarkState
 	currentCheckpoints      map[*Symbol]checkpointState
 	currentRegionRefs       map[*Symbol]regionRefState
+	// A scoped block borrows its caller map until the first binding write.
+	currentRegionRefsBorrowed bool
 	// currentStructInteriorRegionTaint records, per region-less aggregate local,
 	// the innermost (shortest-lived) region name that one of its interior
 	// container/view fields was stored a value from. A struct's TYPE never carries
@@ -950,6 +955,8 @@ type Analyzer struct {
 	mutableBorrowCapabilityMemo map[Type]bool
 	// containerRegionMemo caches containerRegion per type once typeShapesFrozen.
 	containerRegionMemo map[Type]string
+	// regionPointeesMemo holds completed immutable reachability sets for frozen types.
+	regionPointeesMemo map[regionPointeesMemoKey]regionPointees
 	// storeScanAddressMemo caches root store-scan address reachability once type shapes freeze.
 	// Recursive child results are never memoized under a partial cycle traversal.
 	storeScanAddressMemo     map[Type]bool

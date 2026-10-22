@@ -506,5 +506,5 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 		return
 	}
 	a.freshShapeCounter++
-	bindings[param.Name] = &FreshShape{ID: a.freshShapeCounter, Label: param.Name, Origin: origin}
+	bindings[param.Name] = &FreshShape{ID: a.freshShapeCounter, Scope: a.freshShapeScope, Label: param.Name, Origin: origin}
 }

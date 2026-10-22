@@ -160,7 +160,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		before := state.Generation
 		state.Destroyed = true
-		a.currentRegions[sym] = state
+		a.setCurrentRegionState(sym, state)
 		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.recordRegionInvalidateTransform(n.Pos(), n.Name, "", "destroy region", before, -1)
@@ -665,6 +665,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "region %q is destroyed on some control-flow paths and remains live on others; consume it consistently before the paths join", sym.Name)
 		}
 		a.currentRegions = joinedRegions
+		a.currentRegionsBorrowed = false
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentStorageViewDeps = mergedStorageViewDeps

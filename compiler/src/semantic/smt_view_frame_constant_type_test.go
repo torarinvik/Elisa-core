@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"testing"
 )
 
@@ -54,5 +55,32 @@ func TestSViewFrameConstantCastBeforeBodyTyping(t *testing.T) {
 	global.Symbols["Owner.BUCKETS"].Mutable = true
 	if a.computeSViewFrameWriteFree(fn) {
 		t.Fatal("mutable global authorized numeric cast before expression typing")
+	}
+}
+
+func TestSViewFrameNamedTupleFieldBeforeBodyTyping(t *testing.T) {
+	boolean := &BuiltinType{Name: "bool"}
+	integer := &BuiltinType{Name: "i64"}
+	gate := &sviewFrameGate{a: &Analyzer{exprTypes: map[ast.Expr]Type{}}, types: map[string]Type{
+		"record": &TupleType{Fields: []TupleField{{Name: "valid", Type: boolean}, {Name: "value", Type: integer}}},
+	}}
+	for name, want := range map[string]Type{"valid": boolean, "value": integer, "missing": nil} {
+		expr := &ast.FieldExpr{Object: &ast.Ident{Name: "record"}, Field: name}
+		if got := gate.receiverType(expr, 0); got != want {
+			t.Fatalf("tuple field %s: got %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestSViewFrameUnresolvedTupleFieldDeclinesOperator(t *testing.T) {
+	field := &ast.FieldExpr{Object: &ast.Ident{Name: "record"}, Field: "value"}
+	gate := &sviewFrameGate{a: &Analyzer{exprTypes: map[ast.Expr]Type{}}, types: map[string]Type{
+		"record": &TupleType{Fields: []TupleField{{Name: "value", Type: &TypeParamType{Name: "T"}}}},
+	}}
+	if got := gate.receiverType(field, 0); got != nil {
+		t.Fatalf("uninstantiated tuple field borrowed a concrete type: %v", got)
+	}
+	if gate.binaryHasNoOverload(&ast.BinaryExpr{Op: lexer.TOKEN_PLUS, Left: field, Right: &ast.IntLit{}}) {
+		t.Fatal("an unresolved generic field cannot prove an operator write-free")
 	}
 }

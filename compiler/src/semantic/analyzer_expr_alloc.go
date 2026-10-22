@@ -94,7 +94,7 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		return invalidType
 	}
 	state.Allocated = true
-	a.currentRegions[sym] = state
+	a.setCurrentRegionState(sym, state)
 	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 	// A region is a plain-bytes store: destroy/reset frees its contents in bulk
 	// without running destructors or consuming linear handles. A value carrying

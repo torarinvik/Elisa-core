@@ -197,18 +197,20 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	}
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedRegionMarks := a.currentRegionMarks
 	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPools := a.currentPoolScopes
 	a.currentScope = NewScope(savedScope)
-	a.currentRegions = a.cloneRegionStates()
+	a.borrowRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentCheckpoints = a.cloneCheckpointStates()
-	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.borrowRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
@@ -252,9 +254,11 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	}
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentRegionMarks = savedRegionMarks
 	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions

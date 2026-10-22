@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"testing"
 
 	"elisacore/src/ast"
@@ -77,5 +78,61 @@ func TestMergeRegionRefStatesSharesIdenticalDependencyMaps(t *testing.T) {
 	}
 	if !merged.PackedStoreSummaryKnown {
 		t.Fatal("merged state must preserve the normalized packed-store summary")
+	}
+}
+
+func TestIdenticalTrackedBranchJoinRemainsIsolatedFromLaterBinding(t *testing.T) {
+	a := &Analyzer{}
+	declared := &RefType{Elem: &BuiltinType{Name: "i64"}, Mutable: true}
+	sym := &Symbol{Name: "value", Kind: SymbolLocal, Type: declared}
+	private := a.cloneTrackedValueType(declared)
+	entry := map[*Symbol]Type{sym: private}
+	a.currentSpecializedValueTypes = entry
+	left := a.cloneSpecializedValueTypeBindings()
+	right := a.cloneSpecializedValueTypeBindings()
+	merged := a.mergeSpecializedValueTypeBindings(left, right)
+	if merged[sym] != private {
+		t.Fatal("unchanged branch join copied the private immutable graph")
+	}
+	merged, ok := a.intersectSpecializedValueTypeFlows(left, right)
+	if !ok || merged[sym] != private {
+		t.Fatal("flow intersection copied the private immutable graph")
+	}
+	delete(merged, sym)
+	if left[sym] != private || right[sym] != private {
+		t.Fatal("intersection binding map aliases a branch map")
+	}
+	merged[sym] = private
+	a.currentSpecializedValueTypes = merged
+	replacement := &RefType{Elem: declared.Elem, Mutable: false}
+	a.bindTrackedValueType(sym, replacement)
+	current := a.currentSpecializedValueTypes[sym].(*RefType)
+	if current == replacement || current == private || current.Mutable {
+		t.Fatal("later binding did not install an isolated replacement")
+	}
+	if !private.(*RefType).Mutable || !declared.Mutable {
+		t.Fatal("later binding mutated an earlier branch or declaration")
+	}
+	a.verifyTrackedShares("branch join test")
+}
+
+func BenchmarkIntersectUnchangedTrackedFlows(b *testing.B) {
+	a := &Analyzer{}
+	leaf := &DArrayType{Elem: &BuiltinType{Name: "u8"}}
+	fields := map[string]Field{}
+	for i := 0; i < 64; i++ {
+		name := fmt.Sprint(i)
+		fields[name] = Field{Name: name, Type: leaf}
+	}
+	typ := &StructType{Name: "Parser", Fields: fields}
+	sym := &Symbol{Name: "parser", Kind: SymbolParam, Type: typ}
+	flow := map[*Symbol]Type{sym: a.cloneTrackedValueType(typ)}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		merged, ok := a.intersectSpecializedValueTypeFlows(flow, flow)
+		if !ok || len(merged) != 1 {
+			b.Fatal("lost tracked flow")
+		}
 	}
 }

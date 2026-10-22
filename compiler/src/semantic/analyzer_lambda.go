@@ -172,14 +172,18 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		}
 	}
 
+	restoreFreshShapes := a.enterLambdaFreshShapeScope(expr, paramTypes)
+	defer restoreFreshShapes()
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl
 	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
@@ -202,8 +206,10 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentFuncType = fnType
 	a.returnFreshShapeStatus = freshReturnTracker(returnType)
 	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionsBorrowed = false
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentRegionRefsBorrowed = false
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
@@ -380,8 +386,10 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues

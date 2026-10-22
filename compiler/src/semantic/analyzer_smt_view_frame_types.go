@@ -65,6 +65,23 @@ func (g *sviewFrameGate) receiverType(expr ast.Expr, depth int) Type {
 		return typ
 	case *ast.FieldExpr:
 		typ := stripRefForBounds(g.receiverType(n.Object, depth+1))
+		// Frame inspection can precede typing of a tuple-result projection.
+		// Its declared field type is already known; waiting for exprTypes here
+		// cached a false write-free result for read-only fold invariants.
+		if tuple, ok := StripAggregateStateType(typ).(*TupleType); ok && tuple != nil {
+			for _, field := range tuple.Fields {
+				if field.Name == n.Field {
+					// A generic callee's declared return can still contain its
+					// own parameters before call specialization. Such a field
+					// cannot establish that an operator has no implementation.
+					if containsTypeParam(field.Type) {
+						return nil
+					}
+					return field.Type
+				}
+			}
+			return nil
+		}
 		if st, ok := StripAggregateStateType(typ).(*StructType); ok && st != nil {
 			if field, found := st.Fields[n.Field]; found {
 				return field.Type

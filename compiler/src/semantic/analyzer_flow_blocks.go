@@ -591,7 +591,7 @@ func inferSimpleLiteralTypeExpr(expr ast.Expr) ast.TypeExpr {
 }
 
 func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
-	a.analyzeBlockWithRegionCloneCapture(stmts, scope)
+	a.analyzeBlockWithRegionScope(stmts, scope, false)
 }
 
 // analyzeBlockWithRegionCloneCapture analyzes a branch against a private copy of
@@ -600,26 +600,43 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 // branch used to erase `destroy`/`adopt` effects and could make a dead region look
 // live after control-flow joined.
 func (a *Analyzer) analyzeBlockWithRegionCloneCapture(stmts []ast.Stmt, scope *Scope) map[*Symbol]regionState {
+	return a.analyzeBlockWithRegionScope(stmts, scope, true)
+}
+
+func (a *Analyzer) analyzeBlockWithRegionScope(stmts []ast.Stmt, scope *Scope, capture bool) map[*Symbol]regionState {
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedRegionMarks := a.currentRegionMarks
 	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
-	a.currentRegions = a.cloneRegionStates()
+	a.borrowRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentCheckpoints = a.cloneCheckpointStates()
-	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.borrowRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	a.analyzeBlockInScope(stmts, scope)
-	branchRegions := a.cloneRegionStates()
+	var branchRegions map[*Symbol]regionState
+	if capture {
+		// Captured branches remain independently mutable. A branch that wrote already
+		// owns its map; a read-only branch must detach before returning a snapshot.
+		if a.currentRegionsBorrowed {
+			branchRegions = a.cloneRegionStates()
+		} else {
+			branchRegions = a.currentRegions
+		}
+	}
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentRegionMarks = savedRegionMarks
 	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions

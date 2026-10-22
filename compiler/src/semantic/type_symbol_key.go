@@ -30,7 +30,7 @@ func TypeSymbolKeysForNominalLayout(types []Type) (string, error) { return typeS
 func typeSymbolKeys(types []Type, layoutRegions bool) (string, error) {
 	var b bytes.Buffer
 	b.WriteString("symbol-types-v1|")
-	active := &symbolTypeActive{freshShapes: make(map[int]int), layoutRegions: layoutRegions}
+	active := &symbolTypeActive{freshShapes: make(map[freshShapeIdentity]int), layoutRegions: layoutRegions}
 	next := 1
 	appendKeyLen(&b, len(types))
 	for _, t := range types {
@@ -43,7 +43,7 @@ func typeSymbolKeys(types []Type, layoutRegions bool) (string, error) {
 
 type symbolTypeActive struct {
 	typeIDActive
-	freshShapes   map[int]int
+	freshShapes   map[freshShapeIdentity]int
 	layoutRegions bool
 }
 
@@ -52,10 +52,10 @@ func appendSymbolShapeKey(b *bytes.Buffer, shape Shape, active *symbolTypeActive
 		if fresh == nil || fresh.ID <= 0 {
 			return false
 		}
-		id, seen := active.freshShapes[fresh.ID]
+		id, seen := active.freshShapes[fresh.identity()]
 		if !seen {
 			id = len(active.freshShapes) + 1
-			active.freshShapes[fresh.ID] = id
+			active.freshShapes[fresh.identity()] = id
 		}
 		appendKeyTag(b, "shape:fresh")
 		appendKeyInt(b, id)

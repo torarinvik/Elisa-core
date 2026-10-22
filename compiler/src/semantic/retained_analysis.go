@@ -540,6 +540,38 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// changed functions get fresh windows below, the rest are re-based.
 	r.rebaseWindows(drop)
 	r.invalidateReturnBorrow(changed, marks)
+	a.invalidateStorageViewCalleeWriteCaches()
+	a.regionPointeesMemo = nil
+	// Binder and scan indexes describe syntax; replacing a body invalidates both.
+	for _, sd := range changed {
+		if fn, ok := sd.Decl.(*ast.FuncDecl); ok {
+			delete(a.storeFlowBinderIndexes, fn)
+			delete(a.storeScanIndexCache, fn)
+		}
+	}
+	for _, fn := range removedLive {
+		delete(a.storeFlowBinderIndexes, fn)
+		delete(a.storeScanIndexCache, fn)
+	}
+	if len(changed) != 0 || len(removedLive) != 0 {
+		// A body edit can change flow through every transitive caller and can
+		// split or join call cycles. These results predate the replacement bodies.
+		a.invalidateStoreFlowSummaries()
+		a.storeFlowSCC = nil
+		a.cyclicFuncSet = nil
+		if len(addedScoped) != 0 || len(removedLive) != 0 {
+			// New/removed overloads also change name-based edge resolution in
+			// otherwise unchanged bodies.
+			a.callDeclsByName = nil
+			a.callEdgeCache = nil
+		} else {
+			for _, sd := range changed {
+				if fn, ok := sd.Decl.(*ast.FuncDecl); ok {
+					delete(a.callEdgeCache, fn)
+				}
+			}
+		}
+	}
 	r.rbCutoff = len(added) == 0 && len(removed) == 0 && os.Getenv("ELISACORE_RETAINED_RB_CUTOFF") != "0"
 	r.perms.beginUpdate(changed, len(added) == 0 && len(removed) == 0, marks)
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)

@@ -698,7 +698,7 @@ var exportDeclMapPaths = sync.OnceValue(func() [][]int {
 			path := append(append([]int(nil), prefix...), i)
 			switch ft.Kind() {
 			case reflect.Map:
-				if ft.Key() == funcDeclPtrType && !holdsLazyCache(ft.Elem()) {
+				if ft.Key() == funcDeclPtrType && !holdsLazyCache(ft.Elem()) && !parallelBodyWorkerLocalOnlyMap(t.Field(i).Name) {
 					paths = append(paths, path)
 				}
 			case reflect.Struct:

@@ -778,8 +778,12 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	}
 	if len(specializedParamTypes) != 0 {
 		declaredReturnContract := appliedType.ReturnRegion != ""
-		if clonedApplied, ok := a.substituteType(appliedType, nil, nil, nil, nil).(*FuncType); ok && clonedApplied != nil {
-			appliedType = clonedApplied
+		// A successful FuncType substitution already owns its parameter slice and
+		// mutable metadata. Clone only the fallback declaration signature.
+		if appliedType == ft {
+			if clonedApplied, ok := a.substituteType(appliedType, nil, nil, nil, nil).(*FuncType); ok && clonedApplied != nil {
+				appliedType = clonedApplied
+			}
 		}
 		for i, specializedType := range specializedParamTypes {
 			if i < len(appliedType.Params) {
@@ -818,16 +822,19 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.assumeExternEnsures(expr, callAliasArgs)
 	a.assumeLemmaEnsures(expr, callAliasArgs)
 	originalTrackedByRoot := map[*Symbol]Type{}
-	loweredArgs := append([]ast.Expr(nil), orderedArgs...)
-	loweredArgs = append(loweredArgs, expr.ResolvedImplicitArgs...)
+	// The explicit/implicit argument sequence is unchanged by the checks above.
+	loweredArgs := callAliasArgs
 	poststateLimit := len(loweredArgs)
 	if len(appliedType.Params) < poststateLimit {
 		poststateLimit = len(appliedType.Params)
 	}
 	for i := 0; i < poststateLimit; i++ {
-		paramType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
-		if specializedType, ok := specializedParamTypes[i]; ok {
-			paramType = specializedType
+		paramType := appliedType.Params[i]
+		if appliedType == ft {
+			paramType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
+			if specializedType, ok := specializedParamTypes[i]; ok {
+				paramType = specializedType
+			}
 		}
 		a.recordCallArgPoststates(expr, loweredArgs[i], i, paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
 		// Mutable refinement flow (docs/85): passing a variable by ref (incl. the receiver of a
@@ -889,7 +896,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 					a.recordStorageViewCalleeStores(expr, loweredArgs, i)
 				case *StructType:
 					a.checkIteratorInvalidationForEnclosingMutableRefArg(loweredArgs[i])
-					a.invalidateStorageViewsForMutableRefArgSparing(loweredArgs[i], appliedType.Name, a.storageViewCalleeWriteSpare(expr, loweredArgs[i]))
+					if len(a.currentStorageViewDeps) != 0 {
+						a.invalidateStorageViewsForMutableRefArgSparing(loweredArgs[i], appliedType.Name, a.storageViewCalleeWriteSpare(expr, loweredArgs[i]))
+					}
 				case *BuiltinType:
 					// A callee given a dstr by mutable ref may reassign or grow it, moving
 					// the buffer a live `as_sview()` of it points into.

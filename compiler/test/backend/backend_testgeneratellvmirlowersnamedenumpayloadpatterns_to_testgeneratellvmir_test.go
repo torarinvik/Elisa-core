@@ -175,8 +175,8 @@ def inspect(owner: Arena) -> i32:
 	}
 
 	for _, check := range []string{
-		"%NodeKey__Expr = type { i32 }",
-		"%NodeTable__Expr__i32 = type { %DynArrayView }",
+		"%\"NodeKey$generic_v1$",
+		"%\"NodeTable$generic_v1$",
 		"call ptr @arena_alloc(",
 		"call void @arena_da_fill(",
 	} {
@@ -184,6 +184,12 @@ def inspect(owner: Arena) -> i32:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	nodeKeyType := genericV1Symbol(t, output, `%"NodeKey$generic_v1$`)
+	nodeTableType := genericV1Symbol(t, output, `%"NodeTable$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		nodeKeyType+" = type { i32 }",
+		nodeTableType+" = type { %DynArrayView }",
+	)
 	if strings.Contains(output, "@node_table_fill(") {
 		t.Fatalf("expected node_table_fill to lower directly in the backend without a runtime wrapper, got:\n%s", output)
 	}
@@ -192,10 +198,10 @@ def inspect(owner: Arena) -> i32:
 	if body == "" {
 		t.Fatalf("expected to find inspect body, got:\n%s", output)
 	}
-	if !strings.Contains(body, "getelementptr inbounds nuw %NodeTable__Expr__i32") {
+	if !strings.Contains(body, "getelementptr inbounds nuw "+nodeTableType) {
 		t.Fatalf("expected inspect to address through the NodeTable carrier struct, got:\n%s", body)
 	}
-	if !strings.Contains(body, "extractvalue %NodeKey__Expr") {
+	if !strings.Contains(body, "extractvalue "+nodeKeyType) {
 		t.Fatalf("expected inspect to read the dense node key carrier index field, got:\n%s", body)
 	}
 }
@@ -233,8 +239,8 @@ def inspect(owner: Arena) -> i32:
 	}
 
 	for _, check := range []string{
-		"%NodeKey__Expr = type { i32 }",
-		"%NodeTable__Expr__i32 = type { %DynArrayView }",
+		"%\"NodeKey$generic_v1$",
+		"%\"NodeTable$generic_v1$",
 		"call ptr @arena_alloc(",
 		"call void @arena_da_fill(",
 	} {
@@ -242,6 +248,12 @@ def inspect(owner: Arena) -> i32:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	nodeKeyType := genericV1Symbol(t, output, `%"NodeKey$generic_v1$`)
+	nodeTableType := genericV1Symbol(t, output, `%"NodeTable$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		nodeKeyType+" = type { i32 }",
+		nodeTableType+" = type { %DynArrayView }",
+	)
 	if strings.Contains(output, "@node_table_fill(") {
 		t.Fatalf("expected hidden-field node_table_fill to lower directly in the backend without a runtime wrapper, got:\n%s", output)
 	}
@@ -269,22 +281,30 @@ def from_runtime() -> dict[cstr, i32]:
 	}
 
 	checks := []string{
-		"%DynDict__cstr__i32 = type { ptr, i64, i64, i64, ptr }",
-		"declare void @take_runtime(%DynDict__cstr__i32)",
-		"declare %DynDict__cstr__i32 @make_runtime()",
-		"define %DynDict__cstr__i32 @id__i32(%DynDict__cstr__i32",
-		"define %DynDict__cstr__i32 @keep(%DynDict__cstr__i32",
-		"call %DynDict__cstr__i32 @id__i32(%DynDict__cstr__i32",
-		"define void @pass_runtime(%DynDict__cstr__i32",
-		"call void @take_runtime(%DynDict__cstr__i32",
-		"define %DynDict__cstr__i32 @from_runtime()",
-		"call %DynDict__cstr__i32 @make_runtime()",
+		"%\"DynDict$generic_v1$",
+		"declare void @take_runtime(%\"DynDict$generic_v1$",
+		"@make_runtime()",
+		"define void @pass_runtime(%\"DynDict$generic_v1$",
+		"call void @take_runtime(%\"DynDict$generic_v1$",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	dictType := genericV1Symbol(t, output, `%"DynDict$generic_v1$`)
+	idFunction := genericV1Symbol(t, output, `@"id$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		dictType+" = type { ptr, i64, i64, i64, ptr }",
+		"declare void @take_runtime("+dictType+")",
+		"declare "+dictType+" @make_runtime()",
+		"define "+dictType+" "+idFunction+"("+dictType,
+		"define "+dictType+" @keep("+dictType,
+		"call "+dictType+" "+idFunction+"("+dictType,
+		"call void @take_runtime("+dictType,
+		"define "+dictType+" @from_runtime()",
+		"call "+dictType+" @make_runtime()",
+	)
 }
 func TestGenerateLLVMIRRejectsGenericDictRuntimeBridge(t *testing.T) {
 	// Integral keys (u32, ...) are now runtime-backed, so their surface `dict` IS the `DynDict`
@@ -338,17 +358,25 @@ def touch(a: Arena&, m: dict[cstr, i32]&, key: cstr) -> bool:
 
 	checks := []string{
 		"%ErrUnion__RuntimeError__i32 = type { i32, ptr }",
-		"define ptr @arena_dict_get__i32(ptr",
-		"define i32 @arena_dict_put__i32(ptr",
+		"define ptr @\"arena_dict_get$generic_v1$",
+		"define i32 @\"arena_dict_put$generic_v1$",
 		"define i1 @touch(ptr %0, ptr %1, ptr %2)",
-		"call i32 @arena_dict_put__i32(ptr",
-		"call ptr @arena_dict_get__i32(ptr",
+		"call i32 @\"arena_dict_put$generic_v1$",
+		"call ptr @\"arena_dict_get$generic_v1$",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	getFunction := genericV1Symbol(t, output, `@"arena_dict_get$generic_v1$`)
+	putFunction := genericV1Symbol(t, output, `@"arena_dict_put$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		"define ptr "+getFunction+"(ptr",
+		"call ptr "+getFunction+"(ptr",
+		"define i32 "+putFunction+"(ptr",
+		"call i32 "+putFunction+"(ptr",
+	)
 }
 func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 	src := loadFixtureSource(t, "Code", "test_programs", "frontend_stress.elisa")
@@ -361,14 +389,13 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 	checks := []string{
 		"%SourceSpan = type { i64, i64 }",
 		"%Token = type { i8, %SourceSpan, ptr }",
-		"%DynDict__cstr__Symbol = type { ptr, i64, i64, i64, ptr }",
-		"%Scope = type { ptr, %DynDict__cstr__Symbol, i64 }",
+		"%\"DynDict$generic_v1$",
+		"%Scope = type { ptr, %\"DynDict$generic_v1$",
 		"%ParserState = type { %DynArrayView, i64, ptr }",
 		"define %DynArrayView @make_tokens(ptr",
 		"define i32 @frontend_scope_stress(ptr",
 		"define i64 @frontend_region_token(i64",
 		"define i32 @frontend_smoke(ptr",
-		"define %DynDict__cstr__Symbol @arena_dict_new__Symbol(ptr",
 		"define i32 @arena_dict_put__Symbol(ptr",
 		"define i1 @arena_dict_contains__Symbol(ptr",
 		"call ptr @new_region_backend(i64 2048, i64 0)",
@@ -379,6 +406,12 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	dictType := genericV1Symbol(t, output, `%"DynDict$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		dictType+" = type { ptr, i64, i64, i64, ptr }",
+		"%Scope = type { ptr, "+dictType+", i64 }",
+		"define "+dictType+" @arena_dict_new__Symbol(ptr",
+	)
 }
 func TestGenerateLLVMIRLowersAllocatorOwnershipFixture(t *testing.T) {
 	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.elisa")

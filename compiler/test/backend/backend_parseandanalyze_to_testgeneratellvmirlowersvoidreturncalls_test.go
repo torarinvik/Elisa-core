@@ -75,7 +75,9 @@ func assertSourceHelperFallback(t *testing.T, body string) bool {
 		"ctx_string_from_view", "ctx_streq", "ctx_string_view_eq",
 		"string_view_eq", "ctx_string_views_eq", "string_views_eq",
 	} {
-		if strings.Contains(body, "call ") && strings.Contains(body, "@"+name) {
+		plainSymbol := "@" + name
+		genericSymbol := `@"` + name + "$generic_v1$"
+		if strings.Contains(body, "call ") && (strings.Contains(body, plainSymbol) || strings.Contains(body, genericSymbol)) {
 			t.Logf("preserved ordinary call to source-defined helper %q", name)
 			return true
 		}
@@ -453,12 +455,12 @@ def lock_then_fallthrough(mu: mutable Mutex) -> void:
 	}
 
 	checks := []string{
-		"declare %MutexGuard__Held @mutex_lock(ptr)",
-		"declare void @mutex_unlock(%MutexGuard__Held)",
+		" @mutex_lock(ptr)",
+		"declare void @mutex_unlock(",
 		"define i64 @lock_then_return(%Mutex",
 		"define void @lock_then_fallthrough(%Mutex",
-		"call %MutexGuard__Held @mutex_lock(ptr",
-		"call void @mutex_unlock(%MutexGuard__Held",
+		"@mutex_lock(ptr",
+		"call void @mutex_unlock(",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -466,11 +468,20 @@ def lock_then_fallthrough(mu: mutable Mutex) -> void:
 		}
 	}
 	returnIR := functionIR(output, "lock_then_return")
-	if unlockIdx := strings.Index(returnIR, "call void @mutex_unlock(%MutexGuard__Held"); unlockIdx < 0 || unlockIdx > strings.Index(returnIR, "ret i64 7") {
+	guardType := genericV1Symbol(t, output, `%"MutexGuard$generic_v1$`)
+	assertLLVMIRContains(t, returnIR,
+		"call "+guardType+" @mutex_lock(ptr",
+		"call void @mutex_unlock("+guardType,
+	)
+	if unlockIdx := strings.Index(returnIR, "call void @mutex_unlock("); unlockIdx < 0 || unlockIdx > strings.Index(returnIR, "ret i64 7") {
 		t.Fatalf("expected lock_then_return to unlock before returning, got:\n%s", returnIR)
 	}
 	fallthroughIR := functionIR(output, "lock_then_fallthrough")
-	if unlockIdx := strings.Index(fallthroughIR, "call void @mutex_unlock(%MutexGuard__Held"); unlockIdx < 0 || unlockIdx > strings.LastIndex(fallthroughIR, "ret void") {
+	assertLLVMIRContains(t, fallthroughIR,
+		"call "+guardType+" @mutex_lock(ptr",
+		"call void @mutex_unlock("+guardType,
+	)
+	if unlockIdx := strings.Index(fallthroughIR, "call void @mutex_unlock("); unlockIdx < 0 || unlockIdx > strings.LastIndex(fallthroughIR, "ret void") {
 		t.Fatalf("expected lock_then_fallthrough to unlock before fallthrough return, got:\n%s", fallthroughIR)
 	}
 }
@@ -499,13 +510,13 @@ def pool_then_fallthrough(mu: mutable Mutex) -> void:
 	checks := []string{
 		"declare %ThreadPool @pool_new(",
 		"declare void @pool_shutdown(ptr)",
-		"declare %MutexGuard__Held @mutex_lock(ptr)",
-		"declare void @mutex_unlock(%MutexGuard__Held)",
+		" @mutex_lock(ptr)",
+		"declare void @mutex_unlock(",
 		"define i64 @pool_then_return(%Mutex",
 		"define void @pool_then_fallthrough(%Mutex",
 		"call %ThreadPool @pool_new(",
 		"call void @pool_shutdown(ptr",
-		"call void @mutex_unlock(%MutexGuard__Held",
+		"call void @mutex_unlock(",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -513,14 +524,23 @@ def pool_then_fallthrough(mu: mutable Mutex) -> void:
 		}
 	}
 	returnIR := functionIR(output, "pool_then_return")
-	unlockIdx := strings.Index(returnIR, "call void @mutex_unlock(%MutexGuard__Held")
+	guardType := genericV1Symbol(t, output, `%"MutexGuard$generic_v1$`)
+	assertLLVMIRContains(t, returnIR,
+		"call "+guardType+" @mutex_lock(ptr",
+		"call void @mutex_unlock("+guardType,
+	)
+	unlockIdx := strings.Index(returnIR, "call void @mutex_unlock(")
 	shutdownIdx := strings.Index(returnIR, "call void @pool_shutdown(ptr")
 	retIdx := strings.Index(returnIR, "ret i64 7")
 	if unlockIdx < 0 || shutdownIdx < 0 || retIdx < 0 || unlockIdx > shutdownIdx || shutdownIdx > retIdx {
 		t.Fatalf("expected pool_then_return to unlock, then shutdown the pool, then return, got:\n%s", returnIR)
 	}
 	fallthroughIR := functionIR(output, "pool_then_fallthrough")
-	unlockIdx = strings.Index(fallthroughIR, "call void @mutex_unlock(%MutexGuard__Held")
+	assertLLVMIRContains(t, fallthroughIR,
+		"call "+guardType+" @mutex_lock(ptr",
+		"call void @mutex_unlock("+guardType,
+	)
+	unlockIdx = strings.Index(fallthroughIR, "call void @mutex_unlock(")
 	shutdownIdx = strings.Index(fallthroughIR, "call void @pool_shutdown(ptr")
 	retIdx = strings.LastIndex(fallthroughIR, "ret void")
 	if unlockIdx < 0 || shutdownIdx < 0 || retIdx < 0 || unlockIdx > shutdownIdx || shutdownIdx > retIdx {
@@ -555,8 +575,7 @@ def submit_then_await() -> i64:
 		"declare %ThreadPool @pool_new(",
 		"declare void @pool_shutdown(ptr)",
 		"define i64 @submit_then_await()",
-		"call %Task__i64__Pending @pool_submit1(ptr",
-		"call i64 @pool_await(%Task__i64__Pending",
+		"call i64 @pool_await(%\"Task$generic_v1$",
 		"call void @pool_shutdown(ptr",
 	}
 	for _, check := range checks {
@@ -565,9 +584,11 @@ def submit_then_await() -> i64:
 		}
 	}
 	body := functionIR(output, "submit_then_await")
-	if submitIdx := strings.Index(body, "call %Task__i64__Pending @pool_submit1(ptr"); submitIdx < 0 {
-		t.Fatalf("expected submit_then_await to lower submit syntax through pool_submit1, got:\n%s", body)
-	}
+	taskType := genericV1Symbol(t, output, `%"Task$generic_v1$`)
+	assertLLVMIRContains(t, body,
+		"call "+taskType+" @pool_submit1(ptr",
+		"call i64 @pool_await("+taskType,
+	)
 }
 func TestGenerateLLVMIRLowersExplicitSubmitSyntax(t *testing.T) {
 	src := `def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
@@ -591,8 +612,7 @@ def submit_then_await(pool: ThreadPool&) -> i64:
 
 	checks := []string{
 		"define i64 @submit_then_await(ptr",
-		"call %Task__i64__Pending @pool_submit1(ptr",
-		"call i64 @pool_await(%Task__i64__Pending",
+		"call i64 @pool_await(%\"Task$generic_v1$",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -600,9 +620,11 @@ def submit_then_await(pool: ThreadPool&) -> i64:
 		}
 	}
 	body := functionIR(output, "submit_then_await")
-	if submitIdx := strings.Index(body, "call %Task__i64__Pending @pool_submit1(ptr"); submitIdx < 0 {
-		t.Fatalf("expected submit_then_await to lower explicit submit syntax through pool_submit1, got:\n%s", body)
-	}
+	taskType := genericV1Symbol(t, output, `%"Task$generic_v1$`)
+	assertLLVMIRContains(t, body,
+		"call "+taskType+" @pool_submit1(ptr",
+		"call i64 @pool_await("+taskType,
+	)
 }
 func TestGenerateLLVMIRLowersVoidReturnCalls(t *testing.T) {
 	src := `extern touch(value: i32)

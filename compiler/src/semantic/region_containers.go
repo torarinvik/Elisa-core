@@ -2479,7 +2479,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 	argPointees := make([]*regionPointees, len(args))
 	storePointeesOf := func(other int) regionPointees {
 		if argPointees[other] == nil {
-			pointees := argumentStorePointees(a.exprTypes[args[other]])
+			pointees := a.argumentStorePointeesOf(a.exprTypes[args[other]])
 			argPointees[other] = &pointees
 		}
 		return *argPointees[other]
@@ -2522,7 +2522,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		if len(a.programRegions) != 0 && a.darrayElemsProgramLived(paramType) {
 			continue
 		}
-		stored := containerElementPointees(containerType)
+		stored := a.containerElementPointeesOf(containerType)
 		for other, arg := range args {
 			if other == index {
 				continue
@@ -2936,6 +2936,45 @@ func (a *Analyzer) containerMayHoldRegionRefs(t Type) bool {
 type regionPointees struct {
 	keys     map[string]bool
 	wildcard bool
+}
+
+// The two queries include different roots: an argument includes its backing slots,
+// while a container query includes only what its stored elements can point at.
+type regionPointeesMemoKey struct {
+	typ               Type
+	containerElements bool
+}
+
+func (a *Analyzer) containerElementPointeesOf(t Type) regionPointees {
+	return a.memoRegionPointees(t, true)
+}
+
+func (a *Analyzer) argumentStorePointeesOf(t Type) regionPointees {
+	return a.memoRegionPointees(t, false)
+}
+
+func (a *Analyzer) memoRegionPointees(t Type, containerElements bool) regionPointees {
+	key := regionPointeesMemoKey{typ: t, containerElements: containerElements}
+	frozen := a != nil && a.typeShapesFrozen && t != nil
+	if frozen {
+		if result, ok := a.regionPointeesMemo[key]; ok {
+			return result
+		}
+	}
+	var result regionPointees
+	if containerElements {
+		result = containerElementPointees(t)
+	} else {
+		result = argumentStorePointees(t)
+	}
+	if frozen {
+		if a.regionPointeesMemo == nil {
+			a.regionPointeesMemo = make(map[regionPointeesMemoKey]regionPointees)
+		}
+		// Callers only inspect/intersect the completed set; no traversal appends to it.
+		a.regionPointeesMemo[key] = result
+	}
+	return result
 }
 
 func (p regionPointees) intersects(other regionPointees) bool {

@@ -34,7 +34,11 @@ type smtFactFrame struct {
 }
 
 func (a *Analyzer) snapshotSMTFactFrame() smtFactFrame {
-	var frame smtFactFrame
+	depth := 0
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		depth++
+	}
+	frame := smtFactFrame{scopes: make([]*Scope, 0, depth), facts: make([][]smtFact, 0, depth)}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		frame.scopes = append(frame.scopes, sc)
 		frame.facts = append(frame.facts, append([]smtFact(nil), sc.smtAssertFacts...))
@@ -46,12 +50,12 @@ func (a *Analyzer) snapshotSMTFactFrame() smtFactFrame {
 // frame, so the next branch is analyzed from the state it actually starts in: a sibling branch's
 // writes never happen on its path, so their invalidations must not reach it.
 func (a *Analyzer) restoreSMTFactFrame(entry smtFactFrame) smtFactFrame {
-	var survivors smtFactFrame
+	// The frame's scope list is immutable; only the fact lists change between branches.
+	survivors := smtFactFrame{scopes: entry.scopes, facts: make([][]smtFact, len(entry.scopes))}
 	for i, sc := range entry.scopes {
-		survivors.scopes = append(survivors.scopes, sc)
 		// The survivor list is read-only after this point. Restore below always installs
 		// a fresh copy of entry.facts before another branch can append or invalidate facts.
-		survivors.facts = append(survivors.facts, sc.smtAssertFacts)
+		survivors.facts[i] = sc.smtAssertFacts
 		sc.smtAssertFacts = append([]smtFact(nil), entry.facts[i]...)
 	}
 	return survivors
@@ -77,6 +81,19 @@ func (a *Analyzer) joinIfSMTFacts(entry smtFactFrame, survivors []smtFactFrame, 
 				}
 			}
 			if inAll {
+				if common[i] == nil {
+					capacity := len(entry.facts[i])
+					for _, branch := range survivors {
+						if len(branch.facts[i]) < capacity {
+							capacity = len(branch.facts[i])
+						}
+					}
+					// The current scope may receive one disjoined fact below.
+					if disjoin && entry.scopes[i] == a.currentScope {
+						capacity++
+					}
+					common[i] = make([]smtFact, 0, capacity)
+				}
 				common[i] = append(common[i], fact)
 			}
 		}
@@ -94,11 +111,12 @@ func (a *Analyzer) joinIfSMTFacts(entry smtFactFrame, survivors []smtFactFrame, 
 	if !disjoin {
 		return
 	}
-	branches := make([][]smtFact, len(survivors))
+	// extras and its slices are private to this join. Append branch-local facts
+	// directly instead of copying the collected survivors into another builder.
 	for b := range survivors {
-		branches[b] = append(append([]smtFact(nil), extras[b]...), branchFacts[b]...)
+		extras[b] = append(extras[b], branchFacts[b]...)
 	}
-	a.recordIfJoinSMTFact(branches)
+	a.recordIfJoinSMTFact(extras)
 }
 
 // smtFactListHas matches by expression identity: entry facts are carried by value into each

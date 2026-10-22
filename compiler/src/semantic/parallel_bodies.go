@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -39,9 +40,13 @@ func parallelBodyWorkers() int {
 // chunk order, so diagnostics keep source order.
 func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	var bodies []scopedDecl
+	declOrder := make(map[*ast.FuncDecl]int)
+	nextDeclOrder := 0
 	for _, scoped := range decls {
 		switch n := scoped.Decl.(type) {
 		case *ast.FuncDecl:
+			declOrder[n] = nextDeclOrder
+			nextDeclOrder++
 			// Laws are read through refinement types and aliases the call graph does
 			// not see; they are small and pure, so they are settled before the fork.
 			if n.IsLaw {
@@ -50,6 +55,12 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			}
 			bodies = append(bodies, scoped)
 		case *ast.ImplDecl:
+			for _, member := range n.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					declOrder[fn] = nextDeclOrder
+					nextDeclOrder++
+				}
+			}
 			bodies = append(bodies, scoped)
 		default:
 			a.analyzeScopedDecl(scoped)
@@ -208,6 +219,17 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		}
 		return math.MaxInt
 	}
+	annotationOrder := func(fn *ast.FuncDecl) int {
+		if fn != nil {
+			if idx, ok := declOrder[fn]; ok {
+				return idx
+			}
+		}
+		return math.MaxInt
+	}
+	sort.SliceStable(a.annotatedFuncs, func(i, j int) bool {
+		return annotationOrder(a.annotatedFuncs[i].Decl) < annotationOrder(a.annotatedFuncs[j].Decl)
+	})
 	sort.SliceStable(a.returnBorrowLateFrames, func(i, j int) bool {
 		return order(a.returnBorrowLateFrames[i].frame.fn) < order(a.returnBorrowLateFrames[j].frame.fn)
 	})
@@ -241,6 +263,16 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if useMemoOverlays && name == "storeFlowSummaries" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForBodyWorker(a.storeFlowSummaries)))
+			continue
+		}
+		// These caches contain lazily populated maps/slices behind pointers.
+		// Rebuild them privately rather than sharing mutable pointer values.
+		if useMemoOverlays && parallelBodyWorkerRebuildMap(name) {
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
 		if useMemoOverlays && a.retained == nil && parallelBodyMemoMap(name) {
 			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			continue
@@ -251,6 +283,59 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 		settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))
 	}
 	return cloned
+}
+
+func parallelBodyWorkerRebuildMap(field string) bool {
+	switch field {
+	case "storeScanIndexCache", "storeFlowBinderIndexes", "storeFlowInProgress",
+		"storeFlowActive", "regionPointeesMemo":
+		return true
+	default:
+		return false
+	}
+}
+
+// Completed summaries never change their connectivity. Edge-kind solving does
+// mutate retKind/reachKind, so give workers private summary objects and kind
+// slices while retaining the settled (potentially large) connectivity matrices.
+func cloneStoreFlowSummariesForBodyWorker(src map[*ast.FuncDecl]*storeFlowSummary) map[*ast.FuncDecl]*storeFlowSummary {
+	if src == nil {
+		return nil
+	}
+	out := make(map[*ast.FuncDecl]*storeFlowSummary, len(src))
+	memo := make(map[*storeFlowSummary]*storeFlowSummary, len(src))
+	for decl, summary := range src {
+		if summary == nil {
+			out[decl] = nil
+			continue
+		}
+		if prior := memo[summary]; prior != nil {
+			out[decl] = prior
+			continue
+		}
+		cloned := *summary
+		cloned.retKind = slices.Clone(summary.retKind)
+		cloned.reachKind = slices.Clone(summary.reachKind)
+		for i, row := range summary.reachKind {
+			cloned.reachKind[i] = slices.Clone(row)
+		}
+		memo[summary] = &cloned
+		out[decl] = &cloned
+	}
+	return out
+}
+
+// These caches can contain worker read-shadow identities or transient solver
+// state. Keep their worker copies out of unit exports and root merges. Warm graph
+// entries built before the fork contain canonical declarations and immutable
+// slices, so cloning their outer maps avoids repeating whole-graph walks.
+func parallelBodyWorkerLocalOnlyMap(field string) bool {
+	switch field {
+	case "callEdgeCache", "storeFlowSCC", "storeFlowInProgress", "storeFlowActive", "storageViewCalleeWriteCache", "regionPointeesMemo":
+		return true
+	default:
+		return false
+	}
 }
 
 func parallelBodyMemoMap(field string) bool {
@@ -354,6 +439,9 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 	switch w.Kind() {
 	case reflect.Struct:
 		for i := 0; i < w.NumField(); i++ {
+			if p != nil && parallelBodyWorkerLocalOnlyMap(w.Type().Field(i).Name) {
+				continue
+			}
 			mergeValue(settable(dst.Field(i)), settable(w.Field(i)), settable(base.Field(i)), p)
 		}
 	case reflect.Map:

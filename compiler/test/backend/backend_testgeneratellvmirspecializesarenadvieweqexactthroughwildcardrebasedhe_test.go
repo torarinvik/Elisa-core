@@ -505,7 +505,7 @@ def probe(view: view[i64]) -> bool:
 
 	checks := []string{
 		"%DynArrayView = type { ptr, i64 }",
-		"define i1 @non_empty__i64(%DynArrayView",
+		"define i1 @\"non_empty$generic_v1$",
 		"getelementptr inbounds nuw %DynArrayView",
 		"icmp ugt i64",
 	}
@@ -514,6 +514,8 @@ def probe(view: view[i64]) -> bool:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	nonEmptyFunction := genericV1Symbol(t, output, `@"non_empty$generic_v1$`)
+	assertLLVMIRContains(t, output, "define i1 "+nonEmptyFunction+"(%DynArrayView")
 }
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `struct DynArray[T]:
@@ -581,7 +583,7 @@ def head_ref(values: i32[4]&) -> i32:
 		"define i32 @head_ref(ptr",
 		"getelementptr [4 x i32], ptr",
 		"insertvalue %DynArrayView",
-		"getelementptr i32, ptr",
+		"getelementptr inbounds i32, ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

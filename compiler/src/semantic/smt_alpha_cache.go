@@ -1,6 +1,10 @@
 package semantic
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -12,14 +16,30 @@ import (
 // unrelated edit moves those locations. Declaration order, sorts, assertions,
 // strings and every other symbol remain significant. Models never use this key.
 func smtAlphaQuery(query string) (string, bool) {
-	if len(query) > 8<<20 || !utf8.ValidString(query) {
+	var out strings.Builder
+	out.Grow(min(len(query), 4096))
+	if !smtAlphaWriteQuery(query, &out) {
 		return "", false
+	}
+	return out.String(), true
+}
+
+type smtAlphaOutput interface {
+	WriteString(string) (int, error)
+	WriteByte(byte) error
+}
+
+// Keep declaration discovery and token normalization identical for text consumers
+// and the proof-cache digest, without materializing large normalized queries there.
+func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
+	if len(query) > 8<<20 || !utf8.ValidString(query) {
+		return false
 	}
 	// Do not repair malformed input by dropping a comment containing invalid
 	// control bytes. Generated queries use LF; unusual line endings keep exact keys.
 	for i := 0; i < len(query); i++ {
 		if query[i] < 32 && query[i] != '\n' && query[i] != '\t' {
-			return "", false
+			return false
 		}
 	}
 	names := make(map[string]string)
@@ -57,7 +77,7 @@ func smtAlphaQuery(query string) (string, bool) {
 		return true
 	})
 	if !ok || len(ordered) == 0 {
-		return "", false
+		return false
 	}
 	// Choose the same absent namespace as the token-vector implementation,
 	// while retaining only declarations rather than every occurrence in a VC.
@@ -65,12 +85,12 @@ func smtAlphaQuery(query string) (string, bool) {
 	for i, name := range ordered {
 		names[name] = "|" + prefix + strconv.Itoa(i) + "|"
 	}
-	var out strings.Builder
-	out.Grow(min(len(query), 4096))
 	first := true
 	ok = smtAlphaWalk(query, func(tok smtAlphaToken, _ int) bool {
 		if !first {
-			out.WriteByte(' ')
+			if out.WriteByte(' ') != nil {
+				return false
+			}
 		}
 		first = false
 		if tok.kind == 'a' {
@@ -78,17 +98,17 @@ func smtAlphaQuery(query string) (string, bool) {
 				if !smtAlphaValidSymbol(tok.text) {
 					return false
 				}
-				out.WriteString(replacement)
-				return true
+				_, err := out.WriteString(replacement)
+				return err == nil
 			}
 		}
-		out.WriteString(tok.text)
-		return true
+		_, err := out.WriteString(tok.text)
+		return err == nil
 	})
 	if !ok {
-		return "", false
+		return false
 	}
-	return out.String(), true
+	return true
 
 }
 
@@ -222,10 +242,18 @@ func smtAlphaWalk(query string, visit func(smtAlphaToken, int) bool) bool {
 }
 
 func (c *smtProofCache) alphaKey(query string) (string, bool) {
-	canonical, ok := smtAlphaQuery(query)
-	if !ok {
+	if len(query) > 8<<20 {
 		return "", false
 	}
-	// Domain separation keeps this index distinct from legacy exact-text entries.
-	return c.key("alpha-declared-v1\x00" + canonical), true
+	hash := sha256.New()
+	// Small obligations need only a small buffer; large ones retain bounded scratch.
+	out := bufio.NewWriterSize(hash, min(4096, max(256, len(query)+len(c.identity)+32)))
+	// Preserve the exact identity and domain separation used by c.key.
+	_, _ = io.WriteString(out, c.identity)
+	_ = out.WriteByte(0)
+	_, _ = out.WriteString("alpha-declared-v1\x00")
+	if !smtAlphaWriteQuery(query, out) || out.Flush() != nil {
+		return "", false
+	}
+	return hex.EncodeToString(hash.Sum(nil)), true
 }

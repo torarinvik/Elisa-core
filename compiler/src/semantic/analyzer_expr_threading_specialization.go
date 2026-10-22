@@ -689,7 +689,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeWithDepth(expected Type, actual
 		return cloneAggregateStateWithBase(nextBase, aggregateStateStates(tt)), true
 	case *StructType:
 		changed := false
-		fields := cloneStructFields(tt.Fields)
+		var fields map[string]Field
 		for name, field := range tt.Fields {
 			actualFieldType, ok := a.lookupResolvedFieldType(actual, name)
 			if !ok {
@@ -698,6 +698,9 @@ func (a *Analyzer) specializeCallbackCarryingTypeWithDepth(expected Type, actual
 			nextType, fieldChanged := a.specializeCallbackCarryingTypeWithDepth(field.Type, actualFieldType, depth+1)
 			if !fieldChanged {
 				continue
+			}
+			if fields == nil {
+				fields = cloneStructFields(tt.Fields)
 			}
 			field.Type = nextType
 			fields[name] = field
@@ -715,7 +718,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeWithDepth(expected Type, actual
 		bindings := genericBindingsForStructInstance(baseStruct, tt.Args)
 		regionBindings := regionBindingsForStructInstance(baseStruct, tt.Args)
 		changed := false
-		fields := cloneStructFields(baseStruct.Fields)
+		var fields map[string]Field
 		for name, field := range baseStruct.Fields {
 			expectedFieldType := field.Type
 			if len(bindings) != 0 || len(regionBindings) != 0 {
@@ -728,6 +731,9 @@ func (a *Analyzer) specializeCallbackCarryingTypeWithDepth(expected Type, actual
 			nextType, fieldChanged := a.specializeCallbackCarryingTypeWithDepth(expectedFieldType, actualFieldType, depth+1)
 			if !fieldChanged {
 				continue
+			}
+			if fields == nil {
+				fields = cloneStructFields(baseStruct.Fields)
 			}
 			field.Type = nextType
 			fields[name] = field

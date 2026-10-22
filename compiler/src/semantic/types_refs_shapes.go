@@ -153,7 +153,7 @@ func SameShape(a, b Shape) bool {
 		return ok
 	case *FreshShape:
 		sb, ok := b.(*FreshShape)
-		return ok && sa.ID == sb.ID
+		return ok && sa.identity() == sb.identity()
 	default:
 		return false
 	}

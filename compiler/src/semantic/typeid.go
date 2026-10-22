@@ -338,6 +338,7 @@ func appendShapeIDKey(b *bytes.Buffer, shape Shape) bool {
 		appendKeyTag(b, "shape:wildcard")
 	case *FreshShape:
 		appendKeyTag(b, "shape:fresh")
+		appendKeyString(b, ss.Scope)
 		appendKeyInt(b, ss.ID)
 		appendKeyString(b, ss.Label)
 		appendKeyString(b, ss.Origin)

@@ -2698,6 +2698,7 @@ func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string
 // fresh), so it is a view value for the store scan.
 func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool {
 	decl = a.readDecl(decl)
+	idx := a.storeScanIndex(decl)
 	fresh, poisoned := map[string]bool{}, map[string]bool{}
 	for _, p := range decl.Params {
 		poisoned[p.Name] = true
@@ -2717,7 +2718,7 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 		case *ast.ReturnStmt:
 			if n != nil && n.Value != nil {
 				for name := range fresh {
-					allowed[name] += storeScanIdentCount(n.Value, name)
+					allowed[name] += idx.identCount(n.Value, name)
 				}
 			}
 		case *ast.CallExpr:
@@ -2751,7 +2752,7 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 					return
 				}
 			}
-			allowed[root.Name] += storeScanIdentCount(field.Object, root.Name)
+			allowed[root.Name] += idx.identCount(field.Object, root.Name)
 		case ast.Stmt:
 			for _, name := range stmtBoundNames(n) {
 				poisoned[name] = true
@@ -2760,7 +2761,7 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 	})
 	filled := map[string]bool{}
 	for name := range fresh {
-		if !poisoned[name] && storeScanIdentCount(decl.Body, name) == allowed[name] {
+		if !poisoned[name] && idx.bodyIdentCount(decl.Body, name) == allowed[name] {
 			filled[name] = true
 		}
 	}
@@ -2778,10 +2779,10 @@ func storeScanEmptyLiteral(value ast.Expr) bool {
 	return false
 }
 
-// storeScanIdentCount counts the identifier occurrences of name in node (field selectors are not
-// names).
-func storeScanIdentCount(node any, name string) int {
-	count := 0
+// storeScanIdentCounts counts identifier occurrences, excluding field selectors and
+// deduplicating shared AST pointers exactly as the former per-name walk did.
+func storeScanIdentCounts(node any) map[string]int {
+	counts := map[string]int{}
 	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
@@ -2795,8 +2796,9 @@ func storeScanIdentCount(node any, name string) int {
 			}
 			seen[v.Pointer()] = true
 			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
-				if id.Name == name || rootNameOfDotted(id.Name) == name {
-					count++
+				counts[id.Name]++
+				if root := rootNameOfDotted(id.Name); root != id.Name {
+					counts[root]++
 				}
 				return
 			}
@@ -2823,7 +2825,7 @@ func storeScanIdentCount(node any, name string) int {
 		}
 	}
 	rec(reflect.ValueOf(node))
-	return count
+	return counts
 }
 
 // storeScanViewLocalsCached memoizes the per-function view-local set (it depends on the source

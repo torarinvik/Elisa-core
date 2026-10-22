@@ -5,6 +5,24 @@ import (
 	"strings"
 )
 
+// Scoped region state is read-only until a region is created, consumed, or
+// invalidated. A first write detaches the outer map; regionState contains values
+// only, so no nested storage needs a second ownership layer.
+func (a *Analyzer) borrowRegionStates() {
+	a.currentRegionsBorrowed = a.currentRegions != nil
+}
+
+func (a *Analyzer) setCurrentRegionState(sym *Symbol, state regionState) {
+	if a.currentRegionsBorrowed {
+		a.currentRegions = a.cloneRegionStates()
+		a.currentRegionsBorrowed = false
+	}
+	if a.currentRegions == nil {
+		a.currentRegions = make(map[*Symbol]regionState)
+	}
+	a.currentRegions[sym] = state
+}
+
 func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
 	if a.currentRegions == nil {
 		return nil
@@ -94,6 +112,32 @@ func (a *Analyzer) cloneCheckpointStates() map[*Symbol]checkpointState {
 		cloned[sym] = state
 	}
 	return cloned
+}
+
+// Scoped analysis keeps its caller's map read-only. Restore the caller's borrowed
+// flag together with its map when leaving the scope; nested functions use fresh maps.
+func (a *Analyzer) borrowRegionRefStates() {
+	a.currentRegionRefsBorrowed = a.currentRegionRefs != nil
+}
+
+func (a *Analyzer) ownRegionRefStates() {
+	if a.currentRegionRefsBorrowed {
+		a.currentRegionRefs = a.cloneRegionRefStates()
+		a.currentRegionRefsBorrowed = false
+	}
+}
+
+func (a *Analyzer) setCurrentRegionRefState(sym *Symbol, state regionRefState) {
+	a.ownRegionRefStates()
+	a.currentRegionRefs[sym] = state
+}
+
+func (a *Analyzer) deleteCurrentRegionRefState(sym *Symbol) {
+	if _, exists := a.currentRegionRefs[sym]; !exists {
+		return
+	}
+	a.ownRegionRefStates()
+	delete(a.currentRegionRefs, sym)
 }
 
 func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {

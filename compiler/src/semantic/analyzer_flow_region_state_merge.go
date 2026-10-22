@@ -37,23 +37,23 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 	if merged, ok := shareIdenticalRegionRefStates(states); ok {
 		return merged, true
 	}
-	// Parameter-only field states keep the first value for overlapping keys. If every
-	// later field map is covered by that first map with compatible values, it can be
-	// shared as the exact result instead of allocating and merging another map.
+	// A later input may already contain the union of all field keys. Choose the
+	// largest map, then reuse it only if every overlap merges to that same value.
 	fieldSource := -1
+	for i, state := range states {
+		if len(state.Fields) != 0 && (fieldSource < 0 || len(state.Fields) > len(states[fieldSource].Fields)) {
+			fieldSource = i
+		}
+	}
 	shareFieldSource := true
 	for i, state := range states {
-		if len(state.Fields) == 0 {
-			continue
-		}
-		if fieldSource < 0 {
-			fieldSource = i
+		if len(state.Fields) == 0 || i == fieldSource {
 			continue
 		}
 		base := states[fieldSource].Fields
 		for name, next := range state.Fields {
 			prior, ok := base[name]
-			if !ok || !sameParamOnlyRegionRefSummary(prior, next) {
+			if !ok || !sameReusableRegionRefField(prior, next) {
 				shareFieldSource = false
 				break
 			}
@@ -117,7 +117,10 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 				continue
 			}
 			if merged.Fields == nil {
-				merged.Fields = make(map[string]regionRefState, len(state.Fields))
+				// The union contains at least as many keys as its largest input.
+				// Starting with a small earlier map otherwise grows and copies it
+				// repeatedly while the later input is inserted.
+				merged.Fields = make(map[string]regionRefState, len(states[fieldSource].Fields))
 			}
 			for name, fieldState := range state.Fields {
 				if existing, ok := merged.Fields[name]; ok {
@@ -136,6 +139,50 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 		return regionRefState{}, false
 	}
 	return merged, true
+}
+
+// Reuse real-region leaves only when flat merging would preserve every value.
+// Nested fields retain the existing recursive merge and cycle boundaries.
+func sameReusableRegionRefField(left, right regionRefState) bool {
+	if sameParamOnlyRegionRefSummary(left, right) {
+		// Flat parameter-only merging keeps the first value verbatim. A
+		// superset chosen from a later input must preserve even empty-map and
+		// slice representations used by reflect.DeepEqual convergence checks.
+		return (left.Fields == nil) == (right.Fields == nil) &&
+			(left.Deps == nil) == (right.Deps == nil) && maps.Equal(left.Deps, right.Deps) &&
+			(left.StoreDeps == nil) == (right.StoreDeps == nil) && maps.Equal(left.StoreDeps, right.StoreDeps) &&
+			(left.ParamDeps.extra == nil) == (right.ParamDeps.extra == nil) && slices.Equal(left.ParamDeps.extra, right.ParamDeps.extra) &&
+			left.PackedStoreSummary == right.PackedStoreSummary
+	}
+	for _, state := range []regionRefState{left, right} {
+		if state.Fields != nil || !hasRegionProvenance(state) ||
+			!state.PackedStoreSummaryKnown || !canonicalRegionRefParamDeps(state) ||
+			(state.Deps != nil && len(state.Deps) == 0) ||
+			(state.StoreDeps != nil && len(state.StoreDeps) == 0) {
+			return false
+		}
+	}
+	return left.ParamOnlySummary == right.ParamOnlySummary &&
+		left.HasDirectParamDep == right.HasDirectParamDep && left.DirectParamDep == right.DirectParamDep &&
+		sameRegionParamDeps(left.ParamDeps, right.ParamDeps) &&
+		left.PackedStoreSummary == right.PackedStoreSummary &&
+		(regionDependencyMapIdentity(left.Deps) == regionDependencyMapIdentity(right.Deps) || maps.Equal(left.Deps, right.Deps)) &&
+		(packedStoreDependencyMapIdentity(left.StoreDeps) == packedStoreDependencyMapIdentity(right.StoreDeps) || maps.Equal(left.StoreDeps, right.StoreDeps))
+}
+
+// A flat merge replays parameter dependencies through appendRegionParamDep.
+// Only reuse leaves whose direct slot and bitset already have that representation.
+func canonicalRegionRefParamDeps(state regionRefState) bool {
+	if !state.HasDirectParamDep {
+		return state.DirectParamDep == 0 && state.ParamDeps.inline == 0 && state.ParamDeps.extra == nil
+	}
+	if state.DirectParamDep < 0 || state.ParamDeps.Contains(state.DirectParamDep) {
+		return false
+	}
+	if state.ParamDeps.extra != nil {
+		return len(state.ParamDeps.extra) != 0 && state.ParamDeps.extra[len(state.ParamDeps.extra)-1] != 0
+	}
+	return true
 }
 
 func shareIdenticalRegionRefStates(states []regionRefState) (regionRefState, bool) {
@@ -159,6 +206,15 @@ func shareIdenticalRegionRefStates(states []regionRefState) (regionRefState, boo
 		}
 	}
 	merged := cloneRegionRefStateSharedFields(base)
+	// Identity helpers equate nil and empty maps. Normalize the result just
+	// like the ordinary merge; summary convergence observes representation.
+	merged.Fields = shareRegionRefFields(merged.Fields)
+	if len(merged.Deps) == 0 {
+		merged.Deps = nil
+	}
+	if len(merged.StoreDeps) == 0 {
+		merged.StoreDeps = nil
+	}
 	merged.DirectParamDep, merged.HasDirectParamDep, merged.ParamDeps = 0, false, IntBitSet{}
 	forEachRegionParamDep(base, func(index int) { appendRegionParamDep(&merged, index) })
 	merged.PackedStoreSummary = summarizePackedStoreProvenance(base)

@@ -122,9 +122,20 @@ func newSMTProofCache(directory, binary string) *smtProofCache {
 
 func (c *smtProofCache) key(query string) string {
 	hash := sha256.New()
-	io.WriteString(hash, c.identity)
-	hash.Write([]byte{0})
-	io.WriteString(hash, query)
+	_, _ = hash.Write([]byte(c.identity))
+	_, _ = hash.Write([]byte{0})
+	if len(query) <= 4096 {
+		_, _ = hash.Write([]byte(query))
+	} else {
+		// The digest's interface makes []byte(query) escape. Bound scratch
+		// instead of allocating another complete copy of every large query.
+		var block [4096]byte
+		for len(query) != 0 {
+			n := copy(block[:], query)
+			_, _ = hash.Write(block[:n])
+			query = query[n:]
+		}
+	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
 func smtProofChecksum(key string) string {

@@ -2,9 +2,29 @@ package backend_test
 
 import (
 	"elisacore/src/backend"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+func genericV1Symbol(t *testing.T, output, prefix string) string {
+	t.Helper()
+	pattern := regexp.MustCompile(regexp.QuoteMeta(prefix) + `[0-9a-f]{64}"`)
+	symbol := pattern.FindString(output)
+	if symbol == "" {
+		t.Fatalf("expected LLVM IR to contain generic symbol prefix %q", prefix)
+	}
+	return symbol
+}
+
+func assertLLVMIRContains(t *testing.T, output string, fragments ...string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if !strings.Contains(output, fragment) {
+			t.Errorf("expected LLVM IR to contain %q", fragment)
+		}
+	}
+}
 
 func TestGenerateLLVMIRLowersHigherOrderFunctionCalls(t *testing.T) {
 	src := `def apply_twice(fn: fn(i64) -> i64, value: i64) -> i64:
@@ -90,9 +110,9 @@ def run() -> i64:
 	}
 
 	checks := []string{
-		"define i64 @id__i64(i64",
+		"define i64 @\"id$generic_v1$",
 		"define i64 @apply_i64(ptr",
-		"store ptr @id__i64",
+		"store ptr @\"id$generic_v1$",
 		"call i64 @apply_i64(ptr",
 	}
 	for _, check := range checks {
@@ -100,6 +120,11 @@ def run() -> i64:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	idFunction := genericV1Symbol(t, output, `@"id$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		"define i64 "+idFunction+"(i64",
+		"store ptr "+idFunction,
+	)
 }
 func TestGenerateLLVMIRLowersGenericBuilderStructFunctionFields(t *testing.T) {
 	src := `struct Box[T]:
@@ -126,16 +151,26 @@ def run() -> i64:
 	}
 
 	checks := []string{
-		"define %Box__i64 @wrap__i64(",
+		"define %\"Box$generic_v1$",
+		"@\"wrap$generic_v1$",
 		"define i64 @run()",
-		"store %Builder__i64 { ptr @make_i64_box }",
-		"call %Box__i64 %",
+		"store %\"Builder$generic_v1$",
+		"@make_i64_box }",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	boxType := genericV1Symbol(t, output, `%"Box$generic_v1$`)
+	builderType := genericV1Symbol(t, output, `%"Builder$generic_v1$`)
+	wrapFunction := genericV1Symbol(t, output, `@"wrap$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		"define "+boxType+" @make_i64_box(i64",
+		"define "+boxType+" "+wrapFunction+"("+builderType,
+		"store "+builderType+" { ptr @make_i64_box }",
+		"call "+boxType+" "+wrapFunction+"("+builderType,
+	)
 }
 func TestGenerateLLVMIRLowersPanicViaBacktraceAwareAbort(t *testing.T) {
 	src := `def fail() -> void:
@@ -476,14 +511,19 @@ def use_identity(value: i32) -> i32:
 
 	checks := []string{
 		"define i32 @use_identity(i32",
-		"define i32 @identity__i32(i32",
-		"call i32 @identity__i32(i32",
+		"define i32 @\"identity$generic_v1$",
+		"call i32 @\"identity$generic_v1$",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	identityFunction := genericV1Symbol(t, output, `@"identity$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		"define i32 "+identityFunction+"(i32",
+		"call i32 "+identityFunction+"(i32",
+	)
 }
 func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
 	src := `struct Vec[T] layout(c):
@@ -514,21 +554,31 @@ export fn vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i3
 	}
 
 	checks := []string{
-		"%Vec__i32 = type { i32, i32 }",
+		"%\"Vec$generic_v1$",
 		"@seed = global i32 7",
 		"@ctx_seed = alias i32, ptr @seed",
-		"define %Vec__i32 @vec_add_i32(%Vec__i32",
-		"define %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
+		"define %\"Vec$generic_v1$",
+		"@vec_add_i32(%\"Vec$generic_v1$",
+		"@\"keep_left$generic_v1$",
 		"define i64 @vec2i_add(i64",
 		"define i64 @vec2i_keep_left(i64",
-		"call %Vec__i32 @vec_add_i32(%Vec__i32",
-		"call %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
+		"@vec_add_i32(%\"Vec$generic_v1$",
+		"@\"keep_left$generic_v1$",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	vecType := genericV1Symbol(t, output, `%"Vec$generic_v1$`)
+	keepLeftFunction := genericV1Symbol(t, output, `@"keep_left$generic_v1$`)
+	assertLLVMIRContains(t, output,
+		vecType+" = type { i32, i32 }",
+		"define "+vecType+" @vec_add_i32("+vecType,
+		"call "+vecType+" @vec_add_i32("+vecType,
+		"define "+vecType+" "+keepLeftFunction+"("+vecType,
+		"call "+vecType+" "+keepLeftFunction+"("+vecType,
+	)
 }
 func TestGenerateCHeaderForExportedVec2i(t *testing.T) {
 	src := `struct Vec[T] layout(c):
@@ -573,7 +623,7 @@ export fn vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i3
 			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
 		}
 	}
-	if strings.Contains(header, "Vec__i32 vec2i_add") {
+	if strings.Contains(header, "Vec$generic_v1$") {
 		t.Fatalf("expected public header not to leak backend mangled aggregate names, got:\n%s", header)
 	}
 }

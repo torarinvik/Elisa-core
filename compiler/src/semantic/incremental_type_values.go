@@ -169,6 +169,9 @@ func functionNominalTypeFingerprintWithResult(t Type, current *Result) ([32]byte
 		// types_enums.go derives this memo solely from the current Enum/Variant.
 		// It is not a declaration input and may be populated lazily by codegen.
 		reflect.TypeOf(EnumVariant{}): {"packedViewType": true},
+		// Declaration field order is already encoded through Decl. This memo
+		// only caches that flattening and is not an additional semantic input.
+		reflect.TypeOf(StructType{}): {"declarationFieldOrder": true},
 	}}
 	encoder.validateSemanticFunction = func(*FuncType) error {
 		if current == nil || !current.PermissionEffectsConverged {

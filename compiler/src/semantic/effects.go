@@ -429,7 +429,10 @@ func (a *Analyzer) rewriteEffectValue(value reflect.Value, context effectRewrite
 						// Keep the enclosing context so an inner partial handler can
 						// forward an operation to the next installed realization at
 						// compile time. This pointer never reaches generated code.
-						next = effectRewriteContext{handler: handler, args: append([]ast.Expr(nil), captureArgs...), parent: &context}
+						// Only an installed handler needs a persistent parent snapshot.
+						// Taking &context here would heap-allocate it for every visited node.
+						enclosing := context
+						next = effectRewriteContext{handler: handler, args: append([]ast.Expr(nil), captureArgs...), parent: &enclosing}
 					}
 				}
 				body := node.Body

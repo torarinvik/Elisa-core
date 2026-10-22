@@ -165,25 +165,41 @@ func (a *Analyzer) recordStorageViewAssignment(target ast.Expr, value ast.Expr) 
 	a.recordStorageViewBinding(sym, value)
 }
 
+// storageViewPlaceStoreTarget validates a destination that can retain view dependencies.
+func (a *Analyzer) storageViewPlaceStoreTarget(target ast.Expr) (*ast.Ident, *Symbol) {
+	if a.currentScope == nil {
+		return nil, nil
+	}
+	root := storageViewPlaceRoot(target)
+	if root == nil {
+		return nil, nil
+	}
+	sym, ok := a.currentScope.Lookup(root.Name)
+	if !ok || sym == nil || storageViewScalarBindingType(sym.Type) {
+		return nil, nil
+	}
+	// A holder of scalar-only type (`buffer: mutable darray[u8]&`) owns no pointer but its own
+	// buffer: storing into it copies bytes, so it can never carry another value's view.
+	if scalarOnlyType(peelRefType(sym.Type), map[Type]bool{}) {
+		return nil, nil
+	}
+	return root, sym
+}
+
 // recordStorageViewPlaceStore: a view stored into a field or element of a local
 // (`h.s <- buf.as_sview()`, `vs[0] <- view`) makes the holder's root carry the
 // view's backing dependency, so a later relocation of the backing turns a read
 // through the holder (or through a copy of it) into a stale-view error. The
 // dependency is merged, never replaced: other fields may still hold older views.
 func (a *Analyzer) recordStorageViewPlaceStore(target ast.Expr, value ast.Expr) {
-	root := storageViewPlaceRoot(target)
-	if root == nil {
+	root, sym := a.storageViewPlaceStoreTarget(target)
+	if sym == nil {
 		return
 	}
-	sym, ok := a.currentScope.Lookup(root.Name)
-	if !ok || sym == nil || storageViewScalarBindingType(sym.Type) {
-		return
-	}
-	// A holder of scalar-only type (`buffer: mutable darray[u8]&`) owns no pointer but its own
-	// buffer: storing into it copies bytes, so it can never carry another value's view.
-	if scalarOnlyType(peelRefType(sym.Type), map[Type]bool{}) {
-		return
-	}
+	a.recordStorageViewPlaceStoreForRoot(root, sym, value)
+}
+
+func (a *Analyzer) recordStorageViewPlaceStoreForRoot(root *ast.Ident, sym *Symbol, value ast.Expr) {
 	dep, ok := a.storageViewDependencyForExpr(value)
 	if !ok || len(dep.Sources) == 0 {
 		return
@@ -218,11 +234,17 @@ func (a *Analyzer) recordStorageViewCalleeStores(call *ast.CallExpr, args []ast.
 	if addr, ok := target.(*ast.AddrOfExpr); ok {
 		target = stripOptimizationParens(addr.Operand)
 	}
+	// A scalar-only destination cannot retain any other argument's view. Check
+	// that before computing interprocedural store summaries, once per call.
+	root, sym := a.storageViewPlaceStoreTarget(target)
+	if sym == nil {
+		return
+	}
 	for j, arg := range args {
 		if j == index || arg == nil || a.callArgNeverReaches(call, j, index) {
 			continue
 		}
-		a.recordStorageViewPlaceStore(target, arg)
+		a.recordStorageViewPlaceStoreForRoot(root, sym, arg)
 	}
 }
 

@@ -1798,3 +1798,5 @@ F StateTransitionDecl 3 To
 T 281 GlobalRegionDecl
 F GlobalRegionDecl 1 Name
 F GlobalRegionDecl 2 Position
+
+T 282 SyntaxSnapshot

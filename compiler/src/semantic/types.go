@@ -174,6 +174,8 @@ type NamedShape struct {
 type WildcardShape struct{}
 
 type FreshShape struct {
+	// Scope is stable across worker schedules; ID is local to that analysis body.
+	Scope  string
 	ID     int
 	Label  string
 	Origin string

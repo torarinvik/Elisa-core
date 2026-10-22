@@ -67,7 +67,9 @@ func (a *Analyzer) cloneTrackedValueTypeWithMemoDepth(t Type, memo *trackedClone
 	if cloned, ok := memo.get(t); ok {
 		return cloned
 	}
-	if memo.sharePointerFree && a != nil && a.returnTypeHasNoReferences(t, 0) {
+	// Preserve the traversal depth when sharing a pointer-free subtree: resetting
+	// it here could return an over-deep graph just before the clone limit.
+	if memo.sharePointerFree && a != nil && a.returnTypeHasNoReferences(t, depth) {
 		return t
 	}
 	switch tt := t.(type) {
@@ -343,7 +345,10 @@ func (a *Analyzer) mergeTrackedNamedStateValueTypes(dst Type, src Type) (Type, b
 // Stored tracked value types are never edited in place (see shareTrackedValueType),
 // so a snapshot of the bindings can share them; deep-copying here was ~1 GB per seed.
 func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
-	src := a.currentSpecializedValueTypes
+	return a.snapshotSpecializedValueTypes(a.currentSpecializedValueTypes)
+}
+
+func (a *Analyzer) snapshotSpecializedValueTypes(src map[*Symbol]Type) map[*Symbol]Type {
 	if src == nil {
 		return nil
 	}

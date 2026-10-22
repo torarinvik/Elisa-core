@@ -109,10 +109,12 @@ type storeScanDeclIndex struct {
 	iterBinders   map[string][]*ast.IterForStmt
 	nonIterBinder map[string]bool
 	// memoized mention tokens (see mentions / headerMentions)
-	exprTokens   map[ast.Expr][]string
-	headerTokens map[ast.Stmt][]string
-	bound        map[ast.Stmt][]string
-	bundleCache  map[ast.Expr]bool
+	exprTokens      map[ast.Expr][]string
+	headerTokens    map[ast.Stmt][]string
+	bound           map[ast.Stmt][]string
+	bundleCache     map[ast.Expr]bool
+	identCounts     map[ast.Expr]map[string]int
+	bodyIdentCounts map[string]int
 }
 
 func (a *Analyzer) storeScanIndex(decl *ast.FuncDecl) *storeScanDeclIndex {
@@ -405,4 +407,28 @@ func (idx *storeScanDeclIndex) bundles(expr ast.Expr) bool {
 	found := storeScanBundles(expr)
 	idx.bundleCache[expr] = found
 	return found
+}
+
+// Identifier counts are queried for many names and fixpoint iterations over the
+// same syntax. Build all names in one walk, only when a count is first needed.
+func (idx *storeScanDeclIndex) identCount(expr ast.Expr, name string) int {
+	if expr == nil {
+		return 0
+	}
+	counts, ok := idx.identCounts[expr]
+	if !ok {
+		counts = storeScanIdentCounts(expr)
+		if idx.identCounts == nil {
+			idx.identCounts = map[ast.Expr]map[string]int{}
+		}
+		idx.identCounts[expr] = counts
+	}
+	return counts[name]
+}
+
+func (idx *storeScanDeclIndex) bodyIdentCount(body []ast.Stmt, name string) int {
+	if idx.bodyIdentCounts == nil {
+		idx.bodyIdentCounts = storeScanIdentCounts(body)
+	}
+	return idx.bodyIdentCounts[name]
 }

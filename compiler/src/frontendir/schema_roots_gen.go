@@ -270,6 +270,7 @@ var schemaRootTypes = []reflect.Type{
 	reflect.TypeOf(ast.StructDecl{}),
 	reflect.TypeOf(ast.StructLitExpr{}),
 	reflect.TypeOf(ast.StructTestExpr{}),
+	reflect.TypeOf(ast.SyntaxSnapshot{}),
 	reflect.TypeOf(ast.TailType{}),
 	reflect.TypeOf(ast.TernaryExpr{}),
 	reflect.TypeOf(ast.TokenSetDecl{}),

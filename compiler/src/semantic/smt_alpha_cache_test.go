@@ -1,7 +1,10 @@
 package semantic
 
 import (
+	"crypto/sha256"
 	"elisacore/src/smt"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -178,6 +181,99 @@ func BenchmarkSMTAlphaLargeQuery(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if _, ok := smtAlphaQuery(query); !ok {
 			b.Fatal("not admitted")
+		}
+	}
+}
+
+func BenchmarkSMTAlphaLargeKey(b *testing.B) {
+	name := "|sview_length_" + strings.Repeat("0123abcdef", 40) + "|"
+	query := "(declare-const " + name + " Int)" + strings.Repeat("(assert (>= "+name+" 0))", 1000)
+	c := &smtProofCache{identity: "toolchain"}
+	b.SetBytes(int64(len(query)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, ok := c.alphaKey(query); !ok {
+			b.Fatal("not admitted")
+		}
+	}
+}
+
+func FuzzSMTAlphaKeyMatchesCanonicalText(f *testing.F) {
+	for _, query := range []string{
+		"(declare-const v_old Int)(assert (= v_old 1))",
+		"(declare-const |v_old| Int); comment\n(assert (not (= v_old |v_old|)))",
+		"(declare-const v_a Int)(declare-const |__elisa_proof_alpha_0| Int)(assert (= v_a 1))",
+		"(assert true)", "(declare-const v_x Int", "(declare-const |v_bad\\name| Int)",
+	} {
+		f.Add(query)
+	}
+	f.Fuzz(func(t *testing.T, query string) {
+		c := &smtProofCache{identity: "compatibility"}
+		canonical, wantOK := smtAlphaQuery(query)
+		key, gotOK := c.alphaKey(query)
+		if gotOK != wantOK {
+			t.Fatal("streaming changed query admission")
+		}
+		if wantOK && key != c.key("alpha-declared-v1\x00"+canonical) {
+			t.Fatal("streaming changed proof-cache key")
+		}
+	})
+}
+
+func BenchmarkSMTAlphaKeySizes(b *testing.B) {
+	for _, size := range []int{1, 1000} {
+		query := "(declare-const v_x Int)" + strings.Repeat("(assert (>= v_x 0))", size)
+		c := &smtProofCache{identity: "toolchain"}
+		for _, streaming := range []bool{false, true} {
+			label := "legacy"
+			if streaming {
+				label = "streaming"
+			}
+			b.Run(fmt.Sprintf("terms=%d/%s", size, label), func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					if streaming {
+						if _, ok := c.alphaKey(query); !ok {
+							b.Fatal("not admitted")
+						}
+					} else {
+						canonical, ok := smtAlphaQuery(query)
+						if !ok {
+							b.Fatal("not admitted")
+						}
+						_ = c.key("alpha-declared-v1\x00" + canonical)
+					}
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkSMTExactQueryKey(b *testing.B) {
+	c := &smtProofCache{identity: "toolchain"}
+	for _, terms := range []int{1, 1000} {
+		query := "(declare-const v_x Int)" + strings.Repeat("(assert (>= v_x 0))", terms)
+		b.Run(fmt.Sprintf("terms=%d", terms), func(b *testing.B) {
+			b.SetBytes(int64(len(query)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = c.key(query)
+			}
+		})
+	}
+}
+
+func TestSMTExactQueryKeyKeepsLegacyDigest(t *testing.T) {
+	c := &smtProofCache{identity: "compiler\x00solver\x00options"}
+	for _, size := range []int{0, 1, 4095, 4096, 4097, 8193, 128 * 1024} {
+		query := strings.Repeat("x", size)
+		if size >= 3 {
+			query = query[:size-3] + "\x00λ"
+		}
+		digest := sha256.Sum256([]byte(c.identity + "\x00" + query))
+		if got, want := c.key(query), hex.EncodeToString(digest[:]); got != want {
+			t.Fatalf("size %d changed key: %s != %s", size, got, want)
 		}
 	}
 }

@@ -254,10 +254,10 @@ func (a *Analyzer) resolveSinkFuncDecl(expr ast.Expr) (*ast.FuncDecl, *FuncType,
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
 				fnType, _ := sym.Type.(*FuncType)
 				if decl, ok := sym.Node.(*ast.FuncDecl); ok {
-					return decl, fnType, true
+					return decl, a.workerLocalSinkFuncType(decl, fnType), true
 				}
 				if fnType != nil {
-					return nil, fnType, true
+					return nil, a.workerLocalSinkFuncType(nil, fnType), true
 				}
 			}
 		}
@@ -265,18 +265,28 @@ func (a *Analyzer) resolveSinkFuncDecl(expr ast.Expr) (*ast.FuncDecl, *FuncType,
 			if sym, ok := a.globalScope.Lookup(n.Name); ok {
 				fnType, _ := sym.Type.(*FuncType)
 				if decl, ok := sym.Node.(*ast.FuncDecl); ok {
-					return decl, fnType, true
+					return decl, a.workerLocalSinkFuncType(decl, fnType), true
 				}
 				if fnType != nil {
-					return nil, fnType, true
+					return nil, a.workerLocalSinkFuncType(nil, fnType), true
 				}
 			}
 		}
 	}
 	if fnType, ok := a.exprTypes[expr].(*FuncType); ok {
-		return nil, fnType, true
+		return nil, a.workerLocalSinkFuncType(nil, fnType), true
 	}
 	return nil, nil, false
+}
+
+// Sink inference can populate FuncType metadata while function bodies are analyzed
+// in parallel. Types reachable through worker scope symbols remain shared pointers,
+// so give each worker its own copy before any sink-summary read or write.
+func (a *Analyzer) workerLocalSinkFuncType(decl *ast.FuncDecl, fnType *FuncType) *FuncType {
+	if a == nil || a.parallel == nil || fnType == nil {
+		return fnType
+	}
+	return a.privateFuncType(decl, fnType)
 }
 
 func (a *Analyzer) resolveSinkFuncType(expr ast.Expr) (*FuncType, *ast.FuncDecl, bool) {

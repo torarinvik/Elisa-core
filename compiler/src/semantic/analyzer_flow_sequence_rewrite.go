@@ -58,17 +58,19 @@ func (a *Analyzer) resolveSequenceRewriteArmInfo(elemType Type, arm ast.VisitArm
 func (a *Analyzer) analyzeSequenceRewriteArmBody(body []ast.Stmt, scope *Scope) {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	a.currentScope = scope
-	a.currentRegions = a.cloneRegionStates()
+	a.borrowRegionStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	defer func() {
 		a.currentScope = savedScope
 		a.currentRegions = savedRegions
+		a.currentRegionsBorrowed = savedRegionsBorrowed
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
 		a.currentPackedStoreResolutions = savedPackedStoreResolutions

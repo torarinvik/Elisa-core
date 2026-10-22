@@ -30,19 +30,21 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	guardType := a.analyzeExpr(lockCall)
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedRegionMarks := a.currentRegionMarks
 	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedAllocExpr := a.currentAllocExpr
 	guardSym := &Symbol{Name: stmt.GuardName, Kind: SymbolLocal, Type: guardType, Node: stmt, Mutable: true}
 	a.currentScope = NewScope(savedScope)
-	a.currentRegions = a.cloneRegionStates()
+	a.borrowRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentCheckpoints = a.cloneCheckpointStates()
-	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.borrowRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
@@ -59,9 +61,11 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	}
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	a.currentRegionMarks = savedRegionMarks
 	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -108,10 +112,12 @@ func scopedArenaInStoreStmt(stmt *ast.RegionStmt) *ast.InStoreStmt {
 func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedRegionsBorrowed := a.currentRegionsBorrowed
 	savedRegionLiveStack := a.regionLiveStack
 	savedRegionMarks := a.currentRegionMarks
 	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
+	savedRegionRefsBorrowed := a.currentRegionRefsBorrowed
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
@@ -126,10 +132,10 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	// call) are exactly this shape.
 	savedAllocExpr := a.currentAllocExpr
 	a.currentScope = NewScope(savedScope)
-	a.currentRegions = a.cloneRegionStates()
+	a.borrowRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentCheckpoints = a.cloneCheckpointStates()
-	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.borrowRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
@@ -145,12 +151,14 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	}
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
+	a.currentRegionsBorrowed = savedRegionsBorrowed
 	// Unwind the live-region stack: this region (and anything nested under it) is
 	// now closed, so a following sibling region won't see it as an ancestor.
 	a.regionLiveStack = savedRegionLiveStack
 	a.currentRegionMarks = savedRegionMarks
 	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
+	a.currentRegionRefsBorrowed = savedRegionRefsBorrowed
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -194,8 +202,9 @@ func (a *Analyzer) registerOwnedStoreOwner(sym *Symbol) {
 	}
 	if a.currentRegions == nil {
 		a.currentRegions = map[*Symbol]regionState{}
+		a.currentRegionsBorrowed = false
 	}
-	a.currentRegions[sym] = regionState{}
+	a.setCurrentRegionState(sym, regionState{})
 	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "owned region")
 }
 
@@ -225,7 +234,7 @@ func (a *Analyzer) transferRegionOwnerOut(sym *Symbol, reason string) {
 	}
 	if state, ok := a.currentRegions[sym]; ok {
 		state.Destroyed = true
-		a.currentRegions[sym] = state
+		a.setCurrentRegionState(sym, state)
 		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, reason)
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, reason)
 	}
@@ -284,8 +293,9 @@ func (a *Analyzer) markReceivedOwnedRegion(sym *Symbol, value ast.Expr) {
 	}
 	if a.currentRegions == nil {
 		a.currentRegions = map[*Symbol]regionState{}
+		a.currentRegionsBorrowed = false
 	}
-	a.currentRegions[sym] = regionState{}
+	a.setCurrentRegionState(sym, regionState{})
 	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "region owner")
 }
 
@@ -320,7 +330,7 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	sym := &Symbol{Name: stmt.Name, Kind: SymbolRegion, Type: arenaType, Node: stmt, Mutable: false}
 	a.defineLocal(sym, stmt.Pos())
 	if a.currentRegions != nil {
-		a.currentRegions[sym] = regionState{Backing: normalizeBacking(stmt.Allocator), DeclScope: a.currentScope}
+		a.setCurrentRegionState(sym, regionState{Backing: normalizeBacking(stmt.Allocator), DeclScope: a.currentScope})
 	}
 	// Record this region's lifetime ordinal (declaration order == nesting order
 	// for live regions). Outer regions get lower ordinals and thus outlive inner
@@ -459,7 +469,7 @@ func (a *Analyzer) analyzeMarkStmt(stmt *ast.MarkStmt) {
 	markSym := &Symbol{Name: stmt.Name, Kind: SymbolRegionMark, Type: markType, Node: stmt, Mutable: false}
 	a.defineLocal(markSym, stmt.Pos())
 	state.Generation++
-	a.currentRegions[regionSym] = state
+	a.setCurrentRegionState(regionSym, state)
 	if a.currentRegionMarks == nil {
 		a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	}
@@ -484,7 +494,7 @@ func (a *Analyzer) restoreFromRegionCheckpoint(pos lexer.Pos, regionSym *Symbol,
 		return other.Generation > markState.Generation
 	}, reason)
 	state.Generation = markState.Generation
-	a.currentRegions[regionSym] = state
+	a.setCurrentRegionState(regionSym, state)
 	a.recordRegionInvalidateTransform(pos, regionSym.Name, markSym.Name, "restore region checkpoint", before, markState.Generation)
 	if saved, ok := a.currentRegionMarks[markSym]; ok {
 		saved.Valid = true
@@ -543,7 +553,7 @@ func (a *Analyzer) bindCheckpointTarget(pos lexer.Pos, name string, target ast.E
 				a.defineLocalInScope(scope, markSym, pos)
 			}
 			state.Generation++
-			a.currentRegions[regionSym] = state
+			a.setCurrentRegionState(regionSym, state)
 			if a.currentRegionMarks == nil {
 				a.currentRegionMarks = map[*Symbol]regionMarkState{}
 			}
@@ -651,7 +661,7 @@ func (a *Analyzer) analyzeResetStmt(stmt *ast.ResetStmt) {
 	a.invalidateRegionRefs(regionSym, func(regionDependencyState) bool { return true }, reason)
 	a.invalidateRegionMarks(regionSym, func(regionMarkState) bool { return true }, reason)
 	state.Generation = 0
-	a.currentRegions[regionSym] = state
+	a.setCurrentRegionState(regionSym, state)
 	a.recordRegionInvalidateTransform(stmt.Pos(), stmt.Name, "", "reset region", before, 0)
 }
 

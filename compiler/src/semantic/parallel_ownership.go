@@ -184,7 +184,13 @@ func (a *Analyzer) readDecl(decl *ast.FuncDecl) *ast.FuncDecl {
 	if p == nil || decl == nil {
 		return decl
 	}
-	if _, isShadow := p.original[decl]; isShadow {
+	if original, isShadow := p.original[decl]; isShadow {
+		// Cached graph slices can retain a shadow made before the owner's
+		// completed unit was imported. Resolve both forms to the finished
+		// declaration so summary/SCC keys cannot split into two identities.
+		if p.imported[original] {
+			return original
+		}
 		return decl
 	}
 	owner, known := p.ownerOf(decl)
@@ -205,6 +211,29 @@ func (a *Analyzer) readDecl(decl *ast.FuncDecl) *ast.FuncDecl {
 	p.original[shadow] = decl
 	a.rekeyFuncDeclEntries(decl, shadow, false)
 	return shadow
+}
+
+// parallelReadDeclSlice maps canonical graph entries through this worker's read
+// shadows. Warm caches are built before workers exist, so their identities are
+// canonical; a worker must use its own shadow identities when traversing a
+// foreign declaration to keep SCC and summary keys consistent.
+func (a *Analyzer) parallelReadDeclSlice(decls []*ast.FuncDecl) ([]*ast.FuncDecl, bool) {
+	if a == nil || a.parallel == nil || len(decls) == 0 {
+		return decls, false
+	}
+	var mapped []*ast.FuncDecl
+	for i, decl := range decls {
+		resolved := a.readDecl(decl)
+		if resolved == decl {
+			continue
+		}
+		if mapped == nil {
+			mapped = make([]*ast.FuncDecl, len(decls))
+			copy(mapped, decls)
+		}
+		mapped[i] = resolved
+	}
+	return mapped, mapped != nil
 }
 
 // isParallelShadow reports whether decl is a worker-private copy.

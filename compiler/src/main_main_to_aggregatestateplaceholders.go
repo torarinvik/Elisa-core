@@ -931,84 +931,9 @@ func writeSourceWithIncludes(out *bytes.Buffer, filename string, seen map[string
 }
 
 func writeSourceWithIncludesActive(out *bytes.Buffer, filename string, included map[string]bool, active map[string]bool) error {
-	abs, err := filepath.Abs(filename)
-	if err != nil {
-		return err
-	}
-	if active[abs] {
-		return fmt.Errorf("cyclic include detected for %s", abs)
-	}
-	if included[abs] {
-		return nil
-	}
-	active[abs] = true
-	defer delete(active, abs)
-
-	raw, err := os.ReadFile(abs)
-	if err != nil {
-		return err
-	}
-	included[abs] = true
-
-	out.Grow(len(raw))
-	sourceLabel := abs
-	if canonical, err := filepath.EvalSymlinks(abs); err == nil {
-		sourceLabel = filepath.Clean(canonical)
-	}
-	writeLineDirective(out, 1, sourceLabel)
-	start := 0
-	curLine := 1
-	for start <= len(raw) {
-		end := bytes.IndexByte(raw[start:], '\n')
-		hasNewline := end >= 0
-		if hasNewline {
-			end += start
-		} else {
-			end = len(raw)
-		}
-		line := raw[start:end]
-		if includePath, ok := parseIncludeDirectiveBytes(bytes.TrimSpace(line)); ok {
-			indent := leadingWhitespaceBytes(line)
-			var includeBuf bytes.Buffer
-			outLenBefore := out.Len()
-			// An absolute include path is used verbatim; filepath.Join would
-			// concatenate it onto the current dir rather than honoring it.
-			resolvedInclude := includePath
-			if !filepath.IsAbs(resolvedInclude) {
-				resolvedInclude = filepath.Join(filepath.Dir(abs), includePath)
-			}
-			if err := writeSourceWithIncludesActive(&includeBuf, resolvedInclude, included, active); err != nil {
-				return err
-			}
-			writeIndentedInclude(out, includeBuf.Bytes(), indent)
-			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
-				out.WriteByte('\n')
-			}
-			// Resume attribution to the parent file after the spliced include.
-			writeLineDirective(out, curLine+1, sourceLabel)
-		} else {
-			// Reserve #line for include-expansion source maps; preserve a
-			// source-authored spelling as a normal comment instead.
-			trimmed := bytes.TrimLeft(line, " \t")
-			if bytes.HasPrefix(trimmed, []byte("#line ")) || bytes.HasPrefix(trimmed, []byte("#line\t")) {
-				indent := len(line) - len(trimmed)
-				out.Write(line[:indent])
-				out.WriteString("# line")
-				out.Write(trimmed[len("#line"):])
-			} else {
-				out.Write(line)
-			}
-			if hasNewline {
-				out.WriteByte('\n')
-			}
-		}
-		if !hasNewline {
-			break
-		}
-		start = end + 1
-		curLine++
-	}
-	return nil
+	// A nil resolver option retains direct relative/absolute path resolution and
+	// filesystem errors, while sharing the project's streaming splice logic.
+	return writeSourceWithIncludesPrefixed(out, filename, included, active, nil, nil)
 }
 
 // writeLineDirective emits a `#line <num> <path>` source-attribution marker at
@@ -1026,37 +951,6 @@ func leadingWhitespaceBytes(line []byte) []byte {
 	return line[:i]
 }
 
-func writeIndentedInclude(out *bytes.Buffer, data []byte, indent []byte) {
-	if len(indent) == 0 || len(data) == 0 {
-		out.Write(data)
-		return
-	}
-	start := 0
-	for start <= len(data) {
-		end := bytes.IndexByte(data[start:], '\n')
-		hasNewline := end >= 0
-		if hasNewline {
-			end += start
-		} else {
-			end = len(data)
-		}
-		if end > start {
-			// `#line` source-attribution directives must stay at column 0 so the
-			// lexer consumes them before indentation handling.
-			if !bytes.HasPrefix(data[start:end], []byte("#line ")) {
-				out.Write(indent)
-			}
-			out.Write(data[start:end])
-		}
-		if hasNewline {
-			out.WriteByte('\n')
-		}
-		if !hasNewline {
-			break
-		}
-		start = end + 1
-	}
-}
 func parseIncludeDirective(line string) (string, bool) {
 	trimmed := strings.TrimSpace(line)
 	if strings.HasPrefix(trimmed, "#") {

@@ -202,15 +202,27 @@ func (a *Analyzer) mergeSpecializedValueTypeBindings(dst map[*Symbol]Type, src m
 		if !ok {
 			continue
 		}
-		mergedType, ok := a.mergeSpecializedValueTypes(typ, srcType)
-		if !ok {
-			continue
+		// Branch snapshots share their private immutable tracked types. When
+		// both paths still carry the same graph, neither a recursive merge nor
+		// a second deep copy changes any information.
+		identical := typ != nil && typ == srcType
+		mergedType := typ
+		if !identical {
+			var ok bool
+			mergedType, ok = a.mergeSpecializedValueTypes(typ, srcType)
+			if !ok {
+				continue
+			}
 		}
 		if normalized, ok := a.specializeCallbackCarryingType(sym.Type, mergedType); ok {
 			merged[sym] = normalized
 			continue
 		}
-		merged[sym] = a.cloneTrackedValueTypeWithSeen(mergedType, seen)
+		if identical {
+			merged[sym] = a.shareTrackedValueType(mergedType)
+		} else {
+			merged[sym] = a.cloneTrackedValueTypeWithSeen(mergedType, seen)
+		}
 	}
 	return merged
 }
@@ -224,7 +236,10 @@ func (a *Analyzer) intersectSpecializedValueTypeFlows(flows ...map[*Symbol]Type)
 	mergedAny := false
 	for _, flow := range flows {
 		if !mergedAny {
-			merged = a.cloneSpecializedValueTypeMap(flow)
+			// These are snapshots of private immutable tracked graphs, just as
+			// in cloneSpecializedValueTypeBindings. Deep cloning the first path
+			// destroys identity before the unchanged-branch merge can use it.
+			merged = a.snapshotSpecializedValueTypes(flow)
 			mergedAny = true
 			continue
 		}

@@ -40,6 +40,10 @@ func findOptimizationFactsVarInitExpr(stmts []ast.Stmt, name string) (ast.Expr, 
 					return expr, true
 				}
 			}
+		case *ast.RegionStmt:
+			if expr, ok := findOptimizationFactsVarInitExpr(s.Body, name); ok {
+				return expr, true
+			}
 		}
 	}
 	return nil, false

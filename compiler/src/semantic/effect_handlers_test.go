@@ -184,3 +184,20 @@ def main() -> void:
 		t.Fatalf("expected exact generic handler specialization diagnostic, got %v", result.Errors())
 	}
 }
+
+func TestUnknownHandlerStillChecksCaptureExpressions(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "unknown_handler_capture.elisa", `
+permission LocalPermission:
+    Run
+
+def main() -> void:
+    can LocalPermission.Run with MissingHandler(unknown_capture):
+        pass
+`)
+	diagnostics := strings.Join(result.Errors(), "\n")
+	for _, required := range []string{`unknown effect handler "MissingHandler"`, `undefined identifier "unknown_capture"`} {
+		if !strings.Contains(diagnostics, required) {
+			t.Fatalf("missing %s in handler/capture diagnostics:\n%s", required, diagnostics)
+		}
+	}
+}

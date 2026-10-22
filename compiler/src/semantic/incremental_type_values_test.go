@@ -430,3 +430,26 @@ func TestFunctionTypeSchemaAndTableRootGates(t *testing.T) {
 		}
 	}
 }
+
+func TestNominalFingerprintIgnoresDerivedFieldOrderMemo(t *testing.T) {
+	scalar := &BuiltinType{Name: "i64"}
+	typ := &StructType{Name: "M.Pair", Decl: &ast.StructDecl{Name: "Pair", Fields: []ast.FieldDecl{
+		{Name: "first", Type: &ast.NamedType{Name: "i64"}},
+		{Name: "second", Type: &ast.NamedType{Name: "i64"}},
+	}}, Fields: map[string]Field{"first": {Name: "first", Type: scalar}, "second": {Name: "second", Type: scalar}}}
+	before, err := functionNominalTypeFingerprint(typ)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typ.declarationFieldOrder = astFieldDeclNames(typ.Decl.Fields)
+	after, err := functionNominalTypeFingerprint(typ)
+	if err != nil || before != after {
+		t.Fatalf("warming the derived memo changed nominal identity: %v", err)
+	}
+	typ.Decl.Fields[0], typ.Decl.Fields[1] = typ.Decl.Fields[1], typ.Decl.Fields[0]
+	typ.declarationFieldOrder = astFieldDeclNames(typ.Decl.Fields)
+	changed, err := functionNominalTypeFingerprint(typ)
+	if err != nil || changed == before {
+		t.Fatalf("source field-order edit was not fingerprinted: %v", err)
+	}
+}

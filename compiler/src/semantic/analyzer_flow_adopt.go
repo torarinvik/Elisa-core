@@ -53,7 +53,7 @@ func (a *Analyzer) analyzeAdoptStmt(n *ast.AdoptStmt) {
 	// Consume the child owner and end its lifetime. The obligation transfers to
 	// the parent (which now owns the storage), so this is safe, not a leak.
 	childState.Destroyed = true
-	a.currentRegions[childSym] = childState
+	a.setCurrentRegionState(childSym, childState)
 	a.recordAffineConsumption(affineValueKey{Root: childSym}, "adopt")
 }
 
@@ -64,7 +64,7 @@ func (a *Analyzer) rebaseRegionRefs(from, to *Symbol, gen int) {
 	for sym, state := range a.currentRegionRefs {
 		next, changed := rebaseRegionDependencyInState(state, from, to, gen)
 		if changed {
-			a.currentRegionRefs[sym] = next
+			a.setCurrentRegionRefState(sym, next)
 		}
 	}
 }
