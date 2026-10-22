@@ -585,8 +585,8 @@ def make_leaf(v: i64) -> Node can[Memory.Allocate, Abort.Panic]:
     return new Stmt.Leaf(value: v)
 def grow(out: mutable darray[Node]&) -> void can[Memory.Allocate, Abort.Panic]:
     kids: mutable darray[Node] = []
-    kids.push(make_leaf(10))
-    kids.push(make_leaf(20))
+    kids.push(make_leaf(10) can Memory.Allocate, Abort.Panic)
+    kids.push(make_leaf(20) can Memory.Allocate, Abort.Panic)
     out.push(new Stmt.Block(body: kids, tag: 99))
     return
 def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
@@ -598,13 +598,13 @@ def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
             for k in b:
                 total <- total + sumtree(k)
             return total
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nodes: mutable darray[Node] = []
     grow(nodes) can Memory.Allocate, Abort.Panic
     acc: mutable i64 = 0
     for n in nodes:
         acc <- acc + sumtree(n) can Memory.Allocate, Abort.Panic
-    print(acc.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(acc.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "129" {
 		t.Fatalf("void grower inserting a region-poly node-with-payload must adopt its payload into the caller's container region; expected RAN 129, got %s %q", status, out)
@@ -630,7 +630,7 @@ def make_block(tag: i64) -> Node can[Memory.Allocate, Abort.Panic]:
     kids.push(new Stmt.Leaf(value: 1))
     return new Stmt.Block(body: kids, tag: tag)
 def grow(out: mutable darray[Node]&) -> void can[Memory.Allocate, Abort.Panic]:
-    out.push(make_block(0))
+    out.push(make_block(0) can Memory.Allocate, Abort.Panic)
     return
 def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
     match n:
@@ -641,10 +641,10 @@ def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
             for k in b:
                 total <- total + sumtree(k)
             return total
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nodes: mutable darray[Node] = []
     grow(nodes) can Memory.Allocate, Abort.Panic
-    print(sumtree(nodes[0]).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(sumtree(nodes[0]).i64() can Memory.Allocate, Abort.Panic) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "2" {
 		t.Fatalf("single-container void grower must adopt the payload soundly; expected RAN 2, got %s %q", status, out)
@@ -834,8 +834,8 @@ def make_leaf(v: i64) -> Node can[Memory.Allocate, Abort.Panic]:
     return new Stmt.Leaf(value: v)
 def grow(out: mutable darray[Node]&) -> void can[Memory.Allocate, Abort.Panic]:
     kids: mutable darray[Node] = []
-    kids.push(make_leaf(10))
-    kids.push(make_leaf(20))
+    kids.push(make_leaf(10) can Memory.Allocate, Abort.Panic)
+    kids.push(make_leaf(20) can Memory.Allocate, Abort.Panic)
     out.push(new Stmt.Block(body: kids, tag: 99))
     return
 def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
@@ -847,7 +847,7 @@ def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
             for k in b:
                 total <- total + sumtree(k) can Memory.Allocate, Abort.Panic
             return total
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
     nodes: mutable darray[Node] = []
     i: mutable i64 = 0
     while i < 2000:
@@ -856,7 +856,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     acc: mutable i64 = 0
     for n in nodes:
         acc <- acc + sumtree(n) can Memory.Allocate, Abort.Panic
-    print(acc.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(acc.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "258000" {
 		t.Fatalf("repeated void-grower growth must relocate (chained backing), not panic; expected RAN 258000, got %s %q", status, out)

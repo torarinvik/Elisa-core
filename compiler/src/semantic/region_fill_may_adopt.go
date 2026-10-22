@@ -401,14 +401,11 @@ func fillMayAdoptNodes(v reflect.Value) []any {
 }
 
 func fillMayAdoptWalk(v reflect.Value, visit func(any)) {
-	seen := fillMayAdoptSeenPool.Get().(map[uintptr]bool)
-	fillMayAdoptWalkSeen(v, visit, seen)
-	clear(seen)
-	fillMayAdoptSeenPool.Put(seen)
-}
-
-var fillMayAdoptSeenPool = sync.Pool{
-	New: func() any { return make(map[uintptr]bool) },
+	state := fillMayAdoptSeenPool.Get().(*fillWalkSeen)
+	fillMayAdoptWalkSeen(v, visit, state.values)
+	if state.reset() {
+		fillMayAdoptSeenPool.Put(state)
+	}
 }
 
 // fillMayAdoptWalkSeen walks v through the generated typed walker (ast_pointer_walk_gen.go, from

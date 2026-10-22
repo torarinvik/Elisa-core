@@ -214,7 +214,7 @@ func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
 		t.Fatalf("expected region-owned struct fixture to compile, stderr:\n%s", stderr.String())
 	}
 	output := stdout.String()
-	for _, check := range []string{"define i64 @main()", "%Expr", "%Box"} {
+	for _, check := range []string{"define i64 @main()", "Expr$generic_", "Box$generic_"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected llvm output to contain %q, got:\n%s", check, output)
 		}

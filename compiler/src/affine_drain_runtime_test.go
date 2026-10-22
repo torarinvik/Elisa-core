@@ -29,13 +29,14 @@ def make(n: i64) -> Guard:
 
 global mutable g_sum: i64 = 0
 
-def consume(g: Guard) -> void:
-    g_sum <- g_sum + g.token
-    _ = move g
+def consume(g: Guard) -> void can[Global.Read, Global.Write]:
+    can Global{Read,Write}:
+        g_sum <- g_sum + g.token
+        _ = move g
 
 @test
 def affine_move_drain_runtime_test() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Global.Read, Global.Write:
         gs: mutable darray[Guard] = []
         gs.push(make(10))
         gs.push(make(20))

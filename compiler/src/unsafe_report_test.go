@@ -111,13 +111,14 @@ extern LLVMTypeOf(value: LLVMValueRef) -> LLVMTypeRef
 extern LLVMInt1TypeInContext(ctx: LLVMContextRef) -> LLVMTypeRef
 
 def guarded(condition_value: LLVMValueRef?, ctx: LLVMContextRef) -> LLVMValueRef?:
-	validated: LLVMValueRef? =
-		match condition_value:
-			emitted_condition if LLVMTypeOf(emitted_condition) != LLVMInt1TypeInContext(ctx):
-				null
-			_:
-				condition_value
-	return validated
+	can Unsafe.RawExtern:
+		validated: LLVMValueRef? =
+			match condition_value:
+				emitted_condition if LLVMTypeOf(emitted_condition) != LLVMInt1TypeInContext(ctx):
+					null
+				_:
+					condition_value
+		return validated
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatal(err)

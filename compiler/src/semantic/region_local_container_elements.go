@@ -1083,6 +1083,11 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 		}
 		merged := existing
 		known := true
+		// Gather read-only argument states before merging. Folding each source into
+		// an ever-growing union repeatedly copies the same dependency/field maps.
+		var inlineStates [4]regionRefState
+		states := inlineStates[:1]
+		states[0] = existing
 		for other, otherArg := range call.Args {
 			if other == index {
 				continue
@@ -1109,23 +1114,18 @@ func (a *Analyzer) recordCallFilledElementStates(call *ast.CallExpr) {
 				}
 			}
 			if state, ok := a.regionRefStateForExpr(otherArg); ok && !ownStorageIsOnlyElements && hasRegionProvenance(state) {
-				if m, ok := mergeRegionRefStates(merged, state); ok {
-					merged = m
-				} else {
-					known = false
-				}
+				states = append(states, state)
 			}
 			if otherIdent, ok := stripAddrAndParens(otherArg).(*ast.Ident); ok {
 				if otherSym, ok := a.currentScope.Lookup(otherIdent.Name); ok {
 					if elems, ok := a.currentElementStates[otherSym]; ok && hasRegionProvenance(elems) {
-						if m, ok := mergeRegionRefStates(merged, elems); ok {
-							merged = m
-						} else {
-							known = false
-						}
+						states = append(states, elems)
 					}
 				}
 			}
+		}
+		if len(states) > 1 {
+			merged, known = mergeRegionRefStates(states...)
 		}
 		if !known {
 			a.checkElementLoopAssumptions(sym, call, regionRefState{}, false)
