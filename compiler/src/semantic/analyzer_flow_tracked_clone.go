@@ -348,6 +348,18 @@ func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
 	return a.snapshotSpecializedValueTypes(a.currentSpecializedValueTypes)
 }
 
+// Entry clones belong to one analysis path. Its result may take that binding
+// map before the parent is restored; stored type values remain immutable. Keep
+// the same debug sharing records as a copied snapshot without another map copy.
+func (a *Analyzer) snapshotPrivateSpecializedValueTypes() map[*Symbol]Type {
+	if trackedShareCheck {
+		for _, typ := range a.currentSpecializedValueTypes {
+			a.shareTrackedValueType(typ)
+		}
+	}
+	return a.currentSpecializedValueTypes
+}
+
 func (a *Analyzer) snapshotSpecializedValueTypes(src map[*Symbol]Type) map[*Symbol]Type {
 	if src == nil {
 		return nil

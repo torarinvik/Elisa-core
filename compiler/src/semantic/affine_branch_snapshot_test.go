@@ -82,16 +82,39 @@ func TestAffineSnapshotPathsKeepParentAndSiblingsIndependent(t *testing.T) {
 			initial := &ast.IntLit{Value: "1"}
 			a.currentAffineValues = map[affineValueKey]affineValueState{key: {ConsumedBy: "entry"}}
 			a.currentValueBindings = map[*Symbol]ast.Expr{sym: initial}
+			originalType := &BuiltinType{Name: "i32"}
+			a.currentSpecializedValueTypes = map[*Symbol]Type{sym: originalType}
 			first := path.run(a, NewScope(parent))
 			second := path.run(a, NewScope(parent))
 			first.Affine[key] = affineValueState{ConsumedBy: "edited"}
 			first.ValueBindings[sym] = &ast.IntLit{Value: "2"}
+			first.SpecializedValueTypes[sym] = &BuiltinType{Name: "bool"}
 			if a.currentAffineValues[key].ConsumedBy != "entry" || second.Affine[key].ConsumedBy != "entry" {
 				t.Fatal("affine state aliases another path")
 			}
 			if a.currentValueBindings[sym] != initial || second.ValueBindings[sym] != initial {
 				t.Fatal("value bindings alias another path")
 			}
+			if a.currentSpecializedValueTypes[sym] != originalType || second.SpecializedValueTypes[sym] != originalType {
+				t.Fatal("specialized type bindings alias another path")
+			}
 		})
 	}
 }
+
+func BenchmarkSpecializedBranchSnapshot(b *testing.B) {
+	parent := NewScope(nil)
+	a := newAnalyzerWithScope(parent)
+	a.currentSpecializedValueTypes = make(map[*Symbol]Type, 128)
+	typ := &BuiltinType{Name: "i32"}
+	for i := 0; i < 128; i++ {
+		a.currentSpecializedValueTypes[&Symbol{}] = typ
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		snapshot := a.analyzeBlockWithAffineClonePrepared(nil, NewScope(parent), nil)
+		specializedBranchSink = snapshot.SpecializedValueTypes
+	}
+}
+
+var specializedBranchSink map[*Symbol]Type

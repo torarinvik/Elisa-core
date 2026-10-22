@@ -5,11 +5,36 @@ import (
 	"reflect"
 )
 
+// A field selector contributes only its receiver's name. Keep this fast path
+// bounded; deeper or cyclic graphs use the ordinary visited-set token walk.
+func storeScanSimpleMentionNames(expr ast.Expr) (name, root string, known bool) {
+	for depth := 0; depth < 8; depth++ {
+		switch node := expr.(type) {
+		case *ast.Ident:
+			if node != nil {
+				return node.Name, rootNameOfDotted(node.Name), true
+			}
+			return "", "", false
+		case *ast.FieldExpr:
+			if node == nil {
+				return "", "", false
+			}
+			expr = node.Object
+		default:
+			return "", "", false
+		}
+	}
+	return "", "", false
+}
+
 // mentions: storeScanMentions(expr, names), with expr's mention tokens memoized in the index
 // (fixpoints ask the same expressions again on every iteration).
 func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bool {
 	if expr == nil || len(names) == 0 {
 		return false
+	}
+	if name, root, known := storeScanSimpleMentionNames(expr); known {
+		return names[name] || (root != name && names[root])
 	}
 	tokens, ok := idx.exprTokens[expr]
 	if !ok {
@@ -25,6 +50,9 @@ func (idx *storeScanDeclIndex) mentions(expr ast.Expr, names map[string]bool) bo
 func (idx *storeScanDeclIndex) mentionsTwo(expr ast.Expr, left, right map[string]bool) (bool, bool) {
 	if expr == nil || (len(left) == 0 && len(right) == 0) {
 		return false, false
+	}
+	if name, root, known := storeScanSimpleMentionNames(expr); known {
+		return left[name] || (root != name && left[root]), right[name] || (root != name && right[root])
 	}
 	tokens, ok := idx.exprTokens[expr]
 	if !ok {

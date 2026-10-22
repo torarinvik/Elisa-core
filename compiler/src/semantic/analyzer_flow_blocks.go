@@ -1377,7 +1377,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 		prepare()
 	}
 	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
-	snapshot := affineFlowSnapshot{Regions: branchRegions, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	snapshot := affineFlowSnapshot{Regions: branchRegions, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.snapshotPrivateSpecializedValueTypes(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	blockEndRangeFacts(snapshot.RangeFacts, scope)
 	if scope != nil {
 		// Facts over branch-local immutable locals are rewritten through their initializers so they

@@ -509,7 +509,7 @@ func (a *Analyzer) analyzeValueExprInAffineScopePrepared(expr ast.Expr, expected
 	}
 	result := a.analyzeValueExprInScope(expr, expected, scope)
 	// Entry clones belong to this path; transfer them before restoring the parent.
-	snapshot := affineFlowSnapshot{Affine: a.currentAffineValues, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.currentValueBindings, AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	snapshot := affineFlowSnapshot{Affine: a.currentAffineValues, BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.snapshotPrivateSpecializedValueTypes(), ValueBindings: a.currentValueBindings, AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
