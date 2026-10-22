@@ -44,22 +44,23 @@ def code_of(e: Expr) -> i64 can[Abort.Panic]:
         _:
             return -1
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    params: mutable darray[ParamDecl] = []
-    build_param(params)
-    total: mutable i64 = 0
-    for param in params |total|:
-        match param.type_expression:
-            Expr.IndexN(head, arguments, line):
-                total <- total + code_of(head)
-                weight: mutable i64 = 10
-                for argument in arguments |total, weight|:
-                    total <- total + weight * code_of(argument)
-                    weight <- weight * 10
-            _:
-                total <- total - 1000000
-    print(total)
-    return 0`)
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Atomics.Exchange, Atomics.Store, Global.Read, Global.Write]:
+    can Abort.Panic, Atomics{Exchange,Store}, Console{Format,Write}, Global{Read,Write}, Memory.Allocate:
+        params: mutable darray[ParamDecl] = []
+        build_param(params)
+        total: mutable i64 = 0
+        for param in params |total|:
+            match param.type_expression:
+                Expr.IndexN(head, arguments, line):
+                    total <- total + code_of(head)
+                    weight: mutable i64 = 10
+                    for argument in arguments |total, weight|:
+                        total <- total + weight * code_of(argument)
+                        weight <- weight * 10
+                _:
+                    total <- total - 1000000
+        print(total)
+        return 0`)
 	// head "dict" -> 'd'+4 = 104; args "cstr" -> 'c'+4 = 103 (x10), "i64" -> 'i'+3 = 108 (x100).
 	if status != "RAN" || out != "11934" {
 		t.Fatalf("expected RAN 11934 (side-table payloads survive callee return), got %s %q", status, out)
