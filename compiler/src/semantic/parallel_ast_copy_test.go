@@ -10,7 +10,7 @@ func TestASTFallbackCopyPreservesCyclesAndNodeSharing(t *testing.T) {
 	name := &ast.Ident{Name: "call"}
 	call := &ast.CallExpr{Func: name}
 	call.Args = []ast.Expr{call, name}
-	fn := &ast.FuncDecl{Name: "f", Body: []ast.Stmt{&ast.ExprStmt{Expr: call}, &ast.ExprStmt{Expr: call}}}
+	fn := &ast.FuncDecl{Name: "f", TypeParams: []string{"T"}, Body: []ast.Stmt{&ast.ExprStmt{Expr: call}, &ast.ExprStmt{Expr: call}}}
 	file := &ast.File{Decls: []ast.Decl{fn}, DeclVisibility: map[ast.Decl]string{fn: "private"}}
 	copy := copyASTGraph(reflect.ValueOf(file), map[uintptr]reflect.Value{}).Interface().(*ast.File)
 	if !reflect.DeepEqual(file.Decls, copy.Decls) {
@@ -29,7 +29,8 @@ func TestASTFallbackCopyPreservesCyclesAndNodeSharing(t *testing.T) {
 	}
 	copiedCall.Func.(*ast.Ident).Name = "changed"
 	copiedFn.Body[1] = nil
-	if name.Name != "call" || fn.Body[1] == nil {
+	copiedFn.TypeParams[0] = "U"
+	if name.Name != "call" || fn.Body[1] == nil || fn.TypeParams[0] != "T" {
 		t.Fatal("copy mutation reached source")
 	}
 }

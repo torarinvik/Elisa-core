@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"sync"
 
 	"elisacore/src/ast"
 )
@@ -24,7 +25,7 @@ func copyASTGraph(v reflect.Value, memo map[uintptr]reflect.Value) reflect.Value
 		}
 		out := reflect.New(v.Type().Elem())
 		memo[v.Pointer()] = out
-		out.Elem().Set(copyASTGraph(v.Elem(), memo))
+		copyASTGraphInto(out.Elem(), v.Elem(), memo)
 		return out
 	case reflect.Interface:
 		if v.IsNil() {
@@ -39,19 +40,19 @@ func copyASTGraph(v reflect.Value, memo map[uintptr]reflect.Value) reflect.Value
 			return v
 		}
 		out := reflect.New(v.Type()).Elem()
-		out.Set(v)
-		for i := 0; i < v.NumField(); i++ {
-			f := settable(out.Field(i))
-			f.Set(copyASTGraph(settable(v.Field(i)), memo))
-		}
+		copyASTGraphInto(out, v, memo)
 		return out
 	case reflect.Slice:
 		if v.IsNil() {
 			return v
 		}
 		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
-		for i := 0; i < v.Len(); i++ {
-			out.Index(i).Set(copyASTGraph(v.Index(i), memo))
+		if astCopyNeedsTraversal(v.Type().Elem()) {
+			for i := 0; i < v.Len(); i++ {
+				copyASTGraphInto(out.Index(i), v.Index(i), memo)
+			}
+		} else {
+			reflect.Copy(out, v)
 		}
 		return out
 	case reflect.Map:
@@ -66,6 +67,57 @@ func copyASTGraph(v reflect.Value, memo map[uintptr]reflect.Value) reflect.Value
 		return out
 	}
 	return v
+}
+
+// Copy into an existing field or slice element. AST pointer allocation already
+// provides its struct storage, and interface fields can hold a copied node
+// directly; neither needs an intermediate boxed value.
+func copyASTGraphInto(out, source reflect.Value, memo map[uintptr]reflect.Value) {
+	switch source.Kind() {
+	case reflect.Struct:
+		if source.Type().PkgPath() == astGraphPkgPath {
+			out.Set(source)
+			for _, i := range astCopyTraversalFields(source.Type()) {
+				copyASTGraphInto(settable(out.Field(i)), settable(source.Field(i)), memo)
+			}
+			return
+		}
+	case reflect.Interface:
+		if !source.IsNil() {
+			out.Set(copyASTGraph(source.Elem(), memo))
+			return
+		}
+	}
+	out.Set(copyASTGraph(source, memo))
+}
+
+var astCopyFieldCache sync.Map // reflect.Type -> immutable []int
+
+func astCopyNeedsTraversal(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Interface, reflect.Slice, reflect.Map:
+		return true
+	case reflect.Pointer:
+		return t.Elem().PkgPath() == astGraphPkgPath
+	case reflect.Struct:
+		return t.PkgPath() == astGraphPkgPath
+	default:
+		return false
+	}
+}
+
+func astCopyTraversalFields(t reflect.Type) []int {
+	if fields, ok := astCopyFieldCache.Load(t); ok {
+		return fields.([]int)
+	}
+	var fields []int
+	for i := 0; i < t.NumField(); i++ {
+		if astCopyNeedsTraversal(t.Field(i).Type) {
+			fields = append(fields, i)
+		}
+	}
+	actual, _ := astCopyFieldCache.LoadOrStore(t, fields)
+	return actual.([]int)
 }
 
 func copyASTDecl(d ast.Decl) ast.Decl {
