@@ -200,10 +200,6 @@ func (a *Analyzer) registerOwnedStoreOwner(sym *Symbol) {
 	if sym == nil {
 		return
 	}
-	if a.currentRegions == nil {
-		a.currentRegions = map[*Symbol]regionState{}
-		a.currentRegionsBorrowed = false
-	}
 	a.setCurrentRegionState(sym, regionState{})
 	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "owned region")
 }
@@ -290,10 +286,6 @@ func (a *Analyzer) markReceivedOwnedRegion(sym *Symbol, value ast.Expr) {
 	fnType, _ := a.exprTypes[call.Func].(*FuncType)
 	if fnType == nil || !fnType.ReturnsOwnedRegion {
 		return
-	}
-	if a.currentRegions == nil {
-		a.currentRegions = map[*Symbol]regionState{}
-		a.currentRegionsBorrowed = false
 	}
 	a.setCurrentRegionState(sym, regionState{})
 	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "region owner")

@@ -385,9 +385,49 @@ func deepCloneValue(v reflect.Value) reflect.Value {
 			return v
 		}
 		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		if v.Len() == 0 {
+			return out
+		}
 		iter := v.MapRange()
+		if v.Len() < 2 && !typeHoldsMapInline(v.Type().Elem()) {
+			for iter.Next() {
+				out.SetMapIndex(iter.Key(), deepCloneValue(iter.Value()))
+			}
+			return out
+		}
+		// Iterator Key/Value calls box indirect values. Reuse addressable slots;
+		// SetMapIndex copies each slot's contents into the destination entry.
+		var keySlot, valueSlot, structSlot reflect.Value
+		if !parallelCloneDirectReflectKind(v.Type().Key().Kind()) {
+			keySlot = reflect.New(v.Type().Key()).Elem()
+		}
+		if !parallelCloneDirectReflectKind(v.Type().Elem().Kind()) {
+			valueSlot = reflect.New(v.Type().Elem()).Elem()
+		}
+		cloneStruct := v.Type().Elem().Kind() == reflect.Struct && typeHoldsMapInline(v.Type().Elem())
+		if cloneStruct {
+			structSlot = reflect.New(v.Type().Elem()).Elem()
+		}
 		for iter.Next() {
-			out.SetMapIndex(iter.Key(), deepCloneValue(iter.Value()))
+			var key, value reflect.Value
+			if keySlot.IsValid() {
+				keySlot.SetIterKey(iter)
+				key = keySlot
+			} else {
+				key = iter.Key()
+			}
+			if valueSlot.IsValid() {
+				valueSlot.SetIterValue(iter)
+				value = valueSlot
+			} else {
+				value = iter.Value()
+			}
+			if cloneStruct {
+				cloneParallelStructInto(structSlot, value)
+				out.SetMapIndex(key, structSlot)
+			} else {
+				out.SetMapIndex(key, deepCloneValue(value))
+			}
 		}
 		return out
 	case reflect.Struct:
@@ -395,9 +435,17 @@ func deepCloneValue(v reflect.Value) reflect.Value {
 			return v
 		}
 		out := reflect.New(v.Type()).Elem()
+		cloneParallelStructInto(out, v)
+		return out
+	case reflect.Array:
+		if !typeHoldsMapInline(v.Type()) {
+			return v
+		}
+		out := reflect.New(v.Type()).Elem()
 		out.Set(v)
-		for i := 0; i < v.NumField(); i++ {
-			settable(out.Field(i)).Set(deepCloneValue(settable(out.Field(i))))
+		for i := 0; i < v.Len(); i++ {
+			target := settable(out.Index(i))
+			target.Set(deepCloneValue(target))
 		}
 		return out
 	case reflect.Slice:
@@ -407,6 +455,28 @@ func deepCloneValue(v reflect.Value) reflect.Value {
 		return v.Slice3(0, v.Len(), v.Len())
 	}
 	return v
+}
+
+// These kinds fit directly in reflection values, so iterators do not box them.
+func parallelCloneDirectReflectKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Pointer, reflect.UnsafePointer, reflect.Chan, reflect.Map, reflect.Func:
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneParallelStructInto(out, source reflect.Value) {
+	out.Set(source)
+	for i := 0; i < source.NumField(); i++ {
+		target := settable(out.Field(i))
+		if target.Kind() == reflect.Struct && typeHoldsMapInline(target.Type()) {
+			cloneParallelStructInto(target, target)
+		} else {
+			target.Set(deepCloneValue(target))
+		}
+	}
 }
 
 var mapInlineCache sync.Map
