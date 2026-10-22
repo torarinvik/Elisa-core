@@ -442,7 +442,7 @@ func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	// Members of a recursive cycle cannot see each other's finished facts in any
 	// order, so a large cycle is dealt in chunks that run side by side; each chunk
 	// still waits for the cycle's outside callees, and callers wait for every chunk.
-	const chunk = 8
+	chunk := parallelSCCChunkSize()
 	var units [][]int
 	var sccOf []int
 	for c, comp := range components {

@@ -50,11 +50,14 @@ def caller(item: Payload) -> sview:
 		return file.Decls, strings.Join(result.Notices(), "\n")
 	}
 	want, notices := analyze("1")
-	for _, workers := range []string{"2", "3", "4"} {
-		for i := 0; i < 5; i++ {
-			got, actualNotices := analyze(workers)
-			if !reflect.DeepEqual(want, got) || notices != actualNotices {
-				t.Fatalf("workers %s: lowered AST or notices differ from serial", workers)
+	for _, chunk := range []string{"1", "4", "8"} {
+		t.Setenv("ELISA_PARALLEL_SCC_CHUNK", chunk)
+		for _, workers := range []string{"2", "3", "4"} {
+			for i := 0; i < 5; i++ {
+				got, actualNotices := analyze(workers)
+				if !reflect.DeepEqual(want, got) || notices != actualNotices {
+					t.Fatalf("workers %s, chunk %s: lowered AST or notices differ from serial", workers, chunk)
+				}
 			}
 		}
 	}
