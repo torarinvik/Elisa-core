@@ -137,11 +137,16 @@ var numericNameSuffix = regexp.MustCompile(`\.[0-9]+$`)
 
 func partitionedIREnabled() bool { return os.Getenv("ELISACORE_PARALLEL_IR") != "0" }
 
-// partitionedIRApplies limits partitioned generation to unoptimized builds,
-// where no partition needs another's bodies for inlining, of programs large
-// enough to repay a generator per partition.
+// Optimized partition generation is an explicit experiment alongside the
+// existing pre-optimization partition mode. It has the same cross-partition
+// inlining limitation and does not replace the default whole-module O3 path.
+// Programs must be large enough to repay a generator per partition.
 func (s *IncrementalObjectSession) partitionedIRApplies(result *semantic.Result, options LLVMObjectEmitOptions) bool {
-	if !partitionedIREnabled() || options.OptLevel != OptimizationLevel0 {
+	if !partitionedIREnabled() {
+		return false
+	}
+	if options.OptLevel != OptimizationLevel0 && (os.Getenv("ELISACORE_PARALLEL_IR") != "1" ||
+		!parallelOptEnabled() || parallelOptImportWeight() != 0 || !partitionWorkersAvailable) {
 		return false
 	}
 	if s.minWeight == 0 {
@@ -284,18 +289,27 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	defer C.LLVMDisposeMessage(cpu)
 	defer C.LLVMDisposeMessage(features)
 	nativeStart := time.Now()
-	var buffer C.LLVMMemoryBufferRef
-	var message *C.char
-	if C.elisacoreEmitPartitionObject(g.module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
-		text := "native emission failed"
-		if message != nil {
-			text = C.GoString(message)
-			C.free(unsafe.Pointer(message))
+	if options.OptLevel != OptimizationLevel0 {
+		var err error
+		object, err = emitPreoptimizedPartition(g.module, fmt.Sprintf("default<O%d>", int(options.OptLevel)), triple, cpu, features)
+		if err != nil {
+			return nil, fmt.Errorf("partition %d: %w", part, err)
 		}
-		return nil, fmt.Errorf("partition %d: %s", part, text)
+	} else {
+		var buffer C.LLVMMemoryBufferRef
+		var message *C.char
+		if C.elisacoreEmitPartitionObject(g.module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
+			text := "native emission failed"
+			if message != nil {
+				text = C.GoString(message)
+				C.free(unsafe.Pointer(message))
+			}
+			return nil, fmt.Errorf("partition %d: %s", part, text)
+		}
+		object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
+		C.LLVMDisposeMemoryBuffer(buffer)
 	}
-	object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
-	C.LLVMDisposeMemoryBuffer(buffer)
+
 	nativeDuration := time.Since(nativeStart)
 	partitionNativeNanos.Add(int64(nativeDuration))
 	partitionNativeCount.Add(1)

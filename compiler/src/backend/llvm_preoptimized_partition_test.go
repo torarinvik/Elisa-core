@@ -13,6 +13,10 @@ import (
 func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 	if os.Getenv("ELISA_TEST_PREOPT_CHILD") == "1" {
 		t.Setenv("ELISACORE_PARALLEL_OPT", "1")
+		t.Setenv("ELISACORE_PARALLEL_IR", "0")
+		if os.Getenv("ELISA_TEST_PREOPT_IR") == "1" {
+			t.Setenv("ELISACORE_PARALLEL_IR", "1")
+		}
 		source := incrementalObjectFixture(32)
 		revision := os.Getenv("ELISA_TEST_PREOPT_REVISION")
 		want := 54
@@ -36,6 +40,9 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 			t.Fatal(err)
 		}
 		stats := session.Stats()
+		if os.Getenv("ELISA_TEST_PREOPT_IR") == "1" && stats.OwnerMapBuilds != 0 {
+			t.Fatalf("partitioned IR unexpectedly declined: %+v", stats)
+		}
 		expected := os.Getenv("ELISA_TEST_PREOPT_EMIT")
 		if expected == "4" && stats.PartitionsEmitted != 4 || expected == "1" && stats.PartitionsEmitted != 1 || expected == "0" && stats.PartitionsEmitted != 0 {
 			t.Fatalf("expected %s newly optimized partitions: %+v", expected, stats)
@@ -63,6 +70,42 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 			cmd.Env = append(os.Environ(), "ELISACORE_TEST_NATIVE_WORKERS=1", "ELISA_TEST_PREOPT_CHILD=1", "ELISA_TEST_PREOPT_ROOT="+root, "ELISA_TEST_PREOPT_REVISION="+revision.name, "ELISA_TEST_PREOPT_EMIT="+revision.emitted)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestOptimizedPartitionedIRAcrossProcesses(t *testing.T) {
+	t.Setenv("ELISA_TEST_PREOPT_IR", "1")
+	TestPreoptimizedPartitionsPersistAcrossProcesses(t)
+}
+
+func TestOptimizedPartitionedIRAdmission(t *testing.T) {
+	previous := partitionWorkersAvailable
+	defer func() { partitionWorkersAvailable = previous }()
+	result := parseAndAnalyzeBackendTest(t, "ir_admission.elisa", "def main() -> i64:\n    return 0\n")
+	session := NewIncrementalObjectSession(4, 1<<20)
+	session.minWeight = 0
+	for _, tc := range []struct {
+		name, ir, opt, imports string
+		level                  OptimizationLevel
+		workers, want          bool
+	}{
+		{"default-O3", "", "1", "0", OptimizationLevel3, true, false},
+		{"explicit-O3", "1", "1", "0", OptimizationLevel3, true, true},
+		{"no-optimizer-workers", "1", "0", "0", OptimizationLevel3, true, false},
+		{"imports-use-module-split", "1", "1", "10", OptimizationLevel3, true, false},
+		{"missing-worker-entry", "1", "1", "0", OptimizationLevel3, false, false},
+		{"disabled", "0", "1", "0", OptimizationLevel0, true, false},
+		{"ordinary-O0", "", "0", "0", OptimizationLevel0, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ELISACORE_PARALLEL_IR", tc.ir)
+			t.Setenv("ELISACORE_PARALLEL_OPT", tc.opt)
+			t.Setenv("ELISACORE_PARALLEL_OPT_IMPORT", tc.imports)
+			partitionWorkersAvailable = tc.workers
+			if got := session.partitionedIRApplies(result, LLVMObjectEmitOptions{OptLevel: tc.level}); got != tc.want {
+				t.Fatalf("partitioned generation admitted=%v, want %v", got, tc.want)
 			}
 		})
 	}

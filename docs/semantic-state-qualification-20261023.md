@@ -687,3 +687,43 @@ all separate-process disk-analysis regressions. Full native qualification took
 
 An independent 1 MiB pointer-batch experiment restored in 4.225/4.217 s versus
 4.221 s with 64 KiB batches, showing no useful gain; that experiment was reverted.
+
+
+### Generate optimized native units independently (explicit experiment)
+
+`ELISACORE_PARALLEL_IR=1` together with `ELISACORE_PARALLEL_OPT=1` now generates
+optimized units in separate LLVM contexts rather than first lowering one whole
+module and serializing it for restriction. Each miss still runs the requested
+O-level pipeline in an isolated worker. Explicit cross-unit imports retain the
+module-split path. Default whole-module O3 behavior is unchanged. The existing
+cross-unit inlining/quality limitation remains a gate before adopting this mode
+as the default. Missing worker entry points cannot select optimized unit generation.
+
+Non-owner ordinary functions are declared on demand by call/value lowering,
+which avoids creating and subsequently pruning every unused prototype in every
+unit. Intrinsics retain the existing final-LLVM-name ownership check. The unit
+cache configuration includes the optimization pipeline, so O2/O3 outputs cannot
+cross-hit. The existing O0 generator behavior is preserved.
+
+Source/options-checked full-input qualification with 64 units: cold native
+population 23.348 s; unchanged baseline 7.725 s; novel string body edit 11.445 s
+(one unit emitted, 63 disk hits); edited repeat with whole-object caching bypassed
+10.357 s; revert 7.618 s. All processes used external 30-second caps. The edit's
+native phase was 3.301 s (changed-unit optimization/emission 1.534 s); unchanged
+native work was 2.175 s. Hydration remained about 4.24 s, while source replay
+still performs two serial parses and declaration preparation. This remains
+explicit qualification, not production namespace rekeying or final goal success.
+
+An earlier version generated all prototypes in each unit and took 3.014 s of
+native work on a cached baseline; lazy declarations reduced that to 2.175 s.
+The native work products are larger: about 509 MB of retained bitcode/objects,
+versus 110 MB for the whole-module restriction path. The initial experiment's
+first population hit its 30-second cap with 56/64 units published, then resumed;
+the final lazy version's cold population completed within one capped invocation.
+
+Separate-process native tests and race tests pass across body/line/revert edits
+and O2/O3 changes, with expected one-unit invalidation and no serial fallback.
+Admission guards and existing constant-address checks pass. The edited full
+compiler linked and returned the changed `unknown option` diagnostic; it then
+compiled an object for a fresh program, whose linked executable returned 42.
+All controlled source edits were restored.

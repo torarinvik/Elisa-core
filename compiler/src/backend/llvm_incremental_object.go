@@ -358,7 +358,11 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 	triple := C.LLVMGetTargetMachineTriple(probe.targetMachine)
 	cpu := C.LLVMGetTargetMachineCPU(probe.targetMachine)
 	features := C.LLVMGetTargetMachineFeatureString(probe.targetMachine)
-	config, _ := json.Marshal([]string{"partitioned-ir-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model"})
+	pipeline := ""
+	if options.OptLevel != OptimizationLevel0 {
+		pipeline = fmt.Sprintf("default<O%d>", int(options.OptLevel))
+	}
+	config, _ := json.Marshal([]string{"partitioned-ir-object-v2", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline})
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)

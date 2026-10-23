@@ -177,7 +177,9 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 		// Partition generators share the result; their caller records this once.
 		g.result.PackedLowering = profile.metadata()
 	}
-	g.preferPrivateLinkage = optLevel != OptimizationLevel0
+	// Partition generators require stable external names for body ownership.
+	// Their finishing step gives non-owner definitions weak ODR linkage.
+	g.preferPrivateLinkage = optLevel != OptimizationLevel0 && g.partBody == nil
 	if err := g.emitModule(); err != nil {
 		g.dispose()
 		return nil, err
@@ -538,6 +540,9 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		if !ok || sym.Type == nil {
 			return nil
 		}
+		if _, body := decl.(*ast.FuncDecl); body && !g.ownsPartitionFunction(sym) {
+			return nil
+		}
 		if err := g.noteType(sym.Type); err != nil {
 			return err
 		}
@@ -578,6 +583,9 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 				}
 				sym, ok := g.symbolsByNode[fnDecl]
 				if !ok || sym.Type == nil {
+					continue
+				}
+				if _, body := member.(*ast.FuncDecl); body && !g.ownsPartitionFunction(sym) {
 					continue
 				}
 				if err := g.noteType(sym.Type); err != nil {
@@ -742,6 +750,9 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		if !ok {
 			return fmt.Errorf("missing semantic symbol for function declaration")
 		}
+		if !g.ownsPartitionFunction(sym) {
+			return nil
+		}
 		fn, ok := sym.Type.(*semantic.FuncType)
 		if !ok {
 			return fmt.Errorf("function %s does not resolve to semantic function type", sym.Name)
@@ -786,6 +797,9 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 				sym, ok := g.symbolsByNode[fnDecl]
 				if !ok {
 					return fmt.Errorf("missing semantic symbol for impl method declaration")
+				}
+				if !g.ownsPartitionFunction(sym) {
+					continue
 				}
 				fn, ok := sym.Type.(*semantic.FuncType)
 				if !ok {
@@ -853,4 +867,18 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	default:
 		return fmt.Errorf("unsupported declaration %T", decl)
 	}
+}
+
+// Non-owner functions are declared on demand by call/value lowering. Avoid
+// creating and lowering every program-wide prototype in each optimized IR
+// partition, only to prune it later. Intrinsics keep their existing LLVM-name
+// ownership check after declaration, because they may resolve to builtins.
+func (g *llvmGenerator) ownsPartitionFunction(sym *semantic.Symbol) bool {
+	if g.partBody == nil || g.optLevel == OptimizationLevel0 {
+		return true
+	}
+	if fn, ok := sym.Type.(*semantic.FuncType); ok && fn.IntrinsicName != "" {
+		return true
+	}
+	return g.partBody(g.llvmSymbolName(sym.Name))
 }
