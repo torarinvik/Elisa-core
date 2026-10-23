@@ -72,11 +72,11 @@ func TestS4FieldGrowthRunsEndToEnd(t *testing.T) {
     m.bits.push(65)
     m.bits.push(66)
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(4096):
         m: mutable Mod& @a = new[a] Mod{bits: []}
         fill(m) can Memory.Allocate, Abort.Panic
-        print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "131" {
 		t.Fatalf("expected RAN 131 (caller region threaded to field growth), got %s %q", status, out)
@@ -91,11 +91,11 @@ func TestS4Stage1ZeroAnnotationRunsEndToEnd(t *testing.T) {
     m.bits.push(65)
     m.bits.push(66)
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(4096):
         m: mutable Mod& @a = new[a] Mod{bits: []}
         fill(m) can Memory.Allocate, Abort.Panic
-        print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "131" {
 		t.Fatalf("expected RAN 131 (region inferred, no annotation), got %s %q", status, out)
@@ -225,11 +225,11 @@ func TestS4Stage3NestedFieldGrowthSingleHopRuns(t *testing.T) {
 	status, out := s4CompileRun(t, "struct Inner:\n    items: mutable darray[u8]\nstruct Mod:\n    inner: mutable Inner\n"+`def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     m.inner.items.push(65)
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     m: mutable Mod = Mod{inner: Inner{items: []}}
     in perm:
         fill((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
-    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("single-hop nested-field growth must run (65), got %s %q", status, out)
@@ -246,11 +246,11 @@ func TestS4Stage3NestedFieldGrowthMultiHopRuns(t *testing.T) {
 def mid(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     grow((&m).cast[mutable Mod&])
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     m: mutable Mod = Mod{inner: Inner{items: []}}
     in perm:
         mid((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
-    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("multi-hop nested-field growth must run (65) — was a SIGBUS, got %s %q", status, out)
@@ -267,11 +267,11 @@ func TestS4Stage3PermAmbientThreadsAndRuns(t *testing.T) {
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def Grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     self.bits.push(65)
     return
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     m: mutable Mod = Mod{bits: []}
     in perm:
         Grow((&m).cast[mutable Mod&])
-    print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("perm ambient binding must thread through a PascalCase region-poly callee and run (65), got %s %q", status, out)
@@ -388,12 +388,12 @@ func TestS4W5InterprocReadOnlyPassRuns(t *testing.T) {
 	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def peek(v: Mod) -> i64 can[Abort.Panic]:
     return v.bits[0].i64()
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region outer(8192):
         region inner(4096):
             m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
-            print(peek(m).i64()) can Console.Write, Console.Format, Abort.Panic
+            print(peek(m).i64()) can Console.Write, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "65" {
 		t.Fatalf("read-only pass of a tainted struct must run (65), got %s %q", status, out)
