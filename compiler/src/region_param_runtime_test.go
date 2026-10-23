@@ -600,8 +600,8 @@ func TestRunCLIAllocatorInterfaceBumpAndMalloc(t *testing.T) {
 	src := `include "` + filepath.Join(stdDir, "elisacore_runtime.elisa") + `"
 include "` + filepath.Join(stdDir, "allocator.elisa") + `"
 
-def fill_and_sum[A: Allocator](s: mutable A.State&, n: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
-    can Memory.Allocate, Abort.Panic:
+def fill_and_sum[A: Allocator](s: mutable A.State&, n: usize) -> u64 can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]:
+    can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         raw: mutable heap void& = get A.allocate(s, n) else return 0
         trusted Unsafe.PointerCast:
             buf: mutable heap u8& = raw.cast[mutable heap u8&]
@@ -613,7 +613,7 @@ def fill_and_sum[A: Allocator](s: mutable A.State&, n: usize) -> u64 can[Memory.
 
 @test
 def allocator_interface_test() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         region a(4096):
             alloc: mutable Arena& = &a
             before: ArenaMark = arena_snapshot(alloc)

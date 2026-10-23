@@ -102,7 +102,7 @@ def darray_growth_realloc() -> void:
 
 @test
 def dict_scale() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         region r(4194304):
             alloc: mutable Arena& = &r
             m: mutable dict[i64, i64] = arena_dict_new[i64, i64](alloc, 16)
@@ -152,7 +152,7 @@ const concurrencyStressBody = `
 global STRESS_SHARED: mutable AtomicCell[i64] = zeroed
 
 def stress_bump(n: i64) -> i64:
-    can Atomics.Rmw:
+    can Atomics.Rmw, Global{Read, Write}:
         trusted Perf.HotLoop:
             for i in 0..<n:
                 _ = atomic_fetch_add_acqrel((&STRESS_SHARED).cast[mutable AtomicCell[i64]&], 1)
@@ -163,7 +163,7 @@ def stress_sq(x: i64) -> i64:
 
 @test
 def atomic_contention() -> void:
-    can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Atomics.Rmw, Atomics.Load, Atomics.Store, Atomics.CompareExchange, Abort.Panic:
+    can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Atomics.Rmw, Atomics.Load, Atomics.Store, Atomics.CompareExchange, Abort.Panic, Global{Read, Write}:
         atomic_store_release((&STRESS_SHARED).cast[mutable AtomicCell[i64]&], 0)
         t0: Thread[i64, Joinable] = task(stress_bump, 100000)
         t1: Thread[i64, Joinable] = task(stress_bump, 100000)

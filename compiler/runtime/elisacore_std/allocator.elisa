@@ -21,9 +21,9 @@ include "./heap.elisa"
 
 protocol Allocator:
     type State
-    def allocate(s: mutable State&, size: usize) -> mutable heap void&? can[Memory.Allocate]
+    def allocate(s: mutable State&, size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]
     def deallocate(s: mutable State&, ptr: heap void&, size: usize) can[Memory.Release]
-    def reallocate(s: mutable State&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate]
+    def reallocate(s: mutable State&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]
 
 # ------------------------------------------------------------
 # Bump allocator — backed by an Arena.
@@ -36,16 +36,17 @@ struct BumpAllocator:
 impl Allocator for BumpAllocator:
     type State = Arena
 
-    def allocate(s: mutable Arena&, size: usize) -> mutable heap void&? can[Memory.Allocate]:
-        can Memory.Allocate, Abort.Panic:
+    def allocate(s: mutable Arena&, size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]:
+        can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
             return arena_alloc(s, size)
 
     def deallocate(s: mutable Arena&, ptr: heap void&, size: usize) can[Memory.Release]:
         return
 
-    def reallocate(s: mutable Arena&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate]:
-        can Memory.Allocate, Abort.Panic:
-            return arena_realloc(s, ptr, old_size, new_size)
+    def reallocate(s: mutable Arena&, ptr: mutable void&, old_size: usize, new_size: usize) -> mutable heap void&? can[Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}]:
+        can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
+            trusted Unsafe.PointerCast:
+                return arena_realloc(s, ptr, old_size, new_size)
 
 # ------------------------------------------------------------
 # Malloc-backed allocator — per-object libc malloc / free / realloc.

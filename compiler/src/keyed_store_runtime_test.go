@@ -37,7 +37,7 @@ def size[S: KeyedStore](s: S&) -> usize:
 
 @test
 def keyed_store_over_dict() -> void:
-    can Memory.Allocate, Abort.Panic:
+    can Memory.Allocate, Abort.Panic, Global{Read, Write}, Atomics{Exchange, Store}:
         region r:
             a: mutable Arena& = &r
             m: mutable dict[i64, i64] = arena_dict_new[i64, i64](a, 8)

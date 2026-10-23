@@ -8,7 +8,7 @@ include "./elisacore_std/elisacore_runtime.elisa"
 # the buckets re-zeroed -- a reused stack still holds the dead table until then.
 @test
 def dict_growth_ping_pongs_two_stacks() -> void:
-    can Abort.Panic, Memory.Allocate:
+    can Abort.Panic, Memory.Allocate, Atomics{Exchange, Store}, Global{Read, Write}:
         arena: mutable Arena = zeroed
         in arena:
             d: mutable dict[i64, i64] = arena_dict_new(arena, 0)
@@ -34,7 +34,7 @@ def dict_growth_ping_pongs_two_stacks() -> void:
 
 @test
 def reset_then_regrow_reuses_stacks() -> void:
-    can Abort.Panic, Memory.Allocate:
+    can Abort.Panic, Memory.Allocate, Atomics{Exchange, Store}, Global{Read, Write}:
         arena: mutable Arena = zeroed
         regions_after_first: mutable usize = 0
         for round in 0..<3:
@@ -53,7 +53,7 @@ def reset_then_regrow_reuses_stacks() -> void:
 
 @test
 def set_growth_ping_pongs_two_stacks() -> void:
-    can Abort.Panic, Memory.Allocate:
+    can Abort.Panic, Memory.Allocate, Atomics{Exchange, Store}, Global{Read, Write}:
         arena: mutable Arena = zeroed
         in arena:
             s: mutable set[i64] = arena_set_new[i64](arena, 0)
