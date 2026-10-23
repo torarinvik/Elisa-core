@@ -64,8 +64,15 @@ func (r *RetainedAnalysis) findLiveStructEdits(edits [][2]*ast.StructDecl) ([]re
 		}
 	}
 	out := make([]retainedStructEdit, 0, len(edits))
+	seen := map[string]bool{}
 	for _, e := range edits {
-		sd, ok := byKey[retainedLineKey(e[0].Pos())+"|"+e[0].Name]
+		// The declaration walk can list a declaration twice; it is one edit.
+		key := retainedLineKey(e[0].Pos()) + "|" + e[0].Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		sd, ok := byKey[key]
 		if !ok {
 			return nil, "struct " + e[0].Name + " not found in the analysis"
 		}
@@ -84,8 +91,8 @@ func (r *RetainedAnalysis) structDecls() []scopedDecl {
 	return r.a.flattenScopedDecls(r.a.file.Decls, "", nil)
 }
 
-// retainedUsesStructs reports whether fn's types or text reach one of the edited structs.
-func (a *Analyzer) retainedUsesStructs(fn *ast.FuncDecl, targets map[*StructType]bool, names map[string]bool, memo map[Type]bool) bool {
+// retainedUsesTypes reports whether fn's types or text reach one of the edited types.
+func (a *Analyzer) retainedUsesTypes(fn *ast.FuncDecl, targets map[Type]bool, names map[string]bool, memo map[Type]bool) bool {
 	if retainedMentionsAny(fn, names) {
 		return true
 	}
@@ -112,7 +119,7 @@ func (a *Analyzer) retainedUsesStructs(fn *ast.FuncDecl, targets map[*StructType
 
 // retainedTypeReaches: t is, or is built from, one of the targets. Other named types are not
 // entered: a value of them reaches a target only through an expression typed as the target.
-func retainedTypeReaches(t Type, targets map[*StructType]bool, memo map[Type]bool) bool {
+func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool {
 	if t == nil {
 		return false
 	}
@@ -133,7 +140,7 @@ func retainedTypeReaches(t Type, targets map[*StructType]bool, memo map[Type]boo
 			case *StructType:
 				return targets[n]
 			case *EnumType:
-				return false
+				return targets[n]
 			}
 			return rec(v.Elem())
 		case reflect.Interface:

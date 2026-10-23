@@ -288,6 +288,48 @@ func TestRetainedAnalysisAcceptsAddedConst(t *testing.T) {
 	}
 }
 
+const retainedEnumBefore = `
+enum Shape:
+    Circle(i64)
+    Square(i64)
+
+def area(s: Shape) -> i64:
+    match s:
+        Shape.Circle(r):
+            return r * r * 3
+        Shape.Square(w):
+            return w * w
+
+def other(y: i64) -> i64:
+    return y
+`
+
+// A new variant makes the match non-exhaustive, a payload-less one is also a const value, and
+// removing them restores the program; each step matches a fresh analysis.
+func TestRetainedAnalysisAcceptsPlainEnumEdits(t *testing.T) {
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedEnumBefore), retainedParse(t, retainedEnumBefore), []byte(retainedEnumBefore), options)
+	withTri := strings.Replace(retainedEnumBefore, "    Square(i64)\n", "    Square(i64)\n    Triangle(i64, i64)\n", 1)
+	withNone := strings.Replace(withTri, "    Triangle(i64, i64)\n", "    Triangle(i64, i64)\n    Empty\n", 1)
+	for i, src := range []string{withTri, withNone, withTri, retainedEnumBefore} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("enum edit %d fell back: %v", i, err)
+		}
+		if retained.LastStats.EnumUsers != 1 {
+			t.Fatalf("enum edit %d: stats = %+v, want one user re-analyzed", i, retained.LastStats)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh)
+		if got != want {
+			t.Fatalf("enum edit %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
+		}
+		if i == 0 && len(fresh.Errors()) == 0 {
+			t.Fatalf("fixture: the added variant must make the match non-exhaustive:\n%s", want)
+		}
+	}
+}
+
 const retainedBorrowBefore = `struct BorrowedBox:
     value: i64&
 

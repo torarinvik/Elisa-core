@@ -72,6 +72,7 @@ type RetainedUpdateStats struct {
 	Removed                   int
 	StructUsers               int // functions re-analyzed for an edited struct (with the edited ones)
 	ConstUsers                int // functions re-analyzed for an edited const (with the edited ones)
+	EnumUsers                 int // functions re-analyzed for an edited enum (with the edited ones)
 	Pairing, Scratch, Compare time.Duration
 	// Invalidated counts functions whose late return-borrow results were recomputed.
 	Invalidated int
@@ -211,7 +212,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var added []*ast.FuncDecl
 	var addedConsts []*ast.ConstDecl   // added typed consts with fresh names
 	var removedConsts []*ast.ConstDecl // consts whose name is gone from the edited program
-	insertedBefore := map[int]bool{} // pair index preceded by an added declaration
+	insertedBefore := map[int]bool{}   // pair index preceded by an added declaration
 	for i, j := 0, 0; i < len(oldDecls) || j < len(newDecls); {
 		if i < len(oldDecls) && j < len(newDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
 			pairs = append(pairs, [2]int{i, j})
@@ -286,6 +287,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var shifted []ast.Decl
 	var structPairs [][2]*ast.StructDecl // edited plain structs: (previous, edited)
 	var constPairs [][2]*ast.ConstDecl   // typed consts with a new value: (previous, edited)
+	var enumPairs [][2]*ast.EnumDecl     // edited plain enums: (previous, edited)
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
 	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
@@ -318,6 +320,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				if osd, ok := od.(*ast.StructDecl); ok {
 					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedPlainStruct(osd) && retainedPlainStruct(nsd) {
 						structPairs = append(structPairs, [2]*ast.StructDecl{osd, nsd})
+						continue
+					}
+				}
+				if oed, ok := od.(*ast.EnumDecl); ok {
+					if ned, ok := nd.(*ast.EnumDecl); ok && oed.Name == ned.Name && retainedPlainEnum(oed) && retainedPlainEnum(ned) {
+						enumPairs = append(enumPairs, [2]*ast.EnumDecl{oed, ned})
 						continue
 					}
 				}
@@ -399,7 +407,21 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		pendingRetainedMu.Unlock()
 	}
 	compareStart := time.Now()
-	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), len(addedConsts), len(removedConsts), replaced)
+	// A payload-less enum variant is a const value of the declaration phase.
+	constsIn, constsOut := len(addedConsts), len(removedConsts)
+	if len(enumPairs) != 0 {
+		if !retainedEnumStoreSetsEqual(oldDecls, newDecls) {
+			return fail("an enum edit changes which enums are recursive or store-backed")
+		}
+		for _, e := range enumPairs {
+			if d := retainedConstVariantCount(e[1]) - retainedConstVariantCount(e[0]); d > 0 {
+				constsIn += d
+			} else {
+				constsOut -= d
+			}
+		}
+	}
+	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), constsIn, constsOut, replaced)
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
@@ -456,7 +478,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if structEdits, why = r.findLiveStructEdits(structPairs); why != "" {
 			return fail("%s", why)
 		}
-		targets, names := map[*StructType]bool{}, map[string]bool{}
+		targets, names := map[Type]bool{}, map[string]bool{}
 		for _, e := range structEdits {
 			targets[e.st] = true
 			names[e.live.Name] = true
@@ -468,7 +490,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		memo := map[Type]bool{}
 		for _, sd := range r.decls {
 			fn, ok := sd.Decl.(*ast.FuncDecl)
-			if !ok || spliced[fn] || !a.retainedUsesStructs(fn, targets, names, memo) {
+			if !ok || spliced[fn] || !a.retainedUsesTypes(fn, targets, names, memo) {
 				continue
 			}
 			nfn := pairedNew[fn]
@@ -581,6 +603,45 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			spliced[fn] = true
 		}
 		r.LastStats.ConstUsers = len(splices)
+	}
+	// An edited enum: every function whose types or text reach it is re-analyzed against the
+	// new variant table.
+	var enumEdits []retainedEnumEdit
+	if len(enumPairs) != 0 {
+		var why string
+		if enumEdits, why = r.findLiveEnumEdits(enumPairs, scratch); why != "" {
+			return fail("%s", why)
+		}
+		targets, names := map[Type]bool{}, map[string]bool{}
+		for k, e := range enumEdits {
+			targets[e.et] = true
+			names[e.live.Name] = true
+			for _, v := range enumPairs[k][0].Variants {
+				names[v.Name] = true
+			}
+			for _, v := range enumPairs[k][1].Variants {
+				names[v.Name] = true
+			}
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		memo := map[Type]bool{}
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] || !a.retainedUsesTypes(fn, targets, names, memo) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil || !retainedPlainFunction(fn) {
+				return fail("%s uses an edited enum but cannot be re-analyzed alone", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+			spliced[fn] = true
+		}
+		r.LastStats.EnumUsers = len(splices)
 	}
 	// A re-analyzed unchanged function takes its prepared body, which already has its new lines:
 	// only its header shifts.
@@ -739,6 +800,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.decls = append(r.decls, addedConstScoped...)
 	}
 	// Past this point the edit is accepted; mutate the retained state.
+	if len(enumEdits) != 0 {
+		r.applyEnumEdits(enumEdits)
+	}
 	if len(structEdits) != 0 {
 		if !r.applyStructEdits(structEdits) {
 			structOnly = nil
