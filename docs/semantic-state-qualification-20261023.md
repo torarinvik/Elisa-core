@@ -627,3 +627,20 @@ before and 4.685/4.745 s after (the latter after run included CPU profiling).
 These are source/options-checked qualification reads, not production rekeying.
 Codec, race, sparse-entry/shared-pointer regressions and all separate-process
 analysis disk tests pass. Native CLI edit timings still require requalification.
+
+
+### Restore interface-held references directly
+
+Interface-held pointer/map/slice values now use the decoder's already checked,
+owned object table directly. The previous path allocated a mutable intermediate
+header per occurrence, decoded its object ID, then copied it into the interface.
+Dynamic type assignability and exact reference-type checks remain; zero references
+still produce typed nil interfaces. Concrete scalar/struct interface values keep
+their ordinary owned value cells.
+
+A 10,000-reference benchmark improved from 0.859 ms / 244,369 B / 10,012
+allocations to 0.279 ms / 164,369 B / 12 allocations. A paired checked full-input
+restore improved from 4.773 s to 4.279 s. Codec and race tests plus all separate-
+process analysis disk regressions pass, including native edits, diagnostic
+rejection and bootstrap. Typed nils, shared pointer/map/slice identities and
+cycles have explicit regression coverage.

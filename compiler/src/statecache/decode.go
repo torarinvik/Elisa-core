@@ -113,6 +113,25 @@ func (d *decoder) value(v reflect.Value) error {
 		if !typ.AssignableTo(t) {
 			return fmt.Errorf("state type %s does not implement %s", typ, t)
 		}
+		// Reference objects already own a stable typed value. Setting the
+		// interface from that value preserves identity without allocating an
+		// intermediate mutable pointer/map/slice header for every occurrence.
+		switch typ.Kind() {
+		case reflect.Pointer, reflect.Map, reflect.Slice:
+			ref, err := d.uint()
+			if err != nil {
+				return err
+			}
+			if ref == 0 {
+				v.Set(reflect.Zero(typ)) // a typed nil, not a nil interface
+				return nil
+			}
+			if ref >= uint64(len(d.objects)) || d.objects[ref].Type() != typ {
+				return fmt.Errorf("invalid state reference")
+			}
+			v.Set(d.objects[ref])
+			return nil
+		}
 		if err := d.reserve(1, typ.Size()); err != nil {
 			return err
 		}
