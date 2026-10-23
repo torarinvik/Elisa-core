@@ -755,3 +755,26 @@ body reuse against cold diagnostics. Race checks for that path, corruption
 repair and protocol-effect rejection pass. Speculative scratch work increases
 uncached exact-revision qualification slightly (7.725 to 8.315 s); normal
 whole-object hits still avoid frontend work entirely.
+
+
+### Queue likely changed native units first
+
+The retained result exposes recently re-analyzed function names as scheduling
+hints only. Unit generation queues their owners first, so optimization misses
+can overlap generation of cache-hit units. Every unit is still generated and
+checked using its full current bitcode; hints never authorize reuse and are not
+claimed to be an exhaustive invalidation set. Returned hints are copied and
+sorted. Cold analyses retain ordinary unit order.
+
+Full-input qualification: novel body edit 9.124 s (native 2.961 s), exact same
+edited object SHA-256 as before prioritization. Adding an ordinary function on
+that edited revision took 10.830 s (two native misses, 62 disk hits); its prepared
+semantic update took 2.341 s and native work 2.564 s. Repeating the addition while
+bypassing whole-object caching still took 10.703 s because replay repeats. The
+remaining body-only revision took 8.487 s and revert 8.051 s. Cold population
+completed in 22.793 s. All processes had their external 30-second caps.
+
+The changed-unit-order regression verifies copied hints, correct first owner,
+and a complete unique work list; native multi-process admission/edit/optimization
+level checks and all disk-analysis regressions pass. The function-addition case
+still misses the goal, so prepared semantic replay is the next profiling target.

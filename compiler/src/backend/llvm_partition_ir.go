@@ -177,7 +177,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		workers = parts
 	}
 	next := make(chan int, parts)
-	for part := 0; part < parts; part++ {
+	for _, part := range partitionedIRWorkOrder(result, parts) {
 		next <- part
 	}
 	close(next)
@@ -388,4 +388,29 @@ func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven b
 		g.boundsOverlay = map[*ast.IndexExpr]bool{}
 	}
 	g.boundsOverlay[expr] = proven
+}
+
+// Start likely misses early, so their native optimization overlaps generation
+// of cache-hit units. Hints only affect scheduling; all units still generate
+// and validate their full current bitcode before any cache lookup.
+func partitionedIRWorkOrder(result *semantic.Result, parts int) []int {
+	preferred := make([]bool, parts)
+	for _, name := range result.CodegenFunctionPriorities() {
+		if sym, ok := result.GlobalScope.Lookup(name); ok && sym != nil && sym.LinkName != "" {
+			name = sym.LinkName
+		}
+		preferred[partitionOwner(name, parts)] = true
+	}
+	order := make([]int, 0, parts)
+	for part, want := range preferred {
+		if want {
+			order = append(order, part)
+		}
+	}
+	for part, want := range preferred {
+		if !want {
+			order = append(order, part)
+		}
+	}
+	return order
 }
