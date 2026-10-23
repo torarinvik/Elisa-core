@@ -2615,6 +2615,9 @@ type smtTranslator struct {
 	callCanon map[string]string
 	// callProjectionCount numbers aggregate call projection tokens (analyzer_smt_call_projection.go).
 	callProjectionCount int
+	// callProjectionTypes records each projection token's aggregate result type, so a field read
+	// through a token (`result.valid` in a callee's ensure) is typed without the callee's clause nodes.
+	callProjectionTypes map[string]Type
 	// generalizeGoalAtoms makes lowerVCFormula replace an untranslatable goal atom by a fresh Bool.
 	generalizeGoalAtoms bool
 	// ghostUFDecls names the uninterpreted functions already declared for ghost-call congruence.

@@ -133,6 +133,55 @@ func (tr *smtTranslator) translateLocalProjection(local *ast.FieldExpr, wantBool
 	return tr.termEnv(local, nil)
 }
 
+// aggregateProjectionFieldType types a field chain read through a projection token. The token's
+// recorded result type comes first: a callee's contract clauses carry expression types only once the
+// callee's own body was analyzed, so reading them (or resolving `result` in the current scope, which
+// may name the caller's own result) would make the lowering depend on body-analysis order.
+func (tr *smtTranslator) aggregateProjectionFieldType(n *ast.FieldExpr, env map[string]string) Type {
+	if t, ok := tr.projectionTokenChainType(n, env); ok {
+		return t
+	}
+	if t := tr.a.exprTypes[n]; t != nil {
+		return t
+	}
+	if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
+		return resolved
+	}
+	return nil
+}
+
+// projectionTokenChainType resolves the type of expr when it is a field chain whose root is an
+// aggregate call or an identifier bound to a call projection token.
+func (tr *smtTranslator) projectionTokenChainType(expr ast.Expr, env map[string]string) (Type, bool) {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.FieldExpr:
+		inner, ok := tr.projectionTokenChainType(n.Object, env)
+		if !ok || inner == nil {
+			return nil, false
+		}
+		return tr.a.lookupResolvedFieldType(peelNamedStateRefs(inner), n.Field)
+	case *ast.Ident:
+		bound, ok := env[n.Name]
+		if !ok || !strings.HasPrefix(bound, dtTokenPrefix) {
+			return nil, false
+		}
+		t, ok := tr.callProjectionTypes[strings.TrimPrefix(bound, dtTokenPrefix)]
+		return t, ok && t != nil
+	case *ast.CallExpr:
+		decl, direct := tr.a.resolveDirectCallFuncDecl(n)
+		decl = tr.a.readDecl(decl)
+		if !direct || decl == nil {
+			return nil, false
+		}
+		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
+			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil && fnType.Return != nil && len(decl.GenericParams) == 0 {
+				return fnType.Return, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // aggregateProjectionTerm lowers an integer-valued aggregate projection (handled=false: not this shape).
 func (tr *smtTranslator) aggregateProjectionTerm(n *ast.FieldExpr, env map[string]string) (term string, ok bool, handled bool) {
 	key, local, handled := tr.aggregateProjectionKey(n, env)
@@ -146,12 +195,7 @@ func (tr *smtTranslator) aggregateProjectionTerm(n *ast.FieldExpr, env map[strin
 	if key == "" {
 		return "", false, true
 	}
-	fieldType := tr.a.exprTypes[n]
-	if fieldType == nil {
-		if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
-			fieldType = resolved
-		}
-	}
+	fieldType := tr.aggregateProjectionFieldType(n, env)
 	t, numeric := smtNumericValueType(fieldType)
 	if !numeric || IsFloatType(t) {
 		// An sview projection's `.len` is an i64 even when the node carries no type.
@@ -178,12 +222,7 @@ func (tr *smtTranslator) aggregateProjectionBool(n *ast.FieldExpr, env map[strin
 	if key == "" {
 		return "", false, true
 	}
-	fieldType := tr.a.exprTypes[n]
-	if fieldType == nil {
-		if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
-			fieldType = resolved
-		}
-	}
+	fieldType := tr.aggregateProjectionFieldType(n, env)
 	if !IsBoolType(fieldType) {
 		return "", false, true
 	}
@@ -230,6 +269,10 @@ func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]
 	if canonKey != "" {
 		tr.callCanon[canonKey] = token
 	}
+	if tr.callProjectionTypes == nil {
+		tr.callProjectionTypes = map[string]Type{}
+	}
+	tr.callProjectionTypes[token] = resultType
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {

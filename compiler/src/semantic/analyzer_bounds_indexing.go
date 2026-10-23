@@ -29,6 +29,26 @@ func cloneIndexBoundFacts(src map[string]indexBoundFact) map[string]indexBoundFa
 	return out
 }
 
+// enterFunctionBoundsFacts starts a body walk with no name-keyed bounds facts and returns the
+// restore for the enclosing walk. These relations are analyzer fields keyed by binding NAME, saved
+// only around blocks and loops, so without this a body analyzed after (or inside, for an on-demand
+// summary inference) another function reads that function's `i < xs.count`, `n == xs.count` or
+// static view lengths for its own same-named bindings: an unsound bounds proof that also depends on
+// which body happened to be analyzed before.
+func (a *Analyzer) enterFunctionBoundsFacts() func() {
+	savedBounds, savedBoundsShared := a.currentIndexBounds, a.indexBoundsShared
+	savedEqual, savedEqualShared := a.currentBoundEqual, a.boundEqualShared
+	savedViewLen, savedViewMutable := a.currentViewStaticLen, a.currentViewMutable
+	a.currentIndexBounds, a.indexBoundsShared = nil, false
+	a.currentBoundEqual, a.boundEqualShared = nil, false
+	a.currentViewStaticLen, a.currentViewMutable = map[string]int64{}, nil
+	return func() {
+		a.currentIndexBounds, a.indexBoundsShared = savedBounds, savedBoundsShared
+		a.currentBoundEqual, a.boundEqualShared = savedEqual, savedEqualShared
+		a.currentViewStaticLen, a.currentViewMutable = savedViewLen, savedViewMutable
+	}
+}
+
 // ownIndexBounds makes currentIndexBounds safe to write: a map still shared with an enclosing
 // block's saved state is replaced by a private copy first.
 func (a *Analyzer) ownIndexBounds() {
@@ -382,6 +402,13 @@ func (a *Analyzer) markIndexBoundsProof(expr *ast.IndexExpr, objType Type) {
 	}
 	if expr.Fallback != nil {
 		a.indexBoundsProven[expr] = true
+		return
+	}
+	// A summary-inference walk (return provenance, borrowed-owner refs, termination typing) runs on
+	// demand, at whatever point a caller first needs the summary, so its facts depend on body
+	// analysis order. The proof map only grows and the backend elides the check from it, so only the
+	// ordinary body pass, which runs once per body in a fixed context, may record a proof.
+	if a.suppressOptimizationFacts {
 		return
 	}
 	if a.indexExprHasBoundsProof(expr, objType) {

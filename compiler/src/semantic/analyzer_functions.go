@@ -91,6 +91,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		return
 	}
 	fnType = a.privateFuncType(fn, fnType)
+	defer a.enterFunctionBoundsFacts()()
 	// Deferred storage-view errors are scoped per function: a nested function resolves its own
 	// pending uses at its checkRegionLifetimes; restore the enclosing function's pending afterward.
 	if a.funcAnalysisActive == nil {
@@ -685,6 +686,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	}
 	a.returnProvenanceInProgress[fn] = true
 	defer delete(a.returnProvenanceInProgress, fn)
+	defer a.enterFunctionBoundsFacts()()
 
 	restoreFreshShapes := a.enterFreshShapeScope(fn, nil, "infer-provenance")
 	defer restoreFreshShapes()
@@ -888,6 +890,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 		return
 	}
 	a.returnBorrowedOwnerRefInProgress[fn] = true
+	defer a.enterFunctionBoundsFacts()()
 	defer delete(a.returnBorrowedOwnerRefInProgress, fn)
 
 	// This pass can use a call's concrete callback types. Its summary belongs to
