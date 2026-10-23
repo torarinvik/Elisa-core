@@ -124,11 +124,41 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 			if name == "diagnostics" || name == "reportedDiagnostics" || name == "warnOnceSeen" {
 				continue
 			}
-			parts = append(parts, fmt.Sprintf("#%s=%d", name, f.Len()))
+			size := f.Len()
+			if name == "exprTypes" {
+				// A parameter default is typed with its function's header, which the
+				// function's own fingerprint covers; editing one is not a program-wide change.
+				size -= a.preBodyParamDefaultTypedExprs()
+			}
+			parts = append(parts, fmt.Sprintf("#%s=%d", name, size))
 		}
 	}
 	sort.Strings(parts)
 	return retainedNormalized(strings.Join(parts, "\n"))
+}
+
+// preBodyParamDefaultTypedExprs counts the exprTypes entries of nodes inside function parameter
+// defaults.
+func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
+	nodes := map[ast.Expr]bool{}
+	for fn := range a.funcDeclSymbols {
+		for i := range fn.Params {
+			if fn.Params[i].DefaultValue != nil {
+				walkStoreScanNodes([]ast.Stmt{&ast.ExprStmt{Expr: fn.Params[i].DefaultValue}}, func(node any) {
+					if e, ok := node.(ast.Expr); ok {
+						nodes[e] = true
+					}
+				})
+			}
+		}
+	}
+	count := 0
+	for e := range nodes {
+		if _, ok := a.exprTypes[e]; ok {
+			count++
+		}
+	}
+	return count
 }
 
 // preBodyDifference names the first body-dependent declaration-phase result

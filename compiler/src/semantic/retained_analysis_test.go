@@ -120,6 +120,32 @@ func TestRetainedAnalysisAcceptsSignatureEdits(t *testing.T) {
 	}
 }
 
+// Adding a defaulted parameter types its default in the declaration phase; that is the edited
+// function's own header, not a program-wide change, and callers that omit it still check.
+func TestRetainedAnalysisAcceptsDefaultedParameterEdits(t *testing.T) {
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
+	steps := []string{
+		strings.Replace(retainedBefore, "def helper(x: i64) -> i64:", "def helper(x: i64, y: i64 = 0) -> i64:", 1),
+	}
+	steps = append(steps, strings.Replace(steps[0], "y: i64 = 0)", "y: i64 = 0, z: bool = true)", 1))
+	steps = append(steps, strings.Replace(steps[1], "z: bool = true)", "z: bool = 1)", 1))
+	for i, src := range steps {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if err != nil {
+			// A default the declaration phase rejects changes its diagnostics: falling back is right.
+			if i == 2 {
+				continue
+			}
+			t.Fatalf("defaulted parameter edit %d fell back: %v", i, err)
+		}
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("defaulted parameter edit %d disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", i, got, want)
+		}
+	}
+}
+
 func TestRetainedAnalysisReanalyzesFunctionsWhoseLinesMoved(t *testing.T) {
 	options := AnalyzeOptions{}
 	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
