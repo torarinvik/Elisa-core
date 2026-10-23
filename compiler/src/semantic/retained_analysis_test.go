@@ -1279,3 +1279,77 @@ func TestRetainedRemovalDoesNotHideSurvivingRegionSummaryChange(t *testing.T) {
 		t.Fatalf("expected surviving declaration mismatch, got %v", err)
 	}
 }
+
+func TestRetainedOverloadEditsPreserveOtherNamespaces(t *testing.T) {
+	const prefix = "# namespace probe\n"
+	const top = "def pick(x: i64) -> i64:\n    return x + 1\n\n"
+	const member = "        def pick(x: i64) -> i64:\n            return x + 2\n\n"
+	const module = "module Outer:\n    module Lib:\n" + member + "        def kept() -> i64:\n            return 1\n\ndef caller() -> i64:\n    return Outer::Lib::pick(40)\n"
+	const extra = "def pick(x: bool) -> i64:\n    return 3\n\n"
+	before := prefix + top + module
+	_, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+	cases := []struct{ source, keep string }{
+		{prefix + module, "Outer.Lib.pick"}, {before, "Outer.Lib.pick"},
+		{prefix + top + extra + module, "Outer.Lib.pick"}, {before, "Outer.Lib.pick"},
+		{prefix + top + strings.Replace(module, member, "", 1), "pick"}, {before, "pick"},
+		{prefix + module, "Outer.Lib.pick"},
+	}
+	for step, tc := range cases {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		symbol, ok := state.a.globalScope.Lookup(tc.keep)
+		if !ok {
+			t.Fatalf("fixture lost %s", tc.keep)
+		}
+		prior := symbol.Type
+		updated, err := state.Update(retainedParse(t, tc.source), retainedParse(t, tc.source), []byte(tc.source))
+		if err != nil {
+			t.Fatalf("step %d fell back: %v", step, err)
+		}
+		symbol, ok = state.a.globalScope.Lookup(tc.keep)
+		if !ok || symbol.Type != prior {
+			t.Fatalf("step %d re-declared unrelated %s", step, tc.keep)
+		}
+		if state.a.functionTypes[tc.keep] != prior {
+			t.Fatalf("step %d removed surviving function type %s", step, tc.keep)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, tc.source), AnalyzeOptions{})
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diverged\ngot %s\nwant %s", step, got, want)
+		}
+	}
+}
+
+func TestRetainedRemovalRechecksSameNamedNamespaceCaller(t *testing.T) {
+	const removed = "    def shared() -> i64:\n        return 1\n\n"
+	before := "# namespace caller probe\nmodule Gone:\n" + removed + "    def kept() -> i64:\n        return 0\n\nmodule Kept:\n    def shared() -> i64:\n        return Gone::shared()\n"
+	after := strings.Replace(before, removed, "", 1)
+	_, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+	for step, source := range []string{after, before, after} {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{})
+		if source == after && len(fresh.Errors()) == 0 {
+			t.Fatal("fixture did not lose removed callee")
+		}
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diverged\ngot %s\nwant %s", step, got, want)
+		}
+	}
+}

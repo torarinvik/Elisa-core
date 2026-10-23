@@ -1339,3 +1339,42 @@ Its update reports two removed functions and one added function for deleting
 one wrapper; overload tracking currently uses bare names across namespaces.
 Qualified overload bookkeeping is the next investigation to avoid re-declaring
 a separate same-named module function. Optimization-quality gates remain open.
+
+
+### Scope overload registration and preserve unrelated function metadata
+
+Overload edit bookkeeping now uses qualified declaration names for supported
+namespace members. Bare names remain conservative caller-invalidation hints.
+Deleting one global wrapper no longer forces a separate same-named module
+function through removal/re-registration. Function-type cleanup checks the
+owning type before removing an alias, and shared region-parameter metadata is
+preserved when another same-named function survives. A surviving same-named
+function is still re-analyzed if its body references the removed callee.
+
+New disk-round-trip tests remove/re-add global and nested-module functions,
+add/remove real overloads, assert surviving type identities and metadata, and
+compare cold diagnostics. A second test checks a same-named caller in another
+namespace losing and regaining its callee. Existing overload and caller-arena
+regressions, the complete semantic suite, targeted semantic/snapshot race checks
+and main-package disk-cache oracles pass.
+
+Full-source checked qualification now reports Added=0/Removed=1 for the wrapper
+edit, versus Added=1/Removed=2 previously. First removal was 10.357 seconds
+(previous 10.544), warm removal 8.041 (previous 8.398), with replay 1.133 seconds.
+These small latency differences include machine variance; the verified change
+is avoiding unrelated declaration replacement while preserving cold behavior.
+Baseline/removal objects match the preceding objects byte-for-byte. Both linked
+compilers compiled the included fixture twice (miss then valid) and the produced
+executables returned 42. Every build/link retained the 30-second cap. Evidence is
+`qualified-overload-64-*.json` and `qualified-overload-64/functional.json` under
+the once-bitcode production evidence root. Fresh normal CLI admission of this
+semantic change remains unqualified.
+
+Three native units still miss on removal. The bitcode inspection in
+`qualified-overload-64/bitcode-diffs/` establishes that two of them differ solely
+in generated local `__auto_<source-offset>` value names: after substituting those
+names in disassembled IR, both complete module texts match. This is an evidence
+comparison, not relaxed cache admission. Stabilizing non-debug local LLVM names
+in the actual emitted IR is the next optimization; exact bitcode validation must
+continue to compare the same bytes consumed by the native worker. The full
+sub-ten-second and optimization-quality goals remain incomplete.

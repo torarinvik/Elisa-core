@@ -181,13 +181,18 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	collectMembers(file.Decls, "")
-	oldNames, newNames := map[string]bool{}, map[string]bool{}
+	newNames := map[string]bool{}
 	oldValueNames := map[string]bool{} // consts, globals and functions: names an added const must not take
 	oldTypeNames := map[string]bool{}  // structs and enums: names an added struct must not take
+	oldFunctionNames := retainedQualifiedFunctionNames(r.pristine)
+	newFunctionNames := retainedQualifiedFunctionNames(file)
 	oldFuncNameCount := map[string]int{}
 	for _, d := range oldDecls {
 		if f, ok := d.(*ast.FuncDecl); ok {
-			oldFuncNameCount[f.Name]++
+			if oldFunctionNames[f] == "" {
+				oldFunctionNames[f] = f.Name
+			}
+			oldFuncNameCount[oldFunctionNames[f]]++
 		}
 		switch n := d.(type) {
 		case *ast.StructDecl:
@@ -195,7 +200,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		case *ast.EnumDecl:
 			oldTypeNames[n.Name] = true
 		case *ast.FuncDecl:
-			oldNames[n.Name] = true
 			oldValueNames[n.Name] = true
 		case *ast.ConstDecl:
 			oldValueNames[n.Name] = true
@@ -209,7 +213,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	for j, d := range newDecls {
 		newDeclIndex[d] = j
 		if f, ok := d.(*ast.FuncDecl); ok {
-			newFuncNameCount[f.Name]++
+			if newFunctionNames[f] == "" {
+				newFunctionNames[f] = f.Name
+			}
+			newFuncNameCount[newFunctionNames[f]]++
 		}
 	}
 	newTypeNames := map[string]bool{} // structs and enums of the edited program
@@ -254,7 +261,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var addedStructs []*ast.StructDecl   // added plain structs with fresh names
 	var removedStructs []*ast.StructDecl // plain structs whose name is gone from the edited program
 	insertedBefore := map[int]bool{}     // pair index preceded by an added declaration
-	overloadNames := map[string]bool{}   // names that gained an overload
+	overloadNames := map[string]bool{}   // qualified names with an edited overload set
 	usingsAdded, usingsRemoved := 0, 0   // wildcard `using` lines added or removed
 	for i, j := 0, 0; i < len(oldDecls) || j < len(newDecls); {
 		if i < len(oldDecls) && j < len(newDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
@@ -294,7 +301,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		// A removed top-level or module/extend function: its name is gone.
 		if i < len(oldDecls) {
-			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && oldRemovable[of] && !newNames[of.Name] && retainedPlainFunction(of) {
+			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && oldRemovable[of] && newFuncNameCount[oldFunctionNames[of]] == 0 && retainedPlainFunction(of) {
 				removed = append(removed, of)
 				insertedBefore[len(pairs)] = true
 				i++
@@ -302,10 +309,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			// A removed overload: the name survives in another same-named function, which is
 			// re-declared with the rest of its overload set below.
-			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && newNames[of.Name] && retainedPlainFunction(of) &&
-				oldFuncNameCount[of.Name] > newFuncNameCount[of.Name] &&
+			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && newFuncNameCount[oldFunctionNames[of]] != 0 && retainedPlainFunction(of) &&
+				oldFuncNameCount[oldFunctionNames[of]] > newFuncNameCount[oldFunctionNames[of]] &&
 				(j == len(newDecls) || !retainedSameDeclKind(of, newDecls[j])) {
-				overloadNames[of.Name] = true
+				overloadNames[oldFunctionNames[of]] = true
 				removed = append(removed, of)
 				insertedBefore[len(pairs)] = true
 				i++
@@ -340,17 +347,17 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			continue
 		}
 		nf, ok := newDecls[j].(*ast.FuncDecl)
-		if ok && oldNames[nf.Name] && newFuncNameCount[nf.Name] > oldFuncNameCount[nf.Name] &&
+		if ok && oldFuncNameCount[newFunctionNames[nf]] != 0 && newFuncNameCount[newFunctionNames[nf]] > oldFuncNameCount[newFunctionNames[nf]] &&
 			(topLevel[nf] || memberOf[nf] != nil) && retainedPlainFunction(nf) {
 			// An overload of an existing name: registration order decides which one owns the
 			// bare name, so every same-named function is re-declared with it below.
-			overloadNames[nf.Name] = true
+			overloadNames[newFunctionNames[nf]] = true
 			added = append(added, nf)
 			insertedBefore[len(pairs)] = true
 			j++
 			continue
 		}
-		if !ok || !(topLevel[nf] || memberOf[nf] != nil) || oldNames[nf.Name] || !retainedPlainFunction(nf) {
+		if !ok || !(topLevel[nf] || memberOf[nf] != nil) || oldFuncNameCount[newFunctionNames[nf]] != 0 || !retainedPlainFunction(nf) {
 			return fail("declaration set changed at %s", retainedLineKey(newDecls[j].Pos()))
 		}
 		added = append(added, nf)
@@ -469,7 +476,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		live := cands[0]
 		pairedNew[live] = nfn
-		forceReplace := overloadNames[ofn.Name] || overloadNames[nfn.Name]
+		forceReplace := overloadNames[oldFunctionNames[ofn]] || overloadNames[newFunctionNames[nfn]]
 		if sameText && !forceReplace {
 			if lineDelta[op.File] != 0 {
 				shifted = append(shifted, live)
@@ -497,7 +504,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			replaced[namespace+"::"+ofn.Name+"#0"] = true
 			if forceReplace {
 				// Every occurrence of an overloaded name is re-declared.
-				for k := 1; k < newFuncNameCount[ofn.Name]; k++ {
+				for k := 1; k < newFuncNameCount[newFunctionNames[nfn]]; k++ {
 					replaced[fmt.Sprintf("%s::%s#%d", namespace, ofn.Name, k)] = true
 				}
 			}
@@ -587,6 +594,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var removedLive []*ast.FuncDecl
 	if len(removed) != 0 {
 		gone := map[string]bool{}
+		goneFunctions := map[*ast.FuncDecl]bool{}
 		for _, of := range removed {
 			cands := liveFns[fnKey{retainedLineKey(of.Pos()), of.Name}]
 			if len(cands) != 1 {
@@ -595,7 +603,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			live := cands[0]
 			sym := a.funcDeclSymbols[live]
 			// An overload set is removed whole, its survivors re-declared with it.
-			if sym == nil || a.globalScope.Symbols[sym.Name] != sym || (len(a.ufcsFunctionsByName[sym.Name]) > 1 && !overloadNames[of.Name]) {
+			if sym == nil || a.globalScope.Symbols[sym.Name] != sym || (len(a.ufcsFunctionsByName[sym.Name]) > 1 && !overloadNames[oldFunctionNames[of]]) {
 				return fail("removed %s is not a plain global function", of.Name)
 			}
 			if _, known := scoped[live]; !known {
@@ -603,6 +611,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			removedLive = append(removedLive, live)
 			gone[live.Name] = true
+			goneFunctions[live] = true
 		}
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
@@ -610,7 +619,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		for _, sd := range r.decls {
 			fn, ok := sd.Decl.(*ast.FuncDecl)
-			if !ok || spliced[fn] || gone[fn.Name] {
+			if !ok || spliced[fn] || goneFunctions[fn] {
 				continue
 			}
 			if !retainedMentionsAny(fn, gone) {
@@ -1855,6 +1864,14 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 	gone := map[*ast.FuncDecl]bool{}
 	for _, fn := range fns {
 		gone[fn] = true
+	}
+	survivingNames := map[string]bool{}
+	for fn := range a.funcDeclSymbols {
+		if !gone[fn] {
+			survivingNames[fn.Name] = true
+		}
+	}
+	for _, fn := range fns {
 		sym := a.funcDeclSymbols[fn]
 		name := fn.Name
 		if sym != nil {
@@ -1862,17 +1879,22 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 			name = sym.Name
 		}
 		delete(a.globalScope.Symbols, name)
-		delete(a.functionTypes, fn.Name)
-		delete(a.functionTypes, name)
 		if sym != nil {
 			if ft, ok := sym.Type.(*FuncType); ok {
+				for _, key := range []string{fn.Name, name} {
+					if a.functionTypes[key] == ft {
+						delete(a.functionTypes, key)
+					}
+				}
 				delete(a.regionPolyReturnsCallerArena, ft)
 			}
 		}
 		delete(a.funcDeclSymbols, fn)
 		delete(a.funcDeclUsings, fn)
 		delete(a.paramStoreTargets, fn)
-		delete(a.regionParamCalleeParamIndex, fn.Name)
+		if !survivingNames[fn.Name] {
+			delete(a.regionParamCalleeParamIndex, fn.Name)
+		}
 		// The symbol leaves its overload list, which is keyed by the visible name and not
 		// by a receiver-mangled symbol name.
 		for visible, list := range a.ufcsFunctionsByName {
@@ -1941,4 +1963,24 @@ func retainedTrimTrailing(span string) string {
 
 func retainedSortDeclsBySource(decls []ast.Decl) {
 	sort.SliceStable(decls, func(i, j int) bool { return decls[i].Pos().Offset < decls[j].Pos().Offset })
+}
+
+// Overload registration belongs to a namespace. Bare names remain deliberately
+// conservative for caller invalidation, but a separate module's declaration
+// must keep its existing type and specialization identities.
+func retainedQualifiedFunctionNames(file *ast.File) map[*ast.FuncDecl]string {
+	names := map[*ast.FuncDecl]string{}
+	var walk func([]ast.Decl, string)
+	walk = func(decls []ast.Decl, namespace string) {
+		for _, decl := range decls {
+			switch n := decl.(type) {
+			case *ast.FuncDecl:
+				names[n] = joinQualifiedName(namespace, n.Name)
+			case *ast.NamespaceDecl:
+				walk(n.Decls, joinQualifiedName(namespace, n.Name))
+			}
+		}
+	}
+	walk(file.Decls, "")
+	return names
 }
