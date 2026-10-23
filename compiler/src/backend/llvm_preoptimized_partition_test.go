@@ -110,3 +110,34 @@ func TestOptimizedPartitionedIRAdmission(t *testing.T) {
 		})
 	}
 }
+
+// A unit larger than the session budget still needs its checked bitcode as
+// worker input even though no cache key/object can be retained.
+func TestPreoptimizedPartitionUncachedInput(t *testing.T) {
+	t.Setenv("ELISACORE_PARALLEL_OPT", "1")
+	t.Setenv("ELISACORE_TEST_NATIVE_WORKERS", "1")
+	previous := partitionWorkersAvailable
+	RunPartitionWorkerIfRequested()
+	defer func() { partitionWorkersAvailable = previous }()
+	for _, ir := range []string{"0", "1"} {
+		t.Run("IR"+ir, func(t *testing.T) {
+			t.Setenv("ELISACORE_PARALLEL_IR", ir)
+			result := parseAndAnalyzeBackendTest(t, "uncached.elisa", incrementalObjectFixture(32))
+			session := NewIncrementalObjectSession(4, 1)
+			session.minWeight = 0
+			for attempt := 0; attempt < 2; attempt++ {
+				out := filepath.Join(t.TempDir(), "uncached.o")
+				if err := session.WriteObject(result, out, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3}); err != nil {
+					t.Fatal(err)
+				}
+				if got := incrementalObjectNativeStatus(t, out); got != 54 {
+					t.Fatalf("uncached native=%d want=54", got)
+				}
+			}
+			stats := session.Stats()
+			if stats.PartitionsEmitted != 8 || stats.RetainedBytes != 0 || stats.RetainedPartitions != 0 || stats.SerialFallbacks != 0 {
+				t.Fatalf("unexpected uncached path: %+v", stats)
+			}
+		})
+	}
+}

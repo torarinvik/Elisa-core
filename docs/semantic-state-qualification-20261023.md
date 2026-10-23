@@ -1227,3 +1227,53 @@ novel signature (earlier 8.545). The small isolated layout improvement did not
 justify the memory/scheduling complexity and regressions. Neither implementation
 is retained. Explicit qualification evidence remains in `weak-owner-64-*.json`
 and `weak-prefix-64-*.json` under the same production evidence root.
+
+
+### Reuse checked bitcode for native worker input
+
+Both pre-O3 partition paths serialized current LLVM IR to check the native cache,
+then serialized the same unchanged module again to write a worker input file on
+a miss. Workers now receive the first serialization directly. Its LLVM buffer
+remains owned until the synchronous worker call returns, including when a unit
+exceeds the cache budget and no owned cache-key copy is retained. Cache inputs,
+target settings, O3 pipeline, partition ownership and compiler identity checks
+are unchanged. Per-unit native timing is available through the existing
+`ELISACORE_BUILD_TIMING=1` observer.
+
+Fresh-process O2/O3 native edit/revert/line reuse, global/target changes and
+exported-global alias address/value tests passed. A new regression uses a
+one-byte session budget, checks both split-module and independent IR paths,
+executes linked output twice, and confirms every native unit is rebuilt without
+retaining any cache entries. These checks also passed under the race detector;
+main-package `TestAnalysisDisk` oracles passed.
+
+Explicit full-source qualification (checked old semantic payload, no production
+rekeying) compared immediately preceding frozen executables at 64 units:
+
+| Case | Duplicate serialization | Reuse checked bytes |
+| --- | ---: | ---: |
+| Initial native build | 22.564 s | 21.700 s |
+| Warm baseline | 7.079 s | 6.709 s |
+| Novel used layout | 12.680 s | 12.260 s |
+| Warm layout | 7.674 s | 7.679 s |
+
+The first native build's aggregate worker time fell from 138.822 to 131.736
+seconds; layout aggregate worker time was 28.031 versus 27.443 seconds. These
+single samples include machine variance; the concrete gain is removing one full
+bitcode serialization per native miss. The baseline and layout final objects
+were byte-identical to their previous counterparts. Both linked compilers
+compiled an included fixture twice (sidecar miss then valid), and both fixture
+executables returned 42. All builds and links retained 30-second external caps.
+Evidence is `unit-timing-64-*.json`, `once-bitcode-64-*.json` and
+`once-bitcode-64/functional.json` under the global-owner production evidence root.
+
+Restoration investigation found 7,250,967 graph objects in the 563,710,010-byte
+payload, 28,274,310 descriptor bytes, and about 1.44 GB estimated logical backing
+storage before object-table/descriptor metadata. A four-worker pointer-arena
+allocation experiment did not improve three alternating restore-only samples:
+serial 3.956/3.837/3.917 seconds, parallel 3.895/3.882/3.907 seconds. It was
+reverted. GOGC 100/400/off also showed no material restoration gain.
+`state-inventory.json`, `parallel-hydration-restore.json` and `restore-only.pprof`
+preserve those observations. The ten-second used-layout goal and full runtime
+optimization-quality/major-edit qualification remain open; this change does not
+claim fresh normal CLI admission for the new compiler executable.

@@ -269,9 +269,9 @@ func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pi
 	}
 	var retainedInput string
 	if object == nil && retainInput {
-		retainedInput = C.GoStringN(inputData, C.int(inputSize))
+		retainedInput = string(inputBytes)
 	}
-	C.LLVMDisposeMemoryBuffer(bitcode)
+	defer C.LLVMDisposeMemoryBuffer(bitcode)
 	bitcodeDuration := time.Since(bitcodeStart)
 	s.recordStats(func(stats *IncrementalObjectStats) {
 		stats.CloneTime += cloneDuration
@@ -283,7 +283,7 @@ func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pi
 	}
 	nativeStart := time.Now()
 	if pipeline != "" {
-		object, err = emitPreoptimizedPartition(module, pipeline, triple, cpu, features)
+		object, err = emitPreoptimizedPartition(inputBytes, pipeline, triple, cpu, features)
 		if err != nil {
 			return nil, false, fmt.Errorf("incremental optimization partition %d: %w", part, err)
 		}

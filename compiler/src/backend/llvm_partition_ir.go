@@ -271,9 +271,9 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	}
 	var retainedInput string
 	if object == nil && retainInput {
-		retainedInput = C.GoStringN(inputData, C.int(inputSize))
+		retainedInput = string(inputBytes)
 	}
-	C.LLVMDisposeMemoryBuffer(bitcode)
+	defer C.LLVMDisposeMemoryBuffer(bitcode)
 	bitcodeDuration := time.Since(bitcodeStart)
 	partitionBitcodeNanos.Add(int64(bitcodeDuration))
 	s.recordStats(func(stats *IncrementalObjectStats) {
@@ -292,7 +292,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	nativeStart := time.Now()
 	if options.OptLevel != OptimizationLevel0 {
 		var err error
-		object, err = emitPreoptimizedPartition(g.module, fmt.Sprintf("default<O%d>", int(options.OptLevel)), triple, cpu, features)
+		object, err = emitPreoptimizedPartition(inputBytes, fmt.Sprintf("default<O%d>", int(options.OptLevel)), triple, cpu, features)
 		if err != nil {
 			return nil, fmt.Errorf("partition %d: %w", part, err)
 		}
@@ -312,6 +312,9 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	}
 
 	nativeDuration := time.Since(nativeStart)
+	if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
+		fmt.Fprintf(os.Stderr, "[build-timing] partition %d: native-start %s, native %v, input %d bytes\n", part, nativeStart.Format("15:04:05.000"), nativeDuration.Round(time.Millisecond), inputSize)
+	}
 	partitionNativeNanos.Add(int64(nativeDuration))
 	partitionNativeCount.Add(1)
 	s.recordStats(func(stats *IncrementalObjectStats) {
