@@ -24,7 +24,7 @@ func (r *Registry) Decode(data []byte) (any, error) {
 
 // DecodeWithLimit bounds container storage before allocating from a cache file.
 func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
-	if len(data) < 9+32+1+32 || string(data[:9]) != "ELISTATE1" || !bytes.Equal(data[9:41], r.fingerprint[:]) {
+	if len(data) < 9+32+1+32 || string(data[:9]) != "ELISTATE2" || !bytes.Equal(data[9:41], r.fingerprint[:]) {
 		return nil, fmt.Errorf("state schema mismatch")
 	}
 	payload := data[:len(data)-32]
@@ -39,6 +39,12 @@ func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
 	}
 	t, err := d.typ(id)
 	if err != nil {
+		return nil, err
+	}
+	if err := d.readObjects(); err != nil {
+		return nil, err
+	}
+	if err := d.reserve(1, t.Size()); err != nil {
 		return nil, err
 	}
 	v := reflect.New(t).Elem()
@@ -105,95 +111,28 @@ func (d *decoder) value(v reflect.Value) error {
 		if !typ.AssignableTo(t) {
 			return fmt.Errorf("state type %s does not implement %s", typ, t)
 		}
+		if err := d.reserve(1, typ.Size()); err != nil {
+			return err
+		}
 		inner := reflect.New(typ).Elem()
 		if err := d.value(inner); err != nil {
 			return err
 		}
 		v.Set(inner)
+
 	case reflect.Pointer, reflect.Map, reflect.Slice:
-		code, err := d.uint()
+		id, err := d.uint()
 		if err != nil {
 			return err
 		}
-		if code == 0 {
+		if id == 0 {
 			return nil
 		}
-		id := code >> 1
-		if code&1 == 0 {
-			if id == 0 || id >= uint64(len(d.objects)) || d.objects[id].Type() != t {
-				return fmt.Errorf("invalid state reference")
-			}
-			v.Set(d.objects[id])
-			return nil
+		if id >= uint64(len(d.objects)) || d.objects[id].Type() != t {
+			return fmt.Errorf("invalid state reference")
 		}
-		if id != uint64(len(d.objects)) {
-			return fmt.Errorf("nonsequential state reference")
-		}
-		n := 0
-		if v.Kind() != reflect.Pointer {
-			n, err = d.count()
-			if err != nil {
-				return err
-			}
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if err := d.reserve(1, t.Elem().Size()); err != nil {
-				return err
-			}
-			if canonical, ok := d.registry.singletons[t]; ok {
-				v.Set(canonical)
-			} else {
-				v.Set(reflect.New(t.Elem()))
-			}
-		case reflect.Map:
-			if err := d.reserve(uint64(n), t.Key().Size()+t.Elem().Size()+32); err != nil {
-				return err
-			}
-			v.Set(reflect.MakeMapWithSize(t, n))
-		case reflect.Slice:
-			if err := d.reserve(uint64(n), t.Elem().Size()); err != nil {
-				return err
-			}
-			v.Set(reflect.MakeSlice(t, n, n))
-		}
-		// Save the value of the header, not a mutable destination reused by a map loop.
-		owned := reflect.New(t).Elem()
-		owned.Set(v)
-		d.objects = append(d.objects, owned)
-		switch v.Kind() {
-		case reflect.Pointer:
-			return d.value(v.Elem())
-		case reflect.Slice:
-			if t.Elem().Kind() == reflect.Uint8 {
-				data, err := d.take(uint64(n))
-				if err != nil {
-					return err
-				}
-				reflect.Copy(v, reflect.ValueOf(data))
-				return nil
-			}
-			for i := 0; i < n; i++ {
-				if err := d.value(v.Index(i)); err != nil {
-					return fmt.Errorf("%s[%d]: %w", t, i, err)
-				}
-			}
-		case reflect.Map:
-			for i := 0; i < n; i++ {
-				k := reflect.New(t.Key()).Elem()
-				x := reflect.New(t.Elem()).Elem()
-				if err := d.value(k); err != nil {
-					return err
-				}
-				if err := d.value(x); err != nil {
-					return err
-				}
-				if !k.Comparable() {
-					return fmt.Errorf("noncomparable state map key")
-				}
-				v.SetMapIndex(k, x)
-			}
-		}
+		v.Set(d.objects[id])
+
 	case reflect.Struct:
 		n, err := d.count()
 		if err != nil {

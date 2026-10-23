@@ -45,3 +45,21 @@ func TestSemanticStatePreservesOptimizationIdentityDomain(t *testing.T) {
 		t.Fatal("restored identities collided with new symbols")
 	}
 }
+
+func TestSemanticStateRejectsOpenBranchJournal(t *testing.T) {
+	_, r := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
+	aliases := map[string]returnBorrowFlow{}
+	r.a.beginReturnBorrowBranch(aliases)
+	if _, err := r.MarshalState(); err == nil {
+		t.Fatal("persisted an open branch journal")
+	}
+	r.a.endReturnBorrowBranch(aliases)
+	for _, frame := range r.a.returnBorrowAliasFrames[:cap(r.a.returnBorrowAliasFrames)] {
+		if frame.aliases != 0 {
+			t.Fatal("closed frame retained process address")
+		}
+	}
+	if _, err := r.MarshalState(); err != nil {
+		t.Fatal(err)
+	}
+}

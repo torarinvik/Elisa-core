@@ -7,8 +7,9 @@ admit these snapshots automatically yet.
 The state codec writes schema-checked typed values and object IDs. Shared maps,
 slices, pointers and cycles survive restoration. Cache bytes cannot supply Go
 types or executable callbacks. Checksums, collection/allocation bounds and
-reference/type checks reject corrupt records. Unsupported interior alias shapes
-currently reject the entire snapshot rather than restoring independent copies.
+reference/type checks reject corrupt records. Typed interior pointers, overlapping slice views with a covering owner, and
+slices into array fields now preserve their owner relationships. Uncovered
+partial backing-store overlaps still reject the entire snapshot.
 
 Analyzer post passes are callable after restoration, without relying on a closure
 from the creating process. Scope binder observation uses explicit function-frame
@@ -25,9 +26,18 @@ Validation so far:
   effect-row, overload, struct-field/order and function-add/remove edit sequences.
 - The graph codec passes race tests and a five-second malformed-body fuzz run
   (about 965,000 executions).
-- A real readonly-reference compiler atom analyzes successfully in about 2.2 s.
-  Its snapshot is currently declined because a `*ast.MatchArm` points into a
-  `[]ast.MatchArm`; supporting that alias is the next codec step.
+- The real readonly-reference compiler atom (153 retained compiler functions,
+  11,762 source lines before standard-library expansion) analyzes successfully.
+  With the server disabled and a 30-second process cap, its 42,311,961-byte state
+  encoded in 345 ms, restored in 201 ms, and completed a restored no-op update
+  in 52 ms. Initial analysis was 1.97 s. This is a focused slice, not the full
+  self-host compiler.
+- The v2 codec allocates all owners before resolving field/element alias paths
+  and filling values. Slice capacity and hidden backing values are preserved;
+  named byte slices and distinct zero-size pointer map keys are covered.
+- Closed return-borrow journal frames clear their stale map-address slots.
+  Snapshot admission rejects active branch/defer journals, solvers and shared
+  code-generation state.
 
 `TestDiskStateCompilerInput` is an opt-in real-source qualification using
 `ELISACORE_STATE_QUALIFY_INPUT`. Always run it with an external 30-second timeout.

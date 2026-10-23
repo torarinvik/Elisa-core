@@ -10,9 +10,10 @@ import (
 )
 
 type identity struct {
-	typ     reflect.Type
-	pointer uintptr
-	length  int
+	typ      reflect.Type
+	pointer  uintptr
+	length   int
+	capacity int
 }
 type encoder struct {
 	registry    *Registry
@@ -20,25 +21,40 @@ type encoder struct {
 	objects     map[identity]uint64
 	depth       int
 	allocations []allocation
+	nodes       []stateNode
+	scanning    bool
 }
 
 func (r *Registry) Encode(root any) ([]byte, error) {
-	e := &encoder{registry: r, objects: map[identity]uint64{}}
-	e.data.WriteString("ELISTATE1")
-	e.data.Write(r.fingerprint[:])
+	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true}
 	v := reflect.ValueOf(root)
-	if !v.IsValid() {
-		return nil, fmt.Errorf("nil state root")
+	if !v.IsValid() || r.ids[v.Type()] == 0 {
+		return nil, fmt.Errorf("unregistered state root")
 	}
-	id := r.ids[v.Type()]
-	if id == 0 {
-		return nil, fmt.Errorf("unregistered root type %s", v.Type())
-	}
-	e.uint(id)
 	if err := e.value(v); err != nil {
 		return nil, err
 	}
-	if err := e.validateAliases(); err != nil {
+	if err := e.bindAliases(); err != nil {
+		return nil, err
+	}
+	e.scanning = false
+	e.data.WriteString("ELISTATE2")
+	e.data.Write(r.fingerprint[:])
+	e.uint(r.ids[v.Type()])
+	e.uint(uint64(len(e.nodes)))
+	for _, node := range e.nodes {
+		if err := e.descriptor(node); err != nil {
+			return nil, err
+		}
+	}
+	for _, node := range e.nodes {
+		if node.alias == nil {
+			if err := e.body(node.value); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := e.value(v); err != nil {
 		return nil, err
 	}
 	digest := sha256.Sum256(e.data.Bytes())
@@ -46,11 +62,20 @@ func (r *Registry) Encode(root any) ([]byte, error) {
 	return e.data.Bytes(), nil
 }
 func (e *encoder) uint(v uint64) {
+	if e.scanning {
+		return
+	}
 	var b [10]byte
 	n := binary.PutUvarint(b[:], v)
 	e.data.Write(b[:n])
 }
-func (e *encoder) str(v string) { e.uint(uint64(len(v))); e.data.WriteString(v) }
+func (e *encoder) str(v string) {
+	if e.scanning {
+		return
+	}
+	e.uint(uint64(len(v)))
+	e.data.WriteString(v)
+}
 func (e *encoder) value(v reflect.Value) error {
 	e.depth++
 	defer func() { e.depth-- }()
@@ -76,49 +101,21 @@ func (e *encoder) value(v reflect.Value) error {
 			e.uint(0)
 			return nil
 		}
-		key := identity{typ: t}
-		if v.Kind() == reflect.Map {
-			key.pointer = uintptr(v.UnsafePointer())
-		} else {
-			key.pointer = v.Pointer()
-		}
-		if v.Kind() == reflect.Slice {
-			key.length = v.Len()
-		}
+
+		key := objectIdentity(v)
 		if id := e.objects[key]; id != 0 {
-			e.uint(id << 1)
+			e.uint(id)
 			return nil
 		}
-		id := uint64(len(e.objects) + 1)
-		e.objects[key] = id
-		e.recordAllocation(v)
-		e.uint(id<<1 | 1)
-		switch v.Kind() {
-		case reflect.Pointer:
-			return e.value(v.Elem())
-		case reflect.Slice:
-			e.uint(uint64(v.Len()))
-			if t.Elem().Kind() == reflect.Uint8 {
-				e.data.Write(v.Bytes())
-				return nil
-			}
-			for i := 0; i < v.Len(); i++ {
-				if err := e.value(v.Index(i)); err != nil {
-					return fmt.Errorf("%s[%d]: %w", t, i, err)
-				}
-			}
-		case reflect.Map:
-			e.uint(uint64(v.Len()))
-			it := v.MapRange()
-			for it.Next() {
-				if err := e.value(it.Key()); err != nil {
-					return fmt.Errorf("%s key: %w", t, err)
-				}
-				if err := e.value(it.Value()); err != nil {
-					return fmt.Errorf("%s value: %w", t, err)
-				}
-			}
+		if !e.scanning {
+			return fmt.Errorf("state graph changed while encoding %s", t)
 		}
+		id := uint64(len(e.nodes) + 1)
+		e.objects[key] = id
+		e.nodes = append(e.nodes, stateNode{value: v})
+		e.recordAllocation(v, id)
+		return e.body(v)
+
 	case reflect.Struct:
 		if !v.CanAddr() {
 			copy := reflect.New(t).Elem()
@@ -173,6 +170,82 @@ func (e *encoder) value(v reflect.Value) error {
 		e.uint(0)
 	default:
 		return fmt.Errorf("unsupported state type %s", t)
+	}
+	return nil
+}
+
+func objectIdentity(v reflect.Value) identity {
+	key := identity{typ: v.Type()}
+	if v.Kind() == reflect.Map {
+		key.pointer = uintptr(v.UnsafePointer())
+	} else {
+		key.pointer = v.Pointer()
+	}
+	if v.Kind() == reflect.Slice {
+		key.length = v.Len()
+		key.capacity = v.Cap()
+	}
+	return key
+}
+func (e *encoder) body(v reflect.Value) error {
+	switch v.Kind() {
+	case reflect.Pointer:
+		return e.value(v.Elem())
+	case reflect.Slice:
+		full := v.Slice(0, v.Cap())
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			if !e.scanning {
+				e.data.Write(full.Bytes())
+			}
+			return nil
+		}
+		for i := 0; i < full.Len(); i++ {
+			if err := e.value(full.Index(i)); err != nil {
+				return fmt.Errorf("%s[%d]: %w", v.Type(), i, err)
+			}
+		}
+	case reflect.Map:
+		it := v.MapRange()
+		for it.Next() {
+			if err := e.value(it.Key()); err != nil {
+				return fmt.Errorf("%s key: %w", v.Type(), err)
+			}
+			if err := e.value(it.Value()); err != nil {
+				return fmt.Errorf("%s value: %w", v.Type(), err)
+			}
+		}
+	}
+	return nil
+}
+func (e *encoder) descriptor(node stateNode) error {
+	v := node.value
+	id := e.registry.ids[v.Type()]
+	if id == 0 {
+		return fmt.Errorf("unregistered state object %s", v.Type())
+	}
+	e.uint(id)
+	if v.Kind() == reflect.Slice {
+		e.uint(uint64(v.Len()))
+		e.uint(uint64(v.Cap()))
+	} else if v.Kind() == reflect.Map {
+		e.uint(uint64(v.Len()))
+	}
+	if node.alias == nil {
+		e.uint(0)
+		return nil
+	}
+	a := node.alias
+	e.uint(a.owner)
+	e.uint(uint64(len(a.path)))
+	for _, step := range a.path {
+		code := uint64(step.index) << 1
+		if step.element {
+			code |= 1
+		}
+		e.uint(code)
+	}
+	if v.Kind() == reflect.Slice {
+		e.uint(uint64(a.offset))
 	}
 	return nil
 }

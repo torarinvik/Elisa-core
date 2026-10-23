@@ -150,7 +150,7 @@ func BenchmarkGraphRoundTrip(b *testing.B) {
 	}
 }
 
-func TestGraphRejectsUnsupportedInteriorAliases(t *testing.T) {
+func TestGraphPreservesInteriorAliases(t *testing.T) {
 	type interior struct {
 		Values  []int
 		Tail    []int
@@ -158,10 +158,61 @@ func TestGraphRejectsUnsupportedInteriorAliases(t *testing.T) {
 	}
 	r := New([]reflect.Type{reflect.TypeFor[interior]()}, nil, nil)
 	values := []int{1, 2, 3}
-	for _, v := range []*interior{{Values: values, Tail: values[1:]}, {Values: values, Element: &values[1]}} {
-		if _, err := r.Encode(v); err == nil {
-			t.Fatal("interior alias silently duplicated")
-		}
+	data, err := r.Encode(&interior{Values: values, Tail: values[1:], Element: &values[1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := r.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.(*interior)
+	*got.Element = 42
+	if got.Values[1] != 42 || got.Tail[0] != 42 || got.Element != &got.Values[1] {
+		t.Fatal("interior aliases were duplicated")
+	}
+	if cap(got.Values) != cap(values) || cap(got.Tail) != cap(values[1:]) {
+		t.Fatal("slice capacities changed")
+	}
+}
+
+func TestGraphPreservesStructAndArrayFieldAliases(t *testing.T) {
+	type item struct {
+		Value int
+		Array [3]int
+	}
+	type root struct {
+		Object  *item
+		Field   *int
+		Array   []int
+		Element *int
+		Keys    map[*int]string
+	}
+	r := New([]reflect.Type{reflect.TypeFor[root](), reflect.TypeFor[item]()}, nil, nil)
+	object := &item{Value: 4, Array: [3]int{1, 2, 3}}
+	input := &root{Object: object, Field: &object.Value, Array: object.Array[:], Element: &object.Array[1], Keys: map[*int]string{&object.Array[1]: "found"}}
+	data, err := r.Encode(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := r.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.(*root)
+	*got.Field = 9
+	*got.Element = 7
+	if got.Object.Value != 9 || got.Object.Array[1] != 7 || got.Array[1] != 7 || got.Keys[&got.Object.Array[1]] != "found" {
+		t.Fatal("field aliases lost")
+	}
+}
+
+func TestGraphRejectsUncoveredPartiallyOverlappingSlices(t *testing.T) {
+	type root struct{ Left, Right []int }
+	r := New([]reflect.Type{reflect.TypeFor[root]()}, nil, nil)
+	values := []int{1, 2, 3, 4}
+	if _, err := r.Encode(&root{Left: values[:2:2], Right: values[1:]}); err == nil {
+		t.Fatal("unsupported partial backing allocation accepted")
 	}
 }
 
@@ -212,4 +263,52 @@ func FuzzGraphDecode(f *testing.F) {
 		data = append(data, digest[:]...)
 		_, _ = r.DecodeWithLimit(data, 1<<20)
 	})
+}
+
+func TestGraphKeepsDistinctZeroSizePointerKeys(t *testing.T) {
+	type marker struct{}
+	type padded struct {
+		Value   marker
+		Padding byte
+	}
+	type root struct {
+		Left, Right *marker
+		Keys        map[*marker]string
+	}
+	storage := new([2]padded)
+	left, right := &storage[0].Value, &storage[1].Value
+	if left == right {
+		t.Fatal("fixture marker addresses overlap")
+	}
+	r := New([]reflect.Type{reflect.TypeFor[root]()}, nil, nil)
+	data, err := r.Encode(&root{Left: left, Right: right, Keys: map[*marker]string{left: "left", right: "right"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := r.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := value.(*root)
+	if got.Left == got.Right || got.Keys[got.Left] != "left" || got.Keys[got.Right] != "right" {
+		t.Fatal("distinct zero-size identities collapsed")
+	}
+}
+
+func TestGraphPreservesNamedByteSlices(t *testing.T) {
+	type edge uint8
+	type root struct{ Edges []edge }
+	r := New([]reflect.Type{reflect.TypeFor[root]()}, nil, nil)
+	input := &root{Edges: []edge{0, 1, 2, 255}}
+	data, err := r.Encode(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := r.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(input, value) {
+		t.Fatal("named-byte slice changed")
+	}
 }

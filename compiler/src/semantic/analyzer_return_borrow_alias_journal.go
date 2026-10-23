@@ -81,6 +81,9 @@ func (a *Analyzer) endReturnBorrowBranch(aliases map[string]returnBorrowFlow) []
 	if frame.aliases != returnBorrowAliasMapID(aliases) {
 		panic("return-borrow alias journal: frames closed out of order")
 	}
+	// The closed frame no longer owns a map identity. Clear its backing slot
+	// as well as shortening the stack so idle state contains no stale addresses.
+	a.returnBorrowAliasFrames[n-1] = returnBorrowAliasFrame{}
 	a.returnBorrowAliasFrames = a.returnBorrowAliasFrames[:n-1]
 	entries := a.returnBorrowAliasJournal[frame.start:]
 	var changes []returnBorrowBranchChange
