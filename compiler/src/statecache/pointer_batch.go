@@ -21,6 +21,9 @@ func (d *decoder) allocatePointerBatches(descriptions []objectDescription, batch
 			continue
 		}
 		t := d.registry.types[desc.typeID-1]
+		if t.Kind() != reflect.Pointer {
+			continue
+		}
 		batch := &batches[desc.typeID-1]
 		var pointer reflect.Value
 		if !batch.values.IsValid() && batch.remaining < 8 {

@@ -25,8 +25,10 @@ func (d *decoder) readObjects() error {
 	// references, alias bookkeeping and these type-indexed batch headers.
 	// Only large graphs with sufficient per-object slack use batching.
 	var batches []pointerBatch
+	var sliceBatches []sliceBatch
 	if count >= 4096 && len(d.registry.types) <= count/8 {
 		batches = make([]pointerBatch, len(d.registry.types))
+		sliceBatches = make([]sliceBatch, len(d.registry.types))
 	}
 	for id := 1; id <= count; id++ {
 		typeID, err := d.uint()
@@ -115,7 +117,13 @@ func (d *decoder) readObjects() error {
 				if err := d.reserve(uint64(desc.capacity), t.Elem().Size()); err != nil {
 					return err
 				}
-				v = reflect.MakeSlice(t, desc.length, desc.capacity)
+				if sliceBatches != nil && smallSliceBatchEligible(t, desc.capacity) {
+					batch := &sliceBatches[typeID-1]
+					batch.remaining += desc.capacity
+					batch.count++
+				} else {
+					v = reflect.MakeSlice(t, desc.length, desc.capacity)
+				}
 			}
 			d.objects[id] = v
 		}
@@ -123,6 +131,9 @@ func (d *decoder) readObjects() error {
 	}
 	if batches != nil {
 		d.allocatePointerBatches(descriptions, batches)
+		if err := d.allocateSliceBatches(descriptions, sliceBatches); err != nil {
+			return err
+		}
 	}
 	visiting := make([]bool, count+1)
 	for id := 1; id <= count; id++ {

@@ -644,3 +644,23 @@ restore improved from 4.773 s to 4.279 s. Codec and race tests plus all separate
 process analysis disk regressions pass, including native edits, diagnostic
 rejection and bootstrap. Typed nils, shared pointer/map/slice identities and
 cycles have explicit regression coverage.
+
+
+### Batch small slice backing storage
+
+Large graph restores now allocate small slice backing storage in typed blocks
+of at most 1 MiB, then use three-index slices to preserve each original length
+and capacity. Named slices retain their type. Empty, zero-sized and larger
+slices keep the ordinary path. Every request's storage and any unused block
+tail are charged to the decode budget; graph object IDs and interior aliases
+are unchanged. Pointer and slice batches share the existing checked descriptor
+pass; aliases resolve only after all owners have storage.
+
+The 10,000-small-slice benchmark reduced allocations from 30,011 to 20,014
+(time 1.294 to 1.240 ms, bytes 1,630,324 to 1,638,905). Full-input restore was
+4.383 s before versus 4.255/4.312 s after: a modest latency gain. Codec, race,
+20,000-variable-capacity slice/GC/append/cycle/interior-alias tests and the
+separate-process disk analysis suite pass. A checked full compiler native build
+completed in 22.809 s under its 30-second cap; its object SHA-256 was exactly
+the prior production baseline's
+`04537dc89a3ee5c3742c08dd156dd1c414f3d76158ab1b4c0854cd41d41c405e`.

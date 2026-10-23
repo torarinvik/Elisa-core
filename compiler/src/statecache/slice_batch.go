@@ -1,0 +1,60 @@
+package statecache
+
+import "reflect"
+
+const sliceBatchBytes = 1 << 20
+
+type sliceBatch struct {
+	values                 reflect.Value
+	remaining, count, next int
+}
+
+func smallSliceBatchEligible(t reflect.Type, capacity int) bool {
+	size := t.Elem().Size()
+	// Empty/zero-size and larger slices retain the ordinary allocation path.
+	return size > 0 && capacity > 0 && uint64(capacity) <= uint64(sliceBatchBytes/128)/uint64(size)
+}
+
+// Back small slices with bounded typed arrays. Three-index slicing preserves
+// each original capacity, so append cannot write into another logical slice.
+// The graph still owns a separate slice value per object ID. Hidden values and
+// interior aliases are filled/resolved through those original object bounds.
+func (d *decoder) allocateSliceBatches(descriptions []objectDescription, batches []sliceBatch) error {
+	for id := 1; id < len(descriptions); id++ {
+		desc := descriptions[id]
+		if desc.alias != nil || d.objects[id].IsValid() {
+			continue
+		}
+		t := d.registry.types[desc.typeID-1]
+		if t.Kind() != reflect.Slice {
+			continue
+		}
+		batch := &batches[desc.typeID-1]
+		var value reflect.Value
+		if !batch.values.IsValid() && batch.count < 8 {
+			value = reflect.MakeSlice(t, desc.length, desc.capacity)
+		} else {
+			if !batch.values.IsValid() || batch.next+desc.capacity > batch.values.Len() {
+				if batch.values.IsValid() {
+					// Request capacities were charged while reading descriptors. Charge
+					// any unfilled tail too, since live slices retain that physical block.
+					if err := d.reserve(uint64(batch.values.Len()-batch.next), t.Elem().Size()); err != nil {
+						return err
+					}
+				}
+				n := min(batch.remaining, int(sliceBatchBytes/t.Elem().Size()))
+				batch.values = reflect.MakeSlice(reflect.SliceOf(t.Elem()), n, n)
+				batch.next = 0
+			}
+			value = batch.values.Slice3(batch.next, batch.next+desc.length, batch.next+desc.capacity)
+			batch.next += desc.capacity
+			if value.Type() != t {
+				value = value.Convert(t)
+			}
+		}
+		batch.remaining -= desc.capacity
+		batch.count--
+		d.objects[id] = value
+	}
+	return nil
+}
