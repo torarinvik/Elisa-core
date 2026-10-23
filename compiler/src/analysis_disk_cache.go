@@ -159,7 +159,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	replayed := false
 	started := time.Now()
 	if data, err := artifact.read(); err == nil {
-		restored, err := semantic.RestoreAnalysisState(data)
+		restored, preparation, err := restoreAnalysisWithScratch(data, program, options)
 		if err == nil && !restored.MatchesInvocation(program.filename, options) {
 			err = fmt.Errorf("analysis invocation mismatch")
 		}
@@ -171,10 +171,10 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 				unchanged = true
 				debugAnalysisDisk(stderr, "reuse unchanged revision")
 			} else {
-				scratch, ok := parseProgram(program.filename, program.source, io.Discard)
-				if ok {
+				if preparation.file != nil && preparation.prepared != nil {
+					debugAnalysisDisk(stderr, "prepared scratch in=%v", preparation.elapsed.Round(time.Millisecond))
 					updateStart := time.Now()
-					result, err = state.Update(file, scratch, program.source)
+					result, err = state.UpdatePrepared(file, preparation.file, program.source, preparation.prepared)
 					if err == nil {
 						// Keep the admitted baseline immutable. Replaying a
 						// supported source delta is much cheaper than writing

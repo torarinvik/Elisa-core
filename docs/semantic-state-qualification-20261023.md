@@ -727,3 +727,31 @@ Admission guards and existing constant-address checks pass. The edited full
 compiler linked and returned the changed `unknown option` diagnostic; it then
 compiled an object for a fresh program, whose linked executable returned 42.
 All controlled source edits were restored.
+
+
+### Overlap scratch preparation with disk hydration
+
+The disk-cache path starts a separate scratch parse/declaration preparation
+while restoring the graph, then uses `UpdatePrepared`. Hydration itself only
+allocates/reconnects checked data. Preparation is joined even when restoration
+fails, before any fallback analysis or return, so no worker or state persists
+beyond the invocation. Current invocation options/provenance still govern the
+scratch phase and restored-state admission.
+
+Source/options-checked full-input qualification now took 9.470 s for the novel
+string-body edit (one emitted unit / 63 disk hits), versus 11.445 s before.
+Scratch preparation took 2.804 s inside the 4.544 s hydration interval; the
+remaining prepared update took 0.325 s. Native work took 3.350 s. The edited
+object SHA-256 exactly matched the serial-preparation version's
+`3ad2e9a96c9cdb052500c6b5c1934ac442071def08987b41d2b8a6883f5b6fd3`.
+Edited repeat with whole-object cache bypassed took 8.306 s; revert 7.984 s.
+Cold native population took 23.527 s. Each process had its external 30-second cap.
+This is explicit full-input phase qualification; production admission and a wider
+edit matrix still need requalification before the complete goal can be claimed.
+
+All separate-process disk cache regressions pass. A new regression verifies
+joined preparation on both successful and corrupt restore, then checks prepared
+body reuse against cold diagnostics. Race checks for that path, corruption
+repair and protocol-effect rejection pass. Speculative scratch work increases
+uncached exact-revision qualification slightly (7.725 to 8.315 s); normal
+whole-object hits still avoid frontend work entirely.

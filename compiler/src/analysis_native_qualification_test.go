@@ -36,11 +36,16 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		data = envelope[2]
 	}
 	start := time.Now()
-	state, err := semantic.RestoreAnalysisState(data)
-	if err != nil {
-		t.Fatal(err)
+	var state *semantic.RetainedAnalysis
+	var preparation analysisScratchPreparation
+	prefetch := os.Getenv("ELISACORE_STATE_QUALIFY_PREFETCH") == "1"
+	if !prefetch {
+		state, err = semantic.RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("semantic restore: %v", time.Since(start))
 	}
-	t.Logf("semantic restore: %v", time.Since(start))
 	filename := os.Getenv("ELISACORE_STATE_QUALIFY_INPUT")
 	if filename == "" {
 		t.Fatal("set ELISACORE_STATE_QUALIFY_INPUT to validate the snapshot revision")
@@ -69,6 +74,14 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	var invocationOptions semantic.AnalyzeOptions
 	_, result, valid := analyzeLoadedProgramUsing(program, &diagnostics, semanticOptionsForCLI(cli), func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		invocationOptions = options
+		if prefetch {
+			started := time.Now()
+			state, preparation, err = restoreAnalysisWithScratch(data, program, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("overlapped restore/scratch: %v; scratch=%v", time.Since(started), preparation.elapsed)
+		}
 		if !state.MatchesInvocation(filename, options) {
 			t.Fatal("snapshot invocation options differ from native qualification flags")
 		}
@@ -77,13 +90,21 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 			if os.Getenv("ELISACORE_STATE_QUALIFY_REPLAY") != "1" {
 				t.Fatal("native qualification input does not match the saved revision")
 			}
-			scratch, ok := parseProgram(filename, program.source, io.Discard)
-			if !ok {
-				t.Fatal("replay scratch parse failed")
-			}
 			started := time.Now()
 			var err error
-			result, err = state.Update(file, scratch, program.source)
+			if prefetch {
+				if preparation.file == nil || preparation.prepared == nil {
+					t.Fatal("replay scratch preparation failed")
+				}
+				result, err = state.UpdatePrepared(file, preparation.file, program.source, preparation.prepared)
+			} else {
+				scratch, ok := parseProgram(filename, program.source, io.Discard)
+				if !ok {
+					t.Fatal("replay scratch parse failed")
+				}
+				started = time.Now()
+				result, err = state.Update(file, scratch, program.source)
+			}
 			if err != nil {
 				t.Fatalf("qualified baseline replay: %v", err)
 			}
