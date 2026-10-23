@@ -48,11 +48,13 @@ static char *elisacoreRunOptimizationPipeline(
 	LLVMTargetMachineRef TargetMachine,
 	char *PassPipeline,
 	char *AAPipeline,
-	int InlinerThreshold) {
+	int InlinerThreshold,
+	int DebugLogging) {
 	LLVMPassBuilderOptionsRef Options = LLVMCreatePassBuilderOptions();
 	if (Options == NULL) {
 		return LLVMGetErrorMessage(LLVMCreateStringError("failed to create LLVM pass builder options"));
 	}
+	LLVMPassBuilderOptionsSetDebugLogging(Options, DebugLogging);
 	LLVMPassBuilderOptionsSetLoopInterleaving(Options, 1);
 	LLVMPassBuilderOptionsSetLoopVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetSLPVectorization(Options, 1);
@@ -78,6 +80,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"unsafe"
@@ -296,7 +299,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	defer C.free(unsafe.Pointer(passPipeline))
 	aaPipeline := cString(optimizationAAPipeline)
 	defer C.free(unsafe.Pointer(aaPipeline))
-	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)))
+	// LLVM emits pass progress before running each pass, so a bounded process
+	// can identify its active pass even when optimization exceeds its timeout.
+	debugLogging := C.int(0)
+	if os.Getenv("ELISACORE_LLVM_PASS_DEBUG") == "1" {
+		debugLogging = 1
+	}
+	errMessage := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, passPipeline, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging)
 	if errMessage != nil {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}

@@ -249,3 +249,18 @@ still hit 30 s. An 18.19 s bounded CPU profile sampled 82.57% in cgocall, and th
 captured stack was in `elisacoreRunOptimizationPipeline` through
 `llvmGenerator.optimizeModule(..., 3)`, before native partitions could be saved.
 An O0 backend run on an O3 semantic snapshot is not a matching CLI comparison.
+
+The opt-in `ELISACORE_LLVM_PASS_DEBUG=1` diagnostic now enables LLVM's own
+PassBuilder progress logging for the ordinary whole-module pipeline. It leaves
+optimization level, alias analysis, inliner/unroll thresholds and enabled passes
+unchanged. Each pass is named before it runs, allowing a 30-second bounded process
+to retain progress even when optimization never returns. A full-input O3 run
+restored state in 6.308 s and reached the cap with over 627,000 pass/analysis log
+lines; its last recorded work was GVN/MemoryDependenceAnalysis in
+`Parser.append_machine_transition_for_values`. Logging perturbs timing, so these
+results identify work only and do not replace the uninstrumented CPU profile.
+Native optimization-change/revert and language/optimization parity tests, plus
+AA/inliner/unroll consistency checks, pass with logging enabled. Run the backend
+test binary from `compiler/src/backend` because source-consistency tests read C
+sources relative to that directory. This is diagnostic progress, not a measured
+rebuild speedup; default O3 and the sub-10-second target remain unresolved.
