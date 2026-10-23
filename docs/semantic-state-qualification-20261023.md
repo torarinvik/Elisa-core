@@ -1433,3 +1433,53 @@ fresh normal CLI admission of this executable remains to run. The existing
 independent-unit cross-unit-inlining limitation, layout/permission targets,
 contract-constant/const-enum fallbacks and broader major-edit/quality gates keep
 the full goal open.
+
+
+### Fresh normal CLI admission and edit matrix for 8fc62b88
+
+The installed executable was frozen with SHA-256
+`23977e0b2222ae51dd9f9a2ed08fc6f5ed50389f1453e873f00e753a476537fb`
+and admitted a new semantic baseline through normal CLI requests in an empty
+cache directory. No earlier state was rekeyed. Eight requests saved partial
+checkpoints (16.075–28.053 seconds); request nine hit its 30-second cap after
+publishing the complete snapshot, and request ten emitted the initial object in
+18.137 seconds. The complete checked envelope is 563,023,605 bytes.
+
+`/tmp/elisa-discard-locals-production-root` points to this directory, its exact
+environment/CWD, executable, bootstrap logs and normal CLI records. Disk analysis
+and native caches were enabled, server forwarding disabled, and the same explicit
+O3 independent-IR/parallel-opt mode and 64 units retained. Every compiler/linker
+invocation had an external 30-second timeout.
+
+| Normal CLI source edit | First request | Repeat |
+| --- | ---: | ---: |
+| Original revision | 0.531 s | — |
+| Used struct layout | 12.881 s | 0.575 s |
+| Declared Console permission | 8.673 s | 0.420 s |
+| Existing caller-arena wrapper removal | 10.423 s | 0.421 s |
+| Function body string | 8.632 s | 0.423 s |
+| Defaulted signature parameter | 9.605 s | 0.422 s |
+| Remove real postcondition | 8.723 s | 0.426 s |
+| Leading comment / line shift | 9.142 s | 0.418 s |
+
+The signature probe here changes only the signature; earlier signature
+qualification also changed the body string. Permission edits improved from the
+preceding normal CLI sample of 11.217 seconds. Removal and layout remain above
+ten seconds despite their faster checked-payload results. Native cache file
+birth times show seven new products for layout, one for removal/body, three for
+signature, none for permission/contract, and one for the line probe.
+
+All eight rebuilt compilers linked, produced the expected unknown-flag/option
+runtime diagnostic, compiled the included fixture twice (sidecar miss then
+valid), and emitted executable fixtures returning 42. Their functional records
+are `functional.json` and `functional-diagnostics.json` in the evidence root.
+All source variants were restored; the seven pre-existing Claude/user changes
+remain untouched.
+
+The full goal is still incomplete: normal removal takes 10.423 seconds, used
+layout 12.881, and contract-used constant and const-enum edits retain their
+previously measured cold fallbacks. Runtime/default optimization-quality gates
+also remain open. Native critical-path timing shows the removed unit starting
+late and large layout units starting behind cache-hit work; bounded advisory
+native cost scheduling is a candidate next investigation, with exact current
+bitcode/target authority unchanged.
