@@ -371,3 +371,54 @@ uses about 905,774 bytes per decode instead of 979,530. Codec and race tests pas
 and the complete snapshot restores and passes exact-source/options admission.
 Its measured restore was 5.935 s, within noise of the preceding 5.884 s, so this
 change is a memory reduction rather than a claimed latency improvement.
+
+A normal installed-CLI cache baseline (not the snapshot qualification loader) now
+exists at the owned directory recorded by `/tmp/elisa-current-disk-cli-root`.
+It bootstrapped the unchanged full compiler through nine bounded processes and
+published a 622,880,225-byte semantic snapshot under the actual executable's
+normal identity. The final bootstrap process reached the 30-second cap after
+publication. The next process completed the object in 26.745 s; another process
+reused all native work and completed in **11.718 s**. Server forwarding was
+disabled; analysis-cache debug mode bypassed the whole-object source cache. A
+byte-identical copy of that compiler is kept in the owned output directory so
+later compiler-development commits cannot alter the measured cache namespace.
+No cache entries were rekeyed. `baseline.state` is an unchanged backup for explicit
+source/options-validated component qualification, not an admission override.
+
+A controlled full-source body edit changed only `"unknown flag: "` to
+`"unknown option: "` in `src/driver/elisac_cli_capture.elisa`. Through the frozen
+compiler and normal cache admission, restore took 5.710 s, retained update
+reported one changed body in 1.899 s, and serializing/publishing the new state
+took **15.213 s** (690,967,733 bytes). The process hit the 30-second cap before
+finishing native generation. The original source bytes were restored in a
+`finally` block; the seven pre-existing Claude changes remain untouched. The
+updated semantic cache remains a real edited revision; subsequent original-source
+builds must update/revert it normally rather than hand-restoring the backup.
+This identifies snapshot publication as a primary edited-build bottleneck.
+
+An offline inventory of the earlier full snapshot found 4,949,904 pointer,
+3,288,515 slice and 738,895 map entries. Pointer owners now use bounded typed
+allocation batches in large graphs, with at most 64 KiB per backing array.
+Zero-size/canonical pointers keep their individual rules, rare/large pointees
+keep ordinary allocations, and every logical pointer identity remains distinct.
+All storage bytes are still budgeted before allocation; type-indexed batch
+headers fit inside the existing per-object metadata reservation. A live element
+keeps its typed block alive. This allocation detail is not written to disk.
+
+The pointer benchmark drops from 10,012 allocations to 21 per decode (about
+912,398 bytes versus 905,774); its 1.187–1.195 ms time does not establish a
+microbenchmark speedup. Full-state restore measured 5.603 s. Large-graph tests
+cover 10,000 distinct nodes, named pointers, cycles, interior pointers/slices,
+mutation independence and re-encoding; codec/race and semantic snapshot/checkpoint
+tests pass. Native full-input qualification completed in 26.367 s, then 11.342 s
+with disk reuse. Both emitted a byte-identical object to the installed-CLI
+baseline, SHA256 `c7e187742d8e37175ef1687804cc2f2a585af98812800d6118451cb57a110af9`.
+These component qualification times do not replace the normal edited-CLI result
+above, and the sub-10-second goal remains unmet.
+
+The retained pre-body state has four preparation tables (`keyOf`, `prepared`,
+`targets`, `regionIndex`) that root prepared ASTs. Code inspection shows old
+pre-body comparisons read only fingerprints/global data/diagnostics, while
+preparation tables are read from the new scratch state during an update. Their
+idle lifetime should be audited next against the observed post-edit snapshot
+growth; no preparation-table elision has been implemented or claimed here.

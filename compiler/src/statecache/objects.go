@@ -21,6 +21,13 @@ func (d *decoder) readObjects() error {
 	}
 	descriptions := make([]objectDescription, count+1)
 	d.objects = make([]reflect.Value, count+1)
+	// The 128-byte per-object metadata reservation covers descriptions,
+	// references, alias bookkeeping and these type-indexed batch headers.
+	// Only large graphs with sufficient per-object slack use batching.
+	var batches []pointerBatch
+	if count >= 4096 && len(d.registry.types) <= count/8 {
+		batches = make([]pointerBatch, len(d.registry.types))
+	}
 	for id := 1; id <= count; id++ {
 		typeID, err := d.uint()
 		if err != nil {
@@ -91,6 +98,8 @@ func (d *decoder) readObjects() error {
 				}
 				if canonical, ok := d.registry.singletons[t]; ok {
 					v = canonical
+				} else if batches != nil && t.Elem().Size() > 0 && t.Elem().Size() <= pointerBatchBytes/8 {
+					batches[typeID-1].remaining++
 				} else {
 					v = newStatePointer(t)
 					if v.Type() != t {
@@ -111,6 +120,9 @@ func (d *decoder) readObjects() error {
 			d.objects[id] = v
 		}
 		descriptions[id] = desc
+	}
+	if batches != nil {
+		d.allocatePointerBatches(descriptions, batches)
 	}
 	visiting := make([]bool, count+1)
 	for id := 1; id <= count; id++ {
