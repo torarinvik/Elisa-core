@@ -243,21 +243,8 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	}
 	outputPath := outputPathForEmit(options.filename, options.output, ".o")
 
-	transcript, validTranscript := readBuildCacheTranscript(artifact)
-	if validTranscript && usableCachedFile(artifact.object, false) {
-		if err := ensureOutputParentExists(outputPath); err == nil {
-			if err := restoreBuildCacheObject(artifact, outputPath, transcript); err == nil {
-				if _, err := io.Copy(stdout, bytes.NewReader(transcript.Stdout)); err != nil {
-					return 1, true
-				}
-				if _, err := io.Copy(stderr, bytes.NewReader(transcript.Stderr)); err != nil {
-					return 1, true
-				}
-				debugBuildCache(stderr, "hit", artifact)
-				return 0, true
-			}
-		}
-		// Any copy/parent failure: fall back to a normal build below.
+	if code, hit := restoreCachedBuild(options, artifact, stdout, stderr); hit {
+		return code, true
 	}
 
 	var capturedOut, capturedErr buildCacheCapture
@@ -281,6 +268,9 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 // Warning policy and every other compiler variable remain part of the key.
 var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_BUILD_CACHE":                   true,
+	"ELISACORE_RETAINED_SERVER":               true,
+	"ELISACORE_RETAINED_IDLE":                 true,
+	"ELISACORE_RETAINED_AUTO_MIN":             true,
 	"ELISAC_BUILD_CACHE_DIR":                  true,
 	"ELISACORE_BUILD_TIMING":                  true,
 	"ELISACORE_CACHE_DEBUG":                   true,
@@ -334,4 +324,48 @@ func buildCacheRequestObserverEnabled() bool {
 		}
 	}
 	return false
+}
+
+// restoreCachedBuild is shared by the CLI's pre-server lookup and normal builds.
+// It never compiles or starts a server on a miss.
+func restoreCachedBuild(options cliOptions, artifact buildCacheArtifact, stdout, stderr io.Writer) (int, bool) {
+	outputPath := outputPathForEmit(options.filename, options.output, ".o")
+	transcript, validTranscript := readBuildCacheTranscript(artifact)
+	if validTranscript && usableCachedFile(artifact.object, false) {
+		if err := ensureOutputParentExists(outputPath); err == nil {
+			if err := restoreBuildCacheObject(artifact, outputPath, transcript); err == nil {
+				if _, err := io.Copy(stdout, bytes.NewReader(transcript.Stdout)); err != nil {
+					return 1, true
+				}
+				if _, err := io.Copy(stderr, bytes.NewReader(transcript.Stderr)); err != nil {
+					return 1, true
+				}
+				debugBuildCache(stderr, "hit", artifact)
+				return 0, true
+			}
+		}
+		// Any copy/parent failure: fall back to a normal build.
+	}
+
+	return 0, false
+}
+
+// tryBuildObjectCacheHit handles an existing disk artifact before daemon discovery.
+// parseArgs applies codegen flags to the environment, just as the ordinary CLI does.
+func tryBuildObjectCacheHit(args []string, stdout, stderr io.Writer) (int, bool) {
+	if !buildCacheEnabled() || buildCacheRequestObserverEnabled() || len(args) == 0 || isProjectCommand(args[0]) {
+		return 0, false
+	}
+	options, err := parseArgs(args)
+	if err != nil || !isPureObjectEmit(options) {
+		return 0, false
+	}
+	if configureCLIProfile(options) != nil {
+		return 0, false
+	}
+	artifact, ok := buildCacheObjectArtifactFor(options)
+	if !ok {
+		return 0, false
+	}
+	return restoreCachedBuild(options, artifact, stdout, stderr)
 }

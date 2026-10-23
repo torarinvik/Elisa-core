@@ -25,7 +25,10 @@ func main() {
 	applyDefaultGCPercent()
 	stop := startCPUProfile()
 	stopMem := startMemProfile()
-	code, forwarded := forwardToRetainedServer(os.Args[1:], os.Stdout, os.Stderr)
+	code, forwarded := tryBuildObjectCacheHit(os.Args[1:], os.Stdout, os.Stderr)
+	if !forwarded {
+		code, forwarded = forwardToRetainedServer(os.Args[1:], os.Stdout, os.Stderr)
+	}
 	if !forwarded {
 		code = runCLI(os.Args[1:], os.Stdout, os.Stderr)
 	}
@@ -69,15 +72,7 @@ func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	return runWithOptions(options, stdout, stderr)
 }
 func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {
-	// Keep profile selection process-local and deterministic. The backend reads this bridge while
-	// constructing LLVM functions; an empty value explicitly disables inherited hints for a normal
-	// invocation, preventing one in-process CLI test from leaking profile state into the next.
-	profileNames := make([]string, 0, len(options.profileHotFunctions))
-	for name := range options.profileHotFunctions {
-		profileNames = append(profileNames, name)
-	}
-	sort.Strings(profileNames)
-	if err := os.Setenv("ELISACORE_PGO_HOT_FUNCTIONS", strings.Join(profileNames, "\n")); err != nil {
+	if err := configureCLIProfile(options); err != nil {
 		fmt.Fprintf(stderr, "error: cannot configure optimization profile: %s\n", err)
 		return 1
 	}
@@ -1120,4 +1115,14 @@ func aggregateStatePlaceholders(count int) string {
 		parts[i] = "?"
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// Used before both the disk lookup and ordinary compilation, so their keys agree.
+func configureCLIProfile(options cliOptions) error {
+	profileNames := make([]string, 0, len(options.profileHotFunctions))
+	for name := range options.profileHotFunctions {
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+	return os.Setenv("ELISACORE_PGO_HOT_FUNCTIONS", strings.Join(profileNames, "\n"))
 }

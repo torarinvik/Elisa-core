@@ -10,8 +10,9 @@ import (
 
 // IncrementalObjectSession retains native object partitions across analyzed
 // revisions. It owns bytes, never LLVM or semantic handles. This is an in-process
-// cache; it does not trust externally supplied native artifacts.
+// cache, with optional compiler-namespaced disk persistence.
 type IncrementalObjectSession struct {
+	disk          *incrementalObjectDisk
 	mu            sync.Mutex // protects the bounded partition map and LRU metadata
 	statsMu       sync.Mutex
 	mergerOnce    sync.Once
@@ -37,6 +38,7 @@ type incrementalObjectEntry struct {
 type IncrementalObjectStats struct {
 	Builds, PartitionsEmitted, PartitionsReused, SerialFallbacks, Evictions uint64
 	OwnerMapBuilds                                                          uint64
+	DiskPartitionsReused                                                    uint64
 	IRTime, OwnerMapTime, PartitionTime, NativeTime, MergeTime              time.Duration
 	// CloneTime includes restriction, dead-prototype pruning and verification.
 	// BitcodeTime includes serialization and exact-key hashing, plus an owned-key
@@ -108,7 +110,12 @@ func (s *IncrementalObjectSession) lookupObjectBytes(bitcode []byte, target stri
 	// Exact input comparison makes the digest an index, not reuse authority.
 	if entry == nil || entry.bitcode != input || entry.target != target {
 		s.mu.Unlock()
-		return nil
+		object := s.disk.load(bitcode, target)
+		if object != nil {
+			s.retainObjectInMemory(string(bitcode), target, object, [32]byte{})
+			s.recordStats(func(stats *IncrementalObjectStats) { stats.PartitionsReused++; stats.DiskPartitionsReused++ })
+		}
+		return object
 	}
 	s.clock++
 	entry.lastUse = s.clock
@@ -150,6 +157,11 @@ func (s *IncrementalObjectSession) removeObjectLocked(key [32]byte) {
 }
 
 func (s *IncrementalObjectSession) retainObjectForSlot(bitcode, target string, object []byte, slot [32]byte) {
+	s.disk.store(bitcode, target, object)
+	s.retainObjectInMemory(bitcode, target, object, slot)
+}
+
+func (s *IncrementalObjectSession) retainObjectInMemory(bitcode, target string, object []byte, slot [32]byte) {
 	cost := len(bitcode) + len(target) + len(object)
 	if cost > s.maxBytes {
 		return

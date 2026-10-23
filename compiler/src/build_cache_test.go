@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // emitObjForCacheTest compiles src to out via the CLI and returns stderr.
@@ -126,6 +130,93 @@ func TestBuildObjectCacheKeysEveryCodegenFlag(t *testing.T) {
 		reset()
 		if s := build(""); !strings.Contains(s, "build-object hit") {
 			t.Fatalf("after %s, the flag-less build should hit again:\n%s", flag, s)
+		}
+	}
+}
+
+// A valid disk hit must not depend on server availability or transport settings.
+func TestBuildObjectCacheHitBeforeServerDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	t.Setenv("ELISACORE_TEST_CACHE_DEBUG", "1")
+	t.Setenv("ELISACORE_RETAINED_SERVER", "")
+	t.Setenv("ELISACORE_RETAINED_AUTO_MIN", "0")
+	src := filepath.Join(dir, "prog.elisa")
+	if err := os.WriteFile(src, []byte("def value() -> i64:\n    return 42\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.Join(dir, "first.o")
+	emitObjForCacheTest(t, src, first)
+	t.Setenv("ELISACORE_RETAINED_SERVER", filepath.Join(dir, "absent.sock"))
+	second := filepath.Join(dir, "second.o")
+	var stdout, stderr bytes.Buffer
+	code, hit := tryBuildObjectCacheHit([]string{"-emit", "obj", "-o", second, src}, &stdout, &stderr)
+	if code != 0 || !hit || !strings.Contains(stderr.String(), "build-object hit") {
+		t.Fatalf("pre-server lookup: %d %v %s", code, hit, &stderr)
+	}
+	a, _ := os.ReadFile(first)
+	b, _ := os.ReadFile(second)
+	if !bytes.Equal(a, b) {
+		t.Fatal("pre-server lookup changed output")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "absent.sock")); !os.IsNotExist(err) {
+		t.Fatal("lookup created a server socket")
+	}
+	// Codegen flags must be applied before the pre-server key is computed.
+	t.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "")
+	if _, hit := tryBuildObjectCacheHit([]string{"-fbounds-check", "-emit", "obj", "-o", second, src}, &stdout, &stderr); hit {
+		t.Fatal("changed codegen flags reused old object")
+	}
+}
+
+// Exercise main, rather than runCLI, so moving server forwarding ahead of disk
+// lookup cannot silently regress standalone reuse. Every child has a 30s cap.
+func TestBuildObjectCacheMainAcrossProcesses(t *testing.T) {
+	if os.Getenv("TEST_BUILD_CACHE_MAIN") == "1" {
+		for i, arg := range os.Args {
+			if arg == "--" {
+				os.Args = append([]string{os.Args[0]}, os.Args[i+1:]...)
+				main()
+			}
+		}
+		panic("missing child CLI arguments")
+	}
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	t.Setenv("ELISACORE_TEST_CACHE_DEBUG", "1")
+	t.Setenv("ELISACORE_RETAINED_SERVER", "")
+	source := filepath.Join(dir, "program.elisa")
+	if err := os.WriteFile(source, []byte("def answer() -> i64:\n    return 42\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var original []byte
+	for i, server := range []string{"", filepath.Join(dir, "nonexistent.sock")} {
+		t.Setenv("ELISACORE_RETAINED_SERVER", server)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		out := filepath.Join(dir, fmt.Sprintf("result%d.o", i))
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBuildObjectCacheMainAcrossProcesses$", "--", "-emit", "obj", "-o", out, source)
+		cmd.Env = append(os.Environ(), "TEST_BUILD_CACHE_MAIN=1")
+		transcript, err := cmd.CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("child%d: %v %s", i, err, transcript)
+		}
+		if strings.Contains(string(transcript), "[retained]") {
+			t.Fatalf("child%d contacted server: %s", i, transcript)
+		}
+		if i == 1 && !strings.Contains(string(transcript), "build-object hit") {
+			t.Fatalf("fresh process missed disk: %s", transcript)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			original = data
+		} else if !bytes.Equal(original, data) {
+			t.Fatal("disk output differs across processes")
 		}
 	}
 }

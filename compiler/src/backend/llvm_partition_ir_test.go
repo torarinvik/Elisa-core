@@ -41,3 +41,35 @@ func TestPartitionedIRPrivateConstantAndSignatureEdits(t *testing.T) {
 		}
 	}
 }
+
+// Fresh sessions model separate CLI invocations: no semantic or object map is
+// retained. Native behavior must change after an edit and match after reverting.
+func TestPartitionedIRDiskCacheFreshSessions(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "cache")
+	for revision, value := range []int{20, 20, 21, 20} {
+		session := NewIncrementalObjectSession(4, 8<<20)
+		session.minWeight = 0
+		session.EnableDiskCache(root, "test-compiler", 16<<20)
+		var source strings.Builder
+		for i := 0; i < 80; i++ {
+			fmt.Fprintf(&source, "@inline(never)\ndef f%d() -> i64:\n    return %d\n\n", i, i)
+		}
+		fmt.Fprintf(&source, "def main() -> i64:\n    return f0() + %d\n", value)
+		result := parseAndAnalyzeBackendTest(t, "disk_partitions.elisa", source.String())
+		out := filepath.Join(dir, "out.o")
+		if err := session.WriteObject(result, out, LLVMObjectEmitOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		stats := session.Stats()
+		if stats.SerialFallbacks != 0 {
+			t.Fatalf("not partitioned: %+v", stats)
+		}
+		if revision > 0 && stats.DiskPartitionsReused == 0 {
+			t.Fatalf("fresh process did not reuse disk partitions, revision %d: %+v", revision, stats)
+		}
+		if got := incrementalObjectNativeStatus(t, out); got != value {
+			t.Fatalf("revision %d: native status %d want %d", revision, got, value)
+		}
+	}
+}

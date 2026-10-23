@@ -554,7 +554,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if activeRetained != nil && activeRetained.objects != nil {
 			err = activeRetained.objects.WriteObject(result, objectPath, objectOptions)
 		} else {
-			err = backend.WriteLLVMObjectFileWithOptions(result, objectPath, objectOptions)
+			err = newPersistentObjectSession().WriteObject(result, objectPath, objectOptions)
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
