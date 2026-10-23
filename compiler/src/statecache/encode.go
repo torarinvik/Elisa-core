@@ -22,7 +22,7 @@ type encoder struct {
 	depth           int
 	allocationCount int
 	allocations     []allocation
-	nodes           []stateNode
+	nodes           nodeInventory
 	scanning        bool
 	strings         map[string]uint64
 }
@@ -43,13 +43,15 @@ func (r *Registry) Encode(root any) ([]byte, error) {
 	e.data.WriteString("ELISTATE3")
 	e.data.Write(r.fingerprint[:])
 	e.uint(r.ids[v.Type()])
-	e.uint(uint64(len(e.nodes)))
-	for _, node := range e.nodes {
-		if err := e.descriptor(node); err != nil {
+	e.uint(uint64(e.nodes.count))
+	for i := 0; i < e.nodes.count; i++ {
+		node := e.nodes.at(i)
+		if err := e.descriptor(*node); err != nil {
 			return nil, err
 		}
 	}
-	for _, node := range e.nodes {
+	for i := 0; i < e.nodes.count; i++ {
+		node := e.nodes.at(i)
 		if node.alias == nil {
 			if err := e.body(node.value); err != nil {
 				return nil, err
@@ -124,9 +126,9 @@ func (e *encoder) value(v reflect.Value) error {
 		if !e.scanning {
 			return fmt.Errorf("state graph changed while encoding %s", t)
 		}
-		id := uint64(len(e.nodes) + 1)
+		id := uint64(e.nodes.count + 1)
 		e.objects[key] = id
-		e.nodes = append(e.nodes, stateNode{value: v})
+		e.nodes.add(stateNode{value: v})
 		if allocationSize(v) != 0 {
 			e.allocationCount++
 		}

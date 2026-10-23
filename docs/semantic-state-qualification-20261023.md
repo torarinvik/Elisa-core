@@ -466,3 +466,15 @@ trusted-runtime provenance; an initial test harness comparison against raw CLI
 options omitted that provenance and was corrected without relaxing the guard.
 Original source bytes were restored after every controlled edit. Normal full
 edited CLI builds remain above the requested ten-second target.
+
+Encoder node inventory now uses fixed logical blocks of 2,048 records instead of
+growing one multi-million-entry slice. The first block starts small; subsequent
+blocks allocate once. Consecutive discovery IDs and alias lookup/sorting rules
+are unchanged, and no block metadata enters the wire format. Existing large-graph
+round trips cross multiple block boundaries and preserve cyclic/interior aliases.
+Codec/race and CLI cache/bootstrap tests pass. A matched full-state pair measured
+12.780 s before and 11.739 s after; a separate checked round trip encoded in
+12.563 s, so the latency benefit is not a stable sub-ten-second result. That full
+round trip finished in 25.967 s and preserved exact source/options plus all 26,230
+diagnostics. The mechanism eliminates repeated full inventory copies; more work
+is needed on edited-build publication. Controlled source bytes were restored.

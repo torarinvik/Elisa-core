@@ -52,7 +52,8 @@ func (e *encoder) bindAliases() error {
 	// capacity instead of repeatedly copying a growing multi-million-entry
 	// slice while walking the graph. Node order (and therefore IDs) is unchanged.
 	e.allocations = make([]allocation, 0, e.allocationCount)
-	for i, node := range e.nodes {
+	for i := 0; i < e.nodes.count; i++ {
+		node := e.nodes.at(i)
 		e.recordAllocation(node.value, uint64(i+1))
 	}
 
@@ -65,7 +66,7 @@ func (e *encoder) bindAliases() error {
 			return a.end > b.end
 		}
 		// Prefer a backing slice to a pointer to its only element.
-		return e.nodes[a.id-1].value.Kind() == reflect.Slice && e.nodes[b.id-1].value.Kind() != reflect.Slice
+		return e.nodes.at(int(a.id-1)).value.Kind() == reflect.Slice && e.nodes.at(int(b.id-1)).value.Kind() != reflect.Slice
 	})
 	var active []allocation
 	for _, current := range e.allocations {
@@ -82,20 +83,20 @@ func (e *encoder) bindAliases() error {
 				return fmt.Errorf("partially overlapping state allocations need a backing-store adapter")
 			}
 			if alias, ok := e.deriveAlias(owner, current); ok {
-				e.nodes[current.id-1].alias = alias
+				e.nodes.at(int(current.id - 1)).alias = alias
 				bound = true
 				break
 			}
-			if owner.start == current.start && owner.end == current.end && e.nodes[owner.id-1].alias == nil {
+			if owner.start == current.start && owner.end == current.end && e.nodes.at(int(owner.id-1)).alias == nil {
 				if alias, ok := e.deriveAlias(current, owner); ok {
-					e.nodes[owner.id-1].alias = alias
+					e.nodes.at(int(owner.id - 1)).alias = alias
 					bound = true
 					break
 				}
 			}
 		}
 		if len(active) > 0 && !bound {
-			return fmt.Errorf("unsupported typed state alias %s", e.nodes[current.id-1].value.Type())
+			return fmt.Errorf("unsupported typed state alias %s", e.nodes.at(int(current.id-1)).value.Type())
 		}
 		active = append(active, current)
 	}
@@ -103,8 +104,8 @@ func (e *encoder) bindAliases() error {
 }
 
 func (e *encoder) deriveAlias(owner, target allocation) (*nodeAlias, bool) {
-	parent := e.nodes[owner.id-1].value
-	child := e.nodes[target.id-1].value
+	parent := e.nodes.at(int(owner.id - 1)).value
+	child := e.nodes.at(int(target.id - 1)).value
 	var base reflect.Value
 	if parent.Kind() == reflect.Pointer {
 		base = parent.Elem()
