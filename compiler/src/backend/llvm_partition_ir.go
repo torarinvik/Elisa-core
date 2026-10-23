@@ -229,6 +229,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	irStart := time.Now()
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
+		g.partitionGlobalDeclarationsOnly = part != 0
 		g.sharedResult = true
 	})
 	partitionGenNanos.Add(int64(time.Since(irStart)))

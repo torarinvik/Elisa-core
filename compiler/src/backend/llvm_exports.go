@@ -28,6 +28,13 @@ func (g *llvmGenerator) emitExportedGlobal(exported *semantic.ExportedGlobal) er
 		g.globals[exported.PublicName] = target
 		return nil
 	}
+	if g.partitionGlobalDeclarationsOnly {
+		// Only the data owner emits the public alias: LLVM requires its target
+		// to be defined locally. Internal uses of either name retain the exact
+		// same value, so pointer identity does not depend on an opaque extern.
+		g.globals[exported.PublicName] = target
+		return nil
+	}
 	if _, ok := g.globals[exported.PublicName]; ok {
 		return nil
 	}

@@ -197,6 +197,9 @@ type llvmGenerator struct {
 	// program: a top-level external function's body is emitted only when
 	// partBody accepts its symbol name (see llvm_partition_ir.go).
 	partBody func(name string) bool
+	// Source globals are defined by partition zero. Other partitions keep
+	// declarations, while on-demand generated storage retains its own linkage.
+	partitionGlobalDeclarationsOnly bool
 	// sharedResult is set when other generators read the same Result
 	// concurrently; this generator then writes only its own overlays.
 	sharedResult bool

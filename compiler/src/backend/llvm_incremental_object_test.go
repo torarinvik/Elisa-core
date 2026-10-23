@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"context"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 	"elisacore/src/semantic"
@@ -26,15 +27,17 @@ func incrementalObjectFixture(functions int) string {
 
 func incrementalObjectNativeStatus(t *testing.T, object string) int {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	clang, err := exec.LookPath("clang")
 	if err != nil {
 		t.Fatal("native qualification requires clang:", err)
 	}
 	executable := object + ".exe"
-	if output, err := exec.Command(clang, object, "-o", executable).CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, clang, object, "-o", executable).CombinedOutput(); err != nil {
 		t.Fatalf("native link: %v\n%s", err, output)
 	}
-	err = exec.Command(executable).Run()
+	err = exec.CommandContext(ctx, executable).Run()
 	if err == nil {
 		return 0
 	}

@@ -45,6 +45,9 @@ func (g *llvmGenerator) defineGlobal(name string, decl *ast.GlobalDecl, typ sema
 	if decl == nil || global == nil {
 		return nil
 	}
+	if g.partitionGlobalDeclarationsOnly {
+		return nil
+	}
 	// Runtime singleton globals (the `__elisa_` prefix) may be defined both by the
 	// default runtime object and by a program that includes a runtime fragment
 	// directly. Weak linkage dedupes them to one definition at link time.

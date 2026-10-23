@@ -1100,3 +1100,82 @@ objects and functional logs. The full goal remains incomplete: signatures are
 still just over ten seconds, line-only edits have almost no margin, used-layout
 edits take fourteen seconds, and broader major-edit and optimization-quality
 qualification remains open.
+
+
+### 2026-10-24: finer granularity did not remove the critical path
+
+A temporary, subsequently reverted extension allowed 128/256 units. Matched
+qualification used one frozen test executable, the same checked original
+semantic baseline, exact O3 inputs and separate native-output directories. No
+semantic snapshots were rekeyed into a production namespace.
+
+| Units | Initial build | Warm baseline | Novel used layout | Warm layout | Novel signature | Warm signature | Native products |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 21.649 | 7.125 | 12.645 | 7.586 | 8.874 | 7.965 | 509 MB |
+| 128 | 23.382 | 7.257 | 12.853 | 8.033 | 8.892 | 8.350 | 917 MB |
+| 256 | 26.664 | 8.259 | 12.620 | 9.011 | 9.187 | 9.067 | 1,730 MB |
+
+The earlier normal CLI 14.298 s layout result was insufficient as a comparator
+for the 128-unit qualification. The matched comparison shows no meaningful
+end-to-end gain from finer units. The experimental cap and fixture changes were
+reverted; production limits/defaults stay as before. Functional checks on the
+experimental layout/signature compilers at both larger counts linked and ran
+fixtures returning 42, including successful second-read sidecar admission. The
+experiment's data remain as `fine-*.json` and `fine-partitions-*/` under the
+ordered-production evidence root.
+
+### Define source globals and exported aliases once per partitioned program
+
+Native object inspection exposed a different cost: 64 current unit objects
+contained 417,858,704 file bytes, including 397,814,778 initialized data bytes.
+A single mutable `annotation_pair_next` array occupied four MiB in many units;
+other mutable parser/backend arrays were duplicated too. Partition zero already
+provides their actual definitions, but the non-owners were emitting redundant
+weak initialized copies. Non-owner generators now retain source-global
+declarations instead of building their initializers. Aggregate constants and
+on-demand generated storage keep their existing initialization/linkage paths.
+
+Export aliases also belong to the data owner. Non-owner generators bind either
+source name to the same target value without emitting an LLVM alias to an
+undefined declaration. An initial alias-preserving workaround passed runtime
+address checks but rebuilt all four units when its initializer changed; the
+final owner-only alias path rebuilds one. New O0/O3 native C-client tests check
+initial values, volatile alias/target address equality, writes through the
+public alias observed by LLVM-generated getters, disk initializer edits and
+reverts. IR checks cover ordinary/owner/non-owner globals, aliases and retained
+aggregate-constant initializers. Source-global writers/readers are forced into
+non-owner partitions. Native fixture links/runs now use 30-second contexts.
+
+Targeted backend checks, including pre-O3 fresh-process disk reuse, global and
+target changes, constant address identity and same-name exports, passed both
+normally and under the race detector. All main-package `TestAnalysisDisk`
+oracles passed. The rebuilt baseline/layout/signature compilers linked, reported
+the expected unknown-flag/option diagnostics, compiled an included fixture
+twice (`prior=miss` then `prior=valid`), and produced programs returning 42.
+
+Checked full-source qualification at 64 units measured:
+
+| Case | Previous | Single source-global owner |
+| --- | ---: | ---: |
+| Initial native build | 21.649 | 21.777 |
+| Warm baseline | 7.125 | 6.620 |
+| Novel used layout | 12.645 | 12.122 |
+| Warm layout | 7.586 | 7.342 |
+| Novel signature | 8.874 | 8.545 |
+| Warm signature | 7.965 | 7.631 |
+| Retained native bytes | 509,435,200 | 110,643,808 |
+
+All compiler/linker builds retained the 30-second cap. Source edits were
+restored. The final linked objects differ by sixteen bytes of initialized data
+and relocation encodings, so byte identity is not claimed; text-section sizes
+match the earlier versions and runtime tests pass. Evidence is
+`source-global-owner-*.json`, `source-global-owner-64/`, native inventories and
+`source-global-owner-alias-race.log` under the ordered-production root.
+
+The full goal remains open. The latest executable needs fresh normal CLI
+admission/matrix evidence, and the used-layout cold native miss remains above
+ten seconds. The same inventory found thousands of repeated weak specialization
+bodies (4,917 ordinary weak-external text definitions for 919 unique names),
+which motivates investigating duplicate optimization/emission while preserving
+O3 and inlining inputs. No such specialization ownership change is implemented
+by this commit; default optimization-quality and broader edit gates remain open.
