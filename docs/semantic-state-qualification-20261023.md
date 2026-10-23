@@ -334,3 +334,30 @@ runtime tests and optimization-quality checks are still required. Restoring the
 semantic graph plus parsing already accounts for over seven seconds; even exact
 native partition reuse still spends about five seconds lowering/serializing and
 preparing those partitions.
+
+Semantic restore profiling now has a source/options-validated restore-only mode
+(`ELISACORE_STATE_QUALIFY_RESTORE_ONLY=1` in the native qualification test), so
+`-test.cpuprofile` captures restoration without overlapping the native profiler.
+The complete snapshot contains 8,977,314 object-table entries. Its baseline
+restore took 6.506 s; 46.72% of sampled CPU was in Darwin runtime `madvise` calls
+under heap-span allocation. Disk checksum time was only about 0.17 s.
+
+Decoder object allocation now retains the pointer/map/slice values directly,
+without allocating an extra writable header cell per owned object. Named pointer
+types are converted back to their registered type. Slice owners are constructed
+with their final length/capacity in one operation; hidden capacity remains filled
+by the existing second pass. Graph identity, alias resolution and the wire format
+are unchanged. Named pointer aliases, named self-referencing maps/slices and
+mutation independence from the original graph have explicit regression coverage.
+
+A 10,000-pointer decode benchmark improved from 1.304–1.327 ms and 20,014
+allocations (1,059,550 bytes) to 1.156–1.166 ms and 10,013 allocations (979,530
+bytes). Baseline benchmarks used an isolated copy of the previous committed
+codec, with the same benchmark, rather than changing the working compiler source.
+The full saved state restored in 5.884 s in the matched profiled run, versus
+6.506 s before removing the extra headers. Codec tests, race tests, named-reference
+regressions and the semantic suite pass. A five-second unguided malformed-input
+mutation smoke run completed 2.83 million inputs without failure. An initial
+semantic-suite launch from the compiler root failed on relative fixture paths;
+it was stopped and rerun successfully from `compiler/src/semantic`.
+This is a restore improvement, not proof of sub-10-second edited CLI builds.

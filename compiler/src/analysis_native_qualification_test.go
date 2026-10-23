@@ -77,6 +77,11 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		t.Fatal(diagnostics.String())
 	}
 	t.Logf("native flags: opt=%v target=%q debug=%v", effectiveOptimizationLevel(cli), cli.targetTriple, cli.debugInfo)
+	// Allows go test -test.cpuprofile to measure restoration and checked source
+	// admission without overlapping the native-stage profiler below.
+	if os.Getenv("ELISACORE_STATE_QUALIFY_RESTORE_ONLY") == "1" {
+		return
+	}
 	root := os.Getenv("ELISACORE_STATE_QUALIFY_NATIVE_OUTPUT")
 	if root == "" {
 		root = t.TempDir()

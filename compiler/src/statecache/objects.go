@@ -83,27 +83,30 @@ func (d *decoder) readObjects() error {
 			}
 			desc.alias = alias
 		} else {
-			v := reflect.New(t).Elem()
+			var v reflect.Value
 			switch t.Kind() {
 			case reflect.Pointer:
 				if err := d.reserve(1, t.Elem().Size()); err != nil {
 					return err
 				}
 				if canonical, ok := d.registry.singletons[t]; ok {
-					v.Set(canonical)
+					v = canonical
 				} else {
-					v.Set(newStatePointer(t))
+					v = newStatePointer(t)
+					if v.Type() != t {
+						v = v.Convert(t)
+					}
 				}
 			case reflect.Map:
 				if err := d.reserve(uint64(desc.length), t.Key().Size()+t.Elem().Size()+32); err != nil {
 					return err
 				}
-				v.Set(reflect.MakeMapWithSize(t, desc.length))
+				v = reflect.MakeMapWithSize(t, desc.length)
 			case reflect.Slice:
 				if err := d.reserve(uint64(desc.capacity), t.Elem().Size()); err != nil {
 					return err
 				}
-				v.Set(reflect.MakeSlice(t, desc.capacity, desc.capacity).Slice(0, desc.length))
+				v = reflect.MakeSlice(t, desc.length, desc.capacity)
 			}
 			d.objects[id] = v
 		}
