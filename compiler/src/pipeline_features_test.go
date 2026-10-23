@@ -118,31 +118,36 @@ func TestRunCLIInterpretsModuleScopedConstantsAndGlobals(t *testing.T) {
 	global mutable install_speed: OrbisPlayGoInstallSpeed = ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE
 
 	def write_speed(outSpeed: mutable OrbisPlayGoInstallSpeed&) -> void:
-		outSpeed <- install_speed
+		can Global.Read:
+			outSpeed <- install_speed
 
 	def reset_to_trickle() -> void:
-		install_speed <- ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE
+		can Global.Write:
+			install_speed <- ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE
 
 	def set_full() -> void:
-		install_speed <- PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_FULL
+		can Global.Write:
+			install_speed <- PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_FULL
 
 	def current() -> OrbisPlayGoInstallSpeed:
-		return install_speed
+		can Global.Read:
+			return install_speed
 
 def main() -> i64:
-	if PlayGoHle::current() != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
-		return 1
-	PlayGoHle::set_full()
-	if PlayGoHle::current() != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_FULL:
-		return 2
-	PlayGoHle::reset_to_trickle()
-	if PlayGoHle::current() != 1:
-		return 3
-	value: mutable PlayGoHle::OrbisPlayGoInstallSpeed = 0
-	PlayGoHle::write_speed(&value)
-	if value != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
-		return 4
-	return 42
+	can Global{Read, Write}:
+		if PlayGoHle::current() != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
+			return 1
+		PlayGoHle::set_full()
+		if PlayGoHle::current() != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_FULL:
+			return 2
+		PlayGoHle::reset_to_trickle()
+		if PlayGoHle::current() != 1:
+			return 3
+		value: mutable PlayGoHle::OrbisPlayGoInstallSpeed = 0
+		PlayGoHle::write_speed(&value)
+		if value != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
+			return 4
+		return 42
 `
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write module constant interpreter fixture: %v", err)

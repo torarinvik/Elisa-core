@@ -27,11 +27,11 @@ func TestModuleSiblingCallRunsAgainstItsOwnSibling(t *testing.T) {
         add(s, 7) can Memory.Allocate, Abort.Panic
         return
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     region a(4096):
         s: mutable Box::Sack = Box::Sack{items: []}
         Box::fill(&s) can Memory.Allocate, Abort.Panic
-        print(s.items[0]) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+        print(s.items[0]) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     return 0`)
 	if status != "RAN" || out != "7" {
 		t.Fatalf("expected RAN 7 (the sibling ran, not the generic), got %s %q", status, out)

@@ -39,11 +39,11 @@ def classify(n: i64) -> i64:
         return 1
     return 0
 
-def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write]:
     a: i64 = classify(7)
     b: i64 = classify(-3)
     c: i64 = classify(0)
-    print((a * 100 + b * 10 + c).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((a * 100 + b * 10 + c).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic, Global.Read, Global.Write
     print("\n") can Console.Write
     return 0
 `

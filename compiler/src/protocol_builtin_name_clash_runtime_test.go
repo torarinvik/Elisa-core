@@ -34,24 +34,27 @@ struct Painter:
     tag: int
 
 protocol Surface:
-    def clear(value: int) -> void
-    def push(value: int) -> void
-    def insert(value: int) -> void
+    def clear(value: int) -> void can[Global{Read, Write}]
+    def push(value: int) -> void can[Global{Read, Write}]
+    def insert(value: int) -> void can[Global{Read, Write}]
 
 impl Surface for Painter:
-    def clear(value: int) -> void:
-        witness <- witness + value
+    def clear(value: int) -> void can[Global{Read, Write}]:
+        can Global{Read, Write}:
+            witness <- witness + value
 
-    def push(value: int) -> void:
-        witness <- witness + value * 10
+    def push(value: int) -> void can[Global{Read, Write}]:
+        can Global{Read, Write}:
+            witness <- witness + value * 10
 
-    def insert(value: int) -> void:
-        witness <- witness + value * 100
+    def insert(value: int) -> void can[Global{Read, Write}]:
+        can Global{Read, Write}:
+            witness <- witness + value * 100
 
 def drive[S: Surface]() -> int:
-    S.clear(7)
-    S.push(3)
-    S.insert(2)
+    S.clear(7) can Global{Read, Write}
+    S.push(3) can Global{Read, Write}
+    S.insert(2) can Global{Read, Write}
     xs: mutable darray[int] = []
     xs.push(1)
     xs.push(2)
@@ -62,7 +65,7 @@ def drive[S: Surface]() -> int:
 
 @test
 def protocol_builtin_name_clash_test() -> void:
-    can Abort.Panic:
+    can Abort.Panic, Global{Read, Write}:
         produced: int = drive[Painter]()
         if witness != 237:
             panic("protocol dispatch lost to a builtin collection method")

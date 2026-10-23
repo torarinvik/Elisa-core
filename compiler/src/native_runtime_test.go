@@ -1126,19 +1126,19 @@ func TestRunCLINativeRuntimeConcatShortStringRegression(t *testing.T) {
 	src := fmt.Sprintf(`# include %q
 
 def make_queue_label(vqid: int) -> cstr:
-	can Memory.Allocate, Abort.Panic, Console.Format:
+	can Memory.Allocate, Abort.Panic, Console.Format, Global{Read, Write}, Atomics{Exchange, Store}:
 		queue: cstr = "GFX" if vqid > 254 else "ASC"
 		prefix: cstr = rt_concat2_scratch(queue, "[")
 		numbered: cstr = rt_concat2_scratch(prefix, rt_int_to_string((vqid %% 260).i64()))
 		return rt_concat2_scratch(numbered, "]")
 
 def make_queue_label_with_suffix(vqid: int, suffix: cstr) -> cstr:
-	can Memory.Allocate, Abort.Panic, Console.Format:
+	can Memory.Allocate, Abort.Panic, Console.Format, Global{Read, Write}, Atomics{Exchange, Store}:
 		return rt_concat2_scratch(make_queue_label(vqid), suffix)
 
 @test
 def short_concat_finish_regression() -> void:
-	can Abort.Panic, Memory.Allocate, Console.Format:
+	can Abort.Panic, Memory.Allocate, Console.Format, Global{Read, Write}, Atomics{Exchange, Store}:
 		for i in 0..<20000:
 			label: cstr = make_queue_label((i %% 260).int())
 			assert ctx_strlen(label) >= 6
@@ -1146,7 +1146,7 @@ def short_concat_finish_regression() -> void:
 
 @test
 def short_concat_mixed_inputs_regression() -> void:
-	can Abort.Panic, Memory.Allocate, Console.Format:
+	can Abort.Panic, Memory.Allocate, Console.Format, Global{Read, Write}, Atomics{Exchange, Store}:
 		for i in 0..<24000:
 			slot: int = (i %% 5).int()
 			vqid: mutable int = 0
@@ -1174,7 +1174,7 @@ def short_concat_mixed_inputs_regression() -> void:
 
 @test
 def short_concat_cross_path_stress_regression() -> void:
-	can Abort.Panic, Memory.Allocate, Console.Format:
+	can Abort.Panic, Memory.Allocate, Console.Format, Global{Read, Write}, Atomics{Exchange, Store}:
 		total: mutable i64 = 0
 		for i in 0..<16000:
 			base: cstr = make_queue_label((i %% 260).int())

@@ -284,7 +284,7 @@ func TestRunCLICompilesModuleLocalGlobalLookup(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	rootPath := filepath.Join(dir, "module_global.elisa")
-	src := "module M:\n    global mutable counter: int = 5\n\n    def value() -> int:\n        return counter\n\ndef main() -> int:\n    return M::value()\n"
+	src := "module M:\n    global mutable counter: int = 5\n\n    def value() -> int:\n        can Global.Read:\n            return counter\n\ndef main() -> int:\n    can Global.Read:\n        return M::value()\n"
 	if err := os.WriteFile(rootPath, []byte(src), 0o644); err != nil {
 		t.Fatalf("write module global fixture: %v", err)
 	}
