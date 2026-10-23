@@ -291,3 +291,46 @@ times were 0.258/0.217/0.260/0.198 s respectively. This fixture verifies the reu
 path; it is not the full self-host compiler and does not prove the overall target.
 The full compiler still lacks its first completed native O3 work product under
 the 30-second invocation cap, and new lowered code still requires optimization.
+
+Opt-in `ELISACORE_PARALLEL_OPT=1` now connects incremental object emission to
+isolated optimization workers **before** whole-module optimization. Each stable
+partition's exact unoptimized bitcode and resolved native/pipeline settings key
+its finished object. A hit skips both O3 optimization and native emission. The
+workers receive already restricted, namespaced, pruned and verified bitcode; a
+one-part worker retains precisely those definitions. A declined split still runs
+the ordinary O-level pipeline before serial emission. This initial path accepts
+only import weight zero; a positive `ELISACORE_PARALLEL_OPT_IMPORT` keeps the
+whole-module fallback rather than silently discarding the import request.
+The default remains whole-module O3: per-partition optimization loses foreign
+inlining, and runtime-quality qualification/import support remain outstanding.
+
+`TestPreoptimizedPartitionsPersistAcrossProcesses` starts separate test processes
+and actual optimization worker processes. It requires four cold O3 misses, no
+misses on exact repeats, precisely one newly optimized partition after a body
+edit, reuse after source-line shifts/reverts, and correct O2/O3 invalidation.
+Each revision links and executes both partitioned and serial cold objects.
+Test executables dispatch native workers only under the explicit
+`ELISACORE_TEST_NATIVE_WORKERS=1` qualification flag; production main already
+installs the same worker entry point.
+
+The full 14,422-declaration compiler input has now produced its first object
+within the 30-second process cap using this opt-in mode. The matched saved-state
+qualification restored in 6.461 s, generated IR in 3.369 s, optimized/emitted ten
+partitions and merged a 15,366,528-byte object. Native work took 20.154 s; the
+external process took 28.550 s. This is a qualification load of the previously
+verified source/options snapshot, not a manually admitted production cache entry.
+A new process reused all ten partitions, emitted none, restored in 6.258 s and
+spent 4.962 s in native work, taking **12.620 s overall**. Both invocations finished
+normally, with no surviving worker processes. The full compiler object linked
+successfully with the repository's ordinary seed-link flags and profiler weak
+fallbacks. That compiler compiled a fresh `return 42` program; its linked native
+executable returned 42. Linking and every compiler invocation used a 30-second
+external timeout. The product's unsupported `--help` flag returned its ordinary
+`unknown flag` diagnostic; qualification proceeded with an actual compilation.
+
+The sub-10-second objective remains unmet, including this no-edit full-input case.
+Full-source edited builds, production cache admission, broader rebuilt-compiler
+runtime tests and optimization-quality checks are still required. Restoring the
+semantic graph plus parsing already accounts for over seven seconds; even exact
+native partition reuse still spends about five seconds lowering/serializing and
+preparing those partitions.

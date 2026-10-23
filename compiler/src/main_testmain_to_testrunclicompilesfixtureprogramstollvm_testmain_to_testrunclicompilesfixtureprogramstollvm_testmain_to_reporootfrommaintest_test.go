@@ -1,6 +1,7 @@
 package main
 
 import (
+	"elisacore/src/backend"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("ELISACORE_TEST_NATIVE_WORKERS") == "1" {
+		backend.RunPartitionWorkerIfRequested()
+	}
 	prev, hadPrev := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
 	_ = os.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "1")
 	exitCode := m.Run()

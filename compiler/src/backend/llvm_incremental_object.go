@@ -69,13 +69,23 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
-	optimized, err := s.optimizeObjectModule(g, options.OptLevel)
-	if err != nil {
-		return err
-	}
-	if optimized != g {
-		defer optimized.disposeInBackground()
-		g = optimized
+	// Explicit parallel-opt mode runs O-level passes inside isolated workers.
+	// Cache input is then each exact *unoptimized* partition, so an unchanged
+	// partition skips both optimization and native emission across processes.
+	partitionPipeline := ""
+	if parallelOptEnabled() && parallelOptImportWeight() == 0 && partitionWorkersAvailable && options.OptLevel != OptimizationLevel0 &&
+		!options.Serial && !virtualObjectSource(result) && native.Triple == target.Triple &&
+		int64(C.elisacoreObjectPartitionWeight(g.module)) >= s.minWeight && C.elisacoreSelectiveCloneSupported(g.module) != 0 {
+		partitionPipeline = fmt.Sprintf("default<O%d>", int(options.OptLevel))
+	} else {
+		optimized, err := s.optimizeObjectModule(g, options.OptLevel)
+		if err != nil {
+			return err
+		}
+		if optimized != g {
+			defer optimized.disposeInBackground()
+			g = optimized
+		}
 	}
 	irDuration := time.Since(irStart)
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += irDuration })
@@ -97,7 +107,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
 	cpu := C.LLVMGetTargetMachineCPU(g.targetMachine)
 	features := C.LLVMGetTargetMachineFeatureString(g.targetMachine)
-	config, _ := json.Marshal([]string{"incremental-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model"})
+	config, _ := json.Marshal([]string{"incremental-object-v1", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", partitionPipeline})
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
@@ -180,7 +190,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		go func() {
 			defer wg.Done()
 			for part := range next {
-				objects[part], declined[part], errs[part] = s.buildPartition(part, fastCodegen, wholeData, wholeSize, namespace, owners, ownerCount, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
+				objects[part], declined[part], errs[part] = s.buildPartition(part, fastCodegen, partitionPipeline, wholeData, wholeSize, namespace, owners, ownerCount, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
 			}
 		}()
 	}
@@ -211,6 +221,10 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 }
 
 func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath string) error {
+	// A pre-optimization split may decline; its serial fallback still needs O3.
+	if err := g.optimizeModule(g.optLevel); err != nil {
+		return err
+	}
 	start := time.Now()
 	err := g.emitNativeObjectFile(outputPath)
 	nativeDuration := time.Since(start)
@@ -224,7 +238,7 @@ func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath
 // buildPartition loads one partition into a private context, looks its exact
 // bitcode up in the session and compiles it on a miss. declined reports a
 // partition the loader cannot split; the caller then emits the module directly.
-func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
+func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pipeline string, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
 	partitionStart := time.Now()
 	context := C.LLVMContextCreate()
 	defer C.LLVMContextDispose(context)
@@ -268,21 +282,28 @@ func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, wh
 		return object, false, nil
 	}
 	nativeStart := time.Now()
-	var buffer C.LLVMMemoryBufferRef
-	if C.elisacoreEmitPartitionObject(module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
-		text := "native emission failed"
-		if message != nil {
-			text = C.GoString(message)
-			C.free(unsafe.Pointer(message))
+	if pipeline != "" {
+		object, err = emitPreoptimizedPartition(module, pipeline, triple, cpu, features)
+		if err != nil {
+			return nil, false, fmt.Errorf("incremental optimization partition %d: %w", part, err)
 		}
-		return nil, false, fmt.Errorf("incremental object partition %d: %s", part, text)
-	}
-	if uint64(C.LLVMGetBufferSize(buffer)) > 1<<31-1 {
+	} else {
+		var buffer C.LLVMMemoryBufferRef
+		if C.elisacoreEmitPartitionObject(module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
+			text := "native emission failed"
+			if message != nil {
+				text = C.GoString(message)
+				C.free(unsafe.Pointer(message))
+			}
+			return nil, false, fmt.Errorf("incremental object partition %d: %s", part, text)
+		}
+		if uint64(C.LLVMGetBufferSize(buffer)) > 1<<31-1 {
+			C.LLVMDisposeMemoryBuffer(buffer)
+			return nil, false, fmt.Errorf("incremental native partition exceeds buffer limit")
+		}
+		object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
 		C.LLVMDisposeMemoryBuffer(buffer)
-		return nil, false, fmt.Errorf("incremental native partition exceeds buffer limit")
 	}
-	object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
-	C.LLVMDisposeMemoryBuffer(buffer)
 	nativeDuration := time.Since(nativeStart)
 	s.recordStats(func(stats *IncrementalObjectStats) {
 		stats.NativeTime += nativeDuration
