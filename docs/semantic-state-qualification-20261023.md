@@ -1051,3 +1051,52 @@ These are explicit qualified-snapshot measurements. The next normal production
 matrix must bootstrap the latest executable under its own key; previous normal
 signature/struct/line misses and the broader major-edit/quality gates remain
 open. The full goal is still unproven.
+
+
+### Latest normal CLI matrix and a used-layout miss
+
+The frozen `ae945119` production executable bootstrapped a fresh normal cache
+without importing snapshots or native products. Requests 1–8 checkpointed in
+16.301, 25.579, 23.339, 17.660, 22.497, 23.628, 25.184 and 28.385 s. Request 9
+published the 563,401,183-byte state envelope before its 30.219 s timeout;
+request 10 completed object emission in 18.372 s. All builds used `timeout 30s`.
+
+| Normal CLI revision | Seconds |
+| --- | ---: |
+| Cached original | 0.570 |
+| Novel body edit / repeat | 8.985 / 0.427 |
+| Add ordinary function / repeat | 8.872 / 0.449 |
+| Add unused struct / repeat | 9.498 / 0.433 |
+| Existing signature with defaulted parameter / repeat | 10.194 / 0.439 |
+| Leading comment/line | 9.986 |
+| Revert | 0.549 |
+| Add defaulted i64 field before `IncrementalCacheRead.bytes` / repeat | 14.298 / 0.547 |
+| Remove `stage1_semantic_options_from_observations` flow-strict postcondition / repeat | 9.309 / 0.430 |
+| Revert major cases | 0.428 |
+
+Every request succeeded with 9,381,562 diagnostic bytes. Earlier body/addition/
+signature/original hashes were reproduced. Removing the postcondition produced
+the original object; the used-layout change produced
+`89c7492da1be922960102f69478006ad2dbe5c013b01487588cb3e02a9fe0272`.
+The layout-edited object linked into a runnable compiler. With its Stage1
+sidecar cache enabled, it compiled a fixture twice (`prior=miss`, then
+`prior=valid`), exercising the changed `IncrementalCacheRead` return layout and
+its bytes field. The fixture linked and returned 42. All temporary source edits
+were restored; the seven pre-existing user/Claude changes remain untouched.
+
+A normal CLI observer reading the same admitted baseline (only cache-debug,
+build-timing and CPU-profile observers enabled) replayed the layout edit in
+7.805 s: restore 4.114 s, prepared scratch 2.607 s overlapped, semantic update
+0.923 s, IR/native stage 2.005 s, merge 0.050 s, no native misses. Seven unique
+native cache entries have write times in the original layout-build window.
+The large first-edit gap therefore points to invalidated O3 units rather than
+semantic fallback. Each cache entry still compares exact current bitcode and
+all target/compiler authority before reuse. Finer native granularity or reduced
+duplicate specialization work is the next investigation, not weaker admission.
+
+`/tmp/elisa-ordered-production-root` points to the owned directory with exact
+executable hash, environment/CWD, bootstrap/matrix JSON, observer CPU profile,
+objects and functional logs. The full goal remains incomplete: signatures are
+still just over ten seconds, line-only edits have almost no margin, used-layout
+edits take fourteen seconds, and broader major-edit and optimization-quality
+qualification remains open.
