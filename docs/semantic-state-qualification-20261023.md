@@ -564,3 +564,49 @@ artifact benchmark improved from 2.184 ms / 36,233,461 B / 37 allocations to
 1.433 ms / 16,787,696 B / 7 allocations (three iterations each). This is an
 allocation/read microbenchmark, not an edited-build latency claim. Invalid-envelope
 and the full separate-process analysis disk regression group pass.
+
+
+### Production CLI qualification after partition/snapshot/transcript gains
+
+A fresh owned cache was populated normally using a frozen installed compiler
+from `2e3b21c6` (before the later file-read allocation change), without copying
+or rekeying any semantic snapshot. Environment: analysis cache and resumable
+bootstrap on (six-second body slices), 64 native units, experimental parallel
+O3 optimization on, retained server empty, timing/debug observers absent.
+Every invocation used an external `timeout 30s`. The nine bootstrap invocations
+made resumable progress; invocation nine published the completed baseline and
+hit the cap during native work. Invocation ten completed in 22.795 s.
+
+| Normal CLI request | Seconds | Result |
+| --- | ---: | --- |
+| Unchanged full compiler | 0.528 | Whole-object disk hit |
+| First novel diagnostic-string body edit | 15.382 | Successful fresh-process replay/native build |
+| Repeat edited revision | 0.536 | Identical object; exact diagnostic transcript |
+| Add ordinary unused function on edited revision | 17.756 | Successful fresh-process build |
+| Repeat addition | 0.526 | Identical object |
+| Remove addition, returning to compiled edited revision | 0.418 | Prior object restored |
+| Revert to compiled original revision | 0.417 | Original object restored |
+
+Each successful build emitted 9,381,562 diagnostic bytes. Repeated object hashes
+matched the corresponding original build. The edited object linked with LLVM
+and the repository's host/profiler fallback hooks; executing the resulting
+compiler with `--production-disk-probe` returned exit 1 and exactly
+`unknown option: --production-disk-probe`. All controlled source bytes were
+restored; the seven original user/Claude modifications remain untouched.
+
+An earlier addition probe used a reserved `__` function name and intentionally
+fell back to cold analysis. The retained path explicitly excludes synthesized
+names; this guard was preserved and the ordinary-name probe above corrected
+the experiment. The resulting partial bootstrap remains isolated to that probe.
+
+The goal is still incomplete: cached revisions are comfortably below ten
+seconds, but new body edits take 15.4 s and new function additions 17.8 s.
+Next work must reduce frontend hydration/replay and whole-module LLVM lowering,
+then requalify novel signatures, structs and transitive edits. More repeated
+cache-hit measurements do not establish that new edits meet the target.
+
+Owned evidence root: `/tmp/elisa-server-free-cli-root` points to the run folder
+containing the frozen executable, exact environment, checkpoint logs, timing
+JSON, native objects and the linked probe compiler. The existing qualification
+root still supplies the explicit schema-compatible projected payload for phase
+profiling; it is separate from production admission.
