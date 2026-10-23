@@ -81,3 +81,39 @@ func (r *RetainedAnalysis) applyConstEdits(edits [][2]*ast.ConstDecl) []scopedDe
 	}
 	return out
 }
+
+// removeLiveConsts drops removed consts from the live analysis: their declaration, symbol and
+// value.
+func (r *RetainedAnalysis) removeLiveConsts(cds []*ast.ConstDecl) {
+	a := r.a
+	gone := map[ast.Decl]bool{}
+	for _, cd := range cds {
+		gone[cd] = true
+	}
+	decls := r.decls[:0]
+	for _, sd := range r.decls {
+		if gone[sd.Decl] {
+			name := joinQualifiedName(sd.Namespace, sd.Decl.(*ast.ConstDecl).Name)
+			delete(a.globalScope.Symbols, name)
+			delete(a.constValues, name)
+			delete(a.declVisibility, sd.Decl)
+			continue
+		}
+		decls = append(decls, sd)
+	}
+	r.decls = decls
+	var prune func(decls []ast.Decl) []ast.Decl
+	prune = func(decls []ast.Decl) []ast.Decl {
+		out := decls[:0]
+		for _, d := range decls {
+			if n, ok := d.(*ast.NamespaceDecl); ok {
+				n.Decls = prune(n.Decls)
+			}
+			if !gone[d] {
+				out = append(out, d)
+			}
+		}
+		return out
+	}
+	a.file.Decls = prune(a.file.Decls)
+}

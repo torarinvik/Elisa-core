@@ -178,14 +178,28 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	collectMembers(file.Decls, "")
 	oldNames, newNames := map[string]bool{}, map[string]bool{}
+	oldValueNames := map[string]bool{} // consts, globals and functions: names an added const must not take
 	for _, d := range oldDecls {
-		if f, ok := d.(*ast.FuncDecl); ok {
-			oldNames[f.Name] = true
+		switch n := d.(type) {
+		case *ast.FuncDecl:
+			oldNames[n.Name] = true
+			oldValueNames[n.Name] = true
+		case *ast.ConstDecl:
+			oldValueNames[n.Name] = true
+		case *ast.GlobalDecl:
+			oldValueNames[n.Name] = true
 		}
 	}
+	newValueNames := map[string]bool{} // consts, globals and functions of the edited program
 	for _, d := range newDecls {
-		if f, ok := d.(*ast.FuncDecl); ok {
-			newNames[f.Name] = true
+		switch n := d.(type) {
+		case *ast.FuncDecl:
+			newNames[n.Name] = true
+			newValueNames[n.Name] = true
+		case *ast.ConstDecl:
+			newValueNames[n.Name] = true
+		case *ast.GlobalDecl:
+			newValueNames[n.Name] = true
 		}
 	}
 	oldTop := make(map[ast.Decl]bool, len(r.pristine.Decls))
@@ -195,12 +209,23 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var removed []*ast.FuncDecl
 	var pairs [][2]int
 	var added []*ast.FuncDecl
+	var addedConsts []*ast.ConstDecl   // added typed consts with fresh names
+	var removedConsts []*ast.ConstDecl // consts whose name is gone from the edited program
 	insertedBefore := map[int]bool{} // pair index preceded by an added declaration
 	for i, j := 0, 0; i < len(oldDecls) || j < len(newDecls); {
 		if i < len(oldDecls) && j < len(newDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
 			pairs = append(pairs, [2]int{i, j})
 			i, j = i+1, j+1
 			continue
+		}
+		// A removed const: its name is gone from the edited source.
+		if i < len(oldDecls) {
+			if oc, ok := oldDecls[i].(*ast.ConstDecl); ok && oc.Type != nil && !newValueNames[oc.Name] {
+				removedConsts = append(removedConsts, oc)
+				insertedBefore[len(pairs)] = true
+				i++
+				continue
+			}
 		}
 		// A removed top-level function: its name is gone from the edited source.
 		if i < len(oldDecls) {
@@ -214,6 +239,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if j == len(newDecls) {
 			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 		}
+		if cd, ok := newDecls[j].(*ast.ConstDecl); ok && cd.Type != nil && (topLevel[cd] || memberOf[cd] != nil) && !oldValueNames[cd.Name] && !newNames[cd.Name] {
+			addedConsts = append(addedConsts, cd)
+			insertedBefore[len(pairs)] = true
+			j++
+			continue
+		}
 		nf, ok := newDecls[j].(*ast.FuncDecl)
 		if !ok || !(topLevel[nf] || memberOf[nf] != nil) || oldNames[nf.Name] || !retainedPlainFunction(nf) {
 			return fail("declaration set changed at %s", retainedLineKey(newDecls[j].Pos()))
@@ -222,7 +253,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		insertedBefore[len(pairs)] = true
 		j++
 	}
-	if len(pairs)+len(removed) != len(oldDecls) {
+	if len(pairs)+len(removed)+len(removedConsts) != len(oldDecls) {
 		return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 	}
 	type fnKey struct {
@@ -368,7 +399,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		pendingRetainedMu.Unlock()
 	}
 	compareStart := time.Now()
-	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), replaced)
+	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), len(addedConsts), len(removedConsts), replaced)
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
@@ -457,16 +488,23 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// An edited const value: every function that mentions it is re-analyzed. A declaration or
 	// signature that names it was resolved in the declaration phase, which this path keeps.
 	var constLive [][2]*ast.ConstDecl // (live, scratch) per edited const
-	if len(constPairs) != 0 {
+	var addedConstPrepared []*ast.ConstDecl
+	var removedConstLive []*ast.ConstDecl
+	if len(constPairs)+len(addedConsts)+len(removedConsts) != 0 {
 		names := map[string]bool{}
-		for _, e := range constPairs {
-			names[e[0].Name] = true
-		}
-		pat := retainedNamesPattern(names)
 		edited := map[ast.Decl]bool{}
 		for _, e := range constPairs {
+			names[e[0].Name] = true
 			edited[e[1]] = true
 		}
+		for _, cd := range addedConsts {
+			names[cd.Name] = true
+			edited[cd] = true
+		}
+		for _, cd := range removedConsts {
+			names[cd.Name] = true
+		}
+		pat := retainedNamesPattern(names)
 		for j, d := range newDecls {
 			if edited[d] {
 				continue
@@ -504,6 +542,26 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				}
 			}
 			constLive = append(constLive, [2]*ast.ConstDecl{live, prepared})
+		}
+		for _, cd := range removedConsts {
+			live := liveConsts[retainedLineKey(cd.Pos())+"|"+cd.Name]
+			if live == nil {
+				return fail("removed const %s not found in the analysis", cd.Name)
+			}
+			line := live.Pos()
+			for _, d := range a.diagnostics {
+				if d.Pos.File == line.File && d.Pos.Line == line.Line {
+					return fail("removed const %s has diagnostics", cd.Name)
+				}
+			}
+			removedConstLive = append(removedConstLive, live)
+		}
+		for _, cd := range addedConsts {
+			prepared := scratchConsts[retainedLineKey(cd.Pos())+"|"+cd.Name]
+			if prepared == nil {
+				return fail("prepared form of added const %s not found", cd.Name)
+			}
+			addedConstPrepared = append(addedConstPrepared, prepared)
 		}
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
@@ -557,61 +615,73 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// declared them in scratch; their results must then match scratch's exactly.
 	var addedScoped []scopedDecl
 	var addedInto []*ast.NamespaceDecl // live block that receives each added member; nil at top level
-	if len(added) != 0 {
-		// Usings come from an analyzed declaration in the same block: they are the
-		// block's inherited usings plus its own `using` lines.
-		usingsOf := map[string][]string{}
-		liveBlocks := map[string]*ast.NamespaceDecl{}
-		for _, sd := range r.decls {
-			if _, seen := usingsOf[sd.Namespace]; !seen {
-				usingsOf[sd.Namespace] = sd.Usings
-			}
-		}
-		var collectLive func(decls []ast.Decl)
-		collectLive = func(decls []ast.Decl) {
-			for _, d := range decls {
-				if n, ok := d.(*ast.NamespaceDecl); ok {
-					liveBlocks[retainedLineKey(n.Position)+"|"+n.Name] = n
-					collectLive(n.Decls)
+	// place scopes an added declaration (nd in file, prepared its scratch form) in the live
+	// analysis: its block, namespace, usings and visibility.
+	var usingsOf map[string][]string
+	var liveBlocks map[string]*ast.NamespaceDecl
+	place := func(nd, prepared ast.Decl, name string) (scopedDecl, *ast.NamespaceDecl, string) {
+		if usingsOf == nil {
+			// Usings come from an analyzed declaration in the same block: they are the
+			// block's inherited usings plus its own `using` lines.
+			usingsOf, liveBlocks = map[string][]string{}, map[string]*ast.NamespaceDecl{}
+			for _, sd := range r.decls {
+				if _, seen := usingsOf[sd.Namespace]; !seen {
+					usingsOf[sd.Namespace] = sd.Usings
 				}
 			}
+			var collectLive func(decls []ast.Decl)
+			collectLive = func(decls []ast.Decl) {
+				for _, d := range decls {
+					if n, ok := d.(*ast.NamespaceDecl); ok {
+						liveBlocks[retainedLineKey(n.Position)+"|"+n.Name] = n
+						collectLive(n.Decls)
+					}
+				}
+			}
+			collectLive(a.file.Decls)
 		}
-		collectLive(a.file.Decls)
+		sd := scopedDecl{Decl: prepared}
+		var into *ast.NamespaceDecl
+		if block := memberOf[nd]; block != nil && !topLevel[nd] {
+			sd.Namespace = namespaceOf[block]
+			usings, ok := usingsOf[sd.Namespace]
+			if !ok {
+				return sd, nil, fmt.Sprintf("added %s is in a block with no analyzed declarations", name)
+			}
+			sd.Usings = usings
+			// The block itself is unchanged and lines only shift after an
+			// insertion, so it is found again at its own position.
+			if into = liveBlocks[retainedLineKey(block.Position)+"|"+block.Name]; into == nil {
+				return sd, nil, fmt.Sprintf("block of added %s not found in the analysis", name)
+			}
+			switch scratch.DeclVisibility[prepared] {
+			case "private":
+				sd.Private = true
+			case "":
+				if file.DeclVisibility[nd] != "" {
+					return sd, nil, fmt.Sprintf("visibility of added %s not found", name)
+				}
+			}
+			if v := scratch.DeclVisibility[prepared]; v != "" {
+				if a.declVisibility == nil {
+					a.declVisibility = map[ast.Decl]string{}
+				}
+				a.declVisibility[prepared] = v
+			}
+		} else {
+			sd.Usings = usingsOf[""]
+		}
+		return sd, into, ""
+	}
+	if len(added) != 0 {
 		for _, nf := range added {
 			prepared := pre.prepared[retainedLineKey(nf.Pos())+"|"+nf.Name]
 			if prepared == nil {
 				return fail("prepared form of added %s not found", nf.Name)
 			}
-			sd := scopedDecl{Decl: prepared}
-			var into *ast.NamespaceDecl
-			if block := memberOf[nf]; block != nil && !topLevel[nf] {
-				sd.Namespace = namespaceOf[block]
-				usings, ok := usingsOf[sd.Namespace]
-				if !ok {
-					return fail("added %s is in a block with no analyzed declarations", nf.Name)
-				}
-				sd.Usings = usings
-				// The block itself is unchanged and lines only shift after an
-				// insertion, so it is found again at its own position.
-				if into = liveBlocks[retainedLineKey(block.Position)+"|"+block.Name]; into == nil {
-					return fail("block of added %s not found in the analysis", nf.Name)
-				}
-				switch scratch.DeclVisibility[prepared] {
-				case "private":
-					sd.Private = true
-				case "":
-					if file.DeclVisibility[nf] != "" {
-						return fail("visibility of added %s not found", nf.Name)
-					}
-				}
-				if v := scratch.DeclVisibility[prepared]; v != "" {
-					if a.declVisibility == nil {
-						a.declVisibility = map[ast.Decl]string{}
-					}
-					a.declVisibility[prepared] = v
-				}
-			} else {
-				sd.Usings = usingsOf[""]
+			sd, into, why := place(nf, prepared, nf.Name)
+			if why != "" {
+				return fail("%s", why)
 			}
 			addedScoped = append(addedScoped, sd)
 			addedInto = append(addedInto, into)
@@ -645,17 +715,44 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		r.decls = append(r.decls, addedScoped...)
 	}
+	// Added consts are scoped like added functions; declaring them cannot disagree with
+	// scratch, whose declaration-phase diagnostics already matched.
+	var addedConstScoped []scopedDecl
+	var addedConstInto []*ast.NamespaceDecl
+	for k, cd := range addedConsts {
+		sd, into, why := place(cd, addedConstPrepared[k], cd.Name)
+		if why != "" {
+			return fail("%s", why)
+		}
+		addedConstScoped = append(addedConstScoped, sd)
+		addedConstInto = append(addedConstInto, into)
+	}
+	if len(addedConstScoped) != 0 {
+		for k, sd := range addedConstScoped {
+			if addedConstInto[k] != nil {
+				addedConstInto[k].Decls = append(addedConstInto[k].Decls, sd.Decl)
+			} else {
+				a.file.Decls = append(a.file.Decls, sd.Decl)
+			}
+		}
+		a.collectValueSymbols(addedConstScoped)
+		r.decls = append(r.decls, addedConstScoped...)
+	}
 	// Past this point the edit is accepted; mutate the retained state.
 	if len(structEdits) != 0 {
 		if !r.applyStructEdits(structEdits) {
 			structOnly = nil
 		}
 	}
+	if len(removedConstLive) != 0 {
+		r.removeLiveConsts(removedConstLive)
+	}
 	// Edited consts are evaluated first, then added functions: the edited bodies use both.
 	var changed []scopedDecl
 	if len(constLive) != 0 {
 		changed = append(changed, r.applyConstEdits(constLive)...)
 	}
+	changed = append(changed, addedConstScoped...)
 	changed = append(changed, addedScoped...)
 	drop := map[int]bool{}
 	for _, fn := range removedLive {
@@ -1024,11 +1121,14 @@ func retainedSameDeclKind(a, b ast.Decl) bool {
 	if reflect.TypeOf(a) != reflect.TypeOf(b) {
 		return false
 	}
-	fa, ok := a.(*ast.FuncDecl)
-	if !ok {
-		return true
+	switch fa := a.(type) {
+	case *ast.FuncDecl:
+		return fa.Name == b.(*ast.FuncDecl).Name
+	case *ast.ConstDecl:
+		// By name, so an added const is not paired with the next one.
+		return fa.Name == b.(*ast.ConstDecl).Name
 	}
-	return fa.Name == b.(*ast.FuncDecl).Name
+	return true
 }
 
 // retainedPlainFunction is a function an update may add or remove in place: not a

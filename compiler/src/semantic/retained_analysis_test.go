@@ -114,9 +114,9 @@ func TestRetainedAnalysisAcceptsSignatureEdits(t *testing.T) {
 			t.Fatal("fixture: the callee's new parameter type must reject its callers")
 		}
 	}
-	added := steps[1] + "\nconst EXTRA: i64 = 1\n"
+	added := steps[1] + "\nstruct Extra:\n    v: i64\n"
 	if _, err := retained.Update(retainedParse(t, added), retainedParse(t, added), []byte(added)); err == nil {
-		t.Fatal("adding a non-function declaration must fall back")
+		t.Fatal("adding a struct must fall back")
 	}
 }
 
@@ -246,6 +246,45 @@ func TestRetainedAnalysisAcceptsConstValueEdits(t *testing.T) {
 		if i == 0 && (!strings.Contains(want, "out of bounds") || !strings.Contains(want, "does not fit")) {
 			t.Fatalf("const edit 0 should report both value errors:\n%s", want)
 		}
+	}
+}
+
+// An added typed const is declared and evaluated, and the functions that named it before it
+// existed are re-analyzed: their undefined-name errors go, as in a fresh analysis.
+func TestRetainedAnalysisAcceptsAddedConst(t *testing.T) {
+	options := AnalyzeOptions{}
+	fns := "def reads() -> i64:\n    return LIMIT\n\ndef other(y: i64) -> i64:\n    return y\n"
+	before := "const A: i64 = 1\n\nconst B: i64 = 2\n\n" + fns
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	if !strings.Contains(retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, before), options)), "LIMIT") {
+		t.Fatal("the unadded const should be reported")
+	}
+	// Added between two existing consts, so pairing must go by name.
+	edited := "const A: i64 = 1\n\nconst LIMIT: i64 = 3\n\nconst B: i64 = 2\n\n" + fns
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("added const fell back: %v", err)
+	}
+	if retained.LastStats.ConstUsers != 1 {
+		t.Fatalf("stats = %+v, want one user re-analyzed", retained.LastStats)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+	// A value edit to the added const then works like any other, and removing it again
+	// brings back the undefined-name error.
+	again := strings.Replace(edited, "= 3", "= 4", 1)
+	if _, err := retained.Update(retainedParse(t, again), retainedParse(t, again), []byte(again)); err != nil {
+		t.Fatalf("value edit after the add fell back: %v", err)
+	}
+	updated, err = retained.Update(retainedParse(t, before), retainedParse(t, before), []byte(before))
+	if err != nil {
+		t.Fatalf("removing the const fell back: %v", err)
+	}
+	fresh = AnalyzeWithOptions(retainedParse(t, before), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want || !strings.Contains(got, "LIMIT") {
+		t.Fatalf("removal diverged\n got:\n%s\nwant:\n%s", got, want)
 	}
 }
 

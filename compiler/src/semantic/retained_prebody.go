@@ -181,12 +181,12 @@ func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
 // preBodyDifference names the first body-dependent declaration-phase result
 // that differs, or returns "". Old diagnostics are compared after the edit's
 // line shifts.
-func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added, removed int, replaced map[string]bool) string {
+func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added, removed, addedConsts, removedConsts int, replaced map[string]bool) string {
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
 	if old.global != cur.global {
-		if diff := globalGrowthDifference(old.global, cur.global, added, removed); diff != "" {
+		if diff := globalGrowthDifference(old.global, cur.global, added, removed, addedConsts, removedConsts); diff != "" {
 			return "program-wide declaration results changed" + diff
 		}
 	}
@@ -274,10 +274,14 @@ var addedFunctionTables = map[string]bool{
 	"regionParamCalleeParamIndex": true, // copied from the scratch phase on add
 }
 
+// addedConstTables hold one entry per const (declVisibility: one in a `public:`/`private:`
+// section); adding k consts grows each by at most k, removing k shrinks it by at most k.
+var addedConstTables = map[string]bool{"constValues": true, "declVisibility": true}
+
 // globalGrowthDifference accepts a global fingerprint change only when the sole
-// differences are per-function table sizes moved by the added or removed functions.
-func globalGrowthDifference(old, cur string, added, removed int) string {
-	if added == 0 && removed == 0 {
+// differences are table sizes moved by the added or removed functions and added consts.
+func globalGrowthDifference(old, cur string, added, removed, addedConsts, removedConsts int) string {
+	if added == 0 && removed == 0 && addedConsts == 0 && removedConsts == 0 {
 		return firstLineDifference(old, cur)
 	}
 	ol, cl := strings.Split(old, "\n"), strings.Split(cur, "\n")
@@ -293,7 +297,15 @@ func globalGrowthDifference(old, cur string, added, removed int) string {
 		ok1, _ := fmt.Sscanf(strings.Replace(ol[i], "=", " ", 1), "#%s %d", &name, &before)
 		var name2 string
 		ok2, _ := fmt.Sscanf(strings.Replace(cl[i], "=", " ", 1), "#%s %d", &name2, &after)
-		if ok1 != 2 || ok2 != 2 || name != name2 || !addedFunctionTables[name] || after > before+added || after < before-removed {
+		grow, shrink := 0, 0
+		if addedFunctionTables[name] {
+			grow, shrink = added, removed
+		}
+		if addedConstTables[name] {
+			grow += addedConsts
+			shrink += removedConsts
+		}
+		if ok1 != 2 || ok2 != 2 || name != name2 || grow+shrink == 0 || after > before+grow || after < before-shrink {
 			return fmt.Sprintf(" (%s -> %s)", ol[i], cl[i])
 		}
 	}
