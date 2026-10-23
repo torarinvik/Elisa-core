@@ -202,11 +202,11 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
 		} else {
 			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v (ahead %v), compare %v, diff %v, bodies %v, post %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.ScratchPrepared, st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Post.Round(time.Millisecond), st.Total.Round(time.Millisecond))
-			// ELISACORE_RETAINED_SPLICED_CODEGEN=1 (from the request environment)
-			// lets code generation consume the updated analysis directly; its
-			// LLVM IR has matched a fresh analysis byte for byte on the stage1
-			// seed for no-op and body edits.
-			if len(result.Errors()) != 0 || !rt.codegen || os.Getenv("ELISACORE_RETAINED_SPLICED_CODEGEN") == "1" {
+			// Code generation consumes the updated analysis directly: on the stage1 seed
+			// its LLVM IR matches a fresh analysis's for every edit kind the sweep covers
+			// (TestRetainedUpdateGeneratesFreshIR is the unit form).
+			// ELISACORE_RETAINED_SPLICED_CODEGEN=0 analyzes fresh before code generation.
+			if len(result.Errors()) != 0 || !rt.codegen || os.Getenv("ELISACORE_RETAINED_SPLICED_CODEGEN") != "0" {
 				return result
 			}
 			// No errors: code generation follows, and by default it must see a
