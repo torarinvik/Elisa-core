@@ -128,18 +128,135 @@ func (a *Analyzer) retainedUsingMembers(targets map[string]bool, extra []string)
 	return members
 }
 
+// retainedUnshadowedMembers drops the members a function in namespace cannot resolve through
+// a using. Lexical candidates (the namespace and its ancestors) come before every using, so a
+// member is shadowed when one lexical name exists in each table any changed target's member
+// is in, and no overload set (which gathers every candidate) is involved.
+func (a *Analyzer) retainedUnshadowedMembers(members, targets map[string]bool, extra []string, namespace string) map[string]bool {
+	if namespace == "" {
+		return members
+	}
+	tables := []func(string) bool{
+		func(k string) bool { _, ok := a.globalScope.Symbols[k]; return ok },
+		func(k string) bool { _, ok := a.namedTypes[k]; return ok },
+		func(k string) bool { _, ok := a.constValues[k]; return ok },
+		func(k string) bool { _, ok := a.permissions[k]; return ok },
+		func(k string) bool { return a.declaredModules[k] },
+	}
+	out := map[string]bool{}
+	for name := range members {
+		if slices.Contains(extra, name) || len(a.ufcsFunctionsByName[name]) >= 2 || !a.retainedLexicallyShadowed(name, targets, namespace, tables) {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) retainedLexicallyShadowed(name string, targets map[string]bool, namespace string, tables []func(string) bool) bool {
+	var needed []func(string) bool
+	for _, has := range tables {
+		for target := range targets {
+			key := joinQualifiedName(target, name)
+			if len(a.ufcsFunctionsByName[key]) >= 2 {
+				return false
+			}
+			if has(key) {
+				needed = append(needed, has)
+				break
+			}
+		}
+	}
+	for lexical := namespace; lexical != ""; {
+		key := joinQualifiedName(lexical, name)
+		if len(a.ufcsFunctionsByName[key]) >= 2 {
+			return false
+		}
+		covered := len(needed) != 0
+		for _, has := range needed {
+			covered = covered && has(key)
+		}
+		if covered {
+			return true
+		}
+		if dot := strings.LastIndex(lexical, "."); dot >= 0 {
+			lexical = lexical[:dot]
+		} else {
+			lexical = ""
+		}
+	}
+	return false
+}
+
 var retainedIdentToken = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 
 // retainedSpanMentions reports whether a declaration's source text holds any of names as
 // a token. Text, unlike the body walk, also sees type annotations; comments only make the
 // check conservative.
-func retainedSpanMentions(span string, names map[string]bool) bool {
-	for _, tok := range retainedIdentToken.FindAllString(span, -1) {
-		if names[tok] {
+// retainedSpanMentions reports whether span may resolve one of names through a using: a bare
+// name or a UFCS call (`x.name(`). A field access (`x.name` not called) and text in a comment
+// or string never resolve through a using.
+//
+// qualifiers holds the bare names of types and modules: after `Q.` (an enum variant, a module
+// member) a name is qualified, never a UFCS call.
+func retainedSpanMentions(span string, names, qualifiers map[string]bool) bool {
+	toks := retainedIdentToken.FindAllStringIndex(span, -1)
+	for i, loc := range toks {
+		if !names[span[loc[0]:loc[1]]] || retainedInCommentOrString(span, loc[0]) {
+			continue
+		}
+		if loc[0] > 0 && span[loc[0]-1] == '.' && (loc[0] < 2 || span[loc[0]-2] != '.') {
+			rest := strings.TrimLeft(span[loc[1]:], " ")
+			if !strings.HasPrefix(rest, "(") && !strings.HasPrefix(rest, "[") {
+				continue
+			}
+			if i > 0 && toks[i-1][1] == loc[0]-1 && qualifiers[span[toks[i-1][0]:toks[i-1][1]]] {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// retainedQualifierNames is the bare name of every named type and module.
+func (a *Analyzer) retainedQualifierNames() map[string]bool {
+	out := map[string]bool{}
+	add := func(key string) {
+		if dot := strings.LastIndex(key, "."); dot >= 0 {
+			key = key[dot+1:]
+		}
+		if key != "" && key[0] >= 'A' && key[0] <= 'Z' {
+			out[key] = true
+		}
+	}
+	for key := range a.namedTypes {
+		add(key)
+	}
+	for key := range a.declaredModules {
+		add(key)
+	}
+	return out
+}
+
+// retainedInCommentOrString reports whether offset at falls in a `#` comment or a quoted
+// literal on its line.
+func retainedInCommentOrString(span string, at int) bool {
+	start := strings.LastIndexByte(span[:at], '\n') + 1
+	var quote byte
+	for i := start; i < at; i++ {
+		c := span[i]
+		switch {
+		case quote != 0 && c == '\\':
+			i++
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == 0 && (c == '"' || c == '\''):
+			quote = c
+		case quote == 0 && c == '#':
 			return true
 		}
 	}
-	return false
+	return quote != 0
 }
 
 // retainedUsingChange is one live declaration whose usings an edit changes.
@@ -185,16 +302,27 @@ func (r *RetainedAnalysis) findUsingChanges(file *ast.File, newOf func(ast.Decl)
 		return nil, ""
 	}
 	members := a.retainedUsingMembers(targets, extraMembers)
+	qualifiers := a.retainedQualifierNames()
+	unshadowed := map[string]map[string]bool{} // namespace -> members a lexical name does not shadow
 	for k := range changes {
-		fn, isFn := r.decls[changes[k].index].Decl.(*ast.FuncDecl)
+		sd := r.decls[changes[k].index]
+		fn, isFn := sd.Decl.(*ast.FuncDecl)
 		if !isFn {
+			continue
+		}
+		names, ok := unshadowed[sd.Namespace]
+		if !ok {
+			names = a.retainedUnshadowedMembers(members, targets, extraMembers, sd.Namespace)
+			unshadowed[sd.Namespace] = names
+		}
+		if len(names) == 0 {
 			continue
 		}
 		oldSpan, newSpan := spanOf(fn)
 		if newOf(fn) == nil {
 			oldSpan = unparse.FormatDecl(fn)
 		}
-		changes[k].mention = retainedSpanMentions(oldSpan, members) || retainedSpanMentions(newSpan, members)
+		changes[k].mention = retainedSpanMentions(oldSpan, names, qualifiers) || retainedSpanMentions(newSpan, names, qualifiers)
 	}
 	return changes, ""
 }

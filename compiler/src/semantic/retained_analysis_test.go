@@ -611,6 +611,55 @@ func TestRetainedAnalysisAcceptsUsingEdits(t *testing.T) {
 	}
 }
 
+// A using re-analyzes only the functions it can change: App.helper shadows Geo.helper (lexical
+// names come before every using), and `Shape.area(...)` names a variant, not a UFCS call.
+func TestRetainedAnalysisUsingSkipsShadowedMembers(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := `module Geo:
+    def helper() -> i64:
+        return 1
+
+    def area() -> i64:
+        return 2
+
+enum Shape:
+    area(i64)
+    none
+
+module App:
+    def helper() -> i64:
+        return 3
+
+    def uses_helper() -> i64:
+        return helper()
+
+    def uses_variant() -> Shape:
+        return Shape.area(4)
+
+    def uses_area() -> i64:
+        return area()
+`
+	with := strings.Replace(before, "module App:\n", "using Geo\n\nmodule App:\n", 1)
+	if retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, before), options)) == "" ||
+		retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, with), options)) != "" {
+		t.Fatalf("fixture must fail without the using and pass with it:\n%s", retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, with), options)))
+	}
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	for step, src := range []string{with, before} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("step %d: using edit fell back: %v", step, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d: diverged\n got:\n%s\nwant:\n%s", step, got, want)
+		}
+		if retained.LastStats.Changed != 1 {
+			t.Fatalf("step %d: want only uses_area re-analyzed: %+v", step, retained.LastStats)
+		}
+	}
+}
+
 // The add, its revert and a later member addition run on one retained analysis, as an
 // editor's undo does.
 func TestRetainedAnalysisRevertsUsingEditInPlace(t *testing.T) {
