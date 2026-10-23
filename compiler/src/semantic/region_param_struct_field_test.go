@@ -33,6 +33,29 @@ func TestS4FieldGrowthAccepted(t *testing.T) {
 	}
 }
 
+// A scalar field set from a scalar-returning call builds no container: the param needs no
+// region, so a plain local can be passed without one.
+func TestScalarFieldFromCallInfersNoRegion(t *testing.T) {
+	source := `struct Q:
+    head: mutable usize
+
+def idx(q: Q&) -> usize:
+    return q.head + 1
+
+def bump(q: mutable Q&) -> void:
+    q.head <- idx(q)
+
+def main() -> i64:
+    q: mutable Q = Q{head: 0}
+    bump(&q)
+    return q.head.i64()
+`
+	errs := analyzeTreeTestSourceWithSemanticErrors(t, "scalar_field_from_call.elisa", source).Errors()
+	if joined := strings.Join(errs, " | "); joined != "" {
+		t.Fatalf("a scalar field store must not infer a region parameter, got: %s", joined)
+	}
+}
+
 func TestNestedMutableScratchFieldThreadsInferredRegion(t *testing.T) {
 	source := `struct Scratch:
     values: mutable darray[usize]

@@ -299,7 +299,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// regardless of how the region param was introduced — no new lifetime power.
 			facts := bodyFactsForParam(bodyFacts, fn, p.Name)
 			if !facts.fieldAssignedFreshKnown {
-				facts.fieldAssignedFresh = paramFieldAssignedFreshContainer(fn.Body, p.Name)
+				facts.fieldAssignedFresh = paramFieldAssignedFreshContainer(fn.Body, p.Name, funcByName)
 				facts.fieldAssignedFreshKnown = true
 			}
 			if !facts.fieldGrownKnown {
@@ -1091,9 +1091,10 @@ func (a *Analyzer) hasOtherFreshFieldTarget(fn *ast.FuncDecl, name string) bool 
 // param with a container allocated in this body: `p.f <- []`, `p.f <- [x for ...]`, or
 // `p.f <- fresh` where `fresh` is a body local initialised from such a literal (the rehash
 // shape). The fresh backing must live in the caller's region, not the per-call auto region, so
-// the param needs a threaded region that the function's ambient allocations adopt. Purely
-// syntactic and deliberately narrow: a scalar field assignment never matches.
-func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
+// the param needs a threaded region that the function's ambient allocations adopt. Syntactic
+// and deliberately narrow: a scalar field assignment never matches, and funcByName rules out
+// callees that return a scalar.
+func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl) bool {
 	freshLocals := map[string]bool{}
 	var assigns []*ast.AssignStmt
 	walkPruned(stmts, func(node any) bool {
@@ -1154,8 +1155,12 @@ func paramFieldAssignedFreshContainer(stmts []ast.Stmt, name string) bool {
 		// body's auto region freed at return. A non-polymorphic callee is unaffected. Only a
 		// free-function FACTORY qualifies: a call that reads the param (`p.f <- p.f.push(v)`,
 		// `p.f <- grow(p.f)`) rebinds existing storage and builds nothing fresh.
+		// A callee returning a scalar (`p.head <- index_of(p, 1)`) builds no container either.
 		if call, isCall := value.(*ast.CallExpr); isCall && call != nil {
-			if _, isFree := call.Func.(*ast.Ident); isFree {
+			if callee, isFree := call.Func.(*ast.Ident); isFree {
+				if fd := funcByName[callee.Name]; fd != nil && storeFlowScalarTypeExpr(fd.ReturnType) {
+					continue
+				}
 				return true
 			}
 		}
