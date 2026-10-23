@@ -62,6 +62,14 @@ module Lib:
     def width(p: Pair) -> i64:
         return p.a + p.b
 
+    def collect(xs: mutable darray[Pair]&, c: bool) -> i64:
+        xs <- xs.push(Pair{a: 1, b: 2}) if c
+        seen: bool = any q in xs where q.b == 2
+        return 1 if seen else 0
+
+    def record(xs: mutable darray[Pair]&, c: bool) -> void:
+        xs <- xs.push(Pair{a: 1, b: 2}) if c
+
     def tag(x: i64) -> i64 can[Abort.Panic]:
         return x
 

@@ -120,6 +120,8 @@ func (a *Analyzer) retainedUsesTypes(fn *ast.FuncDecl, targets map[Type]bool, na
 
 // retainedTypeReaches: t is, or is built from, one of the targets. Other named types are not
 // entered: a value of them reaches a target only through an expression typed as the target.
+// A struct with region-annotated fields is analyzed through per-binding copies of its type, so
+// a struct type also matches a target of the same qualified name.
 func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool {
 	if t == nil {
 		return false
@@ -128,6 +130,12 @@ func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool
 		return hit
 	}
 	memo[t] = false
+	targetNames := map[string]bool{}
+	for target := range targets {
+		if st, ok := target.(*StructType); ok {
+			targetNames[st.Name] = true
+		}
+	}
 	seen := map[uintptr]bool{}
 	var rec func(v reflect.Value) bool
 	rec = func(v reflect.Value) bool {
@@ -139,7 +147,7 @@ func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool
 			seen[v.Pointer()] = true
 			switch n := v.Interface().(type) {
 			case *StructType:
-				return targets[n]
+				return targets[n] || targetNames[n.Name]
 			case *EnumType:
 				return targets[n]
 			}

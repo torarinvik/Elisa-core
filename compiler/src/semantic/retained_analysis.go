@@ -1759,6 +1759,8 @@ func retainedMentionsAny(fn *ast.FuncDecl, names map[string]bool) bool {
 				hit = names[n.Name] || names[fillMayAdoptLastSegment(n.Name)]
 			case *ast.FieldExpr:
 				hit = names[n.Field]
+			case *ast.StructLitExpr:
+				hit = names[n.Name] || names[fillMayAdoptLastSegment(n.Name)]
 			}
 		})
 	}
