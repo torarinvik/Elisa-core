@@ -184,3 +184,20 @@ returned callback to remain callable, all hidden closed slots to be zero, and a
 finished state to round-trip afterward. The previous snapshot writer correctly
 rejected the callback rather than dropping it. This cleanup also stops the idle
 analyzer retaining the callback's captured state.
+
+The graph inventory pass now traverses only fields/elements capable of containing
+object identities. Scalar values still undergo complete validation and encoding
+in the write pass. A reference-walk test requires byte-identical output and keeps
+pointers into scalar-only slice elements/struct fields aliased correctly; hidden
+nonzero callbacks and uintptr values still reject publication. Codec race tests
+pass. The repeated-string encode benchmark changed from about 0.96 ms to 0.82 ms.
+An opt-in `TestAnalysisBuildCompilerCheckpoint` restores an existing real-source
+`.building` graph without re-running bodies and never publishes into a CLI cache.
+The complete 14,422-declaration body checkpoint restored in 6.105 s, re-encoded in
+11.884 s, and restored again in 6.095 s; the bounded qualification passed in
+24.661 s. Whole-program completion/publication remains separate and unproven.
+The opt-in completion-boundary qualification also passed under the 30 s cap:
+5.954 s restoring the full body checkpoint, 9.355 s final checks (zero errors,
+26,230 notices), and 12.357 s encoding the finished 619,157,503-byte state; total
+27.860 s. This test omits CLI source loading/parsing, publication and native
+codegen, so it is not evidence of a completed full CLI build within 30 s.

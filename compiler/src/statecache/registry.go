@@ -18,6 +18,8 @@ type Registry struct {
 	types       []reflect.Type
 	ids         map[reflect.Type]uint64
 	fields      map[reflect.Type][]int
+	scanFields  map[reflect.Type][]int
+	hasObjects  map[reflect.Type]bool
 	fingerprint [32]byte
 	access      FieldAccess
 	singletons  map[reflect.Type]reflect.Value
@@ -61,7 +63,35 @@ func New(roots []reflect.Type, policy FieldPolicy, access FieldAccess) *Registry
 	for _, v := range []any{false, int(0), int8(0), int16(0), int32(0), int64(0), uint(0), uint8(0), uint16(0), uint32(0), uint64(0), float32(0), float64(0), ""} {
 		walk(reflect.TypeOf(v))
 	}
+	// Inventory only values that can contain graph identities. Scalar fields
+	// (including positions made of strings/integers) are validated and written
+	// in the encoding pass; traversing them adds no owners or aliases.
+	r.hasObjects = make(map[reflect.Type]bool)
+	r.scanFields = make(map[reflect.Type][]int)
+	var hasObjects func(reflect.Type) bool
+	hasObjects = func(t reflect.Type) bool {
+		if result, ok := r.hasObjects[t]; ok {
+			return result
+		}
+		result := false
+		switch t.Kind() {
+		case reflect.Interface, reflect.Pointer, reflect.Slice, reflect.Map:
+			result = true
+		case reflect.Array:
+			result = hasObjects(t.Elem())
+		case reflect.Struct:
+			for _, i := range r.fields[t] {
+				if hasObjects(t.Field(i).Type) {
+					r.scanFields[t] = append(r.scanFields[t], i)
+					result = true
+				}
+			}
+		}
+		r.hasObjects[t] = result
+		return result
+	}
 	for t := range seen {
+		hasObjects(t)
 		r.types = append(r.types, t)
 	}
 	sort.Slice(r.types, func(i, j int) bool { return typeName(r.types[i]) < typeName(r.types[j]) })

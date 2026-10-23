@@ -135,6 +135,17 @@ func (e *encoder) value(v reflect.Value) error {
 			copy.Set(v)
 			v = copy
 		}
+		if e.scanning {
+			for _, i := range e.registry.scanFields[t] {
+				f := e.registry.access(v, i)
+				if !f.IsZero() {
+					if err := e.value(f); err != nil {
+						return fmt.Errorf("%s.%s: %w", t, t.Field(i).Name, err)
+					}
+				}
+			}
+			return nil
+		}
 		fields := e.registry.fields[t]
 		live := 0
 		for _, i := range fields {
@@ -154,6 +165,9 @@ func (e *encoder) value(v reflect.Value) error {
 			}
 		}
 	case reflect.Array:
+		if e.scanning && !e.registry.hasObjects[t.Elem()] {
+			return nil
+		}
 		for i := 0; i < v.Len(); i++ {
 			if err := e.value(v.Index(i)); err != nil {
 				return err
@@ -203,8 +217,14 @@ func objectIdentity(v reflect.Value) identity {
 func (e *encoder) body(v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Pointer:
+		if e.scanning && !e.registry.hasObjects[v.Type().Elem()] {
+			return nil
+		}
 		return e.value(v.Elem())
 	case reflect.Slice:
+		if e.scanning && !e.registry.hasObjects[v.Type().Elem()] {
+			return nil
+		}
 		full := v.Slice(0, v.Cap())
 		if v.Type().Elem().Kind() == reflect.Uint8 {
 			if !e.scanning {
@@ -218,13 +238,22 @@ func (e *encoder) body(v reflect.Value) error {
 			}
 		}
 	case reflect.Map:
+		keys := !e.scanning || e.registry.hasObjects[v.Type().Key()]
+		values := !e.scanning || e.registry.hasObjects[v.Type().Elem()]
+		if !keys && !values {
+			return nil
+		}
 		it := v.MapRange()
 		for it.Next() {
-			if err := e.value(it.Key()); err != nil {
-				return fmt.Errorf("%s key: %w", v.Type(), err)
+			if keys {
+				if err := e.value(it.Key()); err != nil {
+					return fmt.Errorf("%s key: %w", v.Type(), err)
+				}
 			}
-			if err := e.value(it.Value()); err != nil {
-				return fmt.Errorf("%s value: %w", v.Type(), err)
+			if values {
+				if err := e.value(it.Value()); err != nil {
+					return fmt.Errorf("%s value: %w", v.Type(), err)
+				}
 			}
 		}
 	}
