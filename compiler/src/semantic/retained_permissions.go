@@ -20,6 +20,113 @@ type retainedPermissions struct {
 	// an edited function's row before the solve runs, so "changed" is judged
 	// against this, not against the row the recompute found.
 	rows map[*FuncType]permissionRowSnapshot
+	// initial holds every row as the solve started from it (the declaration phase's
+	// row; for an edited function, the row this update's body analysis left).
+	initial map[*FuncType]permissionRowSnapshot
+	// declared holds every row as the declaration phase left it, before any body ran: what
+	// a body's call to itself (or to a function not yet analyzed) reads in a fresh analysis.
+	declared map[*FuncType]permissionRowSnapshot
+}
+
+// recordDeclared snapshots the declaration phase's rows, before the full body analysis.
+func (p *retainedPermissions) recordDeclared(a *Analyzer, decls []scopedDecl) {
+	p.declared = map[*FuncType]permissionRowSnapshot{}
+	for _, sd := range permissionFunctionDecls(decls) {
+		if ft := permissionDeclType(a, sd); ft != nil {
+			p.declared[ft] = snapshotPermissionRow(ft)
+		}
+	}
+}
+
+func (s permissionRowSnapshot) restore(ft *FuncType) {
+	ft.PermissionRefs, ft.MutableGlobalPermissionRefs = s.refs, s.mutable
+	ft.ReturnedFunctionPermissionRefs, ft.ReturnedFunctionGlobalPermissionRefs = s.returned, s.returnedGlobal
+	ft.Permissions = s.families
+}
+
+// coveredBy reports whether every entry of s is still in ft's row, judged by name. A ref
+// with type arguments or a realization is not compared and counts as possibly lost.
+func (s permissionRowSnapshot) coveredBy(ft *FuncType) bool {
+	covered := func(old, cur []ast.PermissionRef) bool {
+		have := map[[2]string]bool{}
+		for _, ref := range cur {
+			have[[2]string{ref.Name, ref.Member}] = true
+		}
+		for _, ref := range old {
+			if len(ref.TypeArgs) != 0 || len(ref.Via) != 0 || !have[[2]string{ref.Name, ref.Member}] {
+				return false
+			}
+		}
+		return true
+	}
+	for _, family := range s.families {
+		if !containsString(ft.Permissions, family) {
+			return false
+		}
+	}
+	return covered(s.refs, ft.PermissionRefs) && covered(s.mutable, ft.MutableGlobalPermissionRefs) &&
+		covered(s.returned, ft.ReturnedFunctionPermissionRefs) && covered(s.returnedGlobal, ft.ReturnedFunctionGlobalPermissionRefs)
+}
+
+// resetToInitialRows prepares a full solve. Outside an update the current rows are the
+// declaration phase's: they are recorded as the initial rows. In an update an edited or
+// newly declared function's current row is its initial one; every other row restarts from
+// its recorded initial row.
+func (p *retainedPermissions) resetToInitialRows(a *Analyzer, decls []scopedDecl, updating bool) {
+	if !updating || p.initial == nil {
+		p.initial = map[*FuncType]permissionRowSnapshot{}
+	}
+	for _, sd := range decls {
+		ft := permissionDeclType(a, sd)
+		if ft == nil {
+			continue
+		}
+		start, known := p.initial[ft]
+		if !updating || !known || p.edited[sd.Decl.(*ast.FuncDecl)] {
+			p.initial[ft] = snapshotPermissionRow(ft)
+			continue
+		}
+		start.restore(ft)
+	}
+}
+
+// withInitialRows runs body analysis of the edited functions against the rows a fresh
+// analysis's bodies read: every other row's initial one, not its solved one (a caller's
+// inferred row takes its callees' rows). The solved rows are put back afterwards for the
+// incremental solve; a full solve restarts from the initial rows anyway.
+func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, body func()) {
+	if p.initial == nil {
+		body()
+		return
+	}
+	solved := map[*FuncType]permissionRowSnapshot{}
+	for _, sd := range permissionFunctionDecls(decls) {
+		ft := permissionDeclType(a, sd)
+		if ft == nil {
+			continue
+		}
+		if p.edited[sd.Decl.(*ast.FuncDecl)] {
+			// An edited function keeps its type when its signature did not change, and with
+			// it the solved row a recursive call would read; its body starts from its
+			// declared row, as in a fresh analysis. The body then writes its own row.
+			if start, known := p.declared[ft]; known {
+				start.restore(ft)
+			} else if p.declared != nil {
+				p.declared[ft] = snapshotPermissionRow(ft) // a new type: fresh from this update's declaration phase
+			}
+			continue
+		}
+		start, known := p.initial[ft]
+		if !known {
+			continue
+		}
+		solved[ft] = snapshotPermissionRow(ft)
+		start.restore(ft)
+	}
+	body()
+	for ft, row := range solved {
+		row.restore(ft)
+	}
 }
 
 type permissionRowSnapshot struct {
@@ -94,6 +201,9 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl) 
 			index[fn] = i
 		}
 	}
+	if p.initial == nil {
+		return false
+	}
 	var work []int
 	queued := map[int]bool{}
 	for fn := range p.edited {
@@ -103,6 +213,15 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl) 
 		}
 		work = append(work, i)
 		queued[i] = true
+		if sym := a.funcDeclSymbols[fn]; sym != nil {
+			if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
+				p.initial[ft] = snapshotPermissionRow(ft)
+			}
+		}
+	}
+	before := map[*FuncType]permissionRowSnapshot{}
+	for ft, row := range p.rows {
+		before[ft] = row
 	}
 	p.changed = map[*FuncType]bool{}
 	saved := a.permissionInference
@@ -118,35 +237,121 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl) 
 		changed: func(*FuncType) {},
 	}
 	evals := 0
-	for len(work) > 0 {
-		i := work[0]
-		work = work[1:]
-		queued[i] = false
-		reader = i
-		ft, _ := a.recomputeFunctionPermissionEffects(decls[i])
-		evals++
-		if evals > 4*len(decls)+16 {
+	shrank := false
+	solve := func() bool {
+		for len(work) > 0 {
+			i := work[0]
+			work = work[1:]
+			queued[i] = false
+			reader = i
+			ft, _ := a.recomputeFunctionPermissionEffects(decls[i])
+			evals++
+			if evals > 8*len(decls)+16 {
+				return false
+			}
+			if ft == nil {
+				continue
+			}
+			prev, known := p.rows[ft]
+			if known && prev.same(ft) {
+				continue
+			}
+			if known && !prev.coveredBy(ft) {
+				shrank = true
+			}
+			p.rows[ft] = snapshotPermissionRow(ft)
+			p.changed[ft] = true
+			for r := range p.readers[ft] {
+				if !queued[r] {
+					queued[r] = true
+					work = append(work, r)
+				}
+			}
+		}
+		return true
+	}
+	if !solve() {
+		return false
+	}
+	if shrank {
+		// Re-solving from the old rows keeps a lost effect alive around a call cycle
+		// (each row in it still reads the other's). Everything that reads an edited row,
+		// transitively, restarts from its initial row, as the full solve does, and the
+		// cone is solved to its least fixpoint; rows outside it do not read the edit.
+		cone := map[int]bool{}
+		stack := append([]int(nil), indicesOf(p.edited, index)...)
+		for len(stack) > 0 {
+			i := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if cone[i] {
+				continue
+			}
+			cone[i] = true
+			ft := permissionDeclType(a, decls[i])
+			if ft == nil {
+				continue
+			}
+			for r := range p.readers[ft] {
+				if !cone[r] {
+					stack = append(stack, r)
+				}
+			}
+		}
+		for i := range cone {
+			ft := permissionDeclType(a, decls[i])
+			if ft == nil {
+				continue
+			}
+			start, ok := p.initial[ft]
+			if !ok {
+				return false
+			}
+			start.restore(ft)
+			p.rows[ft] = start
+			if !queued[i] {
+				queued[i] = true
+				work = append(work, i)
+			}
+		}
+		if !solve() {
 			return false
 		}
-		if ft == nil {
-			continue
-		}
-		prev, known := p.rows[ft]
-		if known && prev.same(ft) {
-			continue
-		}
-		p.rows[ft] = snapshotPermissionRow(ft)
-		p.changed[ft] = true
-		for r := range p.readers[ft] {
-			if !queued[r] {
-				queued[r] = true
-				work = append(work, r)
+		// Changed is judged against the rows before this update, not the reset ones.
+		p.changed = map[*FuncType]bool{}
+		for i := range cone {
+			if ft := permissionDeclType(a, decls[i]); ft != nil {
+				if prev, known := before[ft]; !known || !prev.same(ft) {
+					p.changed[ft] = true
+				}
 			}
 		}
 	}
 	a.permissionEffectsOutcome = permissionInferenceOutcome{Evaluations: evals, Rounds: 1, Converged: true}
 	p.solvedIn = true
 	return true
+}
+
+func indicesOf(fns map[*ast.FuncDecl]bool, index map[*ast.FuncDecl]int) []int {
+	out := make([]int, 0, len(fns))
+	for fn := range fns {
+		if i, ok := index[fn]; ok {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// permissionDeclType is the function type whose row a permission declaration publishes.
+func permissionDeclType(a *Analyzer, sd scopedDecl) *FuncType {
+	fn, ok := sd.Decl.(*ast.FuncDecl)
+	if !ok {
+		return nil
+	}
+	if sym := a.funcDeclSymbols[fn]; sym != nil {
+		ft, _ := sym.Type.(*FuncType)
+		return ft
+	}
+	return nil
 }
 
 // replay reports fn's validation diagnostics from the last run when fn was not

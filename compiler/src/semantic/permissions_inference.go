@@ -31,6 +31,12 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 	if r != nil && r.rbUpdating && r.perms.solveIncremental(a, fdecls) {
 		return
 	}
+	if r != nil {
+		// A full solve starts from the declaration phase's rows. During an update the
+		// retained rows are the last solution, and a lost effect would survive a call
+		// cycle, so every unedited row restarts from its initial one.
+		r.perms.resetToInitialRows(a, fdecls, r.rbUpdating)
+	}
 	a.inferFunctionPermissionEffectsWorklist(fdecls)
 	if r != nil {
 		r.perms.recordGraph(a, fdecls)

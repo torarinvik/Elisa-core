@@ -238,6 +238,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var removedStructs []*ast.StructDecl // plain structs whose name is gone from the edited program
 	insertedBefore := map[int]bool{}     // pair index preceded by an added declaration
 	overloadNames := map[string]bool{}   // names that gained an overload
+	usingsAdded, usingsRemoved := 0, 0   // wildcard `using` lines added or removed
 	for i, j := 0, 0; i < len(oldDecls) || j < len(newDecls); {
 		if i < len(oldDecls) && j < len(newDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
 			pairs = append(pairs, [2]int{i, j})
@@ -267,6 +268,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				continue
 			}
 		}
+		// A removed wildcard `using`: its block's declarations take their new usings below.
+		if i < len(oldDecls) && retainedWildcardUsing(oldDecls[i]) {
+			usingsRemoved++
+			insertedBefore[len(pairs)] = true
+			i++
+			continue
+		}
 		// A removed top-level function: its name is gone from the edited source.
 		if i < len(oldDecls) {
 			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && oldTop[of] && !newNames[of.Name] && retainedPlainFunction(of) {
@@ -289,6 +297,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		if j == len(newDecls) {
 			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
+		}
+		if retainedWildcardUsing(newDecls[j]) {
+			usingsAdded++
+			insertedBefore[len(pairs)] = true
+			j++
+			continue
 		}
 		if sd, ok := newDecls[j].(*ast.StructDecl); ok && retainedPlainStruct(sd) && (topLevel[sd] || memberOf[sd] != nil) && !oldTypeNames[sd.Name] && !oldValueNames[sd.Name] {
 			addedStructs = append(addedStructs, sd)
@@ -326,7 +340,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		insertedBefore[len(pairs)] = true
 		j++
 	}
-	if len(pairs)+len(removed)+len(removedConsts)+len(removedStructs) != len(oldDecls) {
+	if len(pairs)+len(removed)+len(removedConsts)+len(removedStructs)+usingsRemoved != len(oldDecls) {
 		return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 	}
 	type fnKey struct {
@@ -357,9 +371,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
-	var structPairs [][2]*ast.StructDecl // edited plain structs: (previous, edited)
-	var constPairs [][2]*ast.ConstDecl   // typed consts with a new value: (previous, edited)
-	var enumPairs [][2]*ast.EnumDecl     // edited plain enums: (previous, edited)
+	var structPairs [][2]*ast.StructDecl  // edited plain structs: (previous, edited)
+	var constPairs [][2]*ast.ConstDecl    // typed consts with a new value: (previous, edited)
+	var enumPairs [][2]*ast.EnumDecl      // edited plain enums: (previous, edited)
+	var hierarchyPairs [][2]*ast.EnumDecl // edited refinements of an enum hierarchy
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
 	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
@@ -403,6 +418,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				if oed, ok := od.(*ast.EnumDecl); ok {
 					if ned, ok := nd.(*ast.EnumDecl); ok && oed.Name == ned.Name && retainedPlainEnum(oed) && retainedPlainEnum(ned) {
 						enumPairs = append(enumPairs, [2]*ast.EnumDecl{oed, ned})
+						continue
+					}
+					if ned, ok := nd.(*ast.EnumDecl); ok && oed.Name == ned.Name && oed.Parent == ned.Parent &&
+						retainedRefinementEnum(oed) && retainedRefinementEnum(ned) {
+						hierarchyPairs = append(hierarchyPairs, [2]*ast.EnumDecl{oed, ned})
 						continue
 					}
 				}
@@ -505,19 +525,21 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			globalsIn++
 		}
 	}
-	if len(enumPairs) != 0 {
+	if len(enumPairs)+len(hierarchyPairs) != 0 {
 		if !retainedEnumStoreSetsEqual(oldDecls, newDecls) {
 			return fail("an enum edit changes which enums are recursive or store-backed")
 		}
-		for _, e := range enumPairs {
-			if d := retainedConstVariantCount(e[1]) - retainedConstVariantCount(e[0]); d > 0 {
+		storeBacked := retainedStoreBackedEnums(newDecls)
+		for _, e := range append(append([][2]*ast.EnumDecl(nil), enumPairs...), hierarchyPairs...) {
+			sb := storeBacked[e[1].Name]
+			if d := retainedConstVariantCount(e[1], sb) - retainedConstVariantCount(e[0], sb); d > 0 {
 				constsIn += d
 			} else {
 				constsOut -= d
 			}
 		}
 	}
-	growth := retainedGrowth{addedFuncs: len(added), removedFuncs: len(removed), addedConsts: constsIn, removedConsts: constsOut, addedGlobals: globalsIn}
+	growth := retainedGrowth{addedFuncs: len(added), removedFuncs: len(removed), addedConsts: constsIn, removedConsts: constsOut, addedGlobals: globalsIn, usings: usingsAdded+usingsRemoved != 0}
 	for _, st := range removedStructs {
 		namespace := ""
 		if block := r.oldMemberBlock(st); block != "" {
@@ -577,6 +599,70 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			nfn := pairedNew[fn]
 			if nfn == nil {
 				return fail("%s mentions a removed function but has no edited counterpart", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+		}
+	}
+	// A live declaration's paired form in the edited program and both source texts. Live
+	// declarations sit at their pre-edit positions, as the pristine ones do.
+	var newOfOld map[string]int
+	keyOf := func(d ast.Decl) string { return fmt.Sprintf("%s|%T", retainedLineKey(d.Pos()), d) }
+	lookup := func(d ast.Decl) (int, int, bool) {
+		if newOfOld == nil {
+			newOfOld = make(map[string]int, len(pairs))
+			for _, p := range pairs {
+				newOfOld[keyOf(oldDecls[p[0]])] = p[0]<<32 | p[1]
+			}
+		}
+		v, ok := newOfOld[keyOf(d)]
+		return v >> 32, v & (1<<32 - 1), ok
+	}
+	newOf := func(d ast.Decl) ast.Decl {
+		if _, j, ok := lookup(d); ok {
+			return newDecls[j]
+		}
+		return nil
+	}
+	spanOf := func(d ast.Decl) (string, string) {
+		if i, j, ok := lookup(d); ok {
+			return oldSpans[i], newSpans[j]
+		}
+		return "", ""
+	}
+	// An added or removed `using`: its scope's declarations take their new usings, and the
+	// functions there that mention a member of the used module are re-analyzed.
+	var usingChanges []retainedUsingChange
+	if usingsAdded+usingsRemoved != 0 {
+		var extra []string
+		for _, nf := range added {
+			extra = append(extra, nf.Name)
+		}
+		for _, d := range addedConsts {
+			extra = append(extra, retainedValueDeclName(d))
+		}
+		for _, st := range addedStructs {
+			extra = append(extra, st.Name)
+		}
+		var why string
+		if usingChanges, why = r.findUsingChanges(file, newOf, spanOf, extra); why != "" {
+			return fail("%s", why)
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		for _, fn := range removedLive {
+			spliced[fn] = true // removed, or re-declared with a new signature
+		}
+		for _, c := range usingChanges {
+			fn, ok := r.decls[c.index].Decl.(*ast.FuncDecl)
+			if !ok || !c.mention || spliced[fn] {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil {
+				return fail("%s mentions a newly used name but has no edited counterpart", fn.Name)
 			}
 			splices = append(splices, splice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
@@ -824,6 +910,65 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		r.LastStats.EnumUsers = len(splices)
 	}
+	// An edited refinement of an enum hierarchy: the hierarchy is recomputed, and the functions
+	// whose text can observe the edit are re-analyzed.
+	var hierarchyEdits []retainedEnumEdit
+	var hierarchyMembers []scopedDecl
+	if len(hierarchyPairs) != 0 {
+		var why string
+		if hierarchyEdits, hierarchyMembers, why = r.findLiveHierarchyEdits(hierarchyPairs, scratch); why != "" {
+			return fail("%s", why)
+		}
+		edited, members := map[string]bool{}, map[string]bool{}
+		editedTypes := map[Type]bool{}
+		for _, e := range hierarchyEdits {
+			editedTypes[e.et] = true
+		}
+		for name, t := range a.namedTypes {
+			// The type's own name and any alias of it, as a bare token.
+			short := name[strings.LastIndex(name, ".")+1:]
+			if editedTypes[t] {
+				edited[short] = true
+			}
+			if et, ok := t.(*EnumType); ok && et != nil {
+				for _, sd := range hierarchyMembers {
+					if sd.Decl == et.Decl {
+						members[short] = true
+					}
+				}
+			}
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		for _, fn := range removedLive {
+			spliced[fn] = true
+		}
+		users := 0
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] {
+				continue
+			}
+			oldSpan, newSpan := spanOf(fn)
+			if pairedNew[fn] == nil {
+				oldSpan = unparse.FormatDecl(fn)
+			}
+			if !retainedHierarchyUsers(oldSpan, edited, members) && !retainedHierarchyUsers(newSpan, edited, members) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil || !retainedPlainFunction(fn) {
+				return fail("%s uses an edited enum but cannot be re-analyzed alone", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+			spliced[fn] = true
+			users++
+		}
+		r.LastStats.EnumUsers += users
+	}
 	// A re-analyzed unchanged function takes its prepared body, which already has its new lines:
 	// only its header shifts.
 	if len(shifted) != 0 {
@@ -859,41 +1004,26 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var addedInto []*ast.NamespaceDecl // live block that receives each added member; nil at top level
 	// place scopes an added declaration (nd in file, prepared its scratch form) in the live
 	// analysis: its block, namespace, usings and visibility.
-	var usingsOf map[string][]string
-	var liveBlocks map[string]*ast.NamespaceDecl
+	var usingsOf map[ast.Decl][]string
+	var liveBlocks map[ast.Decl]ast.Decl // edited block -> its live counterpart
 	place := func(nd, prepared ast.Decl, name string) (scopedDecl, *ast.NamespaceDecl, string) {
 		if usingsOf == nil {
-			// Usings come from an analyzed declaration in the same block: they are the
-			// block's inherited usings plus its own `using` lines.
-			usingsOf, liveBlocks = map[string][]string{}, map[string]*ast.NamespaceDecl{}
-			for _, sd := range r.decls {
-				if _, seen := usingsOf[sd.Namespace]; !seen {
-					usingsOf[sd.Namespace] = sd.Usings
-				}
-			}
-			var collectLive func(decls []ast.Decl)
-			collectLive = func(decls []ast.Decl) {
-				for _, d := range decls {
-					if n, ok := d.(*ast.NamespaceDecl); ok {
-						liveBlocks[retainedLineKey(n.Position)+"|"+n.Name] = n
-						collectLive(n.Decls)
-					}
-				}
-			}
-			collectLive(a.file.Decls)
+			// Usings are the block's inherited usings plus its own `using` lines. Two
+			// blocks of one namespace can hold different lines, so they come from the
+			// edited file's own block structure.
+			usingsOf = a.retainedDeclUsings(file)
+			_, liveBlocks, _ = a.retainedLiveUsings(a.file, file)
 		}
 		sd := scopedDecl{Decl: prepared}
+		usings, ok := usingsOf[nd]
+		if !ok {
+			return sd, nil, fmt.Sprintf("usings of added %s not found", name)
+		}
+		sd.Usings = usings
 		var into *ast.NamespaceDecl
 		if block := memberOf[nd]; block != nil && !topLevel[nd] {
 			sd.Namespace = namespaceOf[block]
-			usings, ok := usingsOf[sd.Namespace]
-			if !ok {
-				return sd, nil, fmt.Sprintf("added %s is in a block with no analyzed declarations", name)
-			}
-			sd.Usings = usings
-			// The block itself is unchanged and lines only shift after an
-			// insertion, so it is found again at its own position.
-			if into = liveBlocks[retainedLineKey(block.Position)+"|"+block.Name]; into == nil {
+			if into, _ = liveBlocks[block].(*ast.NamespaceDecl); into == nil {
 				return sd, nil, fmt.Sprintf("block of added %s not found in the analysis", name)
 			}
 			switch scratch.DeclVisibility[prepared] {
@@ -910,8 +1040,6 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				}
 				a.declVisibility[prepared] = v
 			}
-		} else {
-			sd.Usings = usingsOf[""]
 		}
 		return sd, into, ""
 	}
@@ -1029,8 +1157,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.decls = append(r.decls, addedStructScoped...)
 	}
 	// Past this point the edit is accepted; mutate the retained state.
+	r.applyUsingChanges(usingChanges, scoped)
 	if len(enumEdits) != 0 {
 		r.applyEnumEdits(enumEdits)
+	}
+	if len(hierarchyEdits) != 0 && r.applyHierarchyEdits(hierarchyEdits, hierarchyMembers) {
+		r.a = nil // half-applied
+		return fail("an enum hierarchy edit moves the zeroed variant")
 	}
 	if len(structEdits) != 0 {
 		if !r.applyStructEdits(structEdits) {
@@ -1158,7 +1291,15 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
 	a.retainedProofsScoped = true
-	a.analyzeDecls(changed)
+	// A re-analyzed body is the same declaration node with a new body: the first analysis's
+	// mark would skip the cyclic-summary convergence a fresh analysis runs before it, leaving
+	// a recursive call to read the summary this update invalidated.
+	for _, sd := range changed {
+		if fn, ok := sd.Decl.(*ast.FuncDecl); ok {
+			delete(a.ambientFillAnalyzed, fn)
+		}
+	}
+	r.perms.withInitialRows(a, r.decls, func() { a.analyzeDecls(changed) })
 	a.retainedProofsScoped = false
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
@@ -1447,6 +1588,9 @@ func retainedSameDeclKind(a, b ast.Decl) bool {
 		return fa.Name == b.(*ast.EnumDecl).Name
 	case *ast.GlobalDecl:
 		return fa.Name == b.(*ast.GlobalDecl).Name
+	case *ast.UsingDecl:
+		fb := b.(*ast.UsingDecl)
+		return fa.Name == fb.Name && fa.Member == fb.Member && fa.Alias == fb.Alias
 	}
 	return true
 }

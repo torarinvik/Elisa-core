@@ -16,10 +16,12 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 	// them for the whole declaration set before source-order body analysis can ask
 	// for a summary of a later-declared function.
 	a.recordVerifiedTaskGroupSubmitsInDecls(decls)
-	// An incremental session records per-body products as bodies finish, and a
-	// retained analysis records per-function diagnostic windows; neither is built
-	// for concurrent writers, so both keep the serial path.
-	if workers := parallelBodyWorkers(); workers > 1 && a.incrementalBodies == nil && a.lexicalReads == nil && a.retained == nil {
+	// An incremental session records per-body products as bodies finish and is not built
+	// for concurrent writers, so it keeps the serial path. A retained analysis's first
+	// analysis runs in parallel, its workers recording into shells merged after the join
+	// (analyzeDeclsParallel); its updates stay serial until they match a fresh analysis in
+	// parallel (an edit reverted and redone kept the redone body's old diagnostics).
+	if workers := parallelBodyWorkers(); workers > 1 && a.incrementalBodies == nil && a.lexicalReads == nil && !a.retainedProofsScoped {
 		a.analyzeDeclsParallel(decls, workers)
 		return
 	}

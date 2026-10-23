@@ -564,6 +564,253 @@ func TestRetainedAnalysisAcceptsAddedMemberNamingModuleType(t *testing.T) {
 	}
 }
 
+const retainedUsingBefore = `module Geo:
+    struct Point:
+        x: i64
+
+    def origin() -> Point:
+        return Point{x: 0}
+
+module App:
+    def width(p: Geo::Point&) -> i64:
+        return p.x
+
+    def far() -> i64:
+        q: Point = origin()
+        return q.x
+
+    def unrelated(n: i64) -> i64:
+        return n + 1
+`
+
+// A top-level `using Geo` line resolves the bare names in far; removing it unresolves them again.
+// Both directions must match a fresh analysis without falling back.
+func TestRetainedAnalysisAcceptsUsingEdits(t *testing.T) {
+	options := AnalyzeOptions{}
+	with := strings.Replace(retainedUsingBefore, "module App:\n", "using Geo\n\nmodule App:\n", 1)
+	if retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, retainedUsingBefore), options)) == "" ||
+		retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, with), options)) != "" {
+		t.Fatalf("fixture must fail without the using and pass with it")
+	}
+	for _, step := range []struct{ name, before, after string }{
+		{"add", retainedUsingBefore, with},
+		{"remove", with, retainedUsingBefore},
+	} {
+		_, retained := AnalyzeRetained(retainedParse(t, step.before), retainedParse(t, step.before), []byte(step.before), options)
+		updated, err := retained.Update(retainedParse(t, step.after), retainedParse(t, step.after), []byte(step.after))
+		if err != nil {
+			t.Fatalf("%s: using edit fell back: %v", step.name, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, step.after), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("%s: diverged\n got:\n%s\nwant:\n%s", step.name, got, want)
+		}
+		if retained.LastStats.Changed == 0 {
+			t.Fatalf("%s: no function was re-analyzed: %+v", step.name, retained.LastStats)
+		}
+	}
+}
+
+// The add, its revert and a later member addition run on one retained analysis, as an
+// editor's undo does.
+func TestRetainedAnalysisRevertsUsingEditInPlace(t *testing.T) {
+	options := AnalyzeOptions{}
+	with := strings.Replace(retainedUsingBefore, "module App:\n", "using Geo\n\nmodule App:\n", 1)
+	_, retained := AnalyzeRetained(retainedParse(t, retainedUsingBefore), retainedParse(t, retainedUsingBefore), []byte(retainedUsingBefore), options)
+	// The last step adds a member to App after the using line moved it: its live block is
+	// found by structure, not by its stale position.
+	for step, src := range []string{with, retainedUsingBefore, with, with + "\n    def extra() -> i64:\n        return origin().x\n"} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("step %d: using edit fell back: %v", step, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d: diverged\n got:\n%s\nwant:\n%s", step, got, want)
+		}
+	}
+}
+
+// Two blocks of one module carry different `using` lines: a function added to the second
+// takes that block's usings, not the first block's.
+func TestRetainedAnalysisAddedMemberTakesItsBlockUsings(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := `module App:
+    def first() -> i64:
+        return 1
+
+    module Inner:
+        struct Spot:
+            x: i64
+
+extend App:
+    using Inner
+
+    def second() -> i64:
+        return 2
+`
+	edited := before + "\n    def third() -> i64:\n        s: Spot = Spot{x: 3}\n        return s.x\n"
+	if got := retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, edited), options)); got != "" {
+		t.Fatalf("fixture must analyze cleanly, got:\n%s", got)
+	}
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("added member fell back: %v", err)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+const retainedHierarchyBefore = `global region src
+
+enum Node layout(handle: u32) @src:
+    pass
+
+enum Expr is Node:
+    Lit(i64)
+    Neg(Expr)
+
+enum Stmt is Node:
+    Ret(Expr)
+    Skip
+
+def eval(e: Expr) -> i64:
+    match e:
+        Expr.Lit(v):
+            return v
+        Expr.Neg(x):
+            return 0 - eval(x)
+
+def first(s: Stmt) -> i64:
+    match s:
+        Stmt.Ret(e):
+            return 1
+        Stmt.Skip:
+            return 0
+
+def pass_through(e: Expr) -> Expr:
+    return e
+`
+
+// A variant added to a refinement of a store-backed hierarchy shifts every later leaf tag
+// (Stmt's) and makes eval's match non-exhaustive; only eval names Expr's variants.
+func TestRetainedAnalysisAcceptsHierarchyVariantEdits(t *testing.T) {
+	options := AnalyzeOptions{}
+	with := strings.Replace(retainedHierarchyBefore, "    Neg(Expr)\n", "    Neg(Expr)\n    Zero\n", 1)
+	if retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, with), options)) == "" {
+		t.Fatalf("fixture must report the non-exhaustive match")
+	}
+	for _, step := range []struct{ name, before, after string }{
+		{"add", retainedHierarchyBefore, with},
+		{"remove", with, retainedHierarchyBefore},
+	} {
+		_, retained := AnalyzeRetained(retainedParse(t, step.before), retainedParse(t, step.before), []byte(step.before), options)
+		updated, err := retained.Update(retainedParse(t, step.after), retainedParse(t, step.after), []byte(step.after))
+		if err != nil {
+			t.Fatalf("%s: hierarchy edit fell back: %v", step.name, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, step.after), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("%s: diverged\n got:\n%s\nwant:\n%s", step.name, got, want)
+		}
+		if got := retained.LastStats.EnumUsers; got != 1 {
+			t.Fatalf("%s: re-analyzed %d enum users, want 1 (eval)", step.name, got)
+		}
+	}
+}
+
+// A recursive function's re-analyzed body must converge its own summary first, as a fresh
+// analysis does; reading the summary the update invalidated made the comprehension copy
+// `base` look backed by `taint`.
+func TestRetainedAnalysisReconvergesRecursiveBodyEdit(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := `def f(body: darray[i64]&, taint: mutable darray[sview]&, regions: mutable darray[sview]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        for s in body |taint, regions|:
+            base: darray[sview] = [n for n in taint]
+            nested: mutable darray[sview] = [n for n in taint]
+            nested_regions: mutable darray[sview] = [r for r in regions]
+            f(body, nested, nested_regions)
+            for name in base |taint, regions|:
+                taint.push(name)
+                regions.push(name)
+`
+	edited := strings.Replace(before, "            for name in base", "            _ = base.count\n            for name in base", 1)
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("body edit fell back: %v", err)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// An effect added to a function's row and then removed must leave its callers' inferred
+// rows too, including around a call cycle, whose rows otherwise keep supporting each other.
+func TestRetainedAnalysisRetractsEffectThroughCallCycle(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := `def leaf(n: i64) -> i64 can[Abort.Panic]:
+    return n + 1
+
+def ping(n: i64) -> i64:
+    return 0 if n <= 0 else pong(n - 1) + leaf(n)
+
+def pong(n: i64) -> i64:
+    return 0 if n <= 0 else ping(n - 1)
+
+def top(n: i64) -> i64:
+    return pong(n)
+`
+	edited := strings.Replace(before, "-> i64 can[Abort.Panic]:", "-> i64 can[Abort.Panic, Console.Write]:", 1)
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	for step, src := range []string{edited, before, edited, before} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("step %d fell back: %v", step, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diverged\n got:\n%s\nwant:\n%s", step, got, want)
+		}
+	}
+}
+
+// rec calls itself and is re-analyzed whenever leaf's signature changes; its recursive call
+// must read rec's declared row, as in a fresh analysis, not the row the last solve left.
+func TestRetainedAnalysisRetractsEffectThroughSelfRecursiveCaller(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := `def leaf(n: i64) -> i64 can[Abort.Panic]:
+    return n + 1
+
+def rec(n: i64) -> i64:
+    return 0 if n <= 0 else rec(n - 1) + leaf(n)
+
+def top(n: i64) -> i64:
+    can Abort.Panic:
+        return rec(n)
+`
+	edited := strings.Replace(before, "-> i64 can[Abort.Panic]:", "-> i64 can[Abort.Panic, Console.Write]:", 1)
+	if retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, edited), options)) == retainedDiagnostics(AnalyzeWithOptions(retainedParse(t, before), options)) {
+		t.Fatal("fixture edit does not change the diagnostics")
+	}
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	for step, src := range []string{edited, before, edited, before} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("step %d fell back: %v", step, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diverged\n got:\n%s\nwant:\n%s", step, got, want)
+		}
+	}
+}
+
 const retainedBorrowBefore = `struct BorrowedBox:
     value: i64&
 

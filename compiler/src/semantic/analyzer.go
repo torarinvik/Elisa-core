@@ -1549,6 +1549,9 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		bodies.prepareAnalyzer(a)
 		bodies.prefetchLocalInitializerQueries()
 	}
+	if a.retained != nil {
+		a.retained.perms.recordDeclared(a, activeDecls)
+	}
 	a.analyzeDecls(activeDecls)
 	postPhases := func(activeDecls []scopedDecl) {
 		if a.retained != nil {

@@ -150,6 +150,11 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			resolvedTypeNamesBase: a.resolvedTypeNames, abstractParamRegionRefMemoBase: a.abstractParamRegionRefMemo,
 			abstractRefRestartMemoBase: a.abstractRefRestartMemo,
 		}
+		if a.retained != nil {
+			// What a retained analysis records during bodies: per-function diagnostic
+			// windows and return-borrow summary dependencies.
+			w.retained = &RetainedAnalysis{windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}}
+		}
 		clones[i] = w
 	}
 	baseDiagnostics := len(a.diagnostics)
@@ -210,8 +215,10 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	t2 := time.Now()
 	sched.reportMeasured()
 	workerDiags := make([][]Diagnostic, workers)
+	workerRecords := make([]*RetainedAnalysis, workers)
 	for i, w := range clones {
 		workerDiags[i] = w.diagnostics
+		workerRecords[i], w.retained = w.retained, a.retained
 		w.diagnostics = a.diagnostics[:baseDiagnostics:baseDiagnostics]
 		w.reportedDiagnostics = a.reportedDiagnostics
 		w.globalScope, w.currentScope, w.smtTextFree = a.globalScope, a.currentScope, a.smtTextFree
@@ -245,9 +252,50 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		return order(a.returnBorrowLateFrames[i].frame.fn) < order(a.returnBorrowLateFrames[j].frame.fn)
 	})
 	a.diagnostics = a.diagnostics[:baseDiagnostics]
+	// merged[w][k]: how many diagnostics precede worker w's k-th in the merged list, for
+	// rebasing a retained analysis's windows (appendDiagnostic can drop a duplicate).
+	var merged [][]int
+	if a.retained != nil {
+		merged = make([][]int, workers)
+		for i := range merged {
+			merged[i] = make([]int, len(workerDiags[i])+1)
+		}
+	}
 	for _, s := range spans {
-		for _, d := range workerDiags[s.worker][s.from:s.to] {
+		for k, d := range workerDiags[s.worker][s.from:s.to] {
+			if merged != nil {
+				merged[s.worker][s.from+k] = len(a.diagnostics)
+			}
 			a.appendDiagnostic(d)
+		}
+		if merged != nil {
+			merged[s.worker][s.to] = len(a.diagnostics)
+		}
+	}
+	if r := a.retained; r != nil {
+		if r.windows == nil {
+			r.windows = map[*ast.FuncDecl][2]int{}
+		}
+		if r.rbDeps == nil {
+			r.rbDeps = map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}
+		}
+		for i, rec := range workerRecords {
+			for fn, win := range rec.windows {
+				// Only a window inside its own declaration's span was kept in the merge.
+				if loc, ok := at[fn]; ok {
+					if s := spans[loc[0]]; s.worker == i && s.from <= win[0] && win[1] <= s.to {
+						r.windows[fn] = [2]int{merged[i][win[0]], merged[i][win[1]]}
+					}
+				}
+			}
+			for owner, deps := range rec.rbDeps {
+				if r.rbDeps[owner] == nil {
+					r.rbDeps[owner] = map[*ast.FuncDecl]bool{}
+				}
+				for fn := range deps {
+					r.rbDeps[owner][fn] = true
+				}
+			}
 		}
 	}
 	if parallelReport {
@@ -274,6 +322,12 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if name == "retained" {
+			// The retained analysis owns the whole analyzer; a worker records into a
+			// shell of its own (analyzeDeclsParallel), merged back after the join.
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
 		if useMemoOverlays && (name == "smtSolver" || name == "smtStats") {
 			// A parent's live solver serializes all checks behind its mutex.
 			// Workers own lazy solver sessions and account only their own work.

@@ -191,10 +191,11 @@ type retainedGrowth struct {
 	addedGlobals               int
 	addedStructs               []string // qualified names
 	removedStructs             []string // qualified names
+	usings                     bool     // a wildcard `using` line was added or removed
 }
 
 func (g retainedGrowth) none() bool {
-	return g.addedFuncs == 0 && g.removedFuncs == 0 && g.addedConsts == 0 && g.removedConsts == 0 && g.addedGlobals == 0 && len(g.addedStructs) == 0 && len(g.removedStructs) == 0
+	return g.addedFuncs == 0 && g.removedFuncs == 0 && g.addedConsts == 0 && g.removedConsts == 0 && g.addedGlobals == 0 && len(g.addedStructs) == 0 && len(g.removedStructs) == 0 && !g.usings
 }
 
 // preBodyDifference reports why the edited program's declaration phase differs from the live
@@ -299,8 +300,9 @@ var addedFunctionTables = map[string]bool{
 }
 
 // addedSignatureTables hold one entry per resolved type name in a signature: an added or
-// removed function moves them by however many its signature has. Unchanged functions keep
-// identical entries, and declaring the added function records its own.
+// removed function moves them by however many its signature has, and a `using` edit by the
+// names it newly resolves or unresolves. Unchanged functions keep identical entries, and
+// declaring the added function records its own.
 var addedSignatureTables = map[string]bool{"resolvedTypeNames": true}
 
 // addedStructTables hold one entry per struct type; adding k structs grows each by at most k.
@@ -362,7 +364,7 @@ func globalGrowthDifference(old, cur string, g retainedGrowth) string {
 			grow += len(g.addedStructs)
 			shrink += len(g.removedStructs)
 		}
-		if ok1 == 2 && ok2 == 2 && name == name2 && addedSignatureTables[name] && added+removed != 0 {
+		if ok1 == 2 && ok2 == 2 && name == name2 && addedSignatureTables[name] && (added+removed != 0 || g.usings) {
 			continue
 		}
 		if ok1 != 2 || ok2 != 2 || name != name2 || grow+shrink == 0 || after > before+grow || after < before-shrink {
