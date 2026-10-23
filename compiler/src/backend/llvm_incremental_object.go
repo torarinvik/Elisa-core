@@ -61,7 +61,11 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		}
 	}
 	irStart := time.Now()
-	g, err := compileLLVMModuleWithTargetDebugTrace(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace)
+	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
+		if !options.DebugInfo {
+			C.LLVMContextSetDiscardValueNames(g.context, 1)
+		}
+	})
 	if err != nil {
 		return err
 	}

@@ -1378,3 +1378,58 @@ comparison, not relaxed cache admission. Stabilizing non-debug local LLVM names
 in the actual emitted IR is the next optimization; exact bitcode validation must
 continue to compare the same bytes consumed by the native worker. The full
 sub-ten-second and optimization-quality goals remain incomplete.
+
+
+### Discard non-debug local LLVM names before lowering
+
+Native object sessions now set LLVM's `LLVMContextSetDiscardValueNames` before
+lowering when debug info is disabled. LLVM retains GlobalValue names (functions,
+globals, aliases) while omitting local argument/instruction/block names. The
+actual emitted/cache-checked IR uses those unnamed values; cache comparison is
+still complete exact bitcode plus target/compiler authority. Textual IR and
+debug object generation keep their existing named contexts. O3, inlining,
+alias-analysis and unroll settings are unchanged.
+
+Fresh-process split-module and independent-IR tests now rename source locals:
+non-debug units all hit the disk cache, body changes still rebuild one unit,
+and debug renames rebuild current debug artifacts before repeating as hits.
+Debug fixtures exposed invalid transient linkage during lazy module loading.
+Omitted functions now keep valid temporary declaration linkage through metadata
+materialization, then restore original linkage for the existing namespace and
+externalization step. This preserves lazy loading rather than copying foreign
+bodies. The prior helper independently reproduces the failure in
+`debug-linkage-before.log`.
+
+Fresh-process O2/O3 edit/revert/line/local/debug matrices, uncached oversized
+inputs, exported-global alias addresses/values, global/target changes and C++
+partition guards pass. Relevant backend matrices also pass under the race
+detector, as do main-package disk-cache oracles. The C++ fixture compiler/run
+now have a 30-second context.
+
+Full-source checked qualification with the same admitted baseline measured:
+
+| Case | First build | Native products warm |
+| --- | ---: | ---: |
+| Original source | 21.001 s | 6.332 s |
+| Used struct layout | 11.757 s | 7.381 s |
+| Existing wrapper removal | 9.688 s | 7.638 s |
+| Defaulted signature parameter | 8.366 s | 7.466 s |
+| Function body string | 7.507 s | 6.858 s |
+
+Removal now misses one native unit instead of three; its preceding qualified
+first-build sample was 10.357 seconds. Retained native inputs/objects for the
+original revision fell from 110,643,808 to 56,769,856 bytes. Warm native time was
+1.765 seconds, including current IR generation and exact-key checks. Layout still
+misses seven native units and exceeds ten seconds. All builds/links kept their
+30-second cap and source edits were restored.
+
+Every baseline/layout/removal/signature/body final object is byte-identical to
+its preceding counterpart (`object-parity.json`). All five linked compilers
+compiled the included fixture twice (sidecar miss then valid), and each fixture
+returned 42. Evidence is `discard-locals-64-*.json`,
+`discard-locals-64/functional.json` and `object-parity.json` under the once-bitcode
+production evidence root. These are explicit checked-payload qualifications;
+fresh normal CLI admission of this executable remains to run. The existing
+independent-unit cross-unit-inlining limitation, layout/permission targets,
+contract-constant/const-enum fallbacks and broader major-edit/quality gates keep
+the full goal open.

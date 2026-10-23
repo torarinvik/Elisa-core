@@ -6,6 +6,7 @@
 // parallel_emit.c so cached and ordinary parallel objects use the same ABI.
 #include <llvm-c/Core.h>
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/InstrTypes.h>
@@ -19,6 +20,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <utility>
 
 // Incremental shards use symbol identity rather than body weight. Editing one
 // body must not migrate unrelated definitions across shard boundaries. Ordinary
@@ -169,6 +171,11 @@ extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
     return nullptr;
   }
   std::unique_ptr<Module> module = std::move(*loaded);
+  // Materializing debug metadata can inspect omitted functions. Keep their
+  // temporary declarations valid until materialization finishes, then restore
+  // original linkage for the shared namespace/externalization step.
+  SmallVector<std::pair<Function *, GlobalValue::LinkageTypes>, 16> omitted;
+
   size_t index = 0;
   for (Function &function : *module) {
     if (index >= count) return nullptr;
@@ -176,7 +183,7 @@ extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
     if (owner >= 0 && owner != part && !function.isDeclaration()) {
       GlobalValue::LinkageTypes linkage = function.getLinkage();
       function.deleteBody();
-      function.setLinkage(linkage);
+      omitted.emplace_back(&function, linkage);
     }
   }
   if (index != count) return nullptr;
@@ -184,6 +191,8 @@ extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
     *error_out = strdup(toString(std::move(err)).c_str());
     return nullptr;
   }
+  for (auto &entry : omitted) entry.first->setLinkage(entry.second);
+
   for (Function &function : *module)
     if (function.hasLocalLinkage())
       function.setName(Twine(unit_namespace) + "." + function.getName());

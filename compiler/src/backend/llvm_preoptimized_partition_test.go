@@ -24,6 +24,9 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 			source = strings.Replace(source, "return value + 1\n", "return value + 2\n", 1)
 			want = 55
 		}
+		if revision == "locals" || revision == "locals-debug" {
+			source = strings.ReplaceAll(source, "value", "renamed")
+		}
 		if revision == "lines" {
 			source = "\n\n" + source
 		}
@@ -33,6 +36,7 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 		session.EnableDiskCache(os.Getenv("ELISA_TEST_PREOPT_ROOT"), "test-executable", 64<<20)
 		out := filepath.Join(t.TempDir(), "partitioned.o")
 		options := LLVMObjectEmitOptions{OptLevel: OptimizationLevel3}
+		options.DebugInfo = strings.Contains(revision, "debug")
 		if revision == "O2" {
 			options.OptLevel = OptimizationLevel2
 		}
@@ -64,7 +68,7 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 		return
 	}
 	root := t.TempDir()
-	for _, revision := range []struct{ name, emitted string }{{"base", "4"}, {"repeat", "0"}, {"body", "1"}, {"body", "0"}, {"lines", "0"}, {"base", "0"}, {"O2", "4"}, {"O2", "0"}, {"base", "0"}} {
+	for _, revision := range []struct{ name, emitted string }{{"base", "4"}, {"repeat", "0"}, {"body", "1"}, {"body", "0"}, {"lines", "0"}, {"locals", "0"}, {"base", "0"}, {"O2", "4"}, {"O2", "0"}, {"debug", "4"}, {"debug", "0"}, {"locals-debug", "4"}, {"locals-debug", "0"}, {"debug", "0"}, {"base", "0"}} {
 		t.Run(revision.name, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestPreoptimizedPartitionsPersistAcrossProcesses$", "-test.timeout=30s")
 			cmd.Env = append(os.Environ(), "ELISACORE_TEST_NATIVE_WORKERS=1", "ELISA_TEST_PREOPT_CHILD=1", "ELISA_TEST_PREOPT_ROOT="+root, "ELISA_TEST_PREOPT_REVISION="+revision.name, "ELISA_TEST_PREOPT_EMIT="+revision.emitted)

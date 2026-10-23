@@ -3,12 +3,14 @@
 package backend
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Exercise IR constructs the source frontend does not currently expose. Native
@@ -139,10 +141,12 @@ define i32 @main() {
 	helper := filepath.Join(filepath.Dir(testFile), "incremental_clone.cpp")
 	args := append(flags("--cxxflags"), source, helper, "-o", binary)
 	args = append(args, flags("--ldflags", "--libs", "core", "asmparser", "transformutils", "ipo", "--system-libs")...)
-	if out, err := exec.Command(clang, args...).CombinedOutput(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, clang, args...).CombinedOutput(); err != nil {
 		t.Fatalf("build partition boundary fixture: %v\n%s", err, out)
 	}
-	if out, err := exec.Command(binary).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, binary).CombinedOutput(); err != nil {
 		t.Fatalf("partition boundary fixture: %v\n%s", err, out)
 	}
 }

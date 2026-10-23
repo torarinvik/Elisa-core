@@ -231,6 +231,11 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
 		g.partitionGlobalDeclarationsOnly = part != 0
 		g.sharedResult = true
+		// LLVM retains GlobalValue names while discarding non-semantic local SSA
+		// names. Set this before lowering to avoid creating source-offset names.
+		if !options.DebugInfo {
+			C.LLVMContextSetDiscardValueNames(g.context, 1)
+		}
 	})
 	partitionGenNanos.Add(int64(time.Since(irStart)))
 	if err != nil {
