@@ -51,3 +51,13 @@ Next qualification must compare a fresh-process edited build and a cache-disable
 cold build (diagnostics, LLVM IR and linked execution), including contract,
 permission, overload, struct-layout and transitive dependency edits. Measure the
 actual stage1 source with the retained server explicitly disabled throughout.
+
+Development compiler builds now disable embedded Go VCS metadata by default.
+Previously, a test/documentation-only commit changed the executable through its
+Git revision/time/dirty stamp and invalidated all compiler-content-keyed caches.
+`make build` / `make install` use `-buildvcs=false`, with
+`ELISAC_BUILD_VCS=true` available for builds that explicitly want that metadata;
+the auto-install hook also uses `-buildvcs=false`. The complete executable hash
+remains cache authority. No compiler-code or toolchain identity check is relaxed.
+Two dirty-checkout builds of the hook's recipe produced the same SHA-256 at
+different output paths; commit/reinstall identity is checked separately.

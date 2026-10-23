@@ -27,7 +27,10 @@ fi
 mkdir -p "${HOME}/.elisac"
 INSTALL_TEMP="$(mktemp "${HOME}/.elisac/elisac-stage0.build.XXXXXX")" || exit 0
 trap 'rm -f "$INSTALL_TEMP"' EXIT HUP INT TERM
-if go build -C "$COMPILER_DIR" -o "$INSTALL_TEMP" ./src 2>/tmp/elisac-autoinstall.log; then
+# Keep binary identity stable across test/documentation-only commits. Cache
+# admission still hashes the complete executable; compiler code changes remain
+# visible without making Git metadata itself an input to every cached program.
+if go build -C "$COMPILER_DIR" -buildvcs=false -o "$INSTALL_TEMP" ./src 2>/tmp/elisac-autoinstall.log; then
     if [ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" != "$SOURCE_REV" ] || [ -n "$(git -C "$SOURCE_ROOT" status --porcelain -- compiler)" ]; then
         echo "[hook] compiler source changed during build; installed compiler retained" >&2
         exit 0

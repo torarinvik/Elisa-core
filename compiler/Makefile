@@ -15,6 +15,10 @@
 # overrides it. A missing solver never weakens checking: obligations it would prove stay unproven.
 Z3 ?= z3
 GO_LDFLAGS := -X elisacore/src/smt.DefaultBinary=$(Z3)
+# Disk work products key the executable's bytes. Test/docs-only commits must
+# not change those bytes through VCS timestamps/revisions. Release builders can
+# opt into embedded VCS metadata explicitly.
+ELISAC_BUILD_VCS ?= false
 
 # LLVM for cgo: the #cgo lines in src/backend carry per-OS defaults (Homebrew on macOS,
 # /usr/lib/llvm-* on Linux). When llvm-config is reachable (LLVM_CONFIG, else PATH) and the
@@ -69,7 +73,7 @@ test-full:
 .PHONY: build
 build:
 	mkdir -p bin
-	go build -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src
+	go build -buildvcs=$(ELISAC_BUILD_VCS) -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src
 
 # install: explicit opt-in installation for users who really want it.
 .PHONY: install
@@ -78,7 +82,7 @@ build:
 # `elisac`: a script that wants a compiler names its stage.
 install:
 	mkdir -p $${HOME}/.elisac
-	go build -ldflags "$(GO_LDFLAGS)" -o $${HOME}/.elisac/elisac-stage0 ./src
+	go build -buildvcs=$(ELISAC_BUILD_VCS) -ldflags "$(GO_LDFLAGS)" -o $${HOME}/.elisac/elisac-stage0 ./src
 	rm -f $${HOME}/.elisac/elisac
 
 .PHONY: help
