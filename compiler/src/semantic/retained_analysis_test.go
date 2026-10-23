@@ -1145,3 +1145,16 @@ func TestRetainedAnalysisAcceptsPlainStructEdits(t *testing.T) {
 		}
 	}
 }
+
+// A kept diagnostic names body-local gensyms after the byte offset of their expression; a
+// body that moved takes the names a fresh analysis gives it, and only those names.
+func TestRetainedShiftLocalGensyms(t *testing.T) {
+	in := "known: __quantifier_100 <- false; __auto_7 and __MachineMode_ab_100 stay"
+	want := "known: __quantifier_112 <- false; __auto_19 and __MachineMode_ab_100 stay"
+	if got := retainedShiftLocalGensyms(in, 12); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := retainedShiftLocalGensyms(in, 0); got != in {
+		t.Fatalf("a zero shift changed %q to %q", in, got)
+	}
+}

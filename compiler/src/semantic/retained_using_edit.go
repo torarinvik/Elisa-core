@@ -378,19 +378,24 @@ func (r *RetainedAnalysis) applyUsingChanges(changes []retainedUsingChange, scop
 type retainedOwnerIndex map[string][]retainedOwnerLine
 
 type retainedOwnerLine struct {
-	line int
-	fn   *ast.FuncDecl
+	line, offset int
+	fn           *ast.FuncDecl
+	shift        int // bytes the function moved by in the edited program
 }
 
 // Declarations the edit added sit at their new positions and own no recorded diagnostic.
-func retainedDiagnosticOwners(decls, added []scopedDecl) retainedOwnerIndex {
+func retainedDiagnosticOwners(decls, added []scopedDecl, newOf func(ast.Decl) ast.Decl) retainedOwnerIndex {
 	skip := make(map[ast.Decl]bool, len(added))
 	for _, sd := range added {
 		skip[sd.Decl] = true
 	}
 	idx := retainedOwnerIndex{}
 	add := func(fn *ast.FuncDecl) {
-		idx[fn.Pos().File] = append(idx[fn.Pos().File], retainedOwnerLine{fn.Pos().Line, fn})
+		shift := 0
+		if nf, ok := newOf(fn).(*ast.FuncDecl); ok && nf != nil {
+			shift = nf.Pos().Offset - fn.Pos().Offset
+		}
+		idx[fn.Pos().File] = append(idx[fn.Pos().File], retainedOwnerLine{fn.Pos().Line, fn.Pos().Offset, fn, shift})
 	}
 	for _, sd := range decls {
 		if skip[sd.Decl] {
@@ -414,10 +419,25 @@ func retainedDiagnosticOwners(decls, added []scopedDecl) retainedOwnerIndex {
 }
 
 func (idx retainedOwnerIndex) owner(pos lexer.Pos) *ast.FuncDecl {
+	fn, _ := idx.ownerAt(pos)
+	return fn
+}
+
+// ownerAt also returns how many bytes the owner moved by in the edited program.
+func (idx retainedOwnerIndex) ownerAt(pos lexer.Pos) (*ast.FuncDecl, int) {
 	fns := idx[pos.File]
 	i := sort.Search(len(fns), func(i int) bool { return fns[i].line > pos.Line })
 	if i == 0 {
-		return nil
+		return nil, 0
 	}
-	return fns[i-1].fn
+	return fns[i-1].fn, fns[i-1].shift
+}
+
+func (idx retainedOwnerIndex) shiftOf(fn *ast.FuncDecl) int {
+	for _, o := range idx[fn.Pos().File] {
+		if o.fn == fn {
+			return o.shift
+		}
+	}
+	return 0
 }

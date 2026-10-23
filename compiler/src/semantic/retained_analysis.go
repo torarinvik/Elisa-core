@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strconv"
 	"bytes"
 	"fmt"
 	"os"
@@ -46,6 +47,7 @@ type RetainedAnalysis struct {
 	frameDiags  map[*ast.FuncDecl][]Diagnostic           // each late frame's diagnostics
 	rbInvalid   map[*ast.FuncDecl]bool                   // owners to recompute in this update
 	rbChanged   []*ast.FuncDecl                          // functions whose bodies this update replaced
+	rbSameFlow  map[*ast.FuncDecl]bool                   // changed functions whose return-borrow summary this update keeps
 	rbCallers   map[*ast.FuncDecl][]*ast.FuncDecl        // consulted -> consulting owners, pre-update
 	rbStaleDeps map[*ast.FuncDecl]map[*ast.FuncDecl]bool // pre-update deps of rbInvalid
 	rbCutoff    bool                                     // the late pass may narrow rbInvalid
@@ -144,6 +146,7 @@ func PrepareRetainedScratch(scratch *ast.File, options AnalyzeOptions) *Retained
 func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, prepared *RetainedScratch) (*Result, error) {
 	start := time.Now()
 	r.LastStats = RetainedUpdateStats{}
+	r.rbSameFlow = map[*ast.FuncDecl]bool{}
 	fail := func(format string, args ...any) (*Result, error) {
 		r.LastStats.Fallback = fmt.Sprintf(format, args...)
 		return nil, fmt.Errorf("%s", r.LastStats.Fallback)
@@ -966,6 +969,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			newTexts[nfn] = retainedText(nfn)
 			spliced[fn] = true
 			users++
+			if oldSpan == newSpan {
+				// Unchanged text re-analyzed for its match coverage: a variant it never
+				// names cannot change how its body forwards borrows.
+				r.rbSameFlow[fn] = true
+			}
 		}
 		r.LastStats.EnumUsers += users
 	}
@@ -1192,7 +1200,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	// Diagnostics sit at pre-edit positions; index the functions before any is shifted.
-	owners := retainedDiagnosticOwners(r.decls, append(addedScoped, addedConstScoped...))
+	owners := retainedDiagnosticOwners(r.decls, append(addedScoped, addedConstScoped...), newOf)
 	for _, d := range movedSplices {
 		retainedShiftDecl(d, marks)
 	}
@@ -1237,11 +1245,25 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if warningsChanged {
 		kept = append(kept, pre.diags...)
 	}
+	// A kept diagnostic may spell a body-local gensym (`__quantifier_<offset>`) in its text;
+	// the function it lies in moved by some bytes, and a fresh analysis names it anew.
 	for k := 0; k < r.bodyEnd && k < len(a.diagnostics); k++ {
 		if !drop[k] {
 			d := a.diagnostics[k]
+			if strings.Contains(d.Message, "__") {
+				if owner, shift := owners.ownerAt(d.Pos); owner != nil {
+					d.Message = retainedShiftLocalGensyms(d.Message, shift)
+				}
+			}
 			d.Pos = retainedShiftPos(d.Pos, marks)
 			kept = append(kept, d)
+		}
+	}
+	for fn, diags := range r.frameDiags {
+		if shift := owners.shiftOf(fn); shift != 0 {
+			for i := range diags {
+				diags[i].Message = retainedShiftLocalGensyms(diags[i].Message, shift)
+			}
 		}
 	}
 	a.diagnostics = kept
@@ -1394,6 +1416,24 @@ var retainedGensym = regexp.MustCompile(`(__[A-Za-z][A-Za-z0-9_]*?)_[0-9]+\b`)
 // Auto arenas and runtime quantifier results are bindings local to the body or
 // expression block that declares them.
 var retainedLocalGensym = regexp.MustCompile(`^__(auto|quantifier)_[0-9]+$`)
+
+var retainedLocalGensymRef = regexp.MustCompile(`\b__(auto|quantifier)_([0-9]+)\b`)
+
+// retainedShiftLocalGensyms renames the body-local gensyms in text for a body that moved by
+// shift bytes.
+func retainedShiftLocalGensyms(text string, shift int) string {
+	if shift == 0 || !strings.Contains(text, "__") {
+		return text
+	}
+	return retainedLocalGensymRef.ReplaceAllStringFunc(text, func(name string) string {
+		m := retainedLocalGensymRef.FindStringSubmatch(name)
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			return name
+		}
+		return "__" + m[1] + "_" + strconv.Itoa(n+shift)
+	})
+}
 
 func retainedNormalized(text string) string { return retainedGensym.ReplaceAllString(text, "${1}_") }
 

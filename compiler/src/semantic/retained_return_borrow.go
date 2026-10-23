@@ -154,6 +154,15 @@ func (r *RetainedAnalysis) narrowReturnBorrowInvalidation(a *Analyzer) {
 	before := len(a.diagnostics)
 	savedFn := a.currentFuncDecl
 	a.currentFuncDecl = nil
+	for fn := range r.rbSameFlow {
+		// Its last summary and the deps it was computed from still hold.
+		if flow, ok := r.rbSummaries[fn]; ok {
+			a.returnBorrowFuncSummaries[fn] = flow
+			if deps := r.rbStaleDeps[fn]; deps != nil && r.rbDeps[fn] == nil {
+				r.rbDeps[fn] = deps
+			}
+		}
+	}
 	for _, fn := range r.rbChanged {
 		a.returnBorrowFlowForFunc(fn, map[*ast.FuncDecl]bool{})
 	}
@@ -163,9 +172,14 @@ func (r *RetainedAnalysis) narrowReturnBorrowInvalidation(a *Analyzer) {
 	}
 	var dirty []*ast.FuncDecl
 	for _, fn := range r.rbChanged {
+		if r.rbSameFlow[fn] {
+			continue // its summary cannot change (see rbSameFlow)
+		}
 		fresh, cached := a.returnBorrowFuncSummaries[fn]
 		old, had := r.rbSummaries[fn]
-		if !cached || !had || !reflect.DeepEqual(normalizedReturnBorrowFlow(fresh), normalizedReturnBorrowFlow(old)) {
+		// No last summary means no analysis read one: unless a caller recorded a dependency
+		// on it, nothing retained can change with it.
+		if !cached || (!had && len(r.rbCallers[fn]) != 0) || (had && !reflect.DeepEqual(normalizedReturnBorrowFlow(fresh), normalizedReturnBorrowFlow(old))) {
 			dirty = append(dirty, fn)
 		}
 	}
