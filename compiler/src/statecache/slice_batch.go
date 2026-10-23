@@ -7,6 +7,8 @@ const sliceBatchBytes = 1 << 20
 type sliceBatch struct {
 	values                 reflect.Value
 	remaining, count, next int
+	typed                  typedSliceAllocator
+	typedChecked           bool
 }
 
 func smallSliceBatchEligible(t reflect.Type, capacity int) bool {
@@ -31,7 +33,19 @@ func (d *decoder) allocateSliceBatches(descriptions []objectDescription, batches
 		}
 		batch := &batches[desc.typeID-1]
 		var value reflect.Value
-		if !batch.values.IsValid() && batch.count < 8 {
+		if !batch.typedChecked {
+			batch.typedChecked = true
+			if factory := d.registry.sliceAllocators[t]; factory != nil && batch.count >= 8 {
+				batch.typed = factory(batch.count, batch.remaining)
+			}
+		}
+		if batch.typed != nil {
+			var err error
+			value, err = batch.typed.next(desc.length, desc.capacity, d)
+			if err != nil {
+				return err
+			}
+		} else if !batch.values.IsValid() && batch.count < 8 {
 			value = reflect.MakeSlice(t, desc.length, desc.capacity)
 		} else {
 			if !batch.values.IsValid() || batch.next+desc.capacity > batch.values.Len() {

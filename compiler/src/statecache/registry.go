@@ -15,14 +15,15 @@ type FieldAccess func(reflect.Value, int) reflect.Value
 type FieldPolicy func(reflect.Type, string) bool
 
 type Registry struct {
-	types       []reflect.Type
-	ids         map[reflect.Type]uint64
-	fields      map[reflect.Type][]int
-	scanFields  map[reflect.Type][]int
-	hasObjects  map[reflect.Type]bool
-	fingerprint [32]byte
-	access      FieldAccess
-	singletons  map[reflect.Type]reflect.Value
+	types           []reflect.Type
+	ids             map[reflect.Type]uint64
+	fields          map[reflect.Type][]int
+	scanFields      map[reflect.Type][]int
+	hasObjects      map[reflect.Type]bool
+	fingerprint     [32]byte
+	access          FieldAccess
+	singletons      map[reflect.Type]reflect.Value
+	sliceAllocators map[reflect.Type]func(int, int) typedSliceAllocator
 }
 
 // New freezes the complete local schema. Policy exclusions must describe

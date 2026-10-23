@@ -664,3 +664,26 @@ separate-process disk analysis suite pass. A checked full compiler native build
 completed in 22.809 s under its 30-second cap; its object SHA-256 was exactly
 the prior production baseline's
 `04537dc89a3ee5c3742c08dd156dd1c414f3d76158ab1b4c0854cd41d41c405e`.
+
+
+### Optional typed slice-header pools and reusable fill views
+
+Common semantic slice types now use compiler-registered, ordinary generic Go
+allocators for typed header/data arrays. Registration cannot add schema types;
+unlisted types retain the general allocator. Each original length/capacity and
+object ID is preserved. A separate per-type scratch header supplies full backing
+views during filling, so self-references still observe the original slice length.
+No unsafe pointer/header construction is used. The wire schema is unchanged.
+
+The small-slice benchmark fell from 20,014 allocations / 1,638,905 B to 18
+allocations / 1,405,624 B; time remained about 1.24 ms. Paired checked full-input
+restore times (4.363 s before, 4.262/4.311 s after) do not establish a substantial
+latency gain. A further memory comparison measured 4,023,304,192 versus
+3,943,301,120 bytes peak RSS; restore stayed 4.272/4.268 s. This is an allocation
+and memory gain, not a claim that novel builds meet ten seconds. Codec/race and
+50,000-variable-capacity slice GC/alias/cycle/chunk-boundary checks pass, as do
+all separate-process disk-analysis regressions. Full native qualification took
+22.335 s and produced the exact prior production baseline object SHA-256.
+
+An independent 1 MiB pointer-batch experiment restored in 4.225/4.217 s versus
+4.221 s with 64 KiB batches, showing no useful gain; that experiment was reverted.

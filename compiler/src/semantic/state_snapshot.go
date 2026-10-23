@@ -17,6 +17,7 @@ var semanticStateRegistry = sync.OnceValue(func() *statecache.Registry {
 		// executable code or process address is ever part of the disk state.
 		return t != reflect.TypeFor[RetainedAnalysis]() || name != "post"
 	}, func(v reflect.Value, i int) reflect.Value { return settable(v.Field(i)) })
+	registerSemanticSliceAllocators(registry)
 	registry.InternZeroPointer(invalidType)
 	registry.InternZeroPointer(neverType)
 	registry.InternZeroPointer(nullType)

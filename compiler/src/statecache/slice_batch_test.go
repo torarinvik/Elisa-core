@@ -14,7 +14,7 @@ type sliceBatchGraph struct {
 }
 
 func TestBatchedSlicesKeepCapacitiesHiddenValuesAndAliases(t *testing.T) {
-	const count = 20000
+	const count = 50000
 	root := &sliceBatchGraph{Slices: make([]batchNamedSlice, count)}
 	for i := range root.Slices {
 		full := make(batchNamedSlice, 4+i%3)
@@ -28,6 +28,7 @@ func TestBatchedSlicesKeepCapacitiesHiddenValuesAndAliases(t *testing.T) {
 	root.Interior = &full[3]
 	root.Tail = []any(full[1:4])
 	r := New([]reflect.Type{reflect.TypeFor[sliceBatchGraph]()}, nil, nil)
+	RegisterTypedSlice[batchNamedSlice](r)
 	data, err := r.Encode(root)
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +90,7 @@ func BenchmarkStateSmallSlices(b *testing.B) {
 		root[i][:4][3] = i + 1
 	}
 	r := New([]reflect.Type{reflect.TypeFor[[][]int]()}, nil, nil)
+	RegisterTypedSlice[[]int](r)
 	data, err := r.Encode(root)
 	if err != nil {
 		b.Fatal(err)

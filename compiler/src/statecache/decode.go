@@ -18,6 +18,7 @@ type decoder struct {
 	budget     uint64
 	strings    []string
 	mapEntries map[reflect.Type]decodedMapEntry
+	sliceFill  map[reflect.Type]reflect.Value
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {

@@ -153,7 +153,10 @@ func (d *decoder) readObjects() error {
 				return err
 			}
 		case reflect.Slice:
-			full := v.Slice(0, v.Cap())
+			full, err := d.fullSlice(v)
+			if err != nil {
+				return err
+			}
 			if v.Type().Elem().Kind() == reflect.Uint8 {
 				data, err := d.take(uint64(v.Cap()))
 				if err != nil {
