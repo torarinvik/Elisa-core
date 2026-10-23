@@ -422,3 +422,29 @@ pre-body comparisons read only fingerprints/global data/diagnostics, while
 preparation tables are read from the new scratch state during an update. Their
 idle lifetime should be audited next against the observed post-edit snapshot
 growth; no preparation-table elision has been implemented or claimed here.
+
+Idle retained state now keeps only pre-body fingerprints, global results and
+phase diagnostics. Its old `keyOf`, `prepared`, `targets` and `regionIndex` tables
+are consumed only from the new scratch phase while an update runs. Successful
+updates detach a comparison-only baseline; snapshot publication and restoration
+also compact older baselines. This replaces the retained baseline pointer without
+mutating a caller-owned `RetainedScratch`. New regression coverage loads a legacy
+full baseline, applies prepared body edits, adds/removes a function, round-trips
+each result and compares diagnostics with cold analysis. Full semantic and CLI
+cache/bootstrap regression groups pass.
+
+Using the normally admitted edited 690,967,733-byte snapshot from the preceding
+CLI experiment, a source/options-validated save-only qualification now writes
+620,521,009 bytes: about 70 MB of unused preparation data is gone. It took 13.780 s
+to encode in that profiled run. This is encoding-only timing, so it is not directly
+comparable to the previous 15.213 s CLI encode-plus-publication measurement. The
+controlled source edit was restored afterwards. `ELISACORE_STATE_QUALIFY_SAVE_ONLY`
+selects this phase profiler without publishing into a production cache namespace.
+
+The resulting CPU profile attributes 82.5% cumulative CPU to the codec and 66.4%
+to recursive `encoder.value`. Flat costs include `memmove` (24.7%), heap clearing
+(10.4%) and reflection/field traversal. The existing writer already uses
+`bytes.Buffer`; treating it as repeated small-growth `[]byte` appends would be an
+incorrect diagnosis. Recording live struct fields once, reducing reflected map
+copies and profiling inventory storage are possible next steps. End-to-end
+edited CLI builds and the sub-10-second objective remain unproven.

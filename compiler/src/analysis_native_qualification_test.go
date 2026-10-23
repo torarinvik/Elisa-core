@@ -89,7 +89,11 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := os.Create(filepath.Join(root, "native.cpu.pprof"))
+	profileName := "native"
+	if os.Getenv("ELISACORE_STATE_QUALIFY_SAVE_ONLY") == "1" {
+		profileName = "snapshot"
+	}
+	profile, err := os.Create(filepath.Join(root, profileName+".cpu.pprof"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +114,15 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	timer := time.AfterFunc(18*time.Second, stop)
 	defer timer.Stop()
 	defer stop()
+	if os.Getenv("ELISACORE_STATE_QUALIFY_SAVE_ONLY") == "1" {
+		start = time.Now()
+		snapshot, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("semantic snapshot: %v bytes=%d", time.Since(start), len(snapshot))
+		return
+	}
 	session := backend.NewIncrementalObjectSession(runtime.NumCPU(), 4<<30)
 	stamp, err := compilerSourceStamp()
 	if err != nil {

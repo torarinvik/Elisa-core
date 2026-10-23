@@ -36,6 +36,7 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r.a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
+	r.pre = r.pre.comparisonState()
 	return semanticStateRegistry().Encode(r)
 }
 
@@ -48,6 +49,7 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	if !ok || r == nil || r.a == nil || r.result == nil || r.result.analyzer != r.a || r.a.retained != r {
 		return nil, fmt.Errorf("incomplete semantic state")
 	}
+	r.pre = r.pre.comparisonState()
 	r.post = func(decls []scopedDecl) { r.a.runPostPhases(decls, r.options, nil) }
 	return r, nil
 }

@@ -1406,7 +1406,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if appendedTop {
 		retainedSortDeclsBySource(a.file.Decls)
 	}
-	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre
+	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
 	r.result.Diagnostics = a.diagnostics
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)

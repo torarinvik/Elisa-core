@@ -89,3 +89,67 @@ func TestSemanticStateClearsClosedStorageViewLoopCallbacks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSemanticSnapshotKeepsOnlyPreBodyComparisonState(t *testing.T) {
+	_, r := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
+	if len(r.pre.prepared) == 0 {
+		t.Fatal("fixture has no preparation tables")
+	}
+	// Emulate an older valid snapshot whose idle baseline still owned scratch
+	// preparation tables. Loading it must keep its comparisons, not its AST roots.
+	data, err := semanticStateRegistry().Encode(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreAnalysisState(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(r *RetainedAnalysis) {
+		t.Helper()
+		p := r.pre
+		if p == nil || len(p.fingerprint) == 0 || p.global == "" {
+			t.Fatal("declaration baseline was discarded")
+		}
+		if p.keyOf != nil || p.prepared != nil || p.targets != nil || p.regionIndex != nil {
+			t.Fatal("idle state still roots scratch preparation data")
+		}
+	}
+	check(restored)
+	added := retainedAfter + "\ndef fresh(x: i64) -> i64:\n    return helper(x)\n"
+	for _, source := range []string{retainedAfter, added, retainedBefore} {
+		file, scratch := retainedParse(t, source), retainedParse(t, source)
+		prepared := PrepareRetainedScratch(scratch, AnalyzeOptions{})
+		if prepared == nil || len(prepared.pre.prepared) == 0 {
+			t.Fatal("scratch preparation unavailable")
+		}
+		original := prepared.pre
+		count := len(original.prepared)
+		got, err := restored.UpdatePrepared(file, scratch, []byte(source), prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prepared.pre != original || len(original.prepared) != count {
+			t.Fatal("compaction changed caller-owned scratch preparation")
+		}
+		check(restored)
+		want := AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{})
+		if retainedDiagnostics(got) != retainedDiagnostics(want) {
+			t.Fatal("compacted update diagnostics differ from cold analysis")
+		}
+		data, err = restored.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored, err = RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(restored)
+	}
+	// Direct serialization compacts a newly analyzed baseline too.
+	if _, err = r.MarshalState(); err != nil {
+		t.Fatal(err)
+	}
+	check(r)
+}

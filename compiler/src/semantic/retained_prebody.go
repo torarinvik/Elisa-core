@@ -30,6 +30,17 @@ type preBodyState struct {
 	regionIndex map[*ast.FuncDecl]map[int]bool
 }
 
+// comparisonState retains only the declaration-phase baseline needed by the
+// next update. The new scratch phase owns preparation tables while that update
+// runs; keeping its prepared functions afterwards roots an unused scratch AST.
+// Return a separate state so a caller-owned RetainedScratch is not modified.
+func (p *preBodyState) comparisonState() *preBodyState {
+	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil {
+		return p
+	}
+	return &preBodyState{fingerprint: p.fingerprint, global: p.global, diags: p.diags}
+}
+
 var pendingPreBody *preBodyState
 
 func takePendingPreBody() *preBodyState {
