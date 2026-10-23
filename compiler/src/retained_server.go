@@ -29,6 +29,7 @@ import (
 	"runtime/pprof"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -71,6 +72,9 @@ type retainedRuntime struct {
 
 	key   string
 	state *semantic.RetainedAnalysis
+
+	// codegen is whether the current request generates code (set per request).
+	codegen bool
 
 	tokensFor []byte
 	tokens    []lexer.Token
@@ -202,7 +206,7 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 			// lets code generation consume the updated analysis directly; its
 			// LLVM IR has matched a fresh analysis byte for byte on the stage1
 			// seed for no-op and body edits.
-			if len(result.Errors()) != 0 || os.Getenv("ELISACORE_RETAINED_SPLICED_CODEGEN") == "1" {
+			if len(result.Errors()) != 0 || !rt.codegen || os.Getenv("ELISACORE_RETAINED_SPLICED_CODEGEN") == "1" {
 				return result
 			}
 			// No errors: code generation follows, and by default it must see a
@@ -227,6 +231,9 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	fmt.Fprintf(rt.log, "[retained] full analysis %v\n", time.Since(start).Round(time.Millisecond))
 	return result
 }
+
+// lastRequest is when the server last started answering a request (Unix nanoseconds).
+var lastRequest atomic.Int64
 
 func serveRetained(socket string, log io.Writer) error {
 	if socket == "" || strings.Contains(socket, ":") && !strings.HasPrefix(socket, "/") {
@@ -270,6 +277,7 @@ func serveRetained(socket string, log io.Writer) error {
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		lastRequest.Store(time.Now().UnixNano())
 		restoreGC := suspendRetainedGC()
 		resp := runRetainedRequest(req)
 		// Answer before collection resumes: re-enabling the collector on a heap far
@@ -300,6 +308,24 @@ func serveRetained(socket string, log io.Writer) error {
 		}
 	})
 	fmt.Fprintf(log, "[retained] serving on %s\n", socket)
+	lastRequest.Store(time.Now().UnixNano())
+	if idle := retainedIdleTimeout(); idle > 0 {
+		go func() {
+			for range time.Tick(time.Minute) {
+				// A request in progress holds mu; the stamp is taken when it starts.
+				if !mu.TryLock() {
+					continue
+				}
+				expired := time.Since(time.Unix(0, lastRequest.Load())) > idle
+				mu.Unlock()
+				if expired {
+					fmt.Fprintf(log, "[retained] idle for %v; exiting\n", idle)
+					_ = os.Remove(socket)
+					os.Exit(0)
+				}
+			}
+		}()
+	}
 	return http.Serve(listener, mux)
 }
 
@@ -324,6 +350,7 @@ func runRetainedRequest(req retainedRequest) retainedResponse {
 			}
 		}
 	}
+	activeRetained.codegen = requestGeneratesCode(req.Args)
 	code := runCLI(req.Args, &stdout, &stderr)
 	fmt.Fprintf(activeRetained.log, "[retained] %s -> %d in %v\n", strings.Join(req.Args, " "), code, time.Since(start).Round(time.Millisecond))
 	if objects := activeRetained.objects; objects != nil {
@@ -347,11 +374,13 @@ func setEnvironment(env []string) {
 // so the caller runs locally.
 func forwardToRetainedServer(args []string, stdout, stderr io.Writer) (int, bool) {
 	socket := os.Getenv("ELISACORE_RETAINED_SERVER")
-	if socket == "" {
-		return 0, false
-	}
 	for _, arg := range args {
 		if arg == emitRetainedServe || arg == emitServe {
+			return 0, false
+		}
+	}
+	if socket == "" {
+		if socket = autoRetainedSocket(args); socket == "" || !ensureRetainedServer(socket, args[len(args)-1], stderr) {
 			return 0, false
 		}
 	}
@@ -423,4 +452,19 @@ func suspendRetainedGC() func() {
 		debug.SetGCPercent(prevPercent)
 		debug.SetMemoryLimit(prevLimit)
 	}
+}
+
+// requestGeneratesCode reports whether args run code generation: an executable or
+// an IR/object emit. Analysis-only emits can use the updated analysis directly.
+func requestGeneratesCode(args []string) bool {
+	for i, arg := range args {
+		if arg == "-emit" && i+1 < len(args) {
+			switch args[i+1] {
+			case emitInterface, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitDoc, emitDeps, emitDepsJSON, emitAST, emitLowered, emitHeader, emitCBindCheck, emitCBindJSON:
+				return false
+			}
+			return true
+		}
+	}
+	return true
 }
