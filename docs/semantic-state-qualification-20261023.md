@@ -817,3 +817,14 @@ callee, changed existing rows, index shifts, callable-type reuse, retargeted
 verified types and removal fallback. Snapshot roundtrip tests preserve the
 invocation-local callback reconstruction. Replay-only CPU profiling and detailed
 update stats are available in the opt-in qualification harness.
+
+
+The final append guard also captures known callable types (including externs
+and aliases), requires unchanged namespaces/usings and old type identities,
+and passes the exact verified declaration/type map into post processing. Type
+retargeting during body analysis rejects incremental solving. The old callback
+field remains excluded from serialization; its signature change adds no graph
+layout or schema change. The complete semantic suite and disk-cache matrix
+pass with these stricter guards. A checked replay of the actual full compiler
+addition measured 0.385 s; phase logs show effect solving 2 ms and permission
+validation 5 ms. Native before/after addition objects matched byte for byte.
