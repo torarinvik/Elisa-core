@@ -39,7 +39,7 @@ def json_parser_document_source_len(impl: heap JsonParserDocumentInternal&) -> u
 def json_parser_document_store(impl: heap JsonParserDocumentInternal&) -> JsonNode.Store[Local]:
     return JsonNode.Store(impl.arena)
 def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out: mutable JsonParserDocument&) -> i64:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         trusted Unsafe.PointerCast:
             if out[0].impl_bits != 0.uintptr():
                 json_parser_document_destroy_impl(out)
@@ -81,10 +81,10 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
             out[0] <- JsonParserDocument{impl_bits: internal.uintptr()}
             return 1
 def json_parser_document_parse_impl(source: u8&, out: mutable JsonParserDocument&) -> i64:
-    return json_parser_document_parse_with_len_impl(source, json_c_string_len(source), out) can Memory.Allocate, Memory.Release, Abort.Panic
+    return json_parser_document_parse_with_len_impl(source, json_c_string_len(source), out) can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}
 def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&):
     trusted Unsafe.PointerCast:
-        can Memory.Release, Abort.Panic:
+        can Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
             impl_bits: uintptr = doc[0].impl_bits
             if impl_bits == 0.uintptr():
                 return
@@ -95,7 +95,7 @@ def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&):
             arena_free(&arena_to_free)
 def json_parser_document_destroy_handle_impl(doc_bits: uintptr) -> i64:
     trusted Unsafe.PointerCast:
-        can Memory.Release, Abort.Panic:
+        can Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
             if doc_bits == 0.uintptr():
                 return 0
 

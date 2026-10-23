@@ -56,7 +56,7 @@ def json_node_store_state_bits(store: JsonNode.Store[Local]&) -> uintptr:
     return json_node_store_words(store)[2]
 def json_node_store_reserve(arena: mutable Arena&, store: JsonNode.Store[Local]&, needed_rows: usize):
     trusted Unsafe.PointerCast:
-        can Memory.Allocate, Abort.Panic:
+        can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
             state_bits: uintptr = json_node_store_state_bits(store)
             if state_bits == 0.uintptr():
                 return
