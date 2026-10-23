@@ -1556,7 +1556,19 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	if a.retained != nil {
 		a.retained.perms.recordDeclared(a, activeDecls)
 	}
+	if build := pendingAnalysisBuild; build != nil && a.retained == build.retained {
+		build.file, build.loweredFile = file, loweredFile
+		a.retained.capture(a, activeDecls, nil)
+		a.closeSMT()
+		return &Result{File: file}
+	}
 	a.analyzeDecls(activeDecls)
+	return a.finishProgramAnalysis(file, loweredFile, activeDecls, options, solver)
+}
+
+// finishProgramAnalysis is shared by ordinary analysis and an initial analysis
+// resumed from a disk checkpoint. No partially analyzed Result is published.
+func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
 	postPhases := func(activeDecls []scopedDecl) { a.runPostPhases(activeDecls, options, solver) }
 	postPhases(activeDecls)
 	if a.retained != nil {

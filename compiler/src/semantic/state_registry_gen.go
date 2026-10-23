@@ -12,6 +12,8 @@ func semanticStateTypes() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeFor[AddressSpaceType](),
 		reflect.TypeFor[AggregateStateType](),
+		reflect.TypeFor[AnalysisBuild](),
+		reflect.TypeFor[AnalysisBuildStats](),
 		reflect.TypeFor[AnalyzeOptions](),
 		reflect.TypeFor[Analyzer](),
 		reflect.TypeFor[AnnotatedFunc](),

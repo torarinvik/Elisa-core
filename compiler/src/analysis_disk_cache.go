@@ -193,7 +193,11 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			return semantic.AnalyzeWithOptions(file, options)
 		}
 		coldStart := time.Now()
-		result, state = semantic.AnalyzeRetained(file, pristine, program.source, options)
+		if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "1" {
+			result, state = advanceAnalysisDiskBuild(program, file, pristine, options, artifact, stderr)
+		} else {
+			result, state = semantic.AnalyzeRetained(file, pristine, program.source, options)
+		}
 		debugAnalysisDisk(stderr, "cold analysis in=%v", time.Since(coldStart).Round(time.Millisecond))
 	}
 	if state != nil && !unchanged {

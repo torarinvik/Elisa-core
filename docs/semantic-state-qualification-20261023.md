@@ -116,3 +116,39 @@ effect added by subsequent inference. Existing effect/error/frame subset tests
 and disk-cache edit/IR comparisons pass; the full semantic suite also passes.
 This does not yet implement resumable
 initial analysis; whole-program bootstrap still exceeds the process cap.
+
+## Initial-analysis checkpoints
+
+`ELISACORE_ANALYSIS_CACHE=1 ELISACORE_ANALYSIS_BOOTSTRAP=1` opts into a
+qualification path for bootstrapping inputs whose initial analysis cannot finish
+inside the process cap. It runs the declaration phase once, then advances serial
+body analysis between portable disk checkpoints. Repeating the identical build
+in a fresh process restores the previous checkpoint. There is no resident worker.
+`ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS` controls the body time slice (default 3 s,
+range 1–15); `ELISACORE_ANALYSIS_BOOTSTRAP_DECLS` can impose a declaration count
+limit for testing. These scheduling controls do not change the semantic key.
+
+An unfinished invocation deliberately fails with a checkpoint message and emits
+no object/IR. `.building` files are keyed by the complete source bytes as well as
+the normal compiler/options/environment/authority identity. A changed revision
+cannot resume them. Completed analyses enter the ordinary `.state` cache and
+subsequent supported edits use retained updates normally. Corrupt checkpoints
+are rejected and reconstructed. Active journals and unavailable solvers reject
+publication. Whole-program checks still run before any successful result.
+
+Tests round-trip checkpoints between declarations and compare published metadata
+against fresh analysis, preserve protocol/contract failures, compare LLVM IR
+(including static-generated declarations), and edit the completed retained state.
+Separate-process CLI tests require progress restoration, no premature artifacts,
+normal completed-cache reuse, corrupt-cache repair and old-revision rejection.
+Existing disk edit/IR and native execution tests also pass.
+
+The real full stage1 input saved its first 666,967,732-byte checkpoint at 1/14,422
+declarations in a 9.938 s invocation. A fresh process restored it in 2.701 s,
+advanced to 3,282 declarations and saved 749,567,373 bytes; total 20.676 s. Later
+attempts reached 3,302 and 3,339 declarations (959,683,922 bytes). The 3,302 attempt
+hit its 30 s cap after publishing progress; the 3,339 attempt returned incomplete
+in 25.623 s. Those trials used an 8 s body slice; the default was reduced to 3 s
+to reserve more time for snapshots. A declaration remains indivisible, so the
+external 30 s timeout is still mandatory. Full bootstrap, post-pass timing,
+full-compiler output and sub-10-second edit builds remain unproven.

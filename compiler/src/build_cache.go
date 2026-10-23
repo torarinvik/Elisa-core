@@ -269,6 +269,9 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_BUILD_CACHE":                   true,
 	"ELISACORE_ANALYSIS_CACHE_DEBUG":          true,
+	"ELISACORE_ANALYSIS_BOOTSTRAP":            true,
+	"ELISACORE_ANALYSIS_BOOTSTRAP_DECLS":      true,
+	"ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS":    true,
 	"ELISACORE_RETAINED_SERVER":               true,
 	"ELISACORE_RETAINED_IDLE":                 true,
 	"ELISACORE_RETAINED_AUTO_MIN":             true,
