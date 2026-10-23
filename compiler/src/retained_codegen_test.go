@@ -132,3 +132,45 @@ func firstLineDiff(got, want string) string {
 	}
 	return ""
 }
+
+func TestDiskStateUpdateGeneratesFreshIR(t *testing.T) {
+	edits := map[string][2]string{
+		"overload":    {"    def width(p: Pair) -> i64:\n", "    def width(p: bool) -> i64:\n        return 1\n\n    def width(p: Pair) -> i64:\n"},
+		"sig":         {"def tag(x: i64) -> i64 can[Abort.Panic]:\n        return x", "def tag(x: i64) -> i32 can[Abort.Panic]:\n        return 1"},
+		"can_row":     {"can[Abort.Panic]:", "can[Abort.Panic, Console.Write]:"},
+		"contract":    {"ensure result == b\n", "ensure result == b and i < n\n"},
+		"field":       {"        a: i64\n        b: i64\n", "        a: i64\n        z: i64 = 0\n        b: i64\n"},
+		"field_first": {"    struct Pair:\n", "    struct Pair:\n        z: i64 = 0\n"},
+		"body":        {"return p.a + p.b", "return p.b + p.a"},
+		"fn_remove":   {"    def tag(x: i64) -> i64 can[Abort.Panic]:\n        return x\n", "    def tag(x: i64) -> i64 can[Abort.Panic]:\n        return x\n\n    def unused(x: i64) -> i64:\n        return x\n"},
+	}
+	for name, e := range edits {
+		t.Run(name, func(t *testing.T) {
+			edited := strings.Replace(retainedCodegenBase, e[0], e[1], 1)
+			if edited == retainedCodegenBase {
+				t.Fatal("fixture: edit did not apply")
+			}
+			_, retained := semantic.AnalyzeRetained(retainedCodegenParse(t, retainedCodegenBase), retainedCodegenParse(t, retainedCodegenBase), []byte(retainedCodegenBase), semantic.AnalyzeOptions{})
+			for i, src := range []string{edited, retainedCodegenBase, edited} {
+				state, err := retained.MarshalState()
+				if err != nil {
+					t.Fatalf("step %d snapshot: %v", i, err)
+				}
+				retained, err = semantic.RestoreAnalysisState(state)
+				if err != nil {
+					t.Fatalf("step %d restore: %v", i, err)
+				}
+
+				updated, err := retained.Update(retainedCodegenParse(t, src), retainedCodegenParse(t, src), []byte(src))
+				if err != nil {
+					t.Fatalf("step %d fell back: %v", i, err)
+				}
+				got := retainedIR(t, updated)
+				want := retainedIR(t, semantic.AnalyzeWithOptions(retainedCodegenParse(t, src), semantic.AnalyzeOptions{}))
+				if got != want {
+					t.Fatalf("step %d: IR differs\n%s", i, firstLineDiff(got, want))
+				}
+			}
+		})
+	}
+}

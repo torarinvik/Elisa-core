@@ -849,7 +849,7 @@ func (a *Analyzer) beginReturnBorrowSummary(fn *ast.FuncDecl) {
 	delete(a.returnBorrowFuncSummaries, fn)
 	a.pushReturnBorrowDeferFrame(fn)
 	if a.currentScope != nil && a.currentScope != a.globalScope {
-		a.currentScope.defineHook = a.noteReturnBorrowBinder
+		a.currentScope.returnBorrowFrame = a.returnBorrowDeferFrames[len(a.returnBorrowDeferFrames)-1]
 	}
 }
 

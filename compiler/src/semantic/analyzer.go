@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sync/atomic"
 	"time"
 )
 
@@ -217,8 +218,10 @@ type Analyzer struct {
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	// Keep identity owners alive until all invocation-local facts are consumed;
 	// a pointer formatted as a string alone does not prevent address reuse by GC.
-	optimizationSymbolIDs map[*Symbol]string
-	indexBoundsProven     map[*ast.IndexExpr]bool
+	optimizationSymbolIDs    map[*Symbol]string
+	optimizationExprIDs      map[ast.Expr]string
+	optimizationIdentityNext *atomic.Uint64
+	indexBoundsProven        map[*ast.IndexExpr]bool
 	// getWrappedIndexExprs records index expressions whose `else` recovery is
 	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
 	// use the explicit `get` head, so they must NOT receive the bare-`else`
@@ -1297,6 +1300,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		parallelForCapacity = 4
 	}
 	a := &Analyzer{
+		optimizationIdentityNext:          &atomic.Uint64{},
 		retained:                          takePendingRetained(),
 		preBody:                           takePendingPreBody(),
 		lookupTrace:                       recorder,
@@ -1553,37 +1557,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		a.retained.perms.recordDeclared(a, activeDecls)
 	}
 	a.analyzeDecls(activeDecls)
-	postPhases := func(activeDecls []scopedDecl) {
-		if a.retained != nil {
-			a.retained.lateFrames = append(a.retained.lateFrames[:0], a.returnBorrowLateFrames...)
-		}
-		postTimed("evaluateLateReturnBorrowFrames", func() { a.evaluateLateReturnBorrowFrames() })
-		// A4: discharge each protocol default method's own contract against its own body (the default
-		// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
-		// after foldInterfaceBases so an inherited member/law the default uses is in scope.
-		postTimed("checkProtocolDefaultMethodContracts", func() { a.checkProtocolDefaultMethodContracts(activeDecls) })
-		postTimed("inferFunctionPermissionEffects", func() {
-			if solver == nil {
-				a.inferFunctionPermissionEffects(activeDecls)
-			} else {
-				solver(a, activeDecls)
-			}
-		})
-		postTimed("validateDeferredBorrowedNurseryShutdownCalls", func() { a.validateDeferredBorrowedNurseryShutdownCalls() })
-		for _, check := range a.deferredImplEffectChecks {
-			check()
-		}
-		a.deferredImplEffectChecks = nil
-		if options.EnforceProgressSafety {
-			a.validateProgressBlocking(activeDecls)
-			a.validateProgressRecursion(activeDecls)
-		}
-		postTimed("validatePermissionUsage", func() { a.validatePermissionUsage(activeDecls) })
-		postTimed("analyzeExports", func() { a.analyzeExports(activeDecls) })
-		postTimed("finalizeCallArgDisjoint", func() { a.finalizeCallArgDisjoint() })
-		postTimed("finalizeFuncDisjointParams", func() { a.finalizeFuncDisjointParams(activeDecls) })
-		postTimed("lintHotKernelsForDisjointness", func() { a.lintHotKernelsForDisjointness() })
-	}
+	postPhases := func(activeDecls []scopedDecl) { a.runPostPhases(activeDecls, options, solver) }
 	postPhases(activeDecls)
 	if a.retained != nil {
 		a.retained.capture(a, activeDecls, postPhases)
@@ -1668,4 +1642,40 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 	}
 	recordInternalParityCase(file, options, analysisResult)
 	return analysisResult
+}
+
+// runPostPhases is callable after restoring semantic state from disk; it does
+// not depend on a closure captured in the process that created the state.
+func (a *Analyzer) runPostPhases(activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) {
+
+	if a.retained != nil {
+		a.retained.lateFrames = append(a.retained.lateFrames[:0], a.returnBorrowLateFrames...)
+	}
+	postTimed("evaluateLateReturnBorrowFrames", func() { a.evaluateLateReturnBorrowFrames() })
+	// A4: discharge each protocol default method's own contract against its own body (the default
+	// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
+	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
+	postTimed("checkProtocolDefaultMethodContracts", func() { a.checkProtocolDefaultMethodContracts(activeDecls) })
+	postTimed("inferFunctionPermissionEffects", func() {
+		if solver == nil {
+			a.inferFunctionPermissionEffects(activeDecls)
+		} else {
+			solver(a, activeDecls)
+		}
+	})
+	postTimed("validateDeferredBorrowedNurseryShutdownCalls", func() { a.validateDeferredBorrowedNurseryShutdownCalls() })
+	for _, check := range a.deferredImplEffectChecks {
+		check()
+	}
+	a.deferredImplEffectChecks = nil
+	if options.EnforceProgressSafety {
+		a.validateProgressBlocking(activeDecls)
+		a.validateProgressRecursion(activeDecls)
+	}
+	postTimed("validatePermissionUsage", func() { a.validatePermissionUsage(activeDecls) })
+	postTimed("analyzeExports", func() { a.analyzeExports(activeDecls) })
+	postTimed("finalizeCallArgDisjoint", func() { a.finalizeCallArgDisjoint() })
+	postTimed("finalizeFuncDisjointParams", func() { a.finalizeFuncDisjointParams(activeDecls) })
+	postTimed("lintHotKernelsForDisjointness", func() { a.lintHotKernelsForDisjointness() })
+
 }

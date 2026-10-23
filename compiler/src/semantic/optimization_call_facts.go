@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"fmt"
+	"sync/atomic"
 )
 
 func (a *Analyzer) isCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bool {
@@ -219,7 +220,7 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 			return a.optimizationSymbolIdentity(sym)
 		}
 	case *ast.AllocExpr:
-		return optimizationExprIdentity(n)
+		return a.optimizationExprIdentity(n)
 	case *ast.IndexExpr:
 		if n.Fallback != nil {
 			if a.exprDefinitelyNever(n.Fallback) {
@@ -301,16 +302,24 @@ func (a *Analyzer) optimizationSymbolIdentity(sym *Symbol) string {
 	if a.optimizationSymbolIDs == nil {
 		a.optimizationSymbolIDs = make(map[*Symbol]string)
 	}
-	identity := fmt.Sprintf("symbol@%p", sym)
+	identity := fmt.Sprintf("symbol@%d", a.nextOptimizationIdentity())
 	a.optimizationSymbolIDs[sym] = identity
 	return identity
 }
 
-func optimizationExprIdentity(expr ast.Expr) string {
+func (a *Analyzer) optimizationExprIdentity(expr ast.Expr) string {
 	if expr == nil {
 		return ""
 	}
-	return fmt.Sprintf("expr@%p", expr)
+	if identity, ok := a.optimizationExprIDs[expr]; ok {
+		return identity
+	}
+	if a.optimizationExprIDs == nil {
+		a.optimizationExprIDs = map[ast.Expr]string{}
+	}
+	identity := fmt.Sprintf("expr@%d", a.nextOptimizationIdentity())
+	a.optimizationExprIDs[expr] = identity
+	return identity
 }
 
 func (a *Analyzer) inferViewHelperExtent(call *ast.CallExpr, baseIndex, startIndex, endIndex int, fullSpanField string) *OptimizationExtent {
@@ -536,4 +545,14 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 		}
 	}
 	return facts, true
+}
+
+// Workers share the counter while checking disjoint bodies; the integer value
+// can be persisted, unlike a process address. A restored process continues the
+// same identity domain without collisions with its newly allocated symbols.
+func (a *Analyzer) nextOptimizationIdentity() uint64 {
+	if a.optimizationIdentityNext == nil {
+		a.optimizationIdentityNext = new(atomic.Uint64)
+	}
+	return a.optimizationIdentityNext.Add(1)
 }

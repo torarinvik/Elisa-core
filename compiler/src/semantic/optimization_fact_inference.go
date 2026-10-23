@@ -166,7 +166,7 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 	case *ast.AllocExpr:
 		if _, ok := t.(*RefType); ok {
 			facts.Exclusive = true
-			facts.base = optimizationExprIdentity(expr)
+			facts.base = a.optimizationExprIdentity(expr)
 		}
 	case *ast.StringLit:
 		facts.ReadOnly = true

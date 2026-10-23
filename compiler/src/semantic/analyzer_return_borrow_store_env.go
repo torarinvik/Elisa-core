@@ -59,31 +59,27 @@ type pendingLocalBorrowStore struct {
 }
 
 type returnBorrowDeferFrame struct {
-	fn      *ast.FuncDecl
-	pending []pendingLocalBorrowStore
+	collecting bool // active only while this function body defines binders
+	fn         *ast.FuncDecl
+	pending    []pendingLocalBorrowStore
 	// binders are the non-declaration local bindings the body's analysis defined, by name.
 	binders map[string][]*Symbol
 }
 
 func (a *Analyzer) pushReturnBorrowDeferFrame(fn *ast.FuncDecl) {
-	a.returnBorrowDeferFrames = append(a.returnBorrowDeferFrames, &returnBorrowDeferFrame{fn: fn})
+	a.returnBorrowDeferFrames = append(a.returnBorrowDeferFrames, &returnBorrowDeferFrame{fn: fn, collecting: true})
 }
 
 // noteReturnBorrowBinder records a local binding defined while the current function's body is
 // analyzed that is not a plain declaration.
-func (a *Analyzer) noteReturnBorrowBinder(sym *Symbol) {
+func (frame *returnBorrowDeferFrame) noteBinder(sym *Symbol) {
+	if !frame.collecting {
+		return
+	}
 	if sym == nil || sym.Kind != SymbolLocal {
 		return
 	}
 	if _, isDecl := sym.Node.(*ast.VarDeclStmt); isDecl {
-		return
-	}
-	count := len(a.returnBorrowDeferFrames)
-	if count == 0 {
-		return
-	}
-	frame := a.returnBorrowDeferFrames[count-1]
-	if frame.fn != a.currentFuncDecl {
 		return
 	}
 	if frame.binders == nil {
@@ -99,6 +95,7 @@ func (a *Analyzer) popReturnBorrowDeferFrame(fn *ast.FuncDecl) {
 		return
 	}
 	frame := a.returnBorrowDeferFrames[count-1]
+	frame.collecting = false
 	a.returnBorrowDeferFrames = a.returnBorrowDeferFrames[:count-1]
 	if frame.fn != fn || len(frame.pending) == 0 {
 		return

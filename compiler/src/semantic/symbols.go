@@ -482,10 +482,10 @@ func symbolAliasRoot(sym *Symbol) *Symbol {
 
 type Scope struct {
 	Parent *Scope
-	// defineHook, inherited by child scopes, observes every successful Define (the return-borrow
+	// returnBorrowFrame, inherited by child scopes, observes each successful Define (the return-borrow
 	// store environment's binder census, analyzer_return_borrow_store_env.go).
-	defineHook func(*Symbol)
-	Symbols    map[string]*Symbol
+	returnBorrowFrame *returnBorrowDeferFrame
+	Symbols           map[string]*Symbol
 	// SMT immutable-local reverse indexes are populated by the analyzer only after a real local
 	// definition succeeds. Candidates keep nil-root invalidation scoped to immutable VarDeclStmt
 	// bindings; the name buckets let finite-root invalidation avoid scanning unrelated locals.
@@ -572,14 +572,14 @@ type Scope struct {
 }
 
 func NewScope(parent *Scope) *Scope {
-	var hook func(*Symbol)
+	var frame *returnBorrowDeferFrame
 	if parent != nil {
-		hook = parent.defineHook
+		frame = parent.returnBorrowFrame
 	}
 	// Refinements, narrowedOptionals and ConditionalBindingHints stay nil until first written
 	// (setRefinement, SetNarrowedOptional, setConditionalBindingHint): most scopes never write
 	// them, and three empty maps per scope were most of NewScope's cost.
-	return &Scope{Parent: parent, defineHook: hook, Symbols: map[string]*Symbol{}}
+	return &Scope{Parent: parent, returnBorrowFrame: frame, Symbols: map[string]*Symbol{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -588,8 +588,8 @@ func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
 	}
 	s.Symbols[sym.Name] = sym
 	s.symbolsVersion++
-	if s.defineHook != nil {
-		s.defineHook(sym)
+	if s.returnBorrowFrame != nil {
+		s.returnBorrowFrame.noteBinder(sym)
 	}
 	return sym, true
 }
