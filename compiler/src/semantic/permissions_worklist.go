@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"container/heap"
+	"elisacore/src/ast"
 	"sync"
 )
 
@@ -40,8 +41,34 @@ type permissionInferenceOutcome struct {
 	Converged                    bool
 }
 
-func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl) int {
-	outcome := a.solveFunctionPermissionEffects(decls, len(decls)+4)
+func (a *Analyzer) inferFunctionPermissionEffectsWorklist(decls []scopedDecl, retained ...*retainedPermissions) int {
+	var capture func(*FuncType, int)
+	if len(retained) != 0 && retained[0] != nil {
+		p := retained[0]
+		p.readers = map[*FuncType]map[int]bool{}
+		capture = func(ft *FuncType, reader int) {
+			if p.readers[ft] == nil {
+				p.readers[ft] = map[int]bool{}
+			}
+			p.readers[ft][reader] = true
+		}
+	}
+	outcome := a.solveFunctionPermissionEffectsWithReadLimit(decls, len(decls)+4, permissionInitialReadLimit, capture)
+	if capture != nil && outcome.Converged {
+		p := retained[0]
+		p.rows = map[*FuncType]permissionRowSnapshot{}
+		for _, sd := range decls {
+			a.withResolutionContext(sd.Namespace, sd.Usings, func() {
+				if fn, ok := sd.Decl.(*ast.FuncDecl); ok {
+					if sym, found := a.symbolForFuncDecl(fn); found {
+						if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
+							p.rows[ft] = snapshotPermissionRow(ft)
+						}
+					}
+				}
+			})
+		}
+	}
 	a.permissionEffectsOutcome = outcome
 	return outcome.Evaluations
 }
@@ -64,7 +91,7 @@ type permissionInitialRead struct {
 
 var permissionInitialReads = sync.Pool{New: func() any { return make([]permissionInitialRead, 0, 256) }}
 
-func (a *Analyzer) solveFunctionPermissionEffectsWithReadLimit(decls []scopedDecl, maxRounds, readLimit int) permissionInferenceOutcome {
+func (a *Analyzer) solveFunctionPermissionEffectsWithReadLimit(decls []scopedDecl, maxRounds, readLimit int, captures ...func(*FuncType, int)) permissionInferenceOutcome {
 
 	n := len(decls)
 	outcome := permissionInferenceOutcome{Converged: n == 0}
@@ -108,6 +135,11 @@ func (a *Analyzer) solveFunctionPermissionEffectsWithReadLimit(decls []scopedDec
 	}
 	a.permissionInference = &permissionInferenceObserver{
 		read: func(ft *FuncType) {
+			for _, capture := range captures {
+				if capture != nil {
+					capture(ft, reader)
+				}
+			}
 			if fallback {
 				return
 			}
@@ -200,6 +232,11 @@ func (a *Analyzer) solveFunctionPermissionEffectsWithReadLimit(decls []scopedDec
 	}
 	a.permissionInference = &permissionInferenceObserver{
 		read: func(ft *FuncType) {
+			for _, capture := range captures {
+				if capture != nil {
+					capture(ft, index)
+				}
+			}
 			if reads[index] == nil {
 				reads[index] = map[*FuncType]struct{}{}
 			}

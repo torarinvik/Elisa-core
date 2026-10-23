@@ -37,9 +37,19 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl, appended .
 		// cycle, so every unedited row restarts from its initial one.
 		r.perms.resetToInitialRows(a, fdecls, r.rbUpdating)
 	}
-	a.inferFunctionPermissionEffectsWorklist(fdecls)
+	if r == nil {
+		a.inferFunctionPermissionEffectsWorklist(fdecls)
+	} else {
+		// The solver already visits every equation and observes its reads. Keep
+		// that conservative union instead of traversing every body again solely
+		// to rebuild the retained graph. Budget exhaustion retains the old final
+		// observation pass; incomplete traces never replace that behavior.
+		a.inferFunctionPermissionEffectsWorklist(fdecls, &r.perms)
+	}
 	if r != nil {
-		r.perms.recordGraph(a, fdecls)
+		if !a.permissionEffectsOutcome.Converged {
+			r.perms.recordGraph(a, fdecls)
+		}
 		r.perms.solvedIn = false
 	}
 }

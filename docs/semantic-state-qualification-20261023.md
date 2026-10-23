@@ -887,3 +887,38 @@ with the exact executable/environment/CWD, bootstrap logs, timing JSON, object
 hashes, native profile and functional verification. Its cache is admitted by
 normal CLI rules and can be reused by the installed byte-identical compiler
 from the recorded directory/environment.
+
+
+### Reuse the full permission solve's observed dependency graph
+
+The converged full solver now supplies its observed read graph directly to the
+retained permission state. Previously a second traversal of every function body
+recomputed the same equations solely to record that graph. The new graph keeps
+a conservative union of all reads during the solve, including both initial and
+later worklist rounds. Final published rows are snapshotted without reevaluating
+bodies. Nonconverged solves retain the previous final observation pass. Cold
+non-retained analysis retains its existing scheduling and diagnostics.
+
+Graph tests independently recompute the final equations and require every
+fixpoint dependency to be present in the captured graph and every published row
+to match. These include cycles, aliases, callbacks, lambdas, drop and cast hooks,
+and lowered calls. The complete semantic suite, permission/retained race tests,
+and separate-process analysis disk-cache tests passed.
+
+Explicit source/options-checked qualification against the existing production
+baseline (not normal CLI cache admission for the new executable) measured the
+signature update at 2.688 s before and 2.123 s after, with final passes falling
+from 2.410 s to 1.854 s. Subsequent native qualification measured update 1.939
+and 1.945 s; the first build completed in 25.728 s with 64 native misses, and
+the warm run in 10.620 s with 64 disk hits. Every build used `timeout 30s`.
+The emitted signature object is byte-identical to the previous verified object:
+`9fefc498f0269171232fd3fd4ec017c7f16c0f807e8ee602b59bb059adeaa8e7`.
+Temporary Stage1 edits were restored. Logs and native output are under the
+production evidence root as `capture-permissions-*.json` and
+`captured-permissions-native/`.
+
+This gain does not establish a sub-ten-second normal CLI signature rebuild.
+The new executable still needs normally admitted bootstrap/matrix evidence;
+full signature permission validation and the existing native/quality caveats
+remain. No semantic snapshots or native products were rekeyed into another
+executable's production namespace.

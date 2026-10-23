@@ -170,7 +170,26 @@ func TestPermissionWorklistMatchesSweep(t *testing.T) {
 			work, reference := newPermissionGraphFixture(16), newPermissionGraphFixture(16)
 			setup(work)
 			setup(reference)
-			evaluations := work.a.inferFunctionPermissionEffectsWorklist(work.decls)
+			var captured retainedPermissions
+			evaluations := work.a.inferFunctionPermissionEffectsWorklist(work.decls, &captured)
+			// Independently walk the final equations, as the previous retained
+			// implementation did. The solve trace may keep extra dependencies,
+			// but must contain every fixpoint read and the same published rows.
+			var final retainedPermissions
+			final.recordGraph(work.a, work.decls)
+			for ft, readers := range final.readers {
+				for reader := range readers {
+					if !captured.readers[ft][reader] {
+						t.Fatalf("solve trace missed fixpoint reader %d of %s", reader, ft.Name)
+					}
+				}
+			}
+			for ft, row := range final.rows {
+				got, ok := captured.rows[ft]
+				if !ok || !got.same(ft) || !row.same(ft) {
+					t.Fatal("captured published row differs from final observation")
+				}
+			}
 			oldEvaluations := permissionReferenceSweep(reference.a, reference.decls)
 			if !reflect.DeepEqual(permissionFixtureRows(work), permissionFixtureRows(reference)) {
 				t.Fatalf("rows differ:\nwork %#v\nsweep %#v", permissionFixtureRows(work), permissionFixtureRows(reference))
