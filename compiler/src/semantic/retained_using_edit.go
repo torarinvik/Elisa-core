@@ -1,9 +1,11 @@
 package semantic
 
 import (
+	"elisacore/src/lexer"
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"elisacore/src/ast"
@@ -340,4 +342,53 @@ func (r *RetainedAnalysis) applyUsingChanges(changes []retainedUsingChange, scop
 			}
 		}
 	}
+}
+
+// retainedOwnerIndex maps a source position to the function declared most recently before it
+// in its file, by the start lines functions had when it was built.
+type retainedOwnerIndex map[string][]retainedOwnerLine
+
+type retainedOwnerLine struct {
+	line int
+	fn   *ast.FuncDecl
+}
+
+// Declarations the edit added sit at their new positions and own no recorded diagnostic.
+func retainedDiagnosticOwners(decls, added []scopedDecl) retainedOwnerIndex {
+	skip := make(map[ast.Decl]bool, len(added))
+	for _, sd := range added {
+		skip[sd.Decl] = true
+	}
+	idx := retainedOwnerIndex{}
+	add := func(fn *ast.FuncDecl) {
+		idx[fn.Pos().File] = append(idx[fn.Pos().File], retainedOwnerLine{fn.Pos().Line, fn})
+	}
+	for _, sd := range decls {
+		if skip[sd.Decl] {
+			continue
+		}
+		switch n := sd.Decl.(type) {
+		case *ast.FuncDecl:
+			add(n)
+		case *ast.ImplDecl:
+			for _, m := range n.Members {
+				if fn, ok := m.(*ast.FuncDecl); ok {
+					add(fn)
+				}
+			}
+		}
+	}
+	for _, fns := range idx {
+		sort.SliceStable(fns, func(i, j int) bool { return fns[i].line < fns[j].line })
+	}
+	return idx
+}
+
+func (idx retainedOwnerIndex) owner(pos lexer.Pos) *ast.FuncDecl {
+	fns := idx[pos.File]
+	i := sort.Search(len(fns), func(i int) bool { return fns[i].line > pos.Line })
+	if i == 0 {
+		return nil
+	}
+	return fns[i-1].fn
 }

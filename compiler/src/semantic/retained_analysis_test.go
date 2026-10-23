@@ -742,10 +742,21 @@ def first(s: Stmt) -> i64:
 
 def pass_through(e: Expr) -> Expr:
     return e
+
+def is_lit(e: Expr) -> bool:
+    match e:
+        Expr.Lit(_):
+            return true
+        _:
+            return false
+
+def make() -> Expr:
+    return Expr.Lit(1)
 `
 
 // A variant added to a refinement of a store-backed hierarchy shifts every later leaf tag
-// (Stmt's) and makes eval's match non-exhaustive; only eval names Expr's variants.
+// (Stmt's) and makes eval's match non-exhaustive. Only eval's match can change: is_lit's has a
+// catch-all arm and make only constructs.
 func TestRetainedAnalysisAcceptsHierarchyVariantEdits(t *testing.T) {
 	options := AnalyzeOptions{}
 	with := strings.Replace(retainedHierarchyBefore, "    Neg(Expr)\n", "    Neg(Expr)\n    Zero\n", 1)

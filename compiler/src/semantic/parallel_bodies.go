@@ -251,6 +251,9 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 	sort.SliceStable(a.returnBorrowLateFrames, func(i, j int) bool {
 		return order(a.returnBorrowLateFrames[i].frame.fn) < order(a.returnBorrowLateFrames[j].frame.fn)
 	})
+	// The merge folds a worker's current candidate table into the root's, whatever
+	// resolution context each was built for; drop the cache rather than mix contexts.
+	a.visibleCandidates = visibleCandidateCache{}
 	a.diagnostics = a.diagnostics[:baseDiagnostics]
 	// merged[w][k]: how many diagnostics precede worker w's k-th in the merged list, for
 	// rebasing a retained analysis's windows (appendDiagnostic can drop a duplicate).

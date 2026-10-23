@@ -1191,14 +1191,30 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 		}
 	}
+	// Diagnostics sit at pre-edit positions; index the functions before any is shifted.
+	owners := retainedDiagnosticOwners(r.decls, append(addedScoped, addedConstScoped...))
 	for _, d := range movedSplices {
 		retainedShiftDecl(d, marks)
+	}
+	spliced := make(map[*ast.FuncDecl]bool, len(splices))
+	for _, s := range splices {
+		spliced[s.live] = true
 	}
 	for i, s := range splices {
 		s.live.Body = bodies[i]
 		changed = append(changed, scoped[s.live])
-		if w, ok := r.windows[s.live]; ok {
-			for k := w[0]; k < w[1]; k++ {
+	}
+	// A body-phase window holds what one function's analysis emitted, including what it
+	// emitted for a callee it analyzed first (nested, or in its parallel worker). Each
+	// diagnostic goes with the function it lies in: dropped when that one is re-analyzed,
+	// kept when it is not, whichever window holds it.
+	for fn, w := range r.windows {
+		for k := w[0]; k < w[1] && k < len(a.diagnostics); k++ {
+			owner := owners.owner(a.diagnostics[k].Pos)
+			if owner == nil || owner == fn {
+				owner = fn
+			}
+			if spliced[owner] {
 				drop[k] = true
 			}
 		}

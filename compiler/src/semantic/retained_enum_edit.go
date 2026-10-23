@@ -1,6 +1,11 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"regexp"
+	"strings"
+
+	"elisacore/src/ast"
+)
 
 // A retained update accepts an edit to a plain enum's variants (added, removed, renamed or with
 // new payloads). As with structs, the scratch declaration phase already ran on the edited
@@ -254,19 +259,83 @@ func (r *RetainedAnalysis) applyHierarchyEdits(edits []retainedEnumEdit, members
 }
 
 // retainedHierarchyUsers reports whether a function's source text can observe a hierarchy edit:
-// it names an edited enum's variants (`E.` — match arms, constructors, `is` tests), or reflects
-// over a hierarchy enum with `variants(...)`. A function that only passes hierarchy values
-// around sees the same types; a category arm still covers its whole category.
+// a match naming an edited enum's variants (`E.`) with no catch-all arm, whose exhaustiveness
+// the edit changes, or reflection over a hierarchy enum with `variants(...)`. Constructors, `is`
+// tests and a match a catch-all arm completes see the same types and coverage; a category arm
+// still covers its whole category.
 func retainedHierarchyUsers(span string, edited, members map[string]bool) bool {
 	toks := retainedIdentToken.FindAllStringIndex(span, -1)
-	reflects, namesMember := false, false
+	reflects, namesMember, namesEdited := false, false, false
 	for _, t := range toks {
 		tok := span[t[0]:t[1]]
 		if edited[tok] && t[1] < len(span) && span[t[1]] == '.' {
-			return true
+			namesEdited = true
 		}
 		reflects = reflects || tok == "variants"
 		namesMember = namesMember || members[tok]
 	}
-	return reflects && namesMember
+	if reflects && namesMember {
+		return true
+	}
+	return namesEdited && retainedOpenMatchNames(span, edited)
+}
+
+var (
+	retainedMatchHeader = regexp.MustCompile(`(^|[^A-Za-z0-9_])match\b`)
+	retainedCatchAllArm = regexp.MustCompile(`^(_|[a-z_][A-Za-z0-9_]*)\s*:`)
+)
+
+// retainedOpenMatchNames reports whether span holds a match that names an edited enum's
+// variant in an arm and has no catch-all arm (`_:` or a bare lowercase bind). A match it cannot
+// lay out by indentation (a header not ending its line, arms not found) counts as open.
+func retainedOpenMatchNames(span string, edited map[string]bool) bool {
+	lines := strings.Split(span, "\n")
+	indent := func(l string) int { return len(l) - len(strings.TrimLeft(l, " ")) }
+	names := func(l string) bool {
+		for _, t := range retainedIdentToken.FindAllStringIndex(l, -1) {
+			if edited[l[t[0]:t[1]]] && t[1] < len(l) && l[t[1]] == '.' {
+				return true
+			}
+		}
+		return false
+	}
+	for i, line := range lines {
+		code := line
+		if hash := strings.IndexByte(code, '#'); hash >= 0 {
+			code = code[:hash]
+		}
+		if !retainedMatchHeader.MatchString(code) || retainedInCommentOrString(line, retainedMatchHeader.FindStringIndex(code)[0]) {
+			continue
+		}
+		if !strings.HasSuffix(strings.TrimRight(code, " "), ":") {
+			if names(line) {
+				return true
+			}
+			continue
+		}
+		header, arm := indent(line), -1
+		named, catchAll := false, false
+		for _, l := range lines[i+1:] {
+			if strings.TrimSpace(l) == "" || strings.HasPrefix(strings.TrimSpace(l), "#") {
+				continue
+			}
+			in := indent(l)
+			if in <= header {
+				break
+			}
+			if arm < 0 {
+				arm = in
+			}
+			if in != arm {
+				continue
+			}
+			body := strings.TrimSpace(l)
+			named = named || names(body)
+			catchAll = catchAll || retainedCatchAllArm.MatchString(body)
+		}
+		if arm < 0 || (named && !catchAll) {
+			return true
+		}
+	}
+	return false
 }
