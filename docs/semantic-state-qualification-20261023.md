@@ -264,3 +264,30 @@ AA/inliner/unroll consistency checks, pass with logging enabled. Run the backend
 test binary from `compiler/src/backend` because source-consistency tests read C
 sources relative to that directory. This is diagnostic progress, not a measured
 rebuild speedup; default O3 and the sub-10-second target remain unresolved.
+
+An additional disk work product now retains the **whole optimized LLVM module**,
+keyed by exact pre-optimization bitcode, resolved target triple/CPU/features,
+optimization level, AA pipeline and inliner/unroll settings within the existing
+executable-content namespace. It preserves the ordinary O3 pipeline and its
+whole-module inlining. Restores use a new LLVM context, verify the parsed module,
+restore the original module identifier and rerun the autovec warning verifier
+against current warning enforcement. The existing checked, atomic, size-bounded
+disk format and shared eviction budget cover these entries. Cache-disabled and
+O0 paths retain their previous behavior; pass-debug mode bypasses optimized-module
+reuse so it can observe actual pass execution.
+
+Separate-process tests compare exact optimized IR and linked native results for
+repeats, source-line shifts, body edits, reverts, O2/O3 changes, compiler identity,
+resolved CPU changes and debug-info line changes. Debug line shifts correctly miss
+while line shifts without position metadata can reuse identical lowering. A
+scalar fallback fixture confirms restored metadata regenerates warnings and
+honors a later change to hard-error enforcement.
+
+A bounded standalone CLI exercise of 512 reachable loop functions (server unset,
+analysis-cache debug bypassing the whole-object source cache) measured whole O3
+optimization/cache publication at 55 ms, exact lowered-input restoration at 3 ms,
+a changed-body miss at 51 ms and reverted-input restoration at 3 ms. Total CLI
+times were 0.258/0.217/0.260/0.198 s respectively. This fixture verifies the reuse
+path; it is not the full self-host compiler and does not prove the overall target.
+The full compiler still lacks its first completed native O3 work product under
+the 30-second invocation cap, and new lowered code still requires optimization.

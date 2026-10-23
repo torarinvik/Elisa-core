@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-// A disk entry contains the exact bitcode and target as well as the object.
+// A disk entry contains exact input bitcode and target configuration as well as
+// its output bytes (native object or optimized bitcode, in separate key domains).
 // Digests locate entries and detect corruption; they never replace input checks.
 // The caller supplies a compiler-build namespace so different native emitters
 // cannot reuse one another's output. Disk failures are ordinary cache misses.

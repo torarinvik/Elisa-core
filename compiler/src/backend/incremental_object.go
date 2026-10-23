@@ -37,6 +37,7 @@ type incrementalObjectEntry struct {
 
 type IncrementalObjectStats struct {
 	Builds, PartitionsEmitted, PartitionsReused, SerialFallbacks, Evictions uint64
+	OptimizedModulesReused                                                  uint64
 	OwnerMapBuilds                                                          uint64
 	DiskPartitionsReused                                                    uint64
 	IRTime, OwnerMapTime, PartitionTime, NativeTime, MergeTime              time.Duration

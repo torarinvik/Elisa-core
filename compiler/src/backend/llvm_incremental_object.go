@@ -33,8 +33,9 @@ import (
 	"elisacore/src/semantic"
 )
 
-// WriteObject regenerates and optimizes current IR, then reuses native partitions
-// only when their complete current bitcode and target-machine inputs match. Global
+// WriteObject regenerates current IR, reusing an exact optimized-module disk
+// artifact when possible, then reuses native partitions only when their complete
+// current bitcode and target-machine inputs match. Global
 // optimization dependencies are already reflected in the partitioned IR. This
 // avoids native code generation, not frontend analysis or LLVM lowering.
 func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
@@ -68,8 +69,13 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
-	if err := g.optimizeModule(options.OptLevel); err != nil {
+	optimized, err := s.optimizeObjectModule(g, options.OptLevel)
+	if err != nil {
 		return err
+	}
+	if optimized != g {
+		defer optimized.disposeInBackground()
+		g = optimized
 	}
 	irDuration := time.Since(irStart)
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += irDuration })
