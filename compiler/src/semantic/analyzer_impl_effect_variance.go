@@ -41,6 +41,19 @@ import (
 // (zero-cost) path is the only path and is correct as-is; this comment is the contract for the
 // dynamic extension.
 
+// A pending conformance check refers to the function types whose effect rows
+// will be completed by inference. Explicit data preserves these aliases in a
+// disk checkpoint; a captured closure cannot be restored in another process.
+type implEffectCheck struct {
+	interfaceName, methodName string
+	expected, actual          *FuncType
+	position                  lexer.Pos
+}
+
+func (check implEffectCheck) run(a *Analyzer) {
+	a.checkImplEffectSubset(check.interfaceName, check.methodName, check.expected, check.actual, check.position)
+}
+
 // checkImplEffectErrorFrameVariance runs the three subset checks for one impl method against its
 // protocol method. expected/actual are the (Self-specialized) protocol and impl FuncTypes; protoDecl
 // is the protocol method's AST decl (for its `changes` paths), implDecl the impl method's. Any
@@ -53,8 +66,9 @@ func (a *Analyzer) checkImplEffectErrorFrameVariance(
 ) {
 	// Body-local can effects are inferred after static interface registration.
 	// Compare completed rows so omitted method headers cannot evade conformance.
-	a.deferredImplEffectChecks = append(a.deferredImplEffectChecks, func() {
-		a.checkImplEffectSubset(interfaceName, methodName, expected, actual, implPos)
+	a.deferredImplEffectChecks = append(a.deferredImplEffectChecks, implEffectCheck{
+		interfaceName: interfaceName, methodName: methodName,
+		expected: expected, actual: actual, position: implPos,
 	})
 	a.checkImplErrorSubset(interfaceName, methodName, expected, actual, implPos)
 	a.checkImplChangesSubset(interfaceName, methodName, protoDecl, implDecl, implPos)

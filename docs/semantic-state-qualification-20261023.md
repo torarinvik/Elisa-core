@@ -106,3 +106,13 @@ initialization/convergence rules. Results match a frozen reference algorithm on
 1,200 generated branching/looping graphs. The 128-block, eight-parameter benchmark
 changed from 797 to 156 allocations and 19,344 to 17,168 bytes per solve; sampled
 time changed from 10.7–11.6 us to 8.8–8.9 us. The full semantic suite passed.
+
+Pending protocol effect obligations are now explicit records (protocol/method,
+expected and actual function types, source position), instead of closures. This
+removes one process-local value that would prevent a future checkpoint before
+post-analysis effect inference. A graph round-trip test verifies the obligation
+still aliases the restored implementation's function type and rejects an extra
+effect added by subsequent inference. Existing effect/error/frame subset tests
+and disk-cache edit/IR comparisons pass; the full semantic suite also passes.
+This does not yet implement resumable
+initial analysis; whole-program bootstrap still exceeds the process cap.

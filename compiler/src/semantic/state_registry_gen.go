@@ -627,6 +627,7 @@ func semanticStateTypes() []reflect.Type {
 		reflect.TypeFor[hypothesisFact](),
 		reflect.TypeFor[implDeriveMode](),
 		reflect.TypeFor[implDeriveSpec](),
+		reflect.TypeFor[implEffectCheck](),
 		reflect.TypeFor[incrementalBodyInvocation](),
 		reflect.TypeFor[incrementalEnsureProofInput](),
 		reflect.TypeFor[indexBoundFact](),

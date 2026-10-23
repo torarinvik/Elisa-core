@@ -119,7 +119,7 @@ type Analyzer struct {
 	headerStabilityCompleted             map[*ast.FuncDecl]bool
 	shortCircuitAnalysisDepth            int
 	shortCircuitStability                map[shortCircuitStabilityKey]bool
-	deferredImplEffectChecks             []func()
+	deferredImplEffectChecks             []implEffectCheck
 	deferredBorrowedNurseryShutdownCalls []borrowedNurseryShutdownCall
 	file                                 *ast.File
 	diagnostics                          []Diagnostic
@@ -1665,7 +1665,7 @@ func (a *Analyzer) runPostPhases(activeDecls []scopedDecl, options AnalyzeOption
 	})
 	postTimed("validateDeferredBorrowedNurseryShutdownCalls", func() { a.validateDeferredBorrowedNurseryShutdownCalls() })
 	for _, check := range a.deferredImplEffectChecks {
-		check()
+		check.run(a)
 	}
 	a.deferredImplEffectChecks = nil
 	if options.EnforceProgressSafety {
