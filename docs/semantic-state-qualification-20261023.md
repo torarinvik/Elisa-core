@@ -361,3 +361,13 @@ mutation smoke run completed 2.83 million inputs without failure. An initial
 semantic-suite launch from the compiler root failed on relative fixture paths;
 it was stopped and rerun successfully from `compiler/src/semantic`.
 This is a restore improvement, not proof of sub-10-second edited CLI builds.
+
+The decoder's temporary object descriptions now store their validated schema type
+ID instead of a reflected-type interface. On this 64-bit host the entry shrinks
+from 40 to 32 bytes, saving about 72 MB for the 8,977,314-entry full snapshot.
+Alias resolution obtains the same registered type after the original type-ID
+validation; no disk bytes or allocation-budget checks change. The pointer fixture
+uses about 905,774 bytes per decode instead of 979,530. Codec and race tests pass,
+and the complete snapshot restores and passes exact-source/options admission.
+Its measured restore was 5.935 s, within noise of the preceding 5.884 s, so this
+change is a memory reduction rather than a claimed latency improvement.

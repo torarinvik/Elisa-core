@@ -6,7 +6,7 @@ import (
 )
 
 type objectDescription struct {
-	typ              reflect.Type
+	typeID           uint64
 	length, capacity int
 	alias            *nodeAlias
 }
@@ -33,7 +33,7 @@ func (d *decoder) readObjects() error {
 		if t.Kind() != reflect.Pointer && t.Kind() != reflect.Map && t.Kind() != reflect.Slice {
 			return fmt.Errorf("invalid state object kind")
 		}
-		desc := objectDescription{typ: t}
+		desc := objectDescription{typeID: typeID}
 		if t.Kind() != reflect.Pointer {
 			desc.length, err = d.count()
 			if err != nil {
@@ -176,6 +176,9 @@ func (d *decoder) resolveAlias(id int, descriptions []objectDescription, visitin
 	}
 	visiting[id] = true
 	desc := descriptions[id]
+	// Type IDs were checked before any description was stored. Keeping the ID
+	// avoids retaining a reflected type interface for every graph object.
+	t := d.registry.types[desc.typeID-1]
 	a := desc.alias
 	if a == nil {
 		return fmt.Errorf("missing state allocation")
@@ -216,25 +219,25 @@ func (d *decoder) resolveAlias(id int, descriptions []objectDescription, visitin
 		}
 	}
 	var restored reflect.Value
-	if desc.typ.Kind() == reflect.Pointer {
-		if !value.CanAddr() || value.Addr().Type() != desc.typ {
+	if t.Kind() == reflect.Pointer {
+		if !value.CanAddr() || value.Addr().Type() != t {
 			return fmt.Errorf("state alias pointer type mismatch")
 		}
 		restored = value.Addr()
 	} else {
-		if (value.Kind() != reflect.Array && value.Kind() != reflect.Slice) || value.Type().Elem() != desc.typ.Elem() || a.offset > value.Len() || desc.capacity > value.Len()-a.offset {
+		if (value.Kind() != reflect.Array && value.Kind() != reflect.Slice) || value.Type().Elem() != t.Elem() || a.offset > value.Len() || desc.capacity > value.Len()-a.offset {
 			return fmt.Errorf("state alias slice range mismatch")
 		}
 		restored = value.Slice3(a.offset, a.offset+desc.length, a.offset+desc.capacity)
-		if restored.Type() != desc.typ {
-			if !restored.CanConvert(desc.typ) {
+		if restored.Type() != t {
+			if !restored.CanConvert(t) {
 				return fmt.Errorf("state alias slice type mismatch")
 			}
-			restored = restored.Convert(desc.typ)
+			restored = restored.Convert(t)
 		}
 	}
 	// Copy the header rather than keeping a destination that its owner later fills.
-	stable := reflect.New(desc.typ).Elem()
+	stable := reflect.New(t).Elem()
 	stable.Set(restored)
 	d.objects[id] = stable
 	visiting[id] = false
