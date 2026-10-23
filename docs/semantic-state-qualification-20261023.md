@@ -230,3 +230,22 @@ a real unrelated body edit and a line shift, matching a cache-disabled compiler.
 The body-edited and line-shifted cases must use retained updates without fallback.
 The full semantic suite and disk-cache bootstrap/edit/native/IR test group pass
 after this change. Full-input phase/publication timing is the next qualification.
+
+Full-input qualification of resumable final checks has now published a finished
+semantic cache with the server disabled. At 14,422/14,422 declarations, the late
+return-borrow phase ran alone in 6.410 s and saved its checkpoint in a 27.576 s
+invocation. The next process restored it, ran the remaining ten phases in 2.653 s,
+and published the complete 619,453,329-byte semantic state in 13.039 s before
+reaching the 30 s native-generation cap. Further processes logged exact-source
+restoration/reuse but also reached the cap before emitting an object. Full native
+rebuilds and the sub-10-second goal remain unproven.
+
+`TestDiskStateNativeCompilerProfile` is an opt-in native-stage profiler using a
+finished snapshot, exact current expanded source, and the CLI's source-authority
+and semantic-option checks. Its default object mode is O3, matching the real CLI;
+`ELISACORE_STATE_QUALIFY_NATIVE_OPT` is checked against the snapshot options. An
+explicit O0 request against the O3 snapshot is rejected. The matching O3 process
+still hit 30 s. An 18.19 s bounded CPU profile sampled 82.57% in cgocall, and the
+captured stack was in `elisacoreRunOptimizationPipeline` through
+`llvmGenerator.optimizeModule(..., 3)`, before native partitions could be saved.
+An O0 backend run on an O3 semantic snapshot is not a matching CLI comparison.
