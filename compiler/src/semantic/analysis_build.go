@@ -20,6 +20,7 @@ type AnalysisBuild struct {
 	file        *ast.File
 	loweredFile *ast.File
 	next        int
+	postNext    int
 	started     bool
 	done        bool
 	LastStats   AnalysisBuildStats
@@ -29,7 +30,9 @@ type AnalysisBuild struct {
 // declaration that most exceeded the requested time slice.
 type AnalysisBuildStats struct {
 	Declarations    int
-	Bodies          time.Duration
+	PostPhases      int
+	LastPostPhase   string
+	Elapsed         time.Duration
 	Slowest         time.Duration
 	SlowestPosition lexer.Pos
 }
@@ -57,7 +60,8 @@ func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOpt
 }
 
 // Advance analyzes at most maxDeclarations source-order declarations, or stops
-// at the next declaration boundary after budget expires. A non-positive limit
+// at the next declaration or final-check boundary after budget expires. Each
+// final-check phase also counts against the unit limit. A non-positive limit
 // means no limit. A declaration is indivisible: callers must still enforce their
 // process timeout. Finishing checks run in a subsequent step when a body limit
 // is reached, so that publication need not share the last body's time budget.
@@ -76,7 +80,7 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 	defer a.closeSMT()
 	started := time.Now()
 	b.LastStats = AnalysisBuildStats{}
-	defer func() { b.LastStats.Bodies = time.Since(started) }()
+	defer func() { b.LastStats.Elapsed = time.Since(started) }()
 	if !b.started {
 		a.recordVerifiedTaskGroupSubmitsInDecls(r.decls)
 		b.started = true
@@ -95,11 +99,28 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 		b.next++
 		completed++
 	}
-	r.bodyEnd = len(a.diagnostics)
+	if b.postNext == 0 {
+		r.bodyEnd = len(a.diagnostics)
+	}
 	if b.next < len(r.decls) || completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
 		return nil, nil, nil
 	}
-	result := a.finishProgramAnalysis(b.file, b.loweredFile, r.decls, r.options, nil)
+	// Count post phases as scheduling units too, so tests and callers can force
+	// a checkpoint at each boundary without changing any semantic policy.
+	for b.postNext < len(analysisPostPhaseNames) {
+		if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
+			return nil, nil, nil
+		}
+		a.runPostPhase(b.postNext, r.decls, r.options, nil)
+		b.LastStats.LastPostPhase = analysisPostPhaseNames[b.postNext]
+		b.postNext++
+		b.LastStats.PostPhases++
+		completed++
+	}
+	if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
+		return nil, nil, nil
+	}
+	result := a.finishProgramResult(b.file, b.loweredFile, r.decls, r.options, nil)
 	r.result = result
 	b.done = true
 	return result, r, nil
@@ -112,6 +133,15 @@ func (b *AnalysisBuild) Progress() (completed, total int) {
 	return b.next, len(b.retained.decls)
 }
 
+// PostProgress reports completed whole-program checks. Body progress stays at
+// its final count while these phases are resumed across processes.
+func (b *AnalysisBuild) PostProgress() (int, int) {
+	if b == nil {
+		return 0, len(analysisPostPhaseNames)
+	}
+	return b.postNext, len(analysisPostPhaseNames)
+}
+
 func (b *AnalysisBuild) MatchesInvocation(filename string, src []byte, options AnalyzeOptions) bool {
 	return b != nil && b.retained != nil && b.file != nil && b.file.Filename == filename && bytes.Equal(b.retained.src, src) && reflect.DeepEqual(b.retained.options, options)
 }
@@ -119,6 +149,9 @@ func (b *AnalysisBuild) MatchesInvocation(filename string, src []byte, options A
 func (b *AnalysisBuild) validate() error {
 	if b == nil || b.retained == nil || b.retained.a == nil || b.file == nil || b.loweredFile == nil || b.retained.a.retained != b.retained || b.next < 0 || b.next > len(b.retained.decls) {
 		return fmt.Errorf("incomplete analysis build")
+	}
+	if b.postNext < 0 || b.postNext > len(analysisPostPhaseNames) || b.postNext > 0 && b.next != len(b.retained.decls) || b.done && b.postNext != len(analysisPostPhaseNames) {
+		return fmt.Errorf("analysis build phase mismatch")
 	}
 	if b.done != (b.retained.result != nil) {
 		return fmt.Errorf("analysis build completion mismatch")

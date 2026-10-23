@@ -39,7 +39,8 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 		if err == nil {
 			build = restored
 			done, total := build.Progress()
-			debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d bytes=%d in=%v", done, total, len(data), time.Since(started).Round(time.Millisecond))
+			post, phases := build.PostProgress()
+			debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, len(data), time.Since(started).Round(time.Millisecond))
 		} else {
 			debugAnalysisDisk(stderr, "declined checkpoint: %v", err)
 		}
@@ -70,12 +71,13 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 		return incomplete(err), nil
 	}
 	stats := build.LastStats
-	debugAnalysisDisk(stderr, "bootstrap step declarations=%d in=%v slowest=%v at=%v", stats.Declarations, stats.Bodies.Round(time.Millisecond), stats.Slowest.Round(time.Millisecond), stats.SlowestPosition)
+	debugAnalysisDisk(stderr, "bootstrap step declarations=%d post=%d last=%s in=%v slowest=%v at=%v", stats.Declarations, stats.PostPhases, stats.LastPostPhase, stats.Elapsed.Round(time.Millisecond), stats.Slowest.Round(time.Millisecond), stats.SlowestPosition)
 	if result != nil {
 		debugAnalysisDisk(stderr, "bootstrap complete")
 		return result, state
 	}
 	done, total := build.Progress()
+	post, phases := build.PostProgress()
 	saveStart := time.Now()
 	data, err := build.MarshalState()
 	if err == nil {
@@ -87,8 +89,8 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 		}
 	}
 	if err != nil {
-		return incomplete(fmt.Errorf("initial analysis stopped at %d/%d declarations; checkpoint not saved: %w", done, total, err)), nil
+		return incomplete(fmt.Errorf("initial analysis stopped at %d/%d declarations, %d/%d final-check phases; checkpoint not saved: %w", done, total, post, phases, err)), nil
 	}
-	debugAnalysisDisk(stderr, "bootstrap checkpoint completed=%d/%d bytes=%d in=%v", done, total, len(data), time.Since(saveStart).Round(time.Millisecond))
-	return incomplete(fmt.Errorf("initial analysis checkpoint saved (%d/%d declarations); rerun the same build to continue", done, total)), nil
+	debugAnalysisDisk(stderr, "bootstrap checkpoint completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, len(data), time.Since(saveStart).Round(time.Millisecond))
+	return incomplete(fmt.Errorf("initial analysis checkpoint saved (%d/%d declarations, %d/%d final-check phases); rerun the same build to continue", done, total, post, phases)), nil
 }

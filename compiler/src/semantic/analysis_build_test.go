@@ -41,6 +41,7 @@ def caller() -> i64:
 				t.Fatal(err)
 			}
 			before, total := b.Progress()
+			postBefore, _ := b.PostProgress()
 			result, state, err := b.Advance(1, time.Minute)
 			if err != nil {
 				t.Fatal(err)
@@ -50,7 +51,8 @@ def caller() -> i64:
 					t.Fatal("unfinished analysis exposed retained state")
 				}
 				after, _ := b.Progress()
-				if after != before+1 || after > total {
+				postAfter, _ := b.PostProgress()
+				if after-before+postAfter-postBefore != 1 || after > total {
 					t.Fatalf("invalid progress: %d -> %d of %d", before, after, total)
 				}
 				paused++
@@ -66,6 +68,26 @@ def caller() -> i64:
 			}
 			if _, err := state.MarshalState(); err != nil {
 				t.Fatal(err)
+			}
+			// Post-phase diagnostics must remain outside body windows when a
+			// later retained update removes and replays final-check results.
+			updated, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if retainedDiagnostics(updated) != retainedDiagnostics(cold) {
+				t.Fatalf("case %d resumed final checks changed retained diagnostic replay:\ngot:\n%s\nwant:\n%s", i, retainedDiagnostics(updated), retainedDiagnostics(cold))
+			}
+			if i == 1 {
+				shifted := "\n\n" + source
+				updated, err = state.Update(retainedParse(t, shifted), retainedParse(t, shifted), []byte(shifted))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := AnalyzeWithOptions(retainedParse(t, shifted), AnalyzeOptions{})
+				if retainedDiagnostics(updated) != retainedDiagnostics(want) {
+					t.Fatalf("shifted protocol check differs:\ngot: %s\nwant: %s", retainedDiagnostics(updated), retainedDiagnostics(want))
+				}
 			}
 			if _, err := b.MarshalState(); err == nil {
 				t.Fatal("completed analysis admitted as unfinished checkpoint")

@@ -32,7 +32,7 @@ func TestAnalysisBuildCompilerCheckpoint(t *testing.T) {
 	t.Logf("restore %d/%d: %v", done, total, time.Since(start))
 	if os.Getenv("ELISACORE_STATE_QUALIFY_FINISH") == "1" {
 		start = time.Now()
-		result, state, err := build.Advance(1, 0)
+		result, state, err := build.Advance(0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -330,3 +330,37 @@ func TestAnalysisDiskCacheUnchangedRevisionDoesNotRewriteState(t *testing.T) {
 		t.Fatal("unchanged state file changed")
 	}
 }
+
+func TestAnalysisDiskCachePreservesProtocolEffectRejection(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "protocol.elisa")
+	out := filepath.Join(dir, "out.ll")
+	base := `struct Net:
+    fd: i64
+protocol Sender:
+    def send(self: Self, n: i64) -> void can[Atomics.Load]
+impl Sender for Net:
+    def send(self: Net, n: i64) -> void can[Atomics.Load, Atomics.Store]:
+        return
+def helper() -> i32:
+    return 1
+def main() -> i32:
+    return helper()
+`
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "missing.sock")}
+	cold := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	edited := strings.Replace(base, "return 1", "return 2", 1)
+	for i, text := range []string{base, base, edited, "\n\n" + edited} {
+		if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, code := runDiskCLIChildResult(t, env, "-emit", "llvm", "-o", out, source)
+		want, wantCode := runDiskCLIChildResult(t, cold, "-emit", "llvm", "-o", out, source)
+		if code == 0 || wantCode == 0 || !strings.Contains(got, "Atomics.Store") || diskDiagnosticTranscript(got) != diskDiagnosticTranscript(want) {
+			t.Fatalf("step %d protocol rejection differs:\ngot=%s\nwant=%s", i, got, want)
+		}
+		if i >= 2 && (!strings.Contains(got, "[analysis-disk] update") || strings.Contains(got, "fallback")) {
+			t.Fatalf("step %d did not exercise retained protocol replay: %s", i, got)
+		}
+	}
+}

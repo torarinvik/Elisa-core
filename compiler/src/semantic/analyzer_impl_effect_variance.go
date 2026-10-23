@@ -48,10 +48,15 @@ type implEffectCheck struct {
 	interfaceName, methodName string
 	expected, actual          *FuncType
 	position                  lexer.Pos
+	declaration               ast.Node
 }
 
 func (check implEffectCheck) run(a *Analyzer) {
-	a.checkImplEffectSubset(check.interfaceName, check.methodName, check.expected, check.actual, check.position)
+	position := check.position
+	if check.declaration != nil {
+		position = check.declaration.Pos()
+	}
+	a.checkImplEffectSubset(check.interfaceName, check.methodName, check.expected, check.actual, position)
 }
 
 // checkImplEffectErrorFrameVariance runs the three subset checks for one impl method against its
@@ -68,7 +73,7 @@ func (a *Analyzer) checkImplEffectErrorFrameVariance(
 	// Compare completed rows so omitted method headers cannot evade conformance.
 	a.deferredImplEffectChecks = append(a.deferredImplEffectChecks, implEffectCheck{
 		interfaceName: interfaceName, methodName: methodName,
-		expected: expected, actual: actual, position: implPos,
+		expected: expected, actual: actual, position: implPos, declaration: implDecl,
 	})
 	a.checkImplErrorSubset(interfaceName, methodName, expected, actual, implPos)
 	a.checkImplChangesSubset(interfaceName, methodName, protoDecl, implDecl, implPos)

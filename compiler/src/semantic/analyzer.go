@@ -1569,10 +1569,13 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 // finishProgramAnalysis is shared by ordinary analysis and an initial analysis
 // resumed from a disk checkpoint. No partially analyzed Result is published.
 func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
-	postPhases := func(activeDecls []scopedDecl) { a.runPostPhases(activeDecls, options, solver) }
-	postPhases(activeDecls)
+	a.runPostPhases(activeDecls, options, solver)
+	return a.finishProgramResult(file, loweredFile, activeDecls, options, solver)
+}
+
+func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
 	if a.retained != nil {
-		a.retained.capture(a, activeDecls, postPhases)
+		a.retained.capture(a, activeDecls, func(decls []scopedDecl) { a.runPostPhases(decls, options, solver) })
 	}
 	// docs/91 G0: death-time cohort + interprocedural arg-retention analysis. Runs AFTER body
 	// analysis so exprTypes is complete and the whole-program retention fixpoint can be computed.
@@ -1656,38 +1659,10 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 	return analysisResult
 }
 
-// runPostPhases is callable after restoring semantic state from disk; it does
-// not depend on a closure captured in the process that created the state.
-func (a *Analyzer) runPostPhases(activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) {
-
-	if a.retained != nil {
-		a.retained.lateFrames = append(a.retained.lateFrames[:0], a.returnBorrowLateFrames...)
+// runPostPhases runs exactly the same ordered checks as resumable initial
+// analysis, without stopping between phases.
+func (a *Analyzer) runPostPhases(decls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) {
+	for phase := range analysisPostPhaseNames {
+		a.runPostPhase(phase, decls, options, solver)
 	}
-	postTimed("evaluateLateReturnBorrowFrames", func() { a.evaluateLateReturnBorrowFrames() })
-	// A4: discharge each protocol default method's own contract against its own body (the default
-	// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
-	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
-	postTimed("checkProtocolDefaultMethodContracts", func() { a.checkProtocolDefaultMethodContracts(activeDecls) })
-	postTimed("inferFunctionPermissionEffects", func() {
-		if solver == nil {
-			a.inferFunctionPermissionEffects(activeDecls)
-		} else {
-			solver(a, activeDecls)
-		}
-	})
-	postTimed("validateDeferredBorrowedNurseryShutdownCalls", func() { a.validateDeferredBorrowedNurseryShutdownCalls() })
-	for _, check := range a.deferredImplEffectChecks {
-		check.run(a)
-	}
-	a.deferredImplEffectChecks = nil
-	if options.EnforceProgressSafety {
-		a.validateProgressBlocking(activeDecls)
-		a.validateProgressRecursion(activeDecls)
-	}
-	postTimed("validatePermissionUsage", func() { a.validatePermissionUsage(activeDecls) })
-	postTimed("analyzeExports", func() { a.analyzeExports(activeDecls) })
-	postTimed("finalizeCallArgDisjoint", func() { a.finalizeCallArgDisjoint() })
-	postTimed("finalizeFuncDisjointParams", func() { a.finalizeFuncDisjointParams(activeDecls) })
-	postTimed("lintHotKernelsForDisjointness", func() { a.lintHotKernelsForDisjointness() })
-
 }

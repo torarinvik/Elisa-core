@@ -208,3 +208,25 @@ for the initial attempt and exactly one for every resume, while retaining the
 existing IR/corruption/revision checks. Ordinary completed-state edit tests pass.
 This removes unused token/AST allocation and parse time from the tight completion
 publication path; it does not remove the initial current-source parse.
+
+## Resumable final checks
+
+Initial-analysis checkpoints now record progress through the same ordered final
+check phases used by ordinary analysis and retained updates. Time/count slices
+can stop after each whole phase; no Result is exposed until all phases and final
+result construction complete. Body diagnostic windows stay fixed while final
+checks resume, so later retained updates can remove/replay post-body diagnostics
+correctly. Debug and incomplete-build messages report both declaration and
+final-check progress. The declaration count limit also bounds final-check units.
+Tests force a round trip after each phase and compare metadata, IR, negative
+contracts, protocol violations and retained diagnostic replay with fresh analysis.
+
+This testing found that protocol effect obligations were consumed after initial
+analysis: an unchanged retained update could silently lose its capability-subset
+violation. Obligations now remain available for subsequent row solves, and their
+positions follow the live method declaration when source lines move. A separate-
+process CLI regression requires the violation to persist through an exact repeat,
+a real unrelated body edit and a line shift, matching a cache-disabled compiler.
+The body-edited and line-shifted cases must use retained updates without fallback.
+The full semantic suite and disk-cache bootstrap/edit/native/IR test group pass
+after this change. Full-input phase/publication timing is the next qualification.
