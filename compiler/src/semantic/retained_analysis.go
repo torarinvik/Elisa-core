@@ -398,8 +398,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// Lists an added declaration was appended to; sorted back into source order at the end.
 	appendedInto := map[*ast.NamespaceDecl]bool{}
 	appendedTop := false
-	var structPairs [][2]*ast.StructDecl  // edited plain structs: (previous, edited)
-	var constPairs [][2]*ast.ConstDecl    // typed consts with a new value: (previous, edited)
+	var structPairs [][2]*ast.StructDecl // edited plain structs: (previous, edited)
+	var constPairs [][2]*ast.ConstDecl   // typed consts with a new value: (previous, edited)
+	var constEnumPairs [][2]*ast.ConstEnumDecl
 	var enumPairs [][2]*ast.EnumDecl      // edited plain enums: (previous, edited)
 	var hierarchyPairs [][2]*ast.EnumDecl // edited refinements of an enum hierarchy
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
@@ -450,6 +451,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 					if ned, ok := nd.(*ast.EnumDecl); ok && oed.Name == ned.Name && oed.Parent == ned.Parent &&
 						retainedRefinementEnum(oed) && retainedRefinementEnum(ned) {
 						hierarchyPairs = append(hierarchyPairs, [2]*ast.EnumDecl{oed, ned})
+						continue
+					}
+				}
+				if oe, ok := od.(*ast.ConstEnumDecl); ok {
+					if ne, ok := nd.(*ast.ConstEnumDecl); ok && retainedConstEnumEditAllowed(oe, ne, oldSpans[i], newSpans[j]) {
+						constEnumPairs = append(constEnumPairs, [2]*ast.ConstEnumDecl{oe, ne})
 						continue
 					}
 				}
@@ -564,6 +571,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			} else {
 				constsOut -= d
 			}
+		}
+	}
+	for _, pair := range constEnumPairs {
+		if delta := len(pair[1].Members) - len(pair[0].Members); delta > 0 {
+			constsIn += delta
+		} else {
+			constsOut -= delta
 		}
 	}
 	growth := retainedGrowth{addedFuncs: len(added), removedFuncs: len(removed), addedConsts: constsIn, removedConsts: constsOut, addedGlobals: globalsIn, usings: usingsAdded+usingsRemoved != 0}
@@ -927,6 +941,55 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		r.LastStats.ConstUsers = len(splices)
 	}
+	// Constant-enum values live in the type's member table. Keep that type's identity,
+	// but reject declaration-phase value dependencies before mutating it.
+	var constEnumEdits []retainedConstEnumEdit
+	if len(constEnumPairs) != 0 {
+		var why string
+		if constEnumEdits, why = r.findLiveConstEnumEdits(constEnumPairs, scratch, newDecls, newSpans); why != "" {
+			return fail("%s", why)
+		}
+		targets, names, members := map[Type]bool{}, map[string]bool{}, map[string]bool{}
+		for _, e := range constEnumEdits {
+			targets[e.et] = true
+			names[e.live.Name] = true
+			for _, d := range []*ast.ConstEnumDecl{e.live, e.edit} {
+				for _, m := range d.Members {
+					members[m.Name] = true
+				}
+			}
+		}
+		for name, t := range a.namedTypes {
+			if targets[t] {
+				names[name[strings.LastIndex(name, ".")+1:]] = true
+			}
+		}
+		namePattern := retainedNamesPattern(names)
+		a.widenLayoutTargets(targets)
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		memo := map[Type]bool{}
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] {
+				continue
+			}
+			_, sourceText := spanOf(fn)
+			if !namePattern.MatchString(sourceText) && !retainedConstEnumShorthand(pairedNew[fn], members) && !a.retainedUsesTypes(fn, targets, names, memo) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil || !retainedPlainFunction(fn) {
+				return fail("%s uses an edited constant enum but cannot be re-analyzed alone", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+			spliced[fn] = true
+		}
+		r.LastStats.EnumUsers = len(splices)
+	}
 	// An edited enum: every function whose types or text reach it is re-analyzed against the
 	// new variant table.
 	var enumEdits []retainedEnumEdit
@@ -1249,6 +1312,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	// Past this point the edit is accepted; mutate the retained state.
 	r.applyUsingChanges(usingChanges, scoped)
+	r.applyConstEnumEdits(constEnumEdits)
 	if len(enumEdits) != 0 {
 		r.applyEnumEdits(enumEdits)
 	}
@@ -1814,6 +1878,8 @@ func retainedSameDeclKind(a, b ast.Decl) bool {
 		return fa.Name == b.(*ast.ConstDecl).Name
 	case *ast.StructDecl:
 		return fa.Name == b.(*ast.StructDecl).Name
+	case *ast.ConstEnumDecl:
+		return fa.Name == b.(*ast.ConstEnumDecl).Name
 	case *ast.EnumDecl:
 		return fa.Name == b.(*ast.EnumDecl).Name
 	case *ast.GlobalDecl:

@@ -1483,3 +1483,75 @@ also remain open. Native critical-path timing shows the removed unit starting
 late and large layout units starting behind cache-hit work; bounded advisory
 native cost scheduling is a candidate next investigation, with exact current
 bitcode/target authority unchanged.
+
+
+### Rejected native cost-order prototype
+
+A bounded, checksummed history of measured native unit durations was prototyped
+as advisory scheduling metadata. Exact current bitcode and target validation
+remained the object reuse authority. Matched checked-payload runs with separate
+native namespaces gave:
+
+| Request | Existing order | Cost history order |
+| --- | ---: | ---: |
+| First native population | 20.817 s | 20.833 s |
+| Baseline replay, native hits | 6.323 s | 6.515 s |
+| Used layout edit | 11.692 s | 11.853 s |
+| Layout repeat | 7.143 s | 7.285 s |
+| Wrapper removal | 9.215 s | 9.015 s |
+| Removal repeat | 7.271 s | 7.549 s |
+
+This did not establish a reliable overall improvement, so the entire prototype
+was removed without changing the committed scheduling implementation. Logs are
+`native-cost-{before,after}-64-*.json` in the directory identified by
+`/tmp/elisa-discard-locals-production-root`. The rejected patch and its two new
+files were saved under `/tmp/elisa-native-cost-rejected.patch` and
+`/tmp/rejected-incremental_object_cost*.go` for investigation only.
+
+
+### Persistent constant-enum member replay
+
+Retained updates now recognize implicit-valued constant-enum member edits with
+an unchanged explicit storage declaration. They preserve the live type identity,
+replace both its member table and folded `constValues` entries, clear type memos,
+and reanalyze functions whose types or bodies can observe the enum. The shared
+type-dependency walker now recognizes `ConstEnumType` targets. Member count deltas
+are included in the existing declaration-phase table-size validation.
+
+Declaration dependencies, static/law function users, contract/default references, explicit member values,
+inferred or changed storage, and open/foreign enum edits still fall back. The
+new guard distinguishes enum type references and shorthand member access from
+unrelated bare declaration names and comments. It does not remove declaration
+phase fingerprint or diagnostic checks.
+
+Disk round trips cover reorder/add/remove/restore, current member values and
+cold diagnostic parity. A strict-SMT fixture retracts and restores a numeric
+proof when a reordered member's integer value changes. A fresh-process CLI
+oracle compares the current LLVM IR and diagnostics with cold compilation for
+reorder/rename/revert and checks the admitted baseline remains byte-identical.
+
+
+The full semantic suite passed during development, as did the fresh-process
+`TestAnalysisDisk` oracles. A checked-payload self-build qualification used the
+previously admitted, fully validated envelope (not a production rekey), O3 with
+independent IR/parallel native optimization, 64 units, no server, and 30-second
+external request caps. Its evidence is under `const-enum-qualified-v5-64` and
+`native-cost-const-enum-v5-64-*.json` in the directory selected by
+`/tmp/elisa-discard-locals-production-root`.
+
+The first accepted reorder rebuilt in 11.608 seconds, rechecking 30 functions.
+Narrowing body invalidation from arbitrary matching field names to enum type
+references and actual shorthand members reduced this to two functions and
+10.683 seconds (repeat 8.313 seconds). Its restore/scratch overlap took 4.427
+seconds, replay 1.888, and native generation/merge 4.005. The two native misses
+were units 8 and 43. Baseline native population took 22.238 seconds and its
+all-hit replay 6.651. This is a verified escape from the previous cold fallback,
+not yet a sub-ten-second normal CLI result. Fresh production admission for this
+compiler namespace is still required.
+
+Both baseline and reordered objects linked and ran the included fixture twice,
+with the second request reporting a valid disk sidecar and both executables
+returning 42 (`const-enum-qualified-v5-64/functional.json`). The reordered native
+object SHA-256 is
+`b7ca554f948253d1a6395021fe8a35f3e5573738a7ea5c577cc48b92cb85f661`.
+Source probes were restored; the seven pre-existing Stage1 changes remain.

@@ -150,6 +150,8 @@ func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool
 				return targets[n] || targetNames[n.Name]
 			case *EnumType:
 				return targets[n]
+			case *ConstEnumType:
+				return targets[n]
 			}
 			return rec(v.Elem())
 		case reflect.Interface:

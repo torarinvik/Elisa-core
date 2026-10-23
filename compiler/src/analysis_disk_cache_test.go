@@ -434,3 +434,60 @@ func TestAnalysisDiskCacheReplaysEditsWithoutRewritingBaseline(t *testing.T) {
 		}
 	}
 }
+
+// Each request starts a new process. A member reorder must regenerate the
+// current constants and body IR while retaining the admitted analysis baseline.
+func TestAnalysisDiskCacheConstantEnumMemberEdits(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "program.elisa")
+	cachedPath, coldPath := filepath.Join(dir, "cached.ll"), filepath.Join(dir, "cold.ll")
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	base := "const enum Choice of u8:\n    First\n    Second\n\ndef main() -> i64:\n    match Choice.First:\n        Choice.First:\n            return 41\n        Choice.Second:\n            return 42\n"
+	if err := os.WriteFile(source, []byte(base), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runDiskCLIChild(t, env, "-emit", "llvm", "-o", cachedPath, source)
+	paths, _ := filepath.Glob(filepath.Join(dir, "cache", "analysis", "*.state"))
+	if len(paths) != 1 {
+		t.Fatal("no unique baseline", paths)
+	}
+	baseline, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	reordered := strings.Replace(base, "    First\n    Second\n", "    Second\n    First\n", 1)
+	renamed := strings.ReplaceAll(reordered, "Second", "Last")
+	for _, text := range []string{reordered, renamed, reordered, base} {
+		if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		output := runDiskCLIChild(t, env, "-emit", "llvm", "-o", cachedPath, source)
+		marker := "replay baseline"
+		if text == base {
+			marker = "reuse unchanged revision"
+		}
+		if !strings.Contains(output, marker) || strings.Contains(output, "fallback") {
+			t.Fatalf("did not reuse baseline: %s", output)
+		}
+		cold := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+		coldOutput := runDiskCLIChild(t, cold, "-emit", "llvm", "-o", coldPath, source)
+		got, err := os.ReadFile(cachedPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(coldPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(retainedGensym.ReplaceAll(got, []byte("__${1}_N")), retainedGensym.ReplaceAll(want, []byte("__${1}_N"))) || diskDiagnosticTranscript(output) != diskDiagnosticTranscript(coldOutput) {
+			t.Fatal("constant enum replay differs from cold compilation")
+		}
+		current, err := os.ReadFile(paths[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(current, baseline) {
+			t.Fatal("member edit rewrote baseline")
+		}
+	}
+}
