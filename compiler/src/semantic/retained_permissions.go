@@ -99,25 +99,31 @@ func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, b
 		body()
 		return
 	}
-	solved := map[*FuncType]permissionRowSnapshot{}
-	for _, sd := range permissionFunctionDecls(decls) {
-		ft := permissionDeclType(a, sd)
+	editedTypes := map[*FuncType]bool{}
+	for fn := range p.edited {
+		sym := a.funcDeclSymbols[fn]
+		if sym == nil {
+			continue
+		}
+		ft, _ := sym.Type.(*FuncType)
 		if ft == nil {
 			continue
 		}
-		if p.edited[sd.Decl.(*ast.FuncDecl)] {
-			// An edited function keeps its type when its signature did not change, and with
-			// it the solved row a recursive call would read; its body starts from its
-			// declared row, as in a fresh analysis. The body then writes its own row.
-			if start, known := p.declared[ft]; known {
-				start.restore(ft)
-			} else if p.declared != nil {
-				p.declared[ft] = snapshotPermissionRow(ft) // a new type: fresh from this update's declaration phase
-			}
-			continue
+		editedTypes[ft] = true
+		// An edited function keeps its type when its signature did not change, and with
+		// it the solved row a recursive call would read; its body starts from its
+		// declared row, as in a fresh analysis. The body then writes its own row.
+		if start, known := p.declared[ft]; known {
+			start.restore(ft)
+		} else if p.declared != nil {
+			p.declared[ft] = snapshotPermissionRow(ft) // a new type: fresh from this update's declaration phase
 		}
-		start, known := p.initial[ft]
-		if !known {
+	}
+	// Every other row reads as its initial one; most already are, so only rows the
+	// solve moved are swapped.
+	solved := map[*FuncType]permissionRowSnapshot{}
+	for ft, start := range p.initial {
+		if editedTypes[ft] || start.identical(ft) {
 			continue
 		}
 		solved[ft] = snapshotPermissionRow(ft)
@@ -127,6 +133,16 @@ func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, b
 	for ft, row := range solved {
 		row.restore(ft)
 	}
+}
+
+// identical reports whether ft's row is the very slices s holds.
+func (s permissionRowSnapshot) identical(ft *FuncType) bool {
+	same := func(x, y []ast.PermissionRef) bool {
+		return len(x) == len(y) && (len(x) == 0 || &x[0] == &y[0])
+	}
+	return same(s.refs, ft.PermissionRefs) && same(s.mutable, ft.MutableGlobalPermissionRefs) &&
+		same(s.returned, ft.ReturnedFunctionPermissionRefs) && same(s.returnedGlobal, ft.ReturnedFunctionGlobalPermissionRefs) &&
+		len(s.families) == len(ft.Permissions) && (len(s.families) == 0 || &s.families[0] == &ft.Permissions[0])
 }
 
 type permissionRowSnapshot struct {

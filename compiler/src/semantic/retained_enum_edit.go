@@ -264,7 +264,15 @@ func (r *RetainedAnalysis) applyHierarchyEdits(edits []retainedEnumEdit, members
 // tests and a match a catch-all arm completes see the same types and coverage; a category arm
 // still covers its whole category.
 func retainedHierarchyUsers(span string, edited, members map[string]bool) bool {
-	toks := retainedIdentToken.FindAllStringIndex(span, -1)
+	// Most spans name neither: a substring test skips tokenizing them.
+	candidate := strings.Contains(span, "variants")
+	for name := range edited {
+		candidate = candidate || strings.Contains(span, name+".")
+	}
+	if !candidate {
+		return false
+	}
+	toks := retainedIdentTokens(span)
 	reflects, namesMember, namesEdited := false, false, false
 	for _, t := range toks {
 		tok := span[t[0]:t[1]]
@@ -292,7 +300,7 @@ func retainedOpenMatchNames(span string, edited map[string]bool) bool {
 	lines := strings.Split(span, "\n")
 	indent := func(l string) int { return len(l) - len(strings.TrimLeft(l, " ")) }
 	names := func(l string) bool {
-		for _, t := range retainedIdentToken.FindAllStringIndex(l, -1) {
+		for _, t := range retainedIdentTokens(l) {
 			if edited[l[t[0]:t[1]]] && t[1] < len(l) && l[t[1]] == '.' {
 				return true
 			}

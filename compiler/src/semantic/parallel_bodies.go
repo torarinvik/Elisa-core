@@ -321,7 +321,7 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 	source := reflect.ValueOf(a).Elem()
 	cloned := reflect.New(source.Type()).Elem()
 	cloned.Set(source)
-	shareDeclarationMaps := a.retained == nil
+	shareDeclarationMaps := true
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
@@ -354,7 +354,7 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			continue
 		}
-		if useMemoOverlays && a.retained == nil && parallelBodyMemoMap(name) {
+		if useMemoOverlays && parallelBodyMemoMap(name) {
 			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			continue
 		}

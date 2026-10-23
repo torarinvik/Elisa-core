@@ -216,11 +216,13 @@ func TestParallelAnalyzerCloneSharesOnlyFrozenDeclarationMaps(t *testing.T) {
 		t.Fatal("mutable expression-type map leaked across workers")
 	}
 
+	// A retained analysis's workers share the frozen maps too: updates run serially, so
+	// nothing writes them while workers run, and per-worker copies kept ~2 GB live.
 	base.retained = &RetainedAnalysis{}
 	retainedWorker := cloneAnalyzerValueForParallel(base).Addr().Interface().(*Analyzer)
-	base.functionTypes["retained-only"] = &FuncType{Name: "retained-only"}
-	if _, ok := retainedWorker.functionTypes["retained-only"]; ok {
-		t.Fatal("retained analysis must keep declaration maps isolated")
+	base.functionTypes["retained-shared"] = &FuncType{Name: "retained-shared"}
+	if _, ok := retainedWorker.functionTypes["retained-shared"]; !ok {
+		t.Fatal("retained analysis copied a frozen declaration map")
 	}
 }
 

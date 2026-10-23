@@ -3,7 +3,6 @@ package semantic
 import (
 	"elisacore/src/lexer"
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -189,7 +188,37 @@ func (a *Analyzer) retainedLexicallyShadowed(name string, targets map[string]boo
 	return false
 }
 
-var retainedIdentToken = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+// retainedIdentTokens returns the [start, end) offsets of every identifier-shaped token
+// (`[A-Za-z_][A-Za-z0-9_]*`) in span.
+func retainedIdentTokens(span string) [][2]int {
+	var out [][2]int
+	for i := 0; i < len(span); {
+		c := span[i]
+		if c == '_' || c|0x20 >= 'a' && c|0x20 <= 'z' {
+			j := i + 1
+			for j < len(span) {
+				d := span[j]
+				if d == '_' || d|0x20 >= 'a' && d|0x20 <= 'z' || d >= '0' && d <= '9' {
+					j++
+					continue
+				}
+				break
+			}
+			out = append(out, [2]int{i, j})
+			i = j
+			continue
+		}
+		if c >= '0' && c <= '9' {
+			// A number's digits and suffix are not an identifier.
+			for i < len(span) && (span[i] == '_' || span[i]|0x20 >= 'a' && span[i]|0x20 <= 'z' || span[i] >= '0' && span[i] <= '9') {
+				i++
+			}
+			continue
+		}
+		i++
+	}
+	return out
+}
 
 // retainedSpanMentions reports whether a declaration's source text holds any of names as
 // a token. Text, unlike the body walk, also sees type annotations; comments only make the
@@ -201,7 +230,7 @@ var retainedIdentToken = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 // qualifiers holds the bare names of types and modules: after `Q.` (an enum variant, a module
 // member) a name is qualified, never a UFCS call.
 func retainedSpanMentions(span string, names, qualifiers map[string]bool) bool {
-	toks := retainedIdentToken.FindAllStringIndex(span, -1)
+	toks := retainedIdentTokens(span)
 	for i, loc := range toks {
 		if !names[span[loc[0]:loc[1]]] || retainedInCommentOrString(span, loc[0]) {
 			continue

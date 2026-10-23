@@ -280,13 +280,24 @@ func serveRetained(socket string, log io.Writer) error {
 			f.Flush()
 		}
 		restoreGC()
-		// Collect while the user edits: the next request then allocates from
-		// memory this process already touched instead of faulting in fresh pages
-		// (the default GC percent lets a retained heap grow for a long time).
-		runtime.GC()
+		// Collect while the user edits, and hand the freed pages back. Keeping them
+		// resident looked cheaper (no fresh page faults next request), but on a machine
+		// under memory pressure the compressor swaps those idle gigabytes out and the
+		// next request swaps them back in: an AST variant edit on the compiler tree took
+		// 10-12.6 s keeping them and 7.7-9.5 s releasing them (24 GB, swap in use).
+		debug.FreeOSMemory()
 		var ms runtime.MemStats
 		runtime.ReadMemStats(&ms)
 		fmt.Fprintf(log, "[retained] heap live %d MB, idle %d MB, released %d MB, sys %d MB\n", ms.HeapAlloc>>20, ms.HeapIdle>>20, ms.HeapReleased>>20, ms.Sys>>20)
+		// The live heap between requests, for finding what a retained analysis keeps.
+		for _, kv := range req.Env {
+			if path, ok := strings.CutPrefix(kv, "ELISACORE_RETAINED_HEAPPROFILE="); ok && path != "" {
+				if f, err := os.Create(path); err == nil {
+					_ = pprof.Lookup("heap").WriteTo(f, 0)
+					_ = f.Close()
+				}
+			}
+		}
 	})
 	fmt.Fprintf(log, "[retained] serving on %s\n", socket)
 	return http.Serve(listener, mux)
