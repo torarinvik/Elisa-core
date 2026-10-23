@@ -1575,7 +1575,9 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
 	if a.retained != nil {
-		a.retained.capture(a, activeDecls, func(decls []scopedDecl) { a.runPostPhases(decls, options, solver) })
+		a.retained.capture(a, activeDecls, func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
+			a.runPostPhases(decls, options, solver, appended)
+		})
 	}
 	// docs/91 G0: death-time cohort + interprocedural arg-retention analysis. Runs AFTER body
 	// analysis so exprTypes is complete and the whole-program retention fixpoint can be computed.
@@ -1661,8 +1663,8 @@ func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls 
 
 // runPostPhases runs exactly the same ordered checks as resumable initial
 // analysis, without stopping between phases.
-func (a *Analyzer) runPostPhases(decls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) {
+func (a *Analyzer) runPostPhases(decls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl), appended ...map[*ast.FuncDecl]*FuncType) {
 	for phase := range analysisPostPhaseNames {
-		a.runPostPhase(phase, decls, options, solver)
+		a.runPostPhase(phase, decls, options, solver, appended...)
 	}
 }

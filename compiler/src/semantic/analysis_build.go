@@ -194,6 +194,8 @@ func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {
 	if b.done {
 		return nil, fmt.Errorf("completed analysis is not a build checkpoint")
 	}
-	b.retained.post = func(decls []scopedDecl) { b.retained.a.runPostPhases(decls, b.retained.options, nil) }
+	b.retained.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
+		b.retained.a.runPostPhases(decls, b.retained.options, nil, appended)
+	}
 	return b, nil
 }

@@ -1,5 +1,7 @@
 package semantic
 
+import "elisacore/src/ast"
+
 // Phase order is shared by ordinary analysis, retained updates and disk
 // bootstrap. A checkpoint may stop only after an entire phase has completed.
 var analysisPostPhaseNames = [...]string{
@@ -10,7 +12,7 @@ var analysisPostPhaseNames = [...]string{
 	"lintHotKernelsForDisjointness",
 }
 
-func (a *Analyzer) runPostPhase(phase int, decls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) {
+func (a *Analyzer) runPostPhase(phase int, decls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl), appended ...map[*ast.FuncDecl]*FuncType) {
 	postTimed(analysisPostPhaseNames[phase], func() {
 		switch phase {
 		case 0:
@@ -23,7 +25,7 @@ func (a *Analyzer) runPostPhase(phase int, decls []scopedDecl, options AnalyzeOp
 			a.checkProtocolDefaultMethodContracts(decls)
 		case 2:
 			if solver == nil {
-				a.inferFunctionPermissionEffects(decls)
+				a.inferFunctionPermissionEffects(decls, appended...)
 			} else {
 				solver(a, decls)
 			}

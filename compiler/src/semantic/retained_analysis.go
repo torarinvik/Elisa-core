@@ -30,7 +30,7 @@ type RetainedAnalysis struct {
 	a        *Analyzer
 	result   *Result
 	decls    []scopedDecl
-	post     func([]scopedDecl)
+	post     func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
 	pristine *ast.File                            // a parse of src, for comparison; see texts
 	texts    map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
 	src      []byte                               // the expanded source pristine was parsed from
@@ -108,7 +108,7 @@ func AnalyzeRetained(file, pristine *ast.File, src []byte, options AnalyzeOption
 	return result, r
 }
 
-func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func([]scopedDecl)) {
+func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func([]scopedDecl, map[*ast.FuncDecl]*FuncType)) {
 	r.a, r.decls, r.post = a, decls, post
 }
 
@@ -1047,6 +1047,29 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		bodies[i] = prepared.Body
 	}
+	// Preserve the old permission-equation numbering before changing the set.
+	var permissionBefore []scopedDecl
+	var permissionBeforeTypes []*FuncType
+	var permissionKnownTypes map[*FuncType]bool
+	if len(added) > 0 && len(removed) == 0 {
+		permissionBefore = permissionFunctionDecls(r.decls)
+		for _, sd := range permissionBefore {
+			permissionBeforeTypes = append(permissionBeforeTypes, permissionDeclType(a, sd))
+		}
+		permissionKnownTypes = map[*FuncType]bool{}
+		for _, ft := range a.functionTypes {
+			if ft != nil {
+				permissionKnownTypes[ft] = true
+			}
+		}
+		for _, sym := range a.globalScope.Symbols {
+			if sym != nil {
+				if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
+					permissionKnownTypes[ft] = true
+				}
+			}
+		}
+	}
 	// Removals go first: a changed signature re-adds the same name below.
 	if len(removedLive) != 0 {
 		r.removeLiveFunctions(removedLive)
@@ -1375,7 +1398,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	r.rbCutoff = len(added) == 0 && len(removed) == 0 && os.Getenv("ELISACORE_RETAINED_RB_CUTOFF") != "0"
-	r.perms.beginUpdate(changed, len(added) == 0 && len(removed) == 0, marks)
+	permissionUsable := len(added) == 0 && len(removed) == 0
+	var permissionAppended map[*ast.FuncDecl]*FuncType
+	if len(added) > 0 && len(removed) == 0 {
+		permissionAppended, permissionUsable = r.perms.appendedFunctions(a, permissionBefore, permissionBeforeTypes, permissionKnownTypes, permissionFunctionDecls(r.decls), changed)
+	}
+	r.perms.beginUpdate(changed, permissionUsable, marks)
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
@@ -1393,7 +1421,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
 	postStart := time.Now()
-	r.post(r.decls)
+	r.post(r.decls, permissionAppended)
 	r.LastStats.Post = time.Since(postStart)
 	r.rbUpdating = false
 	a.closeSMT()

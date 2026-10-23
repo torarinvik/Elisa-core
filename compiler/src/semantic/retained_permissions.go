@@ -12,9 +12,9 @@ import "elisacore/src/ast"
 type retainedPermissions struct {
 	readers  map[*FuncType]map[int]bool // row -> indices (in permissionFunctionDecls) of its readers
 	diags    map[*ast.FuncDecl][]Diagnostic
-	changed  map[*FuncType]bool // rows the last incremental solve changed
+	changed  map[*FuncType]bool // pre-existing rows changed by the last solve; fresh functions validate as edited bodies
 	edited   map[*ast.FuncDecl]bool
-	usable   bool // this update may run incrementally (no added/removed functions)
+	usable   bool // this update has stable equation indexes (body edits or verified append-only growth)
 	solvedIn bool // the incremental solve ran in this update
 	// rows holds every row as the last solve left it: body analysis can rewrite
 	// an edited function's row before the solve runs, so "changed" is judged
@@ -207,9 +207,25 @@ func (p *retainedPermissions) recordGraph(a *Analyzer, decls []scopedDecl) {
 // solveIncremental re-evaluates the edited functions and, transitively, the
 // readers of every row that changed. It reports false (rows possibly partly
 // advanced, still a valid starting point) when it cannot finish.
-func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl) bool {
+func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl, appended ...map[*ast.FuncDecl]*FuncType) bool {
 	if !p.usable || p.rows == nil {
 		return false
+	}
+	// Verified fresh declarations were absent from every old equation. Their
+	// own validation and every rebound caller run because those bodies are edited.
+	// A new row alone cannot invalidate cached validation of unrelated old bodies.
+	fresh := map[*FuncType]bool{}
+	for _, functions := range appended {
+		for fn, verified := range functions {
+			sym := a.funcDeclSymbols[fn]
+			if sym == nil || sym.Type != verified || verified == nil {
+				return false
+			}
+			if _, known := p.rows[verified]; known || len(p.readers[verified]) != 0 {
+				return false
+			}
+			fresh[verified] = true
+		}
 	}
 	index := map[*ast.FuncDecl]int{}
 	for i, sd := range decls {
@@ -276,7 +292,9 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl) 
 				shrank = true
 			}
 			p.rows[ft] = snapshotPermissionRow(ft)
-			p.changed[ft] = true
+			if !fresh[ft] {
+				p.changed[ft] = true
+			}
 			for r := range p.readers[ft] {
 				if !queued[r] {
 					queued[r] = true
@@ -336,7 +354,7 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl) 
 		p.changed = map[*FuncType]bool{}
 		for i := range cone {
 			if ft := permissionDeclType(a, decls[i]); ft != nil {
-				if prev, known := before[ft]; !known || !prev.same(ft) {
+				if prev, known := before[ft]; !fresh[ft] && (!known || !prev.same(ft)) {
 					p.changed[ft] = true
 				}
 			}
@@ -384,4 +402,52 @@ func (p *retainedPermissions) replay(a *Analyzer, fn *ast.FuncDecl) bool {
 		a.appendDiagnostic(d)
 	}
 	return true
+}
+
+// Appending equations preserves all recorded reader indexes only when the old
+// declaration sequence is an exact prefix. Every old row must still be known;
+// every tail node must be newly typed and included in body re-analysis.
+// Replacements, removals, index shifts and shared types retain the full solve.
+func (p *retainedPermissions) appendedFunctions(a *Analyzer, before []scopedDecl, beforeTypes []*FuncType, knownTypes map[*FuncType]bool, current, changed []scopedDecl) (map[*ast.FuncDecl]*FuncType, bool) {
+	if p.readers == nil || p.rows == nil || p.initial == nil || knownTypes == nil || len(beforeTypes) != len(before) || len(current) <= len(before) {
+		return nil, false
+	}
+	for i, old := range before {
+		if current[i].Decl != old.Decl || current[i].Namespace != old.Namespace || !sameStringSlice(current[i].Usings, old.Usings) {
+			return nil, false
+		}
+		ft := permissionDeclType(a, current[i])
+		if ft != beforeTypes[i] {
+			return nil, false
+		}
+		// Untyped/non-executable declarations publish no equation row. A
+		// previously typed row must still be present with the exact same type.
+		if ft != nil {
+			if _, known := p.rows[ft]; !known {
+				return nil, false
+			}
+		}
+	}
+	edited := map[ast.Decl]bool{}
+	for _, sd := range changed {
+		edited[sd.Decl] = true
+	}
+	types := map[*FuncType]bool{}
+	appended := map[*ast.FuncDecl]*FuncType{}
+	for _, sd := range current[len(before):] {
+		fn, ok := sd.Decl.(*ast.FuncDecl)
+		if !ok || !edited[fn] {
+			return nil, false
+		}
+		ft := permissionDeclType(a, sd)
+		if ft == nil || types[ft] || knownTypes[ft] || len(p.readers[ft]) != 0 {
+			return nil, false
+		}
+		if _, known := p.rows[ft]; known {
+			return nil, false
+		}
+		types[ft] = true
+		appended[fn] = ft
+	}
+	return appended, true
 }

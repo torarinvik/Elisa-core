@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 
+	"elisacore/src/ast"
 	"elisacore/src/statecache"
 )
 
@@ -51,7 +52,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 		return nil, fmt.Errorf("incomplete semantic state")
 	}
 	r.pre = r.pre.comparisonState()
-	r.post = func(decls []scopedDecl) { r.a.runPostPhases(decls, r.options, nil) }
+	r.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
+		r.a.runPostPhases(decls, r.options, nil, appended)
+	}
 	return r, nil
 }
 

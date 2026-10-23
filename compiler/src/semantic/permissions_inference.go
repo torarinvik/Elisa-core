@@ -25,10 +25,10 @@ func permissionFunctionDecls(decls []scopedDecl) []scopedDecl {
 	return functions
 }
 
-func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
+func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl, appended ...map[*ast.FuncDecl]*FuncType) {
 	fdecls := permissionFunctionDecls(decls)
 	r := a.retained
-	if r != nil && r.rbUpdating && r.perms.solveIncremental(a, fdecls) {
+	if r != nil && r.rbUpdating && r.perms.solveIncremental(a, fdecls, appended...) {
 		return
 	}
 	if r != nil {

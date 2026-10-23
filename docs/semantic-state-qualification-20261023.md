@@ -778,3 +778,42 @@ The changed-unit-order regression verifies copied hints, correct first owner,
 and a complete unique work list; native multi-process admission/edit/optimization
 level checks and all disk-analysis regressions pass. The function-addition case
 still misses the goal, so prepared semantic replay is the next profiling target.
+
+
+### Preserve the permission graph for verified append-only function growth
+
+Replay profiling isolated the addition regression: prepared update 2.376 s,
+of which post checks took 2.228 s. Permission inference took 1.307 s and
+validation 0.665 s; name/declaration diffing was only about 0.13 s. No new
+name-index cache was added because the profile did not justify one.
+
+The retained updater now keeps the old permission declaration sequence, types
+and known callable types before registration. It permits incremental solving
+only when the old sequence/scopes/types remain an exact prefix, old rows are
+known, and every tail function is edited with a genuinely fresh, unshared type
+that no old equation read. The verified function/type map is passed through
+invocation-local post callbacks and rechecked after body analysis. No persistent
+field or schema layout was added; old checked graph payloads still restore.
+
+New functions and rebound callers always validate as edited bodies. Fresh rows
+alone do not invalidate unrelated old validation; any pre-existing row change
+still revalidates all old functions. Replacements, removals, index shifts,
+reused callable types and failed guards retain the full solve. A later edit of
+a previously added function treats its row as pre-existing normally.
+
+Full-input qualification: novel body edit 9.154 s; function addition on the
+edited revision 8.587 s (two misses / 62 native disk hits), versus 10.830 s
+before. Prepared addition replay fell to 0.377 s and post checks to 0.234 s.
+The final stricter guards reproduced 0.385 s replay, with permission inference
+2 ms and validation 5 ms. Addition object SHA-256 exactly matched the full-solve
+version: `7f1072993dbfa1be66f19bb4211346a984ca2b6b8dec171423c445ad8dbb8379`.
+All processes used external 30-second caps. These remain explicit qualification
+loads; final production admission and broader major edits remain to be tested.
+
+The complete semantic package suite passes from its package directory, along
+with all separate-process disk cache regressions and targeted race checks.
+New cases cover unused additions, new unsafe effects, repair of an undefined
+callee, changed existing rows, index shifts, callable-type reuse, retargeted
+verified types and removal fallback. Snapshot roundtrip tests preserve the
+invocation-local callback reconstruction. Replay-only CPU profiling and detailed
+update stats are available in the opt-in qualification harness.

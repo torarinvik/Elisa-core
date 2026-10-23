@@ -90,6 +90,17 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 			if os.Getenv("ELISACORE_STATE_QUALIFY_REPLAY") != "1" {
 				t.Fatal("native qualification input does not match the saved revision")
 			}
+			if profilePath := os.Getenv("ELISACORE_STATE_QUALIFY_REPLAY_PROFILE"); profilePath != "" {
+				profile, err := os.Create(profilePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := pprof.StartCPUProfile(profile); err != nil {
+					profile.Close()
+					t.Fatal(err)
+				}
+				defer func() { pprof.StopCPUProfile(); profile.Close() }()
+			}
 			started := time.Now()
 			var err error
 			if prefetch {
@@ -108,7 +119,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("qualified baseline replay: %v", err)
 			}
-			t.Logf("baseline replay: %v changed=%d", time.Since(started), state.LastStats.Changed)
+			t.Logf("baseline replay: %v stats=%+v", time.Since(started), state.LastStats)
 			if _, exact := state.ResultForSource(program.source); !exact {
 				t.Fatal("replay did not install current expanded source")
 			}
