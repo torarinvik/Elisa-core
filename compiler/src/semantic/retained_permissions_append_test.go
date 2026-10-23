@@ -39,8 +39,8 @@ func TestRetainedPermissionsAppendPreservesRowsAndValidatesNewBodies(t *testing.
 		if i == 2 && !strings.Contains(retainedDiagnostics(result), `call to "extra_unsafe" requires can[Unsafe]`) {
 			t.Fatal("newly referenced function was not validated")
 		}
-		if i == 3 && state.perms.solvedIn {
-			t.Fatal("removal incorrectly reused append-only equation indexes")
+		if i == 3 && !state.perms.solvedIn {
+			t.Fatal("verified removal unnecessarily rebuilt the equation graph")
 		}
 	}
 }

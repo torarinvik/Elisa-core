@@ -955,3 +955,68 @@ All compiler builds retained `timeout 30s`; temporary source edits were restored
 
 Normal new-executable bootstrap and novel-edit matrix evidence remain necessary,
 as do the broader major-edit and default optimization-quality gates.
+
+
+### Normally admitted production matrix after early hydration
+
+The frozen `7b237070` production compiler created its own new cache from normal
+CLI requests; no snapshot or native namespace was copied. Bootstrap requests
+1–8 checkpointed in 16.150, 25.563, 24.398, 18.176, 22.772, 23.882, 25.181 and
+29.020 s. Request 9 published a complete 563,861,428-byte state envelope before
+its 30.228 s timeout; request 10 completed object emission in 19.537 s. Every
+compiler request had an external `timeout 30s`.
+
+| Normal CLI revision | Seconds |
+| --- | ---: |
+| Cached original | 0.546 |
+| Novel body edit | 9.749 |
+| Repeat body | 0.435 |
+| Add ordinary function | 9.256 |
+| Repeat function addition | 0.436 |
+| Add unused plain struct | 10.040 |
+| Repeat struct addition | 0.547 |
+| Change existing signature with a defaulted parameter | 11.330 |
+| Repeat signature | 0.544 |
+| Add leading comment/line | 10.445 |
+| Revert original | 0.452 |
+
+All requests succeeded and emitted the same 9,381,562 diagnostic bytes. The
+objects matched the previous respective body/addition/signature/original hashes.
+`/tmp/elisa-early-production-root` points to the owned evidence directory with
+frozen executable hash, exact environment/CWD, bootstrap and matrix logs. All
+temporary Stage1 edits were restored. This matrix still fails the complete goal:
+novel signatures, struct additions and line edits remain above ten seconds.
+
+### Reindex permission equations across verified function replacements
+
+Function-set edits may now reuse the surviving equation graph after checking
+node/type/scope identity, distinct genuinely new callable types, and that every
+surviving reader of a retired row has a refreshed body. Reader indexes are
+remapped explicitly, and invalid references decline reuse before mutating the
+cache. The retired row's complete transitive reader cone restarts from declared
+rows and is enqueued in the incremental solver. This is necessary even when a
+first evaluation seems unchanged: recursive peers can otherwise keep a removed
+effect alive. General reindexing clears validation diagnostics so every function
+is validated again. Existing verified append-only behavior is retained.
+
+An initial uncommitted implementation failed the call-cycle retraction oracle;
+it was corrected before retention. The complete semantic suite then passed,
+including a new originally-present-effect withdrawal test, signature/removal
+and snapshot round trips, explicit permission-row comparisons and negative
+reader guards. Targeted permission/retained race tests and all separate-process
+analysis disk-cache tests (including cold IR/diagnostic edit oracles) passed.
+There are no new persistent graph fields or weakened invocation checks.
+
+Explicit checked qualification against the preceding normally admitted baseline
+measured signature update 2.034 -> 1.182 s, with final passes 1.647 -> 0.864 s.
+Full native qualification completed in 23.772 s with 64 misses and 8.718 s with
+64 disk hits; updates were 1.147/1.148 s. The emitted signature object remained
+byte-identical:
+`9fefc498f0269171232fd3fd4ec017c7f16c0f807e8ee602b59bb059adeaa8e7`.
+Evidence is `reindexed-permissions-*.json` and `reindexed-permissions-native/`
+under the new production evidence root. Every build used `timeout 30s`.
+
+These qualification runs do not authorize the new executable to consume another
+executable's production namespace. Fresh normal CLI evidence for this change,
+remaining novel-edit misses, broader major edits and the existing optimization
+quality/default-adoption gates remain open. The overall goal is not complete.

@@ -14,7 +14,7 @@ type retainedPermissions struct {
 	diags    map[*ast.FuncDecl][]Diagnostic
 	changed  map[*FuncType]bool // pre-existing rows changed by the last solve; fresh functions validate as edited bodies
 	edited   map[*ast.FuncDecl]bool
-	usable   bool // this update has stable equation indexes (body edits or verified append-only growth)
+	usable   bool // this update has verified current equation indexes
 	solvedIn bool // the incremental solve ran in this update
 	// rows holds every row as the last solve left it: body analysis can rewrite
 	// an edited function's row before the solve runs, so "changed" is judged

@@ -1051,7 +1051,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var permissionBefore []scopedDecl
 	var permissionBeforeTypes []*FuncType
 	var permissionKnownTypes map[*FuncType]bool
-	if len(added) > 0 && len(removed) == 0 {
+	if len(added) > 0 || len(removed) > 0 {
 		permissionBefore = permissionFunctionDecls(r.decls)
 		for _, sd := range permissionBefore {
 			permissionBeforeTypes = append(permissionBeforeTypes, permissionDeclType(a, sd))
@@ -1400,10 +1400,19 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.rbCutoff = len(added) == 0 && len(removed) == 0 && os.Getenv("ELISACORE_RETAINED_RB_CUTOFF") != "0"
 	permissionUsable := len(added) == 0 && len(removed) == 0
 	var permissionAppended map[*ast.FuncDecl]*FuncType
+	var permissionReset []*ast.FuncDecl
 	if len(added) > 0 && len(removed) == 0 {
 		permissionAppended, permissionUsable = r.perms.appendedFunctions(a, permissionBefore, permissionBeforeTypes, permissionKnownTypes, permissionFunctionDecls(r.decls), changed)
 	}
+	if !permissionUsable {
+		if plan, ok := r.perms.reindexedFunctions(a, permissionBefore, permissionBeforeTypes, permissionKnownTypes, permissionFunctionDecls(r.decls), changed); ok {
+			permissionAppended, permissionReset, permissionUsable = plan.fresh, plan.reset, true
+		}
+	}
 	r.perms.beginUpdate(changed, permissionUsable, marks)
+	for _, fn := range permissionReset {
+		r.perms.edited[fn] = true
+	}
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
