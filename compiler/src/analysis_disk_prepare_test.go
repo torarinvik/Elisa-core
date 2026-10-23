@@ -1,6 +1,7 @@
 package main
 
 import (
+	"elisacore/src/ast"
 	"io"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,23 @@ import (
 
 	"elisacore/src/semantic"
 )
+
+func TestAnalysisDiskPreparationJoinsOnPrimaryParseFailure(t *testing.T) {
+	program := &loadedProgram{filename: filepath.Join(t.TempDir(), "bad.elisa"), source: []byte("def : !!!\n")}
+	started, joined := false, false
+	_, _, ok := analyzeLoadedProgramUsingPreparation(program, io.Discard, semantic.AnalyzeOptions{}, func(*ast.File, semantic.AnalyzeOptions) *semantic.Result {
+		t.Fatal("invalid primary parse reached semantic analysis")
+		return nil
+	}, func(semantic.AnalyzeOptions) func() {
+		started = true
+		done := make(chan struct{})
+		go func() { close(done) }()
+		return func() { <-done; joined = true }
+	})
+	if ok || !started || !joined {
+		t.Fatalf("parse failure did not join invocation work: ok=%v started=%v joined=%v", ok, started, joined)
+	}
+}
 
 func TestAnalysisDiskRestoreJoinsPreparedScratch(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "program.elisa")

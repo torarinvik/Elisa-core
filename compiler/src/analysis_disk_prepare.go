@@ -8,6 +8,44 @@ import (
 	"elisacore/src/semantic"
 )
 
+// This future belongs to one invocation. Its owner always joins it, including
+// parse failures. Nothing survives to answer another compiler request.
+type analysisDiskRestoration struct {
+	artifact    analysisDiskArtifact
+	started     time.Time
+	done        chan struct{}
+	state       *semantic.RetainedAnalysis
+	preparation analysisScratchPreparation
+	err         error
+	loaded      bool
+	bytes       int
+}
+
+func startAnalysisDiskRestoration(program *loadedProgram, options semantic.AnalyzeOptions) *analysisDiskRestoration {
+	artifact, eligible := analysisDiskArtifactFor(program, options)
+	if !eligible {
+		return nil
+	}
+	pending := &analysisDiskRestoration{artifact: artifact, started: time.Now(), done: make(chan struct{})}
+	go func() {
+		defer close(pending.done)
+		data, err := artifact.read()
+		if err != nil {
+			pending.err = err
+			return
+		}
+		pending.loaded, pending.bytes = true, len(data)
+		pending.state, pending.preparation, pending.err = restoreAnalysisWithScratch(data, program, options)
+	}()
+	return pending
+}
+
+func (p *analysisDiskRestoration) join() {
+	if p != nil {
+		<-p.done
+	}
+}
+
 type analysisScratchPreparation struct {
 	file     *ast.File
 	prepared *semantic.RetainedScratch

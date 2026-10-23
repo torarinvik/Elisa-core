@@ -922,3 +922,36 @@ The new executable still needs normally admitted bootstrap/matrix evidence;
 full signature permission validation and the existing native/quality caveats
 remain. No semantic snapshots or native products were rekeyed into another
 executable's production namespace.
+
+
+### Hydrate before the primary parse
+
+Normal source analysis now starts checked artifact reading and graph hydration
+once included-runtime authority and semantic options are finalized, before the
+primary parse. The invocation still joins its restore/preparation work before
+semantic replay, fallback analysis, and on primary parse failure. There is no
+server or work retained across invocations. The analysis callback recomputes the
+artifact authority and declines a mismatched prefetched key. Absent or rejected
+artifacts retain the existing cold/bootstrap path and diagnostic handling.
+
+The complete `TestAnalysisDisk` group and runtime-source authority checks passed.
+Race checks passed for hydration/preparation, failed-parse joining, explicit
+runtime-source inclusion, and the fresh-process edit oracle (cold IR/diagnostic
+comparisons). A test hook in the explicit qualification harness permits matched
+before/after phase measurements without admitting an old snapshot into the new
+executable's normal cache namespace.
+
+Isolated full-source signature qualification with the same executable and native
+cache measured late hydration at 10.062 s and early hydration at 9.000 s. Both
+reused all 64 native units; native time was 2.315/2.305 s and prepared update
+1.939/1.890 s. The final signature object remained byte-identical to the previous
+verified `9fefc498...` object. These are explicit qualified-snapshot runs, not a
+claim about a normally bootstrapped new production executable. Logs are
+`early-restore-{late,early}-isolated.json` under the production evidence root.
+An earlier cold qualification overlapped a race-test build and reached the
+30-second cap; it is excluded from performance comparisons. The retry reused
+61/64 units and finished in 14.173 s, completing the remaining native products.
+All compiler builds retained `timeout 30s`; temporary source edits were restored.
+
+Normal new-executable bootstrap and novel-edit matrix evidence remain necessary,
+as do the broader major-edit and default optimization-quality gates.

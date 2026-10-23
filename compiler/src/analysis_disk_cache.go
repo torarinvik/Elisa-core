@@ -148,7 +148,7 @@ func debugAnalysisDisk(stderr io.Writer, format string, args ...any) {
 	}
 }
 
-func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, stderr io.Writer) *semantic.Result {
+func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, stderr io.Writer, pending *analysisDiskRestoration) *semantic.Result {
 	artifact, eligible := analysisDiskArtifactFor(program, options)
 	if !eligible {
 		return semantic.AnalyzeWithOptions(file, options)
@@ -158,14 +158,20 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	unchanged := false
 	replayed := false
 	started := time.Now()
-	if data, err := artifact.read(); err == nil {
-		restored, preparation, err := restoreAnalysisWithScratch(data, program, options)
+	if pending == nil || pending.artifact.key != artifact.key {
+		pending.join()
+		pending = startAnalysisDiskRestoration(program, options)
+	}
+	pending.join()
+	if pending != nil && pending.loaded {
+		started = pending.started
+		restored, preparation, err := pending.state, pending.preparation, pending.err
 		if err == nil && !restored.MatchesInvocation(program.filename, options) {
 			err = fmt.Errorf("analysis invocation mismatch")
 		}
 		if err == nil {
 			state = restored
-			debugAnalysisDisk(stderr, "restore %s bytes=%d in=%v", artifact.key[:12], len(data), time.Since(started).Round(time.Millisecond))
+			debugAnalysisDisk(stderr, "restore %s bytes=%d in=%v", artifact.key[:12], pending.bytes, time.Since(started).Round(time.Millisecond))
 			if cached, ok := state.ResultForSource(program.source); ok {
 				result = cached
 				unchanged = true

@@ -104,17 +104,27 @@ func analyzeSemanticWithSession(file *ast.File, options semantic.AnalyzeOptions,
 }
 
 func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, session *semantic.IncrementalAnalysisSession) (*ast.File, *semantic.Result, bool) {
-	return analyzeLoadedProgramUsing(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+	var pending *analysisDiskRestoration
+	return analyzeLoadedProgramUsingPreparation(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() && program != nil && program.file == nil {
-			return analyzeSemanticFromDisk(program, file, options, stderr)
+			return analyzeSemanticFromDisk(program, file, options, stderr, pending)
 		}
 		return analyzeSemanticWithSession(file, options, session)
+	}, func(options semantic.AnalyzeOptions) func() {
+		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() {
+			pending = startAnalysisDiskRestoration(program, options)
+		}
+		return pending.join
 	})
 }
 
 // Keep provenance/options handling identical for the normal analyzer and
 // opt-in dependency audits; an injected analyzer must still do full analysis.
 func analyzeLoadedProgramUsing(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
+	return analyzeLoadedProgramUsingPreparation(program, stderr, options, analyze, nil)
+}
+
+func analyzeLoadedProgramUsingPreparation(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, prepare func(semantic.AnalyzeOptions) func()) (*ast.File, *semantic.Result, bool) {
 	if program == nil {
 		fmt.Fprintf(stderr, "error: missing program input\n")
 		return nil, nil, false
@@ -157,6 +167,13 @@ func analyzeLoadedProgramUsing(program *loadedProgram, stderr io.Writer, options
 			return nil, nil, false
 		}
 		options.TrustedRuntimeSourceFiles = append(options.TrustedRuntimeSourceFiles, runtimeSource)
+	}
+	// Source authority and final semantic options are established before any
+	// speculative restore. Join even when the primary parse rejects the input.
+	if prepare != nil {
+		if join := prepare(options); join != nil {
+			defer join()
+		}
 	}
 	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		return analyze(file, options)

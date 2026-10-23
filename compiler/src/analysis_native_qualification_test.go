@@ -72,11 +72,18 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	// Use the CLI's source-authority/options path and reject mismatched
 	// snapshots. In particular default object emission is O3, not O0.
 	var invocationOptions semantic.AnalyzeOptions
-	_, result, valid := analyzeLoadedProgramUsing(program, &diagnostics, semanticOptionsForCLI(cli), func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+	var earlyDone chan struct{}
+	var earlyStarted time.Time
+	_, result, valid := analyzeLoadedProgramUsingPreparation(program, &diagnostics, semanticOptionsForCLI(cli), func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		invocationOptions = options
 		if prefetch {
 			started := time.Now()
-			state, preparation, err = restoreAnalysisWithScratch(data, program, options)
+			if earlyDone != nil {
+				<-earlyDone
+				started = earlyStarted
+			} else {
+				state, preparation, err = restoreAnalysisWithScratch(data, program, options)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,6 +132,16 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 			}
 		}
 		return result
+	}, func(options semantic.AnalyzeOptions) func() {
+		if !prefetch || os.Getenv("ELISACORE_STATE_QUALIFY_EARLY_RESTORE") != "1" {
+			return nil
+		}
+		earlyStarted, earlyDone = time.Now(), make(chan struct{})
+		go func() {
+			defer close(earlyDone)
+			state, preparation, err = restoreAnalysisWithScratch(data, program, options)
+		}()
+		return func() { <-earlyDone }
 	})
 	if !valid {
 		t.Fatal(diagnostics.String())
