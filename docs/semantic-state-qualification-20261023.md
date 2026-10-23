@@ -828,3 +828,62 @@ layout or schema change. The complete semantic suite and disk-cache matrix
 pass with these stricter guards. A checked replay of the actual full compiler
 addition measured 0.385 s; phase logs show effect solving 2 ms and permission
 validation 5 ms. Native before/after addition objects matched byte for byte.
+
+
+### Normal production CLI matrix from the Stage1 project directory
+
+A fresh cache was populated normally with the installed compiler containing
+all gains through `68eef070`. The frozen executable SHA-256 was
+`7e7e1abb25757ab1b901a1f0264b146b97f573fcea318379817c76a875cfc553`,
+byte-identical to the installed executable. Working directory was the Stage1
+project root, not the Core compiler directory. No semantic/native namespace was
+rekeyed. Environment selected disk analysis/bootstrap, six-second bootstrap
+slices, 64 units and explicit parallel IR/O3 optimization; retained server was
+empty, with timing/debug observers absent from the normal matrix.
+
+Nine bootstrap invocations preserved progress; the ninth hit its 30-second cap
+after publishing the complete semantic baseline. The tenth normal invocation
+completed in 19.785 s. Every compiler and linker command used `timeout 30s`.
+
+| New normal CLI request | Seconds | Result |
+| --- | ---: | --- |
+| Cached original revision | 0.529 | Whole-object hit |
+| Novel diagnostic-string body edit | 10.448 | New build; succeeds |
+| Repeat body edit | 0.535 | Exact same object |
+| Add ordinary function to edited source | 9.898 | New build; succeeds |
+| Repeat addition | 0.429 | Exact same object |
+| Add unused plain struct as well | 10.484 | New build; same final object as function addition |
+| Repeat struct revision | 0.424 | Whole-object hit |
+| Add defaulted parameter to existing capture function | 13.203 | New signature/callers; succeeds |
+| Repeat signature revision | 0.536 | Exact same object |
+| Add leading comment/line | 11.165 | Same final object as original |
+| Revert original | 0.539 | Original object restored |
+| Different same-length leading comment (novel source key) | 9.387 | Same original object |
+
+Each successful request emitted 9,381,562 diagnostic bytes. Body and signature
+objects linked into runnable compilers; both returned the edited `unknown option`
+diagnostic. The signature-edited compiler compiled a fresh program, whose linked
+executable returned 42. All temporary source edits were restored; only the seven
+pre-existing user/Claude Stage1 modifications remain.
+
+Observers that bypass whole-object caching while preserving the admitted
+semantic namespace further isolated warm native paths: body replay 8.488 s
+(restore/preparation 4.441 s, prepared update 0.327 s, zero native misses),
+signature replay 11.128 s (4.508 s restore/preparation, 2.461 s update, zero
+native misses), and line-only replay 8.597 s (4.492 s restore/preparation,
+0.294 s update, zero native misses). The signature change still takes the full
+permission path; ordinary native-unit regeneration also remains significant.
+A full CLI signature CPU profile is preserved alongside these logs.
+
+The full goal is still unmet: ordinary novel body/struct/line changes can exceed
+ten seconds, and signatures remain about thirteen. Phase qualification alone
+was not sufficient proof. Next work must address signature/removal dependency
+remapping and remaining current-IR production cost, then expand the major-edit
+matrix (layout, contracts, transitive dependencies and generic cases). The
+experimental no-cross-unit-import quality caveat still gates default adoption.
+
+`/tmp/elisa-production-parallel-ir-root` points to the owned evidence directory
+with the exact executable/environment/CWD, bootstrap logs, timing JSON, object
+hashes, native profile and functional verification. Its cache is admitted by
+normal CLI rules and can be reused by the installed byte-identical compiler
+from the recorded directory/environment.
