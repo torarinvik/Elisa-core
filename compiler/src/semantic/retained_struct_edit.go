@@ -242,6 +242,7 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 		e.st.Decl = e.edit
 		e.st.Fields = map[string]Field{}
 		e.st.GhostFieldOrder, e.st.StoreFieldOrder, e.st.HasPackedGroups = nil, nil, false
+		e.st.declarationFieldOrder = astFieldDeclNames(e.edit.Fields)
 		sd := e.scope
 		sd.Decl = e.edit
 		scoped = append(scoped, sd)

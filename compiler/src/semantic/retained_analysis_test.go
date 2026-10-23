@@ -1158,3 +1158,36 @@ func TestRetainedShiftLocalGensyms(t *testing.T) {
 		t.Fatalf("a zero shift changed %q to %q", in, got)
 	}
 }
+
+// A callee's contract is part of its signature: a caller's proof reads it, so editing it
+// re-checks the caller.
+func TestRetainedContractEditRechecksCallers(t *testing.T) {
+	before := `
+def pick(x: u8, y: u8) -> u8:
+    ensure result == x
+    r: mutable u8 = x
+    for i in 0 ..< 3:
+        r = x
+    return r
+
+def caller(x: u8, y: u8) -> u8:
+    ensure result == x
+    return pick(x, y)
+`
+	after := strings.Replace(before, "    ensure result == x\n    r:", "    ensure result == x or result == y\n    r:", 1)
+	options := AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true}
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	for i, src := range []string{after, before, after} {
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if src == after && len(fresh.Errors()) == 0 {
+			t.Fatalf("fixture: the weaker callee contract should leave caller's ensure unproven:\n%s", retainedDiagnostics(fresh))
+		}
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			continue // a fallback is a fresh analysis
+		}
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
+		}
+	}
+}

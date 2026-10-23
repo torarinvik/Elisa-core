@@ -1,13 +1,13 @@
 package semantic
 
 import (
-	"strconv"
 	"bytes"
 	"fmt"
 	"os"
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -374,6 +374,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
+	// Lists an added declaration was appended to; sorted back into source order at the end.
+	appendedInto := map[*ast.NamespaceDecl]bool{}
+	appendedTop := false
 	var structPairs [][2]*ast.StructDecl  // edited plain structs: (previous, edited)
 	var constPairs [][2]*ast.ConstDecl    // typed consts with a new value: (previous, edited)
 	var enumPairs [][2]*ast.EnumDecl      // edited plain enums: (previous, edited)
@@ -1110,8 +1113,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		for i, sd := range addedScoped {
 			if addedInto[i] != nil {
 				addedInto[i].Decls = append(addedInto[i].Decls, sd.Decl)
+				appendedInto[addedInto[i]] = true
 			} else {
 				a.file.Decls = append(a.file.Decls, sd.Decl)
+				appendedTop = true
 			}
 		}
 		r.decls = append(r.decls, addedScoped...)
@@ -1143,8 +1148,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		for k, sd := range addedConstScoped {
 			if addedConstInto[k] != nil {
 				addedConstInto[k].Decls = append(addedConstInto[k].Decls, sd.Decl)
+				appendedInto[addedConstInto[k]] = true
 			} else {
 				a.file.Decls = append(a.file.Decls, sd.Decl)
+				appendedTop = true
 			}
 		}
 		a.collectValueSymbols(addedConstScoped)
@@ -1155,8 +1162,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		for k, sd := range addedStructScoped {
 			if addedStructInto[k] != nil {
 				addedStructInto[k].Decls = append(addedStructInto[k].Decls, sd.Decl)
+				appendedInto[addedStructInto[k]] = true
 			} else {
 				a.file.Decls = append(a.file.Decls, sd.Decl)
+				appendedTop = true
 			}
 		}
 		a.collectNamedTypes(addedStructScoped)
@@ -1348,6 +1357,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	a.closeSMT()
 	// file is the next comparison base. Its spliced bodies now belong to the
 	// analyzed AST and get rewritten there, so keep their text from before.
+	// Code generation emits declarations in list order; a fresh analysis lists them as written.
+	for ns := range appendedInto {
+		retainedSortDeclsBySource(ns.Decls)
+	}
+	if appendedTop {
+		retainedSortDeclsBySource(a.file.Decls)
+	}
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre
 	r.result.Diagnostics = a.diagnostics
 	r.result.SMTProfile = a.smtStats
@@ -1450,10 +1466,80 @@ func retainedSharedGensyms(text string) string {
 	return strings.Join(out, " ")
 }
 
+// retainedHeader is fn without its statements. Its contracts are part of it (the
+// formatter does not print them): callers' proofs read them, so a contract edit is a
+// signature edit.
 func retainedHeader(fn *ast.FuncDecl) string {
 	c := *fn
 	c.Body = nil
-	return unparse.FormatDecl(&c)
+	var b strings.Builder
+	b.WriteString(unparse.FormatDecl(&c))
+	for _, part := range []struct {
+		name string
+		v    any
+	}{
+		{"requires", fn.Requires}, {"requires-proofs", fn.RequiresProofs},
+		{"ensure", fn.EnsureValues}, {"ensure-proofs", fn.EnsureProofs},
+		{"ensures", fn.Ensures}, {"decreases", fn.Decreases}, {"decreases-wild", fn.DecreasesWild},
+		{"changes", fn.Changes}, {"preserves", fn.Preserves}, {"fulfills", fn.Fulfills},
+		{"contract-includes", fn.ContractIncludes}, {"uses", fn.Uses}, {"param-contracts", fn.ParamContracts},
+		{"forbids", fn.Forbids},
+	} {
+		b.WriteString("\n" + part.name + ": ")
+		retainedWriteSyntax(&b, reflect.ValueOf(part.v))
+	}
+	return b.String()
+}
+
+// retainedWriteSyntax prints v without source positions: expressions and statements
+// through the formatter, other values field by field.
+func retainedWriteSyntax(b *strings.Builder, v reflect.Value) {
+	if !v.IsValid() {
+		b.WriteString("<nil>")
+		return
+	}
+	if v.Kind() == reflect.Interface || v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			b.WriteString("<nil>")
+			return
+		}
+		switch n := v.Interface().(type) {
+		case ast.Expr:
+			b.WriteString(unparse.FormatExpr(n))
+			return
+		case ast.Stmt:
+			b.WriteString(unparse.FormatStmt(n))
+			return
+		}
+		retainedWriteSyntax(b, v.Elem())
+		return
+	}
+	switch v.Kind() {
+	case reflect.Slice, reflect.Array:
+		b.WriteString("[")
+		for i := 0; i < v.Len(); i++ {
+			retainedWriteSyntax(b, v.Index(i))
+			b.WriteString(";")
+		}
+		b.WriteString("]")
+	case reflect.Struct:
+		if v.Type() == retainedPosType {
+			return
+		}
+		b.WriteString("{")
+		for i := 0; i < v.NumField(); i++ {
+			if !v.Type().Field(i).IsExported() {
+				continue
+			}
+			retainedWriteSyntax(b, v.Field(i))
+			b.WriteString(",")
+		}
+		b.WriteString("}")
+	case reflect.Map:
+		b.WriteString(fmt.Sprint(v.Len()))
+	default:
+		fmt.Fprint(b, v.Interface())
+	}
 }
 
 func retainedLineKey(p lexer.Pos) string { return fmt.Sprintf("%s:%d:%d", p.File, p.Line, p.Col) }
@@ -1765,4 +1851,8 @@ func retainedTrimTrailing(span string) string {
 		end--
 	}
 	return strings.Join(lines[:end], "\n")
+}
+
+func retainedSortDeclsBySource(decls []ast.Decl) {
+	sort.SliceStable(decls, func(i, j int) bool { return decls[i].Pos().Offset < decls[j].Pos().Offset })
 }
