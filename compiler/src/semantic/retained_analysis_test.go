@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -483,6 +484,81 @@ func TestRetainedAddedFunctionKeepsRegionPolymorphismTables(t *testing.T) {
 		t.Fatalf("caller edit fell back: %v", err)
 	}
 	fresh := AnalyzeWithOptions(retainedParse(t, again), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+const retainedOverloadBefore = `
+def width(x: i64) -> i64:
+    return x
+
+def caller() -> i64:
+    n: i64 = 2
+    return width(true) + width(n)
+
+def other(y: i64) -> i64:
+    return y
+`
+
+// An overload added before or after the existing function is declared as a full analysis
+// declares the pair (the first owns the bare name), and the caller that now resolves to it
+// loses its error. Removing it again restores the error.
+func TestRetainedAnalysisAcceptsAddedOverloads(t *testing.T) {
+	options := AnalyzeOptions{}
+	overload := "def width(x: bool) -> i64:\n    return 1\n\n"
+	after := strings.Replace(retainedOverloadBefore, "def caller()", overload+"def caller()", 1)
+	before := strings.Replace(retainedOverloadBefore, "\ndef width(x: i64)", "\n"+overload+"def width(x: i64)", 1)
+	for name, edited := range map[string]string{"after": after, "before": before} {
+		_, retained := AnalyzeRetained(retainedParse(t, retainedOverloadBefore), retainedParse(t, retainedOverloadBefore), []byte(retainedOverloadBefore), options)
+		if len(AnalyzeWithOptions(retainedParse(t, retainedOverloadBefore), options).Errors()) == 0 {
+			t.Fatal("fixture: the bool call should not resolve without the overload")
+		}
+		for i, src := range []string{edited, retainedOverloadBefore, edited} {
+			updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+			if err != nil {
+				t.Fatalf("%s step %d fell back: %v", name, i, err)
+			}
+			fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+			if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+				t.Fatalf("%s step %d diverged\n got:\n%s\nwant:\n%s", name, i, got, want)
+			}
+			if src != retainedOverloadBefore && len(fresh.Errors()) != 0 {
+				t.Fatalf("fixture: the overload should resolve the bool call:\n%s", retainedDiagnostics(fresh))
+			}
+			// Each overload has the symbol name a fresh analysis gives it, by line.
+			symbols := func(r *RetainedAnalysis) map[int]string {
+				out := map[int]string{}
+				for _, sd := range r.decls {
+					if fn, ok := sd.Decl.(*ast.FuncDecl); ok && fn.Name == "width" {
+						if sym := r.a.funcDeclSymbols[fn]; sym != nil {
+							out[fn.Pos().Line] = sym.Name
+						}
+					}
+				}
+				return out
+			}
+			_, cold := AnalyzeRetained(retainedParse(t, src), retainedParse(t, src), []byte(src), options)
+			got, want := symbols(retained), symbols(cold)
+			if len(want) != strings.Count(src, "def width(") || fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Fatalf("%s step %d: symbols %v, fresh %v", name, i, got, want)
+			}
+		}
+	}
+}
+
+// An added module member whose signature names a module type records a resolved type name;
+// the update follows that growth instead of falling back.
+func TestRetainedAnalysisAcceptsAddedMemberNamingModuleType(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := "module Shapes:\n    struct Box:\n        w: i64\n\n    def area(b: Box&) -> i64:\n        return b.w\n"
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	edited := before + "\n    def double_area(b: Box&) -> i64:\n        return b.w + b.w\n"
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("added member fell back: %v", err)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
 	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
 		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
 	}

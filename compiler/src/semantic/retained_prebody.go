@@ -22,6 +22,7 @@ type preBodyState struct {
 	fingerprint map[string]string        // stable function key -> body-dependent results
 	global      string                   // program-wide results (struct flags, table sizes)
 	diags       []Diagnostic             // diagnostics the phase emitted
+	keyOf       map[*ast.FuncDecl]string // each prepared function's fingerprint key
 	prepared    map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
 	// Per prepared function, the declaration-phase tables an added function
 	// carries into the live analysis (plain values, no analyzer-owned types).
@@ -57,6 +58,7 @@ func scratchPreBody(file *ast.File, options AnalyzeOptions) *preBodyState {
 func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 	p := &preBodyState{
 		fingerprint: map[string]string{},
+		keyOf:       map[*ast.FuncDecl]string{},
 		prepared:    map[string]*ast.FuncDecl{},
 		diags:       append([]Diagnostic(nil), a.diagnostics...),
 		targets:     map[*ast.FuncDecl][]map[int]bool{},
@@ -73,6 +75,7 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 			key := fmt.Sprintf("%s#%d", base, occurrences[base])
 			occurrences[base]++
 			p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
+			p.keyOf[fn] = key
 			p.prepared[retainedLineKey(fn.Pos())+"|"+fn.Name] = fn
 			if t, ok := a.paramStoreTargets[fn]; ok {
 				p.targets[fn] = t
@@ -184,7 +187,7 @@ func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
 // retainedGrowth is what an accepted edit adds to or removes from the declaration phase.
 type retainedGrowth struct {
 	addedFuncs, removedFuncs   int
-	addedConsts, removedConsts int      // consts and payload-less enum variants
+	addedConsts, removedConsts int // consts and payload-less enum variants
 	addedGlobals               int
 	addedStructs               []string // qualified names
 	removedStructs             []string // qualified names
@@ -295,6 +298,11 @@ var addedFunctionTables = map[string]bool{
 	"regionParamCalleeParamIndex": true, // copied from the scratch phase on add
 }
 
+// addedSignatureTables hold one entry per resolved type name in a signature: an added or
+// removed function moves them by however many its signature has. Unchanged functions keep
+// identical entries, and declaring the added function records its own.
+var addedSignatureTables = map[string]bool{"resolvedTypeNames": true}
+
 // addedStructTables hold one entry per struct type; adding k structs grows each by at most k.
 var addedStructTables = map[string]bool{"namedTypes": true, "declVisibility": true, "privateTypeNames": true}
 
@@ -353,6 +361,9 @@ func globalGrowthDifference(old, cur string, g retainedGrowth) string {
 		if addedStructTables[name] {
 			grow += len(g.addedStructs)
 			shrink += len(g.removedStructs)
+		}
+		if ok1 == 2 && ok2 == 2 && name == name2 && addedSignatureTables[name] && added+removed != 0 {
+			continue
 		}
 		if ok1 != 2 || ok2 != 2 || name != name2 || grow+shrink == 0 || after > before+grow || after < before-shrink {
 			return fmt.Sprintf(" (%s -> %s)", ol[i], cl[i])
