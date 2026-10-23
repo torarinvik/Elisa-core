@@ -211,6 +211,41 @@ func TestBuildObjectCacheReplayIOFailureDoesNotRebuild(t *testing.T) {
 	}
 }
 
+func TestBuildObjectCacheReplaysLargeDiagnosticTranscript(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	program := &loadedProgram{filename: filepath.Join(dir, "unit.elisa"), source: []byte("def main() -> i64:\n    return 0\n")}
+	options := cliOptions{filename: program.filename, emit: emitObject, output: filepath.Join(dir, "result.o")}
+	load := func(string, io.Writer) (*loadedProgram, bool) { return program, true }
+	// Match the real compiler's warning volume, including non-text bytes. Exercise
+	// both streams near the supported bound so JSON's base64 overhead is covered.
+	payload := bytes.Repeat([]byte{0xff, 0, 'x', '\n'}, (buildCacheStreamLimit-16)/4)
+	builds := 0
+	build := func(opts cliOptions, _ *loadedProgram, stdout, stderr io.Writer) int {
+		builds++
+		if _, err := stdout.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := stderr.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(opts.output, []byte("object"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return 0
+	}
+	for i := 0; i < 2; i++ {
+		var stdout, stderr bytes.Buffer
+		if rc, handled := tryBuildObjectCacheWith(options, &stdout, &stderr, load, build); !handled || rc != 0 || !bytes.Equal(stdout.Bytes(), payload) || !bytes.Equal(stderr.Bytes(), payload) {
+			t.Fatal("large transcript changed output")
+		}
+	}
+	if builds != 1 {
+		t.Fatalf("large transcript missed cache: %d builds", builds)
+	}
+}
+
 func TestBuildObjectCacheOversizedTranscriptNeverPublishes(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))

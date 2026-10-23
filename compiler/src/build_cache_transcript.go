@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 )
 
-const buildCacheStreamLimit = 1 << 20
+// The full self-hosted compiler emits about 9 MiB of diagnostics. Keep replay
+// bounded while allowing its successful builds to populate the object cache.
+const buildCacheStreamLimit = 16 << 20
 
 type buildCacheCapture struct {
 	buffer   bytes.Buffer

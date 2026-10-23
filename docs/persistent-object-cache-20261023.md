@@ -61,3 +61,13 @@ the auto-install hook also uses `-buildvcs=false`. The complete executable hash
 remains cache authority. No compiler-code or toolchain identity check is relaxed.
 Two dirty-checkout builds of the hook's recipe produced the same SHA-256 at
 different output paths; commit/reinstall identity is checked separately.
+
+
+The per-stream diagnostic replay bound is now 16 MiB. The real compiler's
+9,381,984-byte warning transcript exceeded the former 1 MiB bound, so otherwise
+successful self-builds never populated the whole-object cache. The reader remains
+bounded (48 MiB encoded JSON), and both streams retain independent size limits
+and exact-byte checksums. A regression replays two nearly-16-MiB binary streams
+through one build and a cache hit; over-limit output still reaches the user
+unchanged and never publishes a cache entry. All build-object/transcript integrity,
+corruption, request-observer and overflow tests pass.
