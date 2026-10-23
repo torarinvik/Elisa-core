@@ -532,3 +532,24 @@ checked replay about 1.97 s. More units increase partition overhead slightly.
 All four processes completed under their external 30-second caps. These remain
 explicit qualification loads, not production cache rekeying. The default
 whole-module O3 policy and experimental partition-path quality caveat remain.
+
+
+### Project unused pristine function bodies out of snapshots
+
+Snapshots now preserve pristine declaration headers, positions and cached gensym
+comparisons while omitting their unused body ASTs. Analyzed/live bodies remain
+complete, including declarations shared with a comparison root. The projection
+is invocation-local: serialization leaves the caller-owned pristine parse intact
+and uses the unchanged checked graph schema. Restored updates compare headers
+and source spans through the existing comparison-text cache.
+
+Full-input source/options-checked encode/restore preserved all 26,230 diagnostics.
+A fresh-process restore of the projected raw qualification payload took 4.785 s,
+versus 5.55–5.72 s for the old full graph. The payload shrank from 622,880,148
+bytes to 563,592,982 bytes (map iteration changes exact encoded size slightly).
+Full roundtrip completed in 23.93 s under the 30-second external cap. Raw
+qualification payloads are never production cache admission or executable
+namespace rekeying. New tests cover untouched input bodies, live-body protection,
+repeated encode/restore across edits, add/remove/shift/revert and header/default
+changes. Retained analysis and separate-process disk-cache regression groups
+(including native execution, contract/protocol diagnostics and bootstrap) pass.

@@ -37,7 +37,7 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
 	r.pre = r.pre.comparisonState()
-	return semanticStateRegistry().Encode(r)
+	return r.marshalComparisonProjection()
 }
 
 func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {

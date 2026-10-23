@@ -28,12 +28,15 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope := bytes.SplitN(data, []byte{'\n'}, 3)
-	if len(envelope) != 3 || string(envelope[0]) != "ELISACSTATE1" || len(envelope[1]) != 64 {
-		t.Fatal("invalid state envelope")
+	if os.Getenv("ELISACORE_STATE_QUALIFY_RAW") != "1" {
+		envelope := bytes.SplitN(data, []byte{'\n'}, 3)
+		if len(envelope) != 3 || string(envelope[0]) != "ELISACSTATE1" || len(envelope[1]) != 64 {
+			t.Fatal("invalid state envelope")
+		}
+		data = envelope[2]
 	}
 	start := time.Now()
-	state, err := semantic.RestoreAnalysisState(envelope[2])
+	state, err := semantic.RestoreAnalysisState(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +143,9 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		}
 		t.Logf("semantic snapshot: %v bytes=%d", time.Since(start), len(snapshot))
 		stop()
+		if err := os.WriteFile(filepath.Join(root, "qualification.payload"), snapshot, 0600); err != nil {
+			t.Fatal(err)
+		}
 		if os.Getenv("ELISACORE_STATE_QUALIFY_SAVE_RESTORE") == "1" {
 			restored, err := semantic.RestoreAnalysisState(snapshot)
 			if err != nil {

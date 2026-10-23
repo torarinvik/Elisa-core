@@ -296,3 +296,14 @@ func (e *encoder) descriptor(node stateNode) error {
 	}
 	return nil
 }
+
+// EncodeWithFieldAccess applies an invocation-local read projection while keeping
+// the registered field types and wire schema. The supplied values must have the
+// same types as their fields. The registry and original graph are not modified.
+func (r *Registry) EncodeWithFieldAccess(root any, access FieldAccess) ([]byte, error) {
+	projected := *r
+	if access != nil {
+		projected.access = access
+	}
+	return projected.Encode(root)
+}
