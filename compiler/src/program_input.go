@@ -105,6 +105,9 @@ func analyzeSemanticWithSession(file *ast.File, options semantic.AnalyzeOptions,
 
 func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, session *semantic.IncrementalAnalysisSession) (*ast.File, *semantic.Result, bool) {
 	return analyzeLoadedProgramUsing(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() && program != nil && program.file == nil {
+			return analyzeSemanticFromDisk(program, file, options, stderr)
+		}
 		return analyzeSemanticWithSession(file, options, session)
 	})
 }

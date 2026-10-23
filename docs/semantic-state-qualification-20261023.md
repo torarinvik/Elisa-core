@@ -1,8 +1,7 @@
 # Semantic-state disk persistence qualification
 
 The semantic analyzer now exposes `RetainedAnalysis.MarshalState` and
-`RestoreAnalysisState`. This is a qualification API; the ordinary CLI does not
-admit these snapshots automatically yet.
+`RestoreAnalysisState`. The CLI path remains opt-in while larger programs and edit kinds are qualified.
 
 The state codec writes schema-checked typed values and object IDs. Shared maps,
 slices, pointers and cycles survive restoration. Cache bytes cannot supply Go
@@ -42,5 +41,38 @@ Validation so far:
 `TestDiskStateCompilerInput` is an opt-in real-source qualification using
 `ELISACORE_STATE_QUALIFY_INPUT`. Always run it with an external 30-second timeout.
 This evidence does not establish a sub-10-second fresh-process rebuild of the
-full stage1 compiler. CLI disk admission, larger-input qualification, snapshot
-load/write cost, and full edit-to-object/executable measurements remain open.
+full stage1 compiler. Default-on admission, larger-input qualification, snapshot load/write cost, and
+full-compiler edit-to-object/executable measurements remain open.
+
+## Standalone CLI path
+
+`ELISACORE_ANALYSIS_CACHE=1` opts into disk-backed semantic state and suppresses
+retained-server forwarding/discovery. Each invocation is an ordinary process;
+there is no resident analysis worker. `ELISACORE_ANALYSIS_CACHE_DEBUG=1` logs
+restoration, update, fallback and publication and bypasses the whole-object cache
+so measurements exercise the frontend cache. It does not disable the native
+partition cache.
+
+Entries live under `<build-cache-root>/analysis/<identity>.state`; publication is
+atomic. Identity covers the running compiler artifact, source root, working
+directory, source authority, semantic options, relevant environment, target and
+SMT executable contents. Current source bytes are intentionally not part of this
+identity: they are checked against the stored revision and passed through the
+incremental update. Corrupt, incompatible or unavailable entries analyze fresh.
+A solver-unavailable result is not persisted across invocations.
+
+Fresh-process CLI tests compare LLVM IR and diagnostics against cache-disabled
+builds after body, struct-field, contract, permission-row, overload, signature and
+function-add/remove edits and reversions. A weakened-contract negative control
+must reject the same caller as the cold compiler, then accept it after reverting.
+Native objects from separate processes are linked and executed for unchanged,
+body-edited and reverted revisions. Tests also cover semantic/environment/source
+identity changes, same-path solver replacement and corrupt-cache repair.
+
+A real compiler atom object-build run (the same focused 153-function slice above)
+measured 3.694 s cold, 1.083 s unchanged, 1.308 s after a function-body edit and
+1.267 s after reverting. Every compiler invocation had a 30 s timeout and the
+server was disabled. Snapshot restoration took 217–254 ms; the changed-body
+analysis took 57–58 ms. This does not establish the target for the full compiler,
+major edits or final executable linking. The mode remains opt-in while those
+larger cases are qualified and optimized.

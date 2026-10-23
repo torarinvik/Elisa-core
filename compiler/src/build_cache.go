@@ -268,6 +268,7 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 // Warning policy and every other compiler variable remain part of the key.
 var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_BUILD_CACHE":                   true,
+	"ELISACORE_ANALYSIS_CACHE_DEBUG":          true,
 	"ELISACORE_RETAINED_SERVER":               true,
 	"ELISACORE_RETAINED_IDLE":                 true,
 	"ELISACORE_RETAINED_AUTO_MIN":             true,
@@ -318,6 +319,9 @@ func buildCacheEnvKey() []string {
 // These modes observe this invocation or publish files outside the object
 // artifact. Replaying an earlier invocation cannot satisfy those effects.
 func buildCacheRequestObserverEnabled() bool {
+	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
+		return true
+	}
 	for _, name := range []string{"ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
 		if os.Getenv(name) != "" {
 			return true

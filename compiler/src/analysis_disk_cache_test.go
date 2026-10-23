@@ -1,0 +1,294 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"elisacore/src/semantic"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+func runDiskCLIChild(t *testing.T, overrides map[string]string, args ...string) string {
+	t.Helper()
+	output, code := runDiskCLIChildResult(t, overrides, args...)
+	if code != 0 {
+		t.Fatalf("compiler child exited %d:\n%s", code, output)
+	}
+	return output
+}
+
+func runDiskCLIChildResult(t *testing.T, overrides map[string]string, args ...string) (string, int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	childArgs := append([]string{"-test.run=^TestBuildObjectCacheMainAcrossProcesses$", "--"}, args...)
+	cmd := exec.CommandContext(ctx, os.Args[0], childArgs...)
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if _, replace := overrides[name]; !replace && name != "TEST_BUILD_CACHE_MAIN" {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	for name, value := range overrides {
+		cmd.Env = append(cmd.Env, name+"="+value)
+	}
+	cmd.Env = append(cmd.Env, "TEST_BUILD_CACHE_MAIN=1")
+	output, err := cmd.CombinedOutput()
+	code := 0
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && ctx.Err() == nil {
+			code = exit.ExitCode()
+		} else {
+			t.Fatalf("compiler child: %v\n%s", err, output)
+		}
+	}
+	if strings.Contains(string(output), "[retained]") {
+		t.Fatalf("standalone build contacted server: %s", output)
+	}
+	return string(output), code
+}
+
+func diskDiagnosticTranscript(text string) string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if line != "" && !strings.HasPrefix(line, "[analysis-disk]") {
+			lines = append(lines, line)
+		}
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
+}
+
+// Every revision runs in a fresh compiler process, so an in-memory analysis
+// or daemon cannot authorize a hit. Compare generated IR and diagnostics with
+// an explicitly cache-disabled fresh compile after each edit and revert.
+func TestAnalysisDiskCacheFreshProcessEditOracle(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "program.elisa")
+	cacheEnv := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "nonexistent.sock")}
+	coldEnv := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_ANALYSIS_CACHE_DEBUG": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	edits := [][2]string{
+		{"return p.a + p.b", "return p.a + p.b + 1"},
+		{"        a: i64\n        b: i64\n", "        a: i64\n        z: i64 = 0\n        b: i64\n"},
+		{"ensure result == b\n", "ensure result == b and i < n\n"},
+		{"can[Abort.Panic]:", "can[Abort.Panic, Console.Write]:"},
+		{"    def width(p: Pair) -> i64:\n", "    def width(p: bool) -> i64:\n        return 1\n\n    def width(p: Pair) -> i64:\n"},
+		{"def tag(x: i64) -> i64 can[Abort.Panic]:\n        return x", "def tag(x: i64) -> i32 can[Abort.Panic]:\n        return 1"},
+		{"    def tag(x: i64) -> i64 can[Abort.Panic]:\n        return x\n", "    def tag(x: i64) -> i64 can[Abort.Panic]:\n        return x\n\n    def unused(x: i64) -> i64:\n        return x\n"},
+	}
+	sources := []string{retainedCodegenBase, retainedCodegenBase}
+	for _, edit := range edits {
+		changed := strings.Replace(retainedCodegenBase, edit[0], edit[1], 1)
+		if changed == retainedCodegenBase {
+			t.Fatal("edit did not apply")
+		}
+		sources = append(sources, changed, retainedCodegenBase)
+	}
+	for i, text := range sources {
+		if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cached, cold := filepath.Join(dir, "cached.ll"), filepath.Join(dir, "cold.ll")
+		gotDiagnostics := runDiskCLIChild(t, cacheEnv, "-emit", "llvm", "-o", cached, source)
+		if i > 0 && !strings.Contains(gotDiagnostics, "[analysis-disk] restore") {
+			t.Fatalf("revision%d did not restore from disk: %s", i, gotDiagnostics)
+		}
+		if i > 0 && strings.Contains(gotDiagnostics, "cold analysis") {
+			t.Fatalf("revision%d fell back: %s", i, gotDiagnostics)
+		}
+		if strings.Contains(gotDiagnostics, "not stored") {
+			t.Fatalf("revision%d was not persisted: %s", i, gotDiagnostics)
+		}
+		wantDiagnostics := runDiskCLIChild(t, coldEnv, "-emit", "llvm", "-o", cold, source)
+		got, err := os.ReadFile(cached)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(cold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = retainedGensym.ReplaceAll(got, []byte("__${1}_N"))
+		want = retainedGensym.ReplaceAll(want, []byte("__${1}_N"))
+		if !bytes.Equal(got, want) {
+			t.Fatalf("revision%d IR mismatch: %s", i, firstLineDiff(string(got), string(want)))
+		}
+		if diskDiagnosticTranscript(gotDiagnostics) != diskDiagnosticTranscript(wantDiagnostics) {
+			t.Fatalf("revision%d diagnostic mismatch\ngot:%s\nwant:%s", i, gotDiagnostics, wantDiagnostics)
+		}
+	}
+}
+
+func TestAnalysisDiskCacheFreshProcessNativeExecution(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "native.elisa")
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "1", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "nonexistent.sock")}
+	for revision, value := range []string{"7", "7", "8", "7"} {
+		var text strings.Builder
+		for i := 0; i < 80; i++ {
+			fmt.Fprintf(&text, "def unused_%d() -> i64:\n    return %d\n\n", i, i)
+		}
+		text.WriteString("def answer() -> i64:\n    return " + value + "\n\ndef main() -> i32:\n    return i32(answer())\n")
+		if err := os.WriteFile(source, []byte(text.String()), 0600); err != nil {
+			t.Fatal(err)
+		}
+		object := filepath.Join(dir, "native.o")
+		output := runDiskCLIChild(t, env, "-emit", "obj", "-o", object, source)
+		if revision > 0 && (!strings.Contains(output, "[analysis-disk] restore") || strings.Contains(output, "cold analysis")) {
+			t.Fatalf("revision%d did not use disk state: %s", revision, output)
+		}
+		if strings.Contains(output, "not stored") {
+			t.Fatalf("revision%d failed to persist: %s", revision, output)
+		}
+		executable := filepath.Join(dir, "native.exe")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		linked, err := exec.CommandContext(ctx, "clang", object, "-o", executable).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("link: %v %s", err, linked)
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		err = exec.CommandContext(ctx, executable).Run()
+		cancel()
+		status := 0
+		if exit, ok := err.(*exec.ExitError); ok {
+			status = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		expected, _ := strconv.Atoi(value)
+		if status != expected {
+			t.Fatalf("revision%d exit=%d want=%d", revision, status, expected)
+		}
+	}
+}
+
+func TestAnalysisDiskCacheKeyTracksSemanticInputs(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "program.elisa")
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	program := &loadedProgram{filename: filename, source: []byte("def main() -> i32:\n    return 0\n"), sourceFiles: []string{filename}}
+	options := semantic.AnalyzeOptions{}
+	key := func() string {
+		t.Helper()
+		a, ok := analysisDiskArtifactFor(program, options)
+		if !ok {
+			t.Fatal("no analysis cache key")
+		}
+		return a.key
+	}
+	original := key()
+	program.source = []byte("def main() -> i32:\n    return 1\n")
+	if key() != original {
+		t.Fatal("body edit discarded reusable analysis state")
+	}
+	options.EnforceStrictProofs = true
+	if key() == original {
+		t.Fatal("proof policy omitted from analysis identity")
+	}
+	options.EnforceStrictProofs = false
+	t.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "1")
+	if key() == original {
+		t.Fatal("environment input omitted")
+	}
+	t.Setenv("ELISACORE_FORCE_BOUNDS_CHECK", "")
+	reset := key()
+	program.sourceFiles = []string{filepath.Join(dir, "different.elisa")}
+	if key() == reset {
+		t.Fatal("source authority omitted")
+	}
+	solver := filepath.Join(dir, "solver")
+	t.Setenv("ELISA_Z3", solver)
+	options.EnableSMT = true
+	if err := os.WriteFile(solver, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	initialSolver := key()
+	if err := os.WriteFile(solver, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if key() == initialSolver {
+		t.Fatal("same-path solver replacement omitted")
+	}
+}
+
+func TestAnalysisDiskCacheCorruptionRebuildsSafely(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "program.elisa")
+	if err := os.WriteFile(source, []byte("def main() -> i32:\n    return 7\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	args := []string{"-emit", "llvm", "-o", filepath.Join(dir, "out.ll"), source}
+	runDiskCLIChild(t, env, args...)
+	paths, err := filepath.Glob(filepath.Join(dir, "cache", "analysis", "*.state"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("cache paths=%v err=%v", paths, err)
+	}
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[len(data)-1] ^= 0xff
+	if err := os.WriteFile(paths[0], data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	output := runDiskCLIChild(t, env, args...)
+	if !strings.Contains(output, "state checksum mismatch") || !strings.Contains(output, "cold analysis") || strings.Contains(output, "not stored") {
+		t.Fatalf("corrupt state not repaired: %s", output)
+	}
+	output = runDiskCLIChild(t, env, args...)
+	if !strings.Contains(output, "[analysis-disk] restore") || strings.Contains(output, "cold analysis") {
+		t.Fatalf("repaired state did not restore: %s", output)
+	}
+}
+
+func TestAnalysisDiskCacheRetractsProofAfterContractEdit(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "contracts.elisa")
+	before := `def pick(x: u8, y: u8) -> u8:
+    ensure result == x
+    r: mutable u8 = x
+    for i in 0 ..< 3:
+        r = x
+    return r
+
+def caller(x: u8, y: u8) -> u8:
+    ensure result == x
+    return pick(x, y)
+`
+	after := strings.Replace(before, "    ensure result == x\n    r:", "    ensure result == x or result == y\n    r:", 1)
+	cachedEnv := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "absent.sock")}
+	coldEnv := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_ANALYSIS_CACHE_DEBUG": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	args := []string{"-emit", "llvm", "-o", filepath.Join(dir, "out.ll"), source}
+	for revision, text := range []string{before, after, before, after} {
+		if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, code := runDiskCLIChildResult(t, cachedEnv, args...)
+		want, wantCode := runDiskCLIChildResult(t, coldEnv, args...)
+		expected := 0
+		if text == after {
+			expected = 1
+		}
+		if code != expected || wantCode != expected {
+			t.Fatalf("revision%d acceptance cached=%d cold=%d want=%d\n%s\n%s", revision, code, wantCode, expected, got, want)
+		}
+		if revision > 0 && (!strings.Contains(got, "[analysis-disk] restore") || strings.Contains(got, "cold analysis")) {
+			t.Fatalf("revision%d did not restore: %s", revision, got)
+		}
+		if strings.Contains(got, "not stored") {
+			t.Fatalf("revision%d was not persisted: %s", revision, got)
+		}
+		if diskDiagnosticTranscript(got) != diskDiagnosticTranscript(want) {
+			t.Fatalf("revision%d diagnostic mismatch\n%s\nwant:\n%s", revision, got, want)
+		}
+	}
+}
