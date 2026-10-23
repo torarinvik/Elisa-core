@@ -652,3 +652,20 @@ func TestAutoReserveEmitsReservesInFirstGrownOrder(t *testing.T) {
 		})
 	}
 }
+
+// A loop ruled on while diagnostics are suppressed stays undecided, so the reporting pass
+// over the same body still emits the lint instead of inheriting a silent ruling.
+func TestIterFillLintSuppressedPassDoesNotDecide(t *testing.T) {
+	loop := &ast.IterForStmt{}
+	a := &Analyzer{suppressDiagnostics: true, pendingIterFillLints: map[*ast.IterForStmt]string{loop: "ys"}}
+	a.flushPendingIterFillLint(nil, loop)
+	if a.iterFillLintDecided[loop] {
+		t.Fatal("a suppressed pass decided the loop")
+	}
+	a.suppressDiagnostics = false
+	a.pendingIterFillLints[loop] = "ys"
+	a.flushPendingIterFillLint(nil, loop)
+	if !a.iterFillLintDecided[loop] || len(a.diagnostics) != 1 {
+		t.Fatalf("reporting pass: decided=%v diagnostics=%d", a.iterFillLintDecided[loop], len(a.diagnostics))
+	}
+}

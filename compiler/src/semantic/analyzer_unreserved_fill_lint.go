@@ -51,10 +51,14 @@ func (a *Analyzer) flushPendingIterFillLint(prev ast.Stmt, loop *ast.IterForStmt
 		return
 	}
 	delete(a.pendingIterFillLints, loop)
-	if a.iterFillLintDecided == nil {
-		a.iterFillLintDecided = make(map[*ast.IterForStmt]bool)
+	// A pass with diagnostics suppressed cannot report, so its ruling must not stand for the
+	// reporting pass that re-analyzes the same body: it would swallow a real lint.
+	if !a.suppressDiagnostics {
+		if a.iterFillLintDecided == nil {
+			a.iterFillLintDecided = make(map[*ast.IterForStmt]bool)
+		}
+		a.iterFillLintDecided[loop] = true
 	}
-	a.iterFillLintDecided[loop] = true
 	if stmtIsExplicitReserveFor(prev, target) {
 		if a.iterFillSuppressedAt == nil {
 			a.iterFillSuppressedAt = make(map[string]bool)
