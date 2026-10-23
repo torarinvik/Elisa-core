@@ -16,6 +16,7 @@ type decoder struct {
 	objects  []reflect.Value
 	depth    int
 	budget   uint64
+	strings  []string
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
@@ -24,7 +25,7 @@ func (r *Registry) Decode(data []byte) (any, error) {
 
 // DecodeWithLimit bounds container storage before allocating from a cache file.
 func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
-	if len(data) < 9+32+1+32 || string(data[:9]) != "ELISTATE2" || !bytes.Equal(data[9:41], r.fingerprint[:]) {
+	if len(data) < 9+32+1+32 || string(data[:9]) != "ELISTATE3" || !bytes.Equal(data[9:41], r.fingerprint[:]) {
 		return nil, fmt.Errorf("state schema mismatch")
 	}
 	payload := data[:len(data)-32]
@@ -32,7 +33,7 @@ func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
 	if !bytes.Equal(digest[:], data[len(data)-32:]) {
 		return nil, fmt.Errorf("state checksum mismatch")
 	}
-	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes}
+	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes, strings: []string{""}}
 	id, err := d.uint()
 	if err != nil {
 		return nil, err
@@ -167,15 +168,11 @@ func (d *decoder) value(v reflect.Value) error {
 			}
 		}
 	case reflect.String:
-		n, err := d.uint()
+		s, err := d.stateString()
 		if err != nil {
 			return err
 		}
-		b, err := d.take(n)
-		if err != nil {
-			return err
-		}
-		v.SetString(string(b))
+		v.SetString(s)
 	default:
 		x, err := d.uint()
 		if err != nil {
@@ -222,4 +219,41 @@ func (d *decoder) reserve(count uint64, size uintptr) error {
 	}
 	d.budget -= count * uint64(size)
 	return nil
+}
+
+// stateString copies each distinct byte string once. Later references share its
+// immutable bytes, never the input buffer. Both bytes and dictionary entries
+// count against the caller's decode allocation budget.
+func (d *decoder) stateString() (string, error) {
+	code, err := d.uint()
+	if err != nil {
+		return "", err
+	}
+	if code == 0 {
+		return "", nil
+	}
+	if code&1 == 0 {
+		id := code >> 1
+		if id >= uint64(len(d.strings)) {
+			return "", fmt.Errorf("invalid state string ID")
+		}
+		return d.strings[id], nil
+	}
+	n := code >> 1
+	if n == 0 {
+		return "", fmt.Errorf("empty state string literal")
+	}
+	b, err := d.take(n)
+	if err != nil {
+		return "", err
+	}
+	if err := d.reserve(n, 1); err != nil {
+		return "", err
+	}
+	if err := d.reserve(1, reflect.TypeFor[string]().Size()); err != nil {
+		return "", err
+	}
+	s := string(b)
+	d.strings = append(d.strings, s)
+	return s, nil
 }

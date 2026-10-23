@@ -152,3 +152,25 @@ in 25.623 s. Those trials used an 8 s body slice; the default was reduced to 3 s
 to reserve more time for snapshots. A declaration remains indivisible, so the
 external 30 s timeout is still mandatory. Full bootstrap, post-pass timing,
 full-compiler output and sub-10-second edit builds remain unproven.
+
+## Compact snapshot strings (state format v3)
+
+The graph codec now writes each distinct nonempty string once and uses checked
+backreferences thereafter. Empty strings have their own zero code. Decoding
+copies literal bytes once, preserves arbitrary byte strings/named string types,
+and counts literal storage plus dictionary entries against its allocation budget.
+Invalid/forward string references, empty literals, truncation and budget exhaustion
+are rejected. The `ELISTATE3` format explicitly rejects older wire versions.
+
+The repeated-filename benchmark changed encode allocations from 4,194,681 B to
+131,704 B and decode allocations from 2,247,956 B / 20,009 allocations to 328,283 B /
+15 allocations. The v3 fixture is 50,268 bytes. Codec race tests, about 1.38 million
+five-second malformed-body fuzz executions, semantic-state round trips, the CLI
+bootstrap/corruption/revision tests and disk-cache edit/IR/native tests pass.
+
+On the full stage1 input, the initial 1/14,422-declaration checkpoint fell from
+666,967,732 bytes to 201,615,227 bytes. The v3 invocation returned incomplete in
+8.529 s (4.385 s encoding/publication). A new process restored it in 2.021 s,
+advanced to 404 declarations with the new default 3 s slice, and saved 203,285,143
+bytes in an 11.689 s invocation. This qualifies full-input checkpoint size and
+cross-process progress, not full bootstrap or sub-10-second completed builds.

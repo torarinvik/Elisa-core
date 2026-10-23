@@ -23,10 +23,11 @@ type encoder struct {
 	allocations []allocation
 	nodes       []stateNode
 	scanning    bool
+	strings     map[string]uint64
 }
 
 func (r *Registry) Encode(root any) ([]byte, error) {
-	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true}
+	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true, strings: map[string]uint64{}}
 	v := reflect.ValueOf(root)
 	if !v.IsValid() || r.ids[v.Type()] == 0 {
 		return nil, fmt.Errorf("unregistered state root")
@@ -38,7 +39,7 @@ func (r *Registry) Encode(root any) ([]byte, error) {
 		return nil, err
 	}
 	e.scanning = false
-	e.data.WriteString("ELISTATE2")
+	e.data.WriteString("ELISTATE3")
 	e.data.Write(r.fingerprint[:])
 	e.uint(r.ids[v.Type()])
 	e.uint(uint64(len(e.nodes)))
@@ -73,7 +74,19 @@ func (e *encoder) str(v string) {
 	if e.scanning {
 		return
 	}
-	e.uint(uint64(len(v)))
+	// Zero denotes the empty string; even codes refer to an earlier string.
+	// Odd codes introduce a new string with code>>1 bytes. Intern by content,
+	// since independent tokens often carry equal filenames in distinct storage.
+	if v == "" {
+		e.uint(0)
+		return
+	}
+	if id := e.strings[v]; id != 0 {
+		e.uint(id << 1)
+		return
+	}
+	e.strings[v] = uint64(len(e.strings) + 1)
+	e.uint(uint64(len(v))<<1 | 1)
 	e.data.WriteString(v)
 }
 func (e *encoder) value(v reflect.Value) error {
