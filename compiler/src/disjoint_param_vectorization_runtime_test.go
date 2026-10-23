@@ -197,33 +197,33 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     fl: f64 = build_fluid_frame()
     sf: f64 = build_stable_fluid_pressure()
     fw: f64 = build_forwarded()
-    print(d) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(d) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((d * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((d * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print(al) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(al) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((al * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((al * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print(j) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(j) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((j * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((j * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print(st) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(st) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((st * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((st * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print(fl) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(fl) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((fl * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((fl * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print(sf) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(sf) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((sf * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((sf * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print(fw) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(fw) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print(" ") can Console.Write
-    print((fw * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print((fw * 1000000.0).i64()) can Memory.Allocate, Console{Format,Write}, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}
     print("\n") can Console.Write
     return 0
 `, filepath.ToSlash(rel))

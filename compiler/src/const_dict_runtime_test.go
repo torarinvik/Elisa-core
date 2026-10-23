@@ -94,7 +94,7 @@ const NUMBERS: dict[cstr, u8] = {"one": 1}
 
 @test
 def mutable_dict_get_returns_mutable_ref() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Global{Read,Write}, Atomics{Exchange,Store}:
         region r:
             owner: mutable Arena& = &r
             numbers: mutable dict[cstr, u8] = arena_dict_new[cstr, u8](owner, 4)
