@@ -30,7 +30,7 @@ def fixed_buffer_allocator_smoke() -> void:
             assert_eq(reset_ptr.cast[u8&].uintptr(), first.cast[u8&].uintptr())
 
 def memory_pool_smoke() -> void:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         trusted Unsafe.PointerCast:
             pool: mutable MemoryPool[PoolPair] = zeroed
             defer block:
@@ -56,7 +56,7 @@ def memory_pool_smoke() -> void:
             assert_eq(after_reset.cast[u8&].uintptr(), second.cast[u8&].uintptr())
 
 def allocator_ports_main_impl() -> int:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         fixed_buffer_allocator_smoke()
         memory_pool_smoke()
         return 0
