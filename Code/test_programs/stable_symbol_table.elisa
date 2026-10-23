@@ -5,7 +5,7 @@ struct FixtureSymbol:
 
 
 def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
-    can Memory.Allocate, Abort.Panic:
+    can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.with_capacity(a, 4)
 
         alpha_id: SymbolTableId = symbol_table_id_from_index(map.set("alpha", FixtureSymbol{value: 7}))
@@ -32,7 +32,7 @@ def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
 
 
 def stable_symbol_table_default_capacity(a: mutable Arena&) -> i32:
-    can Memory.Allocate, Abort.Panic:
+    can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.new(a)
         symbol_id: SymbolTableId = symbol_table_id_from_index(map.set("gamma", FixtureSymbol{value: 19}))
         symbol: FixtureSymbol? = map.get("gamma")
@@ -42,7 +42,7 @@ def stable_symbol_table_default_capacity(a: mutable Arena&) -> i32:
 
 
 def stable_index_map_smoke(a: mutable Arena&) -> i32:
-    can Memory.Allocate, Abort.Panic:
+    can Memory.Allocate, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
         map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.new(a)
 
         alpha_index: usize = map.set("alpha", FixtureSymbol{value: 5})
