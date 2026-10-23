@@ -44,6 +44,14 @@ var retainedTypeMemos = []string{
 	"mutableBorrowCapabilityMemo", "containerRegionMemo", "storeScanAddressMemo", "storeScanAddressSeen",
 }
 
+var retainedTypeMemoNames = func() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range retainedTypeMemos {
+		m[n] = true
+	}
+	return m
+}()
+
 func (a *Analyzer) clearRetainedTypeMemos() {
 	v := reflect.ValueOf(a).Elem()
 	for _, name := range retainedTypeMemos {
@@ -64,15 +72,8 @@ func (r *RetainedAnalysis) findLiveStructEdits(edits [][2]*ast.StructDecl) ([]re
 		}
 	}
 	out := make([]retainedStructEdit, 0, len(edits))
-	seen := map[string]bool{}
 	for _, e := range edits {
-		// The declaration walk can list a declaration twice; it is one edit.
-		key := retainedLineKey(e[0].Pos()) + "|" + e[0].Name
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		sd, ok := byKey[key]
+		sd, ok := byKey[retainedLineKey(e[0].Pos())+"|"+e[0].Name]
 		if !ok {
 			return nil, "struct " + e[0].Name + " not found in the analysis"
 		}
@@ -253,4 +254,116 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 		}
 	}
 	return true
+}
+
+// retainedHoldsByValue: a value of t stores one of the targets inline (fields, array elements,
+// optionals, tuples, enum payloads), so its layout follows theirs. References, darrays and views
+// hold an address and do not.
+func retainedHoldsByValue(t Type, targets map[Type]bool, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	if targets[t] {
+		return true
+	}
+	seen[t] = true
+	switch n := t.(type) {
+	case *StructType:
+		for _, f := range n.Fields {
+			if retainedHoldsByValue(f.Type, targets, seen) {
+				return true
+			}
+		}
+	case *EnumType:
+		for _, v := range n.Variants {
+			for _, p := range v.Payload {
+				if retainedHoldsByValue(p, targets, seen) {
+					return true
+				}
+			}
+		}
+	case *ArrayType:
+		return retainedHoldsByValue(n.Elem, targets, seen)
+	case *OptionalType:
+		return retainedHoldsByValue(n.Value, targets, seen)
+	case *TupleType:
+		for _, f := range n.Fields {
+			if retainedHoldsByValue(f.Type, targets, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// widenLayoutTargets adds every named type that holds a target by value: its layout changed
+// with the target's, so its users are re-analyzed too.
+func (a *Analyzer) widenLayoutTargets(targets map[Type]bool) {
+	for {
+		grew := false
+		for _, t := range a.namedTypes {
+			if targets[t] {
+				continue
+			}
+			switch t.(type) {
+			case *StructType, *EnumType:
+			default:
+				continue
+			}
+			if retainedHoldsByValue(t, targets, map[Type]bool{}) {
+				targets[t] = true
+				grew = true
+			}
+		}
+		if !grew {
+			return
+		}
+	}
+}
+
+// removeLiveStructs drops removed structs from the live analysis: their declaration and type.
+func (r *RetainedAnalysis) removeLiveStructs(sds []scopedDecl) {
+	a := r.a
+	gone := map[ast.Decl]bool{}
+	for _, sd := range sds {
+		gone[sd.Decl] = true
+		name := joinQualifiedName(sd.Namespace, sd.Decl.(*ast.StructDecl).Name)
+		delete(a.namedTypes, name)
+		delete(a.privateTypeNames, name)
+		delete(a.declVisibility, sd.Decl)
+	}
+	decls := r.decls[:0]
+	for _, sd := range r.decls {
+		if !gone[sd.Decl] {
+			decls = append(decls, sd)
+		}
+	}
+	r.decls = decls
+	var prune func(decls []ast.Decl) []ast.Decl
+	prune = func(decls []ast.Decl) []ast.Decl {
+		out := decls[:0]
+		for _, d := range decls {
+			if n, ok := d.(*ast.NamespaceDecl); ok {
+				n.Decls = prune(n.Decls)
+			}
+			if !gone[d] {
+				out = append(out, d)
+			}
+		}
+		return out
+	}
+	a.file.Decls = prune(a.file.Decls)
+	a.clearRetainedTypeMemos()
+}
+
+// oldMemberBlock is the namespace of the live block holding a declaration of the pristine
+// program, by position; "" at top level.
+func (r *RetainedAnalysis) oldMemberBlock(d ast.Decl) string {
+	key := retainedLineKey(d.Pos())
+	for _, sd := range r.decls {
+		if retainedLineKey(sd.Decl.Pos()) == key {
+			return sd.Namespace
+		}
+	}
+	return ""
 }

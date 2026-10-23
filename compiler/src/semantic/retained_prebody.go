@@ -121,8 +121,8 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 		switch f := v.Field(i); f.Kind() {
 		case reflect.Map, reflect.Slice:
 			name := v.Type().Field(i).Name
-			if name == "diagnostics" || name == "reportedDiagnostics" || name == "warnOnceSeen" {
-				continue
+			if name == "diagnostics" || name == "reportedDiagnostics" || name == "warnOnceSeen" || retainedTypeMemoNames[name] {
+				continue // memos: their sizes count lookups, not results
 			}
 			size := f.Len()
 			if name == "exprTypes" {
@@ -181,12 +181,29 @@ func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
 // preBodyDifference names the first body-dependent declaration-phase result
 // that differs, or returns "". Old diagnostics are compared after the edit's
 // line shifts.
-func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added, removed, addedConsts, removedConsts int, replaced map[string]bool) string {
+// retainedGrowth is what an accepted edit adds to or removes from the declaration phase.
+type retainedGrowth struct {
+	addedFuncs, removedFuncs   int
+	addedConsts, removedConsts int      // consts and payload-less enum variants
+	addedGlobals               int
+	addedStructs               []string // qualified names
+	removedStructs             []string // qualified names
+}
+
+func (g retainedGrowth) none() bool {
+	return g.addedFuncs == 0 && g.removedFuncs == 0 && g.addedConsts == 0 && g.removedConsts == 0 && g.addedGlobals == 0 && len(g.addedStructs) == 0 && len(g.removedStructs) == 0
+}
+
+// preBodyDifference reports why the edited program's declaration phase differs from the live
+// one's in a way the update cannot follow. It sets *warningsChanged when the only difference
+// is in its warnings, which the update then takes from cur.
+func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, g retainedGrowth, replaced map[string]bool, warningsChanged *bool) string {
+	added, removed := g.addedFuncs, g.removedFuncs
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
 	if old.global != cur.global {
-		if diff := globalGrowthDifference(old.global, cur.global, added, removed, addedConsts, removedConsts); diff != "" {
+		if diff := globalGrowthDifference(old.global, cur.global, g); diff != "" {
 			return "program-wide declaration results changed" + diff
 		}
 	}
@@ -233,6 +250,10 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added,
 		return strings.Join(out, "\n")
 	}
 	if before, after := render(old.diags, true), render(cur.diags, false); before != after {
+		if retainedOnlyWarningsDiffer(old.diags, cur.diags, marks) {
+			*warningsChanged = true
+			return ""
+		}
 		return "declaration phase diagnostics changed" + firstLineDifference(before, after)
 	}
 	return ""
@@ -274,17 +295,41 @@ var addedFunctionTables = map[string]bool{
 	"regionParamCalleeParamIndex": true, // copied from the scratch phase on add
 }
 
+// addedStructTables hold one entry per struct type; adding k structs grows each by at most k.
+var addedStructTables = map[string]bool{"namedTypes": true, "declVisibility": true, "privateTypeNames": true}
+
 // addedConstTables hold one entry per const (declVisibility: one in a `public:`/`private:`
 // section); adding k consts grows each by at most k, removing k shrinks it by at most k.
 var addedConstTables = map[string]bool{"constValues": true, "declVisibility": true}
 
 // globalGrowthDifference accepts a global fingerprint change only when the sole
 // differences are table sizes moved by the added or removed functions and added consts.
-func globalGrowthDifference(old, cur string, added, removed, addedConsts, removedConsts int) string {
-	if added == 0 && removed == 0 && addedConsts == 0 && removedConsts == 0 {
+func globalGrowthDifference(old, cur string, g retainedGrowth) string {
+	if g.none() {
 		return firstLineDifference(old, cur)
 	}
+	added, removed := g.addedFuncs, g.removedFuncs
 	ol, cl := strings.Split(old, "\n"), strings.Split(cur, "\n")
+	// Each struct type has a line of its own: an added struct's line is new, a removed one's gone.
+	without := func(lines []string, names []string) []string {
+		if len(names) == 0 {
+			return lines
+		}
+		skip := map[string]bool{}
+		for _, name := range names {
+			skip[name+":"] = true
+		}
+		kept := lines[:0:0]
+		for _, l := range lines {
+			if k := strings.Index(l, ":"); k >= 0 && !strings.HasPrefix(l, "#") && skip[l[:k+1]] {
+				continue
+			}
+			kept = append(kept, l)
+		}
+		return kept
+	}
+	cl = without(cl, g.addedStructs)
+	ol = without(ol, g.removedStructs)
 	if len(ol) != len(cl) {
 		return firstLineDifference(old, cur)
 	}
@@ -302,12 +347,38 @@ func globalGrowthDifference(old, cur string, added, removed, addedConsts, remove
 			grow, shrink = added, removed
 		}
 		if addedConstTables[name] {
-			grow += addedConsts
-			shrink += removedConsts
+			grow += g.addedConsts
+			shrink += g.removedConsts
+		}
+		if addedStructTables[name] {
+			grow += len(g.addedStructs)
+			shrink += len(g.removedStructs)
 		}
 		if ok1 != 2 || ok2 != 2 || name != name2 || grow+shrink == 0 || after > before+grow || after < before-shrink {
 			return fmt.Sprintf(" (%s -> %s)", ol[i], cl[i])
 		}
 	}
 	return ""
+}
+
+// retainedOnlyWarningsDiffer: every diagnostic in one list and not the other is a warning.
+// Errors stop analysis of what they report on, so a changed error is never followed in place.
+func retainedOnlyWarningsDiffer(old, cur []Diagnostic, marks map[string][][2]int) bool {
+	count := map[string]int{}
+	sev := map[string]DiagnosticSeverity{}
+	for _, d := range old {
+		d.Pos = retainedShiftPos(d.Pos, marks)
+		count[d.String()]++
+		sev[d.String()] = d.Severity
+	}
+	for _, d := range cur {
+		count[d.String()]--
+		sev[d.String()] = d.Severity
+	}
+	for k, n := range count {
+		if n != 0 && sev[k] != DiagnosticSeverityWarning {
+			return false
+		}
+	}
+	return true
 }

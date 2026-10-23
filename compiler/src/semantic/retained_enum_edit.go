@@ -87,15 +87,8 @@ func (r *RetainedAnalysis) findLiveEnumEdits(pairs [][2]*ast.EnumDecl, scratch *
 		}
 	}
 	out := make([]retainedEnumEdit, 0, len(pairs))
-	seen := map[string]bool{}
 	for _, p := range pairs {
-		// The declaration walk can list a declaration twice; it is one edit.
-		key := retainedLineKey(p[0].Pos()) + "|" + p[0].Name
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		sd, ok := byKey[key]
+		sd, ok := byKey[retainedLineKey(p[0].Pos())+"|"+p[0].Name]
 		edit := prepared[retainedLineKey(p[1].Pos())+"|"+p[1].Name]
 		if !ok || edit == nil {
 			return nil, "enum " + p[0].Name + " not found in the analysis"

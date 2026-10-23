@@ -180,8 +180,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	collectMembers(file.Decls, "")
 	oldNames, newNames := map[string]bool{}, map[string]bool{}
 	oldValueNames := map[string]bool{} // consts, globals and functions: names an added const must not take
+	oldTypeNames := map[string]bool{}  // structs and enums: names an added struct must not take
 	for _, d := range oldDecls {
 		switch n := d.(type) {
+		case *ast.StructDecl:
+			oldTypeNames[n.Name] = true
+		case *ast.EnumDecl:
+			oldTypeNames[n.Name] = true
 		case *ast.FuncDecl:
 			oldNames[n.Name] = true
 			oldValueNames[n.Name] = true
@@ -192,8 +197,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	newValueNames := map[string]bool{} // consts, globals and functions of the edited program
+	newTypeNames := map[string]bool{}  // structs and enums of the edited program
 	for _, d := range newDecls {
 		switch n := d.(type) {
+		case *ast.StructDecl:
+			newTypeNames[n.Name] = true
+		case *ast.EnumDecl:
+			newTypeNames[n.Name] = true
 		case *ast.FuncDecl:
 			newNames[n.Name] = true
 			newValueNames[n.Name] = true
@@ -210,8 +220,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var removed []*ast.FuncDecl
 	var pairs [][2]int
 	var added []*ast.FuncDecl
-	var addedConsts []*ast.ConstDecl   // added typed consts with fresh names
-	var removedConsts []*ast.ConstDecl // consts whose name is gone from the edited program
+	var addedConsts []ast.Decl         // added typed consts and globals with fresh names
+	var removedConsts []ast.Decl       // consts and globals whose name is gone from the edited program
+	var addedStructs []*ast.StructDecl   // added plain structs with fresh names
+	var removedStructs []*ast.StructDecl // plain structs whose name is gone from the edited program
 	insertedBefore := map[int]bool{}   // pair index preceded by an added declaration
 	for i, j := 0, 0; i < len(oldDecls) || j < len(newDecls); {
 		if i < len(oldDecls) && j < len(newDecls) && retainedSameDeclKind(oldDecls[i], newDecls[j]) {
@@ -219,10 +231,24 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			i, j = i+1, j+1
 			continue
 		}
-		// A removed const: its name is gone from the edited source.
+		// A removed struct or const: its name is gone from the edited source.
+		if i < len(oldDecls) {
+			if ost, ok := oldDecls[i].(*ast.StructDecl); ok && retainedPlainStruct(ost) && !newTypeNames[ost.Name] && !newValueNames[ost.Name] {
+				removedStructs = append(removedStructs, ost)
+				insertedBefore[len(pairs)] = true
+				i++
+				continue
+			}
+		}
 		if i < len(oldDecls) {
 			if oc, ok := oldDecls[i].(*ast.ConstDecl); ok && oc.Type != nil && !newValueNames[oc.Name] {
 				removedConsts = append(removedConsts, oc)
+				insertedBefore[len(pairs)] = true
+				i++
+				continue
+			}
+			if og, ok := oldDecls[i].(*ast.GlobalDecl); ok && og.Type != nil && !newValueNames[og.Name] {
+				removedConsts = append(removedConsts, og)
 				insertedBefore[len(pairs)] = true
 				i++
 				continue
@@ -240,8 +266,20 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if j == len(newDecls) {
 			return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 		}
+		if sd, ok := newDecls[j].(*ast.StructDecl); ok && retainedPlainStruct(sd) && (topLevel[sd] || memberOf[sd] != nil) && !oldTypeNames[sd.Name] && !oldValueNames[sd.Name] {
+			addedStructs = append(addedStructs, sd)
+			insertedBefore[len(pairs)] = true
+			j++
+			continue
+		}
 		if cd, ok := newDecls[j].(*ast.ConstDecl); ok && cd.Type != nil && (topLevel[cd] || memberOf[cd] != nil) && !oldValueNames[cd.Name] && !newNames[cd.Name] {
 			addedConsts = append(addedConsts, cd)
+			insertedBefore[len(pairs)] = true
+			j++
+			continue
+		}
+		if gd, ok := newDecls[j].(*ast.GlobalDecl); ok && gd.Type != nil && (topLevel[gd] || memberOf[gd] != nil) && !oldValueNames[gd.Name] && !newNames[gd.Name] {
+			addedConsts = append(addedConsts, gd)
 			insertedBefore[len(pairs)] = true
 			j++
 			continue
@@ -254,7 +292,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		insertedBefore[len(pairs)] = true
 		j++
 	}
-	if len(pairs)+len(removed)+len(removedConsts) != len(oldDecls) {
+	if len(pairs)+len(removed)+len(removedConsts)+len(removedStructs) != len(oldDecls) {
 		return fail("declaration count changed (%d -> %d)", len(oldDecls), len(newDecls))
 	}
 	type fnKey struct {
@@ -315,7 +353,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		sameText := oldSpans[i] == newSpans[j]
 		ofn, isFn := od.(*ast.FuncDecl)
 		if !isFn {
-			// A container's span is its own header up to its first member.
+			// A container's span is its own header up to its first member. Comment and blank
+			// lines trailing a declaration move with an insertion after it; they are not part of
+			// what the declaration declares.
+			if !sameText && retainedTrimTrailing(oldSpans[i]) == retainedTrimTrailing(newSpans[j]) {
+				continue
+			}
 			if !sameText {
 				if osd, ok := od.(*ast.StructDecl); ok {
 					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedPlainStruct(osd) && retainedPlainStruct(nsd) {
@@ -408,7 +451,19 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	compareStart := time.Now()
 	// A payload-less enum variant is a const value of the declaration phase.
-	constsIn, constsOut := len(addedConsts), len(removedConsts)
+	constsIn, constsOut, globalsIn := 0, 0, 0
+	for _, d := range removedConsts {
+		if _, isConst := d.(*ast.ConstDecl); isConst {
+			constsOut++
+		}
+	}
+	for _, d := range addedConsts {
+		if _, isConst := d.(*ast.ConstDecl); isConst {
+			constsIn++
+		} else {
+			globalsIn++
+		}
+	}
 	if len(enumPairs) != 0 {
 		if !retainedEnumStoreSetsEqual(oldDecls, newDecls) {
 			return fail("an enum edit changes which enums are recursive or store-backed")
@@ -421,7 +476,23 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 		}
 	}
-	diff := preBodyDifference(r.pre, pre, marks, len(added), len(removed), constsIn, constsOut, replaced)
+	growth := retainedGrowth{addedFuncs: len(added), removedFuncs: len(removed), addedConsts: constsIn, removedConsts: constsOut, addedGlobals: globalsIn}
+	for _, st := range removedStructs {
+		namespace := ""
+		if block := r.oldMemberBlock(st); block != "" {
+			namespace = block
+		}
+		growth.removedStructs = append(growth.removedStructs, joinQualifiedName(namespace, st.Name))
+	}
+	for _, st := range addedStructs {
+		namespace := ""
+		if block := memberOf[st]; block != nil && !topLevel[st] {
+			namespace = namespaceOf[block]
+		}
+		growth.addedStructs = append(growth.addedStructs, joinQualifiedName(namespace, st.Name))
+	}
+	warningsChanged := false
+	diff := preBodyDifference(r.pre, pre, marks, growth, replaced, &warningsChanged)
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
@@ -483,6 +554,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			targets[e.st] = true
 			names[e.live.Name] = true
 		}
+		a.widenLayoutTargets(targets)
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
 			spliced[sp.live] = true
@@ -510,21 +582,30 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// An edited const value: every function that mentions it is re-analyzed. A declaration or
 	// signature that names it was resolved in the declaration phase, which this path keeps.
 	var constLive [][2]*ast.ConstDecl // (live, scratch) per edited const
-	var addedConstPrepared []*ast.ConstDecl
-	var removedConstLive []*ast.ConstDecl
-	if len(constPairs)+len(addedConsts)+len(removedConsts) != 0 {
+	var addedConstPrepared []ast.Decl
+	var removedConstLive []ast.Decl
+	var addedStructPrepared []*ast.StructDecl
+	var removedStructLive []scopedDecl
+	if len(constPairs)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) != 0 {
 		names := map[string]bool{}
 		edited := map[ast.Decl]bool{}
 		for _, e := range constPairs {
 			names[e[0].Name] = true
 			edited[e[1]] = true
 		}
-		for _, cd := range addedConsts {
-			names[cd.Name] = true
-			edited[cd] = true
+		for _, d := range addedConsts {
+			names[retainedValueDeclName(d)] = true
+			edited[d] = true
 		}
-		for _, cd := range removedConsts {
-			names[cd.Name] = true
+		for _, d := range removedConsts {
+			names[retainedValueDeclName(d)] = true
+		}
+		for _, sd := range addedStructs {
+			names[sd.Name] = true
+			edited[sd] = true
+		}
+		for _, sd := range removedStructs {
+			names[sd.Name] = true
 		}
 		pat := retainedNamesPattern(names)
 		for j, d := range newDecls {
@@ -533,23 +614,67 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			if fn, ok := d.(*ast.FuncDecl); ok {
 				if pat.MatchString(retainedText(fn).header) {
-					return fail("the signature of %s names an edited const", fn.Name)
+					return fail("the signature of %s names an added or edited const or struct", fn.Name)
 				}
 			} else if _, ns := d.(*ast.NamespaceDecl); !ns && pat.MatchString(newSpans[j]) {
-				return fail("declaration at %s names an edited const", retainedLineKey(d.Pos()))
+				return fail("declaration at %s names an added or edited const or struct", retainedLineKey(d.Pos()))
 			}
 		}
 		liveConsts := map[string]*ast.ConstDecl{}
+		liveValues := map[string]ast.Decl{} // consts and globals
 		for _, sd := range r.decls {
-			if cd, ok := sd.Decl.(*ast.ConstDecl); ok {
-				liveConsts[retainedLineKey(cd.Pos())+"|"+cd.Name] = cd
+			switch n := sd.Decl.(type) {
+			case *ast.ConstDecl:
+				liveConsts[retainedLineKey(n.Pos())+"|"+n.Name] = n
+				liveValues[retainedLineKey(n.Pos())+"|"+n.Name] = n
+			case *ast.GlobalDecl:
+				liveValues[retainedLineKey(n.Pos())+"|"+n.Name] = n
 			}
 		}
 		scratchConsts := map[string]*ast.ConstDecl{}
+		scratchValues := map[string]ast.Decl{} // consts and globals
+		scratchStructs := map[string]*ast.StructDecl{}
 		for _, d := range retainedWalkDecls(scratch) {
-			if cd, ok := d.(*ast.ConstDecl); ok {
-				scratchConsts[retainedLineKey(cd.Pos())+"|"+cd.Name] = cd
+			switch n := d.(type) {
+			case *ast.GlobalDecl:
+				scratchValues[retainedLineKey(n.Pos())+"|"+n.Name] = n
+			case *ast.ConstDecl:
+				scratchConsts[retainedLineKey(n.Pos())+"|"+n.Name] = n
+				scratchValues[retainedLineKey(n.Pos())+"|"+n.Name] = n
+			case *ast.StructDecl:
+				scratchStructs[retainedLineKey(n.Pos())+"|"+n.Name] = n
 			}
+		}
+		removedTargets := map[Type]bool{}
+		if len(removedStructs) != 0 {
+			liveStructs := map[string]scopedDecl{}
+			for _, sd := range r.decls {
+				if st, ok := sd.Decl.(*ast.StructDecl); ok {
+					liveStructs[retainedLineKey(st.Pos())+"|"+st.Name] = sd
+				}
+			}
+			for _, ost := range removedStructs {
+				sd, ok := liveStructs[retainedLineKey(ost.Pos())+"|"+ost.Name]
+				st, _ := a.namedTypes[joinQualifiedName(sd.Namespace, ost.Name)].(*StructType)
+				if !ok || st == nil || st.Builtin || len(st.TypeParams) != 0 {
+					return fail("removed struct %s not found in the analysis", ost.Name)
+				}
+				line := sd.Decl.Pos()
+				for _, d := range a.diagnostics {
+					if d.Pos.File == line.File && d.Pos.Line == line.Line {
+						return fail("removed struct %s has diagnostics", ost.Name)
+					}
+				}
+				removedTargets[st] = true
+				removedStructLive = append(removedStructLive, sd)
+			}
+		}
+		for _, sd := range addedStructs {
+			prepared := scratchStructs[retainedLineKey(sd.Pos())+"|"+sd.Name]
+			if prepared == nil {
+				return fail("prepared form of added struct %s not found", sd.Name)
+			}
+			addedStructPrepared = append(addedStructPrepared, prepared)
 		}
 		for _, e := range constPairs {
 			live := liveConsts[retainedLineKey(e[0].Pos())+"|"+e[0].Name]
@@ -566,22 +691,23 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			constLive = append(constLive, [2]*ast.ConstDecl{live, prepared})
 		}
 		for _, cd := range removedConsts {
-			live := liveConsts[retainedLineKey(cd.Pos())+"|"+cd.Name]
+			name := retainedValueDeclName(cd)
+			live := liveValues[retainedLineKey(cd.Pos())+"|"+name]
 			if live == nil {
-				return fail("removed const %s not found in the analysis", cd.Name)
+				return fail("removed %s not found in the analysis", name)
 			}
 			line := live.Pos()
 			for _, d := range a.diagnostics {
 				if d.Pos.File == line.File && d.Pos.Line == line.Line {
-					return fail("removed const %s has diagnostics", cd.Name)
+					return fail("removed %s has diagnostics", name)
 				}
 			}
 			removedConstLive = append(removedConstLive, live)
 		}
-		for _, cd := range addedConsts {
-			prepared := scratchConsts[retainedLineKey(cd.Pos())+"|"+cd.Name]
+		for _, d := range addedConsts {
+			prepared := scratchValues[retainedLineKey(d.Pos())+"|"+retainedValueDeclName(d)]
 			if prepared == nil {
-				return fail("prepared form of added const %s not found", cd.Name)
+				return fail("prepared form of added %s not found", retainedValueDeclName(d))
 			}
 			addedConstPrepared = append(addedConstPrepared, prepared)
 		}
@@ -589,14 +715,26 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		for _, sp := range splices {
 			spliced[sp.live] = true
 		}
+		// A struct is named by type expressions and literals, which the identifier scan
+		// does not see, so the edited function's text is matched too.
+		spanOf := map[ast.Decl]string{}
+		if len(addedStructs)+len(removedStructs) != 0 {
+			for j, d := range newDecls {
+				spanOf[d] = newSpans[j]
+			}
+		}
 		for _, sd := range r.decls {
 			fn, ok := sd.Decl.(*ast.FuncDecl)
-			if !ok || spliced[fn] || !retainedMentionsAny(fn, names) {
+			if !ok || spliced[fn] {
+				continue
+			}
+			if !retainedMentionsAny(fn, names) && (len(addedStructs)+len(removedStructs) == 0 || !pat.MatchString(spanOf[pairedNew[fn]])) &&
+				(len(removedTargets) == 0 || !a.retainedUsesTypes(fn, removedTargets, names, map[Type]bool{})) {
 				continue
 			}
 			nfn := pairedNew[fn]
 			if nfn == nil || !retainedPlainFunction(fn) {
-				return fail("%s uses an edited const but cannot be re-analyzed alone", fn.Name)
+				return fail("%s uses an added or edited name but cannot be re-analyzed alone", fn.Name)
 			}
 			splices = append(splices, splice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)
@@ -623,6 +761,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				names[v.Name] = true
 			}
 		}
+		a.widenLayoutTargets(targets)
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
 			spliced[sp.live] = true
@@ -758,7 +897,27 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				a.regionParamCalleeParamIndex[fn.Name] = idx
 			}
 		}
+		// The classification resets its program-wide tables to the decls it is given; for an
+		// added function that is only the added ones, so the rest of the program's entries are
+		// kept and the added functions' merged in.
+		callerArena, storeBuilders := a.regionPolyReturnsCallerArena, a.packedStoreBuilders
 		a.classifyRegionPolymorphicFunctions(addedScoped)
+		for ft, v := range callerArena {
+			if _, set := a.regionPolyReturnsCallerArena[ft]; !set {
+				if a.regionPolyReturnsCallerArena == nil {
+					a.regionPolyReturnsCallerArena = map[*FuncType]bool{}
+				}
+				a.regionPolyReturnsCallerArena[ft] = v
+			}
+		}
+		for ft, v := range storeBuilders {
+			if _, set := a.packedStoreBuilders[ft]; !set {
+				if a.packedStoreBuilders == nil {
+					a.packedStoreBuilders = map[*FuncType]map[string]string{}
+				}
+				a.packedStoreBuilders[ft] = v
+			}
+		}
 		for _, sd := range addedScoped {
 			fn := sd.Decl.(*ast.FuncDecl)
 			want := pre.fingerprint[sd.Namespace+"::"+fn.Name+"#0"]
@@ -778,15 +937,26 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	// Added consts are scoped like added functions; declaring them cannot disagree with
 	// scratch, whose declaration-phase diagnostics already matched.
-	var addedConstScoped []scopedDecl
-	var addedConstInto []*ast.NamespaceDecl
+	var addedConstScoped, addedStructScoped []scopedDecl
+	var addedConstInto, addedStructInto []*ast.NamespaceDecl
 	for k, cd := range addedConsts {
-		sd, into, why := place(cd, addedConstPrepared[k], cd.Name)
+		sd, into, why := place(cd, addedConstPrepared[k], retainedValueDeclName(cd))
 		if why != "" {
 			return fail("%s", why)
 		}
 		addedConstScoped = append(addedConstScoped, sd)
 		addedConstInto = append(addedConstInto, into)
+	}
+	for k, st := range addedStructs {
+		sd, into, why := place(st, addedStructPrepared[k], st.Name)
+		if why != "" {
+			return fail("%s", why)
+		}
+		if _, exists := a.namedTypes[joinQualifiedName(sd.Namespace, st.Name)]; exists {
+			return fail("added struct %s shadows a declared type", st.Name)
+		}
+		addedStructScoped = append(addedStructScoped, sd)
+		addedStructInto = append(addedStructInto, into)
 	}
 	if len(addedConstScoped) != 0 {
 		for k, sd := range addedConstScoped {
@@ -799,6 +969,20 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		a.collectValueSymbols(addedConstScoped)
 		r.decls = append(r.decls, addedConstScoped...)
 	}
+	// Added structs are declared as the declaration phase declares them.
+	if len(addedStructScoped) != 0 {
+		for k, sd := range addedStructScoped {
+			if addedStructInto[k] != nil {
+				addedStructInto[k].Decls = append(addedStructInto[k].Decls, sd.Decl)
+			} else {
+				a.file.Decls = append(a.file.Decls, sd.Decl)
+			}
+		}
+		a.collectNamedTypes(addedStructScoped)
+		a.populateStructFields(addedStructScoped)
+		a.clearRetainedTypeMemos()
+		r.decls = append(r.decls, addedStructScoped...)
+	}
 	// Past this point the edit is accepted; mutate the retained state.
 	if len(enumEdits) != 0 {
 		r.applyEnumEdits(enumEdits)
@@ -810,6 +994,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	if len(removedConstLive) != 0 {
 		r.removeLiveConsts(removedConstLive)
+	}
+	if len(removedStructLive) != 0 {
+		r.removeLiveStructs(removedStructLive)
 	}
 	// Edited consts are evaluated first, then added functions: the edited bodies use both.
 	var changed []scopedDecl
@@ -844,7 +1031,18 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.LastStats.Diff = time.Since(start)
 	// Keep the body-phase diagnostics of unchanged functions; the changed ones
 	// and everything the whole-program passes emitted are recomputed.
+	// Changed declaration-phase warnings: the live prefix is replaced by the edited program's.
+	declPrefix := 0
+	if warningsChanged {
+		declPrefix = len(r.pre.diags)
+		for k := 0; k < declPrefix; k++ {
+			drop[k] = true
+		}
+	}
 	kept := make([]Diagnostic, 0, r.bodyEnd)
+	if warningsChanged {
+		kept = append(kept, pre.diags...)
+	}
 	for k := 0; k < r.bodyEnd && k < len(a.diagnostics); k++ {
 		if !drop[k] {
 			d := a.diagnostics[k]
@@ -861,6 +1059,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// Windows index into the diagnostics list, which was just compacted; the
 	// changed functions get fresh windows below, the rest are re-based.
 	r.rebaseWindows(drop)
+	if warningsChanged {
+		for fn, w := range r.windows {
+			r.windows[fn] = [2]int{w[0] + len(pre.diags), w[1] + len(pre.diags)}
+		}
+	}
 	r.invalidateReturnBorrow(changed, marks)
 	a.invalidateStorageViewCalleeWriteCaches()
 	a.regionPointeesMemo = nil
@@ -878,17 +1081,17 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if len(changed) != 0 || len(removedLive) != 0 {
 		// A body edit can change flow through every transitive caller and can
 		// split or join call cycles. These results predate the replacement bodies.
-		if len(addedScoped) != 0 || len(removedLive) != 0 {
-			a.invalidateStoreFlowSummaries()
-		} else {
-			fns := make([]*ast.FuncDecl, 0, len(changed))
-			for _, sd := range changed {
-				if fn, ok := sd.Decl.(*ast.FuncDecl); ok && !structOnly[fn] {
-					fns = append(fns, fn)
-				}
+		// Every body whose call resolution an added or removed name changes mentions that
+		// name and is re-analyzed, so it is among the changed functions; a removed function
+		// seeds its callers.
+		fns := make([]*ast.FuncDecl, 0, len(changed)+len(removedLive))
+		for _, sd := range changed {
+			if fn, ok := sd.Decl.(*ast.FuncDecl); ok && !structOnly[fn] {
+				fns = append(fns, fn)
 			}
-			a.invalidateStoreFlowSummariesFrom(fns)
 		}
+		fns = append(fns, removedLive...)
+		a.invalidateStoreFlowSummariesFrom(fns)
 		a.storeFlowSCC = nil
 		a.cyclicFuncSet = nil
 		if len(addedScoped) != 0 || len(removedLive) != 0 {
@@ -1026,7 +1229,9 @@ func retainedWalkDecls(file *ast.File) []ast.Decl {
 			if v.IsNil() {
 				return
 			}
-			if v.Type().Implements(retainedDeclType) {
+			// An interface holding a declaration is recorded through the pointer it holds,
+			// so each declaration is listed once.
+			if v.Kind() == reflect.Pointer && v.Type().Implements(retainedDeclType) {
 				d := v.Interface().(ast.Decl)
 				out = append(out, d)
 				if _, isFn := d.(*ast.FuncDecl); isFn {
@@ -1189,8 +1394,14 @@ func retainedSameDeclKind(a, b ast.Decl) bool {
 	case *ast.FuncDecl:
 		return fa.Name == b.(*ast.FuncDecl).Name
 	case *ast.ConstDecl:
-		// By name, so an added const is not paired with the next one.
+		// By name, so an added const is not paired with the next one; the same for types.
 		return fa.Name == b.(*ast.ConstDecl).Name
+	case *ast.StructDecl:
+		return fa.Name == b.(*ast.StructDecl).Name
+	case *ast.EnumDecl:
+		return fa.Name == b.(*ast.EnumDecl).Name
+	case *ast.GlobalDecl:
+		return fa.Name == b.(*ast.GlobalDecl).Name
 	}
 	return true
 }
@@ -1282,4 +1493,18 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 		}
 	}
 	r.lateFrames = frames
+}
+
+// retainedTrimTrailing drops the comment and blank lines that end a span.
+func retainedTrimTrailing(span string) string {
+	lines := strings.Split(span, "\n")
+	end := len(lines)
+	for end > 1 {
+		t := strings.TrimSpace(lines[end-1])
+		if t != "" && !strings.HasPrefix(t, "#") {
+			break
+		}
+		end--
+	}
+	return strings.Join(lines[:end], "\n")
 }

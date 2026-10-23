@@ -114,9 +114,9 @@ func TestRetainedAnalysisAcceptsSignatureEdits(t *testing.T) {
 			t.Fatal("fixture: the callee's new parameter type must reject its callers")
 		}
 	}
-	added := steps[1] + "\nstruct Extra:\n    v: i64\n"
+	added := steps[1] + "\nstruct Extra[T]:\n    v: T\n"
 	if _, err := retained.Update(retainedParse(t, added), retainedParse(t, added), []byte(added)); err == nil {
-		t.Fatal("adding a struct must fall back")
+		t.Fatal("adding a generic struct must fall back")
 	}
 }
 
@@ -272,6 +272,15 @@ func TestRetainedAnalysisAcceptsAddedConst(t *testing.T) {
 	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
 		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
 	}
+	declared := 0
+	for _, sd := range retained.decls {
+		if cd, ok := sd.Decl.(*ast.ConstDecl); ok && cd.Name == "LIMIT" {
+			declared++
+		}
+	}
+	if declared != 1 {
+		t.Fatalf("the added const is declared %d times", declared)
+	}
 	// A value edit to the added const then works like any other, and removing it again
 	// brings back the undefined-name error.
 	again := strings.Replace(edited, "= 3", "= 4", 1)
@@ -327,6 +336,155 @@ func TestRetainedAnalysisAcceptsPlainEnumEdits(t *testing.T) {
 		if i == 0 && len(fresh.Errors()) == 0 {
 			t.Fatalf("fixture: the added variant must make the match non-exhaustive:\n%s", want)
 		}
+	}
+}
+
+// An added plain struct is declared, and the functions that named it before it existed are
+// re-analyzed: their unknown-type errors go, as in a fresh analysis. Removing it is a fallback.
+func TestRetainedAnalysisAcceptsAddedStruct(t *testing.T) {
+	options := AnalyzeOptions{}
+	fns := "def make() -> i64:\n    p: Point = Point{x: 1, y: 2}\n    return p.x + p.y\n\ndef other(y: i64) -> i64:\n    return y\n"
+	before := "struct Keep:\n    v: i64\n\n" + fns
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	// Added before an existing struct, so pairing must go by name.
+	edited := "struct Point:\n    x: i64\n    y: i64\n\nstruct Keep:\n    v: i64\n\n" + fns
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("added struct fell back: %v", err)
+	}
+	if retained.LastStats.ConstUsers != 1 {
+		t.Fatalf("stats = %+v, want one user re-analyzed", retained.LastStats)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+	if len(fresh.Errors()) != 0 {
+		t.Fatalf("fixture: the added struct should resolve every use:\n%s", retainedDiagnostics(fresh))
+	}
+	n := 0
+	for _, sd := range retained.decls {
+		if st, ok := sd.Decl.(*ast.StructDecl); ok && st.Name == "Point" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the added struct is declared %d times", n)
+	}
+	// Removing it again brings the unknown-type errors back.
+	updated, err = retained.Update(retainedParse(t, before), retainedParse(t, before), []byte(before))
+	if err != nil {
+		t.Fatalf("removing the struct fell back: %v", err)
+	}
+	fresh = AnalyzeWithOptions(retainedParse(t, before), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want || len(fresh.Errors()) == 0 {
+		t.Fatalf("removal diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// An added global between two existing ones is declared, and its users lose their
+// undefined-name errors, as in a fresh analysis.
+func TestRetainedAnalysisAcceptsAddedGlobal(t *testing.T) {
+	options := AnalyzeOptions{}
+	fns := "def reads() -> i64:\n    return counter\n\ndef other(y: i64) -> i64:\n    return y\n"
+	before := "global first: i64 = 1\nglobal last: i64 = 2\n\n" + fns
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	edited := "global first: i64 = 1\nglobal counter: i64 = 5\nglobal last: i64 = 2\n\n" + fns
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("added global fell back: %v", err)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+	if strings.Contains(retainedDiagnostics(fresh), "counter") {
+		t.Fatalf("fixture: the added global should resolve its use:\n%s", retainedDiagnostics(fresh))
+	}
+	// Removing it again brings the undefined-name error back.
+	updated, err = retained.Update(retainedParse(t, before), retainedParse(t, before), []byte(before))
+	if err != nil {
+		t.Fatalf("removing the global fell back: %v", err)
+	}
+	fresh = AnalyzeWithOptions(retainedParse(t, before), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want || !strings.Contains(got, "counter") {
+		t.Fatalf("removal diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A struct that embeds the edited one by value changes layout with it, so a function that only
+// uses the outer struct is re-analyzed too; one holding it through a reference is not.
+func TestRetainedStructEditReachesByValueContainers(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := "struct Inner:\n    a: i64\n\nstruct Outer:\n    inner: Inner\n\nstruct Far:\n    inner: Inner&\n\n" +
+		"def outer_only(o: Outer&) -> i64:\n    return 1\n\ndef far_only(f: Far&) -> i64:\n    return 2\n\ndef none(y: i64) -> i64:\n    return y\n"
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	edited := strings.Replace(before, "    a: i64\n", "    a: i64\n    b: i64\n", 1)
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("struct edit fell back: %v", err)
+	}
+	if retained.LastStats.StructUsers != 1 {
+		t.Fatalf("stats = %+v, want only outer_only re-analyzed", retained.LastStats)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A struct edit that adds or clears a declaration-phase warning (padding) is followed in place:
+// the warnings come from the edited program's declaration phase.
+func TestRetainedAnalysisFollowsDeclarationWarningChanges(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := "struct P:\n    a: i64\n    b: u8\n\ndef reads(p: P&) -> i64:\n    return p.a\n\ndef other(y: i64) -> i64:\n    return y\n"
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	// c: u8 before a: i64 costs 7 bytes a reordering would save.
+	padded := strings.Replace(before, "struct P:\n", "struct P:\n    c: u8\n", 1)
+	for i, src := range []string{padded, before} {
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("edit %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh)
+		if got != want {
+			t.Fatalf("edit %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
+		}
+		if i == 0 && !strings.Contains(want, "padding") {
+			t.Fatalf("fixture: the u8 field should cost padding:\n%s", want)
+		}
+	}
+}
+
+// Declaring an added function classifies region polymorphism for it alone; the program-wide
+// tables that classification resets must keep every other function's entries, or later
+// re-analysis of their callers loses the caller-arena binding.
+func TestRetainedAddedFunctionKeepsRegionPolymorphismTables(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := "def make_list(n: i64) -> darray[i64]:\n    out: mutable darray[i64] = []\n    out.push(n)\n    return out\n\n" +
+		"def use_list() -> i64:\n    xs: darray[i64] = make_list(3)\n    return xs.count.i64()\n"
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	beforeArena := len(retained.a.regionPolyReturnsCallerArena)
+	if beforeArena == 0 {
+		t.Skip("fixture: no caller-arena function classified")
+	}
+	edited := before + "\ndef added(y: i64) -> i64:\n    return y\n"
+	if _, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited)); err != nil {
+		t.Fatalf("added function fell back: %v", err)
+	}
+	if got := len(retained.a.regionPolyReturnsCallerArena); got < beforeArena {
+		t.Fatalf("caller-arena table shrank from %d to %d entries", beforeArena, got)
+	}
+	// A body edit to the caller after the add matches a fresh analysis.
+	again := strings.Replace(edited, "return xs.count.i64()", "return xs.count.i64() + 1", 1)
+	updated, err := retained.Update(retainedParse(t, again), retainedParse(t, again), []byte(again))
+	if err != nil {
+		t.Fatalf("caller edit fell back: %v", err)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, again), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
 	}
 }
 

@@ -82,9 +82,9 @@ func (r *RetainedAnalysis) applyConstEdits(edits [][2]*ast.ConstDecl) []scopedDe
 	return out
 }
 
-// removeLiveConsts drops removed consts from the live analysis: their declaration, symbol and
-// value.
-func (r *RetainedAnalysis) removeLiveConsts(cds []*ast.ConstDecl) {
+// removeLiveConsts drops removed consts and globals from the live analysis: their declaration,
+// symbol and value.
+func (r *RetainedAnalysis) removeLiveConsts(cds []ast.Decl) {
 	a := r.a
 	gone := map[ast.Decl]bool{}
 	for _, cd := range cds {
@@ -93,7 +93,7 @@ func (r *RetainedAnalysis) removeLiveConsts(cds []*ast.ConstDecl) {
 	decls := r.decls[:0]
 	for _, sd := range r.decls {
 		if gone[sd.Decl] {
-			name := joinQualifiedName(sd.Namespace, sd.Decl.(*ast.ConstDecl).Name)
+			name := joinQualifiedName(sd.Namespace, retainedValueDeclName(sd.Decl))
 			delete(a.globalScope.Symbols, name)
 			delete(a.constValues, name)
 			delete(a.declVisibility, sd.Decl)
@@ -116,4 +116,15 @@ func (r *RetainedAnalysis) removeLiveConsts(cds []*ast.ConstDecl) {
 		return out
 	}
 	a.file.Decls = prune(a.file.Decls)
+}
+
+// retainedValueDeclName names an added const or global.
+func retainedValueDeclName(d ast.Decl) string {
+	switch n := d.(type) {
+	case *ast.ConstDecl:
+		return n.Name
+	case *ast.GlobalDecl:
+		return n.Name
+	}
+	return ""
 }
