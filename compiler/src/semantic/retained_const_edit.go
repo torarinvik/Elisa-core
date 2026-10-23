@@ -1,0 +1,83 @@
+package semantic
+
+import (
+	"regexp"
+	"strings"
+
+	"elisacore/src/ast"
+)
+
+// A retained update accepts a new value for a typed const. The value is evaluated in the body
+// phase (analyzeScopedDecl), so when no other declaration and no function signature names the
+// const, the declaration phase is unaffected: the live analysis takes the new declaration,
+// re-evaluates it, and re-analyzes the functions that mention it.
+
+// retainedConstHeader is a const's text up to its value: `const NAME: TYPE`.
+func retainedConstHeader(span string) string {
+	if i := strings.Index(span, "="); i >= 0 {
+		return strings.TrimSpace(span[:i])
+	}
+	return span
+}
+
+// retainedConstValueEdit: the same typed const with only its value changed.
+func retainedConstValueEdit(old, cur *ast.ConstDecl, oldSpan, newSpan string) bool {
+	return old.Name == cur.Name && old.Type != nil && cur.Type != nil &&
+		retainedConstHeader(oldSpan) == retainedConstHeader(newSpan)
+}
+
+// retainedNamesPattern matches any of names as a whole identifier.
+func retainedNamesPattern(names map[string]bool) *regexp.Regexp {
+	quoted := make([]string, 0, len(names))
+	for n := range names {
+		quoted = append(quoted, regexp.QuoteMeta(n))
+	}
+	return regexp.MustCompile(`(^|[^A-Za-z0-9_])(` + strings.Join(quoted, "|") + `)([^A-Za-z0-9_]|$)`)
+}
+
+// replaceLiveDecls swaps declarations in the live file and the retained declaration list.
+func (r *RetainedAnalysis) replaceLiveDecls(replace map[ast.Decl]ast.Decl) {
+	var swap func(decls []ast.Decl)
+	swap = func(decls []ast.Decl) {
+		for i, d := range decls {
+			if n, ok := replace[d]; ok {
+				decls[i] = n
+			}
+			if ns, ok := d.(*ast.NamespaceDecl); ok {
+				swap(ns.Decls)
+			}
+		}
+	}
+	swap(r.a.file.Decls)
+	for i, sd := range r.decls {
+		if n, ok := replace[sd.Decl]; ok {
+			r.decls[i].Decl = n
+		}
+	}
+}
+
+// applyConstEdits installs each edited const and returns their scoped declarations, which the
+// body phase re-evaluates.
+func (r *RetainedAnalysis) applyConstEdits(edits [][2]*ast.ConstDecl) []scopedDecl {
+	replace := map[ast.Decl]ast.Decl{}
+	for _, e := range edits {
+		replace[e[0]] = e[1]
+	}
+	r.replaceLiveDecls(replace)
+	out := make([]scopedDecl, 0, len(edits))
+	for _, sd := range r.decls {
+		cd, ok := sd.Decl.(*ast.ConstDecl)
+		if !ok {
+			continue
+		}
+		for _, e := range edits {
+			if cd == e[1] {
+				if sym, found := r.a.globalScope.Lookup(joinQualifiedName(sd.Namespace, cd.Name)); found {
+					sym.Node = cd
+				}
+				out = append(out, sd)
+			}
+		}
+	}
+	return out
+}

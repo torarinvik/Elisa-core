@@ -71,6 +71,7 @@ type RetainedUpdateStats struct {
 	Added                     int
 	Removed                   int
 	StructUsers               int // functions re-analyzed for an edited struct (with the edited ones)
+	ConstUsers                int // functions re-analyzed for an edited const (with the edited ones)
 	Pairing, Scratch, Compare time.Duration
 	// Invalidated counts functions whose late return-borrow results were recomputed.
 	Invalidated int
@@ -253,6 +254,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
 	var structPairs [][2]*ast.StructDecl // edited plain structs: (previous, edited)
+	var constPairs [][2]*ast.ConstDecl   // typed consts with a new value: (previous, edited)
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
 	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
@@ -266,9 +268,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			return fail("declaration %d moved", i)
 		}
 		// Any line movement must come from a declaration whose text changed; the
-		// span compare below makes that declaration a splice.
+		// span compare below makes that declaration a splice. A span ends at the next
+		// `#line` directive, so the text above a file region's first declaration is in no
+		// span and holds no declaration: a movement there (comments, blank lines) is a
+		// plain shift.
 		if d := np.Line - op.Line; d != lineDelta[op.File] {
-			if !insertedBefore[k] && (k == 0 || oldSpans[i-1] == newSpans[pairs[k-1][1]] || oldDecls[i-1].Pos().File != op.File) {
+			if !insertedBefore[k] && k > 0 && oldSpans[i-1] == newSpans[pairs[k-1][1]] && oldDecls[i-1].Pos().File == op.File {
 				return fail("lines moved after an unchanged declaration at %s", retainedLineKey(op))
 			}
 			lineDelta[op.File] = d
@@ -282,6 +287,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				if osd, ok := od.(*ast.StructDecl); ok {
 					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedPlainStruct(osd) && retainedPlainStruct(nsd) {
 						structPairs = append(structPairs, [2]*ast.StructDecl{osd, nsd})
+						continue
+					}
+				}
+				if ocd, ok := od.(*ast.ConstDecl); ok {
+					if ncd, ok := nd.(*ast.ConstDecl); ok && retainedConstValueEdit(ocd, ncd, oldSpans[i], newSpans[j]) {
+						constPairs = append(constPairs, [2]*ast.ConstDecl{ocd, ncd})
 						continue
 					}
 				}
@@ -443,6 +454,76 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		r.LastStats.StructUsers = len(splices)
 	}
+	// An edited const value: every function that mentions it is re-analyzed. A declaration or
+	// signature that names it was resolved in the declaration phase, which this path keeps.
+	var constLive [][2]*ast.ConstDecl // (live, scratch) per edited const
+	if len(constPairs) != 0 {
+		names := map[string]bool{}
+		for _, e := range constPairs {
+			names[e[0].Name] = true
+		}
+		pat := retainedNamesPattern(names)
+		edited := map[ast.Decl]bool{}
+		for _, e := range constPairs {
+			edited[e[1]] = true
+		}
+		for j, d := range newDecls {
+			if edited[d] {
+				continue
+			}
+			if fn, ok := d.(*ast.FuncDecl); ok {
+				if pat.MatchString(retainedText(fn).header) {
+					return fail("the signature of %s names an edited const", fn.Name)
+				}
+			} else if _, ns := d.(*ast.NamespaceDecl); !ns && pat.MatchString(newSpans[j]) {
+				return fail("declaration at %s names an edited const", retainedLineKey(d.Pos()))
+			}
+		}
+		liveConsts := map[string]*ast.ConstDecl{}
+		for _, sd := range r.decls {
+			if cd, ok := sd.Decl.(*ast.ConstDecl); ok {
+				liveConsts[retainedLineKey(cd.Pos())+"|"+cd.Name] = cd
+			}
+		}
+		scratchConsts := map[string]*ast.ConstDecl{}
+		for _, d := range retainedWalkDecls(scratch) {
+			if cd, ok := d.(*ast.ConstDecl); ok {
+				scratchConsts[retainedLineKey(cd.Pos())+"|"+cd.Name] = cd
+			}
+		}
+		for _, e := range constPairs {
+			live := liveConsts[retainedLineKey(e[0].Pos())+"|"+e[0].Name]
+			prepared := scratchConsts[retainedLineKey(e[1].Pos())+"|"+e[1].Name]
+			if live == nil || prepared == nil {
+				return fail("const %s not found in the analysis", e[0].Name)
+			}
+			line := live.Pos()
+			for _, d := range a.diagnostics {
+				if d.Pos.File == line.File && d.Pos.Line == line.Line {
+					return fail("const %s has diagnostics", e[0].Name)
+				}
+			}
+			constLive = append(constLive, [2]*ast.ConstDecl{live, prepared})
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] || !retainedMentionsAny(fn, names) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil || !retainedPlainFunction(fn) {
+				return fail("%s uses an edited const but cannot be re-analyzed alone", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+			spliced[fn] = true
+		}
+		r.LastStats.ConstUsers = len(splices)
+	}
 	// A re-analyzed unchanged function takes its prepared body, which already has its new lines:
 	// only its header shifts.
 	if len(shifted) != 0 {
@@ -570,8 +651,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			structOnly = nil
 		}
 	}
-	// Added functions are analyzed first: the edited bodies call them.
-	changed := append([]scopedDecl(nil), addedScoped...)
+	// Edited consts are evaluated first, then added functions: the edited bodies use both.
+	var changed []scopedDecl
+	if len(constLive) != 0 {
+		changed = append(changed, r.applyConstEdits(constLive)...)
+	}
+	changed = append(changed, addedScoped...)
 	drop := map[int]bool{}
 	for _, fn := range removedLive {
 		if w, ok := r.windows[fn]; ok {
@@ -897,7 +982,13 @@ func retainedSpans(decls []ast.Decl, src []byte) []string {
 			out[i] = fmt.Sprintf("\x00unordered %d", i) // never equal: forces a fallback or splice
 			continue
 		}
-		out[i] = retainedWithoutLineDirectives(src[start:end])
+		span := src[start:end]
+		// The span stays in its own file region: text past a directive belongs to the
+		// region the directive opens.
+		if k := bytes.Index(span, []byte("\n#line ")); k >= 0 {
+			span = span[:k+1]
+		}
+		out[i] = retainedWithoutLineDirectives(span)
 	}
 	return out
 }

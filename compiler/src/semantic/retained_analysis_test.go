@@ -164,6 +164,91 @@ func TestRetainedAnalysisReanalyzesFunctionsWhoseLinesMoved(t *testing.T) {
 	}
 }
 
+// Comment lines above the first declaration shift every declaration below them and change
+// no declaration's text: a plain shift, not a full analysis.
+func TestRetainedAnalysisAcceptsLeadingCommentLines(t *testing.T) {
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), options)
+	edited := "# leading\n# comment\n\n" + retainedBefore
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("leading comment edit fell back: %v", err)
+	}
+	if retained.LastStats.Changed != 0 {
+		t.Fatalf("stats = %+v, want only shifted declarations", retained.LastStats)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+const retainedRegionsBefore = "#line 1 a.elisa\n" +
+	"def first(x: i64) -> i64:\n    return x\n\n" +
+	"#line 1 b.elisa\n" +
+	"# b's header\n\ndef second(y: i64) -> i64:\n    return first(y)\n\n" +
+	"def third(z: i64) -> i64:\n    return second(z)\n"
+
+// A comment added to the header of an included file's region shifts that region only. The
+// span of the previous region's last declaration ends at the directive, so it is unchanged.
+func TestRetainedAnalysisAcceptsRegionHeaderCommentLines(t *testing.T) {
+	options := AnalyzeOptions{}
+	before := retainedRegionsBefore
+	_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	edited := strings.Replace(before, "# b's header\n", "# b's header\n# more header\n", 1)
+	updated, err := retained.Update(retainedParse(t, edited), retainedParse(t, edited), []byte(edited))
+	if err != nil {
+		t.Fatalf("region header comment fell back: %v", err)
+	}
+	if retained.LastStats.Changed != 0 {
+		t.Fatalf("stats = %+v, want only shifted declarations", retained.LastStats)
+	}
+	fresh := AnalyzeWithOptions(retainedParse(t, edited), options)
+	if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+		t.Fatalf("diverged\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+const retainedConstBefore = `
+const LIMIT: i64 = 1
+
+def reads() -> i64:
+    xs: i64[3] = [1, 2, 3]
+    return xs[LIMIT]
+
+def narrows() -> u8:
+    x: u8 = LIMIT
+    return x
+
+def other(y: i64) -> i64:
+    return y
+`
+
+// A typed const's new value is re-evaluated and its users re-analyzed: 300 is out of bounds and
+// does not fit in u8, and going back to 1 clears both, exactly as a fresh analysis reports.
+func TestRetainedAnalysisAcceptsConstValueEdits(t *testing.T) {
+	options := AnalyzeOptions{}
+	_, retained := AnalyzeRetained(retainedParse(t, retainedConstBefore), retainedParse(t, retainedConstBefore), []byte(retainedConstBefore), options)
+	for i, value := range []string{"300", "2", "1"} {
+		src := strings.Replace(retainedConstBefore, "LIMIT: i64 = 1", "LIMIT: i64 = "+value, 1)
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("const edit %d fell back: %v", i, err)
+		}
+		if retained.LastStats.ConstUsers != 2 {
+			t.Fatalf("const edit %d: stats = %+v, want two users re-analyzed", i, retained.LastStats)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh)
+		if got != want {
+			t.Fatalf("const edit %d diverged\n got:\n%s\nwant:\n%s", i, got, want)
+		}
+		if i == 0 && (!strings.Contains(want, "out of bounds") || !strings.Contains(want, "does not fit")) {
+			t.Fatalf("const edit 0 should report both value errors:\n%s", want)
+		}
+	}
+}
+
 const retainedBorrowBefore = `struct BorrowedBox:
     value: i64&
 
