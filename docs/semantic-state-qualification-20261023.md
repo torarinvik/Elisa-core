@@ -610,3 +610,20 @@ containing the frozen executable, exact environment, checkpoint logs, timing
 JSON, native objects and the linked probe compiler. The existing qualification
 root still supplies the explicit schema-compatible projected payload for phase
 profiling; it is separate from production admission.
+
+
+### Reuse map-entry decode cells
+
+The graph decoder now keeps one zeroed key/value scratch pair per map type.
+`SetMapIndex` copies entries into owned map storage; scratch cells are not graph
+objects, and nested map references do not recursively fill map bodies. Clearing
+both cells before every entry preserves absent fields, nils and shared pointers.
+Scratch storage is charged to the decode allocation budget.
+
+A 10,000-entry map benchmark improved from 2.176 ms / 3,275,632 B / 40,046
+allocations to 1.265 ms / 2,316,419 B / 20,050 allocations. Paired fresh-process
+restores of the normally admitted full compiler baseline took 5.054/4.954 s
+before and 4.685/4.745 s after (the latter after run included CPU profiling).
+These are source/options-checked qualification reads, not production rekeying.
+Codec, race, sparse-entry/shared-pointer regressions and all separate-process
+analysis disk tests pass. Native CLI edit timings still require requalification.

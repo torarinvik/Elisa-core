@@ -157,9 +157,19 @@ func (d *decoder) readObjects() error {
 				}
 			}
 		case reflect.Map:
+			if desc.length == 0 {
+				continue
+			}
+			entry, err := d.mapEntryScratch(v.Type())
+			if err != nil {
+				return err
+			}
+			key, value := entry.key, entry.value
 			for i := 0; i < desc.length; i++ {
-				key := reflect.New(v.Type().Key()).Elem()
-				value := reflect.New(v.Type().Elem()).Elem()
+				// Sparse values leave zero fields untouched. Clear both cells before
+				// reuse; SetMapIndex copies the values into the destination map.
+				key.SetZero()
+				value.SetZero()
 				if err := d.value(key); err != nil {
 					return err
 				}
@@ -264,4 +274,30 @@ func newStatePointer(t reflect.Type) reflect.Value {
 	}
 	backing := reflect.StructOf([]reflect.StructField{{Name: "Value", Type: t.Elem()}, {Name: "Padding", Type: reflect.TypeFor[byte]()}})
 	return reflect.New(backing).Elem().Field(0).Addr()
+}
+
+// These cells never become graph objects. Map insertion copies their values,
+// and decoding a nested map reference does not recursively fill that map, so a
+// pair can be reused across every map with this type during one decode.
+type decodedMapEntry struct{ key, value reflect.Value }
+
+func (d *decoder) mapEntryScratch(t reflect.Type) (decodedMapEntry, error) {
+	if entry, ok := d.mapEntries[t]; ok {
+		return entry, nil
+	}
+	if err := d.reserve(1, 128); err != nil {
+		return decodedMapEntry{}, err
+	}
+	if err := d.reserve(1, t.Key().Size()); err != nil {
+		return decodedMapEntry{}, err
+	}
+	if err := d.reserve(1, t.Elem().Size()); err != nil {
+		return decodedMapEntry{}, err
+	}
+	if d.mapEntries == nil {
+		d.mapEntries = make(map[reflect.Type]decodedMapEntry)
+	}
+	entry := decodedMapEntry{reflect.New(t.Key()).Elem(), reflect.New(t.Elem()).Elem()}
+	d.mapEntries[t] = entry
+	return entry, nil
 }

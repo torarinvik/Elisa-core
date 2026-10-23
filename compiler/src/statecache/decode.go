@@ -10,13 +10,14 @@ import (
 )
 
 type decoder struct {
-	registry *Registry
-	data     []byte
-	at       int
-	objects  []reflect.Value
-	depth    int
-	budget   uint64
-	strings  []string
+	registry   *Registry
+	data       []byte
+	at         int
+	objects    []reflect.Value
+	depth      int
+	budget     uint64
+	strings    []string
+	mapEntries map[reflect.Type]decodedMapEntry
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
