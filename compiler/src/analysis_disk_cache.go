@@ -101,11 +101,18 @@ func (a analysisDiskArtifact) read() ([]byte, error) {
 	if !info.Mode().IsRegular() || info.Size() <= int64(len(header)) || info.Size() > analysisStateMaxBytes {
 		return nil, fmt.Errorf("invalid analysis cache size")
 	}
-	data, err := io.ReadAll(io.LimitReader(f, analysisStateMaxBytes+1))
-	if err != nil {
+	// The stat-checked immutable file has a known size. Reading directly into
+	// its final allocation avoids repeatedly copying a half-gigabyte snapshot
+	// as io.ReadAll grows its buffer. A concurrent size change fails closed.
+	data := make([]byte, int(info.Size()))
+	if _, err := io.ReadFull(f, data); err != nil {
 		return nil, err
 	}
-	if len(data) > analysisStateMaxBytes || !bytes.HasPrefix(data, header) {
+	var extra [1]byte
+	if n, err := f.Read(extra[:]); n != 0 || err != io.EOF {
+		return nil, fmt.Errorf("analysis cache size changed during read")
+	}
+	if !bytes.HasPrefix(data, header) {
 		return nil, fmt.Errorf("analysis cache identity mismatch")
 	}
 	return data[len(header):], nil

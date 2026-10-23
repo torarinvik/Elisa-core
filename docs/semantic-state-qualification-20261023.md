@@ -553,3 +553,14 @@ namespace rekeying. New tests cover untouched input bodies, live-body protection
 repeated encode/restore across edits, add/remove/shift/revert and header/default
 changes. Retained analysis and separate-process disk-cache regression groups
 (including native execution, contract/protocol diagnostics and bootstrap) pass.
+
+
+### Allocate the snapshot file read once
+
+Production semantic-state reads now allocate their stat-validated final file size
+and use `io.ReadFull`, rather than grow an `io.ReadAll` buffer. Truncation or an
+extra trailing byte fails closed; identity and codec checks remain. A 16 MiB
+artifact benchmark improved from 2.184 ms / 36,233,461 B / 37 allocations to
+1.433 ms / 16,787,696 B / 7 allocations (three iterations each). This is an
+allocation/read microbenchmark, not an edited-build latency claim. Invalid-envelope
+and the full separate-process analysis disk regression group pass.
