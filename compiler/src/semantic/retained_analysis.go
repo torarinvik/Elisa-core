@@ -232,6 +232,20 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	for _, d := range r.pristine.Decls {
 		oldTop[d] = true
 	}
+	// Removing a direct module/extend member follows the same live-symbol
+	// pruning as removing a top-level function. Keep oldTop separate because
+	// signature edits also use it to verify that a declaration stayed in scope.
+	oldRemovable := map[ast.Decl]bool{}
+	var collectRemovable func([]ast.Decl)
+	collectRemovable = func(decls []ast.Decl) {
+		for _, d := range decls {
+			oldRemovable[d] = true
+			if ns, ok := d.(*ast.NamespaceDecl); ok && !ns.Const {
+				collectRemovable(ns.Decls)
+			}
+		}
+	}
+	collectRemovable(r.pristine.Decls)
 	var removed []*ast.FuncDecl
 	var pairs [][2]int
 	var added []*ast.FuncDecl
@@ -278,9 +292,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			i++
 			continue
 		}
-		// A removed top-level function: its name is gone from the edited source.
+		// A removed top-level or module/extend function: its name is gone.
 		if i < len(oldDecls) {
-			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && oldTop[of] && !newNames[of.Name] && retainedPlainFunction(of) {
+			if of, ok := oldDecls[i].(*ast.FuncDecl); ok && oldRemovable[of] && !newNames[of.Name] && retainedPlainFunction(of) {
 				removed = append(removed, of)
 				insertedBefore[len(pairs)] = true
 				i++
@@ -605,6 +619,34 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			nfn := pairedNew[fn]
 			if nfn == nil {
 				return fail("%s mentions a removed function but has no edited counterpart", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+		}
+	}
+	// A newly declared name can repair an unresolved call, or change overload
+	// dispatch. Recheck every existing body that mentions it, including bodies
+	// that were unchanged in text and currently only carry an undefined-name error.
+	if len(added) != 0 {
+		names := map[string]bool{}
+		for _, fn := range added {
+			names[fn.Name] = true
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		for _, fn := range removedLive {
+			spliced[fn] = true
+		}
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] || !retainedMentionsAny(fn, names) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil || !retainedPlainFunction(fn) {
+				return fail("%s mentions an added function but cannot be re-analyzed alone", fn.Name)
 			}
 			splices = append(splices, splice{fn, nfn})
 			newTexts[nfn] = retainedText(nfn)

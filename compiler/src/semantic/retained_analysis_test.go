@@ -1191,3 +1191,28 @@ def caller(x: u8, y: u8) -> u8:
 		}
 	}
 }
+
+func TestRetainedRemovesModuleMemberAndRechecksCallers(t *testing.T) {
+	before := `module Lib:
+    def helper() -> i64:
+        return 42
+
+    def kept() -> i64:
+        return 1
+
+def main() -> i64:
+    return Lib::helper()
+`
+	after := strings.Replace(before, "    def helper() -> i64:\n        return 42\n\n", "", 1)
+	_, r := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+	for _, src := range []string{after, before} {
+		got, err := r.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("module member removal/revert fell back: %v", err)
+		}
+		want := AnalyzeWithOptions(retainedParse(t, src), AnalyzeOptions{})
+		if retainedDiagnostics(got) != retainedDiagnostics(want) {
+			t.Fatalf("module member update differs:\n%s\nwant:\n%s", retainedDiagnostics(got), retainedDiagnostics(want))
+		}
+	}
+}
