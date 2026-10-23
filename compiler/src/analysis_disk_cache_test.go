@@ -292,3 +292,41 @@ def caller(x: u8, y: u8) -> u8:
 		}
 	}
 }
+
+func TestAnalysisDiskCacheUnchangedRevisionDoesNotRewriteState(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "program.elisa")
+	if err := os.WriteFile(source, []byte("def main() -> i32:\n    return 7\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	args := []string{"-emit", "llvm", "-o", filepath.Join(dir, "out.ll"), source}
+	runDiskCLIChild(t, env, args...)
+	paths, err := filepath.Glob(filepath.Join(dir, "cache", "analysis", "*.state"))
+	if err != nil || len(paths) != 1 {
+		t.Fatal("no unique saved state", paths, err)
+	}
+	before, err := os.Stat(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := runDiskCLIChild(t, env, args...)
+	after, err := os.Stat(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "reuse unchanged revision") || strings.Contains(output, "[analysis-disk] store") {
+		t.Fatalf("unchanged state was republished: %s", output)
+	}
+	if !before.ModTime().Equal(after.ModTime()) || !bytes.Equal(content, current) {
+		t.Fatal("unchanged state file changed")
+	}
+}

@@ -76,3 +76,16 @@ server was disabled. Snapshot restoration took 217–254 ms; the changed-body
 analysis took 57–58 ms. This does not establish the target for the full compiler,
 major edits or final executable linking. The mode remains opt-in while those
 larger cases are qualified and optimized.
+
+Unchanged revisions now skip snapshot encoding and publication after successful
+restore. The regression test requires the saved bytes and modification time to
+remain identical across processes. An isolated-cache rerun of the same atom
+measured 2.906 s cold, then 0.741 s and 0.731 s unchanged (213–216 ms restore).
+The complete analysis-disk CLI test group passed after this change.
+
+The full stage1 compiler still reaches the 30 s process cap during body analysis,
+before it can publish its initial snapshot. A bounded 25 s CPU profile attributed
+about half its samples to allocation zeroing and virtual-memory page operations;
+a 24 s allocation profile recorded about 12 GiB allocated. Lower-GOGC trials at
+50 and 100 also reached the cap, so no GC default was changed. These observations
+do not establish that any particular allocation optimization will meet the goal.

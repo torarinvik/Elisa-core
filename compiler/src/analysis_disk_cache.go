@@ -148,6 +148,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	}
 	var state *semantic.RetainedAnalysis
 	var result *semantic.Result
+	unchanged := false
 	started := time.Now()
 	if data, err := artifact.read(); err == nil {
 		restored, err := semantic.RestoreAnalysisState(data)
@@ -159,6 +160,8 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			debugAnalysisDisk(stderr, "restore %s bytes=%d in=%v", artifact.key[:12], len(data), time.Since(started).Round(time.Millisecond))
 			if cached, ok := state.ResultForSource(program.source); ok {
 				result = cached
+				unchanged = true
+				debugAnalysisDisk(stderr, "reuse unchanged revision")
 			} else {
 				scratch, ok := parseProgram(program.filename, program.source, io.Discard)
 				if ok {
@@ -193,7 +196,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		result, state = semantic.AnalyzeRetained(file, pristine, program.source, options)
 		debugAnalysisDisk(stderr, "cold analysis in=%v", time.Since(coldStart).Round(time.Millisecond))
 	}
-	if state != nil {
+	if state != nil && !unchanged {
 		saveStart := time.Now()
 		data, err := state.MarshalState()
 		if err == nil {
