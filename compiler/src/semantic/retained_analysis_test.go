@@ -1216,3 +1216,66 @@ def main() -> i64:
 		}
 	}
 }
+
+// Removing a function that returns caller-arena storage changes one declaration
+// table entry. Surviving region summaries must still agree with cold analysis,
+// including after a disk round trip and a later caller edit.
+func TestRetainedRemovesCallerArenaFunctionAcrossDiskState(t *testing.T) {
+	const removed = "def unused_list(n: i64) -> darray[i64]:\n    out: mutable darray[i64] = []\n    out.push(n)\n    return out\n\n"
+	const survivor = "def make_list(n: i64) -> darray[i64]:\n    out: mutable darray[i64] = []\n    out.push(n)\n    return out\n\ndef use_list() -> i64:\n    xs: darray[i64] = make_list(3)\n    return xs.count.i64()\n"
+	before := removed + survivor
+	options := AnalyzeOptions{}
+	_, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	summaries := func(state *RetainedAnalysis) map[string]bool {
+		out := map[string]bool{}
+		for fn, sym := range state.a.funcDeclSymbols {
+			if ft, ok := sym.Type.(*FuncType); ok {
+				out[fn.Name] = state.a.regionPolyReturnsCallerArena[ft]
+			}
+		}
+		return out
+	}
+	if !summaries(state)["unused_list"] || !summaries(state)["make_list"] {
+		t.Fatal("fixture did not classify caller-arena returns")
+	}
+	for step, source := range []string{survivor, before, survivor, strings.Replace(survivor, "return xs.count.i64()", "return xs.count.i64() + 1", 1)} {
+		encoded, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = RestoreAnalysisState(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+		if err != nil {
+			t.Fatalf("step %d fell back: %v", step, err)
+		}
+		fresh, cold := AnalyzeRetained(retainedParse(t, source), retainedParse(t, source), []byte(source), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("step %d diagnostics diverged\ngot %s\nwant %s", step, got, want)
+		}
+		got, want := summaries(state), summaries(cold)
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("step %d region summaries diverged: %v versus %v", step, got, want)
+		}
+		for ft := range state.a.regionPolyReturnsCallerArena {
+			if ft.Name == "unused_list" && !strings.Contains(source, "def unused_list") {
+				t.Fatalf("step %d retains removed region summary", step)
+			}
+		}
+	}
+}
+
+func TestRetainedRemovalDoesNotHideSurvivingRegionSummaryChange(t *testing.T) {
+	const removed = "def unused_scalar(x: i64) -> i64:\n    return x\n\n"
+	const maker = "def make_list() -> darray[i64]:\n    out: mutable darray[i64] = []\n    out.push(1)\n    return out\n"
+	before := "global backing: darray[i64] = []\n\n" + removed + maker
+	_, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+	after := strings.Replace(before, removed, "", 1)
+	after = strings.Replace(after, maker, "def make_list() -> darray[i64]:\n    return backing\n", 1)
+	_, err := state.Update(retainedParse(t, after), retainedParse(t, after), []byte(after))
+	if err == nil || !strings.Contains(err.Error(), "declaration results of ::make_list#0 changed") {
+		t.Fatalf("expected surviving declaration mismatch, got %v", err)
+	}
+}

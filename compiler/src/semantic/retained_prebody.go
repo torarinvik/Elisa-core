@@ -301,13 +301,17 @@ func firstFieldDifference(a, b string) string {
 	return ""
 }
 
-// addedFunctionTables are the declaration tables that hold one entry per
-// function; adding k functions grows each by exactly k.
+// addedFunctionTables can gain or lose at most one entry per changed function.
+// Surviving functions must still pass their individual declaration fingerprints.
 var addedFunctionTables = map[string]bool{
 	"funcDeclSymbols": true, "funcDeclUsings": true, "functionTypes": true,
 	"paramStoreTargets": true, "ufcsFunctionsByName": true,
 	"declVisibility":              true, // a function in a `public:`/`private:` section
 	"regionParamCalleeParamIndex": true, // copied from the scratch phase on add
+	// One true-valued entry per caller-arena function. Surviving entries are
+	// checked individually by preBodyFunctionFingerprint; add/remove maintains
+	// the changed function's entry alongside its declaration.
+	"regionPolyReturnsCallerArena": true,
 }
 
 // addedSignatureTables hold one entry per resolved type name in a signature: an added or

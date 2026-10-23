@@ -1277,3 +1277,65 @@ reverted. GOGC 100/400/off also showed no material restoration gain.
 preserve those observations. The ten-second used-layout goal and full runtime
 optimization-quality/major-edit qualification remain open; this change does not
 claim fresh normal CLI admission for the new compiler executable.
+
+
+### Normal CLI broader-edit probes and caller-arena function removal
+
+`288cb6b7` was freshly admitted through normal CLI bootstrap in an independent
+cache directory. Eight partial requests took 16.089–28.420 seconds; request nine
+hit its 30-second cap after publishing the complete baseline, and request ten
+emitted the initial object in 18.174 seconds. The frozen executable SHA-256 is
+`8ee7695769d904fafff2d37efbc0fa5a8b6b1748a7624c7c58d95ae152708bd5`.
+`/tmp/elisa-once-bitcode-production-root` points to its environment/CWD,
+bootstrap logs, admitted snapshot and normal CLI edit evidence.
+
+| Normal CLI edit | First request | Outcome / repeat |
+| --- | ---: | --- |
+| Original source | 0.422 s | Whole-object hit |
+| Used struct layout | 13.578 s | Success; repeat 0.532 s |
+| Used constant 64 → 65 | 20.770 s | Cold checkpoint; no object |
+| Swap two const-enum ordinals | 20.270 s | Cold checkpoint; no object |
+| Add declared Console permission | 11.217 s | Success; repeat 0.540 s |
+| Remove existing caller-arena wrapper | 20.579 s | Cold checkpoint; no object |
+
+The baseline/layout/permission compilers linked, compiled the included fixture
+twice (miss then valid), and produced executables returning 42. All temporary
+edits were restored. The new constant/enum/removal first requests are failures
+of the requested fast-rebuild behavior, not successful timings. Explicit checked
+replay isolated the reasons: the constant occurs in a function contract header;
+const-enum declarations are not supported by the existing plain-enum editor;
+and removal changed `regionPolyReturnsCallerArena` from 606 to 605 entries.
+
+The latter table has at most one declaration-phase entry per changed function.
+Its size can now move by the accepted function add/remove count, while the
+existing individual declaration fingerprints still reject changed summaries of
+surviving functions. Removing a live function also deletes its caller-arena
+entry. A new regression failed on the old guard, then passed removal, re-add,
+removal and a later caller edit across disk round trips, comparing diagnostics
+and all surviving function region summaries to cold analysis. Another real
+fixture verifies that a simultaneous change to a surviving function's inferred
+region signature still rejects incremental reuse.
+
+The full semantic suite, targeted snapshot/region race checks and main-package
+`TestAnalysisDisk` oracles pass. An accidentally broad race selection also
+exposed the existing parallel flow/typestate race in
+`TestTSRealConstructorInInitialState`; the older frozen
+`/tmp/elisa-reindexed-permissions-race-v2` independently reproduced it for the
+same test. This is recorded in `baseline-typestate-race.log`; the broader
+semantic race suite is not claimed clean.
+
+Full-source explicit qualification of the corrected removal measured 10.544
+seconds with three native misses, versus the old immediate cold fallback, and
+8.398 seconds with those native products warm. Replay itself took 1.212 seconds.
+The removed-wrapper compiler linked and compiled the included fixture twice,
+producing an executable returning 42. All compiler/linker builds remained capped
+at 30 seconds. `region-remove-64-*.json`, `region-remove-64/functional.json`, and
+`replay-diagnose-*.json` preserve the evidence. This qualifies checked replay,
+not fresh normal CLI admission of the subsequent semantic fix.
+
+The full goal remains open. Besides layout and permission misses and unsupported
+contract-constant/const-enum edits, removal is still just above ten seconds.
+Its update reports two removed functions and one added function for deleting
+one wrapper; overload tracking currently uses bare names across namespaces.
+Qualified overload bookkeeping is the next investigation to avoid re-declaring
+a separate same-named module function. Optimization-quality gates remain open.

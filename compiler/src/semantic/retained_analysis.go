@@ -1864,6 +1864,11 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 		delete(a.globalScope.Symbols, name)
 		delete(a.functionTypes, fn.Name)
 		delete(a.functionTypes, name)
+		if sym != nil {
+			if ft, ok := sym.Type.(*FuncType); ok {
+				delete(a.regionPolyReturnsCallerArena, ft)
+			}
+		}
 		delete(a.funcDeclSymbols, fn)
 		delete(a.funcDeclUsings, fn)
 		delete(a.paramStoreTargets, fn)
