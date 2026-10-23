@@ -1179,3 +1179,51 @@ bodies (4,917 ordinary weak-external text definitions for 919 unique names),
 which motivates investigating duplicate optimization/emission while preserving
 O3 and inlining inputs. No such specialization ownership change is implemented
 by this commit; default optimization-quality and broader edit gates remain open.
+
+
+### Fresh normal CLI admission after source-global ownership
+
+The installed `e0a224b6` executable (SHA-256
+`9adf671b075524eb0656ca25fc83450ec592963ce80b2efb1d083728870f0369`)
+was frozen into a new owned directory and admitted its semantic baseline through
+normal CLI bootstrap requests. No earlier snapshot was rekeyed. Every request
+had an external 30-second timeout. Eight requests saved intermediate checkpoints;
+the ninth timed out after publishing the complete baseline, and the tenth
+successfully emitted the initial object in 17.558 seconds.
+
+Fresh compiler processes then measured the following normal CLI builds with disk
+analysis/native caches, the server disabled, O3, 64 independent IR units and
+parallel native optimization enabled:
+
+| Source change | First edited build | Repeated source |
+| --- | ---: | ---: |
+| Function body string | 8.614 s | 0.441 s |
+| Add function | 8.032 s | 0.420 s |
+| Add unused struct | 8.647 s | 0.420 s |
+| Add defaulted signature parameter | 9.654 s | 0.420 s |
+| Leading comment / line shift | 9.279 s | — |
+| Used struct layout | 13.283 s | 0.536 s |
+| Remove real postcondition | 8.919 s | 0.412 s |
+
+The original revision repeated in 0.517 seconds; reverting after the minor edit
+matrix took 0.425 seconds. Every completed build returned zero and replayed
+9,381,562 diagnostic bytes. Source variants were restored, preserving all seven
+pre-existing Claude/user changes. Evidence, exact environment/CWD, executable,
+objects and per-case JSON are under `/tmp/elisa-global-owner-production-root`.
+
+These numbers qualify the explicitly enabled independent-unit mode. Its existing
+loss of cross-unit inlining remains an optimization-quality limitation; default
+whole-module O3 equivalence is not claimed. The used-layout edit still misses
+the ten-second goal, and broader major-edit/runtime-quality gates remain open.
+
+
+A subsequently reverted weak-specialization ownership experiment kept duplicate
+bodies available to the ordinary O3 inliner while suppressing their out-of-line
+emission. An all-IR barrier measured 12.156 seconds for the novel layout and
+7.422 seconds for the warm baseline, both worse than the earlier 12.122/6.620.
+Pipelining deterministic prefix ownership reduced layout to 11.744 seconds but
+measured 6.689 seconds warm baseline, 7.595 seconds warm layout, and 9.147 seconds
+novel signature (earlier 8.545). The small isolated layout improvement did not
+justify the memory/scheduling complexity and regressions. Neither implementation
+is retained. Explicit qualification evidence remains in `weak-owner-64-*.json`
+and `weak-prefix-64-*.json` under the same production evidence root.
