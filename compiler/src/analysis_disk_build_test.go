@@ -14,11 +14,18 @@ func TestAnalysisDiskBootstrapAcrossProcesses(t *testing.T) {
 	if err := os.WriteFile(source, []byte(retainedCodegenBase), 0600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_ANALYSIS_BOOTSTRAP": "1", "ELISACORE_ANALYSIS_BOOTSTRAP_DECLS": "2", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "missing.sock")}
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_ANALYSIS_BOOTSTRAP": "1", "ELISACORE_ANALYSIS_BOOTSTRAP_DECLS": "2", "ELISACORE_BUILD_TIMING": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "missing.sock")}
 	args := []string{"-emit", "llvm", "-o", out, source}
 	paused := 0
 	for step := 0; step < 50; step++ {
 		output, code := runDiskCLIChildResult(t, env, args...)
+		wantParses := 1
+		if step == 0 {
+			wantParses = 2
+		}
+		if got := strings.Count(output, "[front-timing] parse:"); got != wantParses {
+			t.Fatalf("step %d parsed %d times, want %d: %s", step, got, wantParses, output)
+		}
 		if step > 0 && !strings.Contains(output, "bootstrap restore") {
 			t.Fatalf("next process did not restore progress: %s", output)
 		}

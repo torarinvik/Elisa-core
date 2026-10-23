@@ -27,7 +27,7 @@ func analysisBuildArtifact(complete analysisDiskArtifact, source []byte) analysi
 // admits only this exact source revision. A stopped build returns an error and
 // emits no artifact; running the same build again resumes in an ordinary fresh
 // process. This qualification mode does not run a background worker.
-func advanceAnalysisDiskBuild(program *loadedProgram, file, pristine *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer) (*semantic.Result, *semantic.RetainedAnalysis) {
+func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer) (*semantic.Result, *semantic.RetainedAnalysis) {
 	artifact := analysisBuildArtifact(complete, program.source)
 	var build *semantic.AnalysisBuild
 	started := time.Now()
@@ -48,6 +48,12 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file, pristine *ast.File, 
 		return &semantic.Result{File: file, Diagnostics: []semantic.Diagnostic{{Severity: semantic.DiagnosticSeverityError, Message: err.Error()}}}
 	}
 	if build == nil {
+		// A resumed build owns its pristine AST already. Only a new build needs
+		// another parse; on the full compiler this is millions of unused tokens.
+		pristine, ok := parseProgram(program.filename, program.source, io.Discard)
+		if !ok {
+			return semantic.AnalyzeWithOptions(file, options), nil
+		}
 		var err error
 		build, err = semantic.BeginAnalysisBuild(file, pristine, program.source, options)
 		if err != nil {

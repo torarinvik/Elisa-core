@@ -201,3 +201,10 @@ The opt-in completion-boundary qualification also passed under the 30 s cap:
 26,230 notices), and 12.357 s encoding the finished 619,157,503-byte state; total
 27.860 s. This test omits CLI source loading/parsing, publication and native
 codegen, so it is not evidence of a completed full CLI build within 30 s.
+
+Resumed CLI bootstrap invocations now reuse the checkpoint's pristine AST and
+skip the second source parse. A fresh-process regression checks two parser passes
+for the initial attempt and exactly one for every resume, while retaining the
+existing IR/corruption/revision checks. Ordinary completed-state edit tests pass.
+This removes unused token/AST allocation and parse time from the tight completion
+publication path; it does not remove the initial current-source parse.
