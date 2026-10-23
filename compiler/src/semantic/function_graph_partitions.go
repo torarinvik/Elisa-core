@@ -214,9 +214,17 @@ func inferSinkParamsFromCFG(cfg *CFG) []bool {
 		return make([]bool, len(cfg.ParamLocations))
 	}
 	preds := make([][]int, blockCount)
-	gen := make([][]bool, blockCount)
+	// The transfer sets have identical dimensions. Allocate their backing values
+	// together instead of one allocation per block per set.
+	paramCount := len(cfg.ParamLocations)
+	rows := make([][]bool, 3*blockCount)
+	values := make([]bool, len(rows)*paramCount)
+	for i := range rows {
+		start, end := i*paramCount, (i+1)*paramCount
+		rows[i] = values[start:end:end]
+	}
+	gen, in, out := rows[:blockCount], rows[blockCount:2*blockCount], rows[2*blockCount:]
 	for i, block := range cfg.Blocks {
-		gen[i] = make([]bool, len(cfg.ParamLocations))
 		for _, instr := range block.Instrs {
 			if instr.Kind != FlowInstrConsume {
 				continue
@@ -231,11 +239,7 @@ func inferSinkParamsFromCFG(cfg *CFG) []bool {
 			}
 		}
 	}
-	in := make([][]bool, blockCount)
-	out := make([][]bool, blockCount)
 	for i := 0; i < blockCount; i++ {
-		in[i] = make([]bool, len(cfg.ParamLocations))
-		out[i] = make([]bool, len(cfg.ParamLocations))
 		if i != cfg.Entry {
 			for j := range in[i] {
 				in[i][j] = true
@@ -247,16 +251,25 @@ func inferSinkParamsFromCFG(cfg *CFG) []bool {
 		changed = false
 		for i := 0; i < blockCount; i++ {
 			if i != cfg.Entry {
-				nextIn := intersectPredOut(preds[i], out, len(cfg.ParamLocations))
-				if !boolSliceEqual(in[i], nextIn) {
-					copy(in[i], nextIn)
-					changed = true
+				for j := range in[i] {
+					next := len(preds[i]) != 0
+					for _, pred := range preds[i] {
+						next = next && out[pred][j]
+					}
+					if in[i][j] != next {
+						in[i][j] = next
+						changed = true
+					}
 				}
 			}
-			nextOut := mergeMustConsume(in[i], gen[i])
-			if !boolSliceEqual(out[i], nextOut) {
-				copy(out[i], nextOut)
-				changed = true
+			// Complete the predecessor intersection before updating out: a
+			// self-edge must read this block's previous output for every bit.
+			for j := range out[i] {
+				next := in[i][j] || gen[i][j]
+				if out[i][j] != next {
+					out[i][j] = next
+					changed = true
+				}
 			}
 		}
 	}
@@ -276,43 +289,4 @@ func inferSinkParamsFromCFG(cfg *CFG) []bool {
 		}
 	}
 	return mustConsume
-}
-
-func intersectPredOut(preds []int, out [][]bool, size int) []bool {
-	result := make([]bool, size)
-	if len(preds) == 0 {
-		return result
-	}
-	for i := 0; i < size; i++ {
-		result[i] = true
-	}
-	for _, pred := range preds {
-		if pred < 0 || pred >= len(out) {
-			continue
-		}
-		for i := 0; i < size; i++ {
-			result[i] = result[i] && out[pred][i]
-		}
-	}
-	return result
-}
-
-func mergeMustConsume(base []bool, gen []bool) []bool {
-	out := append([]bool(nil), base...)
-	for i, value := range gen {
-		out[i] = out[i] || value
-	}
-	return out
-}
-
-func boolSliceEqual(left []bool, right []bool) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }

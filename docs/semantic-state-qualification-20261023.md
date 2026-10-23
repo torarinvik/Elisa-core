@@ -98,3 +98,11 @@ Regression cases cover direct and extern calls, empty declaration overrides, all
 predicate channels and mutation isolation across calls. The full semantic suite
 and disk-state edit/IR comparisons passed. This is an allocation improvement;
 its full-input wall-time effect is not yet established.
+
+Sink-parameter fixed-point analysis now stores its transfer sets in one backing
+allocation and updates intersections/unions without allocating temporary sets on
+every iteration. It preserves predecessor order, self-edge reads and the prior
+initialization/convergence rules. Results match a frozen reference algorithm on
+1,200 generated branching/looping graphs. The 128-block, eight-parameter benchmark
+changed from 797 to 156 allocations and 19,344 to 17,168 bytes per solve; sampled
+time changed from 10.7–11.6 us to 8.8–8.9 us. The full semantic suite passed.
