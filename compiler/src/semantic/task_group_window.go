@@ -91,7 +91,7 @@ func (a *Analyzer) recordVerifiedTaskGroupSubmits(fn *ast.FuncDecl) {
 		}
 		a.taskGroupSubmits[proof.call] = proof.info
 	}
-	if added {
+	if added && !a.retainedProofsScoped {
 		a.invalidateStoreFlowSummaries()
 	}
 }

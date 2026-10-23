@@ -70,6 +70,7 @@ type RetainedUpdateStats struct {
 	Fallback                  string
 	Added                     int
 	Removed                   int
+	StructUsers               int // functions re-analyzed for an edited struct (with the edited ones)
 	Pairing, Scratch, Compare time.Duration
 	// Invalidated counts functions whose late return-borrow results were recomputed.
 	Invalidated int
@@ -251,6 +252,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
+	var structPairs [][2]*ast.StructDecl // edited plain structs: (previous, edited)
 	newTexts := map[*ast.FuncDecl]funcComparisonText{}
 	lineDelta := map[string]int{}
 	marks := map[string][][2]int{} // per file: (old line, delta from that line on)
@@ -277,6 +279,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if !isFn {
 			// A container's span is its own header up to its first member.
 			if !sameText {
+				if osd, ok := od.(*ast.StructDecl); ok {
+					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedPlainStruct(osd) && retainedPlainStruct(nsd) {
+						structPairs = append(structPairs, [2]*ast.StructDecl{osd, nsd})
+						continue
+					}
+				}
 				if os.Getenv("ELISACORE_RETAINED_DEBUG_SPANS") != "" {
 					fmt.Fprintf(os.Stderr, "[span-old %T]\n%q\n[span-new]\n%q\n", od, oldSpans[i], newSpans[j])
 				}
@@ -397,6 +405,61 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			newTexts[nfn] = retainedText(nfn)
 		}
 	}
+	// An edited struct: every function whose types or text reach it is re-analyzed from its
+	// prepared body against the new field table.
+	var structEdits []retainedStructEdit
+	var structOnly map[*ast.FuncDecl]bool // struct users spliced only for the struct edit
+	if len(structPairs) != 0 {
+		var why string
+		if structEdits, why = r.findLiveStructEdits(structPairs); why != "" {
+			return fail("%s", why)
+		}
+		targets, names := map[*StructType]bool{}, map[string]bool{}
+		for _, e := range structEdits {
+			targets[e.st] = true
+			names[e.live.Name] = true
+		}
+		spliced := map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			spliced[sp.live] = true
+		}
+		memo := map[Type]bool{}
+		for _, sd := range r.decls {
+			fn, ok := sd.Decl.(*ast.FuncDecl)
+			if !ok || spliced[fn] || !a.retainedUsesStructs(fn, targets, names, memo) {
+				continue
+			}
+			nfn := pairedNew[fn]
+			if nfn == nil {
+				return fail("%s uses an edited struct but has no edited counterpart", fn.Name)
+			}
+			splices = append(splices, splice{fn, nfn})
+			newTexts[nfn] = retainedText(nfn)
+			spliced[fn] = true
+			if structOnly == nil {
+				structOnly = map[*ast.FuncDecl]bool{}
+			}
+			structOnly[fn] = true
+		}
+		r.LastStats.StructUsers = len(splices)
+	}
+	// A re-analyzed unchanged function takes its prepared body, which already has its new lines:
+	// only its header shifts.
+	if len(shifted) != 0 {
+		splicedNow := map[ast.Decl]bool{}
+		for _, sp := range splices {
+			splicedNow[sp.live] = true
+		}
+		kept := shifted[:0]
+		for _, d := range shifted {
+			if splicedNow[d] {
+				movedSplices = append(movedSplices, d)
+				continue
+			}
+			kept = append(kept, d)
+		}
+		shifted = kept
+	}
 	bodies := make([][]ast.Stmt, len(splices))
 	for i, s := range splices {
 		prepared := pre.prepared[retainedLineKey(s.edit.Pos())+"|"+s.edit.Name]
@@ -502,6 +565,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.decls = append(r.decls, addedScoped...)
 	}
 	// Past this point the edit is accepted; mutate the retained state.
+	if len(structEdits) != 0 {
+		if !r.applyStructEdits(structEdits) {
+			structOnly = nil
+		}
+	}
 	// Added functions are analyzed first: the edited bodies call them.
 	changed := append([]scopedDecl(nil), addedScoped...)
 	drop := map[int]bool{}
@@ -564,7 +632,17 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if len(changed) != 0 || len(removedLive) != 0 {
 		// A body edit can change flow through every transitive caller and can
 		// split or join call cycles. These results predate the replacement bodies.
-		a.invalidateStoreFlowSummaries()
+		if len(addedScoped) != 0 || len(removedLive) != 0 {
+			a.invalidateStoreFlowSummaries()
+		} else {
+			fns := make([]*ast.FuncDecl, 0, len(changed))
+			for _, sd := range changed {
+				if fn, ok := sd.Decl.(*ast.FuncDecl); ok && !structOnly[fn] {
+					fns = append(fns, fn)
+				}
+			}
+			a.invalidateStoreFlowSummariesFrom(fns)
+		}
 		a.storeFlowSCC = nil
 		a.cyclicFuncSet = nil
 		if len(addedScoped) != 0 || len(removedLive) != 0 {
@@ -585,7 +663,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	a.returnBorrowLateFrames = append([]returnBorrowLateFrame{}, r.lateFrames...)
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
+	a.retainedProofsScoped = true
 	a.analyzeDecls(changed)
+	a.retainedProofsScoped = false
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
 	postStart := time.Now()

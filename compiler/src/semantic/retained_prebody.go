@@ -138,7 +138,7 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 }
 
 // preBodyParamDefaultTypedExprs counts the exprTypes entries of nodes inside function parameter
-// defaults.
+// and struct field defaults.
 func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
 	nodes := map[ast.Expr]bool{}
 	for fn := range a.funcDeclSymbols {
@@ -149,6 +149,23 @@ func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
 						nodes[e] = true
 					}
 				})
+			}
+		}
+	}
+	// A struct field default is typed with its struct's declaration, which an edit to that
+	// struct replaces as a whole.
+	if a.file != nil {
+		for _, sd := range a.flattenScopedDecls(a.file.Decls, "", nil) {
+			if st, ok := sd.Decl.(*ast.StructDecl); ok {
+				for i := range st.Fields {
+					if st.Fields[i].DefaultValue != nil {
+						walkStoreScanNodes([]ast.Stmt{&ast.ExprStmt{Expr: st.Fields[i].DefaultValue}}, func(node any) {
+							if e, ok := node.(ast.Expr); ok {
+								nodes[e] = true
+							}
+						})
+					}
+				}
 			}
 		}
 	}
@@ -215,8 +232,8 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, added,
 		sort.Strings(out)
 		return strings.Join(out, "\n")
 	}
-	if render(old.diags, true) != render(cur.diags, false) {
-		return "declaration phase diagnostics changed"
+	if before, after := render(old.diags, true), render(cur.diags, false); before != after {
+		return "declaration phase diagnostics changed" + firstLineDifference(before, after)
 	}
 	return ""
 }

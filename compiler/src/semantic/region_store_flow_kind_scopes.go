@@ -19,6 +19,8 @@ type storeFlowKindScopes struct {
 	keys   []string
 	scoped map[string]bool       // names with at least one key
 	first  map[string]*ast.Ident // a use of each key (its type is the binding's)
+	// armKeys: per match statement, each bound name's keys across its arms.
+	armKeys map[ast.Stmt]map[string][]string
 	// opaque: names an expression the walk does not model may bind (`r` in `r if a is r else
 	// b`), each with the expressions that hold it. Such a binder may hold anything they mention.
 	opaque map[string][]ast.Expr
@@ -58,16 +60,8 @@ func (sc *storeFlowKindScopes) bound(node any, name string) string {
 
 // boundAll: every key stmt gives name (a match statement scopes each arm's binders apart).
 func (sc *storeFlowKindScopes) boundAll(stmt ast.Stmt, name string) []string {
-	if match, ok := stmt.(*ast.MatchStmt); ok && match != nil {
-		var keys []string
-		for i := range match.Arms {
-			if k, ok := sc.bind[&match.Arms[i]][name]; ok {
-				keys = append(keys, k)
-			}
-		}
-		if len(keys) > 0 {
-			return keys
-		}
+	if keys, ok := sc.armKeys[stmt][name]; ok {
+		return keys
 	}
 	return []string{sc.bound(stmt, name)}
 }
@@ -109,7 +103,7 @@ func (a *Analyzer) storeFlowKindScopesFor(decl *ast.FuncDecl, idx *storeScanDecl
 // storeFlowResolveKindScopes resolves body's names, skipping excluded ones; bad lists the names
 // the walk found it cannot scope (the caller excludes them and resolves again).
 func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*storeFlowKindScopes, map[string]bool) {
-	sc := &storeFlowKindScopes{use: map[*ast.Ident]string{}, bind: map[any]map[string]string{}, sources: map[string]ast.Expr{}, scoped: map[string]bool{}, first: map[string]*ast.Ident{}, opaque: map[string][]ast.Expr{}}
+	sc := &storeFlowKindScopes{use: map[*ast.Ident]string{}, bind: map[any]map[string]string{}, sources: map[string]ast.Expr{}, scoped: map[string]bool{}, first: map[string]*ast.Ident{}, armKeys: map[ast.Stmt]map[string][]string{}, opaque: map[string][]ast.Expr{}}
 	bad := map[string]bool{}
 	bindings := map[string]bool{} // names some binding scopes (an unresolved use of one is bad)
 	seen := map[uintptr]bool{}
@@ -202,6 +196,12 @@ func storeFlowResolveKindScopes(body []ast.Stmt, excluded map[string]bool) (*sto
 					}
 				}
 				inner := extend(e, arm, names)
+				for name, key := range sc.bind[arm] {
+					if sc.armKeys[s] == nil {
+						sc.armKeys[s] = map[string][]string{}
+					}
+					sc.armKeys[s][name] = append(sc.armKeys[s][name], key)
+				}
 				walk(reflect.ValueOf(&arm.Pattern).Elem(), inner, false, "")
 				walk(reflect.ValueOf(&arm.Guard).Elem(), inner, true, "")
 				walkStmts(arm.Body, inner)

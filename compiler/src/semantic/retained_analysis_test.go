@@ -393,3 +393,48 @@ func TestRetainedAnalysisAcceptsModuleMemberSignatureEdits(t *testing.T) {
 		}
 	}
 }
+
+const retainedStructBefore = `
+struct Point:
+    x: i64
+    y: i64 = 0
+
+def norm(p: Point) -> i64:
+    return p.x + p.y
+
+def make(v: i64) -> Point:
+    return Point{x: v}
+
+def unrelated(n: i64) -> i64:
+    return n * 2
+`
+
+// An edit to a plain struct re-analyzes its users against the new fields and leaves the rest.
+func TestRetainedAnalysisAcceptsPlainStructEdits(t *testing.T) {
+	steps := []string{
+		strings.Replace(retainedStructBefore, "    y: i64 = 0\n", "    y: i64 = 0\n    z: i64 = 1\n", 1),
+		strings.Replace(retainedStructBefore, "    y: i64 = 0\n", "    y: bool = false\n", 1),
+		strings.Replace(retainedStructBefore, "    x: i64\n", "", 1),
+	}
+	options := AnalyzeOptions{}
+	for i, src := range steps {
+		if src == retainedStructBefore {
+			t.Fatalf("fixture edit %d did not apply", i)
+		}
+		_, retained := AnalyzeRetained(retainedParse(t, retainedStructBefore), retainedParse(t, retainedStructBefore), []byte(retainedStructBefore), options)
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("struct edit %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("struct edit %d disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", i, got, want)
+		}
+		if i > 0 && len(fresh.Errors()) == 0 {
+			t.Fatalf("fixture: struct edit %d must break a user", i)
+		}
+		if users := retained.LastStats.StructUsers; users != 2 {
+			t.Fatalf("struct edit %d re-analyzed %d functions, want the two users", i, users)
+		}
+	}
+}

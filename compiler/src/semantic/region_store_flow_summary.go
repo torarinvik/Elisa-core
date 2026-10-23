@@ -706,6 +706,47 @@ func (a *Analyzer) invalidateStoreFlowSummaries() {
 	a.storeFlowActive = nil
 }
 
+// invalidateStoreFlowSummariesFrom drops the summaries of changed functions and of every
+// function that reaches one through calls: a summary is a function of its own body, its
+// callees' summaries and the types it reads, so every other summary still holds. Call edges of
+// unchanged functions are unchanged, so the callers are found from the current edges.
+func (a *Analyzer) invalidateStoreFlowSummariesFrom(changed []*ast.FuncDecl) {
+	if len(a.storeFlowSummaries) == 0 {
+		a.invalidateStoreFlowSummaries()
+		return
+	}
+	callers := map[*ast.FuncDecl][]*ast.FuncDecl{}
+	for d := range a.storeFlowSummaries {
+		for _, c := range a.callEdgesOf(d) {
+			callers[c] = append(callers[c], d)
+		}
+	}
+	dirty := map[*ast.FuncDecl]bool{}
+	work := make([]*ast.FuncDecl, 0, len(changed))
+	for _, fn := range changed {
+		fn = a.readDecl(fn)
+		if !dirty[fn] {
+			dirty[fn] = true
+			work = append(work, fn)
+		}
+	}
+	for len(work) > 0 {
+		fn := work[len(work)-1]
+		work = work[:len(work)-1]
+		for _, c := range callers[fn] {
+			if !dirty[c] {
+				dirty[c] = true
+				work = append(work, c)
+			}
+		}
+	}
+	for fn := range dirty {
+		delete(a.storeFlowSummaries, fn)
+	}
+	a.storeFlowInProgress = nil
+	a.storeFlowActive = nil
+}
+
 func storeFlowSummarizable(decl *ast.FuncDecl) bool {
 	if decl == nil || decl.Body == nil || len(decl.TypeParams) != 0 {
 		return false
