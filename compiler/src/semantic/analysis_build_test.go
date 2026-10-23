@@ -89,6 +89,11 @@ func TestAnalysisBuildRejectsActiveJournal(t *testing.T) {
 		t.Fatal("saved active branch")
 	}
 	b.retained.a.endReturnBorrowBranch(aliases)
+	b.retained.a.pushStorageViewLoopUseFrame(b.retained.a.globalScope, nil)
+	if _, err := b.MarshalState(); err == nil {
+		t.Fatal("saved active loop frame")
+	}
+	b.retained.a.popStorageViewLoopUseFrame()
 	if _, err := b.MarshalState(); err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,7 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.depth != 0 {
 		return nil, fmt.Errorf("analysis is not idle")
 	}
-	if len(r.a.returnBorrowAliasFrames) != 0 || len(r.a.returnBorrowAliasJournal) != 0 || len(r.a.returnBorrowDeferFrames) != 0 || r.a.smtSolver != nil || r.result.shared != nil {
+	if len(r.a.storageViewLoopUseFrames) != 0 || len(r.a.returnBorrowAliasFrames) != 0 || len(r.a.returnBorrowAliasJournal) != 0 || len(r.a.returnBorrowDeferFrames) != 0 || r.a.smtSolver != nil || r.result.shared != nil {
 		return nil, fmt.Errorf("analysis still owns invocation resources")
 	}
 	if r.a.smtUnavailable {

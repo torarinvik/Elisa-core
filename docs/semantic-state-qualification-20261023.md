@@ -174,3 +174,13 @@ On the full stage1 input, the initial 1/14,422-declaration checkpoint fell from
 advanced to 404 declarations with the new default 3 s slice, and saved 203,285,143
 bytes in an 11.689 s invocation. This qualifies full-input checkpoint size and
 cross-process progress, not full bootstrap or sub-10-second completed builds.
+
+A broader full-input bootstrap then found a closed-loop stack slot still holding
+`storageViewLoopMutation.spare`, a callback needed only while checking that loop's
+back edge. The stack pop now clears the closed slot while returning the complete
+frame to the back-edge checker. Both finished and unfinished snapshot admission
+explicitly reject open storage-view loop frames. A regression requires the live
+returned callback to remain callable, all hidden closed slots to be zero, and a
+finished state to round-trip afterward. The previous snapshot writer correctly
+rejected the callback rather than dropping it. This cleanup also stops the idle
+analyzer retaining the callback's captured state.

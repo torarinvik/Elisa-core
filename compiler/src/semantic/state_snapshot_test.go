@@ -63,3 +63,29 @@ func TestSemanticStateRejectsOpenBranchJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSemanticStateClearsClosedStorageViewLoopCallbacks(t *testing.T) {
+	_, r := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
+	a := r.a
+	a.pushStorageViewLoopUseFrame(a.globalScope, nil)
+	a.storageViewLoopUseFrames[0].mutations = []storageViewLoopMutation{{spare: func(source, candidate string) bool { return source == candidate }}}
+	if _, err := r.MarshalState(); err == nil {
+		t.Fatal("saved active loop frame")
+	}
+	frame := a.popStorageViewLoopUseFrame()
+	if len(frame.mutations) != 1 || !frame.mutations[0].spare("source", "source") {
+		t.Fatal("popping frame discarded its live back-edge callback")
+	}
+	for _, closed := range a.storageViewLoopUseFrames[:cap(a.storageViewLoopUseFrames)] {
+		if closed.outer != nil || closed.body != nil || closed.firstUse != nil || closed.holders != nil || closed.mutations != nil {
+			t.Fatal("closed stack slot retained loop state")
+		}
+	}
+	data, err := r.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreAnalysisState(data); err != nil {
+		t.Fatal(err)
+	}
+}

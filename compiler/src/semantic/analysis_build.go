@@ -137,7 +137,7 @@ func (b *AnalysisBuild) MarshalState() ([]byte, error) {
 	if b.done {
 		return nil, fmt.Errorf("analysis build is already complete")
 	}
-	if r.rbUpdating || r.depth != 0 || len(r.rbStack) != 0 || a.parallel != nil || len(a.returnBorrowAliasFrames) != 0 || len(a.returnBorrowAliasJournal) != 0 || len(a.returnBorrowDeferFrames) != 0 || a.smtSolver != nil {
+	if r.rbUpdating || r.depth != 0 || len(r.rbStack) != 0 || a.parallel != nil || len(a.storageViewLoopUseFrames) != 0 || len(a.returnBorrowAliasFrames) != 0 || len(a.returnBorrowAliasJournal) != 0 || len(a.returnBorrowDeferFrames) != 0 || a.smtSolver != nil {
 		return nil, fmt.Errorf("analysis build is not idle")
 	}
 	if a.smtUnavailable {

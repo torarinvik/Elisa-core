@@ -110,6 +110,9 @@ func (a *Analyzer) popStorageViewLoopUseFrame() storageViewLoopUseFrame {
 		return storageViewLoopUseFrame{}
 	}
 	frame := a.storageViewLoopUseFrames[n-1]
+	// The returned frame still owns its callbacks for the back-edge check.
+	// The closed stack slot must not retain them (or their analyzer captures).
+	a.storageViewLoopUseFrames[n-1] = storageViewLoopUseFrame{}
 	a.storageViewLoopUseFrames = a.storageViewLoopUseFrames[:n-1]
 	return frame
 }
