@@ -161,23 +161,23 @@ func (d *decoder) value(v reflect.Value) error {
 			return err
 		}
 		allowed := d.registry.fields[t]
-		seen := map[uint64]bool{}
+		// The encoder emits nonzero fields in increasing schema order. Walk
+		// that same order once: omissions remain valid, while duplicates,
+		// descending IDs and excluded/unknown fields are rejected without a
+		// per-value map or repeatedly scanning the entire schema.
+		next := 0
 		for i := 0; i < n; i++ {
 			field, err := d.uint()
 			if err != nil {
 				return err
 			}
-			valid := false
-			for _, j := range allowed {
-				if uint64(j) == field {
-					valid = true
-					break
-				}
+			for next < len(allowed) && uint64(allowed[next]) < field {
+				next++
 			}
-			if !valid || seen[field] {
+			if next == len(allowed) || uint64(allowed[next]) != field {
 				return fmt.Errorf("invalid state field for %s", t)
 			}
-			seen[field] = true
+			next++
 			if err := d.value(d.registry.access(v, int(field))); err != nil {
 				return fmt.Errorf("%s.%s: %w", t, t.Field(int(field)).Name, err)
 			}

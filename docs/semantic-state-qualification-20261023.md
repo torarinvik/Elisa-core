@@ -1020,3 +1020,34 @@ These qualification runs do not authorize the new executable to consume another
 executable's production namespace. Fresh normal CLI evidence for this change,
 remaining novel-edit misses, broader major edits and the existing optimization
 quality/default-adoption gates remain open. The overall goal is not complete.
+
+
+### Validate canonical struct fields without per-value maps
+
+The ELISTATE3 encoder already writes nonzero struct fields in increasing schema
+order. Its decoder now walks that ordered allowed-field list once, rejecting
+duplicate, descending, excluded and unknown IDs without allocating a seen-field
+map or repeatedly scanning the list. Sparse fields and structs larger than a
+machine-word bitset remain supported. Encoded output and schema fingerprints
+are unchanged; snapshots written by previous local encoders remain readable.
+
+Isolated 10,000-record, sixteen-field decoding benchmarks improved from
+7.634/7.666 ms, 10,646,553–557 bytes and 50,009 allocations to 2.745/2.797 ms,
+1,286,498–501 bytes and 9 allocations. New tests exercise canonical sparse
+input, duplicate/descending/excluded/unknown/overflow IDs, truncated values and
+130-field round trips. The complete codec race suite, semantic snapshot/build
+and retained/permission tests, and all separate-process analysis disk-cache
+oracles passed.
+
+Source/options-checked full compiler qualification measured overlapped restore
+4.504 -> 4.039 s. Full native qualification completed in 23.531 s with 64 misses
+and 8.318 s with 64 disk hits; the warm overlapped restore was 4.329 s and native
+stage 2.224 s. The emitted signature object is byte-identical to the previously
+verified `9fefc498...` object. All builds used `timeout 30s`; temporary source
+edits were restored. Evidence is `ordered-fields-*.json` and
+`ordered-fields-native/` under the early-production evidence root.
+
+These are explicit qualified-snapshot measurements. The next normal production
+matrix must bootstrap the latest executable under its own key; previous normal
+signature/struct/line misses and the broader major-edit/quality gates remain
+open. The full goal is still unproven.
