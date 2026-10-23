@@ -570,6 +570,16 @@ func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 }
 
 func privateOwnerNamespace(name string) string {
+	// A receiver-overload or extension symbol (`__ovl__Ns.f__Ns.T__Ns.f`) belongs to the
+	// namespace of the visible name it mangles; its last dot sits inside the suffix.
+	for _, prefix := range [...]string{"__ovl__", "__ext__"} {
+		if rest, ok := strings.CutPrefix(name, prefix); ok {
+			if end := strings.Index(rest, "__"); end > 0 {
+				name = rest[:end]
+			}
+			break
+		}
+	}
 	if idx := strings.LastIndex(name, "."); idx >= 0 {
 		return name[:idx]
 	}

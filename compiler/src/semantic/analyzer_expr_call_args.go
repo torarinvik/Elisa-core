@@ -254,7 +254,9 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 	}
 	// Every function is registered for UFCS, so only ">= 2 entries" signals an
 	// actual overload set worth disambiguating by argument type.
-	if len(a.ufcsFunctionsByName[ident.Name]) < 2 {
+	// The UFCS table is keyed by qualified name, so a bare call inside a namespace
+	// counts the overloads registered under each name it can resolve to.
+	if !a.callNameHasOverloadSet(ident.Name) {
 		return
 	}
 	if len(expr.Args) == 0 {
@@ -817,4 +819,20 @@ func boundsLengthHint(ft *FuncType) string {
 		names = append(names, "\""+n+"\"")
 	}
 	return "; the length parameter " + strings.Join(names, ", ") + " is supplied by @bounds from the view's count, so remove the explicit argument"
+}
+
+// callNameHasOverloadSet reports whether some name a call spelled `name` can resolve
+// to has two or more registered functions. Checking only the spelled name made a bare
+// call skip overload dispatch while the same call, once qualified by an earlier pass,
+// took it.
+func (a *Analyzer) callNameHasOverloadSet(name string) bool {
+	if len(a.ufcsFunctionsByName[name]) >= 2 {
+		return true
+	}
+	for _, candidate := range a.visibleNameCandidates(name) {
+		if len(a.ufcsFunctionsByName[candidate]) >= 2 {
+			return true
+		}
+	}
+	return false
 }
