@@ -149,6 +149,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	var state *semantic.RetainedAnalysis
 	var result *semantic.Result
 	unchanged := false
+	replayed := false
 	started := time.Now()
 	if data, err := artifact.read(); err == nil {
 		restored, err := semantic.RestoreAnalysisState(data)
@@ -168,6 +169,11 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 					updateStart := time.Now()
 					result, err = state.Update(file, scratch, program.source)
 					if err == nil {
+						// Keep the admitted baseline immutable. Replaying a
+						// supported source delta is much cheaper than writing
+						// the entire graph, and reuses the same identity domain
+						// on repeated edits/reverts in fresh processes.
+						replayed = true
 						debugAnalysisDisk(stderr, "update changed=%d in=%v", state.LastStats.Changed, time.Since(updateStart).Round(time.Millisecond))
 					}
 				} else {
@@ -200,7 +206,10 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		}
 		debugAnalysisDisk(stderr, "cold analysis in=%v", time.Since(coldStart).Round(time.Millisecond))
 	}
-	if state != nil && !unchanged {
+	if replayed {
+		debugAnalysisDisk(stderr, "replay baseline; checkpoint unchanged")
+	}
+	if state != nil && !unchanged && !replayed {
 		saveStart := time.Now()
 		data, err := state.MarshalState()
 		if err == nil {

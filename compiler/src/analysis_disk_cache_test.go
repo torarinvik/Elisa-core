@@ -364,3 +364,73 @@ def main() -> i32:
 		}
 	}
 }
+
+func TestAnalysisDiskCacheReplaysEditsWithoutRewritingBaseline(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "program.elisa")
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	base := "def helper(x: i64) -> i64:\n    return x + 1\n\ndef main() -> i64:\n    return helper(6)\n"
+	args := []string{"-emit", "llvm", "-o", filepath.Join(dir, "cached.ll"), source}
+	if err := os.WriteFile(source, []byte(base), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runDiskCLIChild(t, env, args...)
+	paths, _ := filepath.Glob(filepath.Join(dir, "cache", "analysis", "*.state"))
+	if len(paths) != 1 {
+		t.Fatal("no unique baseline", paths)
+	}
+	baseline, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(base, "x + 1", "x + 2", 1)
+	added := strings.Replace(edited, "return helper(6)", "return extra(helper(6))", 1) + "\ndef extra(x: i64) -> i64:\n    return x + 4\n"
+	cumulative := strings.Replace(strings.Replace(added, "x + 2", "x + 3", 1), "x + 4", "x + 5", 1)
+	for _, text := range []string{edited, edited, added, cumulative, edited, base} {
+		if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		output := runDiskCLIChild(t, env, args...)
+		if strings.Contains(output, "[analysis-disk] store") || strings.Contains(output, "fallback") || strings.Contains(output, "cold analysis") {
+			t.Fatalf("did not replay baseline: %s", output)
+		}
+		marker := "replay baseline"
+		if text == base {
+			marker = "reuse unchanged revision"
+		}
+		if !strings.Contains(output, marker) {
+			t.Fatalf("missing %s: %s", marker, output)
+		}
+		current, err := os.ReadFile(paths[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.Stat(paths[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(current, baseline) || !after.ModTime().Equal(info.ModTime()) {
+			t.Fatal("source edit rewrote admitted baseline")
+		}
+		cold := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+		coldPath := filepath.Join(dir, "cold.ll")
+		wantDiagnostics := runDiskCLIChild(t, cold, "-emit", "llvm", "-o", coldPath, source)
+		got, err := os.ReadFile(filepath.Join(dir, "cached.ll"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(coldPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = retainedGensym.ReplaceAll(got, []byte("__${1}_N"))
+		want = retainedGensym.ReplaceAll(want, []byte("__${1}_N"))
+		if !bytes.Equal(got, want) || diskDiagnosticTranscript(output) != diskDiagnosticTranscript(wantDiagnostics) {
+			t.Fatal("baseline replay differed from cold compilation")
+		}
+	}
+}

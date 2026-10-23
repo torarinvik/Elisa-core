@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,14 +65,30 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	// Use the CLI's source-authority/options path and reject mismatched
 	// snapshots. In particular default object emission is O3, not O0.
 	var invocationOptions semantic.AnalyzeOptions
-	_, result, valid := analyzeLoadedProgramUsing(program, &diagnostics, semanticOptionsForCLI(cli), func(_ *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+	_, result, valid := analyzeLoadedProgramUsing(program, &diagnostics, semanticOptionsForCLI(cli), func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		invocationOptions = options
 		if !state.MatchesInvocation(filename, options) {
 			t.Fatal("snapshot invocation options differ from native qualification flags")
 		}
 		result, exact := state.ResultForSource(program.source)
 		if !exact {
-			t.Fatal("native qualification input does not match the saved revision")
+			if os.Getenv("ELISACORE_STATE_QUALIFY_REPLAY") != "1" {
+				t.Fatal("native qualification input does not match the saved revision")
+			}
+			scratch, ok := parseProgram(filename, program.source, io.Discard)
+			if !ok {
+				t.Fatal("replay scratch parse failed")
+			}
+			started := time.Now()
+			var err error
+			result, err = state.Update(file, scratch, program.source)
+			if err != nil {
+				t.Fatalf("qualified baseline replay: %v", err)
+			}
+			t.Logf("baseline replay: %v changed=%d", time.Since(started), state.LastStats.Changed)
+			if _, exact := state.ResultForSource(program.source); !exact {
+				t.Fatal("replay did not install current expanded source")
+			}
 		}
 		return result
 	})

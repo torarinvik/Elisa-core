@@ -2,6 +2,10 @@
 
 The semantic analyzer now exposes `RetainedAnalysis.MarshalState` and
 `RestoreAnalysisState`. The CLI path remains opt-in while larger programs and edit kinds are qualified.
+Its current publication policy keeps the admitted baseline immutable across
+supported source updates and replays those edits in each fresh process. Fresh
+analysis (including fallback and bootstrap completion) publishes a new baseline.
+Historical publication timings below describe the earlier rewrite-on-edit policy.
 
 The state codec writes schema-checked typed values and object IDs. Shared maps,
 slices, pointers and cycles survive restoration. Cache bytes cannot supply Go
@@ -478,3 +482,35 @@ Codec/race and CLI cache/bootstrap tests pass. A matched full-state pair measure
 round trip finished in 25.967 s and preserved exact source/options plus all 26,230
 diagnostics. The mechanism eliminates repeated full inventory copies; more work
 is needed on edited-build publication. Controlled source bytes were restored.
+
+The CLI now avoids whole-graph publication after a supported retained update.
+It preserves the admitted baseline on disk, checks/replays the current source on
+restoration and generates from the updated result. Unsupported updates still
+fall back to fresh analysis, which publishes a new baseline. No process or
+background worker is retained. This exchanges a repeated cheap update for the
+12–15-second full snapshot rewrite; an exact repeat of an edited revision must
+therefore replay again when the whole-object source cache is bypassed.
+
+Separate-process regressions prove baseline bytes and mtime remain unchanged
+through body edits, repeats, cumulative edits, function addition/removal and a
+revert. Current IR and diagnostics match cache-disabled cold compilation. The
+existing native execution, contract/protocol rejection, corruption repair,
+bootstrap and cache-key regression groups pass with this policy.
+
+Source/options-checked full-input replay/native qualification seeded ten native
+partitions in 25.473 s. Replaying the controlled diagnostic-string edit then took
+19.839 s: restore 5.538 s, checked update 1.981 s, and native work 10.277 s,
+optimizing one partition and reusing nine. Repeating the edited source took
+13.865 s (ten native hits, but replay again); reverting took 11.037 s with ten
+native hits and no source update. Every process had a 30-second external cap.
+These are explicit baseline qualification loads, not manually rekeyed production
+semantic cache entries. Production policy is covered by the separate CLI tests.
+
+An additional edited-source qualification emitted/linked an executable compiler.
+Its `--baseline-replay-probe` request returned exit 1 and exactly
+`unknown option: --baseline-replay-probe`, proving the changed string reached
+native output. Controlled source bytes were restored after all probes. The
+full-source edited-build goal remains unmet: even this first edited qualification
+is about twenty seconds, and bypassed-source-cache repeats are about fourteen.
+Next work must address native granularity, frontend restore/lowering and repeated
+baseline replay rather than treating omission of publication as completion.
