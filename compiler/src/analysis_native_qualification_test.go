@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/pprof"
 	"sync"
 	"testing"
@@ -162,7 +161,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		}
 		return
 	}
-	session := backend.NewIncrementalObjectSession(runtime.NumCPU(), 4<<30)
+	session := backend.NewIncrementalObjectSession(backend.NativeObjectPartitions(), 4<<30)
 	stamp, err := compilerSourceStamp()
 	if err != nil {
 		t.Fatal(err)

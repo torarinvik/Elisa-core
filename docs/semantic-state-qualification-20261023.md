@@ -514,3 +514,21 @@ full-source edited-build goal remains unmet: even this first edited qualificatio
 is about twenty seconds, and bypassed-source-cache repeats are about fourteen.
 Next work must address native granularity, frontend restore/lowering and repeated
 baseline replay rather than treating omission of publication as completion.
+
+
+### Independently selectable native unit count
+
+`ELISACORE_OBJECT_PARTITIONS` selects 1–64 stable native units independently of
+worker concurrency. Invalid/unset values retain the CPU-count default. This
+keeps the existing quality/performance default while allowing measured tuning
+of the opt-in pre-optimization partition path.
+
+Source/options-checked full-input qualification with 64 units: initial native
+population 23.595 s; controlled one-string edit 14.713 s (one unit emitted,
+63 disk hits); repeated edit 14.199 s (64 hits); revert 11.413 s (64 hits).
+The edit's native phase fell from 10.277 s with ten units to 5.141 s with 64;
+the changed unit itself took 1.169 s. Restore still costs about 5.55 s and
+checked replay about 1.97 s. More units increase partition overhead slightly.
+All four processes completed under their external 30-second caps. These remain
+explicit qualification loads, not production cache rekeying. The default
+whole-module O3 policy and experimental partition-path quality caveat remain.

@@ -3,6 +3,10 @@ package backend
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -46,6 +50,16 @@ type IncrementalObjectStats struct {
 	// copy on misses.
 	CloneTime, BitcodeTime            time.Duration
 	RetainedBytes, RetainedPartitions int
+}
+
+// NativeObjectPartitions selects stable codegen units independently of worker
+// concurrency. More units can reduce the amount of O3 work invalidated by an edit.
+// The ordinary default stays one unit per CPU pending full-input qualification.
+func NativeObjectPartitions() int {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ELISACORE_OBJECT_PARTITIONS"))); err == nil {
+		return min(64, max(1, n))
+	}
+	return min(64, max(1, runtime.NumCPU()))
 }
 
 // NewIncrementalObjectSession bounds the complete retained bitcode and objects.
