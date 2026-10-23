@@ -448,3 +448,21 @@ to recursive `encoder.value`. Flat costs include `memmove` (24.7%), heap clearin
 incorrect diagnosis. Recording live struct fields once, reducing reflected map
 copies and profiling inventory storage are possible next steps. End-to-end
 edited CLI builds and the sub-10-second objective remain unproven.
+
+Allocation-range inventory now counts eligible owners during graph traversal and
+builds the range table at its final capacity afterwards. This avoids repeatedly
+copying a growing multi-million-entry slice. Object discovery order, object IDs,
+range values, sorting rules and wire format stay unchanged. Codec, interior-alias,
+large-graph, race and CLI cache/bootstrap tests pass. Matched full edited-state
+save qualifications measured 12.719 s before and 11.798 s after this change;
+these remain encoding-only measurements, not edited-build completion claims.
+
+The save qualifier can additionally restore its new output under
+`ELISACORE_STATE_QUALIFY_SAVE_RESTORE=1`. A complete edited-state encode/decode
+round trip finished within the external 30-second cap (25.972 s), retaining exact
+expanded source, invocation options and all 26,230 diagnostics in order. The
+options check retains the include loader's validated augmented options, including
+trusted-runtime provenance; an initial test harness comparison against raw CLI
+options omitted that provenance and was corrected without relaxing the guard.
+Original source bytes were restored after every controlled edit. Normal full
+edited CLI builds remain above the requested ten-second target.

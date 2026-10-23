@@ -24,16 +24,19 @@ type allocation struct {
 	id         uint64
 }
 
-func (e *encoder) recordAllocation(v reflect.Value, id uint64) {
+func allocationSize(v reflect.Value) uintptr {
 	var size uintptr
 	switch v.Kind() {
 	case reflect.Pointer:
 		size = v.Type().Elem().Size()
 	case reflect.Slice:
 		size = uintptr(v.Cap()) * v.Type().Elem().Size()
-	default:
-		return
 	}
+	return size
+}
+
+func (e *encoder) recordAllocation(v reflect.Value, id uint64) {
+	size := allocationSize(v)
 	if size == 0 {
 		return
 	}
@@ -45,6 +48,14 @@ func (e *encoder) recordAllocation(v reflect.Value, id uint64) {
 // addresses nor arbitrary byte offsets enter the wire format. A two-phase
 // decoder allocates owners before resolving these references and filling values.
 func (e *encoder) bindAliases() error {
+	// Inventory has discovered every object. Build this table at its final
+	// capacity instead of repeatedly copying a growing multi-million-entry
+	// slice while walking the graph. Node order (and therefore IDs) is unchanged.
+	e.allocations = make([]allocation, 0, e.allocationCount)
+	for i, node := range e.nodes {
+		e.recordAllocation(node.value, uint64(i+1))
+	}
+
 	sort.Slice(e.allocations, func(i, j int) bool {
 		a, b := e.allocations[i], e.allocations[j]
 		if a.start != b.start {

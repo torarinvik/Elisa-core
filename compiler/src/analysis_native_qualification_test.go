@@ -63,7 +63,9 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	}
 	// Use the CLI's source-authority/options path and reject mismatched
 	// snapshots. In particular default object emission is O3, not O0.
+	var invocationOptions semantic.AnalyzeOptions
 	_, result, valid := analyzeLoadedProgramUsing(program, &diagnostics, semanticOptionsForCLI(cli), func(_ *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+		invocationOptions = options
 		if !state.MatchesInvocation(filename, options) {
 			t.Fatal("snapshot invocation options differ from native qualification flags")
 		}
@@ -121,6 +123,26 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("semantic snapshot: %v bytes=%d", time.Since(start), len(snapshot))
+		stop()
+		if os.Getenv("ELISACORE_STATE_QUALIFY_SAVE_RESTORE") == "1" {
+			restored, err := semantic.RestoreAnalysisState(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !restored.MatchesInvocation(filename, invocationOptions) {
+				t.Fatal("re-encoded snapshot changed invocation")
+			}
+			replay, exact := restored.ResultForSource(program.source)
+			if !exact || len(replay.Diagnostics) != len(result.Diagnostics) {
+				t.Fatal("re-encoded snapshot changed source or diagnostic count")
+			}
+			for i, diagnostic := range result.Diagnostics {
+				if diagnostic.String() != replay.Diagnostics[i].String() {
+					t.Fatalf("re-encoded snapshot changed diagnostic %d", i)
+				}
+			}
+			t.Logf("re-encoded snapshot restored; diagnostics=%d", len(replay.Diagnostics))
+		}
 		return
 	}
 	session := backend.NewIncrementalObjectSession(runtime.NumCPU(), 4<<30)

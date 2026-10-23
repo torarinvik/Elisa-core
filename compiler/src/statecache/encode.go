@@ -16,14 +16,15 @@ type identity struct {
 	capacity int
 }
 type encoder struct {
-	registry    *Registry
-	data        bytes.Buffer
-	objects     map[identity]uint64
-	depth       int
-	allocations []allocation
-	nodes       []stateNode
-	scanning    bool
-	strings     map[string]uint64
+	registry        *Registry
+	data            bytes.Buffer
+	objects         map[identity]uint64
+	depth           int
+	allocationCount int
+	allocations     []allocation
+	nodes           []stateNode
+	scanning        bool
+	strings         map[string]uint64
 }
 
 func (r *Registry) Encode(root any) ([]byte, error) {
@@ -126,7 +127,9 @@ func (e *encoder) value(v reflect.Value) error {
 		id := uint64(len(e.nodes) + 1)
 		e.objects[key] = id
 		e.nodes = append(e.nodes, stateNode{value: v})
-		e.recordAllocation(v, id)
+		if allocationSize(v) != 0 {
+			e.allocationCount++
+		}
 		return e.body(v)
 
 	case reflect.Struct:
