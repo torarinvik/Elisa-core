@@ -89,3 +89,12 @@ about half its samples to allocation zeroing and virtual-memory page operations;
 a 24 s allocation profile recorded about 12 GiB allocated. Lower-GOGC trials at
 50 and 100 also reached the cap, so no GC default was changed. These observations
 do not establish that any particular allocation optimization will meet the goal.
+
+Direct-call refinement adapters now build one owned result from the declaration
+header and canonical predicate channels. They no longer build, clone and discard
+canonical parameter/requirement slices. A four-parameter contract benchmark
+changed from 1,984 B / 23 allocations per call to 1,168 B / 12 allocations.
+Regression cases cover direct and extern calls, empty declaration overrides, all
+predicate channels and mutation isolation across calls. The full semantic suite
+and disk-state edit/IR comparisons passed. This is an allocation improvement;
+its full-input wall-time effect is not yet established.

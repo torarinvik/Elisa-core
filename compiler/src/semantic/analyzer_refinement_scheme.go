@@ -70,52 +70,36 @@ func (a *Analyzer) refinementSchemeFromSignature(name string, params []ast.Param
 	return scheme
 }
 
-func cloneRefinementScheme(s RefinementScheme) RefinementScheme {
-	out := s
-	out.Params = append([]ast.ParamDecl(nil), s.Params...)
-	out.Requires = append([]ast.Expr(nil), s.Requires...)
-	out.EnsureValues = append([]ast.Expr(nil), s.EnsureValues...)
-	out.ParamRefinements = append([]ParamRefinementScheme(nil), s.ParamRefinements...)
-	for i := range out.ParamRefinements {
-		out.ParamRefinements[i].Preds = append([]ast.RefinementPredExpr(nil), s.ParamRefinements[i].Preds...)
-	}
-	out.ReturnRefinements = append([]ast.RefinementPredExpr(nil), s.ReturnRefinements...)
-	out.ParamRefinementEnsures = append([]ParamRefinementEnsureScheme(nil), s.ParamRefinementEnsures...)
-	for i := range out.ParamRefinementEnsures {
-		out.ParamRefinementEnsures[i].Args = append([]ast.Expr(nil), s.ParamRefinementEnsures[i].Args...)
-	}
-	return out
-}
-
 func (a *Analyzer) callRefinementScheme(call *ast.CallExpr) (RefinementScheme, bool) {
-	var canonical RefinementScheme
-	var hasCanonical bool
-	if ft, ok := a.callFuncType(call); ok && ft.SpecSignature != nil {
-		canonical = a.refinementSchemeFromSpecSignature(ft.SpecSignature, ft.RefinementEnsures)
-		hasCanonical = true
-	}
+	ft, _ := a.callFuncType(call)
+	hasCanonical := ft != nil && ft.SpecSignature != nil
 	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil {
 		if hasCanonical {
-			scheme := cloneRefinementScheme(canonical)
-			scheme.DeclName = decl.Name
-			scheme.Params = append([]ast.ParamDecl(nil), decl.Params...)
-			scheme.Requires = append([]ast.Expr(nil), decl.Requires...)
-			scheme.IsLemma = decl.IsLemma
-			return scheme, true
+			return a.directCallRefinementScheme(ft, decl.Name, decl.Params, decl.Requires, decl.IsLemma), true
 		}
 		return a.refinementSchemeFromSignature(decl.Name, decl.Params, decl.ReturnType, decl.Requires, decl.EnsureValues, nil, decl.IsLemma), true
 	}
 	if ext, ok := a.resolveDirectCallExternFuncDecl(call); ok && ext != nil {
 		if hasCanonical {
-			scheme := cloneRefinementScheme(canonical)
-			scheme.DeclName = ext.Name
-			scheme.Params = append([]ast.ParamDecl(nil), ext.Params...)
-			scheme.Requires = append([]ast.Expr(nil), ext.Requires...)
-			return scheme, true
+			return a.directCallRefinementScheme(ft, ext.Name, ext.Params, ext.Requires, false), true
 		}
 		return a.refinementSchemeFromSignature(ext.Name, ext.Params, ext.ReturnType, ext.Requires, ext.EnsureValues, nil, false), true
 	}
-	return canonical, hasCanonical
+	if hasCanonical {
+		return a.refinementSchemeFromSpecSignature(ft.SpecSignature, ft.RefinementEnsures), true
+	}
+	return RefinementScheme{}, false
+}
+
+func (a *Analyzer) directCallRefinementScheme(ft *FuncType, name string, params []ast.ParamDecl, requires []ast.Expr, isLemma bool) RefinementScheme {
+	// Build one owned result. A direct declaration supplies the source binders
+	// and requires clauses; constructing then cloning the canonical header would
+	// allocate slices that are immediately discarded.
+	scheme := RefinementScheme{
+		DeclName: name, Params: append([]ast.ParamDecl(nil), params...),
+		Requires: append([]ast.Expr(nil), requires...), IsLemma: isLemma,
+	}
+	return a.appendSpecRefinementChannels(scheme, ft.SpecSignature, ft.RefinementEnsures)
 }
 
 func (a *Analyzer) callFuncType(call *ast.CallExpr) (*FuncType, bool) {
@@ -140,6 +124,19 @@ func (a *Analyzer) refinementSchemeFromSpecSignature(sig *SpecSignature, refinem
 		DeclName: sig.Name,
 		Params:   specSignatureParams(sig),
 	}
+	for _, pred := range sig.Requires {
+		if pred.Kind != RefinementPredicateRequires {
+			continue
+		}
+		if expr, ok := pred.SourceExpr.(ast.Expr); ok && expr != nil {
+			scheme.Requires = append(scheme.Requires, expr)
+		}
+	}
+	return a.appendSpecRefinementChannels(scheme, sig, refinementEnsures)
+}
+
+// Each channel allocates its own result slices; callers may edit their scheme.
+func (a *Analyzer) appendSpecRefinementChannels(scheme RefinementScheme, sig *SpecSignature, refinementEnsures []RefinementEnsure) RefinementScheme {
 	for _, pred := range sig.ParamPredicates {
 		if pred.Subject.Kind != SpecBinderParam || pred.Subject.Position < 0 {
 			continue
@@ -162,14 +159,6 @@ func (a *Analyzer) refinementSchemeFromSpecSignature(sig *SpecSignature, refinem
 			Name:     pred.LawName,
 			Args:     append([]ast.Expr(nil), pred.Args...),
 		})
-	}
-	for _, pred := range sig.Requires {
-		if pred.Kind != RefinementPredicateRequires {
-			continue
-		}
-		if expr, ok := pred.SourceExpr.(ast.Expr); ok && expr != nil {
-			scheme.Requires = append(scheme.Requires, expr)
-		}
 	}
 	for _, pred := range sig.Ensures {
 		if pred.Kind != RefinementPredicateEnsures {
