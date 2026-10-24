@@ -1654,3 +1654,61 @@ contract-used constant / additional enum forms still have conservative fallbacks
 The independent-unit cross-inlining caveat and default/runtime optimization
 quality gates also remain open; widening the opt-in limit does not establish
 those gates or change the default unit count.
+
+
+### Final 96-unit standalone admission and matrix (32f5233f)
+
+Commit `32f5233f` was installed by the post-commit hook and frozen as SHA-256
+`5eddbf85a9eabfe4b8b7b24c3638a27cf2308fe62667d03a19ec4a9aadad6dde`.
+A new empty cache admitted its own baseline through normal CLI requests with
+96 units, O3 independent IR/parallel optimization, and server forwarding disabled.
+`/tmp/elisa-body-96-production-root` selects this evidence directory, exact
+settings, CWD, executable and per-request logs. No prototype snapshot was copied
+or rekeyed into this namespace.
+
+Requests 1–8 saved checkpoints (16.450–27.897 seconds); request 9 reached the
+30-second cap after publishing the complete state; request 10 emitted the object
+in 16.804 seconds. The complete envelope is 567,604,910 bytes. Every matrix compiler invocation,
+LLVM transform, native link and runtime fixture probe had a 30-second external cap.
+
+| Normal standalone CLI source edit | First request | Repeat |
+| --- | ---: | ---: |
+| Original revision | 0.515 s | — |
+| Const-enum member reorder | 9.451 s | 0.413 s |
+| New enum member + CLI classifier + handler | 9.128 s | 0.427 s |
+| Used struct layout | 12.793 s | 0.419 s |
+| Declared Console permission | 8.762 s | 0.423 s |
+| Existing caller-arena wrapper removal | 8.941 s | 0.413 s |
+| Function body string | 8.046 s | 0.419 s |
+| Defaulted signature parameter (signature only) | 9.018 s | 0.415 s |
+| Remove real postcondition | 8.928 s | 0.426 s |
+| Leading comment / line shift | 8.069 s | 0.432 s |
+
+All ten products linked and compiled the included fixture twice, reporting a
+sidecar miss then valid and producing executables returning 42. Native C probes
+called `cli_argument_kind` and checked the reordered tags and new flag's tag 37;
+the enum-add fixture compiled successfully with that new flag. Unknown-flag
+runtime diagnostics were also checked: the body edit printed `unknown option:`,
+all other variants `unknown flag:`. Records are `functional.json`. Controlled
+sources were restored and the seven pre-existing Stage1 changes preserved. The large-snapshot oracle
+also passed again against this final namespace: 12,048 indexed-vs-walk function
+checks for each of the two target types (`body-use-oracle.log`).
+
+Layout remains above ten seconds. Inspecting its slowest 96-unit input found an
+unchanged `pymodule_dict_type_name_float_lists_records` function (19,916 IR body
+lines) sharing native unit 80 with two generic instances of
+`run_semantic_gate_incremental_with_session`. Comparing the corresponding
+baseline/layout inputs showed only the changed `IncrementalCacheRead` type and
+two field GEP indices, aside from llvm-dis's input-path comment. Exact bitcode
+validation correctly misses, but O3 then reoptimizes the entire large unit.
+The investigation (`layout-unit-investigation/` under the earlier
+`/tmp/elisa-body-use-production-root`) preserves both bitcodes/IR, their diff and
+function sizes. The large unchanged function contains 89 existing memcmp calls;
+short literals use the current per-byte load/compare/and lowering. Compact,
+bounded integer-chunk comparisons are a candidate to reduce that IR without
+lowering O3; this has not been implemented or qualified. Actual generic-provider
+membership would also give more accurate scheduling hints than bare source
+function hashes. These observations do not establish either proposed gain.
+
+The goal remains active: layout, conservative unsupported declaration/contract
+edits, and default/runtime optimization-quality gates are still unresolved.
