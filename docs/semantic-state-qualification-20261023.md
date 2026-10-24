@@ -2021,3 +2021,33 @@ namespace admission are still required. Raw output:
 The four focused handoff tests also pass under the race detector. The broader
 race suite reached its externally enforced 30-second cap without reporting a
 race; it is not recorded as a pass. The non-race cache/analysis-disk suite passed.
+
+
+Normal CLI admission of `27b85baa` completed in its own executable-keyed cache,
+with the server empty, the unchanged O3 flags and 96 opt-in object partitions.
+`/tmp/elisa-source-handoff-production-root` points to all inputs, environment,
+logs and hashes. Eight partial analysis checkpoints took 16.167–28.046 s.
+Invocation nine reached its external 30-second cap after publishing the complete
+state; invocation ten finished the object in 15.666 s. No semantic payload was
+copied into this namespace. This does not meet a one-command cold-start target.
+
+The ordinary fresh-process edit matrix succeeded: baseline replay 0.534 s,
+enum reorder 9.335 s, enum addition/handler 9.351 s, layout 12.393 s, permission
+8.768 s, removal 9.161 s, body 8.136 s, signature 8.997 s, contract 8.743 s and
+line insertion 8.126 s. Exact-repeat whole-object hits took 0.421–0.539 s. All ten
+objects are byte-identical to the previously checked normal CLI products
+(`object-parity.json`). Controlled edits were restored; the seven preexisting
+user source changes remain. These results include the generic-parameter
+allocation improvement and cannot isolate the snapshot handoff's latency effect.
+Layout remains over ten seconds. Unsupported declaration/contract edits and
+default/runtime optimization-quality gates remain open.
+
+A restoration-only profile on that admitted payload completed in 4.462 s
+(`restore-profile/` under the same root). It used the explicit checked-payload
+qualification test, validated the exact source/options, and returned before
+native compilation. Restore/scratch overlap was 4.122 s, scratch 2.667 s. CPU
+samples include 2.74 s under semantic restore, 2.60 s in object reading and
+2.18 s in value filling; reflected string/int writes account for 0.79/0.27 s.
+Runtime page reclamation (`madvise`) also accounts for 3.46 sampled CPU seconds
+across threads. These measurements justify investigating restoration but do
+not establish that parallel decoding alone will close the layout gap.
