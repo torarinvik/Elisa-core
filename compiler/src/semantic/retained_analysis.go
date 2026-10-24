@@ -136,6 +136,8 @@ type RetainedScratch struct {
 	pre     *preBodyState
 	elapsed time.Duration
 	ready   chan struct{} // closed once pre is set; nil when prepared synchronously
+	once    sync.Once
+	lazy    *AnalyzeOptions // set: Wait runs the phase on demand
 }
 
 // NewPendingRetainedScratch returns a scratch whose declaration phase Prepare runs later,
@@ -144,18 +146,32 @@ func NewPendingRetainedScratch(scratch *ast.File) *RetainedScratch {
 	return &RetainedScratch{file: scratch, ready: make(chan struct{})}
 }
 
-// Prepare runs a pending scratch's declaration phase.
-func (s *RetainedScratch) Prepare(options AnalyzeOptions) {
-	defer close(s.ready)
-	done := PrepareRetainedScratch(s.file, options)
-	s.pre, s.elapsed = done.pre, done.elapsed
+// NewLazyRetainedScratch returns a scratch whose declaration phase runs only when an update
+// needs it, on the caller's goroutine, so it never competes with work that may make it moot.
+func NewLazyRetainedScratch(scratch *ast.File, options AnalyzeOptions) *RetainedScratch {
+	s := NewPendingRetainedScratch(scratch)
+	s.lazy = &options
+	return s
 }
 
-// Wait blocks until a pending scratch is prepared.
+// Prepare runs a pending scratch's declaration phase; later calls do nothing.
+func (s *RetainedScratch) Prepare(options AnalyzeOptions) {
+	s.once.Do(func() {
+		defer close(s.ready)
+		done := PrepareRetainedScratch(s.file, options)
+		s.pre, s.elapsed = done.pre, done.elapsed
+	})
+}
+
+// Wait blocks until a pending scratch is prepared, preparing a lazy one first.
 func (s *RetainedScratch) Wait() {
-	if s != nil && s.ready != nil {
-		<-s.ready
+	if s == nil || s.ready == nil {
+		return
 	}
+	if s.lazy != nil {
+		s.Prepare(*s.lazy)
+	}
+	<-s.ready
 }
 
 // PrepareRetainedScratch runs Update's scratch declaration phase ahead of time.

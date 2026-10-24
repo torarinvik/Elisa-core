@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"os"
@@ -155,13 +157,31 @@ type retainedFactTables struct {
 	funcByName map[string]*ast.FuncDecl
 	funcScopes map[*ast.FuncDecl]scopedDecl
 	permRoots  map[string]bool
+	// funcTypeIDs names each declared function's type by its declaration (position and name),
+	// which stays the same across processes, unlike the type's address.
+	funcTypeIDs map[*FuncType]string
 }
 
 func (r *RetainedAnalysis) factTables() *retainedFactTables {
 	if r.tables != nil {
 		return r.tables
 	}
-	t := &retainedFactTables{funcByName: map[string]*ast.FuncDecl{}, funcScopes: map[*ast.FuncDecl]scopedDecl{}, permRoots: collectProgramLifetimeRoots(r.decls)}
+	t := &retainedFactTables{funcByName: map[string]*ast.FuncDecl{}, funcScopes: map[*ast.FuncDecl]scopedDecl{}, permRoots: collectProgramLifetimeRoots(r.decls), funcTypeIDs: map[*FuncType]string{}}
+	ambiguous := map[*FuncType]bool{}
+	for fn, sym := range r.a.funcDeclSymbols {
+		ft, ok := sym.Type.(*FuncType)
+		if !ok || ft == nil {
+			continue
+		}
+		id := retainedLineKey(fn.Pos()) + "|" + fn.Name
+		if prev, seen := t.funcTypeIDs[ft]; seen && prev != id {
+			ambiguous[ft] = true
+		}
+		t.funcTypeIDs[ft] = id
+	}
+	for ft := range ambiguous {
+		delete(t.funcTypeIDs, ft)
+	}
 	cands, namespaceOf := collectRegionPolyCandidateFuncsScoped(r.decls)
 	for _, fn := range cands {
 		if fn == nil {
@@ -203,6 +223,7 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 	tables := r.factTables()
 	a.funcDeclSymbols[fn] = sym
 	defer delete(a.funcDeclSymbols, fn)
+	unknownCallee := false
 	var b strings.Builder
 	a.withResolutionContext(sd.Namespace, sd.Usings, func() {
 		a.regionPolyFn = fn
@@ -215,7 +236,12 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 		a.collectCalleeFuncTypes(fn.Body, callees)
 		names := []string{}
 		for c := range callees {
-			names = append(names, fmt.Sprintf("%p", c))
+			id, known := tables.funcTypeIDs[c]
+			if !known {
+				unknownCallee = true
+				break
+			}
+			names = append(names, id)
 		}
 		slices.Sort(names)
 		fmt.Fprintf(&b, "callees=%v;", names)
@@ -242,11 +268,29 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 		slices.Sort(stores)
 		fmt.Fprintf(&b, "stores=%v;", stores)
 	})
-	return b.String()
+	if unknownCallee {
+		return "" // a callee without a stable identity: the digest cannot vouch for it
+	}
+	if os.Getenv("ELISACORE_RETAINED_FAST_DEBUG") == "1" {
+		return b.String()
+	}
+	// Stored per baseline function in the saved state: a fixed-size hash keeps it small.
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
+// forwardTargetNames names each target by its callee's declaration, which stays the same
+// across processes, unlike the callee's address.
 func forwardTargetNames(ts []regionForwardTarget) string {
-	return fmt.Sprintf("%+v", ts)
+	names := make([]string, 0, len(ts))
+	for _, t := range ts {
+		callee := "<nil>"
+		if t.callee != nil {
+			callee = retainedLineKey(t.callee.Pos()) + "|" + t.callee.Name
+		}
+		names = append(names, fmt.Sprintf("%s@%d", callee, t.argPos))
+	}
+	return "[" + strings.Join(names, " ") + "]"
 }
 
 // shadowPredict reports, beside the scratch comparison's verdict, whether every edited
@@ -319,6 +363,9 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 		}
 		after := r.localFactDigest(a, live, edit, scoped[live])
 		if before == "" || before != after {
+			if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" || os.Getenv("ELISACORE_RETAINED_FAST_DEBUG") == "1" {
+				fmt.Fprintf(os.Stderr, "[fast-path] %s precomputed=%v\n--- before\n%s\n--- after\n%s\n", edit.Name, ok, before, after)
+			}
 			return nil, edit.Name + " changes declaration-level facts"
 		}
 		body, why := r.fastPrepareBody(a, live, edit, scoped[live])
@@ -332,4 +379,51 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 		bodies[i] = body
 	}
 	return bodies, ""
+}
+
+// precomputeBaselineDigests records each baseline function's fact digest while its body is
+// still in memory. A saved state omits the bodies of its comparison parse, so a restored
+// update could not compute an edited function's "before" digest itself.
+func (r *RetainedAnalysis) precomputeBaselineDigests() {
+	if retainedFastPrepareMode != "on" || r.a == nil || r.pristine == nil || r.classify == nil {
+		return
+	}
+	type fnKey struct {
+		line string
+		name string
+	}
+	liveFns := map[fnKey][]*ast.FuncDecl{}
+	for _, d := range retainedWalkDecls(r.a.file) {
+		if f, ok := d.(*ast.FuncDecl); ok {
+			k := fnKey{retainedLineKey(f.Pos()), f.Name}
+			liveFns[k] = append(liveFns[k], f)
+		}
+	}
+	scoped := make(map[*ast.FuncDecl]scopedDecl, len(r.decls))
+	for _, sd := range r.decls {
+		if f, ok := sd.Decl.(*ast.FuncDecl); ok {
+			scoped[f] = sd
+		}
+	}
+	if r.digestOf == nil {
+		r.digestOf = map[*ast.FuncDecl]string{}
+	}
+	for _, d := range retainedWalkDecls(r.pristine) {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok || len(fn.Body) == 0 {
+			continue
+		}
+		if _, done := r.digestOf[fn]; done {
+			continue
+		}
+		cands := liveFns[fnKey{retainedLineKey(fn.Pos()), fn.Name}]
+		if len(cands) != 1 {
+			continue
+		}
+		sd, known := scoped[cands[0]]
+		if !known {
+			continue
+		}
+		r.digestOf[fn] = r.localFactDigest(r.a, cands[0], fn, sd)
+	}
 }

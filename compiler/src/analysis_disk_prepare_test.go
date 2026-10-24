@@ -51,7 +51,7 @@ func TestAnalysisDiskRestoreJoinsPreparedScratch(t *testing.T) {
 		if !ok {
 			t.Fatal("edited parse failed")
 		}
-		restored, prepared, err := restoreAnalysisWithScratch(payload, parse(after), options)
+		restored, prepared, err := restoreAnalysisWithScratch(payload, parse(after), options, false)
 		if prepared.file == nil || prepared.prepared == nil || prepared.elapsed <= 0 {
 			t.Fatal("restore returned before preparation finished")
 		}
