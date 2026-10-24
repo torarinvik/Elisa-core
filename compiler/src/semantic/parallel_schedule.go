@@ -437,8 +437,10 @@ func (s *bodySchedule) finish(u int) {
 }
 
 // depClosure lists every unit u transitively depends on, dependencies first, in an
-// order fixed by the graph alone.
-func (s *bodySchedule) depClosure(u int) []int {
+// order fixed by the graph alone. A unit for which have reports true is left out with
+// its own dependencies: the caller already holds them (it ran or imported that unit
+// after importing the unit's closure), so each worker walks each unit once.
+func (s *bodySchedule) depClosure(u int, have func(int) bool) []int {
 	var out []int
 	seen := map[int]bool{u: true}
 	var visit func(int)
@@ -446,6 +448,9 @@ func (s *bodySchedule) depClosure(u int) []int {
 		for _, d := range s.deps[v] {
 			if !seen[d] {
 				seen[d] = true
+				if have(d) {
+					continue
+				}
 				visit(d)
 				out = append(out, d)
 			}

@@ -49,6 +49,8 @@ type parallelPredicateMemoBases struct {
 	regionRefs                map[Type]bool
 	mutableBorrowCapabilities map[Type]bool
 	storeScanAddresses        map[Type]bool
+	storeScanPlainValues      map[Type]bool
+	storeScanProgramLived     map[Type]bool
 }
 
 var funcDeclPtrType = reflect.TypeOf((*ast.FuncDecl)(nil))

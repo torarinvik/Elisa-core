@@ -168,7 +168,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
 		// Probe the cached storage property before walking generic enum payloads.
-		if t, known := a.exprTypes[inner]; known && t != nil && a.storeScanHoldsNoRegionStorage(t) && !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) {
+		if t, known := a.exprTypes[inner]; known && a.storeScanTypeIsPlainValue(t) {
 			return storeNone
 		}
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
@@ -1534,9 +1534,24 @@ func (a *Analyzer) declParamMayEncodeAddress(decl *ast.FuncDecl, index int) bool
 // cannot encode an address and all of its region-bearing parts are program-lived. A source-lived
 // view sibling must not make a uintptr field disappear from the sink scan.
 func (a *Analyzer) storeScanTypeIsProgramLivedForStoreProof(t Type) bool {
-	return t != nil && len(a.programRegions) != 0 && !containsTypeParam(t) &&
-		!a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) &&
-		a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t)
+	if t == nil || len(a.programRegions) == 0 {
+		return false
+	}
+	return a.memoTypePredicate(&a.storeScanProgramLivedMemo, t, func() bool {
+		return !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{}) &&
+			a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{}) && a.typeIsProgramLivedCached(t)
+	})
+}
+
+// storeScanTypeIsPlainValue reports a concrete type that holds no region storage and cannot
+// encode an address: a value of it carries nothing into a store.
+func (a *Analyzer) storeScanTypeIsPlainValue(t Type) bool {
+	if t == nil {
+		return false
+	}
+	return a.memoTypePredicate(&a.storeScanPlainValueMemo, t, func() bool {
+		return a.storeScanHoldsNoRegionStorage(t) && !containsTypeParam(t) && !a.storeScanTypeMayEncodeAddress(t, map[Type]bool{})
+	})
 }
 
 // storeScanTaint computes, to a fixpoint over the body, which names may hold the WHOLE source

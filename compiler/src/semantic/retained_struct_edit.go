@@ -91,6 +91,7 @@ var retainedTypeMemos = []string{
 	"storeScanNoStorageCache", "storeScanViewOnlyCache", "storeScanSharesCache", "resolvedStructFieldsMemo",
 	"affineHandleMemo", "typeSeenScratch", "borrowedOwnerRefMemo", "regionRefsMemo",
 	"mutableBorrowCapabilityMemo", "containerRegionMemo", "storeScanAddressMemo", "storeScanAddressSeen",
+	"storeScanPlainValueMemo", "storeScanProgramLivedMemo",
 }
 
 var retainedTypeMemoNames = func() map[string]bool {

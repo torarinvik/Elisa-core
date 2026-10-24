@@ -984,9 +984,13 @@ type Analyzer struct {
 	regionPointeesMemo map[regionPointeesMemoKey]regionPointees
 	// storeScanAddressMemo caches root store-scan address reachability once type shapes freeze.
 	// Recursive child results are never memoized under a partial cycle traversal.
-	storeScanAddressMemo     map[Type]bool
-	storeScanAddressSeen     map[Type]bool
-	storeScanAddressSeenBusy bool
+	storeScanAddressMemo map[Type]bool
+	storeScanAddressSeen map[Type]bool
+	// storeScanPlainValueMemo and storeScanProgramLivedMemo cache the two per-type early-outs of
+	// the struct-target store scan's value judgement once type shapes freeze.
+	storeScanPlainValueMemo   map[Type]bool
+	storeScanProgramLivedMemo map[Type]bool
+	storeScanAddressSeenBusy  bool
 	// symbolTypeEpoch changes whenever an existing Symbol's Type is reassigned.
 	symbolTypeEpoch uint64
 	// globalDerivedLoopCandidates caches the global scope's derived-state bindings for

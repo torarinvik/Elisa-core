@@ -108,6 +108,10 @@ func (a *Analyzer) parallelTypePredicateMemoBase(memo *map[Type]bool) map[Type]b
 		return bases.mutableBorrowCapabilities
 	case &a.storeScanAddressMemo:
 		return bases.storeScanAddresses
+	case &a.storeScanPlainValueMemo:
+		return bases.storeScanPlainValues
+	case &a.storeScanProgramLivedMemo:
+		return bases.storeScanProgramLived
 	default:
 		return nil
 	}

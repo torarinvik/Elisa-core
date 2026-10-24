@@ -144,7 +144,8 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			predicateMemoBases: parallelPredicateMemoBases{
 				affineHandles: a.affineHandleMemo, borrowedOwnerRefs: a.borrowedOwnerRefMemo,
 				regionRefs: a.regionRefsMemo, mutableBorrowCapabilities: a.mutableBorrowCapabilityMemo,
-				storeScanAddresses: a.storeScanAddressMemo,
+				storeScanAddresses: a.storeScanAddressMemo, storeScanPlainValues: a.storeScanPlainValueMemo,
+				storeScanProgramLived: a.storeScanProgramLivedMemo,
 			},
 			programLivedTypesBase: a.programLivedTypes, smtLocalDefDepsBase: a.smtLocalDefDeps,
 			resolvedTypeNamesBase: a.resolvedTypeNames, abstractParamRegionRefMemoBase: a.abstractParamRegionRefMemo,
@@ -172,6 +173,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 			ts := time.Now()
 			n := 0
 			var waited, blocked time.Duration
+			ranHere := map[int]bool{}
 			for {
 				u := sched.claim(i)
 				if u < 0 {
@@ -186,7 +188,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 				// termination), and which of those a worker happened to import for an
 				// earlier unit depends on timing. Dependencies of finished units are
 				// finished, so this never waits longer than the direct imports.
-				for _, du := range sched.depClosure(u) {
+				for _, du := range sched.depClosure(u, func(d int) bool { return ranHere[d] || w.parallel.importedUnits[d] }) {
 					if sched.worker[du] != i && !w.parallel.importedUnit(du) {
 						blocked += sched.importUnit(w, du)
 					}
@@ -200,6 +202,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 					n++
 				}
 				sched.took[u] = time.Since(tu)
+				ranHere[u] = true
 				if el := time.Since(tu); el > 300*time.Millisecond && os.Getenv("ELISA_PARALLEL_GRAPH_REPORT") != "" {
 					first := bodies[sched.units[u][0]].Decl
 					label := fmt.Sprintf("%T", first)
@@ -432,6 +435,7 @@ func parallelBodyWorkerLocalOnlyMap(field string) bool {
 func parallelBodyMemoMap(field string) bool {
 	switch field {
 	case "affineHandleMemo", "borrowedOwnerRefMemo", "regionRefsMemo", "mutableBorrowCapabilityMemo", "storeScanAddressMemo",
+		"storeScanPlainValueMemo", "storeScanProgramLivedMemo",
 		"programLivedTypes", "smtLocalDefDeps", "resolvedTypeNames", "abstractParamRegionRefMemo", "abstractRefRestartMemo":
 		return true
 	default:
