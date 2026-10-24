@@ -3057,3 +3057,21 @@ serialized edit; cold and replay O3 native C clients independently check physica
 sizes and offsets. The new regression plus generic layout/ABI tests pass in
 5.262 seconds (`/tmp/elisa-wrapper-argument-backend.log`). Full compiler performance
 and fresh installed-binary matrix qualification remain pending for this change.
+
+
+Installed `51b79192` was admitted into a fresh standalone cache namespace:
+`/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-wrapper-argument-production-4ppsfqnb`. Steps 1–8 advanced bounded checkpoints,
+step 9 reached its 30.226-second external timeout after publishing complete
+state, and step 10 emitted the baseline object in 13.882 seconds. All invocations
+had external 30-second caps; no retained server was configured.
+
+All 23 baseline/edit products compile, link and pass include fixture exit 42,
+sidecar miss→valid, enum dispatch and diagnostic checks. The 45 timed invocations
+all exited zero. However, the generic-field edit took **10.246 seconds**, failing
+the requested performance gate; alignment was 9.651 and packed layout 9.307.
+Exact repeats were 0.141–0.327 seconds. Earlier explicit snapshot qualification
+of the same production source took 8.519 seconds for the generic-field edit
+(baseline 22.123); that does not supersede the ordinary CLI miss. Full timing and
+functional records live in the fresh namespace; aggregate log is
+`/tmp/elisa-wrapper-argument-production-matrix-all.log`. Further profiling is
+required before claiming this latest binary meets the target across the matrix.
