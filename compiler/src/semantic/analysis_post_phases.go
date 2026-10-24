@@ -3,7 +3,8 @@ package semantic
 import "elisacore/src/ast"
 
 // Phase order is shared by ordinary analysis, retained updates and disk
-// bootstrap. A checkpoint may stop only after an entire phase has completed.
+// bootstrap. The initial build can additionally checkpoint the first phase
+// between complete late return-borrow frame checks.
 var analysisPostPhaseNames = [...]string{
 	"evaluateLateReturnBorrowFrames", "checkProtocolDefaultMethodContracts",
 	"inferFunctionPermissionEffects", "validateDeferredBorrowedNurseryShutdownCalls",

@@ -137,17 +137,31 @@ func (a *Analyzer) returnBorrowFrameCanWait() bool {
 // cached while a transitive callee was still unanalyzed are dropped so they are recomputed from
 // the complete bodies.
 func (a *Analyzer) evaluateLateReturnBorrowFrames() {
+	frames := a.prepareLateReturnBorrowFrames()
+	last := lastReturnBorrowFrames(frames)
+	for index, late := range frames {
+		if last[late.frame.fn] == index {
+			a.evaluateLateReturnBorrowFrame(late)
+		}
+	}
+	if len(frames) > 0 && a.retained != nil {
+		a.retained.keepReturnBorrowSummaries(a.returnBorrowFuncSummaries)
+	}
+}
+
+// Initialize final summaries once, after every body has been analyzed. A bounded
+// initial build keeps these same summaries while saving between frame checks.
+func (a *Analyzer) prepareLateReturnBorrowFrames() []returnBorrowLateFrame {
 	frames := a.returnBorrowLateFrames
 	a.returnBorrowLateFrames = nil
 	a.returnBorrowLateEnabled = false
 	if len(frames) == 0 {
-		return
+		return frames
 	}
 	a.returnBorrowFuncSummaries = nil
 	a.returnBorrowRootMemos = nil
 	a.returnBorrowRootMemosFor = nil
-	r := a.retained
-	if r != nil {
+	if r := a.retained; r != nil {
 		a.returnBorrowFuncSummaries = r.reusableReturnBorrowSummaries()
 		if r.rbUpdating {
 			if a.returnBorrowFuncSummaries == nil {
@@ -156,39 +170,44 @@ func (a *Analyzer) evaluateLateReturnBorrowFrames() {
 			r.narrowReturnBorrowInvalidation(a)
 		}
 	}
-	// A function analyzed more than once keeps only its last analysis's checks.
+	return frames
+}
+
+func lastReturnBorrowFrames(frames []returnBorrowLateFrame) map[*ast.FuncDecl]int {
+	// A function analyzed more than once keeps only its final analysis's checks.
 	last := make(map[*ast.FuncDecl]int, len(frames))
 	for index, late := range frames {
 		last[late.frame.fn] = index
 	}
+	return last
+}
+
+func (a *Analyzer) evaluateLateReturnBorrowFrame(late returnBorrowLateFrame) {
+	r := a.retained
+	if r != nil && r.replayLateFrame(a, late.frame.fn) {
+		return
+	}
 	savedFuncDecl, savedFuncType := a.currentFuncDecl, a.currentFuncType
 	savedNamespace, savedUsings := a.currentNamespace, a.currentUsings
 	savedScope, savedBindings := a.currentScope, a.currentValueBindings
-	for index, late := range frames {
-		if last[late.frame.fn] != index {
-			continue
-		}
-		if r != nil && r.replayLateFrame(a, late.frame.fn) {
-			continue
-		}
-		a.currentFuncDecl, a.currentFuncType = late.frame.fn, late.fnType
-		a.currentNamespace, a.currentUsings = late.namespace, late.usings
-		if r == nil {
-			a.evaluateReturnBorrowDeferFrame(late.frame.fn, late.frame)
-			continue
-		}
-		before := len(a.diagnostics)
-		r.pushReturnBorrowOwner(late.frame.fn)
+	savedEnv := a.returnBorrowDeclEnv
+	defer func() {
+		a.currentFuncDecl, a.currentFuncType = savedFuncDecl, savedFuncType
+		a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
+		a.currentScope, a.currentValueBindings = savedScope, savedBindings
+		a.returnBorrowDeclEnv = savedEnv
+	}()
+	a.currentFuncDecl, a.currentFuncType = late.frame.fn, late.fnType
+	a.currentNamespace, a.currentUsings = late.namespace, late.usings
+	if r == nil {
 		a.evaluateReturnBorrowDeferFrame(late.frame.fn, late.frame)
-		r.popReturnBorrowOwner()
-		r.recordLateFrame(late.frame.fn, a.diagnostics[before:])
+		return
 	}
-	if r != nil {
-		r.keepReturnBorrowSummaries(a.returnBorrowFuncSummaries)
-	}
-	a.currentFuncDecl, a.currentFuncType = savedFuncDecl, savedFuncType
-	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
-	a.currentScope, a.currentValueBindings = savedScope, savedBindings
+	before := len(a.diagnostics)
+	r.pushReturnBorrowOwner(late.frame.fn)
+	a.evaluateReturnBorrowDeferFrame(late.frame.fn, late.frame)
+	r.popReturnBorrowOwner()
+	r.recordLateFrame(late.frame.fn, a.diagnostics[before:])
 }
 
 // evaluateReturnBorrowDeferFrame reports the pending checks of fn's frame whose value holds a

@@ -3557,3 +3557,66 @@ generic-function binders, generic records, C-record ABI thresholds and enum
 storage. An earlier invocation omitted the test worker entry-point environment
 and failed its explicit setup assertions; that invocation is not counted as
 validation. The corrected invocation exercised the native fragment path.
+
+
+### Checkpoint within the late return-borrow phase (2026-10-24)
+
+Fresh eight-fragment admission (`44fd6488`, namespace `z6ji93lq`) reached
+14,443/14,443 bodies, then repeatedly hit the external 30-second timeout in
+invocations 18–20 before publishing phase 0's checkpoint. The recorded phase
+alone took 8.558–11.583 seconds, followed by expensive snapshot encoding.
+The owned retry process was stopped; no timeout was increased and no completed
+semantic cache entry was claimed.
+
+Initial analysis now suspends that phase only between complete function-frame
+checks. It initializes final summaries once, keeps the complete frame list and
+last-analysis index, and persists its cursor and partial summary state. The
+last-function-wins index is constructed once, avoiding repeated full scans for
+small slices. A partial frame phase does not advance the whole-phase counter
+or expose a Result. Body diagnostic boundaries stay fixed after phase setup;
+all function/scope/binding/environment context is restored and the return-borrow
+owner stack is empty at every checkpoint. Unbounded analysis and max-declaration
+phase scheduling retain their existing behavior. Debug output reports consumed
+frames separately from completed phases.
+
+A diagnostic-only reader reproduced the previous schema (excluding the new
+cursor/stat fields and using its verified physical sizes) to read the exact
+678,708,053-byte stopped checkpoint. This explicit fixture bridge ran outside
+all production cache admission and did not rekey or publish cache entries.
+The candidate resumed into newly encoded normal-schema diagnostic files in
+four externally capped processes:
+
+| invocation | frame progress | completed phases | full process seconds |
+| --- | --- | --- | --- |
+| 1 | 1368/5836 | 0 | 20.08 |
+| 2 | 3758/5836 | 0 | 20.92 |
+| 3 | 5836/5836 | 3 | 20.85 |
+| 4 | 5836/5836 | 11 | 3.45 |
+
+The final sorted 26,293-diagnostic / 9,745,902-byte transcript is byte-identical
+to the original unchunked implementation on the same stopped input (baseline
+restore 1.920 s, final checks 11.648 s, process 13.71 s without checkpoint save).
+This proves resumable progress and diagnostic equivalence, not faster total
+initialization or full-compiler edit qualification. Ordinary fresh-cache
+admission remains required after installation.
+
+Standalone cursor tests exclude the separate in-progress inferred-summary
+repair through a Go overlay that uses committed retained update/permission
+sources. They pass (0.565 s), as do their race checks (2.618 s): per-frame
+Marshal/Restore, complete initial metadata parity against the same serial body
+policy, retained no-op and rendered line-shift diagnostic replay, duplicate
+function last-analysis ownership, empty phases, invalid cursor rejection,
+existing body/final-check boundaries and active-journal rejection. The original
+strict metadata parity helper is unchanged. Aggregate/reference-borrow and
+optimization-identity regressions also passed (0.341 s).
+
+A stronger transitive-callee edit probe exposed a separate pre-existing retained
+update issue on an exact `44fd6488` control: changing a parameter-borrowing helper
+to return a global can leave callers' ReturnProvenance, ReturnBorrowedOwnerRefs
+and ReturnIsolation stale. That repair is being developed independently; it is
+not evidence against the initial phase's diagnostic equivalence, nor claimed
+fixed by this cursor change. The previous region-record 10.668-second miss and
+full eight-fragment matrix remain pending.
+
+The independent CLI bootstrap across-process and old-revision/corrupt-checkpoint
+rejection tests passed as well (1.055 s), under the same external 30-second cap.

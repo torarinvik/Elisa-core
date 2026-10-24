@@ -24,6 +24,9 @@ type AnalysisBuild struct {
 	started     bool
 	done        bool
 	LastStats   AnalysisBuildStats
+	lateStarted bool
+	lateNext    int
+	lateLast    map[*ast.FuncDecl]int
 }
 
 // AnalysisBuildStats describes the latest step, including the indivisible
@@ -35,6 +38,7 @@ type AnalysisBuildStats struct {
 	Elapsed         time.Duration
 	Slowest         time.Duration
 	SlowestPosition lexer.Pos
+	PostFrames      int
 }
 
 // Access is serialized by pendingRetainedMu, as with AnalyzeRetained.
@@ -61,7 +65,8 @@ func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOpt
 
 // Advance analyzes at most maxDeclarations source-order declarations, or stops
 // at the next declaration or final-check boundary after budget expires. Each
-// final-check phase also counts against the unit limit. A non-positive limit
+// final-check phase also counts against the unit limit. The late return-borrow
+// phase can yield between frame checks when its time budget expires. A non-positive limit
 // means no limit. A declaration is indivisible: callers must still enforce their
 // process timeout. Bounded calls leave finishing checks for a subsequent step
 // after the last body, so publication need not share that body's time budget.
@@ -99,7 +104,7 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 		b.next++
 		completed++
 	}
-	if b.postNext == 0 {
+	if b.postNext == 0 && !b.lateStarted {
 		r.bodyEnd = len(a.diagnostics)
 	}
 	if b.next < len(r.decls) || completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
@@ -118,8 +123,16 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 		if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
 			return nil, nil, nil
 		}
-		a.runPostPhase(b.postNext, r.decls, r.options, nil)
 		b.LastStats.LastPostPhase = analysisPostPhaseNames[b.postNext]
+		if b.postNext == 0 {
+			complete := false
+			postTimed(analysisPostPhaseNames[0], func() { complete = b.advanceLateReturnBorrowFrames(started, budget) })
+			if !complete {
+				return nil, nil, nil
+			}
+		} else {
+			a.runPostPhase(b.postNext, r.decls, r.options, nil)
+		}
 		b.postNext++
 		b.LastStats.PostPhases++
 		completed++
@@ -131,6 +144,44 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 	r.result = result
 	b.done = true
 	return result, r, nil
+}
+
+// Stop only between complete frame checks. All summaries and frame diagnostics
+// stay in the checkpoint; the final result remains unavailable until every phase
+// completes. A frame is indivisible, just like a body declaration.
+func (b *AnalysisBuild) advanceLateReturnBorrowFrames(started time.Time, budget time.Duration) bool {
+	r := b.retained
+	a := r.a
+	if !b.lateStarted {
+		r.lateFrames = append(r.lateFrames[:0], a.returnBorrowLateFrames...)
+		a.prepareLateReturnBorrowFrames()
+		b.lateLast = lastReturnBorrowFrames(r.lateFrames)
+		b.lateStarted = true
+	}
+	frames := r.lateFrames
+	consumed := 0
+	for b.lateNext < len(frames) {
+		if consumed > 0 && budget > 0 && time.Since(started) >= budget {
+			return false
+		}
+		index := b.lateNext
+		late := frames[index]
+		if b.lateLast[late.frame.fn] == index {
+			frameStart := time.Now()
+			a.evaluateLateReturnBorrowFrame(late)
+			if elapsed := time.Since(frameStart); elapsed > b.LastStats.Slowest {
+				b.LastStats.Slowest, b.LastStats.SlowestPosition = elapsed, late.frame.fn.Pos()
+			}
+		}
+		b.lateNext++
+		b.LastStats.PostFrames++
+		consumed++
+	}
+	if len(frames) > 0 {
+		r.keepReturnBorrowSummaries(a.returnBorrowFuncSummaries)
+	}
+	b.lateLast = nil
+	return true
 }
 
 func (b *AnalysisBuild) Progress() (completed, total int) {
@@ -159,6 +210,12 @@ func (b *AnalysisBuild) validate() error {
 	}
 	if b.postNext < 0 || b.postNext > len(analysisPostPhaseNames) || b.postNext > 0 && b.next != len(b.retained.decls) || b.done && b.postNext != len(analysisPostPhaseNames) {
 		return fmt.Errorf("analysis build phase mismatch")
+	}
+	if !b.lateStarted && (b.lateNext != 0 || b.postNext > 0) || b.lateStarted && (b.next != len(b.retained.decls) || b.lateNext < 0 || b.lateNext > len(b.retained.lateFrames) || b.postNext > 0 && b.lateNext != len(b.retained.lateFrames)) {
+		return fmt.Errorf("analysis build late-frame mismatch")
+	}
+	if !b.lateStarted && b.lateLast != nil || b.postNext > 0 && b.lateLast != nil || b.lateStarted && b.postNext == 0 && b.lateNext < len(b.retained.lateFrames) && b.lateLast == nil {
+		return fmt.Errorf("analysis build late-frame index mismatch")
 	}
 	if b.done != (b.retained.result != nil) {
 		return fmt.Errorf("analysis build completion mismatch")

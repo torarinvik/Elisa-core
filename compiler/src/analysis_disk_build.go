@@ -75,7 +75,7 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 		return incomplete(err), nil
 	}
 	stats := build.LastStats
-	debugAnalysisDisk(stderr, "bootstrap step declarations=%d post=%d last=%s in=%v slowest=%v at=%v", stats.Declarations, stats.PostPhases, stats.LastPostPhase, stats.Elapsed.Round(time.Millisecond), stats.Slowest.Round(time.Millisecond), stats.SlowestPosition)
+	debugAnalysisDisk(stderr, "bootstrap step declarations=%d post=%d frames=%d last=%s in=%v slowest=%v at=%v", stats.Declarations, stats.PostPhases, stats.PostFrames, stats.LastPostPhase, stats.Elapsed.Round(time.Millisecond), stats.Slowest.Round(time.Millisecond), stats.SlowestPosition)
 	if result != nil {
 		debugAnalysisDisk(stderr, "bootstrap complete")
 		return result, state
