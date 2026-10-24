@@ -39,7 +39,7 @@ func retainedPlainStruct(d *ast.StructDecl) bool {
 
 // Field/default and ordinary/C layout changes preserve a simple record's
 // declaration protocol. Explicit region binders must remain identical; other
-// generic binders and annotation-driven layouts still need their own rebuild.
+// generic binders and annotations other than validated @align still need their own rebuild.
 func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
 	if old.Name != current.Name || !reflect.DeepEqual(old.RegionParams, current.RegionParams) || len(old.GenericParams) != len(current.GenericParams) {
 		return false
@@ -53,7 +53,21 @@ func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
 				return false
 			}
 		}
+		// @align only contributes requested storage alignment. Other annotations
+		// may register ABI bindings, affinity, or layout assertions and remain guarded.
+		if len(d.Annotations) > 1 {
+			return false
+		}
+		for _, annotation := range d.Annotations {
+			if annotation.Name != "align" || len(annotation.Args) != 1 {
+				return false
+			}
+			if _, ok := normalizeStructAlignmentAnnotationArg(annotation.Args[0]); !ok {
+				return false
+			}
+		}
 		shape := *d
+		shape.Annotations = nil
 		shape.ReprC, shape.Layout = false, ast.StructLayoutDefault
 		shape.RegionParams, shape.GenericParams = nil, nil
 		return retainedPlainStruct(&shape)
@@ -302,6 +316,9 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 		e.st.Decl = e.edit
 		e.st.ReprC, e.st.Layout = e.edit.ReprC, e.edit.Layout
 		e.st.PackedLayout = false // eligibility permits only ordinary/C layouts
+		// The annotation collector only writes when present: reset for removal.
+		e.st.Alignment, e.st.HasAlignment = 0, false
+		a.analyzeStructAnnotations(e.edit, e.st)
 		e.st.Fields = map[string]Field{}
 		e.st.GhostFieldOrder, e.st.StoreFieldOrder, e.st.HasPackedGroups = nil, nil, false
 		e.st.declarationFieldOrder = astFieldDeclNames(e.edit.Fields)

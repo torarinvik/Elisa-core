@@ -2695,3 +2695,37 @@ a following declaration, and an include-style line directive.
 Before: `/tmp/elisa-alignment-span-before.log` fails on stale alignment.
 After: `/tmp/elisa-annotation-span-semantic.log` passes targeted retained
 annotation, line/shift, region, C-layout and constant-enum tests.
+
+
+### Alignment replay after annotation-span correction (2026-10-24)
+
+Paired simple-record edits now admit exactly one valid `@align` annotation,
+including its addition/removal. Invalid powers, duplicate annotations,
+`@fixed_layout`, `@append_only`, C binding metadata, and mixed annotations
+remain guarded. The live canonical StructType resets Alignment/HasAlignment
+before collecting new annotation metadata, so removal cannot retain old flags.
+Existing field, region binder, affinity and layout eligibility checks remain.
+
+`TestRetainedAlignmentDiskRoundTrip` exercises 64→128→default→16→default
+through serialized states, first and following declarations, aliases and inline
+containers. Metadata and diagnostics match cold analysis with identity preserved.
+`TestRetainedAlignmentDiskStorage` compares complete normal/debug IR against
+cold compilation and links/runs both cold and replay O3 products with a C observer
+checking stack/global pointer alignment and stored values. This qualifies the
+existing requested-storage-alignment behavior; it does not establish new nested
+record/array stride or C by-value ABI semantics for over-aligned records.
+Logs `/tmp/elisa-alignment-semantic.log`, `/tmp/elisa-alignment-backend.log`,
+and `/tmp/elisa-alignment-retained-suite.log` pass.
+
+Frozen test binary `/tmp/elisa-alignment-main-test` was qualified using the
+untouched `98e3eb25` ordinary cache payload (no namespace rewriting). Results in
+that root's `alignment-qualification`: baseline 22.521 seconds, actual
+`@align(16)` compiler edit **8.841 seconds**. Replay selected two functions,
+0.760 seconds total (diff 0.485, bodies 0.011, post 0.261); 90 native units reused,
+six rebuilt, six fragments emitted and 18 reused, no fallback. The edited object
+SHA is `7fc0789e56d2fd0fbf5c5fd4c91927a7143aaf1a109e70d1f0451f1f26bdd133`,
+different from the baseline (unlike the erroneous pre-correction result).
+Both products pass native compiler include/cache fixture checks (exit 42,
+miss→valid), enum dispatch tags and unknown-option diagnostics. Functional
+records are in `alignment-qualification/functional.json`.
+Fresh ordinary binary/cache namespace confirmation remains the next gate.
