@@ -94,6 +94,24 @@ func (r *RetainedAnalysis) structDecls() []scopedDecl {
 
 // retainedUsesTypes reports whether fn's types or text reach one of the edited types.
 func (a *Analyzer) retainedUsesTypes(fn *ast.FuncDecl, targets map[Type]bool, names map[string]bool, memo map[Type]bool) bool {
+	if a.retained != nil {
+		if uses, ok := a.retained.bodyUses[fn]; ok {
+			for _, name := range uses.names {
+				if names[name] {
+					return true
+				}
+			}
+			if sym := a.funcDeclSymbols[fn]; sym != nil && retainedTypeReaches(sym.Type, targets, memo) {
+				return true
+			}
+			for _, typ := range uses.types {
+				if retainedTypeReaches(typ, targets, memo) {
+					return true
+				}
+			}
+			return false
+		}
+	}
 	if retainedMentionsAny(fn, names) {
 		return true
 	}

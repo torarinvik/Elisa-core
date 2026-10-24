@@ -108,7 +108,7 @@ func (r *RetainedAnalysis) findLiveConstEnumEdits(pairs [][2]*ast.ConstEnumDecl,
 			if (fn.Static || fn.IsLaw) && (codeMatch(pat, spans[i]) || codeMatch(shorthand, spans[i])) {
 				return nil, "static function depends on an edited constant enum"
 			}
-			h := retainedText(fn).header
+			h := retainedNormalized(retainedHeader(fn))
 			if codeMatch(memberPat, h) {
 				return nil, "function header names an edited constant enum member"
 			}

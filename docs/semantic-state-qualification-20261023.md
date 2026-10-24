@@ -1555,3 +1555,102 @@ returning 42 (`const-enum-qualified-v5-64/functional.json`). The reordered nativ
 object SHA-256 is
 `b7ca554f948253d1a6395021fe8a35f3e5573738a7ea5c577cc48b92cb85f661`.
 Source probes were restored; the seven pre-existing Stage1 changes remain.
+
+
+### Persist body dependency facts and qualify finer native units
+
+The idle semantic snapshot now records, for each retained function, the exact
+identifier/member names and deduplicated expression types that the existing
+`retainedMentionsAny` / `retainedUsesTypes` walks consult. This includes contracts
+and default arguments. Replay reads those facts instead of repeating the full
+body walk. Signature types are still read from the live function symbol. Missing
+indexes retain the original walk, and an update invalidates the index before
+applying edits (including all fallback exits). A later snapshot publication
+rebuilds it from the finished AST rather than trusting earlier scan memos.
+
+This changes the checked logical schema. A new baseline was admitted through
+normal CLI checkpoint requests in an empty cache; no prior snapshot was rekeyed.
+`/tmp/elisa-body-use-production-root` selects its executable/environment/CWD,
+bootstrap records, sources/probe logs and products. The 64-unit prototype producer
+is SHA-256
+`97ad7faefea6df5e23115083993e01d5ec8c6f07158fa394471768166474c476`.
+Its complete envelope is 567,418,066 bytes, up 4,394,461 bytes (about 0.8%).
+Requests 1–8 saved incomplete checkpoints in 16.291–27.961 seconds; request 9
+reached its 30-second cap after publishing the complete state; request 10 emitted
+the native object in 17.236 seconds. These costs include index construction and
+serialization. They are not a claim that cold admission completes in one request.
+
+The index is built at snapshot publication, not on each supported edit. Normal
+CLI replay keeps the admitted baseline immutable (`!replayed` guards publication),
+and the fresh-process oracle verifies the baseline bytes remain unchanged across
+edits. An explicit re-serialization of the admitted snapshot took 11.381 seconds,
+including rebuilding the index, or 16.249 seconds including restore/scratch and
+writing the payload. It emitted 566,359,095 payload bytes; comparison bodies were
+already projected in that input, so this is not a replacement for the cold
+admission measurement. Sampling attributed 210 ms CPU to `captureBodyUses`.
+Logs/profile are `snapshot-publication-cost.json`, `snapshot-index-cpu.txt` and
+`snapshot-publication-cost/`; the payload is qualification evidence, not a new
+production admission.
+
+Small disk-round-trip tests cover name-only unresolved calls, dependencies
+through callees, contracts/defaults, and a body edit followed by a field rename
+that must retract the new user's old field access. The opt-in large-snapshot
+oracle compared indexed answers with the original AST walk for all 12,048
+functions, for both `IncrementalCacheRead` and `CliArgumentKind`; both passed
+(`body-use-oracle.log`). The full semantic suite, retained/state/snapshot race
+selection, `TestAnalysisDisk` fresh-process oracles, and partition/cache/native
+backend fixtures passed. This does not claim the unrelated broader typestate
+race suite is clean.
+
+The first normal CLI matrix used the 64-unit prototype before the subsequent
+header-format cleanup: enum reorder 11.480 seconds, enum member + classifier +
+handler addition 11.994, layout 13.032, permission 8.910, wrapper removal 10.838,
+body 9.047, signature-only 9.983, contract 9.086, lines 9.389. Repeats were
+0.427–0.545 seconds. These are retained as evidence of remaining normal CLI
+misses, not relabeled as final results.
+
+Profiling also found that the constant-enum header guard asked `retainedText`
+for a header, needlessly formatting each complete function body to compute the
+unused gensym comparison. It now requests exactly the same normalized header
+without that body formatting. The explicit native unit limit is raised to 128;
+the ordinary CPU-based default remains unchanged. After the earlier global-owner
+and local-name changes, increasing unit count no longer duplicates the old
+hundreds of megabytes of source globals.
+
+Matched checked-payload qualifications with the same final test executable,
+O3 independent IR, isolated native caches, and 30-second external request caps:
+
+| Request | 64 units | 96 units | 128 units |
+| --- | ---: | ---: | ---: |
+| Native population | 21.537 s | 21.090 s | 22.132 s |
+| Baseline replay, native hits | 6.840 s | 6.483 s | 6.693 s |
+| Enum reorder | 10.016 s | 8.174 s | 9.912 s |
+| Enum repeat | 7.773 s | 7.851 s | 7.981 s |
+| Used layout | 11.687 s | 11.872 s | 12.058 s |
+| Layout repeat | 7.067 s | 7.114 s | 7.487 s |
+| Wrapper removal | 9.463 s | 7.902 s | 8.197 s |
+| Removal repeat | 7.581 s | 7.954 s | 7.701 s |
+
+Initial native retained input/product bytes were 56,769,856 / 57,661,216 /
+58,614,816 respectively. Actual first requests emitted 64 / 96 / 128 units;
+there was no hidden clamp to 64. Records are `native-cost-body-wide-*-*.json`,
+`body-wide-{64,96,128}/`; `wide-test.sha256` identifies the frozen test executable.
+These explicit, invocation/source-validated payload qualifications do not rekey
+or admit the earlier producer's state into the final compiler namespace.
+
+All ten normal 64-unit products linked and compiled the included fixture twice
+(sidecar miss then valid), with executables returning 42. C constructor probes
+also called the emitted `cli_argument_kind` symbol: reorder changed Output/Filter
+from 0/1 to 1/0, and the added CLI flag returned tag 37 and successfully passed
+through its new handler. All four 96-unit products (baseline, enum, layout,
+removal) passed the same link/fixture/value checks (`body-wide-96/functional.json`).
+Twelve corresponding 64-unit products were compared byte-for-byte with earlier
+products and were identical (`object-parity.json`); this is actual native-object
+comparison, not an inference from green semantic tests.
+
+The full goal remains open. Layout still exceeds ten seconds. Fresh normal CLI
+admission/matrix for the final executable with 96 units remains to be done, and
+contract-used constant / additional enum forms still have conservative fallbacks.
+The independent-unit cross-inlining caveat and default/runtime optimization
+quality gates also remain open; widening the opt-in limit does not establish
+those gates or change the default unit count.

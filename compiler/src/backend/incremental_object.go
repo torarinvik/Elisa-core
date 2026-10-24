@@ -52,12 +52,14 @@ type IncrementalObjectStats struct {
 	RetainedBytes, RetainedPartitions int
 }
 
+const maxNativeObjectPartitions = 128
+
 // NativeObjectPartitions selects stable codegen units independently of worker
 // concurrency. More units can reduce the amount of O3 work invalidated by an edit.
 // The ordinary default stays one unit per CPU pending full-input qualification.
 func NativeObjectPartitions() int {
 	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ELISACORE_OBJECT_PARTITIONS"))); err == nil {
-		return min(64, max(1, n))
+		return min(maxNativeObjectPartitions, max(1, n))
 	}
 	return min(64, max(1, runtime.NumCPU()))
 }
@@ -71,8 +73,8 @@ func NewIncrementalObjectSession(partitions, maxBytes int) *IncrementalObjectSes
 	if partitions <= 0 {
 		partitions = 8
 	}
-	if partitions > 64 {
-		partitions = 64
+	if partitions > maxNativeObjectPartitions {
+		partitions = maxNativeObjectPartitions
 	}
 	if maxBytes <= 0 {
 		maxBytes = 256 << 20

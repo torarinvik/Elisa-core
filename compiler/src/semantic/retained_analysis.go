@@ -53,6 +53,7 @@ type RetainedAnalysis struct {
 	rbCutoff    bool                                     // the late pass may narrow rbInvalid
 	rbUpdating  bool
 	perms       retainedPermissions
+	bodyUses    map[*ast.FuncDecl]retainedBodyUses // exact, idle snapshot body dependencies
 
 	options AnalyzeOptions
 	pre     *preBodyState // declaration-phase results the retained state was built from
@@ -145,6 +146,7 @@ func PrepareRetainedScratch(scratch *ast.File, options AnalyzeOptions) *Retained
 // only when it was prepared from scratch itself.
 func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, prepared *RetainedScratch) (*Result, error) {
 	start := time.Now()
+	defer func() { r.bodyUses = nil }()
 	r.LastStats = RetainedUpdateStats{}
 	r.rbSameFlow = map[*ast.FuncDecl]bool{}
 	fail := func(format string, args ...any) (*Result, error) {
@@ -1311,6 +1313,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.decls = append(r.decls, addedStructScoped...)
 	}
 	// Past this point the edit is accepted; mutate the retained state.
+	r.bodyUses = nil
 	r.applyUsingChanges(usingChanges, scoped)
 	r.applyConstEnumEdits(constEnumEdits)
 	if len(enumEdits) != 0 {

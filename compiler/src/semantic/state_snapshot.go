@@ -38,6 +38,7 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r.a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
+	r.captureBodyUses()
 	r.pre = r.pre.comparisonState()
 	return r.marshalComparisonProjection()
 }
