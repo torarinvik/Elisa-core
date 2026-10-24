@@ -2663,3 +2663,35 @@ Baseline state hash is unchanged and controlled source restored. Both candidate
 compilers pass include fixture exit 42, miss/valid cache behavior, enum tags and
 diagnostics (`functional.json`). Fresh ordinary admission/rebuild timing for
 this candidate and broader major/default/runtime-quality gates remain open.
+
+
+### C-layout ordinary CLI confirmation and leading annotation correction (2026-10-24)
+
+Fresh installed `98e3eb25` binary, disk cache namespace, no retained server:
+root `/tmp/elisa-c-layout-production-root` points to
+`elisa-c-layout-production-8uptgfnn`. Eight bounded admission checkpoints,
+step 9 timed out after publishing a full state, step 10 emitted the object in
+15.673 seconds. This is setup, not a sub-10-second cold compile claim.
+All 19 ordinary CLI variants emitted objects below ten seconds: major cases
+(generic/private/contract/region/explicit enum/C-layout) were
+8.291 / 8.756 / 6.289 / 9.524 / 6.784 / 8.773 seconds. Remaining matrix ranged
+5.361–9.554 seconds. Every exact repeat succeeded in 0.150–0.206 seconds.
+Functional native compiler checks are recorded in the root's `functional.json`:
+include fixture exits 42, sidecar miss then valid, enum tags, unknown diagnostics.
+These measurements remain for explicit independent-IR/native-fragment mode;
+default whole-module/runtime-quality admission is still open.
+
+An additional leading `@align(16)` edit appeared to succeed in 5.773 seconds
+with identical object bytes. **This is not alignment replay qualification.**
+A minimized disk round-trip regression proved that the first declaration's
+leading annotation lay outside the compared source span: Update silently
+returned the old unaligned StructType after adding `@align(64)`.
+`retainedDeclSourceStart` now includes leading annotations for all currently
+annotated declaration kinds. This also assigns a later annotation to its own
+declaration rather than its predecessor. Unsupported annotation edits now
+fall back instead of silently reusing stale metadata. Alignment replay remains
+a separate optimization task. The regression covers the first declaration,
+a following declaration, and an include-style line directive.
+Before: `/tmp/elisa-alignment-span-before.log` fails on stale alignment.
+After: `/tmp/elisa-annotation-span-semantic.log` passes targeted retained
+annotation, line/shift, region, C-layout and constant-enum tests.

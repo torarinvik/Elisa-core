@@ -1873,6 +1873,41 @@ func retainedShiftDecl(decl ast.Decl, marks map[string][][2]int) {
 	visit(reflect.ValueOf(decl))
 }
 
+// retainedDeclSourceStart includes leading annotations in the declaration's
+// comparison span. Pos() names the declaration keyword, which otherwise leaves
+// a first declaration's annotations outside every span and assigns later ones
+// to the preceding declaration.
+func retainedDeclSourceStart(d ast.Decl) int {
+	start := d.Pos().Offset
+	var annotations []ast.Annotation
+	switch d := d.(type) {
+	case *ast.StructDecl:
+		annotations = d.Annotations
+	case *ast.EnumDecl:
+		annotations = d.Annotations
+	case *ast.FuncDecl:
+		annotations = d.Annotations
+	case *ast.StoreDecl:
+		annotations = d.Annotations
+	case *ast.ExternFuncDecl:
+		annotations = d.Annotations
+	case *ast.ExternVarDecl:
+		annotations = d.Annotations
+	case *ast.ExternTypeDecl:
+		annotations = d.Annotations
+	case *ast.ExportFuncDecl:
+		annotations = d.Annotations
+	case *ast.ImplDecl:
+		annotations = d.Annotations
+	}
+	for _, annotation := range annotations {
+		if offset := annotation.Position.Offset; offset >= 0 && offset < start {
+			start = offset
+		}
+	}
+	return start
+}
+
 // retainedSpans returns each declaration's source text: from its start to the
 // next declaration's start in the expanded buffer (the last runs to the end).
 // A container's span is therefore its own header, and comments and blank lines
@@ -1883,12 +1918,12 @@ func retainedSpans(decls []ast.Decl, src []byte) []string {
 	// source order, and a walk-order span would cover unrelated edits.
 	starts := make([]int, 0, len(decls))
 	for _, d := range decls {
-		starts = append(starts, d.Pos().Offset)
+		starts = append(starts, retainedDeclSourceStart(d))
 	}
 	sort.Ints(starts)
 	out := make([]string, len(decls))
 	for i, d := range decls {
-		start := d.Pos().Offset
+		start := retainedDeclSourceStart(d)
 		end := len(src)
 		if k := sort.SearchInts(starts, start+1); k < len(starts) {
 			end = starts[k]
