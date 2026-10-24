@@ -3142,3 +3142,19 @@ trust, bad-key, duplicate-origin and format-version guards pass.
 `/tmp/elisa-analysis-family-backend.log`: all retained backend tests pass, 11.036 s.
 All commands externally capped at 30 s. Full-project installed-binary performance
 for the new include path remains the next gate; the broader performance goal is open.
+
+
+Fresh installed `39ed5c2c` namespace: `/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-include-family-production-2ayyu5ok`.
+Eight admission checkpoints, step 9 externally timed out at 30.220 seconds after
+publishing one complete state and its family hint (1,274 origins); step 10 emitted
+the baseline in 16.113 seconds. The ordinary novel helper-include edit now emits
+an object in **6.171 seconds**, exit zero, compared with 13.976 seconds/exit 1/no
+object before family lookup. Root source and temporary include were restored.
+The edited object SHA-256 is
+`c63f01a561ee725e8694460f2cc89eaedb20dce247b4752eb2d5b3250b2dd974`.
+It links and runs the direct new-helper oracle (42), and the rebuilt compiler
+passes include fixture execution 42, sidecar miss→valid, enum dispatch, and unknown
+flag diagnostics. Records: `new-include.json`, `new-include-functional.json` in
+that namespace and `/tmp/elisa-include-family-production-include-functional.log`.
+This verifies the added-file gain; the fresh 23-case matrix and remaining broader
+minor/major edit families still need qualification on the latest implementation.
