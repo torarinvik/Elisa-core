@@ -149,6 +149,11 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStmt, knownValueType Type
 				a.currentReturnProvenance = cloneRegionRefState(summary)
 			}
 		}
+		// The first expression-fact pass runs as analyzeExpr returns, before this
+		// return-provenance query can lazily infer a recursive callee's summary.
+		// Refresh now so cold analysis records the same provenance fact as retained
+		// analysis, where that summary may already be available.
+		a.recordExprOptimizationFacts(n.Value, valueType)
 	}
 	a.inReturnBorrowCapture = true
 	ownerState, ownerStateOK := a.borrowedOwnerRefStateForExpr(n.Value)

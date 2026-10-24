@@ -3620,3 +3620,29 @@ full eight-fragment matrix remain pending.
 
 The independent CLI bootstrap across-process and old-revision/corrupt-checkpoint
 rejection tests passed as well (1.055 s), under the same external 30-second cap.
+
+
+### Refresh return-expression facts after lazy provenance inference
+
+Cold recursive analysis could omit a returned call's optimization provenance:
+the expression's deferred fact writer suppresses lazy callee-summary inference,
+but the following return-provenance query can materialize that summary. The
+return statement now refreshes the returned expression's facts after its existing
+successful provenance query. The normal fact writer retains its quiet-analysis
+guards. This aligns fresh analysis with a retained invocation that already knows
+the callee summary; it does not add a whole-program fact pass.
+
+An isolated snapshot of the committed base plus only this source change and its
+new regression confirms causality. With the committed return-statement source
+restored through a canonical-path Go overlay, the regression fails because the
+recursive call has no fact. With the refresh, it passes twenty repetitions; the
+focused new-auto, named-local-region escape, packed-store and return-provenance
+regression selection passes (0.324 s). Every command used an external 30-second
+timeout. No rebuild speed gain is claimed for this correctness change.
+
+The separate retained inferred-summary repair remains uncommitted. Its three
+recursive source-order cases now match strict current-AST metadata, but repeated
+cycle introduction/removal still exposes nondeterministic stale permission rows.
+That issue and the earlier 10.668-second region-record miss remain open. The
+working-tree compiler binary rebuilt by a separate lane is not a qualified
+committed oracle; the installed stage0 was unchanged by that resolver build.
