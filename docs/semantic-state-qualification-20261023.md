@@ -3817,3 +3817,18 @@ SMT slicing/weakening/abstraction/persistent-cache selection passes once in
 test timeout during the deliberately bounded version-probe test; this is not a
 passing ten-repeat result. Commands were externally capped at 30 seconds.
 No end-to-end rebuild speedup is claimed before a fresh legitimate cache baseline.
+
+
+### Following nonfunction declarations keep current printed positions
+
+A retained record insertion now moves the printed source coordinates of unchanged
+aliases, records and namespace declarations that follow it. Nonfunction
+containers and their members are shifted separately, stopping at nested
+declaration boundaries to avoid applying a shift twice. Declaration-local byte
+offsets keep their existing stable-offset contract.
+
+With only the new regression overlaid on bb24f144, an alias after a field
+insertion stayed at line 4 while cold analysis placed it at line 5. The candidate
+passes both that disk-restore regression and repeated insertions before a nested
+module, including member functions and stable-offset checks (0.369 seconds).
+All test commands are externally capped at 30 seconds.

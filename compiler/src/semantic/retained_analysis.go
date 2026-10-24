@@ -373,11 +373,19 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	// The analyzed AST also holds declarations the analyzer synthesized, so pair
 	// its functions by source position and name rather than by index.
+	type declKey struct {
+		pos  string
+		kind reflect.Type
+	}
+	liveOther := map[declKey][]ast.Decl{}
 	liveFns := map[fnKey][]*ast.FuncDecl{}
 	for _, d := range retainedWalkDecls(a.file) {
 		if f, ok := d.(*ast.FuncDecl); ok {
 			k := fnKey{retainedLineKey(f.Pos()), f.Name}
 			liveFns[k] = append(liveFns[k], f)
+		} else {
+			k := declKey{retainedLineKey(d.Pos()), reflect.TypeOf(d)}
+			liveOther[k] = append(liveOther[k], d)
 		}
 	}
 	scoped := make(map[*ast.FuncDecl]scopedDecl, len(r.decls))
@@ -395,6 +403,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
+	var shiftedOther []ast.Decl
 	// Lists an added declaration was appended to; sorted back into source order at the end.
 	appendedInto := map[*ast.NamespaceDecl]bool{}
 	appendedTop := false
@@ -433,7 +442,14 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			// A container's span is its own header up to its first member. Comment and blank
 			// lines trailing a declaration move with an insertion after it; they are not part of
 			// what the declaration declares.
-			if !sameText && retainedTrimTrailing(oldSpans[i]) == retainedTrimTrailing(newSpans[j]) {
+			if sameText || retainedTrimTrailing(oldSpans[i]) == retainedTrimTrailing(newSpans[j]) {
+				if lineDelta[op.File] != 0 {
+					candidates := liveOther[declKey{retainedLineKey(op), reflect.TypeOf(od)}]
+					if len(candidates) != 1 {
+						return fail("%d analyzed candidates for %T at %s", len(candidates), od, retainedLineKey(op))
+					}
+					shiftedOther = append(shiftedOther, candidates[0])
+				}
 				continue
 			}
 			if !sameText {
@@ -1448,6 +1464,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	for _, d := range shifted {
 		retainedShiftDecl(d, marks)
 	}
+	for _, d := range shiftedOther {
+		retainedShiftDeclOwn(d, marks)
+	}
 	r.LastStats.Diff = time.Since(start)
 	// Keep the body-phase diagnostics of unchanged functions; the changed ones
 	// and everything the whole-program passes emitted are recomputed.
@@ -1870,11 +1889,25 @@ func retainedShiftPos(p lexer.Pos, marks map[string][][2]int) lexer.Pos {
 // index the expanded buffer, are never printed, and stay consistent within a
 // declaration.
 func retainedShiftDecl(decl ast.Decl, marks map[string][][2]int) {
+	retainedShiftDeclPositions(decl, marks, false)
+}
+
+// Nonfunction containers and their members are paired independently. Shift only
+// this declaration's own positions so nested members are never shifted twice.
+func retainedShiftDeclOwn(decl ast.Decl, marks map[string][][2]int) {
+	retainedShiftDeclPositions(decl, marks, true)
+}
+
+func retainedShiftDeclPositions(decl ast.Decl, marks map[string][][2]int, ownOnly bool) {
+	root := reflect.ValueOf(decl).Pointer()
 	seen := map[uintptr]bool{}
 	var visit func(v reflect.Value)
 	visit = func(v reflect.Value) {
 		switch v.Kind() {
 		case reflect.Pointer:
+			if ownOnly && !v.IsNil() && v.Pointer() != root && v.Type().Implements(retainedDeclType) {
+				return
+			}
 			if v.IsNil() || seen[v.Pointer()] {
 				return
 			}
