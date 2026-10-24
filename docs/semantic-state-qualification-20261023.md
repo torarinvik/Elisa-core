@@ -2316,3 +2316,46 @@ diagnostic checks; simply dropping the guard is unqualified. Scripts:
 The plan is `/tmp/elisa-const-enum-storage-next-plan.txt`. This gap, other
 unsupported declaration/contract forms and default/runtime-quality gates keep
 the full goal active.
+
+
+## Primitive enum storage replay and renewed major-edit matrix
+
+`d9ad97eb` permits explicit primitive integer storage changes for implicit-member
+constant enums, preserving live type identity while rebuilding storage/members.
+Plain aliases and passive containing records/enum payloads remain eligible;
+layout targets and their names include containing types and aliases, so layout
+queries are invalidated even when their operand has no recorded expression type.
+Foreign/open/inferred storage and declaration computations retain their guards.
+
+The retained semantic suite passes, including disk round trips, signedness,
+widening/reversion, containing/nested layout queries and cold diagnostic parity.
+The backend disk test compares complete LLVM IR with fresh analysis and links
+both products to native layout/aggregate-call checks at u16/u64/u8 widths. Enum
+fields are not accepted by the existing C export rules; the test uses internal
+aggregate calls and exported scalar probes, not an unsupported C aggregate ABI.
+
+Fresh ordinary CLI admission used the installed binary in its own namespace:
+`/tmp/elisa-enum-storage-production-root`. No payload was copied or rekeyed.
+Eight partial checkpoints completed in 14.984–26.273 s, request nine reached
+its external 30 s cap after publishing complete state, and request ten emitted
+an object in 13.282 s. Server is empty; O3/96 independent IR units are unchanged.
+Scripts are `/tmp/elisa-enum-storage-production-{bootstrap,matrix,functional}.py`.
+
+The new width edits succeeded: u16 7.311 s, u64 7.122 s, i16 6.944 s, replacing
+the previous 17.810 s unsuccessful u16 fallback. Exact repeats were 0.143–0.162 s.
+The remaining matrix: baseline 5.469 s, reorder 7.213 s, add/handler 7.131 s,
+layout 10.272 s, permission 6.406 s, remove 6.895 s, body 5.732 s, signature
+6.762 s, contract 6.612 s, lines 6.271 s. The layout request exceeds ten seconds;
+the earlier thin margin was not robust. All thirteen products linked and compiled
+the include fixture twice (miss then valid), with linked fixture exit 42, enum
+tag constructor checks using each storage ABI, and correct unknown diagnostics.
+The thirteen records are in `functional.json` in this root.
+
+Additional major cases (`/tmp/elisa-enum-storage-major-matrix.py`) found generic
+body 9.696 s and private constant bound 9.799 s successful, but contract-used
+constant 18.318 s and region-parameterized record field addition 18.026 s both
+returned status 1 with no object, saving initial-analysis checkpoints. These
+are failures, not sub-ten-second compilations. Controlled source files were
+restored and the seven preexisting user edits remain intact. The full goal is
+still open: layout margin/native work, declaration/contract fallbacks, broader
+major edits and ordinary/default/runtime-quality qualification remain.
