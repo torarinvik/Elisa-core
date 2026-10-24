@@ -3786,3 +3786,15 @@ The candidate passes the short-circuit and disjoint-focused selection once in
 0.592 seconds and twenty repetitions in 4.465 seconds, each command externally
 capped at 30 seconds. This fixes scanner complexity; it does not qualify the
 full compiler rebuild performance objective.
+
+
+### SMT logging preserves semantic cache identity
+
+SMT resource logging and query tracing are observers: enabling them no longer
+changes the environment component of the analysis/build cache key. Requests for
+either observer bypass whole-object replay so the requested observations can
+actually run. Solver selection, resource limits and declined-query cache policy
+remain part of identity. The observer/key regression and existing observer and
+solver-identity selections pass (0.303 seconds, externally capped at 30 seconds).
+Compiler artifact changes still invalidate prior compiler namespaces normally;
+this change does not migrate or rekey old checkpoints.

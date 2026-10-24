@@ -267,6 +267,8 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 // result or its semantic transcript. Per-request observers bypass cache admission.
 // Warning policy and every other compiler variable remain part of the key.
 var buildCacheEnvIgnored = map[string]bool{
+	"ELISA_SMT_RLIMIT_LOG":                    true,
+	"ELISA_SMT_TRACE":                         true,
 	"ELISACORE_BUILD_CACHE":                   true,
 	"ELISACORE_ANALYSIS_CACHE_DEBUG":          true,
 	"ELISACORE_ANALYSIS_BOOTSTRAP":            true,
@@ -325,7 +327,7 @@ func buildCacheRequestObserverEnabled() bool {
 	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
 		return true
 	}
-	for _, name := range []string{"ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
+	for _, name := range []string{"ELISA_SMT_RLIMIT_LOG", "ELISA_SMT_TRACE", "ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
 		if os.Getenv(name) != "" {
 			return true
 		}
