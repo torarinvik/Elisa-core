@@ -3403,3 +3403,33 @@ checkpoint round-trip/finish and active-journal rejection pass (0.468 s).
 Fresh-process analysis disk regression tests also pass; their bootstrap tests
 exercise resumed hinting and stale/corrupt checkpoint rejection. Full Stage1
 qualification without tuning flags remains open.
+
+
+### Request-local immutable tokens (2026-10-24)
+
+The new default-mode namespace exposed a real generic-record-field miss:
+10.553 s for the first changed layout, after function/record binder edits passed
+in 7.139/7.423 s. A fresh two-field variant took 11.253 s under profiling.
+Those first-build records remain unchanged. The matrix stopped and restored its
+controlled sources; this is not an all-edit success claim. Increasing GOGC from
+200 to 400 on the same cached input was slower (7.646 to 8.874 s) and was rejected.
+
+Standalone disk requests now share one invocation-local immutable lexer product
+between the main and scratch parsers. Each parser still constructs its own AST;
+syntax snapshots and cross-request history are disabled for this token owner.
+A sync.Once publishes the source-owned tokens to concurrent consumers, keyed by
+the exact filename and source digest. Unexpected different-key reuse takes the
+normal lexer path. Parser recovery retains the existing borrowed-token detach
+contract. The legacy server token cache and semantic authority checks are unchanged.
+
+An isolated 20,000-function/two-parser benchmark at the CLI's GOGC=200 measured
+39.308 ms and 264,017,293 allocated bytes before, versus 34.191 ms and 105,074,866
+bytes with shared tokens (13.0% time and 60.2% bytes reduction). Allocations fell
+440,068 to 401,084. These are parser-level measurements, not full rebuild times.
+The earlier GOGC=200 run that overlapped race-check compilation is excluded.
+
+Request/token/syntax/disk-analysis regressions pass (6.785 s), including concurrent
+independent AST identities, recovery diagnostics, filename and changed-source
+parity. Request tests also pass with the race detector (1.478 s). The clean
+benchmark is /tmp/elisa-request-tokens-bench-gc200-clean.log. A fresh installed
+compiler namespace and first-layout remeasurement remain required.

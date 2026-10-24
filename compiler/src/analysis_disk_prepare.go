@@ -28,6 +28,11 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 	if !eligible {
 		return nil
 	}
+	// Established before either parser starts. Sharing tokens does not share AST
+	// identity or semantic mutations, and does not retain a server/session cache.
+	if program.tokenCache == nil {
+		program.tokenCache = newRequestSourceTokenCache()
+	}
 	pending := &analysisDiskRestoration{artifact: artifact, started: time.Now(), done: make(chan struct{})}
 	go func() {
 		defer close(pending.done)
@@ -71,7 +76,7 @@ func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options sem
 	go func() {
 		started := time.Now()
 		var preparation analysisScratchPreparation
-		if file, ok := parseProgram(program.filename, program.source, io.Discard); ok {
+		if file, ok := parseProgramWithTokenCache(program.filename, program.source, io.Discard, program.tokenCache); ok {
 			preparation.file = file
 			preparation.prepared = semantic.PrepareRetainedScratch(file, options)
 		}

@@ -553,3 +553,97 @@ func TestSourceSyntaxCacheConcurrentAdmissionKeepsTrace(t *testing.T) {
 		t.Fatal("concurrent publication prevented subsequent edited-prefix replay")
 	}
 }
+
+func TestRequestTokensConcurrentParsesKeepIndependentASTs(t *testing.T) {
+	cache := newRequestSourceTokenCache()
+	source := []byte("def value() -> i64:\n    return 21\n")
+	const count = 16
+	files := make([]*ast.File, count)
+	var wg sync.WaitGroup
+	for i := range files {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var output bytes.Buffer
+			file, ok := parseProgramWithTokenCache("request.elisa", source, &output, cache)
+			if !ok || output.Len() != 0 {
+				t.Errorf("parse failed: %s", output.String())
+				return
+			}
+			files[i] = file
+		}(i)
+	}
+	wg.Wait()
+	if cache.requestLexed == nil || len(cache.entries) != 0 {
+		t.Fatal("request captured persistent/syntax entries")
+	}
+	for i, file := range files {
+		if file == nil || !reflect.DeepEqual(file, files[0]) {
+			t.Fatal("concurrent parse changed syntax")
+		}
+		for j := 0; j < i; j++ {
+			if file == files[j] || file.Decls[0] == files[j].Decls[0] {
+				t.Fatal("mutable AST identity shared")
+			}
+		}
+	}
+	first, _ := cache.lexBorrowedWithKey(sourceTokenKey{"request.elisa", cache.requestKey.source}, source)
+	second, _ := cache.lexBorrowedWithKey(sourceTokenKey{"request.elisa", cache.requestKey.source}, source)
+	if &first[0] != &second[0] {
+		t.Fatal("immutable token product was duplicated")
+	}
+}
+
+func TestRequestTokensPreserveRecoveryDiagnosticsAndSourceAuthority(t *testing.T) {
+	for _, source := range []string{
+		"def f():\n    to: i64 = 3\n",
+		"def f():\n    return \"unterminated\n",
+		"def f() -> i64:\n    return 1\n",
+	} {
+		cache := newRequestSourceTokenCache()
+		for _, filename := range []string{"request.elisa", "other.elisa"} {
+			for _, text := range []string{source, source + "# edited\n", source} {
+				var cold, shared bytes.Buffer
+				want, wantOK := parseProgram(filename, []byte(text), &cold)
+				got, gotOK := parseProgramWithTokenCache(filename, []byte(text), &shared, cache)
+				if wantOK != gotOK || cold.String() != shared.String() || !reflect.DeepEqual(want, got) {
+					t.Fatalf("request changed syntax/diagnostics for %s: %s / %s", filename, cold.String(), shared.String())
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkRequestIndependentParses(b *testing.B) {
+	var source strings.Builder
+	for i := 0; i < 20000; i++ {
+		fmt.Fprintf(&source, "def value_%d() -> i64:\n    return %d\n", i, i)
+	}
+	data := []byte(source.String())
+	for _, shared := range []bool{false, true} {
+		name := "separate-lexers"
+		if shared {
+			name = "shared-tokens"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for n := 0; n < b.N; n++ {
+				var cache *sourceTokenCache
+				if shared {
+					cache = newRequestSourceTokenCache()
+				}
+				var wg sync.WaitGroup
+				for i := 0; i < 2; i++ {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						if _, ok := parseProgramWithTokenCache("bench.elisa", data, io.Discard, cache); !ok {
+							b.Error("parse failed")
+						}
+					}()
+				}
+				wg.Wait()
+			}
+		})
+	}
+}

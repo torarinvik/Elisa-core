@@ -26,6 +26,12 @@ type sourceTokenEntry struct {
 	lastUse       uint64
 }
 type sourceTokenCache struct {
+	// A standalone request shares one immutable lexer product across independent
+	// parsers. It never captures syntax snapshots or survives this invocation.
+	requestOnly                 bool
+	requestOnce                 sync.Once
+	requestKey                  sourceTokenKey
+	requestLexed                *lexer.SourceTokens
 	mu                          sync.Mutex
 	entries                     map[sourceTokenKey]sourceTokenEntry
 	maxEntries, maxBytes, bytes int
@@ -34,6 +40,10 @@ type sourceTokenCache struct {
 	parseHits                   uint64
 	prefixParsedDeclarations    uint64
 	suffixParsedDeclarations    uint64
+}
+
+func newRequestSourceTokenCache() *sourceTokenCache {
+	return &sourceTokenCache{requestOnly: true}
 }
 
 func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
@@ -63,6 +73,19 @@ func (c *sourceTokenCache) lexWithKey(key sourceTokenKey, source []byte) ([]lexe
 // exceptional token-kind rewrite; legacy slice callers still receive a copy.
 func (c *sourceTokenCache) lexBorrowedWithKey(key sourceTokenKey, source []byte) ([]lexer.Token, []string) {
 	filename := key.filename
+	if c.requestOnly {
+		c.requestOnce.Do(func() {
+			c.requestKey = key
+			c.requestLexed = lexer.TokenizeSource(filename, source, nil)
+		})
+		if c.requestKey == key {
+			_ = lexer.New(filename, source)
+			return c.requestLexed.BorrowReadOnlyTokens(), c.requestLexed.CopyErrors()
+		}
+		// Unexpected reuse for another source must retain normal lexer behavior.
+		l := lexer.New(filename, source)
+		return l.Tokenize(), l.Errors()
+	}
 	c.mu.Lock()
 	c.clock++
 	if entry, ok := c.entries[key]; ok {
@@ -135,6 +158,9 @@ func (c *sourceTokenCache) parsedFile(filename string, source []byte) (*ast.File
 	return c.parsedFileWithKey(sourceTokenKey{filename, sha256.Sum256(source)}, source)
 }
 func (c *sourceTokenCache) parsedFileWithKey(key sourceTokenKey, source []byte) (*ast.File, bool, bool) {
+	if c.requestOnly {
+		return nil, false, false
+	}
 	filename := key.filename
 	c.mu.Lock()
 	entry, exists := c.entries[key]
@@ -232,6 +258,9 @@ func (c *sourceTokenCache) rememberParsedWithKey(key sourceTokenKey, file *ast.F
 // Select before lexing can evict the previous revision. In-flight immutable
 // products may outlive LRU eviction; no secondary unbounded history is retained.
 func (c *sourceTokenCache) prefixCandidate(filename string) sourceTokenEntry {
+	if c.requestOnly {
+		return sourceTokenEntry{}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var candidate sourceTokenEntry
