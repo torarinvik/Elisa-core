@@ -35,6 +35,17 @@ func retainedNamesPattern(names map[string]bool) *regexp.Regexp {
 	return regexp.MustCompile(`(^|[^A-Za-z0-9_])(` + strings.Join(quoted, "|") + `)([^A-Za-z0-9_]|$)`)
 }
 
+// A literal-name miss proves the identifier regexp cannot match. Most function
+// spans do not mention a changed type, so avoid the regexp's boundary scan.
+func retainedNameTextMatch(text string, names map[string]bool, pattern *regexp.Regexp) bool {
+	for name := range names {
+		if strings.Contains(text, name) {
+			return pattern.MatchString(text)
+		}
+	}
+	return false
+}
+
 // replaceLiveDecls swaps declarations in the live file and the retained declaration list.
 func (r *RetainedAnalysis) replaceLiveDecls(replace map[ast.Decl]ast.Decl) {
 	var swap func(decls []ast.Decl)

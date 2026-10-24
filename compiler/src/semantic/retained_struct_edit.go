@@ -37,26 +37,28 @@ func retainedPlainStruct(d *ast.StructDecl) bool {
 	return true
 }
 
-// Explicit region arguments preserve their binding protocol when only fields
-// change. Other generic binders still need their declaration machinery rebuilt.
+// Field/default and ordinary/C layout changes preserve a simple record's
+// declaration protocol. Explicit region binders must remain identical; other
+// generic binders and annotation-driven layouts still need their own rebuild.
 func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
-	if retainedPlainStruct(old) && retainedPlainStruct(current) {
-		return true
-	}
-	if old.Name != current.Name || !reflect.DeepEqual(old.RegionParams, current.RegionParams) || len(old.RegionParams) == 0 {
+	if old.Name != current.Name || !reflect.DeepEqual(old.RegionParams, current.RegionParams) || len(old.GenericParams) != len(current.GenericParams) {
 		return false
 	}
-	regionOnly := func(d *ast.StructDecl) bool {
+	simple := func(d *ast.StructDecl) bool {
+		if d.Layout != ast.StructLayoutDefault && d.Layout != ast.StructLayoutC {
+			return false
+		}
 		for _, p := range d.GenericParams {
 			if p.Kind != ast.GenericParamRegion || p.InterfaceBound != "" || p.StateOwner != "" || len(p.StateCases) != 0 {
 				return false
 			}
 		}
 		shape := *d
+		shape.ReprC, shape.Layout = false, ast.StructLayoutDefault
 		shape.RegionParams, shape.GenericParams = nil, nil
 		return retainedPlainStruct(&shape)
 	}
-	if !regionOnly(old) || !regionOnly(current) || len(old.GenericParams) != len(current.GenericParams) {
+	if !simple(old) || !simple(current) {
 		return false
 	}
 	for i, p := range old.GenericParams {
@@ -298,6 +300,8 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 	for i, e := range edits {
 		olds[i] = e.st.Fields
 		e.st.Decl = e.edit
+		e.st.ReprC, e.st.Layout = e.edit.ReprC, e.edit.Layout
+		e.st.PackedLayout = false // eligibility permits only ordinary/C layouts
 		e.st.Fields = map[string]Field{}
 		e.st.GhostFieldOrder, e.st.StoreFieldOrder, e.st.HasPackedGroups = nil, nil, false
 		e.st.declarationFieldOrder = astFieldDeclNames(e.edit.Fields)

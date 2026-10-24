@@ -761,6 +761,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				names[name[strings.LastIndex(name, ".")+1:]] = true
 			}
 		}
+		namePattern := retainedNamesPattern(names)
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
 			spliced[sp.live] = true
@@ -768,7 +769,15 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		memo := map[Type]bool{}
 		for _, sd := range r.decls {
 			fn, ok := sd.Decl.(*ast.FuncDecl)
-			if !ok || spliced[fn] || !a.retainedUsesTypes(fn, targets, names, memo) {
+			if !ok || spliced[fn] {
+				continue
+			}
+			oldText, newText := spanOf(fn)
+			namedInSource := retainedNameTextMatch(oldText, names, namePattern)
+			if !namedInSource && newText != oldText {
+				namedInSource = retainedNameTextMatch(newText, names, namePattern)
+			}
+			if !namedInSource && !a.retainedUsesTypes(fn, targets, names, memo) {
 				continue
 			}
 			nfn := pairedNew[fn]
@@ -1036,7 +1045,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				continue
 			}
 			_, sourceText := spanOf(fn)
-			if !namePattern.MatchString(sourceText) && !retainedConstEnumShorthand(pairedNew[fn], members) && !a.retainedUsesTypes(fn, targets, names, memo) {
+			if !retainedNameTextMatch(sourceText, names, namePattern) && !retainedConstEnumShorthand(pairedNew[fn], members) && !a.retainedUsesTypes(fn, targets, names, memo) {
 				continue
 			}
 			nfn := pairedNew[fn]

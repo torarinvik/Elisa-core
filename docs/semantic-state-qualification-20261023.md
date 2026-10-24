@@ -2608,3 +2608,58 @@ probes verify shifted Output=64, Filter=65, Unknown=100 tags; diagnostics pass
 (`functional.json`). All toolchain invocations have external 30 s caps. Fresh
 ordinary admission and timing for this candidate are still needed. C-layout,
 other major forms and default/runtime-quality gates keep the full goal open.
+
+
+### Ordinary explicit-tag confirmation and C-layout replay candidate
+
+`2232cbbd` was admitted in its own fresh namespace selected by
+`/tmp/elisa-explicit-enum-production-root`; no state was copied or rekeyed.
+Eight checkpoints took 14.682–26.529 s, invocation nine reached its external
+30 s cap with complete state saved, and ten emitted an initial object in 13.806 s.
+The ordinary explicit-tag edit succeeds in 7.114 s and matches the qualified
+object bytes. Region record takes 9.381 s, generic body 7.947 s, private bound
+7.752 s and contract-bound constant 6.087 s. Remaining cases: baseline 5.048 s;
+u16/u64/i16 storage 6.928/6.802/6.784 s; reorder 7.222 s; addition/handler
+6.944 s; layout 8.386 s; permission 6.499 s; removal 6.783 s; body 5.685 s;
+signature 6.754 s; contract 6.783 s; lines 6.248 s. All eighteen normal products
+pass linked compiler/include-fixture exit 42, cache miss/valid, enum tags and
+diagnostic probes (`functional.json`). The server remains empty; all toolchain
+invocations use external 30 s caps. These timings prove this matrix, not all edits.
+
+Paired simple records can now replay ordinary/C layout changes and field edits
+while preserving their generic-region protocol. Existing complex-layout,
+annotation, affinity/state and other-generic guards remain. The live record's
+ReprC/Layout/PackedLayout flags are updated along with its declaration/fields and
+memos. Semantic CParamPlan is split-view argument ordering; aggregate memory-class
+classification belongs to each fresh backend generator and reads current types.
+Tests exercise C exports and calls across the 16-to-24-byte threshold and revert,
+including signed large field values, aliases, containing-record layout queries
+and full cold/replay normal/debug LLVM IR parity. Both cold and replay native
+products pass. The retained semantic suite also passes mode transition/reversion,
+field edits and alias/containing-query invalidation.
+
+The query test found that a parameterless layout builtin can lack an expression
+type linking it to the record. Struct-user selection now also checks its paired
+source spans, as enum selection already did. Literal-name rejection avoids the
+regexp's whole-span boundary scan on misses, and unchanged spans are scanned once.
+The enum path uses the same prefilter. A differential test checks original regexp
+parity across identifier, punctuation, quoted and Unicode fragment combinations.
+Logs: `/tmp/elisa-c-layout-{semantic-final,backend-final}.log`.
+
+An exploratory top-level sizeof const initializer was rejected by cold analysis;
+it is not used as evidence for supported constant replay. No implementation claim
+rests on comparing absent constant-table entries.
+
+Checked-payload qualification reads the admitted source/options and writes only
+into `c-layout-final-qualification/` under that root, outside production admission
+(`/tmp/elisa-c-layout-final-qualification.py`). Initial native population takes
+22.563 s; changing IncrementalCacheRead to layout(c) succeeds in 6.279 s, replacing
+the prior 17.738 s unsuccessful fallback. The update rechecks two functions and
+reuses all 96 native units; this program's metadata change leaves object bytes
+identical. The separate C ABI field tests cover changes that alter actual native
+calling layout. An earlier candidate with unfiltered source regexp scans took
+7.245 s (diff phase 1.393 s); the final diff phase is 0.522 s with the same output.
+Baseline state hash is unchanged and controlled source restored. Both candidate
+compilers pass include fixture exit 42, miss/valid cache behavior, enum tags and
+diagnostics (`functional.json`). Fresh ordinary admission/rebuild timing for
+this candidate and broader major/default/runtime-quality gates remain open.
