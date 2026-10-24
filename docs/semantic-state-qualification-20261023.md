@@ -3203,3 +3203,34 @@ normal/debug IR matches cold compilation and both cold/replay O3 native C client
 verify high signed copies, nonzero added payloads, small values, references and
 physical layouts. `/tmp/elisa-generic-binder-backend.log` contains the run.
 Full compiler performance of this newly supported edit remains to be qualified.
+
+
+Explicit qualification `/tmp/elisa-generic-binder-main-test` against the unchanged
+original imports snapshot measured baseline 22.985 s and the actual runtime binder
+rename **6.836 s**. Both native products have baseline object SHA
+`64e173d0d20dc28ef96d0cd2e61789f98058605d04e09be36c035b1c74236297`
+and pass include execution 42, sidecar miss→valid, enum dispatch and diagnostics
+(`/tmp/elisa-generic-binder-functional.log`; `generic-binder-qualification` under
+the original imports production root). No checkpoint rekeying or publication.
+
+Fresh installed `ce99026c` namespace: `/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-generic-binder-production-u_ju2ui3`.
+Eight bounded admission checkpoints; step 9 timed out externally at 30.248 s after
+publishing complete state, step 10 emitted the baseline in 15.165 s. Ordinary
+binder-name edit now takes **5.987 s**, exit zero, versus the previous 18.382 s
+checkpoint/no-object miss. Generic field 8.832 s; new include 6.152 s.
+
+The full matrix now has **25 variants including baseline**, **48 timed
+invocations**, all exit zero and below ten seconds. Largest edited times:
+packed 9.321 s, region record 9.209, ordinary record field 9.004, generic field
+8.832, alignment 8.707, private bound 7.919. All previously successful product
+hashes match the preceding matrix; the newly supported binder rename emits the
+unchanged baseline bytes. All 25 native products pass include fixture execution,
+sidecar and enum/diagnostic checks; the new include also passes its direct helper
+oracle. `functional.json` records 24 variants, `new-include-functional.json` one.
+Aggregate run: `/tmp/elisa-generic-binder-production-matrix-all.log`.
+Controlled files restored; the seven preexisting Stage1 user modifications remain.
+
+This is representative qualification of the opt-in standalone disk-cache mode,
+with O3, bounded imports, independent IR/native units and no retained server.
+It does not claim every possible major edit, default-mode policy, or one-pass cold
+admission is complete. The performance goal remains active.
