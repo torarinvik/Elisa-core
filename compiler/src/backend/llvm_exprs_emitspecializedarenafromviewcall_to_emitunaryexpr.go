@@ -6,6 +6,7 @@ package backend
 #include <stdlib.h>
 #include <string.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/Target.h>
 
 static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
 	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
@@ -510,15 +511,37 @@ func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.g.ensureTargetMachine(); err != nil {
+		return nil, err
+	}
+	littleEndian := C.LLVMByteOrder(s.g.targetData) == C.LLVMLittleEndian
 	result := C.LLVMConstInt(boolType, 1, 0)
-	for i, b := range []byte(literalText) {
-		indexValue := C.LLVMConstInt(indexType, C.ulonglong(i), 0)
+	// The caller has checked the length (and a nonempty view's pointer).
+	// Load only complete chunks within those bytes, with alignment 1: views
+	// need not be word-aligned and the last byte may precede a guard page.
+	for offset := 0; offset < len(literalText); {
+		width := 8
+		for width > len(literalText)-offset {
+			width /= 2
+		}
+		var word uint64
+		for j := 0; j < width; j++ {
+			shift := j
+			if !littleEndian {
+				shift = width - 1 - j
+			}
+			word |= uint64(literalText[offset+j]) << (8 * shift)
+		}
+		indexValue := C.LLVMConstInt(indexType, C.ulonglong(offset), 0)
 		indices := []C.LLVMValueRef{indexValue}
-		bytePtr := C.LLVMBuildGEP2(s.builder, byteType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("svlit.byte.ptr"))
-		byteValue := C.LLVMBuildLoad2(s.builder, byteType, bytePtr, cStringFree("svlit.byte"))
-		literalValue := C.LLVMConstInt(byteType, C.ulonglong(b), 0)
-		byteEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteValue, literalValue, cStringFree("svlit.byte.eq"))
-		result = C.LLVMBuildAnd(s.builder, result, byteEqual, cStringFree("svlit.bytes.and"))
+		ptr := C.LLVMBuildGEP2(s.builder, byteType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("svlit.chunk.ptr"))
+		chunkType := C.LLVMIntTypeInContext(s.g.context, C.unsigned(width*8))
+		value := C.LLVMBuildLoad2(s.builder, chunkType, ptr, cStringFree("svlit.chunk"))
+		C.LLVMSetAlignment(value, 1)
+		literalValue := C.LLVMConstInt(chunkType, C.ulonglong(word), 0)
+		equal := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), value, literalValue, cStringFree("svlit.chunk.eq"))
+		result = C.LLVMBuildAnd(s.builder, result, equal, cStringFree("svlit.bytes.and"))
+		offset += width
 	}
 	return result, nil
 }

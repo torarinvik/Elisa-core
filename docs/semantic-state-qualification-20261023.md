@@ -1712,3 +1712,33 @@ function hashes. These observations do not establish either proposed gain.
 
 The goal remains active: layout, conservative unsupported declaration/contract
 edits, and default/runtime optimization-quality gates are still unresolved.
+
+
+### Bounded short-string chunk lowering
+
+Short string-view literals now compare complete 8/4/2/1-byte integer chunks
+with alignment 1 and target byte order. Existing length/null guards still precede
+loads; no chunk extends beyond the literal, and longer literals retain memcmp.
+This keeps O3 and its tuning unchanged. Native guard-page tests cover lengths
+0–9, every unaligned offset, embedded NUL/high bytes/UTF-8, mismatches, wrong
+lengths and null views at O0/O3. LLVM target checks additionally constant-fold
+known comparisons on x86-64, big-endian PowerPC64 and wasm32.
+
+The 96-unit checked-payload profiler used the previous admitted snapshot with
+full invocation/source validation and a separate native cache for the changed
+executable. This is not normal CLI admission of the new executable. Records
+`native-cost-string-chunk-96-*.json` live under
+`/tmp/elisa-body-96-production-root`; outputs and runtime evidence are in
+`string-chunk-96/`. Enum reorder was 8.125 s, layout 11.722 s and wrapper removal
+8.027 s. These small timing differences do not establish a repeatable wall-time
+gain over the earlier checked-payload measurements. The deterministic gain is
+smaller IR: the large `pymodule_dict_type_name_float_lists_records` body falls
+from 19,916 to 15,403 lines (23%); its unit input falls from 1,274,192 to
+1,248,384 bytes. Exact extracted input and counts are in `ir-investigation/`.
+All four products linked, compiled the included fixture with miss then valid
+cache reports, ran with exit 42, and passed direct enum-tag and diagnostic
+checks. Backend partition/cache regressions and main analysis-disk tests pass.
+
+The layout target still fails, and new normal CLI admission plus its edit matrix
+remain required. No server-free/default optimization-quality completion claim
+is made by this reduction.
