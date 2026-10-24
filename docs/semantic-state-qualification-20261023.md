@@ -3317,3 +3317,21 @@ These are representative opt-in standalone disk-cache results with no server.
 All compiler/build/link/native invocations retained external 30-second caps.
 Default-mode policy, cold admission and further major edit families remain open;
 the overall performance goal is not declared complete.
+
+
+## Coupled allocator header/body edit, 24 October 2026
+
+A further ordinary `fbf92e01` case combines the function binder rename with a
+real allocator body change: `ctx_concurrency_alloc(size_of(ConcurrencyBox[Payload])
++ 8)` reserves eight additional bytes. All concrete records still fit their
+allocation; the allocator's existing Memory.Allocate/Abort.Panic scope is retained.
+It emits in **7.887 s**, exact repeat **0.137 s**, both exit zero, with changed object
+SHA `b65ec097d618eff06819d0de6edb32a174c6ea244e7cebe8c3e7f7936e7e519d`.
+The product passes include fixture execution 42, sidecar miss→valid, enum dispatch
+and diagnostics (`binder-body-functional.json` in the latest function-production
+namespace; `/tmp/elisa-generic-function-production-binder-body-functional.log`).
+Controlled runtime source restored. The cumulative matrix now has **27 variants**,
+**52 timed successful invocations**, all under ten seconds on this installed build;
+slowest remains the 8.847-second region-record edit. No new production changes were
+needed for this coupled case. Existing opt-in/default-mode and broader edit-family
+limitations remain; this does not close the full performance goal.
