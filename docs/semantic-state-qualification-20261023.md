@@ -2938,3 +2938,45 @@ This confirms the quality-improving bounded import mode stays within the current
 rebuild matrix. It remains explicitly gated; the single helper-loop quality
 probe does not qualify every workload or justify claiming the full goal complete.
 Broader runtime-quality/default-mode admission and further major edits remain open.
+
+
+### Broader import-mode quality probes (2026-10-24)
+
+`TestPartitionBroaderQualityProbes` now checks three additional workloads against
+C references, whole-module O3, independent IR without imports, and bounded
+imports. Every independent case asserts that its path was not declined.
+The saved source and C driver accompany each result. All three check every
+sample's result; the struct case additionally checks the final mutated value
+and unchanged bias, and strict-FP checks exact double bits with contraction
+disabled on both sides. Mutual recursion uses two different native owners,
+both foreign to the exported caller, with a known depth of 20.
+
+The shared diagnostic runner now performs five checked warm-up calls before
+five timed calls. On macOS `/usr/bin/time -l` also records instruction/cycle
+counts; other platforms run the same correctness/timing probe without that
+macOS-specific option. Counters cover the whole process, including warm-ups,
+C reference calculation and driver overhead; they are not kernel-only counts.
+Initial two-million-element recursion timings were too short for stable CPU
+placement despite warm-up, so the final fixture uses fifty million elements.
+Do not mix those exploratory short timings with the final data.
+
+Current-code run `/tmp/elisa-broader-quality-final.log` passes. Final medians
+in milliseconds (whole-module / independent / imports):
+
+| workload | whole O3 | no imports | bounded imports |
+|---|---:|---:|---:|
+| struct alias read/write, 30M | 3.986 | 13.912 | 3.963 |
+| strict floating-point, 20M | 10.661 | 13.889 | 10.728 |
+| mutual recursion, 50M | 9.431 | 344.108 | 9.390 |
+
+Whole-process retired instructions (millions, same column order):
+struct 753.417 / 3378.490 / 753.177;
+strict-FP 1880.802 / 3180.870 / 1880.690;
+recursion 2486.047 / 65747.172 / 2485.745.
+All checksums/reference bits match. JSON samples, source and counter outputs
+are in `/tmp/elisa-broader-quality-final/{struct-alias,strict-fp,mutual-recursion}`.
+The longer preliminary repeat `/tmp/elisa-broader-quality-long` has the same
+instruction-level conclusions. These probes materially extend quality
+qualification, but do not establish every workload or enable default modes.
+Production code has not changed since `227b8e30`; the previously qualified
+22-case disk-rebuild matrix remains applicable. Full goal remains active.
