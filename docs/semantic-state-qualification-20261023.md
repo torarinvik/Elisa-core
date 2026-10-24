@@ -1968,3 +1968,26 @@ work. This profile bypassed whole-object replay through the existing observer
 flags; server forwarding remained disabled and the request had a 30 s cap.
 The candidate parallel-framing design in `/tmp/elisa-parallel-state-plan.txt`
 is not implemented or qualified and must be justified by further measurements.
+
+
+A normal CLI layout observer profile for `aa4639cc` also succeeded in 11.244 s
+(`normal-layout-profile.{json,stderr}`, `normal-layout.cpu.pprof` in the same
+root). Only the seven exact layout native entries were temporarily moved aside;
+the admitted semantic state and all baseline native entries stayed in place.
+The request regenerated those seven entries, emitted the previously executed
+layout object's exact bytes, and the script restored the original source and
+all original native entries/inodes. Native IR+partitions was 5.542 s; the
+slowest native unit was 4.440 s. No semantic state was copied or rekeyed.
+Observer mode bypasses whole-object replay/publication, so this is not a
+replacement for the plain 12.614 s matrix result.
+
+Inspection finds duplicated source loading on an ordinary whole-object miss:
+`tryBuildObjectCacheHit` calls `buildCacheObjectArtifactFor`, which loads and
+expands source before the pre-server lookup, then drops that loaded program
+on a miss. `runCLI` calls `tryBuildObjectCacheWith`, which loads it again.
+Observer mode skips both cache wrappers and loads once. Reusing the first
+loaded snapshot within the same invocation is a concrete candidate to remove
+this repeated work while keeping cache keys/compiler inputs identical. The
+measured observer/plain difference does not prove how much of it is caused
+by that duplication. `/tmp/elisa-source-handoff-plan.txt` records test and
+source-authority requirements; no handoff change has yet been implemented.
