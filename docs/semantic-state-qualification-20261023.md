@@ -1914,3 +1914,57 @@ time remains about 1.9 s, so these samples establish an allocation gain, not
 a repeatable end-to-end timing gain. The layout case still exceeds ten seconds.
 New normal CLI admission/matrix for this executable remain required; the
 unsupported declaration/contract and default/runtime-quality gates remain open.
+
+
+Normal CLI follow-up for `aa4639cc` used a new empty native/semantic namespace
+(`/tmp/elisa-shared-lookups-production-root`). Requests 1–8 saved checkpoints
+(16.311–27.891 s); request nine hit its 30 s cap after publishing the complete
+state; request ten emitted the object in 16.354 s. The standalone matrix was
+baseline 0.531 s; enum reorder 9.336 s; new flag/handler 9.431 s; layout
+12.614 s; permission 9.181 s; removal 9.326 s; body 8.197 s; signature 9.163 s;
+contract 9.008 s; lines 8.195 s. Repeats were 0.421–0.533 s. All ten products
+are byte-identical to the previously executed normal products (`object-parity.json`).
+The environment still disables server forwarding, and every compiler invocation
+had a 30 s external cap. Controlled sources were restored. The allocation gain
+is real, but no full rebuild timing gain is established by this normal matrix.
+
+
+### Read-only generic-parameter query fast paths
+
+All backend callers of `structGenericParams` use the returned list read-only.
+Non-generic structs now return nil without allocating an empty one-element
+backing array. Complete structured parameter lists are borrowed when no inferred
+region needs adding. Small region membership checks use a bounded scan; larger
+lists retain the original linear map/synthesis path. Missing-region and legacy
+type/region/named-state synthesis retain their original order and independent
+storage. No type binding, lowering, unit assignment or optimization flag changes.
+
+Tests cover zero-allocation common queries, missing-region copy isolation and
+legacy state cases, plus existing generic/region forwarding, named-argument,
+view, nested reference and fresh-session native regressions. Targeted tests
+also pass under the race detector. Checked-payload source replay uses the
+independently admitted `aa4639cc` state in
+`/tmp/elisa-shared-lookups-production-root`, with separate new-executable native
+entries and full invocation/source checks. Records
+`native-cost-generic-params-96-*.json` measure enum reorder 8.259 s, layout
+11.357 s and removal 7.927 s. All 106 complete native entries and all four
+merged compiler products are byte-identical to the previous verified products
+(`generic-params-96/parity.json`).
+
+The separate warm allocation sample completed in 6.409 s with all 96 native
+entries reused (`/tmp/elisa-generic-params-alloc-profile.py`). Direct helper
+allocations fell from approximately 83.52 MiB to 27.01 MiB; sampled backend
+partition allocations fell from 967.11 MiB to 884.39 MiB. Profiles and focused
+reports are under `generic-params-96/`. This demonstrates an allocation gain;
+it does not establish a repeatable request-latency gain or meet the layout
+target. New normal CLI admission of this executable remains required.
+
+An instrumented, observer-mode normal CLI baseline request for the installed
+`aa4639cc` executable took 6.818 s, reused all native entries, and emitted the
+exact previously checked object. `normal-base.cpu.pprof` and focused reports in
+`/tmp/elisa-shared-lookups-production-root` show 2.88 sampled CPU seconds in
+state decoding (2.16 in value filling), alongside substantial allocator system
+work. This profile bypassed whole-object replay through the existing observer
+flags; server forwarding remained disabled and the request had a 30 s cap.
+The candidate parallel-framing design in `/tmp/elisa-parallel-state-plan.txt`
+is not implemented or qualified and must be justified by further measurements.
