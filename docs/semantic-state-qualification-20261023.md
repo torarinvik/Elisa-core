@@ -1873,3 +1873,44 @@ These read-only indexes are currently rebuilt per generator. The ABI helper
 also builds then discards a parameter-plan slice when no view needs splitting.
 Reducing those allocations is the next concrete candidate; no gain has yet
 been implemented or claimed from this profile.
+
+
+### Shared read-only codegen indexes and unsplit ABI fast paths
+
+Independent IR generators now share immutable symbol-by-node, unique-suffix and
+semantic proof-span indexes for the duration of one `BeginSharedCodegen` build.
+Indexes contain no LLVM handles, are never retained across builds, and cannot
+authorize IR/native reuse. Synthesized expression/proof overlays remain private
+to each generator; span fallback still requires an exact complete source span.
+The original sorted symbol-name tie-break is preserved. Ordinary ABI queries
+also return before allocating a parameter-plan slice when no C view needs
+splitting; explicit bounds plans retain precedence and split C views keep
+the same pointer/length order.
+
+Backend regressions (O0/O3, debug/nondebug, globals/aliases, edit/revert, source
+shifts and native disk reuse) pass. New tests check simultaneous shared-index
+reads and proof-overlay isolation, exact-span lookup, symbol aliases, suffix
+ambiguity, zero-allocation unsplit ABI queries and explicit/split C plans.
+Targeted tests including fresh-session native builds pass with the Go race
+detector. LLVM optimization flags and unit placement are unchanged.
+
+The frozen checked-payload profiler used the admitted `d0c9a710` snapshot with
+full invocation/source checks and a new native cache for the changed executable.
+Records `native-cost-shared-lookups-96-*.json` and output `shared-lookups-96/` are
+under `/tmp/elisa-generic-schedule-production-root`. Enum reorder was 8.285 s,
+layout 11.141 s and removal 7.915 s. All 106 full cache entries (exact input
+bitcode, target, checksum and native object) match the previous scheduler's
+entries byte-for-byte. All four complete objects match the previously linked
+and executed normal CLI products (`parity.json`).
+
+A separate warm-cache allocation profile (`/tmp/elisa-shared-lookups-alloc-profile.py`)
+completed in 6.711 s with all 96 native entries reused. Compared with the earlier
+profile, sampled backend partition allocations fall from 1,483.03 MiB to
+967.11 MiB (about 35%). Whole-process sampled allocations fall from
+7,065.23 MiB to 6,541.09 MiB; the profile includes frontend restoration too.
+Files are `native-allocation.pprof`, `allocation-profile.json`,
+`allocation-{flat,space}.txt` in that output directory. Native warm-stage wall
+time remains about 1.9 s, so these samples establish an allocation gain, not
+a repeatable end-to-end timing gain. The layout case still exceeds ten seconds.
+New normal CLI admission/matrix for this executable remain required; the
+unsupported declaration/contract and default/runtime-quality gates remain open.

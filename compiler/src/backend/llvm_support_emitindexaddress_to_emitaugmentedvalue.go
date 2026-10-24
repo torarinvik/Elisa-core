@@ -70,6 +70,23 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 	// semantic proof map is pointer-keyed because that is exact for the original tree, but a
 	// rebuilt node must not lose a proof and regain a redundant watchdog. Match only an exact
 	// source span; a shared line or column is insufficient because two accesses can be adjacent.
+	if shared := s.g.sharedLookups; shared != nil && len(s.g.result.IndexBoundsProven) == shared.proofCount {
+		if shared.indexProofSpans()[expr.Position] {
+			return true
+		}
+		// Synthesized proofs stay private to this generator. Rebuild only
+		// their small span index when its overlay grows, not the full result.
+		if s.g.provenIndexSpans == nil || s.g.provenIndexSpansSize != len(s.g.boundsOverlay) {
+			s.g.provenIndexSpans = make(map[lexer.Pos]bool, len(s.g.boundsOverlay))
+			for indexed, proven := range s.g.boundsOverlay {
+				if indexed != nil && proven {
+					s.g.provenIndexSpans[indexed.Position] = true
+				}
+			}
+			s.g.provenIndexSpansSize = len(s.g.boundsOverlay)
+		}
+		return s.g.provenIndexSpans[expr.Position]
+	}
 	return s.g.provenIndexPositions()[expr.Position]
 }
 

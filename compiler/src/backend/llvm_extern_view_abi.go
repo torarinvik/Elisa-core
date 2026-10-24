@@ -47,18 +47,25 @@ func externCParts(fn *semantic.FuncType) []semantic.CParamPart {
 	if len(fn.CParamPlan) > 0 {
 		return fn.CParamPlan
 	}
-	var parts []semantic.CParamPart
-	split := false
+	if !fn.IsNativeExtern || !funcTypeIsCABI(fn) {
+		return nil
+	}
+	splits := 0
+	for _, param := range fn.Params {
+		if _, ok := externSplitView(fn, param); ok {
+			splits++
+		}
+	}
+	if splits == 0 {
+		return nil
+	}
+	parts := make([]semantic.CParamPart, 0, len(fn.Params)+splits)
 	for i, p := range fn.Params {
 		if _, ok := externSplitView(fn, p); ok {
-			split = true
 			parts = append(parts, semantic.CParamPart{Param: i, Part: semantic.CParamViewPtr}, semantic.CParamPart{Param: i, Part: semantic.CParamViewLen})
 			continue
 		}
 		parts = append(parts, semantic.CParamPart{Param: i, Part: semantic.CParamWhole})
-	}
-	if !split {
-		return nil
 	}
 	return parts
 }

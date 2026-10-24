@@ -170,6 +170,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	result.PackedLowering = options.PackedProfile.metadata()
 	result.BeginSharedCodegen()
 	defer result.EndSharedCodegen()
+	shared := newSharedCodegenLookups(result)
 	objects := make([][]byte, parts)
 	members := make([][]string, parts)
 	var previousMembers [][]string
@@ -192,7 +193,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		go func() {
 			defer wg.Done()
 			for part := range next {
-				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, &members[part])
+				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, &members[part], shared)
 			}
 		}()
 	}
@@ -230,7 +231,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 // up in the session and compiles it on a miss.
 var errPartitionDeclined = errors.New("partitioned IR declined")
 
-func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, members *[]string) ([]byte, error) {
+func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, members *[]string, shared *sharedCodegenLookups) ([]byte, error) {
 	unit := hex.EncodeToString(unitID[:8])
 	irStart := time.Now()
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
@@ -242,7 +243,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		if !options.DebugInfo {
 			C.LLVMContextSetDiscardValueNames(g.context, 1)
 		}
-	})
+	}, shared)
 	partitionGenNanos.Add(int64(time.Since(irStart)))
 	if err != nil {
 		return nil, fmt.Errorf("partition %d: %w", part, err)

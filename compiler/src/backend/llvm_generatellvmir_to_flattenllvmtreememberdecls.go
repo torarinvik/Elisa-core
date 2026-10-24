@@ -24,10 +24,8 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"unsafe"
 )
 
@@ -124,8 +122,8 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 
 // compileLLVMModuleConfigured is compileLLVMModuleWithTargetDebugTrace with a
 // hook that adjusts the generator before any IR is emitted.
-func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, configure func(*llvmGenerator)) (*llvmGenerator, error) {
-	g, err := newLLVMGenerator(result)
+func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, configure func(*llvmGenerator), shared ...*sharedCodegenLookups) (*llvmGenerator, error) {
+	g, err := newLLVMGenerator(result, shared...)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +204,7 @@ type llvmGenerator struct {
 	bodyDepth    int
 	// exprOverlay and boundsOverlay hold this generator's records for the
 	// expressions it synthesizes when the Result is shared (llvm_partition_ir.go).
+	sharedLookups *sharedCodegenLookups
 	exprOverlay   map[ast.Expr]semantic.Type
 	boundsOverlay map[*ast.IndexExpr]bool
 	// Last-segment indexes for the unique-suffix name fallbacks (see
@@ -277,7 +276,7 @@ func noteTypeKeyFor(t semantic.Type) typeMemoKey {
 	}
 	return typeMemoKey{typ: t}
 }
-func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
+func newLLVMGenerator(result *semantic.Result, shared ...*sharedCodegenLookups) (*llvmGenerator, error) {
 	if result == nil {
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
 	}
@@ -323,12 +322,11 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 	}
 	beginModuleCStringLifetime()
 	g.transientCStringLifetime = true
-	for _, name := range slices.Sorted(maps.Keys(result.GlobalScope.Symbols)) { // map: sort so a shared node resolves the same way every run
-		sym := result.GlobalScope.Symbols[name]
-		if sym == nil || sym.Node == nil {
-			continue
-		}
-		g.symbolsByNode[sym.Node] = sym
+	if len(shared) != 0 && shared[0] != nil && shared[0].result == result {
+		g.sharedLookups = shared[0]
+		g.symbolsByNode = shared[0].symbolsByNode
+	} else {
+		g.symbolsByNode = codegenSymbolsByNode(result)
 	}
 	return g, nil
 }

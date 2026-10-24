@@ -1402,6 +1402,10 @@ func suffixIndex[V comparable](entries map[string]V) map[string][]string {
 }
 
 func (g *llvmGenerator) namedTypeSuffixIndex() map[string][]string {
+	if shared := g.sharedLookups; shared != nil && len(g.result.NamedTypes) == shared.namedCount {
+		shared.namedOnce.Do(func() { shared.namedSuffixes = suffixIndex(shared.result.NamedTypes) })
+		return shared.namedSuffixes
+	}
 	if g.namedTypeSuffixes == nil || g.namedTypeSuffixesSize != len(g.result.NamedTypes) {
 		g.namedTypeSuffixes = suffixIndex(g.result.NamedTypes)
 		g.namedTypeSuffixesSize = len(g.result.NamedTypes)
@@ -1411,6 +1415,10 @@ func (g *llvmGenerator) namedTypeSuffixIndex() map[string][]string {
 
 func (g *llvmGenerator) globalSuffixIndex() map[string][]string {
 	symbols := g.result.GlobalScope.Symbols
+	if shared := g.sharedLookups; shared != nil && len(symbols) == shared.symbolCount {
+		shared.globalOnce.Do(func() { shared.globalSuffixes = suffixIndex(shared.result.GlobalScope.Symbols) })
+		return shared.globalSuffixes
+	}
 	if g.globalSuffixes == nil || g.globalSuffixesSize != len(symbols) {
 		g.globalSuffixes = suffixIndex(symbols)
 		g.globalSuffixesSize = len(symbols)
