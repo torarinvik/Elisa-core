@@ -66,16 +66,20 @@ export fn layout() -> usize = layout
 	if len(initial.Errors()) != 0 {
 		t.Fatal(initial.Errors())
 	}
-	for _, mode := range []string{"added", "reordered", "base", "added", "base"} {
+	for _, mode := range []string{"renamed", "base", "added", "renamed-added", "reordered", "renamed", "base"} {
 		source := base
 		prefix, suffix := "", ""
-		if mode == "added" {
+		if mode == "added" || mode == "renamed-added" {
 			source = strings.Replace(base, "    value: T\n", "    value: T\n    probe: u64 = 0\n", 1)
 			suffix = "uint64_t probe;"
 		}
 		if mode == "reordered" {
 			source = strings.Replace(base, "    value: T\n", "    probe: u64 = 0\n    value: T\n", 1)
 			prefix = "uint64_t probe;"
+		}
+		if strings.HasPrefix(mode, "renamed") {
+			source = strings.Replace(source, "Box[T] layout(c):", "Box[Payload] layout(c):", 1)
+			source = strings.Replace(source, "    value: T\n", "    value: Payload\n", 1)
 		}
 		data, err := state.MarshalState()
 		if err != nil {
@@ -107,7 +111,7 @@ export fn layout() -> usize = layout
 			}
 		}
 		assignProbe, checkProbe := "", ""
-		if mode != "base" {
+		if prefix != "" || suffix != "" {
 			assignProbe = "big.probe=0xfedcba9876543210ULL;"
 			checkProbe = " || copied.probe!=big.probe"
 		}

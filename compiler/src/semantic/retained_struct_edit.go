@@ -39,10 +39,11 @@ func retainedPlainStruct(d *ast.StructDecl) bool {
 }
 
 // Field/default and ordinary/C/packed layout changes preserve a simple record's
-// declaration protocol. Type/region binders and their bounds remain identical;
+// declaration protocol. Type binders may be renamed at fixed arity/kind/bounds;
+// region binders remain identical;
 // other binder kinds and annotations beyond validated @align need their own rebuild.
 func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
-	if old.Name != current.Name || !slices.Equal(old.TypeParams, current.TypeParams) || !slices.Equal(old.RegionParams, current.RegionParams) || len(old.GenericParams) != len(current.GenericParams) {
+	if old.Name != current.Name || len(old.TypeParams) != len(current.TypeParams) || !slices.Equal(old.RegionParams, current.RegionParams) || len(old.GenericParams) != len(current.GenericParams) {
 		return false
 	}
 	simple := func(d *ast.StructDecl) bool {
@@ -77,7 +78,7 @@ func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
 		return false
 	}
 	for i, p := range old.GenericParams {
-		if q := current.GenericParams[i]; p.Name != q.Name || p.Kind != q.Kind || p.InterfaceBound != q.InterfaceBound || p.StateOwner != q.StateOwner || !slices.Equal(p.StateCases, q.StateCases) {
+		if q := current.GenericParams[i]; (p.Kind != ast.GenericParamType && p.Name != q.Name) || p.Kind != q.Kind || p.InterfaceBound != q.InterfaceBound || p.StateOwner != q.StateOwner || !slices.Equal(p.StateCases, q.StateCases) {
 			return false
 		}
 	}
@@ -315,6 +316,8 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 	for i, e := range edits {
 		olds[i] = e.st.Fields
 		e.st.Decl = e.edit
+		e.st.TypeParams = slices.Clone(e.edit.TypeParams)
+		e.st.GenericParams = slices.Clone(e.edit.GenericParams)
 		e.st.ReprC, e.st.Layout = e.edit.ReprC, e.edit.Layout
 		e.st.PackedLayout = e.edit.Layout == ast.StructLayoutPacked
 		// The annotation collector only writes when present: reset for removal.

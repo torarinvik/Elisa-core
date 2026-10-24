@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -99,7 +100,24 @@ def read() -> i64:
 	if retainedDiagnostics(got) != retainedDiagnostics(want) || len(got.Errors()) != 0 {
 		t.Fatalf("fixed-bound diagnostics: %v", got.Errors())
 	}
-	for _, source := range []string{strings.Replace(added, "Box[T: Mark]", "Box[T]", 1), strings.ReplaceAll(added, "T", "U")} {
+	data, err := state.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = RestoreAnalysisState(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := strings.ReplaceAll(added, "T", "U")
+	got, err = state.Update(retainedParse(t, renamed), retainedParse(t, renamed), []byte(renamed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = AnalyzeWithOptions(retainedParse(t, renamed), AnalyzeOptions{})
+	if retainedDiagnostics(got) != retainedDiagnostics(want) || len(got.Errors()) != 0 {
+		t.Fatalf("bounded rename diagnostics: %v", got.Errors())
+	}
+	for _, source := range []string{strings.Replace(added, "Box[T: Mark]", "Box[T]", 1), strings.Replace(added, "Box[T: Mark]", "Box[T: Mark, U]", 1)} {
 		old := retainedParse(t, added)
 		current := retainedParse(t, source)
 		oldStruct := old.Decls[2].(*ast.StructDecl)
@@ -156,6 +174,61 @@ def reference_only() -> usize:
 		}
 		if state.LastStats.StructUsers != 2 {
 			t.Fatalf("expected inline wrapper/containing queries only: %+v", state.LastStats)
+		}
+	}
+}
+
+func TestRetainedGenericStructParameterNamesDiskRoundTrip(t *testing.T) {
+	const base = `struct Pair[A, B]:
+    left: A
+    right: B
+type Alias = Pair[i64, u8]
+
+def first[T](value: Pair[T, u8]) -> T:
+    return value.left
+
+def read() -> i64:
+    value: Alias = Alias{left: 7, right: 9}
+    return first[i64](value) + value.right.i64()
+
+def layout() -> usize:
+    return size_of(Alias) + offset_of(Alias, right)
+`
+	renamed := strings.Replace(base, "Pair[A, B]:\n    left: A\n    right: B", "Pair[Left, Right]:\n    left: Left\n    right: Right", 1)
+	swapped := strings.Replace(base, "Pair[A, B]:\n    left: A\n    right: B", "Pair[B, A]:\n    left: B\n    right: A", 1)
+	initial, state := AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
+	if len(initial.Errors()) != 0 {
+		t.Fatal(initial.Errors())
+	}
+	for _, source := range []string{renamed, base, swapped, renamed, base} {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonical := state.a.namedTypes["Pair"].(*StructType)
+		got, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cold := AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{})
+		if retainedDiagnostics(got) != retainedDiagnostics(cold) || len(got.Errors()) != 0 {
+			t.Fatalf("cold mismatch: %v", got.Errors())
+		}
+		want := cold.NamedTypes["Pair"].(*StructType)
+		if got.NamedTypes["Pair"] != canonical || !slices.Equal(canonical.TypeParams, want.TypeParams) {
+			t.Fatal("canonical binder metadata stale")
+		}
+		for i, p := range want.GenericParams {
+			if canonical.GenericParams[i].Name != p.Name {
+				t.Fatal("generic binder metadata stale")
+			}
+		}
+		if state.LastStats.StructUsers != 3 {
+			t.Fatalf("expected all instance users: %+v", state.LastStats)
 		}
 	}
 }

@@ -3172,3 +3172,34 @@ passes the direct emitted helper oracle. Controlled sources are restored.
 the additional case, and `/tmp/elisa-include-family-production-matrix-all.log`
 the main matrix run. This closes the current matrix's ordinary timing miss on
 this installed binary; further edit forms and default-mode policy remain open.
+
+
+## Generic type-binder name edits, 24 October 2026
+
+Renaming runtime `ConcurrencyBox[T]`/`value: mutable T` to
+`ConcurrencyBox[Payload]`/`value: mutable Payload` on ordinary installed 39 hit
+a guarded fallback: 18.382 seconds, exit 1, checkpoint 2434/14422 declarations,
+no object. `generic-record-binder.json` in the include-family production namespace
+records this new miss; the runtime source is restored. A serialized two-parameter
+regression also failed before the change (`/tmp/elisa-generic-binder-before.log`).
+
+Simple generic-record field replay now permits type-parameter names to change
+while preserving arity, binder kinds, region binders and exact bounds. The live
+canonical StructType receives the edited TypeParams and GenericParams before
+its fields are repopulated; its identity remains unchanged. Existing struct-user
+invalidation and memo clearing still apply. Bound changes, arity changes, value
+and state binders retain their guards.
+
+The retained semantic suite passes in 0.956 seconds, including disk round trips
+through renamed parameters, a two-parameter name swap, restoration, generic
+function consumers, alias layout queries, and a renamed binder with the same
+interface bound. The fixed-bound rejection controls now test bound removal and
+arity change, rather than treating a name change as a protocol change.
+`/tmp/elisa-generic-binder-semantic.log` contains the run.
+
+All retained backend tests pass in 11.357 seconds. The generic-instance ABI test
+now interleaves binder renames with field addition/reordering/restoration; full
+normal/debug IR matches cold compilation and both cold/replay O3 native C clients
+verify high signed copies, nonzero added payloads, small values, references and
+physical layouts. `/tmp/elisa-generic-binder-backend.log` contains the run.
+Full compiler performance of this newly supported edit remains to be qualified.
