@@ -3158,3 +3158,17 @@ flag diagnostics. Records: `new-include.json`, `new-include-functional.json` in
 that namespace and `/tmp/elisa-include-family-production-include-functional.log`.
 This verifies the added-file gain; the fresh 23-case matrix and remaining broader
 minor/major edit families still need qualification on the latest implementation.
+
+
+The fresh installed-39 matrix is complete: **24 variants including baseline and
+new include**, 46 timed invocations, all exit zero and under ten seconds.
+Largest edited times: packed 9.197 s, region record 8.759, ordinary record field
+8.720, alignment 8.631, generic field 8.322, private bound 8.234. The new include
+was 6.171 s; exact repeats were 0.140–0.173 s. Generic field output matches its
+established `6556fe...` object hash. All 24 native compiler products pass the
+include fixture/sidecar/enum/diagnostic checks; the new-include product also
+passes the direct emitted helper oracle. Controlled sources are restored.
+`functional.json` contains 23 existing variants, `new-include-functional.json`
+the additional case, and `/tmp/elisa-include-family-production-matrix-all.log`
+the main matrix run. This closes the current matrix's ordinary timing miss on
+this installed binary; further edit forms and default-mode policy remain open.
