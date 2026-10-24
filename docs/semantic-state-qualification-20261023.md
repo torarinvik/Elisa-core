@@ -2051,3 +2051,60 @@ samples include 2.74 s under semantic restore, 2.60 s in object reading and
 Runtime page reclamation (`madvise`) also accounts for 3.46 sampled CPU seconds
 across threads. These measurements justify investigating restoration but do
 not establish that parallel decoding alone will close the layout gap.
+
+
+## Framed restoration qualification
+
+A typed source-position decoder prototype passed identity/malformed-input tests
+and improved a dense 10,000-position microbenchmark by about 26%, but alternating
+full-source requests did not show a reliable request-time gain. It was removed
+from production; its code and evidence are preserved at
+`/tmp/elisa-typed-position-prototype` and `typed-position-ab/` under the source
+handoff qualification root.
+
+The replacement candidate writes `ELISTATE4`: independent object
+frames within a checksummed payload, validated bounded lengths, and a copied immutable string dictionary at
+the tail. All canonical allocations and storage aliases are resolved before any
+object is filled. Up to six workers fill disjoint non-alias objects with private
+scratch and a shared CAS allocation budget. Any error cancels work and returns
+no graph. An explicit registry assertion is required for a concurrent field
+accessor; legacy `ELISTATE3` remains readable sequentially. Semantic snapshots
+use the same field projection and complete schema as before.
+
+The full statecache race suite passes, including framed cyclic/interface/map
+identities, named references, hidden-capacity overlapping slices, interior
+pointers, alias-body rejection, malformed framing/dictionaries, truncation and
+budget failures. Semantic snapshot round-trip/edit/projection tests and the
+main cache/analysis-disk suite pass. Every build and compiler invocation used an
+external 30-second cap.
+
+An explicit qualification helper restored the admitted source-handoff payload,
+validated exact source/options through the native qualification pipeline, and
+re-encoded it only to `framed-qualification/framed.raw` outside cache admission.
+The raw snapshot grew from approximately 566.9 MB to 624.1 MB. Re-encoding plus
+validation took 16.754 s. Alternating fresh-process tests in one frozen executable
+measured restore/scratch overlap of 4.148/4.169/4.178 s for legacy versus
+2.931/2.873/2.905 s for framed. Full restoration-only requests were legacy
+4.482/4.367/4.380 s versus framed 3.342/3.065/3.119 s (the first framed request
+includes CPU profiling). The gain is about 1.3 s of overlap; the scratch parser
+now finishes last. Raw records and a profile are under `framed-qualification/`
+in `/tmp/elisa-source-handoff-production-root`. Native edit equivalence and
+normal CLI admission of the new executable remain required. This does not yet
+meet the layout or broader major-edit/optimization-quality gates.
+
+Native qualification of the framed payload succeeded with unchanged O3/96-unit
+settings: base (new native namespace) 20.047 s, unchanged/native disk reuse
+5.290 s, enum edit 6.906 s, layout 9.986 s and removal 7.039 s. Warm regeneration
+requests took 6.263–6.601 s. All four merged objects are byte-identical to the
+previously verified normal CLI products (`framed-96/parity.json` in the same
+root). Controlled sources were restored. This is explicit payload qualification,
+not new compiler namespace admission; the normal CLI layout result remains
+unproven for this change.
+
+A bounded four-worker alternative did not establish another meaningful gain:
+six-worker overlap 2.861/2.990/2.888 s versus four 2.831/2.872/2.962 s. The
+implementation retains six. Both use the same payload and options;
+`framed-qualification/workers-*.json` records complete process timings, including
+a slower first launch of the newly built four-worker executable. Additional
+tests cover concurrent allocation-budget underflow/overflow, dictionary byte
+ownership/checksums, and the explicit custom-field-accessor parallel assertion.

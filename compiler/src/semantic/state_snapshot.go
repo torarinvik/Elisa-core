@@ -19,6 +19,7 @@ var semanticStateRegistry = sync.OnceValue(func() *statecache.Registry {
 		return t != reflect.TypeFor[RetainedAnalysis]() || name != "post"
 	}, func(v reflect.Value, i int) reflect.Value { return settable(v.Field(i)) })
 	registerSemanticSliceAllocators(registry)
+	registry.EnableParallelDecode()
 	registry.InternZeroPointer(invalidType)
 	registry.InternZeroPointer(neverType)
 	registry.InternZeroPointer(nullType)

@@ -25,10 +25,18 @@ type encoder struct {
 	nodes           nodeInventory
 	scanning        bool
 	strings         map[string]uint64
+	framed          bool
+	stringTable     []string
 }
 
-func (r *Registry) Encode(root any) ([]byte, error) {
-	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true, strings: map[string]uint64{}}
+func (r *Registry) Encode(root any) ([]byte, error) { return r.encode(root, false) }
+
+// EncodeFramed writes independent object records and a shared string dictionary.
+// Decode accepts both this format and the preceding sequential format.
+func (r *Registry) EncodeFramed(root any) ([]byte, error) { return r.encode(root, true) }
+
+func (r *Registry) encode(root any, framed bool) ([]byte, error) {
+	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true, strings: map[string]uint64{}, framed: framed}
 	v := reflect.ValueOf(root)
 	if !v.IsValid() || r.ids[v.Type()] == 0 {
 		return nil, fmt.Errorf("unregistered state root")
@@ -40,7 +48,11 @@ func (r *Registry) Encode(root any) ([]byte, error) {
 		return nil, err
 	}
 	e.scanning = false
-	e.data.WriteString("ELISTATE3")
+	if framed {
+		e.data.WriteString("ELISTATE4")
+	} else {
+		e.data.WriteString("ELISTATE3")
+	}
 	e.data.Write(r.fingerprint[:])
 	e.uint(r.ids[v.Type()])
 	e.uint(uint64(e.nodes.count))
@@ -50,16 +62,34 @@ func (r *Registry) Encode(root any) ([]byte, error) {
 			return nil, err
 		}
 	}
+	framing := e.data.Len()
+	if framed {
+		e.data.Write(make([]byte, 8*(e.nodes.count+2)))
+	}
 	for i := 0; i < e.nodes.count; i++ {
+		before := e.data.Len()
 		node := e.nodes.at(i)
 		if node.alias == nil {
 			if err := e.body(node.value); err != nil {
 				return nil, err
 			}
 		}
+		if framed {
+			binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(i+1):], uint64(e.data.Len()-before))
+		}
 	}
+	before := e.data.Len()
 	if err := e.value(v); err != nil {
 		return nil, err
+	}
+	if framed {
+		binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(e.nodes.count+1):], uint64(e.data.Len()-before))
+		binary.LittleEndian.PutUint64(e.data.Bytes()[framing:], uint64(e.data.Len()))
+		e.uint(uint64(len(e.stringTable)))
+		for _, value := range e.stringTable {
+			e.uint(uint64(len(value)))
+			e.data.WriteString(value)
+		}
 	}
 	digest := sha256.Sum256(e.data.Bytes())
 	e.data.Write(digest[:])
@@ -75,6 +105,20 @@ func (e *encoder) uint(v uint64) {
 }
 func (e *encoder) str(v string) {
 	if e.scanning {
+		return
+	}
+	if e.framed {
+		if v == "" {
+			e.uint(0)
+			return
+		}
+		id := e.strings[v]
+		if id == 0 {
+			id = uint64(len(e.stringTable) + 1)
+			e.strings[v] = id
+			e.stringTable = append(e.stringTable, v)
+		}
+		e.uint(id)
 		return
 	}
 	// Zero denotes the empty string; even codes refer to an earlier string.
@@ -306,4 +350,13 @@ func (r *Registry) EncodeWithFieldAccess(root any, access FieldAccess) ([]byte, 
 		projected.access = access
 	}
 	return projected.Encode(root)
+}
+
+// EncodeFramedWithFieldAccess applies the same read projection as EncodeWithFieldAccess.
+func (r *Registry) EncodeFramedWithFieldAccess(root any, access FieldAccess) ([]byte, error) {
+	projected := *r
+	if access != nil {
+		projected.access = access
+	}
+	return projected.EncodeFramed(root)
 }

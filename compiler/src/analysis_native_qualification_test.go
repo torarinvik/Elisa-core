@@ -147,6 +147,17 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		t.Fatal(diagnostics.String())
 	}
 	t.Logf("native flags: opt=%v target=%q debug=%v", effectiveOptimizationLevel(cli), cli.targetTriple, cli.debugInfo)
+	// Explicit qualification output stays outside production cache admission.
+	if output := os.Getenv("ELISACORE_STATE_QUALIFY_REENCODE"); output != "" {
+		encoded, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(output, encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("checked snapshot re-encoded: %d bytes", len(encoded))
+	}
 	// Allows go test -test.cpuprofile to measure restoration and checked source
 	// admission without overlapping the native-stage profiler below.
 	if os.Getenv("ELISACORE_STATE_QUALIFY_RESTORE_ONLY") == "1" {

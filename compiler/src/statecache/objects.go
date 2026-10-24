@@ -141,63 +141,71 @@ func (d *decoder) readObjects() error {
 			return err
 		}
 	}
+	if d.framed {
+		return d.readFramedBodies(descriptions)
+	}
 	for id := 1; id <= count; id++ {
-		desc := descriptions[id]
-		if desc.alias != nil {
-			continue
+		if descriptions[id].alias == nil {
+			if err := d.fillObject(id, descriptions[id]); err != nil {
+				return err
+			}
 		}
-		v := d.objects[id]
-		switch v.Kind() {
-		case reflect.Pointer:
-			if err := d.value(v.Elem()); err != nil {
-				return err
-			}
-		case reflect.Slice:
-			full, err := d.fullSlice(v)
+	}
+	return nil
+}
+
+func (d *decoder) fillObject(id int, desc objectDescription) error {
+	v := d.objects[id]
+	switch v.Kind() {
+	case reflect.Pointer:
+		if err := d.value(v.Elem()); err != nil {
+			return err
+		}
+	case reflect.Slice:
+		full, err := d.fullSlice(v)
+		if err != nil {
+			return err
+		}
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			data, err := d.take(uint64(v.Cap()))
 			if err != nil {
 				return err
 			}
-			if v.Type().Elem().Kind() == reflect.Uint8 {
-				data, err := d.take(uint64(v.Cap()))
-				if err != nil {
-					return err
-				}
-				copy(full.Bytes(), data)
-				continue
-			}
-			for i := 0; i < full.Len(); i++ {
-				if err := d.value(full.Index(i)); err != nil {
-					return err
-				}
-			}
-		case reflect.Map:
-			if desc.length == 0 {
-				continue
-			}
-			entry, err := d.mapEntryScratch(v.Type())
-			if err != nil {
+			copy(full.Bytes(), data)
+			return nil
+		}
+		for i := 0; i < full.Len(); i++ {
+			if err := d.value(full.Index(i)); err != nil {
 				return err
 			}
-			key, value := entry.key, entry.value
-			for i := 0; i < desc.length; i++ {
-				// Sparse values leave zero fields untouched. Clear both cells before
-				// reuse; SetMapIndex copies the values into the destination map.
-				key.SetZero()
-				value.SetZero()
-				if err := d.value(key); err != nil {
-					return err
-				}
-				if err := d.value(value); err != nil {
-					return err
-				}
-				if !key.Comparable() {
-					return fmt.Errorf("noncomparable state map key")
-				}
-				if v.MapIndex(key).IsValid() {
-					return fmt.Errorf("duplicate state map key")
-				}
-				v.SetMapIndex(key, value)
+		}
+	case reflect.Map:
+		if desc.length == 0 {
+			return nil
+		}
+		entry, err := d.mapEntryScratch(v.Type())
+		if err != nil {
+			return err
+		}
+		key, value := entry.key, entry.value
+		for i := 0; i < desc.length; i++ {
+			// Sparse values leave zero fields untouched. Clear both cells before
+			// reuse; SetMapIndex copies the values into the destination map.
+			key.SetZero()
+			value.SetZero()
+			if err := d.value(key); err != nil {
+				return err
 			}
+			if err := d.value(value); err != nil {
+				return err
+			}
+			if !key.Comparable() {
+				return fmt.Errorf("noncomparable state map key")
+			}
+			if v.MapIndex(key).IsValid() {
+				return fmt.Errorf("duplicate state map key")
+			}
+			v.SetMapIndex(key, value)
 		}
 	}
 	return nil

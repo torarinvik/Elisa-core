@@ -24,6 +24,7 @@ type Registry struct {
 	access          FieldAccess
 	singletons      map[reflect.Type]reflect.Value
 	sliceAllocators map[reflect.Type]func(int, int) typedSliceAllocator
+	parallelDecode  bool
 }
 
 // New freezes the complete local schema. Policy exclusions must describe
@@ -149,3 +150,7 @@ func (r *Registry) InternZeroPointer(value any) {
 	}
 	r.singletons[v.Type()] = v
 }
+
+// EnableParallelDecode asserts that the registered field accessor is safe for
+// concurrent calls on disjoint objects. Call only during registry construction.
+func (r *Registry) EnableParallelDecode() { r.parallelDecode = true }

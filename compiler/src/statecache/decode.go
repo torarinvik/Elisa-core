@@ -7,18 +7,21 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync/atomic"
 )
 
 type decoder struct {
-	registry   *Registry
-	data       []byte
-	at         int
-	objects    []reflect.Value
-	depth      int
-	budget     uint64
-	strings    []string
-	mapEntries map[reflect.Type]decodedMapEntry
-	sliceFill  map[reflect.Type]reflect.Value
+	registry     *Registry
+	data         []byte
+	at           int
+	objects      []reflect.Value
+	depth        int
+	budget       uint64
+	strings      []string
+	mapEntries   map[reflect.Type]decodedMapEntry
+	sliceFill    map[reflect.Type]reflect.Value
+	framed       bool
+	sharedBudget *atomic.Uint64
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
@@ -27,7 +30,7 @@ func (r *Registry) Decode(data []byte) (any, error) {
 
 // DecodeWithLimit bounds container storage before allocating from a cache file.
 func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
-	if len(data) < 9+32+1+32 || string(data[:9]) != "ELISTATE3" || !bytes.Equal(data[9:41], r.fingerprint[:]) {
+	if len(data) < 9+32+1+32 || (string(data[:9]) != "ELISTATE3" && string(data[:9]) != "ELISTATE4") || !bytes.Equal(data[9:41], r.fingerprint[:]) {
 		return nil, fmt.Errorf("state schema mismatch")
 	}
 	payload := data[:len(data)-32]
@@ -35,7 +38,7 @@ func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
 	if !bytes.Equal(digest[:], data[len(data)-32:]) {
 		return nil, fmt.Errorf("state checksum mismatch")
 	}
-	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes, strings: []string{""}}
+	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes, strings: []string{""}, framed: string(data[:9]) == "ELISTATE4"}
 	id, err := d.uint()
 	if err != nil {
 		return nil, err
@@ -235,6 +238,17 @@ func (d *decoder) value(v reflect.Value) error {
 }
 
 func (d *decoder) reserve(count uint64, size uintptr) error {
+	if d.sharedBudget != nil {
+		for {
+			remaining := d.sharedBudget.Load()
+			if size != 0 && count > remaining/uint64(size) {
+				return fmt.Errorf("state allocation budget exceeded")
+			}
+			if d.sharedBudget.CompareAndSwap(remaining, remaining-count*uint64(size)) {
+				return nil
+			}
+		}
+	}
 	if size != 0 && count > d.budget/uint64(size) {
 		return fmt.Errorf("state allocation budget exceeded")
 	}
@@ -249,6 +263,12 @@ func (d *decoder) stateString() (string, error) {
 	code, err := d.uint()
 	if err != nil {
 		return "", err
+	}
+	if d.framed {
+		if code >= uint64(len(d.strings)) {
+			return "", fmt.Errorf("invalid state string ID")
+		}
+		return d.strings[code], nil
 	}
 	if code == 0 {
 		return "", nil

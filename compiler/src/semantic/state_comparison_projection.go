@@ -40,14 +40,14 @@ func (r *RetainedAnalysis) marshalComparisonProjection() ([]byte, error) {
 	}
 	registry := semanticStateRegistry()
 	if len(omitted) == 0 {
-		return registry.Encode(r)
+		return registry.EncodeFramed(r)
 	}
 	fnType := reflect.TypeFor[ast.FuncDecl]()
 	retainedType := reflect.TypeFor[RetainedAnalysis]()
 	body, _ := fnType.FieldByName("Body")
 	textField, _ := retainedType.FieldByName("texts")
 	root := reflect.ValueOf(r).Pointer()
-	return registry.EncodeWithFieldAccess(r, func(v reflect.Value, i int) reflect.Value {
+	return registry.EncodeFramedWithFieldAccess(r, func(v reflect.Value, i int) reflect.Value {
 		if v.Type() == retainedType && i == textField.Index[0] && v.CanAddr() && v.Addr().Pointer() == root {
 			return reflect.ValueOf(texts)
 		}
