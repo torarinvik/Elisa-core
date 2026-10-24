@@ -469,34 +469,42 @@ func (a *Analyzer) traceStorePayloadFailure(decl *ast.FuncDecl, other, index int
 // and fails closed for unknown expressions. Recursive edges share the active
 // proof: every concrete store in the reachable cycle is still checked.
 func (a *Analyzer) calleeStoresProgramLivedElements(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) bool {
-	return a.calleeStoresProgramLivedElementsActive(decl, other, index, seen, map[storeScanKey]bool{}, map[storeScanKey]bool{})
+	return a.calleeStoresProgramLivedElementsActive(decl, other, index, seen, newStoreLivedProof())
 }
 
-func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, other, index int, seen, activeProof, completed map[storeScanKey]bool) (result bool) {
+func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool, root *storeLivedProof) (result bool) {
 	decl = a.readDecl(decl)
 	if decl == nil || other < 0 || index < 0 || other >= len(decl.Params) || index >= len(decl.Params) {
 		a.traceStorePayloadFailure(decl, other, index, "invalid-input", nil)
 		return false
 	}
 	key := storeScanKey{decl, other, index}
-	if result, known := completed[key]; known {
+	if result, known := a.storeLivedFinal(key); known {
 		return result
 	}
-	if activeProof[key] {
+	if done, known := root.completed[key]; known {
+		if done.tentative {
+			root.consult(-1)
+		}
+		return done.result
+	}
+	if depth, active := root.active[key]; active {
 		// This invocation is already checking every store reachable from the
 		// same source/target pair. Re-entering it adds no new obligation; the
 		// active invocation still rejects any unsafe concrete store or unknown
 		// callee in the cycle before its result can reach the root caller.
+		root.consult(depth)
 		return true
 	}
-	activeProof[key] = true
+	frame := root.enter(a, key)
 	defer func() {
-		delete(activeProof, key)
-		// Memoization is confined to this root proof. If a recursive
+		// Memoization within the root proof is unchanged: if a recursive
 		// assumption later fails, that failure propagates up its initiating
-		// call chain and rejects the root; tentative successes never escape
-		// into another query.
-		completed[key] = result
+		// call chain and rejects the root. Only a result that consulted no
+		// assumption still open above it is final (storeLivedProof.leave).
+		if root.leave(a, frame, key, result) {
+			a.storeLivedRecord(key, result)
+		}
 	}()
 	params, header, content, targets, views := a.storeScanTaint(decl, other, decl.Params[index].Name, seen)
 	idx := a.storeScanIndex(decl)
@@ -650,7 +658,7 @@ func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, ot
 						fail("callee-header", args[si])
 						return
 					}
-					if !a.calleeStoresProgramLivedElementsActive(callee, si, ti, seen, activeProof, completed) {
+					if !a.calleeStoresProgramLivedElementsActive(callee, si, ti, seen, root) {
 						fail("callee-payload", args[si])
 						return
 					}

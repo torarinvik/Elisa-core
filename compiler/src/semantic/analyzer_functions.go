@@ -192,6 +192,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.beginReturnBorrowSummary(fn)
 	a.currentFuncDecl = fn
+	a.storeLivedCache = nil
 	a.currentFuncType = fnType
 	if fn != nil && (fn.IsGhost || fn.IsLaw) {
 		a.ghostReadAllowed++
@@ -375,6 +376,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.currentFuncDecl = savedFuncDecl
+	a.storeLivedCache = nil
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
@@ -727,6 +729,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
 	a.currentFuncDecl = nil
+	a.storeLivedCache = nil
 	a.currentFuncType = nil
 	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	a.currentRegions = map[*Symbol]regionState{}
@@ -844,6 +847,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.currentFuncDecl = savedFuncDecl
+	a.storeLivedCache = nil
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
@@ -938,6 +942,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
 	a.currentFuncDecl = nil
+	a.storeLivedCache = nil
 	a.currentFuncType = nil
 	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	a.currentRegions = map[*Symbol]regionState{}
@@ -1042,6 +1047,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.currentFuncDecl = savedFuncDecl
+	a.storeLivedCache = nil
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions

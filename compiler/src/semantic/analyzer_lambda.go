@@ -203,6 +203,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = returnType
 	a.currentFuncDecl = &ast.FuncDecl{Position: expr.Position, Name: "lambda", Params: append([]ast.ParamDecl(nil), expr.Params...), ReturnType: expr.ReturnType, Body: append([]ast.Stmt(nil), expr.Body...)}
+	a.storeLivedCache = nil
 	a.currentFuncType = fnType
 	a.returnFreshShapeStatus = freshReturnTracker(returnType)
 	a.currentRegions = map[*Symbol]regionState{}
@@ -383,6 +384,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.currentFuncDecl = savedFuncDecl
+	a.storeLivedCache = nil
 	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions

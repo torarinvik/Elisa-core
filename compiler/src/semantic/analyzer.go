@@ -301,6 +301,9 @@ type Analyzer struct {
 	// storeScanCycleHit marks a search that consulted an in-progress frame (not cacheable).
 	storeScanCache    map[storeScanKey]storeMode
 	storeScanCycleHit bool
+	// storeLivedCache memoizes final calleeStoresProgramLivedElements proofs while
+	// currentFuncDecl is unchanged; see region_store_lived_cache.go.
+	storeLivedCache   map[storeScanKey]bool
 	storeFlowKindsOff bool // tests: read every store-flow edge kind as Header
 	// The store-scan DFS stack and provisional results (region_store_scan_frames.go).
 	storeScanFrames          []storeScanFrame

@@ -154,6 +154,7 @@ func (r *RetainedAnalysis) narrowReturnBorrowInvalidation(a *Analyzer) {
 	before := len(a.diagnostics)
 	savedFn := a.currentFuncDecl
 	a.currentFuncDecl = nil
+	a.storeLivedCache = nil
 	for fn := range r.rbSameFlow {
 		// Its last summary and the deps it was computed from still hold.
 		if flow, ok := r.rbSummaries[fn]; ok {
@@ -167,6 +168,7 @@ func (r *RetainedAnalysis) narrowReturnBorrowInvalidation(a *Analyzer) {
 		a.returnBorrowFlowForFunc(fn, map[*ast.FuncDecl]bool{})
 	}
 	a.currentFuncDecl = savedFn
+	a.storeLivedCache = nil
 	if len(a.diagnostics) != before {
 		return
 	}

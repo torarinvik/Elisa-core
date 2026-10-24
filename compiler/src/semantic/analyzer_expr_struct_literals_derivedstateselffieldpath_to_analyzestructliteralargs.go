@@ -300,6 +300,7 @@ func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.Fie
 		a.currentScope = NewScope(a.globalScope)
 		a.currentReturn = nil
 		a.currentFuncDecl = nil
+		a.storeLivedCache = nil
 		a.currentFuncType = nil
 		a.currentImplicitScopes = nil
 		var actual Type = invalidType
@@ -307,6 +308,7 @@ func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.Fie
 		a.currentScope = savedScope
 		a.currentReturn = savedReturn
 		a.currentFuncDecl = savedFuncDecl
+		a.storeLivedCache = nil
 		a.currentFuncType = savedFuncType
 		a.currentImplicitScopes = savedImplicitScopes
 		if !AssignableTo(expected, actual) {

@@ -397,12 +397,14 @@ func (a *Analyzer) validateParamDefaultExpr(expr ast.Expr, expected Type) bool {
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = nil
 	a.currentFuncDecl = nil
+	a.storeLivedCache = nil
 	a.currentFuncType = nil
 	a.currentImplicitScopes = nil
 	actualType := a.analyzeValueExpr(expr, expected)
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.currentFuncDecl = savedFuncDecl
+	a.storeLivedCache = nil
 	a.currentFuncType = savedFuncType
 	a.currentImplicitScopes = savedImplicitScopes
 	if !AssignableTo(expected, actualType) {

@@ -717,7 +717,7 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, params []Type, args
 }
 func (a *Analyzer) finalizeCallArgDisjoint() {
 	savedFn := a.currentFuncDecl
-	defer func() { a.currentFuncDecl = savedFn }()
+	defer func() { a.currentFuncDecl, a.storeLivedCache = savedFn, nil }()
 	a.privateFreshDArrayCache = nil
 	// Bodies and call identities are now fixed for this analysis.
 	a.headerStabilityCompleted = make(map[*ast.FuncDecl]bool)
@@ -725,6 +725,7 @@ func (a *Analyzer) finalizeCallArgDisjoint() {
 	a.pendingDisjointCalls = nil
 	for _, request := range pending {
 		a.currentFuncDecl = request.fn
+		a.storeLivedCache = nil
 		a.computeCallArgDisjoint(request)
 	}
 }
