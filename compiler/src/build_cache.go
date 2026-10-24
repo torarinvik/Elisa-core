@@ -360,19 +360,37 @@ func restoreCachedBuild(options cliOptions, artifact buildCacheArtifact, stdout,
 // tryBuildObjectCacheHit handles an existing disk artifact before daemon discovery.
 // parseArgs applies codegen flags to the environment, just as the ordinary CLI does.
 func tryBuildObjectCacheHit(args []string, stdout, stderr io.Writer) (int, bool) {
+	code, handled, _ := tryBuildObjectCacheHitWithProgram(args, stdout, stderr)
+	return code, handled
+}
+
+// A cache miss hands its exact loaded source snapshot to the local build. The
+// snapshot belongs only to this invocation; successful forwarding discards it.
+func tryBuildObjectCacheHitWithProgram(args []string, stdout, stderr io.Writer) (int, bool, *loadedProgram) {
+	return tryBuildObjectCacheHitUsing(args, stdout, stderr, loadProgramInput)
+}
+
+func tryBuildObjectCacheHitUsing(args []string, stdout, stderr io.Writer, load func(string, io.Writer) (*loadedProgram, bool)) (int, bool, *loadedProgram) {
 	if !buildCacheEnabled() || buildCacheRequestObserverEnabled() || len(args) == 0 || isProjectCommand(args[0]) {
-		return 0, false
+		return 0, false, nil
 	}
 	options, err := parseArgs(args)
 	if err != nil || !isPureObjectEmit(options) {
-		return 0, false
+		return 0, false, nil
 	}
 	if configureCLIProfile(options) != nil {
-		return 0, false
+		return 0, false, nil
 	}
-	artifact, ok := buildCacheObjectArtifactFor(options)
+	program, loaded := load(options.filename, io.Discard)
+	if !loaded {
+		return 0, false, nil
+	}
+	artifact, ok := buildCacheObjectArtifactForProgram(options, program)
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
-	return restoreCachedBuild(options, artifact, stdout, stderr)
+	if code, hit := restoreCachedBuild(options, artifact, stdout, stderr); hit {
+		return code, true, nil
+	}
+	return 0, false, program
 }

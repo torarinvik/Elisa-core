@@ -51,3 +51,47 @@ func BenchmarkBuildObjectCacheWarmExecutor(b *testing.B) {
 		})
 	}
 }
+
+// Optional real-tree measurement of source/key work only. The callback declines
+// compilation, so every operation is a miss and no fake native artifact is
+// published. This is not an end-to-end compiler benchmark.
+func BenchmarkBuildObjectCacheSourceHandoff(b *testing.B) {
+	filename := os.Getenv("ELISACORE_SOURCE_HANDOFF_PROFILE_INPUT")
+	if filename == "" {
+		b.Skip("set ELISACORE_SOURCE_HANDOFF_PROFILE_INPUT")
+	}
+	for _, mode := range []string{"legacy", "handoff", "legacy", "handoff"} {
+		b.Run(mode, func(b *testing.B) {
+			dir := b.TempDir()
+			b.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+			b.Setenv("ELISACORE_BUILD_CACHE", "1")
+			args := []string{"-emit", "obj", "-o", filepath.Join(dir, "out.o"), filename}
+			options, err := parseArgs(args)
+			if err != nil {
+				b.Fatal(err)
+			}
+			loads := 0
+			load := func(name string, stderr io.Writer) (*loadedProgram, bool) {
+				loads++
+				return loadProgramInput(name, stderr)
+			}
+			noCompile := func(cliOptions, *loadedProgram, io.Writer, io.Writer) int { return 1 }
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, hit, preloaded := tryBuildObjectCacheHitUsing(args, io.Discard, io.Discard, load)
+				if hit || preloaded == nil {
+					b.Fatal("expected an eligible source-cache miss")
+				}
+				if mode == "legacy" {
+					preloaded = nil
+				}
+				if rc, handled := tryBuildObjectCacheWith(options, io.Discard, io.Discard, loadedProgramLoader(preloaded, load), noCompile); rc != 1 || !handled {
+					b.Fatal("source-only callback was not reached")
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(loads)/float64(b.N), "source-loads/op")
+		})
+	}
+}

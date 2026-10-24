@@ -35,6 +35,21 @@ type loadedProgram struct {
 	sourceFiles []string
 }
 
+// loadedProgramLoader pins only the matching input to the snapshot loaded by
+// this request's initial cache lookup. Cache keys and compilation see the same
+// bytes even if a source file changes after that lookup. Other paths still load.
+func loadedProgramLoader(preloaded *loadedProgram, load func(string, io.Writer) (*loadedProgram, bool)) func(string, io.Writer) (*loadedProgram, bool) {
+	if preloaded == nil {
+		return load
+	}
+	return func(filename string, stderr io.Writer) (*loadedProgram, bool) {
+		if filename == preloaded.filename {
+			return preloaded, true
+		}
+		return load(filename, stderr)
+	}
+}
+
 func loadProgramInput(filename string, stderr io.Writer) (*loadedProgram, bool) {
 	if strings.EqualFold(filepath.Ext(filename), frontendIRExtension) {
 		data, err := os.ReadFile(filename)

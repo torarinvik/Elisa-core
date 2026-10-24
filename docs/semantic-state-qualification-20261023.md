@@ -1990,4 +1990,34 @@ loaded snapshot within the same invocation is a concrete candidate to remove
 this repeated work while keeping cache keys/compiler inputs identical. The
 measured observer/plain difference does not prove how much of it is caused
 by that duplication. `/tmp/elisa-source-handoff-plan.txt` records test and
-source-authority requirements; no handoff change has yet been implemented.
+source-authority requirements; the implementation and focused validation follow below.
+
+
+## One source snapshot across a whole-object cache miss
+
+The prefix cache lookup now hands its loaded program to the local CLI on a
+miss. The loader accepts it only for the exact matching filename. Cache keys
+and compilation consume the same request-local source bytes; no global state
+or retained server is needed. Cache hits discard the snapshot, observer
+requests still bypass the prefix lookup, and invalid input follows the existing
+diagnostic path. Compiler, option, source, toolchain and artifact checks remain
+unchanged.
+
+Focused cache/semantic-disk tests pass, including a real compiled and linked
+fixture whose source changes between lookup and build: it executes the captured
+revision, while the changed revision misses that artifact. Other tests cover
+one source load, different-filename fallback, observer bypass, and edit/revert
+cache authority.
+
+An alternating source/key-only benchmark on the full compiler tree measured
+legacy 676.9/683.4 ms versus handoff 629.8/642.8 ms (three operations per sample).
+Source loads fell from two to one; allocations fell from about 291.9 MB to
+171.6 MB per operation. The benchmark declines compilation and publishes no
+native artifacts. This verifies a small source-loading/allocation gain, not a
+sub-10-second end-to-end result. The broad normal CLI matrix and new executable
+namespace admission are still required. Raw output:
+`/tmp/elisa-source-handoff-benchmark.log`.
+
+The four focused handoff tests also pass under the race detector. The broader
+race suite reached its externally enforced 30-second cap without reporting a
+race; it is not recorded as a pass. The non-race cache/analysis-disk suite passed.

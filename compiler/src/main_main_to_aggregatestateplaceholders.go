@@ -25,12 +25,12 @@ func main() {
 	applyDefaultGCPercent()
 	stop := startCPUProfile()
 	stopMem := startMemProfile()
-	code, forwarded := tryBuildObjectCacheHit(os.Args[1:], os.Stdout, os.Stderr)
+	code, forwarded, preloaded := tryBuildObjectCacheHitWithProgram(os.Args[1:], os.Stdout, os.Stderr)
 	if !forwarded {
 		code, forwarded = forwardToRetainedServer(os.Args[1:], os.Stdout, os.Stderr)
 	}
 	if !forwarded {
-		code = runCLI(os.Args[1:], os.Stdout, os.Stderr)
+		code = runCLIWithProgram(os.Args[1:], os.Stdout, os.Stderr, preloaded)
 	}
 	stopMem()
 	stop()
@@ -60,6 +60,10 @@ func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
 	return "", false
 }
 func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
+	return runCLIWithProgram(args, stdout, stderr, nil)
+}
+
+func runCLIWithProgram(args []string, stdout io.Writer, stderr io.Writer, preloaded *loadedProgram) int {
 	if len(args) != 0 && isProjectCommand(args[0]) {
 		return runProjectCLI(args, stdout, stderr)
 	}
@@ -69,9 +73,13 @@ func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		printUsage(stderr)
 		return 1
 	}
-	return runWithOptions(options, stdout, stderr)
+	return runWithProgramOptions(options, stdout, stderr, preloaded)
 }
 func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {
+	return runWithProgramOptions(options, stdout, stderr, nil)
+}
+
+func runWithProgramOptions(options cliOptions, stdout io.Writer, stderr io.Writer, preloaded *loadedProgram) int {
 	if err := configureCLIProfile(options); err != nil {
 		fmt.Fprintf(stderr, "error: cannot configure optimization profile: %s\n", err)
 		return 1
@@ -94,11 +102,12 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	// Content-addressed build cache (docs/117): serve an identical `-emit obj`
 	// result without reparsing/recompiling. On a miss it builds and publishes,
 	// so it owns the whole build for that path.
-	if code, handled := tryBuildObjectCache(options, stdout, stderr); handled {
+	load := loadedProgramLoader(preloaded, loadProgramInput)
+	if code, handled := tryBuildObjectCacheWith(options, stdout, stderr, load, runLoadedProgramWithOptions); handled {
 		return code
 	}
 
-	program, ok := loadProgramInput(options.filename, stderr)
+	program, ok := load(options.filename, stderr)
 	if !ok {
 		return 1
 	}
