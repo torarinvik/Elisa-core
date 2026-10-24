@@ -430,7 +430,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
 	if !ok {
-		a.errorf(expr.Pos(), "cannot call non-function value of type %s", fnType)
+		if !IsInvalidType(fnType) {
+			a.errorf(expr.Pos(), "cannot call non-function value of type %s", fnType)
+		}
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}

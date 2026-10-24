@@ -116,6 +116,49 @@ def main() -> int can[Abort.Panic]:
 	}
 }
 
+func TestUsingWildcardAmbiguityDoesNotCascadeIntoTry(t *testing.T) {
+	prog := `module OuterApi:
+    public:
+        error OuterFault:
+            Outer
+        def ping() -> i64 error[OuterApi::OuterFault]:
+            return 1
+
+module Consumer:
+    public:
+        error Destination:
+            Other
+    module Inner:
+        using LocalApi
+        module LocalApi:
+            public:
+                error InnerFault:
+                    Inner
+                def ping() -> i64 error[Consumer::Inner::LocalApi::InnerFault]:
+                    return 2
+        public:
+            def direct_caller() -> i64 error[Consumer::Destination]:
+                return try ping()
+            def cached_caller() -> i64 error[Consumer::Destination]:
+                payload = ping()
+                return try payload
+
+using OuterApi
+
+def main() -> i64:
+    return 0
+`
+	status, out := s4CompileRun(t, prog)
+	if status != "REJECTED" || strings.Count(out, `ambiguous reference "ping"`) != 2 {
+		t.Fatalf("expected direct and cached wildcard ambiguity diagnostics, got status=%s out=%q", status, out)
+	}
+	for _, cascade := range []string{"cannot propagate", "try requires a fallible expression", "cannot call non-function value"} {
+		if strings.Contains(out, cascade) {
+			t.Fatalf("ambiguous wildcard binding caused downstream %q diagnostic: %s", cascade, out)
+		}
+	}
+}
+
 // The collision is resolvable by qualifying the reference.
 func TestUsingCollisionResolvableByQualifying(t *testing.T) {
 	prog := `module A:

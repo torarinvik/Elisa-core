@@ -141,7 +141,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if sym, canonical, ok := a.lookupVisibleGlobal(n.Name); ok {
-			a.reportUsingAmbiguity(n.Name, n.Position)
+			if a.reportUsingAmbiguity(n.Name, n.Position) {
+				result = invalidType
+				return
+			}
 			// Record the resolved canonical (namespace/using/import-qualified) name so
 			// the interpreter can resolve namespaced value/function references instead
 			// of re-deriving from the bare name without namespace context.
@@ -369,6 +372,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.TryExpr:
 		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
 		valueType := a.analyzeExpr(n.Value)
+		if IsInvalidType(valueType) {
+			if recovery != nil {
+				a.analyzeRecoveryClause(recovery, invalidType, invalidType, "try fallback")
+			}
+			result = invalidType
+			return
+		}
 		if unionType, ok := valueType.(*ErrorUnionType); ok {
 			a.consumeHandledErrorUnionExpr(n.Value, unionType, "try")
 			if recovery == nil {
