@@ -1798,3 +1798,31 @@ the scheduling executable is still required. Independent-unit/default/runtime
 quality and unsupported declaration/contract gates remain unresolved.
 Targeted scheduling persistence/order/fresh-session tests also pass under the Go
 race detector. All controlled Stage1 sources were restored after profiling.
+
+
+Normal admission for `d0c9a710` succeeded in its own empty namespace
+(`/tmp/elisa-generic-schedule-production-root`): eight checkpoints
+16.315–28.778 s, request nine capped at 30 s after publishing the complete
+snapshot, request ten emitted an object in 16.622 s. The standalone CLI matrix
+was baseline 0.531 s; enum reorder 9.552 s; new enum flag/handler 9.566 s; layout
+12.572 s; permission 9.130 s; removal 9.601 s; body 8.892 s; signature 9.690 s;
+contract 9.216 s; lines 8.469 s. Repeats were 0.435–0.559 s. Server forwarding
+was disabled, and all compiler/link steps remained capped at 30 s. All ten
+objects are byte-identical to the previously linked/executed `3a65a343` products
+(`object-parity.json`); controlled sources were restored. The modest scheduling
+gain survives normal CLI qualification, but layout is still over ten seconds.
+
+
+A subsequent uncommitted large-function grouping experiment was rejected. It
+reserved native units for ordinary functions with at least 128 top-level body
+statements; linked O0/O3 tests proved layout-only reuse, body-edit invalidation,
+revert reuse and same-name aggregate C exports. On the real compiler, however,
+96 units gave enum reorder 10.687 s and layout 11.079 s, while 128 units gave
+enum reorder 8.523 s and layout 11.756 s. Removing the large ordinary function
+from the layout-sensitive unit did not remove the many duplicated generic
+walker/fact-collector bodies that dominate its remaining O3 cost. The 96-unit
+variant also made ordinary units denser. No production grouping change was
+kept. Source/patch/tests are preserved in `/tmp/elisa-large-function-prototype`;
+complete profiles are `native-cost-large-function-{96,128}-*.json` under
+`/tmp/elisa-generic-schedule-production-root`. These are checked-payload
+experiments, not admitted new normal CLI executables.
