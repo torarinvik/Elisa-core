@@ -2359,3 +2359,36 @@ are failures, not sub-ten-second compilations. Controlled source files were
 restored and the seven preexisting user edits remain intact. The full goal is
 still open: layout margin/native work, declaration/contract fallbacks, broader
 major edits and ordinary/default/runtime-quality qualification remain.
+
+
+### Contract-bound constant replay candidate
+
+Typed constant value edits now admit references from value `requires`/`ensure`
+clauses when the remaining header has no such dependency. Defaults, array
+extents, other declarations and other contract forms retain their guards. The
+update rechecks every affected contract function and the transitive caller
+closure. Dependency name facts are reused only for byte-identical nonempty
+function spans; changed/new syntax is scanned. Header-only checks no longer
+format entire function bodies merely to inspect the header. The same guarded
+name facts accelerate ordinary const-user selection.
+
+The retained semantic suite passes: strict pre/postcondition proof retraction,
+reversion and repeated disk round trips; edited caller syntax with/without the
+saved name index; and rejection of array/default/global declaration dependencies.
+Backend tests compare cold and replay LLVM IR, including debug assertions.
+The enum storage/native tests still pass.
+
+Checked-payload qualification (not ordinary production admission) used the
+snapshot under `/tmp/elisa-enum-storage-production-root`, validated through the
+normal source/options path. `/tmp/elisa-const-contract-native-qualification.py`
+keeps all outputs in `const-contract-qualification/`; no payload was rekeyed or
+published into production. Baseline native population took 19.927 s and its
+object is byte-identical to the admitted normal baseline. The contract-bound
+constant edit then succeeded in 6.536 s: eleven functions invalidated, one native
+unit emitted and 95 reused. A repeat took 5.906 s with all 96 native units reused.
+The baseline state hash stayed unchanged and source was restored. The prototype
+objects both linked into compiler executables, compiled the include fixture on
+miss/valid cache reads and produced fixture exit 42; enum and diagnostics probes
+passed (`const-contract-qualification/functional.json`). All toolchain processes
+were externally capped at 30 s. Ordinary CLI admission/rebuild timing remains
+required before counting this candidate as a normal sub-ten-second result.

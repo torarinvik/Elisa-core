@@ -780,8 +780,8 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		r.LastStats.StructUsers = len(splices)
 	}
-	// An edited const value: every function that mentions it is re-analyzed. A declaration or
-	// signature that names it was resolved in the declaration phase, which this path keeps.
+	// An edited const value: recheck direct users and callers of dependent value contracts.
+	// Other declaration/signature dependencies retain their declaration-phase guard.
 	var constLive [][2]*ast.ConstDecl // (live, scratch) per edited const
 	var addedConstPrepared []ast.Decl
 	var removedConstLive []ast.Decl
@@ -809,16 +809,57 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			names[sd.Name] = true
 		}
 		pat := retainedNamesPattern(names)
+		contractUsers := map[string]bool{}
+		valueEditsOnly := len(constPairs) != 0 && len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0
 		for j, d := range newDecls {
 			if edited[d] {
 				continue
 			}
 			if fn, ok := d.(*ast.FuncDecl); ok {
-				if pat.MatchString(retainedText(fn).header) {
-					return fail("the signature of %s names an added or edited const or struct", fn.Name)
+				if pat.MatchString(retainedNormalized(retainedHeader(fn))) {
+					if !valueEditsOnly || !retainedConstValueContractOnly(fn, pat) {
+						return fail("the signature of %s names an added or edited const or struct", fn.Name)
+					}
+					contractUsers[fn.Name] = true
 				}
 			} else if _, ns := d.(*ast.NamespaceDecl); !ns && pat.MatchString(newSpans[j]) {
 				return fail("declaration at %s names an added or edited const or struct", retainedLineKey(d.Pos()))
+			}
+		}
+		// A changed contract value can retract a caller's proof even though the
+		// function's syntax did not change. Recheck the whole caller closure.
+		// Reuse captured name facts only for byte-identical function spans;
+		// edited/new functions are scanned from their current syntax.
+		unchangedUses := map[*ast.FuncDecl]retainedBodyUses{}
+		if len(names) != 0 {
+			for live, current := range pairedNew {
+				if uses, ok := r.bodyUses[live]; ok {
+					oldSpan, newSpan := spanOf(live)
+					if oldSpan != "" && oldSpan == newSpan {
+						unchangedUses[current] = uses
+					}
+				}
+			}
+		}
+		mentionsCurrent := func(fn *ast.FuncDecl, selected map[string]bool) bool {
+			if uses, ok := unchangedUses[fn]; ok {
+				for _, name := range uses.names {
+					if selected[name] {
+						return true
+					}
+				}
+				return false
+			}
+			return retainedMentionsAny(fn, selected)
+		}
+		for grew := len(contractUsers) != 0; grew; {
+			grew = false
+			for _, d := range newDecls {
+				fn, ok := d.(*ast.FuncDecl)
+				if ok && !contractUsers[fn.Name] && mentionsCurrent(fn, contractUsers) {
+					contractUsers[fn.Name] = true
+					grew = true
+				}
 			}
 		}
 		liveConsts := map[string]*ast.ConstDecl{}
@@ -929,7 +970,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			if !ok || spliced[fn] {
 				continue
 			}
-			if !retainedMentionsAny(fn, names) && (len(addedStructs)+len(removedStructs) == 0 || !pat.MatchString(spanOf[pairedNew[fn]])) &&
+			current := pairedNew[fn]
+			if current == nil {
+				current = fn
+			}
+			if !contractUsers[fn.Name] && !mentionsCurrent(current, names) && (len(addedStructs)+len(removedStructs) == 0 || !pat.MatchString(spanOf[pairedNew[fn]])) &&
 				(len(removedTargets) == 0 || !a.retainedUsesTypes(fn, removedTargets, names, map[Type]bool{})) {
 				continue
 			}

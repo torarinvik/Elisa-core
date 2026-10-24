@@ -8,9 +8,9 @@ import (
 )
 
 // A retained update accepts a new value for a typed const. The value is evaluated in the body
-// phase (analyzeScopedDecl), so when no other declaration and no function signature names the
-// const, the declaration phase is unaffected: the live analysis takes the new declaration,
-// re-evaluates it, and re-analyzes the functions that mention it.
+// phase (analyzeScopedDecl). When other declarations and resolved signature shapes do not
+// depend on it, the live analysis re-evaluates the const and rechecks its users. Value
+// pre/postconditions also invalidate their transitive callers, whose proofs read them.
 
 // retainedConstHeader is a const's text up to its value: `const NAME: TYPE`.
 func retainedConstHeader(span string) string {
@@ -127,4 +127,13 @@ func retainedValueDeclName(d ast.Decl) string {
 		return n.Name
 	}
 	return ""
+}
+
+// Value pre/postconditions are evaluated against the live const table during
+// body/proof analysis. Other header uses (array extents, defaults, annotations,
+// named/frame contracts, etc.) retain declaration-phase results and must fall back.
+func retainedConstValueContractOnly(fn *ast.FuncDecl, names *regexp.Regexp) bool {
+	shape := *fn
+	shape.Requires, shape.EnsureValues = nil, nil
+	return !names.MatchString(retainedNormalized(retainedHeader(&shape)))
 }

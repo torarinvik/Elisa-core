@@ -130,3 +130,58 @@ int main(void) {
 		})
 	}
 }
+
+// A constant referenced by a value contract is read by codegen too (including
+// debug assertions). Replayed expression facts must match a new analysis.
+func TestRetainedConstContractDiskIR(t *testing.T) {
+	const base = `const LIMIT: i64 = 1
+
+def answer() -> i64:
+    ensure result == LIMIT
+    return LIMIT
+
+def caller() -> i64:
+    ensure result == LIMIT
+    return answer()
+export fn caller() -> i64 = caller
+`
+	parse := func(source string) *ast.File {
+		l := lexer.New("const-contract.elisa", []byte(source))
+		p := parser.New(l.Tokenize())
+		f := p.ParseFile("const-contract.elisa")
+		if len(l.Errors())+len(p.Errors()) != 0 {
+			t.Fatal("fixture parse failed")
+		}
+		return f
+	}
+	_, state := semantic.AnalyzeRetained(parse(base), parse(base), []byte(base), semantic.AnalyzeOptions{})
+	for _, value := range []string{"2", "1", "3"} {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = semantic.RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := strings.Replace(base, "LIMIT: i64 = 1", "LIMIT: i64 = "+value, 1)
+		got, err := state.Update(parse(source), parse(source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cold := parseAndAnalyzeBackendTest(t, "const-contract.elisa", source)
+		for _, debug := range []bool{false, true} {
+			replayIR, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(got, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coldIR, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(cold, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if replayIR != coldIR {
+				t.Fatalf("constant %s debug=%v: replay IR differs", value, debug)
+			}
+		}
+	}
+}
