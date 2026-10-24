@@ -3234,3 +3234,53 @@ This is representative qualification of the opt-in standalone disk-cache mode,
 with O3, bounded imports, independent IR/native units and no retained server.
 It does not claim every possible major edit, default-mode policy, or one-pass cold
 admission is complete. The performance goal remains active.
+
+
+## Generic function type-binder edits, 24 October 2026
+
+Renaming runtime `ctx_concurrency_box_new[T]` and its type references to Payload
+on installed `ce99026c` hit another guarded fallback: **18.135 seconds**, exit 1,
+checkpoint 2197/14422 declarations, no object. Record is
+`generic-function-binder.json` in the preceding binder production namespace.
+The runtime source was restored. A namespace generic-function disk regression
+also failed before the change (`/tmp/elisa-generic-function-binder-before.log`).
+
+A fixed-protocol binder rename can now use the existing remove/redeclare path:
+the generic function receives a fresh symbol/type and prepared body, and direct
+body consumers are rechecked. Type-parameter arity, binder kinds/bounds, region
+and permission binders remain guarded. Non-type header syntax (annotations,
+defaults, contracts and effects) must remain unchanged; type syntax is compared
+with framed, unqualified type-binder tokens. Qualified member/type projections
+are not mistaken for binders. Global/type/default/header consumers keep the
+conservative fallback rather than retain a deleted generic base. This does not
+admit arbitrary generic signature changes or all non-body consumers.
+
+Retained semantic tests pass, including rename/restore/invalid-caller/repair,
+namespace generic callers and concrete function pointers, fixed interface bounds
+and effect rows. Negative controls cover return/name/parameter/arity/bound/kind,
+region, qualified-member and default-value changes. Root analysis-disk tests
+also pass. Evidence `/tmp/elisa-generic-function-binder-semantic-final.log` and
+`/tmp/elisa-generic-function-binder-main-final.log`.
+
+All retained backend tests pass with separately bounded compile/test commands
+(`/tmp/elisa-generic-function-binder-backend-final.log`). The new native oracle
+uses inferred recursive generic calls, wide C aggregates, small scalars,
+references and function-pointer identity across distinct codegen owners, through
+serialized rename/restore/rename. Full normal/debug IR matches cold compilation;
+both cold/replay independent O3 products link and execute. An explicit recursive
+type-argument fixture was rejected by cold analysis, so it was replaced by the
+valid inferred form and is not counted as supported coverage. An earlier combined
+compile/test command reached its external cap; the isolated build and test each
+complete within their own 30-second cap.
+
+Frozen `/tmp/elisa-generic-function-binder-main-test` qualifies against the
+unchanged original imports snapshot, with output only in that root's
+`generic-function-binder-qualification`: baseline 21.745 seconds, allocator binder
+rename **9.009 seconds**, exit zero. Replay changes two bodies (one addition and
+one removal), 344 ms diff, 12 ms bodies and 1.374 s post checks. All 96 native
+partitions reuse; the new typed IR produces the exact baseline object SHA
+`64e173d0d20dc28ef96d0cd2e61789f98058605d04e09be36c035b1c74236297`.
+Both products pass include execution 42, sidecar miss→valid, enum dispatch and
+diagnostics (`/tmp/elisa-generic-function-binder-functional.log`). Snapshot bytes
+remain unchanged and source restored. Fresh installed-binary ordinary CLI
+qualification remains the next gate; the broader performance goal is open.

@@ -17,15 +17,13 @@ import (
 	"elisacore/src/unparse"
 )
 
-// RetainedAnalysis keeps a finished whole-program analysis alive so a later
-// edit that only changes function bodies can be applied in place: the changed
-// bodies are spliced into the analyzed AST and re-analyzed, then the
-// whole-program passes run again. Everything else (types, symbols, unchanged
-// bodies' facts and body-phase diagnostics) is reused.
+// RetainedAnalysis keeps a finished whole-program analysis for checked updates.
+// Supported body/declaration edits rebuild their affected semantic state against
+// a fresh declaration phase, then rerun the required whole-program checks. The
+// resulting graph supplies both diagnostics and code generation.
 //
-// It only produces diagnostics. Callers that need code generation should run a
-// fresh analysis once Update reports no errors, because spliced state was never
-// validated against the backend.
+// Callers must honor Update errors and fall back to fresh analysis: a late
+// rejection may already have consumed or discarded the retained graph.
 type RetainedAnalysis struct {
 	a        *Analyzer
 	result   *Result
@@ -505,8 +503,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 					sameScope, namespace = true, sd.Namespace
 				}
 			}
-			if !sameScope || !retainedPlainFunction(ofn) || !retainedPlainFunction(nfn) {
+			genericRename := retainedGenericFunctionBinderRename(ofn, nfn)
+			if !sameScope || (!(retainedPlainFunction(ofn) && retainedPlainFunction(nfn)) && !genericRename) {
 				return fail("signature of %s changed", ofn.Name)
+			}
+			if genericRename && retainedGenericFunctionHasNonBodyUsers(oldDecls, ofn) {
+				return fail("generic function %s has non-body consumers", ofn.Name)
 			}
 			removed = append(removed, ofn)
 			added = append(added, nfn)
