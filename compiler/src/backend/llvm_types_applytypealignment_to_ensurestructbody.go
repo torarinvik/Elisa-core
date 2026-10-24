@@ -746,6 +746,7 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 	}
 	packed := C.LLVMBool(0)
 	if st.PackedLayout {
+		g.hasPackedRecords = true
 		packed = C.LLVMBool(1)
 	}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), packed)

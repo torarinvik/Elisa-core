@@ -2753,3 +2753,41 @@ Details: root case JSON files and `functional.json`, runner log
 restored; its seven preexisting user modifications preserved.
 These results qualify the explicitly enabled independent-IR/native-fragment mode.
 Broader edit coverage and default whole-module/runtime-quality admission remain open.
+
+
+### Additional gaps and packed direct-access correctness (2026-10-24)
+
+Ordinary `feed0a00` packed-layout edit on IncrementalCacheRead falls back:
+17.904 seconds, exit 1, no object, new analysis checkpoint. Replay admission for
+packed records remains guarded at this point.
+
+Separately, whole-module mode (PARALLEL_IR=0, PARALLEL_OPT=0,
+NATIVE_FRAGMENTS=0) was admitted under its distinct environment identity.
+Initial probes merely entered admission (14.428/14.577 seconds), not qualified
+rebuilds. Bounded default-bootstrap continued to a second complete analysis
+state, then steps 9–13 repeatedly timed out at about 30.13 seconds without an
+object. Analysis was about 2.1 seconds on these retries. A separate 30-second
+profile invocation sampled at 8 seconds; stacks were inside
+elisacoreRunOptimizationPipeline / LLVM Module PassManager, including
+CalledValuePropagation and InstCombine. Root files `default-bootstrap-*`,
+`default-native-sample.txt`, `default-profile.stderr` record this unresolved
+whole-module optimization bottleneck. No optimizer settings were weakened.
+
+The packed-layout investigation reproduced a **cold compiler** error using a
+valid mutable-field fixture: `Record layout(packed)` with u8 then mutable i64
+emitted field loads/stores at offset 1 with `align 8`.
+`alignPackedRecordAccesses` now corrects direct load/store addresses derived
+through packed-record GEPs to align 1 once before optimization. Nested GEP paths,
+arrays, casts, selects and phi paths are handled; cycles are bounded. Unpacked
+field paths keep their original alignment. The scan is skipped entirely when no
+packed struct body was emitted. LLVM may strengthen proven alignment later.
+This is a direct-access correction, not a new guarantee about escaped scalar
+reference contracts or atomic packed fields; neither is qualified by these tests.
+
+Tests assert direct/nested/array IR on arm64 and x86_64, preserve ordinary-field
+align 8 in the same module, and run native O0/O3 exported reads/writes against
+four deliberately unaligned packed records allocated by a C client. Relevant
+C-layout ABI, alignment replay, and explicit-layout regressions pass.
+Before: `/tmp/elisa-packed-access-before.log` shows invalid align 8.
+After: `/tmp/elisa-packed-record-alignment.log` and
+`/tmp/elisa-packed-access-regressions.log` pass. Replay speed work remains next.

@@ -182,6 +182,7 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 		g.dispose()
 		return nil, err
 	}
+	g.alignPackedRecordAccesses()
 	g.appendAppleX64SegmentReservations(targetTriple)
 	if err := g.verify(); err != nil {
 		g.dispose()
@@ -191,6 +192,7 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 }
 
 type llvmGenerator struct {
+	hasPackedRecords bool // emitted a StructLayoutPacked body
 	// partBody, when set, limits this generator to one partition of the
 	// program: a top-level external function's body is emitted only when
 	// partBody accepts its symbol name (see llvm_partition_ir.go).
