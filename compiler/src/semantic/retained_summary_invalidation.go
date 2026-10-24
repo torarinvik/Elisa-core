@@ -518,6 +518,7 @@ func (r *RetainedAnalysis) reanalyzeSummaryDependentFunction(a *Analyzer, fn *as
 		frames = append(frames, late)
 	}
 	a.returnBorrowLateFrames = frames
+	a.removeDisjointCallSitesForCaller(fn)
 	r.perms.withInitialRows(a, r.decls, func() {
 		a.analyzeScopedDecl(scoped)
 	}, fn)

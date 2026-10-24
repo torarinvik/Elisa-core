@@ -109,8 +109,8 @@ func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl,
 // and (b) have its facts TRUSTED as a `depend` target — both need every call site observed, which
 // only holds for a direct-by-name, non-address-taken free function. See the soundness note on
 // FuncDisjointParamInfo.
-func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
-	if a == nil || len(a.disjointCallSites) == 0 {
+func (a *Analyzer) finalizeFuncDisjointParamsFull(decls []scopedDecl) {
+	if a == nil {
 		return
 	}
 	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
@@ -183,9 +183,7 @@ func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 			SelfNoalias:   selfNoaliasFromPairs(containerParams, pairs),
 		}
 	}
-	if len(result) != 0 {
-		a.funcDisjointParams = result
-	}
+	a.funcDisjointParams = result
 }
 
 // selfNoaliasFromPairs marks param i self-noalias when it is proven distinct from EVERY other

@@ -3712,3 +3712,39 @@ recursive-summary regressions pass (1.406 s); the focused race selection passes
 (1.926 s). Every command used an external 30-second timeout. No performance
 improvement is claimed from these test durations. The separate disjoint-proof
 repair and fresh full compiler disk-cache timing qualification remain pending.
+
+
+### Replace retained disjointness evidence by caller ownership
+
+An edited or deleted caller could leave its old call observations behind, keeping
+FuncDisjointParams/element noalias proofs alive after their only anchor vanished.
+Call observations, pending calls and per-call results now have caller ownership.
+Replacing/removing a body removes its prior contribution and marks affected
+callees and forwarding dependents. The retained solve clears that dependency cone
+and computes its least fixpoint against all remaining observations; unrelated
+proofs are reused. Empty aggregate results are published too, and retained Result
+receives the current FuncDisjointParams map after post-analysis. Existing function
+name/escape eligibility scanning remains unchanged.
+
+The immutable h_7b4r9h snapshot combines the patch with committed 04000890. All
+eight applied source/test files match its SHA-256 manifest. Four disk-restored
+transitions pass twenty repetitions (0.544 s): remove/restore a sole proving call,
+distinct/self-alias replacement, loss of a forwarder's fresh anchor, and deletion
+of the proving caller. Each checks the cold oracle first and compares the complete
+FuncDisjointParams and CallArgDisjoint key sets and values. The global metadata
+parity helper is unchanged; its unrelated ExprTypes source-key restriction is not
+used as the oracle for this targeted proof regression.
+
+The semantic retained/AnalysisBuild/disjoint/cold-return regression selection
+passes (1.137 s), and focused retained disjoint race checks pass (1.733 s).
+Existing backend noalias scopes and O3 runtime-memcheck quality tests pass
+separately (0.276 s). A combined semantic/backend command reached its external
+30-second cap after semantic success; it does not establish completion of the
+larger backend Retained test selection. All subsequent commands retain that cap.
+
+Source audit confirms both object paths generate fresh IR from the current Result
+before consulting content-addressed partition/fragment caches. Updated disjoint
+metadata therefore changes the affected callee's bitcode key even when its body
+text is unchanged. A dedicated disk-object transition/native qualification test
+is still being prepared; this commit does not claim that test, full compiler
+rebuild timings, or the sub-10-second objective is complete.

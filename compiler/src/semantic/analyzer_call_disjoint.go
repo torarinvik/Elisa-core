@@ -115,8 +115,8 @@ func (a *Analyzer) computeCallArgDisjoint(request pendingDisjointCall) {
 	// (direct fresh-anchor `base`, or a `depend` on the enclosing function's own params). Done for
 	// every candidate-kernel call — even one with no distinct pair, since a site that contributes
 	// nothing must keep the pair out of the callee's fact.
-	if request.callee != nil && a.disjointCallSites != nil {
-		a.disjointCallSites[request.callee] = append(a.disjointCallSites[request.callee], callDisjointObservation{enclosing: request.fn, containerParams: containerParams, evidence: buildCapturedPairEvidence(containerParams, distinct, request.forwarded)})
+	if request.callee != nil {
+		a.recordDisjointCallObservation(request.callee, callDisjointObservation{enclosing: request.fn, containerParams: containerParams, evidence: buildCapturedPairEvidence(containerParams, distinct, request.forwarded)})
 	}
 
 	if len(distinct) == 0 {
@@ -127,6 +127,15 @@ func (a *Analyzer) computeCallArgDisjoint(request pendingDisjointCall) {
 		ContainerParams: containerParams,
 		DistinctPairs:   distinct,
 		SelfNoalias:     selfNoalias,
+	}
+	if request.fn != nil {
+		if a.callArgDisjointByFunc == nil {
+			a.callArgDisjointByFunc = map[*ast.FuncDecl]map[*ast.CallExpr]bool{}
+		}
+		if a.callArgDisjointByFunc[request.fn] == nil {
+			a.callArgDisjointByFunc[request.fn] = map[*ast.CallExpr]bool{}
+		}
+		a.callArgDisjointByFunc[request.fn][call] = true
 	}
 }
 

@@ -1570,6 +1570,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			delete(a.ambientFillAnalyzed, fn)
 		}
 	}
+	replacedDisjointCallers := map[*ast.FuncDecl]bool{}
+	for _, sd := range changed {
+		if fn, ok := sd.Decl.(*ast.FuncDecl); ok && !replacedDisjointCallers[fn] {
+			a.removeDisjointCallSitesForCaller(fn)
+			replacedDisjointCallers[fn] = true
+		}
+	}
 	returnBorrowSummaryConverged := true
 	r.perms.withInitialRows(a, r.decls, func() {
 		a.analyzeDecls(changed)
@@ -1591,6 +1598,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.LastStats.Post = time.Since(postStart)
 	r.rbUpdating = false
 	a.closeSMT()
+	r.result.FuncDisjointParams = a.funcDisjointParams
 	// file is the next comparison base. Its spliced bodies now belong to the
 	// analyzed AST and get rewritten there, so keep their text from before.
 	// Code generation emits declarations in list order; a fresh analysis lists them as written.
@@ -2064,6 +2072,7 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 		}
 	}
 	for _, fn := range fns {
+		a.removeDisjointFunction(fn)
 		sym := a.funcDeclSymbols[fn]
 		name := fn.Name
 		if sym != nil {
