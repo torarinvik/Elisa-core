@@ -340,43 +340,68 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 // retainedHoldsByValue: a value of t stores one of the targets inline (fields, array elements,
 // optionals, tuples, enum payloads), so its layout follows theirs. References, darrays and views
 // hold an address and do not.
-func retainedHoldsByValue(t Type, targets map[Type]bool, seen map[Type]bool) bool {
-	if t == nil || seen[t] {
-		return false
-	}
-	if targets[t] {
-		return true
-	}
-	seen[t] = true
-	switch n := t.(type) {
-	case *StructType:
-		for _, f := range n.Fields {
-			if retainedHoldsByValue(f.Type, targets, seen) {
+func (a *Analyzer) retainedHoldsByValue(t Type, targets map[Type]bool, seen map[Type]bool) bool {
+	remaining := 4096
+	var visit func(Type, int) bool
+	visit = func(t Type, depth int) bool {
+		if t == nil || seen[t] {
+			return false
+		}
+		if targets[t] {
+			return true
+		}
+		// Substitution can create fresh instances for recursive generic shapes.
+		// Conservatively invalidate at the bound rather than miss a dependency
+		// or recurse indefinitely through a diagnostic-bearing type graph.
+		if depth >= 128 || remaining == 0 {
+			return true
+		}
+		remaining--
+		seen[t] = true
+		switch n := t.(type) {
+		case *StructType:
+			for _, f := range n.Fields {
+				if visit(f.Type, depth+1) {
+					return true
+				}
+			}
+		case *EnumType:
+			for _, v := range n.Variants {
+				for _, p := range v.Payload {
+					if visit(p, depth+1) {
+						return true
+					}
+				}
+			}
+		case *GenericInstanceType:
+			if targets[n.Base] {
 				return true
 			}
-		}
-	case *EnumType:
-		for _, v := range n.Variants {
-			for _, p := range v.Payload {
-				if retainedHoldsByValue(p, targets, seen) {
+			if base, ok := n.Base.(*StructType); ok {
+				bindings := genericBindingsForStructInstance(base, n.Args)
+				for _, field := range base.Fields {
+					concrete := a.substituteType(field.Type, bindings, nil, nil, nil)
+					if visit(concrete, depth+1) {
+						return true
+					}
+				}
+			} else {
+				return visit(n.Base, depth+1)
+			}
+		case *ArrayType:
+			return visit(n.Elem, depth+1)
+		case *OptionalType:
+			return visit(n.Value, depth+1)
+		case *TupleType:
+			for _, field := range n.Fields {
+				if visit(field.Type, depth+1) {
 					return true
 				}
 			}
 		}
-	case *GenericInstanceType:
-		return retainedHoldsByValue(n.Base, targets, seen)
-	case *ArrayType:
-		return retainedHoldsByValue(n.Elem, targets, seen)
-	case *OptionalType:
-		return retainedHoldsByValue(n.Value, targets, seen)
-	case *TupleType:
-		for _, f := range n.Fields {
-			if retainedHoldsByValue(f.Type, targets, seen) {
-				return true
-			}
-		}
+		return false
 	}
-	return false
+	return visit(t, 0)
 }
 
 // widenLayoutTargets adds every named type that holds a target by value: its layout changed
@@ -393,7 +418,7 @@ func (a *Analyzer) widenLayoutTargets(targets map[Type]bool) {
 			default:
 				continue
 			}
-			if retainedHoldsByValue(t, targets, map[Type]bool{}) {
+			if a.retainedHoldsByValue(t, targets, map[Type]bool{}) {
 				targets[t] = true
 				grew = true
 			}

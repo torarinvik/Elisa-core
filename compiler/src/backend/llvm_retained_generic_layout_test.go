@@ -145,3 +145,103 @@ int main(void) {
 		}
 	}
 }
+
+func TestRetainedEditedGenericArgumentDiskLayout(t *testing.T) {
+	const base = `struct Record layout(c):
+    value: i64
+struct Wrapper[T] layout(c):
+    value: T
+type Alias = Wrapper[Record]
+type Nested = Wrapper[Wrapper[Record]]
+struct Outer layout(c):
+    tag: u8
+    wrapper: Alias
+
+def layout() -> usize:
+    return size_of(Outer) + offset_of(Outer, wrapper) + size_of(Nested)
+export fn layout() -> usize = layout
+`
+	parse := func(source string) *ast.File {
+		l := lexer.New("generic-argument-edit.elisa", []byte(source))
+		p := parser.New(l.Tokenize())
+		f := p.ParseFile("generic-argument-edit.elisa")
+		if len(l.Errors())+len(p.Errors()) != 0 {
+			t.Fatal("parse fixture")
+		}
+		return f
+	}
+	initial, state := semantic.AnalyzeRetained(parse(base), parse(base), []byte(base), semantic.AnalyzeOptions{})
+	if len(initial.Errors()) != 0 {
+		t.Fatal(initial.Errors())
+	}
+	added := strings.Replace(base, "    value: i64\n", "    value: i64\n    extra: u64 = 0\n", 1)
+	for _, source := range []string{added, base, added} {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = semantic.RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := state.Update(parse(source), parse(source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Errors()) != 0 {
+			t.Fatal(got.Errors())
+		}
+		cold := parseAndAnalyzeBackendTest(t, "generic-argument-edit.elisa", source)
+		for _, debug := range []bool{false, true} {
+			replayIR, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(got, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coldIR, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(cold, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if replayIR != coldIR {
+				t.Fatalf("debug=%v stale generic argument IR", debug)
+			}
+		}
+		extra := ""
+		if source == added {
+			extra = "uint64_t extra;"
+		}
+		client := fmt.Sprintf(`#include <stdint.h>
+#include <stddef.h>
+void arena_free(void *p){(void)p;}
+typedef struct {int64_t value;%s} Record;
+typedef struct {Record value;} Wrapper;
+typedef struct {Wrapper value;} Nested;
+typedef struct {uint8_t tag;Wrapper wrapper;} Outer;
+extern size_t layout(void);
+int main(void){return layout()!=sizeof(Outer)+offsetof(Outer,wrapper)+sizeof(Nested);}
+`, extra)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "client.c")
+		if err := os.WriteFile(path, []byte(client), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for label, result := range map[string]*semantic.Result{"replay": got, "cold": cold} {
+			object := filepath.Join(dir, label+".o")
+			if err := NewIncrementalObjectSession(4, 32<<20).WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3, Serial: true}); err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(dir, label)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			out, err := exec.CommandContext(ctx, "clang", object, path, "-O3", "-o", binary).CombinedOutput()
+			cancel()
+			if err != nil {
+				t.Fatalf("link %v %s", err, out)
+			}
+			ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+			out, err = exec.CommandContext(ctx, binary).CombinedOutput()
+			cancel()
+			if err != nil {
+				t.Fatalf("%s: %v %s", label, err, out)
+			}
+		}
+	}
+}

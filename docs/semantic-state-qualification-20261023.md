@@ -3036,3 +3036,24 @@ Both native compiler products pass include fixture exit 42, sidecar miss→valid
 enum dispatch and unknown diagnostics (`generic-record-qualification/functional.json`).
 Snapshot unchanged, controlled runtime source restored. This is a thin margin;
 fresh installed-binary namespace and the full ordinary matrix remain the next gate.
+
+
+## Generic argument layout dependencies, 24 October 2026
+
+Review exposed a missed dependency when an edited record is the argument to
+`Wrapper[T] { value: T }`, rather than the edited generic base itself. The old
+by-value walk inspected only the generic base and stopped at its type parameter.
+The disk-round-trip regression selected zero layout-only users before the fix
+(`/tmp/elisa-wrapper-argument-before.log`).
+
+The walk now substitutes each instantiated struct field before following inline
+storage. References still stop traversal; depth and visit bounds conservatively
+invalidate pathological recursive generic graphs. The semantic regression checks
+add/remove/add through nested wrappers and an outer record, selects both inline
+layout-only users, excludes the reference-only wrapper, and matches cold diagnostics.
+The retained semantic suite passes (`/tmp/elisa-wrapper-argument-semantic.log`).
+Backend tests compare complete normal/debug IR to cold compilation after each
+serialized edit; cold and replay O3 native C clients independently check physical
+sizes and offsets. The new regression plus generic layout/ABI tests pass in
+5.262 seconds (`/tmp/elisa-wrapper-argument-backend.log`). Full compiler performance
+and fresh installed-binary matrix qualification remain pending for this change.

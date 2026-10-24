@@ -109,3 +109,53 @@ def read() -> i64:
 		}
 	}
 }
+
+func TestRetainedEditedRecordThroughGenericArgumentLayoutUsers(t *testing.T) {
+	const base = `struct EditedRecord:
+    value: i64
+struct Wrapper[T]:
+    value: T
+struct ReferenceWrapper[T]:
+    value: T&
+type Alias = Wrapper[EditedRecord]
+type Nested = Wrapper[Wrapper[EditedRecord]]
+type ReferenceAlias = ReferenceWrapper[EditedRecord]
+struct Outer:
+    wrapper: Alias
+struct ReferenceOuter:
+    wrapper: ReferenceAlias
+
+def layout_only() -> usize:
+    return size_of(Outer) + offset_of(Outer, wrapper)
+def nested_only() -> usize:
+    return size_of(Nested)
+def reference_only() -> usize:
+    return size_of(ReferenceOuter)
+`
+	initial, state := AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
+	if len(initial.Errors()) != 0 {
+		t.Fatal(initial.Errors())
+	}
+	added := strings.Replace(base, "    value: i64\n", "    value: i64\n    extra: u64 = 0\n", 1)
+	for _, source := range []string{added, base, added} {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cold := AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{})
+		if retainedDiagnostics(got) != retainedDiagnostics(cold) || len(got.Errors()) != 0 {
+			t.Fatalf("diagnostics: %v", got.Errors())
+		}
+		if state.LastStats.StructUsers != 2 {
+			t.Fatalf("expected inline wrapper/containing queries only: %+v", state.LastStats)
+		}
+	}
+}
