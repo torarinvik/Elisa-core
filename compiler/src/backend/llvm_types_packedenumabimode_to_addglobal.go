@@ -304,6 +304,9 @@ func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncTyp
 		if err := g.ensureDeclaredFunctionType(name, value, fn); err != nil {
 			return nil, err
 		}
+		if err := g.importPartitionFunction(name, fn, value); err != nil {
+			return nil, err
+		}
 		return value, nil
 	}
 	value, err := g.addFunction(name, fn)
@@ -311,6 +314,9 @@ func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncTyp
 		return nil, err
 	}
 	g.functions[name] = value
+	if err := g.importPartitionFunction(name, fn, value); err != nil {
+		return nil, err
+	}
 	return value, nil
 }
 func (g *llvmGenerator) llvmSymbolName(name string) string {

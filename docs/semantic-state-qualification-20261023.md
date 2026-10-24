@@ -2857,3 +2857,48 @@ with unchanged O3, AA, inliner 400, unroll 600 and default native codegen level.
 Ordinary whole-module optimization still exceeds the 30-second cap after
 analysis; its runtime-quality/default-mode gate remains open. The full user goal
 is active despite this passing representative matrix.
+
+
+### Bounded cross-partition imports: quality and first rebuild gate (2026-10-24)
+
+A new optional diagnostic `TestPartitionInliningQualityProbe` compares a hot
+loop calling a leaf in a different native owner with whole-module O3. It checks
+the result against a C reference, executes five 50-million-iteration samples,
+and rejects a declined independent-IR path. This is runtime quality evidence,
+not merely identical exit codes. Final current-code results in
+`/tmp/elisa-partition-quality-final`: checksum 3751756410333120 in all modes;
+whole-module median 0.015360 seconds, ordinary independent IR 0.022572,
+bounded imports 0.015348. Log `/tmp/elisa-partition-quality-final.log` passes.
+These short local timings establish this probe, not broad workload parity.
+
+`ELISACORE_IR_IMPORTS=1` now experimentally permits on-demand imports during
+owned function-body lowering. Only canonical ordinary FuncDecl/FuncType pairs
+are eligible: no static/extern/intrinsic/generic/ghost/lemma/contract functions,
+no explicit noinline, at most 64 syntax pointers per function, 1024 per unit,
+and three transitive import hops. Weight hints are invocation-local and shared
+read-only through a sync.Map. Imported bodies have available_externally linkage;
+the original owner remains the only emitted provider. Current complete bitcode,
+including imported bodies, remains native cache authority. No optimization,
+inliner, AA, unroll or codegen budget is weakened. This remains a gated experiment;
+it does not enable default whole-module fast builds or establish all workload quality.
+
+New tests assert foreign import linkage, folding and noinline guards. Across
+fresh processes, callee body edits invalidate owner and caller units; repeats
+and reverts reuse all four units, in normal and debug modes, with native exit
+values checked. An exported function-pointer test compares imported references
+from two foreign owners with the C-visible original address and calls them,
+with native fragment caching enabled. Aggregate ABI, packed replay, function
+addresses and performance-warning cache regressions pass under the new flag.
+Log `/tmp/elisa-partition-imports-abi-final.log` passes.
+
+Frozen `/tmp/elisa-ir-imports-main-test` qualifies the flag against the untouched
+ordinary `f880510a` snapshot. Output only in its root's `ir-imports-qualification`:
+baseline 21.569 seconds; packed edit **8.650 seconds**. Two users selected,
+replay 0.804 seconds; 89 units reused, seven rebuilt, seven fragments emitted,
+21 reused, no fallback. Baseline object
+`64e173d0d20dc28ef96d0cd2e61789f98058605d04e09be36c035b1c74236297`,
+packed object `8376731d32c24dd721571e9c8a5f8bcdd7eba455bfeb692149730ae70402b0c8`.
+Both native compiler products pass include fixture exit 42, sidecar miss→valid,
+enum dispatch and unknown diagnostics (`ir-imports-qualification/functional.json`).
+Snapshot hash unchanged; controlled Stage1 source restored. Full ordinary
+installed-binary namespace/matrix and broader runtime-quality gates remain next.

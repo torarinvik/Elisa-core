@@ -16,6 +16,7 @@ import (
 // contain no LLVM handles and are immutable after construction. They never
 // survive the build or authorize reuse of IR/native products.
 type sharedCodegenLookups struct {
+	importWeights  sync.Map // current FuncDecl -> bounded AST weight
 	result         *semantic.Result
 	symbolsByNode  map[ast.Node]*semantic.Symbol
 	namedCount     int
