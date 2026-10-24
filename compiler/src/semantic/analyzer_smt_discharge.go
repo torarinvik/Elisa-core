@@ -689,10 +689,13 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	}
 	a.recordSMTAttempt(query)
 	a.smtSetLogLabelForQuery(solver, label, logObligation, query)
+	persistentHits := a.smtStats.PersistentCacheHits
 	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
-		a.smtStats.SolverProven++
+		if a.smtStats.PersistentCacheHits == persistentHits {
+			a.smtStats.SolverProven++
+		}
 		a.cacheSMTQuery(query, smtQueryResult{proven: true})
 		a.smtProofCache.publish(query)
 		return true, ""

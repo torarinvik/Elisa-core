@@ -3798,3 +3798,22 @@ remain part of identity. The observer/key regression and existing observer and
 solver-identity selections pass (0.303 seconds, externally capped at 30 seconds).
 Compiler artifact changes still invalidate prior compiler namespaces normally;
 this change does not migrate or rekey old checkpoints.
+
+
+### Persistent proofs for transformed SMT queries
+
+The existing persistent proof cache now covers the complete queries produced by
+bitvector abstraction, quantifier weakening, cone-of-influence slicing and
+dead-path checks. A definitive UNSAT result is reusable across solver instances
+and source edits even when unrelated outer hypotheses change. SAT models and
+Unknown results continue through the existing solver paths and budgets. Cache
+identity and exact/alpha-normalized proof validation use the existing mechanism.
+
+New regressions exercise actual solver reuse after changing irrelevant quantified
+hypotheses, separate queries and identities, and verify SAT/Unknown are never
+reused by this path. The new selection passes in 0.373 seconds; the broader
+SMT slicing/weakening/abstraction/persistent-cache selection passes once in
+3.395 seconds. Repeating that broader selection ten times exceeded its 25-second
+test timeout during the deliberately bounded version-probe test; this is not a
+passing ten-repeat result. Commands were externally capped at 30 seconds.
+No end-to-end rebuild speedup is claimed before a fresh legitimate cache baseline.

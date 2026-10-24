@@ -295,6 +295,22 @@ type smtBudgetedSolver interface {
 // the AND bound lemma could still prove the goal. A lower budget only forgoes such proofs.
 const smtAfterSatAbstractionBudget = 50000
 
+// smtCheckTransformedProof reuses only definitive UNSAT for a complete transformed
+// query. SAT models and Unknown results must follow the existing solver path.
+// The outer query initializes the cache; nil keeps caching fully disabled.
+func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Result, map[string]string)) (smt.Result, map[string]string) {
+	if a.smtProofCache.contains(query) {
+		a.smtStats.CacheHits++
+		a.smtStats.PersistentCacheHits++
+		return smt.Unsat, nil
+	}
+	result, model := check()
+	if result == smt.Unsat {
+		a.smtProofCache.publish(query)
+	}
+	return result, model
+}
+
 // smtCheckSliced decides a query through its cone of influence: the sliced query first, then —
 // only if that does not prove — whether the dropped hypotheses are unsatisfiable by themselves
 // (a dead path), under a small budget. See smtSliceQuery for why both unsat cases prove the full
@@ -308,7 +324,10 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	}
 	if abstracted, ok := smtAbstractBitvectorReads(query); ok {
 		a.smtSetLogLabelForQuery(solver, "bv-abstract", goalAssert, abstracted)
-		res, _, _ := solver.CheckValues(abstracted, nil)
+		res, _ := a.smtCheckTransformedProof(abstracted, func() (smt.Result, map[string]string) {
+			result, model, _ := solver.CheckValues(abstracted, nil)
+			return result, model
+		})
 		if res == smt.Unsat {
 			return smt.Unsat, nil
 		}
@@ -330,7 +349,9 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	if canBudget {
 		if weaker, ok := smtWithoutQuantifiedHypotheses(query, goalAssert); ok {
 			a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
-			res, model := budgeted.CheckBudgetValues(weaker, vars, smtDeadPathBudget)
+			res, model := a.smtCheckTransformedProof(weaker, func() (smt.Result, map[string]string) {
+				return budgeted.CheckBudgetValues(weaker, vars, smtDeadPathBudget)
+			})
 			if res == smt.Unsat {
 				return res, model
 			}
@@ -347,7 +368,7 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	if !ok || !canBudget {
 		return check(query)
 	}
-	res, model := check(sliced)
+	res, model := a.smtCheckTransformedProof(sliced, func() (smt.Result, map[string]string) { return check(sliced) })
 	if res == smt.Unsat {
 		return res, model
 	}
@@ -359,7 +380,9 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	deadPath, cached := a.smtDeadPathCache[dropped]
 	if !cached {
 		a.smtSetLogLabelForQuery(solver, "deadpath", goalAssert, dropped)
-		deadPath = budgeted.CheckBudget(dropped, smtDeadPathBudget)
+		deadPath, _ = a.smtCheckTransformedProof(dropped, func() (smt.Result, map[string]string) {
+			return budgeted.CheckBudget(dropped, smtDeadPathBudget), nil
+		})
 		if deadPath != smt.Unknown {
 			a.smtDeadPathCache[dropped] = deadPath
 		}
