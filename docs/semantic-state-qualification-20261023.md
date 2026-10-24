@@ -3769,3 +3769,20 @@ exact. The corrected immutable aokvsvmr snapshot passes twenty repetitions
 (1.788 s), each command externally capped at 30 seconds. This qualifies O0 native
 partition invalidation, not a linked executable, O3 cross-process timing or the
 full compiler's sub-10-second rebuild objective.
+
+
+### Shared expression nodes in disjoint-name scanning
+
+The name-usage scanner now memoizes expression pointers and their concrete types
+across declaration roots. Analyzed calls can share children through Args and
+ResolvedArgs; recursively revisiting both caused exponential work on a chain of
+128 pure calls. Direct call targets remain excluded, including when that same
+identifier node is subsequently used as a value. All other call fields remain
+covered. Cold analysis scans once; empty retained call sets still retract old
+proofs without scanning the whole program.
+
+The frozen pre-fix short-circuit regression exceeded its 10-second test timeout.
+The candidate passes the short-circuit and disjoint-focused selection once in
+0.592 seconds and twenty repetitions in 4.465 seconds, each command externally
+capped at 30 seconds. This fixes scanner complexity; it does not qualify the
+full compiler rebuild performance objective.

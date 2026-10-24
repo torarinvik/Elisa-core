@@ -10,6 +10,28 @@ func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 	}
 	wasReady := a.disjointIndexesReady
 	a.ensureDisjointIndexes()
+	// Cold analysis uses the full solver, which performs its own single name-usage scan.
+	// Avoid doing that whole-program walk twice before the retained indexes are ready.
+	if !wasReady || a.retained == nil {
+		a.finalizeFuncDisjointParamsFull(decls)
+		for fn := range a.disjointDirtyCallees {
+			delete(a.disjointDirtyCallees, fn)
+		}
+		return
+	}
+	if len(a.disjointCallSites) == 0 {
+		// A retained removal of the last call site still has to retract old proofs, but
+		// it no longer needs a whole-program name-usage scan to mark every prior candidate
+		// ineligible. Body removal already marks its affected callees dirty.
+		for fn, previous := range a.disjointEligibility {
+			if previous {
+				a.markDisjointDirty(fn)
+			}
+			a.disjointEligibility[fn] = false
+		}
+		a.recomputeDirtyFuncDisjointParams(map[*ast.FuncDecl]bool{})
+		return
+	}
 	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
 	currentEligibility := map[*ast.FuncDecl]bool{}
 	for _, scoped := range decls {
@@ -31,13 +53,6 @@ func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 		a.disjointEligibility[fn] = eligible
 	}
 
-	if !wasReady || a.retained == nil {
-		a.finalizeFuncDisjointParamsFull(decls)
-		for fn := range a.disjointDirtyCallees {
-			delete(a.disjointDirtyCallees, fn)
-		}
-		return
-	}
 	a.recomputeDirtyFuncDisjointParams(currentEligibility)
 }
 

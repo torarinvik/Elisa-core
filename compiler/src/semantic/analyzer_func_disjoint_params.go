@@ -113,6 +113,10 @@ func (a *Analyzer) finalizeFuncDisjointParamsFull(decls []scopedDecl) {
 	if a == nil {
 		return
 	}
+	if len(a.disjointCallSites) == 0 {
+		a.funcDisjointParams = map[*ast.FuncDecl]*FuncDisjointParamInfo{}
+		return
+	}
 	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
 	headerStable := map[*ast.FuncDecl]bool{}
 	for fn := range a.disjointCallSites {
@@ -217,15 +221,61 @@ func selfNoaliasFromPairs(containerParams []int, pairs map[[2]int]bool) map[int]
 // functions: a name shadowed by an unrelated local merely disqualifies a same-named kernel
 // (lost optimization, never a miscompile).
 func scanFuncNameUsage(decls []scopedDecl) (nameCounts map[string]int, valueUsedNames map[string]bool) {
+	return scanFuncNameUsageWithMemo(decls, newScanValueUsedIdentMemo())
+}
+
+// scanFuncNameUsageWithMemo shares one traversal memo across all declaration roots. The
+// analyzed AST may share child nodes through `Args`/`ResolvedArgs` and through lowered
+// expressions; resetting the visited set for each root makes the same DAG expensive again.
+func scanFuncNameUsageWithMemo(decls []scopedDecl, memo *scanValueUsedIdentMemo) (nameCounts map[string]int, valueUsedNames map[string]bool) {
+	if memo == nil {
+		memo = newScanValueUsedIdentMemo()
+	}
 	nameCounts = map[string]int{}
 	valueUsedNames = map[string]bool{}
 	for _, scoped := range decls {
 		if fn, ok := scoped.Decl.(*ast.FuncDecl); ok && fn != nil {
 			nameCounts[fn.Name]++
 		}
-		scanValueUsedIdents(reflect.ValueOf(scoped.Decl), valueUsedNames)
+		scanValueUsedIdentsWithMemo(reflect.ValueOf(scoped.Decl), valueUsedNames, memo)
 	}
 	return nameCounts, valueUsedNames
+}
+
+type scanValueIdentVisit struct {
+	typ reflect.Type
+	ptr uintptr
+}
+
+type scanValueUsedIdentMemo struct {
+	seen             map[scanValueIdentVisit]struct{}
+	callFieldIndexes map[reflect.Type][]int
+}
+
+func newScanValueUsedIdentMemo() *scanValueUsedIdentMemo {
+	return &scanValueUsedIdentMemo{
+		seen:             map[scanValueIdentVisit]struct{}{},
+		callFieldIndexes: map[reflect.Type][]int{},
+	}
+}
+
+// callFields returns every CallExpr field except Func. The caller scans a non-ident Func
+// separately because it is a function value; a direct *ast.Ident Func remains exempt. Cache
+// the complete field inventory by type so the specialized walk cannot accidentally omit
+// ResolvedArgs, implicit args, or future AST fields.
+func (memo *scanValueUsedIdentMemo) callFields(t reflect.Type) []int {
+	if fields, ok := memo.callFieldIndexes[t]; ok {
+		return fields
+	}
+	all := reflectFields(t)
+	indexes := make([]int, 0, len(all))
+	for i := range all {
+		if all[i].Name != "Func" {
+			indexes = append(indexes, i)
+		}
+	}
+	memo.callFieldIndexes[t] = indexes
+	return indexes
 }
 
 // scanValueUsedIdents reflect-walks an AST node, adding every identifier reached in a value
@@ -233,46 +283,55 @@ func scanFuncNameUsage(decls []scopedDecl) (nameCounts map[string]int, valueUsed
 // whose Func is a plain *ast.Ident, that identifier is a call target, not a function value, so it
 // is skipped while the rest of the call (args, receiver, a non-Ident Func) is still walked.
 func scanValueUsedIdents(v reflect.Value, names map[string]bool) {
+	scanValueUsedIdentsWithMemo(v, names, newScanValueUsedIdentMemo())
+}
+
+func scanValueUsedIdentsWithMemo(v reflect.Value, names map[string]bool, memo *scanValueUsedIdentMemo) {
 	if !v.IsValid() {
 		return
+	}
+	if memo == nil {
+		memo = newScanValueUsedIdentMemo()
 	}
 	switch v.Kind() {
 	case reflect.Interface:
 		if v.IsNil() {
 			return
 		}
-		scanValueUsedIdents(v.Elem(), names)
+		scanValueUsedIdentsWithMemo(v.Elem(), names, memo)
 	case reflect.Pointer:
 		if v.IsNil() {
 			return
 		}
+		visit := scanValueIdentVisit{typ: v.Type(), ptr: v.Pointer()}
+		if _, ok := memo.seen[visit]; ok {
+			return
+		}
+		memo.seen[visit] = struct{}{}
 		switch n := v.Interface().(type) {
 		case *ast.Ident:
 			names[n.Name] = true
 			return
 		case *ast.CallExpr:
-			// Skip a direct-Ident callee (a call target, not a value); walk everything else.
+			// A skipped direct callee is intentionally not visited/memoized here: the
+			// same Ident pointer may occur later as an actual function value.
 			if _, direct := n.Func.(*ast.Ident); !direct {
-				scanValueUsedIdents(reflect.ValueOf(n.Func), names)
+				scanValueUsedIdentsWithMemo(reflect.ValueOf(n.Func), names, memo)
 			}
 			rt := v.Elem()
-			rfs := reflectFields(rt.Type())
-			for i := 0; i < rt.NumField(); i++ {
-				if rfs[i].Name == "Func" {
-					continue
-				}
-				scanValueUsedIdents(rt.Field(i), names)
+			for _, index := range memo.callFields(rt.Type()) {
+				scanValueUsedIdentsWithMemo(rt.Field(index), names, memo)
 			}
 			return
 		}
-		scanValueUsedIdents(v.Elem(), names)
+		scanValueUsedIdentsWithMemo(v.Elem(), names, memo)
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			scanValueUsedIdents(v.Field(i), names)
+			scanValueUsedIdentsWithMemo(v.Field(i), names, memo)
 		}
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
-			scanValueUsedIdents(v.Index(i), names)
+			scanValueUsedIdentsWithMemo(v.Index(i), names, memo)
 		}
 	}
 }
