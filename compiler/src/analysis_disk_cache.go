@@ -27,6 +27,10 @@ const analysisStateMaxBytes = 2 << 30
 type analysisDiskArtifact struct{ key, path string }
 
 func analysisDiskArtifactFor(program *loadedProgram, options semantic.AnalyzeOptions) (analysisDiskArtifact, bool) {
+	return analysisDiskArtifactForAuthority(program, options, true)
+}
+
+func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.AnalyzeOptions, includeOrigins bool) (analysisDiskArtifact, bool) {
 	if program == nil || program.file != nil || len(program.easm) != 0 || !isSurfaceSourcePath(program.filename) {
 		return analysisDiskArtifact{}, false
 	}
@@ -58,8 +62,10 @@ func analysisDiskArtifactFor(program *loadedProgram, options semantic.AnalyzeOpt
 	testRunnerCacheWriteBytes(h, "diagnostic-paths", paths)
 	origins := append([]string(nil), program.sourceFiles...)
 	sort.Strings(origins)
-	for _, origin := range origins {
-		testRunnerCacheWriteString(h, "source-authority="+origin)
+	if includeOrigins {
+		for _, origin := range origins {
+			testRunnerCacheWriteString(h, "source-authority="+origin)
+		}
 	}
 	if err := writeNativeCacheTarget(h, options.TargetTriple); err != nil {
 		return analysisDiskArtifact{}, false
@@ -171,8 +177,11 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		}
 		if err == nil {
 			state = restored
+			if pending.familyReplay {
+				debugAnalysisDisk(stderr, "replay added-file baseline")
+			}
 			debugAnalysisDisk(stderr, "restore %s bytes=%d in=%v", artifact.key[:12], pending.bytes, time.Since(started).Round(time.Millisecond))
-			if cached, ok := state.ResultForSource(program.source); ok {
+			if cached, ok := state.ResultForSource(program.source); ok && !pending.familyReplay {
 				result = cached
 				unchanged = true
 				debugAnalysisDisk(stderr, "reuse unchanged revision")
@@ -237,6 +246,9 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			debugAnalysisDisk(stderr, "not stored: %v", err)
 		} else {
 			debugAnalysisDisk(stderr, "store bytes=%d in=%v", len(data), time.Since(saveStart).Round(time.Millisecond))
+			if err := publishAnalysisDiskFamily(program, options, artifact); err != nil {
+				debugAnalysisDisk(stderr, "family not stored: %v", err)
+			}
 		}
 	}
 	return result

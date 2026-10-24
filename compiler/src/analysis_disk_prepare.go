@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"os"
 	"time"
 
 	"elisacore/src/ast"
@@ -11,14 +12,15 @@ import (
 // This future belongs to one invocation. Its owner always joins it, including
 // parse failures. Nothing survives to answer another compiler request.
 type analysisDiskRestoration struct {
-	artifact    analysisDiskArtifact
-	started     time.Time
-	done        chan struct{}
-	state       *semantic.RetainedAnalysis
-	preparation analysisScratchPreparation
-	err         error
-	loaded      bool
-	bytes       int
+	artifact     analysisDiskArtifact
+	started      time.Time
+	done         chan struct{}
+	state        *semantic.RetainedAnalysis
+	preparation  analysisScratchPreparation
+	err          error
+	loaded       bool
+	familyReplay bool
+	bytes        int
 }
 
 func startAnalysisDiskRestoration(program *loadedProgram, options semantic.AnalyzeOptions) *analysisDiskRestoration {
@@ -30,6 +32,14 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 	go func() {
 		defer close(pending.done)
 		data, err := artifact.read()
+		// A family hint never changes the exact artifact's identity or header.
+		// Only a missing exact artifact may try a validated added-file baseline.
+		if os.IsNotExist(err) {
+			if candidate, ok := analysisDiskAddedFilesBaseline(program, options); ok {
+				data, err = candidate.read()
+				pending.familyReplay = err == nil
+			}
+		}
 		if err != nil {
 			pending.err = err
 			return

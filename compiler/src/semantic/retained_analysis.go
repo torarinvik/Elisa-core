@@ -1579,11 +1579,18 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	// file is the next comparison base. Its spliced bodies now belong to the
 	// analyzed AST and get rewritten there, so keep their text from before.
 	// Code generation emits declarations in list order; a fresh analysis lists them as written.
-	for ns := range appendedInto {
-		retainedSortDeclsBySource(ns.Decls)
-	}
-	if appendedTop {
-		retainedSortDeclsBySource(a.file.Decls)
+	if len(appendedInto) != 0 || appendedTop {
+		currentOffsets := make(map[retainedDeclPosition]int, len(newDecls))
+		for _, decl := range newDecls {
+			pos := decl.Pos()
+			currentOffsets[retainedDeclPosition{pos.File, pos.Line, pos.Col}] = pos.Offset
+		}
+		for ns := range appendedInto {
+			retainedSortDeclsBySource(ns.Decls, currentOffsets)
+		}
+		if appendedTop {
+			retainedSortDeclsBySource(a.file.Decls, currentOffsets)
+		}
 	}
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
 	r.result.Diagnostics = a.diagnostics
@@ -2131,8 +2138,24 @@ func retainedTrimTrailing(span string) string {
 	return strings.Join(lines[:end], "\n")
 }
 
-func retainedSortDeclsBySource(decls []ast.Decl) {
-	sort.SliceStable(decls, func(i, j int) bool { return decls[i].Pos().Offset < decls[j].Pos().Offset })
+type retainedDeclPosition struct {
+	file      string
+	line, col int
+}
+
+func retainedSortDeclsBySource(decls []ast.Decl, currentOffsets map[retainedDeclPosition]int) {
+	// Retained declarations keep old physical offsets even when #line attribution
+	// leaves their file/line unchanged after an include was inserted before them.
+	// Compare in the current expanded source's coordinate system, never a mixture
+	// of old retained and newly added physical offsets.
+	offset := func(decl ast.Decl) int {
+		pos := decl.Pos()
+		if current, ok := currentOffsets[retainedDeclPosition{pos.File, pos.Line, pos.Col}]; ok {
+			return current
+		}
+		return pos.Offset // synthesized declarations have no pristine counterpart
+	}
+	sort.SliceStable(decls, func(i, j int) bool { return offset(decls[i]) < offset(decls[j]) })
 }
 
 // Overload registration belongs to a namespace. Bare names remain deliberately

@@ -3098,3 +3098,47 @@ has a direct regression. Generic disk layout/ABI, nested generic argument,
 adopted backing ownership and shared lookup backend regressions also pass
 (`/tmp/elisa-map-copy-backend.log`). This is a verified map-copy improvement;
 full compiler timing for this implementation remains to be qualified.
+
+
+The committed map-copy version's explicit snapshot qualification measured baseline
+22.675 seconds and generic-field 9.604 seconds. Both native compiler products
+match the established base/generic object hashes and pass include execution 42,
+sidecar miss→valid, enum dispatch and unknown-diagnostic checks. Evidence:
+`map-copy-qualification` under the original imports production root, plus
+`/tmp/elisa-map-copy-functional.log`. This does not replace the failed ordinary
+CLI timing gate or claim a stable full-compiler speedup from the microbenchmark.
+
+## Added include-file baseline lookup, 24 October 2026
+
+A novel helper include on ordinary `51b79192` took 13.976 seconds, exited with an
+admission checkpoint, and emitted no object. The included-file authority set
+changed the exact semantic-state key. Result is `new-include.json` in the fresh
+wrapper-argument production namespace. Controlled source/helper changes restored.
+
+Completed states now publish an atomic, bounded family hint beside the exact
+artifact. The family identity retains compiler, working directory/root, semantic
+options, environment, diagnostic path state, target and solver authority; only the
+included-file set is omitted from that hint's identity. On a missing exact state,
+a recorded baseline is considered only if its sorted, unique file set is a
+strict subset of the current set. Its exact key is recomputed from current
+inputs plus that old file set, and its original envelope is read without rekeying.
+No exact-state corruption bypass, trust/policy change, authority removal or
+unvalidated key is admitted. Every family candidate goes through checked scratch
+replay even if expanded bytes happen to match. The complete baseline stays immutable.
+
+The fresh-process cold oracle found an existing emission-order error: retained
+physical byte offsets remained old when an include was inserted before a function.
+Added declarations were sorted against those stale offsets. Append sorting now
+uses current expanded-source offsets matched by file/line/column, retaining the
+synthesized-declaration fallback. The oracle now matches complete cold LLVM IR
+and diagnostics for valid 42, invalid bool return, and valid 43 helper revisions.
+Native qualification honestly admits a native baseline separately from textual
+IR (their semantic options differ), then replays the added include, links and
+executes with status 43. Baseline snapshots remain unchanged. Authority/policy,
+trust, bad-key, duplicate-origin and format-version guards pass.
+
+`/tmp/elisa-analysis-family-final.log`: all analysis-disk tests pass, 4.592 s.
+`/tmp/elisa-analysis-family-semantic.log`: retained semantic suite passes, 0.878 s.
+`/tmp/elisa-analysis-family-backend.log`: all retained backend tests pass, 11.036 s.
+All commands externally capped at 30 s. Full-project installed-binary performance
+for the new include path remains the next gate; the broader performance goal is open.
