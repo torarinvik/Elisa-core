@@ -2172,3 +2172,49 @@ external cap before executing tests; the warm-build retry completed and fuzzed
 42,238 mutations in five seconds with two workers, with no differential failure
 (`/tmp/elisa-path-prefilter-fuzz-retry.log`). The capped first attempt is not
 counted as a fuzz pass.
+
+
+Normal CLI admission of `a2228b09` completed in its own fresh namespace
+(`/tmp/elisa-path-prefilter-production-root`). Eight partial checkpoints took
+14.685–26.422 s. Invocation nine reached its external 30-second cap after
+publishing the complete state; invocation ten finished in 12.337 s. The server
+was empty and the O3/96-unit settings were unchanged.
+
+Ordinary fresh-process results: baseline whole-object replay 0.160 s; enum
+reorder 6.722 s; enum addition/handler 7.248 s; layout 10.112 s; permission
+6.367 s; removal 6.616 s; body 5.645 s; signature 6.585 s; contract 6.515 s;
+line insertion 5.625 s. Exact repeats took 0.146–0.161 s. All ten objects match
+the previous verified products byte for byte (`object-parity.json`). Controlled
+sources were restored, preserving the seven user changes. Layout improves
+from 11.368 s but remains a miss; a 0.112 s miss is not relabeled as success.
+The cold start and broader unsupported declaration/contract/default/runtime
+optimization-quality gates also remain open.
+
+The seven exact layout bitcodes, target configurations and native products were
+then copied only to `layout-native-experiment/` under that root for isolated
+LLVM measurements; cache entries were neither altered nor rekeyed. Standalone
+workers at concurrency seven took 4.002/4.279 s versus 4.721/4.920 s at four
+(largest inputs first). All 28 objects matched the stored native products
+exactly. Lower native concurrency is rejected by this evidence. The helper is
+`/tmp/elisa-layout-native-concurrency.py`.
+
+For the critical 1,248,384-byte input, separate `opt` and `llc` invocations with
+the exact O3/AA/inliner-400/unroll-600 and CPU/native-codegen settings produced
+an object byte-identical to the stored native product. O3 optimization took
+1.290 s; machine code generation took 2.754 s. The machine pass report attributes
+1.233 s to AArch64 instruction selection, 0.439 s to greedy register allocation
+and 0.316 s to scheduling. Reports and `phase-profile.json` are in that experiment
+directory; this is an isolated phase profile, not an end-to-end request timing.
+
+An additional LLVM `mergefunc` pass is only an unadmitted experiment. The critical
+unit's object shrank from 714,144 to 651,208 bytes; separate merge plus native
+emission took 0.113 + 2.538 s. Alternating seven-worker native batches took
+3.986/4.079 s without it versus 3.887/3.949 s with it. Total native bytes fell
+from 3,528,800 to 3,363,656 (about 4.7%). The external defined symbol names are
+preserved in all 14 candidate checks, but all seven object byte streams change.
+This does not prove runtime, function-address, ABI or full-request equivalence.
+No production pipeline was changed. `merge-trial-*.json`,
+`merged-symbol-parity.json`, the pass profiles and
+`/tmp/elisa-layout-native-merge.py` record the experiment. Any promotion needs
+those correctness/quality checks plus ordinary CLI admission and novel edits;
+the isolated approximately 0.1 s difference cannot establish the goal.
