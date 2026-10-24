@@ -2729,3 +2729,27 @@ Both products pass native compiler include/cache fixture checks (exit 42,
 miss→valid), enum dispatch tags and unknown-option diagnostics. Functional
 records are in `alignment-qualification/functional.json`.
 Fresh ordinary binary/cache namespace confirmation remains the next gate.
+
+
+### Alignment ordinary installed-binary confirmation (2026-10-24)
+
+Installed `feed0a00`, fresh namespace and frozen binary at
+`/tmp/elisa-alignment-production-root` → `elisa-alignment-production-5wxtkamp`.
+No retained server; every compiler/link/native invocation externally bounded at
+30 seconds. Eight setup checkpoints were 15.138–27.822 seconds, ninth timed out
+at 30.225 after publishing state, tenth produced the object in 15.488 seconds.
+This setup cost is separate from incremental rebuild timing.
+
+The ordinary CLI alignment edit succeeded in **9.297 seconds**, exact repeat
+0.155, with the exact qualified changed object SHA `7fc0789e…bdd133`.
+The major matrix generic/private-bound/contract-bound/region-record/explicit-tags/
+C-layout took 8.562 / 8.368 / 6.503 / 9.113 / 6.821 / 6.181 seconds.
+Remaining twelve changed variants took 6.035–8.561 seconds; baseline was an exact
+cache hit at 0.141 seconds. All exact repeats succeeded at 0.147–0.174 seconds.
+All **20 native compiler products** pass include fixture compile/link/run
+(exit 42), cache miss→valid, enum dispatch values and unknown diagnostics.
+Details: root case JSON files and `functional.json`, runner log
+`/tmp/elisa-alignment-production-functional.log`. Stage1 controlled source edits
+restored; its seven preexisting user modifications preserved.
+These results qualify the explicitly enabled independent-IR/native-fragment mode.
+Broader edit coverage and default whole-module/runtime-quality admission remain open.
