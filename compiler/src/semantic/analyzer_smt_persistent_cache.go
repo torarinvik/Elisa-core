@@ -225,7 +225,9 @@ func (b *smtProofVersionOutput) Write(payload []byte) (int, error) {
 // this trades that run-to-run variation for speed on unchanged obligations.
 const smtDeclineCacheSchema = "elisa-exact-smt-decline-v1"
 
-var smtDeclineCacheEnabled = os.Getenv("ELISACORE_SMT_CACHE_DECLINED") == "1"
+// An independent solver's declined verdicts are as reproducible as its proofs, so they are cached
+// by default; ELISACORE_SMT_CACHE_DECLINED=0 turns that off.
+var smtDeclineCacheEnabled = os.Getenv("ELISACORE_SMT_CACHE_DECLINED") == "1" || smtIndependent && os.Getenv("ELISACORE_SMT_CACHE_DECLINED") != "0"
 
 type smtDeclineCacheRecord struct{ Schema, Key, Verdict, Counterexample, Checksum string }
 

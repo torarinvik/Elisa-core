@@ -730,7 +730,7 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "wp", ProofProvenSMT)
 			continue
 		}
-		if proven, counterexample := a.trySMTProveRequires(clause, nil); !proven {
+		if proven, counterexample := a.trySMTProveRequiresReported(clause, nil); !proven {
 			diag := a.buildEnsureFailureDiagnostic(clause, nil, counterexample)
 			a.errorf(pos, "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
 		}
@@ -1028,7 +1028,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "live fact", ProofProvenSMT)
 			continue
 		}
-		proven, counterexample := a.trySMTProveRequires(clause, subst)
+		proven, counterexample := a.trySMTProveRequiresReported(clause, subst)
 		if a.incrementalBodies != nil {
 			a.incrementalBodies.recordEnsureProof(a.currentFuncDecl, i, proven)
 		}

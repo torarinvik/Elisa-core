@@ -181,7 +181,12 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 					slots[d].Store(int32(i))
 				}
 				tw := time.Now()
-				for _, du := range sched.deps[u] {
+				// Import every transitive dependency, not only direct ones: a callee's facts
+				// can rest on its own callees' (a spec's equation on a helper's verified
+				// termination), and which of those a worker happened to import for an
+				// earlier unit depends on timing. Dependencies of finished units are
+				// finished, so this never waits longer than the direct imports.
+				for _, du := range sched.depClosure(u) {
 					if sched.worker[du] != i && !w.parallel.importedUnit(du) {
 						blocked += sched.importUnit(w, du)
 					}
@@ -413,6 +418,11 @@ func cloneStoreFlowSummariesForBodyWorker(src map[*ast.FuncDecl]*storeFlowSummar
 func parallelBodyWorkerLocalOnlyMap(field string) bool {
 	switch field {
 	case "callEdgeCache", "storeFlowSCC", "storeFlowInProgress", "storeFlowActive", "storageViewCalleeWriteCache", "regionPointeesMemo":
+		return true
+	// Equation eligibility rests on callees' verified termination, which the exporting
+	// worker may not have known yet. Each worker recomputes it from the termination
+	// facts it holds instead of importing a possibly stale verdict.
+	case "definingEquationCache", "viewEquationCache", "definingEquationInProgress":
 		return true
 	default:
 		return false

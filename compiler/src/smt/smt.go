@@ -97,6 +97,12 @@ type procSolver struct {
 	resourceLimit int64
 	// label is appended (tab-separated) to rlimit log lines; calibration attribution only.
 	label string
+	// independent mode (Options.Independent): preamble is replayed after each (reset), under
+	// checkLimit, the budget of the check in progress.
+	independent bool
+	preamble    string
+	checkLimit  int64
+	warm        bool // CheckAfterHistory: the next check continues the replayed session
 }
 
 // LogsRlimit reports whether ELISA_SMT_RLIMIT_LOG calibration logging is active, so callers
@@ -145,6 +151,11 @@ type Options struct {
 	// timeout it is DETERMINISTIC: the same query gets the same verdict regardless of machine load.
 	// 0 = unlimited. Exhaustion surfaces as Unknown, exactly like a timeout.
 	ResourceLimit int64
+	// Independent resets the solver before every (check-sat) instead of bracketing it in
+	// push/pop, so a verdict depends only on the query, its budget and the solver build, never
+	// on earlier queries in the session. Measured on the self-host's 3956 queries: identical to
+	// a fresh process per query, in either order.
+	Independent bool
 }
 
 // Open starts a solver subprocess in incremental mode. A nil error means the process is live and
@@ -175,6 +186,8 @@ func Open(opts Options) (Solver, error) {
 		out:   bufio.NewReader(stdout),
 
 		resourceLimit: opts.ResourceLimit,
+		independent:   opts.Independent,
+		checkLimit:    opts.ResourceLimit,
 	}
 	s.stats.SpawnMillis = time.Since(start)
 	// Print success/error tokens so we can read a deterministic line per command, and keep models
@@ -188,6 +201,7 @@ func Open(opts Options) (Solver, error) {
 	if opts.PerQueryTimeoutMillis > 0 {
 		preamble += fmt.Sprintf("(set-option :timeout %d)\n", opts.PerQueryTimeoutMillis)
 	}
+	s.preamble = preamble
 	if opts.ResourceLimit > 0 {
 		preamble += fmt.Sprintf("(set-option :rlimit %d)\n", opts.ResourceLimit)
 	}
@@ -270,6 +284,13 @@ func (s *procSolver) CheckBudgetValues(assertions string, vars []string, rlimit 
 	if s.broken {
 		return Unknown, nil
 	}
+	if s.independent {
+		// Every check replays its own budget after the reset.
+		s.checkLimit = rlimit
+		res, values, _ := s.checkValuesLocked(assertions, vars)
+		s.checkLimit = s.resourceLimit
+		return res, values
+	}
 	if _, sawError, err := s.exchange(fmt.Sprintf("(set-option :rlimit %d)\n", rlimit)); err != nil || sawError {
 		if err != nil {
 			s.broken = true
@@ -292,14 +313,30 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 		return Unknown, nil, 0
 	}
 	var b strings.Builder
-	b.WriteString("(push 1)\n")
+	if s.warm {
+		// Continue the session CheckAfterHistory replayed, under this check's budget.
+		b.WriteString("(push 1)\n")
+		fmt.Fprintf(&b, "(set-option :rlimit %d)\n", s.checkLimit)
+	} else if s.independent {
+		b.WriteString("(reset)\n")
+		b.WriteString(s.preamble)
+		if s.checkLimit > 0 {
+			fmt.Fprintf(&b, "(set-option :rlimit %d)\n", s.checkLimit)
+		}
+	} else {
+		b.WriteString("(push 1)\n")
+	}
 	b.WriteString(assertions)
 	if !strings.HasSuffix(assertions, "\n") {
 		b.WriteString("\n")
 	}
 	b.WriteString("(check-sat)\n")
 	if s.rlimitLog != nil {
-		s.rlimitLast = s.readRlimit()
+		// (reset) restarts z3's resource counter.
+		s.rlimitLast = 0
+		if !s.independent {
+			s.rlimitLast = s.readRlimit()
+		}
 	}
 	start := time.Now()
 	lines, sawError, err := s.exchange(b.String())
@@ -340,8 +377,10 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 			parseGetValue(strings.Join(raw, " "), values)
 		}
 	}
-	if _, _, err := s.exchange("(pop 1)\n"); err != nil {
-		s.broken = true
+	if !s.independent || s.warm {
+		if _, _, err := s.exchange("(pop 1)\n"); err != nil {
+			s.broken = true
+		}
 	}
 	elapsed := time.Since(start)
 	s.stats.Total += elapsed
@@ -482,4 +521,39 @@ func isZ3(binary string) bool {
 	base := binary[strings.LastIndexAny(binary, `/\`)+1:]
 	base = strings.TrimSuffix(base, ".exe")
 	return base == "z3"
+}
+
+// CheckAfterHistory decides assertions in a session that first checked each history entry in
+// order, under the session budget, exactly as a push/pop session would have. Its verdict depends
+// only on the history, the query and the budgets, so it is as reproducible as Check; it exists
+// for queries whose proof relies on lemmas a warm session learns from earlier obligations.
+// Only an independent solver supports it (Unknown otherwise).
+func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars []string, rlimit int64) (Result, map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken || !s.independent || rlimit <= 0 {
+		return Unknown, nil
+	}
+	var b strings.Builder
+	b.WriteString("(reset)\n")
+	b.WriteString(s.preamble)
+	if s.resourceLimit > 0 {
+		fmt.Fprintf(&b, "(set-option :rlimit %d)\n", s.resourceLimit)
+	}
+	for _, entry := range history {
+		b.WriteString("(push 1)\n")
+		b.WriteString(entry)
+		if !strings.HasSuffix(entry, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("(check-sat)\n(pop 1)\n")
+	}
+	if _, _, err := s.exchange(b.String()); err != nil {
+		s.broken = true
+		return Unknown, nil
+	}
+	s.warm, s.checkLimit = true, rlimit
+	res, values, _ := s.checkValuesLocked(assertions, vars)
+	s.warm, s.checkLimit = false, s.resourceLimit
+	return res, values
 }

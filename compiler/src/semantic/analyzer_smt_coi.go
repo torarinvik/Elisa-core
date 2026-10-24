@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"elisacore/src/smt"
@@ -316,6 +318,80 @@ func (a *Analyzer) smtCheckTransformedProof(query string, check func() (smt.Resu
 // (a dead path), under a small budget. See smtSliceQuery for why both unsat cases prove the full
 // query and why a sat sliced query plus a sat dropped part is the full query's sat.
 func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, vars []string) (smt.Result, map[string]string) {
+	res, model := a.smtCheckSlicedOnce(solver, query, goalAssert, vars)
+	if res != smt.Unknown {
+		return res, model
+	}
+	budgeted, ok := solver.(smtBudgetedSolver)
+	if !ok {
+		return res, model
+	}
+	// An undecided query whose quantified hypotheses drown a simple arithmetic goal: the
+	// quantifier-free weakening ran first under the small dead-path budget; give it the
+	// query budget now. Dropping hypotheses only weakens, so only its unsat is used.
+	stripped := smtStripAbstractionOnly(query)
+	if weaker, ok := smtWithoutQuantifiedHypotheses(stripped, goalAssert); ok {
+		a.smtSetLogLabelForQuery(solver, "quantifier-weakening-full", goalAssert, weaker)
+		weak, _ := a.smtCheckTransformedProof(weaker+"; full budget\n", func() (smt.Result, map[string]string) {
+			return budgeted.CheckBudgetValues(weaker, vars, smtResourceLimit())
+		})
+		if weak == smt.Unsat {
+			return smt.Unsat, nil
+		}
+	}
+	if a.smtEscalation == 0 {
+		return res, model
+	}
+	// withSMTEscalation: retry the complete query under the larger budget.
+	a.smtSetLogLabelForQuery(solver, "escalated", goalAssert, stripped)
+	res, model = a.smtCheckTransformedProof(stripped+"; escalated\n", func() (smt.Result, map[string]string) {
+		return budgeted.CheckBudgetValues(stripped, vars, smtResourceLimit()*smtEscalationFactor)
+	})
+	if res != smt.Unknown {
+		return res, model
+	}
+	// Some proofs need lemmas a session learns from the body's earlier obligations. Replay them
+	// in one session, then ask again. The history is this body's own asking order, so the
+	// verdict is reproducible; an unsat is cached like any other proof.
+	warm, ok := solver.(smtHistorySolver)
+	history := a.smtHistoryBefore(query)
+	if !ok || len(history) == 0 {
+		return res, model
+	}
+	a.smtSetLogLabelForQuery(solver, "escalated-history", goalAssert, stripped)
+	return a.smtCheckTransformedProof(stripped+"; escalated after history "+smtHistoryDigest(history)+"\n", func() (smt.Result, map[string]string) {
+		return warm.CheckAfterHistory(history, stripped, vars, smtResourceLimit()*smtEscalationFactor)
+	})
+}
+
+type smtHistorySolver interface {
+	CheckAfterHistory(history []string, assertions string, vars []string, rlimit int64) (smt.Result, map[string]string)
+}
+
+// smtHistoryBefore is the body's history up to (excluding) the query's latest entry.
+func (a *Analyzer) smtHistoryBefore(query string) []string {
+	if a.smtHistoryFor != a.currentFuncDecl {
+		return nil
+	}
+	history := a.smtHistory
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i] == query {
+			return history[:i]
+		}
+	}
+	return history
+}
+
+func smtHistoryDigest(history []string) string {
+	hash := sha256.New()
+	for _, entry := range history {
+		hash.Write([]byte(entry))
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func (a *Analyzer) smtCheckSlicedOnce(solver smt.Solver, query, goalAssert string, vars []string) (smt.Result, map[string]string) {
 	// Bit-vector abstraction first (analyzer_smt_bv_abstract.go): an unsat weakening proves.
 	budgeted, canBudget := solver.(smtBudgetedSolver)
 	check := func(q string) (smt.Result, map[string]string) {
@@ -349,8 +425,13 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	if canBudget {
 		if weaker, ok := smtWithoutQuantifiedHypotheses(query, goalAssert); ok {
 			a.smtSetLogLabelForQuery(solver, "quantifier-weakening", goalAssert, weaker)
+			budget := int64(smtDeadPathBudget)
+			if a.smtEscalation > 0 {
+				// A reported obligation: its cheap weakening also gets the larger budget.
+				budget *= smtEscalationFactor
+			}
 			res, model := a.smtCheckTransformedProof(weaker, func() (smt.Result, map[string]string) {
-				return budgeted.CheckBudgetValues(weaker, vars, smtDeadPathBudget)
+				return budgeted.CheckBudgetValues(weaker, vars, budget)
 			})
 			if res == smt.Unsat {
 				return res, model

@@ -106,6 +106,9 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 		// machine load (a 2 s timeout made proofs such as fnv1a's `decreases` flicker between runs).
 		// An undecided obligation becomes Unknown and falls back to the runtime check.
 		ResourceLimit: smtResourceLimit(),
+		// Reset before every check: a verdict is a function of the query alone, so it is the
+		// same in every worker, schedule and process, and every verdict can be cached.
+		Independent: smtIndependent,
 		// Hang guard only, far above the time the budget takes even on a loaded machine; it should
 		// never be the limit that decides a verdict.
 		PerQueryTimeoutMillis: 120000,
@@ -679,10 +682,12 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	// no long-lived solver process needs to be started for the query.
 	a.smtStats.Enabled = true
 	query := tr.takeFactPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
-	if hit, ok := a.smtCachedQuery(query); ok {
+	a.noteSMTHistory(query)
+	key := a.smtVerdictKey(query)
+	if hit, ok := a.smtCachedQuery(key); ok {
 		return hit.proven, hit.ce
 	}
-	defer a.releaseSMTFlight(query)
+	defer a.releaseSMTFlight(key)
 	solver := a.openSMT()
 	if solver == nil {
 		return false, ""
@@ -696,22 +701,84 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 		if a.smtStats.PersistentCacheHits == persistentHits {
 			a.smtStats.SolverProven++
 		}
-		a.cacheSMTQuery(query, smtQueryResult{proven: true})
+		a.cacheSMTQuery(key, smtQueryResult{proven: true})
 		a.smtProofCache.publish(query)
+		if key != query {
+			a.smtProofCache.publish(key)
+		}
 		return true, ""
 	}
 	a.smtStats.Declined++
 	if res == smt.Sat {
 		ce := tr.counterexample(model)
-		a.cacheSMTQuery(query, smtQueryResult{proven: false, ce: ce})
-		a.smtProofCache.publishDeclined(query, res, ce)
+		a.cacheSMTQuery(key, smtQueryResult{proven: false, ce: ce})
+		a.smtProofCache.publishDeclined(key, res, ce)
 		return false, ce
 	}
-	a.smtProofCache.publishDeclined(query, res, "")
-	// `unknown` (timeout / incompleteness) is NOT cached in memory: it is not a stable verdict — a later identical
-	// query is free to try again (e.g. the solver's internal state differs), and caching it would lock in
-	// a decline that a retry might resolve. Only the definitive unsat/sat answers memoize.
+	a.smtProofCache.publishDeclined(key, res, "")
+	// A session solver's `unknown` depends on its history, so a retry may still decide it and it
+	// is not memoized. An independent solver's `unknown` is that query's verdict at this budget.
+	if smtIndependent {
+		a.cacheSMTQuery(key, smtQueryResult{proven: false})
+	}
 	return false, ""
+}
+
+// smtEscalationFactor multiplies the per-query budget for an obligation whose failure would be
+// reported (withSMTEscalation). Measured on the self-host: 8x proves 10 of the 12 queries that
+// independent solving leaves undecided but a warm session proved.
+const smtEscalationFactor = 8
+
+// smtIndependent selects reset-per-check solving (smt.Options.Independent). ELISA_SMT_SESSION=1
+// restores the shared push/pop session, for comparison only.
+var smtIndependent = os.Getenv("ELISA_SMT_SESSION") != "1"
+
+// smtVerdictKey names a query's verdict under the current escalation: an escalated attempt
+// runs under a larger budget, so its verdict is cached separately.
+func (a *Analyzer) smtVerdictKey(query string) string {
+	if a.smtEscalation == 0 {
+		return query
+	}
+	return query + "; escalated x" + strconv.Itoa(smtEscalationFactor) + "\n"
+}
+
+// smtHistoryLimit bounds the obligations a warm-session retry replays.
+const smtHistoryLimit = 4096
+
+// noteSMTHistory records an obligation query of the current body in asking order. The record
+// does not depend on which verdicts were cached, so a retry replays the same session cold or warm.
+func (a *Analyzer) noteSMTHistory(query string) {
+	if a.smtHistoryFor != a.currentFuncDecl {
+		a.smtHistory, a.smtHistoryFor = a.smtHistory[:0], a.currentFuncDecl
+	}
+	if a.smtEscalation == 0 && len(a.smtHistory) < smtHistoryLimit {
+		a.smtHistory = append(a.smtHistory, query)
+	}
+}
+
+// trySMTProveRequiresReported is trySMTProveRequires for an obligation that is reported when it
+// stays unproven; only then is it retried under withSMTEscalation.
+func (a *Analyzer) trySMTProveRequiresReported(clause ast.Expr, subst map[string]ast.Expr) (bool, string) {
+	proven, counterexample := a.trySMTProveRequires(clause, subst)
+	if !proven {
+		a.withSMTEscalation(func() bool {
+			proven, counterexample = a.trySMTProveRequires(clause, subst)
+			return proven
+		})
+	}
+	return proven, counterexample
+}
+
+// withSMTEscalation re-runs a failed obligation check with every full query that stays undecided
+// retried under smtEscalationFactor times the budget. Callers use it only on the path that would
+// report the obligation as unproven, so the larger budget is paid only where a proof matters.
+func (a *Analyzer) withSMTEscalation(prove func() bool) bool {
+	if !a.smtEnabled || a.smtUnavailable || a.smtEscalation > 0 {
+		return false
+	}
+	a.smtEscalation++
+	defer func() { a.smtEscalation-- }()
+	return prove()
 }
 
 // smtCachedQuery returns a cached exact verdict, if available. Query layout is part of the cache key, so
@@ -2331,7 +2398,7 @@ func (a *Analyzer) canAssumeContractFact(expr ast.Expr) bool {
 	if a.proveRequiresClause(expr, nil) == requiresProven {
 		return true
 	}
-	if proven, _ := a.trySMTProveRequires(expr, nil); proven {
+	if proven, _ := a.trySMTProveRequiresReported(expr, nil); proven {
 		return true
 	}
 	a.proofLint(expr.Pos(), "invariant could not be proven statically at this point; keeping the debug runtime check but not using it as a release proof fact")

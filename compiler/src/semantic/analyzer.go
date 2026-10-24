@@ -775,7 +775,13 @@ type Analyzer struct {
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
 	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
 	// cross-function key collision means a byte-identical proof).
-	smtQueryCache            map[string]smtQueryResult
+	smtQueryCache map[string]smtQueryResult
+	// smtEscalation > 0 while withSMTEscalation re-runs a failed obligation.
+	smtEscalation int
+	// smtHistory lists the obligation queries asked so far in smtHistoryFor's body, cache hits
+	// included, for the warm-session stage of an escalated retry.
+	smtHistory               []string
+	smtHistoryFor            *ast.FuncDecl
 	smtProofCache            *smtProofCache
 	smtProofCacheInitialized bool
 	// smtDeclIDs gives each declaration a run-stable identity for SMT symbol names (smtStableDeclID).

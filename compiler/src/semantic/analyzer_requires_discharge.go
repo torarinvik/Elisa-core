@@ -169,6 +169,13 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			// still discharge a non-linear precondition (e.g. `requires lo * 2 <= cap`) under the
 			// caller's facts. Only `unsat` of the negation concludes — sound, off unless -smt.
 			proven, counterexample := a.trySMTProveCallRequires(req, subst, callPath, params, callee)
+			if !proven {
+				// Reported below when it stays unproven: worth the larger budget.
+				a.withSMTEscalation(func() bool {
+					proven, counterexample = a.trySMTProveCallRequires(req, subst, callPath, params, callee)
+					return proven
+				})
+			}
 			if proven {
 				a.recordProof(call.Pos(), subject, clauseName, ProofProvenSMT)
 				a.recordRequiresReport(declName, req, call.Pos(), true)

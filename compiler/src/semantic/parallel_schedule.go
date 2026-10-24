@@ -436,6 +436,25 @@ func (s *bodySchedule) finish(u int) {
 	s.cond.Broadcast()
 }
 
+// depClosure lists every unit u transitively depends on, dependencies first, in an
+// order fixed by the graph alone.
+func (s *bodySchedule) depClosure(u int) []int {
+	var out []int
+	seen := map[int]bool{u: true}
+	var visit func(int)
+	visit = func(v int) {
+		for _, d := range s.deps[v] {
+			if !seen[d] {
+				seen[d] = true
+				visit(d)
+				out = append(out, d)
+			}
+		}
+	}
+	visit(u)
+	return out
+}
+
 func planBodySchedule(bodies []scopedDecl, workers int) *bodySchedule {
 	g := buildBodyGraph(bodies)
 	components := g.sccs()
