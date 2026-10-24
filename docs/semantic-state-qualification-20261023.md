@@ -2108,3 +2108,32 @@ implementation retains six. Both use the same payload and options;
 a slower first launch of the newly built four-worker executable. Additional
 tests cover concurrent allocation-budget underflow/overflow, dictionary byte
 ownership/checksums, and the explicit custom-field-accessor parallel assertion.
+
+
+Normal CLI admission of `c8c14c8b` completed in its own fresh namespace
+(`/tmp/elisa-framed-production-root`). Eight partial checkpoints took
+15.860–27.976 s; invocation nine reached its external 30-second cap after
+publishing the complete state. Invocation ten finished in 15.634 s. The server
+was disabled and all O3/96-unit settings were unchanged.
+
+The ordinary matrix succeeded: baseline whole-object replay 0.531 s, enum reorder
+8.230 s, enum addition/handler 8.347 s, layout 11.368 s, permission 7.442 s,
+removal 7.791 s, body 6.840 s, signature 7.805 s, contract 7.545 s and line
+insertion 6.909 s. Exact-repeat hits took 0.418–0.456 s. All ten products match
+the previously verified objects byte for byte (`object-parity.json`); the
+installed executable matched the frozen admitted binary. Controlled sources
+were restored and the seven preexisting user changes remain. Layout improves
+from 12.393 s to 11.368 s but still misses the requested limit.
+
+A concrete next candidate is diagnostic-path key preparation. The whole-object
+miss computes its key twice, and both `startAnalysisDiskRestoration` and
+`analyzeSemanticFromDisk` compute an analysis key containing
+`diagnosticPathInputs`. That helper tokenizes the entire expanded input whenever
+any `#line` appears, just to discover bare diagnostic filenames. A conservative
+negative prefilter could skip these lexer passes only when no physical
+column-zero candidate can name a bare path; otherwise it would retain the
+existing full lexer. Its grammar/physical-position invariant and file-existence
+invalidation need differential validation before changing authority. The plan
+is `/tmp/elisa-diagnostic-key-prefilter-plan.txt`; no prefilter is implemented
+or qualified yet. Broader unsupported declaration/contract and default/runtime
+optimization-quality gates remain open.
