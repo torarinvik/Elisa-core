@@ -2902,3 +2902,39 @@ Both native compiler products pass include fixture exit 42, sidecar miss→valid
 enum dispatch and unknown diagnostics (`ir-imports-qualification/functional.json`).
 Snapshot hash unchanged; controlled Stage1 source restored. Full ordinary
 installed-binary namespace/matrix and broader runtime-quality gates remain next.
+
+
+### Bounded-import installed-binary confirmation: twenty-two variants (2026-10-24)
+
+Installed `227b8e30`, fresh executable/cache namespace with IR_IMPORTS=1,
+PARALLEL_IR=1, PARALLEL_OPT=1 and NATIVE_FRAGMENTS=1, no retained server.
+Pointer `/tmp/elisa-ir-imports-production-root` →
+`elisa-ir-imports-production-1slyyq7t`. Eight bounded admission checkpoints
+(15.210–26.928 seconds), ninth timeout 30.241 after full state publication,
+tenth object 14.962. Initial setup is separate from incremental timing.
+Every compiler/LLVM/link/native invocation externally capped at 30 seconds.
+
+Packed edit **8.831 seconds**, alignment 8.225. Major generic/private-bound/
+contract-bound/region-record/explicit-values/C-layout:
+7.267 / 7.413 / 5.788 / 8.936 / 6.542 / 5.815 seconds.
+Twelve remaining changed variants took 5.833–8.822; baseline exact hit 0.149.
+New `@inline(never)` edit on the capture file's first function completed in
+6.689 seconds, repeat 0.170. All **43 timed invocations** (22 variants including
+baseline and 21 repeats) succeeded; changed rebuild range **5.788–8.936 seconds**,
+exact repeats 0.139–0.175 seconds.
+
+The inline-policy object legitimately matches baseline: the large function was
+already not imported/inlined. A separate serialized-state regression verifies
+that this is not a lost annotation: `TestRetainedInlinePolicyDiskRoundTrip`
+checks never→always→default→never metadata and complete cold/replay O0/O3 IR,
+normal and debug. `/tmp/elisa-inline-policy-retained.log` passes.
+
+All **22 native compiler products** pass include fixture compile/link/run
+(exit 42), sidecar miss→valid, enum dispatch tags, and unknown-option diagnostics.
+Details: case JSONs and `functional.json`; runner log
+`/tmp/elisa-ir-imports-production-functional22.log`. Controlled Stage1 changes
+restored and seven user modifications preserved.
+This confirms the quality-improving bounded import mode stays within the current
+rebuild matrix. It remains explicitly gated; the single helper-loop quality
+probe does not qualify every workload or justify claiming the full goal complete.
+Broader runtime-quality/default-mode admission and further major edits remain open.
