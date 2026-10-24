@@ -3433,3 +3433,40 @@ independent AST identities, recovery diagnostics, filename and changed-source
 parity. Request tests also pass with the race detector (1.478 s). The clean
 benchmark is /tmp/elisa-request-tokens-bench-gc200-clean.log. A fresh installed
 compiler namespace and first-layout remeasurement remain required.
+
+
+### Framed initial checkpoints and bounded body boundary (2026-10-24)
+
+Fresh request-token qualification reached 14,443 bodies but the remaining
+late-analysis check plus sequential checkpoint encoding repeatedly hit the
+30 s cap. Completing all final checks directly also exceeded the cap while
+saving the completed state. No completed cache artifact was published in that
+namespace. These attempts are not successful cold-build measurements.
+
+A delegated diagnostic used a clean 067ff4e6 checkout and Go overlays only,
+GOGC=200 and separate 30 s capped child runs. It restored the same validated
+609,443,517-byte build checkpoint, encoded each format with the same 685,623,956
+byte capacity hint, and saved raw benchmark files outside the cache directory.
+No cache was modified, rekeyed, published or promoted by the diagnostic.
+
+Sequential encoding took 12.695 s (608,755,458 output bytes); framed took
+12.610 s (680,813,011 bytes). Isolated restore was 4.652 s sequential versus
+1.801 s framed, with about 152 MB higher decode-only peak RSS for framed.
+The checkpoint is 72,057,553 bytes / 11.84% larger. Decode plus all final checks
+completed in 14.28 versus 11.35 s; the advance itself was 9.641 versus 9.585 s.
+Both produced identical sorted full diagnostic transcripts: 26,293 diagnostics,
+9,745,902 bytes. This single paired observation establishes a restore tradeoff,
+not a whole-build speed claim. Artifacts: /tmp/elisa-checkpoint-format.iEEaIZ.
+
+AnalysisBuild now writes the already-supported ELISTATE4 framed format using
+the bounded capacity hint. The reader continues accepting ELISTATE3. No graph
+fields or diagnostic facts are omitted. Bounded Advance calls also yield after
+the last body before starting final checks, even with unused budget; a restored
+boundary proceeds because no body work occurred in that call. Empty builds
+remain productive, and Advance(0,0) retains single-call completion.
+
+State-cache/semantic tests pass (0.647/0.415 s), including both-format boundary
+restore, cold-result and diagnostic replay parity, empty/unbounded progress,
+capacity wire equality and cycle/slice alias identity. Fresh-process disk tests
+pass (6.892 s), including bootstrap/corruption/source-revision cases. Full
+installed admission and first-layout remeasurement remain required.

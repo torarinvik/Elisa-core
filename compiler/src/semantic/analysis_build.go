@@ -63,8 +63,8 @@ func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOpt
 // at the next declaration or final-check boundary after budget expires. Each
 // final-check phase also counts against the unit limit. A non-positive limit
 // means no limit. A declaration is indivisible: callers must still enforce their
-// process timeout. Finishing checks run in a subsequent step when a body limit
-// is reached, so that publication need not share the last body's time budget.
+// process timeout. Bounded calls leave finishing checks for a subsequent step
+// after the last body, so publication need not share that body's time budget.
 // Calls may not overlap any other semantic analysis.
 func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Result, *RetainedAnalysis, error) {
 	if err := b.validate(); err != nil {
@@ -103,6 +103,13 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 		r.bodyEnd = len(a.diagnostics)
 	}
 	if b.next < len(r.decls) || completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
+		return nil, nil, nil
+	}
+	// Give final checks their own bounded step after the last body, even when
+	// that body left unused budget. A final check and checkpoint serialization
+	// may otherwise exceed the process deadline together with the last bodies.
+	// completed>0 lets a restored boundary proceed and leaves empty builds alone.
+	if completed > 0 && b.postNext == 0 && (maxDeclarations > 0 || budget > 0) {
 		return nil, nil, nil
 	}
 	// Count post phases as scheduling units too, so tests and callers can force
@@ -182,7 +189,7 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	if a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
-	return semanticStateRegistry().EncodeWithCapacity(b, capacity)
+	return semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
 }
 
 func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {

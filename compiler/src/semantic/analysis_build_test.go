@@ -120,3 +120,81 @@ func TestAnalysisBuildRejectsActiveJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAnalysisBuildBoundedBodyBoundaryResumesBothFormats(t *testing.T) {
+	const source = "def value() -> i64:\n    return 7\n"
+	b, err := BeginAnalysisBuild(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, state, err := b.Advance(2, 0)
+	if err != nil || result != nil || state != nil {
+		t.Fatalf("body boundary exposed result: %v", err)
+	}
+	done, total := b.Progress()
+	post, _ := b.PostProgress()
+	if done != total || done != 1 || post != 0 || b.LastStats.PostPhases != 0 {
+		t.Fatalf("final check ran in body step: %d/%d, post %d", done, total, post)
+	}
+	framed, err := b.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(framed), "ELISTATE4") {
+		t.Fatal("checkpoint is not framed")
+	}
+	legacy, err := semanticStateRegistry().Encode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold := AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{})
+	for _, data := range [][]byte{legacy, framed} {
+		restored, err := RestoreAnalysisBuild(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, state, err := restored.Advance(0, 0)
+		if err != nil || result == nil || state == nil {
+			t.Fatalf("boundary did not finish: %v", err)
+		}
+		assertIncrementalResultParity(t, cold, result)
+		updated, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if retainedDiagnostics(updated) != retainedDiagnostics(cold) {
+			t.Fatal("post-check diagnostics changed on replay")
+		}
+	}
+}
+
+func TestAnalysisBuildUnboundedAndEmptyRemainProductive(t *testing.T) {
+	for _, source := range []string{"def value() -> i64:\n    return 7\n", "# empty\n"} {
+		b, err := BeginAnalysisBuild(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, state, err := b.Advance(0, 0)
+		if err != nil || result == nil || state == nil {
+			t.Fatalf("unbounded call did not finish: %v", err)
+		}
+		assertIncrementalResultParity(t, AnalyzeWithOptions(retainedParse(t, source), AnalyzeOptions{}), result)
+	}
+	const empty = "# empty\n"
+	b, err := BeginAnalysisBuild(retainedParse(t, empty), retainedParse(t, empty), []byte(empty), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _, err := b.Advance(1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, _ := b.PostProgress()
+	if result == nil && post == 0 {
+		t.Fatal("empty bounded call made no progress")
+	}
+	result, state, err := b.Advance(0, 0)
+	if err != nil || result == nil || state == nil {
+		t.Fatalf("empty boundary did not finish: %v", err)
+	}
+}

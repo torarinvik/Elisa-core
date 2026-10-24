@@ -43,6 +43,12 @@ func (r *Registry) EncodeWithCapacity(root any, capacity int) ([]byte, error) {
 // Decode accepts both this format and the preceding sequential format.
 func (r *Registry) EncodeFramed(root any) ([]byte, error) { return r.encode(root, true, 0) }
 
+// EncodeFramedWithCapacity reserves output space without changing the framed
+// format. Positive hints must be bounded to the caller's allocation budget.
+func (r *Registry) EncodeFramedWithCapacity(root any, capacity int) ([]byte, error) {
+	return r.encode(root, true, capacity)
+}
+
 func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true, strings: map[string]uint64{}, framed: framed}
 	v := reflect.ValueOf(root)
