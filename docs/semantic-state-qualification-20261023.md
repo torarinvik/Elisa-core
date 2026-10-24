@@ -2791,3 +2791,41 @@ C-layout ABI, alignment replay, and explicit-layout regressions pass.
 Before: `/tmp/elisa-packed-access-before.log` shows invalid align 8.
 After: `/tmp/elisa-packed-record-alignment.log` and
 `/tmp/elisa-packed-access-regressions.log` pass. Replay speed work remains next.
+
+
+### Simple packed-record replay qualification (2026-10-24)
+
+After the direct packed-access correction in `7c649e1d`, the paired simple-record
+edit helper admits ordinary/C/packed layouts with the same existing restrictions
+on fields, binders, annotations, affinity, typestate and ownership protocols.
+`applyStructEdits` now derives PackedLayout from the edited declaration instead
+of forcing false. Canonical type identity, field-order reset, containing-type
+selection and memo invalidation remain unchanged.
+
+`TestRetainedPackedLayoutModesAndFieldsDiskRoundTrip` covers serialized edits,
+field addition/removal and transitions through packed/C/default with metadata
+and cold diagnostics parity. The complete retained semantic suite passes
+(`/tmp/elisa-packed-record-semantic.log`).
+`TestRetainedPackedRecordDiskLayouts` compares complete normal/debug IR and runs
+both cold and replay O3 objects through packed→C→default→packed→default.
+A C client checks sizeof/align/field offsets and an inline alias/container,
+Elisa internal by-value copying, high signed values, and four pointer-accessed
+records (deliberately unaligned for packed mode). Physical Pair size changes
+13↔24 bytes. This pointer-boundary test does not qualify C by-value packed ABI.
+The scalar-only internal copy fixture has no arena allocations and uses the same
+empty arena-free hook convention as existing backend tests.
+Backend log `/tmp/elisa-packed-record-backend.log` passes.
+
+Frozen `/tmp/elisa-packed-record-main-test`, untouched ordinary `feed0a00` state,
+qualification-only output in its root's `packed-record-qualification`:
+baseline 22.031 seconds; actual packed compiler-record edit **8.685 seconds**
+(previous ordinary guarded fallback 17.904 seconds/exit 1/no object).
+Two functions selected, diff 0.440, bodies 0.009, post 0.253, replay 0.705 seconds;
+89 native units reused, seven rebuilt, seven fragments emitted and 21 reused,
+no fallbacks. The packed object SHA is
+`14cd35e3af0765174c9ab0d3c30eb9f336723cc2caaf696a191b47287881140d`.
+Both baseline and packed native compiler products pass the include fixture
+(exit 42), sidecar miss→valid, enum dispatch and unknown diagnostics
+(`packed-record-qualification/functional.json`). No baseline payload changed;
+controlled Stage1 edits restored. Fresh ordinary installed-binary confirmation
+is next. Default whole-module optimization remains above the 30-second cap.
