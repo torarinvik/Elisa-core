@@ -22,7 +22,10 @@ import (
 	"unsafe"
 )
 
-const nativeFragmentCount = 4
+// Eight fragments reduce native re-emission for small edits without the extra
+// cloning and cold-cache overhead measured with sixteen. Whole-unit O3 runs
+// before splitting, preserving cross-fragment optimization opportunities.
+const nativeFragmentCount = 8
 const partWorkerFragmentsEnv = "ELISACORE_PART_NATIVE_FRAGMENTS"
 
 type nativeFragmentRequest struct {
@@ -131,7 +134,7 @@ func emitNativeFragments(input, output string, request nativeFragmentRequest, tr
 		}
 	}
 	disk := &incrementalObjectDisk{root: request.Root, maxBytes: request.MaxBytes}
-	config, _ := json.Marshal([]string{"native-fragments-v1", request.Target, request.Namespace, "4", "default-codegen", "default-reloc", "default-code-model"})
+	config, _ := json.Marshal([]string{"native-fragments-v1", request.Target, request.Namespace, fmt.Sprint(nativeFragmentCount), "default-codegen", "default-reloc", "default-code-model"})
 	dir, e := os.MkdirTemp(filepath.Dir(output), "fragments-")
 	if e != nil {
 		return stats, e

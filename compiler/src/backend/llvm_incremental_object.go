@@ -372,7 +372,7 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 		if err != nil {
 			return true, err
 		}
-		settings = append(settings, "native-fragments-v1:4", merger)
+		settings = append(settings, fmt.Sprintf("native-fragments-v1:%d", nativeFragmentCount), merger)
 	}
 	config, _ := json.Marshal(settings)
 	C.LLVMDisposeMessage(triple)

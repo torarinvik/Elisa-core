@@ -3502,3 +3502,58 @@ entries found no identical bitcode/config across different namespace keys, so
 there is no evidence for removing that key component. The original 11.464-second
 generic-body edit miss remains open; this allocation change is not full matrix
 qualification or evidence that all edits finish within ten seconds.
+
+
+### Eight post-optimization native fragments (2026-10-24)
+
+The standalone 4da8ee15 matrix passed generic function/record binder renames
+(7.706/6.911 s), a generic record field (9.591 s), a new include (6.538 s,
+linked CLI fixture exit 42 and persistent sidecar validation), generic body
+(8.594 s), private bound (9.881 s), and contract bound (7.555 s). It stopped
+at a region-record field addition: 10.668 s, exit 0, output SHA256
+`a660bc519a296fb9dad82fd54578d897f01a71b2a0df58a70245c92452d3d90a`.
+The source was restored. This is not complete matrix qualification. A fresh
+two-field variant profiled at 9.794 s: semantic restore 3.186 s, update
+0.711 s, IR/native 5.437 s. Seven native units totaled 23.370 s; the two
+longest native workers took 3.998/4.108 s. That variant is separate evidence,
+not a replacement timing for the first miss.
+
+An isolated experiment used the original saved part-80 pre-optimization
+fixture inputs (manifest `/tmp/elisa-native-fragment-probe-root`), with the
+current worker and unchanged whole-unit `default<O3>,mergefunc` pipeline.
+Each count/edit/repetition got its own disk cache, seeded from the same
+baseline before the edit. Two repetitions reversed the 4/8 comparison order;
+16 was measured separately. Every command had an external 30-second cap.
+Only the temporary diagnostic binary allowed runtime count selection; the
+production count remains compile-time constant. Mean measured seconds:
+
+| fragments | body fragment phase | layout fragment phase | body worker wall | layout worker wall |
+| --- | --- | --- | --- | --- |
+| 4 | 0.435 | 1.279 | 1.542 | 2.438 |
+| 8 | 0.268 | 0.967 | 1.399 | 2.209 |
+| 16 | 0.244 | 0.961 | 1.398 | 2.246 |
+
+Eight reduces the measured fragment phase by about 38% for the body fixture
+and 24% for the layout fixture. Sixteen adds little layout benefit and more
+clones/cache entries, so eight is selected. Whole-unit optimization, inlining,
+AA, unrolling, and codegen settings are unchanged. Both the inner exact fragment
+config and enclosing pre-optimization cache target now derive their fragment
+count from the same constant, preventing four-way objects from satisfying the
+eight-way configuration.
+
+Native cross-process base/repeat/body/revert/corruption tests and merger identity
+checks passed (1.305 s). Inlining quality passed all four modes (whole-module,
+independent IR, imported IR, ordinary disk defaults), with matching runtime
+checksums; the disk-defaults median was 0.014209 s. Broader struct-alias,
+strict-FP and mutual-recursion quality probes passed all modes (7.912 s).
+These fixture results motivate the policy; fresh full-compiler disk-cache
+admission and the unresolved region-record case still require qualification.
+
+The focused native regression group passed with
+`ELISACORE_TEST_NATIVE_WORKERS=1 ELISACORE_NATIVE_FRAGMENTS=1` (6.541 s):
+merged-function addresses and ABI across seven serial/split/debug modes,
+inline callee invalidation, exported/global initializer identity, retained
+generic-function binders, generic records, C-record ABI thresholds and enum
+storage. An earlier invocation omitted the test worker entry-point environment
+and failed its explicit setup assertions; that invocation is not counted as
+validation. The corrected invocation exercised the native fragment path.

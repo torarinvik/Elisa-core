@@ -39,11 +39,11 @@ func TestNativeFragmentsAcrossProcesses(t *testing.T) {
 		stats := session.Stats()
 		switch revision {
 		case "base", "corrupt":
-			if stats.NativeFragmentsEmitted != 4 || stats.NativeFragmentsReused != 0 {
+			if stats.NativeFragmentsEmitted != nativeFragmentCount || stats.NativeFragmentsReused != 0 {
 				t.Fatalf("cold fragments: %+v", stats)
 			}
 		case "body":
-			if stats.NativeFragmentsEmitted == 0 || stats.NativeFragmentsReused == 0 || stats.NativeFragmentsEmitted+stats.NativeFragmentsReused != 4 {
+			if stats.NativeFragmentsEmitted == 0 || stats.NativeFragmentsReused == 0 || stats.NativeFragmentsEmitted+stats.NativeFragmentsReused != nativeFragmentCount {
 				t.Fatalf("missing exact fragment reuse: %+v", stats)
 			}
 		default:
