@@ -1140,8 +1140,13 @@ func TestRetainedAnalysisAcceptsPlainStructEdits(t *testing.T) {
 		if i > 0 && len(fresh.Errors()) == 0 {
 			t.Fatalf("fixture: struct edit %d must break a user", i)
 		}
-		if users := retained.LastStats.StructUsers; users != 2 {
-			t.Fatalf("struct edit %d re-analyzed %d functions, want the two users", i, users)
+		// An added defaulted scalar field is invisible to the reader `norm`.
+		want := 2
+		if i == 0 {
+			want = 1
+		}
+		if users := retained.LastStats.StructUsers; users != want {
+			t.Fatalf("struct edit %d re-analyzed %d functions, want %d", i, users, want)
 		}
 	}
 }

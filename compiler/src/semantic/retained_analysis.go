@@ -72,6 +72,7 @@ type RetainedUpdateStats struct {
 	Added                     int
 	Removed                   int
 	StructUsers               int // functions re-analyzed for an edited struct (with the edited ones)
+	StructUnobserved          int // struct users kept: an additive scalar edit they cannot observe
 	ConstUsers                int // functions re-analyzed for an edited const (with the edited ones)
 	EnumUsers                 int // functions re-analyzed for an edited enum (with the edited ones)
 	Pairing, Scratch, Compare time.Duration
@@ -778,6 +779,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				}
 			}
 		}
+		additive := true
+		for _, e := range structEdits {
+			if !a.retainedAdditiveScalarEdit(e.live, e.edit) {
+				additive = false
+				break
+			}
+		}
 		a.widenLayoutTargets(targets)
 		for name, typ := range a.namedTypes {
 			if targets[typ] {
@@ -790,6 +798,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			spliced[sp.live] = true
 		}
 		memo := map[Type]bool{}
+		var stores map[string]bool
+		if additive {
+			stores = a.retainedPackedStoresReaching(targets, memo)
+		}
 		for _, sd := range r.decls {
 			fn, ok := sd.Decl.(*ast.FuncDecl)
 			if !ok || spliced[fn] {
@@ -801,6 +813,10 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				namedInSource = retainedNameTextMatch(newText, names, namePattern)
 			}
 			if !namedInSource && !a.retainedUsesTypes(fn, targets, names, memo) {
+				continue
+			}
+			if additive && newText == oldText && !a.retainedObservesFieldSet(fn, targets, stores, memo) {
+				r.LastStats.StructUnobserved++
 				continue
 			}
 			nfn := pairedNew[fn]
