@@ -37,6 +37,36 @@ func retainedPlainStruct(d *ast.StructDecl) bool {
 	return true
 }
 
+// Explicit region arguments preserve their binding protocol when only fields
+// change. Other generic binders still need their declaration machinery rebuilt.
+func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
+	if retainedPlainStruct(old) && retainedPlainStruct(current) {
+		return true
+	}
+	if old.Name != current.Name || !reflect.DeepEqual(old.RegionParams, current.RegionParams) || len(old.RegionParams) == 0 {
+		return false
+	}
+	regionOnly := func(d *ast.StructDecl) bool {
+		for _, p := range d.GenericParams {
+			if p.Kind != ast.GenericParamRegion || p.InterfaceBound != "" || p.StateOwner != "" || len(p.StateCases) != 0 {
+				return false
+			}
+		}
+		shape := *d
+		shape.RegionParams, shape.GenericParams = nil, nil
+		return retainedPlainStruct(&shape)
+	}
+	if !regionOnly(old) || !regionOnly(current) || len(old.GenericParams) != len(current.GenericParams) {
+		return false
+	}
+	for i, p := range old.GenericParams {
+		if p.Name != current.GenericParams[i].Name {
+			return false
+		}
+	}
+	return true
+}
+
 // retainedTypeMemos are analyzer memos keyed by type whose answers depend on struct fields.
 var retainedTypeMemos = []string{
 	"storeScanNoStorageCache", "storeScanViewOnlyCache", "storeScanSharesCache", "resolvedStructFieldsMemo",
@@ -311,6 +341,8 @@ func retainedHoldsByValue(t Type, targets map[Type]bool, seen map[Type]bool) boo
 				}
 			}
 		}
+	case *GenericInstanceType:
+		return retainedHoldsByValue(n.Base, targets, seen)
 	case *ArrayType:
 		return retainedHoldsByValue(n.Elem, targets, seen)
 	case *OptionalType:

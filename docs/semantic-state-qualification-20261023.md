@@ -2499,3 +2499,56 @@ invocation is externally capped at 30 s. These explicit qualification timings ar
 not relabeled as ordinary CLI measurements. Fresh ordinary admission, renewed
 novel edit matrix, region-record fallback and default/runtime-quality gates remain
 required. The cache path remains explicitly gated pending that qualification.
+
+
+### Ordinary CLI admission of native fragment reuse
+
+`034fb474` was admitted in a fresh executable-keyed namespace selected by
+`/tmp/elisa-native-fragments-production-root`, with the server empty and fragment
+reuse explicitly enabled. No payload was copied or rekeyed. Eight checkpoints
+took 14.922–26.352 s, invocation nine reached its external 30 s cap after complete
+state publication, and ten emitted an object in 14.011 s. Setup/population times
+are not relabeled as incremental rebuild results.
+
+The ordinary CLI matrix succeeds below ten seconds: baseline 5.139 s; generic
+body 7.735 s; private bound 7.913 s; contract-bound constant 5.963 s; storage u16
+7.102 s, u64 7.273 s, i16 6.913 s; enum reorder 6.998 s; add/handler 7.122 s;
+layout 8.419 s; permission 6.605 s; removal 6.826 s; body 5.697 s; signature
+6.788 s; contract 6.694 s; lines 5.699 s. Exact repeats take 0.149–0.169 s.
+The three former native-cost cases now have more than two seconds of headroom.
+All sixteen normal products link and compile the include fixture on miss/valid
+cache reads; linked fixture exits 42, enum tag and diagnostic probes pass
+(`functional.json`). Scripts are `/tmp/elisa-native-fragments-{major-matrix,
+production-matrix,production-functional}.py`. All toolchain commands have
+external 30 s caps. This proves the matrix, not all major edits or default quality.
+
+### Region-parameterized record field replay candidate
+
+A paired record edit can retain its explicit region binders when their names/order
+and generic-region protocol remain unchanged. Type/value/state/permission generic
+binders and the existing complex declaration features remain guarded. Existing
+scratch declaration comparison remains mandatory. The live field table is rebuilt,
+type memos cleared and dependent bodies rechecked. Layout invalidation now follows
+by-value GenericInstance bases and adds containing/alias names, covering layout
+queries whose operand has no expression-type record.
+
+The retained semantic suite passes. Disk round trips check adding/narrowing/removing
+fields, reversion, nested region records and borrow-bearing element retyping that
+retracts a scalar getter's validity. Region binder rename/removal and added type
+binder changes still fall back. Concrete backend tests instantiate region arguments,
+compare full replay/cold LLVM IR in normal and debug mode, then link and execute
+record construction/forwarding at three shapes (exit 17). Logs are
+`/tmp/elisa-region-struct-{semantic-all,semantic-final,backend}.log`.
+
+Checked-payload qualification (`/tmp/elisa-region-record-qualification.py`) uses the
+admitted native-fragment baseline with normal source/options validation, outputs
+only into `region-record-qualification/` under that root, and leaves the baseline
+state hash unchanged. Initial native population takes 21.716 s. Adding a u64 field
+to `IncrementalSessionIdentityKey[@r]` succeeds in 9.195 s, replacing the earlier
+18.026 s unsuccessful fallback. It rechecks two functions, emits thirteen fragments,
+reuses fifteen fragments within seven changed units, and reuses 89 whole units.
+Both candidate compiler products pass the native include fixture, miss/valid cache
+reads, exit 42, enum and diagnostic probes (`functional.json`). Controlled source
+was restored. This remains explicit qualification; fresh ordinary admission and
+novel edit timing for the region-record implementation are still needed. Other
+major forms and default/runtime-quality gates keep the full goal open.

@@ -440,7 +440,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			if !sameText {
 				if osd, ok := od.(*ast.StructDecl); ok {
-					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedPlainStruct(osd) && retainedPlainStruct(nsd) {
+					if nsd, ok := nd.(*ast.StructDecl); ok && osd.Name == nsd.Name && retainedStructFieldEditAllowed(osd, nsd) {
 						structPairs = append(structPairs, [2]*ast.StructDecl{osd, nsd})
 						continue
 					}
@@ -756,6 +756,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			names[e.live.Name] = true
 		}
 		a.widenLayoutTargets(targets)
+		for name, typ := range a.namedTypes {
+			if targets[typ] {
+				names[name[strings.LastIndex(name, ".")+1:]] = true
+			}
+		}
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
 			spliced[sp.live] = true
