@@ -246,7 +246,7 @@ func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel Optimization
 	if jobs > 1 && optLevel != OptimizationLevel0 && !g.optimizedForCodegen && parallelOptEnabled() {
 		// Opt-in: optimize each partition in its worker (see parallel_emit.c). This skips
 		// the module-wide verifyAutovecExpectations, which needs the optimized module.
-		pipeline := fmt.Sprintf("default<O%d>", int(optLevel))
+		pipeline := optimizationPipeline(optLevel)
 		if done, err := g.emitObjectParallel(outputPath, jobs, pipeline, parallelOptImportWeight()); done || err != nil {
 			return err
 		}
@@ -278,6 +278,22 @@ func (g *llvmGenerator) emitNativeObjectFile(outputPath string) error {
 	return nil
 }
 
+// Common emission pipeline for native workers and cache configuration. Serial
+// optimization applies its diagnostic-preserving condition below.
+// Merge equivalent functions after O3 so native selection does not repeat their
+// bodies. LLVM retains separate entry points where addresses are significant.
+func optimizationPipeline(level OptimizationLevel) string {
+	pipeline := optimizationBasePipeline(level)
+	if level == OptimizationLevel3 {
+		pipeline += ",mergefunc"
+	}
+	return pipeline
+}
+
+func optimizationBasePipeline(level OptimizationLevel) string {
+	return fmt.Sprintf("default<O%d>", int(level))
+}
+
 func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if optLevel == OptimizationLevel0 {
 		return nil
@@ -295,7 +311,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	llvmOptimizationMu.Lock()
 	defer llvmOptimizationMu.Unlock()
 	ensureO3UnrollThreshold(optLevel)
-	passPipeline := cString(fmt.Sprintf("default<O%d>", int(optLevel)))
+	passPipeline := cString(optimizationBasePipeline(optLevel))
 	defer C.free(unsafe.Pointer(passPipeline))
 	aaPipeline := cString(optimizationAAPipeline)
 	defer C.free(unsafe.Pointer(aaPipeline))
@@ -313,6 +329,19 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
 	}
 	g.verifyAutovecExpectations()
+	// Equivalent functions can carry different source-position loop markers.
+	// Preserve every warning (also on optimized-module cache replay) by leaving
+	// such modules unmerged. Successful vectorization has no warning to retain.
+	if optLevel == OptimizationLevel3 && len(g.perfWarnings) == 0 {
+		mergePipeline := cString("mergefunc")
+		defer C.free(unsafe.Pointer(mergePipeline))
+		if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, mergePipeline, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
+			return fmt.Errorf("failed to merge equivalent LLVM functions: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
+		}
+		if err := g.verify(); err != nil {
+			return fmt.Errorf("merged LLVM module failed verification: %w", err)
+		}
+	}
 	g.optimizedForCodegen = true
 	return nil
 }

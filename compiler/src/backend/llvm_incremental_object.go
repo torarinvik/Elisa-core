@@ -80,7 +80,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if parallelOptEnabled() && parallelOptImportWeight() == 0 && partitionWorkersAvailable && options.OptLevel != OptimizationLevel0 &&
 		!options.Serial && !virtualObjectSource(result) && native.Triple == target.Triple &&
 		int64(C.elisacoreObjectPartitionWeight(g.module)) >= s.minWeight && C.elisacoreSelectiveCloneSupported(g.module) != 0 {
-		partitionPipeline = fmt.Sprintf("default<O%d>", int(options.OptLevel))
+		partitionPipeline = optimizationPipeline(options.OptLevel)
 	} else {
 		optimized, err := s.optimizeObjectModule(g, options.OptLevel)
 		if err != nil {
@@ -364,7 +364,7 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 	features := C.LLVMGetTargetMachineFeatureString(probe.targetMachine)
 	pipeline := ""
 	if options.OptLevel != OptimizationLevel0 {
-		pipeline = fmt.Sprintf("default<O%d>", int(options.OptLevel))
+		pipeline = optimizationPipeline(options.OptLevel)
 	}
 	config, _ := json.Marshal([]string{"partitioned-ir-object-v2", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline})
 	C.LLVMDisposeMessage(triple)

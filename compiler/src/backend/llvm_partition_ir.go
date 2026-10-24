@@ -307,7 +307,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	nativeStart := time.Now()
 	if options.OptLevel != OptimizationLevel0 {
 		var err error
-		object, err = emitPreoptimizedPartition(inputBytes, fmt.Sprintf("default<O%d>", int(options.OptLevel)), triple, cpu, features)
+		object, err = emitPreoptimizedPartition(inputBytes, optimizationPipeline(options.OptLevel), triple, cpu, features)
 		if err != nil {
 			return nil, fmt.Errorf("partition %d: %w", part, err)
 		}

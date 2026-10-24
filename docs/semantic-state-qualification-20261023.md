@@ -2218,3 +2218,44 @@ No production pipeline was changed. `merge-trial-*.json`,
 `/tmp/elisa-layout-native-merge.py` record the experiment. Any promotion needs
 those correctness/quality checks plus ordinary CLI admission and novel edits;
 the isolated approximately 0.1 s difference cannot establish the goal.
+
+
+## O3 equivalent-function merging qualification
+
+The candidate appends LLVM `mergefunc` after the unchanged default O3 pipeline.
+Worker emission and native cache configuration use the same pipeline helper.
+O0/O1/O2, native codegen level, AA stack, inliner 400 and unroll 600 are unchanged.
+Serial optimization first runs the base pipeline and collects vectorization
+performance diagnostics. Modules with such warnings are left unmerged, because
+merging equivalent loops could drop a second source-position marker and lose a
+warning on optimized-module cache replay. A regression checks two distinct loop
+warnings before and after replay, including warning-to-error enforcement.
+
+New linked C tests check distinct addresses of identical exported functions,
+scalar and aggregate ABI values, indirect calls, split view arguments to a C
+callback and arena cleanup. They pass for serial, split, independent-IR and
+debug variants, including a focused race run. Existing C ABI/view tests, inline
+attributes, debug information, exported globals, AA/inliner/unroll parity and
+cross-process O2/O3/debug/line/body/local-name cache edit/revert tests pass. The
+main cache and semantic-disk suite passes. An initial source-file-relative test
+was run from the wrong cwd; the recorded passing suite uses the backend source
+directory. Every build/native/LLVM/link invocation has an external 30-second cap.
+
+Checked-payload qualification uses the exact admitted source/options with no
+production state rekeying (`/tmp/elisa-merge-functions-native-probe.py`). Results
+under `merge-functions-96/` in `/tmp/elisa-path-prefilter-production-root`:
+native population 19.468 s; unchanged/native reuse 5.083 s; enum edit 7.016 s;
+layout 9.822 s; removal 6.541 s. Warm edit requests took 5.756–7.017 s. These
+include profiling and are not ordinary CLI timings. The native-only matched
+experiment in the preceding section establishes the small latency/codesize gain;
+no larger end-to-end gain is inferred from unmatched historical timings.
+
+All four resulting objects (baseline, enum, layout, removal) were linked into
+real compiler executables. Each compiled the included fixture on a sidecar miss
+and valid second read; linked fixture executables returned 42. C constructor
+probes verified enum tags (including reordered Output/Filter), and unknown-flag
+diagnostics remained correct. Results are `merge-functions-96/functional.json`.
+Object bytes differ as expected from deduplication; this functional validation
+does not relabel them as byte-identical to the previous pipeline. New ordinary
+CLI admission, its novel-edit matrix and broader major/default/runtime-quality
+gates remain required.
