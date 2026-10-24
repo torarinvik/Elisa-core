@@ -10,14 +10,13 @@ import "C"
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
-	"os"
 	"reflect"
 )
 
 // Experimental bounded imports preserve a single emitted owner. Exact current
 // module bitcode, including every imported body, remains the cache authority.
 func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncType, value C.LLVMValueRef) error {
-	if g.partBody == nil || g.optLevel == OptimizationLevel0 || g.bodyDepth == 0 || g.bodyDepth > 3 || os.Getenv("ELISACORE_IR_IMPORTS") != "1" || C.LLVMCountBasicBlocks(value) != 0 || g.partBody(llvmValueName(value)) {
+	if g.partBody == nil || g.optLevel == OptimizationLevel0 || g.bodyDepth == 0 || g.bodyDepth > 3 || !configuredCodegenFlag("ELISACORE_IR_IMPORTS", g.partitionImportDefaults) || C.LLVMCountBasicBlocks(value) != 0 || g.partBody(llvmValueName(value)) {
 		return nil
 	}
 	if fn == nil || fn.Static || fn.IsNativeExtern || len(fn.TypeParams) != 0 || len(fn.GenericParams) != 0 || fn.IntrinsicName != "" || (fn.HasInlineMode && fn.InlineMode == semantic.FuncInlineModeNever) {

@@ -16,6 +16,7 @@ import (
 // revisions. It owns bytes, never LLVM or semantic handles. This is an in-process
 // cache, with optional compiler-namespaced disk persistence.
 type IncrementalObjectSession struct {
+	diskDefaults  bool // session-local standalone disk-analysis codegen preset
 	disk          *incrementalObjectDisk
 	mu            sync.Mutex // protects the bounded partition map and LRU metadata
 	statsMu       sync.Mutex

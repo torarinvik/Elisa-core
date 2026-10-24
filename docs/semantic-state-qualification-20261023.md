@@ -3335,3 +3335,29 @@ Controlled runtime source restored. The cumulative matrix now has **27 variants*
 slowest remains the 8.847-second region-record edit. No new production changes were
 needed for this coupled case. Existing opt-in/default-mode and broader edit-family
 limitations remain; this does not close the full performance goal.
+
+
+### Standalone disk-object defaults (2026-10-24)
+
+Disk-analysis object sessions now select the qualified 96-unit independent-IR,
+O3 optimizer, bounded import and native-fragment pipeline without tuning flags.
+Explicit environment overrides retain their meanings; ordinary serial and textual
+LLVM entry points keep their previous defaults. Executable emission through the
+textual LLVM path is not covered by this change.
+
+Fresh-process disk-analysis tests pass, including native outputs 102 then 103
+after a body edit. Backend tests verify genuine independent units, fragment
+emission, and exact disk reuse between default and explicitly configured sessions.
+The generic native tests and quality harness now explicitly register optimizer
+workers and assert independent-unit emission; setting the worker environment
+inside a test alone had not registered the parent harness. This correction does
+not change the previously measured production CLI runs.
+
+Clean isolated inlining and broader quality probes pass for all four modes,
+including disk defaults. Reference checksums match for inlining, struct aliasing,
+strict floating point and mutual recursion. Default runtime samples are comparable
+to whole-module samples. Logs: /tmp/elisa-disk-defaults-quality-inline-clean.log
+and /tmp/elisa-disk-defaults-quality-broader.log. The earlier overlapping inline
+probe timings are excluded. Analysis disk tests pass (6.547 s), and default-mode
+plus retained-generic backend tests pass. Full Stage1 qualification without tuning
+flags remains to be measured in a fresh namespace after installation.

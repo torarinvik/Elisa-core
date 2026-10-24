@@ -11,6 +11,9 @@ import (
 // and retained servers. Only exact current bitcode can authorize partition reuse.
 func newPersistentObjectSession() *backend.IncrementalObjectSession {
 	session := backend.NewIncrementalObjectSession(backend.NativeObjectPartitions(), 4<<30)
+	if analysisDiskCacheEnabled() {
+		session.UseDiskIncrementalDefaults()
+	}
 	if !buildCacheEnabled() || os.Getenv("ELISACORE_PARTITION_CACHE") == "0" {
 		return session
 	}

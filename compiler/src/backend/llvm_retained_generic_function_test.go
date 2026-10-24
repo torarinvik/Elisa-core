@@ -22,6 +22,9 @@ func TestRetainedGenericFunctionBinderDiskABI(t *testing.T) {
 	for _, name := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT", "ELISACORE_IR_IMPORTS", "ELISACORE_NATIVE_FRAGMENTS", "ELISACORE_TEST_NATIVE_WORKERS"} {
 		t.Setenv(name, "1")
 	}
+	previous := partitionWorkersAvailable
+	RunPartitionWorkerIfRequested()
+	t.Cleanup(func() { partitionWorkersAvailable = previous })
 	a, b := "binder_address_a", ""
 	for i := 0; i < 20; i++ {
 		candidate := fmt.Sprintf("binder_address_b%d", i)
@@ -137,7 +140,7 @@ int main(void){Pair p={91234567890LL,-71234567890LL,0x123456789abcdefLL},q=wide(
 			if err := session.WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3}); err != nil {
 				t.Fatal(err)
 			}
-			if session.Stats().SerialFallbacks != 0 {
+			if session.Stats().SerialFallbacks != 0 || session.Stats().OwnerMapBuilds != 0 || session.Stats().PartitionsEmitted != 4 {
 				t.Fatal("independent IR declined")
 			}
 			binary := filepath.Join(dir, label)
@@ -161,6 +164,9 @@ func TestRetainedGenericFunctionRenameAndBodyChange(t *testing.T) {
 	for _, name := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT", "ELISACORE_IR_IMPORTS", "ELISACORE_NATIVE_FRAGMENTS", "ELISACORE_TEST_NATIVE_WORKERS"} {
 		t.Setenv(name, "1")
 	}
+	previous := partitionWorkersAvailable
+	RunPartitionWorkerIfRequested()
+	t.Cleanup(func() { partitionWorkersAvailable = previous })
 	const base = `def generic_choose[T](left: T, right: T) -> T:
     return left
 
@@ -248,7 +254,7 @@ int main(void){
 			if err := session.WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3}); err != nil {
 				t.Fatal(err)
 			}
-			if session.Stats().SerialFallbacks != 0 {
+			if session.Stats().SerialFallbacks != 0 || session.Stats().OwnerMapBuilds != 0 || session.Stats().PartitionsEmitted != 4 {
 				t.Fatal("independent IR declined")
 			}
 			binary := filepath.Join(dir, label)

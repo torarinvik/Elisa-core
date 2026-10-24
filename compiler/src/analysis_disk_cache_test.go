@@ -32,14 +32,14 @@ func runDiskCLIChildResult(t *testing.T, overrides map[string]string, args ...st
 	cmd := exec.CommandContext(ctx, os.Args[0], childArgs...)
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if _, replace := overrides[name]; !replace && name != "TEST_BUILD_CACHE_MAIN" {
+		if _, replace := overrides[name]; !replace && name != "TEST_BUILD_CACHE_MAIN" && name != "ELISACORE_TEST_NATIVE_WORKERS" {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
 	for name, value := range overrides {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
-	cmd.Env = append(cmd.Env, "TEST_BUILD_CACHE_MAIN=1")
+	cmd.Env = append(cmd.Env, "TEST_BUILD_CACHE_MAIN=1", "ELISACORE_TEST_NATIVE_WORKERS=1")
 	output, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {

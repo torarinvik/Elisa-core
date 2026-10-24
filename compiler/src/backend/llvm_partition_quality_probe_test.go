@@ -65,6 +65,10 @@ int main(int argc,char **argv){
 
 func runPartitionQualityModes(t *testing.T, root, source, client, count, label string) {
 	t.Helper()
+	t.Setenv("ELISACORE_TEST_NATIVE_WORKERS", "1")
+	previousWorkers := partitionWorkersAvailable
+	RunPartitionWorkerIfRequested()
+	t.Cleanup(func() { partitionWorkersAvailable = previousWorkers })
 	if err := os.WriteFile(filepath.Join(root, "source.elisa"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,7 @@ func runPartitionQualityModes(t *testing.T, root, source, client, count, label s
 	if err := os.WriteFile(path, []byte(client), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"whole-module", "independent-ir", "independent-ir-imports"} {
+	for _, mode := range []string{"whole-module", "independent-ir", "independent-ir-imports", "disk-defaults"} {
 		t.Setenv("ELISACORE_IR_IMPORTS", "0")
 		if mode == "independent-ir-imports" {
 			t.Setenv("ELISACORE_IR_IMPORTS", "1")
@@ -87,11 +91,16 @@ func runPartitionQualityModes(t *testing.T, root, source, client, count, label s
 		result := parseAndAnalyzeBackendTest(t, "quality-probe.elisa", source)
 		session := NewIncrementalObjectSession(4, 32<<20)
 		session.minWeight = 0
+		if mode == "disk-defaults" {
+			unsetDiskPresetFlags(t)
+			session.UseDiskIncrementalDefaults()
+			session.EnableDiskCache(filepath.Join(root, "default-cache"), "quality-emitter", 64<<20)
+		}
 		object := filepath.Join(root, mode+".o")
 		if err := session.WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3, Serial: mode == "whole-module"}); err != nil {
 			t.Fatal(err)
 		}
-		if mode != "whole-module" && session.Stats().OwnerMapBuilds != 0 {
+		if mode != "whole-module" && (session.Stats().OwnerMapBuilds != 0 || session.Stats().PartitionsEmitted == 0) {
 			t.Fatal("independent path declined")
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -77,7 +77,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	// Cache input is then each exact *unoptimized* partition, so an unchanged
 	// partition skips both optimization and native emission across processes.
 	partitionPipeline := ""
-	if parallelOptEnabled() && parallelOptImportWeight() == 0 && partitionWorkersAvailable && options.OptLevel != OptimizationLevel0 &&
+	if s.diskCodegenFlag("ELISACORE_PARALLEL_OPT") && parallelOptImportWeight() == 0 && partitionWorkersAvailable && options.OptLevel != OptimizationLevel0 &&
 		!options.Serial && !virtualObjectSource(result) && native.Triple == target.Triple &&
 		int64(C.elisacoreObjectPartitionWeight(g.module)) >= s.minWeight && C.elisacoreSelectiveCloneSupported(g.module) != 0 {
 		partitionPipeline = optimizationPipeline(options.OptLevel)
@@ -367,7 +367,7 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 		pipeline = optimizationPipeline(options.OptLevel)
 	}
 	settings := []string{"partitioned-ir-object-v2", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline}
-	if nativeFragmentsEnabled() && s.disk != nil && options.OptLevel != OptimizationLevel0 {
+	if s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") && s.disk != nil && options.OptLevel != OptimizationLevel0 {
 		merger, err := s.nativeFragmentMergeKey()
 		if err != nil {
 			return true, err

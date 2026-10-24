@@ -145,8 +145,8 @@ func (s *IncrementalObjectSession) partitionedIRApplies(result *semantic.Result,
 	if !partitionedIREnabled() {
 		return false
 	}
-	if options.OptLevel != OptimizationLevel0 && (os.Getenv("ELISACORE_PARALLEL_IR") != "1" ||
-		!parallelOptEnabled() || parallelOptImportWeight() != 0 || !partitionWorkersAvailable) {
+	if options.OptLevel != OptimizationLevel0 && (!s.diskCodegenFlag("ELISACORE_PARALLEL_IR") ||
+		!s.diskCodegenFlag("ELISACORE_PARALLEL_OPT") || parallelOptImportWeight() != 0 || !partitionWorkersAvailable) {
 		return false
 	}
 	if s.minWeight == 0 {
@@ -238,6 +238,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
 		g.partitionGlobalDeclarationsOnly = part != 0
 		g.sharedResult = true
+		g.partitionImportDefaults = s.diskDefaultsActive()
 		// LLVM retains GlobalValue names while discarding non-semantic local SSA
 		// names. Set this before lowering to avoid creating source-offset names.
 		if !options.DebugInfo {
@@ -308,7 +309,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	if options.OptLevel != OptimizationLevel0 {
 		var err error
 		var fragment *nativeFragmentContext
-		if nativeFragmentsEnabled() && s.disk != nil {
+		if s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") && s.disk != nil {
 			fragment = &nativeFragmentContext{request: nativeFragmentRequest{
 				Root:      filepath.Join(s.disk.root, "native-fragments-v1"),
 				Namespace: fmt.Sprintf("%x.ir.%d", unitID, part), Target: configKey,
