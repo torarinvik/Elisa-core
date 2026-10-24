@@ -2259,3 +2259,60 @@ Object bytes differ as expected from deduplication; this functional validation
 does not relabel them as byte-identical to the previous pipeline. New ordinary
 CLI admission, its novel-edit matrix and broader major/default/runtime-quality
 gates remain required.
+
+
+Normal CLI admission of `add8285c` completed in a fresh executable-keyed cache
+(`/tmp/elisa-merge-functions-production-root`), with the server empty and the
+same O3/96-unit settings. Eight partial checkpoints took 14.819–26.736 s.
+Invocation nine reached its 30-second external cap after publishing the complete
+state; invocation ten finished in 12.934 s. No state was copied or rekeyed.
+
+The ordinary matrix succeeded: baseline replay 0.250 s; enum reorder 7.073 s;
+enum addition/handler 6.902 s; layout 9.834 s; permission 6.202 s; removal
+6.620 s; body 5.572 s; signature 6.576 s; contract 6.387 s; line insertion
+5.592 s. Exact repeats took 0.140–0.167 s. Layout improves from 10.112 s, but
+the 0.166 s margin is thin. The four overlapping normal products exactly match
+the functionally validated qualified products (`qualification-parity.json`).
+All ten normal products then linked and compiled the included fixture twice,
+with sidecar miss/valid behavior and executable exit 42; enum constructor probes
+and unknown-flag diagnostics pass (`functional.json`). This proves this matrix,
+not all major edits or the default/runtime optimization-quality gates.
+
+The seven-unit native size reduction is not a claim about whole-object size.
+The baseline relocatable compiler object grows from 13,809,632 to 13,919,192
+bytes (about 0.8%). Linking both with the same hooks/options and dead stripping
+reduces the executable from 10,981,368 to 10,929,632 bytes (about 0.47%); text
+falls from 9,251,556 to 9,238,884 bytes. Raw sections and `size-comparison.json`
+are in the same root.
+
+Additional runtime/race cases exercise non-inlined signed/unsigned generic
+instances and post-O3 native splitting, including debug mode; no serial
+fallback is accepted. These pass. A temporary negative-control binary built
+with the warning guard removed fails the warning-replay regression: only one
+of the two source warnings survives on cache replay. Its source modification
+was restored before the ordinary matrix; no such binary was installed. Logs
+are `/tmp/elisa-merge-postopt.log`, `/tmp/elisa-merge-postopt-race.log` and
+`/tmp/elisa-merge-warning-negative.log`.
+
+### Newly measured major-edit gap: enum storage width
+
+Changing only `const enum CliArgumentKind of u8` to `of u16` in the admitted
+real compiler took 17.810 s and returned status 1 with no object: it saved an
+initial-analysis checkpoint at 2,271/14,422 declarations instead of replaying
+the edit. This is a failure of the requested rebuild behavior, not a successful
+sub-ten-second compile. `enum-storage-width.json` and its stdout/stderr record
+the normal request. The source was restored, and the full admitted baseline
+state's SHA-256 remained unchanged.
+
+A separate observer request (one-declaration bootstrap budget, not a performance
+measurement) confirms the retained fallback at `elisac_cli.elisa:105:1`, restores
+the width-specific partial checkpoint and advances it by one declaration. It
+returns status 1 in 11.712 s, preserves the baseline state and restores source.
+The conservative first-line equality guard in `retainedConstEnumEditAllowed`
+rejects changed storage. Supporting this requires complete width-dependent ABI,
+layout, bounds/proof, member and transitive caller invalidation, plus cold IR and
+diagnostic checks; simply dropping the guard is unqualified. Scripts:
+`/tmp/elisa-merge-functions-enum-width.py` and the corresponding `-debug.py`.
+The plan is `/tmp/elisa-const-enum-storage-next-plan.txt`. This gap, other
+unsupported declaration/contract forms and default/runtime-quality gates keep
+the full goal active.

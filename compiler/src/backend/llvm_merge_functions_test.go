@@ -35,6 +35,18 @@ def pair_second(value: Pair) -> Pair:
     return value
 export fn pair_second(value: Pair) -> Pair = pair_second
 
+@inline(never)
+def identity[T](value: T) -> T:
+    return value
+
+def id_i64(value: i64) -> i64:
+    return identity[i64](value)
+export fn id_i64(value: i64) -> i64 = id_i64
+
+def id_u64(value: u64) -> u64:
+    return identity[u64](value)
+export fn id_u64(value: u64) -> u64 = id_u64
+
 @callconv(c)
 extern consume(bytes: view[u8]) -> usize
 
@@ -74,6 +86,8 @@ void arena_free(void *owner) {
 }
 typedef struct { int64_t left, right; } Pair;
 extern int64_t first(int64_t), second(int64_t);
+extern int64_t id_i64(int64_t);
+extern uint64_t id_u64(uint64_t);
 extern Pair pair_first(Pair), pair_second(Pair);
 extern size_t view_first(void), view_second(void);
 size_t consume(const unsigned char* bytes, size_t count) { return count==2 && bytes[0]==65 && bytes[1]==0 ? 67 : 999; }
@@ -86,15 +100,17 @@ int main(void) {
  if(left.left!=17 || left.right!=-31 || right.left!=17 || right.right!=-31) return 13;
  size_t (*volatile e)(void)=view_first, (*volatile f)(void)=view_second;
  if(e==f || e()!=67 || f()!=67) return 14;
+ int64_t (*volatile id_a)(int64_t)=id_i64; uint64_t (*volatile id_b)(uint64_t)=id_u64;
+ if((void(*)(void))id_a==(void(*)(void))id_b || id_a(-31)!=-31 || id_b(UINT64_MAX-7)!=UINT64_MAX-7) return 15;
  return 0;
 }`
 	for _, mode := range []struct {
-		name                string
-		ir, parallel, debug bool
-	}{{"serial", false, false, false}, {"split", false, true, false}, {"independent-ir", true, true, false}, {"serial-debug", false, false, true}, {"independent-ir-debug", true, true, true}} {
+		name                         string
+		ir, parallel, debug, postOpt bool
+	}{{"serial", false, false, false, false}, {"split", false, true, false, false}, {"independent-ir", true, true, false, false}, {"serial-debug", false, false, true, false}, {"independent-ir-debug", true, true, true, false}, {"post-opt-split", false, true, false, true}, {"post-opt-split-debug", false, true, true, true}} {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Setenv("ELISACORE_PARALLEL_IR", fmt.Sprint(boolInt(mode.ir)))
-			t.Setenv("ELISACORE_PARALLEL_OPT", fmt.Sprint(boolInt(mode.parallel)))
+			t.Setenv("ELISACORE_PARALLEL_OPT", fmt.Sprint(boolInt(mode.parallel && !mode.postOpt)))
 			dir := t.TempDir()
 			object := filepath.Join(dir, "module.o")
 			result := parseAndAnalyzeBackendTest(t, "merged-addresses.elisa", source)
@@ -106,6 +122,9 @@ int main(void) {
 			}
 			if mode.parallel && !partitionWorkersAvailable {
 				t.Fatal("test did not install native worker entry point")
+			}
+			if mode.postOpt && session.Stats().SerialFallbacks != 0 {
+				t.Fatal("post-O3 alias partitioning declined")
 			}
 			if mode.ir && session.Stats().OwnerMapBuilds != 0 {
 				t.Fatal("independent IR path declined")
