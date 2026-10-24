@@ -3748,3 +3748,24 @@ metadata therefore changes the affected callee's bitcode key even when its body
 text is unchanged. A dedicated disk-object transition/native qualification test
 is still being prepared; this commit does not claim that test, full compiler
 rebuild timings, or the sub-10-second objective is complete.
+
+
+### Disjoint-proof changes invalidate native partition variants
+
+A dedicated O0 partition-cache regression now exercises the complete retained
+semantic restore/update and native object-session path. The kernel body remains
+byte-identical while its caller changes from distinct buffers to the same buffer.
+At each revision, restored retained LLVM IR matches fresh LLVM IR and the kernel's
+noalias scope appears/disappears as required. The test verifies the kernel,
+caller and unrelated function occupy distinct shards.
+
+With a new object session each time and one persistent disk cache, the unchanged
+repeat reuses all eight partitions. The aliasing edit emits exactly the kernel
+and caller partitions and reuses six others; restoring the original caller reuses
+all eight prior variants. Initial population permits identical empty partitions
+to deduplicate within that same cold build. Requiring zero initial disk reuse
+was an invalid test assumption; the meaningful edit/revert assertions remain
+exact. The corrected immutable aokvsvmr snapshot passes twenty repetitions
+(1.788 s), each command externally capped at 30 seconds. This qualifies O0 native
+partition invalidation, not a linked executable, O3 cross-process timing or the
+full compiler's sub-10-second rebuild objective.
