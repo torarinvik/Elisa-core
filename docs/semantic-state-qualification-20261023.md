@@ -3689,3 +3689,26 @@ fact refresh. A separate retained disjoint-call contribution regression also
 proves a stale noalias fact after removal of its sole proving call; its repair
 is being prepared in an isolated copy. These remain open before a fresh full
 compiler disk-cache admission and the pending first-edit performance matrix.
+
+
+### Refresh nested returned-expression facts after lazy summary inference
+
+Refreshing only the outer returned value was insufficient for a factory declared
+before its helper: `return BorrowedBox{value: helper(value)}` could materialize the
+helper's provenance after the nested call had already tried to record its facts.
+The bounded refresh now visits already-typed children before their returned
+parent. It uses cached syntax-field metadata and does not traverse function,
+statement, type or pattern subtrees. Scope-owning expressions retain their own
+root refresh but keep their inner bindings out of the outer-scope traversal.
+The normal fact writer's quiet-analysis guard remains active; a previously nil
+fact map does not prevent creation of newly inferred facts.
+
+The new cold later-helper regression fails on the prior committed source (no
+nested call fact, 0.250 s) and passes with the refresh. An immutable 4_seth45
+snapshot matching both source/test SHA-256 values passes the focused cold,
+Retained/AnalysisBuild, new-auto, local-region escape, packed-store and return-
+provenance selection (1.200 s). Twenty repetitions of the cold and retained
+recursive-summary regressions pass (1.406 s); the focused race selection passes
+(1.926 s). Every command used an external 30-second timeout. No performance
+improvement is claimed from these test durations. The separate disjoint-proof
+repair and fresh full compiler disk-cache timing qualification remain pending.

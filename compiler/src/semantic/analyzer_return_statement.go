@@ -1,6 +1,10 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"reflect"
+
+	"elisacore/src/ast"
+)
 
 // knownValueType is supplied only by the validated incremental primitive-body path.
 // All return/escape/drop/provenance checks still run on the current invocation.
@@ -151,9 +155,9 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStmt, knownValueType Type
 		}
 		// The first expression-fact pass runs as analyzeExpr returns, before this
 		// return-provenance query can lazily infer a recursive callee's summary.
-		// Refresh now so cold analysis records the same provenance fact as retained
-		// analysis, where that summary may already be available.
-		a.recordExprOptimizationFacts(n.Value, valueType)
+		// Refresh the returned expression child-first so cold analysis records the
+		// same nested-call provenance facts as retained analysis.
+		a.refreshReturnedExprOptimizationFacts(n.Value, valueType)
 	}
 	a.inReturnBorrowCapture = true
 	ownerState, ownerStateOK := a.borrowedOwnerRefStateForExpr(n.Value)
@@ -182,4 +186,125 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStmt, knownValueType Type
 	// A `return` leaves every scope: a must-consume value still live here leaks on
 	// this path even when the fall-through path consumes it.
 	a.reportUnconsumedProtocolValuesOnExit()
+}
+
+// refreshReturnedExprOptimizationFacts re-records only already-typed expression
+// nodes in a returned value, after provenance queries may have filled callee
+// summaries. Child-first order lets aggregate children observe fresh facts before
+// their parent. Non-expression syntax nodes are boundaries: their children may
+// use arm, block, lambda, or declaration-local bindings that are no longer active.
+func (a *Analyzer) refreshReturnedExprOptimizationFacts(root ast.Expr, rootType Type) {
+	if a == nil || root == nil || a.suppressOptimizationFacts {
+		return
+	}
+	if !typeMayCarryRegionProvenanceForOptimization(rootType) {
+		a.recordExprOptimizationFacts(root, rootType)
+		return
+	}
+
+	ordered := make([]ast.Expr, 0, 8)
+	seenExpr := make(map[ast.Expr]bool)
+	seenNode := make(map[uintptr]bool)
+	var visitValue func(reflect.Value)
+	var visitExpr func(ast.Expr)
+	visitExpr = func(expr ast.Expr) {
+		if expr == nil || seenExpr[expr] {
+			return
+		}
+		seenExpr[expr] = true
+		if returnedExprFactScopeBoundary(expr) {
+			ordered = append(ordered, expr)
+			return
+		}
+		value := reflect.ValueOf(expr)
+		if value.Kind() == reflect.Ptr && !value.IsNil() {
+			ptr := value.Pointer()
+			if seenNode[ptr] {
+				return
+			}
+			seenNode[ptr] = true
+			visitValue(value.Elem())
+		}
+		ordered = append(ordered, expr)
+	}
+	visitValue = func(value reflect.Value) {
+		if !value.IsValid() {
+			return
+		}
+		switch value.Kind() {
+		case reflect.Interface:
+			if value.IsNil() || !value.CanInterface() {
+				return
+			}
+			if expr, ok := value.Interface().(ast.Expr); ok {
+				visitExpr(expr)
+			}
+		case reflect.Ptr:
+			if value.IsNil() {
+				return
+			}
+			if expr, ok := value.Interface().(ast.Expr); ok {
+				visitExpr(expr)
+				return
+			}
+			if value.Type().Elem().PkgPath() != astPkgPath {
+				return
+			}
+			if _, ok := value.Interface().(ast.Node); ok {
+				return
+			}
+			ptr := value.Pointer()
+			if seenNode[ptr] {
+				return
+			}
+			seenNode[ptr] = true
+			visitValue(value.Elem())
+		case reflect.Struct:
+			if value.Type().PkgPath() != astPkgPath {
+				return
+			}
+			if value.CanAddr() {
+				if node, ok := value.Addr().Interface().(ast.Node); ok {
+					if _, isExpr := node.(ast.Expr); !isExpr {
+						return
+					}
+				}
+			}
+			for _, index := range syntaxWalkFields(value.Type()) {
+				field := value.Field(index)
+				if field.CanInterface() {
+					visitValue(field)
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for index := 0; index < value.Len(); index++ {
+				visitValue(value.Index(index))
+			}
+		}
+	}
+
+	visitExpr(root)
+	for _, expr := range ordered {
+		result, ok := Type(nil), false
+		if expr == root {
+			result, ok = rootType, rootType != nil
+		} else {
+			result, ok = a.exprTypes[expr]
+		}
+		if ok {
+			a.recordExprOptimizationFacts(expr, result)
+		}
+	}
+}
+
+func returnedExprFactScopeBoundary(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.LambdaExpr, *ast.ExprBlock, *ast.ListComprehensionExpr, *ast.QueryExpr,
+		*ast.FoldExpr, *ast.MatchExpr, *ast.CatchExpr, *ast.MachineFromExpr,
+		*ast.QuantifierExpr, *ast.GetExpr, *ast.TryExpr, *ast.UnwrapElseExpr,
+		*ast.OptionalBindExpr:
+		return true
+	default:
+		return false
+	}
 }
