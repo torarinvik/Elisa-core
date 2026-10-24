@@ -28,6 +28,10 @@ type sharedCodegenLookups struct {
 	namedSuffixes  map[string][]string
 	globalSuffixes map[string][]string
 	proofSpans     map[lexer.Pos]bool
+	// typeKeys memoizes noteTypeKeyFor by type pointer. Semantic types are frozen
+	// while one result is lowered, and the canonical key is a pure function of the
+	// type, so every partition of this result shares one encoding per type.
+	typeKeys sync.Map // semantic.Type -> typeMemoKey
 }
 
 func codegenSymbolsByNode(result *semantic.Result) map[ast.Node]*semantic.Symbol {

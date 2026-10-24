@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"unsafe"
 )
 
@@ -280,6 +281,21 @@ func noteTypeKeyFor(t semantic.Type) typeMemoKey {
 	}
 	return typeMemoKey{typ: t}
 }
+
+// typeMemoKey is noteTypeKeyFor, shared across the partitions of one result.
+func (g *llvmGenerator) typeMemoKey(t semantic.Type) typeMemoKey {
+	shared := g.sharedLookups
+	if shared == nil || reflect.TypeOf(t).Kind() != reflect.Pointer {
+		return noteTypeKeyFor(t)
+	}
+	if key, ok := shared.typeKeys.Load(t); ok {
+		return key.(typeMemoKey)
+	}
+	key := noteTypeKeyFor(t)
+	shared.typeKeys.Store(t, key)
+	return key
+}
+
 func newLLVMGenerator(result *semantic.Result, shared ...*sharedCodegenLookups) (*llvmGenerator, error) {
 	if result == nil {
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")

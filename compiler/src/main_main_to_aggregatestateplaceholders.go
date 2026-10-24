@@ -73,6 +73,7 @@ func runCLIWithProgram(args []string, stdout io.Writer, stderr io.Writer, preloa
 		printUsage(stderr)
 		return 1
 	}
+	defaultSMTProofCacheDir()
 	return runWithProgramOptions(options, stdout, stderr, preloaded)
 }
 func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {

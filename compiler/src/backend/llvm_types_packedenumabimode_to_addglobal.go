@@ -153,7 +153,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
 	}
-	key := noteTypeKeyFor(t)
+	key := g.typeMemoKey(t)
 	if g.noteTypeDone[key] || g.noteTypeInProgress[key] {
 		return nil
 	}

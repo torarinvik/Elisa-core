@@ -43,6 +43,19 @@ type buildCacheArtifact struct {
 	object string
 }
 
+// defaultSMTProofCacheDir places the persistent proof cache beside the build cache unless
+// ELISACORE_SMT_CACHE_DIR chooses one. Its records are keyed by the exact query and the
+// compiler, solver and budget identity, so its location never influences a verdict and
+// stays out of every cache key.
+func defaultSMTProofCacheDir() {
+	if _, set := os.LookupEnv("ELISACORE_SMT_CACHE_DIR"); set || !buildCacheEnabled() {
+		return
+	}
+	if root, err := buildCacheRoot(); err == nil {
+		_ = os.Setenv("ELISACORE_SMT_CACHE_DIR", filepath.Join(root, "smt-proofs-v1"))
+	}
+}
+
 func buildCacheRoot() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("ELISAC_BUILD_CACHE_DIR")); override != "" {
 		return override, nil
@@ -278,6 +291,7 @@ var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_RETAINED_IDLE":                 true,
 	"ELISACORE_RETAINED_AUTO_MIN":             true,
 	"ELISAC_BUILD_CACHE_DIR":                  true,
+	"ELISACORE_SMT_CACHE_DIR":                 true,
 	"ELISACORE_BUILD_TIMING":                  true,
 	"ELISACORE_CACHE_DEBUG":                   true,
 	"ELISACORE_CPUPROFILE":                    true,

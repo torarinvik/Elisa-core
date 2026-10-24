@@ -27,6 +27,8 @@ type encoder struct {
 	strings         map[string]uint64
 	framed          bool
 	stringTable     []string
+	// interner replaces strings/stringTable once framed bodies are written in parallel.
+	interner *stringInterner
 }
 
 func (r *Registry) Encode(root any) ([]byte, error) { return r.encode(root, false, 0) }
@@ -83,16 +85,22 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	if framed {
 		e.data.Write(make([]byte, 8*(e.nodes.count+2)))
 	}
-	for i := 0; i < e.nodes.count; i++ {
-		before := e.data.Len()
-		node := e.nodes.at(i)
-		if node.alias == nil {
-			if err := e.body(node.value); err != nil {
-				return nil, err
-			}
+	if framed && r.parallelDecode && e.nodes.count >= parallelFramedEncodeMin {
+		if err := e.writeFramedBodies(framing); err != nil {
+			return nil, err
 		}
-		if framed {
-			binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(i+1):], uint64(e.data.Len()-before))
+	} else {
+		for i := 0; i < e.nodes.count; i++ {
+			before := e.data.Len()
+			node := e.nodes.at(i)
+			if node.alias == nil {
+				if err := e.body(node.value); err != nil {
+					return nil, err
+				}
+			}
+			if framed {
+				binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(i+1):], uint64(e.data.Len()-before))
+			}
 		}
 	}
 	before := e.data.Len()
@@ -102,8 +110,12 @@ func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	if framed {
 		binary.LittleEndian.PutUint64(e.data.Bytes()[framing+8*(e.nodes.count+1):], uint64(e.data.Len()-before))
 		binary.LittleEndian.PutUint64(e.data.Bytes()[framing:], uint64(e.data.Len()))
-		e.uint(uint64(len(e.stringTable)))
-		for _, value := range e.stringTable {
+		table := e.stringTable
+		if e.interner != nil {
+			table = e.interner.table
+		}
+		e.uint(uint64(len(table)))
+		for _, value := range table {
 			e.uint(uint64(len(value)))
 			e.data.WriteString(value)
 		}
@@ -127,6 +139,10 @@ func (e *encoder) str(v string) {
 	if e.framed {
 		if v == "" {
 			e.uint(0)
+			return
+		}
+		if e.interner != nil {
+			e.uint(e.interner.id(v))
 			return
 		}
 		id := e.strings[v]
@@ -213,16 +229,25 @@ func (e *encoder) value(v reflect.Value) error {
 			return nil
 		}
 		fields := e.registry.fields[t]
-		live := 0
-		for _, i := range fields {
-			if !e.registry.access(v, i).IsZero() {
-				live++
-			}
+		var small [32]reflect.Value
+		present := small[:0]
+		if len(fields) > len(small) {
+			present = make([]reflect.Value, 0, len(fields))
 		}
-		e.uint(uint64(live))
+		live := 0
 		for _, i := range fields {
 			f := e.registry.access(v, i)
 			if f.IsZero() {
+				f = reflect.Value{}
+			} else {
+				live++
+			}
+			present = append(present, f)
+		}
+		e.uint(uint64(live))
+		for k, i := range fields {
+			f := present[k]
+			if !f.IsValid() {
 				continue
 			}
 			e.uint(uint64(i))
