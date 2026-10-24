@@ -40,6 +40,7 @@ type incrementalObjectEntry struct {
 }
 
 type IncrementalObjectStats struct {
+	NativeFragmentsEmitted, NativeFragmentsReused, NativeFragmentFallbacks  int
 	Builds, PartitionsEmitted, PartitionsReused, SerialFallbacks, Evictions uint64
 	OptimizedModulesReused                                                  uint64
 	OwnerMapBuilds                                                          uint64

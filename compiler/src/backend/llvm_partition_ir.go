@@ -307,7 +307,23 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	nativeStart := time.Now()
 	if options.OptLevel != OptimizationLevel0 {
 		var err error
-		object, err = emitPreoptimizedPartition(inputBytes, optimizationPipeline(options.OptLevel), triple, cpu, features)
+		var fragment *nativeFragmentContext
+		if nativeFragmentsEnabled() && s.disk != nil {
+			fragment = &nativeFragmentContext{request: nativeFragmentRequest{
+				Root:      filepath.Join(s.disk.root, "native-fragments-v1"),
+				Namespace: fmt.Sprintf("%x.ir.%d", unitID, part), Target: configKey,
+				Merger: s.objectMergerCommand(), MaxBytes: s.disk.maxBytes,
+			}, record: func(fragment nativeFragmentStats) {
+				s.recordStats(func(stats *IncrementalObjectStats) {
+					stats.NativeFragmentsEmitted += fragment.Emitted
+					stats.NativeFragmentsReused += fragment.Reused
+					if fragment.Declined {
+						stats.NativeFragmentFallbacks++
+					}
+				})
+			}}
+		}
+		object, err = emitPreoptimizedPartition(inputBytes, optimizationPipeline(options.OptLevel), triple, cpu, features, fragment)
 		if err != nil {
 			return nil, fmt.Errorf("partition %d: %w", part, err)
 		}

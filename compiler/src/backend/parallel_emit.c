@@ -127,6 +127,8 @@ static void part_strip_body(LLVMValueRef f) {
 		LLVMDeleteBasicBlock(b);
 	}
 	LLVMSetSubprogram(f, NULL);
+	// An omitted weak/linkonce definition must become a legal declaration.
+	LLVMSetLinkage(f, LLVMExternalLinkage);
 	if (LLVMHasPersonalityFn(f)) {
 		LLVMSetPersonalityFn(f, NULL);
 	}
@@ -392,9 +394,9 @@ static int part_fail(char **error_out, const char *text) {
 }
 
 // Worker side (a separate process): parse, restrict to `part`, optionally optimize, emit.
-int elisacorePartitionWorker(const char *bitcode_path, int jobs, int part, const char *pipeline,
+static int part_worker(const char *bitcode_path, int jobs, int part, const char *pipeline,
                              long long import_weight, const char *triple, const char *cpu,
-                             const char *features, const char *out_path, char **error_out) {
+                             const char *features, const char *out_path, int bitcode_out, char **error_out) {
 	*error_out = NULL;
 	char *msg = NULL;
 	LLVMMemoryBufferRef buf = NULL;
@@ -433,6 +435,13 @@ int elisacorePartitionWorker(const char *bitcode_path, int jobs, int part, const
 	if (pipeline != NULL && pipeline[0] != 0 && !part_optimize(m, tm, pipeline, error_out)) {
 		return 0;
 	}
+	if (bitcode_out) {
+		int failed = LLVMWriteBitcodeToFile(m, out_path);
+		LLVMDisposeTargetMachine(tm);
+		LLVMDisposeModule(m);
+		LLVMContextDispose(ctx);
+		return failed ? part_fail(error_out, "failed to write optimized partition bitcode") : 1;
+	}
 	if (LLVMTargetMachineEmitToFile(tm, m, (char *)out_path, LLVMObjectFile, &msg) != 0) {
 		int r = part_fail(error_out, msg ? msg : "partition object emission failed");
 		if (msg) LLVMDisposeMessage(msg);
@@ -440,4 +449,15 @@ int elisacorePartitionWorker(const char *bitcode_path, int jobs, int part, const
 	}
 	// The process exits right after; skip tearing down the module and context.
 	return 1;
+}
+
+int elisacorePartitionWorker(const char *input, int jobs, int part, const char *pipeline,
+    long long imports, const char *triple, const char *cpu, const char *features,
+    const char *output, char **error) {
+    return part_worker(input, jobs, part, pipeline, imports, triple, cpu, features, output, 0, error);
+}
+int elisacoreOptimizePartitionToBitcode(const char *input, int jobs, int part, const char *pipeline,
+    long long imports, const char *triple, const char *cpu, const char *features,
+    const char *output, char **error) {
+    return part_worker(input, jobs, part, pipeline, imports, triple, cpu, features, output, 1, error);
 }

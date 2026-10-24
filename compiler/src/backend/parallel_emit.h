@@ -45,4 +45,9 @@ int elisacorePartitionWorker(const char *bitcode_path, int jobs, int part, const
                              long long import_weight, const char *triple, const char *cpu,
                              const char *features, const char *out_path, char **error_out);
 
+// Worker-only whole-unit optimization, before native fragment restriction.
+int elisacoreOptimizePartitionToBitcode(const char *, int, int, const char *,
+    long long, const char *, const char *, const char *, const char *, char **);
+// Includes weak/linkonce ODR definitions; declines unsupported symbol groups.
+long long *elisacoreNativeFragmentOwners(LLVMModuleRef, int, size_t *);
 #endif

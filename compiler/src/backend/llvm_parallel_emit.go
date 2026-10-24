@@ -20,9 +20,11 @@ import "C"
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -118,6 +120,35 @@ func RunPartitionWorkerIfRequested() {
 	cs := make([]*C.char, len(strs))
 	for i, name := range strs {
 		cs[i] = C.CString(os.Getenv(name))
+	}
+	if encoded := os.Getenv(partWorkerFragmentsEnv); encoded != "" {
+		var request nativeFragmentRequest
+		if err := json.Unmarshal([]byte(encoded), &request); err != nil || jobs != 1 || part != 0 || importWeight != 0 || os.Getenv(partWorkerPipelineEnv) == "" || request.Namespace == "" || request.Root == "" || request.MaxBytes <= 0 {
+			fmt.Fprintln(os.Stderr, "elisac partition worker: malformed native fragment request")
+			os.Exit(2)
+		}
+		optimized := filepath.Join(filepath.Dir(os.Getenv(partWorkerOutputEnv)), "optimized.bc")
+		cpath := C.CString(optimized)
+		var message *C.char
+		if C.elisacoreOptimizePartitionToBitcode(cs[0], C.int(jobs), C.int(part), cs[1], C.longlong(importWeight), cs[2], cs[3], cs[4], cpath, &message) == 0 {
+			if message != nil {
+				fmt.Fprintln(os.Stderr, C.GoString(message))
+			}
+			os.Exit(1)
+		}
+		stats, err := emitNativeFragments(optimized, os.Getenv(partWorkerOutputEnv), request, cs[2], cs[3], cs[4])
+		if err == nil {
+			var data []byte
+			data, err = json.Marshal(stats)
+			if err == nil {
+				err = os.WriteFile(request.Report, data, 0600)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	var errMessage *C.char
 	ok := C.elisacorePartitionWorker(cs[0], C.int(jobs), C.int(part), cs[1], C.longlong(importWeight), cs[2], cs[3], cs[4], cs[5], &errMessage)

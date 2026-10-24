@@ -2451,3 +2451,51 @@ bytes; the fragment candidate is 10,929,336 bytes with 9,235,864 text bytes.
 This narrow check does not establish broader ABI/debug/runtime quality.
 A real worker/cache implementation and ordinary CLI qualification are still
 needed before counting the fragment experiment as a rebuild gain.
+
+
+### Integrated post-O3 native fragment worker (explicit qualification)
+
+The independent-IR optimizer worker now has an opt-in native fragment cache
+(`ELISACORE_NATIVE_FRAGMENTS=1`). It runs the unchanged complete-unit O3 pipeline
+in its isolated process, then clones four native fragments using the existing
+verified selective-clone machinery. Strong/local and weak/linkonce ODR function
+definitions have stable owners. Omitted definitions become external declarations;
+retained weak definitions retain their linkage. The ordinary owner policy remains
+unchanged. Aliases, ifuncs, module/inline assembly, block addresses, COMDAT groups
+and appending registrations conservatively use whole-unit native emission.
+
+Fragment reuse compares complete current optimized fragment bitcode and target
+configuration in the existing checked disk-entry format. Namespaces derive from
+the logical source unit and parent IR partition, not input content. Compiler,
+pipeline, native codegen and resolved target settings remain key inputs. Since
+unit output now includes a partial link, its enclosing key also includes merger
+argv, canonical executable path and executable content digest. The existing
+whole-unit cache still handles exact input repeats. Cache-disabled builds retain
+the original worker. Cold fragment emission is serial inside each worker, avoiding
+a fourfold increase in worker concurrency. No server or retained worker is used.
+
+Cross-process tests pass for body edit, unchanged repeat, revert and corrupt
+fragment recovery. Merger argument/content invalidation tests pass. Linked tests
+check function addresses, scalar/aggregate ABI, generic identities, C callbacks,
+arenas, alias/global identity and debug variants. C++ boundary fixtures check
+aliases, ctor/dtor arrays, assembly, block addresses and COMDAT rejection. Existing
+preoptimized cross-process O2/O3/debug/edit tests and uncached-input tests pass.
+Logs: `/tmp/elisa-native-fragments-{cross-process,abi,final-tests}.log`.
+
+Final checked-payload qualification uses the admitted source/options under
+`/tmp/elisa-const-contract-production-root`, with all candidate outputs restricted
+to `native-fragments-final-qualification/`. No state was copied/rekeyed into a
+production namespace. Script `/tmp/elisa-native-fragments-final-qualification.py`
+uses a frozen candidate test binary. Initial native population takes 21.361 s;
+layout succeeds in 8.337 s, generic body 7.585 s, private bound 7.738 s. Each edit
+emits seven native fragments and reuses twenty-one inside seven changed units;
+89 whole units also reuse their native objects. No fragment fallback occurs.
+The baseline state hash stays unchanged and controlled source is restored.
+
+All four candidate products link into compiler executables and compile the include
+fixture on cache miss and valid repeat; linked fixture exit is 42, enum-tag and
+unknown-diagnostic probes pass (`functional.json`). Every compiler/build/LLVM/link
+invocation is externally capped at 30 s. These explicit qualification timings are
+not relabeled as ordinary CLI measurements. Fresh ordinary admission, renewed
+novel edit matrix, region-record fallback and default/runtime-quality gates remain
+required. The cache path remains explicitly gated pending that qualification.

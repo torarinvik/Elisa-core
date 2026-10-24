@@ -52,8 +52,10 @@ func TestIncrementalObjectPartitionDefinitionGuards(t *testing.T) {
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/SourceMgr.h>
 #include <string>
+#include <cstdlib>
 extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitions(LLVMModuleRef, const long long *, size_t, int, const char *);
 extern "C" void elisacorePruneObjectDeclarations(LLVMModuleRef);
+extern "C" long long *elisacoreNativeFragmentOwners(LLVMModuleRef, int, size_t *);
 int main() {
  const std::string base = R"(
 @count = private global i32 0
@@ -89,6 +91,10 @@ define i32 @main() {
 )");
   auto module = llvm::parseAssemblyString(input, error, context);
   if (!module || llvm::verifyModule(*module)) return 10+i;
+  size_t nativeCount = 0;
+  long long *nativeOwners = elisacoreNativeFragmentOwners(llvm::wrap(module.get()), 4, &nativeCount);
+  if ((nativeOwners != nullptr) != (i == 0)) return 80+i;
+  std::free(nativeOwners);
   const long long owners[] = {0, 1};
   LLVMModuleRef copy = elisacoreCloneSelectedDefinitions(llvm::wrap(module.get()), owners, 2, 0, "guard-unit");
   if ((copy != nullptr) != (i == 0)) return 30+i;
@@ -105,6 +111,15 @@ define i32 @main() {
    LLVMDisposeModule(copy);
   }
   if (llvm::verifyModule(*module)) return 50+i;
+ }
+ {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic error;
+  auto module = llvm::parseAssemblyString("$group = comdat any\ndefine linkonce_odr i32 @grouped() comdat($group) { ret i32 0 }\n", error, context);
+  if (!module || llvm::verifyModule(*module)) return 90;
+  size_t count=0;
+  auto owners=elisacoreNativeFragmentOwners(llvm::wrap(module.get()),4,&count);
+  if (owners) { std::free(owners); return 91; }
  }
  // Pruning is narrower than GlobalDCE: preserve owned/address-significant
  // definitions, initializer closure, and globals referenced only by metadata.

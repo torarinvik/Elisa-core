@@ -117,8 +117,14 @@ int main(void) {
 			options := LLVMObjectEmitOptions{OptLevel: OptimizationLevel3, DebugInfo: mode.debug, Serial: !mode.parallel}
 			session := NewIncrementalObjectSession(4, 32<<20)
 			session.minWeight = 0
+			if nativeFragmentsEnabled() && mode.ir {
+				session.EnableDiskCache(t.TempDir(), "fragment-abi-regression", 64<<20)
+			}
 			if err := session.WriteObject(result, object, options); err != nil {
 				t.Fatal(err)
+			}
+			if nativeFragmentsEnabled() && mode.ir && session.Stats().NativeFragmentsEmitted == 0 {
+				t.Fatalf("fragment ABI path did not emit fragments: %+v", session.Stats())
 			}
 			if mode.parallel && !partitionWorkersAvailable {
 				t.Fatal("test did not install native worker entry point")

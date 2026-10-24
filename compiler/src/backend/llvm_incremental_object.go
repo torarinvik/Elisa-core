@@ -366,7 +366,15 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 	if options.OptLevel != OptimizationLevel0 {
 		pipeline = optimizationPipeline(options.OptLevel)
 	}
-	config, _ := json.Marshal([]string{"partitioned-ir-object-v2", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline})
+	settings := []string{"partitioned-ir-object-v2", C.GoString(triple), C.GoString(cpu), C.GoString(features), codegenLevel, "default-reloc", "default-code-model", pipeline}
+	if nativeFragmentsEnabled() && s.disk != nil && options.OptLevel != OptimizationLevel0 {
+		merger, err := s.nativeFragmentMergeKey()
+		if err != nil {
+			return true, err
+		}
+		settings = append(settings, "native-fragments-v1:4", merger)
+	}
+	config, _ := json.Marshal(settings)
 	C.LLVMDisposeMessage(triple)
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)

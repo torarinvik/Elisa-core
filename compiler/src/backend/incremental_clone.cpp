@@ -25,8 +25,8 @@
 // Incremental shards use symbol identity rather than body weight. Editing one
 // body must not migrate unrelated definitions across shard boundaries. Ordinary
 // one-shot parallel emission retains its instruction-balanced assignment.
-extern "C" long long *elisacoreStableObjectOwners(
-    LLVMModuleRef module, int jobs, size_t *count) {
+static long long *stableObjectOwners(
+    LLVMModuleRef module, int jobs, size_t *count, bool weak) {
   auto &source = *llvm::unwrap(module);
   *count = std::distance(source.begin(), source.end());
   auto *owners = static_cast<long long *>(std::malloc((*count ? *count : 1) * sizeof(long long)));
@@ -34,7 +34,8 @@ extern "C" long long *elisacoreStableObjectOwners(
   size_t index = 0;
   for (const auto &function : source) {
     bool owned = !function.isDeclaration() &&
-        (function.hasExternalLinkage() || function.hasLocalLinkage());
+        (function.hasExternalLinkage() || function.hasLocalLinkage() ||
+         (weak && (function.hasWeakODRLinkage() || function.hasLinkOnceODRLinkage())));
     uint64_t hash = 14695981039346656037ULL;
     for (unsigned char byte : function.getName()) {
       hash ^= byte;
@@ -47,6 +48,20 @@ extern "C" long long *elisacoreStableObjectOwners(
     owners[index++] = owned ? static_cast<long long>(hash % jobs) : -1;
   }
   return owners;
+}
+
+extern "C" long long *elisacoreStableObjectOwners(LLVMModuleRef m, int jobs, size_t *count) {
+  return stableObjectOwners(m, jobs, count, false);
+}
+extern "C" int elisacoreSelectiveCloneSupported(LLVMModuleRef);
+extern "C" long long *elisacoreNativeFragmentOwners(LLVMModuleRef m, int jobs, size_t *count) {
+  if (!elisacoreSelectiveCloneSupported(m)) return nullptr;
+  auto &source = *llvm::unwrap(m);
+  // COMDAT selection and appending registrations are indivisible groups.
+  for (const auto &f : source) if (f.hasComdat()) return nullptr;
+  for (const auto &g : source.globals())
+    if (g.hasComdat() || g.hasAppendingLinkage()) return nullptr;
+  return stableObjectOwners(m, jobs, count, true);
 }
 
 // Foreign declarations with no uses cannot affect emitted code. Removing them
