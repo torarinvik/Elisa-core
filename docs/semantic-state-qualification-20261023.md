@@ -2392,3 +2392,62 @@ miss/valid cache reads and produced fixture exit 42; enum and diagnostics probes
 passed (`const-contract-qualification/functional.json`). All toolchain processes
 were externally capped at 30 s. Ordinary CLI admission/rebuild timing remains
 required before counting this candidate as a normal sub-ten-second result.
+
+
+### Ordinary CLI confirmation of contract-bound replay
+
+`d5231e9b` was admitted normally in a new executable-keyed namespace at
+`/tmp/elisa-const-contract-production-root`; no snapshot was copied or rekeyed.
+Eight checkpoints took 14.642–26.451 s, invocation nine hit its external 30 s cap
+with complete state saved, and ten emitted the object in 12.397 s. The server
+setting remains empty and O3/96 independent IR units remain explicit.
+
+The contract-bound constant edit succeeds normally in 5.928 s (previously
+18.318 s with no object), and its object is byte-identical to the checked-payload
+qualification product. Generic-body and private-bound edits take 9.903 and
+9.927 s, leaving almost no margin. The renewed matrix: baseline 5.108 s; storage
+u16 6.996 s, u64 6.971 s, i16 6.997 s; enum reorder 7.118 s; addition/handler
+7.334 s; layout 10.155 s; permission 6.393 s; removal 6.808 s; body 5.592 s;
+signature 6.651 s; contract 6.606 s; lines 5.738 s. Layout remains over ten seconds.
+All sixteen normal products pass linked compiler/include-fixture tests, miss and
+valid cache reads, executable exit 42, enum tag and unknown-diagnostic probes
+(`functional.json`). Thirty overlapping normal/repeat objects match earlier
+products exactly (`previous-object-parity.json`). The region-record fallback,
+layout/native margin and ordinary/default/runtime quality gates remain open.
+
+### Isolated post-O3 native fragment experiment
+
+This is an experiment outside production, not an implemented cache path. Root:
+`/tmp/elisa-native-fragment-probe-root`; source/tool scripts are
+`/tmp/elisa-native-fragment-probe.cpp`, `-benchmark.py`, `-reconstruct.py` and
+`/tmp/elisa-native-fragment-functional.py`. It reads checked native cache entries,
+validates entry sizes/checksums and exact target settings, and optimizes their
+complete unit with unchanged O3 + mergefunc, AA, inliner 400 and unroll 600.
+The standalone opt/llc path reproduces the admitted unit-80 object byte for byte
+on all three repetitions, confirming these settings for this input.
+
+The critical layout unit has 303 weak ODR definitions. Existing selective clone
+ownership intentionally duplicates such definitions, so the prototype assigns
+weak/linkonce ODR functions to one fragment too. Its private copy of
+`parallel_emit.c` turns omitted weak definitions into ordinary external
+DECLARATIONS; retained definitions preserve weak linkage. Without this correction
+LLVM verification rejects the fragments. No production clone/worker code changed.
+The module has no aliases/ifuncs/assembly and passes the existing clone guard.
+
+Four fragments of the fully optimized baseline and layout unit share three
+byte-identical fragment inputs. The changed fragment's native emission takes
+0.783–0.832 s versus 1.970–2.073 s for the whole optimized unit. This excludes O3,
+cache lookup, cloning/serialization, merging and concurrency effects, so it is
+not a claimed end-to-end saving. Records are `inputs.json`, `fragments.json` and
+`native-timings.json`. All LLVM/compiler/linker commands have external 30 s caps.
+
+Before substitution, reconstructing all 96 baseline and layout native objects
+reproduces their normal full compiler objects byte for byte. Substituting only
+the critical layout unit's four fragments then links into a working compiler:
+include fixture compiles on cache miss and valid repeat, linked fixture exits 42,
+and enum/diagnostic probes pass (`functional.json`). With the same source and
+link flags the normal layout executable is 10,929,632 bytes with 9,239,268 text
+bytes; the fragment candidate is 10,929,336 bytes with 9,235,864 text bytes.
+This narrow check does not establish broader ABI/debug/runtime quality.
+A real worker/cache implementation and ordinary CLI qualification are still
+needed before counting the fragment experiment as a rebuild gain.
