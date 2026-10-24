@@ -3361,3 +3361,11 @@ and /tmp/elisa-disk-defaults-quality-broader.log. The earlier overlapping inline
 probe timings are excluded. Analysis disk tests pass (6.547 s), and default-mode
 plus retained-generic backend tests pass. Full Stage1 qualification without tuning
 flags remains to be measured in a fresh namespace after installation.
+
+
+Follow-up override audit: any explicitly present primary parallel-mode flag now
+opts out of the automatic preset, including a lone `PARALLEL_IR=1` or
+`PARALLEL_OPT=1`. This preserves the previous partial and paired explicit modes
+without silently supplying optimizer/import/fragment settings. Backend default
+and exact-cache-authority tests pass (0.596 s), with new partial/paired opt-in
+regressions. The no-primary-flags preset remains unchanged.

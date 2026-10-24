@@ -30,10 +30,10 @@ func (s *IncrementalObjectSession) diskDefaultsActive() bool {
 	if !s.diskDefaults {
 		return false
 	}
-	// An explicit primary-mode override opts out of the coherent preset. In
-	// particular, IR=0 must not silently enable legacy parallel optimization.
+	// Any explicit primary-mode setting opts out of the coherent preset.
+	// A partial opt-in must not silently supply the other legacy mode flag.
 	for _, name := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT"} {
-		if !configuredCodegenFlag(name, true) {
+		if _, explicit := os.LookupEnv(name); explicit {
 			return false
 		}
 	}

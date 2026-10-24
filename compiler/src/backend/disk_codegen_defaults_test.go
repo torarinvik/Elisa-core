@@ -43,6 +43,30 @@ func TestDiskCodegenDefaultsKeepExplicitOverrides(t *testing.T) {
 			}
 		})
 	}
+	for _, primary := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT"} {
+		t.Run(primary+"-partial-opt-in", func(t *testing.T) {
+			t.Setenv(primary, "1")
+			s := NewIncrementalObjectSession(4, 1<<20)
+			s.UseDiskIncrementalDefaults()
+			if s.diskDefaultsActive() || s.partitions != 4 || s.diskCodegenFlag("ELISACORE_IR_IMPORTS") || s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") {
+				t.Fatal("partial explicit opt-in gained automatic preset features")
+			}
+			for _, name := range diskPresetFlags[:2] {
+				if s.diskCodegenFlag(name) != (name == primary) {
+					t.Fatal("partial explicit opt-in changed legacy mode", name)
+				}
+			}
+		})
+	}
+	t.Run("paired-explicit-opt-in", func(t *testing.T) {
+		t.Setenv("ELISACORE_PARALLEL_IR", "1")
+		t.Setenv("ELISACORE_PARALLEL_OPT", "1")
+		s := NewIncrementalObjectSession(4, 1<<20)
+		s.UseDiskIncrementalDefaults()
+		if s.diskDefaultsActive() || s.partitions != 4 || s.diskCodegenFlag("ELISACORE_IR_IMPORTS") || s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") {
+			t.Fatal("explicit legacy pipeline gained preset features")
+		}
+	})
 	for _, name := range []string{"ELISACORE_IR_IMPORTS", "ELISACORE_NATIVE_FRAGMENTS"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "0")
