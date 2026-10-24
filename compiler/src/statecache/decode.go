@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"sync/atomic"
+	"unsafe"
 )
 
 type decoder struct {
@@ -22,6 +23,10 @@ type decoder struct {
 	sliceFill    map[reflect.Type]reflect.Value
 	framed       bool
 	sharedBudget *atomic.Uint64
+	// ifaceWords caches, per (concrete, interface) type pair already checked assignable, the
+	// interface's first word (itab or type), so a pointer-shaped value is stored without
+	// reflect's per-assignment implements check.
+	ifaceWords map[[2]reflect.Type]unsafe.Pointer
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
@@ -34,10 +39,21 @@ func (r *Registry) DecodeWithLimit(data []byte, maxBytes uint64) (any, error) {
 		return nil, fmt.Errorf("state schema mismatch")
 	}
 	payload := data[:len(data)-32]
-	digest := sha256.Sum256(payload)
-	if !bytes.Equal(digest[:], data[len(data)-32:]) {
+	// The checksum runs beside decoding, which validates every reference and budget as it
+	// goes, so a corrupt payload fails closed either way; the result is used only if it holds.
+	checked := make(chan bool, 1)
+	go func() {
+		digest := sha256.Sum256(payload)
+		checked <- bytes.Equal(digest[:], data[len(data)-32:])
+	}()
+	value, err := r.decodePayload(payload, data, maxBytes)
+	if !<-checked {
 		return nil, fmt.Errorf("state checksum mismatch")
 	}
+	return value, err
+}
+
+func (r *Registry) decodePayload(payload, data []byte, maxBytes uint64) (any, error) {
 	d := &decoder{registry: r, data: payload, at: 41, objects: []reflect.Value{{}}, budget: maxBytes, strings: []string{""}, framed: string(data[:9]) == "ELISTATE4"}
 	id, err := d.uint()
 	if err != nil {
@@ -96,10 +112,16 @@ func (d *decoder) count() (int, error) {
 }
 func (d *decoder) value(v reflect.Value) error {
 	d.depth++
-	defer func() { d.depth-- }()
 	if d.depth > 4096 {
+		d.depth--
 		return fmt.Errorf("state graph nesting exceeds limit")
 	}
+	err := d.valueAtDepth(v)
+	d.depth--
+	return err
+}
+
+func (d *decoder) valueAtDepth(v reflect.Value) error {
 	t := v.Type()
 	switch v.Kind() {
 	case reflect.Interface:
@@ -114,7 +136,7 @@ func (d *decoder) value(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if !typ.AssignableTo(t) {
+		if !d.assignable(typ, t) {
 			return fmt.Errorf("state type %s does not implement %s", typ, t)
 		}
 		// Reference objects already own a stable typed value. Setting the
@@ -133,7 +155,7 @@ func (d *decoder) value(v reflect.Value) error {
 			if ref >= uint64(len(d.objects)) || d.objects[ref].Type() != typ {
 				return fmt.Errorf("invalid state reference")
 			}
-			v.Set(d.objects[ref])
+			d.setInterface(v, d.objects[ref])
 			return nil
 		}
 		if err := d.reserve(1, typ.Size()); err != nil {
@@ -297,4 +319,38 @@ func (d *decoder) stateString() (string, error) {
 	s := string(b)
 	d.strings = append(d.strings, s)
 	return s, nil
+}
+
+func (d *decoder) assignable(typ, iface reflect.Type) bool {
+	if _, ok := d.ifaceWords[[2]reflect.Type{typ, iface}]; ok {
+		return true
+	}
+	return typ.AssignableTo(iface)
+}
+
+// setInterface stores x, a pointer or map value already checked assignable to v's interface
+// type, into v. The interface's words are (itab or type, data pointer); for pointer-shaped
+// x the data word is x itself.
+func (d *decoder) setInterface(v, x reflect.Value) {
+	key := [2]reflect.Type{x.Type(), v.Type()}
+	word, ok := d.ifaceWords[key]
+	if !ok {
+		if !v.CanAddr() || (x.Kind() != reflect.Pointer && x.Kind() != reflect.Map) {
+			v.Set(x)
+			return
+		}
+		proto := reflect.New(v.Type()).Elem()
+		proto.Set(x)
+		word = (*[2]unsafe.Pointer)(proto.Addr().UnsafePointer())[0]
+		if d.ifaceWords == nil {
+			d.ifaceWords = map[[2]reflect.Type]unsafe.Pointer{}
+		}
+		d.ifaceWords[key] = word
+	}
+	if !v.CanAddr() {
+		v.Set(x)
+		return
+	}
+	slot := (*[2]unsafe.Pointer)(v.Addr().UnsafePointer())
+	slot[0], slot[1] = word, x.UnsafePointer()
 }
