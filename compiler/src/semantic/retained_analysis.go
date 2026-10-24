@@ -966,8 +966,15 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				names[name[strings.LastIndex(name, ".")+1:]] = true
 			}
 		}
-		namePattern := retainedNamesPattern(names)
 		a.widenLayoutTargets(targets)
+		// Layout queries name their operand without necessarily recording its type
+		// as an expression type. Include containing records and their aliases.
+		for name, typ := range a.namedTypes {
+			if targets[typ] {
+				names[name[strings.LastIndex(name, ".")+1:]] = true
+			}
+		}
+		namePattern := retainedNamesPattern(names)
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
 			spliced[sp.live] = true

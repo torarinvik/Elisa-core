@@ -14,9 +14,11 @@ type retainedConstEnumEdit struct {
 	et         *ConstEnumType
 }
 
-// An explicit, unchanged storage type preserves the ABI. Implicit member values
-// depend only on their order, so rebuilding the table needs no retained constant
-// evaluation results from other declarations.
+// Implicit member values depend only on their order. A changed storage spelling
+// is also eligible when both sides explicitly name primitive integers: member
+// population resolves the new storage, and the same type/layout dependency walk
+// used for member edits rechecks its users. Aliases and computed storage changes
+// still need their declaration-phase dependencies rebuilt separately.
 func retainedConstEnumEditAllowed(old, cur *ast.ConstEnumDecl, oldSpan, curSpan string) bool {
 	if old.Name != cur.Name || old.Foreign || cur.Foreign || old.Open || cur.Open || old.Storage == nil || cur.Storage == nil {
 		return false
@@ -27,7 +29,7 @@ func retainedConstEnumEditAllowed(old, cur *ast.ConstEnumDecl, oldSpan, curSpan 
 		}
 		return strings.TrimSpace(s)
 	}
-	if header(oldSpan) != header(curSpan) {
+	if header(oldSpan) != header(curSpan) && !(retainedPrimitiveEnumStorage(old.Storage) && retainedPrimitiveEnumStorage(cur.Storage)) {
 		return false
 	}
 	for _, d := range []*ast.ConstEnumDecl{old, cur} {
@@ -38,6 +40,11 @@ func retainedConstEnumEditAllowed(old, cur *ast.ConstEnumDecl, oldSpan, curSpan 
 		}
 	}
 	return true
+}
+
+func retainedPrimitiveEnumStorage(storage ast.TypeExpr) bool {
+	named, ok := storage.(*ast.NamedType)
+	return ok && named.Region == "" && (named.Spelling == "" || named.Spelling == named.Name) && IsIntegralStorageType(&BuiltinType{Name: named.Name})
 }
 
 func (r *RetainedAnalysis) findLiveConstEnumEdits(pairs [][2]*ast.ConstEnumDecl, scratch *ast.File, decls []ast.Decl, spans []string) ([]retainedConstEnumEdit, string) {
@@ -122,10 +129,64 @@ func (r *RetainedAnalysis) findLiveConstEnumEdits(pairs [][2]*ast.ConstEnumDecl,
 				}
 			}
 		} else if _, ns := d.(*ast.NamespaceDecl); !ns && (codeMatch(pat, spans[i]) || codeMatch(shorthand, spans[i])) {
-			return nil, fmt.Sprintf("declaration at %s depends on an edited constant enum", retainedLineKey(d.Pos()))
+			// A plain type reference keeps the live enum identity. Its containing
+			// layouts are widened into the invalidation set by the update. Any
+			// initializer, value-sized array or other declaration computation still
+			// needs a fresh declaration phase instead of this in-place update.
+			if !retainedConstEnumTypeOnlyDeclaration(d) {
+				return nil, fmt.Sprintf("declaration at %s depends on an edited constant enum", retainedLineKey(d.Pos()))
+			}
 		}
 	}
 	return out, ""
+}
+
+func retainedConstEnumTypeOnlyDeclaration(decl ast.Decl) bool {
+	switch d := decl.(type) {
+	case *ast.TypeAliasDecl:
+		return len(d.TypeParams) == 0 && retainedConstEnumPassiveType(d.Target)
+	case *ast.StructDecl:
+		if d.Layout != ast.StructLayoutDefault && d.Layout != ast.StructLayoutC {
+			return false
+		}
+		shape := *d
+		shape.ReprC, shape.Layout = false, ast.StructLayoutDefault
+		if !retainedPlainStruct(&shape) {
+			return false
+		}
+		for _, field := range d.Fields {
+			if field.DefaultValue != nil || !retainedConstEnumPassiveType(field.Type) {
+				return false
+			}
+		}
+		return true
+	case *ast.EnumDecl:
+		if !retainedPlainEnum(d) {
+			return false
+		}
+		for _, variant := range d.Variants {
+			for _, payload := range variant.Payload {
+				if !retainedConstEnumPassiveType(payload.Type) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func retainedConstEnumPassiveType(typ ast.TypeExpr) bool {
+	switch t := typ.(type) {
+	case *ast.NamedType:
+		return true
+	case *ast.RefType:
+		return retainedConstEnumPassiveType(t.Elem)
+	case *ast.ArrayType:
+		_, literal := t.Size.(*ast.IntLit)
+		return literal && retainedConstEnumPassiveType(t.Elem)
+	}
+	return false
 }
 
 func (r *RetainedAnalysis) applyConstEnumEdits(edits []retainedConstEnumEdit) {
