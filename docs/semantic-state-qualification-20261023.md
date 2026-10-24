@@ -3284,3 +3284,36 @@ Both products pass include execution 42, sidecar miss→valid, enum dispatch and
 diagnostics (`/tmp/elisa-generic-function-binder-functional.log`). Snapshot bytes
 remain unchanged and source restored. Fresh installed-binary ordinary CLI
 qualification remains the next gate; the broader performance goal is open.
+
+
+Fresh installed `fbf92e01` namespace: `/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-generic-function-production-txu1m2ta`.
+Eight bounded admission checkpoints; step 9 reached its external cap at 30.309 s
+after publishing complete state, step 10 emitted the baseline in 14.269 s.
+The ordinary allocator function binder rename now emits the baseline object in
+**6.427 seconds**, compared with the prior 18.135-second checkpoint/no-object
+fallback. Generic record binder 5.530 s, generic field 8.119 s, new include 5.903 s.
+
+The fresh matrix has **26 variants including baseline**, **50 timed invocations**,
+all exit zero and under ten seconds. Largest edited times: region record 8.847 s,
+alignment 8.638, ordinary record field 8.511, packed 8.358, generic field 8.119,
+generic body 7.490, private bound 7.421. Exact repeats were 0.140–0.175 s.
+All prior successful product hashes remain unchanged. All 26 native compiler
+products pass include execution 42, sidecar miss→valid, enum and diagnostic checks;
+the new include also passes its direct helper oracle. `functional.json` has 25
+products, `new-include-functional.json` one. Aggregate log:
+`/tmp/elisa-generic-function-production-matrix-all.log`. Controlled source changes
+are restored; the seven preexisting Stage1 user modifications remain untouched.
+
+An additional observable-body native regression proves more than unchanged bytes:
+a coupled generic binder rename/body edit switches from returning the left argument
+to the right, and restoration switches back. Through a generic relay, both signed
+64-bit results and distinct caller-owned reference addresses must switch. Complete
+normal/debug IR matches cold compilation; both cold/replay independent O3 products
+execute correctly across serialized updates. The regression passes in 1.681 s
+(`/tmp/elisa-generic-function-binder-body-choice.log`). It changes tests only, not
+the measured production implementation.
+
+These are representative opt-in standalone disk-cache results with no server.
+All compiler/build/link/native invocations retained external 30-second caps.
+Default-mode policy, cold admission and further major edit families remain open;
+the overall performance goal is not declared complete.

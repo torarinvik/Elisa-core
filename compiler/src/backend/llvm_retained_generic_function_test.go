@@ -156,3 +156,114 @@ int main(void){Pair p={91234567890LL,-71234567890LL,0x123456789abcdefLL},q=wide(
 		}
 	}
 }
+
+func TestRetainedGenericFunctionRenameAndBodyChange(t *testing.T) {
+	for _, name := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT", "ELISACORE_IR_IMPORTS", "ELISACORE_NATIVE_FRAGMENTS", "ELISACORE_TEST_NATIVE_WORKERS"} {
+		t.Setenv(name, "1")
+	}
+	const base = `def generic_choose[T](left: T, right: T) -> T:
+    return left
+
+def generic_relay[T](left: T, right: T) -> T:
+    return generic_choose(left, right)
+
+def select_value(left: i64, right: i64) -> i64:
+    return generic_relay(left, right)
+export fn select_value(left: i64, right: i64) -> i64 = select_value
+
+def select_ref(left: u8&, right: u8&) -> u8&:
+    return generic_relay(left, right)
+export fn select_ref(left: u8&, right: u8&) -> u8& = select_ref
+`
+	renamed := strings.Replace(base, "generic_choose[T](left: T, right: T) -> T:", "generic_choose[Payload](left: Payload, right: Payload) -> Payload:", 1)
+	changed := strings.Replace(renamed, "    return left\n", "    return right\n", 1)
+	parse := func(source string) *ast.File {
+		l := lexer.New("generic-choice-edit.elisa", []byte(source))
+		p := parser.New(l.Tokenize())
+		file := p.ParseFile("generic-choice-edit.elisa")
+		if len(l.Errors())+len(p.Errors()) != 0 {
+			t.Fatal("parse fixture")
+		}
+		return file
+	}
+	initial, state := semantic.AnalyzeRetained(parse(base), parse(base), []byte(base), semantic.AnalyzeOptions{})
+	if len(initial.Errors()) != 0 {
+		t.Fatal(initial.Errors())
+	}
+	for _, source := range []string{renamed, base, changed, base} {
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = semantic.RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replay, err := state.Update(parse(source), parse(source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(replay.Errors()) != 0 {
+			t.Fatal(replay.Errors())
+		}
+		cold := parseAndAnalyzeBackendTest(t, "generic-choice-edit.elisa", source)
+		for _, debug := range []bool{false, true} {
+			got, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(replay, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(cold, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatal("body change differs from cold IR")
+			}
+		}
+		selected := 0
+		if source == changed {
+			selected = 1
+		}
+		clientText := fmt.Sprintf(`#include <stdint.h>
+void arena_free(void *p){(void)p;}
+extern int64_t select_value(int64_t,int64_t);
+extern uint8_t *select_ref(uint8_t*,uint8_t*);
+int main(void){
+ int64_t values[2]={91234567890LL,-71234567890LL};
+ uint8_t bytes[2]={193,237};
+ if(select_value(values[0],values[1])!=values[%d])return 11;
+ if(select_ref(&bytes[0],&bytes[1])!=&bytes[%d])return 12;
+ return 0;
+}
+`, selected, selected)
+		dir := t.TempDir()
+		client := filepath.Join(dir, "client.c")
+		if err := os.WriteFile(client, []byte(clientText), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for label, result := range map[string]*semantic.Result{"replay": replay, "cold": cold} {
+			session := NewIncrementalObjectSession(4, 32<<20)
+			session.minWeight = 0
+			object := filepath.Join(dir, label+".o")
+			if err := session.WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3}); err != nil {
+				t.Fatal(err)
+			}
+			if session.Stats().SerialFallbacks != 0 {
+				t.Fatal("independent IR declined")
+			}
+			binary := filepath.Join(dir, label)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			out, err := exec.CommandContext(ctx, "clang", object, client, "-o", binary).CombinedOutput()
+			cancel()
+			if err != nil {
+				t.Fatalf("link %v %s", err, out)
+			}
+			ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+			out, err = exec.CommandContext(ctx, binary).CombinedOutput()
+			cancel()
+			if err != nil {
+				t.Fatalf("%s body-change %v %s", label, err, out)
+			}
+		}
+	}
+}
