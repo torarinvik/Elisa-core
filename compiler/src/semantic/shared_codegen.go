@@ -110,8 +110,14 @@ func privatizeSharedMaps(r *Result, a *Analyzer) []func() {
 		original := reflect.ValueOf(field.Interface())
 		clone := reflect.MakeMapWithSize(f.Type(), original.Len())
 		iter := original.MapRange()
+		// Key/Value allocate fresh reflected values for every entry. Reuse
+		// scratch storage instead; SetMapIndex copies each entry into clone.
+		key := reflect.New(f.Type().Key()).Elem()
+		value := reflect.New(f.Type().Elem()).Elem()
 		for iter.Next() {
-			clone.SetMapIndex(iter.Key(), iter.Value())
+			key.SetIterKey(iter)
+			value.SetIterValue(iter)
+			clone.SetMapIndex(key, value)
 		}
 		field.Set(clone)
 		restore = append(restore, func() { field.Set(original) })

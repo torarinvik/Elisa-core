@@ -3075,3 +3075,26 @@ of the same production source took 8.519 seconds for the generic-field edit
 functional records live in the fresh namespace; aggregate log is
 `/tmp/elisa-wrapper-argument-production-matrix-all.log`. Further profiling is
 required before claiming this latest binary meets the target across the matrix.
+
+
+## Shared analyzer map-copy allocations, 24 October 2026
+
+The generic-field miss was profiled with allocation samples: the preceding
+binary allocated 6.64 GiB across restoration, preparation and code generation.
+One candidate memoized syntax-only adopted escape facts within the build. It
+saved only about 11 MiB of sampled escape-scan allocations and still measured
+10.322 seconds; that candidate was discarded, with no production changes retained.
+Its base/generic objects nevertheless matched the established SHA-256 values.
+
+`privatizeSharedMaps` previously called reflect iterator Key/Value per entry.
+It now uses reusable SetIterKey/SetIterValue scratch values; SetMapIndex still
+copies every entry, and analyzer/result isolation and restoration are unchanged.
+A 10,000-expression shared-map benchmark (three 200 ms samples) changes from
+543566–556160 ns/op, 976222–976226 B/op, 20038 allocations/op to
+419378–425552 ns/op, 656248 B/op, 40 allocations/op. Logs are
+`/tmp/elisa-map-copy-before.log` and `/tmp/elisa-map-copy-after.log`.
+All retained semantic tests pass three times; map isolation/restored identity
+has a direct regression. Generic disk layout/ABI, nested generic argument,
+adopted backing ownership and shared lookup backend regressions also pass
+(`/tmp/elisa-map-copy-backend.log`). This is a verified map-copy improvement;
+full compiler timing for this implementation remains to be qualified.
