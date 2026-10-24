@@ -1463,6 +1463,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	for _, d := range shifted {
 		retainedShiftDecl(d, marks)
+		if fn, ok := d.(*ast.FuncDecl); ok {
+			a.refreshRetainedFactPositions(a.functionAnalyses[fn], marks)
+		}
 	}
 	for _, d := range shiftedOther {
 		retainedShiftDeclOwn(d, marks)

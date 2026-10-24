@@ -3832,3 +3832,17 @@ insertion stayed at line 4 while cold analysis placed it at line 5. The candidat
 passes both that disk-restore regression and repeated insertions before a nested
 module, including member functions and stable-offset checks (0.369 seconds).
 All test commands are externally capped at 30 seconds.
+
+
+### Shifted function fact reports use current coordinates
+
+Unchanged functions now shift the copied positions in their fact transforms and
+CFG instructions/terminators alongside their AST, then regenerate exit reports
+from those structured transforms. Shared transform slots are shifted once; CFG
+AST nodes are not revisited. This refresh does not reanalyze function bodies.
+
+With the regression overlaid on 7e8e23b5, an unchanged generic identity function
+kept a rendered return-report line of 5 after cold analysis moved it to 6. The
+candidate passes repeated disk-restored edits, exact cold report comparison,
+structured transform positions and zero changed-body checks (0.261 seconds).
+Commands are externally capped at 30 seconds.
