@@ -24,10 +24,11 @@ func diagnosticPathInputs(filename string, source []byte) []diagnosticPathState 
 		}
 	}
 	add(filename)
-	// Ordinary source needs no tokenization for response admission. For possible
-	// attribution directives use the actual lexer, keeping comment/string syntax
-	// and directive parsing identical to the compiler rather than duplicating it.
-	if bytes.Contains(source, []byte("#line")) {
+	// A conservative negative filter avoids lexing an entire include-expanded
+	// program when every possible directive names a path already ignored by add.
+	// Possible bare names still use the real lexer, including comment/string and
+	// directive syntax handling; the filter never extracts a filename itself.
+	if mayHaveBareLineFilename(source) {
 		scanner := lexer.New(filename, source)
 		for {
 			token := scanner.NextToken()
@@ -48,4 +49,30 @@ func diagnosticPathInputs(filename string, source []byte) []diagnosticPathState 
 		states = append(states, diagnosticPathState{Path: path, Exists: err == nil})
 	}
 	return states
+}
+
+func mayHaveBareLineFilename(source []byte) bool {
+	// The lexer consumes attribution only at physical column zero: either its
+	// atLineStart path, or handleIndentation with zero measured indentation.
+	// In an accepted directive, everything before the filename is '#line',
+	// whitespace and decimal digits. Therefore a slash anywhere after '#line'
+	// necessarily belongs to the filename, which add excludes. A slash-free
+	// candidate (even a malformed one or one inside a block comment) falls back.
+	for {
+		if bytes.HasPrefix(source, []byte("#line")) {
+			end := bytes.IndexByte(source, '\n')
+			if end < 0 {
+				end = len(source)
+			}
+			if !bytes.Contains(source[5:end], []byte("/")) {
+				return true
+			}
+			source = source[end:]
+		}
+		next := bytes.Index(source, []byte("\n#line"))
+		if next < 0 {
+			return false
+		}
+		source = source[next+1:]
+	}
 }

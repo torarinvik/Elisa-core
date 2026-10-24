@@ -2137,3 +2137,38 @@ invalidation need differential validation before changing authority. The plan
 is `/tmp/elisa-diagnostic-key-prefilter-plan.txt`; no prefilter is implemented
 or qualified yet. Broader unsupported declaration/contract and default/runtime
 optimization-quality gates remain open.
+
+
+## Diagnostic path-key negative prefilter
+
+The candidate now scans only physical column-zero `#line` candidates. If every
+candidate contains `/` after `#line`, no accepted directive can introduce a bare
+filename: the prefix accepted by the lexer consists only of the keyword,
+whitespace and decimal digits. Those slashed filenames are already excluded by
+the diagnostic path policy. Any slash-free candidate retains the original full
+lexer, including malformed candidates and those inside block comments; initial
+request filenames are always handled. No filename is extracted by the prefilter.
+
+A differential oracle retains the previous full-lexer implementation. All pairs
+of syntax/comment/string/directive fragments and 5,000 deterministic random
+combinations return identical path states for both absolute and bare request
+names. Bare-attribution file creation/removal remains tracked. The main cache
+and semantic-disk suites pass. Native response path-existence tests pass in an
+isolated process; in the broader suite they are skipped because earlier tests
+change the default compiler configuration.
+
+On the full expanded compiler source, three-operation samples measured diagnostic
+path collection at 278.891 ms / 25.443 MB / 220,729 allocations with the previous
+lexer versus 4.123 ms / zero allocations with the prefilter. Path states were
+compared before timing. The source/key-only handoff benchmark took
+75.790/75.531 ms versus the earlier approximately 630/643 ms. No native artifact
+is produced by that benchmark. Raw output: `/tmp/elisa-path-prefilter-bench.log`.
+This is cache-key preparation evidence, not an end-to-end rebuild result. Fresh
+normal CLI namespace admission and the edit matrix remain required.
+
+Focused race checks pass, including all four isolated native response
+file-existence cases. An instrumented fuzz build initially hit its 30-second
+external cap before executing tests; the warm-build retry completed and fuzzed
+42,238 mutations in five seconds with two workers, with no differential failure
+(`/tmp/elisa-path-prefilter-fuzz-retry.log`). The capped first attempt is not
+counted as a fuzz pass.
