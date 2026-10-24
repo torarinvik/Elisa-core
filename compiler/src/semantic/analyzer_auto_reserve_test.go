@@ -665,7 +665,15 @@ func TestIterFillLintSuppressedPassDoesNotDecide(t *testing.T) {
 	a.suppressDiagnostics = false
 	a.pendingIterFillLints[loop] = "ys"
 	a.flushPendingIterFillLint(nil, loop)
-	if !a.iterFillLintDecided[loop] || len(a.diagnostics) != 1 {
+	if a.iterFillLintDecided[loop] || len(a.diagnostics) != 1 {
 		t.Fatalf("reporting pass: decided=%v diagnostics=%d", a.iterFillLintDecided[loop], len(a.diagnostics))
+	}
+	// A retained re-analysis drops the function's diagnostics and analyzes it again: a lint
+	// that fired must fire again rather than inherit a remembered ruling.
+	a.diagnostics, a.reportedDiagnostics = nil, nil
+	a.pendingIterFillLints[loop] = "ys"
+	a.flushPendingIterFillLint(nil, loop)
+	if len(a.diagnostics) != 1 {
+		t.Fatalf("re-analysis: diagnostics=%d, want the lint again", len(a.diagnostics))
 	}
 }

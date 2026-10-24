@@ -51,15 +51,15 @@ func (a *Analyzer) flushPendingIterFillLint(prev ast.Stmt, loop *ast.IterForStmt
 		return
 	}
 	delete(a.pendingIterFillLints, loop)
-	// A pass with diagnostics suppressed cannot report, so its ruling must not stand for the
-	// reporting pass that re-analyzes the same body: it would swallow a real lint.
-	if !a.suppressDiagnostics {
+	if stmtIsExplicitReserveFor(prev, target) {
+		// Only a silencing ruling is remembered: a re-analysis must not resurrect it. A lint
+		// that fired fires again (deduplicated), which a re-analysis that dropped the
+		// function's diagnostics relies on. A pass with diagnostics suppressed rules too,
+		// identically, since the reserve check reads only the statement list.
 		if a.iterFillLintDecided == nil {
 			a.iterFillLintDecided = make(map[*ast.IterForStmt]bool)
 		}
 		a.iterFillLintDecided[loop] = true
-	}
-	if stmtIsExplicitReserveFor(prev, target) {
 		if a.iterFillSuppressedAt == nil {
 			a.iterFillSuppressedAt = make(map[string]bool)
 		}

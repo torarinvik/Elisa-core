@@ -189,6 +189,9 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			exportTargets[ed.TargetName] = true
 		}
 	}
+	if a.retained != nil && a.retained.classify == nil && retainedFastPrepareMode != "" {
+		a.retained.classify = &retainedClassifyState{storeNeeds: storeNeeds, regionBacked: regionBackedPacked, exportTarget: exportTargets}
+	}
 	for _, fn := range funcs {
 		fnType := a.funcTypeForRegionPoly(fn)
 		if fnType == nil {

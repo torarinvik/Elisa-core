@@ -210,6 +210,9 @@ func (a *Analyzer) checkAppendOnlyStores(decls []scopedDecl) {
 		}
 		facts.stores[st.Name] = store
 	}
+	if a.retained != nil && a.retained.appendOnly == nil && retainedFastPrepareMode != "" {
+		a.retained.appendOnly = &retainedAppendOnlyState{facts: facts}
+	}
 	if len(facts.stores) == 0 {
 		return
 	}
@@ -238,6 +241,9 @@ func (a *Analyzer) checkAppendOnlyStores(decls []scopedDecl) {
 				}
 			}
 		}
+	}
+	if a.retained != nil && a.retained.appendOnly != nil && a.retained.appendOnly.facts == facts {
+		a.retained.appendOnly.owners = owners
 	}
 	for _, scoped := range decls {
 		switch d := scoped.Decl.(type) {
