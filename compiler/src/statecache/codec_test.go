@@ -312,3 +312,35 @@ func TestGraphPreservesNamedByteSlices(t *testing.T) {
 		t.Fatal("named-byte slice changed")
 	}
 }
+
+func TestEncodeCapacityPreservesWireAndIdentity(t *testing.T) {
+	root := &graph{Name: "root", Data: []byte{3, 7, 11}}
+	root.Next, root.Alias, root.Dynamic = root, root, root
+	root.Copy = root.Data
+	r := graphRegistry()
+	want, err := r.Encode(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hint := range []int{-1, 0, 1, len(want), 2 * len(want)} {
+		data, err := r.EncodeWithCapacity(root, hint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, want) {
+			t.Fatalf("capacity %d changed wire format", hint)
+		}
+		value, err := r.Decode(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := value.(*graph)
+		if got.Next != got || got.Alias != got || got.Dynamic != got {
+			t.Fatal("cyclic identity lost")
+		}
+		got.Data[0] = 99
+		if got.Copy[0] != 99 {
+			t.Fatal("slice identity lost")
+		}
+	}
+}

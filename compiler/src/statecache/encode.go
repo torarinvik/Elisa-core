@@ -29,13 +29,21 @@ type encoder struct {
 	stringTable     []string
 }
 
-func (r *Registry) Encode(root any) ([]byte, error) { return r.encode(root, false) }
+func (r *Registry) Encode(root any) ([]byte, error) { return r.encode(root, false, 0) }
+
+// EncodeWithCapacity reserves output space using a trusted caller's size estimate.
+// The hint changes allocations only; undersized hints grow normally and the wire
+// format, graph inventory, validation and checksum are identical to Encode.
+// Callers must bound positive capacity hints to their allocation budget.
+func (r *Registry) EncodeWithCapacity(root any, capacity int) ([]byte, error) {
+	return r.encode(root, false, capacity)
+}
 
 // EncodeFramed writes independent object records and a shared string dictionary.
 // Decode accepts both this format and the preceding sequential format.
-func (r *Registry) EncodeFramed(root any) ([]byte, error) { return r.encode(root, true) }
+func (r *Registry) EncodeFramed(root any) ([]byte, error) { return r.encode(root, true, 0) }
 
-func (r *Registry) encode(root any, framed bool) ([]byte, error) {
+func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
 	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true, strings: map[string]uint64{}, framed: framed}
 	v := reflect.ValueOf(root)
 	if !v.IsValid() || r.ids[v.Type()] == 0 {
@@ -46,6 +54,9 @@ func (r *Registry) encode(root any, framed bool) ([]byte, error) {
 	}
 	if err := e.bindAliases(); err != nil {
 		return nil, err
+	}
+	if capacity > 0 {
+		e.data.Grow(capacity)
 	}
 	e.scanning = false
 	if framed {

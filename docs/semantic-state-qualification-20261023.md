@@ -3369,3 +3369,37 @@ opts out of the automatic preset, including a lone `PARALLEL_IR=1` or
 without silently supplying optimizer/import/fragment settings. Backend default
 and exact-cache-authority tests pass (0.596 s), with new partial/paired opt-in
 regressions. The no-primary-flags preset remains unchanged.
+
+
+### Checkpoint output reservation (2026-10-24)
+
+A fixed 14,441-declaration source snapshot reproduced a cold-admission limit:
+a 608,790,276-byte checkpoint restores in about 4.7 s, late return-borrow
+frames take about 7.2 s, and serialization can exceed the remaining 30 s
+command budget. Smaller declaration steps publish progress, but this does not
+yet establish successful full admission or sub-ten-second rebuilds for this
+new snapshot. No completed-state cache was rekeyed or artificially promoted.
+
+Resumed checkpoint encoding now reserves prior payload size plus one sixteenth,
+capped independently at 1 GiB. Larger outputs grow normally. The hint is set
+only after artifact size/header checks, graph/checksum restore and exact invocation
+matching. Graph validation and alias inventory precede allocation. No schema,
+semantic state, checksum or wire format changes; unsupported state still rejects.
+
+A same-binary direct restore/one-post-phase/encode pair, run alone with an external
+30 s cap and the same bounded CPU profiling, measured 27.004 s baseline versus
+26.466 s hinted. Peak RSS fell from 4,707,778,560 to 4,210,212,864 bytes (10.6%).
+Serialization itself was 13.945 versus 14.354 s: these data support a memory
+gain, not a serialization speed claim or a solved admission limit. Requested
+capacity was 646,839,668 bytes; hinted output was 623,086,060 bytes. Existing
+graph-order variation produced 623,544,435 bytes in the baseline. The diagnostic
+harness read the checkpoint directly and never published or authorized cache
+state. Artifacts are in the private disk-defaults-production-7p1yuvd5 root,
+capacity-baseline/hint logs, JSON and CPU profiles.
+
+State-cache tests pass (0.939 s), including byte-identical wire format and
+cyclic/shared identity with negative, zero, small and oversized hints. Semantic
+checkpoint round-trip/finish and active-journal rejection pass (0.468 s).
+Fresh-process analysis disk regression tests also pass; their bootstrap tests
+exercise resumed hinting and stale/corrupt checkpoint rejection. Full Stage1
+qualification without tuning flags remains open.

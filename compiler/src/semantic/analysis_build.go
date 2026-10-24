@@ -162,6 +162,12 @@ func (b *AnalysisBuild) validate() error {
 // MarshalState publishes only an idle checkpoint. Unsupported graph values
 // reject the entire checkpoint; they are never silently dropped.
 func (b *AnalysisBuild) MarshalState() ([]byte, error) {
+	return b.MarshalStateWithCapacity(0)
+}
+
+// MarshalStateWithCapacity uses a prior checkpoint's size as an allocation hint.
+// It preserves the same schema and validation as MarshalState.
+func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	if err := b.validate(); err != nil {
 		return nil, err
 	}
@@ -176,7 +182,7 @@ func (b *AnalysisBuild) MarshalState() ([]byte, error) {
 	if a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
-	return semanticStateRegistry().Encode(b)
+	return semanticStateRegistry().EncodeWithCapacity(b, capacity)
 }
 
 func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {

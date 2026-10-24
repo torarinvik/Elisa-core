@@ -30,6 +30,7 @@ func analysisBuildArtifact(complete analysisDiskArtifact, source []byte) analysi
 func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer) (*semantic.Result, *semantic.RetainedAnalysis) {
 	artifact := analysisBuildArtifact(complete, program.source)
 	var build *semantic.AnalysisBuild
+	capacityHint := 0
 	started := time.Now()
 	if data, err := artifact.read(); err == nil {
 		restored, err := semantic.RestoreAnalysisBuild(data)
@@ -38,6 +39,9 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 		}
 		if err == nil {
 			build = restored
+			// Bound eager reservation independently of the admitted state size.
+			// Larger checkpoints still grow normally if they need more space.
+			capacityHint = min(len(data)+len(data)/16, 1<<30)
 			done, total := build.Progress()
 			post, phases := build.PostProgress()
 			debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, len(data), time.Since(started).Round(time.Millisecond))
@@ -79,7 +83,7 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 	done, total := build.Progress()
 	post, phases := build.PostProgress()
 	saveStart := time.Now()
-	data, err := build.MarshalState()
+	data, err := build.MarshalStateWithCapacity(capacityHint)
 	if err == nil {
 		current, valid := analysisDiskArtifactFor(program, options)
 		if !valid || current.key != complete.key {
