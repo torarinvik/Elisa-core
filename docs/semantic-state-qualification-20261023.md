@@ -1826,3 +1826,50 @@ kept. Source/patch/tests are preserved in `/tmp/elisa-large-function-prototype`;
 complete profiles are `native-cost-large-function-{96,128}-*.json` under
 `/tmp/elisa-generic-schedule-production-root`. These are checked-payload
 experiments, not admitted new normal CLI executables.
+
+
+### ThinLTO native-stage investigation (not a production mode)
+
+`/tmp/elisa-thinlto-investigation` preserves a standalone LLVM 23.1.3 trial
+on the 96 exact baseline native inputs and seven layout replacements from
+the checked-payload scheduler profile. No production caches were rekeyed.
+The preparation utility assigns a distinct stable source filename per logical
+unit/partition before LLVM's required `AssignGUIDPass`, builds a module summary
+with `ProfileSummaryInfo`, and writes hashed ThinLTO-ready bitcode. Symbol
+resolution chooses prevailing definitions and preserves every externally visible
+definition, so dead-stripping the compiler cannot masquerade as a speed gain.
+CLI flags explicitly retain O3, default native codegen level 2, apple-m5 CPU,
+AA `scoped-noalias-aa,tbaa,basic-aa,globals-aa,scev-aa`, inliner 400 and aggressive
+unroll 600; import instruction limit is 400. This is native-only qualification,
+not a measured complete rebuild or proof of runtime optimization equivalence.
+
+Direct ThinLTO crashed in `SCEVAAResult::alias` / ScalarEvolution during
+jump-threading (`wasm_report_error`, `base.json`). Standard
+`thinlto-pre-link<O3>` preparation succeeded for all 103 modules in 6.182 s
+(`prelink/prepare.json`), but post-link O3 still crashed during jump-threading
+(`run_selected_tests`, `prelink/base.json`). Forcing iterative range evaluation
+did not help (`prelink-iterative-ranges/base.json`). A one-backend-thread trial
+also crashed after 16.444 s, leaving eight partial native cache entries
+(`prelink-serial/base.json`); this rules out backend threading as the explanation
+for this reproducer. Every compiler/LLVM command had an external 30 s cap.
+There is no successful complete ThinLTO product, executable check or qualifying
+cache timing here, and no optimizer analysis was removed from production.
+
+The current native CPU profile instead identifies Go allocation work worth
+investigating: 3.65 CPU seconds in malloc out of 11.14 sampled CPU seconds,
+including 2.64 s clearing allocator spans, alongside 3.75 s in C calls. Building
+the generator's symbol map accounts for only 0.23 s; sharing that map alone
+would not explain the remaining rebuild miss. A focused allocation profile completed successfully in 6.913 s using
+`/tmp/elisa-native-alloc-profile.py` and the existing frozen checked-payload
+profiler, without modifying Stage1 sources. This is a profiling invocation,
+not a new normal CLI qualification. The complete-process allocation profile is
+`generic-schedule-96/native-allocation.pprof` under
+`/tmp/elisa-string-chunk-production-root`; focused flat/cumulative reports are
+`native-allocation-{flat,space,objects}.txt`. Backend partition generation accounts
+for about 1,483 MiB of allocations. Notable direct allocations are about 240 MiB
+for `provenIndexPositions`, 130 MiB for global suffix indexes, 170 MiB cumulatively
+constructing generators and their symbol maps, and 70 MiB for `externCParts`.
+These read-only indexes are currently rebuilt per generator. The ABI helper
+also builds then discards a parameter-plan slice when no view needs splitting.
+Reducing those allocations is the next concrete candidate; no gain has yet
+been implemented or claimed from this profile.
