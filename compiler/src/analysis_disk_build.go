@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"elisacore/src/ast"
@@ -66,11 +67,20 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 		}
 	}
 	limit, _ := strconv.Atoi(os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP_DECLS"))
-	seconds, _ := strconv.Atoi(os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS"))
-	if seconds < 1 || seconds > 15 {
-		seconds = 3
-	}
-	result, state, err := build.Advance(limit, time.Duration(seconds)*time.Second)
+	done, total := build.Progress()
+	budget := analysisBootstrapBudget(capacityHint, done == total)
+	slow := analysisBootstrapSlowHint(artifact, done)
+	debugAnalysisDisk(stderr, "bootstrap budget=%v elapsed=%v slow-before=%d", budget.Round(time.Millisecond), time.Since(processStartTime).Round(time.Millisecond), slow)
+	watchdog := time.AfterFunc(budget+analysisBootstrapMargin, func() {
+		// A body still running here leaves too little time for its checkpoint.
+		// Name it so the next step stops before it and gives it a whole budget.
+		if running := semantic.RunningDeclaration(); running >= 0 {
+			analysisBootstrapRecordSlow(artifact, running)
+			debugAnalysisDisk(stderr, "bootstrap deadline reached in declaration %d", running)
+		}
+	})
+	result, state, err := build.AdvanceBefore(limit, budget, slow)
+	watchdog.Stop()
 	if err != nil {
 		return incomplete(err), nil
 	}
@@ -78,9 +88,10 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 	debugAnalysisDisk(stderr, "bootstrap step declarations=%d post=%d frames=%d last=%s in=%v slowest=%v at=%v", stats.Declarations, stats.PostPhases, stats.PostFrames, stats.LastPostPhase, stats.Elapsed.Round(time.Millisecond), stats.Slowest.Round(time.Millisecond), stats.SlowestPosition)
 	if result != nil {
 		debugAnalysisDisk(stderr, "bootstrap complete")
+		_ = os.Remove(artifact.path + ".slow")
 		return result, state
 	}
-	done, total := build.Progress()
+	done, total = build.Progress()
 	post, phases := build.PostProgress()
 	saveStart := time.Now()
 	data, err := build.MarshalStateWithCapacity(capacityHint)
@@ -97,4 +108,69 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 	}
 	debugAnalysisDisk(stderr, "bootstrap checkpoint completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, len(data), time.Since(saveStart).Round(time.Millisecond))
 	return incomplete(fmt.Errorf("initial analysis checkpoint saved (%d/%d declarations, %d/%d final-check phases); rerun the same build to continue", done, total, post, phases)), nil
+}
+
+// Each bootstrap step must finish inside the 30 s run cap: the process start,
+// restore and parse already spent, this step's analysis, then either a
+// checkpoint or, once the final checks complete, the full state store and code
+// generation. A step whose declarations remain always ends with a checkpoint
+// (post phases begin only in a fresh step), so it reserves the checkpoint; the
+// final-check step reserves the store and codegen. Analysis stops between
+// declarations, so one slow body can still overrun its share; the margin
+// absorbs typical bodies and a timed-out step is simply rerun.
+// ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS (1-15) keeps a fixed per-step budget.
+const (
+	analysisBootstrapDeadline    = 30 * time.Second
+	analysisBootstrapMargin      = 6 * time.Second
+	analysisBootstrapCodegen     = 4 * time.Second
+	analysisBootstrapMinBudget   = 3 * time.Second
+	analysisBootstrapNanosPerB   = 12 // checkpoint encode+write, measured ~5.5 s for 470 MB
+	analysisBootstrapStoreNsPerB = 20 // final store, measured ~11.9 s for 625 MB
+	analysisBootstrapFirstBytes  = 400 << 20
+)
+
+func analysisBootstrapBudget(stateBytes int, finalChecks bool) time.Duration {
+	if seconds, err := strconv.Atoi(os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP_SECONDS")); err == nil && seconds >= 1 && seconds <= 15 {
+		return time.Duration(seconds) * time.Second
+	}
+	// A body step's checkpoint grows past the restored state; the completed
+	// state the final step stores is no larger than the checkpoint it resumed.
+	next := max(stateBytes+stateBytes/4, analysisBootstrapFirstBytes)
+	reserve := time.Duration(next*analysisBootstrapNanosPerB)*time.Nanosecond + analysisBootstrapMargin
+	if finalChecks {
+		// Final-check frames are small, so the margin only covers jitter.
+		reserve = time.Duration(max(stateBytes, analysisBootstrapFirstBytes)*analysisBootstrapStoreNsPerB)*time.Nanosecond + analysisBootstrapCodegen + analysisBootstrapMargin/3
+	}
+	budget := analysisBootstrapDeadline - time.Since(processStartTime) - reserve
+	return max(budget, analysisBootstrapMinBudget)
+}
+
+// analysisBootstrapSlowHint returns the first declaration at or after next that
+// an earlier step of this exact build was still analyzing at its deadline, or -1.
+func analysisBootstrapSlowHint(artifact analysisDiskArtifact, next int) int {
+	data, err := os.ReadFile(artifact.path + ".slow")
+	if err != nil {
+		return -1
+	}
+	found := -1
+	for _, line := range strings.Fields(string(data)) {
+		if index, err := strconv.Atoi(line); err == nil && index >= next && (found < 0 || index < found) {
+			found = index
+		}
+	}
+	return found
+}
+
+// analysisBootstrapRecordSlow appends a declaration index to the build's hint
+// list. The checkpoint directory may not exist before the first checkpoint.
+func analysisBootstrapRecordSlow(artifact analysisDiskArtifact, index int) {
+	if os.MkdirAll(filepath.Dir(artifact.path), 0700) != nil {
+		return
+	}
+	f, err := os.OpenFile(artifact.path+".slow", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(f, index)
+	f.Close()
 }

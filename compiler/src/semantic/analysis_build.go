@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"elisacore/src/ast"
@@ -72,6 +73,23 @@ func BeginAnalysisBuild(file, pristine *ast.File, src []byte, options AnalyzeOpt
 // after the last body, so publication need not share that body's time budget.
 // Calls may not overlap any other semantic analysis.
 func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Result, *RetainedAnalysis, error) {
+	return b.AdvanceBefore(maxDeclarations, budget, -1)
+}
+
+// analysisBuildRunning is the index of the declaration an Advance is analyzing,
+// or -1. A watchdog reads it to name a body that is still running at its
+// process deadline.
+var analysisBuildRunning atomic.Int64
+
+func init() { analysisBuildRunning.Store(-1) }
+
+// RunningDeclaration reports the declaration index being analyzed, or -1.
+func RunningDeclaration() int { return int(analysisBuildRunning.Load()) }
+
+// AdvanceBefore is Advance that also stops before declaration stopBefore unless
+// it is the first one of this step, so a body known to be slow starts with a
+// whole step's budget. A negative stopBefore never stops.
+func (b *AnalysisBuild) AdvanceBefore(maxDeclarations int, budget time.Duration, stopBefore int) (*Result, *RetainedAnalysis, error) {
 	if err := b.validate(); err != nil {
 		return nil, nil, err
 	}
@@ -92,11 +110,13 @@ func (b *AnalysisBuild) Advance(maxDeclarations int, budget time.Duration) (*Res
 	}
 	completed := 0
 	for b.next < len(r.decls) {
-		if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget) {
+		if completed > 0 && (maxDeclarations > 0 && completed >= maxDeclarations || budget > 0 && time.Since(started) >= budget || b.next == stopBefore) {
 			break
 		}
 		declStart := time.Now()
+		analysisBuildRunning.Store(int64(b.next))
 		a.analyzeScopedDecl(r.decls[b.next])
+		analysisBuildRunning.Store(-1)
 		if elapsed := time.Since(declStart); elapsed > b.LastStats.Slowest {
 			b.LastStats.Slowest, b.LastStats.SlowestPosition = elapsed, r.decls[b.next].Decl.Pos()
 		}
