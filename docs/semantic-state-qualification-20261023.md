@@ -3846,3 +3846,27 @@ kept a rendered return-report line of 5 after cold analysis moved it to 6. The
 candidate passes repeated disk-restored edits, exact cold report comparison,
 structured transform positions and zero changed-body checks (0.261 seconds).
 Commands are externally capped at 30 seconds.
+
+
+### Disk-restored record edits preserve inline bit groups
+
+Retained record edits now accept inline bitset/bitfield fields. Surviving groups
+keep their type identity while receiving fresh member order, widths, offsets and
+declarations. Old group types participate in invalidation, including projected,
+nested and generic users. Enum storage edits also refresh numeric group layout
+when the owning record text did not change. Scalar-only group edits preserve
+address-flow summaries; existing record-protocol guards remain enforced.
+
+Disk-roundtrip semantic cases cover ordinary field insertion, group membership,
+order/type/kind changes, enum-only widening, generic/nested projections and revert.
+The semantic oracle canonicalizes source positions in independent copies while
+retaining strict live metadata and alias relations; cold and retained semantic
+cases use the same serial body-analysis policy. Linked backend tests retain
+production defaults and compare cold/replayed IR plus layout/runtime probes for
+a 12-to-24-byte aggregate, 8-to-16-bit group storage and enum-only widening.
+
+The combined 645c1968 candidate passes the focused semantic selection in 0.453
+seconds and linked ABI test in 1.378 seconds. A separate immutable 722e709c archive
+plus the exact group patch passes the broader retained/analysis-build selection
+in 1.302 seconds. Commands are externally capped at 30 seconds. These qualify
+correctness; full compiler disk-cache edit timing is still pending.

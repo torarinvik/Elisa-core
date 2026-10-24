@@ -772,6 +772,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		for _, e := range structEdits {
 			targets[e.st] = true
 			names[e.live.Name] = true
+			for _, field := range e.st.Fields {
+				if group, ok := field.Type.(*BitGroupType); ok {
+					targets[group] = true
+				}
+			}
 		}
 		a.widenLayoutTargets(targets)
 		for name, typ := range a.namedTypes {

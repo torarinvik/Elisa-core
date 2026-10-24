@@ -21,7 +21,8 @@ type retainedStructEdit struct {
 
 // retainedPlainStruct: a struct with none of the features whose declaration-phase effects
 // extend past its own field table (generics, regions, typestate, layout modes, annotations,
-// affinity, invariants, ghost / tail / packed fields).
+// affinity, invariants, ghost / tail fields). Inline bit groups only contribute
+// scalar storage and a field-local member table, and are rebuilt with the fields.
 func retainedPlainStruct(d *ast.StructDecl) bool {
 	if d == nil || len(d.Annotations) != 0 || len(d.TypeParams) != 0 || len(d.RegionParams) != 0 ||
 		d.RegionOwner != "" || len(d.GenericParams) != 0 || d.HasStateParam || len(d.NamedStateCases) != 0 ||
@@ -31,7 +32,7 @@ func retainedPlainStruct(d *ast.StructDecl) bool {
 		return false
 	}
 	for _, f := range d.Fields {
-		if len(f.Annotations) != 0 || f.IsTail || f.Ghost || f.BitGroup != nil {
+		if len(f.Annotations) != 0 || f.IsTail || f.Ghost {
 			return false
 		}
 	}
@@ -218,6 +219,16 @@ func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool
 				return targets[n]
 			case *ConstEnumType:
 				return targets[n]
+			case *BitGroupType:
+				if targets[n] {
+					return true
+				}
+				for _, member := range n.Members {
+					if rec(reflect.ValueOf(member.Type)) {
+						return true
+					}
+				}
+				return false
 			}
 			return rec(v.Elem())
 		case reflect.Interface:
@@ -253,6 +264,10 @@ func retainedTypeReaches(t Type, targets map[Type]bool, memo map[Type]bool) bool
 // change what a value of the struct carries.
 func retainedScalarField(t Type) bool {
 	switch t := t.(type) {
+	case *BitGroupType:
+		// Both bitset and bitfield members are validated scalar storage, even
+		// when their spelling names a constant enum.
+		return true
 	case *BitIntType:
 		return true
 	case *BuiltinType:
@@ -264,12 +279,15 @@ func retainedScalarField(t Type) bool {
 	return false
 }
 
-// retainedFlowNeutral: the edit kept every surviving field's type and added or removed only
-// scalars, so store-flow summaries computed from the old shape still hold for functions whose
-// bodies did not change.
+// retainedFlowNeutral: the edit kept every address-bearing field's type and
+// mutability and otherwise changed only scalars, so store-flow summaries computed
+// from the old shape still hold for functions whose bodies did not change.
 func retainedFlowNeutral(old, cur map[string]Field) bool {
 	for name, f := range old {
 		if g, ok := cur[name]; ok {
+			if retainedScalarField(f.Type) && retainedScalarField(g.Type) && g.Mutable == f.Mutable {
+				continue
+			}
 			if g.Type.String() != f.Type.String() || g.Mutable != f.Mutable {
 				return false
 			}
@@ -324,13 +342,34 @@ func (r *RetainedAnalysis) applyStructEdits(edits []retainedStructEdit) bool {
 		e.st.Alignment, e.st.HasAlignment = 0, false
 		a.analyzeStructAnnotations(e.edit, e.st)
 		e.st.Fields = map[string]Field{}
-		e.st.GhostFieldOrder, e.st.StoreFieldOrder, e.st.HasPackedGroups = nil, nil, false
+		e.st.GhostFieldOrder, e.st.HasPackedGroups = nil, false
+		// Match collectNamedTypes even for ordinary records, whose store order
+		// remains empty. Only synthesized store population appends names.
+		e.st.StoreFieldOrder = make([]string, 0, len(e.edit.Fields))
 		e.st.declarationFieldOrder = astFieldDeclNames(e.edit.Fields)
 		sd := e.scope
 		sd.Decl = e.edit
 		scoped = append(scoped, sd)
 	}
 	a.populateStructFields(scoped)
+	for i, e := range edits {
+		for name, oldField := range olds[i] {
+			oldGroup, ok := oldField.Type.(*BitGroupType)
+			if !ok {
+				continue
+			}
+			field, exists := e.st.Fields[name]
+			group, ok := field.Type.(*BitGroupType)
+			if !exists || !ok {
+				continue
+			}
+			// SameType uses pointer identity for inline groups. Keep every live
+			// alias/projection of a surviving group attached to its new table.
+			*oldGroup = *group
+			field.Type = oldGroup
+			e.st.Fields[name] = field
+		}
+	}
 	a.clearRetainedTypeMemos()
 	for i, e := range edits {
 		if !retainedFlowNeutral(olds[i], e.st.Fields) {
@@ -362,6 +401,12 @@ func (a *Analyzer) retainedHoldsByValue(t Type, targets map[Type]bool, seen map[
 		remaining--
 		seen[t] = true
 		switch n := t.(type) {
+		case *BitGroupType:
+			for _, member := range n.Members {
+				if visit(member.Type, depth+1) {
+					return true
+				}
+			}
 		case *StructType:
 			for _, f := range n.Fields {
 				if visit(f.Type, depth+1) {

@@ -83,6 +83,7 @@ func assertIncrementalResultParity(t testing.TB, cold, warm *Result) {
 	}
 	left, right := reflect.ValueOf(*cold), reflect.ValueOf(*warm)
 	baseMap, reverseBaseMap := map[string]string{}, map[string]string{}
+	baseNode, reverseBaseNode := map[string]any{}, map[string]any{}
 	for i := 0; i < left.NumField(); i++ {
 		name := left.Type().Field(i).Name
 		switch name {
@@ -111,17 +112,19 @@ func assertIncrementalResultParity(t testing.TB, cold, warm *Result) {
 					fact := value.Interface().(OptimizationFacts)
 					current := warm.ExprFacts[key.Interface().(ast.Expr)]
 					if (fact.base == "") != (current.base == "") {
-						t.Fatal("optimization base presence differs")
+						t.Fatalf("optimization base presence differs at %s: cold=%#v warm=%#v", incrementalParitySourceKey(warm.File, key.Interface()), fact, current)
 					}
 					if fact.base != "" {
 						if prior, ok := baseMap[fact.base]; ok && prior != current.base {
-							t.Fatal("optimization alias relation differs")
+							t.Fatalf("optimization alias relation differs at %s: cold base=%q warm base=%q; prior node=%s mapped same cold base to %q; cold=%#v warm=%#v", incrementalParitySourceKey(warm.File, key.Interface()), fact.base, current.base, incrementalParitySourceKey(warm.File, baseNode[fact.base]), prior, fact, current)
 						}
 						if prior, ok := reverseBaseMap[current.base]; ok && prior != fact.base {
-							t.Fatal("optimization alias relation merged")
+							t.Fatalf("optimization alias relation merged at %s: cold base=%q warm base=%q; prior node=%s mapped different cold base=%q to same warm base; cold=%#v warm=%#v", incrementalParitySourceKey(warm.File, key.Interface()), fact.base, current.base, incrementalParitySourceKey(warm.File, reverseBaseNode[current.base]), prior, fact, current)
 						}
 						baseMap[fact.base] = current.base
 						reverseBaseMap[current.base] = fact.base
+						baseNode[fact.base] = key.Interface()
+						reverseBaseNode[current.base] = key.Interface()
 						fact.base = current.base // invocation-local identity; preserve the alias relation
 					}
 					value = reflect.ValueOf(fact)
@@ -131,9 +134,33 @@ func assertIncrementalResultParity(t testing.TB, cold, warm *Result) {
 			a = remapped
 		}
 		if !reflect.DeepEqual(a.Interface(), b.Interface()) {
-			t.Fatalf("published metadata differs: %s", name)
+			t.Fatalf("published metadata differs: %s: %s", name, retainedCanonicalFirstDifference(a, b))
 		}
 	}
+}
+
+func incrementalParitySourceKey(file *ast.File, node any) string {
+	for _, decl := range retainedWalkDecls(file) {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ordinal, label := 0, ""
+		visit := func(value any) {
+			if current, ok := value.(PositionedFunctionNode); ok {
+				if current == node {
+					label = fmt.Sprintf("%s/body-node[%d] %T %+v", fn.Name, ordinal, current, current)
+				}
+				ordinal++
+			}
+		}
+		walkStoreScanNodes(funcScanStmts(fn), visit)
+		walkStoreScanNodes(funcDefaultArgStmts(fn), visit)
+		if label != "" {
+			return label
+		}
+	}
+	return fmt.Sprintf("%T %+v", node, node)
 }
 
 func TestIncrementalSessionActuallySkipsPrimaryTyping(t *testing.T) {

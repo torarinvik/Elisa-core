@@ -180,16 +180,25 @@ func retainedConstEnumTypeOnlyDeclaration(decl ast.Decl) bool {
 	case *ast.TypeAliasDecl:
 		return len(d.TypeParams) == 0 && retainedConstEnumPassiveType(d.Target)
 	case *ast.StructDecl:
-		if d.Layout != ast.StructLayoutDefault && d.Layout != ast.StructLayoutC {
-			return false
-		}
-		shape := *d
-		shape.ReprC, shape.Layout = false, ast.StructLayoutDefault
-		if !retainedPlainStruct(&shape) {
+		// The same record protocol supported by field edits is safe here:
+		// only passive member types are allowed below, and enum-dependent
+		// inline group tables are explicitly refreshed after the enum edit.
+		if !retainedStructFieldEditAllowed(d, d) {
 			return false
 		}
 		for _, field := range d.Fields {
-			if field.DefaultValue != nil || !retainedConstEnumPassiveType(field.Type) {
+			// Closed literal defaults cannot observe enum storage or members.
+			// Keep computed/name-dependent initializers on the rebuild path.
+			if field.DefaultValue != nil && !retainedClosedConstEnumValue(field.DefaultValue) {
+				return false
+			}
+			if field.BitGroup != nil {
+				for _, member := range field.BitGroup.Members {
+					if field.BitGroup.Kind == ast.BitGroupBitfield && !retainedConstEnumPassiveType(member.Type) {
+						return false
+					}
+				}
+			} else if !retainedConstEnumPassiveType(field.Type) {
 				return false
 			}
 		}
@@ -242,6 +251,35 @@ func (r *RetainedAnalysis) applyConstEnumEdits(edits []retainedConstEnumEdit) {
 		sd.Decl = e.edit
 		r.a.collectConstValues([]scopedDecl{sd})
 		r.a.populateConstEnumMembers([]scopedDecl{sd})
+	}
+	// Widths and offsets are numeric snapshots, not references to enum storage.
+	// Refresh affected groups even when their owning struct text did not change.
+	targets := map[Type]bool{}
+	for _, e := range edits {
+		targets[e.et] = true
+	}
+	for _, sd := range r.structDecls() {
+		decl, ok := sd.Decl.(*ast.StructDecl)
+		if !ok {
+			continue
+		}
+		st, _ := r.a.namedTypes[joinQualifiedName(sd.Namespace, decl.Name)].(*StructType)
+		if st == nil {
+			continue
+		}
+		for _, field := range decl.Fields {
+			group, ok := st.Fields[field.Name].Type.(*BitGroupType)
+			if !ok || !retainedTypeReaches(group, targets, map[Type]bool{}) {
+				continue
+			}
+			r.a.withResolutionContext(sd.Namespace, sd.Usings, func() {
+				r.a.withGenericParams(st.GenericParams, nil, func() {
+					r.a.withRegionParams(decl.RegionParams, func() {
+						*group = *r.a.resolveBitGroupType(decl.Name+"."+field.Name, field.BitGroup)
+					})
+				})
+			})
+		}
 	}
 	r.a.clearRetainedTypeMemos()
 }
