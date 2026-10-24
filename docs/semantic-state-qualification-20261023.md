@@ -2829,3 +2829,31 @@ Both baseline and packed native compiler products pass the include fixture
 (`packed-record-qualification/functional.json`). No baseline payload changed;
 controlled Stage1 edits restored. Fresh ordinary installed-binary confirmation
 is next. Default whole-module optimization remains above the 30-second cap.
+
+
+### Twenty-one ordinary server-free variants confirmed (2026-10-24)
+
+Installed `f880510a`, fresh namespace/frozen binary:
+`/tmp/elisa-packed-record-production-root` → `elisa-packed-record-production-2_dwk1k1`.
+Eight bounded checkpoints (15.025–27.837 seconds), ninth timeout 30.247 after
+state publication, tenth object 14.924. This is admission setup, not a cold
+sub-10-second build claim. Every compiler/link/native invocation capped at 30 seconds.
+No retained server; exact disk artifact authority preserved.
+
+Ordinary packed edit **8.410 seconds**, repeat 0.149; alignment 8.017, repeat
+0.145. Major generic/private-bound/contract-bound/region-record/explicit-values/
+C-layout: 7.459 / 7.437 / 5.778 / 8.951 / 6.531 / 5.843 seconds.
+Remaining twelve changed cases: 5.934–8.748; baseline exact hit 0.145 seconds.
+All 41 timed invocations succeeded (21 variants including baseline, 20 repeats),
+with exact repeats 0.141–0.176 seconds. Maximum changed rebuild **8.951 seconds**.
+Packed/alignment object SHA values exactly match prior qualification products.
+All **21 native compiler products** pass the include fixture (exit 42), sidecar
+miss→valid, enum tag checks and unknown-flag diagnostics. Records: root JSON
+files and `functional.json`; log `/tmp/elisa-packed-record-production-functional.log`.
+Controlled Stage1 source restored, seven preexisting user edits preserved.
+
+This is the explicitly enabled independent-IR/native-fragment configuration,
+with unchanged O3, AA, inliner 400, unroll 600 and default native codegen level.
+Ordinary whole-module optimization still exceeds the 30-second cap after
+analysis; its runtime-quality/default-mode gate remains open. The full user goal
+is active despite this passing representative matrix.
