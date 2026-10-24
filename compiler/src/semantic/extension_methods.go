@@ -283,11 +283,11 @@ func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {
 		}
 	}
 	// A bare integer literal has the untyped `int` type; let it serve as a receiver
-	// of any integer-typed parameter (the literal is re-typed when prepended as the
-	// argument), mirroring ordinary argument coercion so `7.inc()` works. Float
-	// literals already get a concrete type (f64) and need no special case.
+	// of any integral-typed parameter (the literal is re-typed when prepended as the
+	// argument), mirroring ordinary argument coercion so `7.inc()` works. Float,
+	// bool, string, and other builtin receivers do not accept an integer literal.
 	if an, ok := builtinNumericTypeName(actual); ok && an == "int" {
-		if en, ok := builtinNumericTypeName(expected); ok && en != "f32" && en != "f64" {
+		if IsIntegralStorageType(expected) {
 			return true
 		}
 	}

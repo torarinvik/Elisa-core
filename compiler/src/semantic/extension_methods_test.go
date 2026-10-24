@@ -972,3 +972,18 @@ def via_literal() -> i64:
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 }
+
+func TestUFCSUntypedIntegerReceiverMatchesOnlyIntegralTypes(t *testing.T) {
+	a := &Analyzer{}
+	actual := Type(&BuiltinType{Name: "int"})
+	for _, name := range []string{"char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr"} {
+		if !a.ufcsReceiverAssignableTo(&BuiltinType{Name: name}, actual) {
+			t.Errorf("untyped integer receiver should match integral type %q", name)
+		}
+	}
+	for _, name := range []string{"bool", "string", "cstr", "sview", "void", "f32", "f64"} {
+		if a.ufcsReceiverAssignableTo(&BuiltinType{Name: name}, actual) {
+			t.Errorf("untyped integer receiver must not match non-integral type %q", name)
+		}
+	}
+}
