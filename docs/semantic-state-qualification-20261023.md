@@ -3646,3 +3646,46 @@ cycle introduction/removal still exposes nondeterministic stale permission rows.
 That issue and the earlier 10.668-second region-record miss remain open. The
 working-tree compiler binary rebuilt by a separate lane is not a qualified
 committed oracle; the installed stage0 was unchanged by that resolver build.
+
+
+### Recompute retained callers after inferred return-summary changes
+
+A same-signature callee edit can change return provenance, borrowed-owner paths,
+isolation, sink/fresh-return information or owned-region behavior. Retained body
+updates now compare independent snapshots of these inferred summaries and refresh
+transitive dependent callers when their inputs change. The dependency graph uses
+current conservative typed may-call edges, so added/removed edges and newly
+closed cycles do not depend on which old lazy queries happened to run.
+
+Recursive components reset old body-derived assumptions before bounded fixpoint
+iteration. An edited recursive root enters this step even when its preliminary
+body pass reads its old self-summary and appears unchanged. Scalar reference
+returns are included, rather than using the narrower container/fill predicate.
+Nonconvergence rejects further use of the partially updated state and requests a
+fresh analysis. Acyclic edits with an unchanged inferred summary retain their
+callers' and unrelated functions' analysis objects.
+
+Caller body analysis sees permission rows in cold declaration order, preserving
+new rows from earlier bodies. The incremental permission solver records fresh
+initial rows for summary-dependent callers as well as directly edited functions;
+otherwise a shrink restart could resurrect an old Global.Read around a cycle.
+Old late-check frames and current-body optional expression facts are replaced
+before rerunning a caller. Empty published diagnostics have one representation.
+
+The immutable j04vsdra snapshot matches the seven committed source/test files by
+SHA-256. Twenty repetitions of the focused suite pass (3.858 s): both edit
+directions, three recursive source orders, cycle creation/removal/recreation,
+nested aggregate/self-recursive returns, disk restore at each revision, actual
+escape diagnostics, unchanged-summary caller locality, implicit-region signature
+fallback, transitive summaries and resumable AnalysisBuild checks. Strict live
+metadata parity remains enabled. All existing Retained/AnalysisBuild tests pass
+(1.062 s), and the focused race suite passes (3.092 s). Each command was externally
+capped at 30 seconds. The unassigned generic summaryRelevant experiment was not
+included in this snapshot.
+
+This is a correctness gain, not renewed performance qualification. Nested
+returned expressions whose callee is declared later still need their own cold
+fact refresh. A separate retained disjoint-call contribution regression also
+proves a stale noalias fact after removal of its sole proving call; its repair
+is being prepared in an isolated copy. These remain open before a fresh full
+compiler disk-cache admission and the pending first-edit performance matrix.

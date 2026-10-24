@@ -1594,6 +1594,7 @@ func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls 
 	}
 	reassignReclaims := a.computeReassignReclaims(collectRegionPolyCandidateFuncs(activeDecls))
 	a.closeSMT()
+	diagnostics := publishedResultDiagnostics(a.diagnostics)
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
 	}
@@ -1653,12 +1654,21 @@ func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls 
 		ExportedTypes:           a.exportedTypes,
 		ExportedFuncs:           a.exportedFuncs,
 		ExportedGlobals:         a.exportedGlobals,
-		Diagnostics:             a.diagnostics,
+		Diagnostics:             diagnostics,
 
 		PermissionEffectsConverged: a.permissionEffectsOutcome.Converged,
 	}
 	recordInternalParityCase(file, options, analysisResult)
 	return analysisResult
+}
+
+// publishedResultDiagnostics gives the public result a stable empty-slice
+// representation across cold and retained analysis paths.
+func publishedResultDiagnostics(diagnostics []Diagnostic) []Diagnostic {
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	return diagnostics
 }
 
 // runPostPhases runs exactly the same ordered checks as resumable initial

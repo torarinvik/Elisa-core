@@ -46,7 +46,7 @@ type RetainedAnalysis struct {
 	rbInvalid   map[*ast.FuncDecl]bool                   // owners to recompute in this update
 	rbChanged   []*ast.FuncDecl                          // functions whose bodies this update replaced
 	rbSameFlow  map[*ast.FuncDecl]bool                   // changed functions whose return-borrow summary this update keeps
-	rbCallers   map[*ast.FuncDecl][]*ast.FuncDecl        // consulted -> consulting owners, pre-update
+	rbCallers   map[*ast.FuncDecl][]*ast.FuncDecl        // possible callee -> possible caller, current bodies
 	rbStaleDeps map[*ast.FuncDecl]map[*ast.FuncDecl]bool // pre-update deps of rbInvalid
 	rbCutoff    bool                                     // the late pass may narrow rbInvalid
 	rbUpdating  bool
@@ -1561,6 +1561,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
 	a.retainedProofsScoped = true
+	returnSummariesBefore := r.snapshotReturnBorrowInvalidationSummaries(a)
 	// A re-analyzed body is the same declaration node with a new body: the first analysis's
 	// mark would skip the cyclic-summary convergence a fresh analysis runs before it, leaving
 	// a recursive call to read the summary this update invalidated.
@@ -1569,7 +1570,19 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			delete(a.ambientFillAnalyzed, fn)
 		}
 	}
-	r.perms.withInitialRows(a, r.decls, func() { a.analyzeDecls(changed) })
+	returnBorrowSummaryConverged := true
+	r.perms.withInitialRows(a, r.decls, func() {
+		a.analyzeDecls(changed)
+		returnBorrowSummaryConverged = r.reanalyzeReturnBorrowSummaryCallers(a, returnSummariesBefore, len(pre.diags))
+	})
+	if !returnBorrowSummaryConverged {
+		// The live analyzer has already had the edited bodies and some SCC members
+		// reanalyzed. Do not let a later Update reuse this partial state.
+		a.retainedProofsScoped = false
+		a.closeSMT()
+		r.a = nil
+		return fail("retained return-borrow summary cycle did not converge; retry with a full analysis")
+	}
 	a.retainedProofsScoped = false
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
@@ -1595,7 +1608,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
-	r.result.Diagnostics = a.diagnostics
+	r.result.Diagnostics = publishedResultDiagnostics(a.diagnostics)
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)
 	r.LastStats.Added = len(added)

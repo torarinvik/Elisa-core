@@ -10,18 +10,26 @@ import "elisacore/src/ast"
 // re-checks only the edited functions and replays the rest's diagnostics
 // (validation reads rows directly too, so any row change re-validates all).
 type retainedPermissions struct {
-	readers  map[*FuncType]map[int]bool // row -> indices (in permissionFunctionDecls) of its readers
-	diags    map[*ast.FuncDecl][]Diagnostic
-	changed  map[*FuncType]bool // pre-existing rows changed by the last solve; fresh functions validate as edited bodies
-	edited   map[*ast.FuncDecl]bool
-	usable   bool // this update has verified current equation indexes
-	solvedIn bool // the incremental solve ran in this update
+	readers map[*FuncType]map[int]bool // row -> indices (in permissionFunctionDecls) of its readers
+	diags   map[*ast.FuncDecl][]Diagnostic
+	changed map[*FuncType]bool // pre-existing rows changed by the last solve; fresh functions validate as edited bodies
+	edited  map[*ast.FuncDecl]bool
+	// bodyEdited records functions whose source bodies were actually analyzed this
+	// update; edited also includes permission-solver roots that were not body-edited.
+	bodyEdited map[*ast.FuncDecl]bool
+	// summaryReanalyzed are unchanged declarations whose bodies were rerun after an
+	// inferred summary changed. They need permission recomputation and fresh
+	// diagnostics; their freshly replayed rows become solver restart baselines.
+	summaryReanalyzed map[*ast.FuncDecl]bool
+	usable            bool // this update has verified current equation indexes
+	solvedIn          bool // the incremental solve ran in this update
 	// rows holds every row as the last solve left it: body analysis can rewrite
 	// an edited function's row before the solve runs, so "changed" is judged
 	// against this, not against the row the recompute found.
 	rows map[*FuncType]permissionRowSnapshot
-	// initial holds every row as the solve started from it (the declaration phase's
-	// row; for an edited function, the row this update's body analysis left).
+	// initial holds the rows used as solver baselines. A full analysis snapshots the
+	// post-body rows; an updated or summary-reanalyzed body replaces its baseline with
+	// the row its fresh source-order replay left before the incremental solve.
 	initial map[*FuncType]permissionRowSnapshot
 	// declared holds every row as the declaration phase left it, before any body ran: what
 	// a body's call to itself (or to a function not yet analyzed) reads in a fresh analysis.
@@ -68,10 +76,9 @@ func (s permissionRowSnapshot) coveredBy(ft *FuncType) bool {
 		covered(s.returned, ft.ReturnedFunctionPermissionRefs) && covered(s.returnedGlobal, ft.ReturnedFunctionGlobalPermissionRefs)
 }
 
-// resetToInitialRows prepares a full solve. Outside an update the current rows are the
-// declaration phase's: they are recorded as the initial rows. In an update an edited or
-// newly declared function's current row is its initial one; every other row restarts from
-// its recorded initial row.
+// resetToInitialRows prepares a full solve. Outside an update, the current post-body rows
+// become the initial rows. In an update an edited or newly declared function's current row
+// is its initial one; every other row restarts from its recorded initial row.
 func (p *retainedPermissions) resetToInitialRows(a *Analyzer, decls []scopedDecl, updating bool) {
 	if !updating || p.initial == nil {
 		p.initial = map[*FuncType]permissionRowSnapshot{}
@@ -94,9 +101,12 @@ func (p *retainedPermissions) resetToInitialRows(a *Analyzer, decls []scopedDecl
 // analysis's bodies read: every other row's initial one, not its solved one (a caller's
 // inferred row takes its callees' rows). The solved rows are put back afterwards for the
 // incremental solve; a full solve restarts from the initial rows anyway.
-func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, body func()) {
+func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, body func(), preserveSummaryReanalyzed ...*ast.FuncDecl) {
 	if p.initial == nil {
 		body()
+		return
+	}
+	if len(preserveSummaryReanalyzed) != 0 && p.withInitialRowsForSummaryCaller(a, decls, preserveSummaryReanalyzed[0], body) {
 		return
 	}
 	editedTypes := map[*FuncType]bool{}
@@ -130,9 +140,84 @@ func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, b
 		start.restore(ft)
 	}
 	body()
-	for ft, row := range solved {
-		row.restore(ft)
+	// Summary-dependent callers may be enrolled while body() is running. The outer
+	// update scope keeps all of them; a nested caller scope keeps only the caller it
+	// just analyzed, restoring other rows to the state they had before that scope.
+	keepSummaryReanalyzed := make(map[*ast.FuncDecl]bool, len(p.summaryReanalyzed))
+	if len(preserveSummaryReanalyzed) == 0 {
+		for fn := range p.summaryReanalyzed {
+			keepSummaryReanalyzed[fn] = true
+		}
+	} else {
+		for _, fn := range preserveSummaryReanalyzed {
+			keepSummaryReanalyzed[fn] = true
+		}
 	}
+	for fn := range keepSummaryReanalyzed {
+		sym := a.funcDeclSymbols[fn]
+		if sym == nil {
+			continue
+		}
+		ft, _ := sym.Type.(*FuncType)
+		if ft != nil {
+			editedTypes[ft] = true
+		}
+	}
+	for ft, row := range solved {
+		if !editedTypes[ft] {
+			row.restore(ft)
+		}
+	}
+}
+
+// withInitialRowsForSummaryCaller restores the permission rows a cold body pass
+// would have exposed when it reached fn: bodies earlier in declaration order have
+// already contributed their freshly analyzed rows, while fn and later bodies still
+// see their declaration rows. The saved rows are restored after fn is analyzed.
+func (p *retainedPermissions) withInitialRowsForSummaryCaller(a *Analyzer, decls []scopedDecl, fn *ast.FuncDecl, body func()) bool {
+	functions := permissionFunctionDecls(decls)
+	current := -1
+	for i, sd := range functions {
+		if sd.Decl == fn {
+			current = i
+			break
+		}
+	}
+	if current < 0 {
+		return false
+	}
+	currentType := permissionDeclType(a, functions[current])
+	solved := map[*FuncType]permissionRowSnapshot{}
+	for i, sd := range functions {
+		ft := permissionDeclType(a, sd)
+		if ft == nil {
+			continue
+		}
+		decl, _ := sd.Decl.(*ast.FuncDecl)
+		if i < current && (p.bodyEdited[decl] || p.summaryReanalyzed[decl]) {
+			continue // this body has already run in the current cold-order replay
+		}
+		// In a cold source-order body pass, fn and later functions still expose
+		// declaration-phase rows. p.initial is the previous solve's starting
+		// snapshot and can include effects inferred by bodies that ran later in
+		// that previous pass, so prefer the fresh declaration snapshot here.
+		start, known := p.declared[ft]
+		if !known {
+			start, known = p.initial[ft]
+		}
+		if !known || start.identical(ft) {
+			continue
+		}
+		solved[ft] = snapshotPermissionRow(ft)
+		start.restore(ft)
+	}
+	body()
+	for ft, row := range solved {
+		if ft != currentType {
+			row.restore(ft)
+		}
+	}
+	return true
 }
 
 // identical reports whether ft's row is the very slices s holds.
@@ -162,9 +247,12 @@ func (s permissionRowSnapshot) same(ft *FuncType) bool {
 
 func (p *retainedPermissions) beginUpdate(changed []scopedDecl, usable bool, marks map[string][][2]int) {
 	p.edited = map[*ast.FuncDecl]bool{}
+	p.bodyEdited = map[*ast.FuncDecl]bool{}
+	p.summaryReanalyzed = map[*ast.FuncDecl]bool{}
 	for _, sd := range changed {
 		if fn, ok := sd.Decl.(*ast.FuncDecl); ok {
 			p.edited[fn] = true
+			p.bodyEdited[fn] = true
 		}
 	}
 	p.usable = usable && p.readers != nil
@@ -238,16 +326,30 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl, 
 	}
 	var work []int
 	queued := map[int]bool{}
+	solveFns := make(map[*ast.FuncDecl]bool, len(p.edited)+len(p.summaryReanalyzed))
 	for fn := range p.edited {
+		solveFns[fn] = true
+	}
+	for fn := range p.summaryReanalyzed {
+		solveFns[fn] = true
+	}
+	for fn := range solveFns {
 		i, ok := index[fn]
 		if !ok {
 			return false
 		}
 		work = append(work, i)
 		queued[i] = true
-		if sym := a.funcDeclSymbols[fn]; sym != nil {
-			if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
-				p.initial[ft] = snapshotPermissionRow(ft)
+		if p.edited[fn] || p.summaryReanalyzed[fn] {
+			if sym := a.funcDeclSymbols[fn]; sym != nil {
+				if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
+					// Both source-edited and summary-reanalyzed bodies have just been
+					// analyzed against this update's cold-order rows. Their fresh rows
+					// are the baselines for a shrink restart; retaining the old
+					// post-body snapshot can let a removed effect sustain itself around
+					// a newly closed call cycle.
+					p.initial[ft] = snapshotPermissionRow(ft)
+				}
 			}
 		}
 	}
@@ -313,7 +415,7 @@ func (p *retainedPermissions) solveIncremental(a *Analyzer, decls []scopedDecl, 
 		// transitively, restarts from its initial row, as the full solve does, and the
 		// cone is solved to its least fixpoint; rows outside it do not read the edit.
 		cone := map[int]bool{}
-		stack := append([]int(nil), indicesOf(p.edited, index)...)
+		stack := append([]int(nil), indicesOf(solveFns, index)...)
 		for len(stack) > 0 {
 			i := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
@@ -391,7 +493,7 @@ func permissionDeclType(a *Analyzer, sd scopedDecl) *FuncType {
 // replay reports fn's validation diagnostics from the last run when fn was not
 // edited and the incremental solve changed no row.
 func (p *retainedPermissions) replay(a *Analyzer, fn *ast.FuncDecl) bool {
-	if !p.solvedIn || len(p.changed) != 0 || p.edited[fn] {
+	if !p.solvedIn || len(p.changed) != 0 || p.edited[fn] || p.summaryReanalyzed[fn] {
 		return false
 	}
 	diags, ok := p.diags[fn]
