@@ -149,7 +149,7 @@ func (d *incrementalObjectDisk) prune() {
 	var files []item
 	var total int64
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".part" {
+		if entry.IsDir() || (filepath.Ext(entry.Name()) != ".part" && filepath.Ext(entry.Name()) != ".schedule") {
 			continue
 		}
 		info, err := entry.Info()

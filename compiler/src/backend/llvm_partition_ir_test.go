@@ -3,7 +3,9 @@
 package backend
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,14 +54,33 @@ func TestPartitionedIRDiskCacheFreshSessions(t *testing.T) {
 		session.minWeight = 0
 		session.EnableDiskCache(root, "test-compiler", 16<<20)
 		var source strings.Builder
+		source.WriteString("def keep[T](x: T) -> T:\n    return x\n\n")
 		for i := 0; i < 80; i++ {
-			fmt.Fprintf(&source, "@inline(never)\ndef f%d() -> i64:\n    return %d\n\n", i, i)
+			fmt.Fprintf(&source, "@inline(never)\ndef f%d() -> i64:\n    return keep[i64](%d)\n\n", i, i)
 		}
 		fmt.Fprintf(&source, "def main() -> i64:\n    return f0() + %d\n", value)
 		result := parseAndAnalyzeBackendTest(t, "disk_partitions.elisa", source.String())
 		out := filepath.Join(dir, "out.o")
 		if err := session.WriteObject(result, out, LLVMObjectEmitOptions{}); err != nil {
 			t.Fatal(err)
+		}
+		paths, err := filepath.Glob(filepath.Join(session.disk.root, "*.schedule"))
+		if err != nil || len(paths) != 1 {
+			t.Fatalf("missing emitted-membership record: %v %v", paths, err)
+		}
+		data, err := os.ReadFile(paths[0])
+		var members [][]string
+		if err != nil || len(data) < 32 || json.Unmarshal(data[32:], &members) != nil {
+			t.Fatal("invalid emitted-membership record", err)
+		}
+		found := false
+		for _, names := range members {
+			for _, name := range names {
+				found = found || name == "keep"
+			}
+		}
+		if !found {
+			t.Fatal("generic bodies missing from persisted scheduling record")
 		}
 		stats := session.Stats()
 		if stats.SerialFallbacks != 0 {

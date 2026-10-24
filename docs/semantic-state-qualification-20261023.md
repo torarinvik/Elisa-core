@@ -1742,3 +1742,59 @@ checks. Backend partition/cache regressions and main analysis-disk tests pass.
 The layout target still fails, and new normal CLI admission plus its edit matrix
 remain required. No server-free/default optimization-quality completion claim
 is made by this reduction.
+
+
+Normal CLI follow-up for `3a65a343`: the newly installed executable admitted
+its own empty-cache baseline (`/tmp/elisa-string-chunk-production-root`). Eight
+checkpoint requests took 16.399–27.751 s; request nine published the complete
+snapshot before its 30 s cap, and request ten emitted the object in 16.292 s.
+The full edit matrix succeeded: baseline 0.526 s; enum reorder 9.188 s; new
+flag/handler 9.355 s; layout 13.120 s; permission 9.069 s; removal 9.142 s;
+body 8.201 s; signature 9.152 s; contract 9.056 s; lines 8.314 s. Repeats
+were 0.418–0.519 s. Thus there is no demonstrated end-to-end latency gain;
+the committed gain is the independently verified IR reduction. Layout remains
+above target. This run retains the same opt-in independent-unit O3 settings
+and server-disabled environment as the earlier normal matrix.
+All ten normal-CLI products also passed the included fixture's miss/valid
+cache sequence and exit-42 execution, enum tag probes and expected unknown-flag
+diagnostics (`functional.json`). Controlled sources were restored.
+
+
+### Persisted generic-provider scheduling
+
+Independent native units now persist their actual defined function stems,
+including generic bodies emitted in a provider other than the bare source
+function's hashed owner. On a later build, recently rechecked function hints
+prioritize these provider units too. Every unit still generates its complete
+current bitcode and validates the exact native cache key. The records authorize
+no reuse or skipped work. Records are compiler-namespaced and keyed by logical
+source unit, target configuration and partition count; publication is atomic,
+checksummed and bounded to 4 MiB. They share the native cache's eviction budget.
+Corrupt/unavailable records fall back to the existing complete work queue; stale
+records can only change its order.
+`ELISACORE_PARTITION_SCHEDULE=0` disables their scheduling use for comparison.
+
+The complete new checked-payload profile (same options/snapshot as the normal
+CLI matrix above, separate cache) measured enum reorder 8.680 s, layout 11.284 s
+and removal 8.117 s. Its 540,211-byte membership record correctly identifies
+provider units 8, 12, 64, 79, 80 and 94 for
+`run_semantic_gate_incremental_with_session`. These six native misses now start
+together instead of waiting for later hash-ordered unit generation.
+
+A same-executable OFF/ON/ON/OFF comparison used separate copies of the same
+pre-layout exact native entries and membership record. Only entries born before
+the completed enum-warm request were copied (98 entries; the seven layout
+products were absent). Layout times were OFF 11.509/11.918 s and ON
+10.972/11.090 s. Records are `generic-schedule-ab.json` and each
+`generic-schedule-ab-*/result.json` under `/tmp/elisa-string-chunk-production-root`;
+`/tmp/elisa-generic-schedule-ab.py` preserves the setup and 30-second caps.
+This is a modest reproducible scheduling gain, not the requested sub-ten result.
+The four profile products and all four A/B layout products are byte-identical
+to the functionally checked normal CLI products (`generic-schedule-96/object-parity.json`).
+Backend regressions cover persisted generic membership across fresh sessions,
+corrupt/oversized/configuration-incompatible records, complete unit scheduling,
+and linked execution after edits/reverts at O0/O3. New normal CLI admission of
+the scheduling executable is still required. Independent-unit/default/runtime
+quality and unsupported declaration/contract gates remain unresolved.
+Targeted scheduling persistence/order/fresh-session tests also pass under the Go
+race detector. All controlled Stage1 sources were restored after profiling.

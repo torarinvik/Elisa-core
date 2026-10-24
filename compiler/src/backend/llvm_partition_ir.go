@@ -171,13 +171,18 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	result.BeginSharedCodegen()
 	defer result.EndSharedCodegen()
 	objects := make([][]byte, parts)
+	members := make([][]string, parts)
+	var previousMembers [][]string
+	if os.Getenv("ELISACORE_PARTITION_SCHEDULE") != "0" {
+		previousMembers = s.disk.loadSchedule(unitID, targetID, parts)
+	}
 	errs := make([]error, parts)
 	workers := runtime.GOMAXPROCS(0)
 	if workers > parts {
 		workers = parts
 	}
 	next := make(chan int, parts)
-	for _, part := range partitionedIRWorkOrder(result, parts) {
+	for _, part := range partitionedIRWorkOrder(result, parts, previousMembers) {
 		next <- part
 	}
 	close(next)
@@ -187,7 +192,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		go func() {
 			defer wg.Done()
 			for part := range next {
-				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID)
+				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, &members[part])
 			}
 		}()
 	}
@@ -197,6 +202,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 			return errs[part]
 		}
 	}
+	s.disk.storeSchedule(unitID, targetID, members)
 	buildDuration := time.Since(start)
 	dir, err := os.MkdirTemp(filepath.Dir(outputPath), ".elisa-object-parts-")
 	if err != nil {
@@ -224,7 +230,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 // up in the session and compiles it on a miss.
 var errPartitionDeclined = errors.New("partitioned IR declined")
 
-func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte) ([]byte, error) {
+func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, members *[]string) ([]byte, error) {
 	unit := hex.EncodeToString(unitID[:8])
 	irStart := time.Now()
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
@@ -257,6 +263,9 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	for f := C.LLVMGetFirstFunction(g.module); f != nil; f = C.LLVMGetNextFunction(f) {
 		if C.LLVMIsDeclaration(f) == 0 {
 			defs++
+			if s.disk != nil {
+				*members = append(*members, partitionScheduleStem(llvmValueName(f)))
+			}
 		}
 		if C.LLVMIsDeclaration(f) == 0 && C.LLVMGetLinkage(f) != C.LLVMWeakODRLinkage {
 			bodies++
@@ -402,13 +411,27 @@ func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven b
 // Start likely misses early, so their native optimization overlaps generation
 // of cache-hit units. Hints only affect scheduling; all units still generate
 // and validate their full current bitcode before any cache lookup.
-func partitionedIRWorkOrder(result *semantic.Result, parts int) []int {
+func partitionedIRWorkOrder(result *semantic.Result, parts int, previous ...[][]string) []int {
 	preferred := make([]bool, parts)
 	for _, name := range result.CodegenFunctionPriorities() {
 		if sym, ok := result.GlobalScope.Lookup(name); ok && sym != nil && sym.LinkName != "" {
 			name = sym.LinkName
 		}
 		preferred[partitionOwner(name, parts)] = true
+		if len(previous) != 0 && len(previous[0]) == parts {
+			genericStem := sanitizeIdentifier(name)
+			if len(genericStem) > 48 {
+				genericStem = genericStem[:48]
+			}
+			for part, names := range previous[0] {
+				for _, member := range names {
+					if member == name || member == genericStem {
+						preferred[part] = true
+						break
+					}
+				}
+			}
+		}
 	}
 	order := make([]int, 0, parts)
 	for part, want := range preferred {

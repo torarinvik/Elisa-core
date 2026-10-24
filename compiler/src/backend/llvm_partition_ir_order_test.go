@@ -50,6 +50,15 @@ func TestPartitionedIRStartsChangedUnitFirst(t *testing.T) {
 	if result.CodegenFunctionPriorities()[0] != name {
 		t.Fatal("caller mutated retained hint state")
 	}
+	// A generic instance can be emitted in a provider unit other than the
+	// hash of its source function. A persisted membership hint must queue it.
+	provider := (partitionOwner(name, parts) + 1) % parts
+	members := make([][]string, parts)
+	members[provider] = []string{partitionScheduleStem(name + "$generic_v1$012345")}
+	withProviders := partitionedIRWorkOrder(result, parts, members)
+	if withProviders[0] != provider && withProviders[1] != provider {
+		t.Fatal("generic provider was not prioritized", withProviders[:2])
+	}
 	order := partitionedIRWorkOrder(result, parts)
 	if order[0] != partitionOwner(name, parts) {
 		t.Fatal("likely miss was not queued first")
