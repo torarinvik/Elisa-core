@@ -9,7 +9,9 @@ import (
 	"sync/atomic"
 )
 
-type stateFrame struct{ start, end int }
+// Frames are contiguous, so the previous end also supplies the next start.
+// Keeping only ends avoids a redundant machine word for every graph object.
+type stateFrame struct{ end int }
 
 func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	word, err := d.take(8)
@@ -29,6 +31,7 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 		return err
 	}
 	frames := make([]stateFrame, count+1)
+	bodiesStart := d.at
 	cursor := uint64(d.at)
 	for i := range frames {
 		size := binary.LittleEndian.Uint64(table[i*8:])
@@ -38,7 +41,7 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 		if i < count && descriptions[i+1].alias != nil && size != 0 {
 			return fmt.Errorf("state alias has a body")
 		}
-		frames[i] = stateFrame{int(cursor), int(cursor + size)}
+		frames[i] = stateFrame{int(cursor + size)}
 		cursor += size
 	}
 	if cursor != dictionary {
@@ -104,7 +107,11 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 					continue
 				}
 				frame := frames[i]
-				worker.data = payload[frame.start:frame.end]
+				frameStart := bodiesStart
+				if i > 0 {
+					frameStart = frames[i-1].end
+				}
+				worker.data = payload[frameStart:frame.end]
 				worker.at = 0
 				if err := worker.fillObject(i+1, descriptions[i+1]); err != nil {
 					cancelled.Store(true)
@@ -134,6 +141,9 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	}
 	root := frames[count]
 	d.data = payload[:root.end]
-	d.at = root.start
+	d.at = bodiesStart
+	if count > 0 {
+		d.at = frames[count-1].end
+	}
 	return nil
 }

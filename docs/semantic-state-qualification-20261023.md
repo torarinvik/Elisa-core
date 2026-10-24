@@ -3470,3 +3470,35 @@ restore, cold-result and diagnostic replay parity, empty/unbounded progress,
 capacity wire equality and cycle/slice alias identity. Fresh-process disk tests
 pass (6.892 s), including bootstrap/corruption/source-revision cases. Full
 installed admission and first-layout remeasurement remain required.
+
+
+### Contiguous frame endpoint storage (2026-10-24)
+
+Framed decoding now stores each record end once and reconstructs its start from
+that record's predecessor (or the body area start for the first record). The
+root record uses the same rule, including graphs with no object records. This
+preserves the ELISTATE4 bytes, checksum, alias validation, root ordering and
+worker scheduling. Allocation budgeting uses the smaller actual frame type.
+
+An isolated decode of the existing 680,813,011-byte framed checkpoint containing
+9,008,276 object records eliminates 72,066,216 bytes of frame-array storage on
+this 64-bit host. ReadMemStats measured total decode allocations of
+2,656,791,272 bytes before and 2,584,860,648 bytes after (other runtime allocations
+vary slightly). The same paired run took 1.832 versus 1.667 seconds to decode;
+this single pair does not establish a general timing gain. Peak RSS varied and
+is not claimed to improve. A completed Advance from the candidate decoded state
+produced exactly the baseline's 26,293 diagnostics / 9,745,902 transcript bytes.
+All diagnostic compiler/test processes were externally capped at 30 seconds.
+The public framed/legacy codec and race suites cover alias, empty, malformed,
+budget and concurrent decode behavior. Independent source review found no
+endpoint reconstruction or allocation-budget issue.
+
+Rejected experiments preceding this change: replacing duplicate map-key lookup
+with map-length growth did not show reliable full-checkpoint speed improvement
+across five alternating pairs (medians 1.790 versus 1.773 seconds, substantial
+run variation). Scheduling large object frames first also failed to improve
+consistently. Neither experiment is included. An audit of 434 native fragment
+entries found no identical bitcode/config across different namespace keys, so
+there is no evidence for removing that key component. The original 11.464-second
+generic-body edit miss remains open; this allocation change is not full matrix
+qualification or evidence that all edits finish within ten seconds.
