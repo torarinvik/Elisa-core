@@ -263,7 +263,10 @@ def caller() -> usize:
 			got, err := state.Update(retainedParse(t, after), retainedParse(t, after), []byte(after))
 			want := AnalyzeWithOptions(retainedParse(t, after), options)
 
-			if err == nil && retainedDiagnostics(got) != retainedDiagnostics(want) {
+			if err != nil {
+				t.Fatalf("supported storage/header replay rejected: %v", err)
+			}
+			if retainedDiagnostics(got) != retainedDiagnostics(want) {
 				t.Fatalf("stale header proof: %s\nwant %s", retainedDiagnostics(got), retainedDiagnostics(want))
 			}
 		})
@@ -305,5 +308,57 @@ def bounded() -> u8:
 	}
 	if retainedDiagnostics(got) != retainedDiagnostics(want) {
 		t.Fatalf("stale range proof: %s\nwant %s", retainedDiagnostics(got), retainedDiagnostics(want))
+	}
+}
+
+func TestRetainedConstEnumExplicitValuesDiskRoundTrip(t *testing.T) {
+	before := retainedConstEnumBefore + "\ndef code() -> u8:\n    ensure result == 0\n    return Choice.First.u8()\n"
+	options := AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true}
+	initial, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+	if len(initial.Errors()) != 0 {
+		t.Fatalf("fixture: %s", retainedDiagnostics(initial))
+	}
+	for _, expression := range []string{"64", "(8 << 3)", "64 if true else 128", "0", ""} {
+		source := before
+		if expression != "" {
+			source = strings.Replace(source, "    First\n", "    First = "+expression+"\n", 1)
+		}
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source))
+		if err != nil {
+			t.Fatalf("%s: %v", expression, err)
+		}
+		cold, want := AnalyzeRetained(retainedParse(t, source), retainedParse(t, source), []byte(source), options)
+		if retainedDiagnostics(got) != retainedDiagnostics(cold) {
+			t.Fatalf("%s: stale explicit-member proof\ngot %s\nwant %s", expression, retainedDiagnostics(got), retainedDiagnostics(cold))
+		}
+		if expression != "" && expression != "0" && len(cold.Errors()) == 0 {
+			t.Fatal("changed explicit value did not retract proof")
+		}
+		members := state.a.namedTypes["Choice"].(*ConstEnumType).Members
+		wanted := want.a.namedTypes["Choice"].(*ConstEnumType).Members
+		for i, member := range members {
+			if member.Value != wanted[i].Value || state.a.constValues["Choice."+member.Name].Int != want.a.constValues["Choice."+member.Name].Int || state.a.constValues["Choice."+member.Name].Kind != want.a.constValues["Choice."+member.Name].Kind {
+				t.Fatalf("%s: stale ordinal/folded value", expression)
+			}
+		}
+	}
+}
+
+func TestRetainedConstEnumExplicitExternalDependenciesStayGuarded(t *testing.T) {
+	for _, expression := range []string{"BASE", "BASE + 1", "seed()", "size_of(u8)"} {
+		before := "const BASE: i64 = 64\n\nstatic def seed() -> i64:\n    return 64\n" + retainedConstEnumBefore
+		_, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+		source := strings.Replace(before, "    First\n", "    First = "+expression+"\n", 1)
+		if _, err := state.Update(retainedParse(t, source), retainedParse(t, source), []byte(source)); err == nil {
+			t.Fatalf("accepted nonclosed expression %s", expression)
+		}
 	}
 }

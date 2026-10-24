@@ -2552,3 +2552,59 @@ reads, exit 42, enum and diagnostic probes (`functional.json`). Controlled sourc
 was restored. This remains explicit qualification; fresh ordinary admission and
 novel edit timing for the region-record implementation are still needed. Other
 major forms and default/runtime-quality gates keep the full goal open.
+
+
+### Ordinary region-record replay and two further declaration gaps
+
+`6848302c` was admitted normally in its own fresh namespace selected by
+`/tmp/elisa-region-record-production-root`; no payload was copied or rekeyed.
+Eight checkpoints took 15.247–26.366 s. Invocation nine hit its external 30 s cap
+with complete state saved; ten emitted the initial object in 14.179 s. Server is
+empty, O3/96 independent IR units and native fragments remain explicit.
+The region-record field addition succeeds through the ordinary CLI in 9.211 s,
+with object bytes equal to the qualified candidate. Generic body takes 7.542 s,
+private bound 8.001 s, contract-bound constant 5.883 s. The remaining matrix:
+baseline 5.227 s; u16 storage 6.656 s, u64 6.832 s, i16 6.837 s; enum reorder
+6.886 s, add/handler 7.579 s; layout 8.901 s; permission 6.455 s; removal
+6.731 s; body 5.639 s; signature 6.720 s; contract 6.471 s; lines 5.778 s.
+All seventeen normal products pass linked compiler/include-fixture exit 42,
+cache miss/valid, enum tag and diagnostic probes (`functional.json`).
+
+The novel matrix (`/tmp/elisa-region-record-novel-matrix.py`) changes the first
+CLI enum tag to explicit 64, or changes IncrementalCacheRead to layout(c).
+Both return status 1 with no object, saving initial-analysis checkpoints:
+17.606 s for explicit tags and 17.738 s for C layout. Sources are restored.
+These are rebuild failures, not passing timings; the C-layout gap remains open.
+
+### Closed explicit enum value replay candidate
+
+Explicit enum values derived entirely from literals, unary/binary operations,
+parentheses and conditional expressions can be replayed without consulting a
+changed declaration environment. Eligibility checks their AST dependencies
+iteratively; actual evaluation, integer-kind and storage/bounds checks still use
+the ordinary scratch declaration phase. Names, calls, reflected layouts and cast
+type bindings remain guarded. Existing static/global/header-member dependency
+guards remain in force. The live member/constant tables are rebuilt and enum users
+rechecked using the existing path.
+
+The retained suite passes, including disk round trips, computed explicit values,
+implicit following ordinals, strict proof retraction/reversion and external
+name/call/layout dependency rejection. Backend tests compare complete normal/debug
+cold and replay LLVM IR and execute native probes for tags above 255, negative
+tags, arithmetic tags, dispatch and reversion. Logs are
+`/tmp/elisa-explicit-enum-{semantic,semantic-all,backend}.log`. The existing
+storage/header diagnostic test now explicitly requires successful replay and cold
+diagnostic parity for both requires-size and default-size cases; it cannot pass
+by silently ignoring an Update error (`/tmp/elisa-enum-header-path.log`).
+
+Checked-payload qualification uses the admitted source/options from the region
+root and writes only into `explicit-enum-qualification/`, outside production
+admission (`/tmp/elisa-explicit-enum-qualification.py`). Initial native population
+takes 21.794 s; the real explicit-tag edit then succeeds in 7.071 s, replacing
+the 17.606 s unsuccessful fallback. Baseline state hash stays unchanged and
+source is restored. Both resulting compiler executables compile the include
+fixture on miss/valid cache reads and produce fixture exit 42. C constructor
+probes verify shifted Output=64, Filter=65, Unknown=100 tags; diagnostics pass
+(`functional.json`). All toolchain invocations have external 30 s caps. Fresh
+ordinary admission and timing for this candidate are still needed. C-layout,
+other major forms and default/runtime-quality gates keep the full goal open.

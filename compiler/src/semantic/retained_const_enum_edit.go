@@ -14,7 +14,8 @@ type retainedConstEnumEdit struct {
 	et         *ConstEnumType
 }
 
-// Implicit member values depend only on their order. A changed storage spelling
+// Implicit member values and closed literal expressions need no other declaration.
+// A changed storage spelling
 // is also eligible when both sides explicitly name primitive integers: member
 // population resolves the new storage, and the same type/layout dependency walk
 // used for member edits rechecks its users. Aliases and computed storage changes
@@ -34,9 +35,42 @@ func retainedConstEnumEditAllowed(old, cur *ast.ConstEnumDecl, oldSpan, curSpan 
 	}
 	for _, d := range []*ast.ConstEnumDecl{old, cur} {
 		for _, m := range d.Members {
-			if m.Value != nil {
+			if m.Value != nil && !retainedClosedConstEnumValue(m.Value) {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// This recognizes dependencies, not values: the ordinary scratch declaration
+// phase still evaluates the complete expression and validates storage/bounds.
+// Calls, names, reflected layouts and cast type bindings need a rebuilt
+// declaration dependency graph and keep the conservative fallback.
+func retainedClosedConstEnumValue(expr ast.Expr) bool {
+	stack := []ast.Expr{expr}
+	for len(stack) != 0 {
+		last := len(stack) - 1
+		current := stack[last]
+		stack = stack[:last]
+		switch value := current.(type) {
+		case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit, *ast.NullLit:
+		case *ast.ParenExpr:
+			stack = append(stack, value.Inner)
+		case *ast.UnaryExpr:
+			if value.LoweredCall != nil {
+				return false
+			}
+			stack = append(stack, value.Operand)
+		case *ast.BinaryExpr:
+			if value.LoweredCall != nil {
+				return false
+			}
+			stack = append(stack, value.Left, value.Right)
+		case *ast.TernaryExpr:
+			stack = append(stack, value.Value, value.Cond, value.Alt)
+		default:
+			return false
 		}
 	}
 	return true

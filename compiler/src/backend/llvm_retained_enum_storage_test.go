@@ -185,3 +185,94 @@ export fn caller() -> i64 = caller
 		}
 	}
 }
+
+func TestRetainedExplicitEnumDiskIRAndNative(t *testing.T) {
+	const base = `const enum Choice of u16:
+    First
+    Second
+
+def first() -> i64:
+    return Choice.First.i64()
+export fn first() -> i64 = first
+
+def second() -> i64:
+    return Choice.Second.i64()
+export fn second() -> i64 = second
+
+def classify() -> i64:
+    match Choice.Second:
+        Choice.First:
+            return 11
+        Choice.Second:
+            return 22
+export fn classify() -> i64 = classify
+`
+	parse := func(source string) *ast.File {
+		l := lexer.New("explicit-enum.elisa", []byte(source))
+		p := parser.New(l.Tokenize())
+		f := p.ParseFile("explicit-enum.elisa")
+		if len(l.Errors())+len(p.Errors()) != 0 {
+			t.Fatal("parse fixture")
+		}
+		return f
+	}
+	_, state := semantic.AnalyzeRetained(parse(base), parse(base), []byte(base), semantic.AnalyzeOptions{})
+	for _, change := range []struct {
+		storage, value string
+		first, second  int
+	}{{"u16", "300", 300, 301}, {"u16", "(250 + 50)", 300, 301}, {"i16", "-12", -12, -11}, {"u16", "", 0, 1}} {
+		source := strings.Replace(base, "Choice of u16", "Choice of "+change.storage, 1)
+		if change.value != "" {
+			source = strings.Replace(source, "    First\n", "    First = "+change.value+"\n", 1)
+		}
+		data, err := state.MarshalState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = semantic.RestoreAnalysisState(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := state.Update(parse(source), parse(source), []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cold := parseAndAnalyzeBackendTest(t, "explicit-enum.elisa", source)
+		for _, debug := range []bool{false, true} {
+			got, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebug(cold, OptimizationLevel0, DefaultPackedLoweringProfile(), "", debug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("%s %s debug=%v: cold/replay IR differ", change.storage, change.value, debug)
+			}
+		}
+		dir := t.TempDir()
+		object := filepath.Join(dir, "enum.o")
+		if err := NewIncrementalObjectSession(4, 32<<20).WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3, Serial: true}); err != nil {
+			t.Fatal(err)
+		}
+		client := filepath.Join(dir, "client.c")
+		text := fmt.Sprintf("#include <stdint.h>\nextern int64_t first(void), second(void), classify(void);\nint main(void) { return first()==%d && second()==%d && classify()==22 ? 0 : 71; }\n", change.first, change.second)
+		if err := os.WriteFile(client, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		binary := filepath.Join(dir, "client")
+		out, err := exec.CommandContext(ctx, "clang", object, client, "-o", binary).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("link: %v %s", err, out)
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		out, err = exec.CommandContext(ctx, binary).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("enum values/dispatch: %v %s", err, out)
+		}
+	}
+}
