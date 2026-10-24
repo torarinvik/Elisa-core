@@ -2980,3 +2980,59 @@ instruction-level conclusions. These probes materially extend quality
 qualification, but do not establish every workload or enable default modes.
 Production code has not changed since `227b8e30`; the previously qualified
 22-case disk-rebuild matrix remains applicable. Full goal remains active.
+
+
+### Fixed-type-parameter record replay and packed instances (2026-10-24)
+
+A new real edit adds `disk_cache_generic_probe: u64 = 0` after the value field of
+runtime `ConcurrencyBox[T]`. Ordinary `227b8e30` falls back after **19.200 seconds**,
+exit 1/no object, checkpoint 2152/14422 declarations. This is a valid runtime
+source edit; its controlled file is restored after every invocation.
+
+Paired simple-record edits now permit identical type and region binders,
+including unchanged type interface bounds. Binder names/kinds/bounds remain
+fixed; value/state/permission/error-set binders and existing complex ownership,
+annotation, invariant and field protocols retain their guards. Generic base
+identity is preserved and its fields are repopulated using the original binder
+context. Concrete generic aliases now participate in layout-target widening;
+a new test initially selected five instead of six users because a parameterless
+Small alias query was missed. `/tmp/elisa-generic-record-semantic-before-alias.log`
+records that failure. Widening now includes GenericInstanceType aliases.
+
+`TestRetainedGenericStructFieldsDiskRoundTrip` checks scalar addition, reordering,
+removal/revert and invalid field retyping, cold diagnostics, identity and all six
+direct/generic/alias/container users. The invalid retype is required to produce
+cold errors, avoiding vacuous diagnostic parity. Fixed-bound and binder-change
+checks also pass. Full retained semantic suite:
+`/tmp/elisa-generic-record-semantic-all.log`.
+
+Native serialized-state tests use multiple concrete instances, including nested
+Pair, u8 and u8-reference payloads. Normal/debug IR matches cold compilation.
+Both cold and replay O3 C clients check size/alignment/offsets, 16↔24-byte C ABI
+transitions, reordered fields, high signed payloads, a nonzero high probe value
+through generic copying, small payload extraction and reference identity.
+The public by-value fixture declares `layout(c)`, as required by the language.
+
+A separate valid cold test found that `ensureGenericInstanceStruct` ignored
+PackedLayout. It emitted an unpacked i8/i64 record and align-8 field accesses.
+`/tmp/elisa-generic-packed-before.log` records the failure. Concrete generic
+instances now pass the base's PackedLayout to LLVM and enable the existing
+packed-address alignment normalization. Cold O0/O3 native tests operate on four
+unaligned packed generic records. Additional serialized packed→C→default
+transitions check 13↔24-byte layouts, generic aliases, internal copies, C pointer
+access and complete normal/debug IR parity. Logs
+`/tmp/elisa-generic-record-backend-final.log` and
+`/tmp/elisa-generic-layout-backend.log` pass. This does not newly qualify atomic
+packed fields or escaped unaligned scalar-reference contracts.
+
+Frozen `/tmp/elisa-generic-record-main-test` qualifies against the untouched
+ordinary `227b8e30` state, output only in its root's `generic-record-qualification`:
+baseline 22.793 seconds, actual runtime generic-field edit **9.571 seconds**.
+Replay selects three users, 0.862 seconds total (diff 0.565, bodies 0.003,
+post 0.290); 23 native units rebuilt/73 reused, 28 fragments emitted/64 reused,
+zero fallback. Edited object SHA
+`6556fe227aaa5c0d708c78ba094cc4b9167ed569382187ff3bd80e1d01789173`.
+Both native compiler products pass include fixture exit 42, sidecar miss→valid,
+enum dispatch and unknown diagnostics (`generic-record-qualification/functional.json`).
+Snapshot unchanged, controlled runtime source restored. This is a thin margin;
+fresh installed-binary namespace and the full ordinary matrix remain the next gate.

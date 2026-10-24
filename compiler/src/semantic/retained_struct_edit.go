@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"reflect"
+	"slices"
 )
 
 // A retained update accepts an edit to a plain struct declaration (fields added, removed,
@@ -38,10 +39,10 @@ func retainedPlainStruct(d *ast.StructDecl) bool {
 }
 
 // Field/default and ordinary/C/packed layout changes preserve a simple record's
-// declaration protocol. Explicit region binders must remain identical; other
-// generic binders and annotations other than validated @align still need their own rebuild.
+// declaration protocol. Type/region binders and their bounds remain identical;
+// other binder kinds and annotations beyond validated @align need their own rebuild.
 func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
-	if old.Name != current.Name || !reflect.DeepEqual(old.RegionParams, current.RegionParams) || len(old.GenericParams) != len(current.GenericParams) {
+	if old.Name != current.Name || !slices.Equal(old.TypeParams, current.TypeParams) || !slices.Equal(old.RegionParams, current.RegionParams) || len(old.GenericParams) != len(current.GenericParams) {
 		return false
 	}
 	simple := func(d *ast.StructDecl) bool {
@@ -49,7 +50,7 @@ func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
 			return false
 		}
 		for _, p := range d.GenericParams {
-			if p.Kind != ast.GenericParamRegion || p.InterfaceBound != "" || p.StateOwner != "" || len(p.StateCases) != 0 {
+			if (p.Kind != ast.GenericParamRegion && p.Kind != ast.GenericParamType) || (p.Kind == ast.GenericParamRegion && p.InterfaceBound != "") || p.StateOwner != "" || len(p.StateCases) != 0 {
 				return false
 			}
 		}
@@ -69,14 +70,14 @@ func retainedStructFieldEditAllowed(old, current *ast.StructDecl) bool {
 		shape := *d
 		shape.Annotations = nil
 		shape.ReprC, shape.Layout = false, ast.StructLayoutDefault
-		shape.RegionParams, shape.GenericParams = nil, nil
+		shape.TypeParams, shape.RegionParams, shape.GenericParams = nil, nil, nil
 		return retainedPlainStruct(&shape)
 	}
 	if !simple(old) || !simple(current) {
 		return false
 	}
 	for i, p := range old.GenericParams {
-		if p.Name != current.GenericParams[i].Name {
+		if q := current.GenericParams[i]; p.Name != q.Name || p.Kind != q.Kind || p.InterfaceBound != q.InterfaceBound || p.StateOwner != q.StateOwner || !slices.Equal(p.StateCases, q.StateCases) {
 			return false
 		}
 	}
@@ -125,7 +126,7 @@ func (r *RetainedAnalysis) findLiveStructEdits(edits [][2]*ast.StructDecl) ([]re
 		}
 		live := sd.Decl.(*ast.StructDecl)
 		st, _ := a.namedTypes[joinQualifiedName(sd.Namespace, live.Name)].(*StructType)
-		if st == nil || st.Builtin || len(st.TypeParams) != 0 {
+		if st == nil || st.Builtin || !slices.Equal(st.TypeParams, live.TypeParams) {
 			return nil, "struct " + e[0].Name + " has no plain analyzed type"
 		}
 		out = append(out, retainedStructEdit{live: live, edit: e[1], scope: sd, st: st})
@@ -388,7 +389,7 @@ func (a *Analyzer) widenLayoutTargets(targets map[Type]bool) {
 				continue
 			}
 			switch t.(type) {
-			case *StructType, *EnumType:
+			case *StructType, *EnumType, *GenericInstanceType:
 			default:
 				continue
 			}

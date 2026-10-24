@@ -596,7 +596,12 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 		}
 		fields = append(fields, fieldType)
 	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	packed := C.LLVMBool(0)
+	if base.PackedLayout {
+		packed = C.LLVMBool(1)
+		g.hasPackedRecords = true
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), packed)
 	g.structBodies[name] = true
 	return ty, nil
 }
