@@ -48,6 +48,10 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		a.rejectStoreScanBinderOverlayOperation("parallel declaration scheduling")
 		return
 	}
+	if a.storeScanParamFactsOverlay != nil {
+		a.rejectStoreScanParamFactsOverlayOperation("parallel declaration scheduling")
+		return
+	}
 	if a.noStorageOverlay != nil {
 		a.rejectNoStorageOverlayOperation("parallel declaration scheduling")
 		return
@@ -355,7 +359,7 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 // specializationContext.copyDecl. Its analyzer never queries unrelated function
 // analyses; public Result queries retain canonical fallback after publication.
 func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
-	if a != nil && (a.exprTypeOverlay != nil || a.exprFactsOverlay != nil || a.iterBinderElementOverlay != nil || a.noStorageOverlay != nil || a.storeScanBinderOverlay != nil || a.optimizationSymbolIdentityOverlay != nil) {
+	if a != nil && (a.exprTypeOverlay != nil || a.exprFactsOverlay != nil || a.iterBinderElementOverlay != nil || a.noStorageOverlay != nil || a.storeScanParamFactsOverlay != nil || a.storeScanBinderOverlay != nil || a.optimizationSymbolIdentityOverlay != nil) {
 		panic("specialization construction requires a canonical analyzer, not another construction overlay")
 	}
 	return cloneAnalyzerValueForParallelPolicy(a, true, true)
@@ -411,6 +415,10 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		}
 		if name == "storeScanBinderOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerStoreScanBinderOverlay(a.storeScanBinderOverlay)))
+			continue
+		}
+		if name == "storeScanParamFactsOverlay" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerStoreScanParamFactsOverlay(a.storeScanParamFactsOverlay)))
 			continue
 		}
 		if name == "noStorageOverlay" {
@@ -471,8 +479,8 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
-		if ownedFunctionAnalyses && name == "storeScanParamFactsCache" && specializationParamFactsCopySchemaValid {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneSpecializationParamFacts(a.storeScanParamFactsCache)))
+		if ownedFunctionAnalyses && name == "storeScanParamFactsCache" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreScanParamFactsConstructionMap(a.storeScanParamFactsCache, specializationParamFactsCopySchemaValid)))
 			continue
 		}
 		if ownedFunctionAnalyses && name == "functionAnalyses" {
@@ -535,6 +543,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		worker := cloned.Addr().Interface().(*Analyzer)
 		worker.optimizationSymbolIdentityOverlay = &analyzerOptimizationSymbolIdentityOverlay{base: a.optimizationSymbolIDs}
 		worker.storeScanBinderOverlay = &analyzerStoreScanBinderOverlay{base: a.storeScanBinderTypes}
+		if specializationParamFactsCopySchemaValid {
+			worker.storeScanParamFactsOverlay = &analyzerStoreScanParamFactsOverlay{base: a.storeScanParamFactsCache}
+		}
 		worker.noStorageOverlay = &analyzerNoStorageOverlay{base: a.storeScanNoStorageCache}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
@@ -789,6 +800,14 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 		}
 		return
 	}
+	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("storeScanParamFactsOverlay")).IsNil() {
+		target := dst.Addr().Interface().(*Analyzer)
+		err := target.rejectStoreScanParamFactsOverlayOperation("canonical worker merge")
+		if p != nil && p.specialization != nil {
+			p.specialization.err = err
+		}
+		return
+	}
 	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("noStorageOverlay")).IsNil() {
 		target := dst.Addr().Interface().(*Analyzer)
 		err := target.rejectNoStorageOverlayOperation("canonical worker merge")
@@ -828,7 +847,7 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 		for i := 0; i < w.NumField(); i++ {
 			if p != nil {
 				name := w.Type().Field(i).Name
-				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || name == "noStorageOverlay" || name == "storeScanBinderOverlay" || name == "optimizationSymbolIdentityOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
+				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || name == "noStorageOverlay" || name == "storeScanParamFactsOverlay" || name == "storeScanBinderOverlay" || name == "optimizationSymbolIdentityOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
 					continue
 				}
 			}

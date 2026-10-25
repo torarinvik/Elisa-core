@@ -234,6 +234,9 @@ func (b *AnalysisBuild) validate() error {
 	if b.retained.a.storeScanBinderOverlay != nil {
 		return fmt.Errorf("construction store-scan binder overlay cannot be persisted/restored or resumed")
 	}
+	if b.retained.a.storeScanParamFactsOverlay != nil {
+		return fmt.Errorf("construction store-scan parameter-facts overlay cannot be persisted/restored or resumed")
+	}
 	if b.retained.a.noStorageOverlay != nil {
 		return fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
 	}

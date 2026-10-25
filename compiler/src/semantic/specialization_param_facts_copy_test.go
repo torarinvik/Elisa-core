@@ -39,15 +39,15 @@ func TestSpecializationParamFactsExactOldValuePolicy(t *testing.T) {
 		source := map[storeScanParamKey]storeScanParamFacts{key: {why: "reason", at: node, writes: true, reach: reach}}
 		want := deepCloneValue(reflect.ValueOf(source)).Interface().(map[storeScanParamKey]storeScanParamFacts)
 		private := cloneAnalyzerValueForSpecialization(&Analyzer{storeScanParamFactsCache: source}).Addr().Interface().(*Analyzer)
-		got := private.storeScanParamFactsCache[key]
-		if !reflect.DeepEqual(private.storeScanParamFactsCache, want) || cap(got.reach) != len(reach) || (got.reach == nil) != (reach == nil) || got.at != node {
+		got, present := private.lookupStoreScanParamFacts(key)
+		if !present || !reflect.DeepEqual(got, want[key]) || cap(got.reach) != len(reach) || (got.reach == nil) != (reach == nil) || got.at != node {
 			t.Fatal("old reflective policy differs")
 		}
 		if len(reach) > 0 && &got.reach[0] != &reach[0] {
 			t.Fatal("backing alias changed")
 		}
-		delete(private.storeScanParamFactsCache, key)
-		if len(source) != 1 {
+		private.setStoreScanParamFacts(key, storeScanParamFacts{})
+		if !reflect.DeepEqual(source[key], storeScanParamFacts{why: "reason", at: node, writes: true, reach: reach}) {
 			t.Fatal("outer alias escaped")
 		}
 		ordinary := cloneAnalyzerValueForBodyWorker(&Analyzer{storeScanParamFactsCache: source}).Addr().Interface().(*Analyzer)

@@ -345,15 +345,16 @@ type Analyzer struct {
 
 	noStorageOverlay *analyzerNoStorageOverlay
 
-	storeScanNoStorageCache  map[Type]bool
-	storeScanViewOnlyCache   map[Type]bool
-	storeScanSharesCache     map[Type]bool
-	storeScanTaintCache      map[storeScanTaintKey]storeScanTaintResult
-	storeScanParamFactsCache map[storeScanParamKey]storeScanParamFacts
-	storeScanCallWriteCache  map[*ast.CallExpr][]storeScanCallWrite
-	destinationCall          *ast.CallExpr
-	destinationRegion        string
-	destinationAllocated     map[*ast.CallExpr]string
+	storeScanNoStorageCache    map[Type]bool
+	storeScanViewOnlyCache     map[Type]bool
+	storeScanSharesCache       map[Type]bool
+	storeScanTaintCache        map[storeScanTaintKey]storeScanTaintResult
+	storeScanParamFactsCache   map[storeScanParamKey]storeScanParamFacts
+	storeScanParamFactsOverlay *analyzerStoreScanParamFactsOverlay
+	storeScanCallWriteCache    map[*ast.CallExpr][]storeScanCallWrite
+	destinationCall            *ast.CallExpr
+	destinationRegion          string
+	destinationAllocated       map[*ast.CallExpr]string
 	// regionParamCalleeParamIndex maps each function name to explicit parameter positions whose
 	// types carry one of that function's region parameters. Forwarding a fresh region container to
 	// any such position shares its allocation region with the callee, which may allocate between
@@ -1630,6 +1631,10 @@ func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls 
 	}
 	if a.storeScanBinderOverlay != nil {
 		err := a.rejectStoreScanBinderOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
+	if a.storeScanParamFactsOverlay != nil {
+		err := a.rejectStoreScanParamFactsOverlayOperation("canonical program publication")
 		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
 	}
 	if a.noStorageOverlay != nil {

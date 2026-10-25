@@ -141,14 +141,11 @@ func (a *Analyzer) storeScanParamReaches(start storeScanParamKey) bool {
 }
 
 func (a *Analyzer) storeScanParamLocalFacts(key storeScanParamKey) storeScanParamFacts {
-	if facts, ok := a.storeScanParamFactsCache[key]; ok {
+	if facts, ok := a.lookupStoreScanParamFacts(key); ok {
 		return facts
 	}
 	facts := a.computeStoreScanParamFacts(key)
-	if a.storeScanParamFactsCache == nil {
-		a.storeScanParamFactsCache = map[storeScanParamKey]storeScanParamFacts{}
-	}
-	a.storeScanParamFactsCache[key] = facts
+	a.setStoreScanParamFacts(key, facts)
 	return facts
 }
 

@@ -39,6 +39,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r.a.storeScanBinderOverlay != nil {
 		return nil, fmt.Errorf("construction store-scan binder overlay cannot be persisted/restored or resumed")
 	}
+	if r.a.storeScanParamFactsOverlay != nil {
+		return nil, fmt.Errorf("construction store-scan parameter-facts overlay cannot be persisted/restored or resumed")
+	}
 	if r.a.noStorageOverlay != nil {
 		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
 	}
@@ -80,6 +83,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	}
 	if r.a.storeScanBinderOverlay != nil {
 		return nil, fmt.Errorf("construction store-scan binder overlay cannot be persisted/restored or resumed")
+	}
+	if r.a.storeScanParamFactsOverlay != nil {
+		return nil, fmt.Errorf("construction store-scan parameter-facts overlay cannot be persisted/restored or resumed")
 	}
 	if r.a.noStorageOverlay != nil {
 		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")

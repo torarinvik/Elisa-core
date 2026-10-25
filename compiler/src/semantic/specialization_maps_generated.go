@@ -252,7 +252,6 @@ var specializationOpaqueMapFields = [...]string{
 	"storeScanIndexCache",
 	"storeScanLastHolders",
 	"storeScanNoStorageCache",
-	"storeScanParamFactsCache",
 	"storeScanParamWriteCache",
 	"storeScanPlainValueMemo",
 	"storeScanProgramLivedMemo",
@@ -1025,9 +1024,6 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "storeScanNoStorageCache":
 		dst.storeScanNoStorageCache = maps.Clone(src.storeScanNoStorageCache)
-		return true
-	case "storeScanParamFactsCache":
-		dst.storeScanParamFactsCache = maps.Clone(src.storeScanParamFactsCache)
 		return true
 	case "storeScanParamWriteCache":
 		dst.storeScanParamWriteCache = maps.Clone(src.storeScanParamWriteCache)

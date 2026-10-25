@@ -52,6 +52,9 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 	if root.analyzer.storeScanBinderOverlay != nil {
 		return nil, fmt.Errorf("specialization root retains construction store-scan binder overlay")
 	}
+	if root.analyzer.storeScanParamFactsOverlay != nil {
+		return nil, fmt.Errorf("specialization root retains construction store-scan parameter-facts overlay")
+	}
 	if root.analyzer.noStorageOverlay != nil {
 		return nil, fmt.Errorf("specialization root retains construction no-storage overlay")
 	}
@@ -75,7 +78,7 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 }
 
 func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
-	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil || r.analyzer.storeScanBinderOverlay != nil || r.analyzer.optimizationSymbolIdentityOverlay != nil {
+	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil || r.analyzer.storeScanParamFactsOverlay != nil || r.analyzer.storeScanBinderOverlay != nil || r.analyzer.optimizationSymbolIdentityOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
 	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)

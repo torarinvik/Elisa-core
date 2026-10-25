@@ -17,7 +17,7 @@ import (
 func TestSpecializationParamCacheSourcePolicy(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	directory := filepath.Dir(filename)
-	golden := map[string]string{"region_store_scan_param_writes.go|storeScanParamLocalFacts": "5399453efd920e5950bdba98b0e08240e376f10ea918c359032a1b71a8aa2483", "region_store_scan_param_writes.go|computeStoreScanParamFacts": "cb5c8e0943082f2b3650167cb667c14385a8da67f29a79def46268499872a73f", "region_store_scan_param_writes.go|storeScanParamReaches": "8cdd0f5effba5835474f246d51b40addb9ac123c929a8d38e6063457ae7e44e5"}
+	golden := map[string]string{"region_store_scan_param_writes.go|storeScanParamLocalFacts": "16fc7cd91e8c4b043f8ef27107eae112aa33bed67c60b396781139a2860bc8d3", "region_store_scan_param_writes.go|computeStoreScanParamFacts": "cb5c8e0943082f2b3650167cb667c14385a8da67f29a79def46268499872a73f", "region_store_scan_param_writes.go|storeScanParamReaches": "8cdd0f5effba5835474f246d51b40addb9ac123c929a8d38e6063457ae7e44e5"}
 	allowedCalls := map[string]bool{"storeScanParamLocalFacts": true, "storeScanParamReaches": true}
 	entries, err := os.ReadDir(directory)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestSpecializationParamCacheSourcePolicy(t *testing.T) {
 				if !ok {
 					return true
 				}
-				if selector.Sel.Name == "storeScanParamFactsCache" && !(entry.Name() == "parallel_bodies.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") && !(entry.Name() == "region_store_scan_param_writes.go" && name == "storeScanParamLocalFacts") {
+				if selector.Sel.Name == "storeScanParamFactsCache" && !(entry.Name() == "parallel_bodies.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") && !(entry.Name() == "analyzer_store_scan_param_facts_overlay.go" && (name == "lookupStoreScanParamFacts" || name == "setStoreScanParamFacts")) {
 					t.Errorf("raw cache access outside reviewed policy: %s", set.Position(node.Pos()))
 				}
 				if selector.Sel.Name == "storeScanParamLocalFacts" && !allowedCalls[name] {

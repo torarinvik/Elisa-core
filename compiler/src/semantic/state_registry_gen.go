@@ -227,6 +227,7 @@ func semanticStateTypes() []reflect.Type {
 		reflect.TypeFor[analyzerNoStorageOverlay](),
 		reflect.TypeFor[analyzerOptimizationSymbolIdentityOverlay](),
 		reflect.TypeFor[analyzerStoreScanBinderOverlay](),
+		reflect.TypeFor[analyzerStoreScanParamFactsOverlay](),
 		reflect.TypeFor[aoEnv](),
 		reflect.TypeFor[aoFacts](),
 		reflect.TypeFor[aoStore](),

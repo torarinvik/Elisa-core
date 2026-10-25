@@ -790,3 +790,46 @@ remain explicitly enabled experimental settings, not default-CLI qualification.
 The first edited rebuild still exceeds the goal. Evidence lives at the directory
 named by /tmp/elisa-stage1-binder-root, including normal-streams-comparison.json,
 individual O0 measurement receipts, producer archive and source-restoration.json.
+
+
+## Construction parameter-facts baseline view
+
+The complete composite-key parameter-facts cache now uses a read-only inherited
+baseline and a private local map during specialization construction. Inherited
+reach slices retain their exact old backing and capped length; locally computed
+facts retain their own original spare capacity. Positive, negative and zero facts
+remain distinct from absence. Unknown value schemas use the complete old deep
+clone and create no baseline view. Ordinary worker copies retain the old policy.
+Raw-access source controls and all construction-resource persistence/publication/
+pre-memo/parallel boundaries remain enforced. Actual generation adds one named
+resource and removes the opaque map-copy case. Independent source review found
+no blocker. The private default-edit branch still needs this new resource guard
+when curated integration occurs.
+
+A constructor benchmark with0 or24477 inherited rows uses7608bytes/241allocations
+and24.9–25.0us at either cardinality, eliminating eager row-count growth. Broad
+semantic race checks pass19.007s (the separately corrected real-compute fixture
+is qualified in the focused log). All50 selected backend cases actually RUN and
+PASS with zero skips/missing names. Evidence: /tmp/elisa-param-facts-overlay-*.log,
+/tmp/elisa-param-facts-overlay-backend.json, and source-only artifact
+/tmp/elisa-store-scan-param-facts-overlay-v1 plus the lexical-scope fixture delta
+/tmp/elisa-param-facts-real-compute-fixture-v2. Whole Stage1 latency for this new
+producer remains unmeasured; no process allocation saving is inferred from the
+component benchmark.
+
+## Exact cumulative allocation diagnostic
+
+A separate3f267223 diagnostic producer with default-off hot-input census and
+MEMPROFILE runtime counters completed its own empty cold namespace. Observer
+build SHAa87a29d0e7ba7baf9cb0e011fde5b09e2d31f5ade5ea309e6af7f0d70f8343af,
+source SHA840cf20c9ef4290f883cedbcbc8eb889f829bf2e9c589ed87769221421d06f7f.
+The fresh baseline observed16961001424Go TotalAlloc bytes/113208188mallocs;
+first novel parser body edit17629971296bytes/114181202mallocs, both complete
+successful final captures with10GCs. Counters cover the observed Go interval,
+exclude profile-output work, and omit child/C++ allocations. They are cumulative
+allocated bytes, not live/peak memory. No forcedGC/GOGC change was used. Diagnostic
+timings are not speedup evidence. Baseline/edited objects match035337b9/9eca96bc
+normal objects; source restored to2556c882. This establishes one actual counter
+baseline and does not reinstate any withdrawn comparative percentage claim.
+Artifacts: /tmp/elisa-owned-clone-memstats-debug-root points at manifests, archived
+producer source, per-run counter/profile/receipt records and exact-counter-summary.
