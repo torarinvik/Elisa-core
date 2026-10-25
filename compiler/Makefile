@@ -15,10 +15,16 @@
 # overrides it. A missing solver never weakens checking: obligations it would prove stay unproven.
 Z3 ?= z3
 GO_LDFLAGS := -X elisacore/src/smt.DefaultBinary=$(Z3)
-# Disk work products key the executable's bytes. Test/docs-only commits must
-# not change those bytes through VCS timestamps/revisions. Release builders can
-# opt into embedded VCS metadata explicitly.
+# Receipt-backed Stage0 builds keep executable identity independent of VCS
+# metadata. Set ELISAC_BUILD_VCS=true to force a direct Go build instead; every
+# direct build embeds VCS metadata because it has no content receipt.
 ELISAC_BUILD_VCS ?= false
+
+# The bundled helper binds the default Stage0 product to the exact Go-selected
+# inputs without making a sibling self-host checkout part of the build recipe.
+# Explicit custom solver/linker/VCS builds keep their separate direct Go path.
+ELISA_STAGE0_PROVENANCE_SCRIPT ?= $(CURDIR)/scripts/stage0_provenance.py
+PYTHON_BIN ?= python3
 
 # LLVM for cgo: the #cgo lines in src/backend carry per-OS defaults (Homebrew on macOS,
 # /usr/lib/llvm-* on Linux). When llvm-config is reachable (LLVM_CONFIG, else PATH) and the
@@ -73,7 +79,11 @@ test-full:
 .PHONY: build
 build:
 	mkdir -p bin
-	go build -buildvcs=$(ELISAC_BUILD_VCS) -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src
+	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
+		"$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary bin/elisac; \
+	else \
+		go build -buildvcs=true -ldflags "$(GO_LDFLAGS)" -o bin/elisac ./src && rm -f bin/elisac.provenance.json; \
+	fi
 
 # install: explicit opt-in installation for users who really want it.
 .PHONY: install
@@ -81,9 +91,13 @@ build:
 # using next to the self-hosted `elisac-stage1`. There is deliberately no bare
 # `elisac`: a script that wants a compiler names its stage.
 install:
-	mkdir -p $${HOME}/.elisac
-	go build -buildvcs=$(ELISAC_BUILD_VCS) -ldflags "$(GO_LDFLAGS)" -o $${HOME}/.elisac/elisac-stage0 ./src
-	rm -f $${HOME}/.elisac/elisac
+	mkdir -p "$${HOME}/.elisac"
+	@if [ "$(Z3)" = "z3" ] && [ "$(ELISAC_BUILD_VCS)" = "false" ] && [ "$(GO_LDFLAGS)" = "-X elisacore/src/smt.DefaultBinary=z3" ]; then \
+		"$(PYTHON_BIN)" "$(ELISA_STAGE0_PROVENANCE_SCRIPT)" build --root . --binary "$${HOME}/.elisac/elisac-stage0"; \
+	else \
+		go build -buildvcs=true -ldflags "$(GO_LDFLAGS)" -o "$${HOME}/.elisac/elisac-stage0" ./src && rm -f "$${HOME}/.elisac/elisac-stage0.provenance.json"; \
+	fi
+	rm -f "$${HOME}/.elisac/elisac"
 
 .PHONY: help
 help:

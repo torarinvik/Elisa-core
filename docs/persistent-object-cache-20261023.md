@@ -71,3 +71,39 @@ and exact-byte checksums. A regression replays two nearly-16-MiB binary streams
 through one build and a cache hit; over-limit output still reaches the user
 unchanged and never publishes a cache entry. All build-object/transcript integrity,
 corruption, request-observer and overflow tests pass.
+
+## Stable Stage0 build receipts
+
+Default `make build`, `make install`, and the primary-checkout install hook use
+the bundled `compiler/scripts/stage0_provenance.py` producer. It builds with
+`-buildvcs=false`, stages a fresh output, and publishes a hash-bound binary and
+receipt after the Go-selected source inputs remain unchanged. Test/documentation
+commits do not become binary identity through Git timestamps. Explicit custom
+solver/linker/VCS builds keep their separate direct Go path and do not claim the
+default producer's receipt. Python3 is required by the default receipt path.
+
+Protocol v4 fingerprints the actual `go list -deps -json ./src` production and
+embed inputs, module metadata, binary contents, full embedded Go build/dependency
+metadata and supported build context. Unsafe output/overlay/dry-run flag overrides,
+workspaces, local replacements and unsupported cross-target builds are rejected.
+Failed or changing-source builds preserve the previous binary/receipt pair.
+The self-host checkout carries the matching versioned consumer; freshness checks
+outside Make replay the recorded supported build context rather than requiring
+Make-only cgo flags to remain in the caller environment. This is trusted local
+build provenance, not a signed attestation for untrusted supplied receipts.
+
+The standalone Go copy passes20 helper controls; its consumer-shell-only case
+is skipped here and passes in the self-host checkout's21-case suite. The default
+Make build with explicit llvm-config succeeded under an external30second cap;
+the self-host freshness checker then accepted that product outside Make. The
+resulting compiler emitted a return42 smoke module that independently passed
+LLVM assembly. Default/custom build/install dry runs, shell syntax and diff
+checks also pass. Raw records `/tmp/elisa-core-stage0-receipt-tests-v2.log`,
+`/tmp/elisa-core-stage0-receipt-make-build.log`,
+`/tmp/elisa-stage0-receipt-outside-make-check.log`, and
+`/tmp/elisa-stage0-receipt-smoke.*`.
+
+The producer helper is vendored byte-for-byte from the self-host helper at
+SHA256 f494b6c4a1cfb0e4afb41faf1827b2f3cb67f24a18f941457c69ca25fa2e2181.
+Protocol changes must update both copies/version; the Go test copy adapts only
+the consumer-shell integration case absent from a standalone Go checkout.
