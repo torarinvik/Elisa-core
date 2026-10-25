@@ -490,7 +490,11 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			continue
 		}
 		if useMemoOverlays && name == "storeFlowSummaries" {
-			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForBodyWorker(a.storeFlowSummaries)))
+			if ownedFunctionAnalyses {
+				settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForSpecialization(a.storeFlowSummaries)))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForBodyWorker(a.storeFlowSummaries)))
+			}
 			continue
 		}
 		// These caches contain lazily populated maps/slices behind pointers.

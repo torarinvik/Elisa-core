@@ -680,3 +680,38 @@ field savings across all specializations. Source restored exactly after both edi
 Evidence /tmp/elisa-stage1-borrowed-cache-root, complete JSON/settings/profiles,
 normal-streams-comparison.json and source receipts. Body2s, signature/contract3s,
 major10s, O3/defaultCLI/latest-source/strictIR/full-gen2 gates remain unqualified.
+
+## Bounded eager store-flow summary pooling
+
+Owned construction keeps the exact existing summary copy policy: shared summary
+pointer groups remain shared, distinct summaries and mutable retKind/reachKind
+cells stay private, and completed connectivity fields keep their old shallow
+sharing. It pools eagerly copied structs, row headers and kind cells using
+same-runtime slices.Clone capacity probes and disjoint full-slice partitions.
+Zero-length slices use slices.Clone directly, including nil/empty/backing shape.
+Bounds fall back to the unchanged old helper; no flow/proof budget is changed.
+Ordinary workers always retain that helper, pinned by an exact function hash.
+Maps below256entries use the old path because the expanded small-input benchmark
+found overhead at0/1/128entries. No lazy/value authority or new state field/type
+is introduced; actual generation produces no diff.
+
+Old-helper oracle tests cover nil/empty/capacity/summary aliases, mutable rows,
+reslicing/append isolation, initialization and bounded fallback. The actual parsed
+258-function constructor/publication fixture ensures pooling is exercised and
+private pool pointers do not enter published query state. Focused race after
+threshold/fixture correction passes1.724s; broader retained/private/sparse/canonical/
+parallel/permission/snapshot/overlay race passes17.433s. An initial incorrect test
+name filter matched no tests and is not counted as verification.
+
+At11308rows the targeted fixture changes67915allocations to74 while bytes change
+3486009–3486075 to3507673 (~0.6% increase). CPU ranges overlap: old1.266–1.293ms,
+pooled1.261–1.318ms; no CPU speedup or whole-Stage1 gain is inferred. Small-map
+fallback retains exact byte/allocation counts and similar timings. This cut targets
+object count/GC pressure, not payload removal. Original tests/source artifact
+/tmp/elisa-store-flow-summary-pool-v1; root modifications add the256 threshold,
+0/1/128/11308 benchmarks and real large constructor fixture. Logs:
+/tmp/elisa-store-flow-pool-*.log. End-to-end retained-pool lifetime/time qualification
+remains necessary; actual hot constructor field inputs are still being measured.
+
+All50 selected backend generic/specialization/ABI/layout/alias/region regressions
+pass in10 externally bounded groups: /tmp/elisa-store-flow-pool-backend.json.
