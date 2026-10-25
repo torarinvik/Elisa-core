@@ -544,6 +544,65 @@ def units(stream):
         raise UnsupportedIR("unterminated streamed function")
 
 
+@dataclass(frozen=True)
+class _IdentityPolicy:
+    enabled: bool
+    permitted_scopes: frozenset[int]
+
+
+def _prepare_identity_policy(authorized, left_types, right_types,
+                             module_forward, module_reverse):
+    """Prepare immutable invocation-local authority; never mutate the manifest."""
+    local_only = all(key[0] == "local" for key in authorized)
+    if local_only:
+        # Validate restored module state ONCE, including when type indexes
+        # differ and the shortcut will therefore be disabled.
+        for mapping in (module_forward, module_reverse):
+            if any(key[0] not in ("global", "type") or key[1] != -1
+                   or key[2] != target for key, target in mapping.items()):
+                raise UnsupportedIR("local-only manifest has nonidentity nonlocal state")
+        if module_forward != module_reverse:
+            raise UnsupportedIR("identity nonlocal maps disagree")
+    return _IdentityPolicy(local_only and left_types == right_types,
+                           frozenset(key[1] for key in authorized
+                                     if key[0] == "local"))
+
+
+def _verify_unit_prepared(a, b, left_types, right_types, left_internal,
+                          right_internal, scope, line_number, authorized,
+                          used, changed, module_forward, module_reverse,
+                          identity_policy):
+    """Internal invocation-only shortcut; public verify_unit remains unchanged."""
+    if (identity_policy.enabled and a == b
+            and scope not in identity_policy.permitted_scopes
+            and a.lstrip().startswith(b"define ")):
+        tokens = classify(a, left_types, scope)
+        actual_scopes = {token.scope for token in tokens
+                         if token.kind != "text" and token.scope >= 0}
+        next_scope = max([scope] + [item + 1 for item in actual_scopes])
+        first = a.lstrip().split(None, 1)[0] if a.strip() else b""
+        if first in (b"define", b"declare"):
+            actual_scopes.add(scope)
+            next_scope = max(next_scope, scope + 1)
+        if not actual_scopes.intersection(identity_policy.permitted_scopes):
+            for token in tokens:
+                if token.kind not in ("global", "type"):
+                    continue
+                key = (token.kind, token.scope, token.name)
+                # Constant-time per-occurrence checks preserve the invariant
+                # established once during invocation/checkpoint preparation.
+                if key in module_forward and module_forward[key] != token.name:
+                    raise NotEquivalent("one source identifier maps to several targets")
+                if key in module_reverse and module_reverse[key] != token.name:
+                    raise NotEquivalent("several source identifiers collide, including unchanged bindings")
+                module_forward[key] = token.name
+                module_reverse[key] = token.name
+            return next_scope, line_number + a.count(b"\n")
+    return verify_unit(a, b, left_types, right_types, left_internal,
+        right_internal, scope, line_number, authorized, used, changed,
+        module_forward, module_reverse)
+
+
 def verify_unit(a, b, left_types, right_types, left_internal, right_internal,
                 scope, line_number, authorized, used, changed,
                 module_forward, module_reverse):
@@ -609,13 +668,15 @@ def verify_streams(left, right, renames=None):
         authorized[key] = entry
     used, changed = set(), {}
     module_forward, module_reverse = {}, {}
+    identity_policy = _prepare_identity_policy(authorized, left_types,
+        right_types, module_forward, module_reverse)
     scope, line_number = 0, 1
     for a, b in zip_longest(units(left), units(right)):
         if a is None or b is None:
             raise NotEquivalent("streamed module unit counts differ")
-        scope, line_number = verify_unit(a, b, left_types, right_types,
+        scope, line_number = _verify_unit_prepared(a, b, left_types, right_types,
             left_internal, right_internal, scope, line_number, authorized,
-            used, changed, module_forward, module_reverse)
+            used, changed, module_forward, module_reverse, identity_policy)
     if set(authorized) - used:
         raise UnsupportedIR("manifest contains unused rename entries")
     return changed
@@ -791,6 +852,8 @@ def verify_checkpoint(left_path, right_path, checkpoint_path, renames=None,
             raise UnsupportedIR("checkpoint contains unauthorized used permissions")
         if {(k[0], k[1], k[2], v) for k, v in changed.items()} != used:
             raise UnsupportedIR("checkpoint changed/used records disagree")
+        identity_policy = _prepare_identity_policy(authorized, left_types,
+            right_types, forward, reverse)
         for stream, key in ((left, "left_offset"), (right, "right_offset")):
             if state[key] > identity["left" if key == "left_offset" else "right"]["bytes"]:
                 raise UnsupportedIR("checkpoint offset exceeds input")
@@ -805,9 +868,9 @@ def verify_checkpoint(left_path, right_path, checkpoint_path, renames=None,
                 raise UnsupportedIR("completed checkpoint has unverified trailing units")
             if a is None or b is None:
                 raise NotEquivalent("streamed module unit counts differ")
-            state["scope"], state["line"] = verify_unit(a, b, left_types, right_types,
+            state["scope"], state["line"] = _verify_unit_prepared(a, b, left_types, right_types,
                 left_internal, right_internal, state["scope"], state["line"],
-                authorized, used, changed, forward, reverse)
+                authorized, used, changed, forward, reverse, identity_policy)
             state["left_offset"], state["right_offset"] = left.tell(), right.tell()
             state["units"] += 1
             completed_units += 1

@@ -106,3 +106,21 @@ escape/error behavior while reducing a real315MB module-index pass from
 the same676 named types and64,457 internal globals. All49 tests pass, including
 short-byte scanner parity, large exact literals, and linkage/index parity. This
 is offline qualification throughput, not a compiler rebuild latency result.
+
+
+Streaming/checkpoint verification classifies a byte-identical complete function
+once when all permissions are local, no permission targets any scope classified
+in that unit, and the complete type indexes agree. Supported grammar still runs;
+module identity bindings retain explicit collision checks. Invocation policy and
+restored-map validation run once, avoiding per-function scans of the manifest
+or growing module maps. Changed/permitted units and the public verify_unit API
+retain the complete comparison path. All 65 tests pass, including the original
+49 plus differential grammar/collision/scope/resume/corruption controls.
+
+On 64 identical real Stage1 function units, ABBA full-check times were 0.1262
+and 0.1250 seconds versus 0.0613 and 0.0643 seconds with the prepared identity
+path, with exact equal binding and cursor outcomes. This measures only offline
+function-unit throughput; index preparation and other verifier work remain.
+It is not a compiler or whole-verifier latency claim. Raw evidence:
+`/tmp/elisa-ir-identity-real-benchmark-final.json`. Checker changes require a
+fresh checkpoint identity; never rekey prior proof progress.
