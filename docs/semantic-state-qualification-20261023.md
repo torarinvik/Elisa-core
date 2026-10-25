@@ -3976,3 +3976,26 @@ seconds), preservation cases five times (5.066 seconds), and the integrated broa
 parallel/returned-function/retained/analysis-build selection (1.470 seconds).
 An initial combined twenty-repeat command reached its external 30-second cap;
 it is not counted as a pass. Every command remains externally capped.
+
+### Experimental integration native/disk safety checks (41800eae)
+
+The isolated experimental integration passes fresh-process disk native execution
+across edits/reverts, corruption recovery, contract-proof retraction, and all four
+native artifact lifecycle/concurrency tests. The verbose run executes all seven
+tests without skips (1.986 seconds); raw log:
+`/tmp/elisa-experimental-native-disk-safety-verbose.log`.
+
+Backend inline-callee invalidation, nominal-layout edit/revert, partial object
+reuse/native parity, optimization changes/reverts (including O0 and O3), and
+partition definition guards pass (7.665 seconds). Raw log:
+`/tmp/elisa-experimental-backend-cache-safety.log`. Every command has an external
+30-second cap and internal 25-second test limit. These are small correctness
+fixtures, not Stage1 timing qualification.
+
+A separate accepted scratch-backed body-edit diagnostic exposes missing
+classification dependencies: adding a packed-enum consumer changes transitive
+store needs while the stored fast baseline remains unchanged. The next edit
+incorrectly takes fast preparation and omits a cold-generated region wrapper.
+The experimental integration remains unmerged while the declaration-phase
+certificate is repaired. Raw failing log:
+`/tmp/elisa-fast-body-lease-baseline.log`.
