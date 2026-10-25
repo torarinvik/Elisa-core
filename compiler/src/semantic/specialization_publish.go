@@ -214,6 +214,19 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 		}
 		p.seen[key] |= role
 		it := v.MapRange()
+		if p.context == nil && v.Len() > 1 {
+			// Canonical scans retain underlying identities, never reflected cells.
+			// Full assignment overwrites each reusable cell before walking it.
+			key := reflect.New(v.Type().Key()).Elem()
+			value := reflect.New(v.Type().Elem()).Elem()
+			for it.Next() {
+				key.SetIterKey(it)
+				value.SetIterValue(it)
+				p.walk(key, span)
+				p.walk(value, span)
+			}
+			return
+		}
 		for it.Next() {
 			p.walk(it.Key(), span)
 			p.walk(it.Value(), span)

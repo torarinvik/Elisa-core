@@ -833,3 +833,41 @@ normal objects; source restored to2556c882. This establishes one actual counter
 baseline and does not reinstate any withdrawn comparative percentage claim.
 Artifacts: /tmp/elisa-owned-clone-memstats-debug-root points at manifests, archived
 producer source, per-run counter/profile/receipt records and exact-counter-summary.
+
+
+## Normal disk rebuild at26029651
+
+Fresh producer80040229bf09a06749d22c9c5e91eb88fba7887f93021fee9af632b85ca6f3ae
+(source4a6ed0dea33c0215a16362dda7cb8e179aee91af9f315d0369ce12f6ff681c9e)
+completed cold preparation in22 bounded invocations; final25.727s. Normal prime
+13.750100s, baseline exact0.281007s, first novel body edit14.941999s, edited exact
+0.283340s. Compared with5ded's14.851578s this demonstrates no end-to-end latency
+reduction; the parameter-facts gain remains a construction allocation/cardinality
+gain. All four objects and eight output streams match corresponding5ded runs
+byte for byte. Source restored2556c882. Same no-server/fresh-process/preserved-spec
+and explicit experimental-cache settings as prior normal measurements. Evidence
+/tmp/elisa-stage1-param-facts-root and normal-streams-comparison.json.
+
+## Canonical membership map cells
+
+Shared codegen already caches the canonical node/symbol/scope catalog once per
+session. The446 CPU profile's3.50 cumulative CPU seconds does not establish187
+walks; all187 actual constructor observations had shared codegen enabled. This
+change targets the single catalog walk, not a new cache or expanded lifetime.
+Canonical map traversal for len>1 now reuses invocation-local typed map key/value
+cells via SetIterKey/SetIterValue. Full assignment precedes every recursive walk;
+identities, seen role bits, complete traversal, nominal leaves and private
+publication policy remain unchanged. Small maps keep the old loop. No scratch
+cell address escapes. Independent source review found no blocker.
+
+Same candidate subbenchmark on32768entries before/after:12428080–12428088bytes/
+66112allocations/8.45–8.76ms versus11379532–11379805bytes/578allocations/8.39–8.54ms.
+This is an allocation-count/byte gain; CPU ranges overlap and whole Stage1 effect
+remains unmeasured. The historical frozen-reference subbenchmark was not used to
+attribute this change. Frozen-oracle cycle/alias/unexported-struct/typed-nil/source-
+immutability and existing catalog/publication controls pass race1.543s. Broad
+retained/specialization/sparse/canonical/parallel/ownership race passes18.932s.
+Evidence /tmp/elisa-canonical-map-scratch-*.log and source artifact
+/tmp/elisa-canonical-membership-map-scratch-v1.
+All50 selected backend tests RUN and PASS with no skipped/missing cases;
+JSON events summarized in /tmp/elisa-canonical-map-scratch-backend.json.
