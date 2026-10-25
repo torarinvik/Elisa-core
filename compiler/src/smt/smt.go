@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -99,10 +100,169 @@ type procSolver struct {
 	label string
 	// independent mode (Options.Independent): preamble is replayed after each (reset), under
 	// checkLimit, the budget of the check in progress.
-	independent bool
-	preamble    string
-	checkLimit  int64
-	warm        bool // CheckAfterHistory: the next check continues the replayed session
+	independent                       bool
+	preamble                          string
+	checkLimit                        int64
+	warm                              bool // CheckAfterHistory: the next check continues the replayed session
+	resourceUnknown, transientUnknown uint64
+}
+
+// UnknownCacheEpoch reports monotonic counts of resource-certified and other
+// Unknown checks. Compound callers compare epochs so a later resource failure
+// cannot conceal an earlier timeout, protocol error or broken transport.
+func (s *procSolver) UnknownCacheEpoch() (uint64, uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resourceUnknown, s.transientUnknown
+}
+
+// unknownReason returns a reason only for a clean, single framed reply.
+func (s *procSolver) unknownReason() string {
+	lines, sawError, err := s.exchange("(get-info :reason-unknown)\n")
+	if err != nil {
+		s.broken = true
+	}
+	if err != nil || sawError || len(lines) != 1 {
+		return ""
+	}
+	return strings.TrimSpace(lines[0])
+}
+
+// resourceCount reads a snapshot; querying statistics performs no solver search.
+// Resource limits are relative to the counter at check-sat, not reset: parsing
+// assertions has already used units, so an absolute counter is not a certificate.
+func (s *procSolver) resourceCount() (uint64, bool) {
+	lines, sawError, err := s.exchange("(get-info :all-statistics)\n")
+	if err != nil {
+		s.broken = true
+	}
+	if err != nil || sawError {
+		return 0, false
+	}
+	raw := strings.TrimSpace(strings.Join(lines, " "))
+	if len(raw) < 2 || raw[0] != '(' || raw[len(raw)-1] != ')' {
+		return 0, false
+	}
+	body := raw[1 : len(raw)-1]
+	if strings.ContainsAny(body, "()") {
+		return 0, false
+	}
+	fields := strings.Fields(body)
+	if len(fields)%2 != 0 {
+		return 0, false
+	}
+	var count uint64
+	found := false
+	for i := 0; i < len(fields); i += 2 {
+		if len(fields[i]) < 2 || fields[i][0] != ':' {
+			return 0, false
+		}
+		if fields[i] != ":rlimit-count" {
+			continue
+		}
+		if found {
+			return 0, false
+		}
+		value, err := strconv.ParseUint(fields[i+1], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		count, found = value, true
+	}
+	return count, found
+}
+
+// certifyCanceled replays an ambiguously canceled independent query with the
+// exact same resource budget and no wall timer. It keeps the original attempt's
+// hang guard, and never treats elapsed wall time as evidence of resource failure.
+// The before/after fuel delta excludes assertion parsing. Z3 clamps its counter
+// to the scoped limit on exit, so exhaustion can equal (not exceed) the budget.
+// A recovered SAT/UNSAT is definitive; a failed certification remains retryable.
+func (s *procSolver) certifyCanceled(assertions string) (result Result, certified bool) {
+	if !s.independent || s.warm || s.checkLimit <= 0 || s.broken {
+		return Unknown, false
+	}
+	started := time.Now()
+	setup := "(reset)\n" + s.preamble + assertions
+	if !strings.HasSuffix(setup, "\n") {
+		setup += "\n"
+	}
+	setup += fmt.Sprintf("(set-option :timeout 0)\n(set-option :rlimit %d)\n", s.checkLimit)
+	if lines, sawError, err := s.exchange(setup); err != nil || sawError || len(lines) != 0 {
+		if err != nil {
+			s.broken = true
+		}
+		return Unknown, false
+	}
+	before, ok := s.resourceCount()
+	if !ok {
+		return Unknown, false
+	}
+	var checked time.Duration
+	var resources int64
+	defer func() {
+		label := "resource-certify"
+		if s.label != "" {
+			parts := strings.SplitN(s.label, " | ", 4)
+			if len(parts) == 4 {
+				parts[2] += " [resource-certify]"
+				label = strings.Join(parts, " | ")
+			} else {
+				label = s.label + " [resource-certify]"
+			}
+		}
+		s.writePhysicalCheckLog(result, resources, checked, label)
+	}()
+	s.stats.Unknown++ // original canceled check; the replay is accounted below
+	s.stats.Queries++
+	lines, sawError, err := s.exchange("(check-sat)\n")
+	checked = time.Since(started)
+	if err != nil {
+		s.broken = true
+	}
+	if err != nil || sawError || len(lines) != 1 {
+		return Unknown, false
+	}
+	var after uint64
+	var afterOK bool
+	if s.rlimitLog != nil {
+		after, afterOK = s.resourceCount()
+		if afterOK && after <= uint64(^uint64(0)>>1) {
+			// Independent physical checks start at reset, like ordinary log rows.
+			// Certification below separately excludes assertion parsing.
+			resources = int64(after)
+		}
+	}
+	switch lines[0] {
+	case "sat":
+		return Sat, false
+	case "unsat":
+		return Unsat, false
+	case "unknown":
+		reason := s.unknownReason()
+		if reason != `(:reason-unknown "canceled")` && reason != `(:reason-unknown "max. resource limit exceeded")` {
+			return Unknown, false
+		}
+		if s.rlimitLog == nil {
+			after, afterOK = s.resourceCount()
+		}
+		return Unknown, afterOK && after >= before && after-before >= uint64(s.checkLimit)
+	}
+	return Unknown, false
+}
+
+// writePhysicalCheckLog emits exactly one already-measured physical check. It
+// never queries the solver, so attribution and elapsed time survive later resets
+// or a failed certification attempt.
+func (s *procSolver) writePhysicalCheckLog(result Result, resources int64, checked time.Duration, label string) {
+	if s.rlimitLog == nil {
+		return
+	}
+	if label != "" {
+		fmt.Fprintf(s.rlimitLog, "%d %d %s\t%s\n", resources, checked.Microseconds(), result.String(), label)
+	} else {
+		fmt.Fprintf(s.rlimitLog, "%d %d %s\n", resources, checked.Microseconds(), result.String())
+	}
 }
 
 // LogsRlimit reports whether ELISA_SMT_RLIMIT_LOG calibration logging is active, so callers
@@ -276,12 +436,14 @@ func (s *procSolver) CheckBudget(assertions string, rlimit int64) Result {
 
 // CheckBudgetValues is CheckValues under a one-off resource limit (see CheckBudget).
 func (s *procSolver) CheckBudgetValues(assertions string, vars []string, rlimit int64) (Result, map[string]string) {
-	if rlimit <= 0 {
-		return Unknown, nil
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if rlimit <= 0 {
+		s.transientUnknown++
+		return Unknown, nil
+	}
 	if s.broken {
+		s.transientUnknown++
 		return Unknown, nil
 	}
 	if s.independent {
@@ -295,6 +457,7 @@ func (s *procSolver) CheckBudgetValues(assertions string, vars []string, rlimit 
 		if err != nil {
 			s.broken = true
 		}
+		s.transientUnknown++
 		return Unknown, nil
 	}
 	res, values, _ := s.checkValuesLocked(assertions, vars)
@@ -310,6 +473,7 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 	s.stats.Queries++
 	if s.broken {
 		s.stats.Unknown++
+		s.transientUnknown++
 		return Unknown, nil, 0
 	}
 	var b strings.Builder
@@ -343,6 +507,7 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 	if err != nil {
 		s.broken = true
 		s.stats.Unknown++
+		s.transientUnknown++
 		return Unknown, nil, time.Since(start)
 	}
 	res := Unknown
@@ -354,20 +519,33 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 			res = Sat
 		}
 	}
+	// Log the original verdict and interval before certification can reset the
+	// solver or recover a different verdict. Reason/statistics probes are not
+	// physical check time and must not be counted again in the replay row.
 	if s.rlimitLog != nil {
 		checked := time.Since(start)
-		verdict := "unknown"
-		if res == Sat {
-			verdict = "sat"
-		} else if res == Unsat {
-			verdict = "unsat"
+		resources := s.readRlimit() - s.rlimitLast
+		s.writePhysicalCheckLog(res, resources, checked, s.label)
+	}
+	if res == Unknown {
+		certified := false
+		if !sawError && len(lines) == 1 && lines[0] == "unknown" && s.independent && !s.warm && s.checkLimit > 0 {
+			reason := s.unknownReason()
+			if reason == `(:reason-unknown "max. resource limit exceeded")` {
+				certified = true
+			} else if reason == `(:reason-unknown "canceled")` {
+				res, certified = s.certifyCanceled(assertions)
+			}
 		}
-		if s.label != "" {
-			fmt.Fprintf(s.rlimitLog, "%d %d %s\t%s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict, s.label)
-		} else {
-			fmt.Fprintf(s.rlimitLog, "%d %d %s\n", s.readRlimit()-s.rlimitLast, checked.Microseconds(), verdict)
+		if res == Unknown {
+			if certified {
+				s.resourceUnknown++
+			} else {
+				s.transientUnknown++
+			}
 		}
 	}
+
 	values := map[string]string{}
 	if res == Sat && len(vars) > 0 {
 		// (get-value (v1 v2 ...)) → "((v1 5) (v2 3))" possibly across lines.
@@ -378,7 +556,8 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 		}
 	}
 	if !s.independent || s.warm {
-		if _, _, err := s.exchange("(pop 1)\n"); err != nil {
+		if _, sawError, err := s.exchange("(pop 1)\n"); err != nil || sawError {
+			s.transientUnknown++
 			s.broken = true
 		}
 	}
@@ -400,15 +579,11 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 
 // readRlimit returns z3's cumulative resource counter (calibration logging only); 0 when unavailable.
 func (s *procSolver) readRlimit() int64 {
-	lines, sawError, err := s.exchange("(get-info :rlimit)\n")
-	if err != nil || sawError || len(lines) != 1 {
+	count, ok := s.resourceCount()
+	if !ok || count > uint64(^uint64(0)>>1) {
 		return 0
 	}
-	var n int64
-	if _, perr := fmt.Sscanf(strings.TrimSpace(lines[0]), "(:rlimit %d)", &n); perr != nil {
-		return 0
-	}
-	return n
+	return int64(count)
 }
 
 // readBalancedSExpr reads solver output until parentheses balance — a (get-value ...) reply may span
@@ -532,6 +707,7 @@ func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.broken || !s.independent || rlimit <= 0 {
+		s.transientUnknown++
 		return Unknown, nil
 	}
 	var b strings.Builder
@@ -550,8 +726,14 @@ func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars
 	}
 	if _, _, err := s.exchange(b.String()); err != nil {
 		s.broken = true
+		s.transientUnknown++
 		return Unknown, nil
 	}
+	// The outer verdict key does not include history, and replay does not
+	// retain per-entry unknown reasons. Never memoize a replay decline, even
+	// when its final check exhausts resources; proofs remain reusable.
+	s.transientUnknown++
+
 	s.warm, s.checkLimit = true, rlimit
 	res, values, _ := s.checkValuesLocked(assertions, vars)
 	s.warm, s.checkLimit = false, s.resourceLimit

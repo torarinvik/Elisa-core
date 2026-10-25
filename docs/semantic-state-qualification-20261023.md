@@ -3883,3 +3883,30 @@ while the current group member was u5. With the guard corrected, the regression
 passes (0.479 seconds), and the additive/inline-group selection passes (0.413
 seconds), including strict cold/live metadata parity. Commands are externally
 capped at 30 seconds. Ordinary defaulted scalar insertion remains eligible.
+
+### Transient SMT failures remain retryable
+
+Independent solver mode now distinguishes certified resource exhaustion from
+timeouts, transport/protocol failures and other Unknown results. An ambiguous
+cancellation is replayed independently with the same resource fuel and no wall
+timer; certification measures fuel after assertion parsing. Definitive recovered
+SAT/UNSAT and models follow the existing path. History-dependent declines are
+never certified under a history-free negative key. Proof budgets, original
+attempt guards and escalation/history order remain unchanged.
+
+Compound-query epochs prevent a later resource failure from concealing an
+earlier transient failure. Only certified resource declines enter negative caches;
+old uncertified persistent records are rejected under the new decline schema.
+Calibration logs record original and certification checks separately without
+double-counting resources or time.
+
+The actual installed solver reports resource exhaustion as canceled, which the
+initial strict-reason candidate correctly refused to cache. The final candidate
+tests that case under production timeout settings, relative-fuel boundaries,
+malformed/rollback counters, model recovery, warm-history exclusion, transient
+retry and memory/disk cache behavior. The related semantic cache/weakening selection passes (3.499 seconds); focused
+race checks pass (solver 1.238 seconds, semantic 1.540 seconds), and the final full
+solver suite passes under the race detector (1.362 seconds). Every command is
+externally capped at 30 seconds. A separate existing parallel function-type race
+was exposed by a broader prefix selection and reproduced on the pre-fix baseline;
+it is tracked independently, not claimed fixed by this change.

@@ -217,15 +217,13 @@ func (b *smtProofVersionOutput) Write(payload []byte) (int, error) {
 	return b.Buffer.Write(payload)
 }
 
-// Declined verdicts (sat with its counterexample text, or unknown) are cached only on explicit
-// opt-in (ELISACORE_SMT_CACHE_DECLINED=1) and under their own schema. A declined verdict never
-// proves anything, so reusing one cannot accept a program; it can only keep declining an
-// obligation that a fresh solver run might still decide. Identical query text can already get
-// different declined verdicts across runs (solver history in the shared push/pop process), so
-// this trades that run-to-run variation for speed on unchanged obligations.
-const smtDeclineCacheSchema = "elisa-exact-smt-decline-v1"
+// Declines are kept under a separate schema. Only definitive SAT and explicitly
+// certified independent resource exhaustion can be published. Generic Unknown
+// (timeouts, transport/protocol errors, unsupported or incomplete solving) must
+// remain retryable. Old uncertified unknown records are rejected by this schema.
+const smtDeclineCacheSchema = "elisa-exact-smt-decline-v2"
 
-// An independent solver's declined verdicts are as reproducible as its proofs, so they are cached
+// Definitive SAT and certified independent resource declines are cached
 // by default; ELISACORE_SMT_CACHE_DECLINED=0 turns that off.
 var smtDeclineCacheEnabled = os.Getenv("ELISACORE_SMT_CACHE_DECLINED") == "1" || smtIndependent && os.Getenv("ELISACORE_SMT_CACHE_DECLINED") != "0"
 
@@ -259,20 +257,31 @@ func (c *smtProofCache) declined(query string) (string, bool) {
 	if json.Unmarshal(payload, &record) != nil {
 		return "", false
 	}
-	if record.Schema != smtDeclineCacheSchema || record.Key != key || (record.Verdict != "sat" && record.Verdict != "unknown") ||
+	if record.Schema != smtDeclineCacheSchema || record.Key != key || (record.Verdict != "sat" && record.Verdict != "resource-unknown") ||
 		record.Checksum != smtDeclineChecksum(key, record.Verdict, record.Counterexample) {
+		return "", false
+	}
+	if record.Verdict == "resource-unknown" && !smtIndependent {
 		return "", false
 	}
 	return record.Counterexample, true
 }
 
 func (c *smtProofCache) publishDeclined(query string, res smt.Result, counterexample string) {
-	if c == nil || !smtDeclineCacheEnabled || res == smt.Unsat {
+	if res != smt.Sat {
 		return
 	}
-	verdict := "unknown"
-	if res == smt.Sat {
-		verdict = "sat"
+	c.publishDeclineVerdict(query, "sat", counterexample)
+}
+
+// Call only after every Unknown in the independent compound check is certified.
+func (c *smtProofCache) publishResourceDeclined(query string) {
+	c.publishDeclineVerdict(query, "resource-unknown", "")
+}
+
+func (c *smtProofCache) publishDeclineVerdict(query, verdict, counterexample string) {
+	if c == nil || !smtDeclineCacheEnabled {
+		return
 	}
 	key := c.key(query)
 	path := c.declinePath(key)

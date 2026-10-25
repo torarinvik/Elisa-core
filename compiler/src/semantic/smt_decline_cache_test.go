@@ -34,6 +34,10 @@ func TestSMTDeclineCacheRoundTripAndOptIn(t *testing.T) {
 		t.Fatal("different query text must miss")
 	}
 	cache.publishDeclined(other, smt.Unknown, "")
+	if _, ok := cache.declined(other); ok {
+		t.Fatal("uncertified unknown persisted")
+	}
+	cache.publishResourceDeclined(other)
 	if ce, ok := cache.declined(other); !ok || ce != "" {
 		t.Fatalf("unknown record: got %q %v", ce, ok)
 	}
