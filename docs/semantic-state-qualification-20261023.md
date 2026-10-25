@@ -3943,3 +3943,23 @@ be renamed. Unsupported grammar fails closed. Eighteen fixtures pass, and LLVM
 assembly validates both sides of the positive scoped-renaming fixture. All
 test/assembler commands are externally capped at 30 seconds. No old Stage1 IR
 comparison is retroactively qualified by these fixture results.
+
+### Avoid Go heap escapes for two synchronous LLVM array calls
+
+The cgo wrappers for LLVMAddIncoming and LLVMBuildGEP2 declare both noescape
+and nocallback. Installed Go1.27.3 needs both to emit keepalive-only argument
+uses. It still performs the normal cgo scheduler transition. The exact installed
+LLVM23.1.3 Core.cpp implementation synchronously consumes the arrays, with no
+retained caller buffer; this compiler installs no Go LLVM diagnostic/yield/fatal
+callbacks. No owning-buffer or callback-registration APIs receive these hints.
+
+A controlled overlay removes only these directives for the baseline. Across
+three100-iteration samples, FlagsMembership allocations fall235 to227 per IR
+generation and PackedLoweringCanonical273 to269. Wall time is noisy and does
+not establish a speedup; no Stage1 latency gain is claimed. Existing collection
+benchmarks fail their setup on obsolete raw-concurrency declarations and are
+not counted. Flags/builders, proven/refined/guarded/unproved GEP cases and
+partition edit/fresh-session regressions pass (1.337seconds). All invocations
+are externally bounded at30seconds. Logs `/tmp/elisa-cgo-hints-baseline-small-bench.log`,
+`/tmp/elisa-cgo-hints-candidate-small-bench.log`, and
+`/tmp/elisa-cgo-hints-backend-regressions.log`.
