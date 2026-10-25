@@ -135,7 +135,9 @@ func (p *retainedPermissions) withInitialRowsUsingInventory(a *Analyzer, decls [
 	}
 	// Every other row reads as its initial one; most already are, so only rows the
 	// solve moved are swapped.
-	solved := map[*FuncType]permissionRowSnapshot{}
+	frame := inventory.acquirePermissionSnapshots()
+	defer inventory.releasePermissionSnapshots(frame)
+	solved := frame.saved
 	for ft, start := range p.initial {
 		if editedTypes[ft] || start.identical(ft) {
 			continue
@@ -195,7 +197,9 @@ func (p *retainedPermissions) withInitialRowsForSummaryCallerUsingInventory(a *A
 		return false
 	}
 	currentType := permissionDeclType(a, functions[current])
-	solved := map[*FuncType]permissionRowSnapshot{}
+	frame := inventory.acquirePermissionSnapshots()
+	defer inventory.releasePermissionSnapshots(frame)
+	solved := frame.saved
 	for i, sd := range functions {
 		ft := permissionDeclType(a, sd)
 		if ft == nil {

@@ -533,3 +533,32 @@ source/oracle artifact /tmp/elisa-publication-addressable-struct-walk-v1.
 All50 selected backend generic/specialization/ABI/layout/alias/region regressions
 pass in10 externally bounded groups; complete test names and timing records are
 in /tmp/elisa-publication-addressable-backend.json.
+
+## Invocation-local permission snapshot frames
+
+The explicit update inventory now owns one saved-row map per active nesting
+depth. Every scope still scans the same complete ordered rows, reads live types
+and masks, saves complete five-slice headers, and performs the original normal
+restoration loops. Deferred release clears references and releases only its own
+frame on return, panic or Goexit. Prior exceptional semantic restoration behavior
+is unchanged. No global/persisted/Analyzer/Result reference owns this scratch.
+Nil-context compatibility keeps private one-shot allocation. Actual generation
+adds the unreachable stack-only frame type to the broad registry.
+
+The verbatim previous-path oracle compares complete row values, pointer/len/cap/
+nil headers across nested calls, exceptional unwinds, aliases, masks and later
+reuse, including idle key/value clearing. Focused permission/inventory race
+passes1.633s. At2048functions warmed single caller changes1125082bytes/29allocs/
+243.6–244.0us to0bytes/0allocs/130.2–131.5us; nested two scopes change2250166–
+2250167bytes/58allocs/437.8–443.0us to0bytes/0allocs/218.3–219.3us. The separate
+fresh invocation includes inventory and first-frame cost1583850bytes/57allocs/
+310.3–315.4us. This is a many-callers scratch reuse gain, not free initial setup
+or a complete Stage1 timing. Logs /tmp/elisa-permission-snapshot-*.log; frozen
+source and audit /tmp/elisa-permission-snapshot-frames-v1.
+
+Broader retained/permission/parallel/specialization/build/snapshot/overlay race
+passes14.486s. Initial external30s run expired with empty output during compilation;
+after confirmed process termination, retry completed. No budget was raised.
+
+All50 selected backend regressions pass in10 bounded groups; exact coverage and
+measurements: /tmp/elisa-permission-snapshot-backend.json.
