@@ -66,7 +66,7 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 }
 
 func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
-	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil {
+	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
 	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)

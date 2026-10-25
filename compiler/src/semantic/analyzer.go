@@ -217,7 +217,7 @@ type Analyzer struct {
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                         map[ast.Expr]OptimizationFacts
-	exprFactsOverlay *analyzerExprFactsOverlay
+	exprFactsOverlay                  *analyzerExprFactsOverlay
 	// Keep identity owners alive until all invocation-local facts are consumed;
 	// a pointer formatted as a string alone does not prevent address reuse by GC.
 	optimizationSymbolIDs    map[*Symbol]string
@@ -570,6 +570,9 @@ type Analyzer struct {
 	returnElementStmtUnknown map[*ast.ReturnStmt]bool
 	returnElementSummaries   map[*ast.FuncDecl]regionRefState
 	iterBinderElementStates  map[*Symbol]regionRefState
+
+	iterBinderElementOverlay *analyzerIterBinderElementOverlay
+
 	// comprehensionElementStates holds the provenance of each list comprehension's element
 	// expression, read in the binder scope, for a local container it initializes.
 	comprehensionElementStates   map[*ast.ListComprehensionExpr]regionRefState
@@ -1616,6 +1619,10 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 }
 
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
+	if a.iterBinderElementOverlay != nil {
+		err := a.rejectIterBinderElementOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
 	if a.exprFactsOverlay != nil {
 		err := a.rejectExprFactsOverlayOperation("canonical program publication")
 		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}

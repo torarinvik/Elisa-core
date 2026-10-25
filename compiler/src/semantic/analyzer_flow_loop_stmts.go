@@ -694,10 +694,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	for _, sym := range loopScope.Symbols {
 		a.iterBindingSources[sym] = stmt.Source
 		if binderTracked {
-			if a.iterBinderElementStates == nil {
-				a.iterBinderElementStates = map[*Symbol]regionRefState{}
-			}
-			a.iterBinderElementStates[sym] = cloneRegionRefState(binderElementState)
+			a.setIterBinderElementState(sym, cloneRegionRefState(binderElementState))
 		}
 		if stmt.Mode != ast.IterBindValue {
 			if a.iterBindingByRef == nil {

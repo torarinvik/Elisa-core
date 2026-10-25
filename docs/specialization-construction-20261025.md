@@ -346,3 +346,32 @@ semantic workload: constructor+first-append allocation changes from6004033bytes
 to7672bytes, and0.607–0.647ms to0.075–0.079ms. Full Stage1 timing for this
 producer remains pending. No proof authority, budgets or public event sequence
 is removed.
+
+## Lazy private iteration-binder provenance
+
+Specialization now borrows the idle canonical iteration-binder table as a private
+construction resource, materializing each requested value with the exact former
+deepCloneValue policy once per key. Local writes, present-zero/missing/nil keys,
+tombstones, scalar bits, nested map isolation and prior pointer/slice alias policy
+are preserved. Ordinary canonical workers retain the previous full-copy policy.
+The two production accesses use a closed accessor API; a Go-AST source check
+rejects new raw access and the generated opaque-map switch excludes this table.
+
+The new resource is rejected by canonical publication, scheduling, merges, public
+fact closures, AnalysisBuild, MarshalState and independently encoded Restore.
+Actual generators pass and add only the named resource type while removing its
+old opaque-map case. Focused race tests pass3.087s; broader retained/private/
+parallel/snapshot/zeroed/abstract-state race selection passes10.901s. The initial
+source fixture was invalid and used a field source that could never trigger the
+tracked writer; the corrected valid bare-local fixture requires zero errors and
+actual rows, then compares every value with the old clone. An additional concrete
+generic loop test passes1.526s and native actual-runtime execution passes1.631s,
+checking copied string views retain their live backing. All50 selected backend
+generic/specialization/alias/borrow/region tests pass within individual bounded
+groups; one cumulative25s group timeout was preserved and split without omitting
+any test. Logs: /tmp/elisa-iter-binder-*.log and backend JSON coverage records.
+
+A512-row nested-state constructor fixture changes from24960545bytes/128748
+allocations and14.5–15.6ms to7536bytes/233allocations and66–87us. The real
+Stage1 source attribution was46.8MB per full table copy; neither result alone
+is a full Stage1 speed claim. Fresh-producer/new-edit qualification follows.

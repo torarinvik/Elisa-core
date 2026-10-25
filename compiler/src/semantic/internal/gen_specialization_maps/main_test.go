@@ -15,6 +15,7 @@ type Analyzer struct {
  unknown namedMap
  exprTypes map[int]int
  exprFacts map[int]int
+ iterBinderElementStates map[int]int
  functionAnalyses map[int]int
 }`)
 	one, err := generate(source)
@@ -30,7 +31,7 @@ type Analyzer struct {
 			t.Fatalf("direct map %s omitted", name)
 		}
 	}
-	for _, name := range []string{"unknown", "exprTypes", "exprFacts", "functionAnalyses"} {
+	for _, name := range []string{"unknown", "exprTypes", "exprFacts", "iterBinderElementStates", "functionAnalyses"} {
 		if strings.Contains(string(one), "dst."+name) {
 			t.Fatalf("special/unknown field %s optimized", name)
 		}

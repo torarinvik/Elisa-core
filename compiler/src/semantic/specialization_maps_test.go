@@ -4,8 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"math"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,7 +36,7 @@ func TestSpecializationOpaqueMapSchemaAndPolicy(t *testing.T) {
 		for _, field := range typ.Type.(*ast.StructType).Fields.List {
 			if _, ok := field.Type.(*ast.MapType); ok {
 				for _, name := range field.Names {
-					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "functionAnalyses" {
+					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "functionAnalyses" {
 						expected = append(expected, name.Name)
 					}
 				}
@@ -161,10 +161,10 @@ func TestSpecializationOpaqueInterfacesAndComparableArrayKeys(t *testing.T) {
 	nested := map[string]int{"x": 1}
 	var nilPointer *int
 	input := map[any]any{
-		[0]int{}: data,
+		[0]int{}:                    data,
 		[2]any{"name", (*int)(nil)}: nested,
-		nil: nil,
-		"typed-nil": nilPointer,
+		nil:                         nil,
+		"typed-nil":                 nilPointer,
 	}
 	old := deepCloneValue(reflect.ValueOf(input)).Interface().(map[any]any)
 	typed := maps.Clone(input)
@@ -191,7 +191,7 @@ func TestSpecializationOpaqueHelperUnknownAndResourceFallback(t *testing.T) {
 	if cloneSpecializationOpaqueMap(dst, src, "futureUnknownMap", field) {
 		t.Fatal("unknown field bypassed reflective fallback")
 	}
-	if cloneSpecializationOpaqueMap(dst, src, "exprTypes", field) || cloneSpecializationOpaqueMap(dst, src, "exprFacts", field) || cloneSpecializationOpaqueMap(dst, src, "functionAnalyses", field) {
+	if cloneSpecializationOpaqueMap(dst, src, "exprTypes", field) || cloneSpecializationOpaqueMap(dst, src, "exprFacts", field) || cloneSpecializationOpaqueMap(dst, src, "iterBinderElementStates", field) || cloneSpecializationOpaqueMap(dst, src, "functionAnalyses", field) {
 		t.Fatal("specialization-specific overlay fields bypassed owner policy")
 	}
 	if cloneSpecializationOpaqueMap(dst, src, "exprFacts", reflect.ValueOf(map[string][]int{})) {

@@ -94,7 +94,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 					// storage it copied or borrowed from.
 					r = a.innerRegion(r, a.ownedStorageRootRegion(value, seen))
 				}
-				if state, tracked := a.iterBinderElementStates[sym]; tracked {
+				if state, tracked := a.lookupIterBinderElementState(sym); tracked {
 					r = a.innerRegion(r, a.innermostTrackedRegion(state))
 				} else if src := a.iterBindingSources[sym]; src != nil {
 					r = a.innerRegion(r, a.ownedStorageRootRegion(src, seen))

@@ -115,7 +115,6 @@ var specializationOpaqueMapFields = [...]string{
 	"indexBoundsProven",
 	"initHooksByName",
 	"interfaceMethodRefs",
-	"iterBinderElementStates",
 	"iterBindingByRef",
 	"iterBindingSources",
 	"iterFillLintDecided",
@@ -617,9 +616,6 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "interfaceMethodRefs":
 		dst.interfaceMethodRefs = maps.Clone(src.interfaceMethodRefs)
-		return true
-	case "iterBinderElementStates":
-		dst.iterBinderElementStates = maps.Clone(src.iterBinderElementStates)
 		return true
 	case "iterBindingByRef":
 		dst.iterBindingByRef = maps.Clone(src.iterBindingByRef)
