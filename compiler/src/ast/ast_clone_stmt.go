@@ -92,7 +92,7 @@ func CloneStmtSubst(stmt Stmt, subst map[string]Expr) Stmt {
 				elifs = append(elifs, ElifClause{Position: e.Position, Hint: e.Hint, Cond: ec, Body: body})
 			}
 		}
-		return &IfStmt{Position: n.Position, Hint: n.Hint, Cond: cond, Then: then, Elifs: elifs, Else: els}
+		return &IfStmt{Position: n.Position, Hint: n.Hint, Cond: cond, Then: then, Elifs: elifs, Else: els, FromSource: n.FromSource}
 	case *WhileStmt:
 		cond := CloneExprSubst(n.Cond, subst)
 		if n.Cond != nil && cond == nil {

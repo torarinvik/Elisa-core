@@ -4360,3 +4360,15 @@ A fresh pair-specific producer audit qualifies 3,648 exact candidate local-name
 permissions; the complete strict IR comparison is still pending. The expanded
 source difference is a 33-byte insertion plus three same-length generated
 #line substitutions, all explicitly recorded; it is not an insertion-only pair.
+
+
+AST statement substitution now preserves IfStmt.FromSource, including nested
+source branches while keeping synthesized branches synthetic. Omitting this
+field made cloned retained bodies disagree with cold source provenance. The
+AST clone/isolation suite passes under race in 1.273 seconds. Strict cold
+metadata/diagnostic comparisons for the isolated line-shift experiment also
+pass for warnings, defaults, generic calls, lambda CFGs, moved-hook decline
+and error-prefix decline (1.763 seconds). The separate live bounds-summary
+defect remains under investigation; no line-shift fast-path gain is claimed
+from this field fix alone. Logs `/tmp/elisa-clone-source-if-ast-race.log` and
+`/tmp/elisa-line-shift-fast-v3-provenance-race.log`.
