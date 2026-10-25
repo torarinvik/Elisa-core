@@ -486,3 +486,27 @@ build-once costs457520bytes/24allocations/0.091–0.096ms per update. No-summary
 updates pay this fixed cost, explicitly measured rather than hidden. Logs:
 /tmp/elisa-permission-inventory-*.log and backend JSON coverage. Fresh-producer
 Stage1 timing remains necessary; no sparse-row authority or proof work is skipped.
+
+## Preserved-specification Stage1 comparison at 695c49fb
+
+Fresh empty disk namespace, independent processes, server disabled, identical
+47be source with only the six inactive-storage methods and four owner helpers
+changed; all original specification includes/effect grants remain. Compiler
+695c49fb binary SHA256 ee39ba035a8e874a57db1efe54f69dd472418cf2387ace0865b038d7a59e8660.
+Cold analysis completed in22 externally bounded invocations; every invocation
+finished within30s, final object step29.703s. Normal cache priming15.464849s,
+exact unchanged0.285675s. The first unseen depth-comparison body edit took
+16.600622s versus17.935174s on673183d8 (same source/workload), about7.4% lower
+in this single controlled comparison. Exact edited repeat0.290104s. These are
+separate measurements, not repeat-hit substitution for edit latency.
+
+Baseline and edited objects respectively retain exact SHA256
+035337b9ae6251ba60cebd4d884900f0a3ca2fef1c12ecd2728b55786d7646ef and
+9eca96bcb50e0007f0e7ad4060e22919d617bc21d6950a422b2b51ec391fd669,
+matching the previous producer byte for byte. Source restored to its exact
+original hash after measurement. Evidence pointer
+/tmp/elisa-stage1-settled-inventory-root, JSON/settings/objects and source edit
+receipts alongside it. This run measures the three latest allocation changes
+together; it does not isolate their individual end-to-end effects. Body latency
+still exceeds2s; O3, varied edit matrix, strict current-producer IR and full
+latest-source self-host/gen2 qualification remain open. Cache flags remain opt-in.
