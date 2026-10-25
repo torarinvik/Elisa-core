@@ -3870,3 +3870,16 @@ seconds and linked ABI test in 1.378 seconds. A separate immutable 722e709c arch
 plus the exact group patch passes the broader retained/analysis-build selection
 in 1.302 seconds. Commands are externally capped at 30 seconds. These qualify
 correctness; full compiler disk-cache edit timing is still pending.
+
+### An additive scalar field cannot hide another field's bit-group edit
+
+The defaulted-scalar insertion optimization now compares existing inline group
+declarations as well as ordinary field types and defaults. Inline groups have
+nil AST Field.Type values; comparing only Type incorrectly treated a simultaneous
+u4-to-u5 group member edit as invisible to projected readers.
+
+A disk-roundtrip regression on 5313c938 reproduced a live reader retaining u4
+while the current group member was u5. With the guard corrected, the regression
+passes (0.479 seconds), and the additive/inline-group selection passes (0.413
+seconds), including strict cold/live metadata parity. Commands are externally
+capped at 30 seconds. Ordinary defaulted scalar insertion remains eligible.

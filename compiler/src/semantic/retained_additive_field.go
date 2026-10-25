@@ -20,7 +20,7 @@ func (a *Analyzer) retainedAdditiveScalarEdit(old, current *ast.StructDecl) bool
 		if i < len(old.Fields) && f.Name == old.Fields[i].Name {
 			o := old.Fields[i]
 			if f.Mutable != o.Mutable || f.Private != o.Private || f.Ghost != o.Ghost || f.IsTail != o.IsTail ||
-				!retainedSameShape(f.Type, o.Type) || !retainedSameShape(f.DefaultValue, o.DefaultValue) {
+				!retainedSameShape(f.Type, o.Type) || !retainedSameShape(f.BitGroup, o.BitGroup) || !retainedSameShape(f.DefaultValue, o.DefaultValue) {
 				return false
 			}
 			i++
