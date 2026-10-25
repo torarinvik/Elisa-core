@@ -345,6 +345,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if ownedFunctionAnalyses && name == "exprTypes" {
+			// deepCloneValue deliberately leaves interface values opaque. A
+			// typed outer clone preserves exactly those aliases/nil entries
+			// without reflective per-key/value boxing on this large table.
+			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.exprTypes)))
+			continue
+		}
 		if ownedFunctionAnalyses && name == "functionAnalyses" {
 			// Skip BEFORE deepCloneValue: cloning then clearing still performs
 			// a whole-program map traversal in the serialized specialization path.
