@@ -295,7 +295,11 @@ var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_BUILD_TIMING":                  true,
 	"ELISACORE_CACHE_DEBUG":                   true,
 	"ELISACORE_CPUPROFILE":                    true,
+	"ELISACORE_CPUPROFILE_SECONDS":            true,
 	"ELISACORE_MEMPROFILE":                    true,
+	"ELISACORE_MEMPROFILE_SECONDS":            true,
+	"ELISACORE_GOROUTINEPROFILE":              true,
+	"ELISACORE_BLOCKPROFILE":                  true,
 	"ELISACORE_KEEP_TEST_TEMP":                true,
 	"ELISACORE_TEST_CACHE":                    true,
 	"ELISACORE_TEST_CACHE_DEBUG":              true,
@@ -337,6 +341,8 @@ func buildCacheEnvKey() []string {
 
 // These modes observe this invocation or publish files outside the object
 // artifact. Replaying an earlier invocation cannot satisfy those effects.
+// Profile durations and goroutine/block destinations are dormant without their
+// CPU/memory parent profile; those parent controls already require this bypass.
 func buildCacheRequestObserverEnabled() bool {
 	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
 		return true

@@ -7,11 +7,25 @@ import (
 )
 
 func TestSMTObserversPreserveEnvironmentKeyAndBypassReplay(t *testing.T) {
-	observers := []string{"ELISA_SMT_RLIMIT_LOG", "ELISA_SMT_TRACE"}
+	observers := []string{"ELISA_SMT_RLIMIT_LOG", "ELISA_SMT_TRACE", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE"}
+	profileControls := []struct {
+		name, parent, value string
+	}{
+		{"ELISACORE_CPUPROFILE_SECONDS", "ELISACORE_CPUPROFILE", "1"},
+		{"ELISACORE_MEMPROFILE_SECONDS", "ELISACORE_MEMPROFILE", "1"},
+		{"ELISACORE_GOROUTINEPROFILE", "ELISACORE_CPUPROFILE", "goroutine.pprof"},
+		{"ELISACORE_BLOCKPROFILE", "ELISACORE_CPUPROFILE", "block.pprof"},
+	}
 	// Remove existing observers so the test also works in an instrumented shell.
-	for _, name := range append(observers, "ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT", "ELISACORE_ANALYSIS_CACHE_DEBUG") {
+	for _, name := range append(observers, "ELISACORE_BUILD_TIMING", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT", "ELISACORE_ANALYSIS_CACHE_DEBUG") {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, control := range profileControls {
+		t.Setenv(control.name, "")
+		if err := os.Unsetenv(control.name); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -27,6 +41,26 @@ func TestSMTObserversPreserveEnvironmentKeyAndBypassReplay(t *testing.T) {
 			}
 			if !buildCacheRequestObserverEnabled() {
 				t.Fatal("observer could replay an object without producing requested logs")
+			}
+		})
+	}
+	// Dependent profile controls have no standalone effects in cpuprofile.go.
+	// Their parent profile activates per-invocation capture and must bypass replay.
+	for _, control := range profileControls {
+		t.Run(control.name, func(t *testing.T) {
+			t.Setenv(control.name, control.value)
+			if got := buildCacheEnvKey(); !reflect.DeepEqual(got, baseline) {
+				t.Fatalf("profile control changed semantic environment identity: got %v, want %v", got, baseline)
+			}
+			if buildCacheRequestObserverEnabled() {
+				t.Fatal("dormant profile control unexpectedly bypassed replay")
+			}
+			t.Setenv(control.parent, "profile.pprof")
+			if got := buildCacheEnvKey(); !reflect.DeepEqual(got, baseline) {
+				t.Fatalf("active profile changed semantic environment identity: got %v, want %v", got, baseline)
+			}
+			if !buildCacheRequestObserverEnabled() {
+				t.Fatal("active profile could replay without per-request capture")
 			}
 		})
 	}
