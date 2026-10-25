@@ -576,12 +576,13 @@ Cold, normal baseline, edited and separately profiled arithmetic-edit objects
 all remain byte-identical to their corresponding previous-producer objects.
 
 A separate novel arithmetic-body profile with observers enabled takes17.945267s
-versus22.221040s on673183d8. Sampled allocation total10696.50MB versus16113.98MB
-(~33.6% reduction across the combined latest five cuts). Remaining inclusive
-SpecializeFunction4956.57MB and cloneAnalyzer3230.19MB remain large; these overlap,
-not separate totals. Publication walker1.33GB cumulative, disk decoder2.19GB
-cumulative and ordinary tokenization0.63GB cumulative remain. No discarded proof,
-optimization or check budget contributes to this reduction. Source restored
+versus22.221040s on673183d8. The allocation profile reports10696.50MB versus
+16113.98MB, but these are GC-lagging sampled snapshots, not process TotalAlloc;
+the previously stated33.6% process-allocation reduction is withdrawn below.
+Inclusive SpecializeFunction4956.57MB and cloneAnalyzer3230.19MB identify observed
+hotspots, overlap, and are not separate totals. Publication walker1.33GB cumulative,
+disk decoder2.19GB and tokenization0.63GB are similarly sampled. Proof, optimization
+and check budgets remain unchanged. Source restored
 exactly after both edits. Evidence /tmp/elisa-stage1-snapshot-publication-root,
 complete per-run JSON/settings/objects, source receipts and CPU/allocation profiles.
 Targets still require substantial work: body2s, contract/signature3s, major10s,
@@ -715,3 +716,25 @@ remains necessary; actual hot constructor field inputs are still being measured.
 
 All50 selected backend generic/specialization/ABI/layout/alias/region regressions
 pass in10 externally bounded groups: /tmp/elisa-store-flow-pool-backend.json.
+
+## Allocation-profile accounting correction
+
+Current runtime source documents that MemProfile data may be up to two GC cycles
+old. CLI startMemProfile writes pprof.Lookup("allocs").WriteTo(f,0), without a
+final collection or current runtime.MemStats snapshot. Thus the published profiles
+can lag recent constructors substantially at the default Darwin GOGC200. Reported
+10696/10732/16114MB profile totals and per-function sums are observations from that
+sampled epoch, not complete process allocation totals. The earlier33.6% total
+allocation-reduction claim is withdrawn; the apparent flat latest total likewise
+cannot establish flat real allocations. This is separate from normal CLI timings,
+exact object/diagnostic comparisons and testing.B byte/allocation counts, which
+remain valid. Use an explicit final MemStats TotalAlloc/Mallocs observer or a
+properly synchronized complete profile for future process-wide allocation claims.
+Do not force GC or change GOGC in qualification timings to make profiles comparable.
+
+The isolated actual-input observer at /tmp/elisa-owned-clone-hot-debug-root records
+187 cold and187 fresh-disk-baseline constructors from one actual Analyzer each;
+all match the labeled Result and contain the complete measured145742symbol-ID,
+5013binder,11308store-flow and57673no-storage rows. This confirms actual inputs in
+those phases, not a shortcut for measuring process allocation totals. Debug object
+matches the normal baseline exactly. Observer timings are never gain evidence.
