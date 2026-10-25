@@ -394,6 +394,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		if shareDeclarationMaps && field.Kind() == reflect.Map && !field.IsNil() && parallelDeclarationMapIsReadOnly(name) {
 			continue
 		}
+		if ownedFunctionAnalyses && cloneSpecializationOpaqueMap(cloned.Addr().Interface().(*Analyzer), a, name, field) {
+			continue
+		}
 		settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))
 	}
 	return cloned
