@@ -73,7 +73,7 @@ func (r *RetainedAnalysis) snapshotReturnBorrowInvalidationSummaries(a *Analyzer
 // SCC even when the first summary comparison is masked by the old recursive
 // assumption; acyclic callers are reanalyzed only when a summary changes.
 
-func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCallers(a *Analyzer, before map[*ast.FuncDecl]retainedInferredFunctionSummary, declarationDiagnostics int) bool {
+func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCallers(a *Analyzer, before map[*ast.FuncDecl]retainedInferredFunctionSummary, declarationDiagnostics int, inventory *retainedPermissionInventory) bool {
 	if r == nil || a == nil || len(before) == 0 || len(r.rbInvalid) == 0 {
 		return true
 	}
@@ -135,7 +135,7 @@ func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCallers(a *Analyzer, befo
 		cyclic = cyclic || isCyclic
 	}
 	if cyclic {
-		return r.reanalyzeReturnBorrowSummaryComponents(a, before, affected, components, componentCyclic, declarationDiagnostics, changedSummary)
+		return r.reanalyzeReturnBorrowSummaryComponents(a, before, affected, components, componentCyclic, declarationDiagnostics, changedSummary, inventory)
 	}
 	var order []*ast.FuncDecl
 	for _, component := range components {
@@ -145,7 +145,7 @@ func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCallers(a *Analyzer, befo
 	for _, fn := range order {
 		if needsReanalysis[fn] {
 			if scoped, live := r.retainedScopedFunction(fn); live && fn.Body != nil {
-				r.reanalyzeSummaryDependentFunction(a, fn, scoped, declarationDiagnostics)
+				r.reanalyzeSummaryDependentFunction(a, fn, scoped, declarationDiagnostics, inventory)
 			}
 		}
 		old, hadOld := before[fn]
@@ -333,7 +333,7 @@ func retainedSummaryCycleRoundLimit(componentSize int) int {
 	return limit
 }
 
-func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryComponents(a *Analyzer, before map[*ast.FuncDecl]retainedInferredFunctionSummary, affected map[*ast.FuncDecl]bool, components [][]*ast.FuncDecl, componentCyclic []bool, declarationDiagnostics int, changedSummary map[*ast.FuncDecl]bool) bool {
+func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryComponents(a *Analyzer, before map[*ast.FuncDecl]retainedInferredFunctionSummary, affected map[*ast.FuncDecl]bool, components [][]*ast.FuncDecl, componentCyclic []bool, declarationDiagnostics int, changedSummary map[*ast.FuncDecl]bool, inventory *retainedPermissionInventory) bool {
 	needsReanalysis := map[*ast.FuncDecl]bool{}
 	for componentIndex, component := range components {
 		trigger := false
@@ -344,13 +344,13 @@ func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryComponents(a *Analyzer, b
 			continue
 		}
 		if componentCyclic[componentIndex] {
-			if !r.reanalyzeReturnBorrowSummaryCycle(a, component, declarationDiagnostics) {
+			if !r.reanalyzeReturnBorrowSummaryCycle(a, component, declarationDiagnostics, inventory) {
 				return false
 			}
 		} else if len(component) != 0 && needsReanalysis[component[0]] {
 			fn := component[0]
 			if scoped, live := r.retainedScopedFunction(fn); live && fn.Body != nil {
-				r.reanalyzeSummaryDependentFunction(a, fn, scoped, declarationDiagnostics)
+				r.reanalyzeSummaryDependentFunction(a, fn, scoped, declarationDiagnostics, inventory)
 			}
 		}
 		for _, fn := range component {
@@ -370,7 +370,7 @@ func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryComponents(a *Analyzer, b
 	return true
 }
 
-func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCycle(a *Analyzer, component []*ast.FuncDecl, declarationDiagnostics int) bool {
+func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCycle(a *Analyzer, component []*ast.FuncDecl, declarationDiagnostics int, inventory *retainedPermissionInventory) bool {
 	for _, fn := range component {
 		resetRetainedCycleFunctionSummary(a, fn)
 	}
@@ -390,7 +390,7 @@ func (r *RetainedAnalysis) reanalyzeReturnBorrowSummaryCycle(a *Analyzer, compon
 		}
 		for _, fn := range component {
 			if scoped, live := r.retainedScopedFunction(fn); live && fn.Body != nil {
-				r.reanalyzeSummaryDependentFunction(a, fn, scoped, declarationDiagnostics)
+				r.reanalyzeSummaryDependentFunction(a, fn, scoped, declarationDiagnostics, inventory)
 			}
 		}
 		stable := true
@@ -455,7 +455,7 @@ func (r *RetainedAnalysis) retainedScopedFunction(fn *ast.FuncDecl) (scopedDecl,
 	return scopedDecl{}, false
 }
 
-func (r *RetainedAnalysis) reanalyzeSummaryDependentFunction(a *Analyzer, fn *ast.FuncDecl, scoped scopedDecl, declarationDiagnostics int) {
+func (r *RetainedAnalysis) reanalyzeSummaryDependentFunction(a *Analyzer, fn *ast.FuncDecl, scoped scopedDecl, declarationDiagnostics int, inventory *retainedPermissionInventory) {
 	if r == nil || a == nil || fn == nil {
 		return
 	}
@@ -519,7 +519,7 @@ func (r *RetainedAnalysis) reanalyzeSummaryDependentFunction(a *Analyzer, fn *as
 	}
 	a.returnBorrowLateFrames = frames
 	a.removeDisjointCallSitesForCaller(fn)
-	r.perms.withInitialRows(a, r.decls, func() {
+	r.perms.withInitialRowsUsingInventory(a, r.decls, inventory, func() {
 		a.analyzeScopedDecl(scoped)
 	}, fn)
 	r.bodyEnd = len(a.diagnostics)

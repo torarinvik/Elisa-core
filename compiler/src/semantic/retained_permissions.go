@@ -102,11 +102,15 @@ func (p *retainedPermissions) resetToInitialRows(a *Analyzer, decls []scopedDecl
 // inferred row takes its callees' rows). The solved rows are put back afterwards for the
 // incremental solve; a full solve restarts from the initial rows anyway.
 func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, body func(), preserveSummaryReanalyzed ...*ast.FuncDecl) {
+	p.withInitialRowsUsingInventory(a, decls, nil, body, preserveSummaryReanalyzed...)
+}
+
+func (p *retainedPermissions) withInitialRowsUsingInventory(a *Analyzer, decls []scopedDecl, inventory *retainedPermissionInventory, body func(), preserveSummaryReanalyzed ...*ast.FuncDecl) {
 	if p.initial == nil {
 		body()
 		return
 	}
-	if len(preserveSummaryReanalyzed) != 0 && p.withInitialRowsForSummaryCaller(a, decls, preserveSummaryReanalyzed[0], body) {
+	if len(preserveSummaryReanalyzed) != 0 && p.withInitialRowsForSummaryCallerUsingInventory(a, decls, inventory, preserveSummaryReanalyzed[0], body) {
 		return
 	}
 	editedTypes := map[*FuncType]bool{}
@@ -175,13 +179,17 @@ func (p *retainedPermissions) withInitialRows(a *Analyzer, decls []scopedDecl, b
 // already contributed their freshly analyzed rows, while fn and later bodies still
 // see their declaration rows. The saved rows are restored after fn is analyzed.
 func (p *retainedPermissions) withInitialRowsForSummaryCaller(a *Analyzer, decls []scopedDecl, fn *ast.FuncDecl, body func()) bool {
-	functions := permissionFunctionDecls(decls)
-	current := -1
-	for i, sd := range functions {
-		if sd.Decl == fn {
-			current = i
-			break
-		}
+	return p.withInitialRowsForSummaryCallerUsingInventory(a, decls, nil, fn, body)
+}
+
+func (p *retainedPermissions) withInitialRowsForSummaryCallerUsingInventory(a *Analyzer, decls []scopedDecl, inventory *retainedPermissionInventory, fn *ast.FuncDecl, body func()) bool {
+	if inventory == nil {
+		inventory = newRetainedPermissionInventory(decls)
+	}
+	functions := inventory.functions
+	current, present := inventory.first[fn]
+	if !present {
+		current = -1
 	}
 	if current < 0 {
 		return false

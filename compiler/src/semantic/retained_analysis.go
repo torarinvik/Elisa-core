@@ -1835,9 +1835,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	returnBorrowSummaryConverged := true
-	r.perms.withInitialRows(a, r.decls, func() {
+	// Structural additions/removals/reindexing are complete. This membership
+	// snapshot lives only through body replay; summary rounds still read live
+	// FuncTypes and dynamic bodyEdited/summaryReanalyzed masks on every scan.
+	permissionInventory := newRetainedPermissionInventory(r.decls)
+	r.perms.withInitialRowsUsingInventory(a, r.decls, permissionInventory, func() {
 		a.analyzeDecls(changed)
-		returnBorrowSummaryConverged = r.reanalyzeReturnBorrowSummaryCallers(a, returnSummariesBefore, len(pre.diags))
+		returnBorrowSummaryConverged = r.reanalyzeReturnBorrowSummaryCallers(a, returnSummariesBefore, len(pre.diags), permissionInventory)
 	})
 	if !returnBorrowSummaryConverged {
 		// The live analyzer has already had the edited bodies and some SCC members

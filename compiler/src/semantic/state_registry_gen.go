@@ -785,6 +785,7 @@ func semanticStateTypes() []reflect.Type {
 		reflect.TypeFor[retainedInferredFunctionSummary](),
 		reflect.TypeFor[retainedOwnerIndex](),
 		reflect.TypeFor[retainedOwnerLine](),
+		reflect.TypeFor[retainedPermissionInventory](),
 		reflect.TypeFor[retainedPermissions](),
 		reflect.TypeFor[retainedStructEdit](),
 		reflect.TypeFor[retainedUsingChange](),

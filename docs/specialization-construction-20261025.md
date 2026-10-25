@@ -463,3 +463,26 @@ Direct-map benchmark changes1770312bytes/8229allocations/1.35–2.11ms to
 alias/rekey/publication blocker. Logs: /tmp/elisa-param-facts-*.log and
 /tmp/elisa-param-facts-backend.json. Full fresh-producer edited Stage1 measurement
 remains necessary; the component benchmark is not a target qualification.
+
+## Invocation-local permission inventory reuse
+
+A stable retained update constructs the permission function inventory once after
+structural changes, preserving executable source order and the first FuncDecl
+ordinal. It passes that local value through body/summary components, cycles and
+callers. All live type lookups, dynamic masks, complete row scans, declared/initial
+selection, shallow snapshots and nested/current-type restoration remain unchanged.
+No inventory instance is stored in Analyzer, RetainedAnalysis, Result or a global.
+Generation adds its unused named type to the general registry; no persisted graph
+field or resource is added. Independent source review confirmed phase stability.
+
+The verbatim old-path oracle covers duplicate/nil/missing declarations, aliased
+FuncTypes, dynamic rebinding/masks and five full slice values/identities. Actual
+restored body/summary/add/remove cases compare cold results and every permission
+row. Focused tests pass0.421s; broad semantic race passes13.101s after the first
+external30s run expired during compilation. All50 selected backend regressions
+pass in bounded groups. At2048functions the per-caller benchmark changes
+1508686bytes/42allocations/0.46–0.65ms to1125134bytes/29allocations/0.37–0.41ms;
+build-once costs457520bytes/24allocations/0.091–0.096ms per update. No-summary
+updates pay this fixed cost, explicitly measured rather than hidden. Logs:
+/tmp/elisa-permission-inventory-*.log and backend JSON coverage. Fresh-producer
+Stage1 timing remains necessary; no sparse-row authority or proof work is skipped.
