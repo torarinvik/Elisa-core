@@ -4154,8 +4154,15 @@ preserved separately. Its following exact artifact hit takes0.160925seconds.
 A genuine is_query_keyword median addition takes3.893690seconds, missing the
 2second target. First timings are immutable JSON under the root named in
 `/tmp/elisa-stage1-final-cache-safety-root`. The changed source remains private.
-An independent cold oracle is in progress; its first2checkpoints are preserved
-when the runner stopped on a competing agent seed.
+An independent cold oracle completed in22 bounded invocations. Its edited
+object is byte-identical to the warm first edit (SHA256
+f4dd7ecf48d4907cbcc85f1f23e5f33cd2023178674f0892da4e9500e143a90d),
+and its entire26,874-line diagnostic transcript matches after removing only
+analysis-cache debug records. Its early contention checkpoint is preserved and
+cold wall times are not performance qualification. The315,836,065-byte IR pair
+has37,172 differing lines involving generated identifiers. Full IR equivalence
+is still unqualified: the current strict checker deliberately rejects some
+observed name forms; no regex-normalized result is counted as proof.
 
 The separate profile repeat takes4.164584seconds: state restore1.086seconds,
 fast Update500ms, partition IR2.026seconds, native compilation0. Its object hash
@@ -4185,3 +4192,23 @@ Raw logs `/tmp/elisa-deferred-scratch-all-retained-race-v3.log`,
 `/tmp/elisa-deferred-scratch-native-driver.log`. Initial compile/test commands
 that hit external30second caps are preserved as failures, not passing evidence.
 Stage1 wall-time improvement for this change is still unmeasured.
+
+### Avoid Go heap escapes for two synchronous LLVM array calls
+
+The cgo wrappers for LLVMAddIncoming and LLVMBuildGEP2 declare both noescape
+and nocallback. Installed Go1.27.3 needs both to emit keepalive-only argument
+uses. It still performs the normal cgo scheduler transition. The exact installed
+LLVM23.1.3 Core.cpp implementation synchronously consumes the arrays, with no
+retained caller buffer; this compiler installs no Go LLVM diagnostic/yield/fatal
+callbacks. No owning-buffer or callback-registration APIs receive these hints.
+
+A controlled overlay removes only these directives for the baseline. Across
+three100-iteration samples, FlagsMembership allocations fall235 to227 per IR
+generation and PackedLoweringCanonical273 to269. Wall time is noisy and does
+not establish a speedup; no Stage1 latency gain is claimed. Existing collection
+benchmarks fail their setup on obsolete raw-concurrency declarations and are
+not counted. Flags/builders, proven/refined/guarded/unproved GEP cases and
+partition edit/fresh-session regressions pass (1.337seconds). All invocations
+are externally bounded at30seconds. Logs `/tmp/elisa-cgo-hints-baseline-small-bench.log`,
+`/tmp/elisa-cgo-hints-candidate-small-bench.log`, and
+`/tmp/elisa-cgo-hints-backend-regressions.log`.
