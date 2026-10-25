@@ -375,3 +375,32 @@ A512-row nested-state constructor fixture changes from24960545bytes/128748
 allocations and14.5–15.6ms to7536bytes/233allocations and66–87us. The real
 Stage1 source attribution was46.8MB per full table copy; neither result alone
 is a full Stage1 speed claim. Fresh-producer/new-edit qualification follows.
+
+## Workload provenance correction and preserved-spec rerun
+
+The earlier bucket/iter workload copied the entire Go collections version into
+the47be snapshot. It changed FNV specifications, named bucket constants and
+effect-grant declarations beyond the six intended storage methods. Historical
+manifests/hashes remain intact, with workload-provenance-amendment.json beside
+each affected experiment. Their same-workload before/after timings are engineering
+evidence, not qualification against the self-host repository's preserved library
+specifications. No completion or proof-strength claim follows from that workload.
+
+Within that exact older-library workload, mainfb341977 produces the final cold
+object in29.534s, a first normal object-cache prime in14.866280s and the first
+same depth-comparison edit in16.235027s (prior23.689778s). The actual subsequent
+exact hit is0.272836s; diagnostic bootstrap bypassed object-cache publication,
+so the first normal prime must not be called an exact-hit measurement. Baseline,
+first-edit and arithmetic-profile objects are byte-identical to their respective
+prior-producer counterparts. The complete new profile takes19.114264s, samples
+15.55GB allocation, and still identifies8.10GB specialization/5.95GB analyzer
+clone allocation; retained preparation remains2.640s.
+
+The self-host primary now has exactly the four owner rewraps and six storage
+method changes, preserving every other original collection function byte-for-byte,
+its FNV specification include, bucket constants and unrelated effect grants.
+Commits4bdcd7cde then corrective32113afd5 leave a net two-file30insert/19delete
+delta. An independently copied7043-file preserved-spec input is recorded at
+/tmp/elisa-stage1-preserved-spec-source-root. Its complete original-library
+cold/IR/runtime qualification must run next. This correction preserves the full
+original goal; O3, varied edits, normal CLI defaults and generation2 remain open.
