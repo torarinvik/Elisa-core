@@ -151,3 +151,32 @@ type-cache cost is 5.195 ms / 7.414 MB. With zero unrelated functions, cold
 classifier setup increases time from 0.152 ms to 0.214 ms while allocation drops.
 These fixture costs do not establish full Stage1 performance. Logs
 `/tmp/elisa-canonical-membership-pruning-{race,benchmark,backend-race}.log`.
+
+## Reject private semantic failures before codegen publication
+
+Private concrete analysis previously emitted ordinary semantic errors into a
+construction analyzer, then published only canonical diagnostics and memoized
+the product. Both a new concrete bool-reference arithmetic error and a repeated
+canonical error on the same target reproduced successful invalid products before
+the fix. Source/API failures are preserved in
+`/tmp/elisa-specialization-diagnostic-{unpatched-regression,v3-unpatched}.log`.
+
+Specialization workers now start with fresh diagnostics AND deduplication before
+cloning inherited storage. They reject empty/error-severity diagnostics before
+publication, matching Result.Errors. This prevents inherited reporter state from
+hiding errors or suppressing region-dependent checks. Warnings remain nonfatal,
+canonical diagnostics remain unchanged, failures never enter the successful
+memo, and ordinary worker diagnostic policy remains unchanged. No proof budget
+or check is weakened.
+
+Focused real-source regressions pass under race in 1.445 seconds; all private,
+overlay, canonical, Retained, snapshot and parallel semantic controls pass in
+8.713 seconds. Backend binding/context/disk-IR/ABI/runtime controls pass on the
+bounded retry after preserved compilation-time timeouts. Records
+`/tmp/elisa-specialization-diagnostic-v3-{focused-race,semantic-race-retry,backend-race-final}.log`.
+
+The preceding acbfaf producer still timed out in both final cold object generation
+and a normal same-cache recovery. Those runs remain engineering performance
+evidence, not correctness qualification, because they predate this error gate.
+Their immutable source/cache/producer records are under
+`/tmp/elisa-stage1-specialization-catalog-root`; no state has been rekeyed.

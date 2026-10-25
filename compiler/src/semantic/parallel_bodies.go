@@ -352,6 +352,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if ownedFunctionAnalyses && (name == "diagnostics" || name == "reportedDiagnostics") {
+			// Reanalysis must re-emit its own errors, even when position/text
+			// matches an inherited canonical diagnostic. Skip before cloning
+			// either the inherited slice or its potentially large dedup map.
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
 		if name == "exprTypeOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerExprTypeOverlay(a.exprTypeOverlay)))
 			continue

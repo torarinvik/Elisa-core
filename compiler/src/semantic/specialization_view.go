@@ -127,6 +127,14 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*Spec
 	if ctx.err != nil {
 		return nil, ctx.err
 	}
+	// Ordinary semantic failures do not set ctx.err. The specialization clone
+	// owns fresh diagnostics and fresh deduplication, so no canonical error can
+	// hide a failed private pass or be discarded by canonical-only publication.
+	for _, diagnostic := range a.diagnostics {
+		if diagnostic.Severity == "" || diagnostic.Severity == DiagnosticSeverityError {
+			return nil, fmt.Errorf("cannot specialize %q: %s", fn.Name, diagnostic.String())
+		}
+	}
 	view, err := newSpecializationPublication(ctx, decl).publish()
 	if err != nil {
 		return nil, err
