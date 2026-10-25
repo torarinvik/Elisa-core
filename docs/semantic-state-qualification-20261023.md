@@ -3884,6 +3884,36 @@ passes (0.479 seconds), and the additive/inline-group selection passes (0.413
 seconds), including strict cold/live metadata parity. Commands are externally
 capped at 30 seconds. Ordinary defaulted scalar insertion remains eligible.
 
+### Retained requests own consumed prefetch preparation
+
+A fast retained update now joins its consumed scratch preparation before leaving
+the request, including fallback paths. A source/filename-mismatched prefetch also
+joins before being discarded. Preparation cannot survive merely because the
+prefetch was removed from the runtime's queue.
+
+Controlled pending-preparation regressions fail on 77b99d5a: both the mismatched
+prefetch and fast-return cases leave their request before preparation completes.
+The corrected source passes both (0.731 seconds), including a confirmed fast
+update and cold diagnostic parity. Commands are externally capped at 30 seconds.
+
+The integrated safety worktree also passes these lifecycle cases under the race
+detector (1.814 seconds). Preparation is joined before a fresh fallback analysis.
+
+### Fast preparation invalidates its declaration baseline
+
+Declaration/environment or source-coordinate changes now invalidate captured
+classification, append-only, lookup and digest tables together. The invalidation
+reason survives disk snapshots. Subsequent body edits use the ordinary scratch
+path until an independent analysis establishes a fresh fast baseline; automatic
+requalification remains future work. The digest also records region ownership,
+which controls hidden packed-store parameters.
+
+Regressions cover declaration edits followed by disk restoration and body edits,
+fresh-baseline recovery, and an Arena-backed ownership change with strict cold
+metadata/signature parity. The focused candidate passes in 0.433 seconds; the
+integrated safety worktree passes under the race detector in 1.566 seconds.
+Commands are externally capped at 30 seconds.
+
 ### Transient SMT failures remain retryable
 
 Independent solver mode now distinguishes certified resource exhaustion from
@@ -3911,6 +3941,21 @@ externally capped at 30 seconds. A separate existing parallel function-type race
 was exposed by a broader prefix selection and reproduced on the pre-fix baseline;
 it is tracked independently, not claimed fixed by this change.
 
+### Non-empty decoded interfaces retain graph ownership through GC
+
+A new regression exercises both classic and framed snapshots with method-bearing
+interfaces containing pointer and named-map implementations, repeated aliases,
+pointer cycles, typed nils and nil interfaces. Decoding runs with aggressive
+allocation-triggered and concurrent explicit garbage collection. Mutations must
+reach the restored aliases without touching the original graph; checksum
+corruption must publish no result.
+
+The focused regression passes with the race detector and strict checkptr enabled
+(1.405 seconds), under an external 30-second command cap. This specifically covers
+the decoder's non-empty interface/itab path rather than only empty any values.
+
+The full statecache suite also passes under race/checkptr (8.187 seconds).
+
 ### Parallel function metadata and foreign bodies have explicit read ownership
 
 Lazy function-type copies now synchronize with unit publication. Imported finished
@@ -3932,6 +3977,29 @@ parallel/returned-function/retained/analysis-build selection (1.470 seconds).
 An initial combined twenty-repeat command reached its external 30-second cap;
 it is not counted as a pass. Every command remains externally capped.
 
+### Experimental integration native/disk safety checks (41800eae)
+
+The isolated experimental integration passes fresh-process disk native execution
+across edits/reverts, corruption recovery, contract-proof retraction, and all four
+native artifact lifecycle/concurrency tests. The verbose run executes all seven
+tests without skips (1.986 seconds); raw log:
+`/tmp/elisa-experimental-native-disk-safety-verbose.log`.
+
+Backend inline-callee invalidation, nominal-layout edit/revert, partial object
+reuse/native parity, optimization changes/reverts (including O0 and O3), and
+partition definition guards pass (7.665 seconds). Raw log:
+`/tmp/elisa-experimental-backend-cache-safety.log`. Every command has an external
+30-second cap and internal 25-second test limit. These are small correctness
+fixtures, not Stage1 timing qualification.
+
+A separate accepted scratch-backed body-edit diagnostic exposes missing
+classification dependencies: adding a packed-enum consumer changes transitive
+store needs while the stored fast baseline remains unchanged. The next edit
+incorrectly takes fast preparation and omits a cold-generated region wrapper.
+The experimental integration remains unmerged while the declaration-phase
+certificate is repaired. Raw failing log:
+`/tmp/elisa-fast-body-lease-baseline.log`.
+
 ### IR qualification now uses an explicit scoped bijection
 
 `compiler/scripts/ir_bijection/ir_bijection.py` replaces suffix-collapsing
@@ -3944,25 +4012,88 @@ assembly validates both sides of the positive scoped-renaming fixture. All
 test/assembler commands are externally capped at 30 seconds. No old Stage1 IR
 comparison is retroactively qualified by these fixture results.
 
-### Avoid Go heap escapes for two synchronous LLVM array calls
+### Reject body edits that change declaration-phase classification
 
-The cgo wrappers for LLVMAddIncoming and LLVMBuildGEP2 declare both noescape
-and nocallback. Installed Go1.27.3 needs both to emit keepalive-only argument
-uses. It still performs the normal cgo scheduler transition. The exact installed
-LLVM23.1.3 Core.cpp implementation synchronously consumes the arrays, with no
-retained caller buffer; this compiler installs no Go LLVM diagnostic/yield/fatal
-callbacks. No owning-buffer or callback-registration APIs receive these hints.
+The pre-body certificate now records per-function transitive store needs and
+region preparation decisions, plus the program-wide backed-enum/export sets.
+Scratch comparison rejects a change before mutating live state, allowing the
+normal driver to construct and persist an independently checked baseline.
+Unchanged-classification edits retain the fast-preparation path. Older states
+without the new certificate fail closed.
 
-A controlled overlay removes only these directives for the baseline. Across
-three100-iteration samples, FlagsMembership allocations fall235 to227 per IR
-generation and PackedLoweringCanonical273 to269. Wall time is noisy and does
-not establish a speedup; no Stage1 latency gain is claimed. Existing collection
-benchmarks fail their setup on obsolete raw-concurrency declarations and are
-not counted. Flags/builders, proven/refined/guarded/unproved GEP cases and
-partition edit/fresh-session regressions pass (1.337seconds). All invocations
-are externally bounded at30seconds. Logs `/tmp/elisa-cgo-hints-baseline-small-bench.log`,
-`/tmp/elisa-cgo-hints-candidate-small-bench.log`, and
-`/tmp/elisa-cgo-hints-backend-regressions.log`.
+A fresh-process disk-driver regression reproduces omitted cold-required arena
+allocation in the pre-fix LLVM IR at both O0 and O3. The fixed edit/subsequent
+edit/revert sequence matches cold LLVM bytes exactly, without identifier
+normalization, and preserves diagnostics. The regression and native execution,
+corruption recovery and proof-retraction checks pass together (2.731 seconds);
+logs `/tmp/elisa-classification-disk-cli-baseline-v2.log` and
+`/tmp/elisa-classification-driver-final.log`. Existing retained tests pass with
+fast preparation enabled, including under race (6.675 seconds). All commands
+have external 30-second caps and internal 25-second limits.
+
+Separate expanded semantic-oracle tests are still being developed to distinguish
+current scoped-region wrapper facts from historical analysis-only bindings.
+They are not counted as passing, and these small driver results do not establish
+Stage1 performance or full semantic qualification.
+
+### Classifier regression metadata is now strictly accounted
+
+The extended semantic oracle identifies analysis-only scoped-region Store
+identifiers through the actual `ExprFacts.base` -> optimization symbol ->
+`SymbolRegion.Node` binding. It retains every current published observation.
+Historical bindings may be projected only when absent from both the current
+source AST and current function CFG; conflicting current observations fail.
+No numeric symbol identities are normalized. The owned comparison copies leave
+original results untouched. Negative controls cover a changed fact and an old
+binder still referenced by a live CFG.
+
+Both classifier regressions now pass strict AST, type/summary, published metadata
+and diagnostic comparison, including disk restore, fresh fallback, fast-path
+requalification and unchanged-classification scratch control. The five focused
+cases pass (0.381 seconds), and the complete retained selection passes with
+fast preparation enabled under race (6.936 seconds). Raw logs:
+`/tmp/elisa-classification-certificate-focused-v3.log` and
+`/tmp/elisa-classification-certificate-all-race.log`. External 30-second caps
+and internal 25-second limits apply. This resolves the earlier oracle blocker,
+not the outstanding Stage1 timing/full-self-host requirements.
+
+### Final integration preparation lifetime checks
+
+The scratch-restore fixture now changes between equal-signature callees so it
+actually requires prepared scratch with fast mode either off or on; the earlier
+arithmetic-only edit took the valid fast path and violated the fixture's assumed
+mode. The preparation joins and both retained prefetch lifetime cases pass
+together under race with fast mode on (1.903 seconds). The fresh-process O0
+classification driver oracle also passes under race (10.156 seconds). An initial
+combined compile/test command reached the external 30-second cap and is not a
+pass; splitting the cases retained that limit. Logs:
+`/tmp/elisa-final-prefetch-both-paths-race.log` and
+`/tmp/elisa-final-classification-O0-race.log`.
+
+### Current Stage1 admission exposed program-owned record overtaint
+
+The isolated 24dd88ea compiler processed current Stage1 revision47be11573 through
+all declaration/final-check checkpoints: 21 fresh invocations, 264.411 seconds
+total, maximum28.456 seconds, no external timeouts. Admission stopped with one
+non-warning diagnostic at check_impl_conformance.elisa354: a helper-returned
+record selected by a conditional was incorrectly assigned the inferred arena
+despite every storage-bearing field being explicitly program-lived. Complete
+state and original logs remain under the root recorded in
+`/tmp/elisa-stage1-qualification-current-root`; no object/timing target was
+qualified.
+
+A standalone reproducer confirms the same false positive. valueStoreRegion now
+recognizes program ownership before ambient-call fallback only when the complete
+type is program-lived AND the actual visible region symbol is its global
+declaration. Common explicit field-region collection alone is insufficient:
+it can miss hidden enum/generic storage. Local escapes, mixed fields, hidden
+enum payloads, local/program branch merges and lexical shadowing remain rejected.
+The focused tests pass (0.420 seconds), and the broader region/program-lived/
+container-escape selection passes under race (4.353 seconds), all externally
+capped30 seconds with internal25-second limits. Logs:
+`/tmp/elisa-source-record-ternary-diagnostic.stderr`,
+`/tmp/elisa-program-record-choice-focused.log`,
+`/tmp/elisa-program-record-region-race.log`.
 
 ### Type-shape memo invalidation now actually clears its maps
 
@@ -3985,6 +4116,11 @@ Raw logs `/tmp/elisa-shape-memo-invalidation-baseline.log`,
 `/tmp/elisa-all-shape-and-lifetime-race.log`; external30/internal25second caps.
 Abstract shape controls are not presented as admitted reference-field edits.
 
+The cold00a2cf07 run completed semantic admission but produced56 lifetime
+errors and no object; it is not a performance qualification. A separate correction
+is being verified so program-owned values contribute no local dependency to
+provenance readers rather than returning a program-region name.
+
 ### Program-owned values retain known dependency-free element provenance
 
 The program-owned record carve-out now returns no local dependency rather than
@@ -4003,3 +4139,84 @@ A linked record-choice regression returned expected10 at both O0 and O3 using
 runtime object SHA2566df88f65137191d19ae7a770c28b252516c5f751af2ec7f98b61c443e2e9a35d.
 The final full Stage1 gate remains to be rerun with both ownership and memo fixes;
 no claim is made that all56 diagnostics are resolved by the isolated reader test.
+
+### Fresh Stage1 baseline and first body target miss (fa7adb33)
+
+Frozen Stage1 revision47be11573 completes O0 admission through21 independently
+bounded fresh processes (267.216seconds aggregate, max28.504, zero external
+timeouts). Its32MB object links using the repository's standard optional
+profiler-hook source, and the rebuilt Stage1 compiles a smoke executable that
+returns42. This is an initial linked smoke, not the full gen2 gate.
+
+The first normal invocation after DEBUG-observed admission takes3.538648seconds;
+DEBUG=1 intentionally bypassed whole-object publication, so this transition is
+preserved separately. Its following exact artifact hit takes0.160925seconds.
+A genuine is_query_keyword median addition takes3.893690seconds, missing the
+2second target. First timings are immutable JSON under the root named in
+`/tmp/elisa-stage1-final-cache-safety-root`. The changed source remains private.
+An independent cold oracle completed in22 bounded invocations. Its edited
+object is byte-identical to the warm first edit (SHA256
+f4dd7ecf48d4907cbcc85f1f23e5f33cd2023178674f0892da4e9500e143a90d),
+and its entire26,874-line diagnostic transcript matches after removing only
+analysis-cache debug records. Its early contention checkpoint is preserved and
+cold wall times are not performance qualification. The315,836,065-byte IR pair
+has37,172 differing lines involving generated identifiers. Full IR equivalence
+is still unqualified: the current strict checker deliberately rejects some
+observed name forms; no regex-normalized result is counted as proof.
+
+The separate profile repeat takes4.164584seconds: state restore1.086seconds,
+fast Update500ms, partition IR2.026seconds, native compilation0. Its object hash
+matches the first edited object. Pprof attributes8.10CPU-seconds to madvise,
+5.94to cgocall and1.07to string field hydration. Cached SMT totals printed by
+front-smt describe restored baseline work, not68seconds executed in this request.
+GC100 (4.720384seconds) and GC-off with the soft memory limit retained
+(4.151820seconds) do not improve on the default; no GC policy change is adopted.
+
+### Defer independent scratch parsing until fast admission declines
+
+Likely-body disk restoration now hydrates state without starting an unused
+second parser. A request-scoped factory independently parses the exact input
+only if ordinary scratch preparation is required. It executes once, propagates
+parse errors, rejects primary-AST aliases before preparation, and completes
+rejected futures so later owner joins cannot mutate the primary tree. Lazy
+identity checks do not read a concurrently materializing file. Eager/server
+preparation retains its existing join behavior. Native cache authority and all
+proof/optimization checks remain unchanged.
+
+The complete retained suite passes with fast preparation on under race
+(6.835seconds); lazy/eager restoration and both prefetch lifetime tests pass
+under race (2.027seconds). Fresh-process native execution, corruption recovery,
+and exact-byte O0/O3 classification edit/revert IR comparisons pass (2.304seconds).
+Raw logs `/tmp/elisa-deferred-scratch-all-retained-race-v3.log`,
+`/tmp/elisa-deferred-scratch-driver-race-v3.log`, and
+`/tmp/elisa-deferred-scratch-native-driver.log`. Initial compile/test commands
+that hit external30second caps are preserved as failures, not passing evidence.
+Stage1 wall-time improvement for this change is still unmeasured.
+
+### Avoid Go heap escapes for two synchronous LLVM array calls
+
+The cgo wrappers for LLVMAddIncoming and LLVMBuildGEP2 declare both noescape
+and nocallback. Installed Go1.27.3 needs both to emit keepalive-only argument
+uses. It still performs the normal cgo scheduler transition. The exact installed
+LLVM23.1.3 Core.cpp implementation synchronously consumes the arrays, with no
+retained caller buffer; this compiler installs no Go LLVM diagnostic/yield/fatal
+callbacks. No owning-buffer or callback-registration APIs receive these hints.
+
+A controlled overlay removes only these directives for the baseline. Across
+three100-iteration samples, FlagsMembership allocations fall235 to227 per IR
+generation and PackedLoweringCanonical273 to269. Wall time is noisy and does
+not establish a speedup; no Stage1 latency gain is claimed. Existing collection
+benchmarks fail their setup on obsolete raw-concurrency declarations and are
+not counted. Flags/builders, proven/refined/guarded/unproved GEP cases and
+partition edit/fresh-session regressions pass (1.337seconds). All invocations
+are externally bounded at30seconds. Logs `/tmp/elisa-cgo-hints-baseline-small-bench.log`,
+`/tmp/elisa-cgo-hints-candidate-small-bench.log`, and
+`/tmp/elisa-cgo-hints-backend-regressions.log`.
+
+Main integration: the program-owned record and type-memo regression selection
+passes under race on the primary checkout (1.542seconds), external30/internal25
+second limits; log `/tmp/elisa-main-program-memo-race.log`. Longer three10,000-
+iteration LLVM controls retain the same allocation reductions, with mixed small
+timing differences and no Stage1 speedup claim. Logs
+`/tmp/elisa-cgo-hints-baseline-long-bench.log` and
+`/tmp/elisa-cgo-hints-candidate-long-bench.log`.

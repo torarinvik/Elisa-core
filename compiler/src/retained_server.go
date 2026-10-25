@@ -122,8 +122,22 @@ func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
 	rt.prefetch = pf
 	prepare := rt.state != nil && rt.filename == filename && os.Getenv("ELISACORE_RETAINED_PREPARE_SCRATCH") != "0"
 	options, key := rt.options, rt.key
+	pending := os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") == "on"
 	go func() {
-		defer close(pf.done)
+		var scratch *semantic.RetainedScratch
+		defer func() {
+			if scratch != nil {
+				// The update may take the scratch before its declaration phase is done
+				// and wait for it only when the edit needs it.
+				close(pf.done)
+				scratch.Prepare(options)
+			}
+		}()
+		defer func() {
+			if scratch == nil {
+				close(pf.done)
+			}
+		}()
 		l := lexer.New(filename, src)
 		pf.tokens = l.Tokenize()
 		if len(l.Errors()) != 0 {
@@ -133,6 +147,11 @@ func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
 		pf.file = p.ParseFile(filename)
 		pf.ok = len(p.Errors()) == 0
 		if prepare && pf.ok {
+			if pending {
+				scratch = semantic.NewPendingRetainedScratch(pf.file)
+				pf.prepared, pf.key = scratch, key
+				return
+			}
 			pf.prepared, pf.key = semantic.PrepareRetainedScratch(pf.file, options), key
 		}
 	}()
@@ -144,6 +163,7 @@ func (rt *retainedRuntime) dropPrefetch() {
 		return
 	}
 	<-rt.prefetch.done
+	rt.prefetch.prepared.Wait()
 	rt.prefetch = nil
 }
 
@@ -168,8 +188,10 @@ func (rt *retainedRuntime) parseScratch(key string) (*ast.File, bool, *semantic.
 			if key != "" && pf.key == key {
 				return pf.file, pf.ok, pf.prepared
 			}
-			// Analyzed as a scratch: not usable as a plain parse.
 		}
+		// A mismatched or otherwise unconsumed scratch still belongs to this
+		// invocation. Join it before discarding the prefetch.
+		pf.prepared.Wait()
 	}
 	if rt.tokensFor == nil || !bytes.Equal(rt.tokensFor, rt.src) {
 		l := lexer.New(rt.filename, rt.src)
@@ -191,17 +213,25 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	}
 	key := rt.filename + "\x00" + fmt.Sprintf("%#v", options)
 	if rt.state != nil && rt.key == key {
+		waitStart := time.Now()
 		scratch, ok, prepared := rt.parseScratch(key)
+		// A fast update may not wait for declaration preparation. The request
+		// still owns that background work on every return and fallback path.
+		defer prepared.Wait()
+		wait := time.Since(waitStart)
 		var result *semantic.Result
 		err := fmt.Errorf("scratch parse failed")
 		if ok {
 			result, err = rt.state.UpdatePrepared(file, scratch, rt.src, prepared)
 		}
+		// Join before any fresh fallback analysis, not just before returning.
+		prepared.Wait()
+		fmt.Fprintf(rt.log, "[retained] scratch parse wait %v, update %v\n", wait.Round(time.Millisecond), (time.Since(waitStart) - wait).Round(time.Millisecond))
 		st := rt.state.LastStats
 		if err != nil {
 			fmt.Fprintf(rt.log, "[retained] full analysis: %v\n", err)
 		} else {
-			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v (ahead %v), compare %v, diff %v, bodies %v, post %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.ScratchPrepared, st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Post.Round(time.Millisecond), st.Total.Round(time.Millisecond))
+			fmt.Fprintf(rt.log, "[retained] update: %d changed, %d shifted, %d late-invalidated; pairing %v, scratch %v (ahead %v, fast %v%s), compare %v, diff %v, bodies %v, post %v, total %v\n", st.Changed, st.Shifted, st.Invalidated, st.Pairing.Round(time.Millisecond), st.Scratch.Round(time.Millisecond), st.ScratchPrepared, st.FastPrepared, retainedFastNote(st.FastDeclined), st.Compare.Round(time.Millisecond), st.Diff.Round(time.Millisecond), st.Bodies.Round(time.Millisecond), st.Post.Round(time.Millisecond), st.Total.Round(time.Millisecond))
 			// Code generation consumes the updated analysis directly: on the stage1 seed
 			// its LLVM IR matches a fresh analysis's for every edit kind the sweep covers
 			// (TestRetainedUpdateGeneratesFreshIR is the unit form).
@@ -470,4 +500,11 @@ func requestGeneratesCode(args []string) bool {
 		}
 	}
 	return true
+}
+
+func retainedFastNote(why string) string {
+	if why == "" {
+		return ""
+	}
+	return ": " + why
 }

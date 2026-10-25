@@ -186,8 +186,12 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 				unchanged = true
 				debugAnalysisDisk(stderr, "reuse unchanged revision")
 			} else {
-				if preparation.file != nil && preparation.prepared != nil {
-					debugAnalysisDisk(stderr, "prepared scratch in=%v", preparation.elapsed.Round(time.Millisecond))
+				if preparation.prepared.AcceptsScratch(preparation.file) {
+					if preparation.file == nil {
+						debugAnalysisDisk(stderr, "scratch parsing deferred until needed")
+					} else {
+						debugAnalysisDisk(stderr, "prepared scratch in=%v", preparation.elapsed.Round(time.Millisecond))
+					}
 					updateStart := time.Now()
 					result, err = state.UpdatePrepared(file, preparation.file, program.source, preparation.prepared)
 					if err == nil {
@@ -196,7 +200,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 						// the entire graph, and reuses the same identity domain
 						// on repeated edits/reverts in fresh processes.
 						replayed = true
-						debugAnalysisDisk(stderr, "update changed=%d in=%v", state.LastStats.Changed, time.Since(updateStart).Round(time.Millisecond))
+						debugAnalysisDisk(stderr, "update changed=%d in=%v fast=%v%s", state.LastStats.Changed, time.Since(updateStart).Round(time.Millisecond), state.LastStats.FastPrepared, retainedFastNote(state.LastStats.FastDeclined))
 					}
 				} else {
 					err = fmt.Errorf("scratch parse failed")
@@ -246,6 +250,9 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			debugAnalysisDisk(stderr, "not stored: %v", err)
 		} else {
 			debugAnalysisDisk(stderr, "store bytes=%d in=%v", len(data), time.Since(saveStart).Round(time.Millisecond))
+			if err := artifact.publishBaselineSource(program.source); err != nil {
+				debugAnalysisDisk(stderr, "baseline source not stored: %v", err)
+			}
 			if err := publishAnalysisDiskFamily(program, options, artifact); err != nil {
 				debugAnalysisDisk(stderr, "family not stored: %v", err)
 			}

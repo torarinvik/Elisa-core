@@ -28,12 +28,17 @@ func parseIncrementalSessionFile(t *testing.T, source string) *ast.File {
 	}
 	return file
 }
-func assertIncrementalResultParity(t testing.TB, cold, warm *Result) {
+func assertIncrementalResultParity(t testing.TB, cold, warm *Result, extra ...map[PositionedFunctionNode]PositionedFunctionNode) {
 	t.Helper()
 	// Re-key public source-node maps onto the current invocation, then compare
 	// every published field except invocation objects/costs. No output inventory
 	// is silently limited to the maps restored by the cache.
 	mapping := map[PositionedFunctionNode]PositionedFunctionNode{}
+	for _, supplied := range extra {
+		for source, current := range supplied {
+			mapping[source] = current
+		}
+	}
 	mapIncrementalCurrentAST(t, reflect.ValueOf(cold.File), reflect.ValueOf(warm.File), mapping)
 	collect := func(file *ast.File) map[string]*ast.FuncDecl {
 		out := map[string]*ast.FuncDecl{}

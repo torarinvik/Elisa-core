@@ -25,13 +25,22 @@ import (
 // Callers must honor Update errors and fall back to fresh analysis: a late
 // rejection may already have consumed or discarded the retained graph.
 type RetainedAnalysis struct {
-	a        *Analyzer
-	result   *Result
-	decls    []scopedDecl
-	post     func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
-	pristine *ast.File                            // a parse of src, for comparison; see texts
-	texts    map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
-	src      []byte                               // the expanded source pristine was parsed from
+	// classify is the full analysis's program-wide classification state (fast preparation).
+	classify   *retainedClassifyState
+	appendOnly *retainedAppendOnlyState
+	tables     *retainedFactTables
+	digestOf   map[*ast.FuncDecl]string // local-fact digest of each spliced edit, computed before analysis rewrote it
+	// Persist invalidation across MarshalState/RestoreAnalysisState. A scratch-
+	// backed update can preserve the live analysis without rebuilding the fast
+	// preparer's declaration-phase snapshots.
+	fastPrepareInvalidated string
+	a                      *Analyzer
+	result                 *Result
+	decls                  []scopedDecl
+	post                   func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
+	pristine               *ast.File                            // a parse of src, for comparison; see texts
+	texts                  map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
+	src                    []byte                               // the expanded source pristine was parsed from
 
 	depth      int
 	windows    map[*ast.FuncDecl][2]int // body-phase diagnostics emitted by each top-level analyzeFunc
@@ -66,7 +75,9 @@ type RetainedUpdateStats struct {
 	Diff                      time.Duration
 	Bodies                    time.Duration
 	Post                      time.Duration
-	ScratchPrepared           bool // the scratch phase ran ahead, overlapped with the driver's parse
+	ScratchPrepared           bool   // the scratch phase ran ahead, overlapped with the driver's parse
+	FastPrepared              bool   // edited bodies were prepared without waiting for the scratch
+	FastDeclined              string // why a body-only edit still needed the scratch
 	Total                     time.Duration
 	Fallback                  string
 	Added                     int
@@ -125,9 +136,104 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 // RetainedScratch is a scratch parse with its declaration phase already run,
 // so a server can overlap that phase with its own parse of the request.
 type RetainedScratch struct {
-	file    *ast.File
-	pre     *preBodyState
-	elapsed time.Duration
+	file         *ast.File
+	pre          *preBodyState
+	elapsed      time.Duration
+	ready        chan struct{} // closed once pre is set; nil when prepared synchronously
+	once         sync.Once
+	lazy         *AnalyzeOptions           // set: Wait runs the phase on demand
+	parse        func() (*ast.File, error) // optional independent parse, materialized only on decline
+	parseOnce    sync.Once
+	parseErr     error
+	parseElapsed time.Duration
+}
+
+// NewPendingRetainedScratch returns a scratch whose declaration phase Prepare runs later,
+// typically on another goroutine. UpdatePrepared waits for it only when it needs it.
+func NewPendingRetainedScratch(scratch *ast.File) *RetainedScratch {
+	return &RetainedScratch{file: scratch, ready: make(chan struct{})}
+}
+
+// NewLazyRetainedScratch returns a scratch whose declaration phase runs only when an update
+// needs it, on the caller's goroutine, so it never competes with work that may make it moot.
+func NewLazyRetainedScratch(scratch *ast.File, options AnalyzeOptions) *RetainedScratch {
+	s := NewPendingRetainedScratch(scratch)
+	s.lazy = &options
+	return s
+}
+
+// NewLazyParsedRetainedScratch defers both parsing and declaration preparation.
+// parse must return a fresh, independent AST of the exact source being updated.
+// It runs at most once on demand; no goroutine starts here.
+func NewLazyParsedRetainedScratch(parse func() (*ast.File, error), options AnalyzeOptions) *RetainedScratch {
+	if parse == nil {
+		parse = func() (*ast.File, error) { return nil, fmt.Errorf("missing independent scratch parser") }
+	}
+	s := NewLazyRetainedScratch(nil, options)
+	s.parse = parse
+	return s
+}
+
+// AcceptsScratch validates the caller's explicit scratch identity. A nil AST is
+// admitted only for a lazy parser; it does not identify an ordinary scratch.
+func (s *RetainedScratch) AcceptsScratch(scratch *ast.File) bool {
+	if s == nil {
+		return false
+	}
+	if s.parse != nil {
+		return scratch == nil
+	}
+	return scratch != nil && s.file == scratch
+}
+
+func (s *RetainedScratch) materialize() error {
+	if s.parse != nil {
+		s.parseOnce.Do(func() {
+			started := time.Now()
+			defer func() { s.parseElapsed = time.Since(started) }()
+			s.file, s.parseErr = s.parse()
+			if s.parseErr == nil && s.file == nil {
+				s.parseErr = fmt.Errorf("scratch parser returned no file")
+			}
+		})
+	}
+	return s.parseErr
+}
+
+// reject completes an unstarted preparation without analyzing its AST. An owner
+// may still join the rejected future; joining must never prepare a primary AST
+// that UpdatePrepared has just rejected as an alias.
+func (s *RetainedScratch) reject(err error) {
+	s.once.Do(func() {
+		s.parseErr = err
+		if s.ready != nil {
+			close(s.ready)
+		}
+	})
+}
+
+// Prepare runs a pending scratch's declaration phase; later calls do nothing.
+func (s *RetainedScratch) Prepare(options AnalyzeOptions) {
+	s.once.Do(func() {
+		defer close(s.ready)
+		if err := s.materialize(); err != nil {
+			s.elapsed = s.parseElapsed
+			return
+		}
+		done := PrepareRetainedScratch(s.file, options)
+		s.pre, s.elapsed = done.pre, s.parseElapsed+done.elapsed
+	})
+}
+
+// Wait blocks until a pending scratch is prepared, preparing a lazy one first.
+func (s *RetainedScratch) Wait() {
+	if s == nil || s.ready == nil {
+		return
+	}
+	if s.lazy != nil {
+		s.Prepare(*s.lazy)
+	}
+	<-s.ready
 }
 
 // PrepareRetainedScratch runs Update's scratch declaration phase ahead of time.
@@ -400,6 +506,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		edit *ast.FuncDecl // the function in file, found again in the prepared scratch parse
 	}
 	var splices []splice
+	var shadowEdits [][3]*ast.FuncDecl             // live, old parse, new parse of each edited body (fast-prepare shadow)
 	var movedSplices []ast.Decl                    // edited functions that also moved: header shifts, body is replaced
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
 	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
@@ -548,17 +655,49 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			movedSplices = append(movedSplices, live)
 		}
 		splices = append(splices, splice{live, nfn})
+		shadowEdits = append(shadowEdits, [3]*ast.FuncDecl{live, ofn, nfn})
 		newTexts[nfn] = newText
 	}
 	// Bodies are analyzed in the form the declaration phase leaves them in, and
 	// that phase's body-dependent results must be what the retained state holds.
 	pairing := time.Since(start)
 	var pre *preBodyState
-	if prepared != nil && prepared.file == scratch {
+	var fastBodies [][]ast.Stmt
+	bodyEnvironmentUnchanged := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
+		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
+		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto)+len(movedSplices)+len(shifted)+len(shiftedOther) == 0 &&
+		usingsAdded+usingsRemoved == 0 && !appendedTop && retainedNoLineDelta(lineDelta)
+	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) && bodyEnvironmentUnchanged {
+		var why string
+		if fastBodies, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls); why != "" {
+			fastBodies = nil
+			r.LastStats.FastDeclined = why
+		}
+	}
+	if fastBodies != nil {
+		// The edit leaves every declaration-level result as the retained baseline holds it.
+		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, diags: r.pre.diags}
+		r.LastStats.FastPrepared = true
+	} else if prepared.AcceptsScratch(scratch) {
+		if err := prepared.materialize(); err != nil {
+			return fail("scratch parse failed: %v", err)
+		}
+		if prepared.file == nil || prepared.file == file {
+			prepared.reject(fmt.Errorf("scratch parse must be independent of the primary file"))
+			return fail("scratch parse must be independent of the primary file")
+		}
+		scratch = prepared.file
+		prepared.Wait()
+		if prepared.parseErr != nil || prepared.pre == nil {
+			return fail("scratch preparation failed: %v", prepared.parseErr)
+		}
 		pre = prepared.pre
 		r.LastStats.ScratchPrepared = true
 		r.LastStats.Scratch = prepared.elapsed
 	} else {
+		if scratch == nil || scratch == file {
+			return fail("missing independent scratch parse")
+		}
 		pendingRetainedMu.Lock()
 		scratchStart := time.Now()
 		pre = scratchPreBody(scratch, r.options)
@@ -618,6 +757,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	warningsChanged := false
 	diff := preBodyDifference(r.pre, pre, marks, growth, replaced, &warningsChanged)
+	if retainedFastPrepareMode == "shadow" && len(shadowEdits) != 0 && len(added)+len(removed) == 0 {
+		r.shadowPredict(a, shadowEdits, scoped, diff)
+	}
 	r.LastStats.Compare = time.Since(compareStart)
 	r.LastStats.Pairing = pairing
 	if diff != "" {
@@ -1219,10 +1361,20 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		shifted = kept
 	}
 	bodies := make([][]ast.Stmt, len(splices))
+	if fastBodies != nil && len(fastBodies) != len(splices) {
+		return fail("fast preparation does not cover %d re-analyzed functions", len(splices)-len(fastBodies))
+	}
 	for i, s := range splices {
+		if fastBodies != nil {
+			bodies[i] = fastBodies[i]
+			continue
+		}
 		prepared := pre.prepared[retainedLineKey(s.edit.Pos())+"|"+s.edit.Name]
 		if prepared == nil {
 			return fail("prepared form of %s not found", s.edit.Name)
+		}
+		if retainedFastPrepareMode == "shadow" {
+			r.shadowFastPrepare(a, s.live, s.edit, prepared, scoped[s.live])
 		}
 		bodies[i] = prepared.Body
 	}
@@ -1657,6 +1809,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if appendedTop {
 			retainedSortDeclsBySource(a.file.Decls, currentOffsets)
 		}
+	}
+	if retainedFastPrepareMode != "" && !bodyEnvironmentUnchanged {
+		r.invalidateFastPrepareBaseline("declaration environment changed; fresh retained baseline required")
 	}
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
 	r.result.Diagnostics = publishedResultDiagnostics(a.diagnostics)
@@ -2257,4 +2412,13 @@ func retainedQualifiedFunctionNames(file *ast.File) map[*ast.FuncDecl]string {
 	}
 	walk(file.Decls, "")
 	return names
+}
+
+func retainedNoLineDelta(lineDelta map[string]int) bool {
+	for _, d := range lineDelta {
+		if d != 0 {
+			return false
+		}
+	}
+	return true
 }

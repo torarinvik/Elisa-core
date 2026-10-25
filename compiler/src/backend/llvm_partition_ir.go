@@ -253,9 +253,6 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	if !finishPartitionModule(g.module, part, parts, unit) {
 		return nil, errPartitionDeclined
 	}
-	if err := g.verify(); err != nil {
-		return nil, fmt.Errorf("partition %d: %w", part, err)
-	}
 	if err := g.ensureTargetMachine(); err != nil {
 		return nil, err
 	}
@@ -297,8 +294,15 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		stats.BitcodeTime += bitcodeDuration
 	})
 	if object != nil {
+		// A hit is keyed by these exact bitcode bytes (which name the LLVM producer), and
+		// only modules that passed verification are ever cached, so this module verified.
 		return object, nil
 	}
+	verifyStart := time.Now()
+	if err := g.verify(); err != nil {
+		return nil, fmt.Errorf("partition %d: %w", part, err)
+	}
+	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += time.Since(verifyStart) })
 	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
 	cpu := C.LLVMGetTargetMachineCPU(g.targetMachine)
 	features := C.LLVMGetTargetMachineFeatureString(g.targetMachine)

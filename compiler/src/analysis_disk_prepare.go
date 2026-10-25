@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"elisacore/src/ast"
@@ -50,7 +53,8 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 			return
 		}
 		pending.loaded, pending.bytes = true, len(data)
-		pending.state, pending.preparation, pending.err = restoreAnalysisWithScratch(data, program, options)
+		lazy := analysisDiskLikelyBodyEdit(artifact, program.source)
+		pending.state, pending.preparation, pending.err = restoreAnalysisWithScratch(data, program, options, lazy)
 	}()
 	return pending
 }
@@ -71,7 +75,22 @@ type analysisScratchPreparation struct {
 // semantic analysis. A separate parse/declaration phase can therefore overlap
 // it. Always join preparation before returning, including rejected snapshots,
 // so fallback analysis and later requests never inherit background work.
-func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options semantic.AnalyzeOptions) (*semantic.RetainedAnalysis, analysisScratchPreparation, error) {
+// With lazy set, neither parsing nor declarations run until an update needs them.
+func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options semantic.AnalyzeOptions, lazy bool) (*semantic.RetainedAnalysis, analysisScratchPreparation, error) {
+	if lazy {
+		// Keep invocation inputs, not a second AST. No parsing/declaration work
+		// starts until UpdatePrepared rejects its fast body preparation.
+		filename, source, tokens := program.filename, program.source, program.tokenCache
+		prepared := semantic.NewLazyParsedRetainedScratch(func() (*ast.File, error) {
+			file, ok := parseProgramWithTokenCache(filename, source, io.Discard, tokens)
+			if !ok {
+				return nil, fmt.Errorf("independent source parse rejected")
+			}
+			return file, nil
+		}, options)
+		state, err := semantic.RestoreAnalysisState(data)
+		return state, analysisScratchPreparation{prepared: prepared}, err
+	}
 	done := make(chan analysisScratchPreparation, 1)
 	go func() {
 		started := time.Now()
@@ -86,4 +105,57 @@ func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options sem
 	state, err := semantic.RestoreAnalysisState(data)
 	preparation := <-done
 	return state, preparation, err
+}
+
+// analysisDiskBaselineSource is the source the stored state was analyzed from.
+func (a analysisDiskArtifact) baselineSourcePath() string { return a.path + ".src" }
+
+// analysisDiskLikelyBodyEdit guesses, from the stored baseline source, whether source only
+// edits function bodies in place (or not at all): same line count, and every changed line
+// indented in both.
+// It only decides whether the scratch declaration phase starts early; the update itself
+// decides whether the edit needs that phase.
+func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bool {
+	if os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") != "on" {
+		return false
+	}
+	baseline, err := os.ReadFile(artifact.baselineSourcePath())
+	if err != nil {
+		return false
+	}
+	before, after := bytes.Split(baseline, []byte("\n")), bytes.Split(source, []byte("\n"))
+	if len(before) != len(after) {
+		return false
+	}
+	// Unchanged source reuses the stored result and needs no declaration phase at all.
+	for i := range before {
+		if bytes.Equal(before[i], after[i]) {
+			continue
+		}
+		if !analysisDiskIndented(before[i]) || !analysisDiskIndented(after[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func analysisDiskIndented(line []byte) bool {
+	return len(line) != 0 && (line[0] == ' ' || line[0] == '\t')
+}
+
+// publishBaselineSource records the source a published state was analyzed from.
+func (a analysisDiskArtifact) publishBaselineSource(source []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(a.path), ".analysis-source-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.Write(source)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), a.baselineSourcePath())
 }

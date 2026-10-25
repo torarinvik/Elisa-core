@@ -959,6 +959,9 @@ type Analyzer struct {
 	retained *RetainedAnalysis
 	// preBody stops a scratch analysis after the declaration phase (retained_prebody.go).
 	preBody *preBodyState
+	// Current declaration-phase classification, including local maps that are
+	// otherwise absent from the retained pre-body dependency certificate.
+	preBodyClassify *retainedClassifyState
 	// typeSeenScratch is a reused visited set for containsAffineHandleValues traversals.
 	typeSeenScratch     map[Type]bool
 	typeSeenScratchBusy bool

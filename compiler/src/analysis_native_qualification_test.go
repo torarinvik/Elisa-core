@@ -82,7 +82,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 				<-earlyDone
 				started = earlyStarted
 			} else {
-				state, preparation, err = restoreAnalysisWithScratch(data, program, options)
+				state, preparation, err = restoreAnalysisWithScratch(data, program, options, false)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -139,7 +139,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		earlyStarted, earlyDone = time.Now(), make(chan struct{})
 		go func() {
 			defer close(earlyDone)
-			state, preparation, err = restoreAnalysisWithScratch(data, program, options)
+			state, preparation, err = restoreAnalysisWithScratch(data, program, options, false)
 		}()
 		return func() { <-earlyDone }
 	})

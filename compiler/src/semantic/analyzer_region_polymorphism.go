@@ -189,10 +189,19 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			exportTargets[ed.TargetName] = true
 		}
 	}
+	a.preBodyClassify = &retainedClassifyState{preparation: map[*ast.FuncDecl]retainedClassifyPreparation{}, storeNeeds: storeNeeds, regionBacked: regionBackedPacked, exportTarget: exportTargets}
+	if a.retained != nil && a.retained.classify == nil && retainedFastPrepareMode != "" {
+		a.retained.classify = a.preBodyClassify
+	}
 	for _, fn := range funcs {
 		fnType := a.funcTypeForRegionPoly(fn)
 		if fnType == nil {
 			continue
+		}
+		a.preBodyClassify.preparation[fn] = retainedClassifyPreparation{
+			RegionPolymorphic:  fnType.RegionPolymorphic,
+			ReturnsCallerArena: a.regionPolyReturnsCallerArena[fnType],
+			OwnsRegion:         a.funcOwnsRegion(fn), Entry: funcIsRegionStoreEntryPoint(fn), Export: exportTargets[fn.Name],
 		}
 		if len(regionBackedPacked) == 0 {
 			if !exportTargets[fn.Name] && fnType.RegionPolymorphic {
@@ -212,6 +221,9 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		a.regionPolyFn = fn
 		needsStoreHost := a.bodyCallsStoreNeedingOutsideRegion(fn.Body, storeNeeds, regionBackedPacked)
 		a.regionPolyFn = nil
+		decision := a.preBodyClassify.preparation[fn]
+		decision.NeedsStoreHost = needsStoreHost
+		a.preBodyClassify.preparation[fn] = decision
 		if fn.Name != "" && exportTargets[fn.Name] {
 			if needsStoreHost {
 				wrapFuncBodyInLazyAutoRegion(fn)
@@ -234,6 +246,21 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		} else {
 			a.injectStoreNeeds(fnType, storeNeeds[fnType])
 		}
+	}
+	for _, fn := range funcs {
+		decision, known := a.preBodyClassify.preparation[fn]
+		if !known || len(fn.Body) != 1 {
+			continue
+		}
+		switch body := fn.Body[0].(type) {
+		case *ast.RegionStmt:
+			if isCompilerGeneratedAutoRegionStmt(body) {
+				decision.Wrapper = "auto-region"
+			}
+		case *ast.InStoreStmt:
+			decision.Wrapper = "in-store"
+		}
+		a.preBodyClassify.preparation[fn] = decision
 	}
 }
 

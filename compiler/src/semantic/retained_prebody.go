@@ -19,11 +19,12 @@ import (
 // unchanged; otherwise it falls back to a full analysis.
 
 type preBodyState struct {
-	fingerprint map[string]string        // stable function key -> body-dependent results
-	global      string                   // program-wide results (struct flags, table sizes)
-	diags       []Diagnostic             // diagnostics the phase emitted
-	keyOf       map[*ast.FuncDecl]string // each prepared function's fingerprint key
-	prepared    map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
+	classification map[string]string        // complete per-function classifier decisions
+	fingerprint    map[string]string        // stable function key -> body-dependent results
+	global         string                   // program-wide results (struct flags, table sizes)
+	diags          []Diagnostic             // diagnostics the phase emitted
+	keyOf          map[*ast.FuncDecl]string // each prepared function's fingerprint key
+	prepared       map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
 	// Per prepared function, the declaration-phase tables an added function
 	// carries into the live analysis (plain values, no analyzer-owned types).
 	targets     map[*ast.FuncDecl][]map[int]bool
@@ -38,7 +39,7 @@ func (p *preBodyState) comparisonState() *preBodyState {
 	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil {
 		return p
 	}
-	return &preBodyState{fingerprint: p.fingerprint, global: p.global, diags: p.diags}
+	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, diags: p.diags}
 }
 
 var pendingPreBody *preBodyState
@@ -68,12 +69,13 @@ func scratchPreBody(file *ast.File, options AnalyzeOptions) *preBodyState {
 
 func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 	p := &preBodyState{
-		fingerprint: map[string]string{},
-		keyOf:       map[*ast.FuncDecl]string{},
-		prepared:    map[string]*ast.FuncDecl{},
-		diags:       append([]Diagnostic(nil), a.diagnostics...),
-		targets:     map[*ast.FuncDecl][]map[int]bool{},
-		regionIndex: map[*ast.FuncDecl]map[int]bool{},
+		classification: map[string]string{},
+		fingerprint:    map[string]string{},
+		keyOf:          map[*ast.FuncDecl]string{},
+		prepared:       map[string]*ast.FuncDecl{},
+		diags:          append([]Diagnostic(nil), a.diagnostics...),
+		targets:        map[*ast.FuncDecl][]map[int]bool{},
+		regionIndex:    map[*ast.FuncDecl]map[int]bool{},
 	}
 	occurrences := map[string]int{}
 	for _, scoped := range decls {
@@ -86,6 +88,7 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 			key := fmt.Sprintf("%s#%d", base, occurrences[base])
 			occurrences[base]++
 			p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
+			p.classification[key] = a.preBodyFunctionClassification(fn)
 			p.keyOf[fn] = key
 			p.prepared[retainedLineKey(fn.Pos())+"|"+fn.Name] = fn
 			if t, ok := a.paramStoreTargets[fn]; ok {
@@ -121,8 +124,51 @@ func (a *Analyzer) preBodyFunctionFingerprint(fn *ast.FuncDecl) string {
 	return retainedNormalized(b.String())
 }
 
+// Keep classifier dependencies separate from signature checks for newly added
+// functions, whose prepared bodies already come from the full scratch phase.
+func (a *Analyzer) preBodyFunctionClassification(fn *ast.FuncDecl) string {
+	if a.preBodyClassify == nil {
+		return "unavailable"
+	}
+	sym, found := a.symbolForFuncDecl(fn)
+	if !found || sym == nil {
+		return "unavailable"
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok {
+		return "unavailable"
+	}
+	decision, known := a.preBodyClassify.preparation[fn]
+	if !known {
+		return "unavailable"
+	}
+	var needs []string
+	for name := range a.preBodyClassify.storeNeeds[ft] {
+		needs = append(needs, name)
+	}
+	sort.Strings(needs)
+	return fmt.Sprintf("storeNeeds=%q; preparation=%+v", needs, decision)
+}
+
 func (a *Analyzer) preBodyGlobalFingerprint() string {
 	var parts []string
+	// These classifier inputs are program-wide values, not table lengths.
+	var backed, exports []string
+	if a.preBodyClassify != nil {
+		for name, enabled := range a.preBodyClassify.regionBacked {
+			if enabled {
+				backed = append(backed, name)
+			}
+		}
+		for name, enabled := range a.preBodyClassify.exportTarget {
+			if enabled {
+				exports = append(exports, name)
+			}
+		}
+	}
+	sort.Strings(backed)
+	sort.Strings(exports)
+	parts = append(parts, fmt.Sprintf("classification-region-backed=%q", backed), fmt.Sprintf("classification-export-targets=%q", exports))
 	for name, t := range a.namedTypes {
 		if st, ok := t.(*StructType); ok {
 			parts = append(parts, fmt.Sprintf("%s:%v%v%v", name, st.AppendOnly, st.Affine, st.Droppable))
@@ -239,6 +285,14 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, g reta
 		}
 		if prev != cur.fingerprint[key] {
 			return "declaration results of " + key + " changed" + firstFieldDifference(prev, cur.fingerprint[key])
+		}
+		before, hadBefore := old.classification[key]
+		after, hasAfter := cur.classification[key]
+		if !hadBefore || !hasAfter || before == "unavailable" || after == "unavailable" {
+			return "declaration classification of " + key + " unavailable"
+		}
+		if before != after {
+			return "declaration classification of " + key + " changed (" + before + " -> " + after + ")"
 		}
 	}
 	if fresh != added {
