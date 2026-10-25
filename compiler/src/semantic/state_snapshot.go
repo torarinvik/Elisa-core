@@ -33,6 +33,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 {
 		return nil, fmt.Errorf("analysis is not idle")
 	}
+	if r.a.noStorageOverlay != nil {
+		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
+	}
 	if r.a.iterBinderElementOverlay != nil {
 		return nil, fmt.Errorf("construction iteration-binder overlay cannot be persisted/restored or resumed")
 	}
@@ -65,6 +68,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	r, ok := value.(*RetainedAnalysis)
 	if !ok || r == nil || r.a == nil || r.result == nil || r.result.analyzer != r.a || r.a.retained != r {
 		return nil, fmt.Errorf("incomplete semantic state")
+	}
+	if r.a.noStorageOverlay != nil {
+		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
 	}
 	if r.a.iterBinderElementOverlay != nil {
 		return nil, fmt.Errorf("construction iteration-binder overlay cannot be persisted/restored or resumed")

@@ -340,6 +340,9 @@ type Analyzer struct {
 	storeScanLoopDepth       int                                                 // storeScanSubjectDeclType's loop-binder recursion depth
 	storeScanParamWriteCache map[storeScanParamKey]bool
 	storeScanLastHolders     map[string]bool // holders of the last storeScanTaint (read at once)
+
+	noStorageOverlay *analyzerNoStorageOverlay
+
 	storeScanNoStorageCache  map[Type]bool
 	storeScanViewOnlyCache   map[Type]bool
 	storeScanSharesCache     map[Type]bool
@@ -1619,6 +1622,10 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 }
 
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
+	if a.noStorageOverlay != nil {
+		err := a.rejectNoStorageOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
 	if a.iterBinderElementOverlay != nil {
 		err := a.rejectIterBinderElementOverlayOperation("canonical program publication")
 		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}

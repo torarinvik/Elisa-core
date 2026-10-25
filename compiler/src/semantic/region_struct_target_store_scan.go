@@ -3359,16 +3359,13 @@ func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode
 func (a *Analyzer) storeScanHoldsNoRegionStorage(t Type) bool {
 	cacheable := t != nil && reflect.ValueOf(t).Kind() == reflect.Pointer
 	if cacheable {
-		if cached, ok := a.storeScanNoStorageCache[t]; ok {
+		if cached, ok := a.lookupStoreScanNoStorage(t); ok {
 			return cached
 		}
 	}
 	result := !typeCarriesRegionStorage(t) && !a.typeCanContainRegionRefs(stripRefForBounds(t), map[string]bool{})
 	if cacheable {
-		if a.storeScanNoStorageCache == nil {
-			a.storeScanNoStorageCache = map[Type]bool{}
-		}
-		a.storeScanNoStorageCache[t] = result
+		a.setStoreScanNoStorage(t, result)
 	}
 	return result
 }

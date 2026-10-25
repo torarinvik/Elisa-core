@@ -586,3 +586,38 @@ exactly after both edits. Evidence /tmp/elisa-stage1-snapshot-publication-root,
 complete per-run JSON/settings/objects, source receipts and CPU/allocation profiles.
 Targets still require substantial work: body2s, contract/signature3s, major10s,
 O3 and full self-host/latest-source gates remain unqualified.
+
+## Exact no-storage cache overlay for private construction
+
+An authenticated current61557a73 snapshot exported through the normal disk
+reader attributes3502576bytes/490allocations per private construction to the
+57673-entry storeScanNoStorageCache. Current full owned construction measures
+54054760bytes/270760allocations once; field attribution is a diagnostic including
+fixed constructor overhead, not an additive end-to-end estimate. All-field scan
+passes29.043s, with repeated top-field controls5.284s. Test-only overlays leave
+main source clean; artifact /tmp/elisa-owned-clone-field-attribution-v1, ranked
+measurements /tmp/elisa-owned-clone-attribution-all-ranked.json and raw receipt
+under /tmp/elisa-stage1-snapshot-publication-root. Existing clone policies are
+strictly pinned by source hashes in that diagnostic.
+
+Private construction now borrows completed bool entries through a local/base
+lookup and writes only local misses. Membership and both true/false answers are
+preserved; no inherited entry is recomputed, cleared or materialized. Ordinary
+workers retain their old full-map copy. Canonical invalidation and every
+publication/scheduling/merge/build/Marshal/independently decoded Restore boundary
+reject the construction resource. Closed raw-access controls retain the existing
+Type-keyed cache's lifetime; no cross-edit authority is added. Actual generation
+adds the named overlay resource, and its opaque-copy policy remains unchanged.
+
+Focused race passes2.685s; broad retained/private/parallel/snapshot/permission race
+passes15.555s after one confirmed external30s compilation timeout and retry.
+Targeted32768-entry map-copy fixture changes1752880–1752881bytes/131allocations/
+242.5–244.1us to5432bytes/3allocations/0.804–0.832us. Both sides include the same
+Analyzer shell; the new side includes the actual non-nil empty local map. This
+fixture does not include complete specialization/publication/IR costs or establish
+a Stage1 timing. Logs /tmp/elisa-no-storage-overlay-*.log; frozen source artifact
+/tmp/elisa-specialization-no-storage-overlay-v1. Current-producer fresh Stage1
+qualification remains necessary.
+
+All50 selected backend generic/alias/ABI/layout/region regressions pass in10
+externally bounded groups: /tmp/elisa-no-storage-overlay-backend.json.

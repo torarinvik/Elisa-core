@@ -46,6 +46,9 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 	if root.analyzer == nil {
 		return nil, fmt.Errorf("specialization requires a canonical semantic analyzer")
 	}
+	if root.analyzer.noStorageOverlay != nil {
+		return nil, fmt.Errorf("specialization root retains construction no-storage overlay")
+	}
 	if original := r.specializationCanonical[fn]; original != nil {
 		fn = original
 	}
@@ -66,7 +69,7 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 }
 
 func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
-	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil {
+	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
 	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)

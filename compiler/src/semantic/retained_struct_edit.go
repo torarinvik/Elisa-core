@@ -105,6 +105,10 @@ var retainedTypeMemoNames = func() map[string]bool {
 }()
 
 func (a *Analyzer) clearRetainedTypeMemos() {
+	if a.noStorageOverlay != nil {
+		a.rejectNoStorageOverlayOperation("retained type memo invalidation")
+		return
+	}
 	v := reflect.ValueOf(a).Elem()
 	for _, name := range retainedTypeMemos {
 		f := v.FieldByName(name)

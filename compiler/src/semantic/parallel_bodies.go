@@ -40,6 +40,10 @@ func parallelBodyWorkers() int {
 // chunk runs on its own copy of the Analyzer; the copies' state is merged back in
 // chunk order, so diagnostics keep source order.
 func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
+	if a.noStorageOverlay != nil {
+		a.rejectNoStorageOverlayOperation("parallel declaration scheduling")
+		return
+	}
 	if a.iterBinderElementOverlay != nil {
 		a.rejectIterBinderElementOverlayOperation("parallel declaration scheduling")
 		return
@@ -343,7 +347,7 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 // specializationContext.copyDecl. Its analyzer never queries unrelated function
 // analyses; public Result queries retain canonical fallback after publication.
 func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
-	if a != nil && (a.exprTypeOverlay != nil || a.exprFactsOverlay != nil || a.iterBinderElementOverlay != nil) {
+	if a != nil && (a.exprTypeOverlay != nil || a.exprFactsOverlay != nil || a.iterBinderElementOverlay != nil || a.noStorageOverlay != nil) {
 		panic("specialization construction requires a canonical analyzer, not another construction overlay")
 	}
 	return cloneAnalyzerValueForParallelPolicy(a, true, true)
@@ -383,6 +387,18 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// matches an inherited canonical diagnostic. Skip before cloning
 			// either the inherited slice or its potentially large dedup map.
 			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
+		if name == "noStorageOverlay" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerNoStorageOverlay(a.noStorageOverlay)))
+			continue
+		}
+		if ownedFunctionAnalyses && name == "storeScanNoStorageCache" {
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
 			continue
 		}
 		if name == "iterBinderElementOverlay" {
@@ -481,6 +497,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	}
 	if ownedFunctionAnalyses {
 		worker := cloned.Addr().Interface().(*Analyzer)
+		worker.noStorageOverlay = &analyzerNoStorageOverlay{base: a.storeScanNoStorageCache}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
 		if useExprFactsOverlay {
@@ -717,6 +734,14 @@ func typeHoldsMapInline(t reflect.Type) bool {
 // replaced map entries (nested maps merged entry by entry), slice tails appended
 // past the base length, and changed scalars and pointers.
 func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
+	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("noStorageOverlay")).IsNil() {
+		target := dst.Addr().Interface().(*Analyzer)
+		err := target.rejectNoStorageOverlayOperation("canonical worker merge")
+		if p != nil && p.specialization != nil {
+			p.specialization.err = err
+		}
+		return
+	}
 	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("iterBinderElementOverlay")).IsNil() {
 		target := dst.Addr().Interface().(*Analyzer)
 		err := target.rejectIterBinderElementOverlayOperation("canonical worker merge")
@@ -748,7 +773,7 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 		for i := 0; i < w.NumField(); i++ {
 			if p != nil {
 				name := w.Type().Field(i).Name
-				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
+				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || name == "noStorageOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
 					continue
 				}
 			}
