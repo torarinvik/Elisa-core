@@ -25,6 +25,8 @@ import (
 // Callers must honor Update errors and fall back to fresh analysis: a late
 // rejection may already have consumed or discarded the retained graph.
 type RetainedAnalysis struct {
+	plainDefaults *retainedPlainDefaultLifecycle
+
 	indexProofsUpdating bool                                      // invocation-local: invalidate before ordinary function reanalysis
 	indexProofsByFunc   map[*ast.FuncDecl]map[*ast.IndexExpr]bool // reverse ownership, only during Update
 	indexProofsByDecl   map[ast.Node]map[*ast.IndexExpr]bool
@@ -119,6 +121,7 @@ func AnalyzeRetained(file, pristine *ast.File, src []byte, options AnalyzeOption
 		return result, nil
 	}
 	r.result = result
+	r.refreshPlainDefaultProducts()
 	return result, r
 }
 
@@ -269,6 +272,16 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				return nil, fmt.Errorf("%s", r.LastStats.Fallback)
 			}
 			r.rememberFunctionIndexProof(fn, expr)
+		}
+	}
+	if r.a != nil {
+		for expr, site := range r.a.indexBoundsRuntimeSites {
+			if expr == nil || site.Owner == nil {
+				r.indexProofsUpdating, r.indexProofsByFunc, r.indexProofsByDecl = false, nil, nil
+				r.LastStats = RetainedUpdateStats{Fallback: "retained runtime bounds site has no exact lexical ownership; retry with a full analysis"}
+				return nil, fmt.Errorf("%s", r.LastStats.Fallback)
+			}
+			r.rememberFunctionIndexProof(site.Owner, expr)
 		}
 	}
 	defer func() { r.indexProofsUpdating = false; r.indexProofsByFunc = nil; r.indexProofsByDecl = nil }()
@@ -680,6 +693,46 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		shadowEdits = append(shadowEdits, [3]*ast.FuncDecl{live, ofn, nfn})
 		newTexts[nfn] = newText
 	}
+	reportDeclarationImport := false
+	var relocateProofReport func(*Analyzer) string
+	if r.a != nil {
+		changedOwners := make([]*ast.FuncDecl, 0, len(splices))
+		for _, edit := range splices {
+			changedOwners = append(changedOwners, edit.live)
+		}
+		declarationChange := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs)+len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+usingsAdded+usingsRemoved != 0
+		onlyFunctionRemovals := len(removed) != 0 && len(added)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs)+len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+usingsAdded+usingsRemoved == 0
+		removedOwners := make([]*ast.FuncDecl, 0, len(removed))
+		if onlyFunctionRemovals {
+			for _, old := range removed {
+				candidates := liveFns[fnKey{retainedLineKey(old.Pos()), old.Name}]
+				if len(candidates) != 1 {
+					return fail("proof report removed owner cannot be paired")
+				}
+				removedOwners = append(removedOwners, candidates[0])
+			}
+			declarationChange = false
+		}
+		reportDeclarationImport = declarationChange
+		reportLocationsChanged := len(marks) != 0
+		for live, fresh := range pairedNew {
+			if fresh.Pos().Offset != live.Pos().Offset {
+				reportLocationsChanged = true
+			}
+		}
+		if reportLocationsChanged && len(r.a.proofReport) != 0 {
+			var why string
+			relocateProofReport, why = r.prepareProofReportCoordinates(file, marks)
+			if why != "" {
+				return fail("proof report source relocation: %s", why)
+			}
+		}
+		// A complete coordinate adapter replaces the location-only admission
+		// refusal. Dependency and source-journal admission remain authoritative.
+		if why := r.admitProofReportUpdate(changedOwners, removedOwners, false, declarationChange); why != "" {
+			return fail("%s", why)
+		}
+	}
 	// Bodies are analyzed in the form the declaration phase leaves them in, and
 	// that phase's body-dependent results must be what the retained state holds.
 	pairing := time.Since(start)
@@ -689,16 +742,46 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
 		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto)+len(movedSplices)+len(shifted)+len(shiftedOther) == 0 &&
 		usingsAdded+usingsRemoved == 0 && !appendedTop && retainedNoLineDelta(lineDelta)
-	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) && bodyEnvironmentUnchanged {
+	// Location-only movement can use the complete body certificate once. Keep
+	// bodyEnvironmentUnchanged stricter: its end-of-update invalidation prevents
+	// reusing location-dependent classifier/digest snapshots after this update.
+	fastBodyEnvironmentUnchanged := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
+		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
+		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto) == 0 &&
+		usingsAdded+usingsRemoved == 0 && !appendedTop
+	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) && fastBodyEnvironmentUnchanged {
 		var why string
-		if fastBodies, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls); why != "" {
+		if !bodyEnvironmentUnchanged {
+			why = r.fastLineShiftAuthority(a, marks)
+		}
+		if why == "" {
+			fastBodies, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls)
+		}
+		if why != "" {
 			fastBodies = nil
 			r.LastStats.FastDeclined = why
 		}
 	}
 	if fastBodies != nil {
 		// The edit leaves every declaration-level result as the retained baseline holds it.
-		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, diags: r.pre.diags}
+		// The new prefix is independently relocated; mutating/aliasing the old
+		// baseline would invalidate preBodyDifference and later disk revisions.
+		diags := append([]Diagnostic(nil), r.pre.diags...)
+		owners := retainedDiagnosticOwners(r.decls, nil, func(decl ast.Decl) ast.Decl {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				return pairedNew[fn]
+			}
+			return nil
+		})
+		for i := range diags {
+			if strings.Contains(diags[i].Message, "__") {
+				if owner, shift := owners.ownerAt(diags[i].Pos); owner != nil {
+					diags[i].Message = retainedShiftLocalGensyms(diags[i].Message, shift)
+				}
+			}
+			diags[i].Pos = retainedShiftPos(diags[i].Pos, marks)
+		}
+		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
 		r.LastStats.FastPrepared = true
 	} else if prepared.AcceptsScratch(scratch) {
 		if err := prepared.materialize(); err != nil {
@@ -727,6 +810,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		pendingRetainedMu.Unlock()
 	}
 	compareStart := time.Now()
+	if reportDeclarationImport && pre != nil && pre.proofPrefixError != "" {
+		return fail("proof report declaration capture: %s", pre.proofPrefixError)
+	}
 	// A payload-less enum variant is a const value of the declaration phase.
 	constsIn, constsOut, globalsIn := 0, 0, 0
 	for _, d := range removedConsts {
@@ -1429,6 +1515,15 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 					return fail("edited struct default %s has a declaration/default consumer requiring full reanalysis", edit.live.Name)
 				}
 			}
+			for _, site := range a.indexBoundsRuntimeSites {
+				if site.Origin != edit.live {
+					continue
+				}
+				owner, body := site.Owner.(*ast.FuncDecl)
+				if !body || (!removed[owner] && (site.Header || !planned[owner])) {
+					return fail("edited struct default %s has a runtime bounds site outside reanalyzed bodies", edit.live.Name)
+				}
+			}
 			for expr, origin := range a.indexBoundsProofOrigins {
 				if origin != edit.live || !a.indexBoundsProven[expr] {
 					continue
@@ -1460,6 +1555,69 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
 					permissionKnownTypes[ft] = true
 				}
+			}
+		}
+	}
+	var retirePlainGlobalFacts func() error
+	var plainCoordinates *plainCoordinatePlan
+	var plainRemoved []*retainedPlainDefaultProduct
+	var plainBodies []*retainedPlainBodyRetirement
+	plainRebound := map[*ast.FuncDecl]bool{}
+	plainCommitted := false
+	plainManaged := pre.plainAdmission
+	if r.plainDefaults != nil && r.pre.plainInputs != "" && r.pre.plainInputs == pre.plainInputs {
+		for _, fn := range removedLive {
+			if _, tracked := r.plainDefaults.Candidates[fn]; tracked {
+				plainManaged = true
+			}
+		}
+		for _, splice := range splices {
+			if _, tracked := r.plainDefaults.Candidates[splice.live]; tracked {
+				plainManaged = true
+			}
+		}
+	}
+	if plainManaged {
+		if r.plainDefaults == nil || r.plainDefaults.Poisoned || r.plainDefaults.Updating {
+			return fail("plain default contribution baseline unavailable")
+		}
+		var err error
+		plainRemoved, err = r.preflightPlainDefaultRemoval(removedLive)
+		if err != nil {
+			return fail("plain default transaction: %v", err)
+		}
+		for _, splice := range splices {
+			retirement, err := r.preflightPlainBodyRetirement(splice.live)
+			if err != nil {
+				return fail("plain body transaction: %v", err)
+			}
+			plainBodies = append(plainBodies, retirement)
+		}
+		retirePlainGlobalFacts, err = r.preparePlainGlobalFactRetirement(pre, plainRemoved)
+		if err != nil {
+			return fail("plain global fact preflight: %v", err)
+		}
+		bodyChanged := map[*ast.FuncDecl]bool{}
+		for _, splice := range splices {
+			bodyChanged[splice.live] = true
+		}
+		plainCoordinates, err = r.planPlainSourceCoordinates(pairedNew, bodyChanged)
+		if err != nil {
+			return fail("plain coordinate preflight: %v", err)
+		}
+		state := r.plainDefaults
+		state.Updating = true
+		defer func() {
+			state.Updating = false
+			if !plainCommitted {
+				state.Poisoned = true
+				r.a = nil
+				r.result = nil
+			}
+		}()
+		for _, product := range plainRemoved {
+			if err := cleanupRetainedPlainDefaultProduct(a, r.result, product); err != nil {
+				return fail("plain default cleanup: %v", err)
 			}
 		}
 	}
@@ -1529,7 +1687,21 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			addedInto = append(addedInto, into)
 		}
 		// Declaring mutates the live analysis: from here a mismatch poisons it.
+		var verifyPlainGlobalReplay func() error
+		if plainManaged {
+			var err error
+			verifyPlainGlobalReplay, err = r.reopenPlainHeaderGlobalProducers(pre, addedScoped)
+			if err != nil {
+				return fail("plain header global replay: %v", err)
+			}
+		}
 		a.collectValueSymbols(addedScoped)
+
+		if verifyPlainGlobalReplay != nil {
+			if err := verifyPlainGlobalReplay(); err != nil {
+				return fail("plain header global replay: %v", err)
+			}
+		}
 		for _, sd := range addedScoped {
 			fn := sd.Decl.(*ast.FuncDecl)
 			if t, ok := pre.targets[fn]; ok {
@@ -1578,6 +1750,35 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 		}
 		r.decls = append(r.decls, addedScoped...)
+		if plainManaged && a.fillMayAdoptSet != nil {
+			// Exact canonical owner membership is established by the append above.
+			// Preserve the materialized whole-program classification across new
+			// closed no-call owners. Missing means conservative true to readers,
+			// so an actual new false producer must be explicitly represented.
+			for _, sd := range addedScoped {
+				fn := sd.Decl.(*ast.FuncDecl)
+				if err := plainDefaultProductShape(a, fn); err != nil {
+					return fail("plain fill-adoption producer: %v", err)
+				}
+				a.fillMayAdoptSet[fn] = false
+			}
+		}
+	}
+	if plainManaged {
+		for _, sd := range addedScoped {
+			fn := sd.Decl.(*ast.FuncDecl)
+			want, known := pre.plainHeaders[pre.keyOf[fn]]
+			if !known {
+				return fail("added %s lacks a certified scratch header product", fn.Name)
+			}
+			got, err := captureRetainedPlainDefaultProductPhase(a, fn, true)
+			if err != nil {
+				return fail("added %s header contribution: %v", fn.Name, err)
+			}
+			if got.Certificate != want.Certificate {
+				return fail("added %s header facts differ from independent scratch analysis", fn.Name)
+			}
+		}
 	}
 	// Added consts are scoped like added functions; declaring them cannot disagree with
 	// scratch, whose declaration-phase diagnostics already matched.
@@ -1677,6 +1878,12 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	for _, s := range splices {
 		spliced[s.live] = true
 	}
+	for _, retirement := range plainBodies {
+		if err := r.cleanupPlainBodyRetirement(retirement); err != nil {
+			return fail("plain body cleanup: %v", err)
+		}
+		plainRebound[retirement.Product.Owner] = true
+	}
 	for i, s := range splices {
 		s.live.Body = bodies[i]
 		changed = append(changed, scoped[s.live])
@@ -1704,6 +1911,17 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	for _, d := range shiftedOther {
 		retainedShiftDeclOwn(d, marks)
+	}
+	// Complete producer positions supersede line-only movement inside this
+	// closed plain transaction. Fresh replacement bodies already carry positions.
+	plainCoordinates.apply()
+	if reportDeclarationImport {
+		if why := a.importProofPrefix(pre); why != "" {
+			// Syntax/types have already been updated. Never reuse a partial
+			// revision after a failed source-identity rebind.
+			r.a = nil
+			return fail("proof report declaration import: %s", why)
+		}
 	}
 	r.LastStats.Diff = time.Since(start)
 	// Keep the body-phase diagnostics of unchanged functions; the changed ones
@@ -1858,6 +2076,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.post(r.decls, permissionAppended)
 	r.LastStats.Post = time.Since(postStart)
 	r.rbUpdating = false
+	if retirePlainGlobalFacts != nil {
+		if err := retirePlainGlobalFacts(); err != nil {
+			return fail("plain global fact retirement: %v", err)
+		}
+	}
 	a.closeSMT()
 	r.result.FuncDisjointParams = a.funcDisjointParams
 	// file is the next comparison base. Its spliced bodies now belong to the
@@ -1880,12 +2103,47 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		r.invalidateFastPrepareBaseline("declaration environment changed; fresh retained baseline required")
 	}
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
+	if relocateProofReport != nil {
+		if why := relocateProofReport(a); why != "" {
+			r.a = nil
+			return fail("proof report source relocation: %s", why)
+		}
+	}
+	a.publishLiveProofReport()
+	if a.proofLifecycle.Unknown != "" {
+		r.a = nil
+		return fail("proof report authority: %s", a.proofLifecycle.Unknown)
+	}
+	r.result.ProofReport = append([]ProofFact(nil), a.proofReport...)
+	r.result.ElisionSummary = a.currentElisionSummary()
 	r.result.Diagnostics = publishedResultDiagnostics(a.diagnostics)
 	r.result.SMTProfile = a.smtStats
 	r.LastStats.Changed = len(changed)
 	r.LastStats.Added = len(added)
 	r.LastStats.Removed = len(removed)
 	r.LastStats.Shifted = len(shifted)
+	if plainManaged {
+		r.prunePlainDefaultRetainedOwners(plainRemoved)
+		identityProducts := append([]*retainedPlainDefaultProduct(nil), plainRemoved...)
+		for _, retirement := range plainBodies {
+			identityProducts = append(identityProducts, retirement.Product)
+		}
+		if err := r.prunePlainDeadIdentities(identityProducts); err != nil {
+			return fail("plain identity commit: %v", err)
+		}
+		if err := r.verifyPlainDefaultRemoval(plainRemoved); err != nil {
+			return fail("plain default commit: %v", err)
+		}
+	}
+	for _, retirement := range plainBodies {
+		if err := r.verifyPlainBodyRetirement(retirement); err != nil {
+			return fail("plain retired body commit: %v", err)
+		}
+	}
+	r.refreshPlainDefaultProductsAfterBodyCleanup(plainRebound)
+	if plainManaged {
+		plainCommitted = true
+	}
 	r.LastStats.Total = time.Since(start)
 	return r.result, nil
 }
@@ -2354,6 +2612,10 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 	}
 	for _, fn := range fns {
 		a.removeDisjointFunction(fn)
+		// Removal already queued live callees/dependents through the old
+		// caller edges. A dead declaration cannot be a future solver target;
+		// retain every live dirty row while retracting this exact owner key.
+		delete(a.disjointDirtyCallees, fn)
 		sym := a.funcDeclSymbols[fn]
 		name := fn.Name
 		if sym != nil {
@@ -2490,4 +2752,37 @@ func retainedNoLineDelta(lineDelta map[string]int) bool {
 		}
 	}
 	return true
+}
+
+// Relocation moves syntax, not declaration-time symbol-table identities or source
+// coordinates rendered into diagnostic text. Decline these authorities rather
+// than pretending that a shifted AST has rerun their producers.
+func (r *RetainedAnalysis) fastLineShiftAuthority(a *Analyzer, marks map[string][][2]int) string {
+	for _, diagnostic := range r.pre.diags {
+		if diagnostic.Severity == "" || diagnostic.Severity == DiagnosticSeverityError {
+			return "line movement has declaration-prefix errors"
+		}
+		// The sentinel warning can render a callee declaration's source position.
+		// Padding and builtin-shadow warnings have no such secondary location.
+		if strings.Contains(diagnostic.Message, "(declared at ") {
+			return "line movement has a source-location-bearing declaration diagnostic"
+		}
+	}
+	for fn, symbol := range a.funcDeclSymbols {
+		if fn == nil || symbol == nil || retainedShiftPos(fn.Pos(), marks).Line == fn.Pos().Line {
+			continue
+		}
+		ft, ok := symbol.Type.(*FuncType)
+		if !ok || ft == nil {
+			continue
+		}
+		// Match the actual producer's symbol authority. Direct __init__ keeps
+		// its ordinary name; only cast hooks and named-type constructor sugar
+		// get these location-derived names. FuncType.Name itself is unchanged.
+		if fn.Name == "__cast__" && symbol.Name == castHookSymbolName(ft.Name, ft, fn.Pos()) ||
+			fn.Name != "__init__" && symbol.Name != ft.Name && symbol.Name == initHookSymbolName(ft.Name, ft, fn.Pos()) {
+			return "line movement changes location-derived hook symbol " + symbol.Name
+		}
+	}
+	return ""
 }

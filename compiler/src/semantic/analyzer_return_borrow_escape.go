@@ -2386,6 +2386,7 @@ func (a *Analyzer) returnBorrowTypeNameObject(object ast.Expr) bool {
 // computed for a generic callee outside its type-parameter scope, where `K` is unknown. An
 // unresolvable type comes back invalid, which returnBorrowOwnedValueType treats as opaque.
 func (a *Analyzer) returnBorrowDeclaredType(expr ast.TypeExpr) Type {
+	defer a.beginProofReportProbe()()
 	saved := a.suppressDiagnostics
 	a.suppressDiagnostics = true
 	defer func() { a.suppressDiagnostics = saved }()

@@ -118,6 +118,14 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 
 // resolveDirectCallExternFuncDecl resolves a direct `name(...)` call to its extern declaration.
 func (a *Analyzer) resolveDirectCallExternFuncDecl(call *ast.CallExpr) (*ast.ExternFuncDecl, bool) {
+	decl, ok := a.resolveDirectCallExternFuncDeclForReport(call)
+	if a != nil {
+		a.addProofReportOrigin(decl)
+	}
+	return decl, ok
+}
+
+func (a *Analyzer) resolveDirectCallExternFuncDeclForReport(call *ast.CallExpr) (*ast.ExternFuncDecl, bool) {
 	if call == nil || a.currentScope == nil {
 		return nil, false
 	}
@@ -136,6 +144,7 @@ func (a *Analyzer) resolveDirectCallExternFuncDecl(call *ast.CallExpr) (*ast.Ext
 // checkCalleeRequires discharges/checks a callee's precondition clauses against the caller's
 // arguments — shared by ordinary and extern (FFI boundary) calls.
 func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requires []ast.Expr, params []ast.ParamDecl, args []ast.Expr, callee *ast.FuncDecl) {
+	a.addProofReportOrigin(callee)
 	// Map each callee parameter name to the caller's argument expression. A param with no
 	// corresponding argument (variadic tail, defaulted) is simply absent — a clause that mentions it
 	// then leaves the fragment and declines.

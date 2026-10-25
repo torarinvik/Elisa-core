@@ -87,6 +87,12 @@ func (a *Analyzer) checkOneDefaultMethodContract(protocol string, def *ast.FuncD
 	if synth == nil {
 		return
 	}
+	defer a.beginProofContribution(def, proofPhasePostDefault, nil, "")()
+	oldSynthetic, oldSyntheticOwner := a.proofLifecycle.Synthetic, a.proofLifecycle.SyntheticOwner
+	a.proofLifecycle.Synthetic, a.proofLifecycle.SyntheticOwner = synth, def
+	defer func() { a.proofLifecycle.Synthetic, a.proofLifecycle.SyntheticOwner = oldSynthetic, oldSyntheticOwner }()
+	a.addProofReportOrigin(def)
+	a.addProofInterfaceOrigins(a.staticInterfaces[protocol])
 	// analyzeFunc resolves the function's signature via funcDeclSymbols; the synthesized default is
 	// not a global, so register its FuncType (built with the `Self: protocol` generic binding) for
 	// the duration of this check. The body/contract analysis then runs exactly as for any generic

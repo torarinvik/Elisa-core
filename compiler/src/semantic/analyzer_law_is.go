@@ -213,6 +213,7 @@ func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName st
 // (var decl, return, ensures) allow them; a cross-function call-argument boundary does not, since a
 // dependent key names variables in the callee's scope (see tryProveRefinementByFactSet).
 func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName string, pred ast.RefinementPredExpr, lawDecl *ast.FuncDecl, pos lexer.Pos, allowDependentFacts bool) bool {
+	a.addProofReportOrigin(lawDecl)
 	// Reset any counterexample left over from a previous obligation; the SMT tier below re-populates it
 	// on a failed proof, so the diagnostics that follow only ever show a witness for THIS obligation.
 	a.lastSMTCounterexample = ""
@@ -1346,6 +1347,14 @@ func (a *Analyzer) validateRefinementPreds(n *ast.RefinementTypeExpr, base Type)
 // The FuncType may be nil if the law's signature is not built yet; callers that need the subject
 // type must tolerate that.
 func (a *Analyzer) lookupLaw(name string) (*ast.FuncDecl, *FuncType, bool) {
+	decl, typ, ok := a.lookupLawForReport(name)
+	if a != nil {
+		a.addProofReportOrigin(decl)
+	}
+	return decl, typ, ok
+}
+
+func (a *Analyzer) lookupLawForReport(name string) (*ast.FuncDecl, *FuncType, bool) {
 	scopes := []*Scope{a.currentScope, a.globalScope}
 	for _, scope := range scopes {
 		if scope == nil {

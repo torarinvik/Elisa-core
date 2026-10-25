@@ -822,8 +822,9 @@ type Analyzer struct {
 	// same call would request the certificate again without end (stack overflow).
 	recursiveCertInProgress map[*ast.CallExpr]bool
 	proofReport             []ProofFact
-	currentProofCategory    ProofObligationCategory // elision-telemetry tag stamped on the next recordProof call; cleared after each call
-	indexBoundsRuntimeCount int                     // elision telemetry: index expressions that are NOT statically proven in-bounds
+	proofLifecycle          proofReportLifecycle
+	currentProofCategory    ProofObligationCategory                   // elision-telemetry tag stamped on the next recordProof call; cleared after each call
+	indexBoundsRuntimeSites map[*ast.IndexExpr]indexBoundsRuntimeSite // live ordinary panic-guard sites; speculative visits do not count
 	// zeroedStructLocals tracks locals declared `= zeroed` whose type is a struct and whose root has
 	// not been wholesale-replaced since declaration. Cleared for a root in invalidateWrittenFieldsForRoot
 	// when called for a non-field write (a root reassignment, borrow, or mutating-callee escape).
@@ -1655,6 +1656,7 @@ func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls 
 		err := a.rejectExprTypeOverlayOperation("canonical program publication")
 		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
 	}
+	a.publishLiveProofReport()
 	if a.retained != nil {
 		a.retained.capture(a, activeDecls, func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
 			a.runPostPhases(decls, options, solver, appended)
@@ -1723,7 +1725,7 @@ func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls 
 		ReturnRefinementChecks:  a.returnRefinementChecks,
 		IndexBoundsProven:       a.indexBoundsProven,
 		ProofReport:             a.proofReport,
-		ElisionSummary:          ComputeElisionSummary(a.proofReport, len(a.indexBoundsProven), a.indexBoundsRuntimeCount),
+		ElisionSummary:          a.currentElisionSummary(),
 		RequiresReport:          a.requiresReportEntries(),
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,

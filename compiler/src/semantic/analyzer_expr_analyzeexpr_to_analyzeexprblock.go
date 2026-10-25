@@ -566,9 +566,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				// covers builtins like sview/cstr/dstr that resolveType handles). If
 				// it does not, `recv.Name()` is the call `Name(recv)` instead.
 				savedSuppress := a.suppressDiagnostics
+				restoreReportProbe1 := a.beginProofReportProbe()
+				defer restoreReportProbe1()
 				a.suppressDiagnostics = true
 				probe := a.resolveType(named)
 				a.suppressDiagnostics = savedSuppress
+				restoreReportProbe1()
 				if IsInvalidType(probe) {
 					synth := &ast.CallExpr{
 						Position: n.Position,

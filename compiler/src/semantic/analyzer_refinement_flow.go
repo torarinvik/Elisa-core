@@ -1309,9 +1309,12 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 		// `Name` as a type would emit a spurious "unknown type" error. Suppress diagnostics so
 		// the non-integer/invalid result simply bails below, fail-closed, with no error.
 		savedSuppress := a.suppressDiagnostics
+		restoreReportProbe1 := a.beginProofReportProbe()
+		defer restoreReportProbe1()
 		a.suppressDiagnostics = true
 		t := a.resolveType(ce.Target)
 		a.suppressDiagnostics = savedSuppress
+		restoreReportProbe1()
 		if _, _, isInt := BitIntInfo(t); !isInt {
 			return // non-integer intermediate — cannot reason about value preservation
 		}

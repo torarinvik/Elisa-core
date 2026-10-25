@@ -271,9 +271,12 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 	// an untyped literal, …) needs an expected type to resolve and must be left to
 	// normal resolution (which supplies the primary overload's param type).
 	savedSuppress := a.suppressDiagnostics
+	restoreReportProbe1 := a.beginProofReportProbe()
+	defer restoreReportProbe1()
 	a.suppressDiagnostics = true
 	arg0Type := a.analyzeExpr(expr.Args[0])
 	a.suppressDiagnostics = savedSuppress
+	restoreReportProbe1()
 	if arg0Type == nil || IsInvalidType(arg0Type) {
 		return
 	}

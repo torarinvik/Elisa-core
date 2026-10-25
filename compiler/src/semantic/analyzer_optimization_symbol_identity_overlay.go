@@ -44,3 +44,26 @@ func (a *Analyzer) rejectOptimizationSymbolIdentityOverlayOperation(operation st
 	}
 	return err
 }
+
+// Retained ownership ledgers operate only on idle canonical storage. They need
+// complete registrations, not a construction overlay's local half. Returned
+// storage is read-only; deletion goes through the separately checked method.
+func (a *Analyzer) canonicalOptimizationSymbolIdentities() (map[*Symbol]string, error) {
+	if a == nil || a.optimizationSymbolIdentityOverlay != nil || a.parallel != nil || a.currentFuncDecl != nil {
+		return nil, fmt.Errorf("symbol identity inventory requires idle canonical storage")
+	}
+	return a.optimizationSymbolIDs, nil
+}
+
+func (a *Analyzer) deleteCanonicalOptimizationSymbolIdentity(symbol *Symbol) error {
+	if _, err := a.canonicalOptimizationSymbolIdentities(); err != nil {
+		return err
+	}
+	delete(a.optimizationSymbolIDs, symbol)
+	return nil
+}
+
+// This name is bookkeeping/schema identity, never permission to reflectively
+// access an active construction map. Inventory callers first require canonical
+// storage through the typed boundary above.
+func canonicalOptimizationSymbolIdentityTableName() string { return "optimizationSymbolIDs" }

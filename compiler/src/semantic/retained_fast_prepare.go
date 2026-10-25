@@ -61,6 +61,7 @@ func (r *RetainedAnalysis) invalidateFastPrepareBaseline(reason string) {
 // appendOnlyReports reports whether the append-only store check flags edit. It records
 // nothing: a flagged edit goes through the scratch, which reports it.
 func (r *RetainedAnalysis) appendOnlyReports(a *Analyzer, edit *ast.FuncDecl, sd scopedDecl) bool {
+	defer a.beginProofReportProbe()()
 	ao := r.appendOnly
 	if ao == nil {
 		return true
@@ -95,6 +96,7 @@ func classifierFoldShape(fn *ast.FuncDecl) bool {
 // fastPrepareBody returns live's body as the declaration phase would prepare edit's, or a
 // reason it cannot. edit is not modified.
 func (r *RetainedAnalysis) fastPrepareBody(a *Analyzer, live, edit *ast.FuncDecl, sd scopedDecl) ([]ast.Stmt, string) {
+	defer a.beginProofReportProbe()()
 	cs := r.classify
 	if cs == nil {
 		return nil, "no classification state"
@@ -231,6 +233,7 @@ func (r *RetainedAnalysis) factTables() *retainedFactTables {
 // evaluated against the live program-wide state, with fn standing in for live. Two parses of
 // one function with equal digests give the declaration phase equal inputs.
 func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, sd scopedDecl) string {
+	defer a.beginProofReportProbe()()
 	sym := a.funcDeclSymbols[live]
 	var ft *FuncType
 	if sym != nil {

@@ -159,11 +159,12 @@ func (a *Analyzer) recordProof(pos lexer.Pos, subject, predicate string, outcome
 // contract-ensures). For call paths that go through tryDischargeRefinementStatically set
 // a.currentProofCategory before the call; recordProofWithClass will consume and clear it.
 func (a *Analyzer) recordProofCat(pos lexer.Pos, subject, predicate string, outcome ProofOutcome, cat ProofObligationCategory) {
+	a.currentProofCategory = "" // an explicit record consumes any pending implicit tag
 	var known []string
 	if a != nil {
 		known = append([]string(nil), a.inScopeKnownFacts()...)
 	}
-	a.proofReport = append(a.proofReport, ProofFact{
+	a.appendProofFact(ProofFact{
 		Pos:        pos,
 		Subject:    subject,
 		Predicate:  predicate,
@@ -181,7 +182,7 @@ func (a *Analyzer) recordProofWithClass(pos lexer.Pos, subject, predicate string
 	}
 	cat := a.currentProofCategory
 	a.currentProofCategory = "" // consume
-	a.proofReport = append(a.proofReport, ProofFact{
+	a.appendProofFact(ProofFact{
 		Pos:              pos,
 		Subject:          subject,
 		Predicate:        predicate,

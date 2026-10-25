@@ -37,6 +37,12 @@ func (a *Analyzer) inheritIndexProofOwner() func() {
 }
 
 func (a *Analyzer) withIndexProofHeaderOwner(fn ast.Node, build func() *FuncType) *FuncType {
+	defer a.beginProofContribution(fn, proofPhaseHeader, nil, "")()
+	// Signature/default checks are not runtime instructions in the declared
+	// function body. Keep their real telemetry and local validation checks,
+	// but isolate all body effect/shape collectors from this declaration phase.
+	restoreBodyObservations := a.isolateFunctionBodyObservations()
+	defer restoreBodyObservations()
 	restore := a.enterIndexProofOwner(fn, true)
 	defer restore()
 	return build()
@@ -77,6 +83,7 @@ func (a *Analyzer) recordIndexBoundsProof(expr *ast.IndexExpr) {
 			owner = canonical
 		}
 	}
+	a.dropIndexBoundsRuntimeSite(expr)
 	a.indexBoundsProven[expr] = true
 	a.indexBoundsProofOwners[expr], a.indexBoundsProofHeaders[expr], a.indexBoundsProofOrigins[expr] = owner, header, origin
 	if r := a.retained; r != nil && r.indexProofsUpdating {
@@ -117,6 +124,10 @@ func (a *Analyzer) invalidateRetainedFunctionIndexBoundsProofs(fn *ast.FuncDecl)
 
 func (a *Analyzer) dropOwnedIndexProof(expr *ast.IndexExpr) {
 	owner := a.indexBoundsProofOwners[expr]
+	if owner == nil {
+		owner = a.indexBoundsRuntimeSites[expr].Owner
+	}
+	delete(a.indexBoundsRuntimeSites, expr)
 	delete(a.indexBoundsProven, expr)
 	delete(a.indexBoundsProofOwners, expr)
 	delete(a.indexBoundsProofHeaders, expr)
@@ -131,12 +142,15 @@ func (a *Analyzer) dropOwnedIndexProof(expr *ast.IndexExpr) {
 }
 
 func (a *Analyzer) clearFunctionIndexBoundsProofs(fn *ast.FuncDecl, includeHeader bool) {
+	if includeHeader {
+		a.retractProofContributions(fn)
+	}
 	if fn == nil || a.retained == nil {
 		return
 	}
 	fn = a.canonicalFuncDecl(fn)
 	for expr := range a.retained.indexProofsByFunc[fn] {
-		if !includeHeader && a.indexBoundsProofHeaders[expr] {
+		if !includeHeader && (a.indexBoundsProofHeaders[expr] || a.indexBoundsRuntimeSites[expr].Header) {
 			continue
 		}
 		a.dropOwnedIndexProof(expr)
@@ -147,6 +161,7 @@ func (a *Analyzer) clearFunctionIndexBoundsProofs(fn *ast.FuncDecl, includeHeade
 }
 
 func (a *Analyzer) clearDeclarationIndexBoundsProofs(decl ast.Node) {
+	a.retractProofContributions(decl)
 	if decl == nil || a.retained == nil {
 		return
 	}

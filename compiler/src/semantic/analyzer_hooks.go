@@ -313,6 +313,9 @@ func (a *Analyzer) lookupVisibleInitHooks(target Type) []*Symbol {
 }
 
 func (a *Analyzer) symbolForFuncDecl(fn *ast.FuncDecl) (*Symbol, bool) {
+	if a != nil {
+		a.addProofReportOrigin(fn)
+	}
 	if a == nil || fn == nil {
 		return nil, false
 	}

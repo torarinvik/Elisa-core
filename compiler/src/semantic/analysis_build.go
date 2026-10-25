@@ -162,6 +162,7 @@ func (b *AnalysisBuild) AdvanceBefore(maxDeclarations int, budget time.Duration,
 	}
 	result := a.finishProgramResult(b.file, b.loweredFile, r.decls, r.options, nil)
 	r.result = result
+	r.refreshPlainDefaultProducts()
 	b.done = true
 	return result, r, nil
 }
@@ -228,6 +229,12 @@ func (b *AnalysisBuild) validate() error {
 	if b == nil || b.retained == nil || b.retained.a == nil || b.file == nil || b.loweredFile == nil || b.retained.a.retained != b.retained || b.next < 0 || b.next > len(b.retained.decls) {
 		return fmt.Errorf("incomplete analysis build")
 	}
+	if b.retained.plainDefaults != nil && (b.retained.plainDefaults.Updating || b.retained.plainDefaults.Poisoned) {
+		return fmt.Errorf("analysis build retains an active/poisoned default contribution transaction")
+	}
+	if b.retained.a.noStorageOverlay != nil {
+		return fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
+	}
 	if b.retained.a.optimizationSymbolIdentityOverlay != nil {
 		return fmt.Errorf("construction optimization-symbol identity overlay cannot be persisted/restored or resumed")
 	}
@@ -236,9 +243,6 @@ func (b *AnalysisBuild) validate() error {
 	}
 	if b.retained.a.storeScanParamFactsOverlay != nil {
 		return fmt.Errorf("construction store-scan parameter-facts overlay cannot be persisted/restored or resumed")
-	}
-	if b.retained.a.noStorageOverlay != nil {
-		return fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
 	}
 	if b.retained.a.iterBinderElementOverlay != nil {
 		return fmt.Errorf("construction iteration-binder overlay cannot be persisted/restored or resumed")
@@ -284,6 +288,9 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	if r.rbUpdating || r.depth != 0 || len(r.rbStack) != 0 || a.parallel != nil || len(a.storageViewLoopUseFrames) != 0 || len(a.returnBorrowAliasFrames) != 0 || len(a.returnBorrowAliasJournal) != 0 || len(a.returnBorrowDeferFrames) != 0 || a.smtSolver != nil {
 		return nil, fmt.Errorf("analysis build is not idle")
 	}
+	if why := a.proofReportCheckpointError(); why != "" {
+		return nil, fmt.Errorf("proof report checkpoint: %s", why)
+	}
 	if a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
@@ -304,6 +311,9 @@ func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {
 	}
 	if b.done {
 		return nil, fmt.Errorf("completed analysis is not a build checkpoint")
+	}
+	if why := b.retained.a.proofReportCheckpointError(); why != "" {
+		return nil, fmt.Errorf("proof report checkpoint: %s", why)
 	}
 	b.retained.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
 		b.retained.a.runPostPhases(decls, b.retained.options, nil, appended)

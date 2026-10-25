@@ -1768,15 +1768,14 @@ func guardedInvariantGoal(cond, inv ast.Expr) ast.Expr {
 }
 
 func (a *Analyzer) typeLoopInvariantsQuietly(invs []*ast.ContractStmt) {
+	defer a.beginProofReportProbe()()
 	savedSuppress := a.suppressDiagnostics
-	savedProofs := len(a.proofReport)
 	a.suppressDiagnostics = true
 	a.ghostReadAllowed++
 	defer func() {
 		a.suppressDiagnostics = savedSuppress
 		a.ghostReadAllowed--
 		// Proof records belong to the real (in-place) analysis, not this typing pass.
-		a.proofReport = a.proofReport[:savedProofs]
 	}()
 	for _, inv := range invs {
 		if inv != nil && inv.Cond != nil && a.exprType(inv.Cond) == nil {

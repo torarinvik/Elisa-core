@@ -15,6 +15,11 @@ func exprAsSpecializeTypeArg(e ast.Expr) (ast.TypeExpr, bool) {
 }
 
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
+	// A reclassified site may take an early non-bounds path (flags/dict/overlay).
+	// Revoke only telemetry here; proof/check authority is unchanged.
+	if !a.suppressOptimizationFacts {
+		a.dropIndexBoundsRuntimeSite(expr)
+	}
 	// docs/107 typed guest-memory overlay: `base.field[mem]` over a `GuestVAddr[L]` carrier whose
 	// layout L is registered is a checked field accessor, not an ordinary index. Recognize and
 	// desugar it before analyzing the FieldExpr object (which has no real struct field to resolve).
@@ -83,7 +88,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		// A bounds-requiring access that is not statically proven would emit a runtime bounds check;
 		// record it for the `NoBoundsChecks` shape law (docs/89). Independent of enforceUnsafePermissions
 		// (the shape audit is about what the backend emits, not the unsafe-permission policy).
-		a.indexBoundsRuntimeCount++ // elision telemetry: this site needs a runtime guard
+		a.recordIndexBoundsRuntimeGuard(expr) // distinct current ordinary guard site
 		a.currentFunctionGuardedIndexes = append(a.currentFunctionGuardedIndexes, expr.Position)
 		if a.enforceUnsafePermissions {
 			a.recordFunctionPermissionRefs(unsafeUncheckedIndexRefs(expr.Position))
@@ -610,9 +615,12 @@ func (a *Analyzer) rewriteIndexedElementCall(expr *ast.CallExpr) {
 			return
 		}
 		savedSuppress := a.suppressDiagnostics
+		restoreReportProbe1 := a.beginProofReportProbe()
+		defer restoreReportProbe1()
 		a.suppressDiagnostics = true
 		receiverType := a.analyzeExpr(operand.Object)
 		a.suppressDiagnostics = savedSuppress
+		restoreReportProbe1()
 		if receiverType == nil || IsInvalidType(receiverType) {
 			return
 		}

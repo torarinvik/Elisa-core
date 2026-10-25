@@ -34,6 +34,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 func (a *Analyzer) analyzeScopedDecl(scoped scopedDecl) {
 	{
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			defer a.beginProofContribution(scoped.Decl, proofPhaseDeclaration, nil, "")()
 			restoreProofOwner := a.enterIndexProofOwner(scoped.Decl, false)
 			defer restoreProofOwner()
 			switch n := scoped.Decl.(type) {

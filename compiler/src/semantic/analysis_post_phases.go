@@ -22,6 +22,7 @@ func (a *Analyzer) runPostPhase(phase int, decls []scopedDecl, options AnalyzeOp
 			}
 			a.evaluateLateReturnBorrowFrames()
 		case 1:
+			a.clearProofPhase(proofPhasePostDefault)
 			// Protocol defaults must satisfy their own contracts after body analysis.
 			a.checkProtocolDefaultMethodContracts(decls)
 		case 2:

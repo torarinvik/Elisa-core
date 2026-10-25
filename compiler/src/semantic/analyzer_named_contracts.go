@@ -72,14 +72,20 @@ func (a *Analyzer) expandUsesContracts(decls []scopedDecl) {
 		fn, ok := sd.Decl.(*ast.FuncDecl)
 		if !ok || fn == nil || len(fn.Uses) == 0 || fn.IsContract {
 			if ext, extOK := sd.Decl.(*ast.ExternFuncDecl); extOK && ext != nil && len(ext.Uses) > 0 {
-				a.expandExternUsesContracts(ext, contracts)
+				func() {
+					defer a.beginProofContribution(ext, proofPhaseUses, nil, "")()
+					a.expandExternUsesContracts(ext, contracts)
+				}()
 				publish(sd, ext.Changes, ext.Fulfills)
 			}
 			continue
 		}
-		for _, use := range fn.Uses {
-			a.expandOneUse(fn, use, contracts)
-		}
+		func() {
+			defer a.beginProofContribution(fn, proofPhaseUses, nil, "")()
+			for _, use := range fn.Uses {
+				a.expandOneUse(fn, use, contracts)
+			}
+		}()
 		publish(sd, fn.Changes, fn.Fulfills)
 	}
 }
@@ -137,6 +143,7 @@ func (a *Analyzer) expandOneUse(fn *ast.FuncDecl, use *ast.ContractStmt, contrac
 		a.errorf(use.Position, "contract `%s` takes %d argument(s), but `uses` supplied %d", use.UsesName, len(c.Params), len(use.UsesArgs))
 		return
 	}
+	a.addProofReportOrigin(c)
 	cft := a.contractFuncTypeForUse(use, c)
 	if cft == nil || !a.validateUsesContractArgumentTypes(fn, use, c, cft) {
 		return

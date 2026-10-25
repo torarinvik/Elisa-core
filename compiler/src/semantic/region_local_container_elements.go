@@ -1443,11 +1443,11 @@ func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
 	target, publish := a.quietAnalysisTarget(decl)
 	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = true, true, target
 	a.staticContextDepth = 0
-	proofMark := len(a.proofReport)
+	a.addProofReportOrigin(target)
+	restoreProofReport := a.beginProofReportProbe()
+	defer restoreProofReport()
 	a.analyzeFuncWithTypeArgs(target, nil)
-	if len(a.proofReport) > proofMark {
-		a.proofReport = a.proofReport[:proofMark] // a quiet pass reports nothing
-	}
+	restoreProofReport()
 	a.currentNamespace, a.currentUsings = savedNamespace, savedUsings
 	a.suppressDiagnostics, a.suppressOptimizationFacts, a.provisionalSummaryFn = savedSuppress, savedOpt, savedProvisional
 	a.staticContextDepth = savedStatic

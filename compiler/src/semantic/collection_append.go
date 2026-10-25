@@ -14,6 +14,7 @@ func collectionAppendCall(n *ast.AugAssignStmt) *ast.CallExpr {
 // spelling for typed container updates so they reuse the existing caller-region
 // inference. Numeric updates remain untouched; full checking still owns validity.
 func (a *Analyzer) prepareCollectionAppends(fn *ast.FuncDecl) {
+	defer a.beginProofReportProbe()()
 	saved := a.suppressDiagnostics
 	a.suppressDiagnostics = true
 	defer func() { a.suppressDiagnostics = saved }()

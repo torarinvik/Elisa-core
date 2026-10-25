@@ -199,6 +199,7 @@ func (p *parallelWorkerState) ownsKey(key reflect.Value) bool {
 // worker and given a copy of the original's declaration-keyed entries, or decl
 // itself. Read copies are never analyzed, so they stay pristine.
 func (a *Analyzer) readDecl(decl *ast.FuncDecl) *ast.FuncDecl {
+	a.addProofReportOrigin(decl)
 	p := a.parallel
 	if p == nil || decl == nil {
 		return decl

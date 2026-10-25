@@ -105,10 +105,12 @@ func (a *Analyzer) assumeLemmaEnsures(call *ast.CallExpr, args []ast.Expr) bool 
 			continue
 		}
 		if a.proveRequiresClause(req, subst) == requiresProven {
+			a.addProofReportOrigin(decl)
 			a.recordProof(call.Pos(), "precondition of lemma "+decl.Name, "requires", ProofProvenLinear)
 			continue
 		}
 		if proven, _ := a.trySMTProveRequires(req, subst); proven {
+			a.addProofReportOrigin(decl)
 			a.recordProof(call.Pos(), "precondition of lemma "+decl.Name, "requires", ProofProvenSMT)
 			continue
 		}
@@ -169,6 +171,7 @@ func (a *Analyzer) assumeExternEnsures(call *ast.CallExpr, args []ast.Expr) {
 			continue
 		}
 		a.recordSMTAssertFact(rewritten)
+		a.addProofReportOrigin(ext)
 		a.recordProofWithClass(call.Pos(), "postcondition of extern "+ext.Name, "ensure", ProofAssumedExtern, ProofClassBoundary, nil, "")
 	}
 }

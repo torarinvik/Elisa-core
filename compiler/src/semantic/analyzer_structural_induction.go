@@ -224,6 +224,7 @@ func (tr *smtTranslator) boolPredicateArgToken(arg ast.Expr, env map[string]stri
 // sound NO-OP whenever the predicate is recursive but NOT verified structurally decreasing, the body is
 // not a single pure `match`/return tree we can lower, or any arm fails to lower to a Bool term.
 func (tr *smtTranslator) emitStructuralPredicateEquation(call *ast.CallExpr, decl *ast.FuncDecl, sym string, args []ast.Expr, env map[string]string, key string) {
+	tr.a.addProofReportOrigin(decl)
 	if tr == nil || decl == nil {
 		return
 	}

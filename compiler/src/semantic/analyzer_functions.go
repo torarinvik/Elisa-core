@@ -81,6 +81,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 // Re-analyzing per instantiation is what makes the instantiated type govern — the most
 // specific type wins, as monomorphization requires.
 func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
+	defer a.beginFunctionProofContribution(fn, typeArgs)()
 	restoreProofOwner := a.enterIndexProofOwner(fn, false)
 	defer restoreProofOwner()
 	a.invalidateRetainedFunctionIndexBoundsProofs(fn)
@@ -659,6 +660,8 @@ func reusableDeclReturnProvenance(fn *ast.FuncDecl, source, target *FuncType) (r
 }
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
+	a.addProofReportOrigin(fn)
+	defer a.beginProofReportProbe()()
 	restoreProofOwner := a.enterIndexProofOwner(fn, false)
 	defer restoreProofOwner()
 	fn = a.readDecl(fn)
@@ -887,6 +890,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 }
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
+	a.addProofReportOrigin(fn)
+	defer a.beginProofReportProbe()()
 	restoreProofOwner := a.enterIndexProofOwner(fn, false)
 	defer restoreProofOwner()
 	fn = a.readDecl(fn)

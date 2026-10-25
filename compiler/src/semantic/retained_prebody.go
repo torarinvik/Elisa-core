@@ -19,12 +19,21 @@ import (
 // unchanged; otherwise it falls back to a full analysis.
 
 type preBodyState struct {
-	classification map[string]string        // complete per-function classifier decisions
-	fingerprint    map[string]string        // stable function key -> body-dependent results
-	global         string                   // program-wide results (struct flags, table sizes)
-	diags          []Diagnostic             // diagnostics the phase emitted
-	keyOf          map[*ast.FuncDecl]string // each prepared function's fingerprint key
-	prepared       map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
+	plainHeaders    map[string]retainedPlainHeaderContribution
+	plainGlobal     string
+	plainIdentities *retainedPlainIdentityLedger
+	plainInputs     string
+	plainAdmission  bool // invocation-local; never persisted in comparisonState
+
+	hasProofReport   bool
+	proofPrefix      []proofContribution // immutable declaration-only journal captured before body analysis
+	proofPrefixError string
+	classification   map[string]string        // complete per-function classifier decisions
+	fingerprint      map[string]string        // stable function key -> body-dependent results
+	global           string                   // program-wide results (struct flags, table sizes)
+	diags            []Diagnostic             // diagnostics the phase emitted
+	keyOf            map[*ast.FuncDecl]string // each prepared function's fingerprint key
+	prepared         map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
 	// Per prepared function, the declaration-phase tables an added function
 	// carries into the live analysis (plain values, no analyzer-owned types).
 	targets     map[*ast.FuncDecl][]map[int]bool
@@ -36,10 +45,10 @@ type preBodyState struct {
 // runs; keeping its prepared functions afterwards roots an unused scratch AST.
 // Return a separate state so a caller-owned RetainedScratch is not modified.
 func (p *preBodyState) comparisonState() *preBodyState {
-	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil {
+	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil && !p.plainAdmission {
 		return p
 	}
-	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, diags: p.diags}
+	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, diags: p.diags, plainHeaders: p.plainHeaders, plainGlobal: p.plainGlobal, plainInputs: p.plainInputs, plainIdentities: p.plainIdentities, hasProofReport: p.hasProofReport}
 }
 
 var pendingPreBody *preBodyState
@@ -69,6 +78,7 @@ func scratchPreBody(file *ast.File, options AnalyzeOptions) *preBodyState {
 
 func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 	p := &preBodyState{
+		hasProofReport: len(a.proofReport) != 0,
 		classification: map[string]string{},
 		fingerprint:    map[string]string{},
 		keyOf:          map[*ast.FuncDecl]string{},
@@ -99,7 +109,10 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 			}
 		}
 	}
+	p.proofPrefix, p.proofPrefixError = a.captureProofPrefix()
 	p.global = a.preBodyGlobalFingerprint()
+	p.plainInputs = plainDefaultProgramInputs(a)
+	p.plainHeaders, p.plainGlobal, p.plainIdentities = capturePlainHeaderContributions(a, p.keyOf)
 	return p
 }
 
@@ -189,6 +202,13 @@ func (a *Analyzer) preBodyGlobalFingerprint() string {
 		switch f := v.Field(i); f.Kind() {
 		case reflect.Map, reflect.Slice:
 			name := v.Type().Field(i).Name
+			if name == "indexBoundsRuntimeSites" {
+				// Pure observational telemetry, never a declaration/codegen input.
+				// Its exact lexical owner/header/origin ledger is independently
+				// checked and invalidated by Update; header counts may change on
+				// function removal without changing any surviving declaration.
+				continue
+			}
 			if name == "diagnostics" || name == "reportedDiagnostics" || name == "warnOnceSeen" || retainedTypeMemoNames[name] {
 				continue // memos: their sizes count lookups, not results
 			}
@@ -271,9 +291,13 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, g reta
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
+	cur.plainAdmission = false
 	if old.global != cur.global {
 		if diff := globalGrowthDifference(old.global, cur.global, g); diff != "" {
-			return "program-wide declaration results changed" + diff
+			if residual, certified := plainHeaderResidueDifference(old, cur, g, replaced); !certified || residual != "" {
+				return "program-wide declaration results changed" + diff
+			}
+			cur.plainAdmission = true
 		}
 	}
 	if len(old.fingerprint)+added-removed != len(cur.fingerprint) {

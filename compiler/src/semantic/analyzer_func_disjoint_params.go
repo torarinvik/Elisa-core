@@ -43,6 +43,14 @@ func orderedPair(i, j int) [2]int {
 // generic targets all return false: their call sites are not guaranteed to be fully observable
 // by name, so the conservative choice is to not record them (and finalize excludes such callees).
 func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl, bool) {
+	decl, ok := a.resolveDirectCallFuncDeclForReport(call)
+	if a != nil {
+		a.addProofReportOrigin(decl)
+	}
+	return decl, ok
+}
+
+func (a *Analyzer) resolveDirectCallFuncDeclForReport(call *ast.CallExpr) (*ast.FuncDecl, bool) {
 	if call == nil {
 		return nil, false
 	}

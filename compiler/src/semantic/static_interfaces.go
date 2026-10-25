@@ -772,6 +772,7 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 			continue
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			defer a.beginProofContribution(decl, proofPhaseProtocolHeader, nil, "")()
 			qualifiedName := joinQualifiedName(scoped.Namespace, decl.Name)
 			if _, exists := a.staticInterfaces[qualifiedName]; exists {
 				a.errorf(decl.Pos(), "duplicate interface %q", qualifiedName)
@@ -852,10 +853,15 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 			continue
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			defer a.beginProofContribution(decl, proofPhaseProtocolImpl, nil, "")()
 			iface, interfaceName, ok := a.lookupVisibleStaticInterface(decl.InterfaceName)
 			if !ok || iface == nil {
 				a.errorf(decl.Pos(), "%s", UnknownInterfaceMessage(decl.InterfaceName))
 				return
+			}
+			a.addProofInterfaceOrigins(iface)
+			for _, method := range implMethodBodies(decl) {
+				a.addProofReportOrigin(method)
 			}
 			a.withGenericParams(decl.GenericParams, nil, func() {
 				receiver := a.resolveType(decl.ForType)

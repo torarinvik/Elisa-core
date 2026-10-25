@@ -70,13 +70,15 @@ var functionProductFieldPolicies = map[string]FunctionProductDisposition{
 	"CallArgRefinementChecks": FunctionProductRebind,
 	"ReturnRefinementChecks":  FunctionProductRebind,
 	"IndexBoundsProven":       FunctionProductRebind,
-	"ProofReport":             FunctionProductRebind,
-	"ElisionSummary":          FunctionProductAggregate,
-	"RequiresReport":          FunctionProductAggregate,
-	"Defer":                   FunctionProductRebind,
-	"Fold":                    FunctionProductRebind,
-	"Lambdas":                 FunctionProductRebind,
-	"FunctionAnalyses":        FunctionProductRebind,
+	// Contributions, origins and replaceable producer lifetimes must hydrate
+	// alongside the public slice; a flat report overlay is not a full product.
+	"ProofReport":      FunctionProductRebind | FunctionProductAnalyzerState,
+	"ElisionSummary":   FunctionProductAggregate,
+	"RequiresReport":   FunctionProductAggregate,
+	"Defer":            FunctionProductRebind,
+	"Fold":             FunctionProductRebind,
+	"Lambdas":          FunctionProductRebind,
+	"FunctionAnalyses": FunctionProductRebind,
 	// Body seeds must be replayed, then BlockingPath and SCC Recursion results
 	// cleared/recomputed; final summaries cannot simply be appended again.
 	"ProgressSummaries":  FunctionProductRebind | FunctionProductAggregate,

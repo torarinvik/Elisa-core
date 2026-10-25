@@ -388,14 +388,13 @@ func (a *Analyzer) seqLoopAssertAdmissible(expr ast.Expr) bool {
 // pre-loop scope so the SMT translator sees their widths; diagnostics and proof records of this
 // typing pass are discarded.
 func (a *Analyzer) typeSequentialPathsQuietly(paths []loopBodyPath) {
+	defer a.beginProofReportProbe()()
 	savedSuppress := a.suppressDiagnostics
-	savedProofs := len(a.proofReport)
 	a.suppressDiagnostics = true
 	a.ghostReadAllowed++
 	defer func() {
 		a.suppressDiagnostics = savedSuppress
 		a.ghostReadAllowed--
-		a.proofReport = a.proofReport[:savedProofs]
 	}()
 	for _, p := range paths {
 		for _, c := range p.conds {

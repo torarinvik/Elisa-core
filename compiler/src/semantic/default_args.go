@@ -389,6 +389,11 @@ func (a *Analyzer) validateParamDefaultExpr(expr ast.Expr, expected Type) bool {
 	if a == nil || expr == nil {
 		return false
 	}
+	// This validates the declaration's default, not a call-site evaluation.
+	// Actual cloned defaults are analyzed in the caller and must continue to
+	// contribute to that body's NoBoundsChecks/@inbounds audit.
+	restoreBodyObservations := a.isolateFunctionBodyObservations()
+	defer restoreBodyObservations()
 	// Preserve exact lexical lifetime across the lookup-scope reset below.
 	restoreProofOwner := a.inheritIndexProofOwner()
 	defer restoreProofOwner()

@@ -12,6 +12,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 	a.lowerProtocolParameters(decls)
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			defer a.beginProofContribution(scoped.Decl, proofPhaseValueSymbols, nil, "")()
 			restoreProofOwner := a.enterIndexProofOwner(scoped.Decl, false)
 			defer restoreProofOwner()
 			switch n := scoped.Decl.(type) {

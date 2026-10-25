@@ -113,6 +113,7 @@ var specializationOpaqueMapFields = [...]string{
 	"indexBoundsProofOrigins",
 	"indexBoundsProofOwners",
 	"indexBoundsProven",
+	"indexBoundsRuntimeSites",
 	"initHooksByName",
 	"interfaceMethodRefs",
 	"iterBindingByRef",
@@ -607,6 +608,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "indexBoundsProven":
 		dst.indexBoundsProven = maps.Clone(src.indexBoundsProven)
+		return true
+	case "indexBoundsRuntimeSites":
+		dst.indexBoundsRuntimeSites = maps.Clone(src.indexBoundsRuntimeSites)
 		return true
 	case "initHooksByName":
 		dst.initHooksByName = maps.Clone(src.initHooksByName)

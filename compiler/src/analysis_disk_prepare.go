@@ -110,11 +110,10 @@ func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options sem
 // analysisDiskBaselineSource is the source the stored state was analyzed from.
 func (a analysisDiskArtifact) baselineSourcePath() string { return a.path + ".src" }
 
-// analysisDiskLikelyBodyEdit guesses, from the stored baseline source, whether source only
-// edits function bodies in place (or not at all): same line count, and every changed line
-// indented in both.
-// It only decides whether the scratch declaration phase starts early; the update itself
-// decides whether the edit needs that phase.
+// analysisDiskLikelyBodyEdit is a bounded scheduling guess, never an admission
+// certificate. Trim equal prefix/suffix lines and defer scratch only when the
+// remaining changed lines are indented or blank. Semantic Update still checks
+// the complete body certificate and materializes independent scratch on decline.
 func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bool {
 	if os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") != "on" {
 		return false
@@ -124,16 +123,17 @@ func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bo
 		return false
 	}
 	before, after := bytes.Split(baseline, []byte("\n")), bytes.Split(source, []byte("\n"))
-	if len(before) != len(after) {
-		return false
+	for len(before) != 0 && len(after) != 0 && bytes.Equal(before[0], after[0]) {
+		before, after = before[1:], after[1:]
 	}
-	// Unchanged source reuses the stored result and needs no declaration phase at all.
-	for i := range before {
-		if bytes.Equal(before[i], after[i]) {
-			continue
-		}
-		if !analysisDiskIndented(before[i]) || !analysisDiskIndented(after[i]) {
-			return false
+	for len(before) != 0 && len(after) != 0 && bytes.Equal(before[len(before)-1], after[len(after)-1]) {
+		before, after = before[:len(before)-1], after[:len(after)-1]
+	}
+	for _, lines := range [][][]byte{before, after} {
+		for _, line := range lines {
+			if len(bytes.TrimSpace(line)) != 0 && !analysisDiskIndented(line) {
+				return false
+			}
 		}
 	}
 	return true

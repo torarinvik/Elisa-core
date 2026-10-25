@@ -424,9 +424,12 @@ func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *
 	if idx := strings.LastIndex(qualifiedName, "."); idx >= 0 {
 		a.currentNamespace = qualifiedName[:idx]
 	}
+	restoreReportProbe1 := a.beginProofReportProbe()
+	defer restoreReportProbe1()
 	a.suppressDiagnostics = true
 	resolved := a.resolveType(callee.ReturnType)
 	a.suppressDiagnostics = savedSuppress
+	restoreReportProbe1()
 	a.currentNamespace = savedNamespace
 	return a.typeIsRegionValued(resolved)
 }
@@ -859,9 +862,12 @@ func (a *Analyzer) refParamIsPackedEnum(typ ast.TypeExpr) bool {
 			// generic type-param name (`T`/`K` from an enclosing `extend[T]`) is not yet in scope, so a
 			// bare resolveType would emit a spurious "unknown type" error. We only need the boolean.
 			savedSuppress := a.suppressDiagnostics
+			restoreReportProbe2 := a.beginProofReportProbe()
+			defer restoreReportProbe2()
 			a.suppressDiagnostics = true
 			resolved := a.resolveType(typ)
 			a.suppressDiagnostics = savedSuppress
+			restoreReportProbe2()
 			et, ok := resolved.(*EnumType)
 			return ok && et != nil && (et.Packed || et.Root().Packed)
 		}
@@ -1372,9 +1378,12 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 			// not-yet-bound generic return type must not emit a second diagnostic;
 			// body analysis reports the authoritative error later.
 			savedSuppress := a.suppressDiagnostics
+			restoreReportProbe3 := a.beginProofReportProbe()
+			defer restoreReportProbe3()
 			a.suppressDiagnostics = true
 			resolved := a.resolveType(callee.ReturnType)
 			a.suppressDiagnostics = savedSuppress
+			restoreReportProbe3()
 			return resolved
 		}
 		if scoped, ok := funcScopes[callee]; ok {
@@ -1651,9 +1660,12 @@ func (a *Analyzer) paramStructIsProgramLived(typ ast.TypeExpr) bool {
 	// Silent: this runs before every type is registered; an unresolved name simply keeps the
 	// inferred region (the conservative answer).
 	saved := a.suppressDiagnostics
+	restoreReportProbe4 := a.beginProofReportProbe()
+	defer restoreReportProbe4()
 	a.suppressDiagnostics = true
 	resolved := a.resolveType(typ)
 	a.suppressDiagnostics = saved
+	restoreReportProbe4()
 	if resolved == nil {
 		return false
 	}
@@ -1668,6 +1680,7 @@ func (a *Analyzer) paramStructIsProgramLived(typ ast.TypeExpr) bool {
 // lifetime to buffers that already name their own allocation region. Unknown or
 // indirect field shapes retain the existing conservative inference.
 func (a *Analyzer) paramStructHasExplicitBackingIn(scoped scopedDecl, fn *ast.FuncDecl, typ ast.TypeExpr) bool {
+	defer a.beginProofReportProbe()()
 	if fn == nil || len(fn.TypeParams) != 0 || len(fn.PermissionParams) != 0 {
 		return false
 	}

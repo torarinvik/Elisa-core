@@ -261,6 +261,7 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w.globalScope, w.currentScope, w.smtTextFree = a.globalScope, a.currentScope, a.smtTextFree
 		p := w.parallel
 		w.parallel = nil
+		a.mergeWorkerProofContributions(w, p)
 		mergeRequiresReport(a, w, base)
 		mergeValue(settable(reflect.ValueOf(a).Elem()), reflect.ValueOf(w).Elem(), base, p)
 		mergeParallelSMTStats(&a.smtStats, w.smtStats)
@@ -379,6 +380,16 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if ownedFunctionAnalyses && name == "proofLifecycle" {
+			// The private construction journal contains only concrete work;
+			// publication retains the canonical Result's full public report.
+			settable(cloned.Field(i)).Set(reflect.ValueOf(a.specializationProofReportLifecycle()))
+			continue
+		}
+		if name == "proofLifecycle" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(a.forkProofReportLifecycle()))
+			continue
+		}
 		if ownedFunctionAnalyses && name == "proofReport" {
 			// Concrete producers append only construction-local observations.
 			// Published specialization views inherit the complete canonical
@@ -845,9 +856,12 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 	switch w.Kind() {
 	case reflect.Struct:
 		for i := 0; i < w.NumField(); i++ {
+			if w.Type() == reflect.TypeOf(Analyzer{}) && (w.Type().Field(i).Name == "proofLifecycle" || w.Type().Field(i).Name == "proofReport") {
+				continue
+			}
 			if p != nil {
 				name := w.Type().Field(i).Name
-				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || name == "noStorageOverlay" || name == "storeScanParamFactsOverlay" || name == "storeScanBinderOverlay" || name == "optimizationSymbolIdentityOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
+				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || name == "iterBinderElementOverlay" || name == "noStorageOverlay" || name == "optimizationSymbolIdentityOverlay" || name == "storeScanBinderOverlay" || name == "storeScanParamFactsOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
 					continue
 				}
 			}

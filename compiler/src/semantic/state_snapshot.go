@@ -33,6 +33,15 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 {
 		return nil, fmt.Errorf("analysis is not idle")
 	}
+	if r.plainDefaults != nil && (r.plainDefaults.Updating || r.plainDefaults.Poisoned) {
+		return nil, fmt.Errorf("default contribution transaction is active or poisoned")
+	}
+	if why := r.a.proofReportCheckpointError(); why != "" {
+		return nil, fmt.Errorf("proof report authority: %s", why)
+	}
+	if r.a.noStorageOverlay != nil {
+		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
+	}
 	if r.a.optimizationSymbolIdentityOverlay != nil {
 		return nil, fmt.Errorf("construction optimization-symbol identity overlay cannot be persisted/restored or resumed")
 	}
@@ -41,9 +50,6 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	}
 	if r.a.storeScanParamFactsOverlay != nil {
 		return nil, fmt.Errorf("construction store-scan parameter-facts overlay cannot be persisted/restored or resumed")
-	}
-	if r.a.noStorageOverlay != nil {
-		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
 	}
 	if r.a.iterBinderElementOverlay != nil {
 		return nil, fmt.Errorf("construction iteration-binder overlay cannot be persisted/restored or resumed")
@@ -65,6 +71,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	}
 	r.captureBodyUses()
 	r.precomputeBaselineDigests()
+	if why := r.a.proofReportCheckpointError(); why != "" {
+		return nil, fmt.Errorf("proof report checkpoint: %s", why)
+	}
 	r.pre = r.pre.comparisonState()
 	return r.marshalComparisonProjection()
 }
@@ -78,6 +87,12 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	if !ok || r == nil || r.a == nil || r.result == nil || r.result.analyzer != r.a || r.a.retained != r {
 		return nil, fmt.Errorf("incomplete semantic state")
 	}
+	if r.plainDefaults != nil && (r.plainDefaults.Updating || r.plainDefaults.Poisoned) {
+		return nil, fmt.Errorf("default contribution transaction is active or poisoned")
+	}
+	if r.a.noStorageOverlay != nil {
+		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
+	}
 	if r.a.optimizationSymbolIdentityOverlay != nil {
 		return nil, fmt.Errorf("construction optimization-symbol identity overlay cannot be persisted/restored or resumed")
 	}
@@ -87,9 +102,6 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	if r.a.storeScanParamFactsOverlay != nil {
 		return nil, fmt.Errorf("construction store-scan parameter-facts overlay cannot be persisted/restored or resumed")
 	}
-	if r.a.noStorageOverlay != nil {
-		return nil, fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
-	}
 	if r.a.iterBinderElementOverlay != nil {
 		return nil, fmt.Errorf("construction iteration-binder overlay cannot be persisted/restored or resumed")
 	}
@@ -98,6 +110,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	}
 	if r.a.exprTypeOverlay != nil {
 		return nil, fmt.Errorf("persisted construction expression-type overlay is unsupported")
+	}
+	if why := r.a.proofReportCheckpointError(); why != "" {
+		return nil, fmt.Errorf("proof report authority: %s", why)
 	}
 	r.pre = r.pre.comparisonState()
 	r.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {

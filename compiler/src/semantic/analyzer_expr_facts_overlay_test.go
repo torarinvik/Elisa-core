@@ -259,8 +259,8 @@ func TestAnalyzerExprFactAccessUsesClosedOverlayAPI(t *testing.T) {
 	}
 	boundary := map[string]map[string]bool{
 		"analyzer_expr_facts_overlay.go": {"lookupExprFacts": true, "setExprFacts": true, "deleteExprFacts": true, "rangeExprFacts": true, "exprFactsLen": true, "hasExprFactsStorage": true},
-		"parallel_bodies.go": {"cloneAnalyzerValueForParallelPolicy": true},
-		"analyzer.go": {"finishProgramResult": true},
+		"parallel_bodies.go":             {"cloneAnalyzerValueForParallelPolicy": true},
+		"analyzer.go":                    {"finishProgramResult": true},
 	}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
@@ -294,7 +294,7 @@ func TestAnalyzerExprFactAccessUsesClosedOverlayAPI(t *testing.T) {
 			}
 			if literal, ok := node.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 				value, _ := strconv.Unquote(literal.Value)
-				if value == "exprFacts" && !(entry.Name() == "parallel_bodies.go" && function == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_accessors_gen.go" && function == "") {
+				if value == "exprFacts" && !exprFactsNamedAccessHasClosedPolicy(entry.Name(), function) {
 					t.Errorf("named/reflection fact-table access needs explicit policy at %s", set.Position(literal.Pos()))
 				}
 			}
@@ -340,5 +340,32 @@ func BenchmarkSpecializationExprFactsOverlayConstruction(b *testing.B) {
 			})
 			specializationExprFactsCloneSink = nil
 		})
+	}
+}
+
+// Only these exact named consumers are permitted. This does not permit any raw
+// selector access: capturePlainGlobalHeaderRows rejects construction resources,
+// inventories unknown canonical rows fail-closed, and reads values logically;
+// ownedRows only accounts for already captured immutable receipt labels.
+func exprFactsNamedAccessHasClosedPolicy(file, function string) bool {
+	switch file {
+	case "parallel_bodies.go":
+		return function == "cloneAnalyzerValueForParallelPolicy"
+	case "specialization_accessors_gen.go":
+		return function == ""
+	case "retained_plain_identities.go":
+		return function == "ownedRows" || function == "capturePlainGlobalHeaderRows"
+	}
+	return false
+}
+
+func TestExprFactsNamedInventoryPolicyRemainsFunctionScoped(t *testing.T) {
+	if !exprFactsNamedAccessHasClosedPolicy("retained_plain_identities.go", "ownedRows") || !exprFactsNamedAccessHasClosedPolicy("retained_plain_identities.go", "capturePlainGlobalHeaderRows") {
+		t.Fatal("inventoried immutable/canonical consumers lack policy")
+	}
+	for _, test := range [][2]string{{"retained_plain_identities.go", "arbitraryHelper"}, {"other.go", "capturePlainGlobalHeaderRows"}, {"retained_plain_identities.go", ""}} {
+		if exprFactsNamedAccessHasClosedPolicy(test[0], test[1]) {
+			t.Fatal("named table policy widened outside exact consumers")
+		}
 	}
 }

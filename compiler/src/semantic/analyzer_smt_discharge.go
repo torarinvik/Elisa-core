@@ -3203,6 +3203,7 @@ func (tr *smtTranslator) dictMethodCall(call *ast.CallExpr, kind string, env map
 	}
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
 	decl = tr.a.readDecl(decl)
+	tr.a.addProofReportOrigin(decl)
 	if !direct || decl == nil {
 		return "", false
 	}
@@ -6149,6 +6150,7 @@ func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.Func
 }
 
 func (tr *smtTranslator) emitDefiningEquationWithEnv(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string, recursiveCallDomainProven bool, envOverride map[string]string) {
+	tr.a.addProofReportOrigin(decl)
 	if tr == nil || decl == nil {
 		return
 	}

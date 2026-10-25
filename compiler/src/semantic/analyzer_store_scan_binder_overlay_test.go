@@ -274,3 +274,38 @@ func TestStoreScanBinderOverlayNilEmptyAndOrdinaryIsolation(t *testing.T) {
 		t.Fatal("ordinary worker nested map was shared")
 	}
 }
+
+func TestStoreScanBinderReadDeclRecordsCanonicalProofOriginWithoutChangingRekey(t *testing.T) {
+	fn := &ast.FuncDecl{Name: "first", Body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.IntLit{Value: "1"}}}}
+	caller := &ast.FuncDecl{Name: "caller"}
+	typ := &BuiltinType{Name: "i64"}
+	original := map[string]storeScanBinderVerdict{"known": {typ, true}, "negative": {}}
+	source := &Analyzer{storeScanBinderTypes: map[*ast.FuncDecl]map[string]storeScanBinderVerdict{fn: original}}
+	worker, context := binderOverlayTestContext(source)
+	pending := &proofContribution{Key: proofContributionKey{Owner: caller, Phase: proofPhaseBody}}
+	worker.proofLifecycle.Current = pending
+	shadow := worker.readDecl(fn)
+	if context.err != nil || shadow == nil || shadow == fn {
+		t.Fatal("actual read copy failed", context.err)
+	}
+	if len(pending.Origins) != 1 || !pending.Origins[fn] || pending.Origins[shadow] {
+		t.Fatal("read declaration did not record exactly its canonical proof origin")
+	}
+	worker.mutableStoreScanBinderCache(shadow)["private"] = storeScanBinderVerdict{typ, true}
+	if _, present := worker.mutableStoreScanBinderCache(fn)["private"]; !present {
+		t.Fatal("origin hook changed readDecl source/shadow rekey alias")
+	}
+	if _, present := original["private"]; present {
+		t.Fatal("readDecl proof observation mutated canonical binder backing")
+	}
+	if got := worker.readDecl(shadow); got != shadow {
+		t.Fatal("already-private read identity changed")
+	}
+	if len(pending.Origins) != 1 || !pending.Origins[fn] {
+		t.Fatal("private read was recorded as a second source origin")
+	}
+	var absent *ast.FuncDecl
+	if worker.readDecl(absent) != nil || len(pending.Origins) != 1 {
+		t.Fatal("typed nil declaration created a proof dependency")
+	}
+}

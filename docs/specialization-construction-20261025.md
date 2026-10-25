@@ -905,3 +905,48 @@ normal observers disabled, fresh processes, no server, experimental explicit
 analysis cache/fast-prepare settings and external30s compiler cap. This remains
 above the goal. Evidence /tmp/elisa-stage1-canonical-map-root and its individual
 O0 receipts, producer archive, normal-streams-comparison and source-restoration.
+
+
+## Curated proof-report and plain-default lifecycle integration
+
+The private experiment was integrated through an actual three-way merge against
+main987a6b21 and its common source ancestor, preserving current main cache
+ownership, install/provenance and canonical-scan changes. Main's later LLVM
+query cut is preserved. Actual semantic generation ran again on main. All80
+changed source/generated/test files are byte-identical to the independently
+qualified curated copy (/tmp/elisa-main-default-integration-source-parity.json).
+
+Proof reports retain explicit producer-phase/source-owner contributions,
+construction-local journals, activity/checkpoint guards and exact old-source
+binding recovery. Unknown/live/ambiguous authority still declines; no proof
+budget, verdict, optimization or cache validation is weakened. Plain-default
+transactions track complete owned rows, UID membership and global prefix
+producer receipts. Exact syntax/CFG/fact-transform and verification-binder
+coordinates are rebound through verified source fields; full certificate text,
+positions and cold metadata comparisons remain. Canonical-only construction
+resource checks include every current overlay. Unknown resources fall back.
+The adoption classifier for added owners is installed only after their actual
+canonical append, fixing the real backend materialization/re-add failure.
+
+Qualification on the curated source: actual generation; focused semantic2.729s;
+broad semantic race21.241s after an external compile timeout; post-order-fix
+focused race2.532s; transient SMT retry/certified-decline controls race1.399s;
+all50 prior backend cases passed, and all3 default lifecycle cases passed after
+the order fix, with zero skips. Additional disk-roundtrip default tests compare
+full-quality whole-module cold/warm O3 IR exactly, debug off/on, and link/execute
+both results across six removal/re-add/default/body/revert revisions. Separate
+actual unchanged Elisa default callers explicitly decline retained admission;
+fresh fallback O3 execution observes11→77→11. No partitioning/linkage tricks,
+normalization or claimed default invocation from explicit C arguments are used.
+Logs: /tmp/elisa-curated-main987-*.log and *.jsonl.
+
+This remains a correctness foundation. The plain declaration-edit domain is
+whole-program closed scalar-return/no-call syntax; real unchanged callers require
+fallback and this does not qualify the Stage1 signature/caller target. Full
+Stage1 timing of the new producer, default-CLI settings, the varied edit matrix,
+O0/O3 self-host timing and the full latest-source self-host gate remain open.
+
+Main verification after transfer: actual generation and80-file source parity;
+focused semantic2.665s; all5 default backend top-level tests RUN/PASS with zero
+skips, including O0, O3, debug and linked runtime cases; CLI body-edit hunk
+scheduling0.396s. Main logs /tmp/elisa-main-default-integration-*.log and *.jsonl.

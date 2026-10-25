@@ -71,7 +71,16 @@ func (a *Analyzer) dischargeProtocolLawsForImpl(iface *StaticInterface, impl *St
 	typeName := lawTypeSourceName(a, impl.Receiver, st)
 	methodBodies := implMethodBodies(decl)
 	for _, law := range iface.Laws {
-		a.dischargeOneProtocolLaw(iface, impl, st, typeName, methodBodies, law)
+		func() {
+			defer a.beginProofContribution(decl, proofPhaseProtocolLaw, law, "")()
+			a.addProofReportOrigin(law)
+			a.addProofInterfaceOrigins(iface)
+			a.addProofReportOrigin(st.Decl)
+			for _, method := range methodBodies {
+				a.addProofReportOrigin(method)
+			}
+			a.dischargeOneProtocolLaw(iface, impl, st, typeName, methodBodies, law)
+		}()
 	}
 }
 
