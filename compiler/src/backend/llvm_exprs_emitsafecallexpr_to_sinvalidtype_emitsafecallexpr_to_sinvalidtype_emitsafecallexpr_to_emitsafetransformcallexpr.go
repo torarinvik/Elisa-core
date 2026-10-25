@@ -108,7 +108,7 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
 	info := (*semantic.SafeCallInfo)(nil)
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.SafeCalls != nil {
-		info = s.g.result.SafeCalls[expr]
+		info = s.g.result.ValueSafeCalls(expr)
 	}
 	var (
 		callValue C.LLVMValueRef
@@ -270,7 +270,7 @@ func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMVal
 	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
 	info := (*semantic.SafeCallInfo)(nil)
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.SafeCalls != nil {
-		info = s.g.result.SafeCalls[expr]
+		info = s.g.result.ValueSafeCalls(expr)
 	}
 	transformFunc := expr.Func
 	transformArgs := append([]ast.Expr(nil), expr.Args...)

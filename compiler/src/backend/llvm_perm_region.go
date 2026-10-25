@@ -59,7 +59,7 @@ func (s *functionState) permGrowthOwner(expr ast.Expr) (treeAllocOwnerBinding, b
 	if s == nil || s.g == nil || s.g.result == nil || s.g.result.PermGrowthOps == nil {
 		return treeAllocOwnerBinding{}, false, nil
 	}
-	if !s.g.result.PermGrowthOps[expr] {
+	if !s.g.result.ValuePermGrowthOps(expr) {
 		return treeAllocOwnerBinding{}, false, nil
 	}
 	owner, err := s.permTreeAllocOwner()

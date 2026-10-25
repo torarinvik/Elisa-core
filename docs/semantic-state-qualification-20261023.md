@@ -4306,3 +4306,43 @@ recorded in `/tmp/elisa-stage1-current-main-root`; pprof summaries are
 `/tmp/elisa-current-body-short-circuit-alloc-top.txt`. First-edit timing remains
 separate from the exact hit and profiled repeat. O3 and the varied matrix remain
 unqualified.
+
+
+### Private syntax and sparse facts for concrete generic lowering
+
+Concrete generic reanalysis now owns its rewritten syntax and matching codegen
+facts. It no longer writes canonical CallExpr argument backing while other
+partition walkers read that backing. The previously reproduced race now passes
+with concurrent canonical readers. Nested bodies install and restore their exact
+semantic/proof view; canonical imported bodies use root facts, while synthesized
+closures keep the enclosing private view. Historical target proofs are masked
+and span fallback remains scoped to fresh current-owner authority.
+
+Published products retain only their owned function/fact closure, all 34 typed
+node-map views, and minimal query context, sharing canonical global indexes.
+They do not retain construction analyzers or per-instance whole-program map
+copies. Fixed metadata schemas fail closed on unknown resource-bearing shapes.
+Visible slice aliases/interior pointers remain shared; inaccessible spare tails
+are discarded, and unsupported hidden interior pointers decline explicitly.
+Typed key probes close fact-held synthetic syntax without whole-map scans.
+Construction still clones the Analyzer temporarily; full Stage1 cost is pending.
+
+Focused semantic race controls pass in 2.861 seconds; all Retained, canonical
+snapshot and parallel function-snapshot controls pass in 7.727 seconds. Backend
+proof/context/accessor policy, generic binding and real retained C ABI/runtime
+checks pass under race in 10.461 seconds, including cold/replay IR checks.
+Timed-out initial compilation/test attempts are preserved separately. Actual
+registry generation matches, and accessor generator validation passes. A
+receipt-bound compiler builds in 15.803 seconds. Fresh CLI O0 and default O3
+objects for adversarial module lookup plus nested generic calls both link and
+return the expected 42. Earlier smoke invocations had invalid CLI/default-emit
+and namespace spelling; those failures are preserved rather than counted.
+
+Eight-product construction with 512 unrelated functions falls from approximately
+8.23 ms / 6.83 MB / 79,116 allocations to 6.36 ms / 6.05 MB / 30,594 allocations
+with owned-key probes. These are small-fixture construction results, not Stage1
+latency qualification. Logs `/tmp/elisa-sparse-specialization-v5-focused-race.log`,
+`/tmp/elisa-sparse-specialization-v6-retained-snapshot-race.log`,
+`/tmp/elisa-sparse-specialization-v5-backend-race-retry.log`, and
+`/tmp/elisa-sparse-construction-key-probes-10x.log`; build/CLI records are under
+the root in `/tmp/elisa-sparse-stage0-build-root`.

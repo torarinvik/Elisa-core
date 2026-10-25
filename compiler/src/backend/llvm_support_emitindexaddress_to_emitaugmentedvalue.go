@@ -63,20 +63,33 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 	if expr == nil || s == nil || s.g == nil || s.g.result == nil {
 		return false
 	}
-	if s.g.resultIndexBoundsProven(expr) {
+	view := s.g.result.IndexProofSpanResult(expr)
+	if view.ValueIndexBoundsProven(expr) {
 		return true
 	}
-	// Static lowering can rebuild a user statement while preserving its source position. The
-	// semantic proof map is pointer-keyed because that is exact for the original tree, but a
-	// rebuilt node must not lose a proof and regain a redundant watchdog. Match only an exact
-	// source span; a shared line or column is insufficient because two accesses can be adjacent.
-	if shared := s.g.sharedLookups; shared != nil && len(s.g.result.IndexBoundsProven) == shared.proofCount {
+	if view.IndexProofSpanBlocked(expr) {
+		return false
+	}
+	current := view == s.g.result
+	if current && s.g.boundsOverlay[expr] {
+		return true
+	}
+	// Rebuilt nodes use authority from the semantic view that owns the actual
+	// expression, never an equal-count foreign view or another body's overlay.
+	shared := s.g.sharedLookups
+	if shared != nil && shared.result != view {
+		if program := shared.programLookups(); program.result == view {
+			shared = program
+		}
+	}
+	if shared != nil && shared.result == view && view.IndexProofSpanCount() == shared.proofCount {
 		if shared.indexProofSpans()[expr.Position] {
 			return true
 		}
-		// Synthesized proofs stay private to this generator. Rebuild only
-		// their small span index when its overlay grows, not the full result.
-		if s.g.provenIndexSpans == nil || s.g.provenIndexSpansSize != len(s.g.boundsOverlay) {
+		if !current {
+			return false
+		}
+		if s.g.provenIndexSpans == nil || s.g.provenIndexSpansResult != view || s.g.provenIndexSpansSize != len(s.g.boundsOverlay) {
 			s.g.provenIndexSpans = make(map[lexer.Pos]bool, len(s.g.boundsOverlay))
 			for indexed, proven := range s.g.boundsOverlay {
 				if indexed != nil && proven {
@@ -84,27 +97,40 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 				}
 			}
 			s.g.provenIndexSpansSize = len(s.g.boundsOverlay)
+			s.g.provenIndexSpansResult = view
 		}
 		return s.g.provenIndexSpans[expr.Position]
 	}
-	return s.g.provenIndexPositions()[expr.Position]
+	return s.g.provenIndexPositionsFor(view)[expr.Position]
 }
 
-// provenIndexPositions indexes IndexBoundsProven by source span, rebuilt when
-// the proof map's size changes, so a rebuilt node's lookup is a map hit instead
-// of a scan of every proof.
 func (g *llvmGenerator) provenIndexPositions() map[lexer.Pos]bool {
-	proofs := g.result.IndexBoundsProven
-	if g.provenIndexSpans == nil || g.provenIndexSpansSize != len(proofs)+len(g.boundsOverlay) {
-		g.provenIndexSpans = make(map[lexer.Pos]bool, len(proofs))
-		for _, set := range []map[*ast.IndexExpr]bool{proofs, g.boundsOverlay} {
-			for provenExpr, proven := range set {
-				if proven && provenExpr != nil {
-					g.provenIndexSpans[provenExpr.Position] = true
+	return g.provenIndexPositionsFor(g.result)
+}
+
+func (g *llvmGenerator) provenIndexPositionsFor(view *semantic.Result) map[lexer.Pos]bool {
+	overlaySize := 0
+	if view == g.result {
+		overlaySize = len(g.boundsOverlay)
+	}
+	size := view.IndexProofSpanCount() + overlaySize
+	if g.provenIndexSpans == nil || g.provenIndexSpansResult != view || g.provenIndexSpansSize != size {
+		g.provenIndexSpans = make(map[lexer.Pos]bool, size)
+		view.RangeIndexProofSpanAuthority(func(expr *ast.IndexExpr, proven bool) bool {
+			if expr != nil && proven {
+				g.provenIndexSpans[expr.Position] = true
+			}
+			return true
+		})
+		if view == g.result {
+			for expr, proven := range g.boundsOverlay {
+				if expr != nil && proven {
+					g.provenIndexSpans[expr.Position] = true
 				}
 			}
 		}
-		g.provenIndexSpansSize = len(proofs) + len(g.boundsOverlay)
+		g.provenIndexSpansSize = size
+		g.provenIndexSpansResult = view
 	}
 	return g.provenIndexSpans
 }

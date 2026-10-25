@@ -19,7 +19,7 @@ func (s *functionState) interfaceMethodRef(expr *ast.FieldExpr) (*semantic.Inter
 	if s == nil || s.g == nil || s.g.result == nil || expr == nil || s.g.result.InterfaceMethodRefs == nil {
 		return nil, false
 	}
-	ref, ok := s.g.result.InterfaceMethodRefs[expr]
+	ref, ok := s.g.result.LookupInterfaceMethodRefs(expr)
 	return ref, ok && ref != nil
 }
 

@@ -1,6 +1,9 @@
 package semantic
 
-import "reflect"
+import (
+	"elisacore/src/ast"
+	"reflect"
+)
 
 // Snapshot mutable function metadata without cloning nominal declarations or
 // syntax. Unlike deepCloneValue (worker map COW), publication must detach slice
@@ -16,7 +19,7 @@ func snapshotFuncTypeForDestination(source, destination *FuncType) reflect.Value
 	return snapshotFuncTypeMetadataRoot(reflect.ValueOf(source).Elem(), source, destination)
 }
 
-func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *FuncType) reflect.Value {
+func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *FuncType, syntaxCopy ...func(reflect.Value) reflect.Value) reflect.Value {
 	type pointerKey struct {
 		typ reflect.Type
 		ptr uintptr
@@ -28,6 +31,16 @@ func snapshotFuncTypeMetadataRoot(value reflect.Value, source, destination *Func
 	}
 	var copyValue func(reflect.Value) reflect.Value
 	copyValue = func(v reflect.Value) reflect.Value {
+		if len(syntaxCopy) != 0 && ((v.Kind() == reflect.Pointer && v.Type().Elem().PkgPath() == astGraphPkgPath) || (v.Kind() == reflect.Struct && v.Type().PkgPath() == astGraphPkgPath)) {
+			// Factory/declaration references denote canonical symbols. Expressions
+			// and structural syntax in defaults/contracts need private ownership.
+			if v.CanInterface() {
+				if _, declaration := v.Interface().(ast.Decl); declaration {
+					return v
+				}
+			}
+			return syntaxCopy[0](v)
+		}
 		switch v.Kind() {
 		case reflect.Pointer:
 			if v.IsNil() {

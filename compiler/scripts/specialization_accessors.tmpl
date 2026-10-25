@@ -1,0 +1,104 @@
+// Lookup@@NAME@@ preserves comma-ok membership, including stored false/nil values.
+func (r *Result) Lookup@@NAME@@(key @@KEY@@) (@@VALUE@@, bool) {
+	var zero @@VALUE@@
+	if r == nil {
+		return zero, false
+	}
+	if r.specializationRoot == nil {
+		value, ok := r.@@NAME@@[key]
+		return value, ok
+	}
+	if mapped, ok := r.specializationNodes[key].(@@KEY@@); ok {
+		value, present := r.@@NAME@@[mapped]
+		return value, present
+	}
+	if value, ok := r.@@NAME@@[key]; ok {
+		return value, true
+	}
+	if r.specializationOwned[key] {
+		return zero, false
+	}
+
+@@LOOKUP_MASK@@
+	return r.specializationRoot.Lookup@@NAME@@(key)
+}
+
+func (r *Result) Value@@NAME@@(key @@KEY@@) @@VALUE@@ { value, _ := r.Lookup@@NAME@@(key); return value }
+
+// Range@@NAME@@ visits the complete logical view. Current canonical aliases
+// report their private observation; an owned miss never revives a base row.
+func (r *Result) Range@@NAME@@(yield func(@@KEY@@, @@VALUE@@) bool) {
+	if r == nil || yield == nil {
+		return
+	}
+	if r.specializationRoot == nil {
+		for key, value := range r.@@NAME@@ {
+			if !yield(key, value) {
+				return
+			}
+		}
+		return
+	}
+	root := r.specializationRoot
+	stopped := false
+	root.Range@@NAME@@(func(key @@KEY@@, value @@VALUE@@) bool {
+		if mapped, ok := r.specializationNodes[key].(@@KEY@@); ok {
+			if current, present := r.@@NAME@@[mapped]; present {
+				if !yield(key, current) {
+					stopped = true
+					return false
+				}
+			}
+			return true
+		}
+
+@@RANGE_MASK@@
+		if current, present := r.@@NAME@@[key]; present {
+			value = current
+		}
+		if !yield(key, value) {
+			stopped = true
+			return false
+		}
+		return true
+	})
+	if stopped {
+		return
+	}
+	for original, mapped := range r.specializationNodes {
+		key, ok := original.(@@KEY@@)
+		if !ok {
+			continue
+		}
+		private, ok := mapped.(@@KEY@@)
+		if !ok {
+			continue
+		}
+		if _, present := root.Lookup@@NAME@@(key); present {
+			continue
+		}
+		if value, present := r.@@NAME@@[private]; present {
+			if !yield(key, value) {
+				return
+			}
+		}
+	}
+	for key, value := range r.@@NAME@@ {
+		if _, present := root.Lookup@@NAME@@(key); present {
+			continue
+		}
+		if _, alias := r.specializationNodes[key]; alias {
+			continue
+		}
+		if !yield(key, value) {
+			return
+		}
+	}
+}
+
+func (r *Result) @@NAME@@Len() int {
+	count := 0
+	r.Range@@NAME@@(func(@@KEY@@, @@VALUE@@) bool { count++; return true })
+	return count
+}
+

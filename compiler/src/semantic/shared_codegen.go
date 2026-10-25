@@ -12,13 +12,15 @@ import (
 // sharedCodegen lets several code generators read one Result concurrently.
 // They read its maps without locks: nothing writes them while the session is
 // open. The analyzer behind the Result is used only under mu. A
-// specialization's re-analysis (SpecializedExprTypes) rewrites expression
-// types temporarily, so for the session the analyzer works on a private copy
-// of the expression-type map, never on the one Result.ExprTypes shares with
-// the generators. Each instantiation is re-analyzed once and memoized.
+// specialization's re-analysis owns private syntax and a private semantic view;
+// each resulting immutable product is memoized once per instantiation. Other
+// analyzer-backed codegen queries use detached public maps for this session.
 type sharedCodegen struct {
-	mu   sync.Mutex
-	memo map[specializationKey]map[ast.Expr]Type
+	mu               sync.Mutex
+	bodies           map[specializationKey]*SpecializedFunction
+	canonicalNodes   map[ast.Node]bool
+	canonicalSymbols map[*Symbol]bool
+	canonicalScopes  map[*Scope]bool
 	// restore puts back the analyzer's own maps when the session ends.
 	restore []func()
 }
@@ -32,7 +34,7 @@ type specializationKey struct {
 // must call EndSharedCodegen after every generator has finished, and nothing
 // else may use r in between.
 func (r *Result) BeginSharedCodegen() {
-	sh := &sharedCodegen{memo: map[specializationKey]map[ast.Expr]Type{}}
+	sh := &sharedCodegen{bodies: map[specializationKey]*SpecializedFunction{}}
 	if a := r.analyzer; a != nil {
 		sh.restore = privatizeSharedMaps(r, a)
 	}
@@ -59,20 +61,6 @@ func (r *Result) lockAnalyzer() func() {
 	}
 	sh.mu.Lock()
 	return sh.mu.Unlock
-}
-
-func (sh *sharedCodegen) specializedExprTypes(r *Result, fn *ast.FuncDecl, typeArgs []Type) map[ast.Expr]Type {
-	key, keyed := specializationMemoKey(fn, typeArgs)
-	sh.mu.Lock()
-	defer sh.mu.Unlock()
-	if cached, ok := sh.memo[key]; keyed && ok {
-		return cached
-	}
-	overlay := r.specializedExprTypes(fn, typeArgs)
-	if keyed {
-		sh.memo[key] = overlay
-	}
-	return overlay
 }
 
 func specializationMemoKey(fn *ast.FuncDecl, typeArgs []Type) (specializationKey, bool) {

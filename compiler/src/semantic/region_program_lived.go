@@ -47,6 +47,9 @@ func (r *Result) IsProgramRegion(name string) bool {
 	if r == nil {
 		return false
 	}
+	if queries := r.specializationQueries; queries != nil {
+		return queries.types != nil && queries.types.isProgramRegion(name)
+	}
 	defer r.lockAnalyzer()()
 	return r.analyzer.isProgramRegion(name)
 }
@@ -55,7 +58,16 @@ func (r *Result) IsProgramRegion(name string) bool {
 // program-lived and holds region storage (the single declared program region), for the
 // backend to thread that region's arena into a region parameter the analyzer bound to it.
 func (r *Result) ProgramLivedArgRegion(t Type) (string, bool) {
-	if r == nil || r.analyzer == nil {
+	if r == nil {
+		return "", false
+	}
+	if queries := r.specializationQueries; queries != nil {
+		// Private type predicates populate only small invocation caches. The
+		// ordinary root shared-codegen mutex also protects these private caches.
+		defer r.lockAnalyzer()()
+		return queries.programLivedArgRegion(t)
+	}
+	if r.analyzer == nil {
 		return "", false
 	}
 	defer r.lockAnalyzer()()

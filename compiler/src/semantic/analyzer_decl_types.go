@@ -97,7 +97,15 @@ func (a *Analyzer) activeDeclBranch(n *ast.StaticIfDecl) []ast.Decl {
 	return n.Else
 }
 
-func (a *Analyzer) activeStmtBranch(n *ast.StaticIfStmt) []ast.Stmt {
+func (a *Analyzer) activeStmtBranch(n *ast.StaticIfStmt) (selected []ast.Stmt) {
+	if a.parallel != nil && a.parallel.specialization != nil {
+		defer func() {
+			if a.specializationStaticBranches == nil {
+				a.specializationStaticBranches = map[*ast.StaticIfStmt][]ast.Stmt{}
+			}
+			a.specializationStaticBranches[n] = selected
+		}()
+	}
 	if selected, ok := a.evalConstBoolExpr(n.Cond); ok {
 		if selected {
 			return n.Then

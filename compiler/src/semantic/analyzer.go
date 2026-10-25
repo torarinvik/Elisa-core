@@ -944,9 +944,11 @@ type Analyzer struct {
 	// validateModuleExtensions; rejectDotModulePath consults it.
 	declaredModules map[string]bool
 	// reportedDotModulePaths dedupes rejectDotModulePathExpr across re-analysis.
-	reportedDotModulePaths        map[*ast.FieldExpr]bool
-	reportedDotModuleTypes        map[string]bool
-	resolvedTypeNames             map[ast.TypeExpr]string
+	reportedDotModulePaths map[*ast.FieldExpr]bool
+	reportedDotModuleTypes map[string]bool
+	resolvedTypeNames      map[ast.TypeExpr]string
+	// Transient concrete branch choices captured only during private codegen analysis.
+	specializationStaticBranches  map[*ast.StaticIfStmt][]ast.Stmt
 	contextualTypeBindings        map[ast.TypeExpr]Type
 	mutableGlobalBorrowRefs       map[*ast.VarDeclStmt][]ast.PermissionRef
 	mutableGlobalBorrowAssignRefs map[*ast.AssignStmt][]ast.PermissionRef

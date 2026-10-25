@@ -16,7 +16,8 @@ import (
 // contain no LLVM handles and are immutable after construction. They never
 // survive the build or authorize reuse of IR/native products.
 type sharedCodegenLookups struct {
-	importWeights  sync.Map // current FuncDecl -> bounded AST weight
+	program        *sharedCodegenLookups // canonical immutable declaration/type indexes
+	importWeights  sync.Map              // current FuncDecl -> bounded AST weight
 	result         *semantic.Result
 	symbolsByNode  map[ast.Node]*semantic.Symbol
 	namedCount     int
@@ -50,18 +51,26 @@ func newSharedCodegenLookups(result *semantic.Result) *sharedCodegenLookups {
 	return &sharedCodegenLookups{
 		result: result, symbolsByNode: codegenSymbolsByNode(result),
 		namedCount: len(result.NamedTypes), symbolCount: len(result.GlobalScope.Symbols),
-		proofCount: len(result.IndexBoundsProven),
+		proofCount: result.IndexProofSpanCount(),
 	}
 }
 
 func (shared *sharedCodegenLookups) indexProofSpans() map[lexer.Pos]bool {
 	shared.proofOnce.Do(func() {
 		shared.proofSpans = make(map[lexer.Pos]bool, shared.proofCount)
-		for expr, proven := range shared.result.IndexBoundsProven {
+		shared.result.RangeIndexProofSpanAuthority(func(expr *ast.IndexExpr, proven bool) bool {
 			if expr != nil && proven {
 				shared.proofSpans[expr.Position] = true
 			}
-		}
+			return true
+		})
 	})
 	return shared.proofSpans
+}
+
+func (shared *sharedCodegenLookups) programLookups() *sharedCodegenLookups {
+	for shared != nil && shared.program != nil {
+		shared = shared.program
+	}
+	return shared
 }

@@ -13,6 +13,8 @@ import (
 // analyze on another declaration's behalf (a quiet provisional-summary pass) runs
 // on a private copy taken from the immutable snapshot made at fork time.
 type parallelWorkerState struct {
+	// Codegen specializations own private syntax and never publish into the template.
+	specialization                 *specializationContext
 	worker                         int
 	snapshots                      []*ast.SyntaxSnapshot // per body declaration, taken at fork time
 	frozen                         []ast.Decl            // pristine reflective copies where a snapshot declined
@@ -93,6 +95,9 @@ func (a *Analyzer) quietAnalysisTarget(decl *ast.FuncDecl) (*ast.FuncDecl, func(
 }
 
 func (p *parallelWorkerState) copyDecl(decl *ast.FuncDecl) *ast.FuncDecl {
+	if p.specialization != nil {
+		return p.specialization.copyDecl(decl)
+	}
 	loc, ok := p.at[decl]
 	if !ok {
 		return nil
@@ -313,7 +318,11 @@ func (a *Analyzer) privateFuncType(fn *ast.FuncDecl, shared *FuncType) *FuncType
 	if p.funcTypeMu != nil {
 		p.funcTypeMu.Lock()
 	}
-	settable(reflect.ValueOf(private).Elem()).Set(snapshotFuncTypeForDestination(shared, private))
+	if p.specialization != nil {
+		settable(reflect.ValueOf(private).Elem()).Set(p.specialization.snapshotFuncType(shared, private))
+	} else {
+		settable(reflect.ValueOf(private).Elem()).Set(snapshotFuncTypeForDestination(shared, private))
+	}
 	if p.funcTypeMu != nil {
 		p.funcTypeMu.Unlock()
 	}
@@ -396,6 +405,9 @@ func (p *parallelWorkerState) importedUnit(u int) bool {
 // ownerOf returns the worker that owns a body declaration; known reports whether
 // decl is a body at all. An unclaimed body (-1) is foreign to every worker.
 func (p *parallelWorkerState) ownerOf(decl *ast.FuncDecl) (int, bool) {
+	if p.specialization != nil {
+		return -1, true
+	}
 	loc, ok := p.at[decl]
 	if !ok {
 		return 0, false

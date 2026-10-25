@@ -436,6 +436,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	}
 	return runtimeSliceInfo{}, false
 }
+
 // stringCompareValueOperandType peels an `sview&` (a reference to a view — e.g. the result
 // of `dict.get`, which returns `sview&?`) to the value `sview`. The returned type is used
 // BOTH as the runtime helper's declared parameter type and (via emitStringCompareValue) as
@@ -513,12 +514,12 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 	// A postfix-shorthand cast `recv.Name()` whose target was not a type is lowered
 	// by the analyzer to the call `Name(recv)`; emit that call instead.
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.PostfixShorthandCalls != nil {
-		if call, ok := s.g.result.PostfixShorthandCalls[expr]; ok && call != nil {
+		if call, ok := s.g.result.LookupPostfixShorthandCalls(expr); ok && call != nil {
 			return s.emitExpr(call, s.exprType(expr))
 		}
 	}
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
-		if sym, ok := s.g.result.CastHooks[expr]; ok && sym != nil {
+		if sym, ok := s.g.result.LookupCastHooks(expr); ok && sym != nil {
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok || fnType == nil || len(fnType.Params) == 0 {
 				return nil, nil, fmt.Errorf("invalid semantic cast hook for %T", expr)

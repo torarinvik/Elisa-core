@@ -157,7 +157,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 		// monomorphized — is found instead of the bare name.
 		lookupName := ident.Name
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
-			if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
+			if canon, ok := s.g.result.LookupResolvedValueNames(ident); ok {
 				lookupName = canon
 			}
 		}
@@ -241,7 +241,7 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 	// produces a call/definition arity mismatch.
 	lookupName := ident.Name
 	if s.g.result.ResolvedValueNames != nil {
-		if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
+		if canon, ok := s.g.result.LookupResolvedValueNames(ident); ok {
 			lookupName = canon
 		}
 	}

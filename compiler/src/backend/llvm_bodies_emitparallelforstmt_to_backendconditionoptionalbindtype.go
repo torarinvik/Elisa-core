@@ -20,7 +20,7 @@ import (
 const profileAllocationRegionCreate uint64 = 5
 
 func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
-	info, ok := s.g.result.ParallelFor[stmt]
+	info, ok := s.g.result.LookupParallelFor(stmt)
 	if !ok || info == nil {
 		return fmt.Errorf("missing semantic parallel-for info")
 	}

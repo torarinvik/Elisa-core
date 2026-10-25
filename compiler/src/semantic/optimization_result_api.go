@@ -8,7 +8,7 @@ func (r *Result) ExprOptimizationFacts(expr ast.Expr) (OptimizationFacts, bool) 
 	if r == nil || expr == nil || r.ExprFacts == nil {
 		return OptimizationFacts{}, false
 	}
-	facts, ok := r.ExprFacts[expr]
+	facts, ok := r.LookupExprFacts(expr)
 	return facts, ok
 }
 
@@ -16,7 +16,24 @@ func (r *Result) ExprOptimizationFacts(expr ast.Expr) (OptimizationFacts, bool) 
 // exact call expression through a compiler-owned helper implementation. A
 // source function that merely reuses the helper's spelling is not a builtin.
 func (r *Result) IsCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bool {
-	if r == nil || r.analyzer == nil {
+	if r == nil || call == nil || name == "" {
+		return false
+	}
+	if queries := r.specializationQueries; queries != nil {
+		node, owned := r.specializationLookupNode(call)
+		if owned {
+			private, ok := node.(*ast.CallExpr)
+			if !ok {
+				return false
+			}
+			return queries.helpers[private] == name
+		}
+		if queries.root != nil {
+			return queries.root.IsCompilerBuiltinHelperCall(call, name)
+		}
+		return false
+	}
+	if r.analyzer == nil {
 		return false
 	}
 	defer r.lockAnalyzer()()

@@ -759,7 +759,7 @@ func (s *functionState) errorSetQualifierName(ident *ast.Ident) string {
 		return ""
 	}
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
-		if canonical, ok := s.g.result.ResolvedValueNames[ident]; ok && canonical != "" {
+		if canonical, ok := s.g.result.LookupResolvedValueNames(ident); ok && canonical != "" {
 			return canonical
 		}
 	}

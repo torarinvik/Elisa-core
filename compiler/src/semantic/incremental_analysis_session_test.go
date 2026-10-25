@@ -94,6 +94,16 @@ func assertIncrementalResultParity(t testing.TB, cold, warm *Result, extra ...ma
 		switch name {
 		case "File", "LoweredFile", "GlobalScope", "SMTProfile", "analyzer", "shared":
 			continue
+		case "specializationRoot", "specializationCanonical", "specializationCurrent",
+			"specializationNodes", "specializationOwned", "specializationProofMask",
+			"specializationSpanProofs", "specializationQueries":
+			// These are private codegen products, never canonical incremental
+			// analysis state. Check their absence without Interface on private
+			// fields; retain exact public metadata comparisons below.
+			if !left.Field(i).IsZero() || !right.Field(i).IsZero() {
+				t.Fatalf("canonical parity input retains specialization context: %s: coldZero=%v warmZero=%v", name, left.Field(i).IsZero(), right.Field(i).IsZero())
+			}
+			continue
 		}
 		a, b := left.Field(i), right.Field(i)
 		if a.Kind() == reflect.Map && !a.IsNil() {

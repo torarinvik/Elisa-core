@@ -256,7 +256,7 @@ func (s *functionState) currentNamespace() string {
 		name = strings.TrimSpace(s.fnType.Name)
 	}
 	if name == "" && s.g != nil && s.decl != nil && s.g.symbolsByNode != nil {
-		if sym, ok := s.g.symbolsByNode[s.decl]; ok && sym != nil {
+		if sym, ok := s.g.symbolsByNode[s.g.result.CanonicalCodegenFunction(s.decl)]; ok && sym != nil {
 			name = strings.TrimSpace(sym.Name)
 		}
 	}
@@ -580,6 +580,22 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	g.bodyDepth++
 	defer func() { g.bodyDepth-- }()
 
+	if g.result != nil {
+		defer g.installCodegenResult(g.result.CodegenDeclarationResult(decl))()
+	}
+
+	// Parametric impl/region lowering may have enclosing bindings while this
+	// declaration has no semantic generic arguments. Its existing template
+	// facts plus backend type substitution need no reanalysis or private maps.
+	if semanticArgs := orderedGenericTypeArgs(fnType, decl, typeBindings); len(semanticArgs) != 0 && g.result != nil {
+		body, err := g.result.SpecializeFunction(decl, semanticArgs)
+		if err != nil {
+			return err
+		}
+		defer g.installCodegenResult(body.Result)()
+		decl = body.Decl
+	}
+
 	builder := C.LLVMCreateBuilderInContext(g.context)
 	defer C.LLVMDisposeBuilder(builder)
 
@@ -597,14 +613,6 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		typeMap:            typeBindings,
 		adoptedEscapeNames: adoptedEscapeNamesForBody(decl.Body, paramNames(decl.Params)...),
 		mainReturnsStatus:  decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
-	}
-	// MONOMORPHIZATION: re-analyze this body with the type parameters bound to their
-	// concrete arguments, so type-directed typing rules are decided on the INSTANTIATED
-	// type rather than on the opaque template. Without this a specialized `T& + n` keeps
-	// the pointer-arithmetic typing chosen when T was unknown, and means something
-	// different from the identical code spelled `i64&`.
-	if len(typeBindings) != 0 && g.result != nil {
-		state.specializedExprTypes = g.result.SpecializedExprTypes(decl, orderedGenericTypeArgs(fnType, decl, typeBindings))
 	}
 	// A signature-level `can[Scalar]` grants the whole body; `can Scalar:` blocks nest on top
 	// (see the CanStmt case in emitStmt).
@@ -1163,7 +1171,7 @@ func (s *functionState) emitOldCaptures(decl *ast.FuncDecl) error {
 	}
 	var olds []*ast.CallExpr
 	for _, e := range decl.EnsureValues {
-		if s.g.result != nil && s.g.result.GhostContracts[e] {
+		if s.g.result != nil && s.g.result.ValueGhostContracts(e) {
 			continue
 		}
 		collectOldCalls(e, &olds)
@@ -1234,7 +1242,7 @@ func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
 		return nil
 	}
 	for i, cond := range decl.Requires {
-		if cond == nil || (s.g.result != nil && s.g.result.GhostContracts[cond]) {
+		if cond == nil || (s.g.result != nil && s.g.result.ValueGhostContracts(cond)) {
 			continue
 		}
 		if proofAt(decl.RequiresProofs, i) != nil {
@@ -1270,7 +1278,7 @@ func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual sem
 		}
 	}
 	for i, cond := range s.decl.EnsureValues {
-		if cond == nil || (s.g.result != nil && s.g.result.GhostContracts[cond]) {
+		if cond == nil || (s.g.result != nil && s.g.result.ValueGhostContracts(cond)) {
 			continue
 		}
 		if proofAt(s.decl.EnsureProofs, i) != nil {
@@ -1403,6 +1411,7 @@ func suffixIndex[V comparable](entries map[string]V) map[string][]string {
 
 func (g *llvmGenerator) namedTypeSuffixIndex() map[string][]string {
 	if shared := g.sharedLookups; shared != nil && len(g.result.NamedTypes) == shared.namedCount {
+		shared = shared.programLookups()
 		shared.namedOnce.Do(func() { shared.namedSuffixes = suffixIndex(shared.result.NamedTypes) })
 		return shared.namedSuffixes
 	}
@@ -1416,6 +1425,7 @@ func (g *llvmGenerator) namedTypeSuffixIndex() map[string][]string {
 func (g *llvmGenerator) globalSuffixIndex() map[string][]string {
 	symbols := g.result.GlobalScope.Symbols
 	if shared := g.sharedLookups; shared != nil && len(symbols) == shared.symbolCount {
+		shared = shared.programLookups()
 		shared.globalOnce.Do(func() { shared.globalSuffixes = suffixIndex(shared.result.GlobalScope.Symbols) })
 		return shared.globalSuffixes
 	}

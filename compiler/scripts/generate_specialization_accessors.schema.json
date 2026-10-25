@@ -1,0 +1,270 @@
+{
+  "fields": [
+    {
+      "name": "PermissionEffectsConverged",
+      "type": "bool"
+    },
+    {
+      "name": "SMTProfile",
+      "type": "SMTStats"
+    },
+    {
+      "name": "EnforcePerfLints",
+      "type": "bool"
+    },
+    {
+      "name": "File",
+      "type": "*ast.File"
+    },
+    {
+      "name": "LoweredFile",
+      "type": "*ast.File"
+    },
+    {
+      "name": "GlobalScope",
+      "type": "*Scope"
+    },
+    {
+      "name": "ModuleAliases",
+      "type": "map[string]string"
+    },
+    {
+      "name": "NamedTypes",
+      "type": "map[string]Type"
+    },
+    {
+      "name": "StaticInterfaces",
+      "type": "map[string]*StaticInterface"
+    },
+    {
+      "name": "StaticImpls",
+      "type": "map[string]*StaticImpl"
+    },
+    {
+      "name": "ConstValues",
+      "type": "map[string]ConstValue"
+    },
+    {
+      "name": "ExprTypes",
+      "type": "map[ast.Expr]Type",
+      "analyzer": "exprTypes"
+    },
+    {
+      "name": "PermGrowthOps",
+      "type": "map[ast.Expr]bool",
+      "analyzer": "permGrowthOps"
+    },
+    {
+      "name": "RewriteDefaults",
+      "type": "map[*ast.Ident]bool",
+      "analyzer": "rewriteDefaults"
+    },
+    {
+      "name": "OptionalBindSourceTypes",
+      "type": "map[*ast.OptionalBindExpr]Type",
+      "analyzer": "optionalBindSourceTypes"
+    },
+    {
+      "name": "InterfaceMethodRefs",
+      "type": "map[*ast.FieldExpr]*InterfaceMethodRef",
+      "analyzer": "interfaceMethodRefs"
+    },
+    {
+      "name": "SafeCalls",
+      "type": "map[*ast.CallExpr]*SafeCallInfo",
+      "analyzer": "safeCalls"
+    },
+    {
+      "name": "ExprFacts",
+      "type": "map[ast.Expr]OptimizationFacts",
+      "analyzer": "exprFacts"
+    },
+    {
+      "name": "CastHooks",
+      "type": "map[ast.Expr]*Symbol",
+      "analyzer": "resolvedCastHooks"
+    },
+    {
+      "name": "InitCalls",
+      "type": "map[*ast.StructLitExpr]*ast.CallExpr",
+      "analyzer": "loweredInitCalls"
+    },
+    {
+      "name": "PostfixShorthandCalls",
+      "type": "map[*ast.CastExpr]*ast.CallExpr",
+      "analyzer": "postfixShorthandCalls"
+    },
+    {
+      "name": "RegionStacks",
+      "type": "map[*ast.RegionStmt]RegionStackAssignment",
+      "analyzer": "regionStacks"
+    },
+    {
+      "name": "DeathTimeCohorts",
+      "type": "map[string][]DeathTimeCohort"
+    },
+    {
+      "name": "DeathTimeEscapeStats",
+      "type": "map[string]DeathTimeEscapeStats"
+    },
+    {
+      "name": "ResolvedTypeNames",
+      "type": "map[ast.TypeExpr]string",
+      "analyzer": "resolvedTypeNames"
+    },
+    {
+      "name": "ContextualTypeBindings",
+      "type": "map[ast.TypeExpr]Type",
+      "analyzer": "contextualTypeBindings"
+    },
+    {
+      "name": "ResolvedValueNames",
+      "type": "map[*ast.Ident]string",
+      "analyzer": "resolvedValueNames"
+    },
+    {
+      "name": "DenseNodeKeys",
+      "type": "map[ast.Expr]DenseNodeKeyInfo",
+      "analyzer": "exprDenseNodeKeys"
+    },
+    {
+      "name": "NodeTables",
+      "type": "map[ast.Expr]NodeTableInfo",
+      "analyzer": "exprNodeTables"
+    },
+    {
+      "name": "PackedLowering",
+      "type": "PackedLoweringMetadata"
+    },
+    {
+      "name": "ParallelFor",
+      "type": "map[*ast.ParallelForStmt]*ParallelForInfo",
+      "analyzer": "parallelForInfo"
+    },
+    {
+      "name": "TaskGroupSubmits",
+      "type": "map[*ast.CallExpr]TaskGroupSubmitInfo",
+      "analyzer": "taskGroupSubmits"
+    },
+    {
+      "name": "CallArgDisjoint",
+      "type": "map[*ast.CallExpr]*CallArgDisjointInfo",
+      "analyzer": "callArgDisjoint"
+    },
+    {
+      "name": "ReassignReclaims",
+      "type": "map[*ast.AssignStmt]bool",
+      "analyzer": ""
+    },
+    {
+      "name": "FuncDisjointParams",
+      "type": "map[*ast.FuncDecl]*FuncDisjointParamInfo",
+      "analyzer": "funcDisjointParams"
+    },
+    {
+      "name": "LawIsCalls",
+      "type": "map[*ast.BinaryExpr]*ast.CallExpr",
+      "analyzer": "lawIsCalls"
+    },
+    {
+      "name": "LemmaCalls",
+      "type": "map[*ast.CallExpr]bool",
+      "analyzer": "lemmaCalls"
+    },
+    {
+      "name": "GhostDecls",
+      "type": "map[*ast.VarDeclStmt]bool",
+      "analyzer": "ghostDecls"
+    },
+    {
+      "name": "GhostContracts",
+      "type": "map[ast.Expr]bool",
+      "analyzer": "ghostContracts"
+    },
+    {
+      "name": "RefinementChecks",
+      "type": "map[*ast.VarDeclStmt][]*ast.CallExpr",
+      "analyzer": "refinementChecks"
+    },
+    {
+      "name": "CallArgRefinementChecks",
+      "type": "map[*ast.CallExpr][]*ast.CallExpr",
+      "analyzer": "callArgRefinementChecks"
+    },
+    {
+      "name": "ReturnRefinementChecks",
+      "type": "map[*ast.ReturnStmt][]*ast.CallExpr",
+      "analyzer": "returnRefinementChecks"
+    },
+    {
+      "name": "IndexBoundsProven",
+      "type": "map[*ast.IndexExpr]bool",
+      "analyzer": "indexBoundsProven"
+    },
+    {
+      "name": "ProofReport",
+      "type": "[]ProofFact"
+    },
+    {
+      "name": "ElisionSummary",
+      "type": "ProofElisionSummary"
+    },
+    {
+      "name": "RequiresReport",
+      "type": "[]RequiresReportEntry"
+    },
+    {
+      "name": "Defer",
+      "type": "map[*ast.DeferStmt]*DeferInfo",
+      "analyzer": "deferInfo"
+    },
+    {
+      "name": "Fold",
+      "type": "map[*ast.FoldExpr]*FoldInfo",
+      "analyzer": "foldInfo"
+    },
+    {
+      "name": "Lambdas",
+      "type": "map[*ast.LambdaExpr]*LambdaInfo",
+      "analyzer": "lambdaInfo"
+    },
+    {
+      "name": "FunctionAnalyses",
+      "type": "map[*ast.FuncDecl]*FunctionAnalysis",
+      "analyzer": "functionAnalyses"
+    },
+    {
+      "name": "ProgressSummaries",
+      "type": "map[*ast.FuncDecl]*FunctionProgressSummary",
+      "analyzer": "progressSummaries"
+    },
+    {
+      "name": "AnnotatedFuncs",
+      "type": "[]*AnnotatedFunc"
+    },
+    {
+      "name": "LawFuzzObligations",
+      "type": "[]*LawFuzzObligation"
+    },
+    {
+      "name": "ExportedTypes",
+      "type": "[]*ExportedType"
+    },
+    {
+      "name": "ExportedFuncs",
+      "type": "[]*ExportedFunc"
+    },
+    {
+      "name": "ExportedGlobals",
+      "type": "[]*ExportedGlobal"
+    },
+    {
+      "name": "EASMModules",
+      "type": "[]*easm.Module"
+    },
+    {
+      "name": "Diagnostics",
+      "type": "[]Diagnostic"
+    }
+  ]
+}

@@ -162,7 +162,15 @@ type Result struct {
 	analyzer *Analyzer
 	// shared is set while several code generators read this result at once
 	// (BeginSharedCodegen); nil otherwise.
-	shared *sharedCodegen
+	shared                   *sharedCodegen
+	specializationRoot       *Result
+	specializationCanonical  map[*ast.FuncDecl]*ast.FuncDecl
+	specializationCurrent    *ast.FuncDecl
+	specializationNodes      map[ast.Node]ast.Node
+	specializationOwned      map[ast.Node]bool
+	specializationProofMask  map[*ast.IndexExpr]bool
+	specializationSpanProofs map[*ast.IndexExpr]bool
+	specializationQueries    *specializationQueries
 }
 
 // TaskGroupSubmitInfo is a positive proof attached to one discarded safe submit
@@ -188,7 +196,26 @@ func (r *Result) ActiveFile() *ast.File {
 // is live; consumers that inspect the analyzed AST (for example the unsafe audit)
 // must not walk every platform branch as if it were executable.
 func (r *Result) ActiveStaticStmtBranch(stmt *ast.StaticIfStmt) []ast.Stmt {
-	if r == nil || r.analyzer == nil || stmt == nil {
+	if r == nil || stmt == nil {
+		return nil
+	}
+	if queries := r.specializationQueries; queries != nil {
+		node, owned := r.specializationLookupNode(stmt)
+		if owned {
+			private, ok := node.(*ast.StaticIfStmt)
+			if !ok {
+				return nil
+			}
+			return queries.staticBranches[private]
+		}
+		// Canonical foreign queries lock their own root. Do not recursively
+		// acquire that same shared-codegen mutex through this private Result.
+		if queries.root != nil {
+			return queries.root.ActiveStaticStmtBranch(stmt)
+		}
+		return nil
+	}
+	if r.analyzer == nil {
 		return nil
 	}
 	defer r.lockAnalyzer()()
@@ -381,7 +408,17 @@ func (r *Result) FunctionAnalysis(decl *ast.FuncDecl) (*FunctionAnalysis, bool) 
 	if r == nil || decl == nil || r.FunctionAnalyses == nil {
 		return nil, false
 	}
-	analysis, ok := r.FunctionAnalyses[decl]
+	if root := r.specializationRoot; root != nil {
+		// Canonical declaration queries for this instantiation resolve to its
+		// concrete analysis. Other canonical program queries keep their root
+		// authority, even if a private quiet/read view exists for that callee.
+		if current := r.specializationCurrent; current != nil && r.specializationCanonical[current] == decl {
+			decl = current
+		} else if _, private := r.specializationCanonical[decl]; !private {
+			return root.FunctionAnalysis(decl)
+		}
+	}
+	analysis, ok := r.LookupFunctionAnalyses(decl)
 	return analysis, ok
 }
 

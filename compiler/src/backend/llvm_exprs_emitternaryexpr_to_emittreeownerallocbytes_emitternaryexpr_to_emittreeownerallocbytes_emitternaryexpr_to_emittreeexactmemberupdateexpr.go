@@ -246,7 +246,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 	// A module-scoped callee is found through the analyzer's canonical name, as in resolveCallTarget.
 	lookupName := ident.Name
 	if s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
-		if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
+		if canon, ok := s.g.result.LookupResolvedValueNames(ident); ok {
 			lookupName = canon
 		}
 	}
@@ -300,7 +300,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 }
 func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if s != nil && s.g != nil && s.g.result != nil && s.g.result.InitCalls != nil {
-		if call, ok := s.g.result.InitCalls[expr]; ok && call != nil {
+		if call, ok := s.g.result.LookupInitCalls(expr); ok && call != nil {
 			return s.emitExpr(call, s.exprType(expr))
 		}
 	}

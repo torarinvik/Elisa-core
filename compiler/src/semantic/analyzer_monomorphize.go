@@ -21,74 +21,29 @@ import (
 // the instantiated types at exactly the points where instantiations occur, rather than
 // requiring a separate discovery pass over the program.
 
-// SpecializedExprTypes re-analyzes fn with its generic parameters bound to typeArgs and
-// returns the expression types that DIFFER from the template pass. The returned map is an
-// overlay: an expression absent from it keeps its template type.
-//
-// The template analysis is left untouched — ExprTypes is snapshotted and restored, and any
-// diagnostics produced by the re-run are discarded (they were already reported, or belong
-// to an instantiation the template pass could not see; re-reporting them here would
-// duplicate every diagnostic in a generic body once per instantiation).
+// SpecializedExprTypes is the compatibility projection for consumers which need
+// only changed template-keyed types. It analyzes private syntax and leaves the
+// template untouched. Backend lowering uses SpecializeFunction instead: a type
+// map alone cannot represent expressions rewritten by concrete specialization.
+// Isolation failures return nil here; lowering uses the error-returning API.
 func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast.Expr]Type {
-	if r == nil || r.analyzer == nil || fn == nil || len(typeArgs) == 0 {
+	if r == nil || r.CanonicalCodegenResult().analyzer == nil || fn == nil || len(typeArgs) == 0 {
 		return nil
 	}
-	if sh := r.shared; sh != nil {
-		return sh.specializedExprTypes(r, fn, typeArgs)
-	}
-	return r.specializedExprTypes(fn, typeArgs)
-}
-
-func (r *Result) specializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast.Expr]Type {
-	a := r.analyzer
-
-	// Re-analysis writes types for expressions in this function. Snapshot only those
-	// entries instead of copying the whole program's expression map for every instance.
-	functionExprs := make(map[ast.Expr]struct{})
-	collectSpecializedFunctionExprs(fn, functionExprs)
-	saved := make(map[ast.Expr]Type, len(functionExprs))
-	for expr := range functionExprs {
-		if typ, ok := a.exprTypes[expr]; ok {
-			saved[expr] = typ
-		}
-	}
-	savedDiagnostics := len(a.diagnostics)
-
-	a.analyzeFuncWithTypeArgs(fn, typeArgs)
-
-	overlay := make(map[ast.Expr]Type)
-	// Include any expression nodes synthesized during re-analysis as well.
-	collectSpecializedFunctionExprs(fn, functionExprs)
-	for expr := range functionExprs {
-		typ, exists := a.exprTypes[expr]
-		if !exists {
+	body, err := r.SpecializeFunction(fn, typeArgs)
+	if err != nil {
+		return nil
+	} // Compatibility API; backend uses the error-returning product API.
+	overlay := map[ast.Expr]Type{}
+	for private, original := range body.originalExprs {
+		typ, ok := body.Result.LookupExprTypes(private)
+		if !ok {
 			continue
 		}
-		// Pointer-identical types are trivially the same; skip the canonical-key computation for
-		// the (vast majority of) entries the re-analysis left untouched.
-		if previous, ok := saved[expr]; !ok || (previous != typ && !SameType(previous, typ)) {
-			overlay[expr] = typ
+		previous, existed := r.LookupExprTypes(original)
+		if !existed || (previous != typ && !SameType(previous, typ)) {
+			overlay[original] = typ
 		}
-	}
-
-	// Restore original annotations and remove types attached only to synthesized nodes.
-	for expr := range functionExprs {
-		if previous, ok := saved[expr]; ok {
-			a.exprTypes[expr] = previous
-		} else {
-			delete(a.exprTypes, expr)
-		}
-	}
-	if r.shared == nil {
-		r.ExprTypes = a.exprTypes
-	}
-	if len(a.diagnostics) > savedDiagnostics {
-		// The speculative pass's diagnostics are discarded; forget them in the
-		// once-only set too, or a real report of the same text would be swallowed later.
-		for _, discarded := range a.diagnostics[savedDiagnostics:] {
-			delete(a.reportedDiagnostics, diagnosticIdentity{Pos: discarded.Pos, Severity: discarded.Severity, Message: discarded.Message})
-		}
-		a.diagnostics = a.diagnostics[:savedDiagnostics]
 	}
 	if len(overlay) == 0 {
 		return nil

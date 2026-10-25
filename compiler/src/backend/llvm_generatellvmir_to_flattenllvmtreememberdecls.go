@@ -209,17 +209,19 @@ type llvmGenerator struct {
 	bodyDepth    int
 	// exprOverlay and boundsOverlay hold this generator's records for the
 	// expressions it synthesizes when the Result is shared (llvm_partition_ir.go).
-	sharedLookups *sharedCodegenLookups
-	exprOverlay   map[ast.Expr]semantic.Type
-	boundsOverlay map[*ast.IndexExpr]bool
+	sharedLookups    *sharedCodegenLookups
+	canonicalLookups *sharedCodegenLookups
+	exprOverlay      map[ast.Expr]semantic.Type
+	boundsOverlay    map[*ast.IndexExpr]bool
 	// Last-segment indexes for the unique-suffix name fallbacks (see
 	// namedTypeSuffixIndex); rebuilt when the indexed map's size changes.
-	namedTypeSuffixes     map[string][]string
-	namedTypeSuffixesSize int
-	globalSuffixes        map[string][]string
-	globalSuffixesSize    int
-	provenIndexSpans      map[lexer.Pos]bool
-	provenIndexSpansSize  int
+	namedTypeSuffixes      map[string][]string
+	namedTypeSuffixesSize  int
+	globalSuffixes         map[string][]string
+	globalSuffixesSize     int
+	provenIndexSpans       map[lexer.Pos]bool
+	provenIndexSpansSize   int
+	provenIndexSpansResult *semantic.Result
 	// panicReportFn is the module's outlined panic reporter (llvm_panic_report.go), created lazily.
 	panicReportFn             C.LLVMValueRef
 	sameNameWrapperDecisions  map[*semantic.ExportedFunc]bool
@@ -285,6 +287,9 @@ func noteTypeKeyFor(t semantic.Type) typeMemoKey {
 // typeMemoKey is noteTypeKeyFor, shared across the partitions of one result.
 func (g *llvmGenerator) typeMemoKey(t semantic.Type) typeMemoKey {
 	shared := g.sharedLookups
+	if shared != nil {
+		shared = shared.programLookups()
+	}
 	if shared == nil || reflect.TypeOf(t).Kind() != reflect.Pointer {
 		return noteTypeKeyFor(t)
 	}

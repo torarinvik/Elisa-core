@@ -18,7 +18,7 @@ func (s *functionState) emitRefinementChecks(n *ast.VarDeclStmt) error {
 	if s == nil || s.g == nil || s.g.result == nil || s.g.result.RefinementChecks == nil {
 		return nil
 	}
-	checks := s.g.result.RefinementChecks[n]
+	checks := s.g.result.ValueRefinementChecks(n)
 	if len(checks) == 0 {
 		return nil
 	}
@@ -52,7 +52,7 @@ func (s *functionState) emitCallArgRefinementChecks(expr *ast.CallExpr) error {
 	if s == nil || s.g == nil || s.g.result == nil || s.g.result.CallArgRefinementChecks == nil {
 		return nil
 	}
-	checks := s.g.result.CallArgRefinementChecks[expr]
+	checks := s.g.result.ValueCallArgRefinementChecks(expr)
 	if len(checks) == 0 {
 		return nil
 	}
@@ -69,7 +69,7 @@ func (s *functionState) emitReturnRefinementChecks(n *ast.ReturnStmt) error {
 	if s == nil || s.g == nil || s.g.result == nil || s.g.result.ReturnRefinementChecks == nil {
 		return nil
 	}
-	checks := s.g.result.ReturnRefinementChecks[n]
+	checks := s.g.result.ValueReturnRefinementChecks(n)
 	if len(checks) == 0 {
 		return nil
 	}

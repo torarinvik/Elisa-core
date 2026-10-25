@@ -6,6 +6,9 @@ import "sort"
 // scheduling hints. This is not an exhaustive invalidation set and must never
 // authorize reuse: every native unit still needs its current exact cache key.
 func (r *Result) CodegenFunctionPriorities() []string {
+	if r != nil && r.specializationRoot != nil {
+		return r.specializationRoot.CodegenFunctionPriorities()
+	}
 	if r == nil || r.analyzer == nil || r.analyzer.retained == nil {
 		return nil
 	}

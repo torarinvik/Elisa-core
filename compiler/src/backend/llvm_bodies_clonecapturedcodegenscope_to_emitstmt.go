@@ -49,7 +49,7 @@ func (s *functionState) captureDeferFunctionScope(stmt *ast.DeferStmt) (*codegen
 	if s == nil || stmt == nil || s.g == nil || s.g.result == nil {
 		return nil, nil
 	}
-	info := s.g.result.Defer[stmt]
+	info := s.g.result.ValueDefer(stmt)
 	if info == nil || len(info.Captures) == 0 {
 		return nil, nil
 	}
@@ -938,7 +938,7 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 		if err := s.ensureAdoptedScratchArena(); err != nil {
 			return err
 		}
-		if assignment, ok := s.g.result.RegionStacks[n]; ok && assignment.StackCount > 1 {
+		if assignment, ok := s.g.result.LookupRegionStacks(n); ok && assignment.StackCount > 1 {
 			escaped := adoptedRegionEscapingStacks(n, assignment)
 			private := adoptedRegionStackAssignment(assignment, escaped)
 			restoreTags, err := s.emitRegionExtraStacksWithAssignment(n, false, private)
@@ -1057,7 +1057,7 @@ func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr C.LLVMValueRe
 
 func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool) (func(), error) {
 	noop := func() {}
-	asn, ok := s.g.result.RegionStacks[n]
+	asn, ok := s.g.result.LookupRegionStacks(n)
 	if !ok || asn.StackCount <= 1 {
 		return noop, nil
 	}
@@ -1510,7 +1510,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	}
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
-		if n.Ghost || (s.g != nil && s.g.result != nil && s.g.result.GhostDecls[n]) {
+		if n.Ghost || (s.g != nil && s.g.result != nil && s.g.result.ValueGhostDecls(n)) {
 			// A `ghost` declaration is verification-only: the analyzer proved no real value depends on
 			// it, so emit NOTHING (the variable, its initializer, and any side effects are erased).
 			return nil
@@ -1836,7 +1836,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		if s.g.result != nil && s.g.result.ReassignReclaims[n] {
+		if s.g.result != nil && s.g.result.ValueReassignReclaims(n) {
 			if err := s.emitReassignReclaim(n, ptr, targetType); err != nil {
 				return err
 			}
@@ -2043,12 +2043,12 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.PanicStmt:
 		return s.emitPanicWithBacktrace(n.Pos(), n.Message)
 	case *ast.ExprStmt:
-		if call, ok := n.Expr.(*ast.CallExpr); ok && s.g != nil && s.g.result != nil && s.g.result.LemmaCalls[call] {
+		if call, ok := n.Expr.(*ast.CallExpr); ok && s.g != nil && s.g.result != nil && s.g.result.ValueLemmaCalls(call) {
 			// A lemma call is ghost code: verification already consumed it (requires discharged,
 			// ensures injected as facts). Emit nothing.
 			return nil
 		}
-		if s.g != nil && s.g.result != nil && s.g.result.GhostContracts[n.Expr] {
+		if s.g != nil && s.g.result != nil && s.g.result.ValueGhostContracts(n.Expr) {
 			// An `assert` that reads a ghost var is verification-only — erase its runtime check.
 			return nil
 		}
@@ -2077,7 +2077,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if n.Kind != ast.ContractInvariant || n.Cond == nil {
 			return nil
 		}
-		if s.g != nil && s.g.result != nil && s.g.result.GhostContracts[n.Cond] {
+		if s.g != nil && s.g.result != nil && s.g.result.ValueGhostContracts(n.Cond) {
 			// A ghost-reading invariant is verification-only (the ghost it reads is erased and has no
 			// runtime storage); the obligation was discharged statically. Emit nothing.
 			return nil

@@ -32,14 +32,14 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return bound, nil
 		}
 		if s.g != nil && s.g.result != nil {
-			if bound, ok := s.g.result.ContextualTypeBindings[n]; ok {
+			if bound, ok := s.g.result.LookupContextualTypeBindings(n); ok {
 				return substituteType(bound, s.typeMap, s.g.result.StaticImpls), nil
 			}
 		}
 		// Prefer the analyzer's recorded resolution (handles namespace / using /
 		// import qualification that the bare-name lookup below cannot see).
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {
-			if canonical, ok := s.g.result.ResolvedTypeNames[n]; ok {
+			if canonical, ok := s.g.result.LookupResolvedTypeNames(n); ok {
 				if t, ok := s.g.result.NamedTypes[canonical]; ok {
 					return semantic.DefaultStatefulType(t), nil
 				}
@@ -186,7 +186,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		}
 		lookupName := n.Name
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {
-			if canon, ok := s.g.result.ResolvedTypeNames[n]; ok {
+			if canon, ok := s.g.result.LookupResolvedTypeNames(n); ok {
 				// Canonicalize so the generic instance name matches the analyzer's
 				// (qualified) name used for inference + monomorphization keying.
 				lookupName = canon

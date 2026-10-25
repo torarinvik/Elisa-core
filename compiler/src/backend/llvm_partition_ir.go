@@ -379,7 +379,7 @@ func (g *llvmGenerator) resultExprTypeOK(expr ast.Expr) (semantic.Type, bool) {
 			return t, t != nil
 		}
 	}
-	t, ok := g.result.ExprTypes[expr]
+	t, ok := g.result.LookupExprTypes(expr)
 	return t, ok
 }
 
@@ -416,7 +416,7 @@ func (g *llvmGenerator) resultIndexBoundsProven(expr *ast.IndexExpr) bool {
 	if g.boundsOverlay[expr] {
 		return true
 	}
-	return g.result.IndexBoundsProven[expr]
+	return g.result.ValueIndexBoundsProven(expr)
 }
 
 func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven bool) {
