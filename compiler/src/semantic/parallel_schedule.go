@@ -635,6 +635,10 @@ func (s *bodySchedule) importUnit(a *Analyzer, u int) time.Duration {
 		p.imported = map[*ast.FuncDecl]bool{}
 	}
 	for _, fn := range s.funcs[u] {
+		// Imports happen after the scheduler has waited for the dependency's
+		// entire SCC, including its final FuncType publication. A private copy
+		// obtained by an earlier quiet scan must not mask those finished facts.
+		a.invalidateImportedFuncType(fn)
 		p.imported[fn] = true
 		if shadow := p.readShadows[fn]; shadow != nil {
 			delete(p.readShadows, fn)
@@ -827,10 +831,15 @@ var exportDeclMapPaths = sync.OnceValue(func() [][]int {
 func publishChangedFields(shared, private *FuncType) {
 	dst := settable(reflect.ValueOf(shared).Elem())
 	src := reflect.ValueOf(private).Elem()
+	// One graph snapshot preserves sharing across fields as well as root cycles.
+	snapshot := snapshotFuncTypeForDestination(private, shared)
 	for i := 0; i < dst.NumField(); i++ {
 		d, s := settable(dst.Field(i)), settable(src.Field(i))
 		if !reflect.DeepEqual(d.Interface(), s.Interface()) {
-			d.Set(s)
+			// Publication transfers a snapshot, not ownership of the worker's
+			// mutable slice/map backing. Later local inference must not modify
+			// memory another worker reads through the shared declaration.
+			d.Set(settable(snapshot.Field(i)))
 		}
 	}
 }

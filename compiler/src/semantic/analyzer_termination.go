@@ -245,9 +245,9 @@ func (a *Analyzer) collectSelfRecursiveCalls(fn *ast.FuncDecl) []*ast.CallExpr {
 		return nil
 	}
 	var calls []*ast.CallExpr
-	a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
+	a.walkStaticStmts(a.readDecl(fn).Body, func(expr ast.Expr) bool {
 		if call, ok := expr.(*ast.CallExpr); ok && call != nil {
-			if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl == fn {
+			if decl, ok := a.resolveDirectCallFuncDecl(call); ok && a.canonicalFuncDecl(decl) == a.canonicalFuncDecl(fn) {
 				calls = append(calls, call)
 			}
 		}
@@ -275,7 +275,7 @@ func (a *Analyzer) collectSelfRecursiveCallSites(fn *ast.FuncDecl) []recursiveCa
 			if !ok || call == nil {
 				return false
 			}
-			if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl == fn {
+			if decl, ok := a.resolveDirectCallFuncDecl(call); ok && a.canonicalFuncDecl(decl) == a.canonicalFuncDecl(fn) {
 				sites = append(sites, recursiveCallSite{Call: call, Path: path})
 			}
 			return false
@@ -322,7 +322,7 @@ func (a *Analyzer) collectSelfRecursiveCallSites(fn *ast.FuncDecl) []recursiveCa
 			}
 		}
 	}
-	walk(fn.Body, nil)
+	walk(a.readDecl(fn).Body, nil)
 	return sites
 }
 

@@ -140,7 +140,8 @@ func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
 		w.resolvedTypeNames = make(map[ast.TypeExpr]string)
 		w.parallel = &parallelWorkerState{
 			worker: i, snapshots: snapshots, frozen: frozen, at: at, slots: slots, smtFlights: smtFlights,
-			shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{},
+			funcTypeMu: &sched.mu,
+			shadows:    map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{},
 			predicateMemoBases: parallelPredicateMemoBases{
 				affineHandles: a.affineHandleMemo, borrowedOwnerRefs: a.borrowedOwnerRefMemo,
 				regionRefs: a.regionRefsMemo, mutableBorrowCapabilities: a.mutableBorrowCapabilityMemo,

@@ -33,7 +33,14 @@ type parallelWorkerState struct {
 	// write function facts into; owned copies are written back after the merge.
 	funcTypes     map[*FuncType]*FuncType
 	funcTypeOwned map[*FuncType]bool
-	original      map[*ast.FuncDecl]*ast.FuncDecl
+	// Sources identifies already-private types, including derived signatures
+	// whose nil source means they have no declaration to publish back into.
+	funcTypeSources map[*FuncType]*FuncType
+	// Unit publication mutates completed shared FuncType summaries under the
+	// scheduler mutex. Lazy whole-type copies must use the same read boundary.
+	// Body analysis and worker-local summary inference never hold this mutex.
+	funcTypeMu *sync.Mutex
+	original   map[*ast.FuncDecl]*ast.FuncDecl
 	// imported marks foreign declarations whose finished facts this worker holds.
 	imported      map[*ast.FuncDecl]bool
 	importedUnits map[int]bool
@@ -216,6 +223,18 @@ func (a *Analyzer) readDecl(decl *ast.FuncDecl) *ast.FuncDecl {
 	return shadow
 }
 
+// Body views have private syntax, but direct recursion and proof guards must
+// retain declaration identity. Otherwise a shadow's self-call would resolve to
+// its original declaration and could incorrectly appear non-recursive.
+func (a *Analyzer) canonicalFuncDecl(decl *ast.FuncDecl) *ast.FuncDecl {
+	if a != nil && a.parallel != nil {
+		if original, ok := a.parallel.original[decl]; ok {
+			return original
+		}
+	}
+	return decl
+}
+
 // parallelReadDeclSlice maps canonical graph entries through this worker's read
 // shadows. Warm caches are built before workers exist, so their identities are
 // canonical; a worker must use its own shadow identities when traversing a
@@ -280,18 +299,57 @@ func (a *Analyzer) privateFuncType(fn *ast.FuncDecl, shared *FuncType) *FuncType
 	if p == nil || shared == nil {
 		return shared
 	}
+	if source, private := p.funcTypeSources[shared]; private {
+		if source != nil {
+			p.maybeOwnFuncType(fn, source)
+		}
+		return shared
+	}
 	if private := p.funcTypes[shared]; private != nil {
 		p.maybeOwnFuncType(fn, shared)
 		return private
 	}
 	private := new(FuncType)
-	settable(reflect.ValueOf(private).Elem()).Set(deepCloneValue(reflect.ValueOf(shared).Elem()))
+	if p.funcTypeMu != nil {
+		p.funcTypeMu.Lock()
+	}
+	settable(reflect.ValueOf(private).Elem()).Set(snapshotFuncTypeForDestination(shared, private))
+	if p.funcTypeMu != nil {
+		p.funcTypeMu.Unlock()
+	}
 	if p.funcTypes == nil {
 		p.funcTypes = map[*FuncType]*FuncType{}
 	}
 	p.funcTypes[shared] = private
+	p.recordPrivateFuncType(private, shared)
 	p.maybeOwnFuncType(fn, shared)
 	return private
+}
+
+func (p *parallelWorkerState) recordPrivateFuncType(private, source *FuncType) {
+	if p == nil || private == nil {
+		return
+	}
+	if p.funcTypeSources == nil {
+		p.funcTypeSources = map[*FuncType]*FuncType{}
+	}
+	p.funcTypeSources[private] = source
+}
+
+// A quiet scan can cache provisional foreign facts before a later unit imports
+// the finished callee. Evict that version at the import boundary: the next query
+// must read the newly published summary. Do not mutate the old private object,
+// which may already be referenced by previously exported node facts.
+func (a *Analyzer) invalidateImportedFuncType(fn *ast.FuncDecl) {
+	p := a.parallel
+	if p == nil {
+		return
+	}
+	if sym, ok := a.symbolForFuncDecl(fn); ok && sym != nil {
+		if shared, ok := sym.Type.(*FuncType); ok && !p.funcTypeOwned[shared] {
+			delete(p.funcTypes, shared)
+		}
+	}
 }
 
 // maybeOwnFuncType promotes a cached worker-local type when its declaration is
@@ -319,7 +377,7 @@ func (p *parallelWorkerState) maybeOwnFuncType(fn *ast.FuncDecl, shared *FuncTyp
 func (p *parallelWorkerState) publishFuncTypes() {
 	for shared, private := range p.funcTypes {
 		if p.funcTypeOwned[shared] {
-			*shared = *private
+			settable(reflect.ValueOf(shared).Elem()).Set(snapshotFuncTypeForDestination(private, shared))
 		}
 	}
 }
