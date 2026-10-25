@@ -359,6 +359,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if ownedFunctionAnalyses && name == "visibleCandidates" {
+			// This memo contains only candidate names derived from lexical
+			// context and aliases. Rebuild the few private lookups on demand
+			// instead of copying every context/name table in the program.
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
 		if ownedFunctionAnalyses && (name == "diagnostics" || name == "reportedDiagnostics") {
 			// Reanalysis must re-emit its own errors, even when position/text
 			// matches an inherited canonical diagnostic. Skip before cloning

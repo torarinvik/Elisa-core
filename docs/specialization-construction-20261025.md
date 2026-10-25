@@ -280,3 +280,49 @@ production fails the exact arena_set_zero_buckets zeroed-sview diagnostic.
 Semantic race tests pass1.484 seconds; native/overflow controls pass1.617 seconds.
 Logs: /tmp/elisa-set-inactive-storage-{semantic-race,native,unpatched-native}.log.
 Fresh full Stage1 producer/source qualification remains pending.
+
+## Corrected-runtime Stage1 baseline and new body miss
+
+Fresh main02a74693 (binary6ad4a24f) and an independent7043-file47be-derived
+input differ from the original source only in collections.elisa and the four
+concurrency owner rewraps. Twenty bounded checkpoints saved analysis; step21
+completed/stored analysis and reached the external30-second limit in codegen.
+A fresh normal-process resume produced object
+ed1449433613bf7aa0b5c774dc73b46e4ce788412b15764912bc2594d20506f5
+in21.998139 seconds. The object links; that Stage1 compiler emitted a smoke
+object whose linked executable returns42. An unchanged rebuild takes0.273746
+seconds and reproduces the exact baseline object bytes.
+
+A genuinely new parser.expression body comparison edit takes23.689778 seconds,
+missing2 seconds. A second novel, equivalent arithmetic condition was profiled
+separately (27.149687 seconds with observers): retained preparation remains
+fast=true; specialization construction accounts for12.8GB allocation, analyzer
+cloning10.6GB and its reflective fallback8.2GB (inclusive, overlapping totals).
+The profile samples20.5GB total allocation and14.48CPU seconds clearing memory.
+Read-only API diagnostics restore the original authenticated state without
+publishing/modifying/rekeying it and apply the existing field clone policy:
+iterBinderElementStates costs46.8MB/25.4ms and visibleCandidates9.95MB/6.04ms
+per canonical field copy. Counts alone were not used as allocation evidence.
+All measurements/manifests, exact edit bytes and restoration records reside at
+the path in /tmp/elisa-stage1-bucket-baseline-root. The source parser is restored
+to its recorded2556c882 baseline SHA. Full cold/strict-IR edited parity, O3,
+varied edits and generation2 remain unqualified.
+
+## Rebuild private name-candidate memos on demand
+
+Private generic construction now starts an empty visibleCandidates cache rather
+than reflecting over every cached lexical-context/name table. This cache is a
+pure function of namespace/usings/alias context; ordinary worker-copy policy,
+alias authority, candidate order and actual lookup facts remain unchanged.
+Focused tests compare fresh private candidate lists against the existing
+uncached builder across namespaces, using/import/module aliases and misses,
+check canonical isolation and append capacity, and preserve ordinary workers.
+Semantic retained/specialization/parallel/snapshot race selection passes7.639s.
+All39 selected backend generic/specialization/alias tests pass in four bounded
+groups; the all-in-one25s run expired and was retained as failed timing evidence.
+
+The same construction benchmark source with4096names across three contexts
+changes from1.976MB/16712allocations and1.31–1.95ms to8160bytes/235allocations
+and32–50us per construction. Logs: /tmp/elisa-visible-candidates-*.log and
+/tmp/elisa-visible-candidates-backend-groups.json. This fixture gain is verified;
+full Stage1 timing for this producer is pending.
