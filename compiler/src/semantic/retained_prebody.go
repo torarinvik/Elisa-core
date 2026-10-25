@@ -127,6 +127,14 @@ func (a *Analyzer) preBodyFunctionFingerprint(fn *ast.FuncDecl) string {
 // Keep classifier dependencies separate from signature checks for newly added
 // functions, whose prepared bodies already come from the full scratch phase.
 func (a *Analyzer) preBodyFunctionClassification(fn *ast.FuncDecl) string {
+	// Named contracts are specifications, not callable values. Symbol collection
+	// deliberately skips them, so no callable classifier row can exist. Their
+	// full specification is independently fingerprinted and contract edits still
+	// follow the existing strict declaration protocol.
+	if fn != nil && fn.IsContract && a.funcDeclSymbols[fn] == nil {
+		return "non-callable named contract"
+	}
+
 	if a.preBodyClassify == nil {
 		return "unavailable"
 	}

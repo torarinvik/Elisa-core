@@ -249,3 +249,20 @@ Restoring the old production source makes the native test fail at the exact
 arena_dict_zero_buckets zeroed-sview diagnostic. Logs are
 /tmp/elisa-dict-inactive-storage-{semantic-race,native-v2,overflow,unpatched-native}.log.
 These are correctness controls; no new full Stage1 timing gain is claimed.
+
+## Unchanged named contracts in retained body edits
+
+Named contracts deliberately have no callable symbol/classifier row. They now
+receive a distinct non-callable classification marker; complete contract/header
+fingerprints and edit invalidation remain authoritative, and missing classifier
+authority for actual callables still rejects. Before this correction an ordinary
+body-only update in a program with two unchanged named contracts declined after
+a disk roundtrip with declaration classification unavailable. That control now
+passes full cold/live published-result parity and unchanged diagnostics. The
+parity oracle also explicitly requires both paired non-callable contracts to
+have no symbols, while preserving its missing-callable rejection.
+
+Focused race tests pass1.504 seconds and the retained/session race selection
+passes7.005 seconds, including existing contract/caller invalidation controls.
+Logs: /tmp/elisa-contract-classification-{unpatched,focused-race-v2,retained-race}.log.
+No full Stage1 timing is claimed for this admission correction.

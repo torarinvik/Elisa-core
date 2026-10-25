@@ -80,6 +80,11 @@ func assertIncrementalResultParity(t testing.TB, cold, warm *Result, extra ...ma
 		left := cold.analyzer.funcDeclSymbols[fn]
 		right := warm.analyzer.funcDeclSymbols[other]
 		if left == nil || right == nil {
+			// Named contracts are non-callable specifications. Their paired
+			// syntax was checked above; neither analysis may invent a symbol.
+			if fn.IsContract && other.IsContract && left == nil && right == nil {
+				continue
+			}
 			t.Fatalf("missing function symbol at declaration path %s", name)
 		}
 		if !reflect.DeepEqual(left.Type, right.Type) {
