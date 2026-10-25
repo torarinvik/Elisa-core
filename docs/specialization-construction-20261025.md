@@ -212,3 +212,20 @@ with exit1 rather than producing an object: concrete ctx_task_to_raw reported
 an unconsumed Pending handle. The old helper rebuilt handle/state fields without
 moving its complete source. This newly visible runtime source bug remains open
 until explicit whole-owner transfer is validated; the error gate is retained.
+
+## Whole-owner concurrency handle rewrap
+
+The four runtime thread/task from/to-raw helpers now use existing whole-owner
+move-as destructuring before rebuilding the same-state carrier from its exact
+handle/state fields. Their previous field copies left concrete Pending/Joinable
+inputs live, exposed by the private semantic error gate. No compiler rule, cast
+authority, must-consume check, payload layout, or diagnostic is relaxed.
+
+Tests extract the actual runtime helpers, concretely specialize all four, and
+check renamed helpers, old-body rejection/no memo, duplicate/use-after rejection,
+returned Pending obligations and invalid state casts. Native LLVM/clang execution
+roundtrips distinct handle bits through all four helpers with unchanged states.
+Both semantic and backend race selections pass; logs
+`/tmp/elisa-concurrency-owner-rewrap-{semantic,backend}-race.log`.
+The prior frozen47be runtime source is historical evidence; next Stage1 input
+must explicitly record these four ownership-source changes.

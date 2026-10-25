@@ -961,16 +961,20 @@ def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 		return result
 
 def ctx_thread_from_raw[R, S](raw: Thread[void&?, S]) -> Thread[R, S]:
-	return Thread[R, S]{handle: raw.handle, state: raw.state}
+	move raw as {handle, state}
+	return Thread[R, S]{handle: handle, state: state}
 
 def ctx_thread_to_raw[R, S](thread: Thread[R, S]) -> Thread[void&?, S]:
-	return Thread[void&?, S]{handle: thread.handle, state: thread.state}
+	move thread as {handle, state}
+	return Thread[void&?, S]{handle: handle, state: state}
 
 def ctx_task_from_raw[R, S](raw: Task[void&?, S]) -> Task[R, S]:
-	return Task[R, S]{handle: raw.handle, state: raw.state}
+	move raw as {handle, state}
+	return Task[R, S]{handle: handle, state: state}
 
 def ctx_task_to_raw[R, S](task: Task[R, S]) -> Task[void&?, S]:
-	return Task[void&?, S]{handle: task.handle, state: task.state}
+	move task as {handle, state}
+	return Task[void&?, S]{handle: handle, state: state}
 
 def task_group_new() -> TaskGroup:
 	group: TaskGroup = task_group_new_raw()
