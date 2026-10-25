@@ -82,6 +82,7 @@ func TestNoStorageOverlayActualMissAndCanonicalInvalidation(t *testing.T) {
 			t.Fatal("real producer result differs")
 		}
 	}
+	worker.storeScanBinderOverlay = nil // isolate the no-storage invalidation boundary
 	before := len(worker.diagnostics)
 	worker.clearRetainedTypeMemos()
 	if len(worker.diagnostics) <= before {

@@ -338,7 +338,8 @@ type Analyzer struct {
 	storeScanFilledCache     map[storeScanKey]map[string]bool
 	storeScanIndexCache      map[*ast.FuncDecl]*storeScanDeclIndex
 	storeScanBinderTypes     map[*ast.FuncDecl]map[string]storeScanBinderVerdict // storeScanPatternBinderType memo
-	storeScanLoopDepth       int                                                 // storeScanSubjectDeclType's loop-binder recursion depth
+	storeScanBinderOverlay   *analyzerStoreScanBinderOverlay
+	storeScanLoopDepth       int // storeScanSubjectDeclType's loop-binder recursion depth
 	storeScanParamWriteCache map[storeScanParamKey]bool
 	storeScanLastHolders     map[string]bool // holders of the last storeScanTaint (read at once)
 
@@ -1625,6 +1626,10 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
 	if a.optimizationSymbolIdentityOverlay != nil {
 		err := a.rejectOptimizationSymbolIdentityOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
+	if a.storeScanBinderOverlay != nil {
+		err := a.rejectStoreScanBinderOverlayOperation("canonical program publication")
 		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
 	}
 	if a.noStorageOverlay != nil {

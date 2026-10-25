@@ -18,14 +18,7 @@ func (a *Analyzer) storeScanPatternBinderType(decl *ast.FuncDecl, name string) (
 	if decl == nil || name == "" || name == "_" {
 		return nil, false
 	}
-	if a.storeScanBinderTypes == nil {
-		a.storeScanBinderTypes = map[*ast.FuncDecl]map[string]storeScanBinderVerdict{}
-	}
-	cache := a.storeScanBinderTypes[decl]
-	if cache == nil {
-		cache = map[string]storeScanBinderVerdict{}
-		a.storeScanBinderTypes[decl] = cache
-	}
+	cache := a.mutableStoreScanBinderCache(decl)
 	if v, ok := cache[name]; ok {
 		return v.t, v.ok
 	}

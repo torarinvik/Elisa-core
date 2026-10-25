@@ -738,3 +738,35 @@ all match the labeled Result and contain the complete measured145742symbol-ID,
 5013binder,11308store-flow and57673no-storage rows. This confirms actual inputs in
 those phases, not a shortcut for measuring process allocation totals. Debug object
 matches the normal baseline exactly. Observer timings are never gain evidence.
+
+## Lazy owned pattern-binder memo rows
+
+Actual constructor-input census confirms5013 binder rows in all187 cold,
+fresh-disk and first-body constructions, so this table exists on the measured hot
+path. The4.2MB restored-state field benchmark remains a per-input component
+measurement, not a process total; exact cumulative Go counters remain separate.
+Owned construction now borrows the immutable outer baseline, deepCloneValue-copies
+an inherited row BEFORE any hit/sentinel/mutable access, and owns that row locally.
+Distinct canonical keys clone independently; typed rekey first owns FROM then
+aliases TO, preserving successful import detachment/readDecl re-aliasing and
+failed-copy quiet analysis. Move tombstones prevent inherited-row resurrection.
+Ordinary forks keep their old eager local-row copy policy and independent metadata.
+
+Review established that copyDecl source probes/imports already read the complete
+canonical c.base.analyzer. V2 restores both old source loops and avoids the V1
+unnecessary callback dispatch; only owned TARGET installation and typed rekey
+change there. A source invariant control binds the sole canonical context producer,
+root routing and absence of base rebinding. All independent resource/pre-memo/
+scheduler/merge/publication/Marshal/decodedRestore/build/sparse boundaries remain.
+Actual generation removes the opaque binder-copy case and adds one named resource.
+
+Focused race passes4.103s; hardened independent pre-memo/publication/merge tests
+plus no-storage controls pass5.414s. Broad retained/private/sparse/canonical/parallel/
+permission/snapshot/overlay race passes19.821s. All50 selected backend tests RUN
+and PASS with no skips or missing names, explicitly recorded through JSON events
+in /tmp/elisa-binder-overlay-backend.json. Constructor cardinality controls at0
+and5013rows are7592–7593bytes/239allocations/24.7–25.0us, deferring all inherited
+row work until its first real use. Full Stage1 effect/touched-row cost remains
+unmeasured for this new producer. Artifacts /tmp/elisa-store-scan-binder-overlay-v2
+and /tmp/elisa-binder-overlay-*.log. Private plain-default ledgers still need these
+canonical-only guard/source-policy integrations before any branch-wide merge.

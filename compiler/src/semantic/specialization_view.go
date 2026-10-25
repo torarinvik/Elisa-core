@@ -49,6 +49,9 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 	if root.analyzer.optimizationSymbolIdentityOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
+	if root.analyzer.storeScanBinderOverlay != nil {
+		return nil, fmt.Errorf("specialization root retains construction store-scan binder overlay")
+	}
 	if root.analyzer.noStorageOverlay != nil {
 		return nil, fmt.Errorf("specialization root retains construction no-storage overlay")
 	}
@@ -72,7 +75,7 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 }
 
 func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
-	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil || r.analyzer.optimizationSymbolIdentityOverlay != nil {
+	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil || r.analyzer.storeScanBinderOverlay != nil || r.analyzer.optimizationSymbolIdentityOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
 	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)
@@ -224,7 +227,12 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 			if target.IsNil() {
 				target.Set(reflect.MakeMap(target.Type()))
 			}
-			target.SetMapIndex(privateKey, c.copyFact(value, map[specializationPointer]reflect.Value{}))
+			ownedFact := c.copyFact(value, map[specializationPointer]reflect.Value{})
+			if storeScanBinderFieldPath(path) {
+				c.worker.installOwnedStoreScanBinderRow(privateKey.Interface().(*ast.FuncDecl), ownedFact.Interface().(map[string]storeScanBinderVerdict))
+			} else {
+				target.SetMapIndex(privateKey, ownedFact)
+			}
 		}
 	}
 	return copied

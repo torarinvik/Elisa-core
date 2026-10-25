@@ -129,9 +129,13 @@ func (p *parallelWorkerState) copyDecl(decl *ast.FuncDecl) *ast.FuncDecl {
 // in maps at any depth reachable through struct fields. With move set the from
 // entries are deleted, so a shadow never outlives its pass.
 func (a *Analyzer) rekeyFuncDeclEntries(from, to *ast.FuncDecl, move bool) {
+	a.rekeyStoreScanBinderRow(from, to, move)
 	fromKey, toKey := reflect.ValueOf(from), reflect.ValueOf(to)
 	root := settable(reflect.ValueOf(a).Elem())
 	for _, path := range funcDeclKeyedMapPaths() {
+		if storeScanBinderFieldPath(path) {
+			continue
+		}
 		v := root
 		for _, i := range path {
 			v = settable(v.Field(i))
