@@ -26,7 +26,55 @@ fi
 mkdir -p "${HOME}/.elisac" "$COMPILER_DIR/bin"
 LOCAL_BIN_TEMP="$COMPILER_DIR/bin/elisac.tmp.$$"
 LOCAL_RECEIPT_TEMP="$LOCAL_BIN_TEMP.provenance.json"
-trap 'rm -f "$LOCAL_BIN_TEMP" "$LOCAL_RECEIPT_TEMP"' EXIT HUP INT TERM
+LOCAL_BIN="$COMPILER_DIR/bin/elisac"
+LOCAL_RECEIPT="$LOCAL_BIN.provenance.json"
+LOCAL_BACKUP_DIR=""
+LOCAL_BIN_BACKUP=""
+LOCAL_RECEIPT_BACKUP=""
+LOCAL_BIN_RESTORE=""
+LOCAL_RECEIPT_RESTORE=""
+LOCAL_HAD_BIN=0
+LOCAL_HAD_RECEIPT=0
+LOCAL_PUBLISHING=0
+
+restore_local_pair() {
+    if [ "$LOCAL_HAD_BIN" = 1 ]; then
+        cp -Pp "$LOCAL_BIN_BACKUP" "$LOCAL_BIN_RESTORE" && mv -f "$LOCAL_BIN_RESTORE" "$LOCAL_BIN" || return 1
+    else
+        rm -f "$LOCAL_BIN" || return 1
+    fi
+    if [ "$LOCAL_HAD_RECEIPT" = 1 ]; then
+        cp -Pp "$LOCAL_RECEIPT_BACKUP" "$LOCAL_RECEIPT_RESTORE" && mv -f "$LOCAL_RECEIPT_RESTORE" "$LOCAL_RECEIPT" || return 1
+    else
+        rm -f "$LOCAL_RECEIPT" || return 1
+    fi
+    return 0
+}
+
+cleanup() {
+    if [ "$LOCAL_PUBLISHING" = 1 ]; then
+        if restore_local_pair; then
+            LOCAL_PUBLISHING=0
+        else
+            echo "[hook] could not restore compiler/bin Stage0 pair; recovery files preserved in $LOCAL_BACKUP_DIR" >&2
+        fi
+    fi
+    rm -f "$LOCAL_BIN_TEMP" "$LOCAL_RECEIPT_TEMP"
+    if [ "$LOCAL_PUBLISHING" = 0 ] && [ -n "$LOCAL_BACKUP_DIR" ]; then
+        rm -rf "$LOCAL_BACKUP_DIR"
+    fi
+}
+
+trap cleanup 0
+trap 'exit 1' HUP INT TERM
+LOCAL_BACKUP_DIR="$(mktemp -d "$COMPILER_DIR/bin/.elisac-stage0-backup.XXXXXX")" || {
+    echo "[hook] could not create a unique Stage0 rollback directory; compiler/bin pair retained" >&2
+    exit 0
+}
+LOCAL_BIN_BACKUP="$LOCAL_BACKUP_DIR/elisac"
+LOCAL_RECEIPT_BACKUP="$LOCAL_BACKUP_DIR/elisac.provenance.json"
+LOCAL_BIN_RESTORE="$LOCAL_BACKUP_DIR/elisac.restore"
+LOCAL_RECEIPT_RESTORE="$LOCAL_BACKUP_DIR/elisac.provenance.restore.json"
 INSTALL_BIN="${HOME}/.elisac/elisac-stage0"
 PROVENANCE_SCRIPT="${ELISA_STAGE0_PROVENANCE_SCRIPT:-$COMPILER_DIR/scripts/stage0_provenance.py}"
 PYTHON_TOOL="${PYTHON_BIN:-python3}"
@@ -50,7 +98,29 @@ cp "$INSTALL_BIN" "$LOCAL_BIN_TEMP" && cp "$INSTALL_BIN.provenance.json" "$LOCAL
     echo "[hook] could not copy Stage0 binary/receipt into compiler/bin; installed compiler retained" >&2
     exit 0
 }
-mv -f "$LOCAL_BIN_TEMP" "$COMPILER_DIR/bin/elisac" || exit 0
-mv -f "$LOCAL_RECEIPT_TEMP" "$COMPILER_DIR/bin/elisac.provenance.json" || exit 0
+if [ -e "$LOCAL_BIN" ] || [ -L "$LOCAL_BIN" ]; then
+    cp -Pp "$LOCAL_BIN" "$LOCAL_BIN_BACKUP" || {
+        echo "[hook] could not save the previous compiler/bin Stage0 binary; local pair retained" >&2
+        exit 0
+    }
+    LOCAL_HAD_BIN=1
+fi
+if [ -e "$LOCAL_RECEIPT" ] || [ -L "$LOCAL_RECEIPT" ]; then
+    cp -Pp "$LOCAL_RECEIPT" "$LOCAL_RECEIPT_BACKUP" || {
+        echo "[hook] could not save the previous compiler/bin Stage0 receipt; local pair retained" >&2
+        exit 0
+    }
+    LOCAL_HAD_RECEIPT=1
+fi
+LOCAL_PUBLISHING=1
+if ! mv -f "$LOCAL_BIN_TEMP" "$LOCAL_BIN"; then
+    echo "[hook] could not publish the new compiler/bin Stage0 binary; restoring the previous pair" >&2
+    exit 0
+fi
+if ! mv -f "$LOCAL_RECEIPT_TEMP" "$LOCAL_RECEIPT"; then
+    echo "[hook] could not publish the new compiler/bin Stage0 receipt; restoring the previous pair" >&2
+    exit 0
+fi
+LOCAL_PUBLISHING=0
 echo "[hook] elisac-stage0 reinstalled -> $INSTALL_BIN"
 exit 0

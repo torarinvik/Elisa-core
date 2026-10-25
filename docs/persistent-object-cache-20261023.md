@@ -107,3 +107,14 @@ The producer helper is vendored byte-for-byte from the self-host helper at
 SHA256 f494b6c4a1cfb0e4afb41faf1827b2f3cb67f24a18f941457c69ca25fa2e2181.
 Protocol changes must update both copies/version; the Go test copy adapts only
 the consumer-shell integration case absent from a standalone Go checkout.
+
+
+The install hook now backs up the previous local binary/receipt pair before
+publishing either replacement. Copy or rename failures and handled termination
+restore the old local state; failed restoration preserves recovery files with
+a diagnostic. The isolated shell harness covers 17 scenarios, including absent,
+partial and symlink old states and each restoration copy/rename failure; all
+pass in 8.525 seconds. It uses fake builders and temporary paths, so this is
+publication failure coverage rather than a compiler-build test. Receipt checks
+still reject transient two-file mismatches. SIGKILL and concurrent hook
+invocations are outside the rollback guarantee.
