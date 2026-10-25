@@ -3883,3 +3883,18 @@ while the current group member was u5. With the guard corrected, the regression
 passes (0.479 seconds), and the additive/inline-group selection passes (0.413
 seconds), including strict cold/live metadata parity. Commands are externally
 capped at 30 seconds. Ordinary defaulted scalar insertion remains eligible.
+
+### Retained requests own consumed prefetch preparation
+
+A fast retained update now joins its consumed scratch preparation before leaving
+the request, including fallback paths. A source/filename-mismatched prefetch also
+joins before being discarded. Preparation cannot survive merely because the
+prefetch was removed from the runtime's queue.
+
+Controlled pending-preparation regressions fail on 77b99d5a: both the mismatched
+prefetch and fast-return cases leave their request before preparation completes.
+The corrected source passes both (0.731 seconds), including a confirmed fast
+update and cold diagnostic parity. Commands are externally capped at 30 seconds.
+
+The integrated safety worktree also passes these lifecycle cases under the race
+detector (1.814 seconds). Preparation is joined before a fresh fallback analysis.

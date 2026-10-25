@@ -188,9 +188,10 @@ func (rt *retainedRuntime) parseScratch(key string) (*ast.File, bool, *semantic.
 			if key != "" && pf.key == key {
 				return pf.file, pf.ok, pf.prepared
 			}
-			// Analyzed as a scratch: not usable as a plain parse.
-			pf.prepared.Wait()
 		}
+		// A mismatched or otherwise unconsumed scratch still belongs to this
+		// invocation. Join it before discarding the prefetch.
+		pf.prepared.Wait()
 	}
 	if rt.tokensFor == nil || !bytes.Equal(rt.tokensFor, rt.src) {
 		l := lexer.New(rt.filename, rt.src)
@@ -214,12 +215,17 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	if rt.state != nil && rt.key == key {
 		waitStart := time.Now()
 		scratch, ok, prepared := rt.parseScratch(key)
+		// A fast update may not wait for declaration preparation. The request
+		// still owns that background work on every return and fallback path.
+		defer prepared.Wait()
 		wait := time.Since(waitStart)
 		var result *semantic.Result
 		err := fmt.Errorf("scratch parse failed")
 		if ok {
 			result, err = rt.state.UpdatePrepared(file, scratch, rt.src, prepared)
 		}
+		// Join before any fresh fallback analysis, not just before returning.
+		prepared.Wait()
 		fmt.Fprintf(rt.log, "[retained] scratch parse wait %v, update %v\n", wait.Round(time.Millisecond), (time.Since(waitStart) - wait).Round(time.Millisecond))
 		st := rt.state.LastStats
 		if err != nil {
