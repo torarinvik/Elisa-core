@@ -7,6 +7,10 @@ scope syntax fails closed; every non-identifier byte remains significant.
 from __future__ import annotations
 import argparse
 import json
+import hashlib
+import os
+import tempfile
+import time
 from itertools import zip_longest
 from dataclasses import dataclass
 from pathlib import Path
@@ -530,6 +534,52 @@ def units(stream):
         raise UnsupportedIR("unterminated streamed function")
 
 
+def verify_unit(a, b, left_types, right_types, left_internal, right_internal,
+                scope, line_number, authorized, used, changed,
+                module_forward, module_reverse):
+    """Verify one whole namespace unit; never skip identical units."""
+    aa = classify(a, left_types, scope)
+    bb = classify(b, right_types, scope)
+    if len(aa) != len(bb):
+        raise NotEquivalent(f"token count differs near line {line_number}")
+    forward, reverse = {}, {}
+    next_scope = scope
+    for x, y in zip(aa, bb):
+        if (x.kind, x.scope) != (y.kind, y.scope):
+            raise NotEquivalent(f"namespace/scope differs near line {line_number+x.line-1}")
+        if x.kind == "text":
+            if x.raw != y.raw:
+                raise NotEquivalent(f"non-identifier bytes differ near line {line_number+x.line-1}: {x.raw[:80]!r} != {y.raw[:80]!r}")
+            continue
+        if x.scope >= 0:
+            next_scope = max(next_scope, x.scope + 1)
+        if x.raw != y.raw:
+            permission = (x.kind, x.scope, x.name, y.name)
+            if permission not in authorized:
+                raise NotEquivalent(f"identifier rename lacks manifest authorization near line {line_number+x.line-1}: {x.raw!r} != {y.raw!r}")
+            if x.kind == "global" and (x.name not in left_internal or y.name not in right_internal):
+                raise UnsupportedIR("global renaming requires private/internal definitions on both sides")
+            family = generated_family(x.name)
+            if not family or family != generated_family(y.name) or x.quoted != y.quoted:
+                raise NotEquivalent("non-generated or incompatible identifier rename")
+            used.add(permission)
+            changed[(x.kind, x.scope, x.name)] = y.name
+        f, r = (forward, reverse) if x.kind == "local" else (module_forward, module_reverse)
+        key, target = (x.kind, x.scope, x.name), (y.kind, y.scope, y.name)
+        if key in f and f[key] != y.name:
+            raise NotEquivalent("one source identifier maps to several targets")
+        if target in r and r[target] != x.name:
+            raise NotEquivalent("several source identifiers collide, including unchanged bindings")
+        f[key], r[target] = y.name, x.name
+    # Even a function with no named locals consumes an ordinal.
+    # classify preserves text on ordinary words (name is empty), but its
+    # first significant raw token still identifies the unit header.
+    first = a.lstrip().split(None, 1)[0] if a.strip() else b""
+    if first in (b"define", b"declare"):
+        next_scope = max(next_scope, scope + 1)
+    return next_scope, line_number + a.count(b"\n")
+
+
 def verify_streams(left, right, renames=None):
     """Seekable binary streams; memory bounded by largest function + manifest.
 
@@ -553,50 +603,221 @@ def verify_streams(left, right, renames=None):
     for a, b in zip_longest(units(left), units(right)):
         if a is None or b is None:
             raise NotEquivalent("streamed module unit counts differ")
-        aa = classify(a, left_types, scope)
-        bb = classify(b, right_types, scope)
-        if len(aa) != len(bb):
-            raise NotEquivalent(f"token count differs near line {line_number}")
-        forward, reverse = {}, {}
-        next_scope = scope
-        for x, y in zip(aa, bb):
-            if (x.kind, x.scope) != (y.kind, y.scope):
-                raise NotEquivalent(f"namespace/scope differs near line {line_number+x.line-1}")
-            if x.kind == "text":
-                if x.raw != y.raw:
-                    raise NotEquivalent(f"non-identifier bytes differ near line {line_number+x.line-1}: {x.raw[:80]!r} != {y.raw[:80]!r}")
-                continue
-            if x.scope >= 0:
-                next_scope = max(next_scope, x.scope + 1)
-            if x.raw != y.raw:
-                permission = (x.kind, x.scope, x.name, y.name)
-                if permission not in authorized:
-                    raise NotEquivalent(f"identifier rename lacks manifest authorization near line {line_number+x.line-1}: {x.raw!r} != {y.raw!r}")
-                if x.kind == "global" and (x.name not in left_internal or y.name not in right_internal):
-                    raise UnsupportedIR("global renaming requires private/internal definitions on both sides")
-                family = generated_family(x.name)
-                if not family or family != generated_family(y.name) or x.quoted != y.quoted:
-                    raise NotEquivalent("non-generated or incompatible identifier rename")
-                used.add(permission)
-                changed[(x.kind, x.scope, x.name)] = y.name
-            f, r = (forward, reverse) if x.kind == "local" else (module_forward, module_reverse)
-            key, target = (x.kind, x.scope, x.name), (y.kind, y.scope, y.name)
-            if key in f and f[key] != y.name:
-                raise NotEquivalent("one source identifier maps to several targets")
-            if target in r and r[target] != x.name:
-                raise NotEquivalent("several source identifiers collide, including unchanged bindings")
-            f[key], r[target] = y.name, x.name
-        # Even a function with no named locals consumes an ordinal.
-        # classify preserves text on ordinary words (name is empty), but its
-        # first significant raw token still identifies the unit header.
-        first = a.lstrip().split(None, 1)[0] if a.strip() else b""
-        if first in (b"define", b"declare"):
-            next_scope = max(next_scope, scope + 1)
-        scope = next_scope
-        line_number += a.count(b"\n")
+        scope, line_number = verify_unit(a, b, left_types, right_types,
+            left_internal, right_internal, scope, line_number, authorized,
+            used, changed, module_forward, module_reverse)
     if set(authorized) - used:
         raise UnsupportedIR("manifest contains unused rename entries")
     return changed
+
+
+CHECKPOINT_VERSION = 1
+CHECKPOINT_MAX_BYTES = 64 << 20
+
+
+def canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+def checkpoint_digest(payload):
+    return hashlib.sha256(canonical_json(payload)).hexdigest()
+
+
+def input_identity(stream, path):
+    before = os.fstat(stream.fileno())
+    digest = hashlib.sha256()
+    while True:
+        chunk = stream.read(1 << 20)
+        if not chunk:
+            break
+        digest.update(chunk)
+    after = os.fstat(stream.fileno())
+    stamp = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+    if stamp(before) != stamp(after) or stamp(path.stat()) != stamp(after):
+        raise UnsupportedIR("input changed while hashing")
+    stream.seek(0)
+    return {"path": str(path.resolve()), "bytes": after.st_size, "sha256": digest.hexdigest()}, stamp(after)
+
+
+def atomic_checkpoint(path, payload):
+    data = canonical_json({"version": CHECKPOINT_VERSION, "payload": payload,
+                           "sha256": checkpoint_digest(payload)}) + b"\n"
+    if len(data) > CHECKPOINT_MAX_BYTES:
+        raise UnsupportedIR("checkpoint exceeds size bound")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".ir-proof-", delete=False) as out:
+            temporary = Path(out.name)
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_checkpoint(path, identity):
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise UnsupportedIR("duplicate checkpoint field")
+            result[key] = value
+        return result
+    with path.open("rb") as source:
+        data = source.read(CHECKPOINT_MAX_BYTES + 1)
+    if len(data) > CHECKPOINT_MAX_BYTES:
+        raise UnsupportedIR("checkpoint exceeds size bound")
+    outer = json.loads(data, object_pairs_hook=unique_keys)
+    if not isinstance(outer, dict) or set(outer) != {"version", "payload", "sha256"} or outer["version"] != CHECKPOINT_VERSION:
+        raise UnsupportedIR("unsupported checkpoint envelope")
+    payload = outer["payload"]
+    if outer["sha256"] != checkpoint_digest(payload):
+        raise UnsupportedIR("checkpoint checksum mismatch")
+    fields = {"identity", "left_offset", "right_offset", "scope", "line", "units", "complete", "forward", "reverse", "used", "changed"}
+    if not isinstance(payload, dict) or set(payload) != fields or payload["identity"] != identity:
+        raise UnsupportedIR("checkpoint input/manifest/checker identity mismatch")
+    for field in ("left_offset", "right_offset", "scope", "units"):
+        if type(payload[field]) is not int or payload[field] < 0:
+            raise UnsupportedIR("invalid checkpoint progress counter")
+    if type(payload["line"]) is not int or payload["line"] < 1 or type(payload["complete"]) is not bool:
+        raise UnsupportedIR("invalid checkpoint line/completion state")
+    return payload
+
+
+def encode_mapping(mapping):
+    return [[kind, scope, name.hex(), value.hex()] for (kind, scope, name), value in sorted(mapping.items())]
+
+
+def decode_mapping(rows, module_only=False):
+    result = {}
+    if not isinstance(rows, list):
+        raise UnsupportedIR("invalid checkpoint binding table")
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 4:
+            raise UnsupportedIR("invalid checkpoint binding row")
+        kind, scope, name, value = row
+        if kind not in ("global", "type", "local") or type(scope) is not int:
+            raise UnsupportedIR("invalid checkpoint binding namespace")
+        if (kind == "local" and scope < 0) or (kind != "local" and scope != -1) or (module_only and kind == "local"):
+            raise UnsupportedIR("invalid checkpoint binding scope")
+        if not isinstance(name, str) or not isinstance(value, str):
+            raise UnsupportedIR("invalid checkpoint binding name")
+        key = kind, scope, bytes.fromhex(name)
+        if key in result:
+            raise UnsupportedIR("duplicate checkpoint binding")
+        result[key] = bytes.fromhex(value)
+    return result
+
+
+def validate_cursor(stream, offset, expected_scope, expected_line):
+    """Recheck that progress is an exact complete-unit boundary, not mid-function."""
+    stream.seek(0)
+    scope, line_number, inside = 0, 1, False
+    while stream.tell() < offset:
+        line = stream.readline(MAX_UNIT_BYTES + 1)
+        if not line or len(line) > MAX_UNIT_BYTES or stream.tell() > offset:
+            raise UnsupportedIR("checkpoint byte offset is not a unit boundary")
+        stripped = line.lstrip()
+        if not inside and stripped.startswith((b"define ", b"declare ")):
+            scope += 1
+            if stripped.startswith(b"define "):
+                inside = True
+        elif inside and stripped.startswith(b"}"):
+            inside = False
+        line_number += line.count(b"\n")
+    if inside or (scope, line_number) != (expected_scope, expected_line):
+        raise UnsupportedIR("checkpoint function/line boundary mismatch")
+    stream.seek(offset)
+
+
+def verify_checkpoint(left_path, right_path, checkpoint_path, renames=None,
+                      budget_seconds=15.0, max_units=None):
+    """Return changed mappings only at fully checked EOF; None means checkpointed.
+
+    Checkpoints are trusted local proof-work state with corruption checksums,
+    never an untrusted compiler cache authority. They are not adversary signatures.
+    """
+    if budget_seconds <= 0 or (max_units is not None and max_units < 1):
+        raise UnsupportedIR("positive checkpoint work budget required")
+    entries = list(renames or [])
+    authorized = {}
+    for entry in entries:
+        if not isinstance(entry, Rename) or not entry.evidence.strip():
+            raise UnsupportedIR("rename requires explicit producer evidence")
+        validate_producer(entry)
+        key = entry.namespace, entry.scope, entry.left, entry.right
+        if key in authorized:
+            raise UnsupportedIR("duplicate rename manifest entry")
+        authorized[key] = entry
+    manifest = [[e.namespace, e.scope, e.left.hex(), e.right.hex(), e.evidence, e.producer] for e in entries]
+    with left_path.open("rb") as left, right_path.open("rb") as right:
+        left_id, left_stamp = input_identity(left, left_path)
+        right_id, right_stamp = input_identity(right, right_path)
+        identity = {"left": left_id, "right": right_id, "python": sys.version,
+                    "manifest_sha256": checkpoint_digest(manifest),
+                    "checker_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+        left_types, left_internal = module_index(left)
+        right_types, right_internal = module_index(right)
+        identity["indexes_sha256"] = checkpoint_digest([[x.hex() for x in sorted(names)] for names in (left_types, right_types, left_internal, right_internal)])
+        if checkpoint_path.exists():
+            state = load_checkpoint(checkpoint_path, identity)
+        else:
+            state = {"identity": identity, "left_offset": 0, "right_offset": 0,
+                     "scope": 0, "line": 1, "units": 0, "complete": False,
+                     "forward": [], "reverse": [], "used": [], "changed": []}
+        forward = decode_mapping(state["forward"], True)
+        reverse = decode_mapping(state["reverse"], True)
+        changed = decode_mapping(state["changed"])
+        for (kind, scope, name), target in forward.items():
+            if reverse.get((kind, scope, target)) != name:
+                raise UnsupportedIR("checkpoint forward/reverse maps disagree")
+        if len(forward) != len(reverse):
+            raise UnsupportedIR("checkpoint binding map cardinalities disagree")
+        used_map = decode_mapping(state["used"])
+        used = {(kind, scope, name, target) for (kind, scope, name), target in used_map.items()}
+        if not used.issubset(authorized):
+            raise UnsupportedIR("checkpoint contains unauthorized used permissions")
+        if {(k[0], k[1], k[2], v) for k, v in changed.items()} != used:
+            raise UnsupportedIR("checkpoint changed/used records disagree")
+        for stream, key in ((left, "left_offset"), (right, "right_offset")):
+            if state[key] > identity["left" if key == "left_offset" else "right"]["bytes"]:
+                raise UnsupportedIR("checkpoint offset exceeds input")
+            validate_cursor(stream, state[key], state["scope"], state["line"])
+        # The cooperative budget covers new proof work. Hash/index/cursor
+        # validation is mandatory startup and may already exceed a small budget;
+        # counting it would otherwise checkpoint only one line per invocation.
+        started = time.monotonic()
+        completed_units = 0
+        for a, b in zip_longest(units(left), units(right)):
+            if state["complete"]:
+                raise UnsupportedIR("completed checkpoint has unverified trailing units")
+            if a is None or b is None:
+                raise NotEquivalent("streamed module unit counts differ")
+            state["scope"], state["line"] = verify_unit(a, b, left_types, right_types,
+                left_internal, right_internal, state["scope"], state["line"],
+                authorized, used, changed, forward, reverse)
+            state["left_offset"], state["right_offset"] = left.tell(), right.tell()
+            state["units"] += 1
+            completed_units += 1
+            if time.monotonic() - started >= budget_seconds or (max_units is not None and completed_units >= max_units):
+                break
+        else:
+            if set(authorized) - used:
+                raise UnsupportedIR("manifest contains unused rename entries")
+            state["complete"] = True
+        # Reject ordinary concurrent source changes rather than checkpointing a
+        # mixed invocation. Full cryptographic input hashes are rechecked on resume.
+        stamp = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+        if (stamp(os.fstat(left.fileno())) != left_stamp or stamp(os.fstat(right.fileno())) != right_stamp
+                or stamp(left_path.stat()) != left_stamp or stamp(right_path.stat()) != right_stamp):
+            raise UnsupportedIR("input changed during checkpoint verification")
+        state["forward"], state["reverse"] = encode_mapping(forward), encode_mapping(reverse)
+        state["changed"] = encode_mapping(changed)
+        state["used"] = encode_mapping({(kind, scope, name): target for kind, scope, name, target in used})
+        atomic_checkpoint(checkpoint_path, state)
+        return changed if state["complete"] else None
 
 
 def main() -> int:
@@ -604,10 +825,19 @@ def main() -> int:
     parser.add_argument("left", type=Path)
     parser.add_argument("right", type=Path)
     parser.add_argument("--manifest", type=Path, help="explicit per-pair rename authorization with producer evidence; default permits no renames")
+    parser.add_argument("--checkpoint", type=Path, help="atomic locally trusted proof-work checkpoint")
+    parser.add_argument("--budget-seconds", type=float, default=15.0, help="checkpoint after complete units; use an external process cap too")
     args = parser.parse_args()
     try:
-        with args.left.open("rb") as left, args.right.open("rb") as right:
-            mapping = verify_streams(left, right, load_manifest(args.manifest) if args.manifest else None)
+        entries = load_manifest(args.manifest) if args.manifest else None
+        if args.checkpoint:
+            mapping = verify_checkpoint(args.left, args.right, args.checkpoint, entries, args.budget_seconds)
+            if mapping is None:
+                print("incomplete; verified complete units checkpointed (no equivalence claim)")
+                return 3
+        else:
+            with args.left.open("rb") as left, args.right.open("rb") as right:
+                mapping = verify_streams(left, right, entries)
     except (NotEquivalent, OSError, ValueError, TypeError, KeyError) as err:
         print(str(err), file=sys.stderr)
         return 1 if isinstance(err, NotEquivalent) and not isinstance(err, UnsupportedIR) else 2

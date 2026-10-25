@@ -3,7 +3,7 @@ import io
 import json
 import tempfile
 from pathlib import Path
-from ir_bijection import verify_streams, load_manifest
+from ir_bijection import verify_streams, load_manifest, verify_checkpoint, checkpoint_digest
 from ir_bijection import verify as strict_verify, classify, Rename, NotEquivalent, UnsupportedIR
 
 
@@ -245,6 +245,143 @@ class HeaderTypeRoleTests(unittest.TestCase):
         right = left.replace(b'%__arg_1', b'%__arg_2')
         entry = Rename('local',0,b'__arg_1',b'__arg_2','synthetic collision fixture')
         with self.assertRaises(NotEquivalent): verify_streams(io.BytesIO(left), io.BytesIO(right),[entry])
+
+
+
+class CheckpointBijectionTests(unittest.TestCase):
+    def fixture(self, directory, left=BASE, right=BASE):
+        a,b,c = (Path(directory)/name for name in ("left.ll","right.ll","proof.json"))
+        a.write_bytes(left);b.write_bytes(right)
+        return a,b,c
+
+    def rewrite(self, checkpoint, edit):
+        outer=json.loads(checkpoint.read_text())
+        edit(outer["payload"])
+        outer["sha256"]=checkpoint_digest(outer["payload"])
+        checkpoint.write_text(json.dumps(outer))
+
+    def test_resume_complete_units_matches_uninterrupted(self):
+        right=BASE.replace(b"%__temp_1",b"%__temp_91")
+        entries=[Rename("local",0,b"__temp_1",b"__temp_91","checkpoint fixture")]
+        expected=verify_streams(io.BytesIO(BASE),io.BytesIO(right),entries)
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory,BASE,right)
+            incomplete=0
+            for attempt in range(20):
+                got=verify_checkpoint(a,b,c,entries,max_units=1)
+                state=json.loads(c.read_text())["payload"]
+                if got is not None:
+                    self.assertTrue(state["complete"])
+                    self.assertEqual((state["left_offset"],state["right_offset"]),(len(BASE),len(right)))
+                    self.assertEqual(got,expected)
+                    self.assertEqual(verify_checkpoint(a,b,c,entries,max_units=1),expected)
+                    break
+                incomplete+=1
+                self.assertFalse(state["complete"])
+            else:self.fail("resume never reached checked EOF")
+            self.assertGreater(incomplete,1)
+
+    def test_module_binding_collision_survives_resume(self):
+        left=b'@__global_1 = internal global i32 1\n@__global_2 = internal global i32 2\ndefine i32 @f() {\nentry:\n  %v = load i32, ptr @__global_1\n  ret i32 %v\n}\n'
+        right=left.replace(b'ptr @__global_1',b'ptr @__global_2')
+        entries=[Rename("global",-1,b"__global_1",b"__global_2","reference redirection fixture")]
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory,left,right)
+            self.assertIsNone(verify_checkpoint(a,b,c,entries,max_units=2))
+            with self.assertRaises(NotEquivalent):verify_checkpoint(a,b,c,entries,max_units=1)
+
+    def test_corrupt_checkpoint_and_changed_input_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory)
+            self.assertIsNone(verify_checkpoint(a,b,c,max_units=1))
+            saved=c.read_bytes()
+            outer=json.loads(saved);outer["sha256"]="0"*64;c.write_text(json.dumps(outer))
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
+            c.write_bytes(saved)
+            b.write_bytes(BASE.replace(b'i32 3',b'i32 4'))
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
+
+    def test_rekeyed_manifest_and_checker_identity_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory)
+            self.assertIsNone(verify_checkpoint(a,b,c,max_units=1))
+            saved=c.read_bytes()
+            self.rewrite(c,lambda p:p["identity"].__setitem__("checker_sha256","0"*64))
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
+            c.write_bytes(saved)
+            extra=[Rename("local",0,b"__temp_1",b"__temp_99","different manifest")]
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,extra,max_units=1)
+
+    def test_midfunction_cursor_or_binding_table_tampering_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory)
+            self.assertIsNone(verify_checkpoint(a,b,c,max_units=1))
+            saved=c.read_bytes()
+            offset=BASE.index(b'  %__temp_1')
+            def mid(p):
+                p["left_offset"]=offset;p["right_offset"]=offset;p["scope"]=1;p["line"]=BASE[:offset].count(b'\n')+1
+            self.rewrite(c,mid)
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
+            c.write_bytes(saved)
+            self.rewrite(c,lambda p:p["forward"].append(["global",-1,b"extra".hex(),b"other".hex()]))
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
+
+    def test_unused_permission_checked_only_at_complete_eof(self):
+        entries=[Rename("local",99,b"__temp_1",b"__temp_2","unused fixture")]
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory)
+            self.assertIsNone(verify_checkpoint(a,b,c,entries,max_units=1))
+            with self.assertRaises(UnsupportedIR):
+                for attempt in range(20):
+                    result=verify_checkpoint(a,b,c,entries,max_units=1)
+                    self.assertIsNone(result)
+            self.assertFalse(json.loads(c.read_text())["payload"]["complete"])
+
+    def test_work_budget_excludes_mandatory_startup(self):
+        from unittest import mock
+        import ir_bijection as checker
+        clock = [0.0]
+        index, unit = checker.module_index, checker.verify_unit
+        def slow_index(stream):
+            clock[0] += 10
+            return index(stream)
+        def work(*args):
+            clock[0] += 0.1
+            return unit(*args)
+        with tempfile.TemporaryDirectory() as directory:
+            a, b, c = self.fixture(directory)
+            with mock.patch.object(checker.time, "monotonic", side_effect=lambda: clock[0]), mock.patch.object(checker, "module_index", side_effect=slow_index), mock.patch.object(checker, "verify_unit", side_effect=work):
+                self.assertIsNone(verify_checkpoint(a, b, c, budget_seconds=1, max_units=2))
+            self.assertEqual(json.loads(c.read_text())["payload"]["units"], 2)
+
+    def test_retargeted_input_symlink_is_rejected(self):
+        from unittest import mock
+        import ir_bijection as checker
+        with tempfile.TemporaryDirectory() as directory:
+            a, b, c = self.fixture(directory)
+            old, new = b.with_name("original.ll"), b.with_name("replacement.ll")
+            b.rename(old)
+            new.write_bytes(BASE)
+            try:
+                b.symlink_to(old)
+            except OSError:
+                self.skipTest("symlinks unavailable")
+            unit = checker.verify_unit
+            def retarget(*args):
+                result = unit(*args)
+                b.unlink()
+                b.symlink_to(new)
+                return result
+            with mock.patch.object(checker, "verify_unit", side_effect=retarget), self.assertRaises(UnsupportedIR):
+                verify_checkpoint(a, b, c, max_units=1)
+            self.assertFalse(c.exists())
+
+    def test_identical_unsupported_unit_is_not_skipped_on_resume(self):
+        invalid=b'; validated first unit\n@p = global ptr blockaddress(@f, %entry)\n'
+        with tempfile.TemporaryDirectory() as directory:
+            a,b,c=self.fixture(directory,invalid,invalid)
+            self.assertIsNone(verify_checkpoint(a,b,c,max_units=1))
+            with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
 
 if __name__ == "__main__":
     unittest.main()

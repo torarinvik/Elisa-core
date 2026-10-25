@@ -1,6 +1,6 @@
 # Strict generated-identifier IR bijection candidate
 
-Offline qualification utility. The 36 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
+Offline qualification utility. The 45 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
 
 Run with Python 3.10+:
 
@@ -82,3 +82,13 @@ types and unnamed named-type formals are supported. Unknown percent-containing
 attribute contexts and local/type name collisions remain unsupported. Seven
 header regressions pass; their valid module fixtures independently assemble
 with LLVM23.1.3. No real Stage1 pair equivalence is implied by these fixtures.
+
+Checkpointed qualification uses `--checkpoint proof.json --budget-seconds 4`
+inside an external30second timeout. Exit3 means incomplete; equivalence is
+reported only after checked EOF and consumption of every manifest entry.
+The work budget excludes mandatory input hashing/index/cursor validation,
+which adds startup time. Inputs, manifest and checker hashes bind progress;
+module-wide binding maps survive batches. All45 tests pass, including resume,
+corruption, changed identities, cross-batch collisions, startup budgeting and
+input-symlink retargeting. Checkpoints are trusted local proof bookkeeping with
+corruption checksums, not adversarial signatures or compiler cache authority.
