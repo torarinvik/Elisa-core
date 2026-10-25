@@ -510,3 +510,26 @@ receipts alongside it. This run measures the three latest allocation changes
 together; it does not isolate their individual end-to-end effects. Body latency
 still exceeds2s; O3, varied edit matrix, strict current-producer IR and full
 latest-source self-host/gen2 qualification remain open. Cache flags remain opt-in.
+
+## Read-only publication struct traversal
+
+The publication walker now reuses existing addressable struct storage rather
+than copying it solely to expose fields. Nonaddressable map/interface values
+retain exactly the prior reflect.New+Set fallback. The walk does not write input
+storage; validation, identity classification, canonical pruning, pointer-role
+tracking and span ownership remain unchanged. Immediate pre-cut oracle controls
+compare graphs/errors/roles and actual syntax immutability across private,
+unexported, pointer, slice, map, interface and cyclic inputs.
+
+Focused tests pass0.554s; broader publication/specialization/sparse/canonical/
+overlay race tests pass6.781s. Actual semantic generation produces no diff.
+Targeted8192-row benchmark changes1246424–1246429bytes/24589allocations/
+1.279–1.294ms to721977–721984bytes/16396allocations/1.104–1.115ms.
+Only addressable temporary struct copies are removed; this does not eliminate
+the whole1.8GB cumulative publication cost in the earlier profile, nor establish
+an end-to-end Stage1 gain. Evidence /tmp/elisa-publication-addressable-*.log;
+source/oracle artifact /tmp/elisa-publication-addressable-struct-walk-v1.
+
+All50 selected backend generic/specialization/ABI/layout/alias/region regressions
+pass in10 externally bounded groups; complete test names and timing records are
+in /tmp/elisa-publication-addressable-backend.json.

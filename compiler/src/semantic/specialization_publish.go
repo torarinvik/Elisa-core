@@ -186,8 +186,13 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 		p.seen[key] |= role
 		p.walk(settable(v.Elem()), span)
 	case reflect.Struct:
-		addressable := reflect.New(v.Type()).Elem()
-		addressable.Set(v)
+		// This walk is read-only. Reuse addressable storage; map/interface
+		// values still need a private addressable copy for unexported fields.
+		addressable := v
+		if !addressable.CanAddr() {
+			addressable = reflect.New(v.Type()).Elem()
+			addressable.Set(v)
+		}
 		for i := 0; i < v.NumField(); i++ {
 			p.walk(settable(addressable.Field(i)), span)
 		}
