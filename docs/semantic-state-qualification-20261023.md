@@ -4273,3 +4273,36 @@ The warm/cold object and complete diagnostic comparison described above also
 passes. The first edited rebuild remains 3.893690 seconds, above the 2-second
 body target; the full O3 edit matrix and generation-two self-host gate remain
 unqualified. Later compiler changes require a fresh producer-bound baseline.
+
+
+### Current-main fresh baseline and line-inserting body miss (2026-10-25)
+
+Producer 59a7caa67093e1dad0aeb196a3a53e913a9578c89a63c86df9ceaf2b3d4bf091
+(main 56cbe6a9, including the integrated deferred-parser and proof-ownership fixes)
+admitted frozen Stage1 47be11573 into a new empty cache in 22 separately bounded
+processes. Aggregate admission was 296.494 seconds, maximum 29.831, with zero
+external timeouts. No prior analysis snapshots were copied or rekeyed. The
+baseline object SHA256 remains 05d30412fde6d9f1e36f07dcfd0cbb1a32c504b0110142e20de1a103b697a9be.
+The normal post-debug publication transition took 3.915917 seconds; the following
+exact unchanged fresh-process hit took 0.166598 seconds.
+
+A genuinely new body_query_short_circuit edit inserts the live query predicate's
+`return false if text.len < 3` guard. Its first O0 rebuild took 6.332955 seconds,
+missing the 2-second body target. Its independent cold/IR/runtime qualification
+is pending. This is an emitted control-flow edit with preserved predicate values,
+not an unused probe. The separately labelled profiled repeat took 6.802942
+seconds and had no native fragment compilation. Restore overlapped eager scratch
+preparation (3.038 and 2.971 seconds), retained update took 612 ms with fast=false,
+and partition IR took 2.518 seconds plus 71 ms merge. The profile attributes
+662 MB to tokenization and approximately 2.19 GB to total Go allocation.
+
+Both the initial lazy-scratch heuristic and semantic fast admission currently
+require preserved line counts/positions. Extending the fast path requires
+complete declaration-fact validation and correct relocation of diagnostics,
+proofs and generated syntax; removing the line-shift guard alone is not a fix.
+Immutable measurements, settings, source patch and profiles are under the root
+recorded in `/tmp/elisa-stage1-current-main-root`; pprof summaries are
+`/tmp/elisa-current-body-short-circuit-cpu-top.txt` and
+`/tmp/elisa-current-body-short-circuit-alloc-top.txt`. First-edit timing remains
+separate from the exact hit and profiled repeat. O3 and the varied matrix remain
+unqualified.
