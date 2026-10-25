@@ -52,6 +52,7 @@ func (a *Analyzer) visitFunctionBodyWithElementScan(body []ast.Stmt, visit func(
 // analyzeFunc analyzes a function body with its type parameters left OPAQUE (the
 // template pass). See analyzeFuncWithTypeArgs for the monomorphized re-analysis.
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
+	a.invalidateRetainedFunctionIndexBoundsProofs(fn)
 	if r := a.retained; r != nil && fn != nil && r.depth == 0 {
 		r.depth++
 		before := len(a.diagnostics)
@@ -80,6 +81,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 // Re-analyzing per instantiation is what makes the instantiated type govern — the most
 // specific type wins, as monomorphization requires.
 func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
+	restoreProofOwner := a.enterIndexProofOwner(fn, false)
+	defer restoreProofOwner()
+	a.invalidateRetainedFunctionIndexBoundsProofs(fn)
 	sym, ok := a.symbolForFuncDecl(fn)
 	if !ok || sym == nil {
 		a.errorf(fn.Pos(), "internal error: missing function symbol for %q", fn.Name)
@@ -655,6 +659,8 @@ func reusableDeclReturnProvenance(fn *ast.FuncDecl, source, target *FuncType) (r
 }
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
+	restoreProofOwner := a.enterIndexProofOwner(fn, false)
+	defer restoreProofOwner()
 	fn = a.readDecl(fn)
 	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
 		return
@@ -881,6 +887,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 }
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
+	restoreProofOwner := a.enterIndexProofOwner(fn, false)
+	defer restoreProofOwner()
 	fn = a.readDecl(fn)
 	if fn == nil || fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown {
 		return

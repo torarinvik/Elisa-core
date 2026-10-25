@@ -222,6 +222,15 @@ type Analyzer struct {
 	optimizationExprIDs      map[ast.Expr]string
 	optimizationIdentityNext *atomic.Uint64
 	indexBoundsProven        map[*ast.IndexExpr]bool
+	// Successful proofs retain their owning function even after constant folding
+	// detaches the original node. Updates can retract one function's proofs only.
+	indexBoundsProofOwners       map[*ast.IndexExpr]ast.Node
+	indexBoundsProofHeaders      map[*ast.IndexExpr]bool
+	indexBoundsProofOrigins      map[*ast.IndexExpr]ast.Node
+	currentIndexProofHeaderOwner ast.Node
+	currentIndexProofHeader      bool
+	currentIndexProofContext     bool
+	currentIndexProofOrigin      ast.Node
 	// getWrappedIndexExprs records index expressions whose `else` recovery is
 	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
 	// use the explicit `get` head, so they must NOT receive the bare-`else`

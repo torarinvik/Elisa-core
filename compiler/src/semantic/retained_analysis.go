@@ -25,6 +25,9 @@ import (
 // Callers must honor Update errors and fall back to fresh analysis: a late
 // rejection may already have consumed or discarded the retained graph.
 type RetainedAnalysis struct {
+	indexProofsUpdating bool                                      // invocation-local: invalidate before ordinary function reanalysis
+	indexProofsByFunc   map[*ast.FuncDecl]map[*ast.IndexExpr]bool // reverse ownership, only during Update
+	indexProofsByDecl   map[ast.Node]map[*ast.IndexExpr]bool
 	// classify is the full analysis's program-wide classification state (fast preparation).
 	classify   *retainedClassifyState
 	appendOnly *retainedAppendOnlyState
@@ -250,6 +253,25 @@ func PrepareRetainedScratch(scratch *ast.File, options AnalyzeOptions) *Retained
 // UpdatePrepared is Update with an optional prepared scratch phase; it is used
 // only when it was prepared from scratch itself.
 func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, prepared *RetainedScratch) (*Result, error) {
+	r.indexProofsUpdating = true
+	r.indexProofsByFunc = map[*ast.FuncDecl]map[*ast.IndexExpr]bool{}
+	if r.a != nil {
+		for expr, proven := range r.a.indexBoundsProven {
+			if !proven || expr == nil {
+				continue
+			}
+			fn, owned := r.a.indexBoundsProofOwners[expr]
+			if !owned || fn == nil {
+				r.indexProofsUpdating = false
+				r.indexProofsByFunc = nil
+				r.indexProofsByDecl = nil
+				r.LastStats = RetainedUpdateStats{Fallback: "retained index proof has no exact semantic ownership; retry with a full analysis"}
+				return nil, fmt.Errorf("%s", r.LastStats.Fallback)
+			}
+			r.rememberFunctionIndexProof(fn, expr)
+		}
+	}
+	defer func() { r.indexProofsUpdating = false; r.indexProofsByFunc = nil; r.indexProofsByDecl = nil }()
 	start := time.Now()
 	defer func() { r.bodyUses = nil }()
 	r.LastStats = RetainedUpdateStats{}
@@ -1378,6 +1400,46 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		bodies[i] = prepared.Body
 	}
+	// Indexed declaration defaults can have consumers outside body reanalysis.
+	// Their exact recorded origin must not survive an edit unless its owner is
+	// actually rebuilt by this invocation; unsupported cases decline pre-mutation.
+	if len(structEdits) != 0 {
+		planned, removed := map[*ast.FuncDecl]bool{}, map[*ast.FuncDecl]bool{}
+		for _, sp := range splices {
+			planned[sp.live] = true
+		}
+		for _, fn := range removedLive {
+			planned[fn], removed[fn] = true, true
+		}
+		for _, edit := range structEdits {
+			if !retainedIndexProofDefaultsChanged(edit.live, edit.edit) {
+				continue
+			}
+			names := map[string]bool{edit.live.Name: true}
+			targets := map[Type]bool{edit.st: true}
+			a.widenLayoutTargets(targets)
+			for name, typ := range a.namedTypes {
+				if targets[typ] {
+					names[name[strings.LastIndex(name, ".")+1:]] = true
+				}
+			}
+			pattern := retainedNamesPattern(names)
+			for _, sd := range r.decls {
+				if sd.Decl != edit.live && retainedIndexProofNonBodyDefaultUses(sd.Decl, names, pattern) {
+					return fail("edited struct default %s has a declaration/default consumer requiring full reanalysis", edit.live.Name)
+				}
+			}
+			for expr, origin := range a.indexBoundsProofOrigins {
+				if origin != edit.live || !a.indexBoundsProven[expr] {
+					continue
+				}
+				owner, body := a.indexBoundsProofOwners[expr].(*ast.FuncDecl)
+				if !body || (!removed[owner] && (a.indexBoundsProofHeaders[expr] || !planned[owner])) {
+					return fail("edited struct default %s has an index proof outside reanalyzed bodies", edit.live.Name)
+				}
+			}
+		}
+	}
 	// Preserve the old permission-equation numbering before changing the set.
 	var permissionBefore []scopedDecl
 	var permissionBeforeTypes []*FuncType
@@ -2273,6 +2335,9 @@ func retainedMentionsAny(fn *ast.FuncDecl, names map[string]bool) bool {
 // global registration, per-function tables, diagnostics and late checks.
 func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 	a := r.a
+	for _, fn := range fns {
+		a.clearFunctionIndexBoundsProofs(fn, true)
+	}
 	gone := map[*ast.FuncDecl]bool{}
 	for _, fn := range fns {
 		gone[fn] = true

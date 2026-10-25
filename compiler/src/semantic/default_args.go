@@ -389,6 +389,9 @@ func (a *Analyzer) validateParamDefaultExpr(expr ast.Expr, expected Type) bool {
 	if a == nil || expr == nil {
 		return false
 	}
+	// Preserve exact lexical lifetime across the lookup-scope reset below.
+	restoreProofOwner := a.inheritIndexProofOwner()
+	defer restoreProofOwner()
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl

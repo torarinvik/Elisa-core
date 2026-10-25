@@ -4220,3 +4220,34 @@ iteration LLVM controls retain the same allocation reductions, with mixed small
 timing differences and no Stage1 speedup claim. Logs
 `/tmp/elisa-cgo-hints-baseline-long-bench.log` and
 `/tmp/elisa-cgo-hints-candidate-long-bench.log`.
+
+### Retract retained bounds proofs by exact lexical owner
+
+Semantic index proofs now retain exact declaration ownership independently of
+currentFuncDecl, plus separate signature/default origin. Function-body checks
+and quiet callee scans establish their own context; lambdas and cloned struct
+defaults inherit the actual construction owner. Named/extern parameter defaults,
+globals and constants retain exact declaration identities. Removed/replaced
+declarations and reanalysed bodies retract only their own stale keys, including
+detached nodes. Unknown ownership and unscheduled non-body default consumers
+decline before retained mutation. Synthesized backend proofs stay generator-local.
+Unchanged/reproved facts and normal bounds watchdogs/optimization remain intact.
+
+The original accepted same-span guard edit revived a detached certificate in
+local/shared lookup and vectorization eligibility; its regression failed before
+the fix and now passes. No end-to-end memory-safety exploit was established.
+Actual named/extern/default/global/const/lambda and multi-function edit fixtures
+pass, including header replacement, removal, snapshot/revert and unaffected facts.
+The lambda uses a parser-supported returned block with a statement guard; earlier
+ternary and block-assignment fixtures were invalid proof/parser controls and
+are preserved as failed observations, not claimed reproductions.
+
+All Retained semantic tests pass under race (7.157seconds); backend proof,
+private-overlay and partition edit/fresh-session selection passes under race
+(2.984seconds). Fresh-process native execution, corruption, contract retraction
+and exact-byte O0/O3 classification edit IR pass (2.599seconds). Logs
+`/tmp/elisa-retained-index-proof-v5-all-retained-race.log`,
+`/tmp/elisa-retained-index-proof-v5-backend-race.log`, and
+`/tmp/elisa-retained-index-proof-v5-driver.log`. External30/internal25second caps.
+Full Stage1 latency for this ownership metadata is unmeasured. The independently
+reproduced generic-codegen canonical-AST race remains a separate open issue.

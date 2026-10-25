@@ -244,7 +244,7 @@ func (a *Analyzer) analyzeGetExpr(n *ast.GetExpr) Type {
 		// the bare-`else` deprecation warning.
 		a.getWrappedIndexExprs[idx] = true
 		if idx.Fallback == nil {
-			a.indexBoundsProven[idx] = true
+			a.recordIndexBoundsProof(idx)
 		}
 	}
 	// `get arr[a:b]` is a bounds-checked slice: the `get` performs the runtime

@@ -30,8 +30,11 @@ var semanticStateRegistry = sync.OnceValue(func() *statecache.Registry {
 // unsupported aliases or invocation resources reject publication entirely.
 // The CLI admits it only in the opt-in disk-cache mode during qualification.
 func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
-	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.depth != 0 {
+	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 {
 		return nil, fmt.Errorf("analysis is not idle")
+	}
+	if r.a.currentIndexProofContext || r.a.currentIndexProofHeaderOwner != nil || r.a.currentIndexProofOrigin != nil || r.a.currentIndexProofHeader {
+		return nil, fmt.Errorf("analysis still owns an index-proof context")
 	}
 	if len(r.a.storageViewLoopUseFrames) != 0 || len(r.a.returnBorrowAliasFrames) != 0 || len(r.a.returnBorrowAliasJournal) != 0 || len(r.a.returnBorrowDeferFrames) != 0 || r.a.smtSolver != nil || r.result.shared != nil {
 		return nil, fmt.Errorf("analysis still owns invocation resources")

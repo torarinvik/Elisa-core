@@ -283,6 +283,13 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 }
 
 func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.FieldDecl, expected Type) (ast.Expr, bool) {
+	restoreProofOwner := a.inheritIndexProofOwner()
+	defer restoreProofOwner()
+	oldOrigin := a.currentIndexProofOrigin
+	if base != nil && base.Decl != nil {
+		a.currentIndexProofOrigin = base.Decl
+	}
+	defer func() { a.currentIndexProofOrigin = oldOrigin }()
 	if field.DefaultValue == nil {
 		return nil, false
 	}

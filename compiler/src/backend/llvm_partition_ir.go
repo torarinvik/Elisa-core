@@ -420,10 +420,9 @@ func (g *llvmGenerator) resultIndexBoundsProven(expr *ast.IndexExpr) bool {
 }
 
 func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven bool) {
-	if !g.usesOverlay() {
-		g.result.IndexBoundsProven[expr] = proven
-		return
-	}
+	// Synthesized codegen proofs have generator-local ownership, not a semantic
+	// function owner. Never publish them into a retained Result: a later update
+	// cannot revoke a detached synthesized proof by semantic declaration identity.
 	if g.boundsOverlay == nil {
 		g.boundsOverlay = map[*ast.IndexExpr]bool{}
 	}

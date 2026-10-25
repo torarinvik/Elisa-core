@@ -82,6 +82,8 @@ func cloneFuncTypeWithReturn(fn *FuncType, ret Type) *FuncType {
 }
 
 func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
+	restoreProofOwner := a.inheritIndexProofOwner()
+	defer restoreProofOwner()
 	if expr == nil {
 		return invalidType
 	}

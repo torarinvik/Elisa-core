@@ -401,7 +401,7 @@ func (a *Analyzer) markIndexBoundsProof(expr *ast.IndexExpr, objType Type) {
 		return
 	}
 	if expr.Fallback != nil {
-		a.indexBoundsProven[expr] = true
+		a.recordIndexBoundsProof(expr)
 		return
 	}
 	// A summary-inference walk (return provenance, borrowed-owner refs, termination typing) runs on
@@ -412,7 +412,7 @@ func (a *Analyzer) markIndexBoundsProof(expr *ast.IndexExpr, objType Type) {
 		return
 	}
 	if a.indexExprHasBoundsProof(expr, objType) {
-		a.indexBoundsProven[expr] = true
+		a.recordIndexBoundsProof(expr)
 	}
 }
 

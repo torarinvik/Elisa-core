@@ -1075,6 +1075,11 @@ func (a *Analyzer) returnBorrowFlowForFunc(fn *ast.FuncDecl, active map[*ast.Fun
 	if r := a.retained; r != nil {
 		r.pushReturnBorrowOwner(fn)
 	}
+	// This walk may quietly type checked-get expressions with semantic
+	// currentFuncDecl cleared. Its lexical proof owner is the callee being
+	// scanned, not the requesting caller or a global initializer.
+	restoreProofOwner := a.enterIndexProofOwner(fn, false)
+	defer restoreProofOwner()
 	summary := a.computeReturnBorrowFlowForFunc(fn, active)
 	if r := a.retained; r != nil {
 		r.popReturnBorrowOwner()

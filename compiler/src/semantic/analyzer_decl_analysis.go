@@ -34,6 +34,8 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 func (a *Analyzer) analyzeScopedDecl(scoped scopedDecl) {
 	{
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			restoreProofOwner := a.enterIndexProofOwner(scoped.Decl, false)
+			defer restoreProofOwner()
 			switch n := scoped.Decl.(type) {
 			case *ast.ConstDecl:
 				if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {

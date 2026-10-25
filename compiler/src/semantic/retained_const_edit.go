@@ -72,6 +72,7 @@ func (r *RetainedAnalysis) replaceLiveDecls(replace map[ast.Decl]ast.Decl) {
 func (r *RetainedAnalysis) applyConstEdits(edits [][2]*ast.ConstDecl) []scopedDecl {
 	replace := map[ast.Decl]ast.Decl{}
 	for _, e := range edits {
+		r.a.clearDeclarationIndexBoundsProofs(e[0])
 		replace[e[0]] = e[1]
 	}
 	r.replaceLiveDecls(replace)
@@ -99,6 +100,7 @@ func (r *RetainedAnalysis) removeLiveConsts(cds []ast.Decl) {
 	a := r.a
 	gone := map[ast.Decl]bool{}
 	for _, cd := range cds {
+		a.clearDeclarationIndexBoundsProofs(cd)
 		gone[cd] = true
 	}
 	decls := r.decls[:0]
