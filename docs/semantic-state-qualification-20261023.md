@@ -3940,3 +3940,18 @@ solver suite passes under the race detector (1.362 seconds). Every command is
 externally capped at 30 seconds. A separate existing parallel function-type race
 was exposed by a broader prefix selection and reproduced on the pre-fix baseline;
 it is tracked independently, not claimed fixed by this change.
+
+### Non-empty decoded interfaces retain graph ownership through GC
+
+A new regression exercises both classic and framed snapshots with method-bearing
+interfaces containing pointer and named-map implementations, repeated aliases,
+pointer cycles, typed nils and nil interfaces. Decoding runs with aggressive
+allocation-triggered and concurrent explicit garbage collection. Mutations must
+reach the restored aliases without touching the original graph; checksum
+corruption must publish no result.
+
+The focused regression passes with the race detector and strict checkptr enabled
+(1.405 seconds), under an external 30-second command cap. This specifically covers
+the decoder's non-empty interface/itab path rather than only empty any values.
+
+The full statecache suite also passes under race/checkptr (8.187 seconds).
