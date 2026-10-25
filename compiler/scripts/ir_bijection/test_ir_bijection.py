@@ -221,6 +221,14 @@ class HeaderTypeRoleTests(unittest.TestCase):
         self.same(b'%StringView = type { ptr, i64 }\ndefine { %StringView, i32 } @f(ptr byval(%StringView) align 8 %arg) {\nentry:\n  ret { %StringView, i32 } zeroinitializer\n}\n')
         self.same(b'%Packet = type { i32 }\ndeclare void @f(%Packet, ptr sret(%Packet), ptr byref(%Packet), ...)\n')
 
+    def test_complete_module_type_index_can_be_read_only(self):
+        module = b"%Packet = type { i32 }\ndeclare void @f(%Packet)\n"
+        index = frozenset({b"Packet"})
+        self.assertEqual(classify(module, index), classify(module))
+        self.assertEqual(index, frozenset({b"Packet"}))
+        with self.assertRaises(UnsupportedIR):
+            classify(module, frozenset())
+
     def test_unnamed_named_type_formal_is_a_type_not_a_local(self):
         tokens = classify(b'%Packet = type { i32 }\ndeclare void @f(%Packet)\n')
         self.assertEqual([t.kind for t in tokens if t.name == b'Packet'], ['type', 'type'])

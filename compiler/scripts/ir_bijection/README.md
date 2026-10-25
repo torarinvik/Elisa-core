@@ -1,6 +1,6 @@
 # Strict generated-identifier IR bijection candidate
 
-Offline qualification utility. The 45 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
+Offline qualification utility. The 46 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
 
 Run with Python 3.10+:
 
@@ -56,7 +56,7 @@ These observations do not establish complete producer coverage. V2 is a conserva
 
 ## Streaming qualification
 
-The original18 fixtures and18 streaming/header cases pass, including unchanged-binding
+The original18 fixtures and19 streaming/header cases pass, including unchanged-binding
 collisions, cross-function globals, forward types, nameless function/declaration
 ordinals, exact nonidentifier bytes, denied external ABI renames, producer and
 stack-ordinal checks, and bounded stream reads. The positive fixture pair also
@@ -88,7 +88,14 @@ inside an external30second timeout. Exit3 means incomplete; equivalence is
 reported only after checked EOF and consumption of every manifest entry.
 The work budget excludes mandatory input hashing/index/cursor validation,
 which adds startup time. Inputs, manifest and checker hashes bind progress;
-module-wide binding maps survive batches. All45 tests pass, including resume,
+module-wide binding maps survive batches. All46 tests pass, including resume,
 corruption, changed identities, cross-batch collisions, startup budgeting and
 input-symlink retargeting. Checkpoints are trusted local proof bookkeeping with
 corruption checksums, not adversarial signatures or compiler cache authority.
+
+The classifier reuses the complete read-only module type index rather than
+copying it for every unit. Definitions missing from a supplied complete index
+are rejected; legacy whole-module classification still builds its own index.
+A controlled2,000-unit/10,000-type fixture improves median classification from
+0.219646 to0.034788seconds across three samples. This is an offline checker
+improvement, not a Stage1 compiler latency claim.

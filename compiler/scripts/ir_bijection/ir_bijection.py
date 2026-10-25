@@ -285,7 +285,7 @@ def classify(data: bytes, known_types: set[bytes] | None = None, scope_start: in
     headers: set[int] = set()
     current = -1
     count = scope_start
-    named_types = set(known_types or ())
+    named_types = known_types if known_types is not None else set()
     for line, indices in by_line.items():
         ts = [tokens[i] for i in indices]
         if any(t.raw in (b"blockaddress", b"uselistorder_bb") for t in ts):
@@ -310,7 +310,10 @@ def classify(data: bytes, known_types: set[bytes] | None = None, scope_start: in
                     raise UnsupportedIR("unsupported function terminator")
                 current = -1
         elif ts[0].kind == "%" and len(ts) >= 3 and ts[1].raw == b"=" and ts[2].raw == b"type":
-            named_types.add(ts[0].name)
+            if known_types is None:
+                named_types.add(ts[0].name)
+            elif ts[0].name not in named_types:
+                raise UnsupportedIR("complete module type index is missing a definition")
     if current >= 0:
         raise UnsupportedIR("unterminated function")
 
