@@ -7,6 +7,7 @@ scope syntax fails closed; every non-identifier byte remains significant.
 from __future__ import annotations
 import argparse
 import json
+from itertools import zip_longest
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -43,6 +44,11 @@ def generated_family(name: bytes) -> bytes | None:
     m = GENERATED.fullmatch(name)
     if m:
         return m[1] + b"#"
+    # Extra region stacks preserve their explicit ordinal; only the source
+    # offset can vary. This is the backend's emitRegionExtraStacks spelling.
+    m = re.fullmatch(rb"__auto_[0-9]+#([1-9][0-9]*)", name)
+    if m:
+        return b"__auto_#stack=" + m[1]
     if LOCATION.fullmatch(name):
         return b"__L#_C#"
     return None
@@ -109,7 +115,7 @@ def lex(data: bytes) -> list[Token]:
     return tokens
 
 
-def classify(data: bytes) -> list[Token]:
+def classify(data: bytes, known_types: set[bytes] | None = None, scope_start: int = 0) -> list[Token]:
     if b"\x00" in data:
         raise UnsupportedIR("NUL bytes: expected textual LLVM IR, not an object/bitcode file")
     tokens = lex(data)
@@ -122,8 +128,8 @@ def classify(data: bytes) -> list[Token]:
     scopes: dict[int, int] = {}
     headers: set[int] = set()
     current = -1
-    count = 0
-    named_types = set()
+    count = scope_start
+    named_types = set(known_types or ())
     for line, indices in by_line.items():
         ts = [tokens[i] for i in indices]
         if any(t.raw in (b"blockaddress", b"uselistorder_bb") for t in ts):
@@ -206,6 +212,7 @@ class Rename:
     left: bytes
     right: bytes
     evidence: str
+    producer: str = ""
 
 
 def internal_globals(data: bytes) -> set[bytes]:
@@ -230,11 +237,14 @@ def internal_globals(data: bytes) -> set[bytes]:
 
 def load_manifest(path: Path) -> list[Rename]:
     document = json.loads(path.read_text())
-    if not isinstance(document, dict) or set(document) != {"version", "renames"} or document["version"] != 1:
-        raise UnsupportedIR("expected version-1 explicit rename manifest")
+    if not isinstance(document, dict) or set(document) != {"version", "renames"} or document["version"] not in (1, 2):
+        raise UnsupportedIR("expected version-1 or version-2 explicit rename manifest")
     entries = []
     for row in document["renames"]:
-        if not isinstance(row, dict) or set(row) != {"namespace", "scope", "left", "right", "evidence"}:
+        keys = {"namespace", "scope", "left", "right", "evidence"}
+        if document["version"] == 2:
+            keys.add("producer")
+        if not isinstance(row, dict) or set(row) != keys:
             raise UnsupportedIR("invalid rename manifest entry")
         if row["namespace"] not in ("local", "global", "type") or type(row["scope"]) is not int or not isinstance(row["evidence"], str) or not row["evidence"].strip():
             raise UnsupportedIR("invalid namespace/scope or missing producer evidence")
@@ -242,7 +252,7 @@ def load_manifest(path: Path) -> list[Rename]:
             raise UnsupportedIR("manifest scope does not match namespace")
         if not isinstance(row["left"], str) or not isinstance(row["right"], str):
             raise UnsupportedIR("manifest names must be decoded strings")
-        entries.append(Rename(row["namespace"], row["scope"], row["left"].encode("utf-8"), row["right"].encode("utf-8"), row["evidence"]))
+        entries.append(Rename(row["namespace"], row["scope"], row["left"].encode("utf-8"), row["right"].encode("utf-8"), row["evidence"], row.get("producer", "")))
     return entries
 
 
@@ -273,6 +283,8 @@ def verify(left: bytes, right: bytes, renames: list[Rename] | None = None) -> di
                 raise NotEquivalent(f"identifier rename lacks explicit manifest authorization at line {x.line}")
             if x.kind == "global" and (x.name not in left_internal or y.name not in right_internal):
                 raise UnsupportedIR("global renaming requires explicit private/internal linkage on both definitions; ABI symbols stay exact")
+            entry = next(e for e in renames or [] if (e.namespace, e.scope, e.left, e.right) == permission)
+            validate_producer(entry)
             used.add(permission)
             family = generated_family(x.name)
             if not family or family != generated_family(y.name) or x.quoted != y.quoted:
@@ -290,6 +302,154 @@ def verify(left: bytes, right: bytes, renames: list[Rename] | None = None) -> di
     return forward
 
 
+
+def validate_producer(entry: Rename) -> None:
+    """Validate producer grammar, never infer authorization from a difference."""
+    if not isinstance(entry.producer, str):
+        raise UnsupportedIR("producer must be a reviewed producer name")
+    if b"#" in entry.left or b"#" in entry.right:
+        if entry.producer != "region-extra-stack" or entry.namespace != "local":
+            raise UnsupportedIR("stack suffix rename requires local region-extra-stack producer evidence")
+    if not entry.producer:
+        return  # Legacy complete-name families retain their explicit V1 policy.
+    patterns = {
+        "auto-region": rb"__auto_[0-9]+",
+        "region-extra-stack": rb"__auto_[0-9]+#[1-9][0-9]*",
+        "quantifier": rb"__quantifier_[0-9]+",
+    }
+    if entry.producer not in patterns or entry.namespace != "local":
+        raise UnsupportedIR("unknown producer or nonlocal source-offset rename")
+    pattern = patterns[entry.producer]
+    if not re.fullmatch(pattern, entry.left) or not re.fullmatch(pattern, entry.right):
+        raise UnsupportedIR("identifier does not match its declared producer")
+
+
+MAX_UNIT_BYTES = 64 << 20
+
+
+def bounded_lines(stream, maximum=MAX_UNIT_BYTES):
+    while True:
+        line = stream.readline(maximum + 1)
+        if not line:
+            return
+        if len(line) > maximum:
+            raise UnsupportedIR("IR line exceeds streaming memory bound")
+        yield line
+
+
+def module_index(stream):
+    """First pass retains only named-type and internal-global identities."""
+    named, internal = set(), set()
+    in_function = False
+    for line in bounded_lines(stream):
+        stripped = line.lstrip()
+        if in_function:
+            if stripped.startswith(b"}"):
+                in_function = False
+            continue
+        ts = [t for t in lex(line) if t.kind not in ("text", "comment")]
+        if not ts:
+            continue
+        if ts[0].raw == b"define":
+            in_function = True
+        if ts[0].kind == "%" and len(ts) >= 3 and ts[1].raw == b"=" and ts[2].raw == b"type":
+            named.add(ts[0].name)
+        internal.update(internal_globals(line))
+    stream.seek(0)
+    return named, internal
+
+
+def units(stream):
+    """One whole function or one module line; never materialize a module."""
+    parts, size = [], 0
+    in_function = False
+    for line in bounded_lines(stream):
+        stripped = line.lstrip()
+        if not in_function and stripped.startswith(b"define "):
+            in_function = True
+        if in_function:
+            size += len(line)
+            if size > MAX_UNIT_BYTES:
+                raise UnsupportedIR("function exceeds streaming memory bound")
+            parts.append(line)
+            if stripped.startswith(b"}"):
+                yield b"".join(parts)
+                parts, size, in_function = [], 0, False
+        else:
+            yield line
+    if in_function:
+        raise UnsupportedIR("unterminated streamed function")
+
+
+def verify_streams(left, right, renames=None):
+    """Seekable binary streams; memory bounded by largest function + manifest.
+
+    Returns changed mappings only. All unchanged bindings still participate in
+    collision checks; local tables are released only after their entire function.
+    """
+    left_types, left_internal = module_index(left)
+    right_types, right_internal = module_index(right)
+    authorized = {}
+    for entry in renames or []:
+        if not isinstance(entry, Rename) or not entry.evidence.strip():
+            raise UnsupportedIR("rename requires explicit producer evidence")
+        validate_producer(entry)
+        key = (entry.namespace, entry.scope, entry.left, entry.right)
+        if key in authorized:
+            raise UnsupportedIR("duplicate rename manifest entry")
+        authorized[key] = entry
+    used, changed = set(), {}
+    module_forward, module_reverse = {}, {}
+    scope, line_number = 0, 1
+    for a, b in zip_longest(units(left), units(right)):
+        if a is None or b is None:
+            raise NotEquivalent("streamed module unit counts differ")
+        aa = classify(a, left_types, scope)
+        bb = classify(b, right_types, scope)
+        if len(aa) != len(bb):
+            raise NotEquivalent(f"token count differs near line {line_number}")
+        forward, reverse = {}, {}
+        next_scope = scope
+        for x, y in zip(aa, bb):
+            if (x.kind, x.scope) != (y.kind, y.scope):
+                raise NotEquivalent(f"namespace/scope differs near line {line_number+x.line-1}")
+            if x.kind == "text":
+                if x.raw != y.raw:
+                    raise NotEquivalent(f"non-identifier bytes differ near line {line_number+x.line-1}: {x.raw[:80]!r} != {y.raw[:80]!r}")
+                continue
+            if x.scope >= 0:
+                next_scope = max(next_scope, x.scope + 1)
+            if x.raw != y.raw:
+                permission = (x.kind, x.scope, x.name, y.name)
+                if permission not in authorized:
+                    raise NotEquivalent(f"identifier rename lacks manifest authorization near line {line_number+x.line-1}: {x.raw!r} != {y.raw!r}")
+                if x.kind == "global" and (x.name not in left_internal or y.name not in right_internal):
+                    raise UnsupportedIR("global renaming requires private/internal definitions on both sides")
+                family = generated_family(x.name)
+                if not family or family != generated_family(y.name) or x.quoted != y.quoted:
+                    raise NotEquivalent("non-generated or incompatible identifier rename")
+                used.add(permission)
+                changed[(x.kind, x.scope, x.name)] = y.name
+            f, r = (forward, reverse) if x.kind == "local" else (module_forward, module_reverse)
+            key, target = (x.kind, x.scope, x.name), (y.kind, y.scope, y.name)
+            if key in f and f[key] != y.name:
+                raise NotEquivalent("one source identifier maps to several targets")
+            if target in r and r[target] != x.name:
+                raise NotEquivalent("several source identifiers collide, including unchanged bindings")
+            f[key], r[target] = y.name, x.name
+        # Even a function with no named locals consumes an ordinal.
+        # classify preserves text on ordinary words (name is empty), but its
+        # first significant raw token still identifies the unit header.
+        first = a.lstrip().split(None, 1)[0] if a.strip() else b""
+        if first in (b"define", b"declare"):
+            next_scope = max(next_scope, scope + 1)
+        scope = next_scope
+        line_number += a.count(b"\n")
+    if set(authorized) - used:
+        raise UnsupportedIR("manifest contains unused rename entries")
+    return changed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("left", type=Path)
@@ -297,7 +457,8 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, help="explicit per-pair rename authorization with producer evidence; default permits no renames")
     args = parser.parse_args()
     try:
-        mapping = verify(args.left.read_bytes(), args.right.read_bytes(), load_manifest(args.manifest) if args.manifest else None)
+        with args.left.open("rb") as left, args.right.open("rb") as right:
+            mapping = verify_streams(left, right, load_manifest(args.manifest) if args.manifest else None)
     except (NotEquivalent, OSError, ValueError, TypeError, KeyError) as err:
         print(str(err), file=sys.stderr)
         return 1 if isinstance(err, NotEquivalent) and not isinstance(err, UnsupportedIR) else 2

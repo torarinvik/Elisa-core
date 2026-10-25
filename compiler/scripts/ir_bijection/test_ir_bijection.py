@@ -1,4 +1,9 @@
 import unittest
+import io
+import json
+import tempfile
+from pathlib import Path
+from ir_bijection import verify_streams, load_manifest
 from ir_bijection import verify as strict_verify, classify, Rename, NotEquivalent, UnsupportedIR
 
 
@@ -114,6 +119,74 @@ class BijectionTests(unittest.TestCase):
         for data in examples:
             with self.subTest(data=data), self.assertRaises(UnsupportedIR):
                 verify(data, data)
+
+
+
+class StreamingBijectionTests(unittest.TestCase):
+    def streams(self, left, right, entries=None):
+        return verify_streams(io.BytesIO(left), io.BytesIO(right), entries)
+
+    def test_stream_matches_legacy_on_fixture(self):
+        right = BASE.replace(b"%__temp_1", b"%__temp_91")
+        entry = Rename("local", 0, b"__temp_1", b"__temp_91", "synthetic test producer")
+        self.assertEqual(self.streams(BASE, right, [entry]), {k:v for k,v in strict_verify(BASE, right, [entry]).items() if k[2] != v})
+
+    def test_stack_suffix_preserved_and_producer_required(self):
+        left = b'define i32 @f() {\nentry:\n  %"__auto_12#2" = add i32 1, 2\n  ret i32 %"__auto_12#2"\n}\n'
+        right = left.replace(b"__auto_12", b"__auto_23")
+        entry = Rename("local", 0, b"__auto_12#2", b"__auto_23#2", "synthetic region-extra-stack fixture", "region-extra-stack")
+        self.streams(left, right, [entry])
+        with self.assertRaises(UnsupportedIR):
+            self.streams(left, right, [Rename("local", 0, entry.left, entry.right, "no producer")])
+        with self.assertRaises(NotEquivalent):
+            changed = right.replace(b"#2", b"#3")
+            self.streams(left, changed, [Rename("local", 0, entry.left, b"__auto_23#3", "changed stack fixture", "region-extra-stack")])
+
+    def test_unchanged_collision_and_changed_reference(self):
+        left = b'define i32 @f() {\nentry:\n  %__auto_1 = add i32 1, 2\n  %__auto_2 = add i32 %__auto_1, 3\n  ret i32 %__auto_2\n}\n'
+        right = left.replace(b"__auto_1", b"__auto_2")
+        with self.assertRaises(NotEquivalent):
+            self.streams(left, right, [Rename("local", 0, b"__auto_1", b"__auto_2", "collision fixture", "auto-region")])
+
+    def test_scopes_include_nameless_functions_and_declarations(self):
+        prefix = b'declare void @external()\ndefine void @empty() {\nentry:\n  ret void\n}\n'
+        left = prefix + b'define i32 @f() {\nentry:\n  %__quantifier_12 = add i32 1, 2\n  ret i32 %__quantifier_12\n}\n'
+        right = left.replace(b"__quantifier_12", b"__quantifier_23")
+        self.streams(left, right, [Rename("local", 2, b"__quantifier_12", b"__quantifier_23", "quantifier fixture", "quantifier")])
+        with self.assertRaises(NotEquivalent):
+            self.streams(left, right, [Rename("local", 1, b"__quantifier_12", b"__quantifier_23", "wrong owner", "quantifier")])
+
+    def test_module_binding_collision_across_functions(self):
+        left = b'@__global_1 = internal global i32 0\n@__global_2 = internal global i32 0\ndefine i32 @f() {\nentry:\n  %a = load i32, ptr @__global_1\n  ret i32 %a\n}\ndefine ptr @g() {\nentry:\n  ret ptr @__global_2\n}\n'
+        right = left.replace(b"__global_1", b"__global_2")
+        with self.assertRaises(NotEquivalent):
+            self.streams(left, right, [Rename("global", -1, b"__global_1", b"__global_2", "collision fixture")])
+
+    def test_external_abi_and_nonidentifier_bytes_exact(self):
+        with self.assertRaises(UnsupportedIR):
+            self.streams(b"@__global_1 = global i32 0\n", b"@__global_2 = global i32 0\n", [Rename("global", -1, b"__global_1", b"__global_2", "external fixture")])
+        for right in [BASE.replace(b"i32 3", b"i32 4"), BASE.replace(b"in a comment", b"in a changed comment"), BASE.replace(b"  ret", b" ret")]:
+            with self.assertRaises(NotEquivalent): self.streams(BASE, right)
+
+    def test_forward_named_types_and_unsupported_syntax(self):
+        module = b'define %Packet @f(%Packet %value) {\nentry:\n  ret %Packet %value\n}\n%Packet = type { i32 }\n'
+        self.streams(module, module)
+        for bad in [b'@x = global ptr blockaddress(@f, %entry)\n', b'define void @f() {\n', b'\x00']:
+            with self.assertRaises(UnsupportedIR): self.streams(bad, bad)
+
+    def test_version2_manifest_roundtrip_and_unused(self):
+        row = {"namespace":"local", "scope":0, "left":"__auto_12#2", "right":"__auto_23#2", "evidence":"synthetic reviewed stack site", "producer":"region-extra-stack"}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/"manifest.json"
+            path.write_text(json.dumps({"version":2, "renames":[row]}))
+            entries = load_manifest(path)
+        with self.assertRaises(UnsupportedIR): self.streams(BASE, BASE, entries)
+
+    def test_never_reads_whole_stream(self):
+        class Bounded(io.BytesIO):
+            def read(self, *args): raise AssertionError("whole-stream read")
+            def readlines(self, *args): raise AssertionError("whole-stream readlines")
+        verify_streams(Bounded(BASE), Bounded(BASE))
 
 if __name__ == "__main__":
     unittest.main()
