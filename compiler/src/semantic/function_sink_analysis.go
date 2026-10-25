@@ -273,7 +273,7 @@ func (a *Analyzer) resolveSinkFuncDecl(expr ast.Expr) (*ast.FuncDecl, *FuncType,
 			}
 		}
 	}
-	if fnType, ok := a.exprTypes[expr].(*FuncType); ok {
+	if fnType, ok := a.exprType(expr).(*FuncType); ok {
 		return nil, a.workerLocalSinkFuncType(nil, fnType), true
 	}
 	return nil, nil, false

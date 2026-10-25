@@ -17,7 +17,7 @@ func (a *Analyzer) checkMachineCoverage(stmt *ast.MachineCoverageStmt) {
 	if stmt == nil {
 		return
 	}
-	constEnum, isConstEnum := underlyingConstEnum(a.exprTypes[stmt.Input])
+	constEnum, isConstEnum := underlyingConstEnum(a.exprType(stmt.Input))
 	if !isConstEnum {
 		return // open-domain totality is the parser's early check
 	}

@@ -106,7 +106,7 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 	// outlive) the container's own region. Growth through the copy therefore belongs in that
 	// region — the same place `xs[i].f.push(..)` grows — and the copy is usually written back.
 	if index, isIndex := unwrapParenForRegionPoly(value).(*ast.IndexExpr); isIndex && index.Index2 == nil {
-		if owner := a.containerRegionOf(stripRefForBounds(a.exprTypes[index.Object])); owner != "" && a.structLocalRegionIsLive(owner) {
+		if owner := a.containerRegionOf(stripRefForBounds(a.exprType(index.Object))); owner != "" && a.structLocalRegionIsLive(owner) {
 			a.currentStructLocalAllocRegion[sym] = owner
 			return
 		}
@@ -259,7 +259,7 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 				// `&rows[i]` of a container of containers: the element container's backing
 				// grows in the outer container's region, exactly as `rows[i].push(v)` does.
 				if p.Index2 == nil {
-					region = containerRegion(stripRefForBounds(a.exprTypes[p.Object]))
+					region = containerRegion(stripRefForBounds(a.exprType(p.Object)))
 				}
 			}
 			{
@@ -296,7 +296,7 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 	if region == "" {
 		if address, ok := stripParenExpr(arg).(*ast.AddrOfExpr); ok {
 			if projected, ok := stripParenExpr(address.Operand).(*ast.FieldExpr); ok {
-				region = a.fieldObjectExprRegion(projected.Object, a.exprTypes[projected.Object])
+				region = a.fieldObjectExprRegion(projected.Object, a.exprType(projected.Object))
 			}
 		}
 	}

@@ -140,7 +140,7 @@ func (tr *smtTranslator) scalarCallArgTerms(call *ast.CallExpr, decl *ast.FuncDe
 			if !bare {
 				return "", nil, nil, false
 			}
-			actualType := tr.a.exprTypes[arg]
+			actualType := tr.a.exprType(arg)
 			if actualType == nil && env[id.Name] == "" && tr.a.currentScope != nil {
 				if actual, found := tr.a.currentScope.Lookup(id.Name); found && actual != nil {
 					actualType = actual.Type

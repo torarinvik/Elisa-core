@@ -90,7 +90,7 @@ unwrapped:
 			return regionRefStateFromDependency(sym, state.Generation), true
 		}
 		if n.Owner != nil {
-			if ownerType := a.exprTypes[n.Owner]; ownerType != nil {
+			if ownerType := a.exprType(n.Owner); ownerType != nil {
 				if _, ok := ownerType.(*PackedEnumStoreType); ok {
 					ownerState, ownerOK := a.regionRefStateForExpr(n.Owner)
 					if !ownerOK {
@@ -145,7 +145,7 @@ unwrapped:
 		// to the closure value itself.
 		return a.regionRefStateForLambdaCaptures(n)
 	case *ast.StructLitExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		fields, ok := a.resolvedStructFields(actual)
 		if !ok {
 			return regionRefState{}, false
@@ -174,7 +174,7 @@ unwrapped:
 	case *ast.TupleExpr:
 		// A tuple carries its elements' regions exactly like a struct literal carries its fields':
 		// `t <- (true, xs[0:2])` out of a region block must not erase the view's region.
-		tupleType, _ := a.exprTypes[n].(*TupleType)
+		tupleType, _ := a.exprType(n).(*TupleType)
 		fieldStates := map[string]regionRefState{}
 		unionStates := make([]regionRefState, 0, len(n.Elems))
 		for i, elem := range n.Elems {
@@ -192,7 +192,7 @@ unwrapped:
 		}
 		return mergeRegionRefStatesWithExplicitFields(unionStates, fieldStates)
 	case *ast.RecordUpdateExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		fields, ok := a.resolvedStructFields(actual)
 		if !ok {
 			return regionRefState{}, false
@@ -258,12 +258,12 @@ unwrapped:
 		// docs/128: a field whose declared type reaches only program-lived bytes depends on no
 		// local region, whatever region holds the struct itself.
 		if len(a.programRegions) != 0 && a.provenanceAddrOfDepth == 0 {
-			if fieldType := a.exprTypes[n]; fieldType != nil && a.typeCanContainRegionRefs(fieldType, map[string]bool{}) && a.typeIsProgramLivedCached(fieldType) {
+			if fieldType := a.exprType(n); fieldType != nil && a.typeCanContainRegionRefs(fieldType, map[string]bool{}) && a.typeIsProgramLivedCached(fieldType) {
 				return regionRefState{}, true
 			}
 		}
 		if n.Field == "tags" {
-			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
+			if storeType, ok := a.exprType(n.Object).(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
 				return a.regionRefStateForExpr(n.Object)
 			}
 		}
@@ -276,8 +276,8 @@ unwrapped:
 		}
 		// The raw buffer pointer of a builtin view/container (`view.data`, `xs.items`)
 		// points into the storage the whole value's provenance describes.
-		if _, isRef := a.exprTypes[n].(*RefType); isRef && len(state.Fields) == 0 && hasRegionProvenance(state) {
-			switch StripAggregateStateType(stripRefForBounds(a.exprTypes[n.Object])).(type) {
+		if _, isRef := a.exprType(n).(*RefType); isRef && len(state.Fields) == 0 && hasRegionProvenance(state) {
+			switch StripAggregateStateType(stripRefForBounds(a.exprType(n.Object))).(type) {
 			case *SViewType, *ViewType, *CStrType, *DArrayType:
 				return cloneRegionRefState(state), true
 			}
@@ -287,10 +287,10 @@ unwrapped:
 		if n.Fallback != nil {
 			return a.regionRefStateForRecoveredExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
 		}
-		if viewType, ok := a.exprTypes[n.Object].(*ViewType); ok && viewType.SurfaceName == "packedtags" {
+		if viewType, ok := a.exprType(n.Object).(*ViewType); ok && viewType.SurfaceName == "packedtags" {
 			return a.regionRefStateForExpr(n.Object)
 		}
-		resultType := a.exprTypes[n]
+		resultType := a.exprType(n)
 		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
 			return regionRefState{}, false
 		}
@@ -307,7 +307,7 @@ unwrapped:
 		// (elementStorageState), which is exact and does not over-approximate.
 		_, tracked := a.localContainerElementState(n)
 		if !tracked && a.typeMayOwnArenaStorage(resultType, map[string]bool{}) {
-			if owner, ownerOK := a.containerRegionDependency(a.exprTypes[n.Object]); ownerOK {
+			if owner, ownerOK := a.containerRegionDependency(a.exprType(n.Object)); ownerOK {
 				if !ok {
 					return owner, true
 				}
@@ -318,10 +318,10 @@ unwrapped:
 		}
 		return state, ok
 	case *ast.SliceExpr:
-		if viewType, ok := a.exprTypes[n.Object].(*ViewType); ok && viewType.SurfaceName == "packedtags" {
+		if viewType, ok := a.exprType(n.Object).(*ViewType); ok && viewType.SurfaceName == "packedtags" {
 			return a.regionRefStateForExpr(n.Object)
 		}
-		resultType := a.exprTypes[n]
+		resultType := a.exprType(n)
 		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
 			return regionRefState{}, false
 		}
@@ -332,8 +332,8 @@ unwrapped:
 		return summarizeRegionIndexStates(state)
 	case *ast.BinaryExpr:
 		// Pointer arithmetic (`p + n`, `n + p`, `p - n`) stays inside the pointee's buffer.
-		if binaryExprRequiresUnsafePointerArithmetic(n.Op, a.exprTypes[n.Left], a.exprTypes[n.Right]) {
-			if _, ok := a.exprTypes[n.Left].(*RefType); ok {
+		if binaryExprRequiresUnsafePointerArithmetic(n.Op, a.exprType(n.Left), a.exprType(n.Right)) {
+			if _, ok := a.exprType(n.Left).(*RefType); ok {
 				return a.regionRefStateForExpr(n.Left)
 			}
 			return a.regionRefStateForExpr(n.Right)
@@ -437,7 +437,7 @@ unwrapped:
 		if state, ok := a.regionRefStateForThreadHandleCall(n); ok {
 			return state, true
 		}
-		fnType, _ := a.exprTypes[n.Func].(*FuncType)
+		fnType, _ := a.exprType(n.Func).(*FuncType)
 		if fnType == nil && len(n.Args) == 1 && a.isTypeConstructorCall(n) {
 			return a.regionRefStateForExpr(n.Args[0])
 		}
@@ -475,18 +475,18 @@ unwrapped:
 		// it has no inferred return-provenance summary (notably built-in view
 		// constructors such as darray.as_sview). Preserve that dependency when
 		// the result is assigned into an existing, region-less binding.
-		if state, ok := a.containerRegionDependency(a.exprTypes[n]); ok {
+		if state, ok := a.containerRegionDependency(a.exprType(n)); ok {
 			return state, true
 		}
 		// `buf.as_sview()` / `buf.as_cstr()` borrow the receiver's buffer. A region-less
 		// receiver (a parameter) stamps no region on the result type; carry the receiver's
 		// own provenance instead.
-		if builtin, ok := a.exprTypes[n.Func].(*FuncType); ok && builtin != nil && (builtin.Name == "darray.sview" || builtin.Name == "darray.cstr") {
+		if builtin, ok := a.exprType(n.Func).(*FuncType); ok && builtin != nil && (builtin.Name == "darray.sview" || builtin.Name == "darray.cstr") {
 			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil {
 				if state, ok := a.regionRefStateForExpr(field.Object); ok && hasRegionProvenance(state) {
 					return state, true
 				}
-				if state, ok := a.containerRegionDependency(a.exprTypes[field.Object]); ok {
+				if state, ok := a.containerRegionDependency(a.exprType(field.Object)); ok {
 					return state, true
 				}
 				return a.paramRootRegionDependency(field.Object)
@@ -609,7 +609,7 @@ func (a *Analyzer) exprDefinitelyNever(expr ast.Expr) bool {
 	if a == nil || expr == nil {
 		return false
 	}
-	t := a.exprTypes[expr]
+	t := a.exprType(expr)
 	if t == nil {
 		return false
 	}
@@ -792,7 +792,7 @@ func (a *Analyzer) regionRefStateForBufferAddress(operand ast.Expr) (regionRefSt
 		case *ast.FieldExpr:
 			// A field reached through a reference lives in the pointee, not in a buffer this
 			// expression names; leave that to the ordinary provenance walk.
-			if _, isRef := a.exprTypes[n.Object].(*RefType); isRef {
+			if _, isRef := a.exprType(n.Object).(*RefType); isRef {
 				return regionRefState{}, false
 			}
 			operand = n.Object
@@ -800,7 +800,7 @@ func (a *Analyzer) regionRefStateForBufferAddress(operand ast.Expr) (regionRefSt
 			if n.Fallback != nil {
 				return regionRefState{}, false
 			}
-			objectType := a.exprTypes[n.Object]
+			objectType := a.exprType(n.Object)
 			switch StripAggregateStateType(stripRefForBounds(objectType)).(type) {
 			case *DArrayType, *ViewType, *SViewType, *CStrType, *DictType, *SetType:
 				if state, ok := a.regionRefStateForExpr(n.Object); ok && hasRegionProvenance(state) {
@@ -832,7 +832,7 @@ func (a *Analyzer) paramRootRegionDependency(expr ast.Expr) (regionRefState, boo
 		case *ast.ParenExpr:
 			expr = n.Inner
 		case *ast.FieldExpr:
-			if _, isRef := a.exprTypes[n.Object].(*RefType); isRef {
+			if _, isRef := a.exprType(n.Object).(*RefType); isRef {
 				return regionRefState{}, false
 			}
 			expr = n.Object
@@ -878,7 +878,7 @@ func isBufferOwningType(t Type) bool {
 // every argument a return borrows from or copies. Only for generic callees, whose template
 // summary cannot see that a `T` result carries a view.
 func (a *Analyzer) regionRefStateForCallOrigins(call *ast.CallExpr) (regionRefState, bool) {
-	resultType := a.exprTypes[call]
+	resultType := a.exprType(call)
 	if resultType == nil || !a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
 		return regionRefState{}, false
 	}
@@ -918,7 +918,7 @@ func (a *Analyzer) regionRefStateForCallOrigins(call *ast.CallExpr) (regionRefSt
 // closure it runs, so it carries the provenance of every capture until joined. Returning the
 // handle out of the frame that owns a captured view hands the thread freed memory.
 func (a *Analyzer) regionRefStateForThreadHandleCall(call *ast.CallExpr) (regionRefState, bool) {
-	resultType := a.exprTypes[call]
+	resultType := a.exprType(call)
 	if resultType == nil || !strings.HasPrefix(resultType.String(), "Thread[") {
 		return regionRefState{}, false
 	}

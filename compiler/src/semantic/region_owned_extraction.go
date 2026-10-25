@@ -18,7 +18,7 @@ func (a *Analyzer) ownedExtractionRegion(expr ast.Expr) string {
 	if a == nil || expr == nil {
 		return ""
 	}
-	t := a.exprTypes[stripParenExpr(expr)]
+	t := a.exprType(stripParenExpr(expr))
 	if ref, ok := t.(*RefType); ok && ref != nil {
 		t = ref.Elem
 	}
@@ -41,7 +41,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 	}
 	seen[e] = true
 	own := ""
-	if r := containerRegion(a.exprTypes[e]); r != "" {
+	if r := containerRegion(a.exprType(e)); r != "" {
 		if _, ok := a.regionLifetimeOrdinal(r); ok {
 			own = r
 		}
@@ -103,7 +103,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 		}
 		return r
 	case *ast.FieldExpr:
-		if !ownedStorageProjectable(a.exprTypes[stripParenExpr(n.Object)]) {
+		if !ownedStorageProjectable(a.exprType(stripParenExpr(n.Object))) {
 			return own
 		}
 		return a.innerRegion(own, a.ownedStorageRootRegion(n.Object, seen))
@@ -111,7 +111,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 		if state, tracked := a.localContainerElementState(n); tracked {
 			return a.innerRegion(own, a.innermostTrackedRegion(state))
 		}
-		if !ownedStorageProjectable(a.exprTypes[stripParenExpr(n.Object)]) {
+		if !ownedStorageProjectable(a.exprType(stripParenExpr(n.Object))) {
 			return own
 		}
 		return a.innerRegion(own, a.ownedStorageRootRegion(n.Object, seen))
@@ -121,7 +121,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 			// arena helper with the dict as its first argument. The result still points into the dict's
 			// own entry storage, so it shares the receiver's backing exactly like the method form.
 			receiver := stripParenExpr(n.Args[0])
-			if containerMethodYieldsElement(a.exprTypes[receiver], a.exprTypes[e]) {
+			if containerMethodYieldsElement(a.exprType(receiver), a.exprType(e)) {
 				return a.innerRegion(own, a.ownedStorageRootRegion(receiver, seen))
 			}
 			return own
@@ -135,7 +135,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 			// `v` was read out of a dict): the view lives exactly as long as that storage.
 			return a.innerRegion(own, a.ownedStorageRootRegion(field.Object, seen))
 		}
-		if !containerMethodYieldsElement(a.exprTypes[stripParenExpr(field.Object)], a.exprTypes[e]) {
+		if !containerMethodYieldsElement(a.exprType(stripParenExpr(field.Object)), a.exprType(e)) {
 			return own
 		}
 		return a.innerRegion(own, a.ownedStorageRootRegion(field.Object, seen))
@@ -214,7 +214,7 @@ func (a *Analyzer) nestedFreshStorageRegion(expr ast.Expr) string {
 	default:
 		return ""
 	}
-	t := a.exprTypes[e]
+	t := a.exprType(e)
 	if r := containerRegion(t); r != "" {
 		if _, ok := a.regionLifetimeOrdinal(r); ok {
 			return r
@@ -241,7 +241,7 @@ func (a *Analyzer) nestedFreshStorageRegion(expr ast.Expr) string {
 func (a *Analyzer) elementStorageState(expr ast.Expr) (state regionRefState, ok bool, known bool) {
 	state, ok = a.regionRefStateForExpr(expr)
 	e := stripParenExpr(expr)
-	region := a.innerRegion(a.valueStoreRegion(e, a.exprTypes[e]), a.nestedFreshStorageRegion(e))
+	region := a.innerRegion(a.valueStoreRegion(e, a.exprType(e)), a.nestedFreshStorageRegion(e))
 	region = a.innerRegion(region, a.valueInteriorRegion(e))
 	if region == "" {
 		return state, ok, true
@@ -306,7 +306,7 @@ func (a *Analyzer) isDArrayByteViewCall(expr ast.Expr) bool {
 	}
 	switch field.Field {
 	case "as_sview", "as_cstr", "sview", "cstr":
-		_, isDArray := a.derefContainerType(a.exprTypes[stripParenExpr(field.Object)]).(*DArrayType)
+		_, isDArray := a.derefContainerType(a.exprType(stripParenExpr(field.Object))).(*DArrayType)
 		return isDArray
 	}
 	return false

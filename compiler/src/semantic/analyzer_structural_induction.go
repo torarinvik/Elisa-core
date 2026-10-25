@@ -245,11 +245,11 @@ func (tr *smtTranslator) emitStructuralPredicateEquation(call *ast.CallExpr, dec
 		if tok, ok := tr.boolPredicateArgToken(args[i], env); ok {
 			penv[param.Name+"$tok"] = tok
 		}
-		if IsBoolType(tr.a.exprTypes[args[i]]) {
+		if IsBoolType(tr.a.exprType(args[i])) {
 			if bt, ok := tr.boolTerm(args[i], env); ok {
 				penv[param.Name] = bt
 			}
-		} else if tr.a.smtEquationStructType(tr.a.exprTypes[args[i]]) {
+		} else if tr.a.smtEquationStructType(tr.a.exprType(args[i])) {
 			// A struct argument binds field-wise (`l.a`), so the body's `l.a` reads the actual
 			// argument's field rather than a free symbol named after the formal.
 			tr.a.bindSMTStructEnvArg(tr, penv, param.Name, args[i], env, false)

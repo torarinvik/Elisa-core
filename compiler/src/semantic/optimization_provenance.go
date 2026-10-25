@@ -119,7 +119,7 @@ func (a *Analyzer) sliceFullSpanField(expr ast.Expr) string {
 	if a == nil || expr == nil {
 		return ""
 	}
-	t := a.exprTypes[expr]
+	t := a.exprType(expr)
 	for {
 		ref, ok := t.(*RefType)
 		if !ok {

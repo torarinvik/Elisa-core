@@ -149,7 +149,7 @@ func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason s
 	}
 	if _, ok := a.lookupAffineValueKey(expr); ok {
 		affineType := expected
-		if actual := a.exprTypes[expr]; actual != nil && a.containsAffineHandleValues(actual, map[string]bool{}) {
+		if actual := a.exprType(expr); actual != nil && a.containsAffineHandleValues(actual, map[string]bool{}) {
 			affineType = actual
 		}
 		a.errorf(expr.Pos(), "%s %q must be moved explicitly before %s", affineHandleKind(affineType), affineValueDisplayName(expr), reason)
@@ -349,7 +349,7 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 		if !ok {
 			return affineValueKey{}, false
 		}
-		objType := a.exprTypes[n.Object]
+		objType := a.exprType(n.Object)
 		if objType == nil {
 			objType = a.analyzeExpr(n.Object)
 		}
@@ -387,7 +387,7 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 		if !ok {
 			return affineValueKey{}, false
 		}
-		objType := a.exprTypes[n.Object]
+		objType := a.exprType(n.Object)
 		if objType == nil {
 			objType = a.analyzeExpr(n.Object)
 		}
@@ -426,7 +426,7 @@ func (a *Analyzer) rejectAffineIndexOverwrite(target ast.Expr) {
 	if !ok || idx.Object == nil || idx.Fallback != nil {
 		return
 	}
-	objType := a.exprTypes[idx.Object]
+	objType := a.exprType(idx.Object)
 	if objType == nil {
 		objType = a.analyzeExpr(idx.Object)
 	}

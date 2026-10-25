@@ -207,7 +207,7 @@ func (a *Analyzer) applyViewStaticLenForCondition(cond ast.Expr, truthy bool) {
 		if n.Name == "" || n.Name == "_" {
 			return
 		}
-		a.recordViewStaticLenBinding(n.Name, n.Value, a.exprTypes[n.Value])
+		a.recordViewStaticLenBinding(n.Name, n.Value, a.exprType(n.Value))
 	case *ast.BinaryExpr:
 		if n.Op == lexer.TOKEN_AND && truthy {
 			a.applyViewStaticLenForCondition(n.Left, true)
@@ -393,7 +393,7 @@ func (a *Analyzer) indexExprRequiresUncheckedIndexPermission(expr *ast.IndexExpr
 	if a.indexBoundsProven[expr] {
 		return false
 	}
-	return indexableTypeRequiresBoundsProof(a.exprTypes[expr.Object])
+	return indexableTypeRequiresBoundsProof(a.exprType(expr.Object))
 }
 
 func (a *Analyzer) markIndexBoundsProof(expr *ast.IndexExpr, objType Type) {
@@ -477,7 +477,7 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 	// An upper-bound proof alone is unsound for a SIGNED index: a negative value
 	// also satisfies i < count and indexes out of bounds. Require a proven
 	// non-negativity (unsigned index type, a 0..< loop, or an i >= 0 guard).
-	if !indexTypeGuaranteedNonNegative(a.exprTypes[expr.Index]) && !fact.NonNeg {
+	if !indexTypeGuaranteedNonNegative(a.exprType(expr.Index)) && !fact.NonNeg {
 		return false
 	}
 	return true

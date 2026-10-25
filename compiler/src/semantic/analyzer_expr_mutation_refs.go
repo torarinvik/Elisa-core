@@ -162,7 +162,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			return invalidType
 		}
 		targetType := a.analyzeIndexExpr(n)
-		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
+		if kind, ok := valueOnlyIndexKind(a.exprType(n.Object)); ok {
 			a.errorf(n.Pos(), "cannot assign to %s", kind)
 			return invalidType
 		}
@@ -185,7 +185,7 @@ func (a *Analyzer) readOnlyViewIndexSource(expr ast.Expr) bool {
 	if !ok || !facts.ReadOnly {
 		return false
 	}
-	if mutableViewCapabilityType(a.exprTypes[expr]) {
+	if mutableViewCapabilityType(a.exprType(expr)) {
 		return false
 	}
 	return true
@@ -250,7 +250,7 @@ func (a *Analyzer) legacyRefInitIsWritable(value ast.Expr) bool {
 	case *ast.TernaryExpr:
 		return a.legacyRefInitIsWritable(v.Value) && a.legacyRefInitIsWritable(v.Alt)
 	case *ast.CastExpr:
-		if v.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(a.exprTypes[v.Operand], a.exprTypes[v]) {
+		if v.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(a.exprType(v.Operand), a.exprType(v)) {
 			return true
 		}
 	case *ast.AddrOfExpr:
@@ -260,7 +260,7 @@ func (a *Analyzer) legacyRefInitIsWritable(value ast.Expr) bool {
 			return true
 		}
 	}
-	if ref, ok := a.exprTypes[stripped].(*RefType); ok && ref != nil && ref.Mutable {
+	if ref, ok := a.exprType(stripped).(*RefType); ok && ref != nil && ref.Mutable {
 		return true
 	}
 	return !a.refBindingIdent(stripped) && (a.mutationPathWritable(stripped) || a.exprCanYieldWritableRef(stripped))
@@ -410,7 +410,7 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 	if stripped == nil {
 		return true
 	}
-	objType, ok := a.exprTypes[stripped]
+	objType, ok := a.lookupExprType(stripped)
 	if !ok || objType == nil {
 		objType = a.analyzeExpr(stripped)
 	}
@@ -449,7 +449,7 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 	}
 	switch n := stripped.(type) {
 	case *ast.FieldExpr:
-		field, found := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
+		field, found := a.lookupFieldNoError(a.exprType(n.Object), n.Field)
 		// An immutable aggregate may store a mutable view by value. Writing
 		// through that view mutates its backing elements, not the field slot.
 		if found {
@@ -457,14 +457,14 @@ func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
 				return true
 			}
 		}
-		if ref, ok := a.exprTypes[n.Object].(*RefType); ok && !a.refExprAllowsMutation(n.Object, ref) {
+		if ref, ok := a.exprType(n.Object).(*RefType); ok && !a.refExprAllowsMutation(n.Object, ref) {
 			return false
 		}
 		return (found && field.Mutable) || a.mutationPathWritable(n.Object)
 	case *ast.IndexExpr:
 		// Indexing through a mutable view field mutates the borrowed elements,
 		// not the immutable field slot that stores the view itself.
-		if view, ok := a.exprTypes[n.Object].(*ViewType); ok && view.Mutable {
+		if view, ok := a.exprType(n.Object).(*ViewType); ok && view.Mutable {
 			return true
 		}
 		return a.mutationPathWritable(n.Object)
@@ -521,7 +521,7 @@ func (a *Analyzer) writableRefSuggestionForExpr(expr ast.Expr) (string, bool) {
 	if stripped == nil {
 		return "", false
 	}
-	t := a.exprTypes[stripped]
+	t := a.exprType(stripped)
 	if t == nil {
 		t = a.analyzeExpr(stripped)
 	}
@@ -583,7 +583,7 @@ func (a *Analyzer) rebindableReadOnlyRefRoot(expr ast.Expr) (*Symbol, string, bo
 		}
 		cur = stripMutationTargetExpr(object)
 		if _, isIdent := cur.(*ast.Ident); !isIdent {
-			if _, isRef := a.exprTypes[cur].(*RefType); isRef {
+			if _, isRef := a.exprType(cur).(*RefType); isRef {
 				return nil, "", false
 			}
 		}
@@ -730,7 +730,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 			return invalidType
 		}
 		targetType := a.analyzeIndexExpr(n)
-		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
+		if kind, ok := valueOnlyIndexKind(a.exprType(n.Object)); ok {
 			a.errorf(n.Pos(), "cannot take a reference to %s", kind)
 			return invalidType
 		}
@@ -780,12 +780,12 @@ func (a *Analyzer) inferAddrOfStorage(expr ast.Expr) RefStorage {
 			return RefStorageStatic
 		}
 	case *ast.FieldExpr:
-		if objType, ok := a.exprTypes[n.Object].(*RefType); ok {
+		if objType, ok := a.exprType(n.Object).(*RefType); ok {
 			return objType.Storage
 		}
 		return a.inferAddrOfStorage(n.Object)
 	case *ast.IndexExpr:
-		switch objType := a.exprTypes[n.Object].(type) {
+		switch objType := a.exprType(n.Object).(type) {
 		case *RefType:
 			if _, ok := objType.Elem.(*ArrayType); ok {
 				return objType.Storage

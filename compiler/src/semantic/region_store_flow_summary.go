@@ -1244,7 +1244,7 @@ func (a *Analyzer) storeFlowUnit(stmt reflect.Value, c *storeFlowCtx) []reflect.
 // contain Elisa region storage. A write to such a field/index may mutate its owning
 // aggregate, but it cannot store a borrow there.
 func (a *Analyzer) storeFlowPointerFreePlace(expr ast.Expr) bool {
-	typ := a.exprTypes[expr]
+	typ := a.exprType(expr)
 	if typ == nil {
 		typ = a.storeFlowPlaceType(expr)
 	}
@@ -2697,7 +2697,7 @@ func (a *Analyzer) storeFlowPlaceType(expr ast.Expr) Type {
 		// target itself may not have an exprTypes entry even though its base does.
 		// Recover the element type from that resolved base to distinguish scalar or
 		// pointer-free indexed writes from stores that can retain a borrow.
-		base := a.exprTypes[e.Object]
+		base := a.exprType(e.Object)
 		if base == nil {
 			base = a.storeFlowPlaceType(e.Object)
 		}
@@ -2802,12 +2802,12 @@ func (a *Analyzer) storeFlowPushedElemMayShare(receiver, elem ast.Expr) bool {
 	if a.storeFlowDeclaredViewOrScalarElements(receiver) {
 		return false
 	}
-	if rt := a.exprTypes[receiver]; rt != nil && !containsTypeParam(rt) {
+	if rt := a.exprType(receiver); rt != nil && !containsTypeParam(rt) {
 		if d, ok := StripAggregateStateType(stripRefForBounds(rt)).(*DArrayType); ok && d != nil && d.Elem != nil && !containsTypeParam(d.Elem) && !a.storeScanSharesCached(d.Elem) {
 			return false
 		}
 	}
-	t := a.exprTypes[elem]
+	t := a.exprType(elem)
 	if t == nil {
 		t = a.storeFlowStructLitType(elem)
 	}

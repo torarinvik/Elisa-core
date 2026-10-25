@@ -74,7 +74,7 @@ func isCStrLenReceiver(t Type) bool {
 // type when it has one, else what the receiver's shape settles on its own (a literal is a `u8&`
 // string; a const has its declared type). nil means unknown.
 func (a *Analyzer) constLenReceiverType(expr ast.Expr) Type {
-	if t, ok := a.exprTypes[expr]; ok && t != nil && !IsInvalidType(t) {
+	if t, ok := a.lookupExprType(expr); ok && t != nil && !IsInvalidType(t) {
 		return t
 	}
 	switch n := expr.(type) {

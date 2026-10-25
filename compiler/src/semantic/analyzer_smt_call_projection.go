@@ -116,7 +116,7 @@ func rerootProjection(n *ast.FieldExpr, root ast.Expr, a *Analyzer) *ast.FieldEx
 		rebuilt = rerootProjection(inner, root, a)
 	}
 	out := &ast.FieldExpr{Position: n.Position, Object: rebuilt, Field: n.Field}
-	if t := a.exprTypes[n]; t != nil {
+	if t := a.exprType(n); t != nil {
 		a.exprTypes[out] = t
 	}
 	return out
@@ -141,7 +141,7 @@ func (tr *smtTranslator) aggregateProjectionFieldType(n *ast.FieldExpr, env map[
 	if t, ok := tr.projectionTokenChainType(n, env); ok {
 		return t
 	}
-	if t := tr.a.exprTypes[n]; t != nil {
+	if t := tr.a.exprType(n); t != nil {
 		return t
 	}
 	if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
@@ -245,7 +245,7 @@ func (tr *smtTranslator) callProjectionToken(call *ast.CallExpr, env map[string]
 	if !direct || decl == nil {
 		return "", false
 	}
-	resultType := tr.a.exprTypes[call]
+	resultType := tr.a.exprType(call)
 	if resultType == nil {
 		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
 			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
@@ -538,7 +538,7 @@ func (a *Analyzer) smtAggregateCallLocalEnsures(tr *smtTranslator, declScope *Sc
 	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
 		return
 	}
-	if !aggregateCallResultType(a.exprTypes[call]) || !a.immutableLocalDefinitionCurrent(declScope, sym, vd.Value) {
+	if !aggregateCallResultType(a.exprType(call)) || !a.immutableLocalDefinitionCurrent(declScope, sym, vd.Value) {
 		return
 	}
 	args := proofCallArgs(call)
@@ -607,7 +607,7 @@ func rerootBelowFirstField(n *ast.FieldExpr, fields map[string]ast.Expr, a *Anal
 			return nil, false
 		}
 		out := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
-		if t := a.exprTypes[n]; t != nil {
+		if t := a.exprType(n); t != nil {
 			a.exprTypes[out] = t
 		}
 		return out, true
@@ -617,7 +617,7 @@ func rerootBelowFirstField(n *ast.FieldExpr, fields map[string]ast.Expr, a *Anal
 		return nil, false
 	}
 	out := &ast.FieldExpr{Position: n.Position, Object: rebuilt, Field: n.Field}
-	if t := a.exprTypes[n]; t != nil {
+	if t := a.exprType(n); t != nil {
 		a.exprTypes[out] = t
 	}
 	return out, true

@@ -114,7 +114,7 @@ func (a *Analyzer) preserveFunctionExprTypes(fn *ast.FuncDecl) func() {
 	collectSpecializedFunctionExprs(fn, exprs)
 	saved := make(map[ast.Expr]Type, len(exprs))
 	for expr := range exprs {
-		if typ, ok := a.exprTypes[expr]; ok {
+		if typ, ok := a.lookupExprType(expr); ok {
 			saved[expr] = typ
 		}
 	}
@@ -124,7 +124,7 @@ func (a *Analyzer) preserveFunctionExprTypes(fn *ast.FuncDecl) func() {
 			if typ, ok := saved[expr]; ok {
 				a.exprTypes[expr] = typ
 			} else {
-				delete(a.exprTypes, expr)
+				a.deleteExprType(expr)
 			}
 		}
 	}

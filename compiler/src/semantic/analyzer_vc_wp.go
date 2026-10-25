@@ -84,7 +84,7 @@ func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		rhs := n.Value
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok && sym != nil {
-				rhs = a.implicitIntConversion(rhs, a.exprTypes[rhs], sym.Type)
+				rhs = a.implicitIntConversion(rhs, a.exprType(rhs), sym.Type)
 			}
 		}
 		return wpAssign{name: n.Name, rhs: rhs}, true
@@ -98,7 +98,7 @@ func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		}
 		// A non-value-preserving implicit integer conversion is a bit copy / truncation in codegen;
 		// substitute the converted value, not the source (see implicitIntConversion).
-		return wpAssign{name: key, rhs: a.implicitIntConversion(n.Value, a.exprTypes[n.Value], a.wpAssignTargetType(n.Target))}, true
+		return wpAssign{name: key, rhs: a.implicitIntConversion(n.Value, a.exprType(n.Value), a.wpAssignTargetType(n.Target))}, true
 	case *ast.AugAssignStmt:
 		if !exprIsPureArithOrRead(n.Value) {
 			return wpAssign{}, false
@@ -109,7 +109,7 @@ func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		}
 		// The synthesized `place OP e` below carries no conversion; decline when the operand would
 		// need a non-value-preserving one.
-		if a.implicitIntConversion(n.Value, a.exprTypes[n.Value], a.wpAssignTargetType(n.Target)) != n.Value {
+		if a.implicitIntConversion(n.Value, a.exprType(n.Value), a.wpAssignTargetType(n.Target)) != n.Value {
 			return wpAssign{}, false
 		}
 		baseOp, ok := augAssignBaseOp(n.Op)
@@ -216,7 +216,7 @@ func (a *Analyzer) augAssignTargetType(target ast.Expr, name string) Type {
 			return sym.Type
 		}
 	}
-	if t := a.exprTypes[target]; t != nil {
+	if t := a.exprType(target); t != nil {
 		return t
 	}
 	// A field-place target (`p.pos`) has no scope symbol under its projection key; recover the field's
@@ -553,7 +553,7 @@ func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool
 // wpAssignTargetType is the declared type of an assignment target: its recorded expression type, or
 // for a bare local the binding's type (assignment targets are not always typed as expressions).
 func (a *Analyzer) wpAssignTargetType(target ast.Expr) Type {
-	if t := a.exprTypes[target]; t != nil {
+	if t := a.exprType(target); t != nil {
 		return t
 	}
 	if id, ok := stripOptimizationParens(target).(*ast.Ident); ok && id != nil && a.currentScope != nil {

@@ -136,7 +136,7 @@ func (tr *smtTranslator) bindingFormalImmutableRef(name string) bool {
 // containerArgType is the darray type of an argument (seeing through an implicit borrow), or nil.
 func (a *Analyzer) containerArgType(arg ast.Expr) Type {
 	e := stripOptimizationParens(arg)
-	if t := a.exprTypes[e]; t != nil {
+	if t := a.exprType(e); t != nil {
 		if isDArrayTypeMaybeRef(t) {
 			return t
 		}
@@ -145,7 +145,7 @@ func (a *Analyzer) containerArgType(arg ast.Expr) Type {
 	if addr, isAddr := e.(*ast.AddrOfExpr); isAddr && addr != nil {
 		e = stripOptimizationParens(addr.Operand)
 	}
-	if t := a.exprTypes[e]; t != nil {
+	if t := a.exprType(e); t != nil {
 		if isDArrayTypeMaybeRef(t) {
 			return t
 		}
@@ -184,7 +184,7 @@ func (tr *smtTranslator) containerElementType(expr ast.Expr) Type {
 func (tr *smtTranslator) placeStaticType(expr ast.Expr) Type {
 	switch n := stripOptimizationParens(expr).(type) {
 	case *ast.Ident:
-		if t := tr.a.exprTypes[n]; t != nil {
+		if t := tr.a.exprType(n); t != nil {
 			return t
 		}
 		if tr.calleeBodyDepth != 0 {
@@ -213,7 +213,7 @@ func (tr *smtTranslator) placeStaticType(expr ast.Expr) Type {
 			}
 		}
 	case *ast.IndexExpr:
-		if t := tr.a.exprTypes[n]; t != nil {
+		if t := tr.a.exprType(n); t != nil {
 			return t
 		}
 		if !validContainerViewIndex(n) {
@@ -221,7 +221,7 @@ func (tr *smtTranslator) placeStaticType(expr ast.Expr) Type {
 		}
 		return tr.containerElementType(n.Object)
 	case *ast.FieldExpr:
-		if t := tr.a.exprTypes[n]; t != nil {
+		if t := tr.a.exprType(n); t != nil {
 			return t
 		}
 		object := tr.placeStaticType(n.Object)

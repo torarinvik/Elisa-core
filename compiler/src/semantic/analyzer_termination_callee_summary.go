@@ -599,7 +599,7 @@ func renameFieldRoot(obj ast.Expr) ast.Expr {
 // fieldTypeOfPlace resolves a measured place's scalar field type (analyzed exprTypes, else the struct's
 // declared field type for a synthetic/cloned node).
 func (a *Analyzer) fieldTypeOfPlace(fe *ast.FieldExpr) Type {
-	if t := a.exprTypes[fe]; t != nil {
+	if t := a.exprType(fe); t != nil {
 		return t
 	}
 	if t, ok := a.fieldReadResolvedType(fe); ok {

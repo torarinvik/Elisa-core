@@ -92,7 +92,7 @@ func (tr *smtTranslator) runtimeRangeQuantifierTerm(block *ast.ExprBlock, env ma
 	if !tr.a.smtBoolInitializerStableWithBinders(block, &nodes, map[string]bool{}, 0, binders) {
 		return "", false
 	}
-	startType, endType := tr.a.exprTypes[loop.Start], tr.a.exprTypes[loop.End]
+	startType, endType := tr.a.exprType(loop.Start), tr.a.exprType(loop.End)
 	if startType == nil || endType == nil {
 		return "", false
 	}
@@ -141,6 +141,6 @@ func (tr *smtTranslator) runtimeRangeQuantifierTerm(block *ast.ExprBlock, env ma
 func (tr *smtTranslator) runtimeRangeEndpointTerm(value ast.Expr, target Type, env map[string]string) (string, bool) {
 	cast := &ast.CastExpr{Position: value.Pos(), Operand: value}
 	tr.a.exprTypes[cast] = target
-	defer delete(tr.a.exprTypes, cast)
+	defer tr.a.deleteExprType(cast)
 	return tr.termEnv(cast, env)
 }

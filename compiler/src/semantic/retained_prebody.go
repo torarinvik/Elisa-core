@@ -231,7 +231,7 @@ func (a *Analyzer) preBodyParamDefaultTypedExprs() int {
 	}
 	count := 0
 	for e := range nodes {
-		if _, ok := a.exprTypes[e]; ok {
+		if _, ok := a.lookupExprType(e); ok {
 			count++
 		}
 	}

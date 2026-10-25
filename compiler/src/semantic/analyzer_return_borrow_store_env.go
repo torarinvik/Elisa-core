@@ -549,7 +549,7 @@ func (a *Analyzer) defineReturnBorrowBinding(aliases map[string]returnBorrowFlow
 // returnBorrowConservativeFlow is the flow of a value the walk cannot trace: a frame borrow
 // whenever its type can hold one.
 func (a *Analyzer) returnBorrowConservativeFlow(expr ast.Expr, fallback Type) returnBorrowFlow {
-	t := a.exprTypes[expr]
+	t := a.exprType(expr)
 	if t == nil {
 		t = fallback
 	}
@@ -905,7 +905,7 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 					if n.Type != nil {
 						_, isRef = n.Type.(*ast.RefType)
 					}
-					if _, ok := a.exprTypes[n.Value].(*RefType); ok {
+					if _, ok := a.exprType(n.Value).(*RefType); ok {
 						isRef = true
 					}
 					// A machine's input var is only compared against its arms, unless an arm binds it.
@@ -921,7 +921,7 @@ func (a *Analyzer) returnBorrowUntrustedNames(fn *ast.FuncDecl, processed map[*a
 						refDecls[n.Name] = true
 					}
 				case *ast.AssignStmt:
-					if _, isRef := a.exprTypes[n.Target].(*RefType); isRef {
+					if _, isRef := a.exprType(n.Target).(*RefType); isRef {
 						markRoot(n.Value)
 					}
 					// `xs <- xs.truncate(0)` and `xs <- xs.push(v)` copy the returned receiver back
@@ -1050,7 +1050,7 @@ func (a *Analyzer) returnBorrowDArrayValueArgMethod(call *ast.CallExpr) bool {
 	if !ok || field == nil || (field.Field != "push" && field.Field != "insert") || !a.returnBorrowBuiltinMethodCall(call) {
 		return false
 	}
-	objType := a.exprTypes[field.Object]
+	objType := a.exprType(field.Object)
 	if ref, isRef := objType.(*RefType); isRef && ref != nil {
 		objType = ref.Elem
 	}
@@ -1098,7 +1098,7 @@ func (a *Analyzer) returnBorrowCountOnlyDArrayMethod(call *ast.CallExpr) bool {
 	if !ok || field == nil || !returnBorrowCountOnlyMethods[field.Field] || !a.returnBorrowBuiltinMethodCall(call) {
 		return false
 	}
-	objType := a.exprTypes[field.Object]
+	objType := a.exprType(field.Object)
 	if ref, isRef := objType.(*RefType); isRef && ref != nil {
 		objType = ref.Elem
 	}
@@ -1106,7 +1106,7 @@ func (a *Analyzer) returnBorrowCountOnlyDArrayMethod(call *ast.CallExpr) bool {
 		return false
 	}
 	for _, arg := range returnBorrowCallArgs(call) {
-		switch t := a.exprTypes[returnBorrowStripParens(arg)].(type) {
+		switch t := a.exprType(returnBorrowStripParens(arg)).(type) {
 		case *BuiltinType:
 			if !isIntegerBuiltinName(t.Name) {
 				return false
@@ -1129,7 +1129,7 @@ func (a *Analyzer) returnBorrowBorrowFreeContainerUpdate(call *ast.CallExpr) boo
 	if !ok || field == nil || !returnBorrowContainerUpdateMethods[field.Field] || !a.returnBorrowBuiltinMethodCall(call) {
 		return false
 	}
-	objType := a.exprTypes[field.Object]
+	objType := a.exprType(field.Object)
 	if ref, isRef := objType.(*RefType); isRef && ref != nil {
 		objType = ref.Elem
 	}
@@ -1139,7 +1139,7 @@ func (a *Analyzer) returnBorrowBorrowFreeContainerUpdate(call *ast.CallExpr) boo
 		return false
 	}
 	for _, arg := range returnBorrowCallArgs(call) {
-		argType := a.exprTypes[returnBorrowStripParens(arg)]
+		argType := a.exprType(returnBorrowStripParens(arg))
 		if argType == nil || a.typeMayHoldFrameBorrow(argType, map[Type]bool{}) {
 			return false
 		}
@@ -1169,7 +1169,7 @@ func (a *Analyzer) returnBorrowCopiedArg(arg ast.Expr) bool {
 	if _, isAddr := inner.(*ast.AddrOfExpr); isAddr {
 		return false
 	}
-	argType := a.exprTypes[inner]
+	argType := a.exprType(inner)
 	if argType == nil {
 		return false
 	}
@@ -1205,7 +1205,7 @@ func returnBorrowStripAddr(expr ast.Expr) ast.Expr {
 // markReturnBorrowCallResultAliases marks the arguments a call may hand back as a WRITABLE
 // reference: writes through the result then reach the argument without the walker seeing them.
 func (a *Analyzer) markReturnBorrowCallResultAliases(call *ast.CallExpr, markRoot func(ast.Expr)) {
-	resultType := a.exprTypes[call]
+	resultType := a.exprType(call)
 	if resultType == nil || !a.typeHasWritableBorrow(resultType, map[Type]bool{}) {
 		return
 	}
@@ -1371,8 +1371,8 @@ func (a *Analyzer) returnBorrowCallArgStoreFlow(call *ast.CallExpr, index int) r
 		}
 		if pointee != nil && containsTypeParam(pointee) && index < len(returnBorrowCallArgs(call)) {
 			// A generic pointee: the argument's own type is the instantiation.
-			if at, ok := a.exprTypes[returnBorrowStripAddr(returnBorrowCallArgs(call)[index])]; ok && at != nil {
-				if rt, isRef := a.exprTypes[returnBorrowCallArgs(call)[index]].(*RefType); isRef && rt.Elem != nil {
+			if at, ok := a.lookupExprType(returnBorrowStripAddr(returnBorrowCallArgs(call)[index])); ok && at != nil {
+				if rt, isRef := a.exprType(returnBorrowCallArgs(call)[index]).(*RefType); isRef && rt.Elem != nil {
 					pointee = rt.Elem
 				} else if _, isRef := at.(*RefType); !isRef {
 					pointee = at
@@ -1425,7 +1425,7 @@ func (a *Analyzer) traceLocalBorrowStoreArgs(call *ast.CallExpr, index int) {
 			continue
 		}
 		f := a.returnBorrowCallOtherArgsFlowWhereKinds(args, index, fnType.Params, func(k int) bool { return k == other }, contentsOnly, map[string]returnBorrowFlow{}, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
-		fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d local=%v arg=%s type=%s\n", call.Pos(), index+1, other+1, f.Local, args[other].Pos(), typeString(a.exprTypes[args[other]]))
+		fmt.Fprintf(os.Stderr, "LOCALSTORE at %s into=%d from=%d local=%v arg=%s type=%s\n", call.Pos(), index+1, other+1, f.Local, args[other].Pos(), typeString(a.exprType(args[other])))
 		if f.Local {
 			a.traceLocalFlowExplain(args[other], 3, "  ")
 		}
@@ -1439,7 +1439,7 @@ func (a *Analyzer) traceLocalFlowExplain(expr ast.Expr, depth int, indent string
 		return
 	}
 	f := a.returnBorrowFlowForExpr(expr, nil, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
-	fmt.Fprintf(os.Stderr, "%sEXPLAIN %T at %s local=%v params=%v type=%s\n", indent, expr, expr.Pos(), f.Local, f.Params, typeString(a.exprTypes[expr]))
+	fmt.Fprintf(os.Stderr, "%sEXPLAIN %T at %s local=%v params=%v type=%s\n", indent, expr, expr.Pos(), f.Local, f.Params, typeString(a.exprType(expr)))
 	if !f.Local {
 		return
 	}

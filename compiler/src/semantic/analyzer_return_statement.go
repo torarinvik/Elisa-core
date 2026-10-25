@@ -289,7 +289,7 @@ func (a *Analyzer) refreshReturnedExprOptimizationFacts(root ast.Expr, rootType 
 		if expr == root {
 			result, ok = rootType, rootType != nil
 		} else {
-			result, ok = a.exprTypes[expr]
+			result, ok = a.lookupExprType(expr)
 		}
 		if ok {
 			a.recordExprOptimizationFacts(expr, result)

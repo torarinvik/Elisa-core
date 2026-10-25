@@ -341,7 +341,7 @@ func (a *Analyzer) inStoreScopesArena(store ast.Expr, fn *ast.FuncDecl) bool {
 		return false
 	}
 	s := stripParenExpr(store)
-	if t := a.exprTypes[s]; t != nil {
+	if t := a.exprType(s); t != nil {
 		return IsArenaValueOrRefType(t)
 	}
 	if id, ok := s.(*ast.Ident); ok && fn != nil {

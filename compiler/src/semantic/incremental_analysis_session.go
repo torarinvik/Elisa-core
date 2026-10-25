@@ -1074,7 +1074,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 			session.stats.ReusedExpressionNodes += uint64(restored)
 			a.visitFunctionBodyWithElementScan(fn.Body, func(stmt ast.Stmt) {
 				ret := stmt.(*ast.ReturnStmt)
-				a.analyzeReturnStatement(ret, a.exprTypes[ret.Value])
+				a.analyzeReturnStatement(ret, a.exprType(ret.Value))
 			}, true)
 			return
 		}
@@ -1102,7 +1102,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		if _, rangeNode := expr.(*ast.MembershipRangeExpr); predicate && rangeNode {
 			// The marker means exactly "no standalone semantic contribution".
 			// Decline if a later analyzer adds one instead of silently losing it.
-			_, typed := a.exprTypes[expr]
+			_, typed := a.lookupExprType(expr)
 			_, facts := a.exprFacts[expr]
 			if typed || facts {
 				return
@@ -1110,7 +1110,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 			types[i] = predicateRangeTypeTag
 			continue
 		}
-		typ, ok := a.exprTypes[expr].(*BuiltinType)
+		typ, ok := a.exprType(expr).(*BuiltinType)
 		_, parameter := expr.(*ast.Ident)
 		if !ok || (!parameter && a.exprFacts[expr].HasAnyFacts()) || typ != a.namedTypes[typ.Name] {
 			return

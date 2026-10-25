@@ -215,7 +215,7 @@ func (a *Analyzer) plainEnumTagInterval(idx ast.Expr) (lo int64, hi int64, ok bo
 	default:
 		return 0, 0, false
 	}
-	operandType := stripRefForBounds(a.exprTypes[cast.Operand])
+	operandType := stripRefForBounds(a.exprType(cast.Operand))
 	et, isEnum := operandType.(*EnumType)
 	if !isEnum || et == nil {
 		return 0, 0, false
@@ -355,7 +355,7 @@ func (a *Analyzer) refinementCarriedInterval(idx ast.Expr) (lo int64, hi int64, 
 func (a *Analyzer) refinementIntervalForIndexExpr(idx ast.Expr) (lo int64, hi int64, ok bool) {
 	switch n := stripOptimizationParens(idx).(type) {
 	case *ast.FieldExpr:
-		st, ok := stripRefForBounds(a.exprTypes[n.Object]).(*StructType)
+		st, ok := stripRefForBounds(a.exprType(n.Object)).(*StructType)
 		if !ok || st == nil || st.Decl == nil {
 			return 0, 0, false
 		}
@@ -373,7 +373,7 @@ func (a *Analyzer) refinementIntervalForIndexExpr(idx ast.Expr) (lo int64, hi in
 		// an unresolved associated-type projection `D.Field`. Every conforming impl that binds Field
 		// to a refined type carries that refinement; the bound a generic caller may rely on is the
 		// INTERSECTION across all impls (so one non-refined impl correctly forfeits elision).
-		if preds, ok := a.associatedTypeProjectionRefinement(a.exprTypes[n]); ok {
+		if preds, ok := a.associatedTypeProjectionRefinement(a.exprType(n)); ok {
 			return a.predsInterval(preds)
 		}
 	case *ast.Ident:

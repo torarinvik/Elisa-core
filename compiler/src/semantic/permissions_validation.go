@@ -454,7 +454,7 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 	case *ast.BinaryExpr:
 		a.validatePermissionExpr(n.Left, granted)
 		a.validatePermissionExpr(n.Right, granted)
-		if a.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, a.exprTypes[n.Left], a.exprTypes[n.Right]) {
+		if a.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, a.exprType(n.Left), a.exprType(n.Right)) {
 			a.warnOnMissingLocalGrant(n.Pos(), "pointer arithmetic", unsafePointerArithmeticRefs(n.Position), granted)
 		}
 	case *ast.UnaryExpr:
@@ -463,7 +463,7 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 		a.errorOnMissingLocalGrant(n.Pos(), "mutable global write", a.mutableGlobalCallWriteRefs(n), granted)
 		a.errorOnMissingLocalGrant(n.Pos(), "callback argument", a.mutableGlobalCallbackRefs(n), granted)
 		for _, arg := range n.LoweredArgs() {
-			if callback, ok := a.exprTypes[arg].(*FuncType); ok {
+			if callback, ok := a.exprType(arg).(*FuncType); ok {
 				a.validateLocalPermissionRowGrant(n.Pos(), "callback argument", functionPermissionRefs(callback), granted)
 			}
 		}
@@ -480,14 +480,14 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 		}
 		a.validateCallPermissions(n.Position, n.Func, granted, n.SafeConcurrencySugar)
 		if a.enforceUnsafePermissions {
-			if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
+			if fnType, ok := a.exprType(n.Func).(*FuncType); ok {
 				if (fnType.Name == "spawn1" || fnType.Name == "spawn_daemon") && len(n.Args) > 1 {
-					if threadTransferRequiresUnsafeThreadShare(a.exprTypes[n.Args[1]], map[string]bool{}) {
+					if threadTransferRequiresUnsafeThreadShare(a.exprType(n.Args[1]), map[string]bool{}) {
 						a.warnOnMissingLocalGrant(n.Args[1].Pos(), "thread share", unsafeThreadShareRefs(n.Args[1].Pos()), granted)
 					}
 				}
 				if fnType.Name == "pool_submit1" && len(n.Args) > 2 {
-					if threadTransferRequiresUnsafeThreadShare(a.exprTypes[n.Args[2]], map[string]bool{}) {
+					if threadTransferRequiresUnsafeThreadShare(a.exprType(n.Args[2]), map[string]bool{}) {
 						a.warnOnMissingLocalGrant(n.Args[2].Pos(), "thread share", unsafeThreadShareRefs(n.Args[2].Pos()), granted)
 					}
 				}
@@ -529,8 +529,8 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 			break
 		}
 		a.validatePermissionExprWithValueContext(n.Operand, granted, wholeValue)
-		src := a.exprTypes[n.Operand]
-		dst := a.exprTypes[n]
+		src := a.exprType(n.Operand)
+		dst := a.exprType(n)
 		if n.Origin != ast.CastExprOriginIndirectCall && a.castRequiresUnsafeGuestHostPointerCast(n, dst) {
 			// Address-space crossing: checked regardless of general unsafe
 			// enforcement. warnOnMissingLocalGrant hard-errors a missing
@@ -618,7 +618,7 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 		}
 	case *ast.LambdaExpr:
 		savedFunc := a.currentFuncType
-		if ft, ok := a.exprTypes[n].(*FuncType); ok {
+		if ft, ok := a.exprType(n).(*FuncType); ok {
 			a.currentFuncType = ft
 		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
@@ -720,7 +720,7 @@ func (a *Analyzer) validatePermissionExprWithValueContext(expr ast.Expr, granted
 }
 
 func (a *Analyzer) validateCallPermissions(pos lexer.Pos, fnExpr ast.Expr, granted map[string]bool, safeConcurrencySugar bool) {
-	fnType, ok := a.exprTypes[fnExpr].(*FuncType)
+	fnType, ok := a.exprType(fnExpr).(*FuncType)
 	if !ok {
 		return
 	}

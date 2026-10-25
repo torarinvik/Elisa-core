@@ -50,7 +50,7 @@ func (tr *smtTranslator) pointerIdentityReadStable(expr ast.Expr) bool {
 		!tr.pointerIdentityStableExpr(index.Object, 0) || !tr.pointerIdentityStableExpr(index.Index, 0) {
 		return false
 	}
-	typ := tr.a.exprTypes[index.Object]
+	typ := tr.a.exprType(index.Object)
 	switch stripRefForBounds(typ).(type) {
 	case *ArrayType, *DArrayType:
 		return true
@@ -185,7 +185,7 @@ func (tr *smtTranslator) samePointerIdentityExpr(left, right ast.Expr) bool {
 // Scope lookup is valid only for caller expressions; a callee formal must never
 // acquire the type (or literal value) of a same-spelled caller local.
 func (tr *smtTranslator) pointerIdentityOperandType(expr ast.Expr) Type {
-	typ := tr.a.exprTypes[expr]
+	typ := tr.a.exprType(expr)
 	if typ == nil && tr.calleeBodyDepth == 0 {
 		typ = tr.a.smtOperandType(expr)
 		if typ == nil {

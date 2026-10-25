@@ -500,7 +500,7 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 	if !ok || callIdentName(call) != "chunks_exact" || !a.isCompilerBuiltinHelperCall(call, "chunks_exact") {
 		return OptimizationFacts{}, false
 	}
-	objectType := a.exprTypes[expr.Object]
+	objectType := a.exprType(expr.Object)
 	if _, ok := ChunksExactViewItemType(objectType); !ok {
 		return OptimizationFacts{}, false
 	}

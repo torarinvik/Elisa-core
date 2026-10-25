@@ -56,7 +56,7 @@ func (tr *smtTranslator) ternaryProjectionBool(n *ast.FieldExpr, tern *ast.Terna
 	}
 	arm := func(value ast.Expr) (string, bool) {
 		field := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
-		if typ := tr.a.exprTypes[n]; typ != nil {
+		if typ := tr.a.exprType(n); typ != nil {
 			tr.a.exprTypes[field] = typ
 		}
 		return tr.boolTerm(field, env)

@@ -280,7 +280,7 @@ func (a *Analyzer) smtBoolInitializerStableWithBinders(expr ast.Expr, walkedNode
 	if !a.smtBoolInitializerVisit(walkedNodes, depth) {
 		return false
 	}
-	if t := a.exprTypes[expr]; isDirectRefType(t) {
+	if t := a.exprType(expr); isDirectRefType(t) {
 		return false
 	}
 	switch n := expr.(type) {
@@ -365,7 +365,7 @@ func (a *Analyzer) smtBoolInitializerStableWithBinders(expr ast.Expr, walkedNode
 		case lexer.TOKEN_AND, lexer.TOKEN_OR:
 			return a.smtBoolInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtBoolInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-			if IsBoolType(a.exprTypes[n.Left]) && IsBoolType(a.exprTypes[n.Right]) {
+			if IsBoolType(a.exprType(n.Left)) && IsBoolType(a.exprType(n.Right)) {
 				return a.smtBoolInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtBoolInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
 			}
 			return a.smtScalarInitializerStableWithBinders(n.Left, walkedNodes, identifiers, depth+1, binders) && a.smtScalarInitializerStableWithBinders(n.Right, walkedNodes, identifiers, depth+1, binders)
@@ -386,7 +386,7 @@ func (a *Analyzer) smtScalarInitializerStableWithBinders(expr ast.Expr, walkedNo
 	if !a.smtBoolInitializerVisit(walkedNodes, depth) {
 		return false
 	}
-	if isDirectRefType(a.exprTypes[expr]) {
+	if isDirectRefType(a.exprType(expr)) {
 		return false
 	}
 	switch n := expr.(type) {
@@ -608,10 +608,10 @@ func (a *Analyzer) smtImmutableScalarIdent(id *ast.Ident) bool {
 }
 
 func (a *Analyzer) smtImmutableScalarProjection(expr *ast.FieldExpr) bool {
-	if a == nil || expr == nil || isDirectRefType(a.exprTypes[expr]) {
+	if a == nil || expr == nil || isDirectRefType(a.exprType(expr)) {
 		return false
 	}
-	fieldType := a.exprTypes[expr]
+	fieldType := a.exprType(expr)
 	if fieldType == nil {
 		var ok bool
 		fieldType, ok = a.fieldReadResolvedType(expr)
@@ -641,7 +641,7 @@ func (a *Analyzer) smtImmutableScalarProjection(expr *ast.FieldExpr) bool {
 			return false
 		}
 		depth++
-		t := a.exprTypes[field]
+		t := a.exprType(field)
 		if t == nil {
 			t, _ = a.fieldReadResolvedType(field)
 		}

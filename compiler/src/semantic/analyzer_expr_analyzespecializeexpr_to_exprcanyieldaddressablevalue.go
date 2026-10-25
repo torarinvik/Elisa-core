@@ -125,7 +125,7 @@ func (a *Analyzer) fieldExprProvidesWritableRef(expr *ast.FieldExpr) bool {
 	// the mutating fuzzer surfaced. analyzeExpr caches the object's type in exprTypes on the first pass, so
 	// read it back instead of recomputing; only analyze afresh when it is genuinely unset (identical
 	// result, minus the redundant re-walk and its duplicate diagnostics).
-	objType := a.exprTypes[expr.Object]
+	objType := a.exprType(expr.Object)
 	if objType == nil {
 		objType = a.analyzeExpr(expr.Object)
 	}
@@ -242,7 +242,7 @@ func (a *Analyzer) exprCanYieldAddressableValue(expr ast.Expr) bool {
 		if _, ok := a.lookupFieldNoError(a.analyzeExpr(n.Object), n.Field); !ok {
 			return false
 		}
-		if _, ok := a.exprTypes[n.Object].(*RefType); ok {
+		if _, ok := a.exprType(n.Object).(*RefType); ok {
 			return true
 		}
 		if _, ok := a.analyzeExpr(n.Object).(*RefType); ok {

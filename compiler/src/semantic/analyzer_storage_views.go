@@ -324,7 +324,7 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 		return mergeStorageViewDependencies(deps...)
 	case *ast.ListComprehensionExpr:
 		deps := make([]storageViewDependencyState, 0, 2)
-		if listComprehensionResultMayContainBorrowedStorage(a.exprTypes[n]) {
+		if listComprehensionResultMayContainBorrowedStorage(a.exprType(n)) {
 			if dep, ok := a.storageViewDependencyForExpr(n.Source); ok {
 				deps = append(deps, dep)
 			} else if dep, ok := storageViewDependencyFromSource(n.Source); ok {
@@ -374,7 +374,7 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 	case *ast.IndexExpr:
 		// An element read out of a container of views (`views[0]` over `darray[sview]`)
 		// still points wherever the container's elements point.
-		if resultType := a.exprTypes[n]; resultType != nil && a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
+		if resultType := a.exprType(n); resultType != nil && a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
 			var deps []storageViewDependencyState
 			if dep, ok := a.storageViewDependencyForExpr(n.Object); ok {
 				deps = append(deps, dep)
@@ -484,7 +484,7 @@ func (a *Analyzer) storageViewDependencyForBorrowedPlace(place ast.Expr) (storag
 }
 
 func (a *Analyzer) borrowedPlaceContainerIsRelocatable(obj ast.Expr) bool {
-	switch stripRefForBounds(a.exprTypes[obj]).(type) {
+	switch stripRefForBounds(a.exprType(obj)).(type) {
 	case *DArrayType:
 		// A darray backed by a reserve_commit region grows by committing pages
 		// within its contiguous reservation and never relocates, so interior
@@ -502,7 +502,7 @@ func (a *Analyzer) borrowedPlaceContainerIsRelocatable(obj ast.Expr) bool {
 // reserve_commit commits pages on demand, fixed panics on overflow. Chained/heap
 // backings can relocate the buffer on growth and so are not stable.
 func (a *Analyzer) containerBackingIsStable(obj ast.Expr) bool {
-	dt, ok := stripRefForBounds(a.exprTypes[obj]).(*DArrayType)
+	dt, ok := stripRefForBounds(a.exprType(obj)).(*DArrayType)
 	if !ok || dt.Region == "" {
 		return false
 	}
@@ -645,7 +645,7 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 	if a.currentStorageViewDeps == nil && a.currentScope == nil {
 		return storageViewDependencyState{}, false
 	}
-	resultType := a.exprTypes[call]
+	resultType := a.exprType(call)
 	// A thread handle owns the closure it runs: the spawned body reads every view the
 	// closure captured, so the handle depends on them until joined.
 	if resultType != nil && strings.HasPrefix(resultType.String(), "Thread[") {
@@ -712,7 +712,7 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 			continue
 		}
 		if origin.Suffix == "" {
-			if storageViewScalarBindingType(stripStorageViewRefs(a.exprTypes[arg])) {
+			if storageViewScalarBindingType(stripStorageViewRefs(a.exprType(arg))) {
 				continue
 			}
 			if dep, ok := a.storageViewDependencyForExpr(arg); ok {
@@ -720,14 +720,14 @@ func (a *Analyzer) storageViewDependencyForUserCall(call *ast.CallExpr) (storage
 			}
 			// Only an argument that OWNS relocatable storage can have the result's backing
 			// moved by a later mutation; arena handles hand out stable addresses.
-			if !a.storageViewTypeOwnsRelocatable(stripStorageViewRefs(a.exprTypes[arg]), map[Type]bool{}) {
+			if !a.storageViewTypeOwnsRelocatable(stripStorageViewRefs(a.exprType(arg)), map[Type]bool{}) {
 				continue
 			}
 		}
 		// An `@append_only` store never moves bytes a view points into (its make_room
 		// retires a full buffer instead of growing it, which the store checker enforces),
 		// so the view does not depend on later borrows of the store.
-		if storageViewPathCrossesAppendOnly(a.exprTypes[arg], origin.Suffix) {
+		if storageViewPathCrossesAppendOnly(a.exprType(arg), origin.Suffix) {
 			continue
 		}
 		key := optimizationExprString(arg)
@@ -827,7 +827,7 @@ func (a *Analyzer) invalidateStorageViewsForRelocatingDictCall(call *ast.CallExp
 	if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && name == "" {
 		switch field.Field {
 		case "put", "put_checked", "put_or_panic", "get_or_insert", "get_or_insert_checked", "get_or_insert_or_panic", "reserve":
-			if _, isDict := stripRefForBounds(a.exprTypes[field.Object]).(*DictType); isDict {
+			if _, isDict := stripRefForBounds(a.exprType(field.Object)).(*DictType); isDict {
 				base := dictContainerArgBase(field.Object)
 				a.invalidateStorageViewsForSourceMode(base, "dict insert (may rehash and relocate the bucket array)", true)
 				a.invalidateIndexBoundsForContainer(base)

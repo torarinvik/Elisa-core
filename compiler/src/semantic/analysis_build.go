@@ -228,6 +228,9 @@ func (b *AnalysisBuild) validate() error {
 	if b == nil || b.retained == nil || b.retained.a == nil || b.file == nil || b.loweredFile == nil || b.retained.a.retained != b.retained || b.next < 0 || b.next > len(b.retained.decls) {
 		return fmt.Errorf("incomplete analysis build")
 	}
+	if b.retained.a.exprTypeOverlay != nil {
+		return fmt.Errorf("analysis build retains a construction expression-type overlay")
+	}
 	if b.postNext < 0 || b.postNext > len(analysisPostPhaseNames) || b.postNext > 0 && b.next != len(b.retained.decls) || b.done && b.postNext != len(analysisPostPhaseNames) {
 		return fmt.Errorf("analysis build phase mismatch")
 	}

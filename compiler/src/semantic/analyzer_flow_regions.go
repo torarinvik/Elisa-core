@@ -283,7 +283,7 @@ func (a *Analyzer) markReceivedOwnedRegion(sym *Symbol, value ast.Expr) {
 	if call == nil {
 		return
 	}
-	fnType, _ := a.exprTypes[call.Func].(*FuncType)
+	fnType, _ := a.exprType(call.Func).(*FuncType)
 	if fnType == nil || !fnType.ReturnsOwnedRegion {
 		return
 	}
@@ -383,7 +383,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 			return
 		}
 	}
-	storeType := a.exprTypes[stmt.Store]
+	storeType := a.exprType(stmt.Store)
 	if storeType == nil {
 		storeType = a.analyzeRegionOwnerExpr(stmt.Store)
 	}
@@ -391,7 +391,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	arenaType := a.namedTypes["Arena"]
 	if arenaType != nil {
 		ownerStripped := stripParenExpr(stmt.Store)
-		ownerT := a.exprTypes[ownerStripped]
+		ownerT := a.exprType(ownerStripped)
 		if ownerT == nil {
 			ownerT = storeType
 		}

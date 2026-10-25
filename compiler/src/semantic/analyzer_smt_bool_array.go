@@ -30,9 +30,9 @@ func (tr *smtTranslator) arrayReadOperandType(object ast.Expr) Type {
 	if tr == nil || tr.a == nil || object == nil {
 		return nil
 	}
-	typ := tr.a.exprTypes[object]
+	typ := tr.a.exprType(object)
 	if typ == nil {
-		typ = tr.a.exprTypes[stripOptimizationParens(object)]
+		typ = tr.a.exprType(stripOptimizationParens(object))
 	}
 	if typ == nil && tr.calleeBodyDepth > 0 {
 		return nil

@@ -168,12 +168,12 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		// A value whose (already analyzed) type cannot hold region storage carries none.
 		// Probe the cached storage property before walking generic enum payloads.
-		if t, known := a.exprTypes[inner]; known && a.storeScanTypeIsPlainValue(t) {
+		if t, known := a.lookupExprType(inner); known && a.storeScanTypeIsPlainValue(t) {
 			return storeNone
 		}
 		// The callee may not be analyzed yet (no exprTypes): a parameter field chain still has a
 		// declared type (`scope.deferred.count` is a usize).
-		if _, known := a.exprTypes[inner]; !known {
+		if _, known := a.lookupExprType(inner); !known {
 			t, ok := a.storeScanDeclTypeOf(decl, inner)
 			if !ok || t == nil {
 				t, ok = a.storeScanParamProjectionType(decl, inner)
@@ -206,7 +206,7 @@ func (a *Analyzer) calleeStoreModeIntoBody(decl *ast.FuncDecl, other, index int,
 		}
 		// docs/128: a value whose declared type is program-lived (a `darray[T] @source` field)
 		// reaches only program-region storage, whatever holds it.
-		if t, known := a.exprTypes[inner]; known && a.storeScanTypeIsProgramLivedForStoreProof(t) {
+		if t, known := a.lookupExprType(inner); known && a.storeScanTypeIsProgramLivedForStoreProof(t) {
 			return storeNone
 		}
 		// A local declared `sview @source` (every declaration) views only program-region bytes.
@@ -456,7 +456,7 @@ func (a *Analyzer) traceStorePayloadFailure(decl *ast.FuncDecl, other, index int
 	if expr != nil {
 		position = fmt.Sprint(expr.Pos())
 	}
-	if t := a.exprTypes[inner]; t != nil {
+	if t := a.exprType(inner); t != nil {
 		existingType = typeString(t)
 	}
 	fmt.Fprintf(os.Stderr, "STOREPAYLOAD decl=%s source=%s[%d] target=%s[%d] reason=%s at=%s kind=%T existingType=%s\n", name, source, other+1, target, index+1, reason, position, inner, existingType)
@@ -529,7 +529,7 @@ func (a *Analyzer) calleeStoresProgramLivedElementsActive(decl *ast.FuncDecl, ot
 		if _, ok := inner.(*ast.StructLitExpr); ok {
 			// Omitted/default fields can carry region storage too. Accept this literal only
 			// when its complete declared type is program-lived.
-			t, known := a.exprTypes[inner]
+			t, known := a.lookupExprType(inner)
 			if !known || t == nil {
 				t = a.storeScanDeclaredStructLiteralType(decl, inner.(*ast.StructLitExpr))
 				known = t != nil
@@ -734,7 +734,7 @@ func (a *Analyzer) storeScanStoredElementExprProgramLivedSeen(decl *ast.FuncDecl
 			}
 		}
 	}
-	t, known := a.exprTypes[inner]
+	t, known := a.lookupExprType(inner)
 	if !known || t == nil {
 		if call, ok := inner.(*ast.CallExpr); ok && call != nil {
 			t = a.storeScanCallReturnType(call)
@@ -1458,7 +1458,7 @@ func (a *Analyzer) storeScanBundleHasWritableTargetRO(arg ast.Expr, targets, rea
 			}
 			seen[v.Pointer()] = true
 			if expr, isExpr := v.Interface().(ast.Expr); isExpr && expr != nil {
-				if t, typed := a.exprTypes[expr]; typed && t != nil && !a.storeScanSharesCached(t) {
+				if t, typed := a.lookupExprType(expr); typed && t != nil && !a.storeScanSharesCached(t) {
 					return
 				}
 				if id, isIdent := expr.(*ast.Ident); isIdent {
@@ -1781,7 +1781,7 @@ func (a *Analyzer) storeScanScalarLocals(decl *ast.FuncDecl) map[string]bool {
 		}
 		eligible := true
 		for _, v := range declarations {
-			if v == nil || !(storeScanTypeExprIsPlainScalar(v.Type) || a.storeScanTypeExprIsOpaque(v.Type) || (v.Type == nil && v.Value != nil && storeScanPlainScalarType(a.exprTypes[v.Value]))) {
+			if v == nil || !(storeScanTypeExprIsPlainScalar(v.Type) || a.storeScanTypeExprIsOpaque(v.Type) || (v.Type == nil && v.Value != nil && storeScanPlainScalarType(a.exprType(v.Value)))) {
 				eligible = false
 				break
 			}
@@ -2092,7 +2092,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 			return maxStoreMode(returnedMode(choice.Value), returnedMode(choice.Alt))
 		}
 		if len(a.programRegions) != 0 {
-			t, known := a.exprTypes[value]
+			t, known := a.lookupExprType(value)
 			if !known {
 				t, known = a.storeScanDeclTypeOf(decl, value)
 			}
@@ -2333,7 +2333,7 @@ func (a *Analyzer) storeScanLooksLikeTypeName(name string) bool {
 func (a *Analyzer) storeScanReceiverIsBuiltinDArray(decl *ast.FuncDecl, recv ast.Expr) bool {
 	decl = a.readDecl(decl)
 	inner := storeScanUnwrap(recv)
-	if t, known := a.exprTypes[inner]; known && t != nil {
+	if t, known := a.lookupExprType(inner); known && t != nil {
 		_, ok := stripRefForBounds(t).(*DArrayType)
 		return ok
 	}
@@ -2707,7 +2707,7 @@ func (a *Analyzer) storeScanViewLocals(decl *ast.FuncDecl, other int) map[string
 			}
 			// Declared `sview`/`cstr`, or initialized from a value whose analyzed type is built only
 			// from scalars and plain views (no container, view[T], reference or pointer).
-			if t, known := a.exprTypes[n.Value]; storeScanTypeExprIsView(n.Type) || (n.Value != nil && known && t != nil && typeComponentsViewOnly(t)) {
+			if t, known := a.lookupExprType(n.Value); storeScanTypeExprIsView(n.Type) || (n.Value != nil && known && t != nil && typeComponentsViewOnly(t)) {
 				views[n.Name] = true
 			} else {
 				poisoned[n.Name] = true
@@ -2767,7 +2767,7 @@ func (a *Analyzer) storeScanViewFilledLocals(decl *ast.FuncDecl) map[string]bool
 				return
 			}
 			for _, arg := range n.Args {
-				t, known := a.exprTypes[storeScanUnwrap(arg)]
+				t, known := a.lookupExprType(storeScanUnwrap(arg))
 				if !known || t == nil {
 					t, known = a.storeScanDeclTypeOf(decl, storeScanUnwrap(arg))
 				}
@@ -2890,7 +2890,7 @@ func (a *Analyzer) storeScanValueIsView(decl *ast.FuncDecl, value ast.Expr, view
 	if id, ok := inner.(*ast.Ident); ok && id != nil && views[id.Name] {
 		return true
 	}
-	t, known := a.exprTypes[inner]
+	t, known := a.lookupExprType(inner)
 	if !known || t == nil {
 		// Before the body is analyzed: `p.f[i]` / `p.f` typed from the signature.
 		t, known = a.storeScanDeclTypeOf(decl, inner)
@@ -3334,7 +3334,7 @@ func (a *Analyzer) storeScanExtendArgMode(decl *ast.FuncDecl, arg ast.Expr, mode
 	if mode == storeNone {
 		return mode
 	}
-	t, known := a.exprTypes[storeScanUnwrap(arg)]
+	t, known := a.lookupExprType(storeScanUnwrap(arg))
 	if !known {
 		// The callee may not be typed yet: a field chain of a parameter or of an explicitly
 		// typed local still has its declared type.

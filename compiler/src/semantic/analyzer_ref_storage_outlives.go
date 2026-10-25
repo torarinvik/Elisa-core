@@ -393,7 +393,7 @@ func (a *Analyzer) borrowProvenanceStorage(expr ast.Expr) (RefStorage, bool) {
 	case *ast.AddrOfExpr:
 		return a.borrowProvenanceStorage(n.Operand)
 	case *ast.CastExpr:
-		if rt, ok := a.exprTypes[n].(*RefType); ok && rt != nil && rt.ExplicitStorage {
+		if rt, ok := a.exprType(n).(*RefType); ok && rt != nil && rt.ExplicitStorage {
 			return rt.Storage, true
 		}
 		return a.borrowProvenanceStorage(n.Operand)
@@ -419,17 +419,17 @@ func (a *Analyzer) borrowProvenanceStorage(expr ast.Expr) (RefStorage, bool) {
 		}
 	case *ast.IndexExpr:
 		// Indexing a reference borrows into what the reference points at.
-		if rt, ok := a.exprTypes[n.Object].(*RefType); ok && rt != nil {
+		if rt, ok := a.exprType(n.Object).(*RefType); ok && rt != nil {
 			return rt.Storage, rt.ExplicitStorage
 		}
 		// A container allocated in the permanent region (`in perm:`, or the body of a function
 		// returning `static T&`) keeps its elements for the whole program, whoever owns the header.
-		if containerRegion(a.exprTypes[n.Object]) == "perm" && a.permRegionIsBuiltin() {
+		if containerRegion(a.exprType(n.Object)) == "perm" && a.permRegionIsBuiltin() {
 			return RefStorageStatic, true
 		}
 		return a.borrowProvenanceStorage(n.Object)
 	case *ast.FieldExpr:
-		if rt, ok := a.exprTypes[n.Object].(*RefType); ok && rt != nil {
+		if rt, ok := a.exprType(n.Object).(*RefType); ok && rt != nil {
 			return rt.Storage, rt.ExplicitStorage
 		}
 		return a.borrowProvenanceStorage(n.Object)

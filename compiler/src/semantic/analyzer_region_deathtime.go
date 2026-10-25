@@ -224,12 +224,12 @@ func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 	for _, s := range stmts {
 		switch n := s.(type) {
 		case *ast.VarDeclStmt:
-			if base, ok := aliasSourceName(n.Value); ok && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+			if base, ok := aliasSourceName(n.Value); ok && typeCarriesRegionStorage(a.exprType(n.Value)) {
 				uf.union(n.Name, base)
 			}
 		case *ast.AssignStmt:
 			if tgt, ok := stripParenExpr(n.Target).(*ast.Ident); ok {
-				if base, ok := aliasSourceName(n.Value); ok && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+				if base, ok := aliasSourceName(n.Value); ok && typeCarriesRegionStorage(a.exprType(n.Value)) {
 					uf.union(tgt.Name, base)
 				}
 			}
@@ -341,7 +341,7 @@ func (a *Analyzer) collectEscapedNames(stmt ast.Stmt, returnOut, argOut map[stri
 				}
 			case *ast.CallExpr:
 				for _, arg := range n.Args {
-					if !typeCarriesRegionStorage(a.exprTypes[arg]) {
+					if !typeCarriesRegionStorage(a.exprType(arg)) {
 						continue
 					}
 					// Interprocedural precision (docs/91): a storage argument escapes only if the callee

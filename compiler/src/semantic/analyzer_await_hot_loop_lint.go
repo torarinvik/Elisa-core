@@ -48,7 +48,7 @@ func (a *Analyzer) isThreadJoinCall(call *ast.CallExpr) bool {
 	if a == nil || call == nil {
 		return false
 	}
-	fnType, _ := a.exprTypes[call.Func].(*FuncType)
+	fnType, _ := a.exprType(call.Func).(*FuncType)
 	if fnType == nil || len(fnType.Params) == 0 || fnType.Params[0] == nil {
 		return false
 	}

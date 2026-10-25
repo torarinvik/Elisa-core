@@ -93,7 +93,7 @@ func (a *Analyzer) applyMutableRefinedOutParamConditionRefinements(scope *Scope,
 	}
 	ft := a.directCallFuncType(call)
 	if ft == nil {
-		ft, _ = a.exprTypes[call.Func].(*FuncType)
+		ft, _ = a.exprType(call.Func).(*FuncType)
 	}
 	if ft == nil || len(ft.ParamRefinementRanges) == 0 {
 		return
@@ -171,7 +171,7 @@ func (a *Analyzer) refinedExprPackedVariantView(expr *ast.BinaryExpr, truthy boo
 	if !ok || enumType == nil || variant == nil {
 		return nil, nil, false
 	}
-	leftType := a.exprTypes[expr.Left]
+	leftType := a.exprType(expr.Left)
 	if leftType == nil {
 		leftType = a.analyzeExpr(expr.Left)
 	}
@@ -189,7 +189,7 @@ func (a *Analyzer) refinedExprNamedStateType(expr *ast.BinaryExpr, truthy bool) 
 	if !ok || targetBase == nil || targetState == nil {
 		return nil, nil, false
 	}
-	leftType := a.exprTypes[expr.Left]
+	leftType := a.exprType(expr.Left)
 	if leftType == nil {
 		leftType = a.analyzeExpr(expr.Left)
 	}

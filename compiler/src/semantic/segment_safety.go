@@ -291,7 +291,7 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 		for _, arg := range n.Args {
 			a.validateSegmentFlowExpr(arg, owner)
 		}
-		if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
+		if fnType, ok := a.exprType(n.Func).(*FuncType); ok {
 			required := funcTypeRequiredSegmentOwner(fnType)
 			if required != segmentOwnerUnknown {
 				if *owner == segmentOwnerUnknown {
@@ -523,7 +523,7 @@ func (a *Analyzer) validateSegmentAgnosticExpr(expr ast.Expr) {
 	case *ast.UnaryExpr:
 		a.validateSegmentAgnosticExpr(n.Operand)
 	case *ast.CallExpr:
-		if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok && funcTypeHasSegmentDependency(fnType) {
+		if fnType, ok := a.exprType(n.Func).(*FuncType); ok && funcTypeHasSegmentDependency(fnType) {
 			a.errorf(n.Pos(), "@segment_agnostic code cannot call %q because it requires Segment.Host, Segment.Guest, or Unsafe.SegmentMutation", fnType.Name)
 		}
 		a.validateSegmentAgnosticExpr(n.Func)
@@ -737,7 +737,7 @@ func (a *Analyzer) validateReentrantSafeExpr(expr ast.Expr) {
 	}
 	switch n := expr.(type) {
 	case *ast.CallExpr:
-		if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok && fnType != nil && !fnType.HasReentrantSafe {
+		if fnType, ok := a.exprType(n.Func).(*FuncType); ok && fnType != nil && !fnType.HasReentrantSafe {
 			a.errorf(n.Pos(), "@reentrant_safe code cannot call %q because it is not marked @reentrant_safe", fnType.Name)
 		}
 		a.validateReentrantSafeExpr(n.Func)

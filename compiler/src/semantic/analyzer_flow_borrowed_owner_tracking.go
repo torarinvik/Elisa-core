@@ -191,7 +191,7 @@ func (a *Analyzer) poolInteriorBorrowKey(expr ast.Expr, base ast.Expr) (affineVa
 	if !ok {
 		return affineValueKey{}, false
 	}
-	baseType := a.exprTypes[base]
+	baseType := a.exprType(base)
 	if baseType == nil {
 		baseType = a.analyzeExpr(base)
 	}
@@ -201,7 +201,7 @@ func (a *Analyzer) poolInteriorBorrowKey(expr ast.Expr, base ast.Expr) (affineVa
 	// The projected member must be a plain raw reference (the interior pointer). Use only
 	// the cached type — do not analyze `expr`. A genuine owner/handle-typed member is left
 	// to the existing owner-borrow machinery.
-	valueType := a.exprTypes[expr]
+	valueType := a.exprType(expr)
 	if valueType == nil {
 		return affineValueKey{}, false
 	}

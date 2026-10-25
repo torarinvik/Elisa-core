@@ -30,12 +30,13 @@ func (a *Analyzer) populateAnalyzerFlowInstrs(cfg *CFG) {
 	}
 	builtinFreezePositions := make(map[lexer.Pos]struct{})
 	if a != nil {
-		for expr := range a.exprTypes {
+		a.rangeExprTypes(func(expr ast.Expr, _ Type) bool {
 			call, ok := expr.(*ast.CallExpr)
 			if ok && a.isCompilerBuiltinHelperCall(call, "freeze") {
 				builtinFreezePositions[call.Pos()] = struct{}{}
 			}
-		}
+			return true
+		})
 	}
 	filterFreezeFlowInstrs(cfg, builtinFreezePositions)
 }

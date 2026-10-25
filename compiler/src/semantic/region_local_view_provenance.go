@@ -225,7 +225,7 @@ var storeScanReadOnlyMethods = map[string]bool{
 // storeScanStaticType: the analyzed type of expr, or one derived from declarations (param or
 // literal-initialized local field chains, indexes into them, `.count`).
 func (a *Analyzer) storeScanStaticType(fn *ast.FuncDecl, expr ast.Expr) (Type, bool) {
-	if t, known := a.exprTypes[expr]; known && t != nil {
+	if t, known := a.lookupExprType(expr); known && t != nil {
 		return t, true
 	}
 	// Comparisons and Boolean connectives produce a Boolean, independently of
@@ -509,7 +509,6 @@ func storeScanContainsUserCall(value ast.Expr) bool {
 	})
 	return found
 }
-
 
 // walkDeclScope visits the nodes of body in which name refers to decl: from decl to the end of
 // its statement list (nested lists included), until another declaration of the same name in

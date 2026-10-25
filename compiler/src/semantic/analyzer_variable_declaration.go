@@ -174,7 +174,7 @@ func (a *Analyzer) analyzeVariableDeclaration(n *ast.VarDeclStmt) {
 	}
 	sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
 	if n.Value != nil {
-		a.noteImplicitIntConversion(n.Value, a.exprTypes[n.Value], bindingType)
+		a.noteImplicitIntConversion(n.Value, a.exprType(n.Value), bindingType)
 	}
 	a.defineLocal(sym, n.Pos())
 	if len(a.loopAffineFrames) != 0 {

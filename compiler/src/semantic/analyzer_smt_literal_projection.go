@@ -23,7 +23,7 @@ func (a *Analyzer) nestedLiteralFieldValue(field *ast.FieldExpr, depth int) (ast
 		if !literal.ResolvedArgsValid && (literal.CopyBase != nil || len(literal.Spreads) != 0) {
 			return nil, false
 		}
-		typ, _ := stripRefForBounds(a.exprTypes[literal]).(*StructType)
+		typ, _ := stripRefForBounds(a.exprType(literal)).(*StructType)
 		if literal.ResolvedArgsValid {
 			// Resolved arguments use declaration order; ArgNames keeps source order.
 			if typ == nil || typ.Decl == nil || len(literal.ResolvedArgs) != len(typ.Decl.Fields) {
@@ -136,7 +136,7 @@ func (a *Analyzer) rerootLiteralProjection(n *ast.FieldExpr) (*ast.FieldExpr, bo
 		return nil, false
 	}
 	rerooted := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
-	if t := a.exprTypes[n]; t != nil {
+	if t := a.exprType(n); t != nil {
 		a.exprTypes[rerooted] = t
 	}
 	return rerooted, true
@@ -164,7 +164,7 @@ func (a *Analyzer) reevaluableLiteralComponent(field *ast.FieldExpr, depth int) 
 				// the recursive call has already established that substituting it is
 				// safe with respect to evaluation order.
 				projected := &ast.FieldExpr{Position: field.Position, Object: value, Field: field.Field}
-				if t := a.exprTypes[field]; t != nil {
+				if t := a.exprType(field); t != nil {
 					a.exprTypes[projected] = t
 				}
 				return projected, true

@@ -57,7 +57,7 @@ func (tr *smtTranslator) enumTypeOf(expr ast.Expr) *EnumType {
 	if tr == nil || tr.a == nil || expr == nil {
 		return nil
 	}
-	t := tr.a.exprTypes[expr]
+	t := tr.a.exprType(expr)
 	if t == nil {
 		if id, ok := stripOptimizationParens(expr).(*ast.Ident); ok && tr.a.currentScope != nil {
 			if sym, found := tr.a.currentScope.Lookup(id.Name); found && sym != nil {
@@ -848,7 +848,7 @@ func (tr *smtTranslator) constEnumMatchTerm(n *ast.MatchExpr, env map[string]str
 	if n == nil || n.Store != nil || len(n.Arms) == 0 {
 		return "", false
 	}
-	ce, ok := stripRefForBounds(tr.a.exprTypes[n.Value]).(*ConstEnumType)
+	ce, ok := stripRefForBounds(tr.a.exprType(n.Value)).(*ConstEnumType)
 	if !ok || ce == nil {
 		return "", false
 	}

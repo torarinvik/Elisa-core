@@ -101,3 +101,31 @@ metadata controls pass under race in 1.644 seconds. On identical 2,048-slice/
 This is an interval-validation microbenchmark, not a Stage1 rebuild result.
 Logs `/tmp/elisa-specialization-syntax-interval-v2-race.log` and
 `/tmp/elisa-specialization-syntax-interval-v2-benchmark.log`.
+
+## Construction-only expression-type overlay
+
+Private specialization construction now starts with an empty writable exprTypes
+map over the canonical table for reads. Local membership, present nil/typed nil,
+tombstones, subsequent assignments and logical iteration preserve the previous
+full-copy semantics. Shared-codegen locking protects that base during each
+constructor. Canonical publication and snapshots reject active construction
+resources; published products contain only their current owned facts.
+
+The closed Go-AST source policy covers 461 scalar reads, 30 membership reads,
+152 retained local writes, two deletes and the logical range consumer. Actual
+state/schema generation passes. Overlay membership/resource/foreign-query tests
+and all private, Retained, snapshot and parallel semantic controls pass under
+race in 8.828 seconds. Backend binding/context, retained disk IR/ABI and linked
+runtime controls pass under race in 21.746 seconds after a separately preserved
+compilation-time external timeout. Independent source review found no actionable
+lookup/locking/publication/snapshot issue; it did not replace execution tests.
+
+The 50-iteration ABBA construction comparison restores every changed Go source
+to exact predecessor8124891c for the baseline and disables newly added Go files.
+Eight products with 512 unrelated functions change from baseline 4.349/4.380 ms
+and about 6.012 MB to candidate 4.203/4.203 ms and about 4.701 MB: approximately
+4% less time and 22% less allocation in this fixture. No Stage1 speed claim is
+made yet. Evidence `/tmp/elisa-expr-type-overlay-construction-benchmark-v1`,
+`/tmp/elisa-expr-type-overlay-generate.log`,
+`/tmp/elisa-expr-type-overlay-semantic-race.log`, and
+`/tmp/elisa-expr-type-overlay-backend-race{-retry,}.log`.

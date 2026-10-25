@@ -175,7 +175,7 @@ func (a *Analyzer) typeArithNodesForSMT(expr ast.Expr) Type {
 	if a == nil || expr == nil {
 		return nil
 	}
-	if t := a.exprTypes[expr]; t != nil {
+	if t := a.exprType(expr); t != nil {
 		return t
 	}
 	var t Type
@@ -851,7 +851,7 @@ func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []recursive
 		if m == nil {
 			return false
 		}
-		if t := a.exprTypes[m]; t != nil && (!IsNumericType(t) || IsFloatType(t)) {
+		if t := a.exprType(m); t != nil && (!IsNumericType(t) || IsFloatType(t)) {
 			return false
 		}
 	}
@@ -1294,7 +1294,7 @@ func (a *Analyzer) exprIsPureScalarForAggregateEquation(expr ast.Expr, owner *as
 	if a == nil || expr == nil {
 		return false
 	}
-	t := stripRefForBounds(a.exprTypes[expr])
+	t := stripRefForBounds(a.exprType(expr))
 	if !IsNumericType(t) || IsFloatType(t) {
 		return false
 	}
@@ -1488,7 +1488,7 @@ func (a *Analyzer) ghostReturnBindingsStable(fn *ast.FuncDecl) bool {
 			}
 			// A field-shaped callee can be either a method receiver or a qualified function name.
 			// Check it as a value only when semantic analysis resolved the object to a value type.
-			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil && field.Object != nil && a.exprTypes[field.Object] != nil {
+			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil && field.Object != nil && a.exprType(field.Object) != nil {
 				return stable(field.Object)
 			}
 			return true
@@ -1564,7 +1564,7 @@ func (a *Analyzer) measureBoundedBelow(measure ast.Expr) bool {
 }
 
 func (a *Analyzer) measureBoundedBelowWithTier(measure ast.Expr) (bool, bool) {
-	if t := a.exprTypes[measure]; t != nil && indexTypeGuaranteedNonNegative(t) {
+	if t := a.exprType(measure); t != nil && indexTypeGuaranteedNonNegative(t) {
 		return true, false
 	}
 	form, ok := a.affineOf(measure, a.currentScope)
@@ -1634,7 +1634,7 @@ func (a *Analyzer) pureEquationContainerIndex(index *ast.IndexExpr, owner *ast.F
 	}
 	if viaField {
 		// A container field of an immutable parameter is a stable base (recordFieldContainerBase).
-		if t := a.exprTypes[index.Object]; t != nil {
+		if t := a.exprType(index.Object); t != nil {
 			if _, isContainer := StripAggregateStateType(stripRefForBounds(t)).(*DArrayType); !isContainer {
 				return false
 			}

@@ -105,7 +105,7 @@ func (a *Analyzer) callRetainsArg(call *ast.CallExpr, name string, retained map[
 	// A container-mutation method (`c.push(name)`) stores name into the receiver.
 	if fe, ok := call.Func.(*ast.FieldExpr); ok && fe != nil && retainingMethods[fe.Field] {
 		for _, arg := range call.Args {
-			if base, ok := aliasSourceName(arg); ok && base == name && typeCarriesRegionStorage(a.exprTypes[arg]) {
+			if base, ok := aliasSourceName(arg); ok && base == name && typeCarriesRegionStorage(a.exprType(arg)) {
 				return true
 			}
 		}
@@ -116,7 +116,7 @@ func (a *Analyzer) callRetainsArg(call *ast.CallExpr, name string, retained map[
 	resolved := false
 	for j, arg := range call.Args {
 		base, ok := aliasSourceName(arg)
-		if !ok || base != name || !typeCarriesRegionStorage(a.exprTypes[arg]) {
+		if !ok || base != name || !typeCarriesRegionStorage(a.exprType(arg)) {
 			continue
 		}
 		if !resolved {
@@ -157,7 +157,7 @@ func (a *Analyzer) paramRetainedInBody(fn *ast.FuncDecl, name string, retained m
 				// name) AND name is mentioned in it. A scalar return (`return xs[0]`, `return total`,
 				// `return xs.count`) cannot carry name's storage, so it does not retain — sound and the
 				// common reader pattern.
-				if n.Value != nil && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+				if n.Value != nil && typeCarriesRegionStorage(a.exprType(n.Value)) {
 					names := map[string]bool{}
 					collectIdentNamesInto(n.Value, names)
 					if names[name] {
@@ -167,13 +167,13 @@ func (a *Analyzer) paramRetainedInBody(fn *ast.FuncDecl, name string, retained m
 				}
 			case *ast.VarDeclStmt:
 				// `w = name` (alias out) — w may outlive; conservative retain. (w == name impossible.)
-				if base, ok := aliasSourceName(n.Value); ok && base == name && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+				if base, ok := aliasSourceName(n.Value); ok && base == name && typeCarriesRegionStorage(a.exprType(n.Value)) {
 					found = true
 					return
 				}
 			case *ast.AssignStmt:
 				if tgt, ok := stripParenExpr(n.Target).(*ast.Ident); !ok || tgt == nil || tgt.Name != name {
-					if base, ok := aliasSourceName(n.Value); ok && base == name && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+					if base, ok := aliasSourceName(n.Value); ok && base == name && typeCarriesRegionStorage(a.exprType(n.Value)) {
 						found = true
 						return
 					}

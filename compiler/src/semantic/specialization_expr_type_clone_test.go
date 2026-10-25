@@ -18,19 +18,21 @@ func TestSpecializationTypedExprTypesCloneMatchesExistingOpaqueInterfacePolicy(t
 	source := &Analyzer{exprTypes: map[ast.Expr]Type{first: aggregate, second: nil, third: typedNil}}
 	expected := deepCloneValue(reflect.ValueOf(source.exprTypes)).Interface().(map[ast.Expr]Type)
 	actual := cloneAnalyzerValueForSpecialization(source).Addr().Interface().(*Analyzer)
-	if !reflect.DeepEqual(expected, actual.exprTypes) {
+	logical := map[ast.Expr]Type{}
+	actual.rangeExprTypes(func(expr ast.Expr, typ Type) bool { logical[expr] = typ; return true })
+	if !reflect.DeepEqual(expected, logical) {
 		t.Fatal("typed clone changed existing interface/typed-nil membership")
 	}
 	if reflect.ValueOf(actual.exprTypes).Pointer() == reflect.ValueOf(source.exprTypes).Pointer() {
 		t.Fatal("typed clone shared writable canonical map")
 	}
-	if actual.exprTypes[first] != aggregate || actual.exprTypes[third] != typedNil {
+	if actual.exprType(first) != aggregate || actual.exprType(third) != typedNil {
 		t.Fatal("typed clone changed established value identity")
 	}
-	if _, present := actual.exprTypes[second]; !present {
+	if _, present := actual.lookupExprType(second); !present {
 		t.Fatal("present nil type entry lost")
 	}
-	delete(actual.exprTypes, first)
+	actual.deleteExprType(first)
 	actual.exprTypes[second] = primitive
 	if source.exprTypes[first] != aggregate || source.exprTypes[second] != nil {
 		t.Fatal("private map writes reached canonical expression table")
@@ -60,7 +62,7 @@ func BenchmarkSpecializationExprTypeMapClone(b *testing.B) {
 					specializationAnalysisCloneSink = cloneAnalyzerValueForBodyWorker(source).Addr().Interface().(*Analyzer)
 				}
 			})
-			b.Run("typed_specialization", func(b *testing.B) {
+			b.Run("overlay_specialization", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {

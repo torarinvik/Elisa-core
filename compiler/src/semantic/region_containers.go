@@ -484,7 +484,7 @@ func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
 	case *ast.CastExpr:
 		return a.returnBorrowedRegion(n.Operand)
 	case *ast.FieldExpr:
-		if r := containerOrEntryRegion(a.exprTypes[n]); r != "" {
+		if r := containerOrEntryRegion(a.exprType(n)); r != "" {
 			return r
 		}
 		return a.returnBorrowedRegion(n.Object)
@@ -499,17 +499,17 @@ func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
 		// An identifier can name either an owning container or a borrowed view. Only
 		// views/refs contribute a borrow lifetime here; owning container escape checks
 		// use their separate region rules.
-		if isRegionBorrowedStringOrViewType(a.exprTypes[n]) || isRegionBorrowedAggregateType(a.exprTypes[n]) {
-			if region := regionParamReturnTypeRegion(a.exprTypes[n]); region != "" {
+		if isRegionBorrowedStringOrViewType(a.exprType(n)) || isRegionBorrowedAggregateType(a.exprType(n)) {
+			if region := regionParamReturnTypeRegion(a.exprType(n)); region != "" {
 				return region
 			}
 		}
-		if region := a.fieldObjectRegion(a.exprTypes[n]); region != "" {
+		if region := a.fieldObjectRegion(a.exprType(n)); region != "" {
 			return region
 		}
 		return ""
 	}
-	return regionParamReturnTypeRegion(a.exprTypes[e])
+	return regionParamReturnTypeRegion(a.exprType(e))
 }
 
 // checkReturnRegionContainerEscape rejects returning a container allocated in a
@@ -549,7 +549,7 @@ func (a *Analyzer) checkTupleReturnRegionEscapes(valueExpr ast.Expr, valueType, 
 		actualType := Type(nil)
 		if isLiteral {
 			element = tupleExpr.Elems[index]
-			actualType = a.exprTypes[element]
+			actualType = a.exprType(element)
 		} else {
 			actualType = sourceTuple.Fields[index].Type
 		}
@@ -823,7 +823,7 @@ func (a *Analyzer) callConstructionRegion(call *ast.CallExpr) string {
 	if a == nil || call == nil {
 		return ""
 	}
-	ft, _ := a.exprTypes[call.Func].(*FuncType)
+	ft, _ := a.exprType(call.Func).(*FuncType)
 	if ft == nil {
 		return ""
 	}
@@ -1444,7 +1444,7 @@ func (a *Analyzer) checkProgramViewElementArg(paramType Type, arg ast.Expr) {
 	if !ok || view == nil || !a.isProgramRegion(view.Region) {
 		return
 	}
-	actual, ok := stripRefForBounds(a.exprTypes[arg]).(*DArrayType)
+	actual, ok := stripRefForBounds(a.exprType(arg)).(*DArrayType)
 	if !ok || actual == nil {
 		return
 	} // ordinary type checking owns incompatible arguments
@@ -1672,7 +1672,7 @@ func (a *Analyzer) enumCtorPayloadRegion(expr ast.Expr) string {
 	}
 	region := ""
 	for _, payloadArg := range call.Args {
-		payloadType := a.exprTypes[payloadArg]
+		payloadType := a.exprType(payloadArg)
 		if !typeCarriesRegionStorage(payloadType) {
 			continue
 		}
@@ -1946,7 +1946,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 				continue
 			}
 			targetArg := orderedArgs[tj]
-			targetRegion := containerRegion(a.exprTypes[targetArg])
+			targetRegion := containerRegion(a.exprType(targetArg))
 			if targetRegion == "" {
 				a.checkRegionlessTargetStoreEscape(targetArg, srcRegion)
 				continue
@@ -2176,7 +2176,7 @@ func (a *Analyzer) valueInteriorRegion(expr ast.Expr) string {
 		}
 		return r
 	default:
-		if r := a.valueStoreRegion(stripped, a.exprTypes[stripped]); r != "" {
+		if r := a.valueStoreRegion(stripped, a.exprType(stripped)); r != "" {
 			return r
 		}
 		// An enum-ctor element (`[Item.Row(make_vals(10))]` fed to extend/assign) carries its
@@ -2203,7 +2203,7 @@ func (a *Analyzer) checkFreshContainerStoreEscape(targetExpr ast.Expr, targetTyp
 		elemType := dArrayLikeElemType(targetType)
 		for i, elem := range lit.Elems {
 			if elem != nil && i < len(lit.Spreads) && lit.Spreads[i] {
-				a.checkNestedRegionBulkStoreEscape(elem, targetExpr, targetType, elemType, a.exprTypes[elem])
+				a.checkNestedRegionBulkStoreEscape(elem, targetExpr, targetType, elemType, a.exprType(elem))
 			}
 		}
 	}
@@ -2494,7 +2494,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 	argPointees := make([]*regionPointees, len(args))
 	storePointeesOf := func(other int) regionPointees {
 		if argPointees[other] == nil {
-			pointees := a.argumentStorePointeesOf(a.exprTypes[args[other]])
+			pointees := a.argumentStorePointeesOf(a.exprType(args[other]))
 			argPointees[other] = &pointees
 		}
 		return *argPointees[other]
@@ -2522,7 +2522,7 @@ func (a *Analyzer) checkCallArgumentRegionStoreEscape(call *ast.CallExpr) {
 		if !a.returnBorrowWritableParam(paramType) {
 			continue
 		}
-		containerType := stripRefForBounds(a.exprTypes[args[index]])
+		containerType := stripRefForBounds(a.exprType(args[index]))
 		targetRegion := a.containerRegionOf(containerType)
 		if targetRegion == "" {
 			continue
@@ -2595,7 +2595,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 		}
 	}
 	for other, arg := range args {
-		if other == index || !typeCarriesRegionStorage(a.exprTypes[arg]) {
+		if other == index || !typeCarriesRegionStorage(a.exprType(arg)) {
 			continue
 		}
 		if a.callArgNeverReaches(call, other, index) || a.callArgsKeptApart(call, index, other) {
@@ -2625,14 +2625,14 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			// Only element values read out of the argument can be stored: the argument's own
 			// backing region is not retained, only what its elements depend on.
 			regions = liveLocalRegionDependencyNames(elemState)
-		} else if elementLike && !a.storedPartsMayHoldRegionRefs(stripRefForBounds(a.exprTypes[arg])) {
+		} else if elementLike && !a.storedPartsMayHoldRegionRefs(stripRefForBounds(a.exprType(arg))) {
 			// Values read out of it that cannot hold a region reference (scalars, packed handles)
 			// carry none.
 			continue
-		} else if mode == storeElements && len(a.programRegions) != 0 && a.darrayElemsProgramLived(a.exprTypes[arg]) {
+		} else if mode == storeElements && len(a.programRegions) != 0 && a.darrayElemsProgramLived(a.exprType(arg)) {
 			// docs/128: only element values are stored, and every element is program-lived.
 			continue
-		} else if mode == storeViews && len(a.programRegions) != 0 && a.typeViewsProgramLived(stripRefForBounds(a.exprTypes[arg]), map[Type]bool{}) {
+		} else if mode == storeViews && len(a.programRegions) != 0 && a.typeViewsProgramLived(stripRefForBounds(a.exprType(arg)), map[Type]bool{}) {
 			// docs/128: view-only values read out of it can point only where their views do.
 			// Prefer the directed store summary's exact source projections; only fall back to
 			// the whole argument type when that proves every view program-lived.
@@ -2655,7 +2655,7 @@ func (a *Analyzer) checkCallArgumentStructTargetStoreEscape(call *ast.CallExpr, 
 			if targetRegion == "" || a.regionStoreEscapes(targetRegion, region) {
 				if storeScanTrace {
 					_, tracked := a.trackedElementStateOfLocal(arg)
-					fmt.Fprintf(os.Stderr, "STORECALL at %s mode=%d tracked=%v nobytes=%v argType=%s region=%s\n", arg.Pos(), mode, tracked, typeHoldsNoBytes(stripRefForBounds(a.exprTypes[arg]), map[Type]bool{}), typeString(a.exprTypes[arg]), region)
+					fmt.Fprintf(os.Stderr, "STORECALL at %s mode=%d tracked=%v nobytes=%v argType=%s region=%s\n", arg.Pos(), mode, tracked, typeHoldsNoBytes(stripRefForBounds(a.exprType(arg)), map[Type]bool{}), typeString(a.exprType(arg)), region)
 				}
 				a.errorf(arg.Pos(), "call may store a value in region %q into longer-lived storage through argument %d; region %q is freed first, leaving a dangling reference. Copy it into the target's region (or a region that outlives it) before the call", a.regionDisplayName(region), index+1, a.regionDisplayName(region))
 				break
@@ -3267,7 +3267,7 @@ func (a *Analyzer) storeCallArgRegions(arg ast.Expr, mode storeMode) []string {
 			ownStorageIrrelevant = true
 		}
 	}
-	if own := a.containerRegionOf(stripRefForBounds(a.exprTypes[arg])); own != "" && a.structLocalRegionIsLive(own) && !ownStorageIrrelevant {
+	if own := a.containerRegionOf(stripRefForBounds(a.exprType(arg))); own != "" && a.structLocalRegionIsLive(own) && !ownStorageIrrelevant {
 		regions = append(regions, own)
 	}
 	// A struct local's region-less container fields live in the region it was built in
@@ -3275,7 +3275,7 @@ func (a *Analyzer) storeCallArgRegions(arg ast.Expr, mode storeMode) []string {
 	// local struct passed by value looked region-free. Only an argument that carries that
 	// backing (the struct or a region-less container in it) can retain it; a scalar/view element
 	// read out of it carries its own tracked provenance.
-	if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprTypes[arg], mode) && !ownStorageIrrelevant {
+	if own := a.structLocalArgRegion(arg); own != "" && a.structLocalRegionIsLive(own) && storedValuesCarryRegionlessBacking(a.exprType(arg), mode) && !ownStorageIrrelevant {
 		regions = append(regions, own)
 	}
 	return regions

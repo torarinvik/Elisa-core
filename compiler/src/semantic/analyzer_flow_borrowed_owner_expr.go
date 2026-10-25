@@ -56,7 +56,7 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		// interior-pointer alias: the result is a copied value, not a pointer into the
 		// pooled slot, so it is safe to use after release. Genuine owner-borrow content
 		// is left intact.
-		castType := a.exprTypes[n]
+		castType := a.exprType(n)
 		if castType == nil {
 			castType = a.analyzeExpr(n)
 		}
@@ -70,7 +70,7 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 	case *ast.MoveExpr:
 		return a.borrowedOwnerRefStateForExpr(n.Operand)
 	case *ast.AddrOfExpr:
-		operandType := a.exprTypes[n.Operand]
+		operandType := a.exprType(n.Operand)
 		if operandType == nil {
 			operandType = a.analyzeExpr(n.Operand)
 		}
@@ -119,7 +119,7 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		return borrowedOwnerRefState{}, false
 	case *ast.StructLitExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		fields, ok := a.resolvedStructFields(actual)
 		if !ok {
 			return borrowedOwnerRefState{}, false
@@ -147,7 +147,7 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		return state, true
 	case *ast.RecordUpdateExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		fields, ok := a.resolvedStructFields(actual)
 		if !ok {
 			return borrowedOwnerRefState{}, false
@@ -258,7 +258,7 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		if len(n.Args) == 1 && a.isTypeConstructorCall(n) {
 			return a.borrowedOwnerRefStateForExpr(n.Args[0])
 		}
-		fnType, _ := a.exprTypes[n.Func].(*FuncType)
+		fnType, _ := a.exprType(n.Func).(*FuncType)
 		if fnType == nil {
 			if analyzed := a.analyzeExpr(n.Func); analyzed != nil {
 				fnType, _ = analyzed.(*FuncType)

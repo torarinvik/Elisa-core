@@ -85,7 +85,7 @@ func (a *Analyzer) exprIsExactPackedStoreRoot(expr ast.Expr, enumType *EnumType)
 			return a.exprIsExactPackedStoreRoot(resolved, enumType)
 		}
 	}
-	actual := a.exprTypes[expr]
+	actual := a.exprType(expr)
 	if actual == nil {
 		actual = a.analyzeExpr(expr)
 	}

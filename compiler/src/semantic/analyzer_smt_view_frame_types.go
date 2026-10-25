@@ -26,7 +26,7 @@ func (g *sviewFrameGate) receiverType(expr ast.Expr, depth int) Type {
 			return typ
 		}
 	}
-	if typ := g.a.exprTypes[expr]; typ != nil {
+	if typ := g.a.exprType(expr); typ != nil {
 		return typ
 	}
 	if id, ok := expr.(*ast.Ident); ok && g.decl != nil {

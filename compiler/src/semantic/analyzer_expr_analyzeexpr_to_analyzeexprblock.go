@@ -18,7 +18,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// borrow inference) may fail to resolve names its real analysis
 			// resolved; never let it overwrite a previously computed valid
 			// type with <invalid> - codegen reads this cache.
-			if !(a.suppressDiagnostics && IsInvalidType(result) && !IsInvalidType(a.exprTypes[expr]) && a.exprTypes[expr] != nil) {
+			if !(a.suppressDiagnostics && IsInvalidType(result) && !IsInvalidType(a.exprType(expr)) && a.exprType(expr) != nil) {
 				a.exprTypes[expr] = result
 			}
 			a.recordExprOptimizationFacts(expr, result)
@@ -872,14 +872,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		// backing storage. Keep that owner on the resulting reference so a
 		// borrowed element cannot outlive the darray/view that contains it.
 		if indexed, ok := stripParenExpr(n.Operand).(*ast.IndexExpr); ok && indexed != nil {
-			region = containerRegion(a.exprTypes[indexed.Object])
+			region = containerRegion(a.exprType(indexed.Object))
 			// A darray's `.items` is its lowered backing array. Its own
 			// type does not carry the source container's region, so indexing
 			// `values.items[i]` must inherit the region of `values` itself.
 			// This keeps the returned element borrow tied to the owning
 			// darray while leaving unrelated field/index paths unchanged.
 			if field, ok := stripParenExpr(indexed.Object).(*ast.FieldExpr); ok && field != nil && field.Field == "items" {
-				region = containerRegion(a.exprTypes[field.Object])
+				region = containerRegion(a.exprType(field.Object))
 			}
 		}
 		result = &RefType{Elem: inner, Mutable: a.exprCanYieldWritableRef(n.Operand), State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), Region: region, ExplicitStorage: true}

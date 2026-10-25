@@ -146,7 +146,7 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 			}
 		}
 		if n.Field == "tags" {
-			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
+			if storeType, ok := a.exprType(n.Object).(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
 				facts.ReadOnly = true
 				facts.Contiguous = true
 				facts.UnitStride = true

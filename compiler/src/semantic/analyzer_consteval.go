@@ -207,7 +207,7 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		}
 		return ConstValue{}, false
 	case *ast.ShorthandMemberExpr:
-		constEnumType, ok := a.exprTypes[n].(*ConstEnumType)
+		constEnumType, ok := a.exprType(n).(*ConstEnumType)
 		if !ok || constEnumType == nil {
 			return ConstValue{}, false
 		}
@@ -418,7 +418,7 @@ func (a *Analyzer) evalConstIndexExpr(expr *ast.IndexExpr) (ConstValue, bool) {
 		return ConstValue{}, false
 	}
 	if object.Kind == ConstDict {
-		objType := a.exprTypes[expr.Object]
+		objType := a.exprType(expr.Object)
 		dictType, _, ok := builtinDictReceiverType(objType)
 		if !ok || dictType == nil {
 			return ConstValue{}, false

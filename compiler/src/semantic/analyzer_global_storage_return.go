@@ -157,7 +157,7 @@ func (a *Analyzer) checkGlobalStorageReturnEscape(value ast.Expr) {
 	if !typeOwnsGrowableStorage(returnType) || returnTypeIsRegionTied(returnType) {
 		return
 	}
-	valueType := a.exprTypes[value]
+	valueType := a.exprType(value)
 	if valueType != nil {
 		if _, isRef := StripAggregateStateType(valueType).(*RefType); isRef {
 			return

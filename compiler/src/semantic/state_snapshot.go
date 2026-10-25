@@ -33,6 +33,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 {
 		return nil, fmt.Errorf("analysis is not idle")
 	}
+	if r.a.exprTypeOverlay != nil {
+		return nil, fmt.Errorf("construction expression-type overlay cannot be persisted")
+	}
 	if r.a.currentIndexProofContext || r.a.currentIndexProofHeaderOwner != nil || r.a.currentIndexProofOrigin != nil || r.a.currentIndexProofHeader {
 		return nil, fmt.Errorf("analysis still owns an index-proof context")
 	}
@@ -56,6 +59,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	r, ok := value.(*RetainedAnalysis)
 	if !ok || r == nil || r.a == nil || r.result == nil || r.result.analyzer != r.a || r.a.retained != r {
 		return nil, fmt.Errorf("incomplete semantic state")
+	}
+	if r.a.exprTypeOverlay != nil {
+		return nil, fmt.Errorf("persisted construction expression-type overlay is unsupported")
 	}
 	r.pre = r.pre.comparisonState()
 	r.post = func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {

@@ -209,6 +209,7 @@ type Analyzer struct {
 	externLinkNames                   map[string]externLinkNameSignature
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
+	exprTypeOverlay                   *analyzerExprTypeOverlay
 	compilerBuiltinHelperCalls        map[*ast.CallExpr]string
 	permGrowthOps                     map[ast.Expr]bool
 	rewriteDefaults                   map[*ast.Ident]bool
@@ -1614,6 +1615,12 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 }
 
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
+	if a.exprTypeOverlay != nil {
+		// Specialization publication has its own owned sparse Result. Never
+		// silently materialize or publish a partial whole-program overlay.
+		err := a.rejectExprTypeOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
 	if a.retained != nil {
 		a.retained.capture(a, activeDecls, func(decls []scopedDecl, appended map[*ast.FuncDecl]*FuncType) {
 			a.runPostPhases(decls, options, solver, appended)

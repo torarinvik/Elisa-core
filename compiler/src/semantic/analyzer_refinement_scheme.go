@@ -106,7 +106,7 @@ func (a *Analyzer) callFuncType(call *ast.CallExpr) (*FuncType, bool) {
 	if call == nil {
 		return nil, false
 	}
-	if ft, ok := a.exprTypes[call.Func].(*FuncType); ok && ft != nil {
+	if ft, ok := a.exprType(call.Func).(*FuncType); ok && ft != nil {
 		return ft, true
 	}
 	if ident, ok := call.Func.(*ast.Ident); ok && ident != nil && a.currentScope != nil {
@@ -242,7 +242,7 @@ func (a *Analyzer) fieldReadRefinementScheme(value ast.Expr) (ValueRefinementSch
 	if !ok || fe == nil {
 		return ValueRefinementScheme{}, false
 	}
-	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+	st, ok := stripRefForBounds(a.exprType(fe.Object)).(*StructType)
 	if !ok || st == nil || st.Decl == nil {
 		return ValueRefinementScheme{}, false
 	}
@@ -269,7 +269,7 @@ func (a *Analyzer) indexElemReadRefinementScheme(value ast.Expr) (ValueRefinemen
 	if !ok || idx == nil || idx.Object == nil {
 		return ValueRefinementScheme{}, false
 	}
-	objType := stripRefForBounds(a.exprTypes[idx.Object])
+	objType := stripRefForBounds(a.exprType(idx.Object))
 	var elemTypeExpr ast.TypeExpr
 	switch at := objType.(type) {
 	case *DArrayType:
@@ -390,7 +390,7 @@ func (a *Analyzer) structInvariantFieldRange(fe *ast.FieldExpr) (numRange, bool)
 	if fe == nil {
 		return numRange{}, false
 	}
-	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+	st, ok := stripRefForBounds(a.exprType(fe.Object)).(*StructType)
 	if !ok || st == nil || len(st.Invariants) == 0 {
 		return numRange{}, false
 	}

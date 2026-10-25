@@ -481,7 +481,7 @@ func emitVCTerm(t vcTerm) string {
 // — so the IR models the real machine value rather than the unbounded-ℤ value (which would prove a false
 // `ensure result > 0` over an overflowing signed sum). A provably-in-range result emits clean (0).
 func (tr *smtTranslator) arithWrapInfo(n *ast.BinaryExpr) (int, bool) {
-	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	signed, bits, ok := smtIntWidthSign(tr.a.exprType(n))
 	if !ok || bits <= 0 || bits > 64 {
 		return 0, false
 	}

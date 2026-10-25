@@ -365,7 +365,7 @@ func (a *Analyzer) storeScanBindsNoStorage(stmt ast.Stmt) bool {
 	if !ok || tb == nil || tb.ArgManifest || tb.Value == nil {
 		return false
 	}
-	t := a.exprTypes[tb.Value]
+	t := a.exprType(tb.Value)
 	if t == nil {
 		if call, isCall := storeScanUnwrap(tb.Value).(*ast.CallExpr); isCall && call != nil {
 			t = a.storeScanCallReturnType(call)

@@ -239,9 +239,9 @@ func (t *derivedLoopTransfer) expr(expr ast.Expr, state derivedLoopState, report
 	}
 	if !t.step(depth) {
 		t.widen(state)
-		return t.a.exprTypes[expr]
+		return t.a.exprType(expr)
 	}
-	cached := t.a.exprTypes[expr]
+	cached := t.a.exprType(expr)
 	switch n := expr.(type) {
 	case *ast.Ident:
 		if root := t.a.derivedLoopBindings[n]; root != nil {
@@ -283,7 +283,7 @@ func (t *derivedLoopTransfer) expr(expr ast.Expr, state derivedLoopState, report
 		return result
 	case *ast.CallExpr:
 		t.expr(n.Func, state, report, depth+1)
-		fn, _ := t.a.exprTypes[n.Func].(*FuncType)
+		fn, _ := t.a.exprType(n.Func).(*FuncType)
 		args := n.LoweredArgs()
 		for i, arg := range args {
 			actual := t.expr(arg, state, report, depth+1)

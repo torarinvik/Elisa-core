@@ -208,7 +208,7 @@ func (a *Analyzer) returnBorrowFlowForExpr(expr ast.Expr, aliases map[string]ret
 	if !flow.empty() && expr != nil {
 		// A value whose type holds no reference, view, closure or generic part cannot carry a
 		// borrow of anything: `ValueType{kind, bits}` computed from reference arguments is a copy.
-		if t, ok := a.exprTypes[expr]; ok && a.typeIsBorrowFree(t, map[Type]bool{}) {
+		if t, ok := a.lookupExprType(expr); ok && a.typeIsBorrowFree(t, map[Type]bool{}) {
 			return returnBorrowFlow{}
 		}
 	}
@@ -382,7 +382,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 		return flow
 	case *ast.TupleExpr:
 		flow := returnBorrowFlow{}
-		tupleType, _ := a.exprTypes[n].(*TupleType)
+		tupleType, _ := a.exprType(n).(*TupleType)
 		for index, elem := range n.Elems {
 			var placeType Type
 			if tupleType != nil && len(tupleType.Fields) == len(n.Elems) {
@@ -394,7 +394,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 	case *ast.ListLitExpr:
 		flow := returnBorrowFlow{}
 		var elemType Type
-		switch listType := a.exprTypes[n].(type) {
+		switch listType := a.exprType(n).(type) {
 		case *DArrayType:
 			elemType = listType.Elem
 		case *ArrayType:
@@ -412,7 +412,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 			// `E.Invalid`: a variant (or other member) of a type name holds no borrow.
 			return returnBorrowFlow{}
 		}
-		fieldType := a.exprTypes[n]
+		fieldType := a.exprType(n)
 		if fieldType == nil || a.typeCarriesBorrowedStorage(fieldType, map[Type]bool{}) {
 			if index, ok := a.returnBorrowContentReadParam(n, fieldType, aliases); ok {
 				return returnBorrowPointeeReadFlow(n, index, aliases)
@@ -420,7 +420,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 			return a.returnBorrowFlowForExpr(n.Object, aliases, active, localBindings)
 		}
 	case *ast.IndexExpr:
-		indexType := a.exprTypes[n]
+		indexType := a.exprType(n)
 		if indexType == nil || a.typeCarriesBorrowedStorage(indexType, map[Type]bool{}) {
 			if index, ok := a.returnBorrowContentReadParam(n, indexType, aliases); ok {
 				return returnBorrowPointeeReadFlow(n, index, aliases)
@@ -566,7 +566,7 @@ func (a *Analyzer) returnBorrowFlowForCall(call *ast.CallExpr, aliases map[strin
 	if a.returnBorrowRecordingActive() || a.returnBorrowEnvActive() {
 		// A builtin method's result (`xs.pop()`, `m.get(k)`) can be anything its receiver holds.
 		if field, isField := call.Func.(*ast.FieldExpr); isField && field != nil && a.returnBorrowBuiltinMethodCall(call) {
-			if resultType := a.exprTypes[call]; resultType == nil || a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
+			if resultType := a.exprType(call); resultType == nil || a.typeCarriesBorrowedStorage(resultType, map[Type]bool{}) {
 				flow = mergeReturnBorrowFlow(flow, a.returnBorrowFlowForExpr(field.Object, aliases, active, localBindings))
 			}
 		}
@@ -581,7 +581,7 @@ func (a *Analyzer) returnBorrowVariantPayloadTypes(call *ast.CallExpr, args []as
 	if !ok || field == nil || len(call.ArgNames) != 0 || !a.returnBorrowTypeNameObject(field.Object) {
 		return nil
 	}
-	enumType, ok := a.exprTypes[call].(*EnumType)
+	enumType, ok := a.exprType(call).(*EnumType)
 	if !ok || enumType == nil {
 		return nil
 	}
@@ -739,7 +739,7 @@ func (a *Analyzer) returnBorrowFlowForCopiedValue(expr ast.Expr, placeType Type,
 		inner := returnBorrowStripParens(expr)
 		switch inner.(type) {
 		case *ast.FieldExpr, *ast.IndexExpr:
-			if readType := a.exprTypes[inner]; readType != nil && !isBorrowLikeType(readType) {
+			if readType := a.exprType(inner); readType != nil && !isBorrowLikeType(readType) {
 				if index, ok := a.returnBorrowPointeeReadParam(inner, aliases); ok {
 					return returnBorrowPointeeReadFlow(inner, index, aliases)
 				}
@@ -1405,7 +1405,7 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 				// `n: u32 = for c in xs |acc| -> acc:` is a value-form loop in value position.
 				blockReturned, value := a.returnBorrowFlowForValueBlock(block, aliases, active, localBindings)
 				returned = mergeReturnBorrowFlow(returned, blockReturned)
-				typ := a.exprTypes[n.Value]
+				typ := a.exprType(n.Value)
 				if typ == nil && n.Type != nil {
 					typ = a.returnBorrowDeclaredType(n.Type)
 					value = a.returnBorrowDeclaredValueFlow(value, typ)
@@ -1415,7 +1415,7 @@ func (a *Analyzer) returnBorrowFlowForStatements(stmts []ast.Stmt, aliases map[s
 			}
 			a.noteReturnBorrowCallArgumentStores(n.Value, aliases, active, localBindings)
 			flow := a.returnBorrowFlowForExpr(n.Value, aliases, active, localBindings)
-			typ := a.exprTypes[n.Value]
+			typ := a.exprType(n.Value)
 			declaredType := typ
 			if typ == nil && n.Type != nil {
 				declaredType = a.returnBorrowDeclaredType(n.Type)
@@ -1804,7 +1804,7 @@ func (a *Analyzer) noteReturnBorrowCallArgumentStores(expr ast.Expr, aliases map
 		}
 		for index, arg := range args {
 			_, isAddr := returnBorrowStripParens(arg).(*ast.AddrOfExpr)
-			ref, isRef := a.exprTypes[arg].(*RefType)
+			ref, isRef := a.exprType(arg).(*RefType)
 			if !isAddr && !(isRef && ref != nil && ref.Mutable) {
 				continue
 			}
@@ -1948,7 +1948,7 @@ func (a *Analyzer) returnBorrowCalleeSignature(call *ast.CallExpr) *FuncType {
 			return nil
 		}
 	}
-	if fnType, ok := a.exprTypes[call.Func].(*FuncType); ok && fnType != nil {
+	if fnType, ok := a.exprType(call.Func).(*FuncType); ok && fnType != nil {
 		return fnType
 	}
 	return nil
@@ -1962,7 +1962,7 @@ func (a *Analyzer) returnBorrowBuiltinMethodCall(call *ast.CallExpr) bool {
 		// `E.Ident(x)` constructs a variant: only its arguments flow into the result.
 		return false
 	}
-	objType := a.exprTypes[field.Object]
+	objType := a.exprType(field.Object)
 	if ref, isRef := objType.(*RefType); isRef && ref != nil {
 		objType = ref.Elem
 	}
@@ -2036,7 +2036,7 @@ func (a *Analyzer) returnBorrowAddressFlow(arg ast.Expr, aliases map[string]retu
 // carries what its elements hold; a slice of a view or reference views what it views.
 func (a *Analyzer) returnBorrowFlowForSlice(n *ast.SliceExpr, aliases map[string]returnBorrowFlow, active map[*ast.FuncDecl]bool, localBindings map[*Symbol]bool) returnBorrowFlow {
 	flow := a.returnBorrowFlowForExpr(n.Object, aliases, active, localBindings)
-	objType := a.exprTypes[n.Object]
+	objType := a.exprType(n.Object)
 	if objType != nil && isBorrowLikeType(objType) {
 		return flow
 	}
@@ -2457,20 +2457,20 @@ func (a *Analyzer) sliceViewsFrameArray(n *ast.SliceExpr) bool {
 	if a == nil || n == nil || a.currentScope == nil {
 		return false
 	}
-	if _, ok := a.exprTypes[stripParenExpr(n.Object)].(*ArrayType); !ok {
+	if _, ok := a.exprType(stripParenExpr(n.Object)).(*ArrayType); !ok {
 		return false
 	}
 	root := stripParenExpr(n.Object)
 	for {
 		switch step := root.(type) {
 		case *ast.FieldExpr:
-			if _, ok := a.exprTypes[stripParenExpr(step.Object)].(*StructType); !ok {
+			if _, ok := a.exprType(stripParenExpr(step.Object)).(*StructType); !ok {
 				return false
 			}
 			root = stripParenExpr(step.Object)
 			continue
 		case *ast.IndexExpr:
-			if _, ok := a.exprTypes[stripParenExpr(step.Object)].(*ArrayType); !ok {
+			if _, ok := a.exprType(stripParenExpr(step.Object)).(*ArrayType); !ok {
 				return false
 			}
 			root = stripParenExpr(step.Object)

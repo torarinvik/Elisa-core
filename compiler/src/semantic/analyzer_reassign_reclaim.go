@@ -209,7 +209,7 @@ func (r *reclaimAnalysis) callIsClean(call *ast.CallExpr) bool {
 			return false
 		}
 		if reclaimLocalMethods[f.Field] {
-			if _, isDArray := StripAggregateStateType(peelRefType(r.a.exprTypes[f.Object])).(*DArrayType); isDArray {
+			if _, isDArray := StripAggregateStateType(peelRefType(r.a.exprType(f.Object))).(*DArrayType); isDArray {
 				return true // builtin in-place container operation on a scalar-only receiver
 			}
 		}
@@ -416,7 +416,7 @@ func (r *reclaimAnalysis) functionReclaims(fn *ast.FuncDecl) []*ast.AssignStmt {
 	})
 	var out []*ast.AssignStmt
 	for name, vd := range candidates {
-		if counts[name] != 1 || !reassignedFromCall[name] || !scalarElemDArray(r.a.exprTypes[vd.Value]) {
+		if counts[name] != 1 || !reassignedFromCall[name] || !scalarElemDArray(r.a.exprType(vd.Value)) {
 			continue
 		}
 		for _, p := range fn.Params {
@@ -452,7 +452,7 @@ func (r *reclaimAnalysis) isFreshValue(e ast.Expr, name string) bool {
 
 func (r *reclaimAnalysis) localReclaims(fn *ast.FuncDecl, vd *ast.VarDeclStmt) []*ast.AssignStmt {
 	name := vd.Name
-	sym := r.a.exprTypes[vd.Value]
+	sym := r.a.exprType(vd.Value)
 	if vd.Value == nil || !scalarElemDArray(sym) || !r.isFreshValue(vd.Value, name) {
 		reclaimWhy(fn, name, "initial value is not a fresh scalar darray")
 		return nil

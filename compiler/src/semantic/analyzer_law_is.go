@@ -903,7 +903,7 @@ func (a *Analyzer) tryProveEnsureByDisjunctiveResultRange(clause ast.Expr, ret a
 	if int64(len(seen)) != max-min+1 {
 		return false
 	}
-	if typ := a.exprTypes[ret]; typ != nil {
+	if typ := a.exprType(ret); typ != nil {
 		if _, _, ok := BitIntInfo(typ); !ok {
 			return false
 		}
@@ -965,7 +965,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	// An implicit non-value-preserving integer conversion at the return (an i64 `view.len` returned
 	// as usize) is made explicit for `result`; the tiers below that re-read the return expression or
 	// the body's return statements themselves would see the unconverted value, so they are skipped.
-	retValue := a.implicitIntConversion(n.Value, a.exprTypes[n.Value], a.currentReturn)
+	retValue := a.implicitIntConversion(n.Value, a.exprType(n.Value), a.currentReturn)
 	converted := retValue != n.Value
 	subst := map[string]ast.Expr{"result": retValue}
 	for i, clause := range a.currentFuncDecl.EnsureValues {
@@ -1005,7 +1005,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a
 		// reference field (`self.base`) are modeled as distinct opaque terms (shadPS4 memory-06 finding).
 		// NaN != NaN: a float result is never equal to itself by reflexivity.
-		if !converted && !IsFloatType(stripRefForBounds(a.exprTypes[n.Value])) && ensureHoldsByReturnReflexivity(clause, n.Value) {
+		if !converted && !IsFloatType(stripRefForBounds(a.exprType(n.Value))) && ensureHoldsByReturnReflexivity(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
 			continue
 		}
@@ -1202,7 +1202,7 @@ func (a *Analyzer) smtResultNullnessHypothesis(tr *smtTranslator, subst map[stri
 		return "(assert (= " + pred + " true))\n"
 	}
 	// Case 2: the return expression has type T& (non-optional reference) → structurally non-null.
-	retType := a.exprTypes[ret]
+	retType := a.exprType(ret)
 	if retType == nil {
 		return ""
 	}
@@ -1239,7 +1239,7 @@ func (a *Analyzer) smtNullnessCastLinkHypotheses(tr *smtTranslator) string {
 			if !ok || cast == nil || cast.Operand == nil {
 				continue
 			}
-			if !a.exprIsPointerLike(sym.Type) || !a.exprIsPointerLike(a.exprTypes[cast.Operand]) {
+			if !a.exprIsPointerLike(sym.Type) || !a.exprIsPointerLike(a.exprType(cast.Operand)) {
 				continue
 			}
 			srcName := smtProjectionName(stripOptimizationParens(cast.Operand))
@@ -1475,12 +1475,12 @@ func (a *Analyzer) returnSubjectLocalBindingWouldProve(value ast.Expr, lawDecl *
 	}
 	// Derive the best available range for the expression's resolved type.
 	// First try: primitive-width range (e.g. u8 → [0, 255], i16 → [-32768, 32767]).
-	resolvedType := a.exprTypes[stripped]
+	resolvedType := a.exprType(stripped)
 	r, ok := declaredTypeRange(resolvedType)
 	// Second try: if the field has a declared refinement (e.g. `u32 is InRange[0,127]`), extract the
 	// implied range from the refinement's law constraints and intersect with any primitive-width range.
 	if fe, isFE := stripped.(*ast.FieldExpr); isFE && fe != nil {
-		st, stOk := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+		st, stOk := stripRefForBounds(a.exprType(fe.Object)).(*StructType)
 		if stOk && st != nil && st.Decl != nil {
 			for _, fd := range st.Decl.Fields {
 				if fd.Name != fe.Field {

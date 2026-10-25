@@ -404,7 +404,7 @@ func (a *Analyzer) viewArgAliasRootsDepth(arg ast.Expr, depth int) []string {
 // viewSourceOwnsBuffer: the viewed expression is a container whose own buffer the view points
 // into (a darray, a fixed array, a dstr), not another view (slicing an sview views ITS bytes).
 func (a *Analyzer) viewSourceOwnsBuffer(source ast.Expr) bool {
-	switch t := StripAggregateStateType(stripRefForBounds(a.exprTypes[source])).(type) {
+	switch t := StripAggregateStateType(stripRefForBounds(a.exprType(source))).(type) {
 	case *DArrayType, *ArrayType:
 		return true
 	case *BuiltinType:
@@ -632,7 +632,7 @@ func (a *Analyzer) callReturnAliasedRoots(call *ast.CallExpr) []string {
 	if call == nil {
 		return nil
 	}
-	ft, ok := a.exprTypes[call.Func].(*FuncType)
+	ft, ok := a.exprType(call.Func).(*FuncType)
 	if !ok || ft == nil || !ft.ReturnIsolationKnown {
 		return nil
 	}
@@ -792,7 +792,7 @@ func (a *Analyzer) aliasRootsForExpr(expr ast.Expr) []string {
 		// A reference-typed field of a struct local that carries a laundered borrow aliases the
 		// borrowed parameter(s), e.g. `r.p` where `r = wrap(v)`. Union the carried roots with the
 		// structural root so same-field and param-direct uses both conflict.
-		if _, isRef := a.exprTypes[n].(*RefType); isRef {
+		if _, isRef := a.exprType(n).(*RefType); isRef {
 			if ident, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok {
 				if fields := a.currentAliasCarrierFieldOverrides[ident.Name]; fields != nil {
 					if roots, ok := fields[n.Field]; ok {

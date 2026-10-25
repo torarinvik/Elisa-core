@@ -91,12 +91,12 @@ func (a *Analyzer) reflexiveFold(e ast.Expr) (value bool, known bool) {
 // denote their clause meaning.
 func (a *Analyzer) reflexiveOperandsEqual(l, r ast.Expr) bool {
 	for _, side := range []ast.Expr{l, r} {
-		if t := a.exprTypes[stripOptimizationParens(side)]; t != nil && IsFloatType(stripRefForBounds(t)) {
+		if t := a.exprType(stripOptimizationParens(side)); t != nil && IsFloatType(stripRefForBounds(t)) {
 			return false
 		}
 	}
-	if t := a.exprTypes[stripOptimizationParens(l)]; t == nil {
-		if rt := a.exprTypes[stripOptimizationParens(r)]; rt == nil {
+	if t := a.exprType(stripOptimizationParens(l)); t == nil {
+		if rt := a.exprType(stripOptimizationParens(r)); rt == nil {
 			// Result substitution clones field nodes, including unchanged pointer projections on
 			// the other side. Recover their caller-scope types before declining: a stable pointer
 			// read is reflexive, whereas an unknown or floating-point read must remain excluded.
@@ -159,7 +159,7 @@ func (a *Analyzer) sameExprText(l, r ast.Expr) bool {
 			return false
 		}
 		// Same target: compare the analyzed result types (the target syntax has several spellings).
-		xt, yt := a.exprTypes[x], a.exprTypes[y]
+		xt, yt := a.exprType(x), a.exprType(y)
 		return xt != nil && yt != nil && SameType(xt, yt)
 	case *ast.CallExpr:
 		y, ok := r.(*ast.CallExpr)

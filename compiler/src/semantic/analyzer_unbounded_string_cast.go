@@ -198,7 +198,7 @@ func (a *Analyzer) castOperandRootsAtBufferIndex(expr ast.Expr) (string, Type, b
 		case *ast.CastExpr:
 			expr = n.Operand
 		case *ast.IndexExpr:
-			objType := a.exprTypes[n.Object]
+			objType := a.exprType(n.Object)
 			if objType == nil {
 				objType = a.analyzeExpr(n.Object)
 			}

@@ -1140,7 +1140,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 	}
 	resultType := a.analyzeResolvedCallExpr(synthetic, ft, orderedArgs)
 	resolvedFuncType := ft
-	if analyzedType, ok := a.exprTypes[synthetic.Func].(*FuncType); ok && analyzedType != nil {
+	if analyzedType, ok := a.exprType(synthetic.Func).(*FuncType); ok && analyzedType != nil {
 		resolvedFuncType = analyzedType
 	}
 	receiverArgType := baseReceiverType
@@ -1178,7 +1178,7 @@ func (a *Analyzer) analyzeSafeTransformCallExpr(expr *ast.CallExpr) Type {
 		ArgNames: append([]string{""}, expr.ArgNames...),
 	}
 	resultType := a.analyzeCallExpr(synthetic)
-	resolvedFuncType, _ := a.exprTypes[synthetic.Func].(*FuncType)
+	resolvedFuncType, _ := a.exprType(synthetic.Func).(*FuncType)
 	orderedArgs := synthetic.ResolvedArgs
 	if !synthetic.ResolvedArgsValid {
 		orderedArgs = synthetic.Args
@@ -1191,7 +1191,7 @@ func (a *Analyzer) analyzeSafeTransformCallExpr(expr *ast.CallExpr) Type {
 		}
 	}
 	receiverArgType := baseReceiverType
-	if analyzedReceiverArgType := a.exprTypes[placeholder]; analyzedReceiverArgType != nil {
+	if analyzedReceiverArgType := a.exprType(placeholder); analyzedReceiverArgType != nil {
 		receiverArgType = analyzedReceiverArgType
 	} else if resolvedFuncType != nil && receiverArgIndex < len(resolvedFuncType.Params) {
 		receiverArgType = ufcsPreparedReceiverType(baseReceiverType, resolvedFuncType.Params[receiverArgIndex])
@@ -1235,7 +1235,7 @@ func (a *Analyzer) programLivedRegionArgBinding(ft *FuncType, args []ast.Expr, n
 		if i >= len(args) || args[i] == nil {
 			return "", false
 		}
-		at := a.exprTypes[args[i]]
+		at := a.exprType(args[i])
 		if at == nil || !a.typeCanContainRegionRefs(stripRefForBounds(at), map[string]bool{}) || !a.typeIsProgramLivedCached(stripRefForBounds(at)) {
 			return "", false
 		}

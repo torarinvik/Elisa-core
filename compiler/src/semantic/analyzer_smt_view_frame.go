@@ -234,7 +234,7 @@ func (g *sviewFrameGate) stmt(stmt ast.Stmt) bool {
 		if g.a.isCompilerBuiltinHelperCall(call, "assert") || g.a.isCompilerBuiltinHelperCall(call, "ASSERT") {
 			return g.expr(call.Args[0], 0)
 		}
-		if g.a.exprTypes[call.Func] != nil {
+		if g.a.exprType(call.Func) != nil {
 			// An analyzed user call must not be reclassified by its spelling.
 			return false
 		}

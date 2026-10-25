@@ -583,7 +583,7 @@ func (a *Analyzer) isDictIndexPayloadProjection(value ast.Expr, declType Type) b
 	if !ok || idx == nil || idx.Fallback != nil || declType == nil || IsInvalidType(declType) {
 		return false
 	}
-	objType := a.exprTypes[idx.Object]
+	objType := a.exprType(idx.Object)
 	if objType == nil {
 		return false
 	}

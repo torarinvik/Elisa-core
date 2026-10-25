@@ -399,12 +399,12 @@ func (a *Analyzer) typeSequentialPathsQuietly(paths []loopBodyPath) {
 	}()
 	for _, p := range paths {
 		for _, c := range p.conds {
-			if a.exprTypes[c] == nil {
+			if a.exprType(c) == nil {
 				a.analyzeCondExpr(c)
 			}
 		}
 		for _, v := range p.subst {
-			if a.exprTypes[v] == nil {
+			if a.exprType(v) == nil {
 				a.analyzeExpr(v)
 			}
 		}

@@ -84,7 +84,7 @@ chain:
 	}
 	if !sawBorrow {
 		// No explicit `&` — only an alias if the returned place is itself reference-typed.
-		if _, isRef := a.exprTypes[value].(*RefType); !isRef {
+		if _, isRef := a.exprType(value).(*RefType); !isRef {
 			return ""
 		}
 	}

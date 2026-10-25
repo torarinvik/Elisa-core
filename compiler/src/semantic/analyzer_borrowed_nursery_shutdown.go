@@ -283,7 +283,7 @@ func (a *Analyzer) borrowedNurseryPermissionBindingFunctions(calleeType, applied
 		}
 		var callback *FuncType
 		if i < len(args) {
-			callback, _ = a.exprTypes[args[i]].(*FuncType)
+			callback, _ = a.exprType(args[i]).(*FuncType)
 		}
 		if callback == nil && appliedType != nil && i < len(appliedType.Params) {
 			callback, _ = appliedType.Params[i].(*FuncType)

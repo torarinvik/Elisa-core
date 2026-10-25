@@ -66,6 +66,9 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 }
 
 func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
+	if r.analyzer.exprTypeOverlay != nil {
+		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
+	}
 	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)
 	// Semantic workers use a separate base memo for this table. A published
 	// codegen Result exposes a concrete map instead, including canonical global

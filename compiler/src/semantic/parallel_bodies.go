@@ -40,6 +40,10 @@ func parallelBodyWorkers() int {
 // chunk runs on its own copy of the Analyzer; the copies' state is merged back in
 // chunk order, so diagnostics keep source order.
 func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
+	if a.exprTypeOverlay != nil {
+		a.rejectExprTypeOverlayOperation("parallel declaration scheduling")
+		return
+	}
 	var bodies []scopedDecl
 	declOrder := make(map[*ast.FuncDecl]int)
 	nextDeclOrder := 0
@@ -331,6 +335,9 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 // specializationContext.copyDecl. Its analyzer never queries unrelated function
 // analyses; public Result queries retain canonical fallback after publication.
 func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
+	if a != nil && a.exprTypeOverlay != nil {
+		panic("specialization construction requires a canonical analyzer, not another construction overlay")
+	}
 	return cloneAnalyzerValueForParallelPolicy(a, true, true)
 }
 
@@ -345,11 +352,18 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if name == "exprTypeOverlay" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerExprTypeOverlay(a.exprTypeOverlay)))
+			continue
+		}
 		if ownedFunctionAnalyses && name == "exprTypes" {
-			// deepCloneValue deliberately leaves interface values opaque. A
-			// typed outer clone preserves exactly those aliases/nil entries
-			// without reflective per-key/value boxing on this large table.
-			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.exprTypes)))
+			// Private observations only: canonical reads use the immutable base.
+			// Skip its entire map before reflective cloning or typed cloning.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
 			continue
 		}
 		if ownedFunctionAnalyses && name == "functionAnalyses" {
@@ -398,6 +412,10 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			continue
 		}
 		settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))
+	}
+	if ownedFunctionAnalyses {
+		worker := cloned.Addr().Interface().(*Analyzer)
+		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
 	}
 	return cloned
 }
@@ -629,12 +647,22 @@ func typeHoldsMapInline(t reflect.Type) bool {
 // replaced map entries (nested maps merged entry by entry), slice tails appended
 // past the base length, and changed scalars and pointers.
 func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
+	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("exprTypeOverlay")).IsNil() {
+		// A construction view cannot be merged into canonical analysis. Its
+		// base is immutable and private tombstones are not canonical deltas.
+		target := dst.Addr().Interface().(*Analyzer)
+		err := target.rejectExprTypeOverlayOperation("canonical worker merge")
+		if p != nil && p.specialization != nil {
+			p.specialization.err = err
+		}
+		return
+	}
 	switch w.Kind() {
 	case reflect.Struct:
 		for i := 0; i < w.NumField(); i++ {
 			if p != nil {
 				name := w.Type().Field(i).Name
-				if parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
+				if name == "exprTypeOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
 					continue
 				}
 			}

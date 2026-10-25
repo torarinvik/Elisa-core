@@ -405,7 +405,7 @@ func (a *Analyzer) isFreshRegionAllocation(vd *ast.VarDeclStmt) bool {
 	if typeExprHasExplicitRegion(vd.Type) {
 		return false // user-specified region — exempt from inference analysis
 	}
-	t := a.exprTypes[vd.Value]
+	t := a.exprType(vd.Value)
 	if t == nil {
 		return false
 	}

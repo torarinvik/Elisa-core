@@ -176,7 +176,7 @@ func (a *Analyzer) retainedUsesTypes(fn *ast.FuncDecl, targets map[Type]bool, na
 			return
 		}
 		if e, ok := node.(ast.Expr); ok {
-			if t, ok := a.exprTypes[e]; ok && retainedTypeReaches(t, targets, memo) {
+			if t, ok := a.lookupExprType(e); ok && retainedTypeReaches(t, targets, memo) {
 				hit = true
 			}
 		}

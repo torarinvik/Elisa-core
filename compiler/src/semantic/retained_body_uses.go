@@ -40,7 +40,7 @@ func (r *RetainedAnalysis) captureBodyUses() {
 				name(fillMayAdoptLastSegment(n.Name))
 			}
 			if expr, ok := node.(ast.Expr); ok {
-				if typ, ok := r.a.exprTypes[expr]; ok && !types[typ] {
+				if typ, ok := r.a.lookupExprType(expr); ok && !types[typ] {
 					types[typ] = true
 					use.types = append(use.types, typ)
 				}

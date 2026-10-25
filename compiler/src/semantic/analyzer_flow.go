@@ -350,7 +350,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				// A container field reached through a region-carrying struct reference
 				// (`map.slots` with `map: StrMap& @r`) lives in that reference's region.
 				if field, ok := stripParenExpr(n.Target).(*ast.FieldExpr); ok && field != nil {
-					targetRegion = a.fieldObjectExprRegion(field.Object, a.exprTypes[field.Object])
+					targetRegion = a.fieldObjectExprRegion(field.Object, a.exprType(field.Object))
 				}
 			}
 			if targetRegion == "" {
@@ -463,7 +463,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				n.CollectionAppend = collectionAppendCall(n)
 			}
 			a.analyzeExpr(n.CollectionAppend)
-			valueType := a.exprTypes[n.Value]
+			valueType := a.exprType(n.Value)
 			if !AssignableTo(array.Elem, valueType) {
 				a.errorf(n.Pos(), "darray += requires one element of type %s, got %s; use extend for multiple elements", array.Elem, valueType)
 			}
@@ -1092,7 +1092,7 @@ func (a *Analyzer) checkIndexedElementStoreEscape(target, value ast.Expr, valueT
 	if !ok || idx == nil || idx.Index2 != nil {
 		return
 	}
-	objType := a.exprTypes[idx.Object]
+	objType := a.exprType(idx.Object)
 	for {
 		ref, isRef := objType.(*RefType)
 		if !isRef || ref == nil {

@@ -140,15 +140,15 @@ func (a *Analyzer) storageViewContainerAliasSourcesForValue(expr ast.Expr, typ T
 			visit(n.Alt, currentType)
 		case *ast.StructLitExpr:
 			for _, argument := range n.LoweredArgs() {
-				visit(argument, a.exprTypes[argument])
+				visit(argument, a.exprType(argument))
 			}
 			for _, spread := range n.Spreads {
-				visit(spread, a.exprTypes[spread])
+				visit(spread, a.exprType(spread))
 			}
 		case *ast.RecordUpdateExpr:
-			visit(n.Base, a.exprTypes[n.Base])
+			visit(n.Base, a.exprType(n.Base))
 			for _, argument := range n.LoweredArgs() {
-				visit(argument, a.exprTypes[argument])
+				visit(argument, a.exprType(argument))
 			}
 		case *ast.TupleExpr:
 			tuple, _ := StripAggregateStateType(currentType).(*TupleType)

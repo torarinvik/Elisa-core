@@ -106,7 +106,7 @@ func (tr *smtTranslator) stableStringFieldID(field *ast.FieldExpr, env map[strin
 		tr.envBindsRoot(field, env) || (!classifierStringFrameStable(tr.a, tr.a.currentFuncDecl) && !tr.a.sviewFrameWriteFreeGhostReads(tr.a.currentFuncDecl)) {
 		return "", false
 	}
-	t := tr.a.exprTypes[field]
+	t := tr.a.exprType(field)
 	if t == nil {
 		if resolved, ok := tr.a.fieldReadResolvedType(field); ok {
 			t = resolved

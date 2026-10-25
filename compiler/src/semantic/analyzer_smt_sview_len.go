@@ -58,7 +58,7 @@ func (tr *smtTranslator) sviewArgLengthTerm(argExpr ast.Expr, argEnv map[string]
 		// A contextual sview literal stores the decoded UTF-8 byte count,
 		// including embedded zero bytes. Its contents need not be modeled
 		// to bind a callee's header length exactly.
-		if _, view := stripRefForBounds(tr.a.exprTypes[literal]).(*SViewType); view {
+		if _, view := stripRefForBounds(tr.a.exprType(literal)).(*SViewType); view {
 			return smtInt(int64(len(literal.Value))), true
 		}
 		return "", false
@@ -83,7 +83,7 @@ func (tr *smtTranslator) sviewSliceLengthTerm(slice *ast.SliceExpr, env map[stri
 	if slice.Object == nil || slice.Start == nil || slice.End == nil {
 		return "", false
 	}
-	if _, ok := stripRefForBounds(tr.a.exprTypes[slice.Object]).(*SViewType); !ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(slice.Object)).(*SViewType); !ok {
 		return "", false
 	}
 	base, ok := tr.sviewArgLengthTerm(slice.Object, env)
@@ -220,7 +220,7 @@ rootFound:
 // unsigned type is reinterpreted (values >= 2^63 become negative); narrower integers and signed
 // types are value-preserving. Non-integer or wider types decline.
 func (tr *smtTranslator) sviewSliceBoundI64(expr ast.Expr, env map[string]string) (string, bool) {
-	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[expr])
+	signed, bits, ok := smtIntWidthSign(tr.a.exprType(expr))
 	if !ok || bits > 64 {
 		return "", false
 	}

@@ -29,7 +29,7 @@ func (tr *smtTranslator) concreteStaticBoolMethodCall(call *ast.CallExpr) (*ast.
 		return nil, false
 	}
 	symbol := impl.Methods[ref.MethodName]
-	if symbol == nil || tr.a.exprTypes[selector] != symbol.Type {
+	if symbol == nil || tr.a.exprType(selector) != symbol.Type {
 		return nil, false
 	}
 	decl, declared := symbol.Node.(*ast.FuncDecl)

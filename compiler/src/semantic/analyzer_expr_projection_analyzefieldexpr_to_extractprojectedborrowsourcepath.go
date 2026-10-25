@@ -130,9 +130,9 @@ func (a *Analyzer) fieldObjectExprRegion(objExpr ast.Expr, objType Type) string 
 	}
 	switch n := stripParenExpr(objExpr).(type) {
 	case *ast.FieldExpr:
-		return a.fieldObjectExprRegion(n.Object, a.exprTypes[n.Object])
+		return a.fieldObjectExprRegion(n.Object, a.exprType(n.Object))
 	case *ast.IndexExpr:
-		return a.fieldObjectExprRegion(n.Object, a.exprTypes[n.Object])
+		return a.fieldObjectExprRegion(n.Object, a.exprType(n.Object))
 	}
 	return ""
 }
@@ -262,7 +262,7 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		}
 		return a.resolveProjectedFieldValueExprAtPath(n.Elems[index], path[1:])
 	case *ast.StructLitExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		if actual == nil {
 			actual = a.analyzeExpr(n)
 		}
@@ -286,7 +286,7 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		}
 		return nil, false
 	case *ast.RecordUpdateExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		if actual == nil {
 			actual = a.analyzeExpr(n)
 		}
@@ -310,7 +310,7 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		}
 		return nil, false
 	case *ast.TupleExpr:
-		actual := a.exprTypes[n]
+		actual := a.exprType(n)
 		if actual == nil {
 			actual = a.analyzeExpr(n)
 		}

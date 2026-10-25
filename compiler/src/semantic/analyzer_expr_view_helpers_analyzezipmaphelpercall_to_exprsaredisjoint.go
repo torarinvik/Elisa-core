@@ -16,21 +16,21 @@ func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
 	callbackType := a.analyzeExpr(expr.Args[3])
 
 	if !dstOK {
-		actual := a.exprTypes[expr.Args[0]]
+		actual := a.exprType(expr.Args[0])
 		if actual == nil {
 			actual = invalidType
 		}
 		a.errorf(expr.Args[0].Pos(), "zip_map destination expects a dense view[T], got %s", actual)
 	}
 	if !src1OK {
-		actual := a.exprTypes[expr.Args[1]]
+		actual := a.exprType(expr.Args[1])
 		if actual == nil {
 			actual = invalidType
 		}
 		a.errorf(expr.Args[1].Pos(), "zip_map source 1 expects a dense view[T], got %s", actual)
 	}
 	if !src2OK {
-		actual := a.exprTypes[expr.Args[2]]
+		actual := a.exprType(expr.Args[2])
 		if actual == nil {
 			actual = invalidType
 		}

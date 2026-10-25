@@ -755,7 +755,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 	if expected == nil || actualExpr == nil {
 		return expected, false
 	}
-	if actualType := a.exprTypes[actualExpr]; actualType != nil {
+	if actualType := a.exprType(actualExpr); actualType != nil {
 		if specialized, ok := a.specializeCallbackCarryingType(expected, actualType); ok {
 			return specialized, true
 		}

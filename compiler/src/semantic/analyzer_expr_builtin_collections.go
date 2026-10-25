@@ -55,7 +55,7 @@ func (a *Analyzer) checkContainerGrowthStoreEscape(receiver ast.Expr, operation 
 	if storeRegion == "" || a.isCompilerGeneratedAutoRegion(storeRegion) || !a.activeStoreIsLocalRegion(storeRegion) {
 		return false
 	}
-	receiverType := a.exprTypes[receiver]
+	receiverType := a.exprType(receiver)
 	if receiverType == nil {
 		receiverType = a.analyzeExpr(receiver)
 	}
@@ -321,7 +321,7 @@ func (a *Analyzer) exprObjectIsReference(obj ast.Expr) bool {
 	if obj == nil {
 		return false
 	}
-	t := a.exprTypes[obj]
+	t := a.exprType(obj)
 	if t == nil {
 		t = a.analyzeExpr(obj)
 	}

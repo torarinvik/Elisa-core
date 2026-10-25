@@ -243,7 +243,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Value)
 	case *ast.ReturnStmt:
 		if _, returnsCallback := c.returnType.(*FuncType); returnsCallback {
-			if callback, ok := c.analyzer.exprTypes[n.Value].(*FuncType); ok {
+			if callback, ok := c.analyzer.exprType(n.Value).(*FuncType); ok {
 				c.returnedFunctionRefs = append(c.returnedFunctionRefs, c.analyzer.effectiveFunctionPermissionRefs(callback)...)
 				c.returnedFunctionGlobalRefs = append(c.returnedFunctionGlobalRefs, c.analyzer.mandatoryGlobalPermissionRefs(callback)...)
 			}
@@ -403,7 +403,7 @@ func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, w
 		}
 		c.collectExpr(n.Left)
 		c.collectExpr(n.Right)
-		if c.analyzer.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, c.analyzer.exprTypes[n.Left], c.analyzer.exprTypes[n.Right]) {
+		if c.analyzer.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, c.analyzer.exprType(n.Left), c.analyzer.exprType(n.Right)) {
 			c.addRefs(unsafePointerArithmeticRefs(n.Position))
 		}
 	case *ast.UnaryExpr:
@@ -427,7 +427,7 @@ func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, w
 		if c.analyzer.enforceUnsafePermissions && isIndirectCallTarget(n.Func) {
 			c.addRefs(unsafeIndirectCallRefs(n.Position))
 		}
-		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
+		if fnType, ok := c.analyzer.exprType(n.Func).(*FuncType); ok {
 			if c.mutableGlobalsOnly {
 				c.addRefs(c.analyzer.mandatoryGlobalPermissionRefs(fnType))
 			} else {
@@ -435,12 +435,12 @@ func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, w
 			}
 			if c.analyzer.enforceUnsafePermissions {
 				if (fnType.Name == "spawn1" || fnType.Name == "spawn_daemon") && len(n.Args) > 1 {
-					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprTypes[n.Args[1]], map[string]bool{}) {
+					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprType(n.Args[1]), map[string]bool{}) {
 						c.addRefs(unsafeThreadShareRefs(n.Args[1].Pos()))
 					}
 				}
 				if fnType.Name == "pool_submit1" && len(n.Args) > 2 {
-					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprTypes[n.Args[2]], map[string]bool{}) {
+					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprType(n.Args[2]), map[string]bool{}) {
 						c.addRefs(unsafeThreadShareRefs(n.Args[2].Pos()))
 					}
 				}
@@ -482,8 +482,8 @@ func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, w
 			break
 		}
 		c.collectExprWithValueContext(n.Operand, wholeValue)
-		src := c.analyzer.exprTypes[n.Operand]
-		dst := c.analyzer.exprTypes[n]
+		src := c.analyzer.exprType(n.Operand)
+		dst := c.analyzer.exprType(n)
 		if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && c.analyzer.castRequiresUnsafeGuestHostPointerCast(n, dst) {
 			c.addRefs(unsafeGuestHostPointerCastRefs(n.Position))
 		} else if c.analyzer.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && (castRequiresUnsafePointerCast(src, dst) || c.analyzer.unsafeLifetimeWidenCasts[n]) {
@@ -552,7 +552,7 @@ func (c *permissionEffectCollector) collectExprWithValueContext(expr ast.Expr, w
 		c.collectExpr(n.Projection)
 		c.collectExpr(n.Owner)
 	case *ast.LambdaExpr:
-		if ft, ok := c.analyzer.exprTypes[n].(*FuncType); ok {
+		if ft, ok := c.analyzer.exprType(n).(*FuncType); ok {
 			collector := permissionEffectCollector{analyzer: c.analyzer, mutableGlobalsOnly: true, returnType: ft.Return}
 			collector.collectStmts(n.Body)
 			collector.collectExpr(n.BodyExpr)

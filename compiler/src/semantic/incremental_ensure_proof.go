@@ -147,7 +147,7 @@ func primitiveEnsureBooleanSyntaxAndTypes(a *Analyzer, fn *ast.FuncDecl, root as
 		}
 		(*remainingNodes)--
 		classOf := func() (string, bool) {
-			typ, ok := a.exprTypes[expr].(*BuiltinType)
+			typ, ok := a.exprType(expr).(*BuiltinType)
 			if !ok || typ == nil || a.namedTypes[typ.Name] != typ {
 				return "", false
 			}

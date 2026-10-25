@@ -1310,7 +1310,7 @@ func (a *Analyzer) exprReferencesGhostField(expr ast.Expr) bool {
 		}
 		return false
 	case *ast.FieldExpr:
-		if st, ok := stripRefForBounds(a.exprTypes[n.Object]).(*StructType); ok && st != nil {
+		if st, ok := stripRefForBounds(a.exprType(n.Object)).(*StructType); ok && st != nil {
 			if f, ok := st.Fields[n.Field]; ok && f.Ghost {
 				return true
 			}

@@ -346,7 +346,7 @@ func (a *Analyzer) castRequiresUnsafeGuestHostPointerCast(cast *ast.CastExpr, ds
 	// sites where guest addresses are produced (TLS/GOT resolution that returns
 	// a GuestVAddr), not only HLE parameters, so a produced guest address cannot
 	// be silently dereferenced as a host pointer.
-	if src := a.exprTypes[cast.Operand]; src != nil {
+	if src := a.exprType(cast.Operand); src != nil {
 		if addr, ok := src.(*AddressSpaceType); ok && addr.Space == "guest" {
 			return true
 		}

@@ -34,7 +34,7 @@ func (a *Analyzer) checkCallArgumentHolderStoreEscape(call *ast.CallExpr) {
 		if _, isStruct := StripAggregateStateType(ref.Elem).(*StructType); !isStruct {
 			continue
 		}
-		holderType := stripRefForBounds(a.exprTypes[args[index]])
+		holderType := stripRefForBounds(a.exprType(args[index]))
 		if a.containerRegionOf(holderType) != "" || !a.typeMayHoldFrameBorrow(ref.Elem, map[Type]bool{}) {
 			continue
 		}
@@ -52,7 +52,7 @@ func (a *Analyzer) checkCallArgumentHolderStoreEscape(call *ast.CallExpr) {
 			// Only a VIEW argument (sview, cstr, view[T]) is checked: it is what a holder's view
 			// field keeps pointing at the bytes. A container passed by value is a header copy whose
 			// storage the callee's own checks already govern.
-			argType := a.exprTypes[arg]
+			argType := a.exprType(arg)
 			if argType == nil || !isRegionBorrowedStringOrViewType(argType) {
 				continue
 			}

@@ -247,7 +247,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 			}
 		}
 	}
-	valueType := a.exprTypes[expr]
+	valueType := a.exprType(expr)
 	if valueType == nil {
 		valueType = a.analyzeExpr(expr)
 	}

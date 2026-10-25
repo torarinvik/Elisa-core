@@ -939,7 +939,7 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 		if n.Name == "" || n.Name == "_" {
 			return nil
 		}
-		valueType := a.exprTypes[n.Value]
+		valueType := a.exprType(n.Value)
 		if valueType == nil {
 			valueType = a.analyzeExpr(n.Value)
 		}
@@ -994,7 +994,7 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 			return out
 		}
 		if n.Op == lexer.TOKEN_IS {
-			valueType := a.exprTypes[n.Left]
+			valueType := a.exprType(n.Left)
 			if valueType == nil {
 				valueType = a.analyzeExpr(n.Left)
 			}
@@ -1007,7 +1007,7 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 	if !ok || valueExpr == nil || pattern == nil {
 		return nil
 	}
-	valueType := a.exprTypes[valueExpr]
+	valueType := a.exprType(valueExpr)
 	if valueType == nil {
 		valueType = a.analyzeExpr(valueExpr)
 	}
@@ -1035,7 +1035,7 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 		if n.Name == "" || n.Name == "_" {
 			return nil
 		}
-		valueType := a.exprTypes[n.Value]
+		valueType := a.exprType(n.Value)
 		if valueType == nil {
 			valueType = a.analyzeExpr(n.Value)
 		}
@@ -1069,7 +1069,7 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 			return out
 		}
 		if n.Op == lexer.TOKEN_IS {
-			valueType := a.exprTypes[n.Left]
+			valueType := a.exprType(n.Left)
 			if valueType == nil {
 				valueType = a.analyzeExpr(n.Left)
 			}
@@ -1082,7 +1082,7 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 	if !ok || valueExpr == nil || pattern == nil {
 		return nil
 	}
-	valueType := a.exprTypes[valueExpr]
+	valueType := a.exprType(valueExpr)
 	if valueType == nil {
 		valueType = a.analyzeExpr(valueExpr)
 	}
@@ -1170,7 +1170,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 		if n.Name == "" || n.Name == "_" {
 			return
 		}
-		valueType := a.exprTypes[n.Value]
+		valueType := a.exprType(n.Value)
 		if valueType == nil {
 			valueType = a.analyzeExprInScope(n.Value, scope)
 		}
@@ -1202,7 +1202,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 			return
 		}
 		if n.Op == lexer.TOKEN_IS {
-			valueType := a.exprTypes[n.Left]
+			valueType := a.exprType(n.Left)
 			if valueType == nil {
 				valueType = a.analyzeExprInScope(n.Left, scope)
 			}
@@ -1222,7 +1222,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 	if !ok || valueExpr == nil || pattern == nil {
 		return
 	}
-	valueType := a.exprTypes[valueExpr]
+	valueType := a.exprType(valueExpr)
 	if valueType == nil {
 		valueType = a.analyzeExprInScope(valueExpr, scope)
 	}

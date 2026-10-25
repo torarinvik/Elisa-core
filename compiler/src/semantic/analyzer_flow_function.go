@@ -544,7 +544,7 @@ func (a *Analyzer) isFlowTableLiteral(e ast.Expr) bool {
 	if fieldExpr, ok := isEnumVariantExpr(e); ok && a != nil {
 		enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
 		if ok && enumType != nil && variant != nil && len(variant.Payload) == 0 {
-			if recorded, typed := a.exprTypes[ast.Expr(fieldExpr)]; typed && SameType(recorded, Type(enumType)) {
+			if recorded, typed := a.lookupExprType(ast.Expr(fieldExpr)); typed && SameType(recorded, Type(enumType)) {
 				return true
 			}
 		}

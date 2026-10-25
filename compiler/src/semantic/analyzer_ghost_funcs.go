@@ -95,7 +95,7 @@ func (a *Analyzer) ghostCallIsValueConversion(call *ast.CallExpr) bool {
 	default:
 		return false
 	}
-	t, known := a.exprTypes[field.Object]
+	t, known := a.lookupExprType(field.Object)
 	if !known || t == nil {
 		return false
 	}

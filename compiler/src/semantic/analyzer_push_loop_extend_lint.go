@@ -74,7 +74,7 @@ func (a *Analyzer) flagPushLoopExtendable(loop *ast.IterForStmt) {
 	if dst.Name == srcIdent.Name {
 		return
 	}
-	if !isDArrayTypeMaybeRef(a.exprTypes[dst]) {
+	if !isDArrayTypeMaybeRef(a.exprType(dst)) {
 		return
 	}
 	// The value must actually use the loop variable — otherwise this is a constant/side-channel fill,

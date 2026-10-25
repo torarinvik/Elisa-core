@@ -691,7 +691,7 @@ func (a *Analyzer) machineFromStaticExprType(expr ast.Expr) Type {
 	if a == nil || expr == nil {
 		return nil
 	}
-	if typ := a.exprTypes[expr]; typ != nil {
+	if typ := a.exprType(expr); typ != nil {
 		return typ
 	}
 	switch n := stripOptimizationParens(expr).(type) {

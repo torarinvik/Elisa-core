@@ -173,7 +173,7 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	self := decl.Params[0].Name
 	var subjectTerm string
 	var ok bool
-	if tr.isArrayLike(a.exprTypes[value]) {
+	if tr.isArrayLike(a.exprType(value)) {
 		subjectTerm, ok = tr.arrayTermEnv(value, nil)
 	} else {
 		subjectTerm, ok = tr.term(value)
@@ -314,7 +314,7 @@ func (a *Analyzer) fieldReadResolvedType(n *ast.FieldExpr) (Type, bool) {
 	if n == nil || n.Object == nil {
 		return nil, false
 	}
-	if t := a.exprTypes[n.Object]; t != nil {
+	if t := a.exprType(n.Object); t != nil {
 		return a.lookupResolvedFieldType(peelNamedStateRefs(t), n.Field)
 	}
 	switch obj := n.Object.(type) {
@@ -1001,7 +1001,7 @@ func (a *Analyzer) trySMTProveRequiresCoreWithCallee(clause ast.Expr, subst map[
 			fmt.Fprintf(os.Stderr, "=== TRACE env-decline (%s) clause=%s\n", a.currentFuncName(), optimizationExprString(clause))
 			for _, k := range slices.Sorted(maps.Keys(substForEnv)) {
 				v := substForEnv[k]
-				fmt.Fprintf(os.Stderr, "    subst %s = %T %s type=%v\n", k, v, optimizationExprString(v), a.exprTypes[v])
+				fmt.Fprintf(os.Stderr, "    subst %s = %T %s type=%v\n", k, v, optimizationExprString(v), a.exprType(v))
 			}
 		}
 		return false, "", true
@@ -1311,7 +1311,7 @@ func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string, subst map[
 		// A Boolean UF application looks like a numeric application syntactically.
 		// Readbacks are declared as Int, so require the actual source value to
 		// have an integer type rather than guessing its sort from the SMT text.
-		if _, _, integer := smtIntWidthSign(tr.a.exprTypes[subst[label]]); !integer {
+		if _, _, integer := smtIntWidthSign(tr.a.exprType(subst[label])); !integer {
 			continue
 		}
 		// Only register compound integer-valued SMT expressions. We must avoid:
@@ -1389,21 +1389,21 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	// The result symbol must carry the callee's result SORT. A bool-returning callee's ensures use
 	// `result` as a Bool (`x < 0 implies not result`); declaring it Int made every such query
 	// ill-sorted, so bool callee contracts never reached a call site.
-	if IsBoolType(a.exprTypes[call]) {
+	if IsBoolType(a.exprType(call)) {
 		retTerm = smtBoolVar(retSym)
 		tr.boolDecls[retTerm] = true
-	} else if isDatatypeValuedType(a.exprTypes[call]) {
+	} else if isDatatypeValuedType(a.exprType(call)) {
 		// An aggregate result has no scalar term: bind it to a projection token so `result.f` in the
 		// caller's obligation and in the callee's ensures both re-root to `@return_call_result.f`.
 		retTerm = dtToken(retSym)
-	} else if _, view := stripRefForBounds(a.exprTypes[call]).(*SViewType); !view {
+	} else if _, view := stripRefForBounds(a.exprType(call)).(*SViewType); !view {
 		tr.decls[retSym] = true
 	}
 	callerEnv := map[string]string{"result": retTerm}
 	// A view result is its bytes, start and length: fresh parts shared by the caller's
 	// obligation and the callee's ensures.
 	var viewData, viewLo, viewLen string
-	if _, view := stripRefForBounds(a.exprTypes[call]).(*SViewType); view {
+	if _, view := stripRefForBounds(a.exprType(call)).(*SViewType); view {
 		viewData, viewLo, viewLen = "|@return_call_view$data|", "|@return_call_view$lo|", "|@return_call_view$len|"
 		tr.auxDecls = append(tr.auxDecls,
 			"(declare-const "+viewData+" (Array Int Int))\n",
@@ -1536,7 +1536,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		// Constant-string comparison and view-header reads use separate
 		// bindings. Preserve both when a literal is passed as an sview.
 		if _, literal := stripOptimizationParens(argExpr).(*ast.StringLit); literal {
-			if _, view := stripRefForBounds(a.exprTypes[argExpr]).(*SViewType); view {
+			if _, view := stripRefForBounds(a.exprType(argExpr)).(*SViewType); view {
 				return tr.bindSMTSViewLengthArg(env, name, argExpr, argEnv)
 			}
 		}
@@ -1556,7 +1556,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 		return true
 	}
-	if IsBoolType(a.exprTypes[argExpr]) {
+	if IsBoolType(a.exprType(argExpr)) {
 		bterm, ok := tr.boolTerm(argExpr, argEnv)
 		if !ok {
 			return false
@@ -1569,7 +1569,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 			return true
 		}
 	}
-	if tr.isArrayLike(a.exprTypes[argExpr]) {
+	if tr.isArrayLike(a.exprType(argExpr)) {
 		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
 		if !ok {
 			return false
@@ -1577,7 +1577,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		env[name] = arr
 		return true
 	}
-	argType := a.exprTypes[argExpr]
+	argType := a.exprType(argExpr)
 	if argType == nil {
 		// Loop-invariant preservation runs before the loop body has gone
 		// through ordinary expression analysis. Recover a plain darray
@@ -1659,7 +1659,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 		}
 		return true
 	}
-	if a.smtEquationStructType(a.exprTypes[argExpr]) {
+	if a.smtEquationStructType(a.exprType(argExpr)) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
 	}
 	if token, ok := tr.stableRecordRootToken(argExpr, argEnv); ok {
@@ -1670,7 +1670,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// recoverable projection token so a bool predicate over it canonicalizes to the SAME opaque symbol
 	// as the un-substituted occurrence (structural induction). Tokens only key opaque predicate symbols;
 	// they never enter a numeric SMT term (the type checker forbids datatype operands in arithmetic).
-	if isDatatypeValuedType(a.exprTypes[argExpr]) {
+	if isDatatypeValuedType(a.exprType(argExpr)) {
 		if _, _, _, ok := tr.enumConstructor(argExpr); ok {
 			// Keep a substituted variant constructor recognizable: its tag is a constant and its payload
 			// is its arguments. The token never enters a numeric term.
@@ -1687,7 +1687,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// lowering (keyed by the substituted name, not by an env term), so leave it unbound rather than
 	// failing the env build. SOUND: an unbound entry contributes no fact; only the null-compare path
 	// (which folds against the literal/flow facts) can conclude anything about it.
-	if a.exprIsPointerLike(a.exprTypes[argExpr]) {
+	if a.exprIsPointerLike(a.exprType(argExpr)) {
 		return true
 	}
 	// A bound type-param-typed value (the receiver of a protocol-method call in a behavioral-subtyping
@@ -1695,14 +1695,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// projection token so an abstract method call `c.count()` keyed by its receiver canonicalizes the
 	// same on both the obligation and the caller-fact side (docs P1). SOUND: the token only ever keys an
 	// uninterpreted method-result symbol; it never enters a numeric term.
-	if _, ok := stripRefForBounds(a.exprTypes[argExpr]).(*TypeParamType); ok {
+	if _, ok := stripRefForBounds(a.exprType(argExpr)).(*TypeParamType); ok {
 		env[name] = dtToken(smtProjectionName(argExpr))
 		return true
 	}
 	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
 	// body is type-analyzed (e.g. a loop body's `i+1`) has a nil exprTypes entry; falling through to
 	// termEnv resolves it via scope, which is what the loop-invariant preserve proof needs.
-	if isAnyArrayLike(a.exprTypes[argExpr]) && !tr.isArrayLike(a.exprTypes[argExpr]) {
+	if isAnyArrayLike(a.exprType(argExpr)) && !tr.isArrayLike(a.exprType(argExpr)) {
 		// A container whose elements the array theory does not model: bind its length only.
 		if tr.bindSMTLengthOnlyArg(env, name, argExpr, argEnv) {
 			return true
@@ -1713,14 +1713,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// token, so `result.f` reads the same symbols as the call's own `parse(x).f` and its verified
 	// ensures (analyzer_smt_call_projection.go).
 	if call, isCall := stripOptimizationParens(argExpr).(*ast.CallExpr); isCall && call != nil {
-		if _, tuple := stripRefForBounds(a.exprTypes[argExpr]).(*TupleType); tuple {
+		if _, tuple := stripRefForBounds(a.exprType(argExpr)).(*TupleType); tuple {
 			if token, ok := tr.callProjectionToken(call, argEnv); ok {
 				env[name] = dtToken(token)
 				return true
 			}
 		}
 	}
-	if t := a.exprTypes[argExpr]; t != nil && !isSMTExactAssignmentType(t) {
+	if t := a.exprType(argExpr); t != nil && !isSMTExactAssignmentType(t) {
 		return !requireBinding
 	}
 	term, ok := tr.termEnv(argExpr, argEnv)
@@ -1732,7 +1732,7 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 }
 
 func (a *Analyzer) bindSMTStructEnvArg(tr *smtTranslator, env map[string]string, name string, argExpr ast.Expr, argEnv map[string]string, requireBinding bool) bool {
-	st, ok := stripRefForBounds(a.exprTypes[argExpr]).(*StructType)
+	st, ok := stripRefForBounds(a.exprType(argExpr)).(*StructType)
 	if !ok || st == nil {
 		return !requireBinding
 	}
@@ -2128,7 +2128,7 @@ func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {
 		if arg == nil {
 			continue
 		}
-		if rt, ok := a.exprTypes[arg].(*RefType); ok && rt != nil && rt.Mutable {
+		if rt, ok := a.exprType(arg).(*RefType); ok && rt != nil && rt.Mutable {
 			a.invalidateSMTAssertFactsForPointeeCall(arg)
 		}
 	}
@@ -2138,7 +2138,7 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 	if a == nil || target == nil || value == nil {
 		return
 	}
-	targetType := a.exprTypes[target]
+	targetType := a.exprType(target)
 	if targetType == nil {
 		if name, ok := rootIdentName(target); ok && a.currentScope != nil {
 			if sym, found := a.currentScope.Lookup(name); found && sym != nil {
@@ -2146,7 +2146,7 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 			}
 		}
 	}
-	valueType := a.exprTypes[value]
+	valueType := a.exprType(value)
 	if !isSMTExactAssignmentType(targetType) || !isSMTExactAssignmentType(valueType) {
 		return
 	}
@@ -2462,7 +2462,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			if !a.immutableLocalDefinitionCurrent(sc, sym, vd.Value) {
 				continue
 			}
-			eterm, ok := tr.termEnv(a.implicitIntConversion(vd.Value, a.exprTypes[vd.Value], sym.Type), nil)
+			eterm, ok := tr.termEnv(a.implicitIntConversion(vd.Value, a.exprType(vd.Value), sym.Type), nil)
 			if ok {
 				tr.decls[name] = true
 				b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
@@ -2516,7 +2516,7 @@ func (a *Analyzer) castOperandResolvedType(n *ast.CastExpr) Type {
 	if n == nil || n.Operand == nil {
 		return nil
 	}
-	if t := a.exprTypes[n.Operand]; t != nil {
+	if t := a.exprType(n.Operand); t != nil {
 		return t
 	}
 	switch op := n.Operand.(type) {
@@ -2558,7 +2558,7 @@ func (tr *smtTranslator) castOperandType(n *ast.CastExpr) Type {
 	}
 	operand := n.Operand
 	for operand != nil {
-		if typ := tr.a.exprTypes[operand]; typ != nil {
+		if typ := tr.a.exprType(operand); typ != nil {
 			return typ
 		}
 		paren, ok := operand.(*ast.ParenExpr)
@@ -2853,7 +2853,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// is not yet populated — e.g. loop-invariant proving runs BEFORE the body is type-analyzed — from
 		// the symbol's declared type via scope lookup. The declared type is authoritative for a param or
 		// local, so this is sound and is what lets `arr[k]` in a quantified loop invariant translate.
-		t := tr.a.exprTypes[n]
+		t := tr.a.exprType(n)
 		if t == nil && tr.a.currentScope != nil {
 			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
 				t = sym.Type
@@ -2894,7 +2894,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// produced by substitution and never analyzed) — from the object's struct type, mirroring the
 		// Ident-case scope fallback above. Both readings resolve the SAME syntactic path to the SAME
 		// projection symbol, so a field-array length cancels between measure and measure[body].
-		ft := tr.a.exprTypes[n]
+		ft := tr.a.exprType(n)
 		if ft == nil {
 			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
 				ft = resolved
@@ -2936,7 +2936,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 		if tr.calleeFreeProjection(n, env) {
 			return "", false
 		}
-		t := tr.a.exprTypes[n]
+		t := tr.a.exprType(n)
 		if t == nil && tr.a.currentScope != nil {
 			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
 				t = sym.Type
@@ -2946,7 +2946,7 @@ func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]str
 			return smtVar(n.Name) + smtArrayLenSuffix, true
 		}
 	case *ast.FieldExpr:
-		t := tr.a.exprTypes[n]
+		t := tr.a.exprType(n)
 		if t == nil {
 			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
 				t = resolved
@@ -3117,7 +3117,7 @@ func (tr *smtTranslator) keyTermEnv(expr ast.Expr, ksort string, env map[string]
 // setElemType resolves the element type of a set-typed expression (from exprTypes, or the symbol's
 // declared type when the node predates body analysis — e.g. precondition/law proving).
 func (tr *smtTranslator) setElemType(expr ast.Expr) (Type, bool) {
-	t := tr.a.exprTypes[expr]
+	t := tr.a.exprType(expr)
 	if t == nil && tr.a.currentScope != nil {
 		if id, ok := expr.(*ast.Ident); ok {
 			if sym, ok := tr.a.currentScope.Lookup(id.Name); ok && sym != nil {
@@ -3246,7 +3246,7 @@ func (tr *smtTranslator) dictMethodCall(call *ast.CallExpr, kind string, env map
 }
 
 func (tr *smtTranslator) dictType(expr ast.Expr) (*DictType, bool) {
-	t := tr.a.exprTypes[expr]
+	t := tr.a.exprType(expr)
 	if t == nil && tr.a.currentScope != nil {
 		if id, ok := expr.(*ast.Ident); ok {
 			if sym, ok := tr.a.currentScope.Lookup(id.Name); ok && sym != nil {
@@ -3284,11 +3284,11 @@ func (tr *smtTranslator) sameWidthSignRoundTripEnv(outer *ast.CastExpr, env map[
 	}
 	sourceType := tr.castOperandType(inner)
 	sourceSigned, sourceBits, sourceOK := smtIntWidthSign(sourceType)
-	innerSigned, innerBits, innerOK := smtIntWidthSign(tr.a.exprTypes[inner])
+	innerSigned, innerBits, innerOK := smtIntWidthSign(tr.a.exprType(inner))
 	if !innerOK {
 		innerSigned, innerBits, innerOK = postfixCastTargetWidthSign(inner)
 	}
-	outerSigned, outerBits, outerOK := smtIntWidthSign(tr.a.exprTypes[outer])
+	outerSigned, outerBits, outerOK := smtIntWidthSign(tr.a.exprType(outer))
 	if !outerOK {
 		outerSigned, outerBits, outerOK = postfixCastTargetWidthSign(outer)
 	}
@@ -3315,7 +3315,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 	case *ast.IntLit:
 		// Unsigned literals must enter SMT as their mathematical value, not the
 		// signed bit pattern used by the general constant folder.
-		signed, _, typed := smtIntWidthSign(tr.a.exprTypes[n])
+		signed, _, typed := smtIntWidthSign(tr.a.exprType(n))
 		// Contract substitution clones AST nodes without exprTypes entries; the
 		// literal's preserved explicit suffix remains authoritative there.
 		unsignedSuffix := n.Suffix == "u" || n.Suffix == "u8" || n.Suffix == "u16" || n.Suffix == "u32" || n.Suffix == "u64" || n.Suffix == "usize"
@@ -3532,7 +3532,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// Field type from exprTypes (set once analyzed) OR resolved from the object's struct type when
 		// the node is synthetic/cloned (e.g. a substituted derived-state condition, whose field reads
 		// were never analyzed so their per-node type is unset).
-		fieldType := tr.a.exprTypes[n]
+		fieldType := tr.a.exprType(n)
 		if fieldType == nil {
 			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
 				fieldType = resolved
@@ -3573,7 +3573,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// explicitly rather than treating them as identity.
 		sourceType := tr.castOperandType(n)
 		ssign, sbits, sok := smtIntWidthSign(sourceType)
-		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
+		dsign, dbits, dok := smtIntWidthSign(tr.a.exprType(n))
 		if !dok {
 			// The result type is unset for a synthetic/cloned cast node (e.g. the loop-termination
 			// prover's measure[body], whose `field.usize()` cast was produced by substitution and never
@@ -3795,7 +3795,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 // prover only ever concludes on `unsat`, so a wrap can never fabricate a proof — at worst it declines.
 func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) string {
 	raw := smtArith(op, l, r)
-	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	signed, bits, ok := smtIntWidthSign(tr.a.exprType(n))
 	if !ok || bits <= 0 || bits > 64 {
 		return raw
 	}
@@ -3848,7 +3848,7 @@ func smtSignedWrap(raw string, bits int) string {
 // Bridging the Int and BV theories can be costly for the solver on relational goals; the per-query
 // timeout turns any hard case into Unknown → runtime fallback, so soundness holds regardless of cost.
 func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (string, bool) {
-	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	signed, bits, ok := smtIntWidthSign(tr.a.exprType(n))
 	if !ok || bits <= 0 || bits > 64 {
 		return "", false
 	}
@@ -3856,7 +3856,7 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 	// An operand is bit-faithful at the result width when it is a same-width integer (Elisa bitwise is
 	// same-type) or a compile-time constant (`int2bv` reduces it modulo 2^W exactly).
 	sameWidthOrConst := func(e ast.Expr) bool {
-		if _, ebits, ok := smtIntWidthSign(tr.a.exprTypes[e]); ok && ebits == bits {
+		if _, ebits, ok := smtIntWidthSign(tr.a.exprType(e)); ok && ebits == bits {
 			return true
 		}
 		_, isConst := tr.a.constIntValue(e)
@@ -3959,7 +3959,7 @@ func smtAndBoundLemma(result, a, b string, bits int) string {
 // bound above the type minimum). An unsigned operand has no -1 and never overflows. When neither can be
 // shown, the caller abstracts the result so the exact (overflowing) model is never trusted.
 func (tr *smtTranslator) signedDivCannotOverflow(left, right ast.Expr) bool {
-	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[left])
+	signed, bits, ok := smtIntWidthSign(tr.a.exprType(left))
 	if ok && !signed {
 		return true // unsigned: no -1 divisor, cannot overflow
 	}
@@ -4240,7 +4240,7 @@ func (tr *smtTranslator) markIntVar(name string, t Type) {
 // provablyNonNeg reports whether an expression is provably ≥ 0 — by an unsigned type, or by the
 // interval prover's lower bound. Used to gate sound division/modulo translation.
 func (a *Analyzer) provablyNonNeg(expr ast.Expr) bool {
-	if t := a.exprTypes[expr]; t != nil && indexTypeGuaranteedNonNegative(t) {
+	if t := a.exprType(expr); t != nil && indexTypeGuaranteedNonNegative(t) {
 		return true
 	}
 	if f, ok := a.affineOf(expr, a.currentScope); ok {
@@ -4549,7 +4549,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		if term, ok, handled := tr.aggregateProjectionBool(n, env); handled {
 			return term, ok
 		}
-		fieldType := tr.a.exprTypes[n]
+		fieldType := tr.a.exprType(n)
 		if fieldType == nil {
 			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
 				fieldType = resolved
@@ -4869,7 +4869,7 @@ func (tr *smtTranslator) isUnsignedSumTypeMaxGuard(n *ast.BinaryExpr) bool {
 	if !ok || sum.Op != lexer.TOKEN_PLUS {
 		return false
 	}
-	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[sum])
+	signed, bits, ok := smtIntWidthSign(tr.a.exprType(sum))
 	if !ok || signed || bits <= 0 || bits > 64 {
 		return false
 	}
@@ -4891,8 +4891,8 @@ func smtEnvHasQuantifierBinder(env map[string]string) bool {
 }
 
 func (tr *smtTranslator) compareWidthSign(left, right ast.Expr) (signed bool, bits int, ok bool) {
-	ls, lb, lok := smtIntWidthSign(tr.a.exprTypes[left])
-	rs, rb, rok := smtIntWidthSign(tr.a.exprTypes[right])
+	ls, lb, lok := smtIntWidthSign(tr.a.exprType(left))
+	rs, rb, rok := smtIntWidthSign(tr.a.exprType(right))
 	if lok && rok && ls == rs && lb == rb {
 		return ls, lb, true
 	}
@@ -4910,7 +4910,7 @@ func (tr *smtTranslator) containsFixedWidthMachineArith(expr ast.Expr) bool {
 	case *ast.BinaryExpr:
 		switch n.Op {
 		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR:
-			if _, bits, ok := smtIntWidthSign(tr.a.exprTypes[n]); ok && bits > 0 && bits <= 64 {
+			if _, bits, ok := smtIntWidthSign(tr.a.exprType(n)); ok && bits > 0 && bits <= 64 {
 				return true
 			}
 		}
@@ -5219,7 +5219,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if !tr.opaqueCallQuantifierIndependent(call, argEnv) {
 		return tr.scalarCallUF(call, argEnv, "Int")
 	}
-	resultType := tr.a.exprTypes[call]
+	resultType := tr.a.exprType(call)
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
 	decl = tr.a.readDecl(decl)
 	if resultType == nil && direct && decl != nil {
@@ -5485,7 +5485,7 @@ func (tr *smtTranslator) abstractMethodReturnType(call *ast.CallExpr) Type {
 	}
 	if iface == nil {
 		// Method form: the receiver expression's resolved type is a bound type param.
-		if recvType := tr.a.exprTypes[fieldExpr.Object]; recvType != nil {
+		if recvType := tr.a.exprType(fieldExpr.Object); recvType != nil {
 			if tp, ok := stripRefForBounds(recvType).(*TypeParamType); ok {
 				if bound, isTypeParam := tr.a.lookupTypeParamInterface(tp.Name); isTypeParam {
 					iface = bound
@@ -5594,7 +5594,7 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	if sym, ok := tr.interfaceMethodBoolSym(call, argEnv); ok {
 		return sym, true
 	}
-	resultType := tr.a.exprTypes[call]
+	resultType := tr.a.exprType(call)
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
 	decl = tr.a.readDecl(decl)
 	if resultType == nil && direct && decl != nil {
@@ -6053,9 +6053,9 @@ func (tr *smtTranslator) callKeyBindLocal(local *ast.VarDeclStmt, owner *ast.Fun
 	}
 	var term string
 	var ok bool
-	if IsBoolType(tr.a.exprTypes[local.Value]) {
+	if IsBoolType(tr.a.exprType(local.Value)) {
 		term, ok = tr.boolTerm(local.Value, env)
-	} else if _, isView := stripRefForBounds(tr.a.exprTypes[local.Value]).(*SViewType); isView {
+	} else if _, isView := stripRefForBounds(tr.a.exprType(local.Value)).(*SViewType); isView {
 		term, ok = tr.arrayTermEnv(local.Value, env)
 	} else {
 		term, ok = tr.termEnv(local.Value, env)
@@ -6074,7 +6074,7 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 	// Immutable views have no scalar SMT term, but call congruence can key them by
 	// their already-authorized byte-array binding. This preserves sharing for
 	// recursive contract calls without asserting any property of the view contents.
-	if _, ok := stripRefForBounds(tr.a.exprTypes[arg]).(*SViewType); ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(arg)).(*SViewType); ok {
 		return tr.arrayTermEnv(arg, env)
 	}
 	if t := tr.a.containerArgType(arg); t != nil && !tr.isArrayLike(t) {
@@ -6098,13 +6098,13 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 			}
 		}
 	}
-	if IsBoolType(tr.a.exprTypes[arg]) {
+	if IsBoolType(tr.a.exprType(arg)) {
 		return tr.boolTerm(arg, env)
 	}
 	// A bound type-param-typed receiver (`c: C`) has no scalar term; key it by its env binding (a
 	// dtToken, when substituted) or its projection token. This is what makes an abstract method call
 	// keyed by its receiver canonicalize identically on the obligation and caller-fact sides (docs P1).
-	if _, ok := stripRefForBounds(tr.a.exprTypes[arg]).(*TypeParamType); ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(arg)).(*TypeParamType); ok {
 		if id, ok := arg.(*ast.Ident); ok && env != nil {
 			if bound, ok := env[id.Name]; ok {
 				return bound, true
@@ -6117,8 +6117,8 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 	if token, ok := tr.stableRecordRootTokenGate(arg, env, tr.a.sviewFrameWriteFreeGhostReads); ok {
 		return "record:" + token, true
 	}
-	if tr.a.smtEquationStructType(tr.a.exprTypes[arg]) {
-		st, _ := stripRefForBounds(tr.a.exprTypes[arg]).(*StructType)
+	if tr.a.smtEquationStructType(tr.a.exprType(arg)) {
+		st, _ := stripRefForBounds(tr.a.exprType(arg)).(*StructType)
 		leaves, ok := tr.scalarStructArgLeaves(arg, st, env)
 		if !ok {
 			return "", false
@@ -6131,7 +6131,7 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 	}
 	// An array-modeled container is the array term the call's env binds it to, so that term
 	// identifies it (contents and length) as a call argument.
-	if tr.isArrayLike(tr.a.exprTypes[arg]) {
+	if tr.isArrayLike(tr.a.exprType(arg)) {
 		if arr, ok := tr.arrayTermEnv(arg, env); ok {
 			return "array:" + arr, true
 		}
@@ -6677,7 +6677,7 @@ func (a *Analyzer) tupleLiteralFieldValue(tuple *ast.TupleExpr, name string) (as
 	if tuple == nil || name == "" {
 		return nil, false
 	}
-	typ, ok := contextualTupleType(a.exprTypes[tuple])
+	typ, ok := contextualTupleType(a.exprType(tuple))
 	if !ok || len(typ.Fields) != len(tuple.Elems) {
 		return nil, false
 	}
@@ -6701,7 +6701,7 @@ func (a *Analyzer) tupleLiteralFieldMap(tuple *ast.TupleExpr) map[string]ast.Exp
 	if tuple == nil {
 		return nil
 	}
-	typ, ok := contextualTupleType(a.exprTypes[tuple])
+	typ, ok := contextualTupleType(a.exprType(tuple))
 	if !ok || len(typ.Fields) != len(tuple.Elems) {
 		return nil
 	}
@@ -6727,7 +6727,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 		return nil
 	}
 	if sl.ResolvedArgsValid {
-		typ, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType)
+		typ, ok := stripRefForBounds(a.exprType(sl)).(*StructType)
 		if !ok || typ == nil || typ.Decl == nil || len(sl.ResolvedArgs) != len(typ.Decl.Fields) {
 			return nil
 		}
@@ -6752,7 +6752,7 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 	reevaluable := a.structLiteralReevaluable(sl)
 	args := sl.Args
 	var ordered []string
-	if st, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType); ok && st != nil && st.Decl != nil {
+	if st, ok := stripRefForBounds(a.exprType(sl)).(*StructType); ok && st != nil && st.Decl != nil {
 		for _, fd := range st.Decl.Fields {
 			ordered = append(ordered, fd.Name)
 		}
@@ -6954,7 +6954,7 @@ func (tr *smtTranslator) constIntTerm(expr ast.Expr, c int64) string {
 	if c >= 0 || tr == nil || tr.a == nil {
 		return smtInt(c)
 	}
-	t := tr.a.exprTypes[expr]
+	t := tr.a.exprType(expr)
 	if t == nil {
 		if id, ok := expr.(*ast.Ident); ok {
 			if name, resolved := tr.a.resolvedValueNames[id]; resolved && tr.a.globalScope != nil {
@@ -7192,7 +7192,7 @@ func (a *Analyzer) smtCallLocalResultOnlyEnsures(tr *smtTranslator, b *strings.B
 	if !direct || decl == nil || len(decl.Requires) != 0 || len(decl.EnsureValues) == 0 || decl == a.currentFuncDecl || a.isRecursiveProofCall(decl) {
 		return
 	}
-	if a.implicitIntConversion(value, a.exprTypes[value], sym.Type) != value {
+	if a.implicitIntConversion(value, a.exprType(value), sym.Type) != value {
 		return
 	}
 	if _, _, ok := smtIntWidthSign(sym.Type); !ok {
@@ -7218,7 +7218,7 @@ func (a *Analyzer) smtCallLocalResultOnlyEnsures(tr *smtTranslator, b *strings.B
 // (emitMembershipCompareValueAndExpr): a disjunction of `x == a` and `lo <= x <= hi` (`< hi` for
 // `..<`). Any other candidate shape declines.
 func (tr *smtTranslator) literalMembershipTerm(left, right ast.Expr, env map[string]string) (string, bool) {
-	if t, ok := smtNumericValueType(tr.a.exprTypes[left]); !ok || IsFloatType(t) {
+	if t, ok := smtNumericValueType(tr.a.exprType(left)); !ok || IsFloatType(t) {
 		return "", false
 	}
 	var elems []ast.Expr
@@ -7287,7 +7287,7 @@ func (tr *smtTranslator) literalMembershipTerm(left, right ast.Expr, env map[str
 
 // recordFieldNamed reports whether obj is a tuple or struct value with a declared field `name`.
 func (a *Analyzer) recordFieldNamed(obj ast.Expr, name string) bool {
-	switch t := stripRefForBounds(a.exprTypes[obj]).(type) {
+	switch t := stripRefForBounds(a.exprType(obj)).(type) {
 	case *TupleType:
 		for _, field := range t.Fields {
 			if field.Name == name {
@@ -7312,7 +7312,7 @@ func (tr *smtTranslator) ternaryProjectionTerm(n *ast.FieldExpr, tern *ast.Terna
 	}
 	arm := func(value ast.Expr) (string, bool) {
 		field := &ast.FieldExpr{Position: n.Position, Object: value, Field: n.Field}
-		if t := tr.a.exprTypes[n]; t != nil {
+		if t := tr.a.exprType(n); t != nil {
 			tr.a.exprTypes[field] = t
 		}
 		return tr.termEnv(field, env)
@@ -7424,7 +7424,7 @@ func (a *Analyzer) ternaryBranchType(expr ast.Expr) Type {
 		return nil
 	}
 	for _, branch := range []ast.Expr{ternary.Value, ternary.Alt} {
-		if t := a.exprTypes[branch]; t != nil {
+		if t := a.exprType(branch); t != nil {
 			return t
 		}
 		if t := a.ternaryBranchType(branch); t != nil {

@@ -132,12 +132,12 @@ func (a *Analyzer) retainedObservesFieldSet(fn *ast.FuncDecl, targets map[Type]b
 	}
 	hit := false
 	reaches := func(e ast.Expr) bool {
-		t, ok := a.exprTypes[e]
+		t, ok := a.lookupExprType(e)
 		return !ok || retainedTypeReaches(t, targets, memo)
 	}
 	var typedReaches func(e ast.Expr) bool
 	typedReaches = func(e ast.Expr) bool {
-		if t, ok := a.exprTypes[e]; ok {
+		if t, ok := a.lookupExprType(e); ok {
 			return retainedTypeReaches(t, targets, memo)
 		}
 		if p, ok := e.(*ast.ParenExpr); ok {

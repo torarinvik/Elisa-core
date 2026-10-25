@@ -129,7 +129,7 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	// numRange has signed int64 endpoints. The const folder represents a high
 	// u64 literal as negative bits, which cannot describe an unsigned bound.
 	// Leave that comparison to the width-aware SMT guard instead.
-	if signed, _, typed := smtIntWidthSign(a.exprTypes[identExpr]); typed && !signed && c < 0 {
+	if signed, _, typed := smtIntWidthSign(a.exprType(identExpr)); typed && !signed && c < 0 {
 		return
 	}
 	// The FALSY branch (the fall-through after `if a < c: return …`, or an else) narrows by the
@@ -152,7 +152,7 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	case lexer.TOKEN_EQEQ: // a == c
 		fact = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
 	case lexer.TOKEN_BANGEQ: // a != c — a single range only for an UNSIGNED zero-check: a != 0 ⇒ a >= 1
-		if signed, _, ok := smtIntWidthSign(a.exprTypes[identExpr]); ok && !signed && c == 0 {
+		if signed, _, ok := smtIntWidthSign(a.exprType(identExpr)); ok && !signed && c == 0 {
 			fact = numRange{loKnown: true, lo: 1}
 		} else {
 			return
@@ -627,7 +627,7 @@ func fieldPathKey(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
 		return "", false
 	}
 	// The field's resolved type must be an integer (non-float numeric).
-	ft := a.exprTypes[expr]
+	ft := a.exprType(expr)
 	if ft == nil || !IsNumericType(ft) || IsFloatType(ft) {
 		return "", false
 	}
@@ -2712,7 +2712,7 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 				if r, rOk := a.lookupRangeFact(pathKey); rOk {
 					// Also intersect with the declared type bounds (unsigned non-negativity, etc.),
 					// mirroring the bare-ident path below.
-					if ft := a.exprTypes[value]; ft != nil {
+					if ft := a.exprType(value); ft != nil {
 						if tr, trOk := declaredTypeRange(ft); trOk {
 							r = r.intersect(tr)
 						}

@@ -238,7 +238,7 @@ func (a *Analyzer) analyzeLocalInitializer(n *ast.VarDeclStmt, expected Type) Ty
 	nodes := input.nodes
 	tags := make([]byte, len(nodes)+1)
 	for i, node := range nodes {
-		tag, ok := primitiveTypeTag(a, a.exprTypes[node])
+		tag, ok := primitiveTypeTag(a, a.exprType(node))
 		if !ok {
 			return result
 		}

@@ -139,7 +139,7 @@ func (a *Analyzer) analyzeSplitAtHelperCall(expr *ast.CallExpr) Type {
 	}
 	viewType, ok := denseDViewType(a.analyzeExpr(expr.Args[0]))
 	if !ok {
-		actual := a.exprTypes[expr.Args[0]]
+		actual := a.exprType(expr.Args[0])
 		if actual == nil {
 			actual = invalidType
 		}
@@ -169,7 +169,7 @@ func (a *Analyzer) analyzeChunksExactHelperCall(expr *ast.CallExpr) Type {
 	}
 	viewType, ok := denseDViewType(a.analyzeExpr(expr.Args[0]))
 	if !ok {
-		actual := a.exprTypes[expr.Args[0]]
+		actual := a.exprType(expr.Args[0])
 		if actual == nil {
 			actual = invalidType
 		}
@@ -208,7 +208,7 @@ func (a *Analyzer) analyzeReduceSumHelperCall(expr *ast.CallExpr) Type {
 	}
 
 	if !srcOK {
-		actual := a.exprTypes[expr.Args[0]]
+		actual := a.exprType(expr.Args[0])
 		if actual == nil {
 			actual = invalidType
 		}

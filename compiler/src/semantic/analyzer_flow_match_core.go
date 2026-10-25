@@ -207,7 +207,7 @@ func (a *Analyzer) analyzeExpectPatternStmt(stmt *ast.ExpectPatternStmt) {
 	if len(stmt.Patterns) == 0 {
 		return
 	}
-	valueType := a.exprTypes[stmt.Value]
+	valueType := a.exprType(stmt.Value)
 	if valueType == nil {
 		valueType = a.analyzeExpr(stmt.Value)
 	}

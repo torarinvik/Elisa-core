@@ -82,15 +82,15 @@ func (a *Analyzer) branchLocalDefinitions(scope *Scope) map[string]ast.Expr {
 			default:
 				continue
 			}
-			if _, same := stripRefForBounds(a.exprTypes[vd.Value]).(*SViewType); !same {
+			if _, same := stripRefForBounds(a.exprType(vd.Value)).(*SViewType); !same {
 				continue
 			}
 			value = vd.Value
 		default:
-			if !isSMTExactAssignmentType(t) || !isSMTExactAssignmentType(a.exprTypes[vd.Value]) {
+			if !isSMTExactAssignmentType(t) || !isSMTExactAssignmentType(a.exprType(vd.Value)) {
 				continue
 			}
-			value = a.implicitIntConversion(vd.Value, a.exprTypes[vd.Value], sym.Type)
+			value = a.implicitIntConversion(vd.Value, a.exprType(vd.Value), sym.Type)
 		}
 		if !a.branchLocalInitializerCurrent(scope, sym, vd) {
 			continue
@@ -386,7 +386,7 @@ func (a *Analyzer) substituteTypedIdents(expr ast.Expr, subst map[string]ast.Exp
 	default:
 		return nil, false
 	}
-	if t := a.exprTypes[expr]; t != nil {
+	if t := a.exprType(expr); t != nil {
 		a.exprTypes[out] = t
 	}
 	return out, true

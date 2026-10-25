@@ -111,8 +111,8 @@ func replayPrimitiveParameterNodes(a *Analyzer, nodes []ast.Expr, types string) 
 		case *ast.MembershipRangeExpr:
 			next = replay(next)
 			next = replay(next)
-			a.consumeAffineValueExpr(node.Start, a.exprTypes[node.Start], "move into membership range start")
-			a.consumeAffineValueExpr(node.End, a.exprTypes[node.End], "move into membership range end")
+			a.consumeAffineValueExpr(node.Start, a.exprType(node.Start), "move into membership range start")
+			a.consumeAffineValueExpr(node.End, a.exprType(node.End), "move into membership range end")
 			return next // Cold analysis does not publish a standalone range type.
 		case *ast.BinaryExpr:
 			next = replay(next)
@@ -123,9 +123,9 @@ func replayPrimitiveParameterNodes(a *Analyzer, nodes []ast.Expr, types string) 
 					list = &ast.ListLitExpr{Position: rangeNode.Pos(), Elems: []ast.Expr{rangeNode}}
 					node.Right = list
 				}
-				element := MergeTypes(a.exprTypes[rangeNode.Start], a.exprTypes[rangeNode.End])
+				element := MergeTypes(a.exprType(rangeNode.Start), a.exprType(rangeNode.End))
 				if IsInvalidType(element) {
-					element = a.exprTypes[node.Left]
+					element = a.exprType(node.Left)
 				}
 				a.recordAnalyzedExprType(list, &ArrayType{Elem: element, Size: "1", HasConstSize: true, ConstSize: 1})
 			}

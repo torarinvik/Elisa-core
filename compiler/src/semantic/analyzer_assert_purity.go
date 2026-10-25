@@ -65,7 +65,7 @@ func (a *Analyzer) assertCondMutatingCall(expr ast.Expr) (string, bool) {
 				return
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
-				if ft, ok := a.exprTypes[call.Func].(*FuncType); ok && ft != nil {
+				if ft, ok := a.exprType(call.Func).(*FuncType); ok && ft != nil {
 					for _, p := range ft.Params {
 						if ref, ok := p.(*RefType); ok && ref.Mutable {
 							name, found = callIdentName(call), true

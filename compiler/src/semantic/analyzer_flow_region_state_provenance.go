@@ -145,9 +145,9 @@ func (a *Analyzer) instantiateReturnProvenanceArgState(index int, args []ast.Exp
 		// A region-less container binding (`xs: darray[u8]` in an inferred auto region) carries its
 		// region on its type, not in a provenance state. A callee result that borrows the argument's
 		// buffer still dies with that region.
-		if state, typeOK := a.containerRegionDependency(a.exprTypes[stripAddrOfParens(args[index])]); typeOK {
+		if state, typeOK := a.containerRegionDependency(a.exprType(stripAddrOfParens(args[index]))); typeOK {
 			argState, ok = state, true
-		} else if state, paramOK := a.paramRootRegionDependency(stripAddrOfParens(args[index])); paramOK && (isBufferOwningType(a.exprTypes[stripAddrOfParens(args[index])]) || structOwnsRegionlessBuffers(stripRefForBounds(a.exprTypes[stripAddrOfParens(args[index])]))) {
+		} else if state, paramOK := a.paramRootRegionDependency(stripAddrOfParens(args[index])); paramOK && (isBufferOwningType(a.exprType(stripAddrOfParens(args[index]))) || structOwnsRegionlessBuffers(stripRefForBounds(a.exprType(stripAddrOfParens(args[index]))))) {
 			// The same region-less container reached as one of our own parameters: the
 			// result borrows the caller's argument.
 			argState, ok = state, true

@@ -1779,7 +1779,7 @@ func (a *Analyzer) typeLoopInvariantsQuietly(invs []*ast.ContractStmt) {
 		a.proofReport = a.proofReport[:savedProofs]
 	}()
 	for _, inv := range invs {
-		if inv != nil && inv.Cond != nil && a.exprTypes[inv.Cond] == nil {
+		if inv != nil && inv.Cond != nil && a.exprType(inv.Cond) == nil {
 			a.analyzeCondExpr(inv.Cond)
 		}
 	}

@@ -171,7 +171,7 @@ func (a *Analyzer) invalidateFactsForMutatingBuiltinMethod(expr *ast.CallExpr) {
 // (nil) returns false: the name-set gate alone is then the only filter, which stays sound because the
 // fact channels are only consulted for variables that were narrowed in the first place.
 func (a *Analyzer) receiverIsBuiltinCollection(obj ast.Expr) bool {
-	receiverType := a.exprTypes[obj]
+	receiverType := a.exprType(obj)
 	if receiverType == nil {
 		// machine from builds its capture manifest before arm expressions are analyzed.
 		// Recover the type from collected symbols/fields so a builtin mutation such as

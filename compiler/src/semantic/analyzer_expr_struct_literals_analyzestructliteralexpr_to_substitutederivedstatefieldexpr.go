@@ -307,7 +307,7 @@ func (a *Analyzer) approximateInitHookArgType(expr ast.Expr) Type {
 	if expr == nil {
 		return nil
 	}
-	if actual, ok := a.exprTypes[expr]; ok && actual != nil && !IsInvalidType(actual) {
+	if actual, ok := a.lookupExprType(expr); ok && actual != nil && !IsInvalidType(actual) {
 		return actual
 	}
 	switch n := expr.(type) {

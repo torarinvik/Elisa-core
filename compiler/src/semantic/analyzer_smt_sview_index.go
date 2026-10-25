@@ -191,10 +191,10 @@ func (tr *smtTranslator) sliceLengthTerm(obj ast.Expr, env map[string]string) (s
 	if !ok || slice == nil || slice.Start == nil || slice.End == nil {
 		return "", false
 	}
-	if _, ok := stripRefForBounds(tr.a.exprTypes[slice.Object]).(*SViewType); !ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(slice.Object)).(*SViewType); !ok {
 		return "", false
 	}
-	if _, ok := stripRefForBounds(tr.a.exprTypes[slice]).(*SViewType); !ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(slice)).(*SViewType); !ok {
 		return "", false
 	}
 	start, ok := tr.termEnv(slice.Start, env)
@@ -354,7 +354,7 @@ func (a *Analyzer) implicitIntConversion(value ast.Expr, valueType Type, targetT
 		}
 		// A view's length is non-negative (the SMT preamble asserts it for every length symbol), so
 		// its conversion into a wide unsigned type preserves the value.
-		if f, ok := stripOptimizationParens(value).(*ast.FieldExpr); ok && f != nil && !f.Safe && f.Field == "len" && isStringViewType(stripRefForBounds(a.exprTypes[f.Object])) {
+		if f, ok := stripOptimizationParens(value).(*ast.FieldExpr); ok && f != nil && !f.Safe && f.Field == "len" && isStringViewType(stripRefForBounds(a.exprType(f.Object))) {
 			return value
 		}
 	}
@@ -446,7 +446,7 @@ func (tr *smtTranslator) mixedSignFitGuard(n *ast.BinaryExpr, r string) (string,
 	a := tr.a
 	var leftType, rightType Type
 	if tr.calleeBodyDepth != 0 {
-		leftType, rightType = a.exprTypes[n.Left], a.exprTypes[n.Right]
+		leftType, rightType = a.exprType(n.Left), a.exprType(n.Right)
 	} else {
 		if a.mentionsUnscopedName(n.Left) || a.mentionsUnscopedName(n.Right) {
 			return "", false
@@ -503,7 +503,7 @@ func (tr *smtTranslator) mixedSignConvertedRight(n *ast.BinaryExpr, r string) (s
 	a := tr.a
 	var leftType Type
 	if tr.calleeBodyDepth != 0 {
-		leftType = a.exprTypes[n.Left]
+		leftType = a.exprType(n.Left)
 	} else {
 		leftType = a.smtOperandType(n.Left)
 	}
@@ -527,7 +527,7 @@ func (tr *smtTranslator) mixedSignWrapModulus(n *ast.BinaryExpr) string {
 	a := tr.a
 	var leftType, rightType Type
 	if tr.calleeBodyDepth != 0 {
-		leftType, rightType = a.exprTypes[n.Left], a.exprTypes[n.Right]
+		leftType, rightType = a.exprType(n.Left), a.exprType(n.Right)
 	} else {
 		leftType, rightType = a.smtOperandType(n.Left), a.smtOperandType(n.Right)
 	}
@@ -543,7 +543,7 @@ func (tr *smtTranslator) mixedSignWrapModulus(n *ast.BinaryExpr) string {
 // the scope type of a bare identifier, `result`'s return type, the resolved type of a field read, or
 // an sview's i64 `.len`.
 func (a *Analyzer) smtOperandType(e ast.Expr) Type {
-	if t := a.exprTypes[e]; t != nil {
+	if t := a.exprType(e); t != nil {
 		return t
 	}
 	switch op := stripOptimizationParens(e).(type) {
@@ -566,7 +566,7 @@ func (a *Analyzer) smtOperandType(e ast.Expr) Type {
 			return a.currentReturn
 		}
 	}
-	return a.exprTypes[stripOptimizationParens(e)]
+	return a.exprType(stripOptimizationParens(e))
 }
 
 // mentionsUnscopedName reports whether an expression reads a name that is neither in scope, nor

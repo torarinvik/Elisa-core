@@ -30,7 +30,7 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 	} else if literal, ok := stripOptimizationParens(n.Left).(*ast.StringLit); ok && literal.Value == "" {
 		value, empty = n.Right, true
 	}
-	_, viewValue := stripRefForBounds(tr.a.exprTypes[value]).(*SViewType)
+	_, viewValue := stripRefForBounds(tr.a.exprType(value)).(*SViewType)
 	if empty && viewValue {
 		length, ok := tr.termEnv(&ast.FieldExpr{Position: value.Pos(), Object: value, Field: "len"}, env)
 		if ok {
@@ -79,10 +79,10 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 // sviewEqualityOperand admits a typed view, or a ternary or pure-function call whose view
 // parts sviewContentParts derives structurally (a merged return value carries no type).
 func (tr *smtTranslator) sviewEqualityOperand(expr ast.Expr) bool {
-	if _, ok := stripRefForBounds(tr.a.exprTypes[expr]).(*SViewType); ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(expr)).(*SViewType); ok {
 		return true
 	}
-	if tr.a.exprTypes[expr] == nil {
+	if tr.a.exprType(expr) == nil {
 		if _, ok := stripRefForBounds(tr.placeStaticType(expr)).(*SViewType); ok {
 			return true
 		}
@@ -273,7 +273,7 @@ func (tr *smtTranslator) sviewContentParts(expr ast.Expr, env map[string]string)
 	if slice == nil || slice.Start == nil || slice.End == nil {
 		return "", "", "", false
 	}
-	if _, ok := stripRefForBounds(tr.a.exprTypes[slice.Object]).(*SViewType); !ok {
+	if _, ok := stripRefForBounds(tr.a.exprType(slice.Object)).(*SViewType); !ok {
 		return "", "", "", false
 	}
 	base := stripOptimizationParens(slice.Object)

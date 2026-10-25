@@ -286,7 +286,7 @@ func (a *Analyzer) shortCircuitStablePredicate(expr ast.Expr) bool {
 	if a.suppressDiagnostics {
 		a.shortCircuitStability = nil
 	}
-	_, typed := a.exprTypes[expr]
+	_, typed := a.lookupExprType(expr)
 	if a.shortCircuitStability == nil || a.suppressDiagnostics || !typed {
 		return a.shortCircuitStablePredicateUncached(expr)
 	}
@@ -320,7 +320,7 @@ func (a *Analyzer) shortCircuitStablePredicateUncached(expr ast.Expr) bool {
 	if root, global := a.globalStorageRoot(expr); global && (root.Mutable || root.Kind == SymbolExternVar) {
 		return false
 	}
-	if ref, borrowed := a.exprTypes[expr].(*RefType); borrowed && ref.Storage == RefStorageStatic {
+	if ref, borrowed := a.exprType(expr).(*RefType); borrowed && ref.Storage == RefStorageStatic {
 		return false
 	}
 	switch n := expr.(type) {
@@ -331,11 +331,11 @@ func (a *Analyzer) shortCircuitStablePredicateUncached(expr ast.Expr) bool {
 	case *ast.FieldExpr:
 		return n != nil && a.shortCircuitStablePredicate(n.Object)
 	case *ast.UnaryExpr:
-		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && n.Op != lexer.TOKEN_STAR && shortCircuitPrimitiveType(a.exprTypes[n.Operand]) && a.shortCircuitStablePredicate(n.Operand)
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && n.Op != lexer.TOKEN_STAR && shortCircuitPrimitiveType(a.exprType(n.Operand)) && a.shortCircuitStablePredicate(n.Operand)
 	case *ast.BinaryExpr:
-		return n != nil && shortCircuitPrimitiveType(a.exprTypes[n.Left]) && shortCircuitPrimitiveType(a.exprTypes[n.Right]) && a.shortCircuitStablePredicate(n.Left) && a.shortCircuitStablePredicate(n.Right)
+		return n != nil && shortCircuitPrimitiveType(a.exprType(n.Left)) && shortCircuitPrimitiveType(a.exprType(n.Right)) && a.shortCircuitStablePredicate(n.Left) && a.shortCircuitStablePredicate(n.Right)
 	case *ast.CastExpr:
-		return n != nil && shortCircuitPrimitiveType(a.exprTypes[n.Operand]) && shortCircuitPrimitiveType(a.exprTypes[n]) && a.shortCircuitStablePredicate(n.Operand)
+		return n != nil && shortCircuitPrimitiveType(a.exprType(n.Operand)) && shortCircuitPrimitiveType(a.exprType(n)) && a.shortCircuitStablePredicate(n.Operand)
 	case *ast.CallExpr:
 		decl, ok := a.resolveDirectCallFuncDecl(n)
 		if !ok || decl == nil || !a.functionDefiningEquationEligible(decl) {

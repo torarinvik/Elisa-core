@@ -57,7 +57,7 @@ func (a *Analyzer) derivedLoopLiteralBound(expr ast.Expr, depth int, fuel *int) 
 			return nil, false
 		}
 		value = big.NewInt(constant.Int)
-		if isUnsignedIntegerType(a.exprTypes[expr]) {
+		if isUnsignedIntegerType(a.exprType(expr)) {
 			value.SetUint64(uint64(constant.Int))
 		}
 	case *ast.ParenExpr:
@@ -97,7 +97,7 @@ func (a *Analyzer) derivedLoopLiteralBound(expr ast.Expr, depth int, fuel *int) 
 	default:
 		return nil, false
 	}
-	if !derivedLoopIntegerFits(value, a.exprTypes[expr]) {
+	if !derivedLoopIntegerFits(value, a.exprType(expr)) {
 		return nil, false
 	}
 	return value, true
@@ -113,7 +113,7 @@ func (a *Analyzer) classifyDerivedLiteralRange(stmt *ast.ForStmt) (known, empty,
 	if !sk || !ek {
 		return false, false, false
 	}
-	common := CommonNumericType(a.exprTypes[stmt.Start], a.exprTypes[stmt.End])
+	common := CommonNumericType(a.exprType(stmt.Start), a.exprType(stmt.End))
 	if !derivedLoopIntegerFits(start, common) || !derivedLoopIntegerFits(end, common) {
 		return false, false, false
 	}

@@ -197,7 +197,7 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		if a.isFreshRegionAllocation(vd) {
 			seen[vd.Name] = true
 			order = append(order, vd.Name)
-			if dt, ok := StripAggregateStateType(a.exprTypes[vd.Value]).(*DArrayType); ok {
+			if dt, ok := StripAggregateStateType(a.exprType(vd.Value)).(*DArrayType); ok {
 				elemTypeByName[vd.Name] = dt.Elem
 			}
 			continue

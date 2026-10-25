@@ -1170,7 +1170,7 @@ func (a *Analyzer) isBuiltinDarrayCopyInCall(call *ast.CallExpr) bool {
 	if !ok || field == nil || len(call.Args) != 1 || (field.Field != "extend" && field.Field != "push") {
 		return false
 	}
-	if _, isDArray := stripRefForBounds(a.exprTypes[field.Object]).(*DArrayType); !isDArray {
+	if _, isDArray := stripRefForBounds(a.exprType(field.Object)).(*DArrayType); !isDArray {
 		return false
 	}
 	return a.returnBorrowBuiltinMethodCall(call)

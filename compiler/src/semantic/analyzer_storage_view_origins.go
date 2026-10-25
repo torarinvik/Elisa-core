@@ -165,7 +165,7 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 		if a.isEnumVariantConstructorCall(n) {
 			var out []storageViewReturnOrigin
 			for _, argument := range n.Args {
-				if t := a.exprTypes[argument]; t != nil && !a.typeCarriesBorrowedStorage(t, map[Type]bool{}) {
+				if t := a.exprType(argument); t != nil && !a.typeCarriesBorrowedStorage(t, map[Type]bool{}) {
 					continue
 				}
 				mapped, ok := a.storageViewOriginsOfExpr(argument, params, locals, depth, hops+1, into)
@@ -194,7 +194,7 @@ func (a *Analyzer) storageViewOriginsOfExpr(expr ast.Expr, params map[string]int
 			case "as_sview", "as_cstr", "view":
 				return a.storageViewOriginsOfExpr(field.Object, params, locals, depth, hops+1, true)
 			case "get", "get_mut":
-				if _, isDict := stripRefForBounds(a.exprTypes[field.Object]).(*DictType); isDict {
+				if _, isDict := stripRefForBounds(a.exprType(field.Object)).(*DictType); isDict {
 					return a.storageViewOriginsOfExpr(field.Object, params, locals, depth, hops+1, true)
 				}
 			}
@@ -262,7 +262,7 @@ func (a *Analyzer) storageViewOriginCallee(call *ast.CallExpr) ([]*ast.FuncDecl,
 			// The static form `Holder.name(h)` names the impl's receiver type and passes
 			// the receiver as an ordinary argument.
 			typeName := ""
-			if ident, isIdent := field.Object.(*ast.Ident); isIdent && ident != nil && a.exprTypes[field.Object] == nil {
+			if ident, isIdent := field.Object.(*ast.Ident); isIdent && ident != nil && a.exprType(field.Object) == nil {
 				typeName = ident.Name
 			}
 			collect := func(onlyType string) []*ast.FuncDecl {

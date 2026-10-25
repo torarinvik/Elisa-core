@@ -50,7 +50,7 @@ func (a *Analyzer) recordBuiltinHelperFuncType(expr *ast.CallExpr, name string, 
 	}
 	params := make([]Type, 0, len(expr.Args))
 	for _, arg := range expr.Args {
-		argType := a.exprTypes[arg]
+		argType := a.exprType(arg)
 		if argType == nil {
 			argType = invalidType
 		}
@@ -188,7 +188,7 @@ func (a *Analyzer) resolvePackedStoreRootPathWithSeen(expr ast.Expr, seen map[*S
 	case *ast.MoveExpr:
 		return a.resolvePackedStoreRootPathWithSeen(n.Operand, seen)
 	case *ast.FieldExpr:
-		if actual := a.exprTypes[expr]; actual != nil {
+		if actual := a.exprType(expr); actual != nil {
 			if storeType, ok := StripAggregateStateType(actual).(*PackedEnumStoreType); ok && storeType != nil {
 				if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok && resolved != nil {
 					return a.resolvePackedStoreRootPathWithSeen(resolved, seen)

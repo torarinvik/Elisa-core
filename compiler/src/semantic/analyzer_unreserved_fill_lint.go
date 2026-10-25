@@ -336,7 +336,7 @@ func (a *Analyzer) growthTargetIsDArray(body []ast.Stmt, name string) bool {
 		if !ok || recv.Name != name {
 			return false
 		}
-		found = isDArrayTypeMaybeRef(a.exprTypes[field.Object])
+		found = isDArrayTypeMaybeRef(a.exprType(field.Object))
 		return false
 	})
 	return found

@@ -88,7 +88,7 @@ func (a *Analyzer) globalStorageCastOperand(expr *ast.CastExpr) (ast.Expr, bool,
 	if expr == nil || expr.Origin != ast.CastExprOriginExplicitCast {
 		return nil, false, false
 	}
-	if _, ok := a.exprTypes[expr].(*RefType); !ok {
+	if _, ok := a.exprType(expr).(*RefType); !ok {
 		return nil, false, false
 	}
 	operand := expr.Operand
@@ -101,7 +101,7 @@ func (a *Analyzer) globalStorageCastOperand(expr *ast.CastExpr) (ast.Expr, bool,
 		case *ast.AddrOfExpr:
 			return inner.Operand, true, true
 		default:
-			if _, ok := a.exprTypes[operand].(*RefType); ok {
+			if _, ok := a.exprType(operand).(*RefType); ok {
 				return operand, false, true
 			}
 			return nil, false, false
@@ -165,7 +165,7 @@ func (a *Analyzer) mutableGlobalBorrowStorageRoot(expr ast.Expr) (*Symbol, bool)
 	if sym, mutable := a.mutableGlobalStorageRoot(expr); mutable {
 		return sym, true
 	}
-	if !a.hasMutableBorrowCapability(a.exprTypes[expr]) {
+	if !a.hasMutableBorrowCapability(a.exprType(expr)) {
 		return nil, false
 	}
 	if sym, ok := a.globalStorageRoot(expr); ok && sym.Kind == SymbolGlobal {
@@ -188,7 +188,7 @@ func (a *Analyzer) mutableGlobalBorrowTransferRefs(value ast.Expr, destinationTy
 	var refs []ast.PermissionRef
 	var visit func(ast.Expr, int)
 	visit = func(expr ast.Expr, depth int) {
-		if expr == nil || depth > semanticTraversalDepthLimit || !a.hasMutableBorrowCapability(a.exprTypes[expr]) {
+		if expr == nil || depth > semanticTraversalDepthLimit || !a.hasMutableBorrowCapability(a.exprType(expr)) {
 			return
 		}
 		if call, ok := expr.(*ast.CallExpr); ok && !a.isEnumVariantConstructorCall(call) {
@@ -383,7 +383,7 @@ func (a *Analyzer) mutableGlobalFoldEmitRefs(fold *ast.FoldExpr) []ast.Permissio
 	var refs []ast.PermissionRef
 	for _, arm := range fold.Arms {
 		for _, value := range mutableBorrowEmitValues(arm.Body) {
-			refs = append(refs, a.mutableGlobalBorrowTransferRefs(value, a.exprTypes[value])...)
+			refs = append(refs, a.mutableGlobalBorrowTransferRefs(value, a.exprType(value))...)
 		}
 	}
 	return canonicalizePermissionRefs(refs)
@@ -399,7 +399,7 @@ func (a *Analyzer) mutableGlobalMachinePayloadRefs(machine *ast.MachineFromExpr)
 	var refs []ast.PermissionRef
 	add := func(value ast.Expr) {
 		if value != nil {
-			refs = append(refs, a.mutableGlobalBorrowTransferRefs(value, a.exprTypes[value])...)
+			refs = append(refs, a.mutableGlobalBorrowTransferRefs(value, a.exprType(value))...)
 		}
 	}
 	for _, arg := range machine.StartArgs {
@@ -444,7 +444,7 @@ func (a *Analyzer) mutableGlobalStoreRowsReadRefs(source ast.Expr) []ast.Permiss
 }
 
 func (a *Analyzer) globalStoreRowsCapabilityRoot(source ast.Expr) ast.Expr {
-	if !a.hasMutableBorrowCapability(a.exprTypes[source]) {
+	if !a.hasMutableBorrowCapability(a.exprType(source)) {
 		return nil
 	}
 	return a.globalStoreRowsViewRoot(source, 0)
@@ -469,7 +469,7 @@ func (a *Analyzer) globalStoreRowsViewRoot(expr ast.Expr, depth int) ast.Expr {
 	case *ast.SliceExpr:
 		return a.globalStoreRowsViewRoot(n.Object, depth+1)
 	case *ast.CallExpr:
-		if _, ok := a.exprTypes[n].(*StoreRowsViewType); ok {
+		if _, ok := a.exprType(n).(*StoreRowsViewType); ok {
 			if field, ok := n.Func.(*ast.FieldExpr); ok && field != nil && field.Field == "rows" && field.Object != nil {
 				return globalReferenceStorageExpr(field.Object)
 			}
@@ -497,7 +497,7 @@ func (a *Analyzer) globalWholeValueReadRequiresGrant(expr ast.Expr) bool {
 	if !ok || sym.Kind != SymbolGlobal || sym.Mutable {
 		return false
 	}
-	typ, typed := a.exprTypes[expr]
+	typ, typed := a.lookupExprType(expr)
 	if !typed {
 		if _, ident := expr.(*ast.Ident); ident {
 			typ = sym.Type
@@ -677,7 +677,7 @@ func (a *Analyzer) typeContainsMutableStorage(typ Type, seen map[Type]bool, gene
 func (a *Analyzer) globalPathHasMutableField(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case *ast.FieldExpr:
-		field, ok := a.lookupFieldNoError(a.exprTypes[n.Object], n.Field)
+		field, ok := a.lookupFieldNoError(a.exprType(n.Object), n.Field)
 		return (ok && field.Mutable) || a.globalPathHasMutableField(n.Object)
 	case *ast.IndexExpr:
 		return a.globalPathHasMutableField(n.Object)
@@ -947,7 +947,7 @@ func (a *Analyzer) globalPathLoadsMutableBorrow(expr ast.Expr) bool {
 			if addressFormed {
 				return a.globalPathLoadsMutableBorrow(operand)
 			}
-			return mutableBorrowStorageType(a.exprTypes[n.Operand]) || a.globalPathLoadsMutableBorrow(operand)
+			return mutableBorrowStorageType(a.exprType(n.Operand)) || a.globalPathLoadsMutableBorrow(operand)
 		}
 		return false
 	default:
@@ -971,9 +971,9 @@ func (a *Analyzer) globalPathObjectLoadsMutableBorrow(expr ast.Expr) bool {
 			if operand, addressFormed, ok := a.globalStorageCastOperand(n); ok && addressFormed {
 				return a.globalPathLoadsMutableBorrow(operand)
 			}
-			return mutableBorrowStorageType(a.exprTypes[expr]) || a.globalPathLoadsMutableBorrow(expr)
+			return mutableBorrowStorageType(a.exprType(expr)) || a.globalPathLoadsMutableBorrow(expr)
 		default:
-			return mutableBorrowStorageType(a.exprTypes[expr]) || a.globalPathLoadsMutableBorrow(expr)
+			return mutableBorrowStorageType(a.exprType(expr)) || a.globalPathLoadsMutableBorrow(expr)
 		}
 	}
 }
@@ -1006,7 +1006,7 @@ func (a *Analyzer) mutableGlobalCallWriteRefs(call *ast.CallExpr) []ast.Permissi
 	if receiver, ok := a.mutatingBuiltinMethodReceiver(call); ok {
 		add(receiver)
 	}
-	if ft, ok := a.exprTypes[call.Func].(*FuncType); ok {
+	if ft, ok := a.exprType(call.Func).(*FuncType); ok {
 		args := call.Args
 		if aligned, ok := a.callAlignedAliasArgs[call]; ok {
 			args = aligned
@@ -1083,7 +1083,7 @@ func (a *Analyzer) mandatoryGlobalPermissionRefs(fn *FuncType) []ast.PermissionR
 func (a *Analyzer) mutableGlobalCallbackRefs(call *ast.CallExpr) []ast.PermissionRef {
 	var refs []ast.PermissionRef
 	for _, arg := range call.LoweredArgs() {
-		if callback, ok := a.exprTypes[arg].(*FuncType); ok {
+		if callback, ok := a.exprType(arg).(*FuncType); ok {
 			refs = append(refs, a.mandatoryGlobalPermissionRefs(callback)...)
 		}
 	}
