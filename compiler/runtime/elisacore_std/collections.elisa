@@ -1338,10 +1338,13 @@ def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
     s.used <- s.used + 1.usize()
 
 def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
-    view: view[SetBucket[T]] = DynArrayView{data: collections_void_from_items[SetBucket[T]](items), len: capacity}
-    trusted Unsafe.PointerCast:
-        # State zero marks each bucket inactive until insertion writes its key.
-        arena_da_fill(view, zeroed)
+    return if capacity == 0
+    can Abort.Panic:
+        byte_count: usize = arena_checked_mul_usize(capacity, size_of(SetBucket[T]))
+        trusted Unsafe.RawExtern:
+            # State zero denotes inactive storage, not a constructed T value.
+            # A key becomes readable only after insertion publishes state one.
+            memset(collections_mutable_void_from_items[SetBucket[T]](items), 0, byte_count)
 
 def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
     can Memory.Allocate, Abort.Panic:
@@ -1469,9 +1472,9 @@ def arena_set_remove[T](s: mutable set[T]&, key: T) -> bool:
 
     assert s.items != null
     items: mutable SetBucket[T]& = s.items
-    trusted Unsafe.PointerCast:
+    trusted Unsafe.RawExtern:
         # The tombstone state prevents readers from observing this inactive payload.
-        items[probe.index] <- zeroed
+        memset(collections_mutable_void_from_items[SetBucket[T]](&items[probe.index]), 0, size_of(SetBucket[T]))
     items[probe.index].state <- 2
     s.count <- s.count - 1.usize()
     return true
@@ -1487,7 +1490,7 @@ def arena_set_clear[T](s: mutable set[T]&):
 
     assert s.items != null
     items: mutable SetBucket[T]& = s.items
-    arena_set_zero_buckets(items, s.capacity)
+    arena_set_zero_buckets(items, s.capacity) can Abort.Panic
     s.count <- 0
     s.used <- 0
 

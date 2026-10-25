@@ -266,3 +266,17 @@ Focused race tests pass1.504 seconds and the retained/session race selection
 passes7.005 seconds, including existing contract/caller invalidation controls.
 Logs: /tmp/elisa-contract-classification-{unpatched,focused-race-v2,retained-race}.log.
 No full Stage1 timing is claimed for this admission correction.
+
+## Set inactive bucket storage
+
+The parallel SetBucket initialization/removal paths now use the same checked
+raw-storage protocol as dictionary buckets, retaining occupied-state key guards
+and explicit Abort.Panic at clear. Actual raw SetBucket[sview] specialization
+passes without broadening public supported set keys or relaxing zeroed validity.
+The native control exercises that raw sview storage plus public cstr-set
+add/duplicate/contains/remove/tombstone/reinsert/rehash/clear/zero-capacity
+behavior and overflow-before-write. The identical native control against old
+production fails the exact arena_set_zero_buckets zeroed-sview diagnostic.
+Semantic race tests pass1.484 seconds; native/overflow controls pass1.617 seconds.
+Logs: /tmp/elisa-set-inactive-storage-{semantic-race,native,unpatched-native}.log.
+Fresh full Stage1 producer/source qualification remains pending.
