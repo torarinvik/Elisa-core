@@ -429,6 +429,11 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
 			continue
 		}
+		if ownedFunctionAnalyses && name == "storeScanBoundCache" {
+			// Settled name sets are read-only; only publish new rows privately.
+			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
+			continue
+		}
 		if name == "retained" {
 			// The retained analysis owns the whole analyzer; a worker records into a
 			// shell of its own (analyzeDeclsParallel), merged back after the join.

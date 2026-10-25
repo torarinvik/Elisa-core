@@ -404,3 +404,43 @@ delta. An independently copied7043-file preserved-spec input is recorded at
 /tmp/elisa-stage1-preserved-spec-source-root. Its complete original-library
 cold/IR/runtime qualification must run next. This correction preserves the full
 original goal; O3, varied edits, normal CLI defaults and generation2 remain open.
+
+## Preserved-specification Stage1 baseline
+
+The corrected7043-file47be input preserves original FNV specifications, named
+bucket states and unrelated effect grants, changing only six storage methods and
+four owner rewraps. Main673183d8 (fb341977 executablefe718c05) completes final
+O0 cold step24 in27.892s. Step16's external timeout left step15's atomic
+checkpoint intact; the compiler's saved slow-declaration hint let step17 save
+at12175/14768 and resume without changing any proof or administrative budget.
+Normal state-backed cache prime takes15.996298s and reproduces the cold object's
+exact035337b9ae6251ba60cebd4d884900f0a3ca2fef1c12ecd2728b55786d7646ef
+bytes. That object links to Stage1, which compiles a native smoke returning42.
+
+The first new depth-comparison edit takes17.935174s, still missing2s. Exact
+baseline and edited object hits take0.287850s and0.422048s respectively. The
+second new body profile completes22.221040s, showing16113.98MB allocation,
+8294.57MB specialization and5938.19MB analyzer cloning (inclusive totals),
+plus2147.33MB permission replay and870.60MB inventory allocation. Preparation
+remainsfast=true at2.616s; restore overlaps primary parse, so those times are
+not independent additive costs. Dataset/command/source/cache/runtime records:
+/tmp/elisa-stage1-preserved-spec-root. Edited parser bytes and all edit records
+are preserved, with the original parser baseline restored. Full edited
+independent-cold/strict-IR parity, O3, varied matrix, defaults and generation2
+remain open.
+
+## Settled bound-name cache sharing
+
+Private specializations copy the outer bound-name memo and share settled inner
+sets. The reviewed producer builds a fresh set completely before publication;
+its two consumers only read membership. Source checks bind those complete
+functions and reject new consumers/raw accesses, preserving that closed contract.
+New rows and outer deletions are private; ordinary workers retain deep copies.
+An independent source review found no rekey/publication/mutation blocker.
+Focused race passes2.664s, broad retained/private/snapshot/parallel/iterator race
+passes12.410s, generation has no registry/helper diff, and all50 selected backend
+generic/specialization/alias/borrow/region tests pass in bounded groups. The fair
+direct-map benchmark changes638417bytes/8203allocations/0.73–1.10ms to
+79312bytes/11allocations/4.3–4.8us. Logs: /tmp/elisa-settled-bound-*.log and
+/tmp/elisa-settled-bound-backend.json. No end-to-end gain is inferred from this
+component benchmark; fresh-producer qualification remains necessary.
