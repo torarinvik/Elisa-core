@@ -107,7 +107,8 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 		// An undecided obligation becomes Unknown and falls back to the runtime check.
 		ResourceLimit: smtResourceLimit(),
 		// Reset before every check: a verdict is a function of the query alone, so it is the
-		// same in every worker, schedule and process, and every verdict can be cached.
+		// same in every worker, schedule and process. Unknown still needs a certified
+		// resource-limit reason before it can be cached.
 		Independent: smtIndependent,
 		// Hang guard only, far above the time the budget takes even on a loaded machine; it should
 		// never be the limit that decides a verdict.
@@ -695,6 +696,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	a.recordSMTAttempt(query)
 	a.smtSetLogLabelForQuery(solver, label, logObligation, query)
 	persistentHits := a.smtStats.PersistentCacheHits
+	resourceBefore, transientBefore, canCertify := smtUnknownCacheEpoch(solver)
 	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
@@ -715,13 +717,23 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 		a.smtProofCache.publishDeclined(key, res, ce)
 		return false, ce
 	}
-	a.smtProofCache.publishDeclined(key, res, "")
-	// A session solver's `unknown` depends on its history, so a retry may still decide it and it
-	// is not memoized. An independent solver's `unknown` is that query's verdict at this budget.
-	if smtIndependent {
+	resourceAfter, transientAfter, _ := smtUnknownCacheEpoch(solver)
+	if smtIndependent && canCertify && resourceAfter > resourceBefore && transientAfter == transientBefore {
+		a.smtProofCache.publishResourceDeclined(key)
 		a.cacheSMTQuery(key, smtQueryResult{proven: false})
 	}
+	// Every other Unknown is retryable, including unclassified test/third-party solvers.
+
 	return false, ""
+}
+
+func smtUnknownCacheEpoch(solver smt.Solver) (uint64, uint64, bool) {
+	classified, ok := solver.(interface{ UnknownCacheEpoch() (uint64, uint64) })
+	if !ok {
+		return 0, 0, false
+	}
+	resource, transient := classified.UnknownCacheEpoch()
+	return resource, transient, true
 }
 
 // smtEscalationFactor multiplies the per-query budget for an obligation whose failure would be
