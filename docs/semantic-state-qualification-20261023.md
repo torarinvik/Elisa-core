@@ -4288,8 +4288,8 @@ exact unchanged fresh-process hit took 0.166598 seconds.
 
 A genuinely new body_query_short_circuit edit inserts the live query predicate's
 `return false if text.len < 3` guard. Its first O0 rebuild took 6.332955 seconds,
-missing the 2-second body target. Its independent cold/IR/runtime qualification
-is pending. This is an emitted control-flow edit with preserved predicate values,
+missing the 2-second body target. Subsequent independent cold object/diagnostic
+and linked smoke results are recorded below; strict IR qualification is pending. This is an emitted control-flow edit with preserved predicate values,
 not an unused probe. The separately labelled profiled repeat took 6.802942
 seconds and had no native fragment compilation. Restore overlapped eager scratch
 preparation (3.038 and 2.971 seconds), retained update took 612 ms with fast=false,
@@ -4346,3 +4346,17 @@ latency qualification. Logs `/tmp/elisa-sparse-specialization-v5-focused-race.lo
 `/tmp/elisa-sparse-specialization-v5-backend-race-retry.log`, and
 `/tmp/elisa-sparse-construction-key-probes-10x.log`; build/CLI records are under
 the root in `/tmp/elisa-sparse-stage0-build-root`.
+
+
+The independent cold short-circuit edit completes in 23 bounded processes with
+zero external timeouts. Its object is byte-identical to the first warm edit
+(SHA256 876bba0505f17721da94f077307584d8f2bc14d270b71bb6ec519f993ab691e5),
+and all 26,874 diagnostic lines match after removing only analysis-cache debug
+records. The object links into Stage1, which emits a linked return-42 smoke
+executable with the expected exit status. This remains a smoke, not the full
+generation-two gate. Evidence is under `/tmp/elisa-stage1-cold-short-circuit-root`.
+Both 315,834,937-byte IR captures independently assemble under LLVM 23.1.3.
+A fresh pair-specific producer audit qualifies 3,648 exact candidate local-name
+permissions; the complete strict IR comparison is still pending. The expanded
+source difference is a 33-byte insertion plus three same-length generated
+#line substitutions, all explicitly recorded; it is not an insertion-only pair.
