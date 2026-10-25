@@ -207,5 +207,44 @@ class StreamingBijectionTests(unittest.TestCase):
             def readlines(self, *args): raise AssertionError("whole-stream readlines")
         verify_streams(Bounded(BASE), Bounded(BASE))
 
+
+
+class HeaderTypeRoleTests(unittest.TestCase):
+    def same(self, text):
+        strict_verify(text, text)
+        verify_streams(io.BytesIO(text), io.BytesIO(text))
+
+    def test_actual_stage1_sret_header_shape(self):
+        self.same(b'%Parser.Parser = type { ptr }\ndefine void @constructor(ptr sret(%Parser.Parser) %0, ptr %1) #1 {\nentry:\n  ret void\n}\nattributes #1 = { nounwind }\n')
+
+    def test_aggregate_return_and_typed_attributes(self):
+        self.same(b'%StringView = type { ptr, i64 }\ndefine { %StringView, i32 } @f(ptr byval(%StringView) align 8 %arg) {\nentry:\n  ret { %StringView, i32 } zeroinitializer\n}\n')
+        self.same(b'%Packet = type { i32 }\ndeclare void @f(%Packet, ptr sret(%Packet), ptr byref(%Packet), ...)\n')
+
+    def test_unnamed_named_type_formal_is_a_type_not_a_local(self):
+        tokens = classify(b'%Packet = type { i32 }\ndeclare void @f(%Packet)\n')
+        self.assertEqual([t.kind for t in tokens if t.name == b'Packet'], ['type', 'type'])
+
+    def test_real_local_type_name_collision_stays_unsupported(self):
+        text = b'%Packet = type { i32 }\ndeclare void @f(%Packet %Packet)\n'
+        with self.assertRaises(UnsupportedIR): strict_verify(text, text)
+        with self.assertRaises(UnsupportedIR): verify_streams(io.BytesIO(text), io.BytesIO(text))
+
+    def test_unknown_percent_attribute_context_stays_unsupported(self):
+        text = b'%Packet = type { i32 }\ndeclare void @f(ptr unknown(%Packet) %arg)\n'
+        with self.assertRaises(UnsupportedIR): strict_verify(text, text)
+
+    def test_return_type_and_sret_types_remain_exact(self):
+        left = b'%Packet = type { i32 }\n%Other = type { i64 }\ndeclare void @f(ptr sret(%Packet))\n'
+        right = left.replace(b'sret(%Packet)', b'sret(%Other)')
+        with self.assertRaises(NotEquivalent): strict_verify(left, right)
+        with self.assertRaises(NotEquivalent): verify_streams(io.BytesIO(left), io.BytesIO(right))
+
+    def test_generated_parameter_binding_still_needs_bijection(self):
+        left = b'%Packet = type { i32 }\ndefine void @f(ptr sret(%Packet) %__arg_1, i32 %__arg_2) {\nentry:\n  %v = add i32 %__arg_2, 0\n  ret void\n}\n'
+        right = left.replace(b'%__arg_1', b'%__arg_2')
+        entry = Rename('local',0,b'__arg_1',b'__arg_2','synthetic collision fixture')
+        with self.assertRaises(NotEquivalent): verify_streams(io.BytesIO(left), io.BytesIO(right),[entry])
+
 if __name__ == "__main__":
     unittest.main()

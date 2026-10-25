@@ -1,0 +1,11 @@
+# Header role candidate (source only)
+
+The actual first false rejection is warm IR line180738:
+`define void @Parser.Parser__for__Parser.Parser__L542_C9(ptr sret(%Parser.Parser) %0, ...)`.
+The old guard mistakes the type argument inside `sret` for a formal binding because it is followed by `)`. Another actual false rejection at389128 is aggregate return `{ %StringView, i32 }`, whose named type is followed by `,`.
+
+The candidate parses the return-type boundary and actual outer formal-parameter list. Each formal consumes its leading type, then attributes; named types inside recognized type-valued attributes sret/byval/byref/inalloca/preallocated/elementtype retain module type role. Only an optional final percent identifier is a local parameter binding. Unnamed `%Packet` formal types are supported explicitly. Existing named-type/local overlap rejection still fires for `%Packet %Packet` and for local definitions sharing a type name. Unknown attribute groups containing percent identifiers, unresolved types, ambiguous return boundaries, unclassified percent tokens, and percent-containing function suffix constants remain unsupported. Independently valid LLVM IR remains a prerequisite; this is role parsing for the narrow printer syntax, not an LLVM verifier.
+
+No tests, assembly validation or full-pair checker were run by this source-only agent. Actual header enumeration used bounded streaming reads and no full-module tokenization. The first eight actual rejected headers are sret or aggregate-return forms. Root must run existing+new tests and validate fixtures before qualification. New unknown-context fixture deliberately checks conservative rejection, not valid LLVM syntax support.
+
+Performance: the prior real run exhausted20.46s before the first rejection, so a full pass may exceed30s. This patch does not skip identical units or weaken checks. Checkpointing must authenticate both input hashes, manifest/policy hash, complete module indexes, ordinal/byte offsets, persistent module forward/reverse maps, used entries and changed mapping inventory; every function is processed whole and checkpoints atomically. Finalization must reject unused manifest entries and prove EOF/full coverage. Do not run independent batches with reset module bindings or merely concatenate their success messages.

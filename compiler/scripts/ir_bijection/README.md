@@ -1,6 +1,6 @@
 # Strict generated-identifier IR bijection candidate
 
-Offline qualification utility. The 29 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
+Offline qualification utility. The 36 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
 
 Run with Python 3.10+:
 
@@ -56,7 +56,7 @@ These observations do not establish complete producer coverage. V2 is a conserva
 
 ## Streaming qualification
 
-The original18 fixtures and11 streaming cases pass, including unchanged-binding
+The original18 fixtures and18 streaming/header cases pass, including unchanged-binding
 collisions, cross-function globals, forward types, nameless function/declaration
 ordinals, exact nonidentifier bytes, denied external ABI renames, producer and
 stack-ordinal checks, and bounded stream reads. The positive fixture pair also
@@ -75,3 +75,10 @@ LLVM escaped backslashes are accepted and decoded for identifier identity,
 while literal bytes remain exact. This follows the installed LLVM23.1.3
 [lexer](https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-23.1.3/llvm/lib/AsmParser/LLLexer.cpp).
 The escaped-backslash constant fixture independently passes LLVM assembly.
+
+Function headers distinguish leading formal types, optional local parameter
+names, and recognized typed attributes such as sret/byval. Aggregate return
+types and unnamed named-type formals are supported. Unknown percent-containing
+attribute contexts and local/type name collisions remain unsupported. Seven
+header regressions pass; their valid module fixtures independently assemble
+with LLVM23.1.3. No real Stage1 pair equivalence is implied by these fixtures.
