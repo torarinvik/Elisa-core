@@ -21,10 +21,12 @@ func (r *RetainedAnalysis) prepareProofReportCoordinates(file *ast.File, marks m
 	sameFacts := func(left, right []ProofFact) bool {
 		return len(left) != 0 && len(left) == len(right) && &left[0] == &right[0]
 	}
-	render := proofReportSyntaxRenderer(file, marks)
+	witnesses := captureProofReportCoordinateWitnesses(file)
 	renderBindings := r.prepareProofReportBindings(file, marks)
 
 	return func(a *Analyzer) string {
+		requests := collectProofReportCoordinateRequests(a.proofLifecycle.Segments, old)
+		render := witnesses.requestedRenderer(marks, requests)
 		replacements := make(map[proofContributionKey]proofContribution, len(a.proofLifecycle.Segments))
 		for key, row := range a.proofLifecycle.Segments {
 			baseline, exists := old[key]

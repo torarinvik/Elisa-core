@@ -86,3 +86,50 @@ func BenchmarkProofBindingPositionLeafWholeAdapter(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkProofReportSyntaxRendererIndex(b *testing.B) {
+	source := "def first() -> i64:\n    return 0\n\ndef moved() -> i64:\n    in auto:\n        return 0\n"
+	for i := 0; i < 512; i++ {
+		source += fmt.Sprintf("\ndef other_%d() -> i64:\n    return %d\n", i, i)
+	}
+	file, why := proofReportBindingSource("benchmark.elisa", []byte(source))
+	if why != "" {
+		b.Fatal(why)
+	}
+	first := proofBindingFunction(b, file, "first").Pos()
+	moved := proofBindingFunction(b, file, "moved")
+	region := moved.Body[0].(*ast.RegionStmt).Pos()
+	requested := []proofReportCoordinateRequest{{Pos: first}, {Pos: moved.Pos()}, {Pos: region}}
+	requestSet := make(map[proofReportCoordinateRequest]struct{}, len(requested))
+	for _, request := range requested {
+		requestSet[request] = struct{}{}
+	}
+	for _, bounded := range []bool{false, true} {
+		name := "full"
+		if bounded {
+			name = "requested"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			var last lexer.Pos
+			for i := 0; i < b.N; i++ {
+				var render func(lexer.Pos, bool) (lexer.Pos, string)
+				if bounded {
+					witnesses := captureProofReportCoordinateWitnesses(file)
+					render = witnesses.requestedRenderer(nil, requestSet)
+				} else {
+					render = proofReportSyntaxRenderer(file, nil)
+				}
+				for _, request := range requested {
+					var err string
+					last, err = render(request.Pos, request.Shift)
+					if err != "" {
+						b.Fatal(err)
+					}
+				}
+			}
+			_ = last
+		})
+	}
+}

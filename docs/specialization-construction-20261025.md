@@ -1030,3 +1030,42 @@ race run did not complete: it reported a race in existing `flow_instrs.go` and
 hit the 25s test timeout in `TestTypedASTPointerWalkMatchesReflectiveWalk`.
 Logs `/tmp/elisa-proof-binder-position-focused-v2.jsonl` and
 `/tmp/elisa-proof-binder-position-bench.log`.
+
+
+## Requested proof-coordinate index
+
+The full authored-syntax walk still runs before retained mutation, including
+both `Node.Pos` and stored `lexer.Pos` witnesses. The final callback collects
+requests from the complete current journal, including new and reanalyzed facts,
+deduplicates exact `(position, shift policy)` pairs, then replays every witness
+while storing only requested full spans and endpoint keys. The full renderer
+remains byte-identical and is kept as the oracle. Errors, ambiguity handling,
+old-source shifts and all-or-nothing row publication are preserved.
+
+`UpdatePrepared` is caller-serialized; CLI updates run synchronously and the
+retained server holds its request mutex. All proof producers finish before
+relocation. The callback invokes no producer or analyzer hook. The first design
+copied every fact and evidence array and reflected over them twice; those copies
+were removed because they added work without protecting a supported execution
+path. The exact original 72ca state has
+532 rows, 21,548 facts, 358,479 known-evidence entries, no closed-world entries,
+622 facts with both evidence lists nil, and 2,299 generated-token facts. The
+read-only census and its repaired complete-input manifest are under
+`/tmp/elisa-proof72-complete-inputs-a1k67e23`.
+
+The full coordinate callback benchmark matches that row/fact/evidence census.
+The frozen callback measures 16.31–16.51 ms / 11.29–11.31 MB /
+94,911–94,914 allocations; the requested index measures 16.47–16.50 ms /
+9.61–9.62 MB / 94,861 allocations. This is about 15% fewer allocated bytes with
+callback time effectively flat; it is not yet a Stage1 compile-time gain. On a
+512-function fixture with three requests, capture plus requested-index
+construction and lookup changes 1.405–1.414 ms / 3.04 MB to 0.499–0.501 ms /
+0.61 MB. A 20,000-position sparse-query fixture changes 11.70–11.88 ms /
+13.48 MB to 6.76–6.89 ms / 5.09 MB. These component results do not establish
+whole-compiler edit latency.
+
+The proof/retained race selection passes in 2.024s. Logs are
+`/tmp/elisa-proof-requested-coordinate-final-race.jsonl` and
+`/tmp/elisa-proof-requested-coordinate-final-bench.log`. The normal Stage1 edit
+measurement, default CLI qualification, O0/O3 matrix and full latest-source
+self-host gate remain open.

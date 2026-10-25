@@ -22,7 +22,7 @@ def moved(values: darray[i64]) -> i64 is Positive:
     return 2
 `
 
-func proofBindingFunction(t *testing.T, file *ast.File, name string) *ast.FuncDecl {
+func proofBindingFunction(t testing.TB, file *ast.File, name string) *ast.FuncDecl {
 	t.Helper()
 	for _, decl := range retainedWalkDecls(file) {
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == name {
