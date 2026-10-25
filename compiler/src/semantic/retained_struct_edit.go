@@ -91,7 +91,9 @@ var retainedTypeMemos = []string{
 	"storeScanNoStorageCache", "storeScanViewOnlyCache", "storeScanSharesCache", "resolvedStructFieldsMemo",
 	"affineHandleMemo", "typeSeenScratch", "borrowedOwnerRefMemo", "regionRefsMemo",
 	"mutableBorrowCapabilityMemo", "containerRegionMemo", "storeScanAddressMemo", "storeScanAddressSeen",
-	"storeScanPlainValueMemo", "storeScanProgramLivedMemo",
+	"storeScanPlainValueMemo", "storeScanProgramLivedMemo", "programLivedTypes",
+	"returnBorrowMayTargetMemo", "returnBorrowResultMayTargetMemo",
+	"abstractParamRegionRefMemo", "abstractRefRestartMemo",
 }
 
 var retainedTypeMemoNames = func() map[string]bool {
@@ -106,8 +108,8 @@ func (a *Analyzer) clearRetainedTypeMemos() {
 	v := reflect.ValueOf(a).Elem()
 	for _, name := range retainedTypeMemos {
 		f := v.FieldByName(name)
-		if f.IsValid() && f.Kind() == reflect.Map && f.CanSet() {
-			f.Set(reflect.MakeMap(f.Type()))
+		if f.IsValid() && f.Kind() == reflect.Map {
+			settable(f).Set(reflect.MakeMap(f.Type()))
 		}
 	}
 }

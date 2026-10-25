@@ -3963,3 +3963,24 @@ partition edit/fresh-session regressions pass (1.337seconds). All invocations
 are externally bounded at30seconds. Logs `/tmp/elisa-cgo-hints-baseline-small-bench.log`,
 `/tmp/elisa-cgo-hints-candidate-small-bench.log`, and
 `/tmp/elisa-cgo-hints-backend-regressions.log`.
+
+### Type-shape memo invalidation now actually clears its maps
+
+The existing clearer inspected unexported Analyzer fields with CanSet(), so
+none of its14 intended maps were writable through that reflection value.
+It now uses the package's established owned-field setter. The registry also
+includes five omitted persistent shape caches: programLivedTypes, both
+return-borrow Type-pair memos, abstract parameter layouts and abstract reference
+restart eligibility (19maps total). New workers inherit the newly cleared base.
+
+Pre-fix tests demonstrate stale positive program ownership after an accepted
+ordinary enum payload addition, and stale negative holder/result reachability
+after accepted scalar-field swaps preserving nominal identities. They also
+show every original registered map surviving the old clearer. The repaired
+cases pass, including direct positive/negative shape reversals and abstract
+layout/restart controls. The combined retained/region/program-lived/container
+escape selection passes with fast preparation enabled under race (9.575seconds).
+Raw logs `/tmp/elisa-shape-memo-invalidation-baseline.log`,
+`/tmp/elisa-shape-memo-and-program-owner-fixed.log`,
+`/tmp/elisa-all-shape-and-lifetime-race.log`; external30/internal25second caps.
+Abstract shape controls are not presented as admitted reference-field edits.
