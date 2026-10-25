@@ -3931,3 +3931,15 @@ seconds), preservation cases five times (5.066 seconds), and the integrated broa
 parallel/returned-function/retained/analysis-build selection (1.470 seconds).
 An initial combined twenty-repeat command reached its external 30-second cap;
 it is not counted as a pass. Every command remains externally capped.
+
+### IR qualification now uses an explicit scoped bijection
+
+`compiler/scripts/ir_bijection/ir_bijection.py` replaces suffix-collapsing
+normalization for future qualification. It preserves every non-identifier byte,
+tracks forward and reverse mappings including unchanged names, and separates
+global/type/function-local bindings. Renaming is denied unless an explicit
+per-pair manifest cites producer evidence; externally visible globals cannot
+be renamed. Unsupported grammar fails closed. Eighteen fixtures pass, and LLVM
+assembly validates both sides of the positive scoped-renaming fixture. All
+test/assembler commands are externally capped at 30 seconds. No old Stage1 IR
+comparison is retroactively qualified by these fixture results.
