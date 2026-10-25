@@ -4160,9 +4160,8 @@ f4dd7ecf48d4907cbcc85f1f23e5f33cd2023178674f0892da4e9500e143a90d),
 and its entire26,874-line diagnostic transcript matches after removing only
 analysis-cache debug records. Its early contention checkpoint is preserved and
 cold wall times are not performance qualification. The315,836,065-byte IR pair
-has37,172 differing lines involving generated identifiers. Full IR equivalence
-is still unqualified: the current strict checker deliberately rejects some
-observed name forms; no regex-normalized result is counted as proof.
+has37,172 differing lines involving generated identifiers. The full strict IR comparison subsequently passed; see the completed
+qualification below. No regex-normalized result is counted as proof.
 
 The separate profile repeat takes4.164584seconds: state restore1.086seconds,
 fast Update500ms, partition IR2.026seconds, native compilation0. Its object hash
@@ -4251,3 +4250,26 @@ and exact-byte O0/O3 classification edit IR pass (2.599seconds). Logs
 `/tmp/elisa-retained-index-proof-v5-driver.log`. External30/internal25second caps.
 Full Stage1 latency for this ownership metadata is unmeasured. The independently
 reproduced generic-codegen canonical-AST race remains a separate open issue.
+
+
+### Complete strict Stage1 body-edit IR comparison (2026-10-25)
+
+The complete 315,836,065-byte warm/cold O0 IR pair for the first median body
+edit now passes the strict generated-identifier bijection checker. Both inputs
+previously passed independent LLVM 23.1.3 assembly. All 109,448 complete units
+reached simultaneous EOF, and all 3,648 exact manifest entries were consumed.
+Every other byte, identifier binding and linkage restriction was checked; no
+global/type/ABI rename was authorized. The pair-specific producer audit covers
+the source offset relocation and the independently justified local uniquing
+suffixes. This qualifies this frozen source edit and producer only.
+
+The final bounded invocation returned exit 0 in 22.008 seconds. Earlier exit 3
+records represent incomplete checkpoint prefixes and are not equivalence claims.
+The final evidence is `/tmp/elisa-stage1-real-ir-manifest/checkpoint-run-028.json`,
+with raw stdout/stderr beside it, the completed `proof-checkpoint-v3.json`,
+`renames.json`, `POLICY.md`, and hashed producer/source audit records. Checker
+SHA256: 1d32f033747a9ada0caebc71ea203d2c787db139acb66eb25c5166c6c32dc888.
+The warm/cold object and complete diagnostic comparison described above also
+passes. The first edited rebuild remains 3.893690 seconds, above the 2-second
+body target; the full O3 edit matrix and generation-two self-host gate remain
+unqualified. Later compiler changes require a fresh producer-bound baseline.
