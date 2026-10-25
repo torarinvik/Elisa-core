@@ -326,3 +326,23 @@ changes from1.976MB/16712allocations and1.31–1.95ms to8160bytes/235allocations
 and32–50us per construction. Logs: /tmp/elisa-visible-candidates-*.log and
 /tmp/elisa-visible-candidates-backend-groups.json. This fixture gain is verified;
 full Stage1 timing for this producer is pending.
+
+## Construction-local proof events
+
+A private specialization now starts an empty flat proof-event sequence. Concrete
+producers still record their actual obligations; public specialization publication
+starts from the complete canonical Result and discards the construction analyzer,
+so its full report/summary and foreign/nested query fallback are preserved.
+Ordinary worker inheritance remains unchanged. The independent real-source test
+fails without the correction, and verifies nonempty concrete observations and
+complete canonical report/summary publication with the correction.
+
+Focused race passes1.480s; retained/private/parallel/snapshot/overlay race passes
+9.197s. The39 selected backend generic/specialization/alias tests pass in four
+externally30s-bounded groups. Logs: /tmp/elisa-private-proof-events-*.log and
+/tmp/elisa-private-proof-events-backend-groups.json. A separate prefix-copy
+microbenchmark uses the measured Stage1 row count22893, without claiming a
+semantic workload: constructor+first-append allocation changes from6004033bytes
+to7672bytes, and0.607–0.647ms to0.075–0.079ms. Full Stage1 timing for this
+producer remains pending. No proof authority, budgets or public event sequence
+is removed.

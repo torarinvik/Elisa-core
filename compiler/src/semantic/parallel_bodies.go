@@ -359,6 +359,14 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if ownedFunctionAnalyses && name == "proofReport" {
+			// Concrete producers append only construction-local observations.
+			// Published specialization views inherit the complete canonical
+			// Result report and summary, then discard this analyzer. Borrowing
+			// its event prefix would copy the whole program on the first append.
+			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
 		if ownedFunctionAnalyses && name == "visibleCandidates" {
 			// This memo contains only candidate names derived from lexical
 			// context and aliases. Rebuild the few private lookups on demand
