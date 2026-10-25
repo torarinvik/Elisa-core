@@ -562,3 +562,27 @@ after confirmed process termination, retry completed. No budget was raised.
 
 All50 selected backend regressions pass in10 bounded groups; exact coverage and
 measurements: /tmp/elisa-permission-snapshot-backend.json.
+
+## Fresh Stage1 comparison at 61557a73
+
+Same preserved-spec source, new empty disk namespace, fresh processes and server
+disabled. Producer binary d5b7fdc119b1587643d3a8cecf87949b6e1f436f6ca8191a2c1ca87266bd637a.
+Cold completion22 bounded invocations, final26.806s. Normal prime14.458006s;
+unchanged0.287050s; first unseen comparison body edit15.947435s; exact edited
+repeat0.291867s. The first-edit measurement is about3.9% lower than695c49fb's
+16.600622s in the previous single controlled run (and11.1% below673183d8's
+17.935174s); no statistical consistency claim is made from one sample each.
+Cold, normal baseline, edited and separately profiled arithmetic-edit objects
+all remain byte-identical to their corresponding previous-producer objects.
+
+A separate novel arithmetic-body profile with observers enabled takes17.945267s
+versus22.221040s on673183d8. Sampled allocation total10696.50MB versus16113.98MB
+(~33.6% reduction across the combined latest five cuts). Remaining inclusive
+SpecializeFunction4956.57MB and cloneAnalyzer3230.19MB remain large; these overlap,
+not separate totals. Publication walker1.33GB cumulative, disk decoder2.19GB
+cumulative and ordinary tokenization0.63GB cumulative remain. No discarded proof,
+optimization or check budget contributes to this reduction. Source restored
+exactly after both edits. Evidence /tmp/elisa-stage1-snapshot-publication-root,
+complete per-run JSON/settings/objects, source receipts and CPU/allocation profiles.
+Targets still require substantial work: body2s, contract/signature3s, major10s,
+O3 and full self-host/latest-source gates remain unqualified.
