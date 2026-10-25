@@ -66,7 +66,7 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 }
 
 func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
-	a := cloneAnalyzerValueForBodyWorker(r.analyzer).Addr().Interface().(*Analyzer)
+	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)
 	// Semantic workers use a separate base memo for this table. A published
 	// codegen Result exposes a concrete map instead, including canonical global
 	// type expressions, so materialize that base before adding private rows.

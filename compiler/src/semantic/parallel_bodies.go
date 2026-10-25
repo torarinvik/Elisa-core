@@ -324,6 +324,17 @@ func cloneAnalyzerValueForBodyWorker(a *Analyzer) reflect.Value {
 }
 
 func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflect.Value {
+	return cloneAnalyzerValueForParallelPolicy(a, useMemoOverlays, false)
+}
+
+// A specialization imports exactly the current/private declarations through
+// specializationContext.copyDecl. Its analyzer never queries unrelated function
+// analyses; public Result queries retain canonical fallback after publication.
+func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
+	return cloneAnalyzerValueForParallelPolicy(a, true, true)
+}
+
+func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunctionAnalyses bool) reflect.Value {
 	if a == nil {
 		return reflect.Value{}
 	}
@@ -334,6 +345,12 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
+		if ownedFunctionAnalyses && name == "functionAnalyses" {
+			// Skip BEFORE deepCloneValue: cloning then clearing still performs
+			// a whole-program map traversal in the serialized specialization path.
+			settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			continue
+		}
 		if name == "retained" {
 			// The retained analysis owns the whole analyzer; a worker records into a
 			// shell of its own (analyzeDeclsParallel), merged back after the join.
