@@ -889,3 +889,19 @@ and PASS with no skips (backend1.532s). Evidence:
 /tmp/elisa-partition-declaration-query-backend.jsonl. Source artifact
 /tmp/elisa-partition-declaration-query-v1. This is a redundant-call gain; full
 Stage1 latency for this producer remains unmeasured.
+
+
+## Normal disk rebuild at987a6b21
+
+Fresh producer ec8937a04020fdfec891156cc41b34e9a0d11d4a9ed5043af55857aff4db2896
+(source a863f793060b1b8f50de11ef0dc1e6f1bde2ae6000f896d89c6ce7c99b25b9aa)
+finished bounded cold preparation in22 invocations, final26.472s. Normal prime
+13.522496s, baseline exact0.298675s, first novel parser body edit14.677536s,
+edited exact0.285286s. Prior26029651 first edit14.941999s; this single-run
+comparison is0.264463s lower, not a repeated-run confidence claim. All four
+objects and eight stdout/stderr streams match the corresponding prior results
+byte for byte. Source restored2556c882. Same pinned preserved-spec source,
+normal observers disabled, fresh processes, no server, experimental explicit
+analysis cache/fast-prepare settings and external30s compiler cap. This remains
+above the goal. Evidence /tmp/elisa-stage1-canonical-map-root and its individual
+O0 receipts, producer archive, normal-streams-comparison and source-restoration.
