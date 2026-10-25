@@ -3984,3 +3984,22 @@ Raw logs `/tmp/elisa-shape-memo-invalidation-baseline.log`,
 `/tmp/elisa-shape-memo-and-program-owner-fixed.log`,
 `/tmp/elisa-all-shape-and-lifetime-race.log`; external30/internal25second caps.
 Abstract shape controls are not presented as admitted reference-field edits.
+
+### Program-owned values retain known dependency-free element provenance
+
+The program-owned record carve-out now returns no local dependency rather than
+the program-region name. valueStoreRegion reports tracked local lifetimes; a
+nonempty program owner made elementStorageState perform an invalid lexical-owner
+lookup and turn known provenance into unknown. A reader-level regression proves
+that loss on the previous version and now passes under race, together with the
+positive conditional and all unsafe-storage/shadow controls (1.539seconds).
+The earlier direct return-string assertion was replaced with this observable
+reader contract. The standalone collect/collect_helper source fixture passed the
+previous binary too, so it is retained only as coverage, not reproducing evidence.
+Logs `/tmp/elisa-program-reader-baseline.log` and
+`/tmp/elisa-program-reader-fixed-race.log`; external30/internal25second caps.
+
+A linked record-choice regression returned expected10 at both O0 and O3 using
+runtime object SHA2566df88f65137191d19ae7a770c28b252516c5f751af2ec7f98b61c443e2e9a35d.
+The final full Stage1 gate remains to be rerun with both ownership and memo fixes;
+no claim is made that all56 diagnostics are resolved by the isolated reader test.

@@ -1772,6 +1772,21 @@ func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 		if _, ok := a.regionLifetimeOrdinal(r); ok {
 			return r
 		}
+		// Program regions have no lexical lifetime ordinal. An aggregate whose
+		// complete storage-bearing type names one already owns program-lived
+		// storage; do not replace that contract with a producer call's ambient
+		// arena. The whole-type check is required: common-region collection alone
+		// does not inspect enum payloads or every generic-instance base.
+		// Resolve the binding as well as its spelling so a shadow cannot
+		// supply this evidence.
+		if a.isProgramRegion(r) && a.typeIsProgramLivedCached(valueType) && a.currentScope != nil && a.globalScope != nil {
+			if sym, ok := a.currentScope.Lookup(r); ok && sym != nil && sym == a.globalScope.Symbols[r] && sym.Kind == SymbolRegion {
+				if _, declared := sym.Node.(*ast.GlobalRegionDecl); declared {
+					// This API tracks local storage dependencies, not global owners.
+					return ""
+				}
+			}
+		}
 	}
 	// docs/128 §8: a local declared program-lived holds nothing a local region frees,
 	// whatever taint the value it was initialised from carried.
