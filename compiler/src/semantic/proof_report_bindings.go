@@ -49,6 +49,15 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 			if !v.IsValid() {
 				return
 			}
+			// Exact Pos has one string and only scalar coordinates. Preserve the
+			// File lookalike check; coordinates cannot carry binders or names.
+			if proofBindingPositionSchemaValid && v.Type() == reflect.TypeFor[lexer.Pos]() {
+				name := v.Field(0).String()
+				if retainedLocalGensym.MatchString(name) {
+					blocked[name] = true
+				}
+				return
+			}
 			switch v.Kind() {
 			case reflect.Interface:
 				if !v.IsNil() {
@@ -417,4 +426,25 @@ func proofReportBindingSource(filename string, source []byte) (*ast.File, string
 		return nil, "retained generated binding source does not parse"
 	}
 	return file, ""
+}
+
+// A future Pos schema change must retain the original full visitor.
+var proofBindingPositionSchemaValid = proofBindingPositionSchemaMatches(reflect.TypeFor[lexer.Pos]())
+
+func proofBindingPositionSchemaMatches(typ reflect.Type) bool {
+	if typ == nil || typ.Kind() != reflect.Struct || typ.NumField() != 7 {
+		return false
+	}
+	names := []string{"File", "Line", "Col", "Offset", "EndLine", "EndCol", "EndOffset"}
+	for i, name := range names {
+		field := typ.Field(i)
+		expected := reflect.TypeFor[int]()
+		if i == 0 {
+			expected = reflect.TypeFor[string]()
+		}
+		if field.Name != name || field.Type != expected || field.Anonymous || field.Tag != "" || field.PkgPath != "" {
+			return false
+		}
+	}
+	return true
 }

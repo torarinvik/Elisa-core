@@ -1008,3 +1008,25 @@ requested-span index; binder work needs the same exact old/source epoch lifetime
 proof. No check, source-lookalike blocking, ambiguity detection or proof strength
 may be dropped to repair the regression. Evidence individual receipts plus
 body-profile.cpu, body-profile-cpu-cum.txt and body-profile-proof-cpu.txt.
+
+
+## Exact Pos leaf fast path in the proof binder scan
+
+The three proof-binding AST scans remain eager and run at their original
+pre-mutation point. The generic reflective walker now recognizes only the
+current exact seven-field `lexer.Pos` schema, checks the `File` string with the
+same local-gensym predicate, and skips visiting its six scalar coordinates,
+which had no visitor behavior. Any future or unrecognized schema uses the
+original full visitor. Pointer identity handling, old/fresh source epochs,
+lookalike blocking and authorization rules are unchanged. A frozen copy of the
+previous complete adapter is retained as a test oracle.
+
+On the complete three-scan adapter benchmark with 512 functions, the frozen
+adapter measured 1.1187–1.1220ms and the candidate 1.0444–1.0475ms (about 7%
+less component time); both measured 449.7 KB and 116 allocations. This is a small
+component gain, not a Stage1 compile-time improvement. Focused proof/retained
+tests and the new parity test pass under race in 2.125s. The full semantic-package
+race run did not complete: it reported a race in existing `flow_instrs.go` and
+hit the 25s test timeout in `TestTypedASTPointerWalkMatchesReflectiveWalk`.
+Logs `/tmp/elisa-proof-binder-position-focused-v2.jsonl` and
+`/tmp/elisa-proof-binder-position-bench.log`.
