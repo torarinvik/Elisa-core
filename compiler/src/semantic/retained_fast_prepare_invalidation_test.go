@@ -115,7 +115,12 @@ func TestRetainedFastPrepareDigestIncludesRegionOwnership(t *testing.T) {
 	}
 	warm, err := state.Update(retainedParse(t, after), retainedParse(t, after), []byte(after))
 	if err != nil {
-		t.Fatal(err)
+		if !strings.Contains(err.Error(), "preparation") {
+			t.Fatal(err)
+		}
+		// The complete declaration-phase certificate now rejects a changed
+		// ownership decision before mutation; the driver rebuilds this source.
+		warm = AnalyzeWithOptions(retainedParse(t, after), AnalyzeOptions{})
 	}
 	if state.LastStats.FastPrepared || !strings.Contains(state.LastStats.FastDeclined, "declaration-level facts") {
 		t.Fatalf("ownership flip bypassed scratch: %+v", state.LastStats)

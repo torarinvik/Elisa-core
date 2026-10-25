@@ -618,7 +618,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	}
 	if fastBodies != nil {
 		// The edit leaves every declaration-level result as the retained baseline holds it.
-		pre = &preBodyState{fingerprint: r.pre.fingerprint, global: r.pre.global, diags: r.pre.diags}
+		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, diags: r.pre.diags}
 		r.LastStats.FastPrepared = true
 	} else if prepared != nil && prepared.file == scratch {
 		prepared.Wait()

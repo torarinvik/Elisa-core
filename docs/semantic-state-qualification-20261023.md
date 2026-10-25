@@ -4011,3 +4011,27 @@ be renamed. Unsupported grammar fails closed. Eighteen fixtures pass, and LLVM
 assembly validates both sides of the positive scoped-renaming fixture. All
 test/assembler commands are externally capped at 30 seconds. No old Stage1 IR
 comparison is retroactively qualified by these fixture results.
+
+### Reject body edits that change declaration-phase classification
+
+The pre-body certificate now records per-function transitive store needs and
+region preparation decisions, plus the program-wide backed-enum/export sets.
+Scratch comparison rejects a change before mutating live state, allowing the
+normal driver to construct and persist an independently checked baseline.
+Unchanged-classification edits retain the fast-preparation path. Older states
+without the new certificate fail closed.
+
+A fresh-process disk-driver regression reproduces omitted cold-required arena
+allocation in the pre-fix LLVM IR at both O0 and O3. The fixed edit/subsequent
+edit/revert sequence matches cold LLVM bytes exactly, without identifier
+normalization, and preserves diagnostics. The regression and native execution,
+corruption recovery and proof-retraction checks pass together (2.731 seconds);
+logs `/tmp/elisa-classification-disk-cli-baseline-v2.log` and
+`/tmp/elisa-classification-driver-final.log`. Existing retained tests pass with
+fast preparation enabled, including under race (6.675 seconds). All commands
+have external 30-second caps and internal 25-second limits.
+
+Separate expanded semantic-oracle tests are still being developed to distinguish
+current scoped-region wrapper facts from historical analysis-only bindings.
+They are not counted as passing, and these small driver results do not establish
+Stage1 performance or full semantic qualification.

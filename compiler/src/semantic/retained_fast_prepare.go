@@ -24,9 +24,18 @@ import (
 
 var retainedFastPrepareMode = os.Getenv("ELISACORE_RETAINED_FAST_PREPARE")
 
-// retainedClassifyState is what the region-polymorphism classification decided program-wide
-// and does not keep on the analyzer: the transitive store needs and the region-backed enums.
+// A body can change classifier preparation decisions without changing its callable type.
+// Keep the complete per-function decision independently of mutable syntax.
+type retainedClassifyPreparation struct {
+	RegionPolymorphic, ReturnsCallerArena     bool
+	OwnsRegion, Entry, Export, NeedsStoreHost bool
+	Wrapper                                   string
+}
+
+// retainedClassifyState contains the declaration-phase classifier inputs and
+// decisions needed to validate retained body preparation.
 type retainedClassifyState struct {
+	preparation  map[*ast.FuncDecl]retainedClassifyPreparation
 	storeNeeds   map[*FuncType]map[string]*EnumType
 	regionBacked map[string]bool
 	exportTarget map[string]bool
