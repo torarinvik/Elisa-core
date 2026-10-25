@@ -4069,3 +4069,28 @@ combined compile/test command reached the external 30-second cap and is not a
 pass; splitting the cases retained that limit. Logs:
 `/tmp/elisa-final-prefetch-both-paths-race.log` and
 `/tmp/elisa-final-classification-O0-race.log`.
+
+### Current Stage1 admission exposed program-owned record overtaint
+
+The isolated 24dd88ea compiler processed current Stage1 revision47be11573 through
+all declaration/final-check checkpoints: 21 fresh invocations, 264.411 seconds
+total, maximum28.456 seconds, no external timeouts. Admission stopped with one
+non-warning diagnostic at check_impl_conformance.elisa354: a helper-returned
+record selected by a conditional was incorrectly assigned the inferred arena
+despite every storage-bearing field being explicitly program-lived. Complete
+state and original logs remain under the root recorded in
+`/tmp/elisa-stage1-qualification-current-root`; no object/timing target was
+qualified.
+
+A standalone reproducer confirms the same false positive. valueStoreRegion now
+recognizes program ownership before ambient-call fallback only when the complete
+type is program-lived AND the actual visible region symbol is its global
+declaration. Common explicit field-region collection alone is insufficient:
+it can miss hidden enum/generic storage. Local escapes, mixed fields, hidden
+enum payloads, local/program branch merges and lexical shadowing remain rejected.
+The focused tests pass (0.420 seconds), and the broader region/program-lived/
+container-escape selection passes under race (4.353 seconds), all externally
+capped30 seconds with internal25-second limits. Logs:
+`/tmp/elisa-source-record-ternary-diagnostic.stderr`,
+`/tmp/elisa-program-record-choice-focused.log`,
+`/tmp/elisa-program-record-region-race.log`.
