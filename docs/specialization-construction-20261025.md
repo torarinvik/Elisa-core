@@ -129,3 +129,25 @@ made yet. Evidence `/tmp/elisa-expr-type-overlay-construction-benchmark-v1`,
 `/tmp/elisa-expr-type-overlay-generate.log`,
 `/tmp/elisa-expr-type-overlay-semantic-race.log`, and
 `/tmp/elisa-expr-type-overlay-backend-race{-retry,}.log`.
+
+## Prune statically identity-free canonical catalog values
+
+Only canonical membership scans now skip static type closures proved unable to
+carry AST nodes, Symbols or Scopes. Interfaces, semantic Type implementations,
+AST leaf implementations, cycles and unknown kinds remain on the original walk.
+Private fact/schema/resource validation is unchanged. The cache contains only
+reflection types and booleans, never program graphs.
+
+Exact old-walker index comparisons cover nodes, symbols, scopes and relevant
+seen roles for real generic/default/module facts, detached analyzer AST, aliases,
+interfaces and cycles. Private unknown-fact rejection and existing specialization/
+overlay controls pass under race in 3.014 seconds. Backend generic bindings and
+private context restoration pass under race in 1.631 seconds.
+
+The first-catalog benchmark never warms the AST catalog. With 512 unrelated
+functions, ten iterations change reference 9.363 ms / 13.573 MB to cold-type-cache
+pruned 5.322 ms / 7.430 MB (about 43% less time and 45% less allocation); warm
+type-cache cost is 5.195 ms / 7.414 MB. With zero unrelated functions, cold
+classifier setup increases time from 0.152 ms to 0.214 ms while allocation drops.
+These fixture costs do not establish full Stage1 performance. Logs
+`/tmp/elisa-canonical-membership-pruning-{race,benchmark,backend-race}.log`.

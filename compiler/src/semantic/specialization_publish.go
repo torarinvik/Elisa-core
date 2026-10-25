@@ -98,6 +98,9 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 	if !v.IsValid() || p.err != nil {
 		return
 	}
+	if p.context == nil && !canonicalMembershipMayContainIdentity(v.Type()) {
+		return
+	}
 	if p.context != nil {
 		if err := validateSparseFactValueType(v); err != nil {
 			p.err = err
