@@ -1,6 +1,6 @@
 # Strict generated-identifier IR bijection candidate
 
-Offline qualification utility. The 18 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
+Offline qualification utility. The 27 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
 
 Run with Python 3.10+:
 
@@ -17,7 +17,7 @@ The default CLI/API policy permits NO changed identifiers. Every changed decoded
 
 In addition to explicit authorization, changed globals MUST have an actual `private` or `internal` definition in BOTH modules. External definitions/declarations, linkonce/weak/available_externally symbols, exports, and unresolved globals cannot be renamed even with a manifest. This restriction deliberately sacrifices some true positives to avoid authorizing a linker ABI change by spelling.
 
-Only complete names matching `__[a-z_]+_[0-9]+` or `__L[0-9]+_C[0-9]+` may differ. Both sides must have the same stable stem/family. Embedded matches such as `user__L12_C3` or a mangled symbol containing `__temp_3` are NOT rewritten or accepted. LLVM numeric slots, metadata IDs, COMDAT names, attribute groups, and all ordinary names remain exact. Extending this policy needs a producer-backed grammar, not a broad regex substitution.
+Only complete names matching `__[a-z_]+_[0-9]+`, `__L[0-9]+_C[0-9]+`, or the separately authorized local `__auto_<offset>#<positive-stack-ordinal>` form may differ. The stack ordinal must remain exact, and this form requires the `region-extra-stack` producer in a version-2 manifest. Both sides must have the same stable stem/family. Embedded matches such as `user__L12_C3` or a mangled symbol containing `__temp_3` are NOT rewritten or accepted. LLVM numeric slots, metadata IDs, COMDAT names, attribute groups, and all ordinary names remain exact. Extending this policy needs a producer-backed grammar, not a broad regex substitution.
 
 The lexer distinguishes `@`/`%` symbols, quoted identifiers, ordinary strings, comments, whitespace, and punctuation. LLVM two-hex-digit identifier escapes are decoded for identity checks. Quoted identifiers remain quoted when renamed. All non-identifier bytes, including whitespace, string constants, inline assembly strings, source filenames, comments, debug metadata, and instruction text, must match exactly. Comment predecessors that change due to renamed blocks therefore intentionally cause a conservative rejection.
 
@@ -25,7 +25,7 @@ Namespace keys are `(global,-1,name)`, `(type,-1,name)`, and `(local,function-or
 
 Scope recognition is intentionally restricted to LLVM printer style: each `define` header is on one line ending in `{`, each closing `}` is alone apart from whitespace/comments, and `declare` signatures occupy one line. Named types require module-level `%name = type ...` definitions. Cross-function `blockaddress` and `uselistorder_bb` are rejected. Local/type name overlap and ambiguous named-type/parameter header syntax are rejected rather than guessed. NUL-containing object/bitcode input is rejected. No renaming across functions or reordered instructions/definitions is accepted. Unsupported syntax fails closed even if both inputs are byte-identical.
 
-Memory use is linear in module bytes plus tokens and mapping entries; the implementation materializes both token streams. It is an offline correctness oracle, not a compiler hot-path dependency.
+The CLI uses two seekable streaming passes, retaining module symbol indexes and one complete function at a time. All local bindings, including unchanged names, remain in forward/reverse maps until that function ends; global/type maps persist across functions. A line or function over 64 MiB is rejected. Token storage adds overhead to that bound. The legacy `verify(bytes, bytes)` API still materializes complete streams. It is an offline correctness oracle, not a compiler hot-path dependency.
 
 ## Source inspection evidence
 
@@ -53,3 +53,17 @@ Observed producer grammar from source review:
 - `backend/llvm_types_packedenumabimode_to_addglobal.go:474-488`: defined functions default to external linkage; preferPrivateLinkage can choose private, but main, direct exports and default native runtime support exports stay external. Therefore an internal-looking generated spelling cannot establish ABI safety. The checker enforces actual private/internal IR linkage for global renames.
 
 These observations do not establish complete producer coverage. V2 is a conservative offline oracle for a supported subset, not yet a replacement proving the full edit matrix. Inputs/diagnostics rejected as unsupported must be reported as unqualified, never normalized again until they happen to match.
+
+## Streaming qualification
+
+The original18 fixtures and9 streaming cases pass, including unchanged-binding
+collisions, cross-function globals, forward types, nameless function/declaration
+ordinals, exact nonidentifier bytes, denied external ABI renames, producer and
+stack-ordinal checks, and bounded stream reads. The positive fixture pair also
+passes LLVM assembly. Tests do not establish provenance for a real compiler pair.
+
+Version2 adds a required `producer` field to each exact rename row. Supported
+local producer grammars are `auto-region`, `region-extra-stack`, and `quantifier`.
+A producer tag constrains spelling; it does not independently establish source
+origin. Real manifests still require reviewed binding/source-site evidence. The
+tool has no automatic authorization-from-differences mode.
