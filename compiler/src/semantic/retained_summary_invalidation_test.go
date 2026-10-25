@@ -67,9 +67,14 @@ def escapes_local() -> BorrowedBox:
 // Retained analyses keep facts for old body nodes in their private backing maps.
 // Code generation queries the current AST. Compare every current key, including
 // unexpected live facts, while ignoring only unreachable historical nodes.
-func assertRetainedLiveResultParity(t testing.TB, cold, warm *Result) {
+func assertRetainedLiveResultParity(t testing.TB, cold, warm *Result, extra ...map[PositionedFunctionNode]PositionedFunctionNode) {
 	t.Helper()
 	mapping := map[PositionedFunctionNode]PositionedFunctionNode{}
+	for _, supplied := range extra {
+		for source, current := range supplied {
+			mapping[source] = current
+		}
+	}
 	mapIncrementalCurrentAST(t, reflect.ValueOf(cold.File), reflect.ValueOf(warm.File), mapping)
 	live := map[PositionedFunctionNode]bool{}
 	for _, node := range mapping {
@@ -95,5 +100,5 @@ func assertRetainedLiveResultParity(t testing.TB, cold, warm *Result) {
 		}
 		field.Set(filtered)
 	}
-	assertIncrementalResultParity(t, cold, &projected)
+	assertIncrementalResultParity(t, cold, &projected, mapping)
 }

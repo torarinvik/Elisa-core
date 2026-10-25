@@ -4035,3 +4035,24 @@ Separate expanded semantic-oracle tests are still being developed to distinguish
 current scoped-region wrapper facts from historical analysis-only bindings.
 They are not counted as passing, and these small driver results do not establish
 Stage1 performance or full semantic qualification.
+
+### Classifier regression metadata is now strictly accounted
+
+The extended semantic oracle identifies analysis-only scoped-region Store
+identifiers through the actual `ExprFacts.base` -> optimization symbol ->
+`SymbolRegion.Node` binding. It retains every current published observation.
+Historical bindings may be projected only when absent from both the current
+source AST and current function CFG; conflicting current observations fail.
+No numeric symbol identities are normalized. The owned comparison copies leave
+original results untouched. Negative controls cover a changed fact and an old
+binder still referenced by a live CFG.
+
+Both classifier regressions now pass strict AST, type/summary, published metadata
+and diagnostic comparison, including disk restore, fresh fallback, fast-path
+requalification and unchanged-classification scratch control. The five focused
+cases pass (0.381 seconds), and the complete retained selection passes with
+fast preparation enabled under race (6.936 seconds). Raw logs:
+`/tmp/elisa-classification-certificate-focused-v3.log` and
+`/tmp/elisa-classification-certificate-all-race.log`. External 30-second caps
+and internal 25-second limits apply. This resolves the earlier oracle blocker,
+not the outstanding Stage1 timing/full-self-host requirements.

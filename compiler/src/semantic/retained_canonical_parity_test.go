@@ -20,7 +20,30 @@ import (
 // Callers must compare original diagnostics and layout/member metadata separately.
 func assertRetainedCanonicalLiveResultParity(t testing.TB, cold, warm *Result) {
 	t.Helper()
-	left, right := cloneRetainedCanonicalResult(cold), cloneRetainedCanonicalResult(warm)
+	coldNodes, warmNodes := map[PositionedFunctionNode]PositionedFunctionNode{}, map[PositionedFunctionNode]PositionedFunctionNode{}
+	left := cloneRetainedCanonicalResultRecording(cold, coldNodes)
+	right := cloneRetainedCanonicalResultRecording(warm, warmNodes)
+	coldRegions, err := accountRetainedScopedRegionFacts(t, cold, left, coldNodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warmRegions, err := accountRetainedScopedRegionFacts(t, warm, right, warmNodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	astMapping := map[PositionedFunctionNode]PositionedFunctionNode{}
+	mapIncrementalCurrentAST(t, reflect.ValueOf(left.File), reflect.ValueOf(right.File), astMapping)
+	extra := map[PositionedFunctionNode]PositionedFunctionNode{}
+	for owner, node := range coldRegions {
+		paired, ok := astMapping[owner].(*ast.RegionStmt)
+		if !ok || warmRegions[paired] == nil {
+			t.Fatal("synthetic region-owner fact lacks its paired region binding")
+		}
+		extra[node] = warmRegions[paired]
+	}
+	if len(coldRegions) != len(warmRegions) {
+		t.Fatal("synthetic region-owner binding inventory differs")
+	}
 	functions := map[string]*Symbol{}
 	for fn, symbol := range right.analyzer.funcDeclSymbols {
 		functions[fn.Name] = symbol
@@ -31,7 +54,7 @@ func assertRetainedCanonicalLiveResultParity(t testing.TB, cold, warm *Result) {
 			t.Fatalf("canonical function type/summary differs for %s: %s", fn.Name, retainedCanonicalFirstDifference(reflect.ValueOf(symbol.Type), reflect.ValueOf(other.Type)))
 		}
 	}
-	assertRetainedLiveResultParity(t, left, right)
+	assertRetainedLiveResultParity(t, left, right, extra)
 }
 
 func retainedCanonicalFirstDifference(left, right reflect.Value) string {
@@ -127,6 +150,19 @@ func retainedCanonicalFirstDifference(left, right reflect.Value) string {
 // while replacing all source positions with one canonical value. No source AST,
 // type, map, slice or analyzer is written during comparison.
 func cloneRetainedCanonicalResult(source *Result) *Result {
+	return cloneRetainedCanonicalResultRecording(source, nil)
+}
+
+func cloneRetainedCanonicalResultRecording(source *Result, nodes map[PositionedFunctionNode]PositionedFunctionNode) *Result {
+	record := func(original, copied reflect.Value) {
+		if nodes == nil || !original.CanInterface() || !copied.CanInterface() {
+			return
+		}
+		node, ok := original.Interface().(PositionedFunctionNode)
+		if current, yes := copied.Interface().(PositionedFunctionNode); ok && yes {
+			nodes[node] = current
+		}
+	}
 	type key struct {
 		typ reflect.Type
 		ptr uintptr
@@ -149,10 +185,12 @@ func cloneRetainedCanonicalResult(source *Result) *Result {
 			}
 			k := key{typ: value.Type(), ptr: value.Pointer()}
 			if prior, ok := seen[k]; ok {
+				record(value, prior)
 				return prior
 			}
 			out := reflect.New(value.Type().Elem())
 			seen[k] = out
+			record(value, out)
 			out.Elem().Set(clone(value.Elem()))
 			return out
 		case reflect.Interface:
