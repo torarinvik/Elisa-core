@@ -871,3 +871,21 @@ Evidence /tmp/elisa-canonical-map-scratch-*.log and source artifact
 /tmp/elisa-canonical-membership-map-scratch-v1.
 All50 selected backend tests RUN and PASS with no skipped/missing cases;
 JSON events summarized in /tmp/elisa-canonical-map-scratch-backend.json.
+
+
+## Duplicate LLVM declaration query
+
+The partition definition/schedule statistics loop now reads LLVMIsDeclaration
+once per enumerated function and reuses the result. The module is not mutated
+between the former two queries. Definitions, owned bodies, exact schedule name
+bytes/order, linkage queries and all verification/hash/partition settings remain
+unchanged. A standalone LLVM-C old/new oracle passed empty/single/32768function
+and disk/no-disk cases, with32768 versus65536declaration calls on the large case.
+ABBA component samples are recorded but exclude Go/CGo transition costs and do
+not establish a full rebuild gain. Actual partition signature/constant edits,
+fresh disk sessions, bad-hint rejection and exact-input disk reuse tests all RUN
+and PASS with no skips (backend1.532s). Evidence:
+/tmp/elisa-partition-declaration-query-component.log and
+/tmp/elisa-partition-declaration-query-backend.jsonl. Source artifact
+/tmp/elisa-partition-declaration-query-v1. This is a redundant-call gain; full
+Stage1 latency for this producer remains unmeasured.

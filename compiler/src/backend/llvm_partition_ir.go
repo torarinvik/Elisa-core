@@ -260,13 +260,14 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	partitionIRNanos.Add(int64(irDuration))
 	var bodies, defs int64
 	for f := C.LLVMGetFirstFunction(g.module); f != nil; f = C.LLVMGetNextFunction(f) {
-		if C.LLVMIsDeclaration(f) == 0 {
+		isDeclaration := C.LLVMIsDeclaration(f) != 0
+		if !isDeclaration {
 			defs++
 			if s.disk != nil {
 				*members = append(*members, partitionScheduleStem(llvmValueName(f)))
 			}
 		}
-		if C.LLVMIsDeclaration(f) == 0 && C.LLVMGetLinkage(f) != C.LLVMWeakODRLinkage {
+		if !isDeclaration && C.LLVMGetLinkage(f) != C.LLVMWeakODRLinkage {
 			bodies++
 		}
 	}
