@@ -982,3 +982,29 @@ All55 selected backend cases RUN/PASS with no skips/missing names, including
 exact O0/O3/debug IR and linked runtime default controls; JSON events summarized
 in /tmp/elisa-canonical-dispatch-backend.json. Independent source review found
 no concrete blocker in the exhaustive static dispatch/role/retention predicate.
+
+
+## Normal72ca edit regression and attribution
+
+Fresh namespace /tmp/elisa-stage1-proof-default-root: cold22 final25.534s;
+prime13.424911s, exact baseline0.280606s, first novel body17.339817s, exact edited
+0.299656s. Four objects/eight output streams remain byte-identical to987a6b21;
+source restored2556c882. The first edit REGRESSED from14.677536s. Correctness
+foundation is not a timing gain, and targets remain unmet.
+
+A separately labeled first arithmetic edit CPU/timing observer (no MEMPROFILE)
+ran17.936721s, object e5bad138 matches the prior arithmetic case; source restored.
+Update phase4.850s versus historical4461.992s; restore1.175s; IR/partition phase
+11.309s versus prior13.639s, so the new edit-update cost is the immediate priority.
+CPU samples attribute1.91s to report coordinate setup:1.12s full position indexing
+and0.79s three binder scans. These are sampled CPU costs, not additive wall-time
+claims. Eager setup occurs before actual report rendering needs are known.
+
+Safe optimization must preserve independent pre-analysis source authority. Live
+and even parts of fresh parsed AST can be mutated by update/struct/default passes;
+blindly postponing traversal would change old-epoch bindings or authored spans.
+Candidate work is immutable pre-analysis position witnesses with a final complete
+requested-span index; binder work needs the same exact old/source epoch lifetime
+proof. No check, source-lookalike blocking, ambiguity detection or proof strength
+may be dropped to repair the regression. Evidence individual receipts plus
+body-profile.cpu, body-profile-cpu-cum.txt and body-profile-proof-cpu.txt.
