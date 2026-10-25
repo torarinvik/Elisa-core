@@ -444,3 +444,22 @@ direct-map benchmark changes638417bytes/8203allocations/0.73–1.10ms to
 79312bytes/11allocations/4.3–4.8us. Logs: /tmp/elisa-settled-bound-*.log and
 /tmp/elisa-settled-bound-backend.json. No end-to-end gain is inferred from this
 component benchmark; fresh-producer qualification remains necessary.
+
+## Exact typed parameter-fact memo copy
+
+Private specialization copies storeScanParamFactsCache with a typed loop after
+an exact four-field/name/type schema guard. Scalars, declaration keys and opaque
+interface pointers are unchanged; reach keeps its prior backing with cap=len,
+including nil versus non-nil empty shapes. Both constructor and helper fall back
+to the former reflective policy for unknown schemas. Ordinary workers and the
+mutable binder cache remain unchanged. Closed source controls bind actual
+producer/consumer functions and reject new unreviewed accesses.
+
+Focused race passes2.772s; broader retained/private/parallel/snapshot/iterator
+race passes13.055s. Actual generation has no registry/helper diff. All50 selected
+backend generic/specialization/alias/borrow/region tests pass in bounded groups.
+Direct-map benchmark changes1770312bytes/8229allocations/1.35–2.11ms to
+1573552bytes/34allocations/0.49–0.55ms. An independent source audit found no
+alias/rekey/publication blocker. Logs: /tmp/elisa-param-facts-*.log and
+/tmp/elisa-param-facts-backend.json. Full fresh-producer edited Stage1 measurement
+remains necessary; the component benchmark is not a target qualification.

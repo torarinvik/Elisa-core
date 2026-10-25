@@ -423,6 +423,10 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "storeScanParamFactsCache" && specializationParamFactsCopySchemaValid {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneSpecializationParamFacts(a.storeScanParamFactsCache)))
+			continue
+		}
 		if ownedFunctionAnalyses && name == "functionAnalyses" {
 			// Skip BEFORE deepCloneValue: cloning then clearing still performs
 			// a whole-program map traversal in the serialized specialization path.

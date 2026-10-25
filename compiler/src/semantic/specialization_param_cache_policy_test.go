@@ -1,0 +1,78 @@
+package semantic
+
+import (
+	"crypto/sha256"
+	"fmt"
+	goast "go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+func TestSpecializationParamCacheSourcePolicy(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	directory := filepath.Dir(filename)
+	golden := map[string]string{"region_store_scan_param_writes.go|storeScanParamLocalFacts": "5399453efd920e5950bdba98b0e08240e376f10ea918c359032a1b71a8aa2483", "region_store_scan_param_writes.go|computeStoreScanParamFacts": "cb5c8e0943082f2b3650167cb667c14385a8da67f29a79def46268499872a73f", "region_store_scan_param_writes.go|storeScanParamReaches": "8cdd0f5effba5835474f246d51b40addb9ac123c929a8d38e6063457ae7e44e5"}
+	allowedCalls := map[string]bool{"storeScanParamLocalFacts": true, "storeScanParamReaches": true}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		set := token.NewFileSet()
+		file, err := parser.ParseFile(set, path, source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*goast.FuncDecl)
+			if !ok {
+				continue
+			}
+			name := fn.Name.Name
+			if expected, ok := golden[entry.Name()+"|"+name]; ok {
+				start := set.Position(fn.Pos()).Offset
+				end := set.Position(fn.End()).Offset
+				if fmt.Sprintf("%x", sha256.Sum256(source[start:end])) != expected {
+					t.Errorf("review settled-cache producer/consumer change: %s %s", entry.Name(), name)
+				}
+				delete(golden, entry.Name()+"|"+name)
+			}
+			goast.Inspect(fn.Body, func(node goast.Node) bool {
+				if literal, ok := node.(*goast.BasicLit); ok && literal.Kind == token.STRING {
+					value, _ := strconv.Unquote(literal.Value)
+					if value == "storeScanParamFactsCache" && !(entry.Name() == "parallel_bodies.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") {
+						t.Errorf("named reflection bypass needs review: %s", set.Position(node.Pos()))
+					}
+				}
+				selector, ok := node.(*goast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				if selector.Sel.Name == "storeScanParamFactsCache" && !(entry.Name() == "parallel_bodies.go" && name == "cloneAnalyzerValueForParallelPolicy") && !(entry.Name() == "specialization_maps_generated.go" && name == "cloneSpecializationOpaqueMap") && !(entry.Name() == "region_store_scan_param_writes.go" && name == "storeScanParamLocalFacts") {
+					t.Errorf("raw cache access outside reviewed policy: %s", set.Position(node.Pos()))
+				}
+				if selector.Sel.Name == "storeScanParamLocalFacts" && !allowedCalls[name] {
+					t.Errorf("new cache consumer needs review: %s", set.Position(node.Pos()))
+				}
+				return true
+			})
+		}
+	}
+	if len(golden) != 0 {
+		t.Fatal("reviewed functions missing", golden)
+	}
+}
