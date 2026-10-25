@@ -1782,7 +1782,8 @@ func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 		if a.isProgramRegion(r) && a.typeIsProgramLivedCached(valueType) && a.currentScope != nil && a.globalScope != nil {
 			if sym, ok := a.currentScope.Lookup(r); ok && sym != nil && sym == a.globalScope.Symbols[r] && sym.Kind == SymbolRegion {
 				if _, declared := sym.Node.(*ast.GlobalRegionDecl); declared {
-					return r
+					// This API tracks local storage dependencies, not global owners.
+					return ""
 				}
 			}
 		}

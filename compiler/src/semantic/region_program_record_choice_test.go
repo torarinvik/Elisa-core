@@ -3,8 +3,6 @@ package semantic
 import (
 	"strings"
 	"testing"
-
-	"elisacore/src/ast"
 )
 
 const programRecordChoiceSource = `global region source
@@ -106,28 +104,49 @@ def bad(pick: bool) -> void:
 	}
 }
 
-func TestProgramRecordStorageContractRequiresActualProgramBinding(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "program_record_binding.elisa", programRecordChoiceSource, AnalyzeOptions{})
+func TestProgramRecordContainerElementsDoNotAcquireLocalDependencies(t *testing.T) {
+	const src = `global region source
+struct Item:
+    name: sview @source
+
+def collect(name: sview @source) -> sview @source:
+    can Memory.Allocate, Abort.Panic:
+        items: mutable darray[Item] = []
+        items.push(Item{name: name})
+        return items[0].name
+
+def helper(name: sview @source) -> Item:
+    return Item{name: name}
+
+def collect_helper(name: sview @source) -> sview @source:
+    can Memory.Allocate, Abort.Panic:
+        items: mutable darray[Item] = []
+        items.push(helper(name))
+        return items[0].name
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "program_record_elements.elisa", src, AnalyzeOptions{})
 	if errors := result.Errors(); len(errors) != 0 {
-		t.Fatal(errors)
+		t.Fatalf("program-owned field recovered from local container rejected: %v", errors)
 	}
-	a := result.analyzer
-	a.currentScope = a.globalScope
-	typ := result.NamedTypes["Subset"]
-	if typ == nil {
-		t.Fatal("missing Subset")
+}
+
+func TestProgramRecordRegionShadowIsRejected(t *testing.T) {
+	const src = `global region source
+struct Item:
+    name: sview @source
+def bad() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region source(4096):
+            item: Item = Item{name: "text"}
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "program_record_shadow.elisa", src, AnalyzeOptions{})
+	found := false
+	for _, err := range result.Errors() {
+		if strings.Contains(err, "shadows the program-lived region") {
+			found = true
+		}
 	}
-	expr := &ast.Ident{Name: "unbound"}
-	if got := a.valueStoreRegion(expr, typ); got != "source" {
-		t.Fatalf("program binding: %q", got)
+	if !found {
+		t.Fatalf("region shadow not rejected: %v", result.Errors())
 	}
-	// A same-spelled lexical region cannot provide the new program-owned proof.
-	oldScope := a.currentScope
-	a.currentScope = &Scope{Parent: oldScope, Symbols: map[string]*Symbol{
-		"source": {Name: "source", Kind: SymbolRegion, Node: &ast.RegionStmt{Name: "source"}},
-	}}
-	if got := a.valueStoreRegion(expr, typ); got == "source" {
-		t.Fatal("local shadow supplied program ownership")
-	}
-	a.currentScope = oldScope
 }
