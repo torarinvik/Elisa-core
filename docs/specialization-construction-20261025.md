@@ -655,3 +655,28 @@ overlays.
 
 All50 selected backend generic/specialization/ABI/layout/alias/region tests pass
 in10 externally bounded groups: /tmp/elisa-symbol-id-overlay-backend.json.
+
+## Fresh Stage1 comparison at 446ed7be
+
+Same exact preserved-spec source, new empty namespace, fresh processes and no
+server. Producer binary291d9cb1a514c208ddaabac284aab70cae1e77352429338372ddf2082c37f309.
+Cold completion22 bounded invocations, final26.841s. Normal prime14.035722s;
+unchanged0.292181s; first unseen comparison body edit15.271819s; exact edited
+repeat0.296520s. First edit is4.2% below61557a73's15.947435s in the previous
+controlled single run,14.9% below673183d8's17.935174s. This is not yet evidence
+of consistency across the required varied edit matrix. All corresponding cold,
+normal, edited and profiled arithmetic objects keep their prior exact hashes.
+The complete stdout/stderr streams also match61557a73 byte for byte for all four
+normal measurements, including10379708-byte diagnostic streams.
+
+Separate novel arithmetic-body observer profile takes17.522101s. Allocation total
+10732.46MB versus10696.50MB at61557a73 is essentially flat/slightly higher;
+cloneAnalyzer3161.04MB versus3230.19MB and SpecializeFunction4954.09MB versus
+4956.57MB remain substantial. Thus component map-copy wins do not justify a
+claim of another total-allocation reduction. The earlier final-restored-state
+field census is a diagnostic input, not proof that every hot construction uses
+those same complete maps. Actual callsite/input census is needed before projecting
+field savings across all specializations. Source restored exactly after both edits.
+Evidence /tmp/elisa-stage1-borrowed-cache-root, complete JSON/settings/profiles,
+normal-streams-comparison.json and source receipts. Body2s, signature/contract3s,
+major10s, O3/defaultCLI/latest-source/strictIR/full-gen2 gates remain unqualified.
