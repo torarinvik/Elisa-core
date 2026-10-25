@@ -386,6 +386,9 @@ func (a *Analyzer) typedPureReturnExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 	if a != nil && a.implicitIntConvFuncs[decl] {
 		return nil, false
 	}
+	if a != nil {
+		decl = a.readDecl(decl)
+	}
 	return pureReturnExpr(decl)
 }
 

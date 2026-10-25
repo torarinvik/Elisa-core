@@ -290,7 +290,7 @@ func (tr *smtTranslator) lowerPredicateBody(decl *ast.FuncDecl, penv map[string]
 		return tr.boolTerm(body, tr.predicateEnvIntBool(penv))
 	}
 	// Single top-level `match <param>:` returning bool from each arm.
-	ms, scrutName, ok := singleMatchReturnBody(decl)
+	ms, scrutName, ok := singleMatchReturnBody(tr.a.readDecl(decl))
 	if !ok {
 		return "", false
 	}
@@ -425,7 +425,7 @@ func (a *Analyzer) boolPredicateEligible(decl *ast.FuncDecl) bool {
 	if !ok || fnType == nil || fnType.Return == nil || !IsBoolType(fnType.Return) {
 		return false
 	}
-	if _, _, ok := singleMatchReturnBody(decl); ok {
+	if _, _, ok := singleMatchReturnBody(a.readDecl(decl)); ok {
 		return true
 	}
 	if body, ok := a.typedPureReturnExpr(decl); ok && body != nil {
@@ -469,7 +469,7 @@ func (a *Analyzer) predicateStructurallyWellFounded(decl *ast.FuncDecl) bool {
 		return false
 	}
 	allowed := map[*ast.CallExpr]bool{}
-	a.collectStructuralRecursiveCalls(decl.Body, id.Name, measureEnum, map[string]bool{}, allowed)
+	a.collectStructuralRecursiveCalls(a.readDecl(decl).Body, id.Name, measureEnum, map[string]bool{}, allowed)
 	for _, c := range calls {
 		if !allowed[c] {
 			return false
@@ -516,7 +516,7 @@ func (a *Analyzer) collectSelfRecursiveCallsIn(decl *ast.FuncDecl) []*ast.CallEx
 	walkExpr := func(e ast.Expr) {
 		a.walkStaticExpr(e, func(x ast.Expr) bool {
 			if call, ok := x.(*ast.CallExpr); ok {
-				if d, ok := a.resolveDirectCallFuncDecl(call); ok && d == decl {
+				if d, ok := a.resolveDirectCallFuncDecl(call); ok && a.canonicalFuncDecl(d) == a.canonicalFuncDecl(decl) {
 					out = append(out, call)
 				}
 			}
@@ -545,7 +545,7 @@ func (a *Analyzer) collectSelfRecursiveCallsIn(decl *ast.FuncDecl) []*ast.CallEx
 			}
 		}
 	}
-	walkStmt(decl.Body)
+	walkStmt(a.readDecl(decl).Body)
 	return out
 }
 

@@ -3910,3 +3910,24 @@ solver suite passes under the race detector (1.362 seconds). Every command is
 externally capped at 30 seconds. A separate existing parallel function-type race
 was exposed by a broader prefix selection and reproduced on the pre-fix baseline;
 it is tracked independently, not claimed fixed by this change.
+
+### Parallel function metadata and foreign bodies have explicit read ownership
+
+Lazy function-type copies now synchronize with unit publication. Imported finished
+declarations evict provisional foreign copies. Function-type substitution uses the
+same snapshot boundary, and publication detaches mutable metadata storage.
+Nominal and inline bit-group identities remain canonical; recursive roots and
+cross-field callback sharing remain intact. Body analysis stays parallel.
+
+Foreign structural-predicate, pure-return and recursion scans use existing private
+read views until typed dependencies finish. Canonical declaration identities still
+govern recursion/totality and SMT symbols; proof guards and budgets are unchanged.
+
+The existing float-valued dictionary SMT test reproduced races on the pre-fix
+baseline. An initial type-copy fix exposed a foreign AST read race; subsequent
+stress found a substitution/publication race. The final candidate passes all
+focused cases once (2.000 seconds), core concurrency cases twenty times (10.657
+seconds), preservation cases five times (5.066 seconds), and the integrated broad
+parallel/returned-function/retained/analysis-build selection (1.470 seconds).
+An initial combined twenty-repeat command reached its external 30-second cap;
+it is not counted as a pass. Every command remains externally capped.
