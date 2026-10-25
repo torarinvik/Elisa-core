@@ -30,13 +30,17 @@ type RetainedAnalysis struct {
 	appendOnly *retainedAppendOnlyState
 	tables     *retainedFactTables
 	digestOf   map[*ast.FuncDecl]string // local-fact digest of each spliced edit, computed before analysis rewrote it
-	a          *Analyzer
-	result     *Result
-	decls      []scopedDecl
-	post       func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
-	pristine   *ast.File                            // a parse of src, for comparison; see texts
-	texts      map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
-	src        []byte                               // the expanded source pristine was parsed from
+	// Persist invalidation across MarshalState/RestoreAnalysisState. A scratch-
+	// backed update can preserve the live analysis without rebuilding the fast
+	// preparer's declaration-phase snapshots.
+	fastPrepareInvalidated string
+	a                      *Analyzer
+	result                 *Result
+	decls                  []scopedDecl
+	post                   func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
+	pristine               *ast.File                            // a parse of src, for comparison; see texts
+	texts                  map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
+	src                    []byte                               // the expanded source pristine was parsed from
 
 	depth      int
 	windows    map[*ast.FuncDecl][2]int // body-phase diagnostics emitted by each top-level analyzeFunc
@@ -601,11 +605,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	pairing := time.Since(start)
 	var pre *preBodyState
 	var fastBodies [][]ast.Stmt
-	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) &&
-		len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
+	bodyEnvironmentUnchanged := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
 		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto)+len(movedSplices)+len(shifted)+len(shiftedOther) == 0 &&
-		usingsAdded+usingsRemoved == 0 && !appendedTop && retainedNoLineDelta(lineDelta) {
+		usingsAdded+usingsRemoved == 0 && !appendedTop && retainedNoLineDelta(lineDelta)
+	if retainedFastPrepareMode == "on" && len(shadowEdits) != 0 && len(shadowEdits) == len(splices) && bodyEnvironmentUnchanged {
 		var why string
 		if fastBodies, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls); why != "" {
 			fastBodies = nil
@@ -1733,6 +1737,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if appendedTop {
 			retainedSortDeclsBySource(a.file.Decls, currentOffsets)
 		}
+	}
+	if retainedFastPrepareMode != "" && !bodyEnvironmentUnchanged {
+		r.invalidateFastPrepareBaseline("declaration environment changed; fresh retained baseline required")
 	}
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
 	r.result.Diagnostics = publishedResultDiagnostics(a.diagnostics)

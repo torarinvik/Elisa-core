@@ -39,6 +39,16 @@ type retainedAppendOnlyState struct {
 	owners map[string]string
 }
 
+// A successful scratch-backed declaration update does not recapture/remap these
+// snapshots onto the new live declaration graph. Drop them together rather than
+// mixing new lookup tables with old classification/store/append-only facts.
+// Ordinary retained updates continue through scratch; a fresh AnalyzeRetained
+// invocation supplies the next independently qualified fast baseline.
+func (r *RetainedAnalysis) invalidateFastPrepareBaseline(reason string) {
+	r.classify, r.appendOnly, r.tables, r.digestOf = nil, nil, nil, nil
+	r.fastPrepareInvalidated = reason
+}
+
 // appendOnlyReports reports whether the append-only store check flags edit. It records
 // nothing: a flagged edit goes through the scratch, which reports it.
 func (r *RetainedAnalysis) appendOnlyReports(a *Analyzer, edit *ast.FuncDecl, sd scopedDecl) bool {
@@ -227,6 +237,10 @@ func (r *RetainedAnalysis) localFactDigest(a *Analyzer, live, fn *ast.FuncDecl, 
 	var b strings.Builder
 	a.withResolutionContext(sd.Namespace, sd.Usings, func() {
 		a.regionPolyFn = fn
+		// Owning any region selects signature-only packed-store threading,
+		// instead of the transitive callee store set. A change is an ABI change
+		// even if allocations, callees and outside-region calls are unchanged.
+		fmt.Fprintf(&b, "ownsRegion=%v;", a.funcOwnsRegion(fn))
 		fmt.Fprintf(&b, "poly=%v,%v,%v,%v;", a.functionReturnsRegionAllocatedValue(fn), functionBuildsAndReturnsLocalContainer(fn), functionBuildsAndReturnsLocalStruct(fn, ft), a.functionWritesHandleToScalarOutParam(fn))
 		fmt.Fprintf(&b, "alloc=%v;callsPoly=%v;", bodyAllocatesInferredContainers(fn.Body), a.bodyCallsRegionPolyOutsideRegion(fn.Body))
 		backed := a.collectRegionBackedPackedEnums([]*ast.FuncDecl{fn})
@@ -330,6 +344,9 @@ func (r *RetainedAnalysis) shadowPredict(a *Analyzer, edits [][3]*ast.FuncDecl, 
 // edited function's declaration-level facts must equal its previous version's, and no
 // declaration-phase diagnostic may lie inside it.
 func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl, scoped map[*ast.FuncDecl]scopedDecl, oldDecls []ast.Decl) ([][]ast.Stmt, string) {
+	if r.fastPrepareInvalidated != "" {
+		return nil, r.fastPrepareInvalidated
+	}
 	if r.pre == nil || r.classify == nil {
 		return nil, "no retained baseline"
 	}

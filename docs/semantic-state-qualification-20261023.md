@@ -3898,3 +3898,18 @@ update and cold diagnostic parity. Commands are externally capped at 30 seconds.
 
 The integrated safety worktree also passes these lifecycle cases under the race
 detector (1.814 seconds). Preparation is joined before a fresh fallback analysis.
+
+### Fast preparation invalidates its declaration baseline
+
+Declaration/environment or source-coordinate changes now invalidate captured
+classification, append-only, lookup and digest tables together. The invalidation
+reason survives disk snapshots. Subsequent body edits use the ordinary scratch
+path until an independent analysis establishes a fresh fast baseline; automatic
+requalification remains future work. The digest also records region ownership,
+which controls hidden packed-store parameters.
+
+Regressions cover declaration edits followed by disk restoration and body edits,
+fresh-baseline recovery, and an Arena-backed ownership change with strict cold
+metadata/signature parity. The focused candidate passes in 0.433 seconds; the
+integrated safety worktree passes under the race detector in 1.566 seconds.
+Commands are externally capped at 30 seconds.
