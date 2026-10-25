@@ -766,7 +766,27 @@ permission/snapshot/overlay race passes19.821s. All50 selected backend tests RUN
 and PASS with no skips or missing names, explicitly recorded through JSON events
 in /tmp/elisa-binder-overlay-backend.json. Constructor cardinality controls at0
 and5013rows are7592–7593bytes/239allocations/24.7–25.0us, deferring all inherited
-row work until its first real use. Full Stage1 effect/touched-row cost remains
-unmeasured for this new producer. Artifacts /tmp/elisa-store-scan-binder-overlay-v2
+row work until its first real use. Touched-row component cost remains unmeasured; the combined full Stage1
+measurement is recorded below. Artifacts /tmp/elisa-store-scan-binder-overlay-v2
 and /tmp/elisa-binder-overlay-*.log. Private plain-default ledgers still need these
 canonical-only guard/source-policy integrations before any branch-wide merge.
+
+
+## Normal disk rebuild at 5dedc64d
+
+A fresh producer namespace for 5dedc64d (including eager flow-summary pooling and
+lazy binder ownership) completed bounded cold preparation in22 invocations; the
+final invocation took26.509s. The normal cache prime took13.549529s, unchanged
+baseline0.279680s, first novel parser body edit14.851578s, and exact edited repeat
+0.278024s. The prior446ed7be namespace measured15.271819s for the same first edit;
+this single-run comparison is0.420241s lower, not a repeated-run confidence claim.
+All four objects and all eight stdout/stderr streams match the corresponding
+prior-producer results byte for byte. The source was restored to its pinned hash.
+
+These runs use separate CLI processes and disk caches with no retained server,
+normal observers disabled, original source specifications preserved, and each
+compiler invocation externally capped at30s. Analysis cache and fast preparation
+remain explicitly enabled experimental settings, not default-CLI qualification.
+The first edited rebuild still exceeds the goal. Evidence lives at the directory
+named by /tmp/elisa-stage1-binder-root, including normal-streams-comparison.json,
+individual O0 measurement receipts, producer archive and source-restoration.json.
