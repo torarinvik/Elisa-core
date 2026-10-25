@@ -83,3 +83,21 @@ analyzer cloning, and 3.23 GB under publication.walk. The latter includes
 canonical membership discovery shared once per codegen session, not necessarily
 per-product publication. Evidence `/tmp/elisa-stage1-clone-cuts-root`. This is
 why the larger overlay and validation traversal work remains necessary.
+
+## Interval validation without quadratic pointer scans
+
+Syntax ownership validation still checks every current backing range and pointer,
+but uses predecessor binary search within proven-disjoint ranges instead of
+comparing every pointer with every range. The earliest overlap bounds the
+searchable prefix, preserving exact hidden-tail-versus-overlap diagnostic
+precedence. There is no cached validation epoch or skipped discovery.
+
+Existing private/syntax controls and 2,048 deterministic cases compare against
+the exact previous quadratic oracle, including error strings. Explicit mixed
+invalid, wrong-type, zero-size, end, alias/hidden-tail and newly discovered
+metadata controls pass under race in 1.644 seconds. On identical 2,048-slice/
+2,048-pointer metadata, the 20-iteration benchmark falls from 41.97 ms to
+0.236 ms with identical measured allocation (48,304 bytes, 15 allocations/op).
+This is an interval-validation microbenchmark, not a Stage1 rebuild result.
+Logs `/tmp/elisa-specialization-syntax-interval-v2-race.log` and
+`/tmp/elisa-specialization-syntax-interval-v2-benchmark.log`.

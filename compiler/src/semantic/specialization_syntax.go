@@ -135,19 +135,40 @@ func (s *specializationSyntax) validate() error {
 	}
 	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start < ranges[j].start })
 	var end uintptr
-	for _, r := range ranges {
+	overlap := false
+	for i, r := range ranges {
 		if r.start < end {
-			return fmt.Errorf("specialization syntax has unsupported partially overlapping slice backing")
+			// The old walk checks hidden pointers in earlier slices before
+			// reaching this overlap, but checks overlap before pointers here.
+			// Validate exactly that proven-disjoint prefix before reporting it.
+			ranges = ranges[:i]
+			overlap = true
+			break
 		}
 		end = r.start + uintptr(r.capacity)*r.typ.Elem().Size()
+	}
+	// The retained prefix is disjoint after the check above. Every scanned pointer
+	// can therefore intersect at most one range, independent of element type.
+	// Find that interval once instead of comparing every pointer to every slice.
+	for pointer := range s.scanned {
+		if pointer.typ.Kind() != reflect.Pointer {
+			continue
+		}
+		i := sort.Search(len(ranges), func(i int) bool { return ranges[i].start > pointer.ptr }) - 1
+		if i < 0 {
+			continue
+		}
+		r := ranges[i]
+		size := r.typ.Elem().Size()
 		// An explicit interior pointer is observable too. A pointer into hidden
 		// capacity would require preserving otherwise inaccessible gaps; decline
 		// that shape rather than retain stale tail syntax outside the closure.
-		for pointer := range s.scanned {
-			if pointer.typ.Kind() == reflect.Pointer && pointer.typ.Elem() == r.typ.Elem() && pointer.ptr >= r.start && pointer.ptr < end && pointer.ptr >= r.start+uintptr(r.length)*r.typ.Elem().Size() {
-				return fmt.Errorf("specialization syntax has an interior pointer beyond visible slice views")
-			}
+		if pointer.typ.Elem() == r.typ.Elem() && pointer.ptr < r.start+uintptr(r.capacity)*size && pointer.ptr >= r.start+uintptr(r.length)*size {
+			return fmt.Errorf("specialization syntax has an interior pointer beyond visible slice views")
 		}
+	}
+	if overlap {
+		return fmt.Errorf("specialization syntax has unsupported partially overlapping slice backing")
 	}
 	return nil
 }
