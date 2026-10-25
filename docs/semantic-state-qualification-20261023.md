@@ -4056,3 +4056,16 @@ fast preparation enabled under race (6.936 seconds). Raw logs:
 `/tmp/elisa-classification-certificate-all-race.log`. External 30-second caps
 and internal 25-second limits apply. This resolves the earlier oracle blocker,
 not the outstanding Stage1 timing/full-self-host requirements.
+
+### Final integration preparation lifetime checks
+
+The scratch-restore fixture now changes between equal-signature callees so it
+actually requires prepared scratch with fast mode either off or on; the earlier
+arithmetic-only edit took the valid fast path and violated the fixture's assumed
+mode. The preparation joins and both retained prefetch lifetime cases pass
+together under race with fast mode on (1.903 seconds). The fresh-process O0
+classification driver oracle also passes under race (10.156 seconds). An initial
+combined compile/test command reached the external 30-second cap and is not a
+pass; splitting the cases retained that limit. Logs:
+`/tmp/elisa-final-prefetch-both-paths-race.log` and
+`/tmp/elisa-final-classification-O0-race.log`.
