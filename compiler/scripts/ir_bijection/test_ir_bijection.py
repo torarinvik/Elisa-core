@@ -192,6 +192,15 @@ class StreamingBijectionTests(unittest.TestCase):
                 with self.subTest(producer=producer), self.assertRaises(UnsupportedIR):
                     load_manifest(path)
 
+    def test_llvm_escaped_backslash_is_exact(self):
+        from ir_bijection import decode_name
+        literal = b'@x = private constant [2 x i8] c"\\\\\\00"\n'
+        self.streams(literal, literal)
+        with self.assertRaises(NotEquivalent):
+            self.streams(literal, literal.replace(b'\\\\', b'\\5C', 1))
+        self.assertEqual(decode_name(b'"slash\\\\name"'), b'slash\\name')
+        self.assertEqual(decode_name(b'"slash\\5Cname"'), b'slash\\name')
+
     def test_never_reads_whole_stream(self):
         class Bounded(io.BytesIO):
             def read(self, *args): raise AssertionError("whole-stream read")

@@ -63,8 +63,11 @@ def quoted_end(data: bytes, start: int) -> int:
         if c in (10, 13):
             raise UnsupportedIR("newline in quoted LLVM token")
         if c == 92:
+            if i + 1 < len(data) and data[i+1] == 92:
+                i += 2
+                continue
             if i + 2 >= len(data) or data[i+1] not in HEX or data[i+2] not in HEX:
-                raise UnsupportedIR("only LLVM two-hex-digit escapes are supported")
+                raise UnsupportedIR("only LLVM hex and escaped-backslash forms are supported")
             i += 3
         else:
             i += 1
@@ -74,7 +77,7 @@ def quoted_end(data: bytes, start: int) -> int:
 def decode_name(raw: bytes) -> bytes:
     if not raw.startswith(b'"'):
         return raw
-    return re.sub(rb"\\([0-9A-Fa-f]{2})", lambda m: bytes([int(m[1], 16)]), raw[1:-1])
+    return re.sub(rb"\\(\\|[0-9A-Fa-f]{2})", lambda m: b"\\" if m[1] == b"\\" else bytes([int(m[1], 16)]), raw[1:-1])
 
 
 def lex(data: bytes) -> list[Token]:
