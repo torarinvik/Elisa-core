@@ -250,6 +250,8 @@ def load_manifest(path: Path) -> list[Rename]:
             raise UnsupportedIR("invalid namespace/scope or missing producer evidence")
         if (row["namespace"] == "local" and row["scope"] < 0) or (row["namespace"] != "local" and row["scope"] != -1):
             raise UnsupportedIR("manifest scope does not match namespace")
+        if document["version"] == 2 and (not isinstance(row["producer"], str) or not row["producer"].strip()):
+            raise UnsupportedIR("version-2 manifest requires a nonempty producer")
         if not isinstance(row["left"], str) or not isinstance(row["right"], str):
             raise UnsupportedIR("manifest names must be decoded strings")
         entries.append(Rename(row["namespace"], row["scope"], row["left"].encode("utf-8"), row["right"].encode("utf-8"), row["evidence"], row.get("producer", "")))
