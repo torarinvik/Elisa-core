@@ -1,6 +1,6 @@
 # Strict generated-identifier IR bijection candidate
 
-Offline qualification utility. The 46 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
+Offline qualification utility. The 49 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
 
 Run with Python 3.10+:
 
@@ -88,7 +88,7 @@ inside an external30second timeout. Exit3 means incomplete; equivalence is
 reported only after checked EOF and consumption of every manifest entry.
 The work budget excludes mandatory input hashing/index/cursor validation,
 which adds startup time. Inputs, manifest and checker hashes bind progress;
-module-wide binding maps survive batches. All46 tests pass, including resume,
+module-wide binding maps survive batches. All49 tests pass, including resume,
 corruption, changed identities, cross-batch collisions, startup budgeting and
 input-symlink retargeting. Checkpoints are trusted local proof bookkeeping with
 corruption checksums, not adversarial signatures or compiler cache authority.
@@ -99,3 +99,10 @@ are rejected; legacy whole-module classification still builds its own index.
 A controlled2,000-unit/10,000-type fixture improves median classification from
 0.219646 to0.034788seconds across three samples. This is an offline checker
 improvement, not a Stage1 compiler latency claim.
+
+Bounded quoted-token searches and shared linkage-token scans preserve the prior
+escape/error behavior while reducing a real315MB module-index pass from
+4.43–4.48 to2.57–2.59seconds in an A/B/B/A control. Both versions return exactly
+the same676 named types and64,457 internal globals. All49 tests pass, including
+short-byte scanner parity, large exact literals, and linkage/index parity. This
+is offline qualification throughput, not a compiler rebuild latency result.

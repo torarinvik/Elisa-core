@@ -59,23 +59,28 @@ def generated_family(name: bytes) -> bytes | None:
 
 
 def quoted_end(data: bytes, start: int) -> int:
-    i = start + 1
-    while i < len(data):
-        c = data[i]
-        if c == 34:
-            return i + 1
-        if c in (10, 13):
-            raise UnsupportedIR("newline in quoted LLVM token")
-        if c == 92:
-            if i + 1 < len(data) and data[i+1] == 92:
-                i += 2
-                continue
-            if i + 2 >= len(data) or data[i+1] not in HEX or data[i+2] not in HEX:
-                raise UnsupportedIR("only LLVM hex and escaped-backslash forms are supported")
-            i += 3
+    # Supported LLVM escapes encode a quote as hex; a raw quote always closes.
+    # Native bounded searches skip ordinary string bytes, never their contents.
+    closing = data.find(b'"', start + 1)
+    limit = closing if closing >= 0 else len(data)
+    lf = data.find(b"\n", start + 1, limit)
+    cr = data.find(b"\r", start + 1, limit)
+    newline = min((n for n in (lf, cr) if n >= 0), default=-1)
+    stop = newline if newline >= 0 else limit
+    slash = data.find(b"\\", start + 1, stop)
+    while slash >= 0:
+        if slash + 1 < limit and data[slash+1] == 92:
+            next_byte = slash + 2
+        elif slash + 2 >= limit or data[slash+1] not in HEX or data[slash+2] not in HEX:
+            raise UnsupportedIR("only LLVM hex and escaped-backslash forms are supported")
         else:
-            i += 1
-    raise UnsupportedIR("unterminated quoted LLVM token")
+            next_byte = slash + 3
+        slash = data.find(b"\\", next_byte, stop)
+    if newline >= 0:
+        raise UnsupportedIR("newline in quoted LLVM token")
+    if closing < 0:
+        raise UnsupportedIR("unterminated quoted LLVM token")
+    return closing + 1
 
 
 def decode_name(raw: bytes) -> bytes:
@@ -369,6 +374,17 @@ class Rename:
     producer: str = ""
 
 
+def internal_global_names(ts: list[Token]) -> set[bytes]:
+    """The unchanged linkage predicate over one line's significant tokens."""
+    if not ts or (ts[0].raw != b"define" and ts[0].kind != "@"):
+        return set()
+    for i, token in enumerate(ts):
+        if token.kind == "@":
+            prefix = ts[:i] if ts[0].raw == b"define" else ts[i+1:]
+            return {token.name} if any(t.raw in (b"private", b"internal") for t in prefix) else set()
+    return set()
+
+
 def internal_globals(data: bytes) -> set[bytes]:
     lines = {}
     for token in lex(data):
@@ -376,16 +392,7 @@ def internal_globals(data: bytes) -> set[bytes]:
             lines.setdefault(token.line, []).append(token)
     result = set()
     for ts in lines.values():
-        if ts[0].raw != b"define" and ts[0].kind != "@":
-            continue
-        for i, token in enumerate(ts):
-            if token.kind == "@":
-                # A global definition starts with its name; a function starts
-                # with define/linkage/return type before the function name.
-                prefix = ts[:i] if ts[0].raw == b"define" else ts[i+1:]
-                if any(t.raw in (b"private", b"internal") for t in prefix):
-                    result.add(token.name)
-                break
+        result.update(internal_global_names(ts))
     return result
 
 
@@ -510,7 +517,7 @@ def module_index(stream):
             in_function = True
         if ts[0].kind == "%" and len(ts) >= 3 and ts[1].raw == b"=" and ts[2].raw == b"type":
             named.add(ts[0].name)
-        internal.update(internal_globals(line))
+        internal.update(internal_global_names(ts))
     stream.seek(0)
     return named, internal
 

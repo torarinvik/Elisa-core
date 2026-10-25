@@ -1,4 +1,5 @@
 import unittest
+import itertools
 import io
 import json
 import tempfile
@@ -390,6 +391,55 @@ class CheckpointBijectionTests(unittest.TestCase):
             a,b,c=self.fixture(directory,invalid,invalid)
             self.assertIsNone(verify_checkpoint(a,b,c,max_units=1))
             with self.assertRaises(UnsupportedIR):verify_checkpoint(a,b,c,max_units=1)
+
+
+
+class QuotedSearchAndIndexReuseTests(unittest.TestCase):
+    @staticmethod
+    def previous_quoted_end(data, start):
+        from ir_bijection import HEX
+        i=start+1
+        while i<len(data):
+            c=data[i]
+            if c==34:return i+1
+            if c in (10,13):raise UnsupportedIR("newline in quoted LLVM token")
+            if c==92:
+                if i+1<len(data) and data[i+1]==92:i+=2;continue
+                if i+2>=len(data) or data[i+1] not in HEX or data[i+2] not in HEX:raise UnsupportedIR("only LLVM hex and escaped-backslash forms are supported")
+                i+=3
+            else:i+=1
+        raise UnsupportedIR("unterminated quoted LLVM token")
+
+    def test_bounded_search_matches_previous_grammar_and_error_order(self):
+        from ir_bijection import quoted_end
+        def outcome(function,data,start):
+            try:return ("ok",function(data,start))
+            except UnsupportedIR as error:return ("error",str(error))
+        alphabet=(97,34,92,10,13,48,70,113)
+        for size in range(5):
+            for chars in itertools.product(alphabet,repeat=size):
+                data=b'prefix"'+bytes(chars)
+                self.assertEqual(outcome(quoted_end,data,6),outcome(self.previous_quoted_end,data,6),repr(data))
+
+    def test_search_stops_at_first_raw_quote_and_preserves_literal_bytes(self):
+        from ir_bijection import quoted_end, lex
+        for literal in (b'"ordinary"',rb'"slash\\hex\22end"',rb'"\00\FF\5c"'):
+            data=b'prefix'+literal+rb'\q'+b'\n"later"'
+            self.assertEqual(quoted_end(data,6),6+len(literal))
+            self.assertEqual(lex(literal)[0].raw,literal)
+        literal=b'"'+b'a'*(1<<20)+b'"'
+        self.assertEqual(quoted_end(literal,0),len(literal))
+
+    def test_shared_linkage_tokens_match_standalone_scan(self):
+        from ir_bijection import internal_globals, internal_global_names, lex, module_index
+        lines=[b'@x = private constant [4 x i8] c"text"\n',b'@y = internal global i32 0\n',b'@z = global i32 0\n',b'define internal void @f() {\n',b'declare void @g()\n',b'@word = private constant [8 x i8] c"internal" ; private comment\n']
+        for line in lines:
+            tokens=[t for t in lex(line) if t.kind not in ("text","comment")]
+            self.assertEqual(internal_global_names(tokens),internal_globals(line))
+        module=b''.join(lines[:3])+lines[3]+b'entry:\n ret void\n}\n'+lines[4]+lines[5]
+        _,internal=module_index(io.BytesIO(module))
+        self.assertEqual(internal,internal_globals(module))
+        self.assertEqual(internal,{b'x',b'y',b'f',b'word'})
 
 if __name__ == "__main__":
     unittest.main()
