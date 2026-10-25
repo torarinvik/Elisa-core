@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "renames": [
+    {
+      "namespace": "local",
+      "scope": 0,
+      "left": "__temp_1",
+      "right": "__temp_9",
+      "evidence": "SYNTHETIC EXAMPLE ONLY: replace with reviewed emitter origin, source revision and artifact identity"
+    }
+  ]
+}
