@@ -182,6 +182,16 @@ class StreamingBijectionTests(unittest.TestCase):
             entries = load_manifest(path)
         with self.assertRaises(UnsupportedIR): self.streams(BASE, BASE, entries)
 
+    def test_version2_manifest_rejects_empty_producer(self):
+        row = {"namespace":"local", "scope":0, "left":"__auto_12", "right":"__auto_23", "evidence":"reviewed site", "producer":""}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/"manifest.json"
+            for producer in ("", " ", None, 42):
+                row["producer"] = producer
+                path.write_text(json.dumps({"version":2, "renames":[row]}))
+                with self.subTest(producer=producer), self.assertRaises(UnsupportedIR):
+                    load_manifest(path)
+
     def test_never_reads_whole_stream(self):
         class Bounded(io.BytesIO):
             def read(self, *args): raise AssertionError("whole-stream read")

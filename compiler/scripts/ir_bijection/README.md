@@ -1,6 +1,6 @@
 # Strict generated-identifier IR bijection candidate
 
-Offline qualification utility. The 27 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
+Offline qualification utility. The 28 fixture tests pass; the consistent-renaming fixture pair also passes LLVM assembly validation. This is not a substitute for validating real compiler outputs.
 
 Run with Python 3.10+:
 
@@ -56,7 +56,7 @@ These observations do not establish complete producer coverage. V2 is a conserva
 
 ## Streaming qualification
 
-The original18 fixtures and9 streaming cases pass, including unchanged-binding
+The original18 fixtures and10 streaming cases pass, including unchanged-binding
 collisions, cross-function globals, forward types, nameless function/declaration
 ordinals, exact nonidentifier bytes, denied external ABI renames, producer and
 stack-ordinal checks, and bounded stream reads. The positive fixture pair also
@@ -67,3 +67,6 @@ local producer grammars are `auto-region`, `region-extra-stack`, and `quantifier
 A producer tag constrains spelling; it does not independently establish source
 origin. Real manifests still require reviewed binding/source-site evidence. The
 tool has no automatic authorization-from-differences mode.
+
+Version2 manifest loading also rejects empty, whitespace-only and nonstring
+producer tags; they cannot silently select the legacy version1 policy.
