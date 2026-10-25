@@ -25,7 +25,8 @@ def view_from_parts[T](data: void&?, len: usize) -> view[T]:
     return DynArrayView{data: data, len: len}
 
 # Open-addressing slot: `state` is 0=empty, 1=occupied, 2=tombstone (deleted, but probing
-# must continue past it). A zeroed bucket is therefore an empty slot.
+# must continue past it). Raw cleared storage has state zero; its key/value
+# payload is inactive until both fields are initialized and state one is published.
 struct DictBucket[K, T]:
     key: mutable K
     value: mutable T
@@ -1020,11 +1021,15 @@ def arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> vo
     m.used <- m.used + 1.usize()
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
-    view: view[DictBucket[K, T]] = DynArrayView{data: collections_void_from_items[DictBucket[K, T]](items), len: capacity}
-    trusted Unsafe.PointerCast:
-        # State zero marks each bucket inactive; key/value become readable only
-        # after insertion writes both fields and publishes state one.
-        arena_da_fill(view, zeroed)
+    return if capacity == 0
+    can Abort.Panic:
+        byte_count: usize = arena_checked_mul_usize(capacity, size_of(DictBucket[K, T]))
+        trusted Unsafe.RawExtern:
+            # Clear inactive storage, not a live DictBucket value: zero bits are
+            # not a valid key/value for every K/T (for example sview).
+            # Readers inspect state first; insertion writes both payload fields
+            # before publishing state one.
+            memset(collections_mutable_void_from_items[DictBucket[K, T]](items), 0, byte_count)
 
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
     can Memory.Allocate, Abort.Panic:
@@ -1246,9 +1251,10 @@ def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
     items: mutable DictBucket[K, T]& = m.items
     # Tombstone the slot (state 2): it stays non-empty so probes for entries that collided past
     # it still reach them. `used` is unchanged; the slot is reclaimed on the next rehash.
-    trusted Unsafe.PointerCast:
+    trusted Unsafe.RawExtern:
         # The tombstone state prevents readers from observing this inactive payload.
-        items[probe.index] <- zeroed
+        # Clear its storage without constructing an invalid live key/value.
+        memset(collections_mutable_void_from_items[DictBucket[K, T]](&items[probe.index]), 0, size_of(DictBucket[K, T]))
     items[probe.index].state <- 2
     m.count <- m.count - 1.usize()
     return true
@@ -1261,7 +1267,7 @@ def arena_dict_clear[K, T](m: mutable dict[K, T]&):
 
     assert m.items != null
     items: mutable DictBucket[K, T]& = m.items
-    arena_dict_zero_buckets(items, m.capacity)
+    arena_dict_zero_buckets(items, m.capacity) can Abort.Panic
     m.count <- 0
     m.used <- 0
 

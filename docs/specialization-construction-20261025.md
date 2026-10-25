@@ -229,3 +229,23 @@ Both semantic and backend race selections pass; logs
 `/tmp/elisa-concurrency-owner-rewrap-{semantic,backend}-race.log`.
 The prior frozen47be runtime source is historical evidence; next Stage1 input
 must explicitly record these four ownership-source changes.
+
+## Dictionary inactive bucket storage
+
+The next source-owner-corrected Stage1 recovery failed in25.636 seconds with
+no object: arena_dict_zero_buckets constructed a typed zeroed generic bucket
+containing sview. Initialization and removal now clear inactive raw storage
+through the existing explicit unsafe pointer/extern boundaries. Bulk clearing
+returns before writes at capacity0 and checks size multiplication for overflow.
+Payload reads remain behind occupied-state checks; insertion initializes both
+fields before publishing occupied. Compiler validity checks are unchanged.
+
+Actual-helper semantic specialization for sview plus a payload containing a
+non-null reference and sview passes under race; ordinary zeroed sview still
+rejects. Native actual-runtime controls use supported cstr keys and that same
+nonzero payload, covering zero capacity, insertion, lookup, deletion, tombstones,
+reinsertion, rehash, iteration and clear; checked overflow rejects before writes.
+Restoring the old production source makes the native test fail at the exact
+arena_dict_zero_buckets zeroed-sview diagnostic. Logs are
+/tmp/elisa-dict-inactive-storage-{semantic-race,native-v2,overflow,unpatched-native}.log.
+These are correctness controls; no new full Stage1 timing gain is claimed.
