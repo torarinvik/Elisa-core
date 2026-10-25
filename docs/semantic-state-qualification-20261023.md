@@ -4139,3 +4139,49 @@ A linked record-choice regression returned expected10 at both O0 and O3 using
 runtime object SHA2566df88f65137191d19ae7a770c28b252516c5f751af2ec7f98b61c443e2e9a35d.
 The final full Stage1 gate remains to be rerun with both ownership and memo fixes;
 no claim is made that all56 diagnostics are resolved by the isolated reader test.
+
+### Fresh Stage1 baseline and first body target miss (fa7adb33)
+
+Frozen Stage1 revision47be11573 completes O0 admission through21 independently
+bounded fresh processes (267.216seconds aggregate, max28.504, zero external
+timeouts). Its32MB object links using the repository's standard optional
+profiler-hook source, and the rebuilt Stage1 compiles a smoke executable that
+returns42. This is an initial linked smoke, not the full gen2 gate.
+
+The first normal invocation after DEBUG-observed admission takes3.538648seconds;
+DEBUG=1 intentionally bypassed whole-object publication, so this transition is
+preserved separately. Its following exact artifact hit takes0.160925seconds.
+A genuine is_query_keyword median addition takes3.893690seconds, missing the
+2second target. First timings are immutable JSON under the root named in
+`/tmp/elisa-stage1-final-cache-safety-root`. The changed source remains private.
+An independent cold oracle is in progress; its first2checkpoints are preserved
+when the runner stopped on a competing agent seed.
+
+The separate profile repeat takes4.164584seconds: state restore1.086seconds,
+fast Update500ms, partition IR2.026seconds, native compilation0. Its object hash
+matches the first edited object. Pprof attributes8.10CPU-seconds to madvise,
+5.94to cgocall and1.07to string field hydration. Cached SMT totals printed by
+front-smt describe restored baseline work, not68seconds executed in this request.
+GC100 (4.720384seconds) and GC-off with the soft memory limit retained
+(4.151820seconds) do not improve on the default; no GC policy change is adopted.
+
+### Defer independent scratch parsing until fast admission declines
+
+Likely-body disk restoration now hydrates state without starting an unused
+second parser. A request-scoped factory independently parses the exact input
+only if ordinary scratch preparation is required. It executes once, propagates
+parse errors, rejects primary-AST aliases before preparation, and completes
+rejected futures so later owner joins cannot mutate the primary tree. Lazy
+identity checks do not read a concurrently materializing file. Eager/server
+preparation retains its existing join behavior. Native cache authority and all
+proof/optimization checks remain unchanged.
+
+The complete retained suite passes with fast preparation on under race
+(6.835seconds); lazy/eager restoration and both prefetch lifetime tests pass
+under race (2.027seconds). Fresh-process native execution, corruption recovery,
+and exact-byte O0/O3 classification edit/revert IR comparisons pass (2.304seconds).
+Raw logs `/tmp/elisa-deferred-scratch-all-retained-race-v3.log`,
+`/tmp/elisa-deferred-scratch-driver-race-v3.log`, and
+`/tmp/elisa-deferred-scratch-native-driver.log`. Initial compile/test commands
+that hit external30second caps are preserved as failures, not passing evidence.
+Stage1 wall-time improvement for this change is still unmeasured.

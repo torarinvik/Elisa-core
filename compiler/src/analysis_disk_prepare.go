@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -74,20 +75,29 @@ type analysisScratchPreparation struct {
 // semantic analysis. A separate parse/declaration phase can therefore overlap
 // it. Always join preparation before returning, including rejected snapshots,
 // so fallback analysis and later requests never inherit background work.
-// With lazy set, only the parse overlaps hydration; the declaration phase runs if the update
-// needs it, so a body edit's hydration does not compete with a phase it will not use.
+// With lazy set, neither parsing nor declarations run until an update needs them.
 func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options semantic.AnalyzeOptions, lazy bool) (*semantic.RetainedAnalysis, analysisScratchPreparation, error) {
+	if lazy {
+		// Keep invocation inputs, not a second AST. No parsing/declaration work
+		// starts until UpdatePrepared rejects its fast body preparation.
+		filename, source, tokens := program.filename, program.source, program.tokenCache
+		prepared := semantic.NewLazyParsedRetainedScratch(func() (*ast.File, error) {
+			file, ok := parseProgramWithTokenCache(filename, source, io.Discard, tokens)
+			if !ok {
+				return nil, fmt.Errorf("independent source parse rejected")
+			}
+			return file, nil
+		}, options)
+		state, err := semantic.RestoreAnalysisState(data)
+		return state, analysisScratchPreparation{prepared: prepared}, err
+	}
 	done := make(chan analysisScratchPreparation, 1)
 	go func() {
 		started := time.Now()
 		var preparation analysisScratchPreparation
 		if file, ok := parseProgramWithTokenCache(program.filename, program.source, io.Discard, program.tokenCache); ok {
 			preparation.file = file
-			if lazy {
-				preparation.prepared = semantic.NewLazyRetainedScratch(file, options)
-			} else {
-				preparation.prepared = semantic.PrepareRetainedScratch(file, options)
-			}
+			preparation.prepared = semantic.PrepareRetainedScratch(file, options)
 		}
 		preparation.elapsed = time.Since(started)
 		done <- preparation

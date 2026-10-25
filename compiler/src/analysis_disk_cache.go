@@ -186,8 +186,12 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 				unchanged = true
 				debugAnalysisDisk(stderr, "reuse unchanged revision")
 			} else {
-				if preparation.file != nil && preparation.prepared != nil {
-					debugAnalysisDisk(stderr, "prepared scratch in=%v", preparation.elapsed.Round(time.Millisecond))
+				if preparation.prepared.AcceptsScratch(preparation.file) {
+					if preparation.file == nil {
+						debugAnalysisDisk(stderr, "scratch parsing deferred until needed")
+					} else {
+						debugAnalysisDisk(stderr, "prepared scratch in=%v", preparation.elapsed.Round(time.Millisecond))
+					}
 					updateStart := time.Now()
 					result, err = state.UpdatePrepared(file, preparation.file, program.source, preparation.prepared)
 					if err == nil {

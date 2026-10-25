@@ -136,12 +136,16 @@ func (r *RetainedAnalysis) Update(file, scratch *ast.File, src []byte) (*Result,
 // RetainedScratch is a scratch parse with its declaration phase already run,
 // so a server can overlap that phase with its own parse of the request.
 type RetainedScratch struct {
-	file    *ast.File
-	pre     *preBodyState
-	elapsed time.Duration
-	ready   chan struct{} // closed once pre is set; nil when prepared synchronously
-	once    sync.Once
-	lazy    *AnalyzeOptions // set: Wait runs the phase on demand
+	file         *ast.File
+	pre          *preBodyState
+	elapsed      time.Duration
+	ready        chan struct{} // closed once pre is set; nil when prepared synchronously
+	once         sync.Once
+	lazy         *AnalyzeOptions           // set: Wait runs the phase on demand
+	parse        func() (*ast.File, error) // optional independent parse, materialized only on decline
+	parseOnce    sync.Once
+	parseErr     error
+	parseElapsed time.Duration
 }
 
 // NewPendingRetainedScratch returns a scratch whose declaration phase Prepare runs later,
@@ -158,12 +162,66 @@ func NewLazyRetainedScratch(scratch *ast.File, options AnalyzeOptions) *Retained
 	return s
 }
 
+// NewLazyParsedRetainedScratch defers both parsing and declaration preparation.
+// parse must return a fresh, independent AST of the exact source being updated.
+// It runs at most once on demand; no goroutine starts here.
+func NewLazyParsedRetainedScratch(parse func() (*ast.File, error), options AnalyzeOptions) *RetainedScratch {
+	if parse == nil {
+		parse = func() (*ast.File, error) { return nil, fmt.Errorf("missing independent scratch parser") }
+	}
+	s := NewLazyRetainedScratch(nil, options)
+	s.parse = parse
+	return s
+}
+
+// AcceptsScratch validates the caller's explicit scratch identity. A nil AST is
+// admitted only for a lazy parser; it does not identify an ordinary scratch.
+func (s *RetainedScratch) AcceptsScratch(scratch *ast.File) bool {
+	if s == nil {
+		return false
+	}
+	if s.parse != nil {
+		return scratch == nil
+	}
+	return scratch != nil && s.file == scratch
+}
+
+func (s *RetainedScratch) materialize() error {
+	if s.parse != nil {
+		s.parseOnce.Do(func() {
+			started := time.Now()
+			defer func() { s.parseElapsed = time.Since(started) }()
+			s.file, s.parseErr = s.parse()
+			if s.parseErr == nil && s.file == nil {
+				s.parseErr = fmt.Errorf("scratch parser returned no file")
+			}
+		})
+	}
+	return s.parseErr
+}
+
+// reject completes an unstarted preparation without analyzing its AST. An owner
+// may still join the rejected future; joining must never prepare a primary AST
+// that UpdatePrepared has just rejected as an alias.
+func (s *RetainedScratch) reject(err error) {
+	s.once.Do(func() {
+		s.parseErr = err
+		if s.ready != nil {
+			close(s.ready)
+		}
+	})
+}
+
 // Prepare runs a pending scratch's declaration phase; later calls do nothing.
 func (s *RetainedScratch) Prepare(options AnalyzeOptions) {
 	s.once.Do(func() {
 		defer close(s.ready)
+		if err := s.materialize(); err != nil {
+			s.elapsed = s.parseElapsed
+			return
+		}
 		done := PrepareRetainedScratch(s.file, options)
-		s.pre, s.elapsed = done.pre, done.elapsed
+		s.pre, s.elapsed = done.pre, s.parseElapsed+done.elapsed
 	})
 }
 
@@ -620,12 +678,26 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		// The edit leaves every declaration-level result as the retained baseline holds it.
 		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, diags: r.pre.diags}
 		r.LastStats.FastPrepared = true
-	} else if prepared != nil && prepared.file == scratch {
+	} else if prepared.AcceptsScratch(scratch) {
+		if err := prepared.materialize(); err != nil {
+			return fail("scratch parse failed: %v", err)
+		}
+		if prepared.file == nil || prepared.file == file {
+			prepared.reject(fmt.Errorf("scratch parse must be independent of the primary file"))
+			return fail("scratch parse must be independent of the primary file")
+		}
+		scratch = prepared.file
 		prepared.Wait()
+		if prepared.parseErr != nil || prepared.pre == nil {
+			return fail("scratch preparation failed: %v", prepared.parseErr)
+		}
 		pre = prepared.pre
 		r.LastStats.ScratchPrepared = true
 		r.LastStats.Scratch = prepared.elapsed
 	} else {
+		if scratch == nil || scratch == file {
+			return fail("missing independent scratch parse")
+		}
 		pendingRetainedMu.Lock()
 		scratchStart := time.Now()
 		pre = scratchPreBody(scratch, r.options)
