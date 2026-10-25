@@ -458,7 +458,7 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		}
 		return iterLoopSourceInfo{ItemType: invalidType}, false
 	}
-	facts, hasFacts := a.exprFacts[sourceExpr]
+	facts, hasFacts := a.lookupExprFacts(sourceExpr)
 	readOnly := hasFacts && facts.ReadOnly
 	switch tt := sourceType.(type) {
 	case *ConstValueType:
@@ -933,7 +933,7 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 				a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType)
 			}
 		} else {
-			facts, hasFacts := a.exprFacts[stmt.Source]
+			facts, hasFacts := a.lookupExprFacts(stmt.Source)
 			if !hasFacts || !facts.ReadOnly || !facts.Contiguous || !facts.UnitStride || !facts.HasExactExtent() {
 				a.errorf(stmt.Source.Pos(), "parallel for requires a readonly contiguous exact-extent view, got %s", sourceType)
 			}

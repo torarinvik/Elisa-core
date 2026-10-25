@@ -90,7 +90,6 @@ var specializationOpaqueMapFields = [...]string{
 	"dropHooks",
 	"effectHandlers",
 	"exprDenseNodeKeys",
-	"exprFacts",
 	"exprNodeTables",
 	"extensionMethodsByName",
 	"externLinkNames",
@@ -543,9 +542,6 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "exprDenseNodeKeys":
 		dst.exprDenseNodeKeys = maps.Clone(src.exprDenseNodeKeys)
-		return true
-	case "exprFacts":
-		dst.exprFacts = maps.Clone(src.exprFacts)
 		return true
 	case "exprNodeTables":
 		dst.exprNodeTables = maps.Clone(src.exprNodeTables)

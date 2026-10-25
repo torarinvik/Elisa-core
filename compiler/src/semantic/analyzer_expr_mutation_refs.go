@@ -181,7 +181,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 // readOnlyViewIndexSource distinguishes a readonly optimization fact from a
 // mutable view capability stored in an otherwise readonly aggregate field.
 func (a *Analyzer) readOnlyViewIndexSource(expr ast.Expr) bool {
-	facts, ok := a.exprFacts[expr]
+	facts, ok := a.lookupExprFacts(expr)
 	if !ok || !facts.ReadOnly {
 		return false
 	}

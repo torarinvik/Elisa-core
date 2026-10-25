@@ -96,7 +96,7 @@ func (a *Analyzer) exprSupportsDenseWrite(expr ast.Expr) bool {
 	if a == nil || expr == nil {
 		return false
 	}
-	facts, ok := a.exprFacts[expr]
+	facts, ok := a.lookupExprFacts(expr)
 	if !ok {
 		return false
 	}
@@ -106,7 +106,7 @@ func (a *Analyzer) exprSupportsReadonlyDenseView(expr ast.Expr) bool {
 	if a == nil || expr == nil {
 		return false
 	}
-	facts, ok := a.exprFacts[expr]
+	facts, ok := a.lookupExprFacts(expr)
 	if !ok {
 		return false
 	}
@@ -116,11 +116,11 @@ func (a *Analyzer) exprsHaveEqualExtentSize(left ast.Expr, right ast.Expr) bool 
 	if a == nil {
 		return false
 	}
-	leftFacts, ok := a.exprFacts[left]
+	leftFacts, ok := a.lookupExprFacts(left)
 	if !ok {
 		return false
 	}
-	rightFacts, ok := a.exprFacts[right]
+	rightFacts, ok := a.lookupExprFacts(right)
 	if !ok {
 		return false
 	}
@@ -130,11 +130,11 @@ func (a *Analyzer) exprsAreDisjoint(left ast.Expr, right ast.Expr) bool {
 	if a == nil {
 		return false
 	}
-	leftFacts, ok := a.exprFacts[left]
+	leftFacts, ok := a.lookupExprFacts(left)
 	if !ok {
 		return false
 	}
-	rightFacts, ok := a.exprFacts[right]
+	rightFacts, ok := a.lookupExprFacts(right)
 	if !ok {
 		return false
 	}

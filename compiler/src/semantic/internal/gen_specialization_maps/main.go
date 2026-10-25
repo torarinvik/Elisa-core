@@ -39,7 +39,7 @@ func generate(source []byte) ([]byte, error) {
 					continue // Unknown/named resource shapes retain reflective fallback.
 				}
 				for _, name := range field.Names {
-					if name.Name != "exprTypes" && name.Name != "functionAnalyses" {
+					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "functionAnalyses" {
 						fields = append(fields, name.Name)
 					}
 				}

@@ -14,6 +14,7 @@ type Analyzer struct {
  resources map[string][]int
  unknown namedMap
  exprTypes map[int]int
+ exprFacts map[int]int
  functionAnalyses map[int]int
 }`)
 	one, err := generate(source)
@@ -29,7 +30,7 @@ type Analyzer struct {
 			t.Fatalf("direct map %s omitted", name)
 		}
 	}
-	for _, name := range []string{"unknown", "exprTypes", "functionAnalyses"} {
+	for _, name := range []string{"unknown", "exprTypes", "exprFacts", "functionAnalyses"} {
 		if strings.Contains(string(one), "dst."+name) {
 			t.Fatalf("special/unknown field %s optimized", name)
 		}

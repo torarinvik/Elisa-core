@@ -1103,7 +1103,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 			// The marker means exactly "no standalone semantic contribution".
 			// Decline if a later analyzer adds one instead of silently losing it.
 			_, typed := a.lookupExprType(expr)
-			_, facts := a.exprFacts[expr]
+			_, facts := a.lookupExprFacts(expr)
 			if typed || facts {
 				return
 			}
@@ -1112,7 +1112,7 @@ func (a *Analyzer) analyzeIncrementalFunctionBody(fn *ast.FuncDecl, typeArgs []T
 		}
 		typ, ok := a.exprType(expr).(*BuiltinType)
 		_, parameter := expr.(*ast.Ident)
-		if !ok || (!parameter && a.exprFacts[expr].HasAnyFacts()) || typ != a.namedTypes[typ.Name] {
+		if !ok || (!parameter && a.exprFact(expr).HasAnyFacts()) || typ != a.namedTypes[typ.Name] {
 			return
 		}
 		if predicate {

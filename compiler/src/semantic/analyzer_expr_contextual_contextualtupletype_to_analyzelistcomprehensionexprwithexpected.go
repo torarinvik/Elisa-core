@@ -341,16 +341,16 @@ func (a *Analyzer) recordAnalyzedExprType(expr ast.Expr, result Type) {
 	a.recordExprOptimizationFacts(expr, result)
 }
 func (a *Analyzer) recordExprOptimizationFacts(expr ast.Expr, result Type) {
-	if a == nil || expr == nil || a.exprFacts == nil || a.suppressOptimizationFacts {
+	if a == nil || expr == nil || !a.hasExprFactsStorage() || a.suppressOptimizationFacts {
 		return
 	}
 	baseFacts := optimizationFactsForType(result)
 	if !exprRequiresOptimizationFactInference(expr) && !typeMayCarryRegionProvenanceForOptimization(result) {
 		if baseFacts.HasAnyFacts() {
-			a.exprFacts[expr] = baseFacts
+			a.setExprFacts(expr, baseFacts)
 			return
 		}
-		delete(a.exprFacts, expr)
+		a.deleteExprFacts(expr)
 		return
 	}
 	savedSuppressLazyFuncSummaryInference := a.suppressLazyFuncSummaryInference
@@ -360,10 +360,10 @@ func (a *Analyzer) recordExprOptimizationFacts(expr ast.Expr, result Type) {
 	}()
 	facts := a.inferExprOptimizationFactsWithBase(expr, result, baseFacts)
 	if facts.HasAnyFacts() {
-		a.exprFacts[expr] = facts
+		a.setExprFacts(expr, facts)
 		return
 	}
-	delete(a.exprFacts, expr)
+	a.deleteExprFacts(expr)
 }
 func contextualIntLiteralType(expected Type) (Type, bool) {
 	if expected == nil || !IsIntegralStorageType(expected) {

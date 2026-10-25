@@ -94,7 +94,7 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		}
 	case *ast.IndexExpr:
 		if resolved, ok := a.resolveIndexedValueExpr(n.Object, n.Index); ok {
-			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
+			if resolvedFacts, ok := a.lookupExprFacts(resolved); ok {
 				facts = resolvedFacts
 				facts.Exclusive = false
 			}
@@ -110,7 +110,7 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		}
 	case *ast.FieldExpr:
 		if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
-			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
+			if resolvedFacts, ok := a.lookupExprFacts(resolved); ok {
 				facts = resolvedFacts
 				facts.Exclusive = false
 			}
@@ -120,7 +120,7 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		}
 		if n.Field == "values" {
 			if tableInfo, ok := a.nodeTableInfoForExpr(n.Object); ok && tableInfo.Enum != nil {
-				if objectFacts, ok := a.exprFacts[n.Object]; ok && objectFacts.Exclusive {
+				if objectFacts, ok := a.lookupExprFacts(n.Object); ok && objectFacts.Exclusive {
 					facts.Exclusive = true
 				}
 				facts.ReadOnly = false

@@ -180,3 +180,35 @@ and a normal same-cache recovery. Those runs remain engineering performance
 evidence, not correctness qualification, because they predate this error gate.
 Their immutable source/cache/producer records are under
 `/tmp/elisa-stage1-specialization-catalog-root`; no state has been rekeyed.
+
+## Private expression-fact overlay
+
+The constructor now overlays exprFacts as well as exprTypes instead of copying
+all canonical facts. Whole OptimizationFacts values, Extent pointer aliases,
+present-zero membership, tombstones and local rewrites retain the old semantics.
+The constructor base is stable under shared-codegen locking. Future inline
+resource-bearing OptimizationFacts schemas fall back to reflective cloning.
+
+Actual generation, generator/source-policy and logical/reference controls pass.
+Semantic/optimization/Retained/private/parallel/snapshot race controls pass before
+and after an independently reviewed restore guard: raw registry encoding of an
+active overlay must not restore as canonical. Marshal, Restore, AnalysisBuild,
+public closure and worker/merge boundaries reject active construction resources.
+Backend generic/context/disk-IR/ABI/native controls pass on the bounded retry
+after a preserved compilation-time timeout. Logs
+`/tmp/elisa-expr-facts-overlay-{semantic-race,restored-resource-race,policy-benchmark,generator-test,backend-race-retry}.log`.
+
+Exact predecessor1f344e9e Go sources are restored in the 50-iteration ABBA
+construction baseline. Eight products with 512 unrelated functions change from
+4.232/4.254 ms and 4.701 MB to 4.213/4.098 ms and 3.657 MB: approximately22%
+less allocation, with only a small timing improvement in this fixture.
+`/tmp/elisa-expr-facts-overlay-construction-benchmark-v1` preserves the exact
+overlay and logs. The isolated65536-row constructor benchmark changes from
+4.151 ms / 8.401 MB in the ordinary reflective worker to 0.0267 ms / 7.6 KB in
+the specialization overlay; it is not a full-construction or Stage1 comparison.
+
+The correctly error-gated main1f344e Stage1 recovery completed26.761 seconds
+with exit1 rather than producing an object: concrete ctx_task_to_raw reported
+an unconsumed Pending handle. The old helper rebuilt handle/state fields without
+moving its complete source. This newly visible runtime source bug remains open
+until explicit whole-owner transfer is validated; the error gate is retained.

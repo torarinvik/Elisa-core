@@ -530,12 +530,12 @@ func (r *RetainedAnalysis) reanalyzeSummaryDependentFunction(a *Analyzer, fn *as
 // fact writes, so otherwise a fact from the previous inferred callee summary can
 // survive when the refreshed expression no longer has that fact.
 func clearRetainedSummaryDependentExprFacts(a *Analyzer, fn *ast.FuncDecl) {
-	if a == nil || fn == nil || len(a.exprFacts) == 0 {
+	if a == nil || fn == nil || a.exprFactsLen() == 0 {
 		return
 	}
 	walkStoreScanNodes(funcScanStmts(fn), func(node any) {
 		if expr, ok := node.(ast.Expr); ok {
-			delete(a.exprFacts, expr)
+			a.deleteExprFacts(expr)
 		}
 	})
 }

@@ -40,6 +40,10 @@ func parallelBodyWorkers() int {
 // chunk runs on its own copy of the Analyzer; the copies' state is merged back in
 // chunk order, so diagnostics keep source order.
 func (a *Analyzer) analyzeDeclsParallel(decls []scopedDecl, workers int) {
+	if a.exprFactsOverlay != nil {
+		a.rejectExprFactsOverlayOperation("parallel declaration scheduling")
+		return
+	}
 	if a.exprTypeOverlay != nil {
 		a.rejectExprTypeOverlayOperation("parallel declaration scheduling")
 		return
@@ -335,7 +339,7 @@ func cloneAnalyzerValueForParallelMode(a *Analyzer, useMemoOverlays bool) reflec
 // specializationContext.copyDecl. Its analyzer never queries unrelated function
 // analyses; public Result queries retain canonical fallback after publication.
 func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
-	if a != nil && a.exprTypeOverlay != nil {
+	if a != nil && (a.exprTypeOverlay != nil || a.exprFactsOverlay != nil) {
 		panic("specialization construction requires a canonical analyzer, not another construction overlay")
 	}
 	return cloneAnalyzerValueForParallelPolicy(a, true, true)
@@ -349,6 +353,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	cloned := reflect.New(source.Type()).Elem()
 	cloned.Set(source)
 	shareDeclarationMaps := true
+	// Preserve deepCloneValue's value policy if OptimizationFacts ever grows
+	// inline maps/slices: that schema keeps the ordinary reflective copy.
+	useExprFactsOverlay := ownedFunctionAnalyses && !typeHoldsMapInline(reflect.TypeFor[OptimizationFacts]())
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
 		name := source.Type().Field(i).Name
@@ -357,6 +364,18 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			// matches an inherited canonical diagnostic. Skip before cloning
 			// either the inherited slice or its potentially large dedup map.
 			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			continue
+		}
+		if name == "exprFactsOverlay" {
+			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerExprFactsOverlay(a.exprFactsOverlay)))
+			continue
+		}
+		if useExprFactsOverlay && name == "exprFacts" {
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
 			continue
 		}
 		if name == "exprTypeOverlay" {
@@ -423,6 +442,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	if ownedFunctionAnalyses {
 		worker := cloned.Addr().Interface().(*Analyzer)
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
+		if useExprFactsOverlay {
+			worker.exprFactsOverlay = &analyzerExprFactsOverlay{base: a.exprFacts}
+		}
 	}
 	return cloned
 }
@@ -654,6 +676,14 @@ func typeHoldsMapInline(t reflect.Type) bool {
 // replaced map entries (nested maps merged entry by entry), slice tails appended
 // past the base length, and changed scalars and pointers.
 func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
+	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("exprFactsOverlay")).IsNil() {
+		target := dst.Addr().Interface().(*Analyzer)
+		err := target.rejectExprFactsOverlayOperation("canonical worker merge")
+		if p != nil && p.specialization != nil {
+			p.specialization.err = err
+		}
+		return
+	}
 	if w.Kind() == reflect.Struct && w.Type() == reflect.TypeFor[Analyzer]() && !settable(w.FieldByName("exprTypeOverlay")).IsNil() {
 		// A construction view cannot be merged into canonical analysis. Its
 		// base is immutable and private tombstones are not canonical deltas.
@@ -669,7 +699,7 @@ func mergeValue(dst, w, base reflect.Value, p *parallelWorkerState) {
 		for i := 0; i < w.NumField(); i++ {
 			if p != nil {
 				name := w.Type().Field(i).Name
-				if name == "exprTypeOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
+				if name == "exprTypeOverlay" || name == "exprFactsOverlay" || parallelBodyWorkerLocalOnlyMap(name) || name == "smtSolver" || name == "smtStats" || name == "smtUnavailable" {
 					continue
 				}
 			}

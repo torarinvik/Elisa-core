@@ -126,7 +126,7 @@ func validateSparseFactType(typ reflect.Type, seen map[reflect.Type]bool) error 
 	}
 	if base.PkgPath() == sparseFactSemanticPackage {
 		switch base.Name() {
-		case "Analyzer", "RetainedAnalysis", "parallelWorkerState", "specializationContext", "sharedCodegen", "specializationPublication", "specializationQueries", "specializationSyntax", "analyzerExprTypeOverlay":
+		case "Analyzer", "RetainedAnalysis", "parallelWorkerState", "specializationContext", "sharedCodegen", "specializationPublication", "specializationQueries", "specializationSyntax", "analyzerExprTypeOverlay", "analyzerExprFactsOverlay":
 			return fmt.Errorf("sparse fact retains construction/resource type %s", typ)
 		}
 	}

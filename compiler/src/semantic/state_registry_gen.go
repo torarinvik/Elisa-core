@@ -221,6 +221,7 @@ func semanticStateTypes() []reflect.Type {
 		reflect.TypeFor[aliasAccessMode](),
 		reflect.TypeFor[aliasAccessState](),
 		reflect.TypeFor[analyzerASTCensus](),
+		reflect.TypeFor[analyzerExprFactsOverlay](),
 		reflect.TypeFor[analyzerExprTypeOverlay](),
 		reflect.TypeFor[aoEnv](),
 		reflect.TypeFor[aoFacts](),

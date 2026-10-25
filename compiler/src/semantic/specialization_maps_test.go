@@ -36,7 +36,7 @@ func TestSpecializationOpaqueMapSchemaAndPolicy(t *testing.T) {
 		for _, field := range typ.Type.(*ast.StructType).Fields.List {
 			if _, ok := field.Type.(*ast.MapType); ok {
 				for _, name := range field.Names {
-					if name.Name != "exprTypes" && name.Name != "functionAnalyses" {
+					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "functionAnalyses" {
 						expected = append(expected, name.Name)
 					}
 				}
@@ -94,17 +94,13 @@ func TestSpecializationOpaqueFactsPreservePointerAliasesAndOuterIsolation(t *tes
 	first, second := new(compilerast.Ident), new(compilerast.Ident)
 	facts := OptimizationFacts{Exclusive: true, ReadOnly: true, Extent: extent, base: "shared"}
 	src := &Analyzer{exprFacts: map[compilerast.Expr]OptimizationFacts{first: facts, second: facts}}
-	dst := new(Analyzer)
-	field := settable(reflect.ValueOf(src).Elem().FieldByName("exprFacts"))
-	if !cloneSpecializationOpaqueMap(dst, src, "exprFacts", field) {
-		t.Fatal("opaque OptimizationFacts not copied")
-	}
-	if dst.exprFacts[first].Extent != extent || dst.exprFacts[second].Extent != extent {
+	dst := cloneAnalyzerValueForSpecialization(src).Addr().Interface().(*Analyzer)
+	if dst.exprFact(first).Extent != extent || dst.exprFact(second).Extent != extent {
 		t.Fatal("pointer alias policy changed")
 	}
-	delete(dst.exprFacts, first)
+	dst.deleteExprFacts(first)
 	if len(src.exprFacts) != 2 {
-		t.Fatal("outer mutation reached parent")
+		t.Fatal("private mutation reached parent")
 	}
 }
 
@@ -195,7 +191,7 @@ func TestSpecializationOpaqueHelperUnknownAndResourceFallback(t *testing.T) {
 	if cloneSpecializationOpaqueMap(dst, src, "futureUnknownMap", field) {
 		t.Fatal("unknown field bypassed reflective fallback")
 	}
-	if cloneSpecializationOpaqueMap(dst, src, "exprTypes", field) || cloneSpecializationOpaqueMap(dst, src, "functionAnalyses", field) {
+	if cloneSpecializationOpaqueMap(dst, src, "exprTypes", field) || cloneSpecializationOpaqueMap(dst, src, "exprFacts", field) || cloneSpecializationOpaqueMap(dst, src, "functionAnalyses", field) {
 		t.Fatal("specialization-specific overlay fields bypassed owner policy")
 	}
 	if cloneSpecializationOpaqueMap(dst, src, "exprFacts", reflect.ValueOf(map[string][]int{})) {

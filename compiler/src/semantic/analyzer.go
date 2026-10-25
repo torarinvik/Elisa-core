@@ -217,6 +217,7 @@ type Analyzer struct {
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                         map[ast.Expr]OptimizationFacts
+	exprFactsOverlay *analyzerExprFactsOverlay
 	// Keep identity owners alive until all invocation-local facts are consumed;
 	// a pointer formatted as a string alone does not prevent address reuse by GC.
 	optimizationSymbolIDs    map[*Symbol]string
@@ -1615,6 +1616,10 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 }
 
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
+	if a.exprFactsOverlay != nil {
+		err := a.rejectExprFactsOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
 	if a.exprTypeOverlay != nil {
 		// Specialization publication has its own owned sparse Result. Never
 		// silently materialize or publish a partial whole-program overlay.

@@ -27,7 +27,7 @@ func (a *Analyzer) recordImmutableSymbolOptimizationFacts(sym *Symbol, expr ast.
 	if a == nil || sym == nil || expr == nil || sym.Mutable || a.symbolFacts == nil {
 		return
 	}
-	facts, ok := a.exprFacts[expr]
+	facts, ok := a.lookupExprFacts(expr)
 	if !ok {
 		return
 	}
@@ -255,8 +255,8 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 	case *ast.OptionalBindExpr:
 		return a.optimizationBaseForExpr(n.Value)
 	}
-	if a != nil && a.exprFacts != nil {
-		if facts, ok := a.exprFacts[stripped]; ok && facts.base != "" {
+	if a != nil && a.hasExprFactsStorage() {
+		if facts, ok := a.lookupExprFacts(stripped); ok && facts.base != "" {
 			return facts.base
 		}
 	}
@@ -386,7 +386,7 @@ func (a *Analyzer) lookupOptimizationFactsForExpr(expr ast.Expr) (OptimizationFa
 	if a == nil || expr == nil {
 		return OptimizationFacts{}, false
 	}
-	if facts, ok := a.exprFacts[expr]; ok {
+	if facts, ok := a.lookupExprFacts(expr); ok {
 		return facts, true
 	}
 	ident, ok := stripOptimizationParens(expr).(*ast.Ident)
@@ -504,7 +504,7 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 	if _, ok := ChunksExactViewItemType(objectType); !ok {
 		return OptimizationFacts{}, false
 	}
-	objectFacts, ok := a.exprFacts[expr.Object]
+	objectFacts, ok := a.lookupExprFacts(expr.Object)
 	if !ok {
 		return OptimizationFacts{}, false
 	}
