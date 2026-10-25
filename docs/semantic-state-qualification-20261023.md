@@ -4289,7 +4289,7 @@ exact unchanged fresh-process hit took 0.166598 seconds.
 A genuinely new body_query_short_circuit edit inserts the live query predicate's
 `return false if text.len < 3` guard. Its first O0 rebuild took 6.332955 seconds,
 missing the 2-second body target. Subsequent independent cold object/diagnostic
-and linked smoke results are recorded below; strict IR qualification is pending. This is an emitted control-flow edit with preserved predicate values,
+and linked smoke results are recorded below; strict IR qualification is complete below. This is an emitted control-flow edit with preserved predicate values,
 not an unused probe. The separately labelled profiled repeat took 6.802942
 seconds and had no native fragment compilation. Restore overlapped eager scratch
 preparation (3.038 and 2.971 seconds), retained update took 612 ms with fast=false,
@@ -4357,7 +4357,7 @@ executable with the expected exit status. This remains a smoke, not the full
 generation-two gate. Evidence is under `/tmp/elisa-stage1-cold-short-circuit-root`.
 Both 315,834,937-byte IR captures independently assemble under LLVM 23.1.3.
 A fresh pair-specific producer audit qualifies 3,648 exact candidate local-name
-permissions; the complete strict IR comparison is still pending. The expanded
+permissions; the complete strict IR comparison is recorded below. The expanded
 source difference is a 33-byte insertion plus three same-length generated
 #line substitutions, all explicitly recorded; it is not an insertion-only pair.
 
@@ -4372,3 +4372,38 @@ and error-prefix decline (1.763 seconds). The separate live bounds-summary
 defect remains under investigation; no line-shift fast-path gain is claimed
 from this field fix alone. Logs `/tmp/elisa-clone-source-if-ast-race.log` and
 `/tmp/elisa-line-shift-fast-v3-provenance-race.log`.
+
+
+### Completed short-circuit IR comparison and next-producer baseline miss
+
+The strict checker completed the full O0 short-circuit warm/cold pair at
+315,834,937 bytes on both sides, 109,448 units, with all 3,648 exact permissions
+used bijectively. Final exit 0 is recorded in
+`/tmp/elisa-short-circuit-ir-manifest-v2/checkpoint-run-018.json`; checker SHA256
+53400c39735e5d6e7d6ac71f4ebf15cfadb6bde8f037a19aeb62dc7286602aae.
+The checker/manifest authority stayed fixed across checkpoints. This completes
+IR qualification for the earlier producer 59a7 pair; its first edit still took
+6.332955 seconds and misses the body target. O3/full matrix/gen2 remain open.
+After completion, the frozen parser source was restored to its exact pristine
+47be baseline; the restoration hashes are preserved with the warm artifacts.
+
+A separate experimental producer 77a7009eadc3e4091cd905103a1ac052730171f386b5cdb9502306e3f4177739
+includes sparse private specialization, source-if provenance and private
+line-shift/bounds work. Its new empty-cache baseline used 47be plus the previous
+short-circuit guard. Processes 1–21 saved analysis checkpoints; process 22 finished
+analysis and stored its state but timed out externally at 30.185 seconds without
+an object. Aggregate first-namespace admission was 314.088 seconds. An unchanged
+same-identity resume also timed out at 30.116955 seconds. No first body-edit
+timing or correctness qualification is claimed for this producer.
+
+A separate native-sampled diagnostic run restored analysis in 1.156 seconds and
+reported unchanged revision reuse, then showed Result.SpecializeFunction calling
+cloneAnalyzerValueForParallelMode/deepCloneValue during partition IR generation.
+The sampled footprint was 7.3 GB. Sampling adds overhead; that run is not a
+qualifying timing or a causal A/B comparison of individual commits. The clone
+preserves pointer values; copying the full function-analysis map does not mean
+deep-copying all pointed CFG graphs. Root `/tmp/elisa-stage1-line-fast-root`
+contains the pinned producer/source manifest, archive, failed records and native
+sample. Profiling with extra timer/destination variables accidentally created
+separate namespaces; those attempts are explicitly excluded from first-namespace
+counts. Commit f2893caa fixes those observer-only cache identities.
