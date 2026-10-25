@@ -98,8 +98,13 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 	if !v.IsValid() || p.err != nil {
 		return
 	}
-	if p.context == nil && !canonicalMembershipMayContainIdentity(v.Type()) {
-		return
+	dispatch := true
+	if p.context == nil {
+		policy := canonicalMembershipPolicyFor(v.Type())
+		if !policy.relevant {
+			return
+		}
+		dispatch = policy.dispatch
 	}
 	if p.context != nil {
 		if err := validateSparseFactValueType(v); err != nil {
@@ -107,7 +112,7 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 			return
 		}
 	}
-	if v.CanInterface() {
+	if dispatch && v.CanInterface() {
 		switch value := v.Interface().(type) {
 		case *Symbol:
 			if value == nil {

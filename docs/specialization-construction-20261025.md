@@ -950,3 +950,35 @@ Main verification after transfer: actual generation and80-file source parity;
 focused semantic2.665s; all5 default backend top-level tests RUN/PASS with zero
 skips, including O0, O3, debug and linked runtime cases; CLI body-edit hunk
 scheduling0.396s. Main logs /tmp/elisa-main-default-integration-*.log and *.jsonl.
+
+
+## Canonical identity dispatch without impossible boxing
+
+The canonical walk's existing static-type cache now stores unchanged relevance
+plus an exact identity-dispatch verdict in the same lookup. Static interfaces,
+concrete ast.Node/Type implementers and exact Symbol/Scope pointers retain the
+old dispatch. Other concrete containers cannot match any old type-switch case,
+so avoid Interface boxing while traversing every old field/value. Unknown and
+recursive relevance, seen identities/role bits, nominal leaves and span behavior
+remain. Private publication keeps its old unconditional dispatch and validation.
+The cache retains only static reflect.Type metadata. Actual generation adds the
+named immutable two-bool policy type; no program graph or new cache lifetime.
+
+Same existing analyzed catalog benchmark before/after (candidate modes across
+source versions; historical reference not used):512 unrelated functions warm
+4.65–4.71ms/5.030MB/36356allocs→3.95–3.96ms/2.338MB/10457allocs; cold type metadata
+4.82–4.86ms/5.049MB/36597→3.98–3.99ms/2.357MB/10881. Small warm52.3–52.4us/42.5KB/
+387→44.2–44.3us/16.8KB/88; small cold had one185.96us outlier, otherwise128.8–129.3us
+versus prior132.8–133.5us. Cold setup/allocation is included, no forced GC. Before
+benchmark used only a test-file overlay stub for the candidate-specific helper
+test, since that new API did not exist in baseline; production and benchmark
+fixture were the unchanged72ca source. New full frozen-oracle custom Type/pointer/
+value/panic-method/typed-nil/container tests pass actual JSON race1.602s; broad
+proof/retained/specialization/sparse/parallel/default/ownership race20.936s.
+Component CPU and allocation gains do not yet establish full Stage1 latency.
+Evidence /tmp/elisa-canonical-dispatch-*.log/*.jsonl; source artifact
+/tmp/elisa-canonical-membership-dispatch-boxing-v1.
+All55 selected backend cases RUN/PASS with no skips/missing names, including
+exact O0/O3/debug IR and linked runtime default controls; JSON events summarized
+in /tmp/elisa-canonical-dispatch-backend.json. Independent source review found
+no concrete blocker in the exhaustive static dispatch/role/retention predicate.

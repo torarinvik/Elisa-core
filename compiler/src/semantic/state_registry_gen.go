@@ -553,6 +553,7 @@ func semanticStateTypes() []reflect.Type {
 		reflect.TypeFor[callArgSource](),
 		reflect.TypeFor[callDisjointObservation](),
 		reflect.TypeFor[callFrameCtx](),
+		reflect.TypeFor[canonicalMembershipPolicy](),
 		reflect.TypeFor[canonicalTypeIDResult](),
 		reflect.TypeFor[capabilityDepthGraph](),
 		reflect.TypeFor[capabilityLocalResult](),

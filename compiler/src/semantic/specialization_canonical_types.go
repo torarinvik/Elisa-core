@@ -10,18 +10,30 @@ import (
 // Canonical membership scanning alone may skip values whose complete static
 // closure cannot carry syntax or borrowed identities. Private publication must
 // still validate every value, including AST-free resource/schema violations.
-var canonicalMembershipTypeCache sync.Map // reflect.Type -> bool
+type canonicalMembershipPolicy struct {
+	relevant bool
+	dispatch bool
+}
+
+var canonicalMembershipTypeCache sync.Map // reflect.Type -> canonicalMembershipPolicy
 
 func canonicalMembershipMayContainIdentity(typ reflect.Type) bool {
+	return canonicalMembershipPolicyFor(typ).relevant
+}
+
+func canonicalMembershipPolicyFor(typ reflect.Type) canonicalMembershipPolicy {
 	if typ == nil {
-		return true
+		return canonicalMembershipPolicy{true, true}
 	}
 	if cached, ok := canonicalMembershipTypeCache.Load(typ); ok {
-		return cached.(bool)
+		return cached.(canonicalMembershipPolicy)
 	}
-	relevant := canonicalMembershipTypeContainsIdentity(typ, map[reflect.Type]bool{})
-	canonicalMembershipTypeCache.Store(typ, relevant)
-	return relevant
+	policy := canonicalMembershipPolicy{
+		relevant: canonicalMembershipTypeContainsIdentity(typ, map[reflect.Type]bool{}),
+		dispatch: typ.Kind() == reflect.Interface || typ.Implements(reflect.TypeFor[ast.Node]()) || typ.Implements(reflect.TypeFor[Type]()) || typ == reflect.TypeFor[*Symbol]() || typ == reflect.TypeFor[*Scope](),
+	}
+	canonicalMembershipTypeCache.Store(typ, policy)
+	return policy
 }
 
 func canonicalMembershipTypeContainsIdentity(typ reflect.Type, active map[reflect.Type]bool) bool {
