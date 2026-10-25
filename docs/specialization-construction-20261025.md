@@ -621,3 +621,37 @@ qualification remains necessary.
 
 All50 selected backend generic/alias/ABI/layout/region regressions pass in10
 externally bounded groups: /tmp/elisa-no-storage-overlay-backend.json.
+
+## Private optimization-symbol identity lookup overlay
+
+Actual145742-row Stage1 attribution identified6997616bytes/746allocations per
+owned constructor for optimizationSymbolIDs. Private construction now borrows
+those immutable string rows and allocates only local misses. Local-first comma-ok
+lookup preserves present-empty IDs; nil-symbol API behavior and exact shared
+atomic UID allocation on a true miss remain unchanged. Ordinary worker map copy
+and counter policies remain unchanged. Sparse public OptimizationFacts retain
+complete IDs, extents and flags; the construction cache/resource is discarded.
+Every canonical scheduling/merge/publication/build/Marshal/independently decoded
+Restore and nested/pre-memo boundary rejects the active resource. Existing
+no-storage/ExprTypes/ExprFacts/iterator resource checks remain intact.
+
+Closed raw-access policy migrates the only production getter/writer and excludes
+this map from generated owned opaque-copy dispatch. Actual generation confirms
+that exact removal plus one state registry resource row. Independent source
+review found no concrete counter, lifetime or alias defect. Controls cover known
+and empty IDs, counter77->78 exactly once on miss, nil/empty map shapes, foreign
+copy decline/rekey isolation, nested publication and full real global-array facts.
+Focused combined identity/no-storage race passes2.643s; broader retained/private/
+parallel/permission/snapshot/overlay race passes17.023s.
+
+Actual owned constructor benchmark over otherwise empty Analyzer input is7568
+bytes/237allocations/24.4–25.1us at0,1024 and145742rows, with the required empty
+local map and inherited membership retained. This establishes no growth with
+inherited table size in this fixture; it does not measure complete Stage1 output
+or add field timings together. Logs /tmp/elisa-symbol-id-overlay-*.log; source
+artifact /tmp/elisa-optimization-symbol-identity-overlay-v2-6de48dea. Fresh
+producer end-to-end/cache/native/IR qualification remains pending for both new
+overlays.
+
+All50 selected backend generic/specialization/ABI/layout/alias/region tests pass
+in10 externally bounded groups: /tmp/elisa-symbol-id-overlay-backend.json.

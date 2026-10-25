@@ -138,7 +138,6 @@ var specializationOpaqueMapFields = [...]string{
 	"oneShotClosureSyms",
 	"oneShotLambdas",
 	"optimizationExprIDs",
-	"optimizationSymbolIDs",
 	"optionalBindSourceTypes",
 	"overlayLayouts",
 	"overlaySourceLayouts",
@@ -685,9 +684,6 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "optimizationExprIDs":
 		dst.optimizationExprIDs = maps.Clone(src.optimizationExprIDs)
-		return true
-	case "optimizationSymbolIDs":
-		dst.optimizationSymbolIDs = maps.Clone(src.optimizationSymbolIDs)
 		return true
 	case "optionalBindSourceTypes":
 		dst.optionalBindSourceTypes = maps.Clone(src.optionalBindSourceTypes)

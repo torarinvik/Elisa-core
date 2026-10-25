@@ -36,7 +36,7 @@ func TestSpecializationOpaqueMapSchemaAndPolicy(t *testing.T) {
 		for _, field := range typ.Type.(*ast.StructType).Fields.List {
 			if _, ok := field.Type.(*ast.MapType); ok {
 				for _, name := range field.Names {
-					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "functionAnalyses" {
+					if name.Name != "exprTypes" && name.Name != "exprFacts" && name.Name != "iterBinderElementStates" && name.Name != "optimizationSymbolIDs" && name.Name != "functionAnalyses" {
 						expected = append(expected, name.Name)
 					}
 				}
@@ -191,7 +191,7 @@ func TestSpecializationOpaqueHelperUnknownAndResourceFallback(t *testing.T) {
 	if cloneSpecializationOpaqueMap(dst, src, "futureUnknownMap", field) {
 		t.Fatal("unknown field bypassed reflective fallback")
 	}
-	if cloneSpecializationOpaqueMap(dst, src, "exprTypes", field) || cloneSpecializationOpaqueMap(dst, src, "exprFacts", field) || cloneSpecializationOpaqueMap(dst, src, "iterBinderElementStates", field) || cloneSpecializationOpaqueMap(dst, src, "functionAnalyses", field) {
+	if cloneSpecializationOpaqueMap(dst, src, "exprTypes", field) || cloneSpecializationOpaqueMap(dst, src, "exprFacts", field) || cloneSpecializationOpaqueMap(dst, src, "iterBinderElementStates", field) || cloneSpecializationOpaqueMap(dst, src, "functionAnalyses", field) || cloneSpecializationOpaqueMap(dst, src, "optimizationSymbolIDs", field) {
 		t.Fatal("specialization-specific overlay fields bypassed owner policy")
 	}
 	if cloneSpecializationOpaqueMap(dst, src, "exprFacts", reflect.ValueOf(map[string][]int{})) {

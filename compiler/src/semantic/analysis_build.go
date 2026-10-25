@@ -228,6 +228,9 @@ func (b *AnalysisBuild) validate() error {
 	if b == nil || b.retained == nil || b.retained.a == nil || b.file == nil || b.loweredFile == nil || b.retained.a.retained != b.retained || b.next < 0 || b.next > len(b.retained.decls) {
 		return fmt.Errorf("incomplete analysis build")
 	}
+	if b.retained.a.optimizationSymbolIdentityOverlay != nil {
+		return fmt.Errorf("construction optimization-symbol identity overlay cannot be persisted/restored or resumed")
+	}
 	if b.retained.a.noStorageOverlay != nil {
 		return fmt.Errorf("construction no-storage overlay cannot be persisted/restored or resumed")
 	}

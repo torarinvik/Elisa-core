@@ -220,10 +220,11 @@ type Analyzer struct {
 	exprFactsOverlay                  *analyzerExprFactsOverlay
 	// Keep identity owners alive until all invocation-local facts are consumed;
 	// a pointer formatted as a string alone does not prevent address reuse by GC.
-	optimizationSymbolIDs    map[*Symbol]string
-	optimizationExprIDs      map[ast.Expr]string
-	optimizationIdentityNext *atomic.Uint64
-	indexBoundsProven        map[*ast.IndexExpr]bool
+	optimizationSymbolIDs             map[*Symbol]string
+	optimizationSymbolIdentityOverlay *analyzerOptimizationSymbolIdentityOverlay
+	optimizationExprIDs               map[ast.Expr]string
+	optimizationIdentityNext          *atomic.Uint64
+	indexBoundsProven                 map[*ast.IndexExpr]bool
 	// Successful proofs retain their owning function even after constant folding
 	// detaches the original node. Updates can retract one function's proofs only.
 	indexBoundsProofOwners       map[*ast.IndexExpr]ast.Node
@@ -1622,6 +1623,10 @@ func (a *Analyzer) finishProgramAnalysis(file, loweredFile *ast.File, activeDecl
 }
 
 func (a *Analyzer) finishProgramResult(file, loweredFile *ast.File, activeDecls []scopedDecl, options AnalyzeOptions, solver func(*Analyzer, []scopedDecl)) *Result {
+	if a.optimizationSymbolIdentityOverlay != nil {
+		err := a.rejectOptimizationSymbolIdentityOverlayOperation("canonical program publication")
+		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}
+	}
 	if a.noStorageOverlay != nil {
 		err := a.rejectNoStorageOverlayOperation("canonical program publication")
 		return &Result{File: file, LoweredFile: loweredFile, Diagnostics: []Diagnostic{{Severity: DiagnosticSeverityError, Message: err.Error()}}}

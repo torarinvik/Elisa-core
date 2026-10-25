@@ -102,6 +102,7 @@ func TestNoStorageOverlayResourceGuards(t *testing.T) {
 	worker.exprTypeOverlay = nil
 	worker.exprFactsOverlay = nil
 	worker.iterBinderElementOverlay = nil
+	worker.optimizationSymbolIdentityOverlay = nil
 	state.a.noStorageOverlay = worker.noStorageOverlay
 	if _, err := state.MarshalState(); err == nil {
 		t.Fatal("active overlay persisted")

@@ -296,14 +296,11 @@ func (a *Analyzer) optimizationSymbolIdentity(sym *Symbol) string {
 	if sym == nil {
 		return ""
 	}
-	if identity, ok := a.optimizationSymbolIDs[sym]; ok {
+	if identity, ok := a.lookupOptimizationSymbolIdentity(sym); ok {
 		return identity
 	}
-	if a.optimizationSymbolIDs == nil {
-		a.optimizationSymbolIDs = make(map[*Symbol]string)
-	}
 	identity := fmt.Sprintf("symbol@%d", a.nextOptimizationIdentity())
-	a.optimizationSymbolIDs[sym] = identity
+	a.setOptimizationSymbolIdentity(sym, identity)
 	return identity
 }
 
