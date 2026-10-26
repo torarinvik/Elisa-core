@@ -80,7 +80,14 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	return runWithProgramOptions(options, stdout, stderr, nil)
 }
 
-func runWithProgramOptions(options cliOptions, stdout io.Writer, stderr io.Writer, preloaded *loadedProgram) int {
+func runWithProgramOptions(options cliOptions, stdout io.Writer, stderr io.Writer, preloaded *loadedProgram) (code int) {
+	status := &analysisCommandStatus{Writer: stderr}
+	stderr = status
+	defer func() {
+		if status.incomplete {
+			code = analysisIncompleteExitCode
+		}
+	}()
 	if err := configureCLIProfile(options); err != nil {
 		fmt.Fprintf(stderr, "error: cannot configure optimization profile: %s\n", err)
 		return 1
@@ -226,6 +233,9 @@ func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.
 
 	analyzeStart := time.Now()
 	result := analyze(file, options)
+	if result == nil {
+		return nil, nil, false
+	}
 	frontendTimingLog("analyze", analyzeStart)
 	frontendSMTTimingLog(stderr, result)
 	if warns := result.Notices(); len(warns) > 0 {

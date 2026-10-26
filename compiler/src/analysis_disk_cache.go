@@ -18,9 +18,24 @@ import (
 	"elisacore/src/smt"
 )
 
-// Opt-in during qualification. This mode always runs in this process and never
-// forwards to a retained server. Only portable, complete idle state is admitted.
-func analysisDiskCacheEnabled() bool { return os.Getenv("ELISACORE_ANALYSIS_CACHE") == "1" }
+// Standalone builds use complete portable disk state by default. Explicit
+// legacy controls retain priority; no default selection starts a retained server.
+func analysisDiskCacheEnabled() bool {
+	switch os.Getenv("ELISACORE_ANALYSIS_CACHE") {
+	case "1":
+		return true // preserve explicit disk selection, including server override
+	case "0":
+		return false
+	case "":
+		return buildCacheEnabled() && os.Getenv("ELISACORE_RETAINED_SERVER") == ""
+	default:
+		return false
+	}
+}
+func analysisDiskBootstrapEnabled() bool {
+	value := os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP")
+	return value == "" || value == "1"
+}
 
 // These environment controls ask for per-analysis output or validation that a
 // completed semantic snapshot cannot replay. Backend-only observers are
@@ -138,6 +153,30 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 	}
 	key := hex.EncodeToString(h.Sum(nil))
 	return analysisDiskArtifact{key: key, path: filepath.Join(root, "analysis", key+".state")}, true
+}
+
+// Probe the configured storage by actual I/O, not mode bits (which can lie
+// under ACLs, containers or privileged users). This is a best-effort prerequisite
+// for automatic checkpoints, never cache admission or semantic authority.
+func analysisDiskCheckpointStorageAvailable(artifact analysisDiskArtifact) error {
+	dir := filepath.Dir(artifact.path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(dir, ".analysis-checkpoint-probe-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write([]byte{0})
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Remove(file.Name())
 }
 
 func (a analysisDiskArtifact) header() []byte { return []byte("ELISACSTATE1\n" + a.key + "\n") }
@@ -280,7 +319,17 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	}
 	if result == nil {
 		coldStart := time.Now()
-		if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "1" {
+		if analysisDiskBootstrapEnabled() {
+			if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "" {
+				if err := analysisDiskCheckpointStorageAvailable(artifact); err != nil {
+					// Persistent state is optional. Without writable storage,
+					// use the established uncached analyzer rather than turn
+					// unfinished progress into a compile failure. The external
+					// process cap still applies; no deadline clock is reset.
+					debugAnalysisDisk(stderr, "automatic checkpoint storage unavailable: %v; uncached local analysis", err)
+					return semantic.AnalyzeWithOptions(file, options)
+				}
+			}
 			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, options, artifact, stderr, buildCheckpoint, checkpointTried)
 		} else {
 			pristine, ok := parseProgram(program.filename, program.source, io.Discard)
@@ -309,6 +358,10 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			debugAnalysisDisk(stderr, "not stored: %v", err)
 		} else {
 			debugAnalysisDisk(stderr, "store bytes=%d in=%v", len(data), time.Since(saveStart).Round(time.Millisecond))
+			// Retain a durable cold boundary until completed publication succeeds.
+			building := analysisBuildArtifact(artifact, program.source)
+			_ = os.Remove(building.path)
+			_ = os.Remove(building.path + ".slow")
 			if err := artifact.publishBaselineSource(program.source); err != nil {
 				debugAnalysisDisk(stderr, "baseline source not stored: %v", err)
 			}

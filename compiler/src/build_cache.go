@@ -261,7 +261,11 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	}
 
 	var capturedOut, capturedErr buildCacheCapture
-	rc := build(options, program, io.MultiWriter(stdout, &capturedOut), io.MultiWriter(stderr, &capturedErr))
+	capturedStatus := &analysisCommandStatus{Writer: io.MultiWriter(stderr, &capturedErr)}
+	rc := build(options, program, io.MultiWriter(stdout, &capturedOut), capturedStatus)
+	if capturedStatus.incomplete {
+		rc = analysisIncompleteExitCode
+	}
 	if rc == 0 && !capturedOut.overflow && !capturedErr.overflow {
 		current, valid := buildCacheObjectArtifactForProgram(options, program)
 		if !valid || current.key != artifact.key {

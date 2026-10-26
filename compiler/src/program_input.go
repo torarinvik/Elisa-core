@@ -153,6 +153,9 @@ func analyzeLoadedProgramUsingPreparation(program *loadedProgram, stderr io.Writ
 		// provenance, so it cannot authorize source-sensitive TaskGroup proofs.
 		options.TrustedRuntimeSourceFiles = nil
 		result := analyze(program.file, options)
+		if result == nil {
+			return nil, nil, false
+		}
 		frontendSMTTimingLog(stderr, result)
 		result.EASMModules = append([]*easm.Module(nil), program.easm...)
 		if warns := result.Notices(); len(warns) > 0 {

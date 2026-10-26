@@ -46,7 +46,7 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		// more valuable than restoring an older completed baseline and preparing
 		// a full scratch graph. A .src byte match is only an ordering hint: the
 		// completed snapshot still needs its normal restore and source check.
-		if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "1" {
+		if analysisDiskBootstrapEnabled() {
 			buildArtifact := analysisBuildArtifact(artifact, program.source)
 			if _, statErr := os.Stat(buildArtifact.path); statErr == nil && !analysisDiskBaselineSourceMatches(artifact, program.source) {
 				pending.buildTried = true
