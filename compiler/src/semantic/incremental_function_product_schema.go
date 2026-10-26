@@ -94,6 +94,16 @@ var functionProductFieldPolicies = map[string]FunctionProductDisposition{
 	"analyzer": FunctionProductInvocation | FunctionProductAnalyzerState,
 	// Set only while concurrent code generators share the result; nil otherwise.
 	"shared": FunctionProductInvocation,
+	// Private sparse-codegen views exist only during specialization publication.
+	// Canonical retained products require these fields to stay zero-valued.
+	"specializationRoot":       FunctionProductInvocation,
+	"specializationCanonical":  FunctionProductInvocation,
+	"specializationCurrent":    FunctionProductInvocation,
+	"specializationNodes":      FunctionProductInvocation,
+	"specializationOwned":      FunctionProductInvocation,
+	"specializationProofMask":  FunctionProductInvocation,
+	"specializationSpanProofs": FunctionProductInvocation,
+	"specializationQueries":    FunctionProductInvocation,
 }
 
 func validateFunctionProductFields(typ reflect.Type, policies map[string]FunctionProductDisposition) error {
