@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"strings"
@@ -12,13 +13,18 @@ import (
 
 // sharedCodegen lets several code generators read one Result concurrently.
 // They read its maps without locks: nothing writes them while the session is
-// open. The analyzer behind the Result is used only under mu. A
+// open. Analyzer-backed queries use analyzerMu, while specialization products
+// and their lazy canonical indexes use independent synchronization. A
 // specialization's re-analysis owns private syntax and a private semantic view;
 // each resulting immutable product is memoized once per instantiation. Other
 // analyzer-backed codegen queries use detached public maps for this session.
 type sharedCodegen struct {
-	mu                         sync.Mutex
+	analyzerMu                 sync.Mutex
+	memoMu                     sync.Mutex
+	unkeyedMu                  sync.Mutex
+	canonicalMu                sync.Mutex
 	bodies                     map[specializationKey]*SpecializedFunction
+	inFlight                   map[specializationKey]*specializationCall
 	compilerBuiltinHelperCalls map[*ast.CallExpr]string
 	programRegions             map[string]bool
 	canonicalNodes             map[ast.Node]bool
@@ -26,6 +32,12 @@ type sharedCodegen struct {
 	canonicalScopes            map[*Scope]bool
 	// restore puts back the analyzer's own maps when the session ends.
 	restore []func()
+}
+
+type specializationCall struct {
+	done    chan struct{}
+	product *SpecializedFunction
+	err     error
 }
 
 type specializationKey struct {
@@ -67,8 +79,59 @@ func (r *Result) lockAnalyzer() func() {
 	if sh == nil {
 		return func() {}
 	}
-	sh.mu.Lock()
-	return sh.mu.Unlock
+	sh.analyzerMu.Lock()
+	return sh.analyzerMu.Unlock
+}
+
+// specialize memoizes successful work per key. Different instantiations can
+// analyze concurrently, while callers for the same instantiation share one
+// in-flight product.
+func (sh *sharedCodegen) specialize(key specializationKey, build func() (*SpecializedFunction, error)) (*SpecializedFunction, error) {
+	sh.memoMu.Lock()
+	if sh.bodies == nil {
+		sh.bodies = make(map[specializationKey]*SpecializedFunction)
+	}
+	if product, ok := sh.bodies[key]; ok {
+		sh.memoMu.Unlock()
+		return product, nil
+	}
+	if call := sh.inFlight[key]; call != nil {
+		sh.memoMu.Unlock()
+		<-call.done
+		return call.product, call.err
+	}
+	if sh.inFlight == nil {
+		sh.inFlight = make(map[specializationKey]*specializationCall)
+	}
+	call := &specializationCall{done: make(chan struct{})}
+	sh.inFlight[key] = call
+	sh.memoMu.Unlock()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			sh.memoMu.Lock()
+			if sh.inFlight[key] == call {
+				call.err = fmt.Errorf("specialization construction panicked: %v", recovered)
+				delete(sh.inFlight, key)
+				close(call.done)
+			}
+			sh.memoMu.Unlock()
+			panic(recovered)
+		}
+	}()
+
+	product, err := build()
+
+	sh.memoMu.Lock()
+	defer sh.memoMu.Unlock()
+	if err == nil {
+		sh.bodies[key] = product
+	}
+	call.product = product
+	call.err = err
+	delete(sh.inFlight, key)
+	close(call.done)
+	return product, err
 }
 
 func specializationMemoKey(fn *ast.FuncDecl, typeArgs []Type) (specializationKey, bool) {

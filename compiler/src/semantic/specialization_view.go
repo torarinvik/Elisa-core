@@ -66,16 +66,17 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 	}
 	if sh := root.shared; sh != nil {
 		key, keyed := specializationMemoKey(fn, args)
-		sh.mu.Lock()
-		defer sh.mu.Unlock()
-		if product, ok := sh.bodies[key]; keyed && ok {
-			return product, nil
+		if keyed {
+			return sh.specialize(key, func() (*SpecializedFunction, error) {
+				return root.specializePrivateFunction(fn, args)
+			})
 		}
-		product, err := root.specializePrivateFunction(fn, args)
-		if err == nil && keyed {
-			sh.bodies[key] = product
-		}
-		return product, err
+		// Noncanonical arguments cannot be safely memoized. Preserve their old
+		// serialized behavior without blocking keyed instantiations or analyzer
+		// queries for the full private analysis.
+		sh.unkeyedMu.Lock()
+		defer sh.unkeyedMu.Unlock()
+		return root.specializePrivateFunction(fn, args)
 	}
 	return root.specializePrivateFunction(fn, args)
 }
@@ -87,17 +88,27 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*Spec
 	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil || r.analyzer.optimizationSymbolIdentityOverlay != nil || r.analyzer.storeScanBinderOverlay != nil || r.analyzer.storeScanParamFactsOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
-	a := cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)
-	// Semantic workers use a separate base memo for this table. A published
-	// codegen Result exposes a concrete map instead, including canonical global
-	// type expressions, so materialize that base before adding private rows.
-	a.resolvedTypeNames = maps.Clone(r.analyzer.resolvedTypeNames)
-	isolateWorkerScopes(r.analyzer, a)
+	var a *Analyzer
+	var hasRetained bool
+	func() {
+		// Clone while holding the analyzer-query lock because queries such as
+		// ProgramLivedArgRegion may populate memo maps during shared codegen.
+		// The private worker is independent after this snapshot is complete.
+		unlock := r.lockAnalyzer()
+		defer unlock()
+		a = cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)
+		// Semantic workers use a separate base memo for this table. A published
+		// codegen Result exposes a concrete map instead, including canonical global
+		// type expressions, so materialize that base before adding private rows.
+		a.resolvedTypeNames = maps.Clone(r.analyzer.resolvedTypeNames)
+		isolateWorkerScopes(r.analyzer, a)
+		hasRetained = r.analyzer.retained != nil
+	}()
 	targetExprs := map[ast.Expr]struct{}{}
 	collectSpecializedFunctionExprs(fn, targetExprs)
 	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}
 	a.parallel = &parallelWorkerState{worker: 0, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, readShadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}, specialization: ctx}
-	if r.analyzer.retained != nil {
+	if hasRetained {
 		a.retained = &RetainedAnalysis{windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}}
 	}
 	defer a.closeSMT()

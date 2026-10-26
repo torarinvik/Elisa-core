@@ -54,8 +54,14 @@ func newSpecializationPublication(c *specializationContext, decl *ast.FuncDecl) 
 // Canonical syntax membership is shared once per concurrent codegen session.
 // It is a reference index over the already-owned program, not another AST copy.
 func canonicalSpecializationNodes(root *Result) map[ast.Node]bool {
-	if root.shared != nil && root.shared.canonicalNodes != nil {
-		return root.shared.canonicalNodes
+	var shared *sharedCodegen
+	if root.shared != nil {
+		shared = root.shared
+		shared.canonicalMu.Lock()
+		defer shared.canonicalMu.Unlock()
+		if shared.canonicalNodes != nil {
+			return shared.canonicalNodes
+		}
 	}
 	nodes := map[ast.Node]bool{}
 	scan := &specializationPublication{rootNodes: nil, owned: nodes, rootSymbols: map[*Symbol]bool{}, rootScopes: map[*Scope]bool{}, seen: map[specializationPointer]uint8{}}
@@ -84,10 +90,10 @@ func canonicalSpecializationNodes(root *Result) map[ast.Node]bool {
 			scan.walk(reflect.ValueOf(symbol), false)
 		}
 	}
-	if root.shared != nil {
-		root.shared.canonicalNodes = nodes
-		root.shared.canonicalSymbols = scan.rootSymbols
-		root.shared.canonicalScopes = scan.rootScopes
+	if shared != nil {
+		shared.canonicalNodes = nodes
+		shared.canonicalSymbols = scan.rootSymbols
+		shared.canonicalScopes = scan.rootScopes
 	}
 	return nodes
 }
