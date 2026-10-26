@@ -15,7 +15,7 @@ import (
 func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filename)
-	allowed := map[string]map[string]bool{"analyzer_no_storage_overlay.go": {"lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true}, "parallel_bodies.go": {"cloneAnalyzerValueForParallelPolicy": true}, "specialization_maps_generated.go": {"cloneSpecializationOpaqueMap": true}}
+	allowed := map[string]map[string]bool{"analyzer_no_storage_overlay.go": {"lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true, "lookupStoreScanShares": true, "setStoreScanShares": true}, "parallel_bodies.go": {"cloneAnalyzerValueForParallelPolicy": true}, "specialization_maps_generated.go": {"cloneSpecializationOpaqueMap": true}}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -35,13 +35,13 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 				continue
 			}
 			goast.Inspect(fn.Body, func(n goast.Node) bool {
-				if selector, ok := n.(*goast.SelectorExpr); ok && selector.Sel.Name == "storeScanNoStorageCache" && !allowed[entry.Name()][fn.Name.Name] {
-					t.Errorf("raw NoStorage access bypasses overlay at %s", set.Position(n.Pos()))
+				if selector, ok := n.(*goast.SelectorExpr); ok && (selector.Sel.Name == "storeScanNoStorageCache" || selector.Sel.Name == "storeScanSharesCache") && !allowed[entry.Name()][fn.Name.Name] {
+					t.Errorf("raw type-property cache access bypasses overlay at %s", set.Position(n.Pos()))
 				}
 				if literal, ok := n.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 					value, _ := strconv.Unquote(literal.Value)
-					if value == "storeScanNoStorageCache" && !allowed[entry.Name()][fn.Name.Name] {
-						t.Errorf("named NoStorage reflection needs review at %s", set.Position(n.Pos()))
+					if (value == "storeScanNoStorageCache" || value == "storeScanSharesCache") && !allowed[entry.Name()][fn.Name.Name] {
+						t.Errorf("named type-property cache reflection needs review at %s", set.Position(n.Pos()))
 					}
 				}
 				return true
@@ -54,6 +54,9 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	}
 	if !strings.Contains(string(policy), "ownedFunctionAnalyses && name == \"storeScanNoStorageCache\"") {
 		t.Fatal("specialization-only clone boundary lost")
+	}
+	if !strings.Contains(string(policy), "ownedFunctionAnalyses && name == \"storeScanSharesCache\"") {
+		t.Fatal("specialization-only shares cache clone boundary lost")
 	}
 	invalidation, err := os.ReadFile(filepath.Join(dir, "retained_struct_edit.go"))
 	if err != nil {

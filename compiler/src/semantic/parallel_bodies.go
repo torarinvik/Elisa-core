@@ -452,6 +452,17 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "storeScanSharesCache" {
+			// This memo contains immutable type-property results. Inherit settled
+			// rows through noStorageOverlay and keep new rows private to this
+			// specialization instead of copying the whole program cache.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if name == "iterBinderElementOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
@@ -557,7 +568,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		if specializationParamFactsCopySchemaValid {
 			worker.storeScanParamFactsOverlay = &analyzerStoreScanParamFactsOverlay{base: a.storeScanParamFactsCache}
 		}
-		worker.noStorageOverlay = &analyzerNoStorageOverlay{base: a.storeScanNoStorageCache}
+		worker.noStorageOverlay = &analyzerNoStorageOverlay{base: a.storeScanNoStorageCache, sharesBase: a.storeScanSharesCache}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
 		if useExprFactsOverlay {

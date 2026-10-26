@@ -66,6 +66,47 @@ func TestNoStorageOverlayPositiveNegativeMissingAndIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreScanSharesOverlayPositiveNegativeMissingAndIsolation(t *testing.T) {
+	scalar := &BuiltinType{Name: "i64"}
+	container := &DArrayType{Elem: scalar}
+	newScalar := &BuiltinType{Name: "u32"}
+	newContainer := &DictType{Key: scalar, Value: scalar}
+	root := &Analyzer{storeScanSharesCache: map[Type]bool{scalar: false, container: true}}
+	private := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+	if len(private.storeScanSharesCache) != 0 || private.noStorageOverlay == nil || private.noStorageOverlay.sharesBase == nil {
+		t.Fatal("specialization copied the cache or lost its inherited base")
+	}
+	for typ, want := range root.storeScanSharesCache {
+		got := private.storeScanSharesCached(typ)
+		if got != want {
+			t.Fatal("inherited positive/negative result changed")
+		}
+	}
+	if len(private.storeScanSharesCache) != 0 {
+		t.Fatal("inherited lookup materialized local rows")
+	}
+	if private.storeScanSharesCached(newScalar) || !private.storeScanSharesCached(newContainer) {
+		t.Fatal("miss computation changed type-property results")
+	}
+	if len(private.storeScanSharesCache) != 2 || !private.storeScanSharesCache[newContainer] {
+		t.Fatal("misses were not written to the private cache")
+	}
+	private.setStoreScanShares(newContainer, false)
+	if !root.storeScanSharesCache[container] || len(root.storeScanSharesCache) != 2 {
+		t.Fatal("private write mutated canonical cache")
+	}
+
+	nested := cloneAnalyzerValueForBodyWorker(private).Addr().Interface().(*Analyzer)
+	if nested.noStorageOverlay == private.noStorageOverlay {
+		t.Fatal("nested worker shared overlay metadata")
+	}
+	nested.setStoreScanShares(newContainer, true)
+	if private.storeScanSharesCache[newContainer] || !nested.storeScanSharesCached(container) {
+		t.Fatal("nested worker lost local isolation or inherited base lookup")
+	}
+}
+
 func TestNoStorageOverlayActualMissAndCanonicalInvalidation(t *testing.T) {
 	const source = "def keep(x: i64) -> i64:\n    return x\n"
 	result, state := AnalyzeRetained(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
@@ -169,6 +210,27 @@ func BenchmarkNoStorageOverlayConstruction(b *testing.B) {
 					noStorageCloneSink = &Analyzer{storeScanNoStorageCache: maps.Clone(root.storeScanNoStorageCache)}
 				} else {
 					noStorageCloneSink = &Analyzer{storeScanNoStorageCache: map[Type]bool{}, noStorageOverlay: &analyzerNoStorageOverlay{base: root.storeScanNoStorageCache}}
+				}
+			}
+		})
+	}
+}
+
+var storeScanSharesCloneSink *Analyzer
+
+func BenchmarkStoreScanSharesOverlayConstruction(b *testing.B) {
+	root := &Analyzer{storeScanSharesCache: make(map[Type]bool, 32768)}
+	for i := 0; i < 32768; i++ {
+		root.storeScanSharesCache[&BuiltinType{Name: "i64"}] = i%2 == 0
+	}
+	for _, mode := range []string{"full_map_copy", "overlay"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if mode == "full_map_copy" {
+					storeScanSharesCloneSink = cloneAnalyzerValueForParallelPolicy(root, true, false).Addr().Interface().(*Analyzer)
+				} else {
+					storeScanSharesCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 				}
 			}
 		})

@@ -2,9 +2,12 @@ package semantic
 
 import "fmt"
 
-// Constructor-only bool lookup base. Never recompute an inherited positive or
-// negative entry; new entries are published to the private local map only.
-type analyzerNoStorageOverlay struct{ base map[Type]bool }
+// Constructor-only bool lookup bases. Never recompute an inherited positive or
+// negative entry; new entries are published to the private local maps only.
+type analyzerNoStorageOverlay struct {
+	base       map[Type]bool
+	sharesBase map[Type]bool
+}
 
 func (a *Analyzer) lookupStoreScanNoStorage(t Type) (bool, bool) {
 	if value, present := a.storeScanNoStorageCache[t]; present {
@@ -22,11 +25,30 @@ func (a *Analyzer) setStoreScanNoStorage(t Type, value bool) {
 	}
 	a.storeScanNoStorageCache[t] = value
 }
+
+func (a *Analyzer) lookupStoreScanShares(t Type) (bool, bool) {
+	if value, present := a.storeScanSharesCache[t]; present {
+		return value, true
+	}
+	if a.noStorageOverlay != nil {
+		value, present := a.noStorageOverlay.sharesBase[t]
+		return value, present
+	}
+	return false, false
+}
+
+func (a *Analyzer) setStoreScanShares(t Type, value bool) {
+	if a.storeScanSharesCache == nil {
+		a.storeScanSharesCache = map[Type]bool{}
+	}
+	a.storeScanSharesCache[t] = value
+}
+
 func cloneAnalyzerNoStorageOverlay(source *analyzerNoStorageOverlay) *analyzerNoStorageOverlay {
 	if source == nil {
 		return nil
 	}
-	return &analyzerNoStorageOverlay{base: source.base}
+	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase}
 }
 func (a *Analyzer) rejectNoStorageOverlayOperation(operation string) error {
 	err := fmt.Errorf("specialization no-storage overlay cannot enter %s", operation)

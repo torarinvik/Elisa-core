@@ -3392,16 +3392,13 @@ func (a *Analyzer) storeScanViewOnlyCached(t Type) bool {
 func (a *Analyzer) storeScanSharesCached(t Type) bool {
 	cacheable := t != nil && reflect.ValueOf(t).Kind() == reflect.Pointer
 	if cacheable {
-		if cached, ok := a.storeScanSharesCache[t]; ok {
+		if cached, ok := a.lookupStoreScanShares(t); ok {
 			return cached
 		}
 	}
 	result := typeSharesIndirectStorage(t, map[Type]bool{})
 	if cacheable {
-		if a.storeScanSharesCache == nil {
-			a.storeScanSharesCache = map[Type]bool{}
-		}
-		a.storeScanSharesCache[t] = result
+		a.setStoreScanShares(t, result)
 	}
 	return result
 }
