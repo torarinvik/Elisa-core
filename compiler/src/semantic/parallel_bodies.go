@@ -553,6 +553,17 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
 			continue
 		}
+		if ownedFunctionAnalyses && name == "regionStacks" {
+			// copyDecl imports and isolates assignments for owned region syntax
+			// from the canonical source. Private analysis only writes fresh rows;
+			// published queries inherit foreign assignments through the root view.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if ownedFunctionAnalyses && name == "storeScanBoundCache" {
 			// Settled name sets are read-only; only publish new rows privately.
 			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
