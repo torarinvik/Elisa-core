@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-func TestStoreFlowPoolKeepsOrdinaryCloneAndOwnedBoundary(t *testing.T) {
+func TestStoreFlowCloneKeepsOrdinaryCloneAndOwnedBoundary(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	path := filepath.Join(filepath.Dir(filename), "parallel_bodies.go")
 	source, err := os.ReadFile(path)
@@ -41,6 +41,6 @@ func TestStoreFlowPoolKeepsOrdinaryCloneAndOwnedBoundary(t *testing.T) {
 		t.Fatal("ordinary reference helper missing")
 	}
 	if !strings.Contains(string(source), "if ownedFunctionAnalyses {\n\t\t\t\tsettable(cloned.Field(i)).Set(reflect.ValueOf(cloneStoreFlowSummariesForSpecialization(a.storeFlowSummaries)))") {
-		t.Fatal("owned-only pooling boundary changed")
+		t.Fatal("owned-only specialization clone boundary changed")
 	}
 }

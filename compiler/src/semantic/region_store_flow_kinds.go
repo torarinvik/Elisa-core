@@ -126,7 +126,11 @@ func (a *Analyzer) storeFlowKindsFor(decl *ast.FuncDecl) *storeFlowSummary {
 	if s == nil || a.storeFlowSummaries[decl] != s || s.retKind != nil {
 		return s
 	}
-	a.storeFlowSolveKinds(a.storeFlowComponent(decl))
+	members := a.storeFlowComponent(decl)
+	if a.parallel != nil && a.parallel.specialization != nil {
+		detachStoreFlowKindsForWrite(a.storeFlowSummaries, members)
+	}
+	a.storeFlowSolveKinds(members)
 	return s
 }
 
