@@ -19,6 +19,9 @@ type analysisDiskRestoration struct {
 	started      time.Time
 	done         chan struct{}
 	state        *semantic.RetainedAnalysis
+	build        *analysisDiskBuildCheckpoint
+	buildTried   bool
+	buildErr     error
 	preparation  analysisScratchPreparation
 	err          error
 	loaded       bool
@@ -39,6 +42,20 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 	pending := &analysisDiskRestoration{artifact: artifact, started: time.Now(), done: make(chan struct{})}
 	go func() {
 		defer close(pending.done)
+		// During a resumable bootstrap, an exact unfinished build is usually
+		// more valuable than restoring an older completed baseline and preparing
+		// a full scratch graph. A .src byte match is only an ordering hint: the
+		// completed snapshot still needs its normal restore and source check.
+		if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "1" {
+			buildArtifact := analysisBuildArtifact(artifact, program.source)
+			if _, statErr := os.Stat(buildArtifact.path); statErr == nil && !analysisDiskBaselineSourceMatches(artifact, program.source) {
+				pending.buildTried = true
+				pending.build, pending.buildErr = restoreAnalysisDiskBuildCheckpoint(artifact, program, options)
+				if pending.build != nil {
+					return
+				}
+			}
+		}
 		data, err := artifact.read()
 		// A family hint never changes the exact artifact's identity or header.
 		// Only a missing exact artifact may try a validated added-file baseline.
@@ -57,6 +74,14 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		pending.state, pending.preparation, pending.err = restoreAnalysisWithScratch(data, program, options, lazy)
 	}()
 	return pending
+}
+
+// analysisDiskBaselineSourceMatches is only a restore-ordering hint. The
+// source sidecar never admits a semantic state; RestoreAnalysisState,
+// MatchesInvocation, and ResultForSource remain the completed-state gates.
+func analysisDiskBaselineSourceMatches(artifact analysisDiskArtifact, source []byte) bool {
+	baseline, err := os.ReadFile(artifact.baselineSourcePath())
+	return err == nil && bytes.Equal(baseline, source)
 }
 
 func (p *analysisDiskRestoration) join() {

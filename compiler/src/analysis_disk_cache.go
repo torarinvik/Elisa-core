@@ -161,6 +161,8 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	}
 	var state *semantic.RetainedAnalysis
 	var result *semantic.Result
+	var buildCheckpoint *analysisDiskBuildCheckpoint
+	checkpointTried := false
 	unchanged := false
 	replayed := false
 	started := time.Now()
@@ -169,7 +171,16 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		pending = startAnalysisDiskRestoration(program, options)
 	}
 	pending.join()
-	if pending != nil && pending.loaded {
+	if pending != nil {
+		buildCheckpoint = pending.build
+		checkpointTried = pending.buildTried
+		if pending.buildTried && pending.buildErr != nil && !os.IsNotExist(pending.buildErr) {
+			debugAnalysisDisk(stderr, "declined checkpoint: %v", pending.buildErr)
+		}
+	}
+	if pending != nil && pending.build != nil {
+		debugAnalysisDisk(stderr, "prefer exact bootstrap checkpoint over completed baseline")
+	} else if pending != nil && pending.loaded {
 		started = pending.started
 		restored, preparation, err := pending.state, pending.preparation, pending.err
 		if err == nil && !restored.MatchesInvocation(program.filename, options) {
@@ -222,7 +233,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	if result == nil {
 		coldStart := time.Now()
 		if os.Getenv("ELISACORE_ANALYSIS_BOOTSTRAP") == "1" {
-			result, state = advanceAnalysisDiskBuild(program, file, options, artifact, stderr)
+			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, options, artifact, stderr, buildCheckpoint, checkpointTried)
 		} else {
 			pristine, ok := parseProgram(program.filename, program.source, io.Discard)
 			if !ok {

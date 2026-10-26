@@ -24,30 +24,91 @@ func analysisBuildArtifact(complete analysisDiskArtifact, source []byte) analysi
 	return analysisDiskArtifact{key: key, path: filepath.Join(filepath.Dir(complete.path), key+".building")}
 }
 
+// analysisDiskBuildCheckpoint is fully decoded and invocation-checked before
+// it is handed from the restoration future to the synchronous build advance.
+// Its capacity hint and timing preserve the ordinary restore path's sizing and
+// diagnostics without decoding the same checkpoint twice.
+type analysisDiskBuildCheckpoint struct {
+	artifact     analysisDiskArtifact
+	build        *semantic.AnalysisBuild
+	capacityHint int
+	bytes        int
+	started      time.Time
+}
+
+func restoreAnalysisDiskBuildCheckpoint(complete analysisDiskArtifact, program *loadedProgram, options semantic.AnalyzeOptions) (*analysisDiskBuildCheckpoint, error) {
+	artifact := analysisBuildArtifact(complete, program.source)
+	started := time.Now()
+	data, err := artifact.read()
+	if err != nil {
+		return nil, err
+	}
+	build, err := semantic.RestoreAnalysisBuild(data)
+	if err == nil && !build.MatchesInvocation(program.filename, program.source, options) {
+		err = fmt.Errorf("checkpoint invocation mismatch")
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Bound eager reservation independently of the admitted state size, just
+	// like the synchronous restore path.
+	capacityHint := min(len(data)+len(data)/16, 1<<30)
+	return &analysisDiskBuildCheckpoint{artifact: artifact, build: build, capacityHint: capacityHint, bytes: len(data), started: started}, nil
+}
+
+func validateAnalysisDiskBuildCheckpoint(complete analysisDiskArtifact, program *loadedProgram, options semantic.AnalyzeOptions, checkpoint *analysisDiskBuildCheckpoint) error {
+	if checkpoint == nil || checkpoint.build == nil {
+		return fmt.Errorf("missing restored build checkpoint")
+	}
+	current := analysisBuildArtifact(complete, program.source)
+	if checkpoint.artifact.key != current.key {
+		return fmt.Errorf("checkpoint artifact changed before handoff")
+	}
+	if !checkpoint.build.MatchesInvocation(program.filename, program.source, options) {
+		return fmt.Errorf("checkpoint invocation changed before handoff")
+	}
+	return nil
+}
+
 // An unfinished checkpoint is separate from the reusable completed state and
 // admits only this exact source revision. A stopped build returns an error and
 // emits no artifact; running the same build again resumes in an ordinary fresh
 // process. This qualification mode does not run a background worker.
 func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer) (*semantic.Result, *semantic.RetainedAnalysis) {
+	return advanceAnalysisDiskBuildWithCheckpoint(program, file, options, complete, stderr, nil, false)
+}
+
+func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer, checkpoint *analysisDiskBuildCheckpoint, checkpointTried bool) (*semantic.Result, *semantic.RetainedAnalysis) {
 	artifact := analysisBuildArtifact(complete, program.source)
+	if checkpoint != nil {
+		if err := validateAnalysisDiskBuildCheckpoint(complete, program, options, checkpoint); err != nil {
+			debugAnalysisDisk(stderr, "declined checkpoint: %v", err)
+			checkpoint = nil
+			checkpointTried = false
+		}
+	}
 	var build *semantic.AnalysisBuild
 	capacityHint := 0
 	started := time.Now()
-	if data, err := artifact.read(); err == nil {
-		restored, err := semantic.RestoreAnalysisBuild(data)
-		if err == nil && !restored.MatchesInvocation(program.filename, program.source, options) {
-			err = fmt.Errorf("checkpoint invocation mismatch")
-		}
-		if err == nil {
-			build = restored
-			// Bound eager reservation independently of the admitted state size.
-			// Larger checkpoints still grow normally if they need more space.
-			capacityHint = min(len(data)+len(data)/16, 1<<30)
+	if checkpoint != nil {
+		build = checkpoint.build
+		capacityHint = checkpoint.capacityHint
+		started = checkpoint.started
+		done, total := build.Progress()
+		post, phases := build.PostProgress()
+		debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, checkpoint.bytes, time.Since(started).Round(time.Millisecond))
+	} else if !checkpointTried {
+		restored, restoreErr := restoreAnalysisDiskBuildCheckpoint(complete, program, options)
+		if restoreErr == nil {
+			checkpoint = restored
+			build = checkpoint.build
+			capacityHint = checkpoint.capacityHint
+			started = checkpoint.started
 			done, total := build.Progress()
 			post, phases := build.PostProgress()
-			debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, len(data), time.Since(started).Round(time.Millisecond))
-		} else {
-			debugAnalysisDisk(stderr, "declined checkpoint: %v", err)
+			debugAnalysisDisk(stderr, "bootstrap restore completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, checkpoint.bytes, time.Since(started).Round(time.Millisecond))
+		} else if !os.IsNotExist(restoreErr) {
+			debugAnalysisDisk(stderr, "declined checkpoint: %v", restoreErr)
 		}
 	}
 	incomplete := func(err error) *semantic.Result {
