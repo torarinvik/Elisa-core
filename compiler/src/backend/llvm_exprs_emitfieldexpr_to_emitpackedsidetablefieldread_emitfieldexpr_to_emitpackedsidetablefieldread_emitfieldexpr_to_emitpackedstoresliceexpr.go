@@ -463,7 +463,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if !ok || !ops.canDirectWordRead() {
 		return nil, nil, false, nil
 	}
-	if s.g != nil && s.g.result != nil && s.g.result.ExprHasOnlyFrozenPackedStoreDeps(expr.Object) {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().ExprHasOnlyFrozenPackedStoreDeps(expr.Object) {
 		if !packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) {
 			return nil, nil, false, nil
 		}

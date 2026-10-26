@@ -37,6 +37,43 @@ func codegenReadSchema(t *testing.T) []struct {
 func TestCodegenReadViewCoversActualSparseAccessorSchema(t *testing.T) {
 	resultType, viewType := reflect.TypeFor[*Result](), reflect.TypeFor[CodegenReadView]()
 	methods := 0
+	for _, name := range []string{
+		"ExprOptimizationFacts",
+		"ExprsHaveSameExtent",
+		"ExprsHaveEqualExtentSize",
+		"ExprsAreDisjoint",
+		"ExprSupportsDenseWrite",
+		"ExprPackedStoreProvenance",
+		"ExprHasPackedStoreProvenance",
+		"ExprDependsOnFrozenPackedStores",
+		"ExprDependsOnNonFrozenPackedStores",
+		"ExprHasOnlyFrozenPackedStoreDeps",
+		"ExprHasMixedPackedStoreProvenance",
+		"ExprDependsOnlyOnFrozenPackedStores",
+	} {
+		original, ok := resultType.MethodByName(name)
+		if !ok {
+			t.Fatalf("Result missing derived optimization method %s", name)
+		}
+		wrapped, ok := viewType.MethodByName(name)
+		if !ok {
+			t.Fatalf("CodegenReadView missing derived optimization method %s", name)
+		}
+		if original.Type.NumIn() != wrapped.Type.NumIn() || original.Type.NumOut() != wrapped.Type.NumOut() {
+			t.Fatalf("derived method signature mismatch %s", name)
+		}
+		for i := 1; i < original.Type.NumIn(); i++ {
+			if original.Type.In(i) != wrapped.Type.In(i) {
+				t.Fatalf("derived method input mismatch %s", name)
+			}
+		}
+		for i := 0; i < original.Type.NumOut(); i++ {
+			if original.Type.Out(i) != wrapped.Type.Out(i) {
+				t.Fatalf("derived method output mismatch %s", name)
+			}
+		}
+		methods++
+	}
 	for _, field := range codegenReadSchema(t) {
 		if field.Analyzer == nil {
 			continue
@@ -215,6 +252,155 @@ func TestCodegenReadViewRangeCompletionAndDisabledParity(t *testing.T) {
 	if count != 1 || plain.ExprTypesLen() != root.ExprTypesLen() {
 		t.Fatal("disabled observer changed range/length")
 	}
+}
+
+func TestCodegenReadViewOptimizationQueriesMatchResult(t *testing.T) {
+	left := &ast.Ident{Name: "left"}
+	right := &ast.Ident{Name: "right"}
+	mixed := &ast.Ident{Name: "mixed"}
+	missing := &ast.Ident{Name: "missing"}
+	canonical := &ast.Ident{Name: "canonical"}
+	private := &ast.Ident{Name: "private"}
+	foreign := &ast.Ident{Name: "foreign"}
+	ownedMiss := &ast.Ident{Name: "owned-miss"}
+	extent := &OptimizationExtent{Kind: OptimizationExtentArraySize, HasConstSize: true, ConstSize: 4}
+	otherExtent := &OptimizationExtent{Kind: OptimizationExtentArraySize, HasConstSize: true, ConstSize: 9}
+	leftFacts := OptimizationFacts{
+		Exclusive: true, Contiguous: true, UnitStride: true, Extent: extent, base: "left-base",
+		PackedStoreProvenance: PackedStoreProvenance{HasPackedStoreDeps: true, HasFrozenPackedStoreDeps: true},
+	}
+	rightFacts := OptimizationFacts{Exclusive: true, ReadOnly: true, Contiguous: true, Extent: extent, base: "right-base"}
+	mixedFacts := OptimizationFacts{
+		ReadOnly: true, Contiguous: true, UnitStride: false, Extent: otherExtent, base: "left-base",
+		PackedStoreProvenance: PackedStoreProvenance{
+			HasPackedStoreDeps: true, HasFrozenPackedStoreDeps: true,
+			HasNonFrozenPackedStoreDeps: true, HasNonStoreProvenance: true,
+		},
+	}
+	root := &Result{ExprFacts: map[ast.Expr]OptimizationFacts{canonical: leftFacts, foreign: rightFacts}}
+	privateNilMap := &Result{specializationRoot: root}
+	privateEmptyMap := &Result{ExprFacts: map[ast.Expr]OptimizationFacts{}, specializationRoot: root}
+	privateFacts := &Result{
+		ExprFacts:           map[ast.Expr]OptimizationFacts{left: leftFacts, right: rightFacts, mixed: mixedFacts, private: leftFacts},
+		specializationRoot:  root,
+		specializationNodes: map[ast.Node]ast.Node{canonical: private},
+		specializationOwned: map[ast.Node]bool{private: true, ownedMiss: true},
+	}
+	nilMap := &Result{}
+	emptyMap := &Result{ExprFacts: map[ast.Expr]OptimizationFacts{}}
+	plainFacts := &Result{ExprFacts: map[ast.Expr]OptimizationFacts{left: leftFacts, right: rightFacts, mixed: mixedFacts}}
+	queryNames := []string{
+		"ExprOptimizationFacts", "ExprsHaveSameExtent", "ExprsHaveEqualExtentSize", "ExprsAreDisjoint",
+		"ExprSupportsDenseWrite", "ExprPackedStoreProvenance", "ExprHasPackedStoreProvenance",
+		"ExprDependsOnFrozenPackedStores", "ExprDependsOnNonFrozenPackedStores",
+		"ExprHasOnlyFrozenPackedStoreDeps", "ExprHasMixedPackedStoreProvenance",
+		"ExprDependsOnlyOnFrozenPackedStores",
+	}
+	pairQueries := map[string]bool{
+		"ExprsHaveSameExtent": true, "ExprsHaveEqualExtentSize": true, "ExprsAreDisjoint": true,
+	}
+	expressions := []ast.Expr{nil, left, right, mixed, missing, canonical, private, foreign, ownedMiss}
+	cases := []struct {
+		name   string
+		result *Result
+		view   CodegenReadView
+	}{
+		{name: "nil-result", view: NewCodegenReadView(nil, nil)},
+		{name: "nil-map", result: nilMap, view: NewCodegenReadView(nilMap, nil)},
+		{name: "empty-map", result: emptyMap, view: NewCodegenReadView(emptyMap, nil)},
+		{name: "private-nil-map-does-not-inherit", result: privateNilMap, view: NewCodegenReadView(privateNilMap, nil)},
+		{name: "private-empty-map-inherits-foreign-only", result: privateEmptyMap, view: NewCodegenReadView(privateEmptyMap, nil)},
+		{name: "private-owned-and-inherited-rows", result: privateFacts, view: NewCodegenReadView(privateFacts, nil)},
+		{name: "plain-populated", result: plainFacts, view: NewCodegenReadView(plainFacts, nil)},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			resultValue := reflect.ValueOf(testCase.result)
+			viewValue := reflect.ValueOf(testCase.view)
+			for _, name := range queryNames {
+				if pairQueries[name] {
+					for _, leftExpr := range expressions {
+						for _, rightExpr := range expressions {
+							args := []reflect.Value{optimizationExprArgument(leftExpr), optimizationExprArgument(rightExpr)}
+							result := callOptimizationQuery(t, resultValue, name, args)
+							view := callOptimizationQuery(t, viewValue, name, args)
+							if !reflect.DeepEqual(result, view) {
+								t.Fatalf("%s differs for (%v, %v): Result=%v view=%v", name, leftExpr, rightExpr, result, view)
+							}
+						}
+					}
+					continue
+				}
+				for _, expr := range expressions {
+					args := []reflect.Value{optimizationExprArgument(expr)}
+					result := callOptimizationQuery(t, resultValue, name, args)
+					view := callOptimizationQuery(t, viewValue, name, args)
+					if !reflect.DeepEqual(result, view) {
+						t.Fatalf("%s differs for %v: Result=%v view=%v", name, expr, result, view)
+					}
+				}
+			}
+		})
+	}
+	if !privateFacts.ExprsHaveSameExtent(left, right) || !privateFacts.ExprsHaveEqualExtentSize(left, right) || !privateFacts.ExprsAreDisjoint(left, right) {
+		t.Fatal("positive extent/disjoint predicate fixture is invalid")
+	}
+	if privateFacts.ExprsHaveSameExtent(left, mixed) || privateFacts.ExprsHaveEqualExtentSize(left, mixed) || privateFacts.ExprsAreDisjoint(left, mixed) {
+		t.Fatal("negative extent/disjoint predicate fixture is invalid")
+	}
+	if !privateFacts.ExprSupportsDenseWrite(left) || privateFacts.ExprSupportsDenseWrite(right) || privateFacts.ExprSupportsDenseWrite(mixed) {
+		t.Fatal("positive/negative dense-write predicate fixture is invalid")
+	}
+	if !privateFacts.ExprHasOnlyFrozenPackedStoreDeps(left) || !privateFacts.ExprDependsOnlyOnFrozenPackedStores(left) || !privateFacts.ExprHasMixedPackedStoreProvenance(mixed) || privateFacts.ExprHasOnlyFrozenPackedStoreDeps(mixed) {
+		t.Fatal("positive/negative packed-store predicate fixture is invalid")
+	}
+	if privateFacts.ExprHasPackedStoreProvenance(right) || privateFacts.ExprDependsOnFrozenPackedStores(right) || privateFacts.ExprDependsOnNonFrozenPackedStores(left) {
+		t.Fatal("negative packed-store query fixture is invalid")
+	}
+
+	var events []CodegenFactRead
+	observed := NewCodegenReadView(privateFacts, func(read CodegenFactRead) { events = append(events, read) })
+	if _, ok := observed.ExprOptimizationFacts(nil); ok || len(events) != 0 {
+		t.Fatal("nil expression performed or reported an optimization-fact read")
+	}
+	if facts, ok := observed.ExprOptimizationFacts(left); !ok || !reflect.DeepEqual(facts, leftFacts) {
+		t.Fatal("view did not return the physical positive ExprFacts row")
+	}
+	if _, ok := observed.ExprOptimizationFacts(ownedMiss); ok {
+		t.Fatal("view revived a canonical row for an owned miss")
+	}
+	if len(events) != 4 || events[0].Operation != "own-map-presence" || events[0].Result != privateFacts || !events[0].Present || events[1].Operation != "lookup" || events[1].Table != "ExprFacts" || events[1].Key != left || !events[1].Present || events[2].Operation != "own-map-presence" || events[2].Result != privateFacts || events[3].Operation != "lookup" || events[3].Table != "ExprFacts" || events[3].Key != ownedMiss || events[3].Present {
+		t.Fatalf("optimization reads did not retain physical-presence, key, result, or negative membership: %+v", events)
+	}
+	events = nil
+	if _, ok := NewCodegenReadView(privateNilMap, func(read CodegenFactRead) { events = append(events, read) }).ExprOptimizationFacts(foreign); ok || len(events) != 1 || events[0].Operation != "own-map-presence" || events[0].Present {
+		t.Fatalf("nil physical ExprFacts map inherited a row or reported a key lookup: %+v", events)
+	}
+	events = nil
+	if facts, ok := NewCodegenReadView(privateEmptyMap, func(read CodegenFactRead) { events = append(events, read) }).ExprOptimizationFacts(foreign); !ok || !reflect.DeepEqual(facts, rightFacts) || len(events) != 2 || events[0].Operation != "own-map-presence" || !events[0].Present || events[1].Operation != "lookup" || events[1].Result != privateEmptyMap || !events[1].Present {
+		t.Fatalf("allocated empty map did not preserve canonical fallback and read context: facts=%+v events=%+v", facts, events)
+	}
+}
+
+func optimizationExprArgument(expr ast.Expr) reflect.Value {
+	if expr == nil {
+		return reflect.Zero(reflect.TypeFor[ast.Expr]())
+	}
+	return reflect.ValueOf(expr)
+}
+
+func callOptimizationQuery(t *testing.T, receiver reflect.Value, name string, args []reflect.Value) []any {
+	t.Helper()
+	method := receiver.MethodByName(name)
+	if !method.IsValid() {
+		t.Fatalf("missing optimization query method %s", name)
+	}
+	values := method.Call(args)
+	result := make([]any, len(values))
+	for i, value := range values {
+		result[i] = value.Interface()
+	}
+	return result
 }
 
 // Exercise every schema entry: physical map semantics must not become logical

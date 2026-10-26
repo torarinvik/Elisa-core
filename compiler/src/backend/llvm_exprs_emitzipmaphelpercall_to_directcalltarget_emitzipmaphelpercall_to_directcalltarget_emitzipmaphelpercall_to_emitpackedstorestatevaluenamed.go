@@ -128,9 +128,9 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, true, err
 	}
-	dstSrc1Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[0], expr.Args[1])
-	dstSrc2Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[0], expr.Args[2])
-	src1Src2Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[1], expr.Args[2])
+	dstSrc1Disjoint := s.g.semanticReadView().ExprsAreDisjoint(expr.Args[0], expr.Args[1])
+	dstSrc2Disjoint := s.g.semanticReadView().ExprsAreDisjoint(expr.Args[0], expr.Args[2])
+	src1Src2Disjoint := s.g.semanticReadView().ExprsAreDisjoint(expr.Args[1], expr.Args[2])
 	domainName := ""
 	dstScopeName := ""
 	src1ScopeName := ""

@@ -158,7 +158,7 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	C.LLVMBuildBr(s.builder, mergeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
-	disjoint := s.g.result.ExprsAreDisjoint(leftExpr, rightExpr)
+	disjoint := s.g.semanticReadView().ExprsAreDisjoint(leftExpr, rightExpr)
 	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, lenValue, "strsliceeq.memcmp", disjoint)
 	if err != nil {
 		return nil, nil, true, err
@@ -255,7 +255,7 @@ func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C
 	C.LLVMBuildBr(s.builder, mergeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
-	disjoint := s.g.result.ExprsAreDisjoint(leftExpr, rightExpr)
+	disjoint := s.g.semanticReadView().ExprsAreDisjoint(leftExpr, rightExpr)
 	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, lenValue, "strsliceseq.memcmp", disjoint)
 	if err != nil {
 		return nil, nil, true, err
@@ -443,11 +443,11 @@ func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LL
 	if _, ok := inputType.(*semantic.CStrType); !ok {
 		return nil, nil, false, nil
 	}
-	if s.g.result.ExprsHaveSameExtent(expr, inputExpr) {
+	if s.g.semanticReadView().ExprsHaveSameExtent(expr, inputExpr) {
 		value, _, err := s.emitExpr(inputExpr, inputType)
 		return value, resultType, true, err
 	}
-	sliceFacts, ok := s.g.result.ExprOptimizationFacts(expr)
+	sliceFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(expr)
 	if !ok || !sliceFacts.HasExactExtent() {
 		return nil, nil, false, nil
 	}

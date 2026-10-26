@@ -37,6 +37,39 @@ func TestIRInputBodyRecorderIncludesRejectedOrdinaryWrapper(t *testing.T) {
 	}
 }
 
+func TestIRInputAuditRecordsExprFactsFromLowerer(t *testing.T) {
+	left, right := &ast.Ident{Name: "left"}, &ast.Ident{Name: "right"}
+	result := &semantic.Result{ExprFacts: map[ast.Expr]semantic.OptimizationFacts{
+		left:  {},
+		right: {},
+	}}
+	plainState := &functionState{g: &llvmGenerator{result: result}}
+	plain := plainState.memcpyOperandsAreDisjoint(left, right)
+	if plain {
+		t.Fatal("empty optimization facts unexpectedly proved disjointness")
+	}
+	recorder := &irInputReadRecorder{}
+	auditedState := &functionState{g: &llvmGenerator{result: result, inputReads: recorder}}
+	audited := auditedState.memcpyOperandsAreDisjoint(left, right)
+	if audited != plain {
+		t.Fatal("diagnostic read recording changed a real lowerer predicate")
+	}
+	lookups := map[ast.Expr]bool{}
+	for _, read := range recorder.snapshot().Codegen {
+		if read.Result != result || read.Table != "ExprFacts" {
+			continue
+		}
+		if read.Operation == "lookup" && read.Present {
+			if expr, ok := read.Key.(ast.Expr); ok {
+				lookups[expr] = true
+			}
+		}
+	}
+	if !lookups[left] || !lookups[right] {
+		t.Fatalf("lowerer optimization query did not record both Result-context ExprFacts rows: %+v", recorder.snapshot().Codegen)
+	}
+}
+
 func TestIRInputAuditRealGenericLoweringParity(t *testing.T) {
 	const source = `def keep[T](value: T) -> T:
     return value

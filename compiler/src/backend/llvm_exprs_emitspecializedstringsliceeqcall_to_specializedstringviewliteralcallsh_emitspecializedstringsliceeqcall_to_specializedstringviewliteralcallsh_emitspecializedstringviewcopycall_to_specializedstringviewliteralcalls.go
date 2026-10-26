@@ -96,7 +96,7 @@ func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C
 	if !isStringViewCarrierType(viewType) {
 		return nil, nil, false, nil
 	}
-	viewFacts, ok := s.g.result.ExprOptimizationFacts(viewExpr)
+	viewFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(viewExpr)
 	if !ok || !viewFacts.HasExactExtent() {
 		return nil, nil, false, nil
 	}

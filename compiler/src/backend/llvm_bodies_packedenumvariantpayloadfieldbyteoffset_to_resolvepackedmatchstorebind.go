@@ -150,7 +150,7 @@ func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.E
 	}
 	return values, nil
 }
-func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, enumType *semantic.EnumType, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
+func packedMatchShouldEagerDecode(view semantic.CodegenReadView, abi packedEnumABIMode, enumType *semantic.EnumType, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
 	needsPayloadDecode := packedMatchNeedsEagerDecode(arms)
 	ident, ok := matchValue.(*ast.Ident)
 	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
@@ -161,7 +161,7 @@ func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode
 		return false
 	}
 	hasFrozenPackedStoreDeps := false
-	if result != nil && result.ExprHasOnlyFrozenPackedStoreDeps(matchValue) {
+	if view.ExprHasOnlyFrozenPackedStoreDeps(matchValue) {
 		hasFrozenPackedStoreDeps = true
 	}
 	if !hasFrozenPackedStoreDeps && store != nil && store.typ != nil && semantic.IsFrozenPackedEnumStoreType(store.typ) {

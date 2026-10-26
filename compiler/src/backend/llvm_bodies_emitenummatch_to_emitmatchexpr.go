@@ -55,7 +55,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedModeForEnum(enumType), enumType, stmt.Value, storeBinding, stmt.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.semanticReadView(), s.g.packedModeForEnum(enumType), enumType, stmt.Value, storeBinding, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err

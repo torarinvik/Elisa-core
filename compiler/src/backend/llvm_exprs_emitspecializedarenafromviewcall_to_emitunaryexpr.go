@@ -102,7 +102,7 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if !isDynArrayViewCarrierType(viewType) || !isDynArrayCarrierType(resultType) {
 		return nil, nil, false, nil
 	}
-	viewFacts, ok := s.g.result.ExprOptimizationFacts(viewExpr)
+	viewFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(viewExpr)
 	if !ok || !viewFacts.HasExactExtent() {
 		return nil, nil, false, nil
 	}
@@ -261,12 +261,12 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	fillType := funcType.Params[1]
 	fillByte, constByte := staticRepeatedByteFillValueForType(s, fillExpr, fillType)
 	dynamicByte := !constByte && isSingleByteScalarFillType(s, fillType)
-	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) {
+	if !isDynArrayViewCarrierType(dstType) || !s.g.semanticReadView().ExprSupportsDenseWrite(dstExpr) {
 		return nil, nil, false, nil
 	}
 	exactFillCount := uint64(0)
 	hasSmallExactFillCount := false
-	if facts, ok := s.g.result.ExprOptimizationFacts(dstExpr); ok {
+	if facts, ok := s.g.semanticReadView().ExprOptimizationFacts(dstExpr); ok {
 		if count, ok := constOptimizationExtentSize(facts.Extent); ok && count <= smallExactArenaFillUnrollLimit {
 			exactFillCount = count
 			hasSmallExactFillCount = true

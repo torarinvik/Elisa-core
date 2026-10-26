@@ -368,7 +368,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	return cmp, s.g.namedType("bool"), nil
 }
 func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
-	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.ExprsHaveSameExtent(firstExpr, secondExpr) {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().ExprsHaveSameExtent(firstExpr, secondExpr) {
 		return nil, false, nil
 	}
 	firstData, firstLen, firstLenType, firstKind, err := s.emitRuntimeStringCompareOperand(firstExpr, firstType)
@@ -396,7 +396,7 @@ func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKin
 	if err != nil {
 		return nil, true, err
 	}
-	disjoint := s.g.result.ExprsAreDisjoint(firstExpr, secondExpr)
+	disjoint := s.g.semanticReadView().ExprsAreDisjoint(firstExpr, secondExpr)
 	cmp, err := s.emitMemcmpEqualValue(firstData, secondData, coercedLen, "streq.memcmp", disjoint)
 	if err != nil {
 		return nil, true, err
@@ -407,7 +407,7 @@ func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKin
 	return cmp, true, nil
 }
 func (s *functionState) emitDisjointRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
-	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.ExprsAreDisjoint(firstExpr, secondExpr) {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().ExprsAreDisjoint(firstExpr, secondExpr) {
 		return nil, false, nil
 	}
 	firstData, firstLen, firstLenType, firstKind, err := s.emitRuntimeStringCompareOperand(firstExpr, firstType)

@@ -92,6 +92,22 @@ func TestCodegenASTSemanticReadsUseExplicitReadView(t *testing.T) {
 		getterNames["Range"+table] = true
 		getterNames[table+"Len"] = true
 	}
+	for _, name := range []string{
+		"ExprOptimizationFacts",
+		"ExprsHaveSameExtent",
+		"ExprsHaveEqualExtentSize",
+		"ExprsAreDisjoint",
+		"ExprSupportsDenseWrite",
+		"ExprPackedStoreProvenance",
+		"ExprHasPackedStoreProvenance",
+		"ExprDependsOnFrozenPackedStores",
+		"ExprDependsOnNonFrozenPackedStores",
+		"ExprHasOnlyFrozenPackedStoreDeps",
+		"ExprHasMixedPackedStoreProvenance",
+		"ExprDependsOnlyOnFrozenPackedStores",
+	} {
+		getterNames[name] = true
+	}
 
 	files, err := filepath.Glob(filepath.Join(backendDir, "*.go"))
 	if err != nil {
@@ -125,8 +141,18 @@ func (g *llvmGenerator) semanticReadView() sem.CodegenReadView { return sem.Code
 func (g *llvmGenerator) semanticReadViewFor(r *sem.Result) sem.CodegenReadView { return sem.CodegenReadView{} }
 func useView(v sem.CodegenReadView, g *llvmGenerator) {
     _ = v.LookupExprTypes(nil)
+    _, _ = v.ExprOptimizationFacts(nil)
     _ = g.semanticReadView().LookupExprTypes(nil)
 }`)
+	for _, name := range []string{
+		"ExprOptimizationFacts", "ExprsHaveSameExtent", "ExprsHaveEqualExtentSize", "ExprsAreDisjoint",
+		"ExprSupportsDenseWrite", "ExprPackedStoreProvenance", "ExprHasPackedStoreProvenance",
+		"ExprDependsOnFrozenPackedStores", "ExprDependsOnNonFrozenPackedStores",
+		"ExprHasOnlyFrozenPackedStoreDeps", "ExprHasMixedPackedStoreProvenance",
+		"ExprDependsOnlyOnFrozenPackedStores",
+	} {
+		getterNames[name] = true
+	}
 	if diagnostics := codegenASTReadDiagnostics(map[string]*ast.File{"llvm_codegen_read_view.go": good}, tables, getterNames, false); len(diagnostics) != 0 {
 		t.Fatalf("valid qualified view fixture rejected: %v", diagnostics)
 	}
@@ -142,7 +168,8 @@ type holder struct { semanticReadView func() sem.CodegenReadView }
 func wrongPackage(v wrong.CodegenReadView) { _ = v.LookupExprTypes(nil) }
 func fakeAlias(v CodegenReadView) { _ = v.LookupExprTypes(nil) }
 func fakeFactory(f *fake) { _ = f.semanticReadView().LookupExprTypes(nil) }
-func fakeField(h holder) { _ = h.semanticReadView().LookupExprTypes(nil) }`)
+func fakeField(h holder) { _ = h.semanticReadView().LookupExprTypes(nil) }
+func directResultFacts(r *sem.Result) { _ = r.ExprsAreDisjoint(nil, nil) }`)
 	diagnostics := codegenASTReadDiagnostics(map[string]*ast.File{
 		"llvm_codegen_read_view.go": good,
 		"spoofed.go":                bad,
@@ -156,6 +183,7 @@ func fakeField(h holder) { _ = h.semanticReadView().LookupExprTypes(nil) }`)
 		"LookupExprTypes call in fakeFactory bypasses",
 		"reserved read-view factory name semanticReadView declared as a struct or interface field",
 		"LookupExprTypes call in fakeField bypasses",
+		"ExprsAreDisjoint call in directResultFacts bypasses",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Errorf("source gate did not reject fixture for %q; diagnostics:\n%s", expected, joined)

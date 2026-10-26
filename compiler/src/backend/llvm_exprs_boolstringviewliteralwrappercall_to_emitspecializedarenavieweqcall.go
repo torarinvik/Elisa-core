@@ -195,7 +195,7 @@ func (s *functionState) memcpyOperandsAreDisjoint(destExpr ast.Expr, srcExpr ast
 	if s == nil || s.g == nil || s.g.result == nil {
 		return false
 	}
-	if s.g.result.ExprsAreDisjoint(destExpr, srcExpr) {
+	if s.g.semanticReadView().ExprsAreDisjoint(destExpr, srcExpr) {
 		return true
 	}
 	destCarrier := s.memcpyDisjointCarrierExpr(destExpr)
@@ -203,7 +203,7 @@ func (s *functionState) memcpyOperandsAreDisjoint(destExpr ast.Expr, srcExpr ast
 	if destCarrier == nil || srcCarrier == nil {
 		return false
 	}
-	return s.g.result.ExprsAreDisjoint(destCarrier, srcCarrier)
+	return s.g.semanticReadView().ExprsAreDisjoint(destCarrier, srcCarrier)
 }
 func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
@@ -280,9 +280,9 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	}
 	exactCopyCount := uint64(0)
 	hasSmallExactCopyCount := false
-	if dstFacts, ok := s.g.result.ExprOptimizationFacts(dstExpr); ok {
+	if dstFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(dstExpr); ok {
 		if dstCount, ok := constOptimizationExtentSize(dstFacts.Extent); ok && dstCount <= smallExactArenaCopyUnrollLimit {
-			if srcFacts, ok := s.g.result.ExprOptimizationFacts(srcExpr); ok {
+			if srcFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(srcExpr); ok {
 				if srcCount, ok := constOptimizationExtentSize(srcFacts.Extent); ok && srcCount == dstCount {
 					exactCopyCount = dstCount
 					hasSmallExactCopyCount = true
@@ -290,7 +290,7 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 			}
 		}
 	}
-	disjoint := s.g.result.ExprsAreDisjoint(dstExpr, srcExpr)
+	disjoint := s.g.semanticReadView().ExprsAreDisjoint(dstExpr, srcExpr)
 	if !hasSmallExactCopyCount && !disjoint {
 		return nil, nil, false, nil
 	}
@@ -392,7 +392,7 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 		s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 	}
 
-	if s.g.result.ExprsHaveEqualExtentSize(dstExpr, srcExpr) {
+	if s.g.semanticReadView().ExprsHaveEqualExtentSize(dstExpr, srcExpr) {
 		zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("view.copy.bytes.zero"))
 		copyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.exact.fast"))
 		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.copy.exact.merge"))
@@ -451,17 +451,17 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	if !isDynArrayViewCarrierType(leftType) || !isDynArrayViewCarrierType(rightType) {
 		return nil, nil, false, nil
 	}
-	if !s.g.result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+	if !s.g.semanticReadView().ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
 		return nil, nil, false, nil
 	}
-	disjoint := s.g.result.ExprsAreDisjoint(leftExpr, rightExpr)
+	disjoint := s.g.semanticReadView().ExprsAreDisjoint(leftExpr, rightExpr)
 	exactEqByteCount := uint64(0)
 	hasSmallExactEqByteCount := false
 	if elemType, ok := runtimeIndexedElemType(leftType); ok {
 		if elemSize, err := s.sizeOfType(elemType); err == nil && elemSize != 0 {
-			if leftFacts, ok := s.g.result.ExprOptimizationFacts(leftExpr); ok {
+			if leftFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(leftExpr); ok {
 				if leftCount, ok := constOptimizationExtentSize(leftFacts.Extent); ok {
-					if rightFacts, ok := s.g.result.ExprOptimizationFacts(rightExpr); ok {
+					if rightFacts, ok := s.g.semanticReadView().ExprOptimizationFacts(rightExpr); ok {
 						if rightCount, ok := constOptimizationExtentSize(rightFacts.Extent); ok && rightCount == leftCount {
 							totalBytes := leftCount * elemSize
 							if totalBytes <= smallExactArenaEqUnrollByteLimit {
