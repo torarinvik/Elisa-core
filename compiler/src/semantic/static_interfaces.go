@@ -610,7 +610,13 @@ func (a *Analyzer) resolveProjectedAssociatedType(named *ast.NamedType) (Type, b
 			a.errorf(named.Pos(), "interface %q has no associated type %q", iface.Name, assocName)
 			return invalidType, true
 		}
-		return &AssociatedTypeProjection{Receiver: receiver, InterfaceName: iface.Name, Name: assocName}, true
+		projection := &AssociatedTypeProjection{Receiver: receiver, InterfaceName: iface.Name, Name: assocName}
+		if _, stillAbstract := receiver.(*TypeParamType); !stillAbstract {
+			if resolved, ok := ResolveAssociatedTypeProjection(projection, a.staticImpls); ok {
+				return resolved, true
+			}
+		}
+		return projection, true
 	}
 	receiver, _, ok := a.lookupVisibleType(ownerName)
 	if !ok || receiver == nil {
