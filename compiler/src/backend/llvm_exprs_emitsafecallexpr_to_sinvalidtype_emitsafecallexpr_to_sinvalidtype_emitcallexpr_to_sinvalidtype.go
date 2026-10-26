@@ -82,7 +82,7 @@ import (
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if s != nil && s.g != nil && s.g.result != nil {
-		if info, ok := s.g.result.LookupTaskGroupSubmits(expr); ok {
+		if info, ok := s.g.semanticReadView().LookupTaskGroupSubmits(expr); ok {
 			return s.emitVerifiedTaskGroupSubmit(expr, info)
 		}
 	}
@@ -437,8 +437,8 @@ func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMV
 		}
 		targetType = resolved
 	}
-	if s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
-		if sym, ok := s.g.result.LookupCastHooks(expr); ok && sym != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnCastHooksMap() {
+		if sym, ok := s.g.semanticReadView().LookupCastHooks(expr); ok && sym != nil {
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok || fnType == nil || len(fnType.Params) == 0 {
 				return nil, nil, true, fmt.Errorf("invalid semantic cast hook for %T", expr)

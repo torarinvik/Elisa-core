@@ -64,7 +64,7 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 		return false
 	}
 	view := s.g.result.IndexProofSpanResult(expr)
-	if view.ValueIndexBoundsProven(expr) {
+	if s.g.semanticReadViewFor(view).ValueIndexBoundsProven(expr) {
 		return true
 	}
 	if view.IndexProofSpanBlocked(expr) {

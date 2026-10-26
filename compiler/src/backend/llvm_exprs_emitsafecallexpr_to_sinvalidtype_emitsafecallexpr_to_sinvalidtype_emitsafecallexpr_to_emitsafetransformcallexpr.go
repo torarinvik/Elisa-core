@@ -107,8 +107,8 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 
 	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
 	info := (*semantic.SafeCallInfo)(nil)
-	if s != nil && s.g != nil && s.g.result != nil && s.g.result.SafeCalls != nil {
-		info = s.g.result.ValueSafeCalls(expr)
+	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnSafeCallsMap() {
+		info = s.g.semanticReadView().ValueSafeCalls(expr)
 	}
 	var (
 		callValue C.LLVMValueRef
@@ -127,7 +127,7 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 			ResolvedImplicitArgsValid: len(info.ImplicitArgs) != 0,
 			ResolvedImplicitArgs:      append([]ast.Expr(nil), info.ImplicitArgs...),
 		}
-		if s.g.result.ExprTypes != nil {
+		if s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := fakeReceiver, receiverArgType
 				s.g.setResultExprType(key, value)
@@ -269,8 +269,8 @@ func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMVal
 
 	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
 	info := (*semantic.SafeCallInfo)(nil)
-	if s != nil && s.g != nil && s.g.result != nil && s.g.result.SafeCalls != nil {
-		info = s.g.result.ValueSafeCalls(expr)
+	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnSafeCallsMap() {
+		info = s.g.semanticReadView().ValueSafeCalls(expr)
 	}
 	transformFunc := expr.Func
 	transformArgs := append([]ast.Expr(nil), expr.Args...)
@@ -309,7 +309,7 @@ func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMVal
 	} else {
 		synthetic.Args[receiverArgIndex] = fakeReceiver
 	}
-	if s.g.result.ExprTypes != nil {
+	if s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := fakeReceiver, receiverArgType
 			s.g.setResultExprType(key, value)

@@ -68,8 +68,13 @@ def main() -> i64:
 	if plain != traced {
 		t.Fatal("diagnostic generic lowering changed LLVM IR")
 	}
-	if len(tracedReport.Semantic) == 0 || len(tracedReport.Uncovered) == 0 {
+	if len(tracedReport.Semantic) == 0 || len(tracedReport.Codegen) == 0 || len(tracedReport.Uncovered) == 0 {
 		t.Fatal("real generic lowering did not retain partial semantic observations")
+	}
+	for _, read := range tracedReport.Codegen {
+		if read.Result == nil || read.Table == "" {
+			t.Fatalf("semantic getter observation lost table or Result identity: %+v", read)
+		}
 	}
 }
 
@@ -127,15 +132,30 @@ func TestIRInputAuditCoversEveryO0UnitAndDefaultO3WholeModule(t *testing.T) {
 				t.Fatalf("wrong lowering units: %+v", reports)
 			}
 			semanticReads := 0
+			codegenReads := 0
+			seenASTTable := false
 			for _, unit := range want {
 				report, ok := reports[unit]
 				if !ok || !report.Lowered || len(report.Uncovered) == 0 {
 					t.Fatalf("unit %d missing successful incomplete report: %+v", unit, report)
 				}
 				semanticReads += len(report.Semantic)
+				if len(report.Codegen) == 0 {
+					t.Fatalf("unit %d has no AST-table observations", unit)
+				}
+				for _, read := range report.Codegen {
+					if read.Result == nil || read.Table == "" {
+						t.Fatalf("unit %d has an observation without table/Result identity: %+v", unit, read)
+					}
+					seenASTTable = true
+					codegenReads++
+				}
 			}
 			if semanticReads == 0 {
 				t.Fatal("generic specialization was not observed in actual object pipeline")
+			}
+			if codegenReads == 0 || !seenASTTable {
+				t.Fatal("AST-keyed semantic reads were not observed in actual object pipeline")
 			}
 			if plain.irInputAudit != nil {
 				t.Fatal("ordinary session unexpectedly enabled tracing")

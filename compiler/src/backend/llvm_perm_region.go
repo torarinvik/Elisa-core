@@ -56,10 +56,10 @@ func (s *functionState) permTreeAllocOwner() (treeAllocOwnerBinding, error) {
 // receiver roots at a global, so its backing belongs in the permanent region.
 // This is the in-place analogue of routing a global store's RHS to perm.
 func (s *functionState) permGrowthOwner(expr ast.Expr) (treeAllocOwnerBinding, bool, error) {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.PermGrowthOps == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().HasOwnPermGrowthOpsMap() {
 		return treeAllocOwnerBinding{}, false, nil
 	}
-	if !s.g.result.ValuePermGrowthOps(expr) {
+	if !s.g.semanticReadView().ValuePermGrowthOps(expr) {
 		return treeAllocOwnerBinding{}, false, nil
 	}
 	owner, err := s.permTreeAllocOwner()

@@ -16,10 +16,10 @@ import (
 )
 
 func (s *functionState) interfaceMethodRef(expr *ast.FieldExpr) (*semantic.InterfaceMethodRef, bool) {
-	if s == nil || s.g == nil || s.g.result == nil || expr == nil || s.g.result.InterfaceMethodRefs == nil {
+	if s == nil || s.g == nil || s.g.result == nil || expr == nil || !s.g.semanticReadView().HasOwnInterfaceMethodRefsMap() {
 		return nil, false
 	}
-	ref, ok := s.g.result.LookupInterfaceMethodRefs(expr)
+	ref, ok := s.g.semanticReadView().LookupInterfaceMethodRefs(expr)
 	return ref, ok && ref != nil
 }
 

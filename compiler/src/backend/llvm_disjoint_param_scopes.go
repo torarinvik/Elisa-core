@@ -181,10 +181,10 @@ func (s *functionState) initDisjointParamScopes() {
 	if s == nil || s.g == nil || !s.g.noaliasMutableRefs {
 		return
 	}
-	if s.decl == nil || s.g.result == nil || s.g.result.FuncDisjointParams == nil {
+	if s.decl == nil || s.g.result == nil || !s.g.semanticReadView().HasOwnFuncDisjointParamsMap() {
 		return
 	}
-	info := s.g.result.ValueFuncDisjointParams(s.decl)
+	info := s.g.semanticReadView().ValueFuncDisjointParams(s.decl)
 	if info == nil || len(info.SelfNoalias) < 2 {
 		// Need at least two mutually-distinct params for a non-empty sibling list.
 		return

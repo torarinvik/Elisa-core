@@ -758,8 +758,8 @@ func (s *functionState) errorSetQualifierName(ident *ast.Ident) string {
 	if ident == nil {
 		return ""
 	}
-	if s != nil && s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
-		if canonical, ok := s.g.result.LookupResolvedValueNames(ident); ok && canonical != "" {
+	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnResolvedValueNamesMap() {
+		if canonical, ok := s.g.semanticReadView().LookupResolvedValueNames(ident); ok && canonical != "" {
 			return canonical
 		}
 	}

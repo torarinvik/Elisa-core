@@ -513,13 +513,13 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semantic.Type, error) {
 	// A postfix-shorthand cast `recv.Name()` whose target was not a type is lowered
 	// by the analyzer to the call `Name(recv)`; emit that call instead.
-	if s != nil && s.g != nil && s.g.result != nil && s.g.result.PostfixShorthandCalls != nil {
-		if call, ok := s.g.result.LookupPostfixShorthandCalls(expr); ok && call != nil {
+	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnPostfixShorthandCallsMap() {
+		if call, ok := s.g.semanticReadView().LookupPostfixShorthandCalls(expr); ok && call != nil {
 			return s.emitExpr(call, s.exprType(expr))
 		}
 	}
-	if s != nil && s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
-		if sym, ok := s.g.result.LookupCastHooks(expr); ok && sym != nil {
+	if s != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnCastHooksMap() {
+		if sym, ok := s.g.semanticReadView().LookupCastHooks(expr); ok && sym != nil {
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok || fnType == nil || len(fnType.Params) == 0 {
 				return nil, nil, fmt.Errorf("invalid semantic cast hook for %T", expr)

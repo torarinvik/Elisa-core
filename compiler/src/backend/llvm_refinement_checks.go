@@ -15,10 +15,10 @@ import "elisacore/src/ast"
 // in debug (-O0) or under -fbounds-check, a no-op in release. The static prover (1d) will discharge
 // the provable predicates so only the genuinely-unprovable ones keep this check.
 func (s *functionState) emitRefinementChecks(n *ast.VarDeclStmt) error {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.RefinementChecks == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().HasOwnRefinementChecksMap() {
 		return nil
 	}
-	checks := s.g.result.ValueRefinementChecks(n)
+	checks := s.g.semanticReadView().ValueRefinementChecks(n)
 	if len(checks) == 0 {
 		return nil
 	}
@@ -49,10 +49,10 @@ func (s *functionState) emitRefinementChecks(n *ast.VarDeclStmt) error {
 // or under -fbounds-check, a no-op in release. The static prover already removed the provable args,
 // so this traps only on a genuinely-unprovable argument that turned out to violate the contract.
 func (s *functionState) emitCallArgRefinementChecks(expr *ast.CallExpr) error {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.CallArgRefinementChecks == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().HasOwnCallArgRefinementChecksMap() {
 		return nil
 	}
-	checks := s.g.result.ValueCallArgRefinementChecks(expr)
+	checks := s.g.semanticReadView().ValueCallArgRefinementChecks(expr)
 	if len(checks) == 0 {
 		return nil
 	}
@@ -66,10 +66,10 @@ func (s *functionState) emitCallArgRefinementChecks(expr *ast.CallExpr) error {
 // value against the function's refinement-typed return (docs/85: the return half of the
 // function-contract boundary). Debug-only, emitted before the return.
 func (s *functionState) emitReturnRefinementChecks(n *ast.ReturnStmt) error {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.ReturnRefinementChecks == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.semanticReadView().HasOwnReturnRefinementChecksMap() {
 		return nil
 	}
-	checks := s.g.result.ValueReturnRefinementChecks(n)
+	checks := s.g.semanticReadView().ValueReturnRefinementChecks(n)
 	if len(checks) == 0 {
 		return nil
 	}

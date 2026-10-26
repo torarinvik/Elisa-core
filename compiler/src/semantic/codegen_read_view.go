@@ -7,7 +7,13 @@ package semantic
 // reuse: canonical encoding, full query coverage and dependency validation are
 // deliberately unresolved.
 //
-// Operation is lookup, value, len, range-item or range-end. Present preserves
+// Operation is lookup, value, len, range-item, range-end, own-map-presence
+// or own-map. The Own APIs access only the physical current-Result map; they
+// never inherit from a specialization root. Their Present reports map != nil.
+// An own-map event stores a shallow maps.Clone membership snapshot, preserving
+// nil versus allocated empty; its keys and pointer/slice/map values remain opaque.
+// The caller receives the original map, so later membership edits do not change
+// the event snapshot, but mutation inside borrowed values remains visible. Present preserves
 // comma-ok membership (including stored nil/false) for lookup/value/range-item.
 // Complete applies only to range-end and is false for early stop, nil yield or
 // panic. A full range is still an opaque observation, not a cache certificate.
@@ -24,8 +30,9 @@ type CodegenFactRead struct {
 // CodegenReadView is a receiver-local read path. It never installs an observer
 // on the shared Result. Recreate it from the current Result after any private
 // specialization install/restore; a previously created value keeps its context.
-// It delegates to the existing logical sparse accessors, preserving owned misses,
+// Logical methods delegate to the existing sparse accessors, preserving owned misses,
 // canonical/private remapping and inherited rows without introducing new policy.
+// HasOwn/Own map methods separately preserve physical direct-field semantics.
 type CodegenReadView struct {
 	Result  *Result
 	Observe func(CodegenFactRead)

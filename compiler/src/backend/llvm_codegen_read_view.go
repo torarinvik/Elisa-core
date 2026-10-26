@@ -69,6 +69,17 @@ func (g *llvmGenerator) semanticReadView() semantic.CodegenReadView {
 	return semantic.NewCodegenReadView(g.result, g.inputReads.codegenFactRead)
 }
 
+// semanticReadViewFor binds observations to a Result returned by an explicit
+// semantic query (for example IndexProofSpanResult). Such a Result is a
+// distinct read context from g.result and must keep its own identity in the
+// diagnostic stream.
+func (g *llvmGenerator) semanticReadViewFor(result *semantic.Result) semantic.CodegenReadView {
+	if g == nil || g.inputReads == nil {
+		return semantic.NewCodegenReadView(result, nil)
+	}
+	return semantic.NewCodegenReadView(result, g.inputReads.codegenFactRead)
+}
+
 func (g *llvmGenerator) lookupGlobal(name string) (*semantic.Symbol, bool) {
 	return g.lookupGlobalSymbol(name, "backend-lookup")
 }

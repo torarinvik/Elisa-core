@@ -341,7 +341,7 @@ const darrayLiteralMinCapacity = 8
 func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
 	resultName := s.g.nextSyntheticName("list.spread.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position}
-	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := resultInit, darrayType
 			s.g.setResultExprType(key, value)
@@ -397,7 +397,7 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 	}
 	resultName := s.g.nextSyntheticName("list.comp.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
-	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := resultInit, resultType
 			s.g.setResultExprType(key, value)
@@ -486,7 +486,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	}
 	srcCount := func() ast.Expr {
 		fe := &ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}
-		if usizeType != nil && s.g.result.ExprTypes != nil {
+		if usizeType != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := fe, usizeType
 				s.g.setResultExprType(key, value)
@@ -497,7 +497,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	// Register the synthesized index expressions' element type so backend type inference (which
 	// has no structural fallback for IndexExpr) can resolve the element binding and the store.
 	registerElemType := func(e ast.Expr) ast.Expr {
-		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := e, srcDarray.Elem
 				s.g.setResultExprType(key, value)
@@ -516,7 +516,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		return e
 	}
 	markSynthesizedIndexProof := func(index *ast.IndexExpr) *ast.IndexExpr {
-		if s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven != nil {
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnIndexBoundsProvenMap() {
 			{
 				key, value := index, true
 				s.g.setResultIndexBoundsProven(key, value)
@@ -541,7 +541,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	body = append(body, ast.Stmt(store))
 
 	startLit := &ast.IntLit{Position: pos, Value: "0"}
-	if usizeType != nil && s.g.result.ExprTypes != nil {
+	if usizeType != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := startLit, usizeType
 			s.g.setResultExprType(key, value)
@@ -648,7 +648,7 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	}
 	pos := comp.Position
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
-		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := e, t
 				s.g.setResultExprType(key, value)
@@ -769,7 +769,7 @@ func (s *functionState) fusedDictExtendComprehensionBlock(dstExpr, arg ast.Expr,
 	}
 	pos := comp.Position
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
-		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := e, t
 				s.g.setResultExprType(key, value)
@@ -882,7 +882,7 @@ func (s *functionState) fusedFilteredExtendComprehensionBlock(dstExpr, arg ast.E
 	}
 	pos := comp.Position
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
-		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := e, t
 				s.g.setResultExprType(key, value)
@@ -1002,7 +1002,7 @@ func (s *functionState) fusedRangeExtendComprehensionBlock(dstExpr, arg ast.Expr
 		boolType = s.g.namedType("bool")
 	}
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
-		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := e, t
 				s.g.setResultExprType(key, value)
@@ -1126,7 +1126,7 @@ func (s *functionState) fusedPushExtendComprehensionBlock(dstExpr, arg ast.Expr,
 		usizeType = s.g.namedType("usize")
 	}
 	value := ast.Expr(&ast.IntLit{Position: pos, Value: "0"})
-	if usizeType != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+	if usizeType != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := value, usizeType
 			s.g.setResultExprType(key, value)
@@ -1231,7 +1231,7 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 		boolType = s.g.namedType("bool")
 	}
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
-		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := e, t
 				s.g.setResultExprType(key, value)
@@ -1259,7 +1259,7 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	resultIndex := &ast.IndexExpr{Position: pos, Object: resultIdent, Index: storeIndex}
 	// For every executed range iteration, end > start and 0 <= loopName-start < end-start;
 	// the clamped resize therefore establishes a real bounds proof for this synthesized store.
-	if s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnIndexBoundsProvenMap() {
 		{
 			key, value := resultIndex, true
 			s.g.setResultIndexBoundsProven(key, value)
@@ -1347,7 +1347,7 @@ func (s *functionState) emitDictComprehensionExpr(expr *ast.ListComprehensionExp
 	}
 	resultName := s.g.nextSyntheticName("dict.comp.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position, Brace: true}
-	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := resultInit, resultType
 			s.g.setResultExprType(key, value)
@@ -1382,7 +1382,7 @@ func (s *functionState) emitSetComprehensionExpr(expr *ast.ListComprehensionExpr
 	}
 	resultName := s.g.nextSyntheticName("set.comp.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position, Brace: true}
-	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := resultInit, resultType
 			s.g.setResultExprType(key, value)
@@ -1438,7 +1438,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 				},
 			}
 			patternFilter = nil
-			if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 				boolType := s.g.namedType("bool")
 				{
 					key, value := failValue, boolType
@@ -1516,7 +1516,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 			return nil, nil, fmt.Errorf("each query expression requires a darray result type")
 		}
 		init = &ast.ListLitExpr{Position: expr.Position, Owner: expr.Owner}
-		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := init, darrayType
 				s.g.setResultExprType(key, value)
@@ -1542,7 +1542,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 			return nil, nil, fmt.Errorf("first query expression requires an optional result type")
 		}
 		init = &ast.NullLit{Position: expr.Position}
-		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := init, optionalType
 				s.g.setResultExprType(key, value)
@@ -1562,7 +1562,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 	default:
 		return nil, nil, fmt.Errorf("unknown query expression kind %d", expr.Kind)
 	}
-	if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 		{
 			key, value := init, resultType
 			s.g.setResultExprType(key, value)

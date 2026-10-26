@@ -1172,7 +1172,7 @@ func (s *functionState) emitOldCaptures(decl *ast.FuncDecl) error {
 	}
 	var olds []*ast.CallExpr
 	for _, e := range decl.EnsureValues {
-		if s.g.result != nil && s.g.result.ValueGhostContracts(e) {
+		if s.g.result != nil && s.g.semanticReadView().ValueGhostContracts(e) {
 			continue
 		}
 		collectOldCalls(e, &olds)
@@ -1243,7 +1243,7 @@ func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
 		return nil
 	}
 	for i, cond := range decl.Requires {
-		if cond == nil || (s.g.result != nil && s.g.result.ValueGhostContracts(cond)) {
+		if cond == nil || (s.g.result != nil && s.g.semanticReadView().ValueGhostContracts(cond)) {
 			continue
 		}
 		if proofAt(decl.RequiresProofs, i) != nil {
@@ -1279,7 +1279,7 @@ func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual sem
 		}
 	}
 	for i, cond := range s.decl.EnsureValues {
-		if cond == nil || (s.g.result != nil && s.g.result.ValueGhostContracts(cond)) {
+		if cond == nil || (s.g.result != nil && s.g.semanticReadView().ValueGhostContracts(cond)) {
 			continue
 		}
 		if proofAt(s.decl.EnsureProofs, i) != nil {

@@ -71,7 +71,7 @@ func (s *functionState) lambdaCaptureBindings(expr *ast.LambdaExpr) ([]lambdaCap
 	if s == nil || s.g == nil || s.g.result == nil || expr == nil {
 		return nil, fmt.Errorf("missing lambda metadata")
 	}
-	info, ok := s.g.result.LookupLambdas(expr)
+	info, ok := s.g.semanticReadView().LookupLambdas(expr)
 	if !ok || info == nil || len(info.Captures) == 0 {
 		return nil, nil
 	}

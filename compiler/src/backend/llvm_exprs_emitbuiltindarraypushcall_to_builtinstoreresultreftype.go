@@ -106,7 +106,7 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 			},
 			Args: expr.Args,
 		}
-		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnExprTypesMap() {
 			{
 				key, value := extendExpr.Func, s.exprType(expr.Func)
 				s.g.setResultExprType(key, value)

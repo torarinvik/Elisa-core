@@ -165,8 +165,8 @@ func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) seman
 			return valueType
 		}
 	}
-	if s.g != nil && s.g.result != nil && s.g.result.OptionalBindSourceTypes != nil {
-		if valueType, ok := s.g.result.LookupOptionalBindSourceTypes(expr); ok && valueType != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnOptionalBindSourceTypesMap() {
+		if valueType, ok := s.g.semanticReadView().LookupOptionalBindSourceTypes(expr); ok && valueType != nil {
 			return substituteType(valueType, s.typeMap, s.g.result.StaticImpls)
 		}
 	}

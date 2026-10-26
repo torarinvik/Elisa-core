@@ -156,8 +156,8 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 		// namespaced/imported call target — including a generic function that must be
 		// monomorphized — is found instead of the bare name.
 		lookupName := ident.Name
-		if s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
-			if canon, ok := s.g.result.LookupResolvedValueNames(ident); ok {
+		if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnResolvedValueNamesMap() {
+			if canon, ok := s.g.semanticReadView().LookupResolvedValueNames(ident); ok {
 				lookupName = canon
 			}
 		}
@@ -240,8 +240,8 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 	// function-value path, which doesn't thread the hidden region-param args and
 	// produces a call/definition arity mismatch.
 	lookupName := ident.Name
-	if s.g.result.ResolvedValueNames != nil {
-		if canon, ok := s.g.result.LookupResolvedValueNames(ident); ok {
+	if s.g.semanticReadView().HasOwnResolvedValueNamesMap() {
+		if canon, ok := s.g.semanticReadView().LookupResolvedValueNames(ident); ok {
 			lookupName = canon
 		}
 	}

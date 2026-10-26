@@ -65,6 +65,25 @@ func TestCodegenReadViewCoversActualSparseAccessorSchema(t *testing.T) {
 				}
 			}
 		}
+		for _, own := range []struct {
+			name   string
+			output reflect.Type
+		}{
+			{"HasOwn" + field.Name + "Map", reflect.TypeFor[bool]()},
+			{"Own" + field.Name + "Map", func() reflect.Type {
+				f, ok := reflect.TypeFor[Result]().FieldByName(field.Name)
+				if !ok {
+					t.Fatal("missing physical table", field.Name)
+				}
+				return f.Type
+			}()},
+		} {
+			methods++
+			method, ok := viewType.MethodByName(own.name)
+			if !ok || method.Type.NumIn() != 1 || method.Type.NumOut() != 1 || method.Type.Out(0) != own.output {
+				t.Fatalf("physical map signature mismatch %s", own.name)
+			}
+		}
 	}
 	if methods != viewType.NumMethod() {
 		t.Fatalf("unreviewed view methods: schema=%d view=%d", methods, viewType.NumMethod())
@@ -195,5 +214,98 @@ func TestCodegenReadViewRangeCompletionAndDisabledParity(t *testing.T) {
 	plain.RangeExprTypes(func(ast.Expr, Type) bool { count++; return false })
 	if count != 1 || plain.ExprTypesLen() != root.ExprTypesLen() {
 		t.Fatal("disabled observer changed range/length")
+	}
+}
+
+// Exercise every schema entry: physical map semantics must not become logical
+// sparse inheritance, and observed membership must outlive caller map mutation.
+func TestCodegenReadViewEveryOwnMapPreservesPhysicalMembershipSnapshot(t *testing.T) {
+	for _, field := range codegenReadSchema(t) {
+		if field.Analyzer == nil {
+			continue
+		}
+		t.Run(field.Name, func(t *testing.T) {
+			root := &Result{}
+			table := reflect.ValueOf(root).Elem().FieldByName(field.Name)
+			key, value := reflect.Zero(table.Type().Key()), reflect.Zero(table.Type().Elem())
+			table.Set(reflect.MakeMap(table.Type()))
+			table.SetMapIndex(key, value)
+			current := &Result{specializationRoot: root}
+			currentTable := reflect.ValueOf(current).Elem().FieldByName(field.Name)
+			var events []CodegenFactRead
+			call := func(view CodegenReadView, prefix string) reflect.Value {
+				return reflect.ValueOf(view).MethodByName(prefix + field.Name + "Map").Call(nil)[0]
+			}
+			view := NewCodegenReadView(current, func(read CodegenFactRead) { events = append(events, read) })
+			// The base has a real logical row, while the physical private table is nil.
+			logical := reflect.ValueOf(view).MethodByName("Lookup" + field.Name).Call([]reflect.Value{key})
+			if !logical[1].Bool() {
+				t.Fatal("fixture lost inherited logical row")
+			}
+			events = nil
+			if call(view, "HasOwn").Bool() || !call(view, "Own").IsNil() {
+				t.Fatal("physical view inherited canonical root map")
+			}
+			if len(events) != 2 || events[0].Present || events[1].Present || !reflect.ValueOf(events[1].Value).IsNil() {
+				t.Fatal("nil physical map observation changed")
+			}
+			// Nil Result has the same physical absence with its own explicit context.
+			events = nil
+			nilView := NewCodegenReadView(nil, view.Observe)
+			if call(nilView, "HasOwn").Bool() || !call(nilView, "Own").IsNil() {
+				t.Fatal("nil Result physical map changed")
+			}
+			if events[0].Result != nil || events[1].Result != nil {
+				t.Fatal("nil context not preserved")
+			}
+			currentTable.Set(reflect.MakeMap(table.Type()))
+			events = nil
+			if !call(view, "HasOwn").Bool() {
+				t.Fatal("allocated empty map lost physical presence")
+			}
+			own := call(view, "Own")
+			emptySnapshot := reflect.ValueOf(events[1].Value)
+			if own.IsNil() || emptySnapshot.IsNil() || emptySnapshot.Len() != 0 || !events[1].Present {
+				t.Fatal("allocated empty snapshot became nil")
+			}
+			own.SetMapIndex(key, value)
+			if currentTable.Len() != 1 || emptySnapshot.Len() != 0 {
+				t.Fatal("returned map not original or event aliased membership")
+			}
+			events = nil
+			own = call(view, "Own")
+			snapshot := reflect.ValueOf(events[0].Value)
+			if snapshot.Len() != 1 || !snapshot.MapIndex(key).IsValid() {
+				t.Fatal("stored nil/false row missing from snapshot")
+			}
+			own.SetMapIndex(key, reflect.Value{})
+			if currentTable.Len() != 0 || snapshot.Len() != 1 {
+				t.Fatal("map deletion mutated prior snapshot")
+			}
+			if events[0].Result != current || events[0].Table != field.Name || events[0].Operation != "own-map" {
+				t.Fatal("map event lost physical Result/table/operation")
+			}
+			// Disabled tracing still returns the original physical map and emits nothing.
+			disabled := NewCodegenReadView(current, nil)
+			call(disabled, "Own").SetMapIndex(key, value)
+			if currentTable.Len() != 1 || len(events) != 1 {
+				t.Fatal("disabled physical read changed semantics")
+			}
+		})
+	}
+}
+
+func TestCodegenReadViewOwnMapSnapshotLeavesBorrowedValuesOpaque(t *testing.T) {
+	key := &ast.Ident{}
+	typ := &BuiltinType{Name: "before"}
+	root := &Result{ExprTypes: map[ast.Expr]Type{key: typ}}
+	var read CodegenFactRead
+	view := NewCodegenReadView(root, func(event CodegenFactRead) { read = event })
+	own := view.OwnExprTypesMap()
+	snapshot := read.Value.(map[ast.Expr]Type)
+	typ.Name = "after"
+	delete(own, key)
+	if len(snapshot) != 1 || snapshot[key] != typ || snapshot[key].(*BuiltinType).Name != "after" {
+		t.Fatal("snapshot must preserve membership while leaving borrowed nominal payload opaque")
 	}
 }

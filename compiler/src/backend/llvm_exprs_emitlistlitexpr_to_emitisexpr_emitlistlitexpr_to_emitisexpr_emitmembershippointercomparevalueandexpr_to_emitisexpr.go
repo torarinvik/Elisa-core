@@ -173,8 +173,8 @@ func (s *functionState) emitRuntimeStringCompareValues(op lexer.TokenKind, leftV
 }
 func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
 	// docs/85 §2: `subject is Law` was desugared by analysis into the call `Law(subject)`; emit it.
-	if s.g != nil && s.g.result != nil && s.g.result.LawIsCalls != nil {
-		if call := s.g.result.ValueLawIsCalls(expr); call != nil {
+	if s.g != nil && s.g.result != nil && s.g.semanticReadView().HasOwnLawIsCallsMap() {
+		if call := s.g.semanticReadView().ValueLawIsCalls(expr); call != nil {
 			return s.emitExpr(call, nil)
 		}
 	}
