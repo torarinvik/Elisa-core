@@ -74,7 +74,9 @@ def first[T](value: T) -> T:
 }
 
 func TestSharedSpecializationBuildsDistinctKeysConcurrently(t *testing.T) {
-	result := analyzeTreeTestSource(t, "shared_specialization_keys.elisa", `struct Left:
+	result := analyzeTreeTestSource(t, "shared_specialization_keys.elisa", `global region program
+
+struct Left:
     value: i64
 
 struct Right:
@@ -103,6 +105,29 @@ def identity[T](value: T) -> T:
 	defer result.EndSharedCodegen()
 
 	start := make(chan struct{})
+	queryStop := make(chan struct{})
+	queryReady := make(chan struct{})
+	var queryFailed bool
+	var queryer sync.WaitGroup
+	queryer.Add(1)
+	go func() {
+		defer queryer.Done()
+		close(queryReady)
+		<-start
+		for {
+			select {
+			case <-queryStop:
+				return
+			default:
+			}
+			if region, ok := result.ProgramLivedArgRegion(&SViewType{Region: "program"}); !ok || region != "program" {
+				queryFailed = true
+				return
+			}
+			runtime.Gosched()
+		}
+	}()
+	<-queryReady
 	products := make([]*SpecializedFunction, len(arguments))
 	errors := make([]error, len(arguments))
 	var workers sync.WaitGroup
@@ -116,6 +141,11 @@ def identity[T](value: T) -> T:
 	}
 	close(start)
 	workers.Wait()
+	close(queryStop)
+	queryer.Wait()
+	if queryFailed {
+		t.Fatal("concurrent program-lived region query failed")
+	}
 	for i, product := range products {
 		if errors[i] != nil || product == nil {
 			t.Fatalf("specialization %d failed: product %p, error %v", i, product, errors[i])

@@ -88,22 +88,25 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*Spec
 	if r.analyzer.exprTypeOverlay != nil || r.analyzer.exprFactsOverlay != nil || r.analyzer.iterBinderElementOverlay != nil || r.analyzer.noStorageOverlay != nil || r.analyzer.optimizationSymbolIdentityOverlay != nil || r.analyzer.storeScanBinderOverlay != nil || r.analyzer.storeScanParamFactsOverlay != nil {
 		return nil, fmt.Errorf("specialization root is not a canonical analyzer")
 	}
-	var a *Analyzer
+	var analyzerSnapshot Analyzer
+	var resolvedTypeNames map[ast.TypeExpr]string
 	var hasRetained bool
 	func() {
-		// Clone while holding the analyzer-query lock because queries such as
-		// ProgramLivedArgRegion may populate memo maps during shared codegen.
-		// The private worker is independent after this snapshot is complete.
+		// Take a shallow value snapshot while query methods may populate analyzer
+		// memo maps. The specialization clone drops those memo maps, so deep-copying
+		// the rest of the worker state can happen after releasing this short lock.
 		unlock := r.lockAnalyzer()
 		defer unlock()
-		a = cloneAnalyzerValueForSpecialization(r.analyzer).Addr().Interface().(*Analyzer)
+		analyzerSnapshot = *r.analyzer
 		// Semantic workers use a separate base memo for this table. A published
 		// codegen Result exposes a concrete map instead, including canonical global
 		// type expressions, so materialize that base before adding private rows.
-		a.resolvedTypeNames = maps.Clone(r.analyzer.resolvedTypeNames)
-		isolateWorkerScopes(r.analyzer, a)
+		resolvedTypeNames = maps.Clone(r.analyzer.resolvedTypeNames)
 		hasRetained = r.analyzer.retained != nil
 	}()
+	a := cloneAnalyzerValueForSpecialization(&analyzerSnapshot).Addr().Interface().(*Analyzer)
+	a.resolvedTypeNames = resolvedTypeNames
+	isolateWorkerScopes(&analyzerSnapshot, a)
 	targetExprs := map[ast.Expr]struct{}{}
 	collectSpecializedFunctionExprs(fn, targetExprs)
 	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}

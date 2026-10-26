@@ -36,7 +36,6 @@ func newSpecializationPublication(c *specializationContext, decl *ast.FuncDecl) 
 		p.rootSymbols, p.rootScopes = canonicalSpecializationIdentities(c.base)
 	}
 	p.walk(reflect.ValueOf(decl), false)
-	p.walk(reflect.ValueOf(decl.Body), true)
 	// Detached proof nodes are part of the current function's semantic closure,
 	// even when folding removed them from the final syntax tree.
 	for expr, owner := range c.worker.indexBoundsProofOwners {
@@ -195,6 +194,19 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 			return
 		}
 		p.seen[key] |= role
+		if decl, ok := v.Interface().(*ast.FuncDecl); ok && p.context != nil && decl == p.target {
+			fields := settable(v.Elem())
+			for i := 0; i < fields.NumField(); i++ {
+				fieldSpan := span
+				// The published target body grants span authority. Walk it in that
+				// role on the first pass, leaving defaults/contracts unprivileged.
+				if fields.Type().Field(i).Name == "Body" {
+					fieldSpan = true
+				}
+				p.walk(settable(fields.Field(i)), fieldSpan)
+			}
+			return
+		}
 		p.walk(settable(v.Elem()), span)
 	case reflect.Struct:
 		// This walk is read-only. Reuse addressable storage; map/interface
@@ -307,11 +319,6 @@ func (p *specializationPublication) publish() (*Result, error) {
 			}
 			dst.SetMapIndex(nv, value)
 			p.walk(value, true)
-		}
-		// Analyzer-only helper identity is a codegen query, not a Result field.
-		if call, ok := node.(*ast.CallExpr); ok {
-			if _, exists := c.worker.compilerBuiltinHelperCalls[call]; exists { /* extracted after closure */
-			}
 		}
 	}
 	if p.err != nil {
