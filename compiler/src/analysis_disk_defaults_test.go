@@ -33,8 +33,8 @@ func TestAnalysisDiskDefaultNativePipelineFreshProcess(t *testing.T) {
 		}
 		object := filepath.Join(dir, "program.o")
 		output := runDiskCLIChild(t, env, "-emit", "obj", "-o", object, source)
-		if !strings.Contains(output, "[build-timing] partitioned object:") {
-			t.Fatal("default disk request did not select independent units", output)
+		if !strings.Contains(output, "[build-timing] optimized module disk miss:") || strings.Contains(output, "[build-timing] partitioned object:") {
+			t.Fatal("default disk request did not select whole-module O3", output)
 		}
 		if index == 1 && (!strings.Contains(output, "[analysis-disk] restore") || strings.Contains(output, "cold analysis")) {
 			t.Fatal("edit did not replay disk state", output)

@@ -3,8 +3,6 @@
 package backend
 
 import (
-	"bytes"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -30,41 +28,48 @@ func TestDiskCodegenDefaultsMatchExplicitCacheAuthority(t *testing.T) {
 	profile.minWeight = 0
 	profile.UseDiskIncrementalDefaults()
 	profile.EnableDiskCache(cache, "same-emitter", 64<<20)
-	if !profile.partitionedIRApplies(probe, options) {
-		t.Fatal("disk profile did not select independent units")
+	if profile.partitionedIRApplies(probe, options) || profile.diskCodegenFlag("ELISACORE_PARALLEL_OPT") {
+		t.Fatal("disk profile selected a pre-O3 partition path")
 	}
 	profileObject := filepath.Join(dir, "profile.o")
 	if err := profile.WriteObject(probe, profileObject, options); err != nil {
 		t.Fatal(err)
 	}
-	if profile.Stats().NativeFragmentsEmitted == 0 {
-		t.Fatal("default fragment path was not exercised")
+	if stats := profile.Stats(); stats.NativeFragmentsEmitted != 0 || stats.PartitionsEmitted == 0 || stats.SerialFallbacks != 0 {
+		t.Fatalf("disk O3 did not use post-optimization native partitions: %+v", stats)
 	}
 	if got := incrementalObjectNativeStatus(t, profileObject); got != 30 {
 		t.Fatal("profile result", got)
 	}
+	repeat := NewIncrementalObjectSession(4, 32<<20)
+	repeat.minWeight = 0
+	repeat.UseDiskIncrementalDefaults()
+	repeat.EnableDiskCache(cache, "same-emitter", 64<<20)
+	repeatObject := filepath.Join(dir, "repeat.o")
+	if err := repeat.WriteObject(parseAndAnalyzeBackendTest(t, "disk-defaults.elisa", source), repeatObject, options); err != nil {
+		t.Fatal(err)
+	}
+	if stats := repeat.Stats(); stats.OptimizedModulesReused != 1 || stats.DiskPartitionsReused == 0 || stats.PartitionsEmitted != 0 {
+		t.Fatalf("fresh disk-profile session did not reuse post-O3 artifacts: %+v", stats)
+	}
+	if got := incrementalObjectNativeStatus(t, repeatObject); got != 30 {
+		t.Fatal("reused profile result", got)
+	}
+
 	for _, name := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT", "ELISACORE_IR_IMPORTS", "ELISACORE_NATIVE_FRAGMENTS"} {
 		t.Setenv(name, "1")
 	}
 	explicit := NewIncrementalObjectSession(4, 32<<20)
 	explicit.minWeight = 0
 	explicit.EnableDiskCache(cache, "same-emitter", 64<<20)
+	if !explicit.partitionedIRApplies(probe, options) {
+		t.Fatal("explicit parallel IR/O3 experiment is no longer available")
+	}
 	explicitObject := filepath.Join(dir, "explicit.o")
 	if err := explicit.WriteObject(parseAndAnalyzeBackendTest(t, "disk-defaults.elisa", source), explicitObject, options); err != nil {
 		t.Fatal(err)
 	}
-	if explicit.Stats().DiskPartitionsReused != 4 || explicit.Stats().PartitionsEmitted != 0 {
-		t.Fatalf("effective pipeline authority diverged: %+v", explicit.Stats())
-	}
-	a, err := os.ReadFile(profileObject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(explicitObject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(a, b) {
-		t.Fatal("preset/explicit native bytes differ")
+	if got := incrementalObjectNativeStatus(t, explicitObject); got != 30 {
+		t.Fatal("explicit experiment result", got)
 	}
 }

@@ -33,11 +33,12 @@ import (
 	"elisacore/src/semantic"
 )
 
-// WriteObject regenerates current IR, reusing an exact optimized-module disk
-// artifact when possible, then reuses native partitions only when their complete
-// current bitcode and target-machine inputs match. Global
-// optimization dependencies are already reflected in the partitioned IR. This
-// avoids native code generation, not frontend analysis or LLVM lowering.
+// WriteObject regenerates current IR and can reuse an exact optimized-module disk
+// artifact. On the default disk path, whole-module O-level optimization runs
+// before native partitions are reused by exact post-optimization bitcode and
+// target-machine inputs. Explicit partitioned-O3 experiments use their own
+// pre-optimization cache inputs. This avoids native code generation, not
+// frontend analysis or LLVM lowering.
 func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.Builds++ })
 	if strings.TrimSpace(outputPath) == "" {
@@ -55,17 +56,37 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if err != nil {
 		return err
 	}
+	filename := result.ActiveFile().Filename
 	if s.partitionedIRApplies(result, options) && !options.Serial && native.Triple == target.Triple && !virtualObjectSource(result) {
 		if done, err := s.tryPartitionedObject(result, outputPath, options); done {
 			return err
 		}
 	}
 	irStart := time.Now()
+	sharedResult := s.diskDefaults
+	sharedResultActive := false
+	var sharedLookups []*sharedCodegenLookups
+	if sharedResult {
+		// This standalone disk build exclusively owns the analyzed Result during
+		// codegen and the selected optimization phase. The shared session memoizes
+		// generic products/canonical membership once and routes synthesized facts
+		// into generator-local overlays; EndSharedCodegen restores analyzer maps.
+		// Callers must not use this Result concurrently until this phase ends.
+		result.BeginSharedCodegen()
+		sharedResultActive = true
+		defer func() {
+			if sharedResultActive {
+				result.EndSharedCodegen()
+			}
+		}()
+		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result))
+	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		if !options.DebugInfo {
 			C.LLVMContextSetDiscardValueNames(g.context, 1)
 		}
-	})
+		g.sharedResult = sharedResult
+	}, sharedLookups...)
 	if err != nil {
 		return err
 	}
@@ -91,9 +112,12 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 			g = optimized
 		}
 	}
+	if sharedResultActive {
+		result.EndSharedCodegen()
+		sharedResultActive = false
+	}
 	irDuration := time.Since(irStart)
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += irDuration })
-	filename := result.ActiveFile().Filename
 	identity := strings.TrimSpace(filename)
 	virtual := identity == "" || identity == "-" || identity == "/dev/stdin" || (strings.HasPrefix(identity, "<") && strings.HasSuffix(identity, ">"))
 	if options.Serial || virtual || native.Triple != target.Triple || int64(C.elisacoreObjectPartitionWeight(g.module)) < s.minWeight {

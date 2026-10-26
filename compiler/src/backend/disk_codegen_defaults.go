@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// UseDiskIncrementalDefaults selects the qualified native pipeline for a
-// standalone disk-analysis request. Call before using the session. The ordinary
-// backend/serial/textual-IR entry points retain their existing defaults.
-// Explicit environment settings always keep their original meanings.
+// UseDiskIncrementalDefaults selects disk-backed object reuse for standalone
+// disk-analysis requests. Optimized builds retain whole-module optimization;
+// partitioned O3 optimization remains an explicit experiment. O0 can still use
+// the independent IR path. Call before using the session.
 func (s *IncrementalObjectSession) UseDiskIncrementalDefaults() {
 	s.diskDefaults = true
 	if _, explicit := os.LookupEnv("ELISACORE_OBJECT_PARTITIONS"); !explicit && s.diskDefaultsActive() {
@@ -45,5 +45,11 @@ func (s *IncrementalObjectSession) diskDefaultsActive() bool {
 }
 
 func (s *IncrementalObjectSession) diskCodegenFlag(name string) bool {
-	return configuredCodegenFlag(name, s.diskDefaultsActive())
+	fallback := s.diskDefaultsActive()
+	// Partitioned IR and per-partition optimization reduce whole-program O3
+	// visibility. Keep them opt-in even for disk-backed standalone builds.
+	if name == "ELISACORE_PARALLEL_IR" || name == "ELISACORE_PARALLEL_OPT" {
+		fallback = false
+	}
+	return configuredCodegenFlag(name, fallback)
 }

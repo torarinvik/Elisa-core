@@ -24,14 +24,27 @@ func TestDiskCodegenDefaultsKeepExplicitOverrides(t *testing.T) {
 		t.Fatal("ordinary session gained default parallel optimization")
 	}
 	profile := NewIncrementalObjectSession(4, 1<<20)
+	profile.minWeight = 0
 	profile.UseDiskIncrementalDefaults()
 	if profile.partitions != 96 {
-		t.Fatal("disk profile did not select qualified units")
+		t.Fatal("disk profile did not select post-O3 cache units")
 	}
-	for _, name := range diskPresetFlags[:4] {
-		if !profile.diskCodegenFlag(name) {
-			t.Fatal("missing preset", name)
+	for _, name := range diskPresetFlags[:2] {
+		if profile.diskCodegenFlag(name) {
+			t.Fatal("disk O3 profile implicitly enabled partitioned optimization", name)
 		}
+	}
+	for _, name := range diskPresetFlags[2:4] {
+		if !profile.diskCodegenFlag(name) {
+			t.Fatal("missing disk reuse preset", name)
+		}
+	}
+	result := parseAndAnalyzeBackendTest(t, "disk-defaults-o0.elisa", "def main() -> i64:\n    return 0\n")
+	if !profile.partitionedIRApplies(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}) {
+		t.Fatal("O0 disk profile lost the independent IR path")
+	}
+	if profile.partitionedIRApplies(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel3}) {
+		t.Fatal("O3 disk profile enabled partitioned optimization by default")
 	}
 	for _, primary := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_PARALLEL_OPT"} {
 		t.Run(primary, func(t *testing.T) {
