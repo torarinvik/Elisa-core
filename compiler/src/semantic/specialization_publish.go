@@ -33,21 +33,25 @@ type boundSparseSpecializationMap struct {
 
 func newSpecializationPublication(c *specializationContext, decl *ast.FuncDecl) *specializationPublication {
 	canonical := c.worker.parallel.original[decl]
-	p := &specializationPublication{context: c, rootNodes: canonicalSpecializationNodes(c.base), owned: map[ast.Node]bool{}, spanNodes: map[*ast.IndexExpr]bool{}, seen: map[specializationPointer]uint8{}, target: decl, canonical: canonical}
-	if c.base.shared != nil {
-		p.rootSymbols = c.base.shared.canonicalSymbols
-		p.rootScopes = c.base.shared.canonicalScopes
+	var nodes map[ast.Node]bool
+	var symbols map[*Symbol]bool
+	var scopes map[*Scope]bool
+	if c.base.shared == nil {
+		// Ordinary serial lowering may update Result fact maps between calls.
+		// Preserve its historical complete, current-publication catalogs and
+		// direct map answers; only a shared immutable session uses targeting.
+		nodes = canonicalSpecializationNodes(c.base)
+		symbols, scopes = canonicalSpecializationIdentities(c.base)
 	} else {
-		// Serial construction receives the same membership sets without retaining
-		// them in the per-function product.
-		p.rootSymbols, p.rootScopes = canonicalSpecializationIdentities(c.base)
+		nodes, symbols, scopes = targetedSpecializationMembership(c)
 	}
+	p := &specializationPublication{context: c, rootNodes: nodes, rootSymbols: symbols, rootScopes: scopes, owned: map[ast.Node]bool{}, spanNodes: map[*ast.IndexExpr]bool{}, seen: map[specializationPointer]uint8{}, target: decl, canonical: canonical}
 	p.walk(reflect.ValueOf(decl), false)
 	// Detached proof nodes are part of the current function's semantic closure,
 	// even when folding removed them from the final syntax tree.
 	for expr, owner := range c.worker.indexBoundsProofOwners {
 		if owner == canonical || owner == decl {
-			if p.rootNodes[expr] {
+			if p.canonicalNodeMember(expr) {
 				p.err = fmt.Errorf("specialization retained canonical syntax in current proof authority")
 				continue
 			}
@@ -134,7 +138,7 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 			p.seen[key] |= 4
 			if p.context == nil {
 				p.rootSymbols[value] = true
-			} else if p.rootSymbols[value] {
+			} else if p.canonicalSymbolMember(value) {
 				return
 			}
 			p.walk(reflect.ValueOf(value.Node), false)
@@ -149,7 +153,7 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 				p.rootScopes[value] = true
 				return
 			}
-			if !p.rootScopes[value] {
+			if !p.canonicalScopeMember(value) {
 				p.err = fmt.Errorf("specialization fact retains a private semantic scope")
 			}
 			return
@@ -159,7 +163,7 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 			if reflect.ValueOf(value).Kind() == reflect.Pointer && reflect.ValueOf(value).IsNil() {
 				return
 			}
-			if p.rootNodes != nil && p.rootNodes[value] {
+			if p.rootNodes != nil && p.canonicalNodeMember(value) {
 				return
 			}
 			if decl, ok := value.(ast.Decl); ok && p.rootNodes != nil && decl != p.target {

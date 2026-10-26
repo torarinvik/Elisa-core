@@ -249,6 +249,9 @@ func BenchmarkSpecializationPublicationWarmedSharedLargeOwnedBody(b *testing.B) 
 			root, worker, context, private := specializationPublicationLargeBodyFixture(b, locals)
 			defer worker.closeSMT()
 			defer root.EndSharedCodegen()
+			// Warming a specialization no longer requires the full fallback catalog.
+			// This benchmark explicitly measures its historically warmed case.
+			canonicalSpecializationNodes(root)
 			if root.shared.canonicalNodes == nil || root.shared.canonicalSymbols == nil || root.shared.canonicalScopes == nil {
 				b.Fatal("canonical membership indexes were not warmed")
 			}
