@@ -14,9 +14,11 @@ import (
 // rewritten expressions. Nominal types and global declaration identity remain
 // canonical so module ABI/type caches do not acquire a second identity.
 type SpecializedFunction struct {
-	Decl          *ast.FuncDecl
-	Result        *Result
-	originalExprs map[ast.Expr]ast.Expr
+	Decl               *ast.FuncDecl
+	Result             *Result
+	originalExprs      map[ast.Expr]ast.Expr
+	inputReads         []SpecializationInputRead
+	inputReadsObserved bool
 }
 
 type specializationContext struct {
@@ -24,6 +26,7 @@ type specializationContext struct {
 	worker       *Analyzer
 	syntax       *specializationSyntax
 	declarations map[*ast.FuncDecl]*ast.FuncDecl
+	inputReads   *specializationInputTrace
 	err          error
 }
 
@@ -31,6 +34,15 @@ type specializationContext struct {
 // semantic type arguments were supplied. Nonempty enclosing backend bindings
 // alone do not request a semantic specialization of this function.
 func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
+	return r.specializeFunctionWithInputAudit(fn, args, false)
+}
+
+// SpecializeFunctionWithInputAudit enables diagnostic observations, not reuse authority.
+func (r *Result) SpecializeFunctionWithInputAudit(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
+	return r.specializeFunctionWithInputAudit(fn, args, true)
+}
+
+func (r *Result) specializeFunctionWithInputAudit(fn *ast.FuncDecl, args []Type, audit bool) (*SpecializedFunction, error) {
 	if r == nil || fn == nil {
 		return nil, fmt.Errorf("specialization requires a semantic result and declaration")
 	}
@@ -66,8 +78,12 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 	}
 	if sh := root.shared; sh != nil {
 		key, keyed := specializationMemoKey(fn, args)
+		key.inputAudit = audit
 		if keyed {
 			return sh.specialize(key, func() (*SpecializedFunction, error) {
+				if audit {
+					return root.specializePrivateFunction(fn, args, true)
+				}
 				return root.specializePrivateFunction(fn, args)
 			})
 		}
@@ -76,12 +92,18 @@ func (r *Result) SpecializeFunction(fn *ast.FuncDecl, args []Type) (*Specialized
 		// queries for the full private analysis.
 		sh.unkeyedMu.Lock()
 		defer sh.unkeyedMu.Unlock()
+		if audit {
+			return root.specializePrivateFunction(fn, args, true)
+		}
 		return root.specializePrivateFunction(fn, args)
+	}
+	if audit {
+		return root.specializePrivateFunction(fn, args, true)
 	}
 	return root.specializePrivateFunction(fn, args)
 }
 
-func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*SpecializedFunction, error) {
+func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, audit ...bool) (*SpecializedFunction, error) {
 	if why := r.analyzer.specializationProofReportActivityError(); why != "" {
 		return nil, fmt.Errorf("cannot specialize during %s", why)
 	}
@@ -110,6 +132,9 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*Spec
 	targetExprs := map[ast.Expr]struct{}{}
 	collectSpecializedFunctionExprs(fn, targetExprs)
 	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}
+	if len(audit) > 0 && audit[0] {
+		ctx.inputReads = &specializationInputTrace{}
+	}
 	a.parallel = &parallelWorkerState{worker: 0, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, readShadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}, specialization: ctx}
 	if hasRetained {
 		a.retained = &RetainedAnalysis{windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}}
@@ -179,13 +204,19 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type) (*Spec
 			}
 		}
 	}
-	return &SpecializedFunction{Decl: decl, Result: view, originalExprs: originalExprs}, nil
+	product := &SpecializedFunction{Decl: decl, Result: view, originalExprs: originalExprs}
+	if ctx.inputReads != nil {
+		product.inputReadsObserved = true
+		product.inputReads = append([]SpecializationInputRead(nil), ctx.inputReads.reads...)
+	}
+	return product, nil
 }
 
 func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 	if original := c.worker.parallel.original[fn]; original != nil {
 		fn = original
 	}
+	c.observeInputRead(fn, "copy-declaration")
 	if copied := c.declarations[fn]; copied != nil {
 		return copied
 	}

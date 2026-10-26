@@ -28,6 +28,7 @@ type storageViewReturnOriginSummary struct {
 const storageViewOriginMaxDepth = 4
 
 func (a *Analyzer) storageViewReturnOriginsFor(decl *ast.FuncDecl, depth int) *storageViewReturnOriginSummary {
+	a.observeSpecializationInputRead(decl, "storage-view-origin-query-unresolved-provenance")
 	if decl == nil || depth > storageViewOriginMaxDepth {
 		return &storageViewReturnOriginSummary{}
 	}

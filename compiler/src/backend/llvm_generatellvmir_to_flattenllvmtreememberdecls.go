@@ -193,6 +193,7 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 }
 
 type llvmGenerator struct {
+	inputReads              *irInputReadRecorder // optional diagnostic trace; never cache authority
 	partitionImportWeight   int
 	partitionImportDefaults bool
 	// partitionModuleDecls is a build-local worklist for partitioned IR. A

@@ -1211,7 +1211,7 @@ func (g *llvmGenerator) evalStaticFunctionCallWith(expr *ast.CallExpr, evalArg f
 	g.staticCallDepth++
 	g.constEvalScopes = append(g.constEvalScopes, scope)
 	state := &functionState{g: g}
-	value, returned, ok := state.evalStaticStmtBlock(decl.Body, true)
+	value, returned, ok := state.evalStaticStmtBlock(g.functionBodyForInputRead(decl, "static-function-evaluation"), true)
 	g.constEvalScopes = g.constEvalScopes[:len(g.constEvalScopes)-1]
 	g.staticCallDepth--
 	if !returned {
@@ -1268,7 +1268,10 @@ func (g *llvmGenerator) lookupConstReflectionType(typeName string) (semantic.Typ
 	return matched, matched != nil
 }
 
-func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (*semantic.Symbol, bool) {
+func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (result *semantic.Symbol, found bool) {
+	if g != nil && g.inputReads != nil {
+		defer func() { g.inputReads.query("static-function-resolution", name, result, found) }()
+	}
 	if g == nil || g.result == nil || g.result.GlobalScope == nil {
 		return nil, false
 	}

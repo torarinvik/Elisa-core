@@ -41,8 +41,9 @@ type specializationCall struct {
 }
 
 type specializationKey struct {
-	fn   *ast.FuncDecl
-	args string
+	inputAudit bool // diagnostic products must never reuse an unobserved memo product
+	fn         *ast.FuncDecl
+	args       string
 }
 
 // BeginSharedCodegen prepares r for concurrent code generators. The caller

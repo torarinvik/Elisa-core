@@ -68,6 +68,7 @@ var funcDeclPtrType = reflect.TypeOf((*ast.FuncDecl)(nil))
 // func to run afterwards. Off the parallel path, or for an owned declaration, that
 // is decl itself.
 func (a *Analyzer) quietAnalysisTarget(decl *ast.FuncDecl) (*ast.FuncDecl, func()) {
+	a.observeSpecializationInputRead(decl, "quiet-analysis-target")
 	p := a.parallel
 	if p == nil {
 		return decl, func() {}
@@ -199,6 +200,7 @@ func (p *parallelWorkerState) ownsKey(key reflect.Value) bool {
 // worker and given a copy of the original's declaration-keyed entries, or decl
 // itself. Read copies are never analyzed, so they stay pristine.
 func (a *Analyzer) readDecl(decl *ast.FuncDecl) *ast.FuncDecl {
+	a.observeSpecializationInputRead(decl, "read-declaration")
 	a.addProofReportOrigin(decl)
 	p := a.parallel
 	if p == nil || decl == nil {

@@ -22,12 +22,16 @@ func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncTy
 	if fn == nil || fn.Static || fn.IsNativeExtern || len(fn.TypeParams) != 0 || len(fn.GenericParams) != 0 || fn.IntrinsicName != "" || (fn.HasInlineMode && fn.InlineMode == semantic.FuncInlineModeNever) {
 		return nil
 	}
-	sym, ok := g.result.GlobalScope.Lookup(name)
+	sym, ok := g.lookupGlobalForInputRead(name, "partition-import-resolution")
 	if !ok || sym == nil || sym.Type != fn {
 		return nil
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
-	if !ok || decl == nil || decl.Static || len(decl.GenericParams) != 0 || len(decl.TypeParams) != 0 || len(decl.Body) == 0 || decl.IsGhost || decl.IsContract || decl.IsLemma {
+	if !ok || decl == nil || decl.Static || len(decl.GenericParams) != 0 || len(decl.TypeParams) != 0 {
+		return nil
+	}
+	body := g.functionBodyForInputRead(decl, "partition-import-admission")
+	if len(body) == 0 || decl.IsGhost || decl.IsContract || decl.IsLemma {
 		return nil
 	}
 	weight := 0
@@ -37,7 +41,7 @@ func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncTy
 		}
 	}
 	if weight == 0 {
-		weight = partitionImportWeight(decl)
+		weight = partitionImportBodyWeight(body)
 		if g.sharedLookups != nil {
 			g.sharedLookups.importWeights.Store(decl, weight)
 		}
@@ -57,6 +61,10 @@ func (g *llvmGenerator) importPartitionFunction(name string, fn *semantic.FuncTy
 // Stop at the admission boundary; source-position structs do not contribute.
 // Counting pointers bounds recursion even for shared/lowered syntax graphs.
 func partitionImportWeight(decl *ast.FuncDecl) int {
+	return partitionImportBodyWeight(functionBodyForInputRead(decl, nil, decl, "partition-import-weight"))
+}
+
+func partitionImportBodyWeight(body []ast.Stmt) int {
 	count := 0
 	var visit func(reflect.Value)
 	visit = func(v reflect.Value) {
@@ -83,7 +91,7 @@ func partitionImportWeight(decl *ast.FuncDecl) int {
 			}
 		}
 	}
-	visit(reflect.ValueOf(decl.Body))
+	visit(reflect.ValueOf(body))
 	if count == 0 {
 		return 1
 	}

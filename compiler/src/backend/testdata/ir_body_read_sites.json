@@ -1,0 +1,110 @@
+{
+  "purpose": "Diagnostic-only closed source inventory; not a cache authority. All remaining direct Body selectors were reviewed as statement/lambda/static-declaration branches, except the one FuncDecl wrapper. New or modified sites require renewed type/context review. Reflection and semantic summary coverage remain open.",
+  "files": {
+    "llvm_autovec_verify.go": {
+      "sha256": "975cb4115699842d6465159f32dd8c326cf8e67c55fc0777cf265424ac0e846b",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_clonecapturedcodegenscope_to_emitstmt.go": {
+      "sha256": "2404e7fcb42f55155212166ae99f88716c54227cc6d8438ffe6a649fd1d61bef",
+      "selectors": 8,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_emitenummatch_to_emitmatchexpr.go": {
+      "sha256": "f00b36d198efd9404cb72ede7c868569ffd54265a34a454dab8dce861bf7c80a",
+      "selectors": 5,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_emitenummatchexpr_to_treevisitrelevantarms.go": {
+      "sha256": "caa86a9f4c8e0fb442271bc092f640fd35a7d2f3ab07076b051d03de44dd0239",
+      "selectors": 5,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_emititerlooppatternbindings_to_emitpoolstmt.go": {
+      "sha256": "611214edc421863eedc588aeb3d527853e0acaca6c6bde87667a5715f9cb17c8",
+      "selectors": 11,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_emitparallelforstmt_to_backendconditionoptionalbindtype.go": {
+      "sha256": "2707a5e4b293f09dfa615f9f92ae183d1c1653170d9e18fff7d273d0e2e9fa2d",
+      "selectors": 4,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_emitstringmatchexpr_to_countmatchpatternexpectedlen.go": {
+      "sha256": "0c5d0d63b9e466879a0442e16d41077ab8c597b474476fcecdc703a132a2c928",
+      "selectors": 6,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_emittuplebindstmt_to_emittreevariantstructuralchildcount.go": {
+      "sha256": "89e22cf8a3440f4dc536eb561a94324603c9e8f297b59c7ceb88460e5c7ccdf4",
+      "selectors": 4,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_enumtagconstant_to_activestmtbranch.go": {
+      "sha256": "c8261c52903a32aef4fdb9866dc86caea0b453b3620a1999cf65ec7dd85a6b6f",
+      "selectors": 7,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_invertbranchhint_to_emitexpectpatternstmt.go": {
+      "sha256": "2827d4e00a37900a3ef11b62e95c43667bf1bec0ee39124064203a783b972c99",
+      "selectors": 4,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_optional_match.go": {
+      "sha256": "e8cf1b48ac9ec399b4001025aac23f4b676df516f64862f788b185b260dbb02b",
+      "selectors": 2,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_packedenumvariantpayloadfieldbyteoffset_to_resolvepackedmatchstorebind.go": {
+      "sha256": "8b06adf2aa1effd9f87323f2fa9b8d414bb7f1f950ca59e307670a8bd24fdaed",
+      "selectors": 13,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_bodies_treevisitrelevantexactarms_to_emitstringmatch.go": {
+      "sha256": "03fadcbb1d7c93763dbc865911815d911596ec9c2e2b5cf14ffa6f69f1669b0a",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_consteval_consts_to_cstringfree.go": {
+      "sha256": "49217924566fea96483b16a9cb315f5d943000c7ff407c40877497b57630e673",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_exprs_emiterrortagexpr_to_emitcharliteral.go": {
+      "sha256": "c8f7eb36dd281aacde115d6295745a468ebbe04ebd7d58a74731e4f85a62aa65",
+      "selectors": 4,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_generatellvmir_to_flattenllvmtreememberdecls.go": {
+      "sha256": "66c8f03db8f35cdf2cab8ffc4384775704e34bb3a9cd9488b4af02985a7488ad",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_ir_input_reads.go": {
+      "sha256": "a510fb30218a496163435982a203221804d4f17410293b42b02790661016948f",
+      "selectors": 1,
+      "classification": "function-body-wrapper"
+    },
+    "llvm_lambda.go": {
+      "sha256": "240b8bd6ce9a36126d73bc240aa8dc3e38b8d43ec27de13433b542a1a4c25f9b",
+      "selectors": 2,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_partition_ir.go": {
+      "sha256": "992702e4465da67e701861efb2121ac816d183072b5b827b2700c672f9b6fe9c",
+      "selectors": 2,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_quantifier_runtime.go": {
+      "sha256": "b3970b75d671ab1a2a605bbba31e6b892cdf117389214682d17f579b9a1c39aa",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    },
+    "llvm_sequence_rewrite.go": {
+      "sha256": "8dffa38c01d543c7a8fe5a662c8868a7f6a3a2fac78fdb8fd7b2a40efa750fcf",
+      "selectors": 1,
+      "classification": "reviewed-statement-lambda-or-declaration-branch"
+    }
+  }
+}

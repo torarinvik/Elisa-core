@@ -353,7 +353,13 @@ var errPartitionDeclined = errors.New("partitioned IR declined")
 func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, declarations []ast.Decl, members *[]string, shared *sharedCodegenLookups) ([]byte, error) {
 	unit := hex.EncodeToString(unitID[:8])
 	irStart := time.Now()
+	var inputReads *irInputReadRecorder
+	if s.irInputAudit != nil {
+		inputReads = &irInputReadRecorder{}
+		defer func() { s.irInputAudit(part, inputReads.snapshot()) }()
+	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
+		g.inputReads = inputReads
 		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
 		g.partitionGlobalDeclarationsOnly = part != 0
 		g.sharedResult = true
@@ -376,6 +382,11 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	}
 	if err := g.ensureTargetMachine(); err != nil {
 		return nil, err
+	}
+	if inputReads != nil {
+		inputReads.mu.Lock()
+		inputReads.lowered = true
+		inputReads.mu.Unlock()
 	}
 	irDuration := time.Since(irStart)
 	partitionIRNanos.Add(int64(irDuration))

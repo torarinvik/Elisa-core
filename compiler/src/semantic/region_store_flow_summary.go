@@ -599,6 +599,7 @@ func (u *nameUnion) unionAll(names []string) {
 // own. Memoizing a member before its component settled made `eb` -> `ea` -> `eb` cache `eb` as
 // "never stores r into out" although `ea` does, letting a local reference escape.
 func (a *Analyzer) storeFlowSummaryFor(decl *ast.FuncDecl) *storeFlowSummary {
+	a.observeSpecializationInputRead(decl, "store-flow-summary-query-unresolved-provenance")
 	decl = a.readDecl(decl)
 	if !storeFlowSummarizable(decl) {
 		return nil

@@ -16,6 +16,10 @@ import (
 // revisions. It owns bytes, never LLVM or semantic handles. This is an in-process
 // cache, with optional compiler-namespaced disk persistence.
 type IncrementalObjectSession struct {
+	// irInputAudit is a diagnostic-only hook. Install before generation; the
+	// callback can run concurrently for different partitions. It has no effect
+	// on artifact admission and every report explicitly records coverage gaps.
+	irInputAudit  func(partition int, report irInputReadReport)
 	diskDefaults  bool // session-local standalone disk-analysis codegen preset
 	disk          *incrementalObjectDisk
 	mu            sync.Mutex // protects the bounded partition map and LRU metadata

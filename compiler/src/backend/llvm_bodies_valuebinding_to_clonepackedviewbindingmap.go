@@ -588,13 +588,14 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	// declaration has no semantic generic arguments. Its existing template
 	// facts plus backend type substitution need no reanalysis or private maps.
 	if semanticArgs := orderedGenericTypeArgs(fnType, decl, typeBindings); len(semanticArgs) != 0 && g.result != nil {
-		body, err := g.result.SpecializeFunction(decl, semanticArgs)
+		body, err := g.specializeFunctionForInputRead(decl, semanticArgs)
 		if err != nil {
 			return err
 		}
 		defer g.installCodegenResult(body.Result)()
 		decl = body.Decl
 	}
+	bodyStatements := g.functionBodyForInputRead(decl, "function-emission")
 
 	builder := C.LLVMCreateBuilderInContext(g.context)
 	defer C.LLVMDisposeBuilder(builder)
@@ -611,7 +612,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnType:             fnType,
 		builder:            builder,
 		typeMap:            typeBindings,
-		adoptedEscapeNames: adoptedEscapeNamesForBody(decl.Body, paramNames(decl.Params)...),
+		adoptedEscapeNames: adoptedEscapeNamesForBody(bodyStatements, paramNames(decl.Params)...),
 		mainReturnsStatus:  decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
 	}
 	// A signature-level `can[Scalar]` grants the whole body; `can Scalar:` blocks nest on top
@@ -732,7 +733,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType, owned: false})
 		}
 	}
-	state.callerStorageArenas = state.callerStorageArenasForBody(decl, fnType, decl.Body)
+	state.callerStorageArenas = state.callerStorageArenasForBody(decl, fnType, bodyStatements)
 
 	// Void-grower ambient region (docs/75 cross-fn container growth): when this function grows a
 	// caller-owned container by INSERTING region-allocated values (`out.push(make_node())`), bind its
@@ -756,7 +757,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		return err
 	}
 
-	if err := state.emitBlock(decl.Body, false); err != nil {
+	if err := state.emitBlock(bodyStatements, false); err != nil {
 		return err
 	}
 

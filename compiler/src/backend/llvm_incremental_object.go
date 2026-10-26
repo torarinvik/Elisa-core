@@ -63,6 +63,13 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		}
 	}
 	irStart := time.Now()
+	var inputReads *irInputReadRecorder
+	if s.irInputAudit != nil {
+		inputReads = &irInputReadRecorder{}
+		// -1 identifies the ordinary whole-module lowering unit, including
+		// default O3. The audit never changes partition/import policy.
+		defer func() { s.irInputAudit(-1, inputReads.snapshot()) }()
+	}
 	sharedResult := s.diskDefaults
 	sharedResultActive := false
 	var sharedLookups []*sharedCodegenLookups
@@ -82,6 +89,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result))
 	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
+		g.inputReads = inputReads
 		if !options.DebugInfo {
 			discardLLVMValueNames(g.context)
 		}
@@ -93,6 +101,11 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	defer g.disposeInBackground()
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
+	}
+	if inputReads != nil {
+		inputReads.mu.Lock()
+		inputReads.lowered = true
+		inputReads.mu.Unlock()
 	}
 	// Explicit parallel-opt mode runs O-level passes inside isolated workers.
 	// Cache input is then each exact *unoptimized* partition, so an unchanged

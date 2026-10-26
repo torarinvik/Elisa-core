@@ -224,15 +224,19 @@ func (s *functionState) specializedStringViewLiteralCallShape(funcName string) (
 	if funcName == "string_view_eq" || funcName == "ctx_string_view_eq" {
 		return 0, 1, true, true
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(funcName)
+	sym, ok := s.g.lookupGlobalForInputRead(funcName, "literal-wrapper-resolution")
 	if !ok {
 		return 0, 0, false, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
-	if !ok || len(decl.Params) != 2 || len(decl.Body) != 1 {
+	if !ok || len(decl.Params) != 2 {
 		return 0, 0, false, false
 	}
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	body := s.g.functionBodyForInputRead(decl, "literal-wrapper-stability")
+	if len(body) != 1 {
+		return 0, 0, false, false
+	}
+	ret, ok := body[0].(*ast.ReturnStmt)
 	if !ok || ret.Value == nil {
 		return 0, 0, false, false
 	}
