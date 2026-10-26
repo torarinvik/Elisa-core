@@ -19,10 +19,20 @@ const proofReportCoordinateWitnessSlabSize = 1024
 
 func captureProofReportCoordinateWitnesses(file *ast.File) proofReportCoordinateWitnesses {
 	witnesses := proofReportCoordinateWitnesses{}
+	var previous lexer.Pos
+	havePrevious := false
 	addPosition := func(p lexer.Pos) {
 		if p.IsZero() {
 			return
 		}
+		// node.Pos() and its Position field commonly emit the same tuple
+		// consecutively. Replaying an identical tuple is idempotent for full,
+		// start-only and endpoint ambiguity indexes. Keep every differing
+		// witness (including same printed span with conflicting offsets).
+		if havePrevious && p == previous {
+			return
+		}
+		previous, havePrevious = p, true
 		if len(witnesses.slabs) == 0 || len(witnesses.slabs[len(witnesses.slabs)-1]) == proofReportCoordinateWitnessSlabSize {
 			witnesses.slabs = append(witnesses.slabs, make([]lexer.Pos, 0, proofReportCoordinateWitnessSlabSize))
 		}
