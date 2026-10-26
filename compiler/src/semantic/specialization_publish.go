@@ -165,7 +165,11 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 			}
 			if !p.owned[value] {
 				p.owned[value] = true
-				p.queue = append(p.queue, value)
+				// Canonical scans build only the membership index; publication
+				// consumes this worklist only for private fact-held syntax.
+				if p.context != nil {
+					p.queue = append(p.queue, value)
+				}
 			}
 			if index, ok := value.(*ast.IndexExpr); ok && span {
 				p.spanNodes[index] = true

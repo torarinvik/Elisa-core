@@ -143,6 +143,9 @@ func TestCanonicalMembershipFirstCatalogMatchesOldIndex(t *testing.T) {
 	current := canonicalMembershipCatalogTestScan(root, false)
 	reference := canonicalMembershipCatalogTestScan(root, true)
 	assertCanonicalMembershipParity(t, current, reference)
+	if len(current.queue) != 0 {
+		t.Fatalf("canonical membership scan retained a private publication queue of %d nodes", len(current.queue))
+	}
 	if !current.owned[detached] {
 		t.Fatal("analyzer-private synthesized syntax missed")
 	}

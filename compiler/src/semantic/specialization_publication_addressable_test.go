@@ -45,8 +45,12 @@ func assertPublicationAddressableParity(t *testing.T, current, reference *specia
 		}
 		return out
 	}
-	if !reflect.DeepEqual(queue(current.queue), queue(reference.queue)) {
-		t.Fatal("publication work queue membership changed")
+	if current.context != nil {
+		if !reflect.DeepEqual(queue(current.queue), queue(reference.queue)) {
+			t.Fatal("private publication work queue membership changed")
+		}
+	} else if len(current.queue) != 0 {
+		t.Fatalf("canonical membership scan retained a private publication queue of %d nodes", len(current.queue))
 	}
 }
 func TestPublicationAddressableStructWalkParityAndReadOnly(t *testing.T) {
