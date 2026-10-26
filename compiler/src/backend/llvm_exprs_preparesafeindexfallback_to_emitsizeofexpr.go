@@ -225,7 +225,7 @@ func (s *functionState) emitContainerCountValue(containerPtr C.LLVMValueRef, con
 		return nil, err
 	}
 	countPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 1, cStringFree(name+".ptr"))
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	count, err := s.loadValue(countPtr, usizeType, name)
 	if err != nil {
 		return nil, err
@@ -251,7 +251,7 @@ func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	indexValue, _, err := s.emitExpr(expr.Index, usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -271,8 +271,8 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 	if err != nil {
 		return nil, nil, err
 	}
-	indexType := s.g.result.NamedTypes["i64"]
-	resultType := s.g.result.NamedTypes["char"]
+	indexType := s.g.namedType("i64")
+	resultType := s.g.namedType("char")
 	indexValue, _, err := s.emitExpr(expr.Index, indexType)
 	if err != nil {
 		return nil, nil, err
@@ -316,12 +316,12 @@ func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, err
 	}
-	byteType := s.g.result.NamedTypes["u8"]
+	byteType := s.g.namedType("u8")
 	loaded, err := s.loadValue(ptr, byteType, "str.byte")
 	if err != nil {
 		return nil, nil, err
 	}
-	resultType := s.g.result.NamedTypes["char"]
+	resultType := s.g.namedType("char")
 	llvmResultType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err
@@ -620,7 +620,7 @@ func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, se
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(size), 0), s.g.result.NamedTypes["usize"], nil
+	return C.LLVMConstInt(usizeType, C.ulonglong(size), 0), s.g.namedType("usize"), nil
 }
 
 func (s *functionState) emitAlignofExpr(expr *ast.AlignofExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -636,7 +636,7 @@ func (s *functionState) emitAlignofExpr(expr *ast.AlignofExpr) (C.LLVMValueRef, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(alignment), 0), s.g.result.NamedTypes["usize"], nil
+	return C.LLVMConstInt(usizeType, C.ulonglong(alignment), 0), s.g.namedType("usize"), nil
 }
 
 func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -660,7 +660,7 @@ func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, err
 	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(offset), 0), s.g.result.NamedTypes["usize"], nil
+	return C.LLVMConstInt(usizeType, C.ulonglong(offset), 0), s.g.namedType("usize"), nil
 }
 
 // castOperandAddrOf returns the `&x` a cast operand is, peeling parentheses.

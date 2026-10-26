@@ -342,7 +342,7 @@ func (d *debugInfo) buildDArrayDIType(t semantic.Type, da *semantic.DArrayType) 
 	d.typeCache[noteTypeKeyFor(t)] = fwd
 
 	llvmType, lerr := g.lowerType(t)
-	usizeT := g.result.NamedTypes["usize"]
+	usizeT := g.namedType("usize")
 	members := make([]C.LLVMMetadataRef, 0, 3)
 	addMember := func(memberName string, index int, sizeBytes uint64, ty C.LLVMMetadataRef) {
 		offsetBytes := uint64(0)

@@ -132,7 +132,7 @@ func (s *functionState) resolveImplicitPackedStoreEnum(n *ast.Ident, actualType 
 	if enumName == "" || s.g == nil || s.g.result == nil {
 		return nil
 	}
-	if named, ok := s.g.result.NamedTypes[enumName].(*semantic.EnumType); ok && named != nil && named.Packed {
+	if named, ok := s.g.namedType(enumName).(*semantic.EnumType); ok && named != nil && named.Packed {
 		return named
 	}
 	return nil
@@ -163,7 +163,7 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	// a valid allocation in a region-polymorphic helper fails only in LLVM.
 	if !found {
 		if arena := s.regionArenaPointer(ownerIdent.Name); arena != nil {
-			binding = valueBinding{ptr: arena, typ: s.g.result.NamedTypes["Arena"]}
+			binding = valueBinding{ptr: arena, typ: s.g.namedType("Arena")}
 			found = true
 		}
 	}
@@ -177,7 +177,7 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 // arena (the native stack arena set up by the enclosing synthesized/in-auto region — the same arena
 // containers allocate into). A nil ptr means no active region; emitRegionStructAlloc reports it.
 func (s *functionState) autoRegionBinding() valueBinding {
-	return valueBinding{ptr: s.treeAllocOwner.arenaRef, typ: s.g.result.NamedTypes["Arena"]}
+	return valueBinding{ptr: s.treeAllocOwner.arenaRef, typ: s.g.namedType("Arena")}
 }
 
 // emitRegionStructAlloc lowers a plain-struct allocation into a region's arena (arena_alloc(size)
@@ -201,14 +201,14 @@ func (s *functionState) emitRegionStructAlloc(expr *ast.AllocExpr, binding value
 	if err != nil {
 		return nil, nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, err
 	}
 	sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)
 	arenaRefType := &semantic.RefType{Elem: binding.typ, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
@@ -332,7 +332,7 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 		restore()
 		return packedStoreBinding{}, fmt.Errorf("packed enum %s is missing store layout metadata", root.Name)
 	}
-	storeType := semantic.PackedEnumStoreWithState(root.StoreType, s.g.result.NamedTypes["Local"])
+	storeType := semantic.PackedEnumStoreWithState(root.StoreType, s.g.namedType("Local"))
 	storeValue, err := s.emitPackedStoreValueFromArenaPtr(arenaPtr, storeType)
 	restore()
 	if err != nil {
@@ -516,7 +516,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	var indexValue C.LLVMValueRef
 	switch s.g.packedModeForEnum(sourceEnum) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
-		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.result.NamedTypes["u32"])
+		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.namedType("u32"))
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -557,7 +557,7 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -582,9 +582,9 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
@@ -615,7 +615,7 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, err
 	}
 	fillType := s.g.cachedRuntimeHelperType("arena_da_fill", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "arena_da_fill", Params: []semantic.Type{viewType, elemType}, Return: s.g.result.NamedTypes["void"]}
+		return &semantic.FuncType{Name: "arena_da_fill", Params: []semantic.Type{viewType, elemType}, Return: s.g.namedType("void")}
 	})
 	fillCallee, err := s.g.ensureFunctionDeclared("arena_da_fill", fillType)
 	if err != nil {

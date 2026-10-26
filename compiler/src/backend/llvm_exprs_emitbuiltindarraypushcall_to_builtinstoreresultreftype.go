@@ -296,7 +296,7 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 		fused, fusedOK = s.fusedPushExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
 	}
 	if fusedOK {
-		if _, _, err := s.emitExprBlock(fused, s.g.result.NamedTypes["usize"]); err != nil {
+		if _, _, err := s.emitExprBlock(fused, s.g.namedType("usize")); err != nil {
 			return nil, nil, true, err
 		}
 		darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
@@ -324,7 +324,7 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -367,9 +367,9 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.namedType("usize")}, Return: voidRefType}
 	})
 	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
 	if err != nil {
@@ -466,7 +466,7 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 		if !ok || arrayType == nil {
 			return nil, nil, fmt.Errorf("darray extend could not materialize fixed array source")
 		}
-		usizeType := s.g.result.NamedTypes["usize"]
+		usizeType := s.g.namedType("usize")
 		usizeLLVMType, err := s.g.lowerType(usizeType)
 		if err != nil {
 			return nil, nil, err
@@ -676,7 +676,7 @@ func darrayElemNeedsZeroInit(t semantic.Type, seen map[semantic.Type]bool) bool 
 // emitBuiltinDArrayEnsureCapacity). A memset of a zero-length tail (shrink/no-op) is
 // harmless, so the only guard needed is a saturating subtraction.
 func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType, countPtr C.LLVMValueRef, neededValue C.LLVMValueRef) error {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -709,11 +709,11 @@ func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, d
 	i8Type := C.LLVMInt8TypeInContext(s.g.context)
 	tailPtr := C.LLVMBuildGEP2(s.builder, i8Type, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{offsetBytes}), 1, cStringFree("darray.resize.tailptr"))
 
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	// Match libc's `memset(void*, int, size_t)` ABI: the fill byte is i32, not
 	// Elisa's 64-bit `int`.
-	memsetValueType := s.g.result.NamedTypes["i32"]
+	memsetValueType := s.g.namedType("i32")
 	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, usizeType}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
 	if err != nil {
@@ -724,7 +724,7 @@ func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, d
 		return err
 	}
 	fillZero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-	fillValue, err := s.coerceValue(fillZero, s.g.result.NamedTypes["i32"], memsetValueType)
+	fillValue, err := s.coerceValue(fillZero, s.g.namedType("i32"), memsetValueType)
 	if err != nil {
 		return err
 	}
@@ -830,7 +830,7 @@ func (s *functionState) emitBuiltinDArrayCountPtr(darrayPtr C.LLVMValueRef, darr
 		return nil, nil, err
 	}
 	countPtr := C.LLVMBuildStructGEP2(s.builder, containerType, darrayPtr, 1, cStringFree("darray.count.ptr"))
-	return countPtr, s.g.result.NamedTypes["usize"], nil
+	return countPtr, s.g.namedType("usize"), nil
 }
 func (s *functionState) emitBuiltinDArrayItemsPtr(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType) (C.LLVMValueRef, error) {
 	if darrayType == nil {
@@ -851,7 +851,7 @@ func (s *functionState) emitBuiltinDArrayCapacityPtr(darrayPtr C.LLVMValueRef, d
 		return nil, nil, err
 	}
 	capacityPtr := C.LLVMBuildStructGEP2(s.builder, containerType, darrayPtr, 2, cStringFree("darray.capacity.ptr"))
-	return capacityPtr, s.g.result.NamedTypes["usize"], nil
+	return capacityPtr, s.g.namedType("usize"), nil
 }
 func (s *functionState) emitBuiltinStoreReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (C.LLVMValueRef, semantic.Type, error) {
 	if receiverRefType != nil {
@@ -943,9 +943,9 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 	currentItems := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree(name+".items"))
 	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), currentItems, C.LLVMConstPointerNull(voidPtrType), cStringFree(name+".items.null"))
 
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
 	})

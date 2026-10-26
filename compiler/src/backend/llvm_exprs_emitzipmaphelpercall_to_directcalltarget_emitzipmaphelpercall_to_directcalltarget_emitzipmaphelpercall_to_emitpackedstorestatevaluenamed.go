@@ -143,7 +143,7 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 		src2ScopeName = domainName + ".src2"
 	}
 	totalValue := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("zip_map.total"))
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -233,7 +233,7 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(nextIndexValues), llvmBlockSlicePtr(nextIndexBlocks), 1)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
-	return nil, s.g.result.NamedTypes["void"], true, nil
+	return nil, s.g.namedType("void"), true, nil
 }
 func zipMapViewInfo(t semantic.Type) (semantic.Type, semantic.Type, bool) {
 	switch tt := t.(type) {
@@ -277,14 +277,14 @@ func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewTy
 	if err != nil {
 		return nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
 	}
 	dataValue := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".data"))
 	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree(name+".len"))
-	var elemType semantic.Type = s.g.result.NamedTypes["u8"]
+	var elemType semantic.Type = s.g.namedType("u8")
 	if vt, ok := viewType.(*semantic.ViewType); ok {
 		elemType = vt.Elem
 	}
@@ -308,7 +308,7 @@ func (s *functionState) emitDenseViewSliceValue(viewValue C.LLVMValueRef, viewTy
 	return out, nil
 }
 func (s *functionState) emitChunksExactValidation(chunkSizeValue C.LLVMValueRef, totalValue C.LLVMValueRef, prefix string) error {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -377,7 +377,7 @@ func (s *functionState) emitPackedStoreValueFromArenaPtr(arenaPtr C.LLVMValueRef
 	if err != nil {
 		return nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -391,9 +391,9 @@ func (s *functionState) emitPackedStoreValueFromArenaPtr(arenaPtr C.LLVMValueRef
 	if err != nil {
 		return nil, err
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	stateHelperName := "ctx_packed_store_state_new"
 	stateHelperParams := []semantic.Type{arenaRefType, usizeType}
 	stateArgs := []C.LLVMValueRef{arenaPtr, rowSizeValue}

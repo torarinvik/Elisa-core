@@ -130,7 +130,7 @@ func (s *functionState) emitVerifiedTaskGroupSubmit(expr *ast.CallExpr, info sem
 		return nil, nil, err
 	}
 	s.buildCall(groupAddLLVMType, groupAdd, []C.LLVMValueRef{group.ptr, taskValue}, "")
-	return nil, s.g.result.NamedTypes["void"], nil
+	return nil, s.g.namedType("void"), nil
 }
 
 func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -336,7 +336,7 @@ func (s *functionState) promoteCVariadicArg(value C.LLVMValueRef, actual semanti
 		return value, actual, nil
 	}
 	if semantic.IsBoolType(actual) {
-		i32Type := s.g.result.NamedTypes["i32"]
+		i32Type := s.g.namedType("i32")
 		i32LLVM, err := s.g.lowerType(i32Type)
 		if err != nil {
 			return nil, nil, err
@@ -344,12 +344,12 @@ func (s *functionState) promoteCVariadicArg(value C.LLVMValueRef, actual semanti
 		return C.LLVMBuildZExt(s.builder, value, i32LLVM, cStringFree("vararg.bool")), i32Type, nil
 	}
 	if builtin, ok := numericCastType(actual).(*semantic.BuiltinType); ok && builtin != nil && builtin.Name == "f32" {
-		f64Type := s.g.result.NamedTypes["f64"]
+		f64Type := s.g.namedType("f64")
 		promoted, err := s.coerceValue(value, actual, f64Type)
 		return promoted, f64Type, err
 	}
 	if _, width, ok := semantic.BitIntInfo(numericCastType(actual)); ok && width < 32 {
-		i32Type := s.g.result.NamedTypes["i32"]
+		i32Type := s.g.namedType("i32")
 		promoted, err := s.coerceValue(value, actual, i32Type)
 		return promoted, i32Type, err
 	}
@@ -423,7 +423,7 @@ func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMV
 	if !ok {
 		return nil, nil, false, nil
 	}
-	if s.g == nil || s.g.result == nil || !backendTypeConstructorTargetKnown(targetExpr, s.g.result.NamedTypes) {
+	if s.g == nil || s.g.result == nil || !backendTypeConstructorTargetKnown(targetExpr, s.g.namedTypesMap("type-constructor-target-check")) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 1 {

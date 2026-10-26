@@ -91,7 +91,7 @@ func (s *functionState) namedStateIsTarget(expr ast.Expr) (*semantic.StructType,
 	}
 	switch n := typedExpr.Type.(type) {
 	case *ast.NamedType:
-		base, ok := s.g.result.NamedTypes[n.Name]
+		base, ok := s.g.lookupNamedType(n.Name)
 		if !ok {
 			return nil, nil, false
 		}
@@ -101,7 +101,7 @@ func (s *functionState) namedStateIsTarget(expr ast.Expr) (*semantic.StructType,
 		}
 		return structType, append([]string(nil), structType.NamedStateCases...), true
 	case *ast.GenericType:
-		base, ok := s.g.result.NamedTypes[n.Name]
+		base, ok := s.g.lookupNamedType(n.Name)
 		if !ok {
 			return nil, nil, false
 		}

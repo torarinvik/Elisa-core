@@ -61,11 +61,11 @@ func (s *functionState) emitReassignReclaim(n *ast.AssignStmt, slotPtr C.LLVMVal
 	if err != nil {
 		return err
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	reclaimType := s.g.cachedRuntimeHelperType("arena_reclaim_bytes", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "arena_reclaim_bytes", Params: []semantic.Type{arenaRefType, voidRefType, usizeType}, Return: s.g.result.NamedTypes["void"]}
+		return &semantic.FuncType{Name: "arena_reclaim_bytes", Params: []semantic.Type{arenaRefType, voidRefType, usizeType}, Return: s.g.namedType("void")}
 	})
 	callee, err := s.g.ensureFunctionDeclared("arena_reclaim_bytes", reclaimType)
 	if err != nil {

@@ -278,7 +278,7 @@ func (s *functionState) emitRegionDecl(n *ast.RegionStmt) error {
 // a loop), the arena slot is zeroed ONCE in the entry block instead of on every iteration — so the
 // region's blocks, reset (not freed) at each scope exit, are reused across iterations.
 func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) error {
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	if arenaType == nil {
 		return fmt.Errorf("missing builtin Arena type for region %s", n.Name)
 	}
@@ -882,10 +882,10 @@ func (s *functionState) ensureAdoptedScratchArena() error {
 	if s == nil || s.scratchArena != nil {
 		return nil
 	}
-	if s.g == nil || s.g.result == nil || s.g.result.NamedTypes["Arena"] == nil {
+	if s.g == nil || s.g.result == nil || s.g.namedType("Arena") == nil {
 		return fmt.Errorf("missing builtin Arena type for adopted scratch arena")
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	alloca, err := s.createEntryAllocaZeroed("adopted.scratch", arenaType)
 	if err != nil {
 		return err
@@ -933,7 +933,7 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 		// the caller, while its scratch `chunk` must not be allocated on top of `contents` in a
 		// reserve_commit arena. The old all-or-nothing adoption made that second growth panic at
 		// runtime with "not the tail allocation".
-		s.defineBinding(n.Name, valueBinding{ptr: s.regionPolyOwner.arenaRef, typ: s.g.result.NamedTypes["Arena"]})
+		s.defineBinding(n.Name, valueBinding{ptr: s.regionPolyOwner.arenaRef, typ: s.g.namedType("Arena")})
 		s.treeAllocOwner = s.regionPolyOwner
 		if err := s.ensureAdoptedScratchArena(); err != nil {
 			return err
@@ -999,7 +999,7 @@ func (s *functionState) emitReserveCommitStackInit(arenaPtr C.LLVMValueRef, aren
 	if boundExpr == nil || elemType == nil {
 		return fmt.Errorf("reserve_commit stack missing bound or element type")
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVM, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -1045,7 +1045,7 @@ func (s *functionState) emitDefaultReserveCommitStackInit(arenaPtr C.LLVMValueRe
 	if err != nil {
 		return err
 	}
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVM, err := s.g.lowerType(intType)
 	if err != nil {
 		return err
@@ -1073,7 +1073,7 @@ func (s *functionState) emitRegionExtraStacksWithAssignment(n *ast.RegionStmt, l
 	if asn.StackCount <= 1 {
 		return noop, nil
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	if arenaType == nil {
 		return noop, fmt.Errorf("missing builtin Arena type for region %s", n.Name)
 	}
@@ -1492,7 +1492,7 @@ func (s *functionState) maybeEarlyFreeAfter(stmt ast.Stmt) error {
 		return nil
 	}
 	delete(s.earlyFreeByOffset, stmt.Pos().Offset)
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	for _, arenaPtr := range arenaPtrs {
 		if err := s.emitArenaFree(arenaPtr, arenaType); err != nil {
 			return err
@@ -1652,7 +1652,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if !ok {
 			return fmt.Errorf("unknown region %q during LLVM lowering", n.RegionName)
 		}
-		markType := s.g.result.NamedTypes["ArenaMark"]
+		markType := s.g.namedType("ArenaMark")
 		if markType == nil {
 			return fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
 		}

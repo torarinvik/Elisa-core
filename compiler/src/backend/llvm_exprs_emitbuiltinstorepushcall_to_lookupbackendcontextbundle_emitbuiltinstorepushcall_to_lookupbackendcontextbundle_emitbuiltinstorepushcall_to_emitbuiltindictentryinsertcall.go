@@ -156,7 +156,7 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		C.LLVMBuildStore(s.builder, itemValue, slotPtr)
 		C.LLVMBuildStore(s.builder, neededValue, countPtr)
 	}
-	resultType := builtinStorePushResultType(storeType, s.g.result.NamedTypes["u32"])
+	resultType := builtinStorePushResultType(storeType, s.g.namedType("u32"))
 	if storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
 		if rowIndexValue == nil {
 			return nil, nil, true, fmt.Errorf("soa push requires at least one field")
@@ -200,7 +200,7 @@ func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -266,7 +266,7 @@ func (s *functionState) emitBuiltinStoreTruncateCall(expr *ast.CallExpr) (C.LLVM
 	if err != nil {
 		return nil, nil, true, err
 	}
-	limitValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	limitValue, _, err := s.emitExpr(expr.Args[0], s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -366,7 +366,7 @@ func (s *functionState) emitBuiltinSOACountFieldExpr(expr *ast.FieldExpr) (C.LLV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	return countValue, s.g.result.NamedTypes["usize"], true, nil
+	return countValue, s.g.namedType("usize"), true, nil
 }
 func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Fallback != nil {
@@ -381,12 +381,12 @@ func (s *functionState) emitBuiltinSOARowIndexExpr(expr *ast.IndexExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	rowIDType := &semantic.IDType{Tag: storeType, Storage: s.g.result.NamedTypes["u32"]}
+	rowIDType := &semantic.IDType{Tag: storeType, Storage: s.g.namedType("u32")}
 	indexValue, _, err := s.emitExpr(expr.Index, rowIDType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	indexValue, err = s.coerceValue(indexValue, rowIDType, usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -425,17 +425,17 @@ func (s *functionState) emitBuiltinSOAValidCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	rowIDType := &semantic.IDType{Tag: storeType, Storage: s.g.result.NamedTypes["u32"]}
+	rowIDType := &semantic.IDType{Tag: storeType, Storage: s.g.namedType("u32")}
 	rowValue, _, err := s.emitExpr(expr.Args[0], rowIDType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	rowValue, err = s.coerceValue(rowValue, rowIDType, s.g.result.NamedTypes["usize"])
+	rowValue, err = s.coerceValue(rowValue, rowIDType, s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}
 	value := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), rowValue, countValue, cStringFree("soa.valid"))
-	return value, s.g.result.NamedTypes["bool"], true, nil
+	return value, s.g.namedType("bool"), true, nil
 }
 func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiverType semantic.Type, receiverRefType *semantic.RefType) (C.LLVMValueRef, error) {
 	if receiverRefType != nil {
@@ -459,7 +459,7 @@ func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiver
 }
 func (s *functionState) emitBuiltinStoreCountValue(storePtr C.LLVMValueRef, storeType *semantic.StructType, name string) (C.LLVMValueRef, error) {
 	if storeType == nil || len(storeType.StoreFieldOrder) == 0 {
-		usizeType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		usizeType, err := s.g.lowerType(s.g.namedType("usize"))
 		if err != nil {
 			return nil, err
 		}
@@ -713,13 +713,13 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 		if err != nil {
 			return nil, nil, true, err
 		}
-		usizeType := s.g.result.NamedTypes["usize"]
+		usizeType := s.g.namedType("usize")
 		minCapacity, _, err := s.emitExpr(expr.Args[0], usizeType)
 		if err != nil {
 			return nil, nil, true, err
 		}
 		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, minCapacity}, "")
-		return value, s.g.result.NamedTypes["void"], true, nil
+		return value, s.g.namedType("void"), true, nil
 	}
 	keyValue, _, err := s.emitExpr(expr.Args[0], dictType.Key)
 	if err != nil {
@@ -807,13 +807,13 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 		if err != nil {
 			return nil, nil, true, err
 		}
-		usizeType := s.g.result.NamedTypes["usize"]
+		usizeType := s.g.namedType("usize")
 		minCapacity, _, err := s.emitExpr(expr.Args[0], usizeType)
 		if err != nil {
 			return nil, nil, true, err
 		}
 		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, setValue, minCapacity}, "")
-		return value, s.g.result.NamedTypes["void"], true, nil
+		return value, s.g.namedType("void"), true, nil
 	}
 	elemValue, _, err := s.emitExpr(expr.Args[0], setType.Elem)
 	if err != nil {
@@ -828,5 +828,5 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 		return nil, nil, true, err
 	}
 	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, setValue, elemValue}, "set.add.result")
-	return value, s.g.result.NamedTypes["bool"], true, nil
+	return value, s.g.namedType("bool"), true, nil
 }

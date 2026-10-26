@@ -106,7 +106,7 @@ func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("svcopy.data"))
 	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("svcopy.len"))
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -152,7 +152,7 @@ func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C
 	C.LLVMBuildCondBr(s.builder, smallCond, smallBB, largeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, smallBB)
-	viewLenUsize, err := s.coerceValue(viewLen, s.g.result.NamedTypes["i64"], usizeType)
+	viewLenUsize, err := s.coerceValue(viewLen, s.g.namedType("i64"), usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -213,7 +213,7 @@ func (s *functionState) emitSpecializedStringViewLiteralCall(expr *ast.CallExpr)
 	if !returnsInt {
 		return cmp, s.exprType(expr), true, nil
 	}
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, nil, true, err

@@ -29,8 +29,8 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 		var live semantic.Type
 		if binding, ok := s.lookupBinding(n.Name); ok {
 			live = binding.typ
-		} else if s.g != nil && s.g.result != nil && s.g.result.GlobalScope != nil {
-			if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
+		} else if s.g != nil && s.g.result != nil && s.g.hasGlobalScope() {
+			if sym, ok := s.g.lookupGlobal(n.Name); ok {
 				live = sym.Type
 			}
 		}
@@ -64,11 +64,11 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 				t = resolved
 			}
 		case *ast.SizeofExpr:
-			t = s.g.result.NamedTypes["usize"]
+			t = s.g.namedType("usize")
 		case *ast.AlignofExpr:
-			t = s.g.result.NamedTypes["usize"]
+			t = s.g.namedType("usize")
 		case *ast.OffsetofExpr:
-			t = s.g.result.NamedTypes["usize"]
+			t = s.g.namedType("usize")
 		case *ast.AddrOfExpr:
 			innerType := s.exprType(n.Operand)
 			if innerType != nil {
@@ -204,33 +204,33 @@ func fieldInfoFromOrderedFields(typeName string, decls []ast.FieldDecl, fields m
 }
 func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 	if _, ok := t.(*semantic.ViewType); ok {
-		if base, ok := g.result.NamedTypes["DynArrayView"]; ok {
+		if base, ok := g.lookupNamedType("DynArrayView"); ok {
 			return base
 		}
 		return nil
 	}
 	if _, ok := t.(*semantic.SViewType); ok {
-		if base, ok := g.result.NamedTypes["StringView"]; ok {
+		if base, ok := g.lookupNamedType("StringView"); ok {
 			return base
 		}
 		return nil
 	}
 	if dict, ok := t.(*semantic.DictType); ok {
-		base, ok := g.result.NamedTypes["DynDict"]
+		base, ok := g.lookupNamedType("DynDict")
 		if !ok {
 			return nil
 		}
 		return &semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{dict.Key, dict.Value}}
 	}
 	if set, ok := t.(*semantic.SetType); ok {
-		base, ok := g.result.NamedTypes["DynSet"]
+		base, ok := g.lookupNamedType("DynSet")
 		if !ok {
 			return nil
 		}
 		return &semantic.GenericInstanceType{Name: "DynSet", Base: base, Args: []semantic.Type{set.Elem}}
 	}
 	if darray, ok := t.(*semantic.DArrayType); ok {
-		base, ok := g.result.NamedTypes["DynArray"]
+		base, ok := g.lookupNamedType("DynArray")
 		if !ok {
 			return nil
 		}
@@ -258,7 +258,7 @@ func (s *functionState) resolveBarePackedVariantWitnessType(name string) (semant
 	if lastDot <= 0 || lastDot >= len(name)-1 {
 		return nil, false
 	}
-	base, ok := s.g.result.NamedTypes[name[:lastDot]]
+	base, ok := s.g.lookupNamedType(name[:lastDot])
 	if !ok {
 		return nil, false
 	}
@@ -284,7 +284,7 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 	}
 	enumName := named.Name[:lastDot]
 	variantName := named.Name[lastDot+1:]
-	base, ok := s.g.result.NamedTypes[enumName]
+	base, ok := s.g.lookupNamedType(enumName)
 	if !ok {
 		return nil, fmt.Errorf("unknown packed enum %q in packedview type", enumName)
 	}

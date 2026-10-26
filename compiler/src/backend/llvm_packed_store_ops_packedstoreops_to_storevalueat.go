@@ -55,7 +55,7 @@ func (ops *packedStoreOps) voidRefType() *semantic.RefType {
 	}
 	if ops.s.g.cachedVoidRefType == nil {
 		ops.s.g.cachedVoidRefType = &semantic.RefType{
-			Elem:            ops.s.g.result.NamedTypes["void"],
+			Elem:            ops.s.g.namedType("void"),
 			State:           semantic.RefStateNonNull,
 			Storage:         semantic.RefStorageAny,
 			ExplicitStorage: true,
@@ -69,7 +69,7 @@ func (ops *packedStoreOps) arenaRefType() *semantic.RefType {
 	}
 	if ops.s.g.cachedArenaRefType == nil {
 		ops.s.g.cachedArenaRefType = &semantic.RefType{
-			Elem:            ops.s.g.result.NamedTypes["Arena"],
+			Elem:            ops.s.g.namedType("Arena"),
 			State:           semantic.RefStateNonNull,
 			Storage:         semantic.RefStorageAny,
 			ExplicitStorage: true,
@@ -233,7 +233,7 @@ func (ops *packedStoreOps) canUseOptimizedIndexSOADirectPrefixRead(enumType *sem
 	// A program that does not include the store runtime source (the runtime object provides
 	// the helpers) has no such type; the helper-call path is equivalent, so take it instead
 	// of failing with "packed store state type is unavailable".
-	if _, ok := ops.s.g.result.NamedTypes["PackedStoreState"].(*semantic.StructType); !ok {
+	if _, ok := ops.s.g.namedType("PackedStoreState").(*semantic.StructType); !ok {
 		return false
 	}
 	return ops.storeType != nil && semantic.IsFrozenPackedEnumStoreType(ops.storeType)
@@ -262,8 +262,8 @@ func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	usizeType := ops.s.g.result.NamedTypes["usize"]
-	coercedIndex, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], usizeType)
+	usizeType := ops.s.g.namedType("usize")
+	coercedIndex, err := ops.s.coerceValue(indexValue, ops.s.g.namedType("u32"), usizeType)
 	if err != nil {
 		return nil, err
 	}
@@ -304,22 +304,22 @@ func (ops *packedStoreOps) loadIndexSOAHandleDirect(stateValue C.LLVMValueRef, i
 	if err != nil {
 		return nil, err
 	}
-	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.result.NamedTypes["uintptr"], indexValue, name)
+	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.namedType("uintptr"), indexValue, name)
 }
 func (ops *packedStoreOps) loadIndexSOATagDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	fieldOffset, err := ops.packedStoreStateFieldOffset("tags")
 	if err != nil {
 		return nil, err
 	}
-	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.result.NamedTypes["u32"], indexValue, name)
+	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.namedType("u32"), indexValue, name)
 }
 func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, wordOffset uint64, name string) (C.LLVMValueRef, error) {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return nil, fmt.Errorf("missing packed store lowering state")
 	}
-	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
-	usizeType := ops.s.g.result.NamedTypes["usize"]
-	u32Type := ops.s.g.result.NamedTypes["u32"]
+	uintptrType := ops.s.g.namedType("uintptr")
+	usizeType := ops.s.g.namedType("usize")
+	u32Type := ops.s.g.namedType("u32")
 	uintptrLLVMType, err := ops.s.g.lowerType(uintptrType)
 	if err != nil {
 		return nil, err
@@ -353,7 +353,7 @@ func (ops *packedStoreOps) packedStoreStateFieldOffset(fieldName string) (uint64
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return 0, fmt.Errorf("missing packed store lowering state")
 	}
-	stateType, ok := ops.s.g.result.NamedTypes["PackedStoreState"].(*semantic.StructType)
+	stateType, ok := ops.s.g.namedType("PackedStoreState").(*semantic.StructType)
 	if !ok || stateType == nil {
 		return 0, fmt.Errorf("packed store state type is unavailable while resolving field %q", fieldName)
 	}
@@ -365,7 +365,7 @@ func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	usizeType := ops.s.g.result.NamedTypes["usize"]
+	usizeType := ops.s.g.namedType("usize")
 	helperType := ops.cachedRuntimeHelperType("ctx_packed_store_count", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "ctx_packed_store_count", Params: []semantic.Type{ops.voidRefType()}, Return: usizeType}
 	})
@@ -388,8 +388,8 @@ func (ops *packedStoreOps) encodeDenseIndex(rowPtr C.LLVMValueRef, name string) 
 	if err != nil {
 		return nil, err
 	}
-	u32Type := ops.s.g.result.NamedTypes["u32"]
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
+	u32Type := ops.s.g.namedType("u32")
+	arenaType := ops.s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "ctx_packed_store_encode_index", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: u32Type}
 	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_encode_index", helperType)
@@ -411,8 +411,8 @@ func (ops *packedStoreOps) decodeDenseIndex(indexValue C.LLVMValueRef, name stri
 	if err != nil {
 		return nil, err
 	}
-	u32Type := ops.s.g.result.NamedTypes["u32"]
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
+	u32Type := ops.s.g.namedType("u32")
+	arenaType := ops.s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "ctx_packed_store_decode_index", Params: []semantic.Type{arenaRefType, u32Type, ops.voidRefType()}, Return: ops.voidRefType()}
 	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_decode_index", helperType)
@@ -439,8 +439,8 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		if err != nil {
 			return nil, err
 		}
-		u32Type := ops.s.g.result.NamedTypes["u32"]
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
+		u32Type := ops.s.g.namedType("u32")
+		arenaType := ops.s.g.namedType("Arena")
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode_index", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: u32Type}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_encode_index", helperType)
@@ -458,7 +458,7 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		if err != nil {
 			return nil, err
 		}
-		u32Type := ops.s.g.result.NamedTypes["u32"]
+		u32Type := ops.s.g.namedType("u32")
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode_variant_sparse", Params: []semantic.Type{ops.voidRefType(), ops.voidRefType()}, Return: u32Type}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_encode_variant_sparse", helperType)
 		if err != nil {
@@ -488,8 +488,8 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		if err != nil {
 			return nil, err
 		}
-		u32Type := ops.s.g.result.NamedTypes["u32"]
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
+		u32Type := ops.s.g.namedType("u32")
+		arenaType := ops.s.g.namedType("Arena")
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode_index", Params: []semantic.Type{arenaRefType, u32Type, ops.voidRefType()}, Return: ops.voidRefType()}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_decode_index", helperType)
@@ -510,7 +510,7 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		if err != nil {
 			return nil, err
 		}
-		u32Type := ops.s.g.result.NamedTypes["u32"]
+		u32Type := ops.s.g.namedType("u32")
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode_variant_sparse", Params: []semantic.Type{u32Type, ops.voidRefType()}, Return: ops.voidRefType()}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_decode_variant_sparse", helperType)
 		if err != nil {
@@ -537,10 +537,10 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 	if err != nil {
 		return nil, nil, err
 	}
-	usizeType := ops.s.g.result.NamedTypes["usize"]
+	usizeType := ops.s.g.namedType("usize")
 	switch ops.s.g.packedLoweringForStore(ops.storeType) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
-		u32Type := ops.s.g.result.NamedTypes["u32"]
+		u32Type := ops.s.g.namedType("u32")
 		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_index_at", func() *semantic.FuncType {
 			return &semantic.FuncType{Name: "ctx_packed_store_index_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: u32Type}
 		})

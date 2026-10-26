@@ -292,7 +292,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		fields := []C.LLVMTypeRef{storePtrType}
 		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
 	case *semantic.StoreRowViewType:
-		usizeType, err := g.lowerType(g.result.NamedTypes["usize"])
+		usizeType, err := g.lowerType(g.namedType("usize"))
 		if err != nil {
 			return nil, err
 		}
@@ -302,13 +302,13 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.CStrType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.DictType:
-		base, ok := g.result.NamedTypes["DynDict"]
+		base, ok := g.lookupNamedType("DynDict")
 		if !ok {
 			return nil, fmt.Errorf("missing runtime struct DynDict")
 		}
 		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Key, tt.Value}})
 	case *semantic.SetType:
-		base, ok := g.result.NamedTypes["DynSet"]
+		base, ok := g.lookupNamedType("DynSet")
 		if !ok {
 			return nil, fmt.Errorf("missing runtime struct DynSet")
 		}
@@ -702,7 +702,7 @@ func (g *llvmGenerator) lowerBuiltin(name string) (C.LLVMTypeRef, error) {
 	}
 }
 func (g *llvmGenerator) lookupStructType(name string) (*semantic.StructType, bool) {
-	t, ok := g.result.NamedTypes[name]
+	t, ok := g.lookupNamedType(name)
 	if !ok {
 		return nil, false
 	}

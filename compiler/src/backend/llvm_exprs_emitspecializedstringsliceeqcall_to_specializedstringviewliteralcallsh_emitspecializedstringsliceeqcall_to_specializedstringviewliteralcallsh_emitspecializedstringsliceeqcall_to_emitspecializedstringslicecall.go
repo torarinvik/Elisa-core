@@ -110,7 +110,7 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	if classifyRuntimeStringCompareKind(rightType) != runtimeStringCompareCStr {
 		return nil, nil, false, nil
 	}
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, nil, true, err
@@ -126,15 +126,15 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	if rightKind != runtimeStringCompareCStr || rightLen == nil || rightLenType == nil {
 		return nil, nil, false, nil
 	}
-	rightLenI64, err := s.coerceValue(rightLen, rightLenType, s.g.result.NamedTypes["i64"])
+	rightLenI64, err := s.coerceValue(rightLen, rightLenType, s.g.namedType("i64"))
 	if err != nil {
 		return nil, nil, true, err
 	}
 	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, rightLenI64, cStringFree("strsliceeq.len.eq"))
 	sliceZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceeq.len.zero"))
 	dataEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftData, rightData, cStringFree("strsliceeq.data.eq"))
-	usizeType := s.g.result.NamedTypes["usize"]
-	lenValue, err := s.coerceValue(leftSliceLen, s.g.result.NamedTypes["i64"], usizeType)
+	usizeType := s.g.namedType("usize")
+	lenValue, err := s.coerceValue(leftSliceLen, s.g.namedType("i64"), usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -214,7 +214,7 @@ func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C
 	if !ok || rightEnd < rightStart {
 		return nil, nil, false, nil
 	}
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, nil, true, err
@@ -230,8 +230,8 @@ func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C
 	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, rightSliceLen, cStringFree("strsliceseq.len.eq"))
 	sliceZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceseq.len.zero"))
 	dataEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftData, rightData, cStringFree("strsliceseq.data.eq"))
-	usizeType := s.g.result.NamedTypes["usize"]
-	lenValue, err := s.coerceValue(leftSliceLen, s.g.result.NamedTypes["i64"], usizeType)
+	usizeType := s.g.namedType("usize")
+	lenValue, err := s.coerceValue(leftSliceLen, s.g.namedType("i64"), usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -299,7 +299,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 			if err != nil {
 				return nil, nil, true, err
 			}
-			intType := s.g.result.NamedTypes["int"]
+			intType := s.g.namedType("int")
 			intLLVMType, err := s.g.lowerType(intType)
 			if err != nil {
 				return nil, nil, true, err
@@ -311,7 +311,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 			if err != nil {
 				return nil, nil, true, err
 			}
-			intType := s.g.result.NamedTypes["int"]
+			intType := s.g.namedType("int")
 			intLLVMType, err := s.g.lowerType(intType)
 			if err != nil {
 				return nil, nil, true, err
@@ -332,7 +332,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 			return nil, nil, false, nil
 		}
 	}
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, nil, true, err
@@ -367,8 +367,8 @@ func (s *functionState) emitGlobalStringBytes(text string, name string) C.LLVMVa
 	return global
 }
 func (s *functionState) emitInternSmallStringCall(data C.LLVMValueRef, lenValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	u8Type := s.g.result.NamedTypes["u8"]
-	usizeType := s.g.result.NamedTypes["usize"]
+	u8Type := s.g.namedType("u8")
+	usizeType := s.g.namedType("usize")
 	srcType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	retType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "intern_small_string", Params: []semantic.Type{srcType, usizeType}, Return: retType}
@@ -383,9 +383,9 @@ func (s *functionState) emitInternSmallStringCall(data C.LLVMValueRef, lenValue 
 	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{data, lenValue}, name), nil
 }
 func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, viewLen C.LLVMValueRef) (C.LLVMValueRef, error) {
-	i64Type := s.g.result.NamedTypes["i64"]
-	usizeType := s.g.result.NamedTypes["usize"]
-	voidType := s.g.result.NamedTypes["void"]
+	i64Type := s.g.namedType("i64")
+	usizeType := s.g.namedType("usize")
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	heapVoidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
 	allocType := &semantic.FuncType{Name: "alloc_perm", Params: []semantic.Type{i64Type}, Return: heapVoidRefType}
@@ -463,7 +463,7 @@ func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err

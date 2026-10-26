@@ -147,7 +147,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		return ptr, elemType, err
 	}
 	objType := s.exprType(expr.Object)
-	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
+	indexValue, _, err := s.emitExpr(expr.Index, s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -342,7 +342,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 		if !t.HasConstSize {
 			return false, nil
 		}
-		usizeLLVM, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		usizeLLVM, err := s.g.lowerType(s.g.namedType("usize"))
 		if err != nil {
 			return false, err
 		}
@@ -371,7 +371,7 @@ func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, container
 	// the trace ring just before trapping, so the fault dump shows the exact values
 	// (e.g. `oob.index = 4294967295`, `oob.count = 1712`) at the right site.
 	if s.g.emitTrace && s.g.trace != nil {
-		usize := s.g.result.NamedTypes["usize"]
+		usize := s.g.namedType("usize")
 		line := 0
 		s.g.trace.recordValue(s, line, "oob.index", indexValue, usize)
 		s.g.trace.recordValue(s, line, "oob.count", countValue, usize)
@@ -643,7 +643,7 @@ func (s *functionState) coercePackedEnumHandleValue(value C.LLVMValueRef, actual
 		if !isNumericCastType(actual) {
 			return nil, false, nil
 		}
-		coerced, err := s.coerceNumericValue(value, actual, s.g.result.NamedTypes["u32"])
+		coerced, err := s.coerceNumericValue(value, actual, s.g.namedType("u32"))
 		return coerced, true, err
 	default:
 		return nil, false, nil
@@ -704,7 +704,7 @@ func (s *functionState) emitDebugPointerDerefGuard(ptr C.LLVMValueRef) error {
 	C.LLVMBuildCondBr(s.builder, valid, okBB, failBB)
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
 	if s.g.emitTrace && s.g.trace != nil {
-		s.g.trace.recordValue(s, 0, "deref.nullptr", ptrInt, s.g.result.NamedTypes["usize"])
+		s.g.trace.recordValue(s, 0, "deref.nullptr", ptrInt, s.g.namedType("usize"))
 	}
 	if err := s.emitTrapUnreachable("pg.trap"); err != nil {
 		return err
@@ -931,7 +931,7 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		// LLVM requires integer-typed input for inttoptr; float->ptr must lower
 		// through an explicit float->uintptr conversion first.
 		if isFloatType(actual) {
-			uintptrType := s.g.result.NamedTypes["uintptr"]
+			uintptrType := s.g.namedType("uintptr")
 			if uintptrType == nil {
 				return nil, fmt.Errorf("missing builtin uintptr type for float-to-pointer cast")
 			}
@@ -1342,7 +1342,7 @@ func (s *functionState) coerceNumericValue(value C.LLVMValueRef, actual semantic
 func (s *functionState) binaryOperandType(op lexer.TokenKind, left semantic.Type, right semantic.Type) semantic.Type {
 	switch op {
 	case lexer.TOKEN_AND, lexer.TOKEN_OR:
-		return s.g.result.NamedTypes["bool"]
+		return s.g.namedType("bool")
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
 		if isNumericType(left) && isNumericType(right) {
 			return semantic.CommonNumericType(left, right)

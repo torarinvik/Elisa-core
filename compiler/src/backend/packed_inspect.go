@@ -47,7 +47,7 @@ func DescribePackedLowering(result *semantic.Result, profile PackedLoweringProfi
 				if namespace != "" {
 					qualifiedName = namespace + "." + n.Name
 				}
-				named, ok := result.NamedTypes[qualifiedName]
+				named, ok := g.lookupNamedType(qualifiedName)
 				if !ok {
 					continue
 				}
@@ -60,7 +60,7 @@ func DescribePackedLowering(result *semantic.Result, profile PackedLoweringProfi
 			}
 		}
 	}
-	if result != nil && result.File != nil && result.NamedTypes != nil {
+	if result != nil && result.File != nil && g.hasNamedTypes() {
 		collect(result.File.Decls, "")
 	}
 	if len(packedEnums) == 0 {

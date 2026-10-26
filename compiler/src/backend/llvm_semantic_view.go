@@ -16,19 +16,21 @@ func (g *llvmGenerator) installCodegenResult(next *semantic.Result) func() {
 	previousSpans, previousSpanSize := g.provenIndexSpans, g.provenIndexSpansSize
 	previousSpanResult := g.provenIndexSpansResult
 	root := next.CanonicalCodegenResult()
+	rootReads := newIRCodegenReadView(root, g.inputReads)
 	program := g.canonicalLookups
 	if program == nil || program.result != root {
 		if previousLookups != nil && previousLookups.programLookups().result == root {
 			program = previousLookups.programLookups()
 		} else {
-			program = &sharedCodegenLookups{result: root, symbolsByNode: previousSymbols, namedCount: len(root.NamedTypes), symbolCount: len(root.GlobalScope.Symbols), proofCount: root.IndexProofSpanCount()}
+			program = &sharedCodegenLookups{result: root, symbolsByNode: previousSymbols, namedCount: rootReads.NamedTypesCount("canonical-result-view-named-type-count"), symbolCount: rootReads.GlobalSymbolsCount("canonical-result-view-global-symbol-count"), proofCount: root.IndexProofSpanCount()}
 		}
 		g.canonicalLookups = program
 	}
 	g.result = next
 	g.sharedLookups = program
 	if next != root {
-		g.sharedLookups = &sharedCodegenLookups{program: program, result: next, symbolsByNode: program.symbolsByNode, namedCount: len(next.NamedTypes), symbolCount: len(next.GlobalScope.Symbols), proofCount: next.IndexProofSpanCount()}
+		nextReads := newIRCodegenReadView(next, g.inputReads)
+		g.sharedLookups = &sharedCodegenLookups{program: program, result: next, symbolsByNode: program.symbolsByNode, namedCount: nextReads.NamedTypesCount("specialized-result-view-named-type-count"), symbolCount: nextReads.GlobalSymbolsCount("specialized-result-view-global-symbol-count"), proofCount: next.IndexProofSpanCount()}
 	}
 	g.symbolsByNode = program.symbolsByNode
 	g.exprOverlay, g.boundsOverlay = nil, nil

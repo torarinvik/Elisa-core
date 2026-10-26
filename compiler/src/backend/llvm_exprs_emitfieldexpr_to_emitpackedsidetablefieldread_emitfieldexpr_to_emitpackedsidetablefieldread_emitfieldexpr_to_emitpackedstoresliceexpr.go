@@ -193,7 +193,7 @@ func (s *functionState) emitPackedStoreCountExpr(expr *ast.FieldExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	return value, s.g.result.NamedTypes["usize"], true, nil
+	return value, s.g.namedType("usize"), true, nil
 }
 func (s *functionState) emitPackedStoreCountValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
 	return (&packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}).storeCount(name)
@@ -217,7 +217,7 @@ func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+	zeroType, err := s.g.lowerType(s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -498,7 +498,7 @@ func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyI
 	}
 	switch s.g.packedModeForEnum(ops.storeType.Enum) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse, packedEnumABIAoS:
-		coerced, err := s.coerceValue(keyIndex, s.g.result.NamedTypes["u32"], ops.storeType.Enum)
+		coerced, err := s.coerceValue(keyIndex, s.g.namedType("u32"), ops.storeType.Enum)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -525,7 +525,7 @@ func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 		value, actualType, err := s.emitPackedStoreValueAtDenseKey(ops, keyIndex, "packed.store.key")
 		return value, actualType, true, err
 	}
-	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
+	indexValue, _, err := s.emitExpr(expr.Index, s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -543,11 +543,11 @@ func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (C.LLVMVal
 	if !ok {
 		return nil, nil, false, nil
 	}
-	startValue, _, err := s.emitExpr(expr.Start, s.g.result.NamedTypes["usize"])
+	startValue, _, err := s.emitExpr(expr.Start, s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}
-	endValue, _, err := s.emitExpr(expr.End, s.g.result.NamedTypes["usize"])
+	endValue, _, err := s.emitExpr(expr.End, s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}

@@ -86,7 +86,12 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 				result.EndSharedCodegen()
 			}
 		}()
-		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result))
+		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result, inputReads))
+	}
+	// When auditing is enabled, route constructor-time global-index reads
+	// through an explicit view even if shared-result memoization is disabled.
+	if inputReads != nil && len(sharedLookups) == 0 {
+		sharedLookups = append(sharedLookups, newSharedCodegenLookups(result, inputReads))
 	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.inputReads = inputReads

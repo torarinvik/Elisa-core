@@ -201,7 +201,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 		if wordBytes == 0 {
 			wordBytes = 8
 		}
-		sideBufferType := &semantic.ArrayType{Elem: s.g.result.NamedTypes["uintptr"], HasConstSize: true, ConstSize: int64(sideWords)}
+		sideBufferType := &semantic.ArrayType{Elem: s.g.namedType("uintptr"), HasConstSize: true, ConstSize: int64(sideWords)}
 		sideBufferPtr, err := s.createEntryAlloca("packed.side.words", sideBufferType)
 		if err != nil {
 			return nil, nil, err
@@ -292,7 +292,7 @@ func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumV
 	if tailIndex >= len(orderedArgs) {
 		return nil, fmt.Errorf("packed enum %s tail payload argument is missing", variant.Name)
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -384,10 +384,10 @@ func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef
 	if err != nil {
 		return nil, err
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	usizeType := s.g.result.NamedTypes["usize"]
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.namedType("usize")
 	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
 	})
@@ -415,6 +415,7 @@ func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef
 	adopted = C.LLVMBuildInsertValue(s.builder, adopted, countValue, 2, cStringFree("packed.payload.adopt.cap"))
 	return adopted, nil
 }
+
 // emitDeepAdoptElementContainers, for a darray payload whose element is a STRUCT with owned
 // container (darray) fields, copies each such field's backing into the store arena too — the
 // recursive counterpart of the shallow memcpy in emitPackedEnumPayloadDArrayAdopt. Without it a
@@ -459,7 +460,7 @@ func (s *functionState) emitDeepAdoptElementContainers(base, count C.LLVMValueRe
 	if err != nil {
 		return err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLL, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -520,7 +521,7 @@ func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPaylo
 		if err != nil {
 			return nil, err
 		}
-		usizeType := s.g.result.NamedTypes["usize"]
+		usizeType := s.g.namedType("usize")
 		usizeLLVMType, err := s.g.lowerType(usizeType)
 		if err != nil {
 			return nil, err
@@ -546,9 +547,9 @@ func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPaylo
 	return viewValue, nil
 }
 func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData C.LLVMValueRef, byteCount C.LLVMValueRef) error {
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
 	})

@@ -252,7 +252,7 @@ func (s *functionState) canonicalArmOwnerName(enumType *semantic.EnumType, patte
 		return enumType.Name
 	}
 	wanted := strings.ReplaceAll(pattern.EnumName, "::", ".")
-	if resolved, ok := s.g.result.NamedTypes[wanted].(*semantic.EnumType); ok && resolved != nil {
+	if resolved, ok := s.g.namedType(wanted).(*semantic.EnumType); ok && resolved != nil {
 		return resolved.Name
 	}
 	// A bare arm naming the scrutinee's own enum from inside its module

@@ -250,7 +250,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 			lookupName = canon
 		}
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(lookupName)
+	sym, ok := s.g.lookupGlobal(lookupName)
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown generic function %q during LLVM lowering", ident.Name)
 	}

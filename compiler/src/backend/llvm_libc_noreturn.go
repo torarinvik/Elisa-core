@@ -70,10 +70,10 @@ func (g *llvmGenerator) applyLibcNoreturnAttr(fn C.LLVMValueRef, elisaName, symb
 }
 
 func (g *llvmGenerator) isExternFuncDecl(name string) bool {
-	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+	if g == nil || g.result == nil || !g.hasGlobalScope() {
 		return false
 	}
-	sym, ok := g.result.GlobalScope.Lookup(name)
+	sym, ok := g.lookupGlobal(name)
 	if !ok || sym == nil {
 		return false
 	}

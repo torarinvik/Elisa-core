@@ -294,7 +294,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 			if expr.Op == lexer.TOKEN_BANGEQ {
 				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("cstrlit.eq.not"))
 			}
-			return cmp, s.g.result.NamedTypes["bool"], nil
+			return cmp, s.g.namedType("bool"), nil
 		}
 		if literalText, ok := s.staticCStringLiteral(firstExpr); ok {
 			cmp, err := s.emitCStrStaticLiteralEqual(secondExpr, secondType, firstExpr, literalText)
@@ -304,7 +304,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 			if expr.Op == lexer.TOKEN_BANGEQ {
 				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("cstrlit.eq.not"))
 			}
-			return cmp, s.g.result.NamedTypes["bool"], nil
+			return cmp, s.g.namedType("bool"), nil
 		}
 	}
 	if helperName == "ctx_string_view_eq" {
@@ -316,20 +316,20 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 			if expr.Op == lexer.TOKEN_BANGEQ {
 				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("strcmp.lit.not"))
 			}
-			return cmp, s.g.result.NamedTypes["bool"], nil
+			return cmp, s.g.namedType("bool"), nil
 		}
 	}
 	if cmp, ok, err := s.emitSameExtentRuntimeStringCompareExpr(expr.Op, firstExpr, firstType, secondExpr, secondType); ok {
 		if err != nil {
 			return nil, nil, err
 		}
-		return cmp, s.g.result.NamedTypes["bool"], nil
+		return cmp, s.g.namedType("bool"), nil
 	}
 	if cmp, ok, err := s.emitDisjointRuntimeStringCompareExpr(expr.Op, firstExpr, firstType, secondExpr, secondType); ok {
 		if err != nil {
 			return nil, nil, err
 		}
-		return cmp, s.g.result.NamedTypes["bool"], nil
+		return cmp, s.g.namedType("bool"), nil
 	}
 	firstValue, err := s.emitStringCompareOperandValue(firstExpr, firstType)
 	if err != nil {
@@ -339,7 +339,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	if err != nil {
 		return nil, nil, err
 	}
-	helperReturn := s.g.result.NamedTypes["int"]
+	helperReturn := s.g.namedType("int")
 	helperType := &semantic.FuncType{
 		Name:   helperName,
 		Params: []semantic.Type{firstType, secondType},
@@ -365,7 +365,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 		pred = C.LLVMIntPredicate(C.LLVMIntEQ)
 	}
 	cmp := C.LLVMBuildICmp(s.builder, pred, call, zero, cStringFree("strcmp"))
-	return cmp, s.g.result.NamedTypes["bool"], nil
+	return cmp, s.g.namedType("bool"), nil
 }
 func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
 	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.ExprsHaveSameExtent(firstExpr, secondExpr) {
@@ -391,7 +391,7 @@ func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKin
 	if lenValue == nil || lenType == nil {
 		return nil, false, nil
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	coercedLen, err := s.coerceValue(lenValue, lenType, usizeType)
 	if err != nil {
 		return nil, true, err
@@ -424,7 +424,7 @@ func (s *functionState) emitDisjointRuntimeStringCompareExpr(op lexer.TokenKind,
 	if firstLen == nil || firstLenType == nil || secondLen == nil || secondLenType == nil {
 		return nil, false, nil
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	firstCoercedLen, err := s.coerceValue(firstLen, firstLenType, usizeType)
 	if err != nil {
 		return nil, true, err
@@ -474,12 +474,12 @@ func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType 
 	}
 	switch kind {
 	case runtimeStringCompareView:
-		lenType := s.g.result.NamedTypes["i64"]
+		lenType := s.g.namedType("i64")
 		data := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("streq.view.data"))
 		length := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("streq.view.len"))
 		return data, length, lenType, kind, nil
 	case runtimeStringCompareCStr:
-		lenType := s.g.result.NamedTypes["i64"]
+		lenType := s.g.namedType("i64")
 		length, err := s.emitRuntimeStringLengthValue(value, exprType, lenType, "streq.len")
 		if err != nil {
 			return nil, nil, nil, kind, err
@@ -545,7 +545,7 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, nil, true, err
@@ -600,7 +600,7 @@ func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exp
 	if err != nil {
 		return nil, nil, err
 	}
-	i64Type := s.g.result.NamedTypes["i64"]
+	i64Type := s.g.namedType("i64")
 	stringLen, err := s.emitRuntimeStringLengthValue(stringValue, exprType, i64Type, namePrefix+".len")
 	if err != nil {
 		return nil, nil, err
@@ -620,7 +620,7 @@ func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exp
 	sliceLen := C.LLVMBuildSub(s.builder, clampedEnd, clampedStart, cStringFree(namePrefix+".slice.len"))
 	sliceData := stringValue
 	if start > 0 {
-		usizeType := s.g.result.NamedTypes["usize"]
+		usizeType := s.g.namedType("usize")
 		clampedStartUsize, err := s.coerceValue(clampedStart, i64Type, usizeType)
 		if err != nil {
 			return nil, nil, err

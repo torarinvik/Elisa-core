@@ -143,26 +143,26 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		for _, candidate := range llvmVisibleGlobalNames(namespace, n.Name) {
 			if value, ok := g.constValue(candidate); ok {
 				coercedType := expected
-				if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
-					if sym, ok := g.result.GlobalScope.Lookup(candidate); ok && sym.Kind == semantic.SymbolConst {
+				if coercedType == nil && g.result != nil && g.hasGlobalScope() {
+					if sym, ok := g.lookupGlobal(candidate); ok && sym.Kind == semantic.SymbolConst {
 						coercedType = sym.Type
 					}
 				}
 				if coercedType == nil {
-					coercedType = constValueType(g.result, value)
+					coercedType = constValueType(g, value)
 				}
 				return g.constValueAsLLVM(value, coercedType)
 			}
 		}
 		if value, ok := g.constValue(n.Name); ok {
 			coercedType := expected
-			if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
-				if sym, ok := g.result.GlobalScope.Lookup(n.Name); ok && sym.Kind == semantic.SymbolConst {
+			if coercedType == nil && g.result != nil && g.hasGlobalScope() {
+				if sym, ok := g.lookupGlobal(n.Name); ok && sym.Kind == semantic.SymbolConst {
 					coercedType = sym.Type
 				}
 			}
 			if coercedType == nil {
-				coercedType = constValueType(g.result, value)
+				coercedType = constValueType(g, value)
 			}
 			return g.constValueAsLLVM(value, coercedType)
 		}
@@ -184,7 +184,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 				coercedType = g.exprType(expr)
 			}
 			if coercedType == nil {
-				coercedType = constValueType(g.result, value)
+				coercedType = constValueType(g, value)
 			}
 			if coercedType == nil {
 				return nil, fmt.Errorf("could not infer type for constant global initializer %T", expr)
@@ -196,8 +196,8 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 			for _, candidate := range llvmVisibleGlobalNames(namespace, name) {
 				if value, ok := g.constValue(candidate); ok {
 					coercedType := expected
-					if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
-						if sym, ok := g.result.GlobalScope.Lookup(candidate); ok && sym.Kind == semantic.SymbolConst {
+					if coercedType == nil && g.result != nil && g.hasGlobalScope() {
+						if sym, ok := g.lookupGlobal(candidate); ok && sym.Kind == semantic.SymbolConst {
 							coercedType = sym.Type
 						}
 					}
@@ -205,7 +205,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 						coercedType = g.exprType(expr)
 					}
 					if coercedType == nil {
-						coercedType = constValueType(g.result, value)
+						coercedType = constValueType(g, value)
 					}
 					if coercedType == nil {
 						return nil, fmt.Errorf("could not infer type for constant global initializer %T", expr)
@@ -300,7 +300,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if value, ok := g.evalConstExpr(expr); ok {
 			coercedType := expected
 			if coercedType == nil {
-				coercedType = constValueType(g.result, value)
+				coercedType = constValueType(g, value)
 			}
 			if coercedType == nil {
 				return nil, fmt.Errorf("could not infer type for constant global initializer %T", expr)
@@ -449,10 +449,10 @@ func (g *llvmGenerator) resolveConstAggregateExpr(expr ast.Expr) (ast.Expr, sema
 }
 
 func (g *llvmGenerator) lookupGlobalConstDecl(name string) (*ast.GlobalDecl, semantic.Type, bool) {
-	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+	if g == nil || g.result == nil || !g.hasGlobalScope() {
 		return nil, nil, false
 	}
-	sym, ok := g.result.GlobalScope.Lookup(name)
+	sym, ok := g.lookupGlobal(name)
 	if !ok || sym == nil {
 		return nil, nil, false
 	}
@@ -520,7 +520,7 @@ func (g *llvmGenerator) constStringLiteralValue(value string, expected semantic.
 	if err != nil {
 		return nil, err
 	}
-	i64Type, err := g.lowerType(g.result.NamedTypes["i64"])
+	i64Type, err := g.lowerType(g.namedType("i64"))
 	if err != nil {
 		return nil, err
 	}
@@ -559,19 +559,19 @@ func (g *llvmGenerator) constValueAsLLVM(value semantic.ConstValue, expected sem
 	}
 }
 
-func constValueType(result *semantic.Result, value semantic.ConstValue) semantic.Type {
-	if result == nil {
+func constValueType(g *llvmGenerator, value semantic.ConstValue) semantic.Type {
+	if g == nil || g.result == nil {
 		return nil
 	}
 	switch value.Kind {
 	case semantic.ConstInt:
-		return result.NamedTypes["int"]
+		return g.namedType("int")
 	case semantic.ConstFloat:
-		return result.NamedTypes["f64"]
+		return g.namedType("f64")
 	case semantic.ConstBool:
-		return result.NamedTypes["bool"]
+		return g.namedType("bool")
 	case semantic.ConstString:
-		return &semantic.RefType{Elem: result.NamedTypes["u8"], State: semantic.RefStateNonNull}
+		return &semantic.RefType{Elem: g.namedType("u8"), State: semantic.RefStateNonNull}
 	default:
 		return nil
 	}

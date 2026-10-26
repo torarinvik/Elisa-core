@@ -343,8 +343,8 @@ func (g *llvmGenerator) constExprType(expr ast.Expr) semantic.Type {
 	case *ast.StringLit:
 		return &semantic.RefType{Elem: &semantic.BuiltinType{Name: "u8"}}
 	case *ast.Ident:
-		if n != nil && g.result != nil && g.result.GlobalScope != nil {
-			if sym, ok := g.result.GlobalScope.Lookup(n.Name); ok && sym != nil && sym.Kind == semantic.SymbolConst {
+		if n != nil && g.result != nil && g.hasGlobalScope() {
+			if sym, ok := g.lookupGlobal(n.Name); ok && sym != nil && sym.Kind == semantic.SymbolConst {
 				return sym.Type
 			}
 		}
@@ -1252,12 +1252,12 @@ func (g *llvmGenerator) lookupConstReflectionType(typeName string) (semantic.Typ
 	if g == nil || g.result == nil || typeName == "" {
 		return nil, false
 	}
-	if t, ok := g.result.NamedTypes[typeName]; ok {
+	if t, ok := g.lookupNamedType(typeName); ok {
 		return t, true
 	}
 	var matched semantic.Type
 	suffix := "." + typeName
-	for name, t := range g.result.NamedTypes {
+	for name, t := range g.namedTypesMap("const-reflection-suffix-scan") {
 		if strings.HasSuffix(name, suffix) {
 			if matched != nil {
 				return nil, false
@@ -1269,18 +1269,15 @@ func (g *llvmGenerator) lookupConstReflectionType(typeName string) (semantic.Typ
 }
 
 func (g *llvmGenerator) lookupStaticFunctionSymbol(name string) (result *semantic.Symbol, found bool) {
-	if g != nil && g.inputReads != nil {
-		defer func() { g.inputReads.query("static-function-resolution", name, result, found) }()
-	}
-	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+	if g == nil || g.result == nil || !g.hasGlobalScope() {
 		return nil, false
 	}
-	if sym, ok := g.result.GlobalScope.Lookup(name); ok {
+	if sym, ok := g.lookupGlobalSymbol(name, "static-function-resolution"); ok {
 		return sym, true
 	}
 	var matched *semantic.Symbol
 	suffix := "." + name
-	for symbolName, sym := range g.result.GlobalScope.Symbols {
+	for symbolName, sym := range g.globalSymbolsMap("static-function-suffix-scan") {
 		if strings.HasSuffix(symbolName, suffix) {
 			if matched != nil {
 				return nil, false

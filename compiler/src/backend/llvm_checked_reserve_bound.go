@@ -15,7 +15,7 @@ import (
 )
 
 func (s *functionState) emitReserveBoundExpr(expr ast.Expr, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	if reserveBoundNeedsCheckedArithmetic(expr) {
 		return s.emitCheckedUSizeReserveBoundExpr(expr, name)
 	}
@@ -39,7 +39,7 @@ func reserveBoundNeedsCheckedArithmetic(expr ast.Expr) bool {
 }
 
 func (s *functionState) emitCheckedUSizeReserveBoundExpr(expr ast.Expr, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return s.emitCheckedUSizeReserveBoundExpr(paren.Inner, name)
 	}
@@ -87,7 +87,7 @@ func (s *functionState) emitCheckedUSizeBinaryIntrinsic(intrinsicName string, le
 }
 
 func (s *functionState) emitUSizeBinaryOverflowIntrinsic(intrinsicName string, left, right C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, err

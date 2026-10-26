@@ -40,7 +40,7 @@ func (s *functionState) emitFlagsIndexExpr(expr *ast.IndexExpr, flagType *semant
 	if err != nil {
 		return nil, nil, err
 	}
-	u64Type := s.g.result.NamedTypes["u64"]
+	u64Type := s.g.namedType("u64")
 	indexValue, err = s.coerceValue(indexValue, indexType, u64Type)
 	if err != nil {
 		return nil, nil, err
@@ -54,5 +54,5 @@ func (s *functionState) emitFlagsIndexExpr(expr *ast.IndexExpr, flagType *semant
 	maskValue := C.LLVMBuildShl(s.builder, one, indexValue, cStringFree("flags.mask"))
 	hitValue := C.LLVMBuildAnd(s.builder, bitsValue, maskValue, cStringFree("flags.hit"))
 	boolValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), hitValue, zero, cStringFree("flags.has"))
-	return boolValue, s.g.result.NamedTypes["bool"], nil
+	return boolValue, s.g.namedType("bool"), nil
 }

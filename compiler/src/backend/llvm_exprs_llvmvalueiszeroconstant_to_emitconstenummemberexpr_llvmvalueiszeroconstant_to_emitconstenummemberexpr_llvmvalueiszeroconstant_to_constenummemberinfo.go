@@ -146,9 +146,9 @@ func (s *functionState) emitMemcpy(dst C.LLVMValueRef, src C.LLVMValueRef, sizeB
 	if sizeBytes == 0 {
 		return nil
 	}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	if voidType == nil || usizeType == nil {
 		return fmt.Errorf("missing builtin types for memcpy lowering")
 	}
@@ -178,10 +178,10 @@ func (s *functionState) emitZeroMemset(ptr C.LLVMValueRef, sizeBytes uint64, nam
 	if sizeBytes == 0 {
 		return nil
 	}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memsetValueType := s.g.result.NamedTypes["i32"]
-	usizeType := s.g.result.NamedTypes["usize"]
+	memsetValueType := s.g.namedType("i32")
+	usizeType := s.g.namedType("usize")
 	if voidType == nil || memsetValueType == nil || usizeType == nil {
 		return fmt.Errorf("missing builtin types for memset lowering")
 	}
@@ -682,7 +682,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		// expected (a runtime container constructor like `indexmap.new(owner)`), the no-Arena-field
 		// replacement for an `owner: mutable Arena&` state field. The arena param is already a
 		// `mutable Arena&` pointer value, so it is returned directly with no load.
-		arenaType := s.g.result.NamedTypes["Arena"]
+		arenaType := s.g.namedType("Arena")
 		refType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, Mutable: true}
 		return arena, refType, nil
 	}
@@ -740,7 +740,7 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 	if !ok {
 		return nil, "", false
 	}
-	base, ok := s.g.result.NamedTypes[s.errorSetQualifierName(ident)]
+	base, ok := s.g.lookupNamedType(s.errorSetQualifierName(ident))
 	if !ok {
 		return nil, "", false
 	}

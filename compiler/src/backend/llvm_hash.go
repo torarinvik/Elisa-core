@@ -30,7 +30,7 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("ctx_hash_value expects 1 argument, got %d", len(expr.Args))
 	}
-	u64Type := s.g.result.NamedTypes["u64"]
+	u64Type := s.g.namedType("u64")
 	argType := s.exprType(expr.Args[0])
 	if argType == nil {
 		return nil, nil, true, fmt.Errorf("ctx_hash_value requires a resolved argument type")

@@ -77,7 +77,7 @@ func (g *llvmGenerator) constDictLiteralValue(expr *ast.ListLitExpr, dictType *s
 	if err != nil {
 		return nil, err
 	}
-	usizeType, err := g.lowerType(g.result.NamedTypes["usize"])
+	usizeType, err := g.lowerType(g.namedType("usize"))
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (g *llvmGenerator) constDictLiteralValue(expr *ast.ListLitExpr, dictType *s
 }
 
 func (g *llvmGenerator) constDictBucketArray(expr *ast.ListLitExpr, dictType *semantic.DictType, slots []staticDictSlot, capacity int, namespace string) (C.LLVMValueRef, error) {
-	base, ok := g.result.NamedTypes["DictBucket"]
+	base, ok := g.lookupNamedType("DictBucket")
 	if !ok {
 		return nil, fmt.Errorf("missing runtime struct DictBucket")
 	}

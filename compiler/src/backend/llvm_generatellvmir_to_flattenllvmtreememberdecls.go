@@ -131,6 +131,11 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 	if configure != nil {
 		configure(g)
 	}
+	if g.inputReads != nil {
+		// newLLVMGenerator builds symbolsByNode before its configuration hook.
+		// Re-observe the exact source domain once the unit recorder is attached.
+		g.codegenReadView().GlobalSymbolsMap("generator-symbols-by-node-input")
+	}
 	g.emitDebugInfo = debugInfo
 	g.emitTrace = traceInfo
 	// ELISACORE_FORCE_BOUNDS_CHECK forces the debug index-bounds watchdog on even in
@@ -312,7 +317,7 @@ func newLLVMGenerator(result *semantic.Result, shared ...*sharedCodegenLookups) 
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
 	}
 	activeFile := result.ActiveFile()
-	if activeFile == nil || result.GlobalScope == nil {
+	if activeFile == nil || !newIRCodegenReadView(result, nil).HasGlobalScope() {
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
 	}
 	ctx := C.LLVMContextCreate()
@@ -536,7 +541,7 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		}
 	case *ast.EnumDecl:
 		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
-		t, ok := g.result.NamedTypes[qualifiedName]
+		t, ok := g.lookupNamedType(qualifiedName)
 		if !ok {
 			return fmt.Errorf("missing semantic enum type %s", qualifiedName)
 		}
@@ -749,7 +754,7 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		return nil
 	case *ast.EnumDecl:
 		qualifiedName := llvmQualifiedDeclName(namespace, n.Name)
-		t, ok := g.result.NamedTypes[qualifiedName]
+		t, ok := g.lookupNamedType(qualifiedName)
 		if !ok {
 			return fmt.Errorf("missing semantic enum type %s", qualifiedName)
 		}

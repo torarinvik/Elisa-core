@@ -25,7 +25,7 @@ func (s *functionState) emitRefinementChecks(n *ast.VarDeclStmt) error {
 	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
 		return nil
 	}
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	for _, call := range checks {
 		cond, _, err := s.emitExpr(call, boolType)
 		if err != nil {
@@ -83,7 +83,7 @@ func (s *functionState) emitReturnRefinementChecks(n *ast.ReturnStmt) error {
 // Shared by the var-decl, call-arg, and return refinement runtime tiers. `tag` names the basic
 // blocks for readable IR.
 func (s *functionState) emitRefinementCheckCalls(checks []*ast.CallExpr, tag string) error {
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	for _, call := range checks {
 		cond, _, err := s.emitExpr(call, boolType)
 		if err != nil {

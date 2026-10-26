@@ -100,8 +100,8 @@ func (s *functionState) emitRawMemcpy(dstPtr C.LLVMValueRef, srcPtr C.LLVMValueR
 	if byteCount == 0 {
 		return nil
 	}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	usizeType := s.g.result.NamedTypes["usize"]
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.namedType("usize")
 	memcpyType := &semantic.FuncType{Name: "memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
 	memcpyCallee, err := s.g.ensureFunctionDeclared("memcpy", memcpyType)
 	if err != nil {
@@ -120,7 +120,7 @@ func (s *functionState) emitRawMemcpy(dstPtr C.LLVMValueRef, srcPtr C.LLVMValueR
 	return nil
 }
 func (s *functionState) emitByteOffsetPtr(basePtr C.LLVMValueRef, byteOffset uint64, name string) (C.LLVMValueRef, error) {
-	i8Type := s.g.result.NamedTypes["u8"]
+	i8Type := s.g.namedType("u8")
 	i8LLVMType, err := s.g.lowerType(i8Type)
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps,
 		if err != nil {
 			return nil, err
 		}
-		wordPtr, err := s.createEntryAlloca(name+".word.tmp", s.g.result.NamedTypes["uintptr"])
+		wordPtr, err := s.createEntryAlloca(name+".word.tmp", s.g.namedType("uintptr"))
 		if err != nil {
 			return nil, err
 		}

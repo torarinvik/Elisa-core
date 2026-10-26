@@ -23,7 +23,7 @@ func (g *llvmGenerator) permArenaGlobal() (C.LLVMValueRef, error) {
 	if value, ok := g.globals[permArenaGlobalName]; ok {
 		return value, nil
 	}
-	arenaType := g.result.NamedTypes["Arena"]
+	arenaType := g.namedType("Arena")
 	if arenaType == nil {
 		return nil, fmt.Errorf("missing builtin Arena type for perm region")
 	}

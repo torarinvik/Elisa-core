@@ -568,7 +568,7 @@ func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	indexValue, err := s.coerceValue(keyIndex, s.g.result.NamedTypes["u32"], s.g.result.NamedTypes["usize"])
+	indexValue, err := s.coerceValue(keyIndex, s.g.namedType("u32"), s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}

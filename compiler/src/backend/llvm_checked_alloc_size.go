@@ -18,7 +18,7 @@ import "C"
 // against the constant SIZE_MAX/elemSize (no umul intrinsic needed). For
 // elemSize <= 1 the product cannot exceed countValue, so the check is skipped.
 func (s *functionState) emitCheckedElemByteCount(countValue C.LLVMValueRef, elemSize uint64, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err

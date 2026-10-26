@@ -82,7 +82,7 @@ import (
 )
 
 func (s *functionState) emitTreeOwnerAllocBytes(owner treeAllocOwnerBinding, byteCount C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	if owner.arenaRef == nil && owner.arenaRefPtr != nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, name+".owner.arena")
 		if err != nil {
@@ -93,9 +93,9 @@ func (s *functionState) emitTreeOwnerAllocBytes(owner treeAllocOwnerBinding, byt
 	if owner.arenaRef == nil {
 		return nil, fmt.Errorf("missing Arena owner for allocation")
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}

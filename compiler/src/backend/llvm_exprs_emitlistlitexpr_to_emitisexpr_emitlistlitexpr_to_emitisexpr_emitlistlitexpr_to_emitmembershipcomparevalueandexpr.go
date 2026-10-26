@@ -264,7 +264,7 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	if err != nil {
 		return nil, nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, err
@@ -283,8 +283,8 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 		literalCapacity = darrayLiteralMinCapacity
 	}
 	byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(literalCapacity)*elemSize), 0)
-	arenaType := s.g.result.NamedTypes["Arena"]
-	voidType := s.g.result.NamedTypes["void"]
+	arenaType := s.g.namedType("Arena")
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
@@ -481,8 +481,8 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	idxName := s.g.nextSyntheticName("list.comp.i.")
 	idxIdent := &ast.Ident{Position: pos, Name: idxName}
 	var usizeType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		usizeType = s.g.result.NamedTypes["usize"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		usizeType = s.g.namedType("usize")
 	}
 	srcCount := func() ast.Expr {
 		fe := &ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}
@@ -614,9 +614,9 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 		srcType = ref.Elem
 	}
 	var usizeType, u8Type semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		usizeType = s.g.result.NamedTypes["usize"]
-		u8Type = s.g.result.NamedTypes["u8"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		usizeType = s.g.namedType("usize")
+		u8Type = s.g.namedType("u8")
 	}
 	if usizeType == nil {
 		return nil, false
@@ -639,7 +639,7 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 		if u8Type == nil {
 			return nil, false
 		}
-		srcElem, countField, countType = u8Type, "len", s.g.result.NamedTypes["i64"]
+		srcElem, countField, countType = u8Type, "len", s.g.namedType("i64")
 		if countType == nil {
 			return nil, false
 		}
@@ -761,8 +761,8 @@ func (s *functionState) fusedDictExtendComprehensionBlock(dstExpr, arg ast.Expr,
 		return nil, false
 	}
 	var usizeType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		usizeType = s.g.result.NamedTypes["usize"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		usizeType = s.g.namedType("usize")
 	}
 	if usizeType == nil {
 		return nil, false
@@ -874,8 +874,8 @@ func (s *functionState) fusedFilteredExtendComprehensionBlock(dstExpr, arg ast.E
 		return nil, false
 	}
 	var usizeType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		usizeType = s.g.result.NamedTypes["usize"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		usizeType = s.g.namedType("usize")
 	}
 	if usizeType == nil {
 		return nil, false
@@ -981,8 +981,8 @@ func (s *functionState) fusedRangeExtendComprehensionBlock(dstExpr, arg ast.Expr
 		return nil, false
 	}
 	var usizeType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		usizeType = s.g.result.NamedTypes["usize"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		usizeType = s.g.namedType("usize")
 	}
 	if usizeType == nil {
 		return nil, false
@@ -998,8 +998,8 @@ func (s *functionState) fusedRangeExtendComprehensionBlock(dstExpr, arg ast.Expr
 		return nil, false
 	}
 	var boolType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		boolType = s.g.result.NamedTypes["bool"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		boolType = s.g.namedType("bool")
 	}
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
@@ -1122,8 +1122,8 @@ func (s *functionState) fusedPushExtendComprehensionBlock(dstExpr, arg ast.Expr,
 	loop := comprehensionLoopStmt(comp, pushCall)
 
 	var usizeType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		usizeType = s.g.result.NamedTypes["usize"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		usizeType = s.g.namedType("usize")
 	}
 	value := ast.Expr(&ast.IntLit{Position: pos, Value: "0"})
 	if usizeType != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
@@ -1227,8 +1227,8 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 		return nil, false
 	}
 	var boolType semantic.Type
-	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
-		boolType = s.g.result.NamedTypes["bool"]
+	if s.g != nil && s.g.result != nil && s.g.hasNamedTypes() {
+		boolType = s.g.namedType("bool")
 	}
 	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
 		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
@@ -1439,7 +1439,7 @@ func (s *functionState) emitQueryExpr(expr *ast.QueryExpr) (C.LLVMValueRef, sema
 			}
 			patternFilter = nil
 			if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
-				boolType := s.g.result.NamedTypes["bool"]
+				boolType := s.g.namedType("bool")
 				{
 					key, value := failValue, boolType
 					s.g.setResultExprType(key, value)
@@ -1669,7 +1669,7 @@ func (s *functionState) emitBoolLiteral(expr *ast.BoolLit) (C.LLVMValueRef, sema
 	if expr.Value {
 		raw = 1
 	}
-	return C.LLVMConstInt(llvmType, raw, 0), s.g.result.NamedTypes["bool"], nil
+	return C.LLVMConstInt(llvmType, raw, 0), s.g.namedType("bool"), nil
 }
 func (s *functionState) emitNullLiteral() (C.LLVMValueRef, semantic.Type, error) {
 	ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
@@ -1829,13 +1829,13 @@ func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef
 			return nil, nil, err
 		}
 		value := s.buildCall(llvmType, callee, []C.LLVMValueRef{setValue, leftValue}, "set.in")
-		return value, s.g.result.NamedTypes["bool"], nil
+		return value, s.g.namedType("bool"), nil
 	}
 	list, ok := s.membershipCandidateList(expr.Right)
 	if !ok || list == nil {
 		return nil, nil, fmt.Errorf("membership operator requires a list literal or tokenset on the right-hand side")
 	}
-	resultType := s.g.result.NamedTypes["bool"]
+	resultType := s.g.namedType("bool")
 	boolLLVMType := C.LLVMInt1TypeInContext(s.g.context)
 	if len(list.Elems) == 0 {
 		return C.LLVMConstInt(boolLLVMType, 0, 0), resultType, nil
@@ -1879,10 +1879,10 @@ func (s *functionState) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr
 		return &ast.ListLitExpr{Position: rangeExpr.Pos(), Elems: []ast.Expr{rangeExpr}}, true
 	}
 	ident, ok := expr.(*ast.Ident)
-	if !ok || ident == nil || s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+	if !ok || ident == nil || s == nil || s.g == nil || s.g.result == nil || !s.g.hasGlobalScope() {
 		return nil, false
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	sym, ok := s.g.lookupGlobal(ident.Name)
 	if !ok || sym == nil {
 		return nil, false
 	}
@@ -1931,10 +1931,10 @@ func (s *functionState) backendCharsetMembershipElems(terms []ast.LexerCharClass
 }
 
 func (s *functionState) backendCharsetRef(name string) *ast.CharsetDecl {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.hasGlobalScope() {
 		return nil
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(name)
+	sym, ok := s.g.lookupGlobal(name)
 	if !ok || sym == nil {
 		return nil
 	}
@@ -1946,7 +1946,7 @@ func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueR
 		return s.emitMembershipRangeCompareValueAndExpr(leftValue, leftType, rangeExpr)
 	}
 	rightType := s.exprType(rightExpr)
-	resultType := s.g.result.NamedTypes["bool"]
+	resultType := s.g.namedType("bool")
 	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(leftType, rightType); ok {
 		return s.emitRuntimeStringCompareValues(lexer.TOKEN_EQEQ, leftValue, leftType, rightExpr, helperName, firstType, secondType, swap)
 	}

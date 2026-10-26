@@ -42,7 +42,7 @@ func (s *functionState) lambdaVoidRefType() *semantic.RefType {
 	}
 	if s.g.cachedVoidRefType == nil {
 		s.g.cachedVoidRefType = &semantic.RefType{
-			Elem:            s.g.result.NamedTypes["void"],
+			Elem:            s.g.namedType("void"),
 			State:           semantic.RefStateNonNull,
 			Storage:         semantic.RefStorageAny,
 			ExplicitStorage: true,
@@ -87,7 +87,7 @@ func (s *functionState) lambdaCaptureBindings(expr *ast.LambdaExpr) ([]lambdaCap
 }
 
 func (s *functionState) emitMallocBytes(byteCount uint64, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	llvmSizeType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func (s *functionState) emitLambdaEnvironment(captures []lambdaCaptureBinding, n
 }
 
 func (s *functionState) tagLambdaClosurePointer(ptr C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	llvmSizeType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -327,7 +327,7 @@ func (s *functionState) emitFunctionValueCall(calleeValue C.LLVMValueRef, funcTy
 	if err != nil {
 		return nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	llvmSizeType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err

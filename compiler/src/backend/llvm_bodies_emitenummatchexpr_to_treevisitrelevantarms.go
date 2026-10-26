@@ -11,10 +11,10 @@ void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigne
 import "C"
 
 import (
-	"strings"
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"strings"
 )
 
 // resolveEnumArmVariant resolves a match arm's variant against the scrutinee enum or, for a sealed
@@ -27,7 +27,7 @@ func (s *functionState) resolveEnumArmVariant(enumType *semantic.EnumType, patte
 		// carry the module prefix, so `Ui::Container` and a bare `Container`
 		// written inside `module Ui` both have to find `Ui.Container`.
 		wanted := strings.ReplaceAll(pattern.EnumName, "::", ".")
-		if resolved, ok := s.g.result.NamedTypes[wanted].(*semantic.EnumType); ok && resolved != nil {
+		if resolved, ok := s.g.namedType(wanted).(*semantic.EnumType); ok && resolved != nil {
 			owner = resolved
 		} else if refinement := findEnumRefinementNamed(enumType, wanted); refinement != nil {
 			owner = refinement

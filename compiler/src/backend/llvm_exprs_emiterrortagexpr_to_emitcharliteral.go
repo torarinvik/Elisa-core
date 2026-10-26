@@ -813,7 +813,7 @@ func (s *functionState) emitGetDictIndexExpr(idx *ast.IndexExpr, recovery *ast.R
 // otherwise it runs the recovery clause. The bounds are usize (unsigned), so the
 // non-negativity of start is free.
 func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	startValue, _, err := s.emitExpr(slice.Start, usizeType)
 	if err != nil {
 		return nil, nil, err
@@ -839,7 +839,7 @@ func (s *functionState) emitGetCheckedSliceExpr(slice *ast.SliceExpr, recovery *
 // bounds check: a constant for fixed-size arrays, the runtime count field for
 // dynamic containers (darray / view / darray-view).
 func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVM, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -867,7 +867,7 @@ func (s *functionState) emitSliceSourceLength(slice *ast.SliceExpr) (C.LLVMValue
 // emitGetCheckedIndexExpr emits a bounds-checked container access: in-range
 // produces the element, out-of-range runs the recovery clause.
 func (s *functionState) emitGetCheckedIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	indexValue, _, err := s.emitExpr(idx.Index, usizeType)
 	if err != nil {
 		return nil, nil, err
@@ -988,7 +988,7 @@ func (s *functionState) emitGetBranch(okCond C.LLVMValueRef, okValue func() (C.L
 func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {
-		t = s.g.result.NamedTypes["int"]
+		t = s.g.namedType("int")
 	}
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
@@ -1003,7 +1003,7 @@ func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semant
 func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (C.LLVMValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {
-		t = s.g.result.NamedTypes["f64"]
+		t = s.g.namedType("f64")
 	}
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
@@ -1022,7 +1022,7 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic
 		// Synthetic literal with no analyzed type (e.g. a backend-built contract-failure
 		// message): a global string pointer is exactly a `u8&`, which is what the panic
 		// message coercer accepts. Without this it falls back to the default "panic" text.
-		resultType = &semantic.RefType{Elem: s.g.result.NamedTypes["u8"]}
+		resultType = &semantic.RefType{Elem: s.g.namedType("u8")}
 	}
 	if expected != nil && isStringViewCarrierType(expected) {
 		resultType = expected
@@ -1040,7 +1040,7 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic
 		if err != nil {
 			return nil, nil, err
 		}
-		i64Type, err := s.g.lowerType(s.g.result.NamedTypes["i64"])
+		i64Type, err := s.g.lowerType(s.g.namedType("i64"))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1054,7 +1054,7 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic
 func (s *functionState) emitCharLiteral(expr *ast.CharLit) (C.LLVMValueRef, semantic.Type, error) {
 	t := s.exprType(expr)
 	if t == nil {
-		t = s.g.result.NamedTypes["char"]
+		t = s.g.namedType("char")
 	}
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {

@@ -22,9 +22,9 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 	if err != nil {
 		return nil, err
 	}
-	u32Type := ops.s.g.result.NamedTypes["u32"]
-	usizeType := ops.s.g.result.NamedTypes["usize"]
-	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
+	u32Type := ops.s.g.namedType("u32")
+	usizeType := ops.s.g.namedType("usize")
+	uintptrType := ops.s.g.namedType("uintptr")
 	coercedIndex, err := ops.s.coerceValue(indexValue, ops.storeType.Enum, u32Type)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (ops *packedStoreOps) storeTagsView(startValue C.LLVMValueRef, endValue C.L
 	}
 	helperType := &semantic.FuncType{
 		Name:   "ctx_packed_store_tags_view",
-		Params: []semantic.Type{ops.voidRefType(), ops.s.g.result.NamedTypes["usize"], ops.s.g.result.NamedTypes["usize"]},
+		Params: []semantic.Type{ops.voidRefType(), ops.s.g.namedType("usize"), ops.s.g.namedType("usize")},
 		Return: resultType,
 	}
 	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_tags_view", helperType)

@@ -318,7 +318,7 @@ func (s *functionState) emitCheckpointBindingFromTarget(name string, target ast.
 	var binding checkpointBinding
 	if ident, ok := target.(*ast.Ident); ok {
 		if regionBinding, ok := s.lookupBinding(ident.Name); ok && semantic.IsArenaValueOrRefType(regionBinding.typ) {
-			markType := s.g.result.NamedTypes["ArenaMark"]
+			markType := s.g.namedType("ArenaMark")
 			if markType == nil {
 				return checkpointBinding{}, fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
 			}

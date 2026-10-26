@@ -52,7 +52,7 @@ func (s *functionState) registerDropCleanup(name string, alloca C.LLVMValueRef, 
 	if hook == "" {
 		return false, nil
 	}
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	if boolType == nil {
 		return false, nil
 	}
@@ -87,7 +87,7 @@ func (s *functionState) clearDropLiveFlag(binding scopedCleanupBinding) error {
 	if binding.kind != scopedCleanupDrop || binding.flagPtr == nil {
 		return nil
 	}
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	llvmBool, err := s.g.lowerType(boolType)
 	if err != nil {
 		return err
@@ -106,7 +106,7 @@ func (s *functionState) emitConditionalDrop(binding scopedCleanupBinding) error 
 	if binding.flagPtr == nil || binding.dropHook == "" {
 		return nil
 	}
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	llvmBool, err := s.g.lowerType(boolType)
 	if err != nil {
 		return err

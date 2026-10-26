@@ -98,7 +98,7 @@ func (s *functionState) emitStoreRowsCount(sourceAlloca C.LLVMValueRef, sourceTy
 		return nil, err
 	}
 	if rowsType.Store == nil || len(rowsType.Store.StoreFieldOrder) == 0 {
-		usizeType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		usizeType, err := s.g.lowerType(s.g.namedType("usize"))
 		if err != nil {
 			return nil, err
 		}

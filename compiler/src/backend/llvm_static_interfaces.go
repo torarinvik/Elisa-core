@@ -36,7 +36,7 @@ func (s *functionState) resolveStaticInterfaceMethod(expr *ast.FieldExpr) (*sema
 		if ownerName, ok := backendQualifiedTypePath(expr.Object); ok && ownerName != "" {
 			if bound, ok := s.typeMap[ownerName]; ok && bound != nil {
 				receiver = bound
-			} else if named, ok := s.g.result.NamedTypes[ownerName]; ok && named != nil {
+			} else if named, ok := s.g.lookupNamedType(ownerName); ok && named != nil {
 				receiver = named
 			}
 		}
@@ -119,7 +119,7 @@ func (s *functionState) resolveStaticAssociatedType(name string) (semantic.Type,
 	var receiver semantic.Type
 	if bound, ok := s.typeMap[ownerName]; ok && bound != nil {
 		receiver = bound
-	} else if named, ok := s.g.result.NamedTypes[ownerName]; ok && named != nil {
+	} else if named, ok := s.g.lookupNamedType(ownerName); ok && named != nil {
 		receiver = named
 	} else {
 		return nil, false, nil

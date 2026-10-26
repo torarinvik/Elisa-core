@@ -65,7 +65,7 @@ func (s *functionState) emitConditionBranchWithBindings(expr ast.Expr, trueBB C.
 		}
 		return s.emitConditionPatternTestAndBind(pattern, leftValue, leftType, leftExpr, trueBB, falseBB)
 	}
-	condValue, _, err := s.emitExpr(expr, s.g.result.NamedTypes["bool"])
+	condValue, _, err := s.emitExpr(expr, s.g.namedType("bool"))
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 
 	C.LLVMBuildBr(s.builder, condBB)
 	C.LLVMPositionBuilderAtEnd(s.builder, condBB)
-	condValue, _, err := s.emitExpr(stmt.Cond, s.g.result.NamedTypes["bool"])
+	condValue, _, err := s.emitExpr(stmt.Cond, s.g.namedType("bool"))
 	if err != nil {
 		return err
 	}

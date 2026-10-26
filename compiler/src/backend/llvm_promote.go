@@ -139,8 +139,8 @@ func (s *functionState) emitPromoteDArray(sourceValue C.LLVMValueRef, t *semanti
 // emitArenaMemcpy emits a runtime arena_memcpy(dst, src, byteCount) for a runtime-sized
 // bulk copy (LLVM's loop-idiom pass lowers the byte loop to a real memcpy).
 func (s *functionState) emitArenaMemcpy(dstPtr, srcPtr, byteCount C.LLVMValueRef, name string) error {
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	usizeType := s.g.result.NamedTypes["usize"]
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.namedType("usize")
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
 	})
@@ -158,7 +158,7 @@ func (s *functionState) emitArenaMemcpy(dstPtr, srcPtr, byteCount C.LLVMValueRef
 
 // constUsize materializes a compile-time usize constant.
 func (s *functionState) constUsize(v uint64) (C.LLVMValueRef, error) {
-	usizeLLVMType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+	usizeLLVMType, err := s.g.lowerType(s.g.namedType("usize"))
 	if err != nil {
 		return nil, err
 	}

@@ -41,8 +41,8 @@ func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 // `pool workers(w):` scope: default_pool() (a cost-free zeroed dispatcher) plus a perf_cores()
 // worker count. Both are runtime calls; the ThreadPool is stored in a fresh alloca for pool_submit1.
 func (s *functionState) defaultParallelForPool(stmt *ast.ParallelForStmt) (activePoolBinding, error) {
-	poolType := s.g.result.NamedTypes["ThreadPool"]
-	usizeType := s.g.result.NamedTypes["usize"]
+	poolType := s.g.namedType("ThreadPool")
+	usizeType := s.g.namedType("usize")
 	defCallee, defType, err := s.ensureRuntimeFunction("default_pool", nil)
 	if err != nil {
 		return activePoolBinding{}, err
@@ -109,13 +109,13 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 		lengthField = "count" // Slice[T] exposes its length as `count`
 	}
 	totalExpr := &ast.FieldExpr{Position: stmt.Position, Object: sourceIdent, Field: lengthField}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	totalValue, _, err := s.emitExpr(totalExpr, usizeType)
 	if err != nil {
 		return err
 	}
 
-	groupType := s.g.result.NamedTypes["TaskGroup"]
+	groupType := s.g.namedType("TaskGroup")
 	groupAlloca, err := s.createEntryAlloca(groupName, groupType)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	if err != nil {
 		return err
 	}
-	poolSubmit, poolSubmitType, err := s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.result.NamedTypes["i64"]})
+	poolSubmit, poolSubmitType, err := s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.namedType("i64")})
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	if err != nil {
 		return err
 	}
-	taskGroupAdd, taskGroupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": s.g.result.NamedTypes["i64"]})
+	taskGroupAdd, taskGroupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": s.g.namedType("i64")})
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	workerName := prefix + "_worker"
 	// The worker returns i64 (not void): pool_submit1 boxes the result type, and boxing a void
 	// value crashes lowering. Workers return a dummy 0 -- matching the each()/nursery convention.
-	i64Type := s.g.result.NamedTypes["i64"]
+	i64Type := s.g.namedType("i64")
 	workerType := &semantic.FuncType{Name: workerName, Params: []semantic.Type{chunkType}, Return: i64Type}
 	workerFn, err := s.g.addFunction(workerName, workerType)
 	if err != nil {
@@ -351,7 +351,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	body = append(body, &ast.ReturnStmt{Position: stmt.Position, Value: &ast.IntLit{Position: stmt.Position, Value: "0"}})
 
 	{
-		key, value := condExpr, s.g.result.NamedTypes["bool"]
+		key, value := condExpr, s.g.namedType("bool")
 		s.g.setResultExprType(key, value)
 	}
 
@@ -368,7 +368,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	return workerFn, workerType, chunkType, nil
 }
 func (s *functionState) buildParallelForChunkType(info *semantic.ParallelForInfo, prefix string) (*semantic.StructType, error) {
-	usize := s.g.result.NamedTypes["usize"]
+	usize := s.g.namedType("usize")
 	var fields map[string]semantic.Field
 	var declFields []ast.FieldDecl
 	if info.BandMode {
@@ -429,7 +429,7 @@ func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInf
 		if err != nil {
 			return nil, err
 		}
-		usizeLLVM, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		usizeLLVM, err := s.g.lowerType(s.g.namedType("usize"))
 		if err != nil {
 			return nil, err
 		}
@@ -463,7 +463,7 @@ func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInf
 	return chunkValue, nil
 }
 func (s *functionState) ensureRuntimeFunction(name string, bindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
-	sym, ok := s.g.result.GlobalScope.Lookup(name)
+	sym, ok := s.g.lookupGlobal(name)
 	if !ok {
 		return nil, nil, fmt.Errorf("missing runtime function %q", name)
 	}
@@ -523,7 +523,7 @@ func (s *functionState) emitConditionalMutexUnlock(guard scopedCleanupBinding) e
 		return err
 	}
 	handleValue := C.LLVMBuildExtractValue(s.builder, guardValue, 0, cStringFree("lock.guard.handle"))
-	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
+	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 	if err != nil {
 		return err
 	}
@@ -556,7 +556,7 @@ func (s *functionState) emitConditionalPoolShutdown(pool scopedCleanupBinding) e
 		return err
 	}
 	handleValue := C.LLVMBuildExtractValue(s.builder, poolValue, 0, cStringFree("pool.handle"))
-	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
+	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 	if err != nil {
 		return err
 	}
@@ -583,7 +583,7 @@ func (s *functionState) emitConditionalPoolShutdown(pool scopedCleanupBinding) e
 }
 func (s *functionState) emitPoolShutdown(poolPtr C.LLVMValueRef, poolType semantic.Type) error {
 	poolRefType := &semantic.RefType{Elem: poolType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "pool_shutdown", Params: []semantic.Type{poolRefType}, Return: s.g.result.NamedTypes["void"]}
+	helperType := &semantic.FuncType{Name: "pool_shutdown", Params: []semantic.Type{poolRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("pool_shutdown", helperType)
 	if err != nil {
 		return err
@@ -613,7 +613,7 @@ func regionStrategyTag(allocator string) int {
 	}
 }
 func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr, allocator string) error {
-	capacityType := s.g.result.NamedTypes["usize"]
+	capacityType := s.g.namedType("usize")
 	var capacityValue C.LLVMValueRef
 	if capacityExpr != nil {
 		value, _, err := s.emitExpr(capacityExpr, capacityType)
@@ -635,8 +635,8 @@ func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semant
 // and strategy tag (used for inferred reserve_commit stacks, where the capacity is a derived value
 // rather than a surface expression).
 func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityValue C.LLVMValueRef, strategyTag int) error {
-	capacityType := s.g.result.NamedTypes["usize"]
-	regionType := s.g.result.NamedTypes["Region"]
+	capacityType := s.g.namedType("usize")
+	regionType := s.g.namedType("Region")
 	if regionType == nil {
 		return fmt.Errorf("missing builtin Region type for region initialization")
 	}
@@ -648,7 +648,7 @@ func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType s
 	// The ARENA_STRATEGY_* tag selects the block source (MALLOC -> libc, everything else -> mmap)
 	// and is recorded in Arena.strategy (field 3) so growth (arena_alloc/arena_realloc) and
 	// teardown (arena_free) honor it. CHAINED (0) leaves the zero-initialized field untouched.
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.namedType("int")
 	intLLVMType, lerr := s.g.lowerType(intType)
 	if lerr != nil {
 		return lerr
@@ -683,10 +683,10 @@ func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType s
 // explicit regions bypass that path, so omitting this call loses their lifecycle
 // entirely from the profiler stream.
 func (s *functionState) emitRegionProfileCreate(arenaPtr C.LLVMValueRef, regionValue C.LLVMValueRef, capacityValue C.LLVMValueRef) error {
-	u32Type := s.g.result.NamedTypes["u32"]
-	uintptrType := s.g.result.NamedTypes["uintptr"]
-	usizeType := s.g.result.NamedTypes["usize"]
-	voidType := s.g.result.NamedTypes["void"]
+	u32Type := s.g.namedType("u32")
+	uintptrType := s.g.namedType("uintptr")
+	usizeType := s.g.namedType("usize")
+	voidType := s.g.namedType("void")
 	if u32Type == nil || uintptrType == nil || usizeType == nil || voidType == nil {
 		return fmt.Errorf("missing builtin type for profiler region-create event")
 	}
@@ -738,7 +738,7 @@ func (s *functionState) emitRegionProfileCreate(arenaPtr C.LLVMValueRef, regionV
 }
 func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "arena_free", Params: []semantic.Type{arenaRefType}, Return: s.g.result.NamedTypes["void"]}
+	helperType := &semantic.FuncType{Name: "arena_free", Params: []semantic.Type{arenaRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_free", helperType)
 	if err != nil {
 		return err
@@ -751,7 +751,7 @@ func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semanti
 	return nil
 }
 func (s *functionState) emitArenaSnapshot(arenaPtr C.LLVMValueRef, arenaType semantic.Type) (C.LLVMValueRef, error) {
-	markType := s.g.result.NamedTypes["ArenaMark"]
+	markType := s.g.namedType("ArenaMark")
 	if markType == nil {
 		return nil, fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
 	}
@@ -769,7 +769,7 @@ func (s *functionState) emitArenaSnapshot(arenaPtr C.LLVMValueRef, arenaType sem
 }
 func (s *functionState) emitArenaRewind(arenaPtr C.LLVMValueRef, arenaType semantic.Type, markValue C.LLVMValueRef, markType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "arena_rewind", Params: []semantic.Type{arenaRefType, markType}, Return: s.g.result.NamedTypes["void"]}
+	helperType := &semantic.FuncType{Name: "arena_rewind", Params: []semantic.Type{arenaRefType, markType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_rewind", helperType)
 	if err != nil {
 		return err
@@ -783,7 +783,7 @@ func (s *functionState) emitArenaRewind(arenaPtr C.LLVMValueRef, arenaType seman
 }
 func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "arena_reset", Params: []semantic.Type{arenaRefType}, Return: s.g.result.NamedTypes["void"]}
+	helperType := &semantic.FuncType{Name: "arena_reset", Params: []semantic.Type{arenaRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_reset", helperType)
 	if err != nil {
 		return err
@@ -797,7 +797,7 @@ func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semant
 }
 func (s *functionState) emitArenaAdopt(parentPtr C.LLVMValueRef, childPtr C.LLVMValueRef, arenaType semantic.Type) error {
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "arena_adopt", Params: []semantic.Type{arenaRefType, arenaRefType}, Return: s.g.result.NamedTypes["void"]}
+	helperType := &semantic.FuncType{Name: "arena_adopt", Params: []semantic.Type{arenaRefType, arenaRefType}, Return: s.g.namedType("void")}
 	callee, err := s.g.ensureFunctionDeclared("arena_adopt", helperType)
 	if err != nil {
 		return err

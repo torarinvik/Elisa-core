@@ -218,7 +218,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		if err = g.noteType(tt.Value); err != nil {
 			break
 		}
-		base, ok := g.result.NamedTypes["DynDict"]
+		base, ok := g.lookupNamedType("DynDict")
 		if !ok {
 			err = fmt.Errorf("missing runtime struct DynDict")
 			break
@@ -228,7 +228,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		if err = g.noteType(tt.Elem); err != nil {
 			break
 		}
-		base, ok := g.result.NamedTypes["DynSet"]
+		base, ok := g.lookupNamedType("DynSet")
 		if !ok {
 			err = fmt.Errorf("missing runtime struct DynSet")
 			break
@@ -320,13 +320,13 @@ func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncTyp
 	return value, nil
 }
 func (g *llvmGenerator) llvmSymbolName(name string) string {
-	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+	if g == nil || g.result == nil || !g.hasGlobalScope() {
 		return name
 	}
 	if impl := g.sameNameExportImplSymbol(name); impl != "" {
 		return impl
 	}
-	sym, ok := g.result.GlobalScope.Lookup(name)
+	sym, ok := g.lookupGlobal(name)
 	if !ok || sym == nil || strings.TrimSpace(sym.LinkName) == "" {
 		return name
 	}
@@ -411,10 +411,10 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 // latter for the core symbol and this string attribute for the component
 // interface/package namespace.
 func (g *llvmGenerator) wasmImportModule(name string) string {
-	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+	if g == nil || g.result == nil || !g.hasGlobalScope() {
 		return ""
 	}
-	sym, ok := g.result.GlobalScope.Lookup(name)
+	sym, ok := g.lookupGlobal(name)
 	if !ok || sym == nil {
 		return ""
 	}

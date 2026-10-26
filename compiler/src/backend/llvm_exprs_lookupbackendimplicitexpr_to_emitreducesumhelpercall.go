@@ -91,8 +91,8 @@ func (s *functionState) lookupBackendImplicitExpr(name string, working map[strin
 	if _, ok := s.lookupBinding(name); ok {
 		return &ast.Ident{Name: name}, true
 	}
-	if s.g != nil && s.g.result != nil && s.g.result.GlobalScope != nil {
-		if _, ok := s.g.result.GlobalScope.Lookup(name); ok {
+	if s.g != nil && s.g.result != nil && s.g.hasGlobalScope() {
+		if _, ok := s.g.lookupGlobal(name); ok {
 			return &ast.Ident{Name: name}, true
 		}
 	}
@@ -178,7 +178,7 @@ func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, 
 	}
 	resultType := s.exprType(expr)
 	if resultType == nil {
-		resultType = s.g.result.NamedTypes["bool"]
+		resultType = s.g.namedType("bool")
 	}
 	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
 	if err != nil {
@@ -197,12 +197,12 @@ func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	boolLLVMType, err := s.g.lowerType(boolType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -312,7 +312,7 @@ func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (C.LLVMValueRe
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	indexValue, _, err := s.emitExpr(expr.Args[1], usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -353,7 +353,7 @@ func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	chunkSizeValue, _, err := s.emitExpr(expr.Args[1], usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -411,7 +411,7 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 		return nil, nil, true, err
 	}
 	totalValue := C.LLVMBuildExtractValue(s.builder, srcValue, 1, cStringFree("reduce_sum.total"))
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err

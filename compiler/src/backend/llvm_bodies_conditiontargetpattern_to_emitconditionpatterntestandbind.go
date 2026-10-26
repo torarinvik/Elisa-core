@@ -116,7 +116,7 @@ func (s *functionState) enumCategoryAliasTarget(enumType *semantic.EnumType, tar
 	default:
 		return nil, false
 	}
-	category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType)
+	category, ok := s.g.namedType(name).(*semantic.EnumType)
 	if !ok || category == nil || !semantic.EnumDescendsFrom(category, enumType) {
 		return nil, false
 	}
@@ -208,7 +208,7 @@ func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVM
 	// `if arr[a:b] is s:` — a bounds-checked slice. "Present" means the bounds
 	// are within the source; the bound value is the bounded view.
 	if slice, ok := unwrapToSliceForBind(expr.Value); ok {
-		usizeType := s.g.result.NamedTypes["usize"]
+		usizeType := s.g.namedType("usize")
 		startValue, _, err := s.emitExpr(slice.Start, usizeType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -276,7 +276,7 @@ func (s *functionState) emitOptionalBindExpr(expr *ast.OptionalBindExpr) (C.LLVM
 	if err != nil {
 		return nil, nil, err
 	}
-	return presentValue, s.g.result.NamedTypes["bool"], nil
+	return presentValue, s.g.namedType("bool"), nil
 }
 func (s *functionState) emitOptionalBindCondition(expr *ast.OptionalBindExpr, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) error {
 	presentValue, boundValue, _, err := s.emitOptionalBindTest(expr)

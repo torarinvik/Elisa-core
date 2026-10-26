@@ -149,7 +149,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 			truncated := C.LLVMBuildTrunc(s.builder, wordValue, bitsType, cStringFree(name+".bits"))
 			coerced = C.LLVMBuildBitCast(s.builder, truncated, fieldLLVMType, cStringFree(name+".float"))
 		} else {
-			converted, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+			converted, err := s.coerceValue(wordValue, s.g.namedType("uintptr"), fieldType)
 			if err != nil {
 				return nil, err
 			}
@@ -184,7 +184,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		if err != nil {
 			return nil, err
 		}
-		wordPtr, err := s.createEntryAlloca(name+".word.tmp", s.g.result.NamedTypes["uintptr"])
+		wordPtr, err := s.createEntryAlloca(name+".word.tmp", s.g.namedType("uintptr"))
 		if err != nil {
 			return nil, err
 		}
@@ -271,6 +271,7 @@ func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, 
 	}
 	return ops.loadPayloadWord(handleValue, enumType, wordOffset, "packed.common.store")
 }
+
 // The owner resolves exactly as an enum constructor's does (enumConstructorInfoFromField):
 // through the enclosing module's visible names. A raw NamedTypes lookup of the bare
 // spelling missed every packed enum declared inside a module, so `Message.Store(owner)`
@@ -291,7 +292,7 @@ func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr)
 	if !ok || !enumType.Packed || expr.Field != "Store" || enumType.StoreType == nil {
 		return nil, false
 	}
-	return semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.result.NamedTypes["Local"]), true
+	return semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.namedType("Local")), true
 }
 func (s *functionState) packedStoreConstructorCall(expr *ast.CallExpr) (*semantic.PackedEnumStoreType, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
@@ -377,7 +378,7 @@ func (s *functionState) emitRawU8RefSliceExpr(expr *ast.SliceExpr) (C.LLVMValueR
 	if !ok {
 		return nil, nil, true, fmt.Errorf("u8& slice must produce sview, got %s", s.exprType(expr).String())
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -425,7 +426,7 @@ func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef
 	if !ok {
 		return nil, nil, true, fmt.Errorf("dynamic array slice must produce a view, got %s", s.exprType(expr).String())
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	startValue, _, err := s.emitExpr(expr.Start, usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -481,7 +482,7 @@ func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValu
 		return nil, nil, handled, err
 	}
 	resultType := s.exprType(expr)
-	usizeSemanticType := s.g.result.NamedTypes["usize"]
+	usizeSemanticType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeSemanticType)
 	if err != nil {
 		return nil, nil, true, err
@@ -600,7 +601,7 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 		if value, ok := s.evalConstExpr(expr); ok {
 			resultType := s.exprType(expr)
 			if resultType == nil {
-				resultType = semantic.ConstValueStaticType(s.g.result.NamedTypes, value)
+				resultType = semantic.ConstValueStaticType(s.g.namedTypesMap("const-value-static-type"), value)
 			}
 			llvmValue, err := s.g.constValueAsLLVM(value, resultType)
 			return llvmValue, resultType, err
@@ -733,7 +734,7 @@ func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (C.LLVMValueR
 	if resultType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for safe index fallback result")
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	indexValue, _, err := s.emitExpr(expr.Index, usizeType)
 	if err != nil {
 		return nil, nil, err

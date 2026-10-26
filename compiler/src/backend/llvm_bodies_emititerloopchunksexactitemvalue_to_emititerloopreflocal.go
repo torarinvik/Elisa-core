@@ -45,7 +45,7 @@ func iterLoopIsDictSource(t semantic.Type) bool {
 }
 
 func (s *functionState) iterLoopDictBucketType(dictType *semantic.DictType) (*semantic.GenericInstanceType, C.LLVMTypeRef, error) {
-	base, ok := s.g.result.NamedTypes["DictBucket"]
+	base, ok := s.g.lookupNamedType("DictBucket")
 	if !ok {
 		return nil, nil, fmt.Errorf("missing runtime struct DictBucket")
 	}
@@ -88,7 +88,7 @@ func (s *functionState) emitIterLoopDictCapacity(sourceAlloca C.LLVMValueRef, so
 	if err != nil {
 		return nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	capacityPtr := C.LLVMBuildStructGEP2(s.builder, dictLLVMType, dictPtr, 3, cStringFree(sourceName+".iter.dict.capacity.ptr"))
 	return s.loadValue(capacityPtr, usizeType, sourceName+".iter.dict.capacity")
 }
@@ -121,7 +121,7 @@ func (s *functionState) emitIterLoopDictOccupied(sourceAlloca C.LLVMValueRef, so
 		return nil, err
 	}
 	statePtr := C.LLVMBuildStructGEP2(s.builder, bucketLLVMType, bucketPtr, 2, cStringFree(sourceName+".iter.dict.state.ptr"))
-	stateValue, err := s.loadValue(statePtr, s.g.result.NamedTypes["u8"], sourceName+".iter.dict.state")
+	stateValue, err := s.loadValue(statePtr, s.g.namedType("u8"), sourceName+".iter.dict.state")
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 	if colExpr, ok := sourceExpr.(*ast.EnumColumnExpr); ok {
 		return s.emitEnumColumnScanCount(colExpr, sourceName)
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -190,22 +190,22 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 		if err != nil {
 			return nil, err
 		}
-		lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, sourceType, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+		lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, sourceType, s.g.namedType("i64"), sourceName+".iter.len")
 		if err != nil {
 			return nil, err
 		}
-		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		return s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 	case *semantic.SViewType:
 		containerLLVMType, err := s.g.lowerType(sourceType)
 		if err != nil {
 			return nil, err
 		}
 		lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceAlloca, 1, cStringFree(sourceName+".iter.len.ptr"))
-		lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+		lenValue, err := s.loadValue(lenPtr, s.g.namedType("i64"), sourceName+".iter.len")
 		if err != nil {
 			return nil, err
 		}
-		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		return s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 	case *semantic.GenericInstanceType:
 		if projectedSourceType, ok := semantic.TreeAttributeSequenceSourceType(tt); ok {
 			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.projected.source")
@@ -247,11 +247,11 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 			return nil, err
 		}
 		lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceAlloca, 1, cStringFree(sourceName+".iter.len.ptr"))
-		lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+		lenValue, err := s.loadValue(lenPtr, s.g.namedType("i64"), sourceName+".iter.len")
 		if err != nil {
 			return nil, err
 		}
-		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		return s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 	case *semantic.RefType:
 		if tt.State != semantic.RefStateNonNull {
 			return nil, fmt.Errorf("iterable loop requires a non-null reference source, got %s", sourceType.String())
@@ -282,22 +282,22 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 		case *semantic.StoreRowsViewType:
 			return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
 		case *semantic.CStrType:
-			lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, tt.Elem, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+			lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, tt.Elem, s.g.namedType("i64"), sourceName+".iter.len")
 			if err != nil {
 				return nil, err
 			}
-			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+			return s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 		case *semantic.SViewType:
 			containerLLVMType, err := s.g.lowerType(tt.Elem)
 			if err != nil {
 				return nil, err
 			}
 			lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceValue, 1, cStringFree(sourceName+".iter.len.ptr"))
-			lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+			lenValue, err := s.loadValue(lenPtr, s.g.namedType("i64"), sourceName+".iter.len")
 			if err != nil {
 				return nil, err
 			}
-			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+			return s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 		case *semantic.StructType:
 			if !isIterLoopRuntimeStringViewType(elem) {
 				return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
@@ -307,11 +307,11 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 				return nil, err
 			}
 			lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceValue, 1, cStringFree(sourceName+".iter.len.ptr"))
-			lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+			lenValue, err := s.loadValue(lenPtr, s.g.namedType("i64"), sourceName+".iter.len")
 			if err != nil {
 				return nil, err
 			}
-			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+			return s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 		case *semantic.GenericInstanceType:
 			if _, ok := semantic.ChunksExactViewItemType(elem); !ok {
 				return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
@@ -406,12 +406,12 @@ func (s *functionState) emitIterLoopStringIndexValue(stringValue C.LLVMValueRef,
 	if !ok {
 		return nil, nil, fmt.Errorf("iterable loop string index is not supported for %s", operandType.String())
 	}
-	indexType := s.g.result.NamedTypes["i64"]
-	coercedIndex, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], indexType)
+	indexType := s.g.namedType("i64")
+	coercedIndex, err := s.coerceValue(indexValue, s.g.namedType("usize"), indexType)
 	if err != nil {
 		return nil, nil, err
 	}
-	resultType := s.g.result.NamedTypes["char"]
+	resultType := s.g.namedType("char")
 	helperType := &semantic.FuncType{
 		Name:   helperName,
 		Params: []semantic.Type{operandType, indexType},
@@ -443,11 +443,11 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 			if err != nil {
 				return nil, nil, err
 			}
-			llvmResultType, err := s.g.lowerType(s.g.result.NamedTypes["char"])
+			llvmResultType, err := s.g.lowerType(s.g.namedType("char"))
 			if err != nil {
 				return nil, nil, err
 			}
-			return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree(sourceName+".iter.char")), s.g.result.NamedTypes["char"], nil
+			return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree(sourceName+".iter.char")), s.g.namedType("char"), nil
 		}
 		value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 		return value, elemType, err
@@ -498,11 +498,11 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 				if err != nil {
 					return nil, nil, err
 				}
-				llvmResultType, err := s.g.lowerType(s.g.result.NamedTypes["char"])
+				llvmResultType, err := s.g.lowerType(s.g.namedType("char"))
 				if err != nil {
 					return nil, nil, err
 				}
-				return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree(sourceName+".iter.char")), s.g.result.NamedTypes["char"], nil
+				return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree(sourceName+".iter.char")), s.g.namedType("char"), nil
 			}
 			value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 			return value, elemType, err

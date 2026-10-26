@@ -213,7 +213,7 @@ func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (C.LL
 		value := C.LLVMBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.found.value"))
 		nullValue := C.LLVMConstNull(valueRefLLVMType)
 		found := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("dict.entry.found"))
-		return found, s.g.result.NamedTypes["bool"], true, nil
+		return found, s.g.namedType("bool"), true, nil
 	default:
 		return nil, nil, false, nil
 	}

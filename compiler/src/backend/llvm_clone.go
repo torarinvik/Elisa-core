@@ -159,7 +159,7 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 	if err != nil {
 		return nil, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -251,11 +251,11 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		// u8 bytes into the region, producing an owned darray[u8] / dstr.
 		sourceData := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(name+".src.data"))
 		lenValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 1, cStringFree(name+".src.len"))
-		countValue, err := s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		countValue, err := s.coerceValue(lenValue, s.g.namedType("i64"), usizeType)
 		if err != nil {
 			return nil, err
 		}
-		return buildMaterializedFromDynamicSource(sourceData, s.g.result.NamedTypes["u8"], countValue)
+		return buildMaterializedFromDynamicSource(sourceData, s.g.namedType("u8"), countValue)
 	case *semantic.ArrayType:
 		if !st.HasConstSize {
 			return nil, fmt.Errorf("clone does not support non-constant array sources")

@@ -373,10 +373,10 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	dstBytes := C.LLVMBuildMul(s.builder, dstLen, copyElemSizeConst, cStringFree("view.copy.dst.bytes"))
 	srcBytes := C.LLVMBuildMul(s.builder, srcLen, copyElemSizeConst, cStringFree("view.copy.src.bytes"))
 	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.namedType("usize")}, Return: voidRefType}
 	})
 	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
 	if err != nil {
@@ -446,7 +446,7 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	rightType := s.exprType(rightExpr)
 	resultType := s.exprType(expr)
 	if resultType == nil {
-		resultType = s.g.result.NamedTypes["bool"]
+		resultType = s.g.namedType("bool")
 	}
 	if !isDynArrayViewCarrierType(leftType) || !isDynArrayViewCarrierType(rightType) {
 		return nil, nil, false, nil

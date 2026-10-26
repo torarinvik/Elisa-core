@@ -18,6 +18,7 @@ import (
 type sharedCodegenLookups struct {
 	program        *sharedCodegenLookups // canonical immutable declaration/type indexes
 	importWeights  sync.Map              // current FuncDecl -> bounded AST weight
+	inputReads     *irInputReadRecorder  // build setup reads shared by every unit
 	result         *semantic.Result
 	symbolsByNode  map[ast.Node]*semantic.Symbol
 	namedCount     int
@@ -35,11 +36,16 @@ type sharedCodegenLookups struct {
 	typeKeys sync.Map // semantic.Type -> typeMemoKey
 }
 
-func codegenSymbolsByNode(result *semantic.Result) map[ast.Node]*semantic.Symbol {
-	byNode := make(map[ast.Node]*semantic.Symbol, len(result.GlobalScope.Symbols))
+func codegenSymbolsByNode(result *semantic.Result, recorders ...*irInputReadRecorder) map[ast.Node]*semantic.Symbol {
+	var recorder *irInputReadRecorder
+	if len(recorders) != 0 {
+		recorder = recorders[0]
+	}
+	symbols := newIRCodegenReadView(result, recorder).GlobalSymbolsMap("symbols-by-node-index")
+	byNode := make(map[ast.Node]*semantic.Symbol, len(symbols))
 	// Preserve the original tie-break when several names refer to one node.
-	for _, name := range slices.Sorted(maps.Keys(result.GlobalScope.Symbols)) {
-		sym := result.GlobalScope.Symbols[name]
+	for _, name := range slices.Sorted(maps.Keys(symbols)) {
+		sym := symbols[name]
 		if sym != nil && sym.Node != nil {
 			byNode[sym.Node] = sym
 		}
@@ -47,10 +53,24 @@ func codegenSymbolsByNode(result *semantic.Result) map[ast.Node]*semantic.Symbol
 	return byNode
 }
 
-func newSharedCodegenLookups(result *semantic.Result) *sharedCodegenLookups {
+func newSharedCodegenLookups(result *semantic.Result, recorders ...*irInputReadRecorder) *sharedCodegenLookups {
+	var recorder *irInputReadRecorder
+	if len(recorders) != 0 {
+		recorder = recorders[0]
+	}
+	view := newIRCodegenReadView(result, recorder)
+	symbols := view.GlobalSymbolsMap("shared-codegen-symbol-index")
+	namedTypes := view.NamedTypesMap("shared-codegen-named-type-count")
+	byNode := make(map[ast.Node]*semantic.Symbol, len(symbols))
+	for _, name := range slices.Sorted(maps.Keys(symbols)) {
+		sym := symbols[name]
+		if sym != nil && sym.Node != nil {
+			byNode[sym.Node] = sym
+		}
+	}
 	return &sharedCodegenLookups{
-		result: result, symbolsByNode: codegenSymbolsByNode(result),
-		namedCount: len(result.NamedTypes), symbolCount: len(result.GlobalScope.Symbols),
+		result: result, inputReads: recorder, symbolsByNode: byNode,
+		namedCount: len(namedTypes), symbolCount: len(symbols),
 		proofCount: result.IndexProofSpanCount(),
 	}
 }

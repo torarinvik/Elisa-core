@@ -21,7 +21,7 @@ func (s *functionState) resolveColumnScanStore(colExpr *ast.EnumColumnExpr) (*se
 	if colExpr == nil {
 		return nil, nil, fmt.Errorf("nil column scan expression")
 	}
-	named := s.g.result.NamedTypes[colExpr.Enum]
+	named := s.g.namedType(colExpr.Enum)
 	enumType, ok := semantic.StripAggregateStateType(named).(*semantic.EnumType)
 	if !ok || enumType == nil || !enumType.Packed {
 		return nil, nil, fmt.Errorf("column scan over %q requires a packed enum type", colExpr.Enum)
@@ -69,7 +69,7 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 		if tagType == nil {
 			return nil, nil, fmt.Errorf("enum %q has no tag type for column scan", enumType.Name)
 		}
-		coerced, err := s.coerceValue(tagRaw, s.g.result.NamedTypes["u32"], tagType)
+		coerced, err := s.coerceValue(tagRaw, s.g.namedType("u32"), tagType)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -85,7 +85,7 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 	if !layout.StoredInline {
 		// Cold commons (Stage 2): the field lives in a parallel side column — which is itself exactly
 		// what a column scan walks — so read each row's value from the side table by its dense handle.
-		handleValue, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], enumType)
+		handleValue, err := s.coerceValue(indexValue, s.g.namedType("usize"), enumType)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -104,7 +104,7 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 	}
 	// The dense index is the node handle for the index-SoA store; the read
 	// helpers coerce it to the store's handle width internally.
-	handleValue, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], enumType)
+	handleValue, err := s.coerceValue(indexValue, s.g.namedType("usize"), enumType)
 	if err != nil {
 		return nil, nil, err
 	}

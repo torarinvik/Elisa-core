@@ -106,7 +106,7 @@ func flattenIsTargetExprsBackend(expr ast.Expr) []ast.Expr {
 func (s *functionState) emitComparableIsTargetTest(leftExpr ast.Expr, targetExpr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
 	leftType := s.exprType(leftExpr)
 	rightType := s.exprType(targetExpr)
-	resultType := s.g.result.NamedTypes["bool"]
+	resultType := s.g.namedType("bool")
 	synthetic := &ast.BinaryExpr{Position: leftExpr.Pos(), Op: lexer.TOKEN_EQEQ, Left: leftExpr, Right: targetExpr}
 	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(leftType, rightType); ok {
 		return s.emitRuntimeStringCompareExpr(synthetic, helperName, firstType, secondType, swap)
@@ -166,7 +166,7 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 		values := []C.LLVMValueRef{successValue, failureValue}
 		blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
 		C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
-		return phi, s.g.result.NamedTypes["bool"], nil
+		return phi, s.g.namedType("bool"), nil
 	}
 	tagValue, err := s.extractEnumTagValue(enumValue, nil, enumType, storeBinding)
 	if err != nil {
@@ -177,7 +177,7 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 		return nil, nil, err
 	}
 	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("istag"))
-	return cmp, s.g.result.NamedTypes["bool"], nil
+	return cmp, s.g.namedType("bool"), nil
 }
 
 // emitEnumCategoryIsTest lowers a bare-category `is` test (`e is Statement`, docs/77 §2) to the
@@ -185,7 +185,7 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 // scrutinee's static type already descends from the category) is constant true; an empty category
 // is constant false. The scrutinee is still evaluated for effects in the constant cases.
 func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *semantic.EnumType, category *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	storeBinding, err := s.resolvePackedMatchStoreBinding(scrutinee, leftExpr, nil)
 	if err != nil {
 		return nil, nil, err
@@ -210,7 +210,7 @@ func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *sem
 // emitTagRangeTest emits the docs/81 category-membership primitive: matches ⇔ tag - lo <u count.
 // count==1 folds to plain equality (a leaf is a range of size 1), lo==0 skips the subtract.
 func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, enumType *semantic.EnumType, lo uint32, count uint32) (C.LLVMValueRef, semantic.Type, error) {
-	boolType := s.g.result.NamedTypes["bool"]
+	boolType := s.g.namedType("bool")
 	if lo == 0 && uint64(count) == enumTagValueCapacity(enumType) {
 		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), boolType, nil
 	}
@@ -239,7 +239,7 @@ func (s *functionState) enumCategoryArm(enumType *semantic.EnumType, name string
 	if enumType == nil || name == "" || (enumType.Parent == nil && len(enumType.Children) == 0) {
 		return nil, false
 	}
-	if category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType); ok && category != nil && semantic.EnumDescendsFrom(category, enumType) {
+	if category, ok := s.g.namedType(name).(*semantic.EnumType); ok && category != nil && semantic.EnumDescendsFrom(category, enumType) {
 		return category, true
 	}
 	// A category-arm name (`Decl d:`) is written UNQUALIFIED, but a type declared inside a
@@ -311,7 +311,7 @@ func (s *functionState) enumCategoryIsTarget(leftExpr ast.Expr, target ast.Expr)
 	default:
 		return nil, nil, false
 	}
-	category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType)
+	category, ok := s.g.namedType(name).(*semantic.EnumType)
 	if !ok || category == nil {
 		return nil, nil, false
 	}
@@ -360,7 +360,7 @@ func (s *functionState) emitStructIsTest(leftExpr ast.Expr, pattern *ast.MatchSt
 	values := []C.LLVMValueRef{successValue, failureValue}
 	blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
-	return phi, s.g.result.NamedTypes["bool"], nil
+	return phi, s.g.namedType("bool"), nil
 }
 func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
@@ -409,10 +409,10 @@ func (s *functionState) emitNamedStateIsTest(leftExpr ast.Expr, base *semantic.S
 		return nil, nil, fmt.Errorf("missing named-state struct metadata")
 	}
 	if len(cases) == 0 {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0), s.g.result.NamedTypes["bool"], nil
+		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0), s.g.namedType("bool"), nil
 	}
 	if len(cases) == len(base.NamedStateCases) {
-		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), s.g.result.NamedTypes["bool"], nil
+		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), s.g.namedType("bool"), nil
 	}
 	selfType := s.exprType(leftExpr)
 	selfValue, _, err := s.emitExpr(leftExpr, selfType)
@@ -431,7 +431,7 @@ func (s *functionState) emitNamedStateIsTest(leftExpr ast.Expr, base *semantic.S
 		}
 		combined = C.LLVMBuildOr(s.builder, combined, pred, cStringFree("isstate.or"))
 	}
-	return combined, s.g.result.NamedTypes["bool"], nil
+	return combined, s.g.namedType("bool"), nil
 }
 func (s *functionState) emitDerivedStatePredicate(base *semantic.StructType, stateName string, selfValue C.LLVMValueRef, selfType semantic.Type) (C.LLVMValueRef, error) {
 	if base == nil || base.DerivedStateMap == nil {
@@ -473,7 +473,7 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		}
 		switch n.Op {
 		case lexer.TOKEN_NOT:
-			return C.LLVMBuildNot(s.builder, operand, cStringFree("isstate.not")), s.g.result.NamedTypes["bool"], nil
+			return C.LLVMBuildNot(s.builder, operand, cStringFree("isstate.not")), s.g.namedType("bool"), nil
 		case lexer.TOKEN_MINUS:
 			if isFloatType(operandType) {
 				return C.LLVMBuildFNeg(s.builder, operand, cStringFree("isstate.fneg")), operandType, nil
@@ -495,23 +495,23 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		}
 		if n.Op == lexer.TOKEN_AND || n.Op == lexer.TOKEN_OR {
 			if n.Op == lexer.TOKEN_AND {
-				return C.LLVMBuildAnd(s.builder, leftValue, rightValue, cStringFree("isstate.and")), s.g.result.NamedTypes["bool"], nil
+				return C.LLVMBuildAnd(s.builder, leftValue, rightValue, cStringFree("isstate.and")), s.g.namedType("bool"), nil
 			}
-			return C.LLVMBuildOr(s.builder, leftValue, rightValue, cStringFree("isstate.or")), s.g.result.NamedTypes["bool"], nil
+			return C.LLVMBuildOr(s.builder, leftValue, rightValue, cStringFree("isstate.or")), s.g.namedType("bool"), nil
 		}
 		if (n.Op == lexer.TOKEN_EQEQ || n.Op == lexer.TOKEN_BANGEQ) && (isPointerLikeType(leftType) || semantic.IsNullType(leftType)) && (isPointerLikeType(rightType) || semantic.IsNullType(rightType)) {
 			pred := C.LLVMIntPredicate(C.LLVMIntEQ)
 			if n.Op == lexer.TOKEN_BANGEQ {
 				pred = C.LLVMIntPredicate(C.LLVMIntNE)
 			}
-			return C.LLVMBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.ptrcmp")), s.g.result.NamedTypes["bool"], nil
+			return C.LLVMBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.ptrcmp")), s.g.namedType("bool"), nil
 		}
 		if semantic.IsBoolType(leftType) && semantic.IsBoolType(rightType) && (n.Op == lexer.TOKEN_EQEQ || n.Op == lexer.TOKEN_BANGEQ) {
 			pred := C.LLVMIntPredicate(C.LLVMIntEQ)
 			if n.Op == lexer.TOKEN_BANGEQ {
 				pred = C.LLVMIntPredicate(C.LLVMIntNE)
 			}
-			return C.LLVMBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.boolcmp")), s.g.result.NamedTypes["bool"], nil
+			return C.LLVMBuildICmp(s.builder, pred, leftValue, rightValue, cStringFree("isstate.boolcmp")), s.g.namedType("bool"), nil
 		}
 		operandType := s.binaryOperandType(n.Op, leftType, rightType)
 		coercedLeft, err := s.coerceValue(leftValue, leftType, operandType)
@@ -574,13 +574,13 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 				if err != nil {
 					return nil, nil, err
 				}
-				return C.LLVMBuildFCmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.fcmp")), s.g.result.NamedTypes["bool"], nil
+				return C.LLVMBuildFCmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.fcmp")), s.g.namedType("bool"), nil
 			}
 			pred, err := llvmIntPredicate(n.Op, operandType)
 			if err != nil {
 				return nil, nil, err
 			}
-			return C.LLVMBuildICmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.icmp")), s.g.result.NamedTypes["bool"], nil
+			return C.LLVMBuildICmp(s.builder, pred, coercedLeft, coercedRight, cStringFree("isstate.icmp")), s.g.namedType("bool"), nil
 		default:
 			return nil, nil, fmt.Errorf("unsupported derived-state binary operator %s", lexer.TokenName(n.Op))
 		}

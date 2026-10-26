@@ -72,7 +72,7 @@ func (s *functionState) emitCountMatchPatternTest(pattern ast.MatchPattern, actu
 	if err != nil {
 		return true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return true, err
@@ -98,7 +98,7 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 	if err != nil {
 		return err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -772,7 +772,7 @@ func (s *functionState) emitRuntimeStringCompareLiteralValue(actualValue C.LLVMV
 	if swap {
 		firstValue, secondValue = secondValue, firstValue
 	}
-	helperReturn := s.g.result.NamedTypes["int"]
+	helperReturn := s.g.namedType("int")
 	helperType := &semantic.FuncType{Name: helperName, Params: []semantic.Type{firstType, secondType}, Return: helperReturn}
 	callee, err := s.g.ensureFunctionDeclared(helperName, helperType)
 	if err != nil {

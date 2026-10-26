@@ -41,7 +41,7 @@ const panicReportFunctionName = "elisa.panic.report"
 func (s *functionState) ensurePanicReportFunction() (C.LLVMValueRef, C.LLVMTypeRef, error) {
 	g := s.g
 	ptrType := C.LLVMPointerTypeInContext(g.context, 0)
-	intLLVMType, err := g.lowerType(g.result.NamedTypes["int"])
+	intLLVMType, err := g.lowerType(g.namedType("int"))
 	if err != nil {
 		return nil, nil, err
 	}

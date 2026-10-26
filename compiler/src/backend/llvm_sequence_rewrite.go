@@ -74,7 +74,7 @@ func (s *functionState) emitSequenceRewriteEmitExpr(expr *ast.EmitExpr) (C.LLVMV
 	if s.currentSequenceRewrite == nil || s.currentSequenceRewrite.outType == nil {
 		return nil, nil, fmt.Errorf("emit is only allowed inside sequence rewrite arms")
 	}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	if expr == nil || expr.Nothing || expr.Value == nil {
 		return nil, voidType, nil
 	}
@@ -161,7 +161,7 @@ func (s *functionState) emitSequenceRewriteAppendView(outPtr C.LLVMValueRef, out
 	if outPtr == nil || outType == nil || viewType == nil {
 		return fmt.Errorf("missing sequence rewrite output")
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -239,7 +239,7 @@ func (s *functionState) emitSequenceRewriteArms(elemValue C.LLVMValueRef, elemTy
 			if nextBB == nil {
 				nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".guard.next"))
 			}
-			guardValue, _, err := s.emitExpr(arm.Guard, s.g.result.NamedTypes["bool"])
+			guardValue, _, err := s.emitExpr(arm.Guard, s.g.namedType("bool"))
 			if err != nil {
 				s.popScope()
 				return err
@@ -307,7 +307,7 @@ func (s *functionState) emitSequenceRewriteExpr(expr *ast.FoldExpr) (C.LLVMValue
 		return nil, nil, err
 	}
 	C.LLVMBuildStore(s.builder, zeroOut, outPtr)
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, err

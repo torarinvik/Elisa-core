@@ -33,7 +33,7 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		name := C.CString("")
 		defer C.free(unsafe.Pointer(name))
 		C.LLVMBuildFence(s.builder, backendAtomicOrderingForExpr(expr.Args[0], backendAtomicOrderFence), 0, name)
-		return nil, s.g.result.NamedTypes["void"], true, nil
+		return nil, s.g.namedType("void"), true, nil
 	}
 	if len(expr.Args) == 0 {
 		return nil, nil, true, fmt.Errorf("%s expects an atomic slot argument", callName)
@@ -85,7 +85,7 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		order := backendAtomicOrderingForExpr(expr.Args[2], backendAtomicOrderStore)
 		store := C.LLVMBuildStore(s.builder, value, valuePtr)
 		C.LLVMSetOrdering(store, order)
-		return nil, s.g.result.NamedTypes["void"], true, nil
+		return nil, s.g.namedType("void"), true, nil
 	case "exchange":
 		if len(expr.Args) != 3 {
 			return nil, nil, true, fmt.Errorf("exchange expects 3 arguments, got %d", len(expr.Args))
@@ -134,7 +134,7 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		successOrder := backendAtomicOrderingForExpr(expr.Args[3], backendAtomicOrderReadModifyWrite)
 		failureOrder := backendAtomicOrderingForExpr(expr.Args[4], backendAtomicOrderCompareFailure)
 		cmpxchg := C.LLVMBuildAtomicCmpXchg(s.builder, valuePtr, expected, desired, successOrder, failureOrder, 0)
-		return C.LLVMBuildExtractValue(s.builder, cmpxchg, 1, cStringFree("atomic.cmpxchg.ok")), s.g.result.NamedTypes["bool"], true, nil
+		return C.LLVMBuildExtractValue(s.builder, cmpxchg, 1, cStringFree("atomic.cmpxchg.ok")), s.g.namedType("bool"), true, nil
 	case "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
 		if len(expr.Args) != 3 {
 			return nil, nil, true, fmt.Errorf("%s expects 3 arguments, got %d", callName, len(expr.Args))

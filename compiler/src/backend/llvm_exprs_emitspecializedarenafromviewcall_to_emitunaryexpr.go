@@ -134,7 +134,7 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	}
 	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("view.materialize.src.data"))
 	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("view.materialize.src.len"))
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
@@ -159,7 +159,7 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, allocBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	if _, ok := resultType.(*semantic.DArrayType); !ok {
 		return nil, nil, true, fmt.Errorf("arena_da_from_view specialization expected darray result type, got %T", resultType)
@@ -312,7 +312,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	if constByte {
 		fillValue = C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), C.ulonglong(fillByte), 0)
 	} else {
-		fillValue, err = s.coerceValue(typedFillValue, fillType, s.g.result.NamedTypes["i32"])
+		fillValue, err = s.coerceValue(typedFillValue, fillType, s.g.namedType("i32"))
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -334,18 +334,18 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, fillBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	// libc declares memset's byte value as C int, which is i32 on every supported
 	// target. Elisa's `int` is i64, so using it here conflicts with the source-level
 	// extern signature and can make a Stage0 bootstrap fail with two LLVM prototypes.
-	memsetValueType := s.g.result.NamedTypes["i32"]
-	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	memsetValueType := s.g.namedType("i32")
+	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, s.g.namedType("usize")}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	fillValue, err = s.coerceValue(fillValue, s.g.result.NamedTypes["i32"], memsetValueType)
+	fillValue, err = s.coerceValue(fillValue, s.g.namedType("i32"), memsetValueType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -440,7 +440,7 @@ func (s *functionState) emitCStrStaticLiteralEqual(textExpr ast.Expr, textType s
 	if classifyRuntimeStringCompareKind(textType) != runtimeStringCompareCStr {
 		return nil, fmt.Errorf("cstr literal specialization requires cstr operand")
 	}
-	lenType := s.g.result.NamedTypes["i64"]
+	lenType := s.g.namedType("i64")
 	var (
 		textData C.LLVMValueRef
 		textLen  C.LLVMValueRef
@@ -546,7 +546,7 @@ func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef,
 	return result, nil
 }
 func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRef, length int) (C.LLVMValueRef, error) {
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -555,11 +555,11 @@ func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRe
 	return s.emitMemcmpEqualValue(left, right, lengthValue, "svlit.memcmp", false)
 }
 func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string, noAliasArgs bool) (C.LLVMValueRef, error) {
-	voidType := s.g.result.NamedTypes["void"]
-	usizeType := s.g.result.NamedTypes["usize"]
+	voidType := s.g.namedType("void")
+	usizeType := s.g.namedType("usize")
 	// libc's memcmp returns C int (i32); Elisa's `int` is 64-bit and conflicts
 	// with the standard-library extern on ABI-correct Stage1 sources.
-	intType := s.g.result.NamedTypes["i32"]
+	intType := s.g.namedType("i32")
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{
 		Name:   "memcmp",
@@ -605,7 +605,7 @@ func (s *functionState) staticCStringLiteral(expr ast.Expr) (string, bool) {
 	}
 }
 func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	left, _, err := s.emitExpr(expr.Left, s.g.result.NamedTypes["bool"])
+	left, _, err := s.emitExpr(expr.Left, s.g.namedType("bool"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -624,7 +624,7 @@ func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, s
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, rhsBB)
-	right, _, err := s.emitExpr(expr.Right, s.g.result.NamedTypes["bool"])
+	right, _, err := s.emitExpr(expr.Right, s.g.namedType("bool"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -642,7 +642,7 @@ func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, s
 	values := []C.LLVMValueRef{fallback, right}
 	blocks := []C.LLVMBasicBlockRef{parentBlock, rhsEnd}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
-	return phi, s.g.result.NamedTypes["bool"], nil
+	return phi, s.g.namedType("bool"), nil
 }
 func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Operand == nil {

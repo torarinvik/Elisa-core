@@ -43,12 +43,12 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 		return nil, nil, false, nil
 	}
 
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVM, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.namedType("void"), State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 
 	// Evaluate every part once, in order, collecting (ptr, len).
 	type fstrPart struct {
@@ -152,7 +152,7 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	// append each part.
 	dstrRefType := &semantic.RefType{Elem: dstrType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	appendType := s.g.cachedRuntimeHelperType("ctx_fstr_append", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "ctx_fstr_append", Params: []semantic.Type{dstrRefType, voidRefType, usizeType}, Return: s.g.result.NamedTypes["void"]}
+		return &semantic.FuncType{Name: "ctx_fstr_append", Params: []semantic.Type{dstrRefType, voidRefType, usizeType}, Return: s.g.namedType("void")}
 	})
 	appendCallee, err := s.g.ensureFunctionDeclared("ctx_fstr_append", appendType)
 	if err != nil {

@@ -27,7 +27,7 @@ func (s *functionState) programPackedStore(enumType *semantic.EnumType) (packedS
 	if root.StoreType == nil {
 		return packedStoreBinding{}, false, fmt.Errorf("packed enum %s is missing store layout metadata", root.Name)
 	}
-	storeType := semantic.PackedEnumStoreWithState(root.StoreType, s.g.result.NamedTypes["Local"])
+	storeType := semantic.PackedEnumStoreWithState(root.StoreType, s.g.namedType("Local"))
 	storeLLVMType, err := s.g.lowerPackedEnumStoreType(storeType)
 	if err != nil {
 		return packedStoreBinding{}, false, err
@@ -100,7 +100,7 @@ func (s *functionState) programRegionArena(name string) (valueBinding, bool, err
 	if s == nil || s.g == nil || !s.g.result.IsProgramRegion(name) {
 		return valueBinding{}, false, nil
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	if arenaType == nil {
 		return valueBinding{}, false, fmt.Errorf("missing builtin Arena type for program-lived region %s", name)
 	}

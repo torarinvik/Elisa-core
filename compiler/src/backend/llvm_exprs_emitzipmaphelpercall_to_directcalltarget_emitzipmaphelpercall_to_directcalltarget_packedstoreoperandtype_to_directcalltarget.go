@@ -161,7 +161,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				lookupName = canon
 			}
 		}
-		if sym, ok := s.g.result.GlobalScope.Lookup(lookupName); ok {
+		if sym, ok := s.g.lookupGlobal(lookupName); ok {
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok {
 				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", lookupName)
@@ -245,7 +245,7 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 			lookupName = canon
 		}
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(lookupName)
+	sym, ok := s.g.lookupGlobal(lookupName)
 	if !ok {
 		return false
 	}

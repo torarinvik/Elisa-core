@@ -72,10 +72,10 @@ func (g *llvmGenerator) appendAppleX64SegmentReservations(targetTriple string) {
 	// reserved sizes (e.g. USER_AREA would double to 210TB, extend above image_base,
 	// and overlap the binary's own segments). address_space_arena is defined only in
 	// the main program's core/address_space.elisa, so it identifies the main module.
-	if g.result == nil || g.result.GlobalScope == nil {
+	if g.result == nil || !g.hasGlobalScope() {
 		return
 	}
-	if _, ok := g.result.GlobalScope.Lookup("address_space_arena"); !ok {
+	if _, ok := g.lookupGlobal("address_space_arena"); !ok {
 		return
 	}
 	directives := ".zerofill TCB_SPACE,TCB_SPACE,__tcb_space,0x3FC000\n" +
@@ -189,10 +189,10 @@ func (g *llvmGenerator) lowerEASMFunctionType(fn *easm.Function) (C.LLVMTypeRef,
 
 func (g *llvmGenerator) validateEASMFunctionEffects(fn *easm.Function) error {
 	required := easmDeclaredEffectPermissions(fn)
-	if len(required) == 0 || g == nil || g.result == nil || g.result.GlobalScope == nil {
+	if len(required) == 0 || g == nil || g.result == nil || !g.hasGlobalScope() {
 		return nil
 	}
-	sym, ok := g.result.GlobalScope.Lookup(fn.Name)
+	sym, ok := g.lookupGlobal(fn.Name)
 	if !ok || sym == nil {
 		return nil
 	}
@@ -291,18 +291,18 @@ func (g *llvmGenerator) easmSemanticType(name string) (semantic.Type, error) {
 	name = strings.TrimSpace(name)
 	switch name {
 	case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64":
-		if t, ok := g.result.NamedTypes[name]; ok {
+		if t, ok := g.lookupNamedType(name); ok {
 			return t, nil
 		}
 		return &semantic.BuiltinType{Name: name}, nil
 	default:
 		if strings.HasSuffix(name, "&?") || strings.HasSuffix(name, "&") {
-			return g.result.NamedTypes["void"], fmt.Errorf("EASM v1 only accepts primitive value types in signatures, got %s", name)
+			return g.namedType("void"), fmt.Errorf("EASM v1 only accepts primitive value types in signatures, got %s", name)
 		}
 		if t, ok := g.easmAddressSpaceCarrierType(name); ok {
 			return t, nil
 		}
-		if t, ok := g.result.NamedTypes[name]; ok {
+		if t, ok := g.lookupNamedType(name); ok {
 			return t, nil
 		}
 		return nil, fmt.Errorf("unknown EASM type %s", name)
@@ -323,17 +323,17 @@ func (g *llvmGenerator) easmAddressSpaceCarrierType(name string) (semantic.Type,
 			continue
 		}
 		elemName := strings.TrimSpace(name[len(spec.prefix) : len(name)-1])
-		elem, ok := g.result.NamedTypes[elemName]
+		elem, ok := g.lookupNamedType(elemName)
 		if !ok {
 			// A layout-typed carrier (`HostPtr[ThreadCtx]`) names a verifier-only record shape with
 			// no ABI of its own; lower it as a host pointer to bytes, identical to HostPtr[u8]/[void].
 			if g.easmLayoutNames[elemName] {
-				elem = g.result.NamedTypes["u8"]
+				elem = g.namedType("u8")
 			} else {
 				return nil, false
 			}
 		}
-		return &semantic.AddressSpaceType{Space: spec.space, Elem: elem, Storage: g.result.NamedTypes["uintptr"]}, true
+		return &semantic.AddressSpaceType{Space: spec.space, Elem: elem, Storage: g.namedType("uintptr")}, true
 	}
 	return nil, false
 }

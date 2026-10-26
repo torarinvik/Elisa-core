@@ -180,7 +180,7 @@ func (s *functionState) buildEnumerateItemValue(tupleType semantic.Type, indexVa
 	if err != nil {
 		return nil, err
 	}
-	indexCoerced, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], tuple.Fields[0].Type)
+	indexCoerced, err := s.coerceValue(indexValue, s.g.namedType("usize"), tuple.Fields[0].Type)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +318,7 @@ func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, source
 	if err != nil {
 		return fmt.Errorf("emit iterable filter at %s (%T %q): %w", filter.Pos(), filter, unparse.FormatExpr(filter), err)
 	}
-	filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
+	filterBool, err := s.coerceValue(filterValue, filterType, s.g.namedType("bool"))
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	if err != nil {
 		return err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return err
@@ -676,7 +676,7 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 	return s.emitBlock(stmt.Body, true)
 }
 func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
-	poolType := s.g.result.NamedTypes["ThreadPool"]
+	poolType := s.g.namedType("ThreadPool")
 	if stmt.BorrowedPool != "" {
 		binding, local := s.lookupBinding(stmt.BorrowedPool)
 		poolPtr := C.LLVMValueRef(nil)
@@ -709,7 +709,7 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 		defer func() { s.poolScopes = s.poolScopes[:len(s.poolScopes)-1] }()
 		return s.emitPoolBodyInCurrentScope(stmt)
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	workersValue, _, err := s.emitExpr(stmt.Workers, usizeType)
 	if err != nil {
 		return err
@@ -775,7 +775,7 @@ func (s *functionState) emitPoolBodyInCurrentScope(stmt *ast.PoolStmt) error {
 		return err
 	}
 	groupBinding, found := s.lookupBinding(groupDecl.Name)
-	if !found || !semantic.SameType(groupBinding.typ, s.g.result.NamedTypes["TaskGroup"]) {
+	if !found || !semantic.SameType(groupBinding.typ, s.g.namedType("TaskGroup")) {
 		return fmt.Errorf("generated nursery task group %q is unavailable after initialization", groupDecl.Name)
 	}
 	s.registerScopedCleanup(scopedCleanupBinding{

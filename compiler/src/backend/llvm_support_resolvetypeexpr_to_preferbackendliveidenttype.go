@@ -26,7 +26,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		case "sview":
 			return &semantic.SViewType{Region: substituteRegionName(n.Region, s.typeMap)}, nil
 		case "dstr":
-			return &semantic.DArrayType{Elem: s.g.result.NamedTypes["u8"], Shape: &semantic.WildcardShape{}, SurfaceName: "dstr", Region: substituteRegionName(n.Region, s.typeMap)}, nil
+			return &semantic.DArrayType{Elem: s.g.namedType("u8"), Shape: &semantic.WildcardShape{}, SurfaceName: "dstr", Region: substituteRegionName(n.Region, s.typeMap)}, nil
 		}
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
@@ -40,12 +40,12 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		// import qualification that the bare-name lookup below cannot see).
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {
 			if canonical, ok := s.g.result.LookupResolvedTypeNames(n); ok {
-				if t, ok := s.g.result.NamedTypes[canonical]; ok {
+				if t, ok := s.g.lookupNamedType(canonical); ok {
 					return semantic.DefaultStatefulType(t), nil
 				}
 			}
 		}
-		if t, ok := s.g.result.NamedTypes[n.Name]; ok {
+		if t, ok := s.g.lookupNamedType(n.Name); ok {
 			return semantic.DefaultStatefulType(t), nil
 		}
 		if t, handled, err := s.resolveStaticAssociatedType(n.Name); handled {
@@ -132,7 +132,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			params = append(params, resolved)
 		}
-		ret := s.g.result.NamedTypes["void"]
+		ret := s.g.namedType("void")
 		if n.Return != nil {
 			resolved, err := s.resolveTypeExpr(n.Return)
 			if err != nil {
@@ -192,7 +192,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 				lookupName = canon
 			}
 		}
-		base, ok := s.g.result.NamedTypes[lookupName]
+		base, ok := s.g.lookupNamedType(lookupName)
 		if !ok {
 			return nil, fmt.Errorf("unknown type %q", n.Name)
 		}
@@ -406,7 +406,7 @@ func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Ty
 	return semantic.CanonicalizeErrorSetSelections(familySets, fullFamilies, selectedTags), nil
 }
 func (s *functionState) lookupDeclaredErrorSet(tag ast.ErrorTagExpr) (string, *semantic.ErrorSetType, error) {
-	t, ok := s.g.result.NamedTypes[tag.SetName]
+	t, ok := s.g.lookupNamedType(tag.SetName)
 	if !ok {
 		return "", nil, fmt.Errorf("unknown error set %q", tag.SetName)
 	}
@@ -466,7 +466,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.IDType{Tag: tag, Storage: s.g.result.NamedTypes["u32"]}, nil
+		return &semantic.IDType{Tag: tag, Storage: s.g.namedType("u32")}, nil
 	case "ptrid":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("ptrid expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -475,7 +475,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.IDType{Tag: tag, Storage: s.g.result.NamedTypes["uintptr"]}, nil
+		return &semantic.IDType{Tag: tag, Storage: s.g.namedType("uintptr")}, nil
 	case "GuestVAddr", "HostPtr", "NativeMappedGuestPtr":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("%s expects 1 type argument, got %d", expr.Name, len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -487,7 +487,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		// has already validated the type-arg (real type or registered layout), so this is sound.
 		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
 		if err != nil {
-			elem = s.g.result.NamedTypes["uintptr"]
+			elem = s.g.namedType("uintptr")
 		}
 		space := "guest"
 		if expr.Name == "HostPtr" {
@@ -495,7 +495,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		} else if expr.Name == "NativeMappedGuestPtr" {
 			space = "native_mapped_guest"
 		}
-		return &semantic.AddressSpaceType{Space: space, Elem: elem, Storage: s.g.result.NamedTypes["uintptr"]}, nil
+		return &semantic.AddressSpaceType{Space: space, Elem: elem, Storage: s.g.namedType("uintptr")}, nil
 	case "RowId":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("RowId expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -508,7 +508,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if !ok || store == nil || store.StoreDecl == nil || !store.StoreDecl.Soa {
 			return nil, fmt.Errorf("RowId expects an soa type argument, got %s", tag)
 		}
-		return &semantic.IDType{Tag: tag, Storage: s.g.result.NamedTypes["u32"]}, nil
+		return &semantic.IDType{Tag: tag, Storage: s.g.namedType("u32")}, nil
 	case "array":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

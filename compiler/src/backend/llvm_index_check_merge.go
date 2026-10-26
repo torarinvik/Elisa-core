@@ -151,7 +151,7 @@ func indexMergeContainerType(t semantic.Type) semantic.Type {
 }
 
 func (s *functionState) collectIndexMergeGroups(expr ast.Expr) []*indexMergeGroup {
-	usize := s.g.result.NamedTypes["usize"]
+	usize := s.g.namedType("usize")
 	var groups []*indexMergeGroup
 	byKey := map[[2]string]*indexMergeGroup{}
 	var walk func(ast.Expr)
@@ -235,7 +235,7 @@ func (s *functionState) emitExprWithMergedIndexChecks(expr ast.Expr, expected se
 	s.indexMergeDepth++
 	defer func() { s.indexMergeDepth-- }()
 
-	usizeLLVM, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+	usizeLLVM, err := s.g.lowerType(s.g.namedType("usize"))
 	if err != nil {
 		return nil, nil, true, err
 	}

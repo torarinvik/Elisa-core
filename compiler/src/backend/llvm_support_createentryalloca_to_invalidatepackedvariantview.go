@@ -61,7 +61,7 @@ func (s *functionState) createTempStorage(name string, t semantic.Type) (C.LLVMV
 	if sizeBytes < largeCompilerTempHeapThresholdBytes {
 		return s.createEntryAllocaRaw(name, t)
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
+	usizeType := s.g.namedType("usize")
 	llvmSizeType, err := s.g.lowerType(usizeType)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func (s *functionState) emitHeapTempCleanup() error {
 	if len(s.heapTemps) == 0 {
 		return nil
 	}
-	voidType := s.g.result.NamedTypes["void"]
+	voidType := s.g.namedType("void")
 	freeType := s.g.cachedRuntimeHelperType("free", func() *semantic.FuncType {
 		return &semantic.FuncType{Name: "free", Params: []semantic.Type{s.lambdaVoidRefType()}, Return: voidType}
 	})
@@ -221,7 +221,7 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	if expr == nil {
 		return treeAllocOwnerBinding{}, false, nil
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	if arenaType == nil {
 		return treeAllocOwnerBinding{}, false, nil
 	}
@@ -286,13 +286,13 @@ func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
 // check), then the older `_checked` (returns null on OOM) for runtimes that predate
 // the panic wrappers, then the base name for minimal/test stubs.
 func (s *functionState) dictMutationHelperName(base string) string {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.hasGlobalScope() {
 		return base
 	}
-	if _, ok := s.g.result.GlobalScope.Lookup(base + "_or_panic"); ok {
+	if _, ok := s.g.lookupGlobal(base + "_or_panic"); ok {
 		return base + "_or_panic"
 	}
-	if _, ok := s.g.result.GlobalScope.Lookup(base + "_checked"); ok {
+	if _, ok := s.g.lookupGlobal(base + "_checked"); ok {
 		return base + "_checked"
 	}
 	return base
@@ -533,7 +533,7 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 	if name != "owner" && name != "alloc" && !isRegionParam {
 		return
 	}
-	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaType := s.g.namedType("Arena")
 	if arenaType == nil || ptr == nil {
 		return
 	}
@@ -772,7 +772,7 @@ func (s *functionState) packedReadOriginKey(expr ast.Expr) (packedReadOriginKey,
 		if s.g == nil || s.g.result == nil {
 			return packedReadOriginKey{}, false, nil
 		}
-		if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
+		if sym, ok := s.g.lookupGlobal(n.Name); ok {
 			if sym.Kind == semantic.SymbolGlobal || sym.Kind == semantic.SymbolExternVar {
 				global, err := s.g.ensureGlobalDeclared(n.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
 				if err != nil {

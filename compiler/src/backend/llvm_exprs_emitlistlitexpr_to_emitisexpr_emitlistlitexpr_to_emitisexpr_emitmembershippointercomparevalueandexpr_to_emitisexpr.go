@@ -145,7 +145,7 @@ func (s *functionState) emitRuntimeStringCompareValues(op lexer.TokenKind, leftV
 			return nil, err
 		}
 	}
-	helperReturn := s.g.result.NamedTypes["int"]
+	helperReturn := s.g.namedType("int")
 	helperType := &semantic.FuncType{
 		Name:   helperName,
 		Params: []semantic.Type{firstType, secondType},
@@ -208,5 +208,5 @@ func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semant
 		}
 		combined = C.LLVMBuildOr(s.builder, combined, value, cStringFree("istest.or"))
 	}
-	return combined, s.g.result.NamedTypes["bool"], nil
+	return combined, s.g.namedType("bool"), nil
 }

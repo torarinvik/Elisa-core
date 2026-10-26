@@ -489,10 +489,10 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 	return nil, false, fmt.Errorf("match expression arm must end with an expression")
 }
 func (s *functionState) predicateMatchPatternFuncType(name string) *semantic.FuncType {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil || name == "" {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.hasGlobalScope() || name == "" {
 		return nil
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(name)
+	sym, ok := s.g.lookupGlobal(name)
 	if !ok || sym == nil {
 		return nil
 	}

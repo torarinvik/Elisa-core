@@ -69,10 +69,15 @@ func partitionOwner(name string, parts int) int {
 // Functions whose final LLVM symbol needs generator-specific ABI resolution
 // remain in every list; the generator's existing owner check stays authoritative
 // for those uncommon cases.
-func partitionIRDeclarationWorklists(result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, parts int) [][]ast.Decl {
+func partitionIRDeclarationWorklists(result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, parts int, recorders ...*irInputReadRecorder) [][]ast.Decl {
 	if result == nil || result.ActiveFile() == nil || parts < 1 {
 		return nil
 	}
+	var recorder *irInputReadRecorder
+	if len(recorders) != 0 {
+		recorder = recorders[0]
+	}
+	view := newIRCodegenReadView(result, recorder)
 	worklists := make([][]ast.Decl, parts)
 	sameNameExports := make(map[string]struct{}, len(result.ExportedFuncs))
 	for _, exported := range result.ExportedFuncs {
@@ -81,13 +86,13 @@ func partitionIRDeclarationWorklists(result *semantic.Result, symbols map[ast.No
 		}
 	}
 	for _, decl := range result.ActiveFile().Decls {
-		appendPartitionIRDecl(worklists, decl, result, symbols, sameNameExports)
+		appendPartitionIRDecl(worklists, decl, result, symbols, sameNameExports, view)
 	}
 	return worklists
 }
 
-func partitionIRFunctionOwner(result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, decl *ast.FuncDecl, parts int) (int, bool) {
-	if result == nil || result.GlobalScope == nil || decl == nil || parts < 1 {
+func partitionIRFunctionOwner(result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, decl *ast.FuncDecl, parts int, view irCodegenReadView) (int, bool) {
+	if result == nil || !view.HasGlobalScope() || decl == nil || parts < 1 {
 		return 0, false
 	}
 	sym := symbols[decl]
@@ -100,22 +105,22 @@ func partitionIRFunctionOwner(result *semantic.Result, symbols map[ast.Node]*sem
 	if _, sameNameExport := sameNameExports[sym.Name]; sameNameExport {
 		return 0, false
 	}
-	resolved, ok := result.GlobalScope.Lookup(sym.Name)
+	resolved, ok := view.LookupGlobalSymbol(sym.Name, "partition-function-owner")
 	if !ok || resolved == nil || resolved.Node != decl || strings.TrimSpace(resolved.LinkName) != "" {
 		return 0, false
 	}
 	return partitionOwner(sym.Name, parts), true
 }
 
-func partitionIRDeclBranch(decls []ast.Decl, result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, parts int) [][]ast.Decl {
+func partitionIRDeclBranch(decls []ast.Decl, result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, parts int, view irCodegenReadView) [][]ast.Decl {
 	branches := make([][]ast.Decl, parts)
 	for _, decl := range decls {
-		appendPartitionIRDecl(branches, decl, result, symbols, sameNameExports)
+		appendPartitionIRDecl(branches, decl, result, symbols, sameNameExports, view)
 	}
 	return branches
 }
 
-func appendPartitionIRDecl(worklists [][]ast.Decl, decl ast.Decl, result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}) {
+func appendPartitionIRDecl(worklists [][]ast.Decl, decl ast.Decl, result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, view irCodegenReadView) {
 	parts := len(worklists)
 	if parts == 0 || decl == nil {
 		return
@@ -127,25 +132,25 @@ func appendPartitionIRDecl(worklists [][]ast.Decl, decl ast.Decl, result *semant
 	}
 	switch n := decl.(type) {
 	case *ast.FuncDecl:
-		if owner, exact := partitionIRFunctionOwner(result, symbols, sameNameExports, n, parts); exact {
+		if owner, exact := partitionIRFunctionOwner(result, symbols, sameNameExports, n, parts, view); exact {
 			worklists[owner] = append(worklists[owner], decl)
 			return
 		}
 		appendEverywhere(decl)
 	case *ast.NamespaceDecl:
-		children := partitionIRDeclBranch(n.Decls, result, symbols, sameNameExports, parts)
+		children := partitionIRDeclBranch(n.Decls, result, symbols, sameNameExports, parts, view)
 		for part := range parts {
 			copy := *n
 			copy.Decls = children[part]
 			worklists[part] = append(worklists[part], &copy)
 		}
 	case *ast.StaticIfDecl:
-		thenDecls := partitionIRDeclBranch(n.Then, result, symbols, sameNameExports, parts)
+		thenDecls := partitionIRDeclBranch(n.Then, result, symbols, sameNameExports, parts, view)
 		elifDecls := make([][][]ast.Decl, len(n.Elifs))
 		for index, branch := range n.Elifs {
-			elifDecls[index] = partitionIRDeclBranch(branch.Body, result, symbols, sameNameExports, parts)
+			elifDecls[index] = partitionIRDeclBranch(branch.Body, result, symbols, sameNameExports, parts, view)
 		}
-		elseDecls := partitionIRDeclBranch(n.Else, result, symbols, sameNameExports, parts)
+		elseDecls := partitionIRDeclBranch(n.Else, result, symbols, sameNameExports, parts, view)
 		for part := range parts {
 			copy := *n
 			copy.Then = thenDecls[part]
@@ -160,7 +165,7 @@ func appendPartitionIRDecl(worklists [][]ast.Decl, decl ast.Decl, result *semant
 		members := make([][]ast.ImplMember, parts)
 		for _, member := range n.Members {
 			if fn, ok := member.(*ast.FuncDecl); ok {
-				if owner, exact := partitionIRFunctionOwner(result, symbols, sameNameExports, fn, parts); exact {
+				if owner, exact := partitionIRFunctionOwner(result, symbols, sameNameExports, fn, parts, view); exact {
 					members[owner] = append(members[owner], member)
 					continue
 				}
@@ -288,8 +293,12 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	result.PackedLowering = options.PackedProfile.metadata()
 	result.BeginSharedCodegen()
 	defer result.EndSharedCodegen()
-	shared := newSharedCodegenLookups(result)
-	declarations := partitionIRDeclarationWorklists(result, shared.symbolsByNode, parts)
+	var sharedReads *irInputReadRecorder
+	if s.irInputAudit != nil {
+		sharedReads = &irInputReadRecorder{}
+	}
+	shared := newSharedCodegenLookups(result, sharedReads)
+	declarations := partitionIRDeclarationWorklists(result, shared.symbolsByNode, parts, sharedReads)
 	objects := make([][]byte, parts)
 	members := make([][]string, parts)
 	var previousMembers [][]string
@@ -302,7 +311,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		workers = parts
 	}
 	next := make(chan int, parts)
-	for _, part := range partitionedIRWorkOrder(result, parts, previousMembers) {
+	for _, part := range partitionedIRWorkOrderWithReads(result, parts, sharedReads, previousMembers) {
 		next <- part
 	}
 	close(next)
@@ -356,6 +365,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	var inputReads *irInputReadRecorder
 	if s.irInputAudit != nil {
 		inputReads = &irInputReadRecorder{}
+		inputReads.shared = shared.inputReads
 		defer func() { s.irInputAudit(part, inputReads.snapshot()) }()
 	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
@@ -566,9 +576,14 @@ func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven b
 // of cache-hit units. Hints only affect scheduling; all units still generate
 // and validate their full current bitcode before any cache lookup.
 func partitionedIRWorkOrder(result *semantic.Result, parts int, previous ...[][]string) []int {
+	return partitionedIRWorkOrderWithReads(result, parts, nil, previous...)
+}
+
+func partitionedIRWorkOrderWithReads(result *semantic.Result, parts int, recorder *irInputReadRecorder, previous ...[][]string) []int {
 	preferred := make([]bool, parts)
+	view := newIRCodegenReadView(result, recorder)
 	for _, name := range result.CodegenFunctionPriorities() {
-		if sym, ok := result.GlobalScope.Lookup(name); ok && sym != nil && sym.LinkName != "" {
+		if sym, ok := view.LookupGlobalSymbol(name, "partition-priority-symbol"); ok && sym != nil && sym.LinkName != "" {
 			name = sym.LinkName
 		}
 		preferred[partitionOwner(name, parts)] = true

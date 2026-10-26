@@ -301,34 +301,34 @@ func (s *functionState) visibleGlobalNames(name string) []string {
 // current-namespace candidates first, then a unique-suffix fallback so a `using`
 // (which the backend does not track) still resolves when unambiguous.
 func (s *functionState) lookupVisibleNamedType(name string) (semantic.Type, string, bool) {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.NamedTypes == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.hasNamedTypes() {
 		return nil, "", false
 	}
 	for _, candidate := range s.visibleGlobalNames(name) {
-		if t, ok := s.g.result.NamedTypes[candidate]; ok && t != nil {
+		if t, ok := s.g.lookupNamedType(candidate); ok && t != nil {
 			return t, candidate, true
 		}
 	}
 	if !strings.Contains(name, ".") && !strings.Contains(name, "::") {
 		if matches := s.g.namedTypeSuffixIndex()[strings.TrimSpace(name)]; len(matches) == 1 {
-			return s.g.result.NamedTypes[matches[0]], matches[0], true
+			return s.g.namedType(matches[0]), matches[0], true
 		}
 	}
 	return nil, "", false
 }
 
 func (s *functionState) lookupVisibleGlobalSymbol(name string) (*semantic.Symbol, string, bool) {
-	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.hasGlobalScope() {
 		return nil, "", false
 	}
 	for _, candidate := range s.visibleGlobalNames(name) {
-		if sym, ok := s.g.result.GlobalScope.Lookup(candidate); ok && sym != nil {
+		if sym, ok := s.g.lookupGlobal(candidate); ok && sym != nil {
 			return sym, candidate, true
 		}
 	}
 	if !strings.Contains(name, ".") && !strings.Contains(name, "::") {
 		if matches := s.g.globalSuffixIndex()[strings.TrimSpace(name)]; len(matches) == 1 {
-			return s.g.result.GlobalScope.Symbols[matches[0]], matches[0], true
+			return s.g.globalSymbolsMap("unique-suffix-result")[matches[0]], matches[0], true
 		}
 	}
 	return nil, "", false
@@ -581,7 +581,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	defer func() { g.bodyDepth-- }()
 
 	if g.result != nil {
-		defer g.installCodegenResult(g.result.CodegenDeclarationResult(decl))()
+		defer g.installCodegenResult(g.codegenDeclarationResult(decl))()
 	}
 
 	// Parametric impl/region lowering may have enclosing bindings while this
@@ -726,7 +726,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	// region environment, so container ops on `@r` resolve their arena via
 	// regionArenaOwner(r). Inert for functions with no region params.
 	if len(fnType.RegionParams) != 0 {
-		arenaType := g.result.NamedTypes["Arena"]
+		arenaType := g.namedType("Arena")
 		base := paramOffset + len(fnType.Params)
 		for j, regionName := range fnType.RegionParams {
 			arenaParam := C.LLVMGetParam(fnValue, C.unsigned(base+j))
@@ -1411,23 +1411,25 @@ func suffixIndex[V comparable](entries map[string]V) map[string][]string {
 }
 
 func (g *llvmGenerator) namedTypeSuffixIndex() map[string][]string {
-	if shared := g.sharedLookups; shared != nil && len(g.result.NamedTypes) == shared.namedCount {
+	namedTypes := g.namedTypesMap("named-type-suffix-index")
+	count := len(namedTypes)
+	if shared := g.sharedLookups; shared != nil && count == shared.namedCount {
 		shared = shared.programLookups()
-		shared.namedOnce.Do(func() { shared.namedSuffixes = suffixIndex(shared.result.NamedTypes) })
+		shared.namedOnce.Do(func() { shared.namedSuffixes = suffixIndex(namedTypes) })
 		return shared.namedSuffixes
 	}
-	if g.namedTypeSuffixes == nil || g.namedTypeSuffixesSize != len(g.result.NamedTypes) {
-		g.namedTypeSuffixes = suffixIndex(g.result.NamedTypes)
-		g.namedTypeSuffixesSize = len(g.result.NamedTypes)
+	if g.namedTypeSuffixes == nil || g.namedTypeSuffixesSize != count {
+		g.namedTypeSuffixes = suffixIndex(namedTypes)
+		g.namedTypeSuffixesSize = count
 	}
 	return g.namedTypeSuffixes
 }
 
 func (g *llvmGenerator) globalSuffixIndex() map[string][]string {
-	symbols := g.result.GlobalScope.Symbols
+	symbols := g.globalSymbolsMap("global-symbol-suffix-index")
 	if shared := g.sharedLookups; shared != nil && len(symbols) == shared.symbolCount {
 		shared = shared.programLookups()
-		shared.globalOnce.Do(func() { shared.globalSuffixes = suffixIndex(shared.result.GlobalScope.Symbols) })
+		shared.globalOnce.Do(func() { shared.globalSuffixes = suffixIndex(symbols) })
 		return shared.globalSuffixes
 	}
 	if g.globalSuffixes == nil || g.globalSuffixesSize != len(symbols) {

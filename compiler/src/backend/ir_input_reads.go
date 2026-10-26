@@ -16,26 +16,50 @@ type irFunctionBodyRead struct {
 }
 
 type irInputQueryRead struct {
+	Result     *semantic.Result
+	Context    string
 	Kind, Name string
 	Symbol     *semantic.Symbol
+	Type       semantic.Type
 	Found      bool
+}
+
+type irInputRangeEntry struct {
+	Name   string
+	Symbol *semantic.Symbol
+	Type   semantic.Type
+}
+
+type irInputRangeRead struct {
+	Result    *semantic.Result
+	Context   string
+	Kind, Use string
+	Nil       bool
+	Entries   []irInputRangeEntry
 }
 
 type irInputReadReport struct {
 	Semantic  []semantic.SpecializationInputRead
+	Codegen   []semantic.CodegenFactRead
 	Bodies    []irFunctionBodyRead
 	Queries   []irInputQueryRead
+	Ranges    []irInputRangeRead
 	Uncovered []string
 	Lowered   bool
 }
 
 type irInputReadRecorder struct {
 	semanticReads []semantic.SpecializationInputRead
+	codegenReads  []semantic.CodegenFactRead
 	mu            sync.Mutex
 	bodies        []irFunctionBodyRead
 	queries       []irInputQueryRead
+	ranges        []irInputRangeRead
 	seen          map[irFunctionBodyRead]bool
 	lowered       bool
+	// shared contains build-setup reads used by every partition (for example
+	// declaration routing and shared symbol indexes). It is not another unit.
+	shared *irInputReadRecorder
 }
 
 func (r *irInputReadRecorder) body(decl, canonical *ast.FuncDecl, use string) {
@@ -54,34 +78,91 @@ func (r *irInputReadRecorder) body(decl, canonical *ast.FuncDecl, use string) {
 	}
 }
 
-func (r *irInputReadRecorder) query(kind, name string, symbol *semantic.Symbol, found bool) {
+func (r *irInputReadRecorder) query(result *semantic.Result, context, kind, name string, symbol *semantic.Symbol, found bool) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	r.queries = append(r.queries, irInputQueryRead{kind, name, symbol, found})
+	r.queries = append(r.queries, irInputQueryRead{Result: result, Context: context, Kind: kind, Name: name, Symbol: symbol, Found: found})
+	r.mu.Unlock()
+}
+
+func (r *irInputReadRecorder) namedTypeQuery(result *semantic.Result, name string, value semantic.Type, found bool) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.queries = append(r.queries, irInputQueryRead{Result: result, Context: "codegen", Kind: "named-type", Name: name, Type: value, Found: found})
+	r.mu.Unlock()
+}
+
+func (r *irInputReadRecorder) rangeRead(read irInputRangeRead) {
+	if r == nil {
+		return
+	}
+	read.Entries = append([]irInputRangeEntry(nil), read.Entries...)
+	r.mu.Lock()
+	r.ranges = append(r.ranges, read)
+	r.mu.Unlock()
+}
+
+func (r *irInputReadRecorder) codegenFactRead(read semantic.CodegenFactRead) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.codegenReads = append(r.codegenReads, read)
 	r.mu.Unlock()
 }
 
 func (r *irInputReadRecorder) snapshot() irInputReadReport {
+	if r == nil {
+		return irInputReadReport{}
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return irInputReadReport{
+	report := irInputReadReport{
 		Semantic: append([]semantic.SpecializationInputRead(nil), r.semanticReads...),
+		Codegen:  append([]semantic.CodegenFactRead(nil), r.codegenReads...),
 		Bodies:   append([]irFunctionBodyRead(nil), r.bodies...),
 		Queries:  append([]irInputQueryRead(nil), r.queries...),
+		Ranges:   cloneIRInputRanges(r.ranges),
 		Lowered:  r.lowered,
 		// These are hard coverage gaps, even for a unit with no observed
 		// body reads. No caller may infer reuse authority from this report.
 		Uncovered: []string{
 			"owned and derived AST-keyed semantic facts, including proof/noalias",
+			"semantic getter observations retain opaque AST keys and values without portable canonical encoding",
 			"global declarations, layouts, contracts/defaults/laws, resolution candidate sets",
+			"NamedTypes and GlobalScope values are observed as opaque in-process payloads; canonical value encoding is not implemented",
 			"private semantic foreign-body consultations and inherited summary/memo reads",
 			"reflective and opaque metadata walks that may carry foreign function syntax",
 			"complete positive/negative query and lexical/captured environment coverage",
 			"target/codegen settings and source-position/generated-name provenance",
 		},
 	}
+	shared := r.shared
+	r.mu.Unlock()
+	if shared != nil && shared != r {
+		common := shared.snapshot()
+		report.Semantic = append(report.Semantic, common.Semantic...)
+		report.Codegen = append(report.Codegen, common.Codegen...)
+		report.Bodies = append(report.Bodies, common.Bodies...)
+		report.Queries = append(report.Queries, common.Queries...)
+		report.Ranges = append(report.Ranges, cloneIRInputRanges(common.Ranges)...)
+	}
+	return report
+}
+
+func cloneIRInputRanges(reads []irInputRangeRead) []irInputRangeRead {
+	if reads == nil {
+		return nil
+	}
+	copy := make([]irInputRangeRead, len(reads))
+	for i, read := range reads {
+		copy[i] = read
+		copy[i].Entries = append([]irInputRangeEntry(nil), read.Entries...)
+	}
+	return copy
 }
 
 // semanticObservations preserves nil-declaration negative queries separately from

@@ -26,11 +26,7 @@ func (g *llvmGenerator) functionBodyForInputRead(decl *ast.FuncDecl, use string)
 }
 
 func (g *llvmGenerator) lookupGlobalForInputRead(name, use string) (*semantic.Symbol, bool) {
-	symbol, found := g.result.GlobalScope.Lookup(name)
-	if g.inputReads != nil {
-		g.inputReads.query(use, name, symbol, found)
-	}
-	return symbol, found
+	return g.codegenReadView().LookupGlobalSymbol(name, use)
 }
 
 func (g *llvmGenerator) specializeFunctionForInputRead(decl *ast.FuncDecl, args []semantic.Type) (*semantic.SpecializedFunction, error) {
