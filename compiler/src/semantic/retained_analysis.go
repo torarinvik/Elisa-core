@@ -2671,6 +2671,10 @@ func (r *RetainedAnalysis) removeLiveFunctions(fns []*ast.FuncDecl) {
 		}
 		delete(a.funcDeclSymbols, fn)
 		delete(a.funcDeclUsings, fn)
+		delete(a.declVisibility, fn)
+		if a.file != nil {
+			delete(a.file.DeclVisibility, fn)
+		}
 		delete(a.paramStoreTargets, fn)
 		if !survivingNames[fn.Name] {
 			delete(a.regionParamCalleeParamIndex, fn.Name)
