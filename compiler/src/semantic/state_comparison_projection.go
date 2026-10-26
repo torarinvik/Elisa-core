@@ -35,7 +35,11 @@ func (r *RetainedAnalysis) marshalComparisonProjection() ([]byte, error) {
 		if !ok || live[fn] || len(fn.Body) == 0 {
 			continue
 		}
-		texts[fn] = r.comparisonText(fn)
+		text := r.comparisonText(fn)
+		if text.bodyTypeSyntax == "" {
+			text.bodyTypeSyntax, _ = resolvedTypeNameBodySyntaxFingerprint(fn)
+		}
+		texts[fn] = text
 		omitted[fn] = true
 	}
 	registry := semanticStateRegistry()

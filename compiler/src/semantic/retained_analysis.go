@@ -38,14 +38,16 @@ type RetainedAnalysis struct {
 	// Persist invalidation across MarshalState/RestoreAnalysisState. A scratch-
 	// backed update can preserve the live analysis without rebuilding the fast
 	// preparer's declaration-phase snapshots.
-	fastPrepareInvalidated string
-	a                      *Analyzer
-	result                 *Result
-	decls                  []scopedDecl
-	post                   func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
-	pristine               *ast.File                            // a parse of src, for comparison; see texts
-	texts                  map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
-	src                    []byte                               // the expanded source pristine was parsed from
+	fastPrepareInvalidated            string
+	a                                 *Analyzer
+	result                            *Result
+	decls                             []scopedDecl
+	resolvedTypeNameSourceOwners      map[ast.TypeExpr]resolvedTypeNameSourceOwner // immutable pre-body source ownership for the live AST
+	resolvedTypeNameSourceOwnersValid bool
+	post                              func([]scopedDecl, map[*ast.FuncDecl]*FuncType)
+	pristine                          *ast.File                            // a parse of src, for comparison; see texts
+	texts                             map[*ast.FuncDecl]funcComparisonText // pristine functions whose bodies were spliced away
+	src                               []byte                               // the expanded source pristine was parsed from
 
 	depth      int
 	windows    map[*ast.FuncDecl][2]int // body-phase diagnostics emitted by each top-level analyzeFunc
@@ -738,6 +740,8 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	pairing := time.Since(start)
 	var pre *preBodyState
 	var fastBodies [][]ast.Stmt
+	var fastResolvedTypeNameRows map[string]map[ast.TypeExpr]string
+	var fastResolvedTypeNameSourceOwners map[ast.TypeExpr]resolvedTypeNameSourceOwner
 	bodyEnvironmentUnchanged := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
 		len(replaced)+len(insertedBefore)+len(overloadNames)+len(appendedInto)+len(movedSplices)+len(shifted)+len(shiftedOther) == 0 &&
@@ -755,10 +759,19 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			why = r.fastLineShiftAuthority(a, marks)
 		}
 		if why == "" {
-			fastBodies, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls)
+			fastBodies, fastResolvedTypeNameRows, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls)
+			if why == "" {
+				var ownershipErr error
+				fastResolvedTypeNameSourceOwners, ownershipErr = resolvedTypeNameFastBodySourceOwners(shadowEdits, fastBodies, retainedPreBodyFunctionKeys(r.decls))
+				if ownershipErr != nil {
+					why = ownershipErr.Error()
+				}
+			}
 		}
 		if why != "" {
 			fastBodies = nil
+			fastResolvedTypeNameRows = nil
+			fastResolvedTypeNameSourceOwners = nil
 			r.LastStats.FastDeclined = why
 		}
 	}
@@ -781,7 +794,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			diags[i].Pos = retainedShiftPos(diags[i].Pos, marks)
 		}
-		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
+		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, resolvedTypeNames: r.pre.resolvedTypeNames, resolvedTypeNameSourceOwners: fastResolvedTypeNameSourceOwners, resolvedTypeNameRows: fastResolvedTypeNameRows, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
 		r.LastStats.FastPrepared = true
 	} else if prepared.AcceptsScratch(scratch) {
 		if err := prepared.materialize(); err != nil {
@@ -863,8 +876,70 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		growth.addedStructs = append(growth.addedStructs, joinQualifiedName(namespace, st.Name))
 	}
+	// Build the declaration pairing and using-dependent reanalysis plan before
+	// comparing resolved type-name rows. Those planned owners are the only
+	// unchanged bodies whose rows a using edit may legitimately change.
+	keyOf := func(d ast.Decl) string { return fmt.Sprintf("%s|%T", retainedLineKey(d.Pos()), d) }
+	newOfOld := make(map[string]int, len(pairs))
+	for _, pair := range pairs {
+		newOfOld[keyOf(oldDecls[pair[0]])] = pair[0]<<32 | pair[1]
+	}
+	lookup := func(d ast.Decl) (int, int, bool) {
+		v, ok := newOfOld[keyOf(d)]
+		return v >> 32, v & (1<<32 - 1), ok
+	}
+	newOf := func(d ast.Decl) ast.Decl {
+		if _, j, ok := lookup(d); ok {
+			return newDecls[j]
+		}
+		return nil
+	}
+	spanOf := func(d ast.Decl) (string, string) {
+		if i, j, ok := lookup(d); ok {
+			return oldSpans[i], newSpans[j]
+		}
+		return "", ""
+	}
+	var usingChanges []retainedUsingChange
+	if usingsAdded+usingsRemoved != 0 {
+		var extra []string
+		for _, nf := range added {
+			extra = append(extra, nf.Name)
+		}
+		for _, d := range addedConsts {
+			extra = append(extra, retainedValueDeclName(d))
+		}
+		for _, st := range addedStructs {
+			extra = append(extra, st.Name)
+		}
+		var why string
+		if usingChanges, why = r.findUsingChanges(file, newOf, spanOf, extra); why != "" {
+			return fail("%s", why)
+		}
+	}
 	warningsChanged := false
-	diff := preBodyDifference(r.pre, pre, marks, growth, replaced, &warningsChanged)
+	functionKeysBeforeReplay := retainedPreBodyFunctionKeys(r.decls)
+	reanalyzedBodyKeys := make(map[string]bool, len(splices))
+	for _, splice := range splices {
+		if key := functionKeysBeforeReplay[splice.live]; key != "" {
+			reanalyzedBodyKeys[key] = true
+		}
+	}
+	for _, change := range usingChanges {
+		fn, ok := r.decls[change.index].Decl.(*ast.FuncDecl)
+		if !ok || !change.mention {
+			continue
+		}
+		if key := functionKeysBeforeReplay[fn]; key != "" {
+			reanalyzedBodyKeys[key] = true
+		}
+	}
+	// The owner certificate is authoritative for body-only and function-set
+	// updates. Existing struct/enum/const edit protocols have their own
+	// declaration-fact import rules; retain the legacy table-size proof there.
+	checkResolvedTypeNames := len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs)+
+		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+globalsIn == 0
+	diff := preBodyDifference(r.pre, pre, marks, growth, replaced, reanalyzedBodyKeys, checkResolvedTypeNames, &warningsChanged)
 	if retainedFastPrepareMode == "shadow" && len(shadowEdits) != 0 && len(added)+len(removed) == 0 {
 		r.shadowPredict(a, shadowEdits, scoped, diff)
 	}
@@ -946,50 +1021,9 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			newTexts[nfn] = retainedText(nfn)
 		}
 	}
-	// A live declaration's paired form in the edited program and both source texts. Live
-	// declarations sit at their pre-edit positions, as the pristine ones do.
-	var newOfOld map[string]int
-	keyOf := func(d ast.Decl) string { return fmt.Sprintf("%s|%T", retainedLineKey(d.Pos()), d) }
-	lookup := func(d ast.Decl) (int, int, bool) {
-		if newOfOld == nil {
-			newOfOld = make(map[string]int, len(pairs))
-			for _, p := range pairs {
-				newOfOld[keyOf(oldDecls[p[0]])] = p[0]<<32 | p[1]
-			}
-		}
-		v, ok := newOfOld[keyOf(d)]
-		return v >> 32, v & (1<<32 - 1), ok
-	}
-	newOf := func(d ast.Decl) ast.Decl {
-		if _, j, ok := lookup(d); ok {
-			return newDecls[j]
-		}
-		return nil
-	}
-	spanOf := func(d ast.Decl) (string, string) {
-		if i, j, ok := lookup(d); ok {
-			return oldSpans[i], newSpans[j]
-		}
-		return "", ""
-	}
 	// An added or removed `using`: its scope's declarations take their new usings, and the
 	// functions there that mention a member of the used module are re-analyzed.
-	var usingChanges []retainedUsingChange
 	if usingsAdded+usingsRemoved != 0 {
-		var extra []string
-		for _, nf := range added {
-			extra = append(extra, nf.Name)
-		}
-		for _, d := range addedConsts {
-			extra = append(extra, retainedValueDeclName(d))
-		}
-		for _, st := range addedStructs {
-			extra = append(extra, st.Name)
-		}
-		var why string
-		if usingChanges, why = r.findUsingChanges(file, newOf, spanOf, extra); why != "" {
-			return fail("%s", why)
-		}
 		spliced := map[*ast.FuncDecl]bool{}
 		for _, sp := range splices {
 			spliced[sp.live] = true
@@ -1622,6 +1656,29 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 	}
 	// Removals go first: a changed signature re-adds the same name below.
+	retireTypeNameBodies := make([]*ast.FuncDecl, 0, len(splices))
+	for _, splice := range splices {
+		retireTypeNameBodies = append(retireTypeNameBodies, splice.live)
+	}
+	plainRetiredTypeNameRows := map[ast.TypeExpr]bool{}
+	for _, retirement := range plainBodies {
+		for _, node := range retirement.Nodes {
+			if expr, ok := node.(ast.TypeExpr); ok {
+				plainRetiredTypeNameRows[expr] = true
+			}
+		}
+	}
+	for _, product := range plainRemoved {
+		for _, node := range product.Nodes {
+			if expr, ok := node.(ast.TypeExpr); ok {
+				plainRetiredTypeNameRows[expr] = true
+			}
+		}
+	}
+	resolvedTypeNameRetirement, err := prepareResolvedTypeNameRetirement(a, r.resolvedTypeNameSourceOwners, functionKeysBeforeReplay, retireTypeNameBodies, removedLive, plainRetiredTypeNameRows, r.resolvedTypeNameSourceOwnersValid)
+	if err != nil {
+		return fail("resolved type-name body cleanup: %v", err)
+	}
 	if len(removedLive) != 0 {
 		r.removeLiveFunctions(removedLive)
 	}
@@ -1884,6 +1941,34 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		plainRebound[retirement.Product.Owner] = true
 	}
+	if err := resolvedTypeNameRetirement.apply(a); err != nil {
+		r.a = nil
+		return fail("resolved type-name body cleanup: %v", err)
+	}
+	for _, splice := range splices {
+		key := functionKeysBeforeReplay[splice.live]
+		if pre.prepared != nil {
+			prepared := pre.prepared[retainedLineKey(splice.edit.Pos())+"|"+splice.edit.Name]
+			if prepared == nil {
+				r.a = nil
+				return fail("resolved type-name prepared function %s is missing", splice.edit.Name)
+			}
+			key = pre.keyOf[prepared]
+		}
+		if key == "" {
+			r.a = nil
+			return fail("resolved type-name body owner %s is missing", splice.edit.Name)
+		}
+		rows := pre.resolvedTypeNameRows[key]
+		if pre.resolvedTypeNames.functions[key].body != "" && rows == nil {
+			r.a = nil
+			return fail("resolved type-name body rows for %s are missing", splice.edit.Name)
+		}
+		if err := importResolvedTypeNameBodyRows(a, rows); err != nil {
+			r.a = nil
+			return fail("resolved type-name body import: %v", err)
+		}
+	}
 	for i, s := range splices {
 		s.live.Body = bodies[i]
 		changed = append(changed, scoped[s.live])
@@ -2109,6 +2194,103 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if retainedFastPrepareMode != "" && !bodyEnvironmentUnchanged {
 		r.invalidateFastPrepareBaseline("declaration environment changed; fresh retained baseline required")
 	}
+	nextTypeNameOwners := make(map[ast.TypeExpr]resolvedTypeNameSourceOwner, len(r.resolvedTypeNameSourceOwners))
+	for expr, owner := range r.resolvedTypeNameSourceOwners {
+		nextTypeNameOwners[expr] = owner
+	}
+	typeNameOwnersValid := r.resolvedTypeNameSourceOwnersValid && pre != nil && pre.resolvedTypeNames.failure == ""
+	if typeNameOwnersValid {
+		removedFunctions := map[*ast.FuncDecl]bool{}
+		for _, fn := range removedLive {
+			removedFunctions[fn] = true
+			oldKey := functionKeysBeforeReplay[fn]
+			for expr, owner := range nextTypeNameOwners {
+				if owner.owner == "fn:"+oldKey {
+					delete(nextTypeNameOwners, expr)
+				}
+			}
+		}
+		newFunctionKeys := map[*ast.FuncDecl]string{}
+		for live, oldKey := range functionKeysBeforeReplay {
+			if removedFunctions[live] {
+				continue
+			}
+			newKey := oldKey
+			if newDecl := pairedNew[live]; newDecl != nil && pre.prepared != nil {
+				if preparedFn := pre.prepared[retainedLineKey(newDecl.Pos())+"|"+newDecl.Name]; preparedFn != nil {
+					if preparedKey := pre.keyOf[preparedFn]; preparedKey != "" {
+						newKey = preparedKey
+					}
+				}
+			}
+			newFunctionKeys[live] = newKey
+		}
+		ownerKeyRewrites := make(map[string]string, len(newFunctionKeys))
+		for live, oldKey := range functionKeysBeforeReplay {
+			if newKey := newFunctionKeys[live]; newKey != "" && newKey != oldKey {
+				ownerKeyRewrites["fn:"+oldKey] = "fn:" + newKey
+			}
+		}
+		for expr, owner := range nextTypeNameOwners {
+			if newOwner, ok := ownerKeyRewrites[owner.owner]; ok {
+				owner.owner = newOwner
+				nextTypeNameOwners[expr] = owner
+			}
+		}
+		replaceBodyOwner := map[string]bool{}
+		for _, splice := range splices {
+			key := newFunctionKeys[splice.live]
+			if key == "" {
+				key = functionKeysBeforeReplay[splice.live]
+			}
+			replaceBodyOwner["fn:"+key] = true
+		}
+		for expr, owner := range nextTypeNameOwners {
+			if replaceBodyOwner[owner.owner] && owner.region == "body" {
+				delete(nextTypeNameOwners, expr)
+			}
+		}
+		for _, splice := range splices {
+			key := newFunctionKeys[splice.live]
+			if key == "" {
+				key = functionKeysBeforeReplay[splice.live]
+			}
+			preparedFn := (*ast.FuncDecl)(nil)
+			if pre.prepared != nil {
+				preparedFn = pre.prepared[retainedLineKey(splice.edit.Pos())+"|"+splice.edit.Name]
+			}
+			preparedKey := key
+			if preparedFn != nil && pre.keyOf[preparedFn] != "" {
+				preparedKey = pre.keyOf[preparedFn]
+			}
+			for expr, owner := range pre.resolvedTypeNameSourceOwners {
+				if owner.owner == "fn:"+preparedKey && owner.region == "body" {
+					owner.owner = "fn:" + key
+					nextTypeNameOwners[expr] = owner
+				}
+			}
+		}
+		for _, scoped := range addedScoped {
+			fn, ok := scoped.Decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			key := pre.keyOf[fn]
+			if key == "" {
+				continue
+			}
+			for expr, owner := range pre.resolvedTypeNameSourceOwners {
+				if owner.owner == "fn:"+key {
+					nextTypeNameOwners[expr] = owner
+				}
+			}
+		}
+		if len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs)+len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs)+globalsIn != 0 {
+			typeNameOwnersValid = false
+		}
+	}
+	r.resolvedTypeNameSourceOwners = nextTypeNameOwners
+	r.resolvedTypeNameSourceOwnersValid = typeNameOwnersValid
 	r.pristine, r.src, r.texts, r.pre = file, src, newTexts, pre.comparisonState()
 	if relocateProofReport != nil {
 		if why := relocateProofReport(a); why != "" {
@@ -2186,8 +2368,9 @@ func (r *RetainedAnalysis) rebaseWindows(drop map[int]bool) {
 
 // funcComparisonText is what Update compares for a function whose source changed.
 type funcComparisonText struct {
-	header  string // signature, gensyms normalized
-	gensyms string // offset-named identifiers the function mentions
+	header         string // signature, gensyms normalized
+	gensyms        string // offset-named identifiers the function mentions
+	bodyTypeSyntax string // pointer-free source TypeExpr fingerprint for a projected body
 }
 
 func retainedText(fn *ast.FuncDecl) funcComparisonText {

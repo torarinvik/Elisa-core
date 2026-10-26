@@ -355,16 +355,37 @@ func (r *RetainedAnalysis) shadowPredict(a *Analyzer, edits [][3]*ast.FuncDecl, 
 // update must wait for it. Only line-preserving edits to function bodies qualify; each
 // edited function's declaration-level facts must equal its previous version's, and no
 // declaration-phase diagnostic may lie inside it.
-func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl, scoped map[*ast.FuncDecl]scopedDecl, oldDecls []ast.Decl) ([][]ast.Stmt, string) {
+func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl, scoped map[*ast.FuncDecl]scopedDecl, oldDecls []ast.Decl) ([][]ast.Stmt, map[string]map[ast.TypeExpr]string, string) {
 	if r.fastPrepareInvalidated != "" {
-		return nil, r.fastPrepareInvalidated
+		return nil, nil, r.fastPrepareInvalidated
 	}
 	if r.pre == nil || r.classify == nil {
-		return nil, "no retained baseline"
+		return nil, nil, "no retained baseline"
 	}
+	if r.pre.resolvedTypeNames.failure != "" {
+		return nil, nil, "resolved type-name ownership baseline is unavailable"
+	}
+	if !r.resolvedTypeNameSourceOwnersValid {
+		return nil, nil, "source TypeExpr ownership inventory is unavailable"
+	}
+	functionKeys := retainedPreBodyFunctionKeys(r.decls)
 	bodies := make([][]ast.Stmt, len(edits))
+	resolvedTypeNameRows := map[string]map[ast.TypeExpr]string{}
 	for i, e := range edits {
 		live, old, edit := e[0], e[1], e[2]
+		oldTypeSyntax, oldTypeSyntaxErr := "", error(nil)
+		if len(old.Body) == 0 {
+			oldTypeSyntax = r.comparisonText(old).bodyTypeSyntax
+			if oldTypeSyntax == "" {
+				oldTypeSyntaxErr = fmt.Errorf("projected source body has no type-syntax fingerprint")
+			}
+		} else {
+			oldTypeSyntax, oldTypeSyntaxErr = resolvedTypeNameBodySyntaxFingerprint(old)
+		}
+		newTypeSyntax, newTypeSyntaxErr := resolvedTypeNameBodySyntaxFingerprint(edit)
+		if oldTypeSyntaxErr != nil || newTypeSyntaxErr != nil || oldTypeSyntax != newTypeSyntax {
+			return nil, nil, edit.Name + " changes or cannot certify body type-name syntax"
+		}
 		op := old.Pos()
 		end := int(^uint(0) >> 1)
 		for _, d := range oldDecls {
@@ -374,17 +395,17 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 		}
 		for _, d := range r.pre.diags {
 			if d.Pos.File == op.File && d.Pos.Line >= op.Line && d.Pos.Line < end {
-				return nil, edit.Name + " holds a declaration-phase diagnostic"
+				return nil, nil, edit.Name + " holds a declaration-phase diagnostic"
 			}
 		}
 		if live.IsLaw {
-			return nil, edit.Name + " is a law"
+			return nil, nil, edit.Name + " is a law"
 		}
 		if classifierFoldShape(old) || classifierFoldShape(edit) {
-			return nil, edit.Name + " may fold into a classifier table"
+			return nil, nil, edit.Name + " may fold into a classifier table"
 		}
 		if r.appendOnlyReports(a, edit, scoped[live]) {
-			return nil, edit.Name + " breaks an append-only store rule"
+			return nil, nil, edit.Name + " breaks an append-only store rule"
 		}
 		before, ok := r.digestOf[old]
 		if !ok {
@@ -395,11 +416,22 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 			if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" || os.Getenv("ELISACORE_RETAINED_FAST_DEBUG") == "1" {
 				fmt.Fprintf(os.Stderr, "[fast-path] %s precomputed=%v\n--- before\n%s\n--- after\n%s\n", edit.Name, ok, before, after)
 			}
-			return nil, edit.Name + " changes declaration-level facts"
+			return nil, nil, edit.Name + " changes declaration-level facts"
 		}
 		body, why := r.fastPrepareBody(a, live, edit, scoped[live])
 		if why != "" {
-			return nil, edit.Name + ": " + why
+			return nil, nil, edit.Name + ": " + why
+		}
+		key := functionKeys[live]
+		rows, err := rebindResolvedTypeNameBodyRows(a, r.resolvedTypeNameSourceOwners, key, body)
+		if err != nil {
+			return nil, nil, edit.Name + ": " + err.Error()
+		}
+		if r.pre.resolvedTypeNames.functions[key].body != "" && len(rows) == 0 {
+			return nil, nil, edit.Name + " lost previously certified body type-name rows"
+		}
+		if len(rows) != 0 {
+			resolvedTypeNameRows[key] = rows
 		}
 		if r.digestOf == nil {
 			r.digestOf = map[*ast.FuncDecl]string{}
@@ -407,7 +439,7 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 		r.digestOf[edit] = after
 		bodies[i] = body
 	}
-	return bodies, ""
+	return bodies, resolvedTypeNameRows, ""
 }
 
 // precomputeBaselineDigests records each baseline function's fact digest while its body is

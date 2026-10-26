@@ -25,15 +25,18 @@ type preBodyState struct {
 	plainInputs     string
 	plainAdmission  bool // invocation-local; never persisted in comparisonState
 
-	hasProofReport   bool
-	proofPrefix      []proofContribution // immutable declaration-only journal captured before body analysis
-	proofPrefixError string
-	classification   map[string]string        // complete per-function classifier decisions
-	fingerprint      map[string]string        // stable function key -> body-dependent results
-	global           string                   // program-wide results (struct flags, table sizes)
-	diags            []Diagnostic             // diagnostics the phase emitted
-	keyOf            map[*ast.FuncDecl]string // each prepared function's fingerprint key
-	prepared         map[string]*ast.FuncDecl // position key -> function as prepared for body analysis
+	hasProofReport               bool
+	proofPrefix                  []proofContribution // immutable declaration-only journal captured before body analysis
+	proofPrefixError             string
+	classification               map[string]string                            // complete per-function classifier decisions
+	fingerprint                  map[string]string                            // stable function key -> body-dependent results
+	global                       string                                       // program-wide results (struct flags, table sizes)
+	resolvedTypeNames            resolvedTypeNameContributions                // exact per-owner pre-body type-name facts
+	resolvedTypeNameSourceOwners map[ast.TypeExpr]resolvedTypeNameSourceOwner // scratch-only pre-body ownership rows
+	resolvedTypeNameRows         map[string]map[ast.TypeExpr]string           // scratch-only body rows to import with prepared bodies
+	diags                        []Diagnostic                                 // diagnostics the phase emitted
+	keyOf                        map[*ast.FuncDecl]string                     // each prepared function's fingerprint key
+	prepared                     map[string]*ast.FuncDecl                     // position key -> function as prepared for body analysis
 	// Per prepared function, the declaration-phase tables an added function
 	// carries into the live analysis (plain values, no analyzer-owned types).
 	targets     map[*ast.FuncDecl][]map[int]bool
@@ -45,10 +48,10 @@ type preBodyState struct {
 // runs; keeping its prepared functions afterwards roots an unused scratch AST.
 // Return a separate state so a caller-owned RetainedScratch is not modified.
 func (p *preBodyState) comparisonState() *preBodyState {
-	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil && !p.plainAdmission {
+	if p == nil || p.keyOf == nil && p.prepared == nil && p.targets == nil && p.regionIndex == nil && p.resolvedTypeNameSourceOwners == nil && p.resolvedTypeNameRows == nil && !p.plainAdmission {
 		return p
 	}
-	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, diags: p.diags, plainHeaders: p.plainHeaders, plainGlobal: p.plainGlobal, plainInputs: p.plainInputs, plainIdentities: p.plainIdentities, hasProofReport: p.hasProofReport}
+	return &preBodyState{classification: p.classification, fingerprint: p.fingerprint, global: p.global, resolvedTypeNames: p.resolvedTypeNames, diags: p.diags, plainHeaders: p.plainHeaders, plainGlobal: p.plainGlobal, plainInputs: p.plainInputs, plainIdentities: p.plainIdentities, hasProofReport: p.hasProofReport}
 }
 
 var pendingPreBody *preBodyState
@@ -87,16 +90,17 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 		targets:        map[*ast.FuncDecl][]map[int]bool{},
 		regionIndex:    map[*ast.FuncDecl]map[int]bool{},
 	}
-	occurrences := map[string]int{}
+	functionKeys := retainedPreBodyFunctionKeys(decls)
 	for _, scoped := range decls {
 		for _, d := range retainedWalkDecls(&ast.File{Decls: []ast.Decl{scoped.Decl}}) {
 			fn, ok := d.(*ast.FuncDecl)
 			if !ok {
 				continue
 			}
-			base := scoped.Namespace + "::" + fn.Name
-			key := fmt.Sprintf("%s#%d", base, occurrences[base])
-			occurrences[base]++
+			key := functionKeys[fn]
+			if key == "" {
+				continue
+			}
 			p.fingerprint[key] = a.preBodyFunctionFingerprint(fn)
 			p.classification[key] = a.preBodyFunctionClassification(fn)
 			p.keyOf[fn] = key
@@ -108,6 +112,14 @@ func capturePreBody(a *Analyzer, decls []scopedDecl) *preBodyState {
 				p.regionIndex[fn] = idx
 			}
 		}
+	}
+	var resolvedTypeNameLocations map[ast.TypeExpr]resolvedTypeNameLocation
+	p.resolvedTypeNames, resolvedTypeNameLocations = captureResolvedTypeNameContributions(a.resolvedTypeNames, decls, functionKeys, true)
+	p.resolvedTypeNameSourceOwners = resolvedTypeNameSourceOwners(resolvedTypeNameLocations)
+	p.resolvedTypeNameRows = resolvedTypeNameBodyRows(a.resolvedTypeNames, resolvedTypeNameLocations)
+	if a.retained != nil {
+		a.retained.resolvedTypeNameSourceOwners = p.resolvedTypeNameSourceOwners
+		a.retained.resolvedTypeNameSourceOwnersValid = p.resolvedTypeNames.failure == ""
 	}
 	p.proofPrefix, p.proofPrefixError = a.captureProofPrefix()
 	p.global = a.preBodyGlobalFingerprint()
@@ -286,14 +298,31 @@ func (g retainedGrowth) none() bool {
 // preBodyDifference reports why the edited program's declaration phase differs from the live
 // one's in a way the update cannot follow. It sets *warningsChanged when the only difference
 // is in its warnings, which the update then takes from cur.
-func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, g retainedGrowth, replaced map[string]bool, warningsChanged *bool) string {
+func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, g retainedGrowth, replaced, reanalyzedBodies map[string]bool, checkResolvedTypeNames bool, warningsChanged *bool) string {
 	added, removed := g.addedFuncs, g.removedFuncs
 	if old == nil || cur == nil {
 		return "declaration phase results unavailable"
 	}
 	cur.plainAdmission = false
+	resolvedTypeNamesHandled := false
+	if checkResolvedTypeNames {
+		oldFunctionKeys := stringSetKeys(old.fingerprint)
+		currentFunctionKeys := stringSetKeys(cur.fingerprint)
+		if difference := compareResolvedTypeNameContributions(old.resolvedTypeNames, cur.resolvedTypeNames, oldFunctionKeys, currentFunctionKeys, g.addedFuncs, g.removedFuncs, replaced, reanalyzedBodies); difference != "" {
+			return "resolved type-name contributions changed: " + difference
+		}
+		resolvedTypeNamesHandled = true
+	}
 	if old.global != cur.global {
-		if diff := globalGrowthDifference(old.global, cur.global, g); diff != "" {
+		oldGlobal, currentGlobal := old.global, cur.global
+		if resolvedTypeNamesHandled {
+			oldGlobal = retainedWithoutResolvedTypeNameCount(oldGlobal)
+			currentGlobal = retainedWithoutResolvedTypeNameCount(currentGlobal)
+		}
+		if oldGlobal == currentGlobal {
+			// The only table-size delta is explained by the exact owner-scoped
+			// certificate above.
+		} else if diff := globalGrowthDifference(oldGlobal, currentGlobal, g); diff != "" {
 			if residual, certified := plainHeaderResidueDifference(old, cur, g, replaced); !certified || residual != "" {
 				return "program-wide declaration results changed" + diff
 			}
@@ -358,6 +387,25 @@ func preBodyDifference(old, cur *preBodyState, marks map[string][][2]int, g reta
 		return "declaration phase diagnostics changed" + firstLineDifference(before, after)
 	}
 	return ""
+}
+
+func stringSetKeys(values map[string]string) map[string]bool {
+	keys := make(map[string]bool, len(values))
+	for key := range values {
+		keys[key] = true
+	}
+	return keys
+}
+
+func retainedWithoutResolvedTypeNameCount(fingerprint string) string {
+	lines := strings.Split(fingerprint, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "#resolvedTypeNames=") {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 func firstLineDifference(a, b string) string {
