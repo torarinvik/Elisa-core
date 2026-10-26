@@ -640,6 +640,11 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	return phi, resultType, true, nil
 }
 func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef, regionArenaArgs []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	// ABI lowering may rewrite args. Preserve the source argument values only
+	// for native extern calls whose postconditions will actually be checked.
+	if !s.externEnsureChecksEnabled(funcType) {
+		return s.emitResolvedCallInner(callee, funcType, direct, args, regionArenaArgs)
+	}
 	elisaArgs := append([]C.LLVMValueRef(nil), args...)
 	value, valueType, err := s.emitResolvedCallInner(callee, funcType, direct, args, regionArenaArgs)
 	if err != nil {

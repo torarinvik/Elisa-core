@@ -21,14 +21,19 @@ import (
 // with the parameters bound to the argument values and `result` to the returned value,
 // and panics on violation — the same gate and label shape as an Elisa function's own
 // postcondition. `@trusted("reason")` is what buys the pure assumption.
-func (s *functionState) emitExternEnsureChecks(fn *semantic.FuncType, args []C.LLVMValueRef, result C.LLVMValueRef, resultType semantic.Type) error {
+func (s *functionState) externEnsureChecksEnabled(fn *semantic.FuncType) bool {
 	if fn == nil || !fn.IsNativeExtern || fn.TrustedExtern || len(fn.ExternEnsureValues) == 0 {
-		return nil
+		return false
 	}
 	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
-		return nil
+		return false
 	}
-	if _, isUnion := fn.Return.(*semantic.ErrorUnionType); isUnion {
+	_, isUnion := fn.Return.(*semantic.ErrorUnionType)
+	return !isUnion
+}
+
+func (s *functionState) emitExternEnsureChecks(fn *semantic.FuncType, args []C.LLVMValueRef, result C.LLVMValueRef, resultType semantic.Type) error {
+	if !s.externEnsureChecksEnabled(fn) {
 		return nil
 	}
 	s.pushScope()
