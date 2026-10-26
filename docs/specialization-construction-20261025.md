@@ -25,6 +25,14 @@ from 4.17 MB to 3.92 MB per edit. Records are under
 `/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-stage1-lazy-prototypes-candidate`
 and `/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-stage1-proof-main-matched-q3pi64kb`.
 
+The candidate's `compiler-O0.o` was also linked into an arm64 Stage1 executable
+with the repository's profiler-hook fallbacks and selected LLVM toolchain. That
+executable compiled a small `main` fixture through `scripts/elisac_stage1.sh`;
+the resulting object linked with the checkout runtime and exited with status 42.
+The candidate had no provenance manifest, so this smoke invocation explicitly
+allowed a stale product. This checks that the candidate object links and runs;
+it is not the full self-host fixpoint gate.
+
 ## Owned function-analysis rows
 
 Specialization construction now starts with an empty writable functionAnalyses
