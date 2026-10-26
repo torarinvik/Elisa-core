@@ -344,10 +344,22 @@ func buildCacheEnvKey() []string {
 // Profile durations and goroutine/block destinations are dormant without their
 // CPU/memory parent profile; those parent controls already require this bypass.
 func buildCacheRequestObserverEnabled() bool {
+	if analysisDiskRequestObserverEnabled() {
+		return true
+	}
 	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
 		return true
 	}
-	for _, name := range []string{"ELISA_SMT_RLIMIT_LOG", "ELISA_SMT_TRACE", "ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
+	for _, name := range []string{
+		"ELISACORE_BUILD_TIMING",
+		"ELISACORE_CPUPROFILE",
+		"ELISACORE_MEMPROFILE",
+		"ELISACORE_EMIT_LL",
+		"ELISACORE_LEXER_CAPACITY_REPORT",
+		"ELISACORE_RETAINED_DEBUG_SPANS",
+		"ELISACORE_RETAINED_FAST_DEBUG",
+		"ELISA_BACKEND_PARITY_OUT",
+	} {
 		if os.Getenv(name) != "" {
 			return true
 		}

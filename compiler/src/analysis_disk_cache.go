@@ -22,6 +22,54 @@ import (
 // forwards to a retained server. Only portable, complete idle state is admitted.
 func analysisDiskCacheEnabled() bool { return os.Getenv("ELISACORE_ANALYSIS_CACHE") == "1" }
 
+// These environment controls ask for per-analysis output or validation that a
+// completed semantic snapshot cannot replay. Backend-only observers are
+// intentionally absent: codegen still runs on a semantic-state hit and can
+// produce their output from the current parsed source.
+var analysisDiskRequestObserverVariables = [...]string{
+	"ELISA_SMT_RLIMIT_LOG",
+	"ELISA_SMT_TRACE",
+	"ELISA_SEMANTIC_INTERNAL_PARITY_OUT",
+	"ELISA_DUMP_DEATHTIME",
+	"ELISA_DUMP_REGION_STACKS",
+	"ELISA_REGION_DEBUG",
+	"ELISA_ELEMSTATE_TRACE",
+	"ELISA_STORE_PAYLOAD_TRACE",
+	"ELISA_STORESCAN_TRACE",
+	"ELISA_STORE_TRACE",
+	"ELISA_RECLAIM_TRACE",
+	"ELISA_PARALLEL_GRAPH_REPORT",
+	"ELISA_PARALLEL_SHARING_REPORT",
+	"ELISA_PARALLEL_DECLINE_LOG",
+	"ELISA_POST_TIMING",
+	"ELISA_DECL_TIMING",
+	// These shadow/check modes validate work performed by the analyzer. A
+	// restored snapshot would skip the validation for this invocation.
+	"ELISA_REGION_FIXPOINT_SHADOW",
+	"ELISA_TRACKED_SHARE_CHECK",
+	"ELISA_SMT_PREAMBLE_SHADOW",
+}
+
+func analysisDiskRequestObserver() string {
+	for _, name := range analysisDiskRequestObserverVariables {
+		if os.Getenv(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func analysisDiskRequestObserverEnabled() bool { return analysisDiskRequestObserver() != "" }
+
+// A retained server is a separate process with semantic observer globals
+// captured at startup. Keep observer requests in the client process so their
+// output/validation switches describe this invocation, not the server's
+// startup environment. Backend parity also depends on a lexer package global
+// captured at startup, but it does not require bypassing semantic disk state.
+func retainedRequestRequiresLocalProcess() bool {
+	return analysisDiskRequestObserverEnabled() || os.Getenv("ELISA_BACKEND_PARITY_OUT") != ""
+}
+
 const analysisStateMaxBytes = 2 << 30
 
 type analysisDiskArtifact struct{ key, path string }

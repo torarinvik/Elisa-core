@@ -122,11 +122,15 @@ func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, o
 	var pending *analysisDiskRestoration
 	return analyzeLoadedProgramUsingPreparation(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() && program != nil && program.file == nil {
+			if observer := analysisDiskRequestObserver(); observer != "" {
+				debugAnalysisDisk(stderr, "bypass request observer %s", observer)
+				return semantic.AnalyzeWithOptions(file, options)
+			}
 			return analyzeSemanticFromDisk(program, file, options, stderr, pending)
 		}
 		return analyzeSemanticWithSession(file, options, session)
 	}, func(options semantic.AnalyzeOptions) func() {
-		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() {
+		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() && !analysisDiskRequestObserverEnabled() {
 			pending = startAnalysisDiskRestoration(program, options)
 		}
 		return pending.join

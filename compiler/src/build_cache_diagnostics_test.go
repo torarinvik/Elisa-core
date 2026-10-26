@@ -99,7 +99,17 @@ func TestBuildCacheTranscriptIntegrityAndCaptureBound(t *testing.T) {
 }
 
 func TestBuildObjectCacheDeclinesRequestObservers(t *testing.T) {
-	for _, name := range []string{"ELISACORE_BUILD_TIMING", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_EMIT_LL", "ELISA_SEMANTIC_INTERNAL_PARITY_OUT", "ELISA_BACKEND_PARITY_OUT"} {
+	for _, name := range []string{
+		"ELISACORE_BUILD_TIMING",
+		"ELISACORE_CPUPROFILE",
+		"ELISACORE_MEMPROFILE",
+		"ELISACORE_EMIT_LL",
+		"ELISACORE_LEXER_CAPACITY_REPORT",
+		"ELISACORE_RETAINED_DEBUG_SPANS",
+		"ELISACORE_RETAINED_FAST_DEBUG",
+		"ELISA_SEMANTIC_INTERNAL_PARITY_OUT",
+		"ELISA_BACKEND_PARITY_OUT",
+	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "observer")
 			if _, handled := tryBuildObjectCacheWith(cliOptions{emit: emitObject}, nil, nil, nil, nil); handled {

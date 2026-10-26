@@ -403,7 +403,7 @@ func setEnvironment(env []string) {
 // ELISACORE_RETAINED_SERVER. It reports false when there is no server to use,
 // so the caller runs locally.
 func forwardToRetainedServer(args []string, stdout, stderr io.Writer) (int, bool) {
-	if analysisDiskCacheEnabled() {
+	if retainedRequestRequiresLocalProcess() || analysisDiskCacheEnabled() {
 		return 0, false
 	}
 	socket := os.Getenv("ELISACORE_RETAINED_SERVER")
