@@ -49,3 +49,31 @@ func TestCanonicalWalkerDelegatesMapsAndInaccessibleStructs(t *testing.T) {
 		t.Fatal("inaccessible AST record did not delegate its full structure")
 	}
 }
+
+func TestProofBindingGeneratorHandlesNamedStringsAndScalarSlices(t *testing.T) {
+	pkg := types.NewPackage("elisacore/src/ast", "ast")
+	namedString := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "TestSpelling", nil), types.Typ[types.String], nil)
+	parent := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "TestRecord", nil), types.NewStruct(nil, nil), nil)
+	var out bytes.Buffer
+	field := types.NewVar(token.NoPos, pkg, "Name", namedString)
+	if err := emitProofBindingField(&out, parent, field); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte("string(p.Name)")) {
+		t.Fatal("named string must be converted for the event callback")
+	}
+	out.Reset()
+	if err := emitProofBindingValue(&out, "p.Flags", types.NewSlice(types.Typ[types.Bool]), 0); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("scalar-only slice should emit no loop: %s", out.String())
+	}
+	out.Reset()
+	if err := emitProofBindingValue(&out, "p.Names", types.NewSlice(types.Typ[types.String]), 0); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte("proofBindingVisitString")) {
+		t.Fatal("string slices must retain source-name blocker events")
+	}
+}

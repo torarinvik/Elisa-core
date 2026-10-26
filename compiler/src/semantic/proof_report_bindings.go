@@ -57,66 +57,59 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 		} else {
 			clear(seen)
 		}
-		var visit func(reflect.Value, sourceIdentity)
-		visit = func(v reflect.Value, owner sourceIdentity) {
-			if !v.IsValid() {
-				return
-			}
-			// Exact Pos has one string and only scalar coordinates. Preserve the
-			// File lookalike check; coordinates cannot carry binders or names.
-			if proofBindingPositionSchemaValid && v.Type() == reflect.TypeFor[lexer.Pos]() {
-				name := v.Field(0).String()
-				if retainedLocalGensymName(name) {
-					blocked[name] = true
+		visit := func(value any, parentType reflect.Type, owner ast.Decl, event uint8, fieldName, text string, addressable bool) {
+			switch event {
+			case proofBindingVisitPositionFile, proofBindingVisitString:
+				if retainedLocalGensymName(text) {
+					blocked[text] = true
 				}
-				return
-			}
-			switch v.Kind() {
-			case reflect.Interface:
-				if !v.IsNil() {
-					visit(v.Elem(), owner)
+			case proofBindingVisitNode:
+				if block, ok := value.(*ast.ExprBlock); ok {
+					if binder := proofRuntimeQuantifierBinder(block); binder != nil {
+						quantifiers[binder] = true
+					}
 				}
-			case reflect.Pointer:
-				if v.IsNil() || seen[v.Pointer()] {
+				var node ast.Node
+				var name string
+				switch n := value.(type) {
+				case *ast.RegionStmt:
+					if n.Lazy && n.Name == fmt.Sprintf("__auto_%d", n.Position.Offset) {
+						node, name = n, n.Name
+					}
+				case *ast.VarDeclStmt:
+					if quantifiers[n] {
+						node, name = n, n.Name
+					}
+				}
+				if node != nil {
+					ownerID := sourceIdentity{}
+					if owner != nil {
+						ownerID = identity(owner, shift)
+					}
+					p := node.Pos()
+					if shift {
+						p = retainedShiftPos(p, marks)
+					}
+					key := binderIdentity{ownerID, reflect.TypeOf(node), p.File, p.Line, p.Col}
+					previous, present := result[key]
+					result[key] = binder{name, present && (previous.Conflicting || previous.Name != name)}
+				}
+			case proofBindingVisitStringField:
+				if !retainedLocalGensymName(text) {
 					return
 				}
-				seen[v.Pointer()] = true
-				if v.CanInterface() {
-					if block, ok := v.Interface().(*ast.ExprBlock); ok {
-						if binder := proofRuntimeQuantifierBinder(block); binder != nil {
-							quantifiers[binder] = true
-						}
-					}
-					if decl, ok := v.Interface().(ast.Decl); ok {
-						owner = identity(decl, shift)
-					}
-					var node ast.Node
-					var name string
-					switch n := v.Interface().(type) {
-					case *ast.RegionStmt:
-						if n.Lazy && n.Name == fmt.Sprintf("__auto_%d", n.Position.Offset) {
-							node, name = n, n.Name
-						}
-					case *ast.VarDeclStmt:
-						if quantifiers[n] {
-							node, name = n, n.Name
-						}
-					}
-					if node != nil {
-						p := node.Pos()
-						if shift {
-							p = retainedShiftPos(p, marks)
-						}
-						key := binderIdentity{owner, reflect.TypeOf(node), p.File, p.Line, p.Col}
-						previous, present := result[key]
-						result[key] = binder{name, present && (previous.Conflicting || previous.Name != name)}
-					}
+				// Ident.Name is a reference spelling; literals are source data.
+				// Every other lookalike source name blocks authorization, including
+				// fields, parameters and nested user binders.
+				if parentType == reflect.TypeFor[ast.Ident]() && fieldName == "Name" {
+					return
 				}
-				visit(v.Elem(), owner)
-			case reflect.Struct:
+				if parentType == reflect.TypeFor[ast.StringLit]() {
+					return
+				}
 				generated := ""
-				if v.CanAddr() && v.Addr().CanInterface() {
-					switch n := v.Addr().Interface().(type) {
+				if addressable {
+					switch n := value.(type) {
 					case *ast.RegionStmt:
 						if n.Lazy && n.Name == fmt.Sprintf("__auto_%d", n.Position.Offset) {
 							generated = n.Name
@@ -127,44 +120,13 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 						}
 					}
 				}
-				for i := 0; i < v.NumField(); i++ {
-					field := v.Field(i)
-					if field.Kind() == reflect.String {
-						name := field.String()
-						if !retainedLocalGensymName(name) {
-							continue
-						}
-						// Ident.Name is a reference spelling; literals are source data.
-						// Every other lookalike source name blocks authorization,
-						// including fields, parameters and nested user binders.
-						if v.Type() == reflect.TypeOf(ast.Ident{}) && v.Type().Field(i).Name == "Name" {
-							continue
-						}
-						if v.Type() == reflect.TypeOf(ast.StringLit{}) {
-							continue
-						}
-						if v.Type().Field(i).Name == "Name" && name == generated {
-							continue
-						}
-						blocked[name] = true
-						continue
-					}
-					visit(field, owner)
-				}
-			case reflect.String:
-				if retainedLocalGensymName(v.String()) {
-					blocked[v.String()] = true
-				}
-			case reflect.Slice:
-				if v.Type().Elem().Kind() == reflect.Uint8 {
+				if fieldName == "Name" && text == generated {
 					return
 				}
-				for i := 0; i < v.Len(); i++ {
-					visit(v.Index(i), owner)
-				}
+				blocked[text] = true
 			}
 		}
-		visit(reflect.ValueOf(root), sourceIdentity{})
+		proofBindingASTWalkTyped(root, visit, seen)
 		return result, blocked
 	}
 	fresh, blocked := collect(file, false)
