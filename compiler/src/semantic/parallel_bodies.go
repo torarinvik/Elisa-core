@@ -558,6 +558,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
 			continue
 		}
+		if ownedFunctionAnalyses && name == "funcDeclUsings" {
+			// Usings are installed as fresh slices and only read (or copied into a
+			// resolution context). Keep the index private for declaration edits,
+			// while sharing its immutable per-declaration rows.
+			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.funcDeclUsings)))
+			continue
+		}
 		if name == "retained" {
 			// The retained analysis owns the whole analyzer; a worker records into a
 			// shell of its own (analyzeDeclsParallel), merged back after the join.
