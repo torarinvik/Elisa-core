@@ -6,6 +6,7 @@
 package semantic
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -185,4 +186,161 @@ def runfreshanchors() -> void:
 	assertRetainedNoFuncProof(t, "cold", cold, "axpy")
 	assertRetainedNoFuncProof(t, "warm", warm, "axpy")
 	assertRetainedDisjointProductParity(t, cold, warm)
+}
+
+func TestRetainedFuncDisjointAddressTakenOwnerAddedAndRemovedAcrossDiskReload(t *testing.T) {
+	t.Setenv("ELISA_PARALLEL_BODIES", "0")
+	const before = retainedDisjointKernelSrc + `
+def run() -> void:
+    a: mutable darray[f64] = []
+    b: mutable darray[f64] = []
+    axpy(&a, &b)
+`
+	const addressTaken = retainedDisjointKernelSrc + `
+def run() -> void:
+    a: mutable darray[f64] = []
+    b: mutable darray[f64] = []
+    axpy(&a, &b)
+    handler: fn(mutable darray[f64]&, mutable darray[f64]&) -> void = axpy
+`
+	_, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+	for _, step := range []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{name: "address taken", source: addressTaken, want: false},
+		{name: "address use removed", source: before, want: true},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			warm, restored := retainedUpdateAfterDiskReload(t, state, step.source)
+			state = restored
+			cold := AnalyzeWithOptions(retainedParse(t, step.source), AnalyzeOptions{})
+			assertRetainedFuncPair(t, "cold "+step.name, cold, step.want)
+			assertRetainedFuncPair(t, "warm "+step.name, warm, step.want)
+			assertRetainedDisjointProductParity(t, cold, warm)
+		})
+	}
+}
+
+func TestRetainedFuncNameUsageIndexTracksNonFunctionOwnersAndRepeatedEntries(t *testing.T) {
+	target := &ast.FuncDecl{Name: "target"}
+	targetOverload := &ast.FuncDecl{Name: "target"}
+	sharedValue := &ast.Ident{Name: "target"}
+	global := &ast.GlobalDecl{Name: "handler", Value: sharedValue}
+	otherGlobal := &ast.GlobalDecl{Name: "other", Value: sharedValue}
+	decls := []scopedDecl{{Decl: target}, {Decl: targetOverload}, {Decl: global}, {Decl: global}, {Decl: otherGlobal}}
+	state := &RetainedAnalysis{}
+	if !state.rebuildRetainedFuncNameUsageIndex(decls) {
+		t.Fatal("failed to build value-name index")
+	}
+	if state.funcNameUsageFunctionCounts["target"] != 2 || state.funcNameUsageValueCounts["target"] != 3 {
+		t.Fatalf("unexpected initial counts: functions=%v values=%v", state.funcNameUsageFunctionCounts, state.funcNameUsageValueCounts)
+	}
+
+	global.Value = &ast.IntLit{Value: "0"}
+	state.funcNameUsagePending = true
+	state.funcNameUsageChangedOwners = []ast.Decl{global}
+	_, used := state.funcNameUsageForPost(decls)
+	if !used["target"] || state.funcNameUsageValueCounts["target"] != 1 {
+		t.Fatalf("replacing a repeated non-function owner erased another owner's contribution: used=%v counts=%v", used["target"], state.funcNameUsageValueCounts)
+	}
+
+	state.funcNameUsagePending = true
+	state.funcNameUsageChangedOwners = []ast.Decl{otherGlobal}
+	otherGlobal.Value = &ast.IntLit{Value: "1"}
+	gotCounts, gotUsed := state.funcNameUsageForPost(decls)
+	wantCounts, wantUsed := scanFuncNameUsage(decls)
+	if !reflect.DeepEqual(gotCounts, wantCounts) || !reflect.DeepEqual(gotUsed, wantUsed) {
+		t.Fatalf("indexed names differ from full scan: counts=%v/%v used=%v/%v", gotCounts, wantCounts, gotUsed, wantUsed)
+	}
+	if gotUsed["target"] || state.funcNameUsageValueCounts["target"] != 0 {
+		t.Fatalf("last non-function contribution was not removed: used=%v counts=%v", gotUsed["target"], state.funcNameUsageValueCounts)
+	}
+}
+
+func TestRetainedFuncNameUsageIndexHarvestsLateTrackedOwners(t *testing.T) {
+	t.Run("late known owner", func(t *testing.T) {
+		fn := &ast.FuncDecl{Name: "worker", Body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.Ident{Name: "before"}}}}
+		decls := []scopedDecl{{Decl: fn}}
+		state := &RetainedAnalysis{}
+		if !state.rebuildRetainedFuncNameUsageIndex(decls) {
+			t.Fatal("failed to build value-name index")
+		}
+		fn.Body[0].(*ast.ReturnStmt).Value.(*ast.Ident).Name = "after"
+		state.funcNameUsagePending = true
+		state.funcNameUsageTracking = true
+		state.funcNameUsageOwnerLookup = retainedFuncNameUsageFunctionOwnerMap(decls)
+		state.funcNameUsageTouchedOwners = map[ast.Decl]bool{}
+		state.noteFuncNameUsageFunctionAnalysis(fn)
+
+		gotCounts, gotUsed := state.funcNameUsageForPost(decls)
+		wantCounts, wantUsed := scanFuncNameUsage(decls)
+		if !reflect.DeepEqual(gotCounts, wantCounts) || !reflect.DeepEqual(gotUsed, wantUsed) {
+			t.Fatalf("late known owner was omitted: counts=%v/%v used=%v/%v", gotCounts, wantCounts, gotUsed, wantUsed)
+		}
+	})
+
+	t.Run("late unknown owner forces rebuild", func(t *testing.T) {
+		fn := &ast.FuncDecl{Name: "worker"}
+		global := &ast.GlobalDecl{Name: "value", Value: &ast.Ident{Name: "before"}}
+		decls := []scopedDecl{{Decl: fn}, {Decl: global}}
+		state := &RetainedAnalysis{}
+		if !state.rebuildRetainedFuncNameUsageIndex(decls) {
+			t.Fatal("failed to build value-name index")
+		}
+		global.Value = &ast.Ident{Name: "after"}
+		state.funcNameUsagePending = true
+		state.funcNameUsageTracking = true
+		state.funcNameUsageOwnerLookup = retainedFuncNameUsageFunctionOwnerMap(decls)
+		state.funcNameUsageTouchedOwners = map[ast.Decl]bool{}
+		state.noteFuncNameUsageFunctionAnalysis(&ast.FuncDecl{Name: "synthetic"})
+
+		gotCounts, gotUsed := state.funcNameUsageForPost(decls)
+		wantCounts, wantUsed := scanFuncNameUsage(decls)
+		if !reflect.DeepEqual(gotCounts, wantCounts) || !reflect.DeepEqual(gotUsed, wantUsed) {
+			t.Fatalf("late unknown owner did not rebuild the index: counts=%v/%v used=%v/%v", gotCounts, wantCounts, gotUsed, wantUsed)
+		}
+	})
+}
+
+func BenchmarkRetainedFuncNameUsageUpdate(b *testing.B) {
+	const declarations = 4096
+	decls := make([]scopedDecl, declarations)
+	for i := range decls {
+		name := fmt.Sprintf("worker_%d", i)
+		use := fmt.Sprintf("worker_%d", (i+1)%declarations)
+		decls[i] = scopedDecl{Decl: &ast.FuncDecl{
+			Name: name,
+			Body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.Ident{Name: use}}},
+		}}
+	}
+
+	b.Run("full_scan", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			scanFuncNameUsage(decls)
+		}
+	})
+	b.Run("one_owner_update", func(b *testing.B) {
+		state := &RetainedAnalysis{}
+		if !state.rebuildRetainedFuncNameUsageIndex(decls) {
+			b.Fatal("failed to build value-name index")
+		}
+		owner := decls[declarations/2].Decl.(*ast.FuncDecl)
+		ident := owner.Body[0].(*ast.ReturnStmt).Value.(*ast.Ident)
+		ownerDecl := decls[declarations/2].Decl
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if ident.Name == "worker_1" {
+				ident.Name = "worker_2"
+			} else {
+				ident.Name = "worker_1"
+			}
+			state.funcNameUsagePending = true
+			state.funcNameUsageChangedOwners = []ast.Decl{ownerDecl}
+			state.funcNameUsageForPost(decls)
+		}
+	})
 }

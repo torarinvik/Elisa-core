@@ -52,6 +52,9 @@ func (a *Analyzer) visitFunctionBodyWithElementScan(body []ast.Stmt, visit func(
 // analyzeFunc analyzes a function body with its type parameters left OPAQUE (the
 // template pass). See analyzeFuncWithTypeArgs for the monomorphized re-analysis.
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
+	if a != nil && a.retained != nil {
+		a.retained.noteFuncNameUsageFunctionAnalysis(fn)
+	}
 	a.invalidateRetainedFunctionIndexBoundsProofs(fn)
 	if r := a.retained; r != nil && fn != nil && r.depth == 0 {
 		r.depth++
@@ -81,6 +84,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 // Re-analyzing per instantiation is what makes the instantiated type govern — the most
 // specific type wins, as monomorphization requires.
 func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
+	if a != nil && a.retained != nil {
+		a.retained.noteFuncNameUsageFunctionAnalysis(fn)
+	}
 	defer a.beginFunctionProofContribution(fn, typeArgs)()
 	restoreProofOwner := a.enterIndexProofOwner(fn, false)
 	defer restoreProofOwner()

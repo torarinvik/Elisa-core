@@ -27,6 +27,25 @@ import (
 type RetainedAnalysis struct {
 	plainDefaults *retainedPlainDefaultLifecycle
 
+	// funcNameUsage* is an exact retained snapshot of value-position identifier
+	// names, split by declaration owner so a body-only replay can replace only
+	// the edited owners' contributions. The pending fields are invocation-local
+	// and must be empty whenever this state is serialized.
+	funcNameUsageContributions  map[ast.Decl]map[string]bool
+	funcNameUsageOwnerCounts    map[ast.Decl]int
+	funcNameUsageFunctionOwners map[ast.Decl]string
+	funcNameUsageValueCounts    map[string]int
+	funcNameUsageFunctionCounts map[string]int
+	funcNameUsageOwnerTotal     int
+	funcNameUsageReady          bool
+	funcNameUsagePending        bool
+	funcNameUsageRebuild        bool
+	funcNameUsageChangedOwners  []ast.Decl
+	funcNameUsageTracking       bool
+	funcNameUsageOwnerLookup    map[*ast.FuncDecl]ast.Decl
+	funcNameUsageTouchedOwners  map[ast.Decl]bool
+	funcNameUsageUnknownTouched bool
+
 	indexProofsUpdating bool                                      // invocation-local: invalidate before ordinary function reanalysis
 	indexProofsByFunc   map[*ast.FuncDecl]map[*ast.IndexExpr]bool // reverse ownership, only during Update
 	indexProofsByDecl   map[ast.Node]map[*ast.IndexExpr]bool
@@ -2128,6 +2147,21 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	a.returnBorrowLateEnabled = true
 	bodiesStart := time.Now()
 	a.retainedProofsScoped = true
+	r.clearFuncNameUsageUpdateTracking()
+	if bodyEnvironmentUnchanged {
+		// Track every body actually analyzed, including recursive-summary and
+		// return-borrow replay. Args/ResolvedArgs aliases stay inside one call
+		// owner and are deduplicated within that owner's scan. Default argument
+		// expressions are cloned before insertion. Refine expansion reuses the
+		// declaration's Base type and may reuse unchanged predicate Ident leaves;
+		// body analysis reads these shared nodes without mutating them. Rewrites
+		// update fields on the analyzed declaration's body nodes and do not rename
+		// shared identifier leaves in place.
+		// An unrecognized function owner forces the final index update to rebuild.
+		r.funcNameUsageTracking = true
+		r.funcNameUsageOwnerLookup = retainedFuncNameUsageFunctionOwnerMap(r.decls)
+		r.funcNameUsageTouchedOwners = map[ast.Decl]bool{}
+	}
 	returnSummariesBefore := r.snapshotReturnBorrowInvalidationSummaries(a)
 	// A re-analyzed body is the same declaration node with a new body: the first analysis's
 	// mark would skip the cyclic-summary convergence a fresh analysis runs before it, leaving
@@ -2165,7 +2199,49 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	r.LastStats.Bodies = time.Since(bodiesStart)
 	r.rbUpdating = true
 	postStart := time.Now()
+	r.funcNameUsagePending = true
+	r.funcNameUsageRebuild = !bodyEnvironmentUnchanged
+	r.funcNameUsageChangedOwners = nil
+	if bodyEnvironmentUnchanged {
+		owners := map[ast.Decl]bool{}
+		for owner := range r.funcNameUsageTouchedOwners {
+			owners[owner] = true
+		}
+		if r.funcNameUsageUnknownTouched {
+			r.funcNameUsageRebuild = true
+		}
+		for _, sd := range changed {
+			if sd.Decl != nil {
+				owners[sd.Decl] = true
+			}
+		}
+		// Return-borrow summary convergence can reanalyze callers that were not
+		// part of the source splice list. Their lowered call argument fields are
+		// declaration-owned syntax too, so include the entire invalidation closure.
+		var functionOwners map[*ast.FuncDecl]ast.Decl
+		if len(r.rbInvalid) != 0 {
+			functionOwners = r.funcNameUsageOwnerLookup
+			if functionOwners == nil {
+				functionOwners = retainedFuncNameUsageFunctionOwnerMap(r.decls)
+			}
+		}
+		for fn := range r.rbInvalid {
+			owner := functionOwners[fn]
+			if owner == nil {
+				r.funcNameUsageRebuild = true
+				break
+			}
+			owners[owner] = true
+		}
+		for owner := range owners {
+			r.funcNameUsageChangedOwners = append(r.funcNameUsageChangedOwners, owner)
+		}
+	}
 	r.post(r.decls, permissionAppended)
+	r.funcNameUsagePending = false
+	r.funcNameUsageRebuild = false
+	r.funcNameUsageChangedOwners = nil
+	r.clearFuncNameUsageUpdateTracking()
 	r.LastStats.Post = time.Since(postStart)
 	r.rbUpdating = false
 	if retirePlainGlobalFacts != nil {

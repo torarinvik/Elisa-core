@@ -10,10 +10,19 @@ func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 	}
 	wasReady := a.disjointIndexesReady
 	a.ensureDisjointIndexes()
-	// Cold analysis uses the full solver, which performs its own single name-usage scan.
-	// Avoid doing that whole-program walk twice before the retained indexes are ready.
+	var nameCounts map[string]int
+	var valueUsedNames map[string]bool
+	if len(a.disjointCallSites) != 0 || a.retained != nil && a.retained.funcNameUsagePending {
+		if a.retained != nil {
+			nameCounts, valueUsedNames = a.retained.funcNameUsageForPost(decls)
+		} else {
+			nameCounts, valueUsedNames = scanFuncNameUsage(decls)
+		}
+	}
+	// Cold analysis uses the full solver with the single name-usage snapshot already
+	// computed above (or nil maps when there are no call sites).
 	if !wasReady || a.retained == nil {
-		a.finalizeFuncDisjointParamsFull(decls)
+		a.finalizeFuncDisjointParamsFullWithNameUsage(decls, nameCounts, valueUsedNames)
 		for fn := range a.disjointDirtyCallees {
 			delete(a.disjointDirtyCallees, fn)
 		}
@@ -32,7 +41,6 @@ func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 		a.recomputeDirtyFuncDisjointParams(map[*ast.FuncDecl]bool{})
 		return
 	}
-	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
 	currentEligibility := map[*ast.FuncDecl]bool{}
 	for _, scoped := range decls {
 		fn, ok := scoped.Decl.(*ast.FuncDecl)

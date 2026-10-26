@@ -1,6 +1,11 @@
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"elisacore/src/ast"
+)
 
 func TestSemanticStateRoundTripAndEdit(t *testing.T) {
 	before, r := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
@@ -61,6 +66,46 @@ func TestSemanticStateRejectsOpenBranchJournal(t *testing.T) {
 	}
 	if _, err := r.MarshalState(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSemanticStateRejectsTransientFuncNameUsageUpdateState(t *testing.T) {
+	_, baseline := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
+	data, err := baseline.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		set  func(*RetainedAnalysis)
+	}{
+		{name: "pending", set: func(r *RetainedAnalysis) { r.funcNameUsagePending = true }},
+		{name: "rebuild", set: func(r *RetainedAnalysis) { r.funcNameUsageRebuild = true }},
+		{name: "empty changed-owner slice", set: func(r *RetainedAnalysis) { r.funcNameUsageChangedOwners = []ast.Decl{} }},
+		{name: "tracking", set: func(r *RetainedAnalysis) { r.funcNameUsageTracking = true }},
+		{name: "owner lookup", set: func(r *RetainedAnalysis) { r.funcNameUsageOwnerLookup = map[*ast.FuncDecl]ast.Decl{} }},
+		{name: "touched owners", set: func(r *RetainedAnalysis) { r.funcNameUsageTouchedOwners = map[ast.Decl]bool{} }},
+		{name: "unknown touched", set: func(r *RetainedAnalysis) { r.funcNameUsageUnknownTouched = true }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := RestoreAnalysisState(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.set(r)
+			if _, err := r.MarshalState(); err == nil {
+				t.Fatal("MarshalState accepted transient function-name usage state")
+			}
+			// Bypass MarshalState so Restore's independent trust boundary is tested.
+			encoded, err := semanticStateRegistry().Encode(r)
+			if err != nil {
+				t.Fatalf("could not independently encode transient state: %v", err)
+			}
+			if restored, err := RestoreAnalysisState(encoded); restored != nil || err == nil || !strings.Contains(err.Error(), "function value-name usage update state is transient") {
+				t.Fatalf("Restore admitted transient state or returned wrong error: restored=%v err=%v", restored != nil, err)
+			}
+		})
 	}
 }
 

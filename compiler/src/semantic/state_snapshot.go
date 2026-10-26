@@ -30,7 +30,7 @@ var semanticStateRegistry = sync.OnceValue(func() *statecache.Registry {
 // unsupported aliases or invocation resources reject publication entirely.
 // The CLI admits it only in the opt-in disk-cache mode during qualification.
 func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
-	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 {
+	if r == nil || r.a == nil || r.result == nil || r.rbUpdating || r.indexProofsUpdating || r.indexProofsByFunc != nil || r.indexProofsByDecl != nil || r.depth != 0 || r.hasFuncNameUsageTransientState() {
 		return nil, fmt.Errorf("analysis is not idle")
 	}
 	if r.plainDefaults != nil && (r.plainDefaults.Updating || r.plainDefaults.Poisoned) {
@@ -71,6 +71,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	}
 	r.captureBodyUses()
 	r.precomputeBaselineDigests()
+	if !r.ensureFuncNameUsageIndex(r.decls) {
+		return nil, fmt.Errorf("function value-name usage index could not be bound to retained declarations")
+	}
 	if why := r.a.proofReportCheckpointError(); why != "" {
 		return nil, fmt.Errorf("proof report checkpoint: %s", why)
 	}
@@ -86,6 +89,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	r, ok := value.(*RetainedAnalysis)
 	if !ok || r == nil || r.a == nil || r.result == nil || r.result.analyzer != r.a || r.a.retained != r {
 		return nil, fmt.Errorf("incomplete semantic state")
+	}
+	if r.hasFuncNameUsageTransientState() {
+		return nil, fmt.Errorf("function value-name usage update state is transient")
 	}
 	if r.plainDefaults != nil && (r.plainDefaults.Updating || r.plainDefaults.Poisoned) {
 		return nil, fmt.Errorf("default contribution transaction is active or poisoned")

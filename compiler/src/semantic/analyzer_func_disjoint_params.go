@@ -126,6 +126,17 @@ func (a *Analyzer) finalizeFuncDisjointParamsFull(decls []scopedDecl) {
 		return
 	}
 	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
+	a.finalizeFuncDisjointParamsFullWithNameUsage(decls, nameCounts, valueUsedNames)
+}
+
+func (a *Analyzer) finalizeFuncDisjointParamsFullWithNameUsage(decls []scopedDecl, nameCounts map[string]int, valueUsedNames map[string]bool) {
+	if a == nil {
+		return
+	}
+	if len(a.disjointCallSites) == 0 {
+		a.funcDisjointParams = map[*ast.FuncDecl]*FuncDisjointParamInfo{}
+		return
+	}
 	headerStable := map[*ast.FuncDecl]bool{}
 	for fn := range a.disjointCallSites {
 		if fn != nil && nameCounts[fn.Name] == 1 && !valueUsedNames[fn.Name] {
