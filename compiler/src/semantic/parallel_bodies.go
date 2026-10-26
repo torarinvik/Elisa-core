@@ -598,6 +598,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		if shareDeclarationMaps && field.Kind() == reflect.Map && !field.IsNil() && parallelDeclarationMapIsReadOnly(name) {
 			continue
 		}
+		if ownedFunctionAnalyses && cloneSpecializationStoreScanBoolSetCache(cloned.Addr().Interface().(*Analyzer), a, name) {
+			continue
+		}
 		if ownedFunctionAnalyses && cloneSpecializationOpaqueMap(cloned.Addr().Interface().(*Analyzer), a, name, field) {
 			continue
 		}
@@ -624,6 +627,23 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		}
 	}
 	return cloned
+}
+
+// These per-function sets are fully built before insertion and are only read
+// afterward. Specializations can add entries for private declarations, so copy
+// the outer maps while sharing the immutable name sets already cached.
+func cloneSpecializationStoreScanBoolSetCache(dst, src *Analyzer, field string) bool {
+	switch field {
+	case "storeScanViewCache":
+		dst.storeScanViewCache = maps.Clone(src.storeScanViewCache)
+	case "storeScanScalarCache":
+		dst.storeScanScalarCache = maps.Clone(src.storeScanScalarCache)
+	case "storeScanReadOnlyCache":
+		dst.storeScanReadOnlyCache = maps.Clone(src.storeScanReadOnlyCache)
+	default:
+		return false
+	}
+	return true
 }
 
 func parallelBodyWorkerRebuildMap(field string) bool {

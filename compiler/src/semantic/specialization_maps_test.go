@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	compilerast "elisacore/src/ast"
@@ -199,16 +200,77 @@ func TestSpecializationOpaqueHelperUnknownAndResourceFallback(t *testing.T) {
 	}
 }
 
+func TestSpecializationStoreScanBoolSetCachesShareRowsAndIsolateOuterMaps(t *testing.T) {
+	decl := &compilerast.FuncDecl{Name: "cached"}
+	newDecl := &compilerast.FuncDecl{Name: "private"}
+	makeRow := func() map[string]bool { return map[string]bool{"present": true, "absent": false} }
+	source := &Analyzer{
+		storeScanViewCache:     map[*compilerast.FuncDecl]map[string]bool{decl: makeRow()},
+		storeScanScalarCache:   map[*compilerast.FuncDecl]map[string]bool{decl: makeRow()},
+		storeScanReadOnlyCache: map[*compilerast.FuncDecl]map[string]bool{decl: makeRow()},
+	}
+	specialization := cloneAnalyzerValueForSpecialization(source).Addr().Interface().(*Analyzer)
+	ordinary := cloneAnalyzerValueForBodyWorker(source).Addr().Interface().(*Analyzer)
+
+	check := func(name string, original, private, worker map[*compilerast.FuncDecl]map[string]bool) {
+		t.Helper()
+		if original == nil || private == nil || worker == nil {
+			t.Fatalf("%s cache nil shape changed", name)
+		}
+		if reflect.ValueOf(original).Pointer() == reflect.ValueOf(private).Pointer() {
+			t.Fatalf("%s specialization shares the mutable outer map", name)
+		}
+		if reflect.ValueOf(original[decl]).Pointer() != reflect.ValueOf(private[decl]).Pointer() {
+			t.Fatalf("%s specialization failed to share the settled read-only row", name)
+		}
+		if reflect.ValueOf(original).Pointer() == reflect.ValueOf(worker).Pointer() || reflect.ValueOf(original[decl]).Pointer() == reflect.ValueOf(worker[decl]).Pointer() {
+			t.Fatalf("%s ordinary worker lost deep map isolation", name)
+		}
+		private[newDecl] = map[string]bool{"private": true}
+		delete(private, decl)
+		if _, ok := original[newDecl]; ok {
+			t.Fatalf("%s specialization insertion leaked to source", name)
+		}
+		if _, ok := original[decl]; !ok {
+			t.Fatalf("%s specialization deletion leaked to source", name)
+		}
+		worker[decl]["present"] = false
+		if !original[decl]["present"] {
+			t.Fatalf("%s ordinary worker row mutation leaked to source", name)
+		}
+	}
+	check("view", source.storeScanViewCache, specialization.storeScanViewCache, ordinary.storeScanViewCache)
+	check("scalar", source.storeScanScalarCache, specialization.storeScanScalarCache, ordinary.storeScanScalarCache)
+	check("read-only", source.storeScanReadOnlyCache, specialization.storeScanReadOnlyCache, ordinary.storeScanReadOnlyCache)
+
+	// Concurrent private construction reads the same settled rows while each
+	// specialization writes only to its own outer maps.
+	var readers sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			private := cloneAnalyzerValueForSpecialization(source).Addr().Interface().(*Analyzer)
+			if !private.storeScanViewCache[decl]["present"] || !private.storeScanScalarCache[decl]["present"] || !private.storeScanReadOnlyCache[decl]["present"] {
+				t.Error("concurrent specialization failed to read a settled row")
+			}
+			private.storeScanViewCache[newDecl] = map[string]bool{"private": true}
+			if _, leaked := source.storeScanViewCache[newDecl]; leaked {
+				t.Error("concurrent specialization outer-map write leaked to source")
+			}
+		}()
+	}
+	readers.Wait()
+}
+
 func TestSpecializationOpaqueHookPreservesOrdinaryWorkersAndDeepFallback(t *testing.T) {
 	source := &Analyzer{storeScanViewCache: map[*compilerast.FuncDecl]map[string]bool{
 		nil: {"present": true},
 	}}
-	for _, specialization := range []bool{false, true} {
-		cloned := cloneAnalyzerValueForParallelPolicy(source, specialization, specialization).Interface().(Analyzer)
-		cloned.storeScanViewCache[nil]["present"] = false
-		if !source.storeScanViewCache[nil]["present"] {
-			t.Fatal("ordinary/specialization resource map lost reflective deep fallback")
-		}
+	ordinary := cloneAnalyzerValueForBodyWorker(source).Interface().(Analyzer)
+	ordinary.storeScanViewCache[nil]["present"] = false
+	if !source.storeScanViewCache[nil]["present"] {
+		t.Fatal("ordinary worker lost reflective deep fallback")
 	}
 	_, file, _, _ := runtime.Caller(0)
 	text, err := os.ReadFile(filepath.Join(filepath.Dir(file), "parallel_bodies.go"))
@@ -225,9 +287,46 @@ func TestSpecializationOpaqueHookPreservesOrdinaryWorkersAndDeepFallback(t *test
 	}
 	body := string(text)[start : start+end]
 	hook := strings.Index(body, "if ownedFunctionAnalyses && cloneSpecializationOpaqueMap(")
+	storeScanHook := strings.Index(body, "if ownedFunctionAnalyses && cloneSpecializationStoreScanBoolSetCache(")
 	declarationPolicy := strings.Index(body, "parallelDeclarationMapIsReadOnly(name)")
 	fallback := strings.Index(body, "settable(cloned.Field(i)).Set(deepCloneValue(settable(field)))")
-	if hook < declarationPolicy || hook < 0 || fallback < hook {
+	if storeScanHook < declarationPolicy || storeScanHook < 0 || storeScanHook > hook || hook < 0 || fallback < hook {
 		t.Fatal("typed map hook moved ahead of owner-specific policies or lost specialization guard")
+	}
+}
+
+var specializationStoreScanSetCloneSink *Analyzer
+
+func BenchmarkSpecializationStoreScanBoolSetCacheCopy(b *testing.B) {
+	const rows = 2048
+	names := [...]string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"}
+	makeRows := func() map[*compilerast.FuncDecl]map[string]bool {
+		cache := make(map[*compilerast.FuncDecl]map[string]bool, rows)
+		for i := 0; i < rows; i++ {
+			row := make(map[string]bool, len(names))
+			for j, name := range names {
+				row[name] = (i+j)%2 == 0
+			}
+			cache[&compilerast.FuncDecl{}] = row
+		}
+		return cache
+	}
+	root := &Analyzer{
+		storeScanViewCache:     makeRows(),
+		storeScanScalarCache:   makeRows(),
+		storeScanReadOnlyCache: makeRows(),
+	}
+	for _, mode := range []string{"ordinary_worker_deep_clone", "specialization_clone"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if mode == "ordinary_worker_deep_clone" {
+					specializationStoreScanSetCloneSink = cloneAnalyzerValueForBodyWorker(root).Addr().Interface().(*Analyzer)
+				} else {
+					specializationStoreScanSetCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+				}
+			}
+		})
 	}
 }
