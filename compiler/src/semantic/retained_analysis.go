@@ -2215,6 +2215,35 @@ var retainedLocalGensym = regexp.MustCompile(`^__(auto|quantifier)_[0-9]+$`)
 
 var retainedLocalGensymRef = regexp.MustCompile(`\b__(auto|quantifier)_([0-9]+)\b`)
 
+// retainedLocalGensymName recognizes the exact language of retainedLocalGensym
+// without paying regexp-engine overhead in reflective source scans. Keep the
+// regexp as an independent oracle in tests; this predicate only classifies a
+// spelling and does not grant binder authority.
+func retainedLocalGensymName(name string) bool {
+	const (
+		autoPrefix       = "__auto_"
+		quantifierPrefix = "__quantifier_"
+	)
+	var suffix string
+	switch {
+	case strings.HasPrefix(name, autoPrefix):
+		suffix = name[len(autoPrefix):]
+	case strings.HasPrefix(name, quantifierPrefix):
+		suffix = name[len(quantifierPrefix):]
+	default:
+		return false
+	}
+	if len(suffix) == 0 {
+		return false
+	}
+	for i := 0; i < len(suffix); i++ {
+		if suffix[i] < '0' || suffix[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // retainedShiftLocalGensyms renames the body-local gensyms in text for a body that moved by
 // shift bytes.
 func retainedShiftLocalGensyms(text string, shift int) string {
@@ -2239,7 +2268,7 @@ func retainedNormalized(text string) string { return retainedGensym.ReplaceAllSt
 func retainedSharedGensyms(text string) string {
 	var out []string
 	for _, name := range retainedGensym.FindAllString(text, -1) {
-		if !retainedLocalGensym.MatchString(name) {
+		if !retainedLocalGensymName(name) {
 			out = append(out, name)
 		}
 	}

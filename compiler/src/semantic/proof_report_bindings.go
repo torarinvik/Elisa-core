@@ -53,7 +53,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 			// File lookalike check; coordinates cannot carry binders or names.
 			if proofBindingPositionSchemaValid && v.Type() == reflect.TypeFor[lexer.Pos]() {
 				name := v.Field(0).String()
-				if retainedLocalGensym.MatchString(name) {
+				if retainedLocalGensymName(name) {
 					blocked[name] = true
 				}
 				return
@@ -118,7 +118,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 					field := v.Field(i)
 					if field.Kind() == reflect.String {
 						name := field.String()
-						if !retainedLocalGensym.MatchString(name) {
+						if !retainedLocalGensymName(name) {
 							continue
 						}
 						// Ident.Name is a reference spelling; literals are source data.
@@ -139,7 +139,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 					visit(field, owner)
 				}
 			case reflect.String:
-				if retainedLocalGensym.MatchString(v.String()) {
+				if retainedLocalGensymName(v.String()) {
 					blocked[v.String()] = true
 				}
 			case reflect.Slice:
@@ -292,7 +292,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 					i++
 				}
 				token := text[start:i]
-				if !retainedLocalGensym.MatchString(token) {
+				if !retainedLocalGensymName(token) {
 					if retainedGensym.FindString(token) == token {
 						return "", "offset-derived proof naming family has no producer adapter"
 					}
