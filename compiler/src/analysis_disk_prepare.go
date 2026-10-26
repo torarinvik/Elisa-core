@@ -140,7 +140,7 @@ func (a analysisDiskArtifact) baselineSourcePath() string { return a.path + ".sr
 // remaining changed lines are indented or blank. Semantic Update still checks
 // the complete body certificate and materializes independent scratch on decline.
 func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bool {
-	if os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") != "on" {
+	if semantic.RetainedFastPrepareSetting() != "on" {
 		return false
 	}
 	baseline, err := os.ReadFile(artifact.baselineSourcePath())

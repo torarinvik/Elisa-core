@@ -20,9 +20,20 @@ import (
 // edit whose declaration-level results are unchanged, that form is the fresh body with the
 // phase's body rewrites applied against the program-wide results the live analysis already
 // holds. ELISACORE_RETAINED_FAST_PREPARE=shadow computes it beside the scratch's and reports
-// every difference; =on uses it for body-only edits (fastPathBodies).
+// every difference; =on uses it for body-only edits (fastPathBodies). Unset
+// selects on; explicitly empty or off keeps independent scratch preparation.
 
-var retainedFastPrepareMode = os.Getenv("ELISACORE_RETAINED_FAST_PREPARE")
+// RetainedFastPrepareSetting resolves only configuration. Explicit selections
+// (including empty/off/shadow) are preserved. Certificates and independent
+// scratch fallback remain the sole authority for each actual update.
+func RetainedFastPrepareSetting() string {
+	if value, explicit := os.LookupEnv("ELISACORE_RETAINED_FAST_PREPARE"); explicit {
+		return value
+	}
+	return "on"
+}
+
+var retainedFastPrepareMode = RetainedFastPrepareSetting()
 
 // A body can change classifier preparation decisions without changing its callable type.
 // Keep the complete per-function decision independently of mutable syntax.
