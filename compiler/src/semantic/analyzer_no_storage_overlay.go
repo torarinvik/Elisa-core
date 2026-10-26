@@ -1,12 +1,17 @@
 package semantic
 
-import "fmt"
+import (
+	"fmt"
 
-// Constructor-only bool lookup bases. Never recompute an inherited positive or
-// negative entry; new entries are published to the private local maps only.
+	"elisacore/src/ast"
+)
+
+// Specialization construction reads canonical memo/fact bases and publishes new
+// rows only into its private local maps.
 type analyzerNoStorageOverlay struct {
-	base       map[Type]bool
-	sharesBase map[Type]bool
+	base        map[Type]bool
+	sharesBase  map[Type]bool
+	helperCalls map[*ast.CallExpr]string
 }
 
 func (a *Analyzer) lookupStoreScanNoStorage(t Type) (bool, bool) {
@@ -44,11 +49,32 @@ func (a *Analyzer) setStoreScanShares(t Type, value bool) {
 	a.storeScanSharesCache[t] = value
 }
 
+func (a *Analyzer) lookupCompilerBuiltinHelperCall(call *ast.CallExpr) (string, bool) {
+	if a == nil || call == nil {
+		return "", false
+	}
+	if name, present := a.compilerBuiltinHelperCalls[call]; present {
+		return name, true
+	}
+	if a.noStorageOverlay != nil {
+		name, present := a.noStorageOverlay.helperCalls[call]
+		return name, present
+	}
+	return "", false
+}
+
+func (a *Analyzer) setCompilerBuiltinHelperCall(call *ast.CallExpr, name string) {
+	if a.compilerBuiltinHelperCalls == nil {
+		a.compilerBuiltinHelperCalls = make(map[*ast.CallExpr]string)
+	}
+	a.compilerBuiltinHelperCalls[call] = name
+}
+
 func cloneAnalyzerNoStorageOverlay(source *analyzerNoStorageOverlay) *analyzerNoStorageOverlay {
 	if source == nil {
 		return nil
 	}
-	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase}
+	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase, helperCalls: source.helperCalls}
 }
 func (a *Analyzer) rejectNoStorageOverlayOperation(operation string) error {
 	err := fmt.Errorf("specialization no-storage overlay cannot enter %s", operation)

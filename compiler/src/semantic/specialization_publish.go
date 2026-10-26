@@ -360,7 +360,7 @@ func (p *specializationPublication) publish() (*Result, error) {
 	helpers := map[*ast.CallExpr]string{}
 	for node := range p.owned {
 		if call, ok := node.(*ast.CallExpr); ok {
-			if name := c.worker.compilerBuiltinHelperCalls[call]; name != "" {
+			if name, present := c.worker.lookupCompilerBuiltinHelperCall(call); present && name != "" {
 				helpers[call] = name
 			}
 		}

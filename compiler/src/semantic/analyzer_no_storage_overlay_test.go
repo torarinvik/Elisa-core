@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -104,6 +105,77 @@ func TestStoreScanSharesOverlayPositiveNegativeMissingAndIsolation(t *testing.T)
 	nested.setStoreScanShares(newContainer, true)
 	if private.storeScanSharesCache[newContainer] || !nested.storeScanSharesCached(container) {
 		t.Fatal("nested worker lost local isolation or inherited base lookup")
+	}
+}
+
+func TestCompilerBuiltinHelperCallsOverlayAndCopyDeclRekey(t *testing.T) {
+	originalCall, originalMissing := &ast.CallExpr{}, &ast.CallExpr{}
+	rootAnalyzer := &Analyzer{compilerBuiltinHelperCalls: map[*ast.CallExpr]string{originalCall: "freeze"}}
+	worker := cloneAnalyzerValueForSpecialization(rootAnalyzer).Addr().Interface().(*Analyzer)
+	if len(worker.compilerBuiltinHelperCalls) != 0 || worker.noStorageOverlay == nil || len(worker.noStorageOverlay.helperCalls) != 1 {
+		t.Fatal("specialization copied the whole helper table or lost its canonical base")
+	}
+	if !worker.isCompilerBuiltinHelperCall(originalCall, "freeze") || worker.isCompilerBuiltinHelperCall(originalMissing, "freeze") {
+		t.Fatal("canonical inherited helper lookup changed")
+	}
+
+	fn := &ast.FuncDecl{Name: "target", Body: []ast.Stmt{
+		&ast.ExprStmt{Expr: originalCall},
+		&ast.ExprStmt{Expr: originalMissing},
+	}}
+	base := &Result{analyzer: rootAnalyzer}
+	ctx := &specializationContext{base: base, worker: worker, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}
+	worker.parallel = &parallelWorkerState{specialization: ctx, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
+	privateDecl := ctx.copyDecl(fn)
+	if ctx.err != nil || privateDecl == nil {
+		t.Fatal("copyDecl failed", ctx.err)
+	}
+	privateCall := privateDecl.Body[0].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	privateMissing := privateDecl.Body[1].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	if privateCall == originalCall || !worker.isCompilerBuiltinHelperCall(privateCall, "freeze") {
+		t.Fatal("copyDecl did not rekey the inherited helper fact onto private syntax")
+	}
+	if worker.isCompilerBuiltinHelperCall(privateMissing, "freeze") {
+		t.Fatal("an owned missing helper fact fell back to a canonical identity")
+	}
+	worker.recordCompilerBuiltinHelperCall(privateCall, "private-freeze")
+	if !worker.isCompilerBuiltinHelperCall(privateCall, "private-freeze") || !rootAnalyzer.isCompilerBuiltinHelperCall(originalCall, "freeze") {
+		t.Fatal("private override mutated or failed to shadow canonical helper facts")
+	}
+
+	nested := cloneAnalyzerValueForBodyWorker(worker).Addr().Interface().(*Analyzer)
+	if nested.noStorageOverlay == worker.noStorageOverlay || !nested.isCompilerBuiltinHelperCall(privateCall, "private-freeze") || !nested.isCompilerBuiltinHelperCall(originalCall, "freeze") {
+		t.Fatal("nested worker lost local/base helper lookup or shared overlay metadata")
+	}
+	nested.recordCompilerBuiltinHelperCall(privateCall, "nested")
+	if !worker.isCompilerBuiltinHelperCall(privateCall, "private-freeze") {
+		t.Fatal("nested worker write reached its parent")
+	}
+}
+
+func TestCompilerBuiltinHelperCallsOverlayConcurrentPrivateMaps(t *testing.T) {
+	baseCall := &ast.CallExpr{}
+	root := &Analyzer{compilerBuiltinHelperCalls: map[*ast.CallExpr]string{baseCall: "freeze"}}
+	const workers = 12
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+			local := &ast.CallExpr{}
+			worker.recordCompilerBuiltinHelperCall(local, "local")
+			if !worker.isCompilerBuiltinHelperCall(baseCall, "freeze") || !worker.isCompilerBuiltinHelperCall(local, "local") {
+				t.Error("concurrent private helper lookup failed")
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if len(root.compilerBuiltinHelperCalls) != 1 {
+		t.Fatal("concurrent private helper writes reached the canonical base")
 	}
 }
 
@@ -231,6 +303,27 @@ func BenchmarkStoreScanSharesOverlayConstruction(b *testing.B) {
 					storeScanSharesCloneSink = cloneAnalyzerValueForParallelPolicy(root, true, false).Addr().Interface().(*Analyzer)
 				} else {
 					storeScanSharesCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+				}
+			}
+		})
+	}
+}
+
+var compilerBuiltinHelperCloneSink *Analyzer
+
+func BenchmarkCompilerBuiltinHelperCallsOverlayConstruction(b *testing.B) {
+	root := &Analyzer{compilerBuiltinHelperCalls: make(map[*ast.CallExpr]string, 32768)}
+	for i := 0; i < 32768; i++ {
+		root.compilerBuiltinHelperCalls[&ast.CallExpr{}] = "freeze"
+	}
+	for _, mode := range []string{"full_map_copy", "overlay"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if mode == "full_map_copy" {
+					compilerBuiltinHelperCloneSink = cloneAnalyzerValueForParallelPolicy(root, true, false).Addr().Interface().(*Analyzer)
+				} else {
+					compilerBuiltinHelperCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 				}
 			}
 		})

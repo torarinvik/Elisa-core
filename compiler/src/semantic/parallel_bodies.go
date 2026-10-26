@@ -463,6 +463,17 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "compilerBuiltinHelperCalls" {
+			// copyDecl rekeys only the owned call facts needed by this
+			// specialization. Keep the whole-program canonical table as a
+			// read-only overlay base instead of cloning every helper call.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if name == "iterBinderElementOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
@@ -568,7 +579,11 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		if specializationParamFactsCopySchemaValid {
 			worker.storeScanParamFactsOverlay = &analyzerStoreScanParamFactsOverlay{base: a.storeScanParamFactsCache}
 		}
-		worker.noStorageOverlay = &analyzerNoStorageOverlay{base: a.storeScanNoStorageCache, sharesBase: a.storeScanSharesCache}
+		worker.noStorageOverlay = &analyzerNoStorageOverlay{
+			base:        a.storeScanNoStorageCache,
+			sharesBase:  a.storeScanSharesCache,
+			helperCalls: a.compilerBuiltinHelperCalls,
+		}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
 		if useExprFactsOverlay {

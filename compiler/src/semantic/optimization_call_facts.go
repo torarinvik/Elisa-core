@@ -7,20 +7,18 @@ import (
 )
 
 func (a *Analyzer) isCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bool {
-	if a == nil || call == nil || name == "" || a.compilerBuiltinHelperCalls == nil {
+	if a == nil || call == nil || name == "" {
 		return false
 	}
-	return a.compilerBuiltinHelperCalls[call] == name
+	got, present := a.lookupCompilerBuiltinHelperCall(call)
+	return present && got == name
 }
 
 func (a *Analyzer) recordCompilerBuiltinHelperCall(call *ast.CallExpr, name string) {
 	if a == nil || call == nil || name == "" {
 		return
 	}
-	if a.compilerBuiltinHelperCalls == nil {
-		a.compilerBuiltinHelperCalls = make(map[*ast.CallExpr]string)
-	}
-	a.compilerBuiltinHelperCalls[call] = name
+	a.setCompilerBuiltinHelperCall(call, name)
 }
 
 func (a *Analyzer) recordImmutableSymbolOptimizationFacts(sym *Symbol, expr ast.Expr) {
