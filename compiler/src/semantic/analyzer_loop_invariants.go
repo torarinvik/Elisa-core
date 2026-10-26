@@ -200,17 +200,31 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 				}
 				// SMT: the loop variables are FREE, constrained only by the loop condition, the surviving
 				// invariants and the disjoint outer invariants, never by their stale pre-loop values.
-				if preserved, ce := a.proveLoopPreservationSMT(stmt.Cond, candidates, inv.Cond, subst, arrayStores, outerSafeInvs); !preserved {
+				// Only after both the ordinary and guarded obligations fail do we retry this same
+				// preservation decision under the existing larger per-query budget.
+				prove := func() (bool, bool, string) {
+					preserved, ce := a.proveLoopPreservationSMT(stmt.Cond, candidates, inv.Cond, subst, arrayStores, outerSafeInvs)
+					if preserved || stmt.Cond == nil {
+						return preserved, false, ce
+					}
 					// Guarded preservation: the invariant need only hold at the NEXT body entry, where the
 					// guard holds again: prove `cond' implies inv'`.
-					if stmt.Cond == nil {
-						failed, failedCE[inv] = inv, ce
-						break
+					guardCE := ""
+					preserved, guardCE = a.proveLoopPreservationSMT(stmt.Cond, candidates, guardedInvariantGoal(stmt.Cond, inv.Cond), subst, arrayStores, outerSafeInvs)
+					if preserved {
+						return true, true, ""
 					}
-					if ok, _ := a.proveLoopPreservationSMT(stmt.Cond, candidates, guardedInvariantGoal(stmt.Cond, inv.Cond), subst, arrayStores, outerSafeInvs); !ok {
-						failed, failedCE[inv] = inv, ce
-						break
+					if ce == "" {
+						ce = guardCE
 					}
+					return false, false, ce
+				}
+				preserved, guardedUse, ce := a.proveLoopPreservationReported(prove)
+				if !preserved {
+					failed, failedCE[inv] = inv, ce
+					break
+				}
+				if guardedUse {
 					guarded[inv] = true
 				}
 				preserveTier[inv] = ProofProvenSMT
@@ -220,25 +234,29 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 			if !pathsOK {
 				invPaths = perInvPaths[inv]
 			}
-			preserved, guardedUse, ce := a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, outerSafeInvs)
-			// Fallbacks, each sound and tried only after the standard query fails (extra
-			// hypotheses can slow a query the standard set already decides):
-			//  - live pre-loop facts about values the body never writes;
-			//  - the invariant alone, since a heavy sibling hypothesis can leave the joint query
-			//    undecided and an invariant preserved under itself is preserved under any superset.
-			if !preserved && len(preserveHyps) > len(outerSafeInvs) {
-				preserved, guardedUse, _ = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, preserveHyps)
-			}
-			if !preserved && len(candidates) > 1 {
-				preserved, guardedUse, _ = a.proveInvariantOnPaths(stmt.Cond, []*ast.ContractStmt{inv}, inv, invPaths, preserveHyps)
-			}
-			if !preserved && seqOK && !sameLoopPathSet(invPaths, seqPaths) {
-				var seqCE string
-				preserved, guardedUse, seqCE = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, seqPaths, outerSafeInvs)
-				if !preserved && ce == "" {
-					ce = seqCE
+			prove := func() (bool, bool, string) {
+				preserved, guardedUse, ce := a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, outerSafeInvs)
+				// Fallbacks, each sound and tried only after the standard query fails (extra
+				// hypotheses can slow a query the standard set already decides):
+				//  - live pre-loop facts about values the body never writes;
+				//  - the invariant alone, since a heavy sibling hypothesis can leave the joint query
+				//    undecided and an invariant preserved under itself is preserved under any superset.
+				if !preserved && len(preserveHyps) > len(outerSafeInvs) {
+					preserved, guardedUse, _ = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, invPaths, preserveHyps)
 				}
+				if !preserved && len(candidates) > 1 {
+					preserved, guardedUse, _ = a.proveInvariantOnPaths(stmt.Cond, []*ast.ContractStmt{inv}, inv, invPaths, preserveHyps)
+				}
+				if !preserved && seqOK && !sameLoopPathSet(invPaths, seqPaths) {
+					var seqCE string
+					preserved, guardedUse, seqCE = a.proveInvariantOnPaths(stmt.Cond, candidates, inv, seqPaths, outerSafeInvs)
+					if !preserved && ce == "" {
+						ce = seqCE
+					}
+				}
+				return preserved, guardedUse, ce
 			}
+			preserved, guardedUse, ce := a.proveLoopPreservationReported(prove)
 			if !preserved {
 				failed, failedCE[inv] = inv, ce
 				break
@@ -285,6 +303,32 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// a captured straight-line body.
 	exitSound := captured || ((pathsOK || len(perInvPaths) != 0) && !seqExits)
 	return inductiveInvs, allProven && exitSound
+}
+
+// proveLoopPreservationReported retries a complete preservation strategy only after its normal
+// and sound fallback attempts still fail. The retry runs the same closure and hypotheses under
+// withSMTEscalation; proof success still requires the same sound preservation path to accept the
+// obligation. Callers use this only immediately before they would otherwise remove the invariant
+// and report a runtime
+// fallback, so successful proofs and unrelated queries keep their ordinary budget.
+func (a *Analyzer) proveLoopPreservationReported(prove func() (bool, bool, string)) (bool, bool, string) {
+	preserved, guarded, ce := prove()
+	if preserved {
+		return preserved, guarded, ce
+	}
+	retryCE := ""
+	a.withSMTEscalation(func() bool {
+		var retryGuarded bool
+		preserved, retryGuarded, retryCE = prove()
+		if preserved {
+			guarded = retryGuarded
+		}
+		return preserved
+	})
+	if retryCE != "" {
+		ce = retryCE
+	}
+	return preserved, guarded, ce
 }
 
 // proveInvariantOnPaths proves inv preserved on every non-exiting path; guardedUse reports that
