@@ -88,6 +88,59 @@ func TestStoreFlowSpecializationCopiesHeadersAndPreservesAliases(t *testing.T) {
 	}
 }
 
+func TestStoreFlowSpecializationHeaderBlocksPreserveAliasGroups(t *testing.T) {
+	root := make(map[*ast.FuncDecl]*storeFlowSummary)
+	var first, alias *ast.FuncDecl
+	for index := 0; index < 384; index++ {
+		decl := &ast.FuncDecl{Name: fmt.Sprintf("function_%d", index)}
+		summary := newStoreFlowSummary(1)
+		storeFlowInitKinds(summary)
+		summary.retKind[0] = storeFlowEdgeElements
+		root[decl] = summary
+		if index == 0 {
+			first, alias = decl, &ast.FuncDecl{Name: "alias"}
+			root[alias] = summary
+		}
+	}
+	root[&ast.FuncDecl{Name: "unknown"}] = nil
+	worker := cloneStoreFlowSummariesForSpecialization(root)
+	if len(worker) != len(root) {
+		t.Fatal("header blocks changed the outer map")
+	}
+	groups := make(map[*storeFlowSummary]*storeFlowSummary)
+	privateOwners := make(map[*storeFlowSummary]*storeFlowSummary)
+	for decl, source := range root {
+		private := worker[decl]
+		if source == nil {
+			if private != nil {
+				t.Fatal("unknown summary acquired a header")
+			}
+			continue
+		}
+		if private == source || !reflect.DeepEqual(private, source) {
+			t.Fatal("block header is shared with the source or changed its facts")
+		}
+		if previous := groups[source]; previous != nil && previous != private {
+			t.Fatal("source alias group split across private headers")
+		}
+		if previous := privateOwners[private]; previous != nil && previous != source {
+			t.Fatal("distinct source summaries share one private header")
+		}
+		groups[source], privateOwners[private] = private, source
+		assertStoreFlowKindsShared(t, source, private)
+	}
+	detachStoreFlowKindsForWrite(worker, []*ast.FuncDecl{first, alias})
+	worker[first].retKind[0] = storeFlowEdgeHeader
+	if worker[first] != worker[alias] {
+		t.Fatal("kind detachment split the aliased header")
+	}
+	for _, source := range root {
+		if source != nil && source.retKind[0] != storeFlowEdgeElements {
+			t.Fatal("block header mutation reached the canonical catalog")
+		}
+	}
+}
+
 func TestStoreFlowSpecializationDetachesKindsForEverySolvedComponentMember(t *testing.T) {
 	makeDecl := func(name string) *ast.FuncDecl {
 		return &ast.FuncDecl{
