@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -12,6 +13,11 @@ import (
 // Frames are contiguous, so the previous end also supplies the next start.
 // Keeping only ends avoids a redundant machine word for every graph object.
 type stateFrame struct{ end int }
+
+// Keep restored dictionary strings in small immutable allocations rather than
+// one allocation per dictionary entry. An entry larger than this limit remains
+// an individual string so no arena allocation grows without bound.
+const framedStringArenaChunkBytes = 1 << 20
 
 func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	word, err := d.take(8)
@@ -47,36 +53,16 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	if cursor != dictionary {
 		return fmt.Errorf("state frames do not fill bodies")
 	}
-	// Strings are copied and budgeted once, before workers see the immutable
-	// dictionary. No restored string retains a view into the input payload.
+	// Strings are copied into bounded immutable arenas and budgeted once, before
+	// workers see the dictionary. No restored string retains a view into the
+	// input payload.
 	d.at = int(dictionary)
 	n, err := d.count()
 	if err != nil {
 		return err
 	}
-	if err := d.reserve(uint64(n+1), reflect.TypeFor[string]().Size()); err != nil {
+	if err := d.readFramedStringDictionary(n); err != nil {
 		return err
-	}
-	d.strings = make([]string, n+1)
-	for i := 1; i <= n; i++ {
-		size, err := d.uint()
-		if err != nil {
-			return err
-		}
-		if size == 0 {
-			return fmt.Errorf("empty state dictionary entry")
-		}
-		data, err := d.take(size)
-		if err != nil {
-			return err
-		}
-		if err := d.reserve(size, 1); err != nil {
-			return err
-		}
-		d.strings[i] = string(data)
-	}
-	if d.at != len(d.data) {
-		return fmt.Errorf("trailing state dictionary data")
 	}
 	payload := d.data
 	budget := &atomic.Uint64{}
@@ -144,6 +130,89 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	d.at = bodiesStart
 	if count > 0 {
 		d.at = frames[count-1].end
+	}
+	return nil
+}
+
+func (d *decoder) readFramedStringDictionary(n int) error {
+	if err := d.reserve(uint64(n+1), reflect.TypeFor[string]().Size()); err != nil {
+		return err
+	}
+	d.strings = make([]string, n+1)
+	for first := 1; first <= n; {
+		scan := *d
+		chunkCount, chunkBytes := 0, 0
+		for first+chunkCount <= n {
+			size, err := scan.uint()
+			if err != nil {
+				return err
+			}
+			if size == 0 {
+				return fmt.Errorf("empty state dictionary entry")
+			}
+			data, err := scan.take(size)
+			if err != nil {
+				return err
+			}
+			if len(data) > framedStringArenaChunkBytes {
+				if chunkCount != 0 {
+					break
+				}
+				// A single huge string already requires one contiguous allocation.
+				// Keep it separate rather than letting it expand an arena.
+				size, err = d.uint()
+				if err != nil {
+					return err
+				}
+				data, err = d.take(size)
+				if err != nil {
+					return err
+				}
+				if err := d.reserve(size, 1); err != nil {
+					return err
+				}
+				d.strings[first] = string(data)
+				first++
+				break
+			}
+			if chunkCount != 0 && len(data) > framedStringArenaChunkBytes-chunkBytes {
+				break
+			}
+			chunkCount++
+			chunkBytes += len(data)
+			if chunkBytes == framedStringArenaChunkBytes {
+				break
+			}
+		}
+		if chunkCount == 0 {
+			continue
+		}
+
+		if err := d.reserve(uint64(chunkBytes), 1); err != nil {
+			return err
+		}
+		var arena strings.Builder
+		arena.Grow(chunkBytes)
+		for i := 0; i < chunkCount; i++ {
+			size, err := d.uint()
+			if err != nil {
+				return err
+			}
+			data, err := d.take(size)
+			if err != nil {
+				return err
+			}
+			start := arena.Len()
+			_, _ = arena.Write(data)
+			// String exposes an immutable view of the builder's current prefix.
+			// Later writes append after this range, and Grow reserved the whole
+			// chunk, so each substring remains stable without an offsets table.
+			d.strings[first+i] = arena.String()[start:]
+		}
+		first += chunkCount
+	}
+	if d.at != len(d.data) {
+		return fmt.Errorf("trailing state dictionary data")
 	}
 	return nil
 }
