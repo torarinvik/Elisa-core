@@ -30,7 +30,7 @@ func TestCanonicalMembershipMapScratchReferenceParity(t *testing.T) {
 		map[*Symbol]*Scope{symbol: scope, nil: nil},
 		map[int]any{}, map[int]any{0: leaf},
 	}
-	current, reference := newCanonicalMembershipTestScan(), newCanonicalMembershipTestScan()
+	current, reference := newCanonicalMembershipIndexTestScan(), newCanonicalMembershipTestScan()
 	for _, value := range values {
 		current.walk(reflect.ValueOf(value), false)
 		reference.walkCanonicalReference(reflect.ValueOf(value), false)
@@ -59,10 +59,12 @@ func BenchmarkCanonicalMembershipMapScratch(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				scan := newCanonicalMembershipTestScan()
+				var scan *specializationPublication
 				if reference {
+					scan = newCanonicalMembershipTestScan()
 					scan.walkCanonicalReference(reflect.ValueOf(nodes), false)
 				} else {
+					scan = newCanonicalMembershipIndexTestScan()
 					scan.walk(reflect.ValueOf(nodes), false)
 				}
 				canonicalMembershipBenchmarkCatalog = scan

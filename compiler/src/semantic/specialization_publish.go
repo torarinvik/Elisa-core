@@ -11,17 +11,18 @@ import (
 // A published product owns only this closure. Construction-only analyzer maps,
 // copy planners and unrelated foreign analysis views are never retained.
 type specializationPublication struct {
-	context     *specializationContext
-	rootNodes   map[ast.Node]bool
-	rootSymbols map[*Symbol]bool
-	rootScopes  map[*Scope]bool
-	owned       map[ast.Node]bool
-	spanNodes   map[*ast.IndexExpr]bool
-	queue       []ast.Node
-	seen        map[specializationPointer]uint8
-	target      *ast.FuncDecl
-	canonical   *ast.FuncDecl
-	err         error
+	context                 *specializationContext
+	canonicalMembershipScan bool
+	rootNodes               map[ast.Node]bool
+	rootSymbols             map[*Symbol]bool
+	rootScopes              map[*Scope]bool
+	owned                   map[ast.Node]bool
+	spanNodes               map[*ast.IndexExpr]bool
+	queue                   []ast.Node
+	seen                    map[specializationPointer]uint8
+	target                  *ast.FuncDecl
+	canonical               *ast.FuncDecl
+	err                     error
 }
 
 func newSpecializationPublication(c *specializationContext, decl *ast.FuncDecl) *specializationPublication {
@@ -63,7 +64,7 @@ func canonicalSpecializationNodes(root *Result) map[ast.Node]bool {
 		}
 	}
 	nodes := map[ast.Node]bool{}
-	scan := &specializationPublication{rootNodes: nil, owned: nodes, rootSymbols: map[*Symbol]bool{}, rootScopes: map[*Scope]bool{}, seen: map[specializationPointer]uint8{}}
+	scan := &specializationPublication{canonicalMembershipScan: true, owned: nodes, rootSymbols: map[*Symbol]bool{}, rootScopes: map[*Scope]bool{}, seen: map[specializationPointer]uint8{}}
 	rv := reflect.ValueOf(root).Elem()
 	for i := 0; i < rv.NumField(); i++ {
 		if rv.Type().Field(i).PkgPath == "" {
@@ -163,8 +164,16 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 				// it is not part of this function's published body closure.
 				return
 			}
+			canonicalNodeWalk := p.canonicalMembershipScan && !span
+			if canonicalNodeWalk && p.owned[value] {
+				return
+			}
 			if !p.owned[value] {
-				p.owned[value] = true
+				// An interface value is unwrapped below. Defer its first visited
+				// mark to the concrete node so the node itself still gets walked.
+				if !canonicalNodeWalk || v.Kind() != reflect.Interface {
+					p.owned[value] = true
+				}
 				// Canonical scans build only the membership index; publication
 				// consumes this worklist only for private fact-held syntax.
 				if p.context != nil {
@@ -189,15 +198,18 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 		if v.IsNil() {
 			return
 		}
-		key := specializationPointer{v.Type(), v.Pointer()}
-		role := uint8(1)
-		if span {
-			role = 2
+		canonicalNodeWalk := p.canonicalMembershipScan && !span && v.CanInterface() && v.Type().Implements(astNodeType)
+		if !canonicalNodeWalk {
+			key := specializationPointer{v.Type(), v.Pointer()}
+			role := uint8(1)
+			if span {
+				role = 2
+			}
+			if p.seen[key]&role != 0 {
+				return
+			}
+			p.seen[key] |= role
 		}
-		if p.seen[key]&role != 0 {
-			return
-		}
-		p.seen[key] |= role
 		if decl, ok := v.Interface().(*ast.FuncDecl); ok && p.context != nil && decl == p.target {
 			fields := settable(v.Elem())
 			for i := 0; i < fields.NumField(); i++ {

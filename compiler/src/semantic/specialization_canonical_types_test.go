@@ -28,6 +28,12 @@ func newCanonicalMembershipTestScan() *specializationPublication {
 	return &specializationPublication{owned: map[ast.Node]bool{}, rootSymbols: map[*Symbol]bool{}, rootScopes: map[*Scope]bool{}, seen: map[specializationPointer]uint8{}}
 }
 
+func newCanonicalMembershipIndexTestScan() *specializationPublication {
+	scan := newCanonicalMembershipTestScan()
+	scan.canonicalMembershipScan = true
+	return scan
+}
+
 func assertCanonicalMembershipParity(t *testing.T, current, reference *specializationPublication) {
 	t.Helper()
 	if current.err != nil || reference.err != nil {
@@ -36,11 +42,11 @@ func assertCanonicalMembershipParity(t *testing.T, current, reference *specializ
 	if !reflect.DeepEqual(current.owned, reference.owned) || !reflect.DeepEqual(current.rootSymbols, reference.rootSymbols) || !reflect.DeepEqual(current.rootScopes, reference.rootScopes) {
 		t.Fatal("canonical node/symbol/scope index changed")
 	}
-	// AST-free pointer/map seen entries are deliberately absent after pruning.
-	// Every potentially relevant key and its exact role bits remain unchanged.
+	// Canonical walks use owned as the visited set for AST pointers. Preserve
+	// exact parity for other relevant pointer/map identities and their role bits.
 	expected := map[specializationPointer]uint8{}
 	for key, bits := range reference.seen {
-		if canonicalMembershipMayContainIdentity(key.typ) {
+		if canonicalMembershipMayContainIdentity(key.typ) && (!current.canonicalMembershipScan || !key.typ.Implements(astNodeType)) {
 			expected[key] = bits
 		}
 	}
@@ -88,7 +94,7 @@ func TestCanonicalMembershipWalkParityOpaqueAliasesCyclesAndLeafNodes(t *testing
 	cycle.Payload = map[string]any{"leaf": leaf, "symbol": symbol, "scope": scope}
 	plain := &canonicalMembershipPlainProbe{Values: []int{1, 2, 3}}
 	values := []any{leaf, leaf, cycle, plain, lexer.Pos{}, &lexer.Pos{}, []any{symbol, symbol, scope}, map[string]any{"opaque": cycle, "nominal": &BuiltinType{Name: "i64"}}, (*ast.IntLit)(nil), [2]any{leaf, scope}}
-	current, reference := newCanonicalMembershipTestScan(), newCanonicalMembershipTestScan()
+	current, reference := newCanonicalMembershipIndexTestScan(), newCanonicalMembershipTestScan()
 	for _, value := range values {
 		current.walk(reflect.ValueOf(value), false)
 		reference.walkCanonicalReference(reflect.ValueOf(value), false)
@@ -102,10 +108,46 @@ func TestCanonicalMembershipWalkParityOpaqueAliasesCyclesAndLeafNodes(t *testing
 	}
 }
 
+func TestCanonicalMembershipWalkUsesOwnedForASTAliasesAndCycles(t *testing.T) {
+	leaf := &ast.IntLit{Value: "9"}
+	root := &ast.BinaryExpr{Left: leaf, Right: leaf}
+	call := &ast.CallExpr{Func: root, Args: []ast.Expr{leaf, root}}
+	root.LoweredCall = call
+
+	container := &canonicalMembershipCycleProbe{}
+	container.Next = container
+	facts := map[string]any{"node": root, "container": container}
+	facts["self"] = facts
+	container.Payload = facts
+
+	current, reference := newCanonicalMembershipIndexTestScan(), newCanonicalMembershipTestScan()
+	current.walk(reflect.ValueOf(container), false)
+	reference.walkCanonicalReference(reflect.ValueOf(container), false)
+	assertCanonicalMembershipParity(t, current, reference)
+
+	for _, node := range []ast.Node{root, call, leaf} {
+		if !current.owned[node] {
+			t.Fatalf("canonical AST node %T was not indexed", node)
+		}
+		if _, seen := current.seen[specializationPointer{reflect.TypeOf(node), reflect.ValueOf(node).Pointer()}]; seen {
+			t.Fatalf("canonical AST pointer %T redundantly entered seen", node)
+		}
+	}
+	containerKey := specializationPointer{reflect.TypeOf(container), reflect.ValueOf(container).Pointer()}
+	if _, seen := current.seen[containerKey]; !seen {
+		t.Fatal("non-AST cyclic pointer lost its seen guard")
+	}
+	factsKey := specializationPointer{reflect.TypeOf(facts), reflect.ValueOf(facts).Pointer()}
+	if current.seen[factsKey]&1 == 0 {
+		t.Fatal("cyclic map lost its seen guard")
+	}
+}
+
 // Deliberately mirrors the production first catalog scan without using shared
 // indexes. Source analysis and catalog warming never enter its measured loop.
 func canonicalMembershipCatalogTestScan(root *Result, reference bool) *specializationPublication {
 	scan := newCanonicalMembershipTestScan()
+	scan.canonicalMembershipScan = !reference
 	walk := scan.walk
 	if reference {
 		walk = scan.walkCanonicalReference
