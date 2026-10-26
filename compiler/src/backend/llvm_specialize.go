@@ -173,6 +173,11 @@ func explicitFunctionApplicationParams(base *semantic.FuncType) []ast.GenericPar
 // that only select a hidden Arena argument; those must remain runtime parameters,
 // not become mandatory monomorphization keys.
 func functionSpecializationParams(base *semantic.FuncType) []ast.GenericParam {
+	if len(base.RegionParams) == 0 {
+		// No layout region can be added, so keep the canonical generic-parameter
+		// slice read-only and skip the maps and recursive parameter-type walk.
+		return funcGenericParams(base)
+	}
 	params := append([]ast.GenericParam(nil), funcGenericParams(base)...)
 	seen := make(map[string]bool, len(params))
 	for _, param := range params {
