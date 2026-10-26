@@ -1069,3 +1069,29 @@ The proof/retained race selection passes in 2.024s. Logs are
 `/tmp/elisa-proof-requested-coordinate-final-bench.log`. The normal Stage1 edit
 measurement, default CLI qualification, O0/O3 matrix and full latest-source
 self-host gate remain open.
+
+
+## Matched-source Stage1 recheck at 1d1a21e9
+
+Fresh producer `acb3247519df4145f75d2a681e4a6545b63716b1a17a419b6fca8f8cd98bc519`
+from main 1d1a21e9; independent empty cache namespace
+`/tmp/elisa-stage1-proof-main-matched-root`. The frozen Stage1 tree is the exact
+same tree used for the 72ca baseline above. Server disabled; explicit disk
+analysis/build cache, bootstrap and retained-fast-prepare settings unchanged;
+O0, fresh CLI processes and an external 30-second cap. Cold preparation
+completed in 22 checkpoint invocations; the final invocation took 24.912s.
+Measured prime was 12.595586s (versus 13.424911s at 72ca), exact baseline repeat
+was 0.283076s (versus 0.280606s), the first novel parser-body edit was 15.008199s
+(versus 17.339817s), and the edited exact repeat was 0.284776s (versus
+0.299656s). This is a single-run directional whole-Stage1 improvement, not a
+confidence interval. The OS cache was not flushed. Corresponding objects and
+both output streams for all four labels are byte-identical to 72ca; the
+temporary source edit was restored to SHA256
+`2556c8824fdf063ee8093d02bcf63afde4eba07fd721245986d22b8f2499b271`.
+
+An earlier exploratory root, `/tmp/elisa-stage1-proof-coordinate-main-root`,
+used a different frozen Stage1 snapshot. Its runtime and collections sources
+differed from the successful baseline; the runtime variant failed at
+`ctx_task_to_raw` because it read fields without moving the linear task. That
+failure is source-input-specific and is excluded from the comparison above.
+The full latest self-host checkout gate and O3 edit matrix remain open.
