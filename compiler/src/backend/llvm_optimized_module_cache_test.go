@@ -44,7 +44,14 @@ func TestOptimizedModuleDiskCacheAcrossProcesses(t *testing.T) {
 		}
 		session.EnableDiskCache(root, identity, 64<<20)
 		// Compare the exact optimized IR, including its metadata, to a fresh pipeline.
-		g, err := compileLLVMModuleWithTargetDebugTrace(result, level, DefaultPackedLoweringProfile(), "", debug, false)
+		compileInput := func() (*llvmGenerator, error) {
+			return compileLLVMModuleConfigured(result, level, DefaultPackedLoweringProfile(), "", debug, false, func(g *llvmGenerator) {
+				if !debug {
+					discardLLVMValueNames(g.context)
+				}
+			})
+		}
+		g, err := compileInput()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +70,7 @@ func TestOptimizedModuleDiskCacheAcrossProcesses(t *testing.T) {
 		if hit != (os.Getenv("ELISA_TEST_OPTIMIZED_CACHE_HIT") == "1") {
 			t.Fatalf("unexpected cache hit=%v", hit)
 		}
-		cold, err := compileLLVMModuleWithTargetDebugTrace(result, level, DefaultPackedLoweringProfile(), "", debug, false)
+		cold, err := compileInput()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,11 +82,12 @@ func TestOptimizedModuleDiskCacheAcrossProcesses(t *testing.T) {
 			t.Fatal("cached optimized IR differs from fresh pipeline")
 		}
 		object := filepath.Join(t.TempDir(), "cached.o")
+		beforeWriteReuse := session.Stats().OptimizedModulesReused
 		if err := session.WriteObject(result, object, LLVMObjectEmitOptions{OptLevel: level, DebugInfo: debug}); err != nil {
 			t.Fatal(err)
 		}
-		if session.Stats().OptimizedModulesReused == 0 {
-			t.Fatal("WriteObject did not reuse optimized module")
+		if reused := session.Stats().OptimizedModulesReused - beforeWriteReuse; reused != 1 {
+			t.Fatalf("WriteObject reused %d optimized modules, want exactly one", reused)
 		}
 		if got := incrementalObjectNativeStatus(t, object); got != want {
 			t.Fatalf("native=%d want=%d", got, want)

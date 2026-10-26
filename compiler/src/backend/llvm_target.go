@@ -96,6 +96,15 @@ var llvmTargetInitErr error
 // only that pipeline serialized; independent O0 lowering/codegen remains parallel.
 var llvmOptimizationMu sync.Mutex
 
+// discardLLVMValueNames applies the object-emission policy before lowering so
+// the exact bitcode bytes used by optimized-module cache lookups are stable
+// across WriteObject and other callers.
+func discardLLVMValueNames(context C.LLVMContextRef) {
+	if context != nil {
+		C.LLVMContextSetDiscardValueNames(context, 1)
+	}
+}
+
 func ensureLLVMTargetRegistry() error {
 	llvmTargetInitOnce.Do(func() {
 		if C.elisacoreInitializeNativeTarget() != 0 {
