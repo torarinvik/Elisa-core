@@ -484,6 +484,17 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "indexBoundsRuntimeSites" {
+			// Runtime guard sites are observational telemetry. Specialization
+			// re-analyzes its private syntax and publishes the canonical summary,
+			// so start with a private empty ledger instead of copying every site.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if name == "iterBinderElementOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
