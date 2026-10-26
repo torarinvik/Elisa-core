@@ -171,6 +171,9 @@ func (p *specializationPublication) walk(v reflect.Value, span bool) {
 			if canonicalNodeWalk && p.owned[value] {
 				return
 			}
+			if canonicalNodeWalk && p.walkCanonicalAST(value) {
+				return
+			}
 			if !p.owned[value] {
 				// An interface value is unwrapped below. Defer its first visited
 				// mark to the concrete node so the node itself still gets walked.

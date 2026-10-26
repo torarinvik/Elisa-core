@@ -84,23 +84,28 @@ type walkMode struct {
 	// Prune: visit returns whether to descend into the node, and nodes are not
 	// deduplicated -- the shape of the reflective predicate walks it replaces.
 	Prune bool
+	// OpaqueFields delegates maps and structs with inaccessible fields to the
+	// caller's complete reflective policy instead of the pointer-only policy.
+	OpaqueFields bool
 }
 
 var modes = []walkMode{
 	{File: "src/semantic/ast_pointer_walk_gen.go", Maps: true, Prefix: "astWalk", Reflect: "fillMayAdoptWalkReflect", Entry: "fillMayAdoptWalkTyped", Describe: "fillMayAdoptWalk"},
 	{File: "src/semantic/ast_scan_walk_gen.go", Maps: false, Prefix: "astScanWalk", Reflect: "storeScanWalkReflect", Entry: "storeScanWalkTyped", Describe: "walkStoreScanNodes"},
 	{File: "src/semantic/ast_prune_walk_gen.go", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "pruneWalkTyped", Describe: "walkPruned", Prune: true},
+	{File: "src/semantic/ast_canonical_walk_gen.go", Maps: true, Prefix: "astCanonicalWalk", Reflect: "canonicalASTWalkOpaque", Entry: "canonicalASTWalkTyped", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
 }
 
 type gen struct {
-	maps bool
-	out       bytes.Buffer
-	universe  []*types.Named // exported named types in the walked packages
-	ptrFuncs  map[string]bool
-	valFuncs  map[string]bool
-	ifaceFunc map[string]bool
-	queue     []func()
-	funcCount int
+	maps         bool
+	opaqueFields bool
+	out          bytes.Buffer
+	universe     []*types.Named // exported named types in the walked packages
+	ptrFuncs     map[string]bool
+	valFuncs     map[string]bool
+	ifaceFunc    map[string]bool
+	queue        []func()
+	funcCount    int
 }
 
 func walked(n *types.Named) bool {
@@ -213,6 +218,12 @@ func (g *gen) emitWalk(b *bytes.Buffer, x string, t types.Type, depth int) {
 		b.Write(inner.Bytes())
 		b.WriteString("}\n")
 	case *types.Map:
+		if g.opaqueFields {
+			// Canonical identity includes keys as well as values and must retain
+			// the outer map's identity guard for aliases and cycles.
+			g.fallback(b, x)
+			return
+		}
 		if !g.maps {
 			return
 		}
@@ -259,6 +270,17 @@ func (g *gen) needVal(n *types.Named) {
 	st := n.Underlying().(*types.Struct)
 	g.queue = append(g.queue, func() {
 		var b bytes.Buffer
+		if g.opaqueFields {
+			for i := 0; i < st.NumFields(); i++ {
+				if !st.Field(i).Exported() {
+					g.fallback(&b, "*p")
+					fmt.Fprintf(&g.out, "func astWalkVal_%s(p *%s, visit func(any), seen map[uintptr]bool) {\n", key, qual(n))
+					g.out.Write(b.Bytes())
+					g.out.WriteString("}\n\n")
+					return
+				}
+			}
+		}
 		for i := 0; i < st.NumFields(); i++ {
 			f := st.Field(i)
 			if !f.Exported() {
@@ -324,7 +346,7 @@ func main() {
 func generate(m walkMode) ([]byte, error) {
 	fset := token.NewFileSet()
 	im := &srcImporter{fset: fset, std: importer.ForCompiler(fset, "source", nil), cache: map[string]*types.Package{}}
-	g := &gen{maps: m.Maps, ptrFuncs: map[string]bool{}, valFuncs: map[string]bool{}, ifaceFunc: map[string]bool{}}
+	g := &gen{maps: m.Maps, opaqueFields: m.OpaqueFields, ptrFuncs: map[string]bool{}, valFuncs: map[string]bool{}, ifaceFunc: map[string]bool{}}
 	paths := make([]string, 0, len(pkgDirs))
 	for p := range pkgDirs {
 		paths = append(paths, p)
