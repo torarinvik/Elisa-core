@@ -39,11 +39,24 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 		}
 		return sourceIdentity{reflect.TypeOf(node), p.File, p.Line, p.Col}
 	}
+	// The three eager source roots are walked sequentially before analysis can
+	// mutate the fresh file. Reuse only the pointer-visit set across those walks;
+	// the returned binder/blocker maps and the quantifier set remain per-root.
+	// Release the largest map before returning the renderer so its backing table
+	// does not remain live across the body update.
+	seenScratch := make(map[uintptr]bool)
 	collect := func(root *ast.File, shift bool) (map[binderIdentity]binder, map[string]bool) {
 		result := map[binderIdentity]binder{}
 		blocked := map[string]bool{}
 		quantifiers := map[*ast.VarDeclStmt]bool{}
-		seen := map[uintptr]bool{}
+		seen := seenScratch
+		if seen == nil {
+			// The lazy baseline-source recovery is called after the eager scratch
+			// has been released. It gets a private one-shot map, never stale keys.
+			seen = make(map[uintptr]bool)
+		} else {
+			clear(seen)
+		}
 		var visit func(reflect.Value, sourceIdentity)
 		visit = func(v reflect.Value, owner sourceIdentity) {
 			if !v.IsValid() {
@@ -165,6 +178,10 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 			blocked[name] = true
 		}
 	}
+	// collect is retained by ensureBaseline for a possible one-shot source parse.
+	// Set the captured variable to nil now so this renderer does not retain the
+	// eager scratch map throughout body analysis.
+	seenScratch = nil
 	type candidates map[string]map[string]bool
 	byOwner := map[sourceIdentity]candidates{}
 	add := func(owner sourceIdentity, from, to string) {
