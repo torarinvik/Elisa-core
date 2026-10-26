@@ -195,6 +195,11 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 type llvmGenerator struct {
 	partitionImportWeight   int
 	partitionImportDefaults bool
+	// partitionModuleDecls is a build-local worklist for partitioned IR. A
+	// non-owner function body is absent because partition generation has already
+	// assigned it to its owner; all shared declarations remain present.
+	partitionModuleDecls    []ast.Decl
+	hasPartitionModuleDecls bool
 	hasPackedRecords        bool // emitted a StructLayoutPacked body
 	// partBody, when set, limits this generator to one partition of the
 	// program: a top-level external function's body is emitted only when
@@ -447,7 +452,11 @@ func (g *llvmGenerator) emitModule() error {
 	if g.emitTrace {
 		g.initTrace()
 	}
-	for _, decl := range g.result.ActiveFile().Decls {
+	decls := g.result.ActiveFile().Decls
+	if g.hasPartitionModuleDecls {
+		decls = g.partitionModuleDecls
+	}
+	for _, decl := range decls {
 		if err := g.predeclareDeclTypes(decl); err != nil {
 			return err
 		}
@@ -457,7 +466,7 @@ func (g *llvmGenerator) emitModule() error {
 			return err
 		}
 	}
-	for _, decl := range g.result.ActiveFile().Decls {
+	for _, decl := range decls {
 		if err := g.emitDecl(decl); err != nil {
 			return err
 		}

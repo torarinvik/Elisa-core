@@ -9,7 +9,125 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
+
+func partitionIRModuleTextForWorklistTest(t *testing.T, result *semantic.Result, part, parts int, declarations []ast.Decl, useWorklist bool) string {
+	t.Helper()
+	shared := newSharedCodegenLookups(result)
+	g, err := compileLLVMModuleConfigured(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", false, false, func(g *llvmGenerator) {
+		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
+		g.partitionGlobalDeclarationsOnly = part != 0
+		g.sharedResult = true
+		if useWorklist {
+			g.partitionModuleDecls = declarations
+			g.hasPartitionModuleDecls = true
+		}
+	}, shared)
+	if err != nil {
+		t.Fatalf("compile partition %d: %v", part, err)
+	}
+	defer g.dispose()
+	if !finishPartitionModule(g.module, part, parts, "worklist-equivalence-test") {
+		t.Fatalf("partition %d declined module finalization", part)
+	}
+	return g.printModule()
+}
+
+func countPartitionWorklistFunctions(decls []ast.Decl) int {
+	count := 0
+	for _, decl := range decls {
+		switch n := decl.(type) {
+		case *ast.FuncDecl:
+			count++
+		case *ast.NamespaceDecl:
+			count += countPartitionWorklistFunctions(n.Decls)
+		case *ast.StaticIfDecl:
+			count += countPartitionWorklistFunctions(n.Then) + countPartitionWorklistFunctions(n.Else)
+			for _, branch := range n.Elifs {
+				count += countPartitionWorklistFunctions(branch.Body)
+			}
+		case *ast.ImplDecl:
+			for _, member := range n.Members {
+				if _, ok := member.(*ast.FuncDecl); ok {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+func TestPartitionedIRDeclarationWorklistsPreserveModuleText(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "partition_worklists.elisa", `
+struct Pair:
+    left: i64
+    right: i64
+
+global mutable counter: i64 = 17
+export global counter as public_counter
+const TABLE = [5, 7, 11]
+
+protocol Identity:
+    def identity(self: Self) -> Self
+
+impl Identity for Pair:
+    def identity(self: Self) -> Self:
+        return self
+
+def add(left: i64, right: i64) -> i64:
+    return left + right
+export fn add(left: i64, right: i64) -> i64 = add
+
+def identity_pair(value: Pair) -> Pair:
+    return value
+
+def read_counter() -> i64:
+    can Global.Read:
+        return counter + TABLE[1]
+export fn public_read_counter() -> i64 = read_counter
+
+module Nested:
+    struct Cell:
+        value: i64
+
+    global mutable count: i64 = 3
+
+    def read_cell(value: Cell) -> i64:
+        return value.value
+
+    impl Cell:
+        def doubled(self: Self) -> i64:
+            return self.value + self.value
+
+static if true:
+    def selected() -> i64:
+        return 1
+static else:
+    def not_selected() -> i64:
+        return 2
+`)
+	const parts = 4
+	symbols := codegenSymbolsByNode(result)
+	worklists := partitionIRDeclarationWorklists(result, symbols, parts)
+	originalFunctionCount := countPartitionWorklistFunctions(result.ActiveFile().Decls)
+	plannedFunctionCount := 0
+	for _, declarations := range worklists {
+		plannedFunctionCount += countPartitionWorklistFunctions(declarations)
+	}
+	if plannedFunctionCount >= originalFunctionCount*parts {
+		t.Fatalf("worklists retained all function declarations: original=%d planned=%d", originalFunctionCount, plannedFunctionCount)
+	}
+	for part := 0; part < parts; part++ {
+		want := partitionIRModuleTextForWorklistTest(t, result, part, parts, nil, false)
+		got := partitionIRModuleTextForWorklistTest(t, result, part, parts, worklists[part], true)
+		if got != want {
+			t.Fatalf("partition %d module changed after declaration filtering", part)
+		}
+	}
+}
 
 // Partitioned IR at -O0: a private constant reached from functions owned by
 // different partitions keeps one address, an edit to it is seen everywhere,

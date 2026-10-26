@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,6 +60,123 @@ func partitionOwner(name string, parts int) int {
 	h := fnv.New64a()
 	h.Write([]byte(name))
 	return int(h.Sum64() % uint64(parts))
+}
+
+// partitionIRDeclarationWorklists preserves every shared declaration in every
+// partition while placing ordinary function bodies only in their owner list.
+// Namespace, static-if, and impl wrappers are copied with their children
+// partitioned so each generator can keep using its normal declaration logic.
+// Functions whose final LLVM symbol needs generator-specific ABI resolution
+// remain in every list; the generator's existing owner check stays authoritative
+// for those uncommon cases.
+func partitionIRDeclarationWorklists(result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, parts int) [][]ast.Decl {
+	if result == nil || result.ActiveFile() == nil || parts < 1 {
+		return nil
+	}
+	worklists := make([][]ast.Decl, parts)
+	sameNameExports := make(map[string]struct{}, len(result.ExportedFuncs))
+	for _, exported := range result.ExportedFuncs {
+		if exported != nil && len(exported.TargetBindings) == 0 && exported.PublicName == exported.TargetName {
+			sameNameExports[exported.TargetName] = struct{}{}
+		}
+	}
+	for _, decl := range result.ActiveFile().Decls {
+		appendPartitionIRDecl(worklists, decl, result, symbols, sameNameExports)
+	}
+	return worklists
+}
+
+func partitionIRFunctionOwner(result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, decl *ast.FuncDecl, parts int) (int, bool) {
+	if result == nil || result.GlobalScope == nil || decl == nil || parts < 1 {
+		return 0, false
+	}
+	sym := symbols[decl]
+	if sym == nil || sym.Name == "" || strings.TrimSpace(sym.LinkName) != "" {
+		return 0, false
+	}
+	if fn, ok := sym.Type.(*semantic.FuncType); ok && fn.IntrinsicName != "" {
+		return 0, false
+	}
+	if _, sameNameExport := sameNameExports[sym.Name]; sameNameExport {
+		return 0, false
+	}
+	resolved, ok := result.GlobalScope.Lookup(sym.Name)
+	if !ok || resolved == nil || resolved.Node != decl || strings.TrimSpace(resolved.LinkName) != "" {
+		return 0, false
+	}
+	return partitionOwner(sym.Name, parts), true
+}
+
+func partitionIRDeclBranch(decls []ast.Decl, result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}, parts int) [][]ast.Decl {
+	branches := make([][]ast.Decl, parts)
+	for _, decl := range decls {
+		appendPartitionIRDecl(branches, decl, result, symbols, sameNameExports)
+	}
+	return branches
+}
+
+func appendPartitionIRDecl(worklists [][]ast.Decl, decl ast.Decl, result *semantic.Result, symbols map[ast.Node]*semantic.Symbol, sameNameExports map[string]struct{}) {
+	parts := len(worklists)
+	if parts == 0 || decl == nil {
+		return
+	}
+	appendEverywhere := func(decl ast.Decl) {
+		for part := range parts {
+			worklists[part] = append(worklists[part], decl)
+		}
+	}
+	switch n := decl.(type) {
+	case *ast.FuncDecl:
+		if owner, exact := partitionIRFunctionOwner(result, symbols, sameNameExports, n, parts); exact {
+			worklists[owner] = append(worklists[owner], decl)
+			return
+		}
+		appendEverywhere(decl)
+	case *ast.NamespaceDecl:
+		children := partitionIRDeclBranch(n.Decls, result, symbols, sameNameExports, parts)
+		for part := range parts {
+			copy := *n
+			copy.Decls = children[part]
+			worklists[part] = append(worklists[part], &copy)
+		}
+	case *ast.StaticIfDecl:
+		thenDecls := partitionIRDeclBranch(n.Then, result, symbols, sameNameExports, parts)
+		elifDecls := make([][][]ast.Decl, len(n.Elifs))
+		for index, branch := range n.Elifs {
+			elifDecls[index] = partitionIRDeclBranch(branch.Body, result, symbols, sameNameExports, parts)
+		}
+		elseDecls := partitionIRDeclBranch(n.Else, result, symbols, sameNameExports, parts)
+		for part := range parts {
+			copy := *n
+			copy.Then = thenDecls[part]
+			copy.Else = elseDecls[part]
+			copy.Elifs = append([]ast.StaticElifDecl(nil), n.Elifs...)
+			for index := range copy.Elifs {
+				copy.Elifs[index].Body = elifDecls[index][part]
+			}
+			worklists[part] = append(worklists[part], &copy)
+		}
+	case *ast.ImplDecl:
+		members := make([][]ast.ImplMember, parts)
+		for _, member := range n.Members {
+			if fn, ok := member.(*ast.FuncDecl); ok {
+				if owner, exact := partitionIRFunctionOwner(result, symbols, sameNameExports, fn, parts); exact {
+					members[owner] = append(members[owner], member)
+					continue
+				}
+			}
+			for part := range parts {
+				members[part] = append(members[part], member)
+			}
+		}
+		for part := range parts {
+			copy := *n
+			copy.Members = members[part]
+			worklists[part] = append(worklists[part], &copy)
+		}
+	default:
+		appendEverywhere(decl)
+	}
 }
 
 // finishPartitionModule gives the partition's definitions their final
@@ -171,6 +289,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	result.BeginSharedCodegen()
 	defer result.EndSharedCodegen()
 	shared := newSharedCodegenLookups(result)
+	declarations := partitionIRDeclarationWorklists(result, shared.symbolsByNode, parts)
 	objects := make([][]byte, parts)
 	members := make([][]string, parts)
 	var previousMembers [][]string
@@ -193,7 +312,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		go func() {
 			defer wg.Done()
 			for part := range next {
-				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, &members[part], shared)
+				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations[part], &members[part], shared)
 			}
 		}()
 	}
@@ -231,13 +350,15 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 // up in the session and compiles it on a miss.
 var errPartitionDeclined = errors.New("partitioned IR declined")
 
-func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, members *[]string, shared *sharedCodegenLookups) ([]byte, error) {
+func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, declarations []ast.Decl, members *[]string, shared *sharedCodegenLookups) ([]byte, error) {
 	unit := hex.EncodeToString(unitID[:8])
 	irStart := time.Now()
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
 		g.partitionGlobalDeclarationsOnly = part != 0
 		g.sharedResult = true
+		g.partitionModuleDecls = declarations
+		g.hasPartitionModuleDecls = true
 		g.partitionImportDefaults = s.diskDefaultsActive()
 		// LLVM retains GlobalValue names while discarding non-semantic local SSA
 		// names. Set this before lowering to avoid creating source-offset names.
