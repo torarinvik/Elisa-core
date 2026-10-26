@@ -179,6 +179,52 @@ func TestCompilerBuiltinHelperCallsOverlayConcurrentPrivateMaps(t *testing.T) {
 	}
 }
 
+func TestReturnElementUnknownOverlayAndCopyDeclRekey(t *testing.T) {
+	original := &ast.ReturnStmt{Value: &ast.Ident{Name: "value"}}
+	originalMissing := &ast.ReturnStmt{Value: &ast.Ident{Name: "other"}}
+	rootAnalyzer := &Analyzer{returnElementStmtUnknown: map[*ast.ReturnStmt]bool{original: true}}
+	worker := cloneAnalyzerValueForSpecialization(rootAnalyzer).Addr().Interface().(*Analyzer)
+	if len(worker.returnElementStmtUnknown) != 0 || worker.noStorageOverlay == nil || len(worker.noStorageOverlay.returnUnknown) != 1 {
+		t.Fatal("specialization copied all return rows or lost their canonical base")
+	}
+	if unknown, present := worker.lookupReturnElementStmtUnknown(original); !present || !unknown {
+		t.Fatal("inherited unknown return row lost")
+	}
+	if unknown, present := worker.lookupReturnElementStmtUnknown(originalMissing); present || unknown {
+		t.Fatal("missing return row became present")
+	}
+
+	fn := &ast.FuncDecl{Name: "target", Body: []ast.Stmt{original, originalMissing}}
+	ctx := &specializationContext{base: &Result{analyzer: rootAnalyzer}, worker: worker, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}
+	worker.parallel = &parallelWorkerState{specialization: ctx, original: map[*ast.FuncDecl]*ast.FuncDecl{}}
+	privateDecl := ctx.copyDecl(fn)
+	if ctx.err != nil || privateDecl == nil {
+		t.Fatal("copyDecl failed", ctx.err)
+	}
+	private := privateDecl.Body[0].(*ast.ReturnStmt)
+	privateMissing := privateDecl.Body[1].(*ast.ReturnStmt)
+	if private == original {
+		t.Fatal("return syntax was not detached")
+	}
+	if unknown, present := worker.lookupReturnElementStmtUnknown(private); !present || !unknown {
+		t.Fatal("copyDecl did not rekey the inherited return fact")
+	}
+	if unknown, present := worker.lookupReturnElementStmtUnknown(privateMissing); present || unknown {
+		t.Fatal("owned missing return fact inherited an unrelated row")
+	}
+	worker.clearReturnElementStmtUnknown(private)
+	if unknown, present := worker.lookupReturnElementStmtUnknown(private); present || unknown {
+		t.Fatal("clearing a copied return row resurrected it from the base")
+	}
+	worker.clearReturnElementStmtUnknown(original)
+	if unknown, present := worker.lookupReturnElementStmtUnknown(original); !present || unknown {
+		t.Fatal("local false tombstone failed to mask an inherited true row")
+	}
+	if !rootAnalyzer.returnElementStmtUnknown[original] {
+		t.Fatal("local clear mutated the canonical return map")
+	}
+}
+
 func TestNoStorageOverlayActualMissAndCanonicalInvalidation(t *testing.T) {
 	const source = "def keep(x: i64) -> i64:\n    return x\n"
 	result, state := AnalyzeRetained(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
@@ -324,6 +370,27 @@ func BenchmarkCompilerBuiltinHelperCallsOverlayConstruction(b *testing.B) {
 					compilerBuiltinHelperCloneSink = cloneAnalyzerValueForParallelPolicy(root, true, false).Addr().Interface().(*Analyzer)
 				} else {
 					compilerBuiltinHelperCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+				}
+			}
+		})
+	}
+}
+
+var returnElementUnknownCloneSink *Analyzer
+
+func BenchmarkReturnElementUnknownOverlayConstruction(b *testing.B) {
+	root := &Analyzer{returnElementStmtUnknown: make(map[*ast.ReturnStmt]bool, 32768)}
+	for i := 0; i < 32768; i++ {
+		root.returnElementStmtUnknown[&ast.ReturnStmt{}] = true
+	}
+	for _, mode := range []string{"full_map_copy", "overlay"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if mode == "full_map_copy" {
+					returnElementUnknownCloneSink = cloneAnalyzerValueForParallelPolicy(root, true, false).Addr().Interface().(*Analyzer)
+				} else {
+					returnElementUnknownCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 				}
 			}
 		})

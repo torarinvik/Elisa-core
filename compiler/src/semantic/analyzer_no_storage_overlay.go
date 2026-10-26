@@ -9,9 +9,10 @@ import (
 // Specialization construction reads canonical memo/fact bases and publishes new
 // rows only into its private local maps.
 type analyzerNoStorageOverlay struct {
-	base        map[Type]bool
-	sharesBase  map[Type]bool
-	helperCalls map[*ast.CallExpr]string
+	base          map[Type]bool
+	sharesBase    map[Type]bool
+	helperCalls   map[*ast.CallExpr]string
+	returnUnknown map[*ast.ReturnStmt]bool
 }
 
 func (a *Analyzer) lookupStoreScanNoStorage(t Type) (bool, bool) {
@@ -70,11 +71,51 @@ func (a *Analyzer) setCompilerBuiltinHelperCall(call *ast.CallExpr, name string)
 	a.compilerBuiltinHelperCalls[call] = name
 }
 
+func (a *Analyzer) lookupReturnElementStmtUnknown(ret *ast.ReturnStmt) (bool, bool) {
+	if a == nil || ret == nil {
+		return false, false
+	}
+	if unknown, present := a.returnElementStmtUnknown[ret]; present {
+		return unknown, true
+	}
+	if a.noStorageOverlay != nil {
+		unknown, present := a.noStorageOverlay.returnUnknown[ret]
+		return unknown, present
+	}
+	return false, false
+}
+
+func (a *Analyzer) setReturnElementStmtUnknown(ret *ast.ReturnStmt) {
+	if a.returnElementStmtUnknown == nil {
+		a.returnElementStmtUnknown = make(map[*ast.ReturnStmt]bool)
+	}
+	a.returnElementStmtUnknown[ret] = true
+}
+
+func (a *Analyzer) clearReturnElementStmtUnknown(ret *ast.ReturnStmt) {
+	if a == nil || ret == nil {
+		return
+	}
+	if a.noStorageOverlay == nil {
+		delete(a.returnElementStmtUnknown, ret)
+		return
+	}
+	if _, inherited := a.noStorageOverlay.returnUnknown[ret]; inherited {
+		if a.returnElementStmtUnknown == nil {
+			a.returnElementStmtUnknown = make(map[*ast.ReturnStmt]bool)
+		}
+		// Mask an inherited true row when removing a canonical-keyed entry.
+		a.returnElementStmtUnknown[ret] = false
+		return
+	}
+	delete(a.returnElementStmtUnknown, ret)
+}
+
 func cloneAnalyzerNoStorageOverlay(source *analyzerNoStorageOverlay) *analyzerNoStorageOverlay {
 	if source == nil {
 		return nil
 	}
-	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase, helperCalls: source.helperCalls}
+	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown}
 }
 func (a *Analyzer) rejectNoStorageOverlayOperation(operation string) error {
 	err := fmt.Errorf("specialization no-storage overlay cannot enter %s", operation)

@@ -474,6 +474,16 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "returnElementStmtUnknown" {
+			// copyDecl rekeys only owned return rows. Inherit the remaining
+			// whole-program facts through the overlay base instead of copying all.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if name == "iterBinderElementOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
@@ -580,9 +590,10 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			worker.storeScanParamFactsOverlay = &analyzerStoreScanParamFactsOverlay{base: a.storeScanParamFactsCache}
 		}
 		worker.noStorageOverlay = &analyzerNoStorageOverlay{
-			base:        a.storeScanNoStorageCache,
-			sharesBase:  a.storeScanSharesCache,
-			helperCalls: a.compilerBuiltinHelperCalls,
+			base:          a.storeScanNoStorageCache,
+			sharesBase:    a.storeScanSharesCache,
+			helperCalls:   a.compilerBuiltinHelperCalls,
+			returnUnknown: a.returnElementStmtUnknown,
 		}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}

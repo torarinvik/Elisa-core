@@ -1453,7 +1453,7 @@ func (a *Analyzer) analyzeQuietly(decl *ast.FuncDecl) {
 	a.staticContextDepth = savedStatic
 	returnElementWalk(reflect.ValueOf(target.Body), func(ret *ast.ReturnStmt) {
 		delete(a.returnElementStmtStates, ret)
-		delete(a.returnElementStmtUnknown, ret)
+		a.clearReturnElementStmtUnknown(ret)
 	}, map[uintptr]bool{})
 	publish()
 }

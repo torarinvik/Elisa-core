@@ -27,18 +27,15 @@ func (a *Analyzer) noteReturnElementState(n *ast.ReturnStmt) {
 	if a.returnElementStmtStates == nil {
 		a.returnElementStmtStates = map[*ast.ReturnStmt]regionRefState{}
 	}
-	if a.returnElementStmtUnknown == nil {
-		a.returnElementStmtUnknown = map[*ast.ReturnStmt]bool{}
-	}
 	state, ok := a.returnedContainerElementState(n.Value)
 	if !ok {
-		a.returnElementStmtUnknown[n] = true
+		a.setReturnElementStmtUnknown(n)
 		return
 	}
 	if prior, seen := a.returnElementStmtStates[n]; seen {
 		merged, mergedOK := mergeReturnElementStates(prior, state)
 		if !mergedOK {
-			a.returnElementStmtUnknown[n] = true
+			a.setReturnElementStmtUnknown(n)
 			return
 		}
 		state = merged
@@ -133,7 +130,8 @@ func (a *Analyzer) finishReturnElementSummary(fn *ast.FuncDecl) {
 	summary := regionRefState{}
 	for _, ret := range returns {
 		state, recorded := a.returnElementStmtStates[ret]
-		if !recorded || a.returnElementStmtUnknown[ret] {
+		unknown, _ := a.lookupReturnElementStmtUnknown(ret)
+		if !recorded || unknown {
 			return
 		}
 		merged, ok := mergeReturnElementStates(summary, state)
