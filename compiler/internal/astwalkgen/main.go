@@ -86,8 +86,9 @@ type walkMode struct {
 	Prune bool
 	// OpaqueFields delegates maps and structs with inaccessible fields to the
 	// caller's complete reflective policy instead of the pointer-only policy.
-	OpaqueFields bool
-	ProofBinding bool
+	OpaqueFields    bool
+	ProofBinding    bool
+	ProofCoordinate bool
 }
 
 var modes = []walkMode{
@@ -96,6 +97,7 @@ var modes = []walkMode{
 	{File: "src/semantic/ast_prune_walk_gen.go", Maps: false, Prefix: "astPruneWalk", Reflect: "pruneWalkReflect", Entry: "pruneWalkTyped", Describe: "walkPruned", Prune: true},
 	{File: "src/semantic/ast_canonical_walk_gen.go", Maps: true, Prefix: "astCanonicalWalk", Reflect: "canonicalASTWalkOpaque", Entry: "canonicalASTWalkTyped", Describe: "canonical AST membership", Prune: true, OpaqueFields: true},
 	{File: "src/semantic/proof_binding_walk_gen.go", Describe: "proof-binding source syntax", ProofBinding: true},
+	{File: "src/semantic/proof_coordinate_walk_gen.go", Describe: "proof-coordinate source syntax", ProofCoordinate: true},
 }
 
 type gen struct {
@@ -346,6 +348,9 @@ func main() {
 // generate returns the formatted walker source. It must run with compiler/ as the working
 // directory (package paths are resolved relative to it).
 func generate(m walkMode) ([]byte, error) {
+	if m.ProofCoordinate {
+		return generateProofCoordinate()
+	}
 	if m.ProofBinding {
 		return generateProofBinding()
 	}

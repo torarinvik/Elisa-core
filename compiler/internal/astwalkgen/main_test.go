@@ -77,3 +77,38 @@ func TestProofBindingGeneratorHandlesNamedStringsAndScalarSlices(t *testing.T) {
 		t.Fatal("string slices must retain source-name blocker events")
 	}
 }
+
+func TestCoordinateWalkerPreservesLeavesAndScalarPointerVisits(t *testing.T) {
+	var output bytes.Buffer
+	namedScalar := types.NewNamed(types.NewTypeName(token.NoPos, types.NewPackage("elisacore/src/ast", "ast"), "NamedScalar", nil), types.Typ[types.String], nil)
+	for _, typ := range []types.Type{namedScalar, types.Typ[types.String], types.NewArray(types.Typ[types.Int], 2), types.NewMap(types.Typ[types.String], types.Typ[types.Int])} {
+		if err := emitProofCoordinateValue(&output, "value", typ, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output.Len() != 0 {
+		t.Fatal("coordinate generator visited scalar/array/map leaves")
+	}
+	if err := emitProofCoordinateValue(&output, "pointer", types.NewPointer(types.Typ[types.Int]), 0); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(output.Bytes(), []byte("proofCoordinateWalkReflect")) {
+		t.Fatal("scalar pointer bypassed original pointer identity guard")
+	}
+}
+
+func TestCoordinateWalkerDefinedPointersAndInaccessibleASTStructsUseReflection(t *testing.T) {
+	pkg := types.NewPackage("elisacore/src/ast", "ast")
+	exported := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "Exported", nil), types.NewStruct(nil, nil), nil)
+	hidden := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "hidden", nil), types.NewStruct(nil, nil), nil)
+	definedPointer := types.NewNamed(types.NewTypeName(token.NoPos, pkg, "DefinedPointer", nil), types.NewPointer(exported), nil)
+	for _, typ := range []types.Type{definedPointer, hidden, types.NewPointer(hidden)} {
+		var output bytes.Buffer
+		if err := emitProofCoordinateValue(&output, "value", typ, 0); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(output.Bytes(), []byte("proofCoordinateWalkReflect")) || bytes.Contains(output.Bytes(), []byte("proofCoordinateWalkPtr_")) || bytes.Contains(output.Bytes(), []byte("proofCoordinateWalkVal_")) {
+			t.Fatalf("defined pointer or inaccessible AST shape bypassed exact reflection: %s", output.String())
+		}
+	}
+}

@@ -2,7 +2,6 @@ package semantic
 
 import (
 	"fmt"
-	"reflect"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -40,47 +39,7 @@ func captureProofReportCoordinateWitnesses(file *ast.File) proofReportCoordinate
 		witnesses.slabs[last] = append(witnesses.slabs[last], p)
 	}
 	seen := map[uintptr]bool{}
-	var visit func(reflect.Value)
-	visit = func(v reflect.Value) {
-		if !v.IsValid() {
-			return
-		}
-		if v.Type() == retainedPosType {
-			// Some producers intentionally use only a token start. Preserve that
-			// contract; never manufacture an end span during rendering.
-			addPosition(v.Interface().(lexer.Pos))
-			return
-		}
-		switch v.Kind() {
-		case reflect.Interface:
-			if !v.IsNil() {
-				visit(v.Elem())
-			}
-		case reflect.Pointer:
-			if v.IsNil() || seen[v.Pointer()] {
-				return
-			}
-			seen[v.Pointer()] = true
-			if v.CanInterface() {
-				if node, ok := v.Interface().(ast.Node); ok {
-					addPosition(node.Pos())
-				}
-			}
-			visit(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				visit(v.Field(i))
-			}
-		case reflect.Slice:
-			if v.Type().Elem().Kind() == reflect.Uint8 {
-				return
-			}
-			for i := 0; i < v.Len(); i++ {
-				visit(v.Index(i))
-			}
-		}
-	}
-	visit(reflect.ValueOf(file))
+	proofCoordinateASTWalkTyped(file, addPosition, seen)
 	return witnesses
 }
 
