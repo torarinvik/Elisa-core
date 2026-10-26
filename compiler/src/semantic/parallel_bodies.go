@@ -564,6 +564,19 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && (name == "storeScanCallWriteCache" || name == "storageViewCalleeWriteCache") {
+			// The call-write cache is AST-keyed, so copyDecl imports only rows for
+			// syntax owned by the private declaration. Storage-view summaries use
+			// composite declaration keys; specialization reads go through private
+			// shadows and recompute those rows on demand. Keep this map private so
+			// fresh memo entries cannot mutate the canonical analyzer.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if ownedFunctionAnalyses && name == "storeScanBoundCache" {
 			// Settled name sets are read-only; only publish new rows privately.
 			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
