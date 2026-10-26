@@ -25,6 +25,12 @@ type specializationPublication struct {
 	err                     error
 }
 
+type boundSparseSpecializationMap struct {
+	dst    reflect.Value
+	source reflect.Value
+	key    reflect.Type
+}
+
 func newSpecializationPublication(c *specializationContext, decl *ast.FuncDecl) *specializationPublication {
 	canonical := c.worker.parallel.original[decl]
 	p := &specializationPublication{context: c, rootNodes: canonicalSpecializationNodes(c.base), owned: map[ast.Node]bool{}, spanNodes: map[*ast.IndexExpr]bool{}, seen: map[specializationPointer]uint8{}, target: decl, canonical: canonical}
@@ -295,48 +301,7 @@ func (p *specializationPublication) publish() (*Result, error) {
 	result.specializationOwned = p.owned
 	result.specializationNodes = map[ast.Node]ast.Node{}
 	result.specializationProofMask = map[*ast.IndexExpr]bool{}
-	rv := reflect.ValueOf(&result).Elem()
-	av := reflect.ValueOf(c.worker).Elem()
-	rootv := reflect.ValueOf(c.base).Elem()
-	// Seed only empty shapes. Borrowing a whole node-fact map here would put the
-	// whole-program multiplier back into every memoized product.
-	for _, entry := range sparseSpecializationMaps {
-		dst := rv.FieldByName(entry.result)
-		if entry.analyzer == "" {
-			continue
-		}
-		source := settable(av.FieldByName(entry.analyzer))
-		if !rootv.FieldByName(entry.result).IsNil() || !source.IsNil() {
-			dst.Set(reflect.MakeMap(dst.Type()))
-		} else {
-			dst.Set(reflect.Zero(dst.Type()))
-		}
-	}
-	// Probe by owned keys, including newly discovered fact-held syntax, until
-	// closure. No per-function full scan of every source fact table is needed.
-	for cursor := 0; cursor < len(p.queue); cursor++ {
-		node := p.queue[cursor]
-		nv := reflect.ValueOf(node)
-		for _, entry := range sparseSpecializationMaps {
-			dst := rv.FieldByName(entry.result)
-			if entry.analyzer == "" {
-				continue
-			}
-			source := settable(av.FieldByName(entry.analyzer))
-			if source.IsNil() || !nv.Type().AssignableTo(source.Type().Key()) {
-				continue
-			}
-			value := source.MapIndex(nv)
-			if !value.IsValid() {
-				continue
-			}
-			if dst.IsNil() {
-				dst.Set(reflect.MakeMap(dst.Type()))
-			}
-			dst.SetMapIndex(nv, value)
-			p.walk(value, true)
-		}
-	}
+	p.projectSparseMaps(&result)
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -386,6 +351,63 @@ func (p *specializationPublication) publish() (*Result, error) {
 	// program's immutable values. No speculative whole-program report slices or
 	// mutable construction caches are retained by the product.
 	return &result, nil
+}
+
+// projectSparseMaps imports facts by owned syntax key. Bind the reflection
+// fields once, then probe only tables whose key type accepts each concrete node
+// type. Keeping the cached candidate slice in source-table order preserves the
+// original projection and the fact-held syntax closure walk.
+func (p *specializationPublication) projectSparseMaps(result *Result) {
+	c := p.context
+	rv := reflect.ValueOf(result).Elem()
+	av := reflect.ValueOf(c.worker).Elem()
+	rootv := reflect.ValueOf(c.base).Elem()
+	bindings := make([]boundSparseSpecializationMap, 0, len(sparseSpecializationMaps))
+	// Seed only empty shapes. Borrowing a whole node-fact map here would put the
+	// whole-program multiplier back into every memoized product.
+	for _, entry := range sparseSpecializationMaps {
+		dst := rv.FieldByName(entry.result)
+		if entry.analyzer == "" {
+			continue
+		}
+		source := settable(av.FieldByName(entry.analyzer))
+		if !rootv.FieldByName(entry.result).IsNil() || !source.IsNil() {
+			dst.Set(reflect.MakeMap(dst.Type()))
+		} else {
+			dst.Set(reflect.Zero(dst.Type()))
+		}
+		if !source.IsNil() {
+			bindings = append(bindings, boundSparseSpecializationMap{dst: dst, source: source, key: source.Type().Key()})
+		}
+	}
+	eligibleByType := make(map[reflect.Type][]boundSparseSpecializationMap)
+	// Probe by owned keys, including newly discovered fact-held syntax, until
+	// closure. No per-function full scan of every source fact table is needed.
+	for cursor := 0; cursor < len(p.queue); cursor++ {
+		node := p.queue[cursor]
+		nodeValue := reflect.ValueOf(node)
+		nodeType := nodeValue.Type()
+		eligible, cached := eligibleByType[nodeType]
+		if !cached {
+			for _, binding := range bindings {
+				if nodeType.AssignableTo(binding.key) {
+					eligible = append(eligible, binding)
+				}
+			}
+			eligibleByType[nodeType] = eligible
+		}
+		for _, binding := range eligible {
+			value := binding.source.MapIndex(nodeValue)
+			if !value.IsValid() {
+				continue
+			}
+			if binding.dst.IsNil() {
+				binding.dst.Set(reflect.MakeMap(binding.dst.Type()))
+			}
+			binding.dst.SetMapIndex(nodeValue, value)
+			p.walk(value, true)
+		}
+	}
 }
 
 func validateSparseSpecializationSchema() error {
