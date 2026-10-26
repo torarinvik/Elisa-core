@@ -104,10 +104,10 @@ func startMemProfile() func() {
 // speed over memory). An explicit GOGC in the environment still wins.
 const defaultGCPercent = 1200
 
-// darwinGCPercent replaces defaultGCPercent on macOS, where a fresh heap page costs a slow fault
-// (madvise + zeroing were ~60% of a seed's CPU profile at 1200). Measured on an M5 (2026-10-20,
-// seed, wall / peak RSS): 1200 41.3-42.6 s / 9.6 GB, 300 39.9 s / 7.5 GB, 200 39.3 s / 6.0 GB.
-const darwinGCPercent = 200
+// darwinGCPercent replaces defaultGCPercent on macOS, where a fresh heap page costs a slow fault.
+// On the Stage1 self-compile edit workload (M5, 2026-10-26, 96 partitions, disk caches, no server),
+// three first-body edits averaged 15.05 s at 100 versus 15.42 s at 200. Explicit GOGC still wins.
+const darwinGCPercent = 100
 
 // defaultMemoryLimitFraction caps the soft heap limit at this share of installed RAM, so the
 // generous GOGC tightens collection instead of swapping on a smaller machine. An explicit

@@ -1,5 +1,17 @@
 # Specialization construction measurements
 
+## macOS Stage1 edit GC target
+
+The one-shot compiler's macOS GC target is now 100 instead of 200. On the exact
+preserved Stage1 source, using the default 96 partitions, local disk caches and
+no retained server, three distinct first-body edits averaged 15.047 seconds at
+GOGC=100 and 15.417 seconds at GOGC=200 (about 2.4% faster). Individual times
+were 14.876/14.983/15.280 seconds at 100 and 15.168/15.537/15.547 seconds at
+200. The measurements used the same compiler binary and cache root; only the
+small parser depth constant differed between edits. This is a local macOS
+Stage1 workload result, not a universal Go GC recommendation. Explicit GOGC
+settings continue to take precedence.
+
 ## Owned function-analysis rows
 
 Specialization construction now starts with an empty writable functionAnalyses
