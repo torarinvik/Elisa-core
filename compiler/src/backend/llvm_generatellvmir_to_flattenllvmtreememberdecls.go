@@ -900,7 +900,7 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 // partition, only to prune it later. Intrinsics keep their existing LLVM-name
 // ownership check after declaration, because they may resolve to builtins.
 func (g *llvmGenerator) ownsPartitionFunction(sym *semantic.Symbol) bool {
-	if g.partBody == nil || g.optLevel == OptimizationLevel0 {
+	if g.partBody == nil {
 		return true
 	}
 	if fn, ok := sym.Type.(*semantic.FuncType); ok && fn.IntrinsicName != "" {

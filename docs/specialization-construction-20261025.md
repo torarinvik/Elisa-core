@@ -12,6 +12,19 @@ small parser depth constant differed between edits. This is a local macOS
 Stage1 workload result, not a universal Go GC recommendation. Explicit GOGC
 settings continue to take precedence.
 
+## Lazy prototypes in partitioned `-O0` builds
+
+Partitioned `-O0` codegen now predeclares only functions owned by the current
+partition. Cross-partition calls, function values, exports and global
+initializers continue to create declarations on demand; intrinsic declarations
+retain their existing handling. Two first-body edits in the preserved Stage1
+source averaged 14.477 seconds, versus 15.009 seconds before the change (3.5%
+faster). Both edits produced byte-identical object files and diagnostics to the
+baseline. A focused 8-partition body-edit benchmark also reduced allocations
+from 4.17 MB to 3.92 MB per edit. Records are under
+`/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-stage1-lazy-prototypes-candidate`
+and `/var/folders/k7/71kp36qd5_q9_tfp77s2vqzc0000gn/T/elisa-stage1-proof-main-matched-q3pi64kb`.
+
 ## Owned function-analysis rows
 
 Specialization construction now starts with an empty writable functionAnalyses
