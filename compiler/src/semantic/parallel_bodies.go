@@ -495,6 +495,16 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "storeScanParamWriteCache" {
+			// This reachability memo is shared as an immutable base. Keep only
+			// private rows produced while analyzing the concrete specialization.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if name == "iterBinderElementOverlay" {
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
@@ -603,6 +613,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		worker.noStorageOverlay = &analyzerNoStorageOverlay{
 			base:          a.storeScanNoStorageCache,
 			sharesBase:    a.storeScanSharesCache,
+			paramWrites:   a.storeScanParamWriteCache,
 			helperCalls:   a.compilerBuiltinHelperCalls,
 			returnUnknown: a.returnElementStmtUnknown,
 		}

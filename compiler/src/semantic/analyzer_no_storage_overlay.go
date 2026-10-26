@@ -11,6 +11,7 @@ import (
 type analyzerNoStorageOverlay struct {
 	base          map[Type]bool
 	sharesBase    map[Type]bool
+	paramWrites   map[storeScanParamKey]bool
 	helperCalls   map[*ast.CallExpr]string
 	returnUnknown map[*ast.ReturnStmt]bool
 }
@@ -48,6 +49,24 @@ func (a *Analyzer) setStoreScanShares(t Type, value bool) {
 		a.storeScanSharesCache = map[Type]bool{}
 	}
 	a.storeScanSharesCache[t] = value
+}
+
+func (a *Analyzer) lookupStoreScanParamWriteCache(key storeScanParamKey) (bool, bool) {
+	if value, present := a.storeScanParamWriteCache[key]; present {
+		return value, true
+	}
+	if a.noStorageOverlay != nil {
+		value, present := a.noStorageOverlay.paramWrites[key]
+		return value, present
+	}
+	return false, false
+}
+
+func (a *Analyzer) setStoreScanParamWriteCache(key storeScanParamKey, value bool) {
+	if a.storeScanParamWriteCache == nil {
+		a.storeScanParamWriteCache = make(map[storeScanParamKey]bool)
+	}
+	a.storeScanParamWriteCache[key] = value
 }
 
 func (a *Analyzer) lookupCompilerBuiltinHelperCall(call *ast.CallExpr) (string, bool) {
@@ -115,7 +134,7 @@ func cloneAnalyzerNoStorageOverlay(source *analyzerNoStorageOverlay) *analyzerNo
 	if source == nil {
 		return nil
 	}
-	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown}
+	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase, paramWrites: source.paramWrites, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown}
 }
 func (a *Analyzer) rejectNoStorageOverlayOperation(operation string) error {
 	err := fmt.Errorf("specialization no-storage overlay cannot enter %s", operation)

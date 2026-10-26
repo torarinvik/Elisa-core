@@ -108,6 +108,43 @@ func TestStoreScanSharesOverlayPositiveNegativeMissingAndIsolation(t *testing.T)
 	}
 }
 
+func TestStoreScanParamWriteOverlayPositiveNegativeAndIsolation(t *testing.T) {
+	decl := &ast.FuncDecl{Name: "memoized"}
+	positive := storeScanParamKey{decl: decl, index: 0, mode: storeScanModeWrite}
+	negative := storeScanParamKey{decl: decl, index: 1, mode: storeScanModeWrite}
+	missing := storeScanParamKey{decl: decl, index: 2, mode: storeScanModeWrite}
+	root := &Analyzer{storeScanParamWriteCache: map[storeScanParamKey]bool{positive: true, negative: false}}
+	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+	if len(worker.storeScanParamWriteCache) != 0 || worker.noStorageOverlay == nil || len(worker.noStorageOverlay.paramWrites) != 2 {
+		t.Fatal("specialization copied the reachability cache or lost its base")
+	}
+	if value, present := worker.lookupStoreScanParamWriteCache(positive); !present || !value {
+		t.Fatal("inherited positive reachability lost")
+	}
+	if value, present := worker.lookupStoreScanParamWriteCache(negative); !present || value {
+		t.Fatal("inherited negative reachability lost")
+	}
+	if value, present := worker.lookupStoreScanParamWriteCache(missing); present || value {
+		t.Fatal("missing reachability became present")
+	}
+	if !worker.storeScanParamReaches(positive) || worker.storeScanParamReaches(negative) {
+		t.Fatal("reachability query bypassed inherited memo rows")
+	}
+	if !worker.storeScanParamReaches(missing) {
+		t.Fatal("reachability miss did not compute a private result")
+	}
+	worker.setStoreScanParamWriteCache(positive, false)
+	if value, present := worker.lookupStoreScanParamWriteCache(positive); !present || value {
+		t.Fatal("local false did not override inherited true")
+	}
+	if value, present := worker.lookupStoreScanParamWriteCache(missing); !present || !value {
+		t.Fatal("private reachability write was not cached")
+	}
+	if !root.storeScanParamWriteCache[positive] || len(root.storeScanParamWriteCache) != 2 {
+		t.Fatal("private reachability write mutated the canonical base")
+	}
+}
+
 func TestCompilerBuiltinHelperCallsOverlayAndCopyDeclRekey(t *testing.T) {
 	originalCall, originalMissing := &ast.CallExpr{}, &ast.CallExpr{}
 	rootAnalyzer := &Analyzer{compilerBuiltinHelperCalls: map[*ast.CallExpr]string{originalCall: "freeze"}}
@@ -150,6 +187,39 @@ func TestCompilerBuiltinHelperCallsOverlayAndCopyDeclRekey(t *testing.T) {
 	nested.recordCompilerBuiltinHelperCall(privateCall, "nested")
 	if !worker.isCompilerBuiltinHelperCall(privateCall, "private-freeze") {
 		t.Fatal("nested worker write reached its parent")
+	}
+}
+
+func TestRetainedBodyEditInvalidatesStoreScanParamWriteCache(t *testing.T) {
+	t.Setenv("ELISA_PARALLEL_BODIES", "0")
+	const before = `def touch(xs: mutable darray[i64]&) -> void:
+    return
+`
+	const after = `def touch(xs: mutable darray[i64]&) -> void:
+    can Abort.Panic:
+        xs[0] <- 1
+`
+	result, state := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), AnalyzeOptions{})
+	if len(result.Errors()) != 0 {
+		t.Fatal(result.Errors())
+	}
+	fn := retainedProofNamedDecl(t, result, "touch").(*ast.FuncDecl)
+	if state.a.storeScanParamMayBeWritten(fn, 0) {
+		t.Fatal("no-op function unexpectedly writes its parameter")
+	}
+	if len(state.a.storeScanParamWriteCache) == 0 || len(state.a.storeScanParamFactsCache) == 0 {
+		t.Fatal("fixture did not populate the reachability memo")
+	}
+	updated, err := state.Update(retainedParse(t, after), retainedParse(t, after), []byte(after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Errors()) != 0 {
+		t.Fatal(updated.Errors())
+	}
+	fn = retainedProofNamedDecl(t, updated, "touch").(*ast.FuncDecl)
+	if !state.a.storeScanParamMayBeWritten(fn, 0) {
+		t.Fatal("edited function retained the no-write verdict from its old body")
 	}
 }
 

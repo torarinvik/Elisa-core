@@ -1987,6 +1987,13 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		delete(a.storeFlowBinderIndexes, fn)
 		delete(a.storeScanIndexCache, fn)
 	}
+	// Parameter-write reachability and its local facts depend on function bodies
+	// and call resolution. A retained semantic edit can change any transitive
+	// path, so invalidate both caches before re-analyzing edited bodies.
+	if !bodyEnvironmentUnchanged || len(splices) != 0 || len(removedLive) != 0 {
+		a.storeScanParamWriteCache = nil
+		a.storeScanParamFactsCache = nil
+	}
 	if len(changed) != 0 || len(removedLive) != 0 {
 		// A body edit can change flow through every transitive caller and can
 		// split or join call cycles. These results predate the replacement bodies.
