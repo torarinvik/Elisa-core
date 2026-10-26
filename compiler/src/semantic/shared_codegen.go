@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,11 +17,13 @@ import (
 // each resulting immutable product is memoized once per instantiation. Other
 // analyzer-backed codegen queries use detached public maps for this session.
 type sharedCodegen struct {
-	mu               sync.Mutex
-	bodies           map[specializationKey]*SpecializedFunction
-	canonicalNodes   map[ast.Node]bool
-	canonicalSymbols map[*Symbol]bool
-	canonicalScopes  map[*Scope]bool
+	mu                         sync.Mutex
+	bodies                     map[specializationKey]*SpecializedFunction
+	compilerBuiltinHelperCalls map[*ast.CallExpr]string
+	programRegions             map[string]bool
+	canonicalNodes             map[ast.Node]bool
+	canonicalSymbols           map[*Symbol]bool
+	canonicalScopes            map[*Scope]bool
 	// restore puts back the analyzer's own maps when the session ends.
 	restore []func()
 }
@@ -36,6 +39,11 @@ type specializationKey struct {
 func (r *Result) BeginSharedCodegen() {
 	sh := &sharedCodegen{bodies: map[specializationKey]*SpecializedFunction{}}
 	if a := r.analyzer; a != nil {
+		// These codegen queries are frequent and immutable after analysis. Give
+		// the concurrent workers detached snapshots so they do not serialize on
+		// the analyzer mutex for every call and region-name lookup.
+		sh.compilerBuiltinHelperCalls = maps.Clone(a.compilerBuiltinHelperCalls)
+		sh.programRegions = maps.Clone(a.programRegions)
 		sh.restore = privatizeSharedMaps(r, a)
 	}
 	r.shared = sh

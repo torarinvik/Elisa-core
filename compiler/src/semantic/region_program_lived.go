@@ -48,7 +48,12 @@ func (r *Result) IsProgramRegion(name string) bool {
 		return false
 	}
 	if queries := r.specializationQueries; queries != nil {
+		// The region-name set is immutable after the private query view is
+		// published. Unlike ProgramLivedArgRegion, this lookup populates no memo.
 		return queries.types != nil && queries.types.isProgramRegion(name)
+	}
+	if shared := r.shared; shared != nil {
+		return shared.programRegions[name]
 	}
 	defer r.lockAnalyzer()()
 	return r.analyzer.isProgramRegion(name)

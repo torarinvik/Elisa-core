@@ -33,6 +33,9 @@ func (r *Result) IsCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bo
 		}
 		return false
 	}
+	if shared := r.shared; shared != nil {
+		return shared.compilerBuiltinHelperCalls[call] == name
+	}
 	if r.analyzer == nil {
 		return false
 	}
