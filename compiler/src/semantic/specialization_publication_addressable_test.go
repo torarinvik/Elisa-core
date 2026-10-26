@@ -107,7 +107,7 @@ func TestPublicationAddressableActualCanonicalGraphReadOnly(t *testing.T) {
 	}
 	current := canonicalMembershipCatalogTestScan(root, false)
 	reference := canonicalMembershipCatalogTestScan(root, true)
-	assertCanonicalMembershipParity(t, current, reference)
+	assertCanonicalMembershipIndexesEqual(t, current, reference)
 	after, err := ast.NewSyntaxSnapshot(root.File, 1<<30)
 	if err != nil {
 		t.Fatal(err)

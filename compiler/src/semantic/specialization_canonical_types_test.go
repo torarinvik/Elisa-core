@@ -34,7 +34,7 @@ func newCanonicalMembershipIndexTestScan() *specializationPublication {
 	return scan
 }
 
-func assertCanonicalMembershipParity(t *testing.T, current, reference *specializationPublication) {
+func assertCanonicalMembershipIndexesEqual(t *testing.T, current, reference *specializationPublication) {
 	t.Helper()
 	if current.err != nil || reference.err != nil {
 		t.Fatalf("walk errors: current=%v reference=%v", current.err, reference.err)
@@ -42,6 +42,11 @@ func assertCanonicalMembershipParity(t *testing.T, current, reference *specializ
 	if !reflect.DeepEqual(current.owned, reference.owned) || !reflect.DeepEqual(current.rootSymbols, reference.rootSymbols) || !reflect.DeepEqual(current.rootScopes, reference.rootScopes) {
 		t.Fatal("canonical node/symbol/scope index changed")
 	}
+}
+
+func assertCanonicalMembershipParity(t *testing.T, current, reference *specializationPublication) {
+	t.Helper()
+	assertCanonicalMembershipIndexesEqual(t, current, reference)
 	// Canonical walks use owned as the visited set for AST pointers. Preserve
 	// exact parity for other relevant pointer/map identities and their role bits.
 	expected := map[specializationPointer]uint8{}
@@ -163,10 +168,17 @@ func canonicalMembershipCatalogTestScan(root *Result, reference bool) *specializ
 		if table.IsNil() {
 			continue
 		}
-		it := table.MapRange()
-		for it.Next() {
-			walk(it.Key(), false)
-			walk(it.Value(), false)
+		if reference {
+			// Keep the frozen traversal for exact index parity.
+			it := table.MapRange()
+			for it.Next() {
+				walk(it.Key(), false)
+				walk(it.Value(), false)
+			}
+		} else {
+			// Candidate path: use the map-level seen guard to avoid re-reading a
+			// backing table already reached through an exported Result field.
+			scan.walk(table, false)
 		}
 	}
 	if root.GlobalScope != nil {
@@ -178,13 +190,43 @@ func canonicalMembershipCatalogTestScan(root *Result, reference bool) *specializ
 	return scan
 }
 
+// Current-walker baseline that retains the old manual analyzer-map traversal.
+// It isolates map-pointer deduplication from the older walker/type-pruning changes.
+func canonicalMembershipCatalogManualCurrentTestScan(root *Result) *specializationPublication {
+	scan := newCanonicalMembershipIndexTestScan()
+	rv := reflect.ValueOf(root).Elem()
+	for i := 0; i < rv.NumField(); i++ {
+		if rv.Type().Field(i).PkgPath == "" {
+			scan.walk(rv.Field(i), false)
+		}
+	}
+	for _, path := range specializationASTMapPaths() {
+		table := specializationField(reflect.ValueOf(root.analyzer).Elem(), path)
+		if table.IsNil() {
+			continue
+		}
+		it := table.MapRange()
+		for it.Next() {
+			scan.walk(it.Key(), false)
+			scan.walk(it.Value(), false)
+		}
+	}
+	if root.GlobalScope != nil {
+		scan.rootScopes[root.GlobalScope] = true
+		for _, symbol := range root.GlobalScope.Symbols {
+			scan.walk(reflect.ValueOf(symbol), false)
+		}
+	}
+	return scan
+}
+
 func TestCanonicalMembershipFirstCatalogMatchesOldIndex(t *testing.T) {
 	root, _ := privateSpecializationFixture(t)
 	detached := &ast.IntLit{Value: "71"}
 	root.analyzer.exprTypes[detached] = root.NamedTypes["i64"]
 	current := canonicalMembershipCatalogTestScan(root, false)
 	reference := canonicalMembershipCatalogTestScan(root, true)
-	assertCanonicalMembershipParity(t, current, reference)
+	assertCanonicalMembershipIndexesEqual(t, current, reference)
 	if len(current.queue) != 0 {
 		t.Fatalf("canonical membership scan retained a private publication queue of %d nodes", len(current.queue))
 	}
@@ -199,6 +241,71 @@ func TestCanonicalMembershipFirstCatalogMatchesOldIndex(t *testing.T) {
 	}
 	if !reflect.DeepEqual(production, reference.owned) {
 		t.Fatal("actual production catalog differs from old index")
+	}
+}
+
+func TestCanonicalMembershipCatalogDeduplicatesAliasesAndScansPrivateFactMaps(t *testing.T) {
+	root, _ := privateSpecializationFixture(t)
+	if root.ExprTypes == nil || root.analyzer.exprTypes == nil || reflect.ValueOf(root.ExprTypes).Pointer() != reflect.ValueOf(root.analyzer.exprTypes).Pointer() {
+		t.Fatal("fixture did not retain the public expression type map alias")
+	}
+	publicExpr := &ast.IntLit{Value: "72"}
+	root.analyzer.exprTypes[publicExpr] = root.NamedTypes["i64"]
+
+	privateKey := &ast.IndexExpr{}
+	privateFact := &ast.IntLit{Value: "73"}
+	root.analyzer.indexBoundsProofOrigins = map[*ast.IndexExpr]ast.Node{privateKey: privateFact}
+
+	privateDecl := &ast.FuncDecl{}
+	privateSymbol := &Symbol{Name: "private_catalog_symbol", Node: privateDecl}
+	if root.analyzer.funcDeclSymbols == nil {
+		root.analyzer.funcDeclSymbols = map[*ast.FuncDecl]*Symbol{}
+	}
+	root.analyzer.funcDeclSymbols[privateDecl] = privateSymbol
+
+	current := canonicalMembershipCatalogTestScan(root, false)
+	reference := canonicalMembershipCatalogTestScan(root, true)
+	assertCanonicalMembershipIndexesEqual(t, current, reference)
+	for _, node := range []ast.Node{publicExpr, privateKey, privateFact, privateDecl} {
+		if !current.owned[node] {
+			t.Fatalf("canonical AST node %T was not indexed", node)
+		}
+	}
+	if !current.rootSymbols[privateSymbol] {
+		t.Fatal("private analyzer fact symbol identity was not indexed")
+	}
+	if root.GlobalScope == nil || !current.rootScopes[root.GlobalScope] {
+		t.Fatal("canonical global scope identity was not indexed")
+	}
+
+	publicMap := reflect.ValueOf(root.ExprTypes)
+	publicMapKey := specializationPointer{publicMap.Type(), publicMap.Pointer()}
+	if current.seen[publicMapKey]&1 == 0 {
+		t.Fatal("public aliased map lost its map-level seen entry")
+	}
+	privateMap := reflect.ValueOf(root.analyzer.indexBoundsProofOrigins)
+	privateMapKey := specializationPointer{privateMap.Type(), privateMap.Pointer()}
+	if current.seen[privateMapKey]&1 == 0 {
+		t.Fatal("distinct private fact map was not traversed through the map-level walker")
+	}
+}
+
+func TestCanonicalMembershipMapSeenRetainsDistinctSpanRole(t *testing.T) {
+	index := &ast.IndexExpr{}
+	facts := map[*ast.IndexExpr]ast.Node{index: index}
+	scan := newCanonicalMembershipIndexTestScan()
+	scan.spanNodes = map[*ast.IndexExpr]bool{}
+	value := reflect.ValueOf(facts)
+	scan.walk(value, false)
+	scan.walk(value, true)
+	scan.walk(value, false)
+
+	key := specializationPointer{value.Type(), value.Pointer()}
+	if got := scan.seen[key]; got != 3 {
+		t.Fatalf("map seen roles=%b, want both ordinary and span roles", got)
+	}
+	if !scan.spanNodes[index] {
+		t.Fatal("span-role revisit did not retain the index expression")
 	}
 }
 
@@ -228,6 +335,44 @@ func BenchmarkCanonicalSpecializationFirstCatalog(b *testing.B) {
 							canonicalMembershipTypeCache.Clear()
 						}
 						canonicalMembershipBenchmarkCatalog = canonicalMembershipCatalogTestScan(root, mode == "reference")
+					}
+					runtime.KeepAlive(root)
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkCanonicalSpecializationAliasedPublicAndPrivateFactMaps(b *testing.B) {
+	for _, rows := range []int{4096, 16384} {
+		b.Run(fmt.Sprintf("rows_%d", rows), func(b *testing.B) {
+			root, _, _ := specializationBenchmarkAnalyze(b, specializationBenchmarkSource(512))
+			if root.shared != nil || root.ExprTypes == nil || root.analyzer.exprTypes == nil || reflect.ValueOf(root.ExprTypes).Pointer() != reflect.ValueOf(root.analyzer.exprTypes).Pointer() {
+				b.Fatal("fixture did not retain the aliased public expression type map")
+			}
+			for i := 0; i < rows; i++ {
+				root.analyzer.exprTypes[&ast.IntLit{Value: "74"}] = root.NamedTypes["i64"]
+			}
+			privateFacts := make(map[*ast.IndexExpr]ast.Node, rows)
+			for i := 0; i < rows; i++ {
+				privateFacts[&ast.IndexExpr{}] = &ast.IntLit{Value: "75"}
+			}
+			root.analyzer.indexBoundsProofOrigins = privateFacts
+
+			for _, manualEntries := range []bool{false, true} {
+				name := "candidate_map_seen"
+				if manualEntries {
+					name = "manual_current_entries"
+				}
+				b.Run(name, func(b *testing.B) {
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						if manualEntries {
+							canonicalMembershipBenchmarkCatalog = canonicalMembershipCatalogManualCurrentTestScan(root)
+						} else {
+							canonicalMembershipBenchmarkCatalog = canonicalMembershipCatalogTestScan(root, false)
+						}
 					}
 					runtime.KeepAlive(root)
 				})

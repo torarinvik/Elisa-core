@@ -81,13 +81,10 @@ func canonicalSpecializationNodes(root *Result) map[ast.Node]bool {
 	// not otherwise present in the source file or published Result tables.
 	for _, path := range specializationASTMapPaths() {
 		table := specializationField(reflect.ValueOf(root.analyzer).Elem(), path)
-		if table.IsNil() {
-			continue
-		}
-		it := table.MapRange()
-		for it.Next() {
-			scan.walk(it.Key(), false)
-			scan.walk(it.Value(), false)
+		if !table.IsNil() {
+			// Route through walk so its map identity guard skips tables already
+			// visited through Result while still scanning private analyzer tables.
+			scan.walk(table, false)
 		}
 	}
 	if root.GlobalScope != nil {
@@ -441,13 +438,10 @@ func canonicalSpecializationIdentities(root *Result) (map[*Symbol]bool, map[*Sco
 	}
 	for _, path := range specializationASTMapPaths() {
 		table := specializationField(reflect.ValueOf(root.analyzer).Elem(), path)
-		if table.IsNil() {
-			continue
-		}
-		it := table.MapRange()
-		for it.Next() {
-			scan.walk(it.Key(), false)
-			scan.walk(it.Value(), false)
+		if !table.IsNil() {
+			// Route through walk so its map identity guard skips tables already
+			// visited through Result while still scanning private analyzer tables.
+			scan.walk(table, false)
 		}
 	}
 	return scan.rootSymbols, scan.rootScopes
