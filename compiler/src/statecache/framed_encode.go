@@ -45,7 +45,11 @@ func (e *encoder) writeFramedBodies(framing int) error {
 	count := e.nodes.count
 	chunks := (count + framedEncodeChunk - 1) / framedEncodeChunk
 	buffers := make([][]byte, chunks)
-	sizes := make([]uint64, count)
+	// The frame table is already reserved in e.data. Each body worker owns a
+	// disjoint range of these slots, and e.data is not otherwise modified until
+	// all workers finish, so write body lengths there directly instead of making
+	// and later copying a second per-object size array.
+	bodySizes := e.data.Bytes()[framing+8 : framing+8*(count+1)]
 	interner := &stringInterner{}
 	var next atomic.Int64
 	var failed atomic.Bool
@@ -74,7 +78,7 @@ func (e *encoder) writeFramedBodies(framing int) error {
 							return
 						}
 					}
-					sizes[i] = uint64(worker.data.Len() - before)
+					binary.LittleEndian.PutUint64(bodySizes[8*i:], uint64(worker.data.Len()-before))
 				}
 				buffers[k] = append([]byte(nil), worker.data.Bytes()...)
 			}
@@ -91,10 +95,6 @@ func (e *encoder) writeFramedBodies(framing int) error {
 	e.data.Grow(total)
 	for _, b := range buffers {
 		e.data.Write(b)
-	}
-	table := e.data.Bytes()
-	for i, size := range sizes {
-		binary.LittleEndian.PutUint64(table[framing+8*(i+1):], size)
 	}
 	// The root and later strings continue the shared dictionary.
 	e.interner = interner

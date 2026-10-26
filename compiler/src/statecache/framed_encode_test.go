@@ -46,3 +46,32 @@ func TestParallelFramedEncodeRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkParallelFramedEncode(b *testing.B) {
+	type node struct {
+		Value int
+		Next  *node
+	}
+	const nodeCount = 10000
+	root := make([]*node, nodeCount)
+	for i := range root {
+		root[i] = &node{Value: i}
+		if i > 0 {
+			root[i].Next = root[i-1]
+		}
+	}
+	r := New([]reflect.Type{reflect.TypeFor[[]*node]()}, nil, nil)
+	r.EnableParallelDecode() // also enables parallel framed encoding
+	sample, err := r.EncodeFramed(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(sample)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := r.EncodeFramed(root); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
