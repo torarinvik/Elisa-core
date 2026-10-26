@@ -577,6 +577,17 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
+		if ownedFunctionAnalyses && name == "returnElementStmtStates" {
+			// copyDecl imports and isolates statement facts for owned ReturnStmt
+			// syntax. Unrelated functions' rows are never queried during private
+			// specialization analysis, so avoid cloning the whole-program map.
+			if field.IsNil() {
+				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
+			} else {
+				settable(cloned.Field(i)).Set(reflect.MakeMap(field.Type()))
+			}
+			continue
+		}
 		if ownedFunctionAnalyses && name == "storeScanBoundCache" {
 			// Settled name sets are read-only; only publish new rows privately.
 			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanBoundCache)))
