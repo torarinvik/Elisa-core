@@ -565,7 +565,8 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var shadowEdits [][3]*ast.FuncDecl             // live, old parse, new parse of each edited body (fast-prepare shadow)
 	var movedSplices []ast.Decl                    // edited functions that also moved: header shifts, body is replaced
 	pairedNew := map[*ast.FuncDecl]*ast.FuncDecl{} // live function -> its declaration in file
-	replaced := map[string]bool{}                  // fingerprint keys of functions whose signature changed
+	pairedOld := map[*ast.FuncDecl]*ast.FuncDecl{}
+	replaced := map[string]bool{} // fingerprint keys of functions whose signature changed
 	var shifted []ast.Decl
 	var shiftedOther []ast.Decl
 	// Lists an added declaration was appended to; sorted back into source order at the end.
@@ -663,6 +664,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		}
 		live := cands[0]
 		pairedNew[live] = nfn
+		pairedOld[live] = ofn
 		forceReplace := overloadNames[oldFunctionNames[ofn]] || overloadNames[newFunctionNames[nfn]]
 		if sameText && !forceReplace {
 			if lineDelta[op.File] != 0 {
@@ -733,6 +735,44 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 				removedOwners = append(removedOwners, candidates[0])
 			}
 			declarationChange = false
+		}
+		proofBodies, why := r.proofReportBodyReanalysisClosure(changedOwners, removedOwners)
+		if why != "" {
+			return fail("%s", why)
+		}
+		if len(proofBodies) != 0 {
+			// Traverse independently parsed declarations in source order, using
+			// ONLY the already-established exact live/fresh pairing. No source
+			// position, function spelling or fact-table key selects an owner.
+			liveOf := map[*ast.FuncDecl]*ast.FuncDecl{}
+			for live, fresh := range pairedNew {
+				liveOf[fresh] = live
+			}
+			for _, decl := range newDecls {
+				fresh, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				live := liveOf[fresh]
+				if !proofBodies[live] {
+					continue
+				}
+				old := pairedOld[live]
+				if old == nil {
+					return fail("proof report dependent body has no exact baseline parse")
+				}
+				if _, known := scoped[live]; !known {
+					return fail("proof report dependent body is not independently analyzable")
+				}
+				splices = append(splices, splice{live, fresh})
+				shadowEdits = append(shadowEdits, [3]*ast.FuncDecl{live, old, fresh})
+				newTexts[fresh] = retainedText(fresh)
+				changedOwners = append(changedOwners, live)
+				delete(proofBodies, live)
+			}
+			if len(proofBodies) != 0 {
+				return fail("proof report dependent body has no exact fresh source counterpart")
+			}
 		}
 		reportDeclarationImport = declarationChange
 		reportLocationsChanged := len(marks) != 0
