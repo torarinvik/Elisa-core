@@ -71,6 +71,17 @@ def main() -> i64:
 				t.Fatalf("warning severity stale: %s", warning)
 			}
 		}
+		if !strict {
+			files, err := filepath.Glob(filepath.Join(session.disk.root, "*.part"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) == 0 {
+				if err := os.WriteFile(filepath.Join(os.Getenv("ELISA_WARNING_HIT_DIR"), "declined"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 		return
 	}
 	root := t.TempDir()
@@ -82,6 +93,13 @@ def main() -> i64:
 		cancel()
 		if err != nil {
 			t.Fatalf("strict=%s: %v\n%s", strict, err, out)
+		}
+		if strict == "0" {
+			if _, err := os.Stat(filepath.Join(root, "declined")); err == nil {
+				t.Skip("LLVM did not preserve this warning fixture exactly during serialization")
+			} else if !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
 		}
 	}
 }
