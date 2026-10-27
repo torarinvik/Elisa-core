@@ -20,6 +20,7 @@ import "C"
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,6 +31,60 @@ import (
 	"strings"
 	"unsafe"
 )
+
+type partitionWorkerFailure struct {
+	index   int
+	startup bool
+	err     error
+}
+
+// runPartitionWorkers cancels all still-running workers after the first start
+// or execution failure, then waits for every worker that started before it
+// returns. The workers run this compiler executable directly and do not spawn
+// subprocesses, so CommandContext can stop each worker with a direct process kill.
+func runPartitionWorkers(parent context.Context, count int, commandFor func(context.Context, int) *exec.Cmd) *partitionWorkerFailure {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	commands := make([]*exec.Cmd, count)
+	for k := range commands {
+		cmd := commandFor(ctx, k)
+		if err := cmd.Start(); err != nil {
+			cancel()
+			for _, started := range commands[:k] {
+				_ = started.Wait()
+			}
+			return &partitionWorkerFailure{index: k, startup: true, err: err}
+		}
+		commands[k] = cmd
+	}
+
+	type workerResult struct {
+		index int
+		err   error
+	}
+	results := make(chan workerResult, len(commands))
+	for k, cmd := range commands {
+		go func(index int, command *exec.Cmd) {
+			results <- workerResult{index: index, err: command.Wait()}
+		}(k, cmd)
+	}
+
+	errs := make([]error, len(commands))
+	firstFailure := -1
+	for range commands {
+		result := <-results
+		errs[result.index] = result.err
+		if result.err != nil && firstFailure < 0 {
+			firstFailure = result.index
+			cancel()
+		}
+	}
+	if firstFailure >= 0 {
+		return &partitionWorkerFailure{index: firstFailure, err: errs[firstFailure]}
+	}
+	return nil
+}
 
 // parallelEmitMinWeight is the partitioned instruction count below which the serial
 // path is used, so small programs do not pay for bitcode round-trips and `ld -r`.
@@ -215,31 +270,21 @@ func (g *llvmGenerator) emitObjectParallel(outputPath string, jobs int, pipeline
 	C.LLVMDisposeMessage(cpu)
 	C.LLVMDisposeMessage(features)
 
-	cmds := make([]*exec.Cmd, jobs)
 	outputs := make([]bytes.Buffer, jobs)
-	for k := range cmds {
-		cmd := exec.Command(self)
+	failure := runPartitionWorkers(context.Background(), jobs, func(ctx context.Context, k int) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, self)
 		cmd.Env = append(append([]string{}, baseEnv...),
 			partWorkerIndexEnv+"="+strconv.Itoa(k),
 			partWorkerOutputEnv+"="+partPaths[k])
 		cmd.Stdout = &outputs[k]
 		cmd.Stderr = &outputs[k]
-		if err := cmd.Start(); err != nil {
-			for _, started := range cmds[:k] {
-				_ = started.Wait()
-			}
-			return true, fmt.Errorf("failed to start partition worker %d: %v", k, err)
+		return cmd
+	})
+	if failure != nil {
+		if failure.startup {
+			return true, fmt.Errorf("failed to start partition worker %d: %v", failure.index, failure.err)
 		}
-		cmds[k] = cmd
-	}
-	var firstErr error
-	for k, cmd := range cmds {
-		if err := cmd.Wait(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("failed to write LLVM object file to %s: partition worker %d: %v: %s", outputPath, k, err, strings.TrimSpace(outputs[k].String()))
-		}
-	}
-	if firstErr != nil {
-		return true, firstErr
+		return true, fmt.Errorf("failed to write LLVM object file to %s: partition worker %d: %v: %s", outputPath, failure.index, failure.err, strings.TrimSpace(outputs[failure.index].String()))
 	}
 
 	linker := strings.TrimSpace(os.Getenv("ELISA_LD"))
