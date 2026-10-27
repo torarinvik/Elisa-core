@@ -5,6 +5,7 @@ package backend
 import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,6 +41,79 @@ func TestGenericSymbolFramingAndBoundedNames(t *testing.T) {
 	if err != nil || carrier != "DynArray__uintptr" {
 		t.Fatal(carrier, err)
 	}
+}
+
+func nestedGenericSymbolType(depth int) semantic.Type {
+	var typ semantic.Type = &semantic.BuiltinType{Name: "u64"}
+	for index := 0; index < depth; index++ {
+		name := fmt.Sprintf("Box%d", index)
+		typ = &semantic.GenericInstanceType{
+			Name: name,
+			Base: &semantic.StructType{Name: name},
+			Args: []semantic.Type{typ},
+		}
+	}
+	return typ
+}
+
+func TestGenericSymbolMemoSharedAcrossGenerators(t *testing.T) {
+	shared := &sharedCodegenLookups{}
+	args := []semantic.Type{nestedGenericSymbolType(12)}
+	first := &llvmGenerator{sharedLookups: shared}
+	second := &llvmGenerator{sharedLookups: shared}
+	want, err := first.mangleGenericType("Boxed", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := second.mangleGenericType("Boxed", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("shared memo changed generated identity: %q != %q", got, want)
+	}
+	if first.genericSymbolKeys[want] != second.genericSymbolKeys[want] || first.genericSymbolKeys[want] == "" {
+		t.Fatal("each generator did not retain the full structural collision key")
+	}
+	// A structurally equal but separately allocated type must miss the pointer
+	// lookup and still produce the exact same emitted identity.
+	separate := &llvmGenerator{sharedLookups: shared}
+	got, err = separate.mangleGenericType("Boxed", []semantic.Type{nestedGenericSymbolType(12)})
+	if err != nil || got != want {
+		t.Fatalf("structural identity changed across equivalent type allocations: %q, %v", got, err)
+	}
+	second.genericSymbolKeys[want] = "injected collision"
+	if _, err := second.mangleGenericType("Boxed", args); err == nil {
+		t.Fatal("shared memo bypassed the generator-local collision guard")
+	}
+}
+
+func BenchmarkGenericSymbolMangleShared(b *testing.B) {
+	args := []semantic.Type{nestedGenericSymbolType(24)}
+	b.Run("uncached", func(b *testing.B) {
+		g := &llvmGenerator{}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, err := g.mangleGenericType("Boxed", args); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("shared-cache-hit", func(b *testing.B) {
+		shared := &sharedCodegenLookups{}
+		g := &llvmGenerator{sharedLookups: shared}
+		if _, err := g.mangleGenericType("Boxed", args); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, err := g.mangleGenericType("Boxed", args); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func TestGenericExternLegacyABICompatibility(t *testing.T) {

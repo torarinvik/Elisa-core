@@ -35,6 +35,7 @@ import (
 	"elisacore/src/semantic"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -347,6 +348,22 @@ func (g *llvmGenerator) mangleGenericLayoutType(base string, args []semantic.Typ
 }
 
 func (g *llvmGenerator) mangleGenericSymbol(base string, args []semantic.Type, layout bool) (string, error) {
+	shared := g.sharedLookups
+	if shared != nil {
+		shared = shared.programLookups()
+	}
+	lookupKey, cacheable := genericSymbolLookupKeyFor(base, args, layout)
+	if cacheable && shared != nil {
+		if cached, ok := shared.genericSymbols.Load(lookupKey); ok {
+			entry := cached.(genericSymbolCacheValue)
+			if genericSymbolCacheArgsMatch(lookupKey, entry.arguments) {
+				if err := g.rememberGenericSymbol(entry.name, entry.identity, base); err != nil {
+					return "", err
+				}
+				return entry.name, nil
+			}
+		}
+	}
 	key, err := genericInstantiationKey(base, args, layout)
 	if err != nil {
 		return "", err
@@ -357,14 +374,69 @@ func (g *llvmGenerator) mangleGenericSymbol(base string, args []semantic.Type, l
 		prefix = prefix[:48]
 	}
 	name := prefix + "$generic_v1$" + hex.EncodeToString(digest[:])
+	if err := g.rememberGenericSymbol(name, key, prefix); err != nil {
+		return "", err
+	}
+	if cacheable && shared != nil {
+		entry := genericSymbolCacheValue{arguments: append([]semantic.Type(nil), args...), identity: key, name: name}
+		if cached, loaded := shared.genericSymbols.LoadOrStore(lookupKey, entry); loaded {
+			previous := cached.(genericSymbolCacheValue)
+			if genericSymbolCacheArgsMatch(lookupKey, previous.arguments) && previous.identity != key {
+				return "", fmt.Errorf("generic symbol inputs changed during code generation for %s", prefix)
+			}
+		}
+	}
+	return name, nil
+}
+
+func genericSymbolLookupKeyFor(base string, args []semantic.Type, layout bool) (genericSymbolLookupKey, bool) {
+	var key genericSymbolLookupKey
+	if len(args) > len(key.args) {
+		return key, false
+	}
+	key.base, key.layout, key.count = base, layout, uint8(len(args))
+	for index, arg := range args {
+		if arg == nil {
+			return genericSymbolLookupKey{}, false
+		}
+		value := reflect.ValueOf(arg)
+		if value.Kind() != reflect.Ptr || value.IsNil() {
+			return genericSymbolLookupKey{}, false
+		}
+		key.args[index] = value.Pointer()
+	}
+	return key, true
+}
+
+func genericSymbolCacheArgsMatch(key genericSymbolLookupKey, args []semantic.Type) bool {
+	if len(args) != int(key.count) {
+		return false
+	}
+	for index, arg := range args {
+		if arg == nil {
+			return false
+		}
+		value := reflect.ValueOf(arg)
+		if value.Kind() != reflect.Ptr || value.IsNil() || value.Pointer() != key.args[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *llvmGenerator) rememberGenericSymbol(name, key, base string) error {
 	if g.genericSymbolKeys == nil {
 		g.genericSymbolKeys = make(map[string]string)
 	}
 	if previous, exists := g.genericSymbolKeys[name]; exists && previous != key {
-		return "", fmt.Errorf("generic symbol digest collision for %s", prefix)
+		prefix := sanitizeIdentifier(base)
+		if len(prefix) > 48 {
+			prefix = prefix[:48]
+		}
+		return fmt.Errorf("generic symbol digest collision for %s", prefix)
 	}
 	g.genericSymbolKeys[name] = key
-	return name, nil
+	return nil
 }
 
 func legacyGenericExternName(base string, args []semantic.Type) string {

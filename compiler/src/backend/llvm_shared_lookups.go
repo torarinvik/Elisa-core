@@ -38,6 +38,24 @@ type sharedCodegenLookups struct {
 	// parameters for region-indexed function types. The returned slices are
 	// immutable for the lifetime of this build, like the semantic types above.
 	specializationParams sync.Map // *semantic.FuncType -> []ast.GenericParam
+	// genericSymbols memoizes structural name construction across partition
+	// generators. Entries keep exact argument pointers alive for this build.
+	genericSymbols sync.Map // genericSymbolLookupKey -> genericSymbolCacheValue
+}
+
+const genericSymbolCacheMaxArgs = 8
+
+type genericSymbolLookupKey struct {
+	base   string
+	layout bool
+	count  uint8
+	args   [genericSymbolCacheMaxArgs]uintptr
+}
+
+type genericSymbolCacheValue struct {
+	arguments []semantic.Type
+	identity  string
+	name      string
 }
 
 func codegenSymbolsByNode(result *semantic.Result, recorders ...*irInputReadRecorder) map[ast.Node]*semantic.Symbol {
