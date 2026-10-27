@@ -17,6 +17,36 @@ type structLiteralField struct {
 
 func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralField, error) {
 	t = semantic.StripAggregateStateType(t)
+	if g != nil && g.result != nil && g.sharedLookups != nil && structLiteralFieldsCacheable(t) {
+		shared := g.sharedLookups.programLookups()
+		key := structLiteralFieldLookupKey{result: g.result, typ: t}
+		if cached, ok := shared.structLiteralFields.Load(key); ok {
+			return cached.([]structLiteralField), nil
+		}
+		fields, err := g.buildStructLiteralFields(t)
+		if err != nil {
+			return nil, err
+		}
+		cached, _ := shared.structLiteralFields.LoadOrStore(key, fields)
+		return cached.([]structLiteralField), nil
+	}
+	return g.buildStructLiteralFields(t)
+}
+
+func structLiteralFieldsCacheable(t semantic.Type) bool {
+	switch tt := t.(type) {
+	case *semantic.StructType:
+		return tt != nil
+	case *semantic.TupleType:
+		return tt != nil
+	case *semantic.GenericInstanceType:
+		return tt != nil
+	default:
+		return false
+	}
+}
+
+func (g *llvmGenerator) buildStructLiteralFields(t semantic.Type) ([]structLiteralField, error) {
 	switch tt := t.(type) {
 	case *semantic.StructType:
 		if tt.Decl == nil {

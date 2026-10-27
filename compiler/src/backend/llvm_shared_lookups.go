@@ -45,6 +45,9 @@ type sharedCodegenLookups struct {
 	// complete specialization binding map. The specialized symbol name omits
 	// some region bindings, so it is deliberately not used as this cache key.
 	specializedFuncTypes sync.Map // specializedFuncTypeLookupKey -> specializedFuncTypeCacheValue
+	// structLiteralFields memoizes immutable field projections for exact semantic
+	// aggregate types during one build. Generic instances remain distinct keys.
+	structLiteralFields sync.Map // structLiteralFieldLookupKey -> []structLiteralField
 }
 
 const genericSymbolCacheMaxArgs = 8
@@ -78,6 +81,11 @@ type specializedFuncTypeCacheValue struct {
 	names       [specializedFuncTypeCacheMaxBindings]string
 	types       [specializedFuncTypeCacheMaxBindings]semantic.Type
 	specialized *semantic.FuncType
+}
+
+type structLiteralFieldLookupKey struct {
+	result *semantic.Result
+	typ    semantic.Type
 }
 
 func codegenSymbolsByNode(result *semantic.Result, recorders ...*irInputReadRecorder) map[ast.Node]*semantic.Symbol {
