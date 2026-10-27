@@ -104,10 +104,13 @@ func startMemProfile() func() {
 // speed over memory). An explicit GOGC in the environment still wins.
 const defaultGCPercent = 1200
 
-// darwinGCPercent replaces defaultGCPercent on macOS, where a fresh heap page costs a slow fault.
-// On the Stage1 self-compile edit workload (M5, 2026-10-26, 96 partitions, disk caches, no server),
-// three first-body edits averaged 15.05 s at 100 versus 15.42 s at 200. Explicit GOGC still wins.
-const darwinGCPercent = 100
+// darwinGCPercent replaces defaultGCPercent on macOS. On the Stage1 self-compile body-edit
+// workload (M5, 2026-10-28, 96 O0 partitions, disk caches, no server), two reversed-order pairs
+// measured a 5.48 s median CLI wall at 300 versus 6.54 s at 100; partitioned IR+object time was
+// 3.14 s versus 4.30 s. Both produced the same object and 29,468 diagnostics. Sampled peak RSS
+// differed by 15 MiB (5,329 versus 5,314 MiB) under the existing 60%-of-RAM soft limit. Explicit
+// GOGC still wins.
+const darwinGCPercent = 300
 
 // defaultMemoryLimitFraction caps the soft heap limit at this share of installed RAM, so the
 // generous GOGC tightens collection instead of swapping on a smaller machine. An explicit
@@ -116,15 +119,18 @@ const defaultMemoryLimitFraction = 0.6
 
 func applyDefaultGCPercent() {
 	if _, set := os.LookupEnv("GOGC"); !set {
-		percent := defaultGCPercent
-		if runtime.GOOS == "darwin" {
-			percent = darwinGCPercent
-		}
-		debug.SetGCPercent(percent)
+		debug.SetGCPercent(defaultGCPercentFor(runtime.GOOS))
 	}
 	if _, set := os.LookupEnv("GOMEMLIMIT"); !set {
 		if ram := physicalMemoryBytes(); ram > 0 {
 			debug.SetMemoryLimit(int64(float64(ram) * defaultMemoryLimitFraction))
 		}
 	}
+}
+
+func defaultGCPercentFor(goos string) int {
+	if goos == "darwin" {
+		return darwinGCPercent
+	}
+	return defaultGCPercent
 }
