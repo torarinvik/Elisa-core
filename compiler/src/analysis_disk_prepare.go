@@ -185,12 +185,33 @@ func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bo
 	}
 	for _, lines := range [][][]byte{before, after} {
 		for _, line := range lines {
-			if len(bytes.TrimSpace(line)) != 0 && !analysisDiskIndented(line) {
+			trimmed := bytes.TrimSpace(line)
+			if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// analysisDiskContractClause is a scheduling hint, not an admission check.
+// Leading function-body contract statements are lifted into the declaration
+// phase, so prepare the independent scratch eagerly when their text changes.
+// Protocol methods also permit changes and preserves clauses in their block.
+func analysisDiskContractClause(line []byte) bool {
+	for _, keyword := range [...]string{"requires", "ensure", "decreases", "uses", "changes", "preserves", "fulfills"} {
+		if !bytes.HasPrefix(line, []byte(keyword)) {
+			continue
+		}
+		if len(line) == len(keyword) {
+			return true
+		}
+		next := line[len(keyword)]
+		if next == ' ' || next == '\t' || next == '(' || next == '[' || next == ':' || next == '*' {
+			return true
+		}
+	}
+	return false
 }
 
 func analysisDiskIndented(line []byte) bool {

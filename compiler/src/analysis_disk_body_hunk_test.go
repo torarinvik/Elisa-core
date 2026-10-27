@@ -45,3 +45,41 @@ func TestAnalysisDiskBodyEditHunkScheduling(t *testing.T) {
 		t.Fatal("disabled mode guessed lazy")
 	}
 }
+
+func TestAnalysisDiskContractHunkSchedulesScratch(t *testing.T) {
+	t.Setenv("ELISACORE_RETAINED_FAST_PREPARE", "on")
+	artifact := analysisDiskArtifact{path: filepath.Join(t.TempDir(), "baseline")}
+	for _, clause := range []string{
+		"requires value > 0", "ensure result > 0", "decreases value", "decreases * \"reason\"",
+		"uses Positive(value)", "changes value", "preserves value", "fulfills Rule(value)",
+	} {
+		t.Run(clause, func(t *testing.T) {
+			before := "def f(value: i64) -> i64:\n    " + clause + "\n    return value\n"
+			after := "def f(value: i64) -> i64:\n    " + clause + " # edited\n    return value\n"
+			if err := os.WriteFile(artifact.baselineSourcePath(), []byte(before), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if analysisDiskLikelyBodyEdit(artifact, []byte(after)) {
+				t.Fatal("contract change deferred declaration preparation")
+			}
+			without := "def f(value: i64) -> i64:\n    return value\n"
+			if analysisDiskLikelyBodyEdit(artifact, []byte(without)) {
+				t.Fatal("contract removal deferred declaration preparation")
+			}
+			if err := os.WriteFile(artifact.baselineSourcePath(), []byte(without), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if analysisDiskLikelyBodyEdit(artifact, []byte(before)) {
+				t.Fatal("contract insertion deferred declaration preparation")
+			}
+		})
+	}
+	before := "def f() -> i64:\n    ensure_count: i64 = 1\n    return ensure_count\n"
+	if err := os.WriteFile(artifact.baselineSourcePath(), []byte(before), 0600); err != nil {
+		t.Fatal(err)
+	}
+	after := strings.Replace(before, "ensure_count: i64 = 1", "ensure_count: i64 = 2", 1)
+	if !analysisDiskLikelyBodyEdit(artifact, []byte(after)) {
+		t.Fatal("identifier with contract-keyword prefix caused eager preparation")
+	}
+}
