@@ -335,6 +335,8 @@ func (a *Analyzer) lazyFilledLocals(decl *ast.FuncDecl, other int, content, view
 			if a.storeScanFilledCache == nil {
 				a.storeScanFilledCache = map[storeScanKey]map[string]bool{}
 			}
+			// `set` is a completed fixed-point result. Consumers only query it,
+			// so specialization clones may share this row after copying the map.
 			a.storeScanFilledCache[key] = set
 		}
 		a.storeScanCycleHit = saved || a.storeScanCycleHit

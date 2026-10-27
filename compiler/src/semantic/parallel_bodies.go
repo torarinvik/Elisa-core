@@ -643,6 +643,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		if ownedFunctionAnalyses && cloneSpecializationStoreScanBoolSetCache(cloned.Addr().Interface().(*Analyzer), a, name) {
 			continue
 		}
+		if ownedFunctionAnalyses && name == "storeScanFilledCache" {
+			// Filled-local rows are completed fixed-point results. The scanner
+			// only reads them after publication, so copy the mutable cache header
+			// and share its immutable result sets.
+			settable(cloned.Field(i)).Set(reflect.ValueOf(maps.Clone(a.storeScanFilledCache)))
+			continue
+		}
 		if ownedFunctionAnalyses && cloneSpecializationOpaqueMap(cloned.Addr().Interface().(*Analyzer), a, name, field) {
 			continue
 		}
