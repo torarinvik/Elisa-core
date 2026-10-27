@@ -286,7 +286,7 @@ func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (C.LLVMValueRe
 	if value, actualType, handled, err := s.emitTypeConstructorCastCall(expr); handled {
 		return value, actualType, err
 	}
-	callee, funcType, err := s.resolveCallTarget(expr)
+	callee, funcType, direct, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -324,7 +324,7 @@ func (s *functionState) emitCallExprUnwrapped(expr *ast.CallExpr) (C.LLVMValueRe
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args, regionArenaArgs)
+	return s.emitResolvedCall(callee, funcType, direct, args, regionArenaArgs)
 }
 
 func backendIsCVariadicTailArg(fnType *semantic.FuncType, index int) bool {

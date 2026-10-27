@@ -251,7 +251,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	dstType := s.exprType(dstExpr)
 	resultType := s.exprType(expr)
 	fillExpr := expr.Args[1]
-	_, funcType, err := s.resolveCallTarget(expr)
+	_, funcType, _, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, true, err
 	}

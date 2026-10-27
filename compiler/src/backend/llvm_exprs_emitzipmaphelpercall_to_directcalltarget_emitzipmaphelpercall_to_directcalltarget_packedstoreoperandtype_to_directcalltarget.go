@@ -124,11 +124,11 @@ func (s *functionState) emitPackedStoreValueFromExpr(expr ast.Expr) (C.LLVMValue
 	}
 	return storeValue, storeType, nil
 }
-func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, error) {
+func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, bool, error) {
 	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok {
 		if sym, fnType, handled, err := s.resolveStaticInterfaceMethod(fieldExpr); handled {
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
 			// A protocol method with its own generic params (e.g. `[errorset R]`)
 			// must be monomorphized per call site, exactly like the plain-Ident
@@ -141,10 +141,10 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				}
 				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes, s.exprType(expr))
 				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
-				return value, specialized, err
+				return value, specialized, true, err
 			}
 			value, err := s.g.ensureFunctionDeclared(sym.Name, fnType)
-			return value, fnType, err
+			return value, fnType, true, err
 		}
 	}
 	if ident, ok := expr.Func.(*ast.Ident); ok && !s.identIsLocalBinding(ident.Name) {
@@ -164,8 +164,9 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 		if sym, ok := s.g.lookupGlobal(lookupName); ok {
 			fnType, ok := sym.Type.(*semantic.FuncType)
 			if !ok {
-				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", lookupName)
+				return nil, nil, false, fmt.Errorf("call target %s does not resolve to a function type", lookupName)
 			}
+			direct := sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc
 			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(functionSpecializationParams(fnType)) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
 				for _, arg := range expr.Args {
@@ -173,7 +174,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				}
 				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes, s.exprType(expr))
 				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
-				return value, specialized, err
+				return value, specialized, direct, err
 			}
 			if decl, ok := sym.Node.(*ast.ExternFuncDecl); ok && len(functionSpecializationParams(fnType)) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
@@ -182,22 +183,22 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				}
 				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes, s.exprType(expr))
 				value, specialized, err := s.g.ensureSpecializedExternFunction(decl, fnType, bindings)
-				return value, specialized, err
+				return value, specialized, direct, err
 			}
 			specialized := s.specializeFunctionType(fnType)
 			value, err := s.g.ensureFunctionDeclared(lookupName, specialized)
-			return value, specialized, err
+			return value, specialized, direct, err
 		}
 	}
 	callee, calleeType, err := s.emitExpr(expr.Func, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	fnType, ok := calleeType.(*semantic.FuncType)
 	if !ok {
-		return nil, nil, fmt.Errorf("call target does not have a function type")
+		return nil, nil, false, fmt.Errorf("call target does not have a function type")
 	}
-	return callee, fnType, nil
+	return callee, fnType, s.directCallTarget(expr.Func), nil
 }
 func (s *functionState) directCallTarget(expr ast.Expr) bool {
 	// An explicit generic application (`identity[LargeResult](x)`) is still a direct
@@ -221,35 +222,11 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 	if cast, ok := expr.(*ast.CastExpr); ok && cast != nil && cast.Origin == ast.CastExprOriginIndirectCall {
 		return true
 	}
-	if fieldExpr, ok := expr.(*ast.FieldExpr); ok {
-		_, _, handled, err := s.resolveStaticInterfaceMethod(fieldExpr)
-		return handled && err == nil
-	}
-	ident, ok := expr.(*ast.Ident)
-	if !ok || s == nil || s.g == nil || s.g.result == nil {
-		return false
-	}
-	// A local binding (function-value variable) shadows a same-named global
-	// function: the call lowers through the function-value path, not a direct call.
-	if s.identIsLocalBinding(ident.Name) {
-		return false
-	}
-	// Resolve through the analyzer's recorded canonical (namespace/using/import-
-	// qualified) name, exactly as resolveCallTarget does — otherwise a module-scoped
-	// callee (`M.grow`) misses the bare-name lookup and is mis-dispatched through the
-	// function-value path, which doesn't thread the hidden region-param args and
-	// produces a call/definition arity mismatch.
-	lookupName := ident.Name
-	if s.g.semanticReadView().HasOwnResolvedValueNamesMap() {
-		if canon, ok := s.g.semanticReadView().LookupResolvedValueNames(ident); ok {
-			lookupName = canon
-		}
-	}
-	sym, ok := s.g.lookupGlobal(lookupName)
-	if !ok {
-		return false
-	}
-	return sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc
+	// Static interface methods and resolved global identifiers are classified
+	// by resolveCallTarget while it materializes the callee. Do not repeat those
+	// analyzer/global lookups here; this helper only handles syntactic direct-call
+	// forms that reach the function-value fallback.
+	return false
 }
 
 // identIsLocalBinding reports whether name resolves to a local FUNCTION-VALUE

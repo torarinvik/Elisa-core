@@ -134,7 +134,7 @@ func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, se
 			}
 			defer s.g.deleteResultExprType(fakeReceiver)
 		}
-		callee, funcType, err := s.resolveCallTarget(synthetic)
+		callee, funcType, _, err := s.resolveCallTarget(synthetic)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -316,7 +316,7 @@ func (s *functionState) emitSafeTransformCallExpr(expr *ast.CallExpr) (C.LLVMVal
 		}
 		defer s.g.deleteResultExprType(fakeReceiver)
 	}
-	callee, funcType, err := s.resolveCallTarget(synthetic)
+	callee, funcType, _, err := s.resolveCallTarget(synthetic)
 	if err != nil {
 		return nil, nil, err
 	}

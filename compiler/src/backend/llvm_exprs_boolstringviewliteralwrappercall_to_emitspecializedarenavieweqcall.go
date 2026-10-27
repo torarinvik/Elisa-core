@@ -219,7 +219,7 @@ func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMVal
 	if len(expr.Args) != 3 {
 		return nil, nil, false, nil
 	}
-	callee, funcType, err := s.resolveCallTarget(expr)
+	callee, funcType, _, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -271,7 +271,7 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if !isDynArrayViewCarrierType(dstType) || !isDynArrayViewCarrierType(srcType) {
 		return nil, nil, false, nil
 	}
-	callee, funcType, err := s.resolveCallTarget(expr)
+	callee, funcType, _, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, true, err
 	}
