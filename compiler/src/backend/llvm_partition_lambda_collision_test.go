@@ -5,6 +5,7 @@ package backend
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -141,7 +142,8 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	result := parseAndAnalyzeBackendTest(t, "parallel_worker_decline.elisa", source)
 	session := NewIncrementalObjectSession(2, 32<<20)
 	session.minWeight = 0
-	session.EnableDiskCache(t.TempDir(), "worker-decline", 64<<20)
+	cacheRoot := t.TempDir()
+	session.EnableDiskCache(cacheRoot, "worker-decline", 64<<20)
 	func() {
 		result.BeginSharedCodegen()
 		defer result.EndSharedCodegen()
@@ -162,6 +164,76 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	}
 	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
 		t.Fatalf("missing fallback object: %v", err)
+	}
+	paths, err := filepath.Glob(filepath.Join(session.disk.root, "*.schedule"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("missing decline schedule: %v %v", paths, err)
+	}
+	data, err := os.ReadFile(paths[0])
+	if err != nil || len(data) <= sha256.Size {
+		t.Fatalf("invalid schedule: %v", err)
+	}
+	var saved [][]string
+	if err := json.Unmarshal(data[sha256.Size:], &saved); err != nil {
+		t.Fatal(err)
+	}
+	order := partitionedIRWorkOrder(result, 2, saved)
+	found := false
+	for _, name := range saved[order[0]] {
+		if name == partitionScheduleDeclined {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("declined partition was not stored and prioritized: %v", saved)
+	}
+	// A stale hint may only reorder work. Once the unsafe worker is removed,
+	// every partition must complete and successful scheduling clears the hint.
+	worker := "        parallel for node in frozen:\n            if node in frozen is Expr.Int(value: value):\n                _ = value + node.span\n"
+	if !strings.Contains(source, worker) {
+		t.Fatal("parallel fixture changed")
+	}
+	changed := strings.Replace(source, worker, "        pass\n", 1)
+	updated := parseAndAnalyzeBackendTest(t, "parallel_worker_decline.elisa", changed)
+	again := NewIncrementalObjectSession(2, 32<<20)
+	again.minWeight = 0
+	again.EnableDiskCache(cacheRoot, "worker-decline", 64<<20)
+	if err := again.WriteObject(updated, filepath.Join(t.TempDir(), "after.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
+	}
+	stats := again.Stats()
+	if stats.PartitionsEmitted+stats.PartitionsReused != 2 {
+		t.Fatalf("stale hint skipped a partition: %+v", stats)
+	}
+	data, err = os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data[sha256.Size:], &saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, names := range saved {
+		for _, name := range names {
+			if name == partitionScheduleDeclined {
+				t.Fatal("successful partition build retained stale decline hint")
+			}
+		}
+	}
+	// Disabled schedules and a no-disk session must still safely fall back.
+	t.Setenv("ELISACORE_PARTITION_SCHEDULE", "0")
+	disabled := NewIncrementalObjectSession(2, 32<<20)
+	disabled.minWeight = 0
+	disabled.EnableDiskCache(t.TempDir(), "disabled-schedule", 64<<20)
+	if err := disabled.WriteObject(result, filepath.Join(t.TempDir(), "disabled.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
+	}
+	if files, err := filepath.Glob(filepath.Join(disabled.disk.root, "*.schedule")); err != nil || len(files) != 0 {
+		t.Fatalf("disabled scheduling published hints: %v %v", files, err)
+	}
+	uncached := NewIncrementalObjectSession(2, 32<<20)
+	uncached.minWeight = 0
+	if err := uncached.WriteObject(result, filepath.Join(t.TempDir(), "uncached.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
 	}
 }
 

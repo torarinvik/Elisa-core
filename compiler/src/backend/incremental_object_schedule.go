@@ -17,6 +17,9 @@ import (
 // emitted. They only order work; current exact bitcode still authorizes reuse.
 const partitionScheduleLimit = 4 << 20
 
+// Advisory only: this partition previously required whole-module lowering.
+const partitionScheduleDeclined = "\x00partition-helper-declined-v1"
+
 func partitionScheduleStem(name string) string {
 	stem, _, _ := strings.Cut(name, "$generic_v1$")
 	return stem

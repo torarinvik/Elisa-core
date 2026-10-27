@@ -74,3 +74,20 @@ func TestPartitionedIRStartsChangedUnitFirst(t *testing.T) {
 		t.Fatal("priority skipped unmodified units")
 	}
 }
+
+func TestDeclinedPartitionHintOnlyChangesWorkOrder(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "schedule_hint.elisa", "def main() -> i64:\n    return 1\n")
+	members := make([][]string, 8)
+	members[6] = []string{partitionScheduleDeclined}
+	order := partitionedIRWorkOrder(result, 8, members)
+	if len(order) != 8 || order[0] != 6 {
+		t.Fatalf("hint not prioritized: %v", order)
+	}
+	seen := map[int]bool{}
+	for _, part := range order {
+		if part < 0 || part >= 8 || seen[part] {
+			t.Fatalf("invalid work order: %v", order)
+		}
+		seen[part] = true
+	}
+}

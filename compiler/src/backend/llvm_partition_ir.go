@@ -317,11 +317,33 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		workers = parts
 	}
 	order := partitionedIRWorkOrderWithReads(result, parts, sharedReads, previousMembers)
+	var declinedPart atomic.Int64
 	if err := runPartitionIRWorkers(parts, workers, order, func(part int) error {
 		var err error
 		objects[part], err = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations[part], &members[part], shared)
+		if errors.Is(err, errPartitionDeclined) {
+			declinedPart.CompareAndSwap(0, int64(part+1))
+		}
 		return err
 	}); err != nil {
+		if errors.Is(err, errPartitionDeclined) && os.Getenv("ELISACORE_PARTITION_SCHEDULE") != "0" {
+			if len(previousMembers) != parts {
+				previousMembers = make([][]string, parts)
+			}
+			for part, names := range previousMembers {
+				filtered := names[:0]
+				for _, name := range names {
+					if name != partitionScheduleDeclined {
+						filtered = append(filtered, name)
+					}
+				}
+				previousMembers[part] = filtered
+			}
+			if part := int(declinedPart.Load()) - 1; part >= 0 && part < parts {
+				previousMembers[part] = append(previousMembers[part], partitionScheduleDeclined)
+				s.disk.storeSchedule(unitID, targetID, previousMembers)
+			}
+		}
 		return err
 	}
 	s.disk.storeSchedule(unitID, targetID, members)
@@ -668,14 +690,30 @@ func partitionedIRWorkOrderWithReads(result *semantic.Result, parts int, recorde
 			}
 		}
 	}
+	declined := make([]bool, parts)
+	if len(previous) != 0 && len(previous[0]) == parts {
+		for part, names := range previous[0] {
+			for _, name := range names {
+				if name == partitionScheduleDeclined {
+					declined[part] = true
+					break
+				}
+			}
+		}
+	}
 	order := make([]int, 0, parts)
-	for part, want := range preferred {
+	for part, want := range declined {
 		if want {
 			order = append(order, part)
 		}
 	}
 	for part, want := range preferred {
-		if !want {
+		if want && !declined[part] {
+			order = append(order, part)
+		}
+	}
+	for part, want := range preferred {
+		if !want && !declined[part] {
 			order = append(order, part)
 		}
 	}
