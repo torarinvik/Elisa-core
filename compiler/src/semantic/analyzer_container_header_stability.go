@@ -215,7 +215,8 @@ func (a *Analyzer) containerHeadersStable(root *ast.FuncDecl) bool {
 
 type headerFunctionNameIndex struct {
 	declCount int
-	counts    map[string]int
+	// Built locally and immutable after publication. Rebuilds replace the map.
+	counts map[string]int
 }
 
 // uniqueHeaderCallTarget never uses the candidate call's local scope to resolve

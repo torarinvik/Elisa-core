@@ -405,6 +405,12 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			continue
 		}
+		if ownedFunctionAnalyses && name == "headerFunctionNames" {
+			// The published counts map is immutable. A worker that needs a new
+			// index replaces its own whole value, so sharing the current map avoids
+			// copying every function name for each specialization.
+			continue
+		}
 		if ownedFunctionAnalyses && (name == "diagnostics" || name == "reportedDiagnostics") {
 			// Reanalysis must re-emit its own errors, even when position/text
 			// matches an inherited canonical diagnostic. Skip before cloning
