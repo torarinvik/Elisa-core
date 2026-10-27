@@ -44,6 +44,7 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	argType := workerType.Params[0]
 	retType := workerType.Return
 	pos := expr.Position
+	s.g.partUnsafeHelpers = true
 	prefix := s.g.nextSyntheticName("__submit_capture_")
 
 	fields := map[string]semantic.Field{"arg": {Name: "arg", Type: argType}}

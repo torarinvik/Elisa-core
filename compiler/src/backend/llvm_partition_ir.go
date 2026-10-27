@@ -370,6 +370,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.inputReads = inputReads
+		g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.", unitID, part)
 		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
 		g.partitionGlobalDeclarationsOnly = part != 0
 		g.sharedResult = true
@@ -387,6 +388,11 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		return nil, fmt.Errorf("partition %d: %w", part, err)
 	}
 	defer g.disposeInBackground()
+	// These workers synthesize types that can flow into generic symbol names.
+	// Until their cross-module identity is qualified, use whole-module lowering.
+	if g.partUnsafeHelpers {
+		return nil, errPartitionDeclined
+	}
 	if !finishPartitionModule(g.module, part, parts, unit) {
 		return nil, errPartitionDeclined
 	}

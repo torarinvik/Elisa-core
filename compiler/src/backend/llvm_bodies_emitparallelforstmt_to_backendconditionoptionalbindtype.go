@@ -86,6 +86,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 		return err
 	}
 
+	s.g.partUnsafeHelpers = true
 	prefix := s.g.nextSyntheticName("__parallel_for_")
 	sourceName := prefix + "_source"
 	groupName := prefix + "_group"

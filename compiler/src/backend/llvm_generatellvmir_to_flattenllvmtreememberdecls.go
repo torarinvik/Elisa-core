@@ -269,6 +269,8 @@ type llvmGenerator struct {
 	cachedVoidRefType         *semantic.RefType
 	cachedArenaRefType        *semantic.RefType
 	syntheticCounter          int
+	partSynthNS               string
+	partUnsafeHelpers         bool
 	wordBits                  int
 	emitDebugInfo             bool
 	di                        *debugInfo
@@ -399,6 +401,12 @@ func (g *llvmGenerator) nextSyntheticName(prefix string) string {
 	name := fmt.Sprintf("%s%d", prefix, g.syntheticCounter)
 	g.syntheticCounter++
 	return name
+}
+
+// nextSyntheticHelperName scopes generated global helpers to their IR partition.
+// A counter alone can identify different bodies in different LLVM modules.
+func (g *llvmGenerator) nextSyntheticHelperName(prefix string) string {
+	return g.partSynthNS + g.nextSyntheticName(prefix)
 }
 func (g *llvmGenerator) dispose() {
 	if g.di != nil {

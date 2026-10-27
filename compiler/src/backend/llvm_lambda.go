@@ -272,7 +272,7 @@ func (s *functionState) emitLambdaExpr(expr *ast.LambdaExpr) (C.LLVMValueRef, se
 	if err != nil {
 		return nil, nil, err
 	}
-	helperName := s.g.nextSyntheticName("lambda_")
+	helperName := s.g.nextSyntheticHelperName("lambda_")
 	if len(captures) == 0 {
 		helperValue, err := s.emitLambdaHelper(expr, funcType, nil, nil, helperName)
 		if err != nil {
