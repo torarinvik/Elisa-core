@@ -119,10 +119,10 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 	testRunnerCacheWriteBytes(h, "options", encoded)
 	for _, entry := range buildCacheEnvKey() {
 		name, _, _ := strings.Cut(entry, "=")
-		// Object partitioning only changes native emission granularity. It cannot
-		// change semantic facts or diagnostics, so switching it must still be able
-		// to restore the same portable analysis snapshot.
-		if name == "ELISACORE_OBJECT_PARTITIONS" {
+		// These controls only select backend emission strategy. They cannot change
+		// semantic facts or diagnostics, so switching codegen modes must still be
+		// able to restore the same portable analysis snapshot.
+		if name == "ELISACORE_OBJECT_PARTITIONS" || name == "ELISACORE_PARALLEL_IR" || name == "ELISACORE_EXPERIMENT_PARTITION_SUBMIT" {
 			continue
 		}
 		testRunnerCacheWriteString(h, entry)
