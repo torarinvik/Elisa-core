@@ -3,11 +3,88 @@
 package backend
 
 import (
+	"fmt"
 	"testing"
 
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 )
+
+func TestSpecializedFuncTypeMemoUsesCompleteBindings(t *testing.T) {
+	result := &semantic.Result{}
+	shared := &sharedCodegenLookups{result: result}
+	base := &semantic.FuncType{
+		Name:         "region_signature",
+		TypeParams:   []string{"T"},
+		RegionParams: []string{"r"},
+		Params: []semantic.Type{
+			&semantic.RefType{Elem: &semantic.TypeParamType{Name: "T"}, Region: "r"},
+		},
+		Return: &semantic.RefType{Elem: &semantic.TypeParamType{Name: "T"}, Region: "r"},
+	}
+	concrete := &semantic.BuiltinType{Name: "i64"}
+	firstBindings := map[string]semantic.Type{"T": concrete, "r": &semantic.RegionParamType{Name: "heap"}}
+	secondBindings := map[string]semantic.Type{"r": &semantic.RegionParamType{Name: "stack"}, "T": concrete}
+	firstGenerator := &llvmGenerator{result: result, sharedLookups: shared}
+	secondGenerator := &llvmGenerator{result: result, sharedLookups: shared}
+
+	first := firstGenerator.cachedSpecializedFuncType(base, firstBindings)
+	reused := secondGenerator.cachedSpecializedFuncType(base, firstBindings)
+	if reused != first {
+		t.Fatal("identical complete bindings did not reuse the immutable specialized signature")
+	}
+	second := secondGenerator.cachedSpecializedFuncType(base, secondBindings)
+	if second == first {
+		t.Fatal("different non-layout region bindings aliased in the shared cache")
+	}
+	if got := first.Return.(*semantic.RefType).Region; got != "heap" {
+		t.Fatalf("first specialization region = %q, want heap", got)
+	}
+	if got := second.Return.(*semantic.RefType).Region; got != "stack" {
+		t.Fatalf("second specialization region = %q, want stack", got)
+	}
+	otherResult := &semantic.Result{}
+	otherGenerator := &llvmGenerator{result: otherResult, sharedLookups: shared}
+	otherDomain := otherGenerator.cachedSpecializedFuncType(base, firstBindings)
+	if otherDomain == first {
+		t.Fatal("specialized signature crossed semantic-result domains")
+	}
+}
+
+func nestedSpecializationFuncType(depth int) *semantic.FuncType {
+	var nested semantic.Type = &semantic.TypeParamType{Name: "T"}
+	for index := 0; index < depth; index++ {
+		name := fmt.Sprintf("Box%d", index)
+		nested = &semantic.GenericInstanceType{
+			Name: name,
+			Base: &semantic.StructType{Name: name},
+			Args: []semantic.Type{nested},
+		}
+	}
+	return &semantic.FuncType{Name: "deep", TypeParams: []string{"T"}, Params: []semantic.Type{nested, nested}, Return: nested}
+}
+
+func BenchmarkSpecializeFuncTypeAcrossPartitions(b *testing.B) {
+	base := nestedSpecializationFuncType(24)
+	bindings := map[string]semantic.Type{"T": &semantic.BuiltinType{Name: "i64"}}
+	b.Run("recompute", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			_ = specializeFuncType(base, bindings, nil)
+		}
+	})
+	b.Run("shared-cache-hit", func(b *testing.B) {
+		result := &semantic.Result{}
+		generator := &llvmGenerator{result: result, sharedLookups: &sharedCodegenLookups{result: result}}
+		_ = generator.cachedSpecializedFuncType(base, bindings)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			_ = generator.cachedSpecializedFuncType(base, bindings)
+		}
+	})
+}
 
 func TestOrderedSemanticTypeArgsIgnoreEnclosingImplBindings(t *testing.T) {
 	concrete := &semantic.BuiltinType{Name: "i64"}

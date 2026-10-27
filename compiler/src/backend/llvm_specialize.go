@@ -10,6 +10,8 @@ import "C"
 
 import (
 	"fmt"
+	"reflect"
+	"sort"
 	"unsafe"
 
 	"elisacore/src/ast"
@@ -40,7 +42,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
-		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
+		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
 	if existing, ok := g.functions[specializedName]; ok {
@@ -92,7 +94,7 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
-		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
+		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
 	if existing, ok := g.functions[specializedName]; ok {
@@ -136,7 +138,7 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
-		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
+		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
 	if err := g.checkGenericExternABI(symbolName, specializedType); err != nil {
@@ -319,6 +321,95 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		SinkParamsKnown:   base.SinkParamsKnown,
 	}
 	return specialized
+}
+
+// cachedSpecializedFuncType shares immutable signature substitution across
+// partition generators. The full binding map is part of the key: layout-only
+// specialization names intentionally omit region arguments that can still
+// affect signature metadata and substituted region names.
+func (g *llvmGenerator) cachedSpecializedFuncType(base *semantic.FuncType, typeBindings map[string]semantic.Type) *semantic.FuncType {
+	if g == nil || g.result == nil || g.sharedLookups == nil {
+		var impls map[string]*semantic.StaticImpl
+		if g != nil && g.result != nil {
+			impls = g.result.StaticImpls
+		}
+		return specializeFuncType(base, typeBindings, impls)
+	}
+	shared := g.sharedLookups.programLookups()
+	key, ok := specializedFuncTypeLookupKeyFor(g.result, base, typeBindings)
+	if !ok {
+		return specializeFuncType(base, typeBindings, g.result.StaticImpls)
+	}
+	if cached, found := shared.specializedFuncTypes.Load(key); found {
+		entry := cached.(specializedFuncTypeCacheValue)
+		if specializedFuncTypeCacheValueMatches(key, entry, base, g.result) {
+			return entry.specialized
+		}
+	}
+	specialized := specializeFuncType(base, typeBindings, g.result.StaticImpls)
+	entry := specializedFuncTypeCacheValue{base: base, result: g.result, specialized: specialized}
+	for index := 0; index < int(key.count); index++ {
+		entry.names[index] = key.names[index]
+		entry.types[index] = typeBindings[key.names[index]]
+	}
+	actual, loaded := shared.specializedFuncTypes.LoadOrStore(key, entry)
+	if !loaded {
+		return specialized
+	}
+	previous := actual.(specializedFuncTypeCacheValue)
+	if specializedFuncTypeCacheValueMatches(key, previous, base, g.result) {
+		return previous.specialized
+	}
+	return specialized
+}
+
+func specializedFuncTypeLookupKeyFor(result *semantic.Result, base *semantic.FuncType, bindings map[string]semantic.Type) (specializedFuncTypeLookupKey, bool) {
+	var key specializedFuncTypeLookupKey
+	if result == nil || base == nil || len(bindings) > specializedFuncTypeCacheMaxBindings {
+		return key, false
+	}
+	baseValue, resultValue := reflect.ValueOf(base), reflect.ValueOf(result)
+	key.base, key.result = baseValue.Pointer(), resultValue.Pointer()
+	count := len(bindings)
+	names := key.names[:count]
+	index := 0
+	for name := range bindings {
+		// The map length is bounded above, so filling the fixed array cannot
+		// allocate on the lookup path.
+		names[index] = name
+		index++
+	}
+	sort.Strings(names)
+	key.count = uint8(count)
+	for index, name := range names {
+		typ := bindings[name]
+		if typ == nil {
+			return specializedFuncTypeLookupKey{}, false
+		}
+		value := reflect.ValueOf(typ)
+		if value.Kind() != reflect.Ptr || value.IsNil() {
+			return specializedFuncTypeLookupKey{}, false
+		}
+		key.types[index] = value.Pointer()
+	}
+	return key, true
+}
+
+func specializedFuncTypeCacheValueMatches(key specializedFuncTypeLookupKey, entry specializedFuncTypeCacheValue, base *semantic.FuncType, result *semantic.Result) bool {
+	if entry.base != base || entry.result != result || entry.specialized == nil {
+		return false
+	}
+	for index := 0; index < int(key.count); index++ {
+		typ := entry.types[index]
+		if entry.names[index] != key.names[index] || typ == nil {
+			return false
+		}
+		value := reflect.ValueOf(typ)
+		if value.Kind() != reflect.Ptr || value.IsNil() || value.Pointer() != key.types[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes []semantic.Type, resultType semantic.Type) map[string]semantic.Type {

@@ -41,6 +41,10 @@ type sharedCodegenLookups struct {
 	// genericSymbols memoizes structural name construction across partition
 	// generators. Entries keep exact argument pointers alive for this build.
 	genericSymbols sync.Map // genericSymbolLookupKey -> genericSymbolCacheValue
+	// specializedFuncTypes memoizes immutable signatures generated from one
+	// complete specialization binding map. The specialized symbol name omits
+	// some region bindings, so it is deliberately not used as this cache key.
+	specializedFuncTypes sync.Map // specializedFuncTypeLookupKey -> specializedFuncTypeCacheValue
 }
 
 const genericSymbolCacheMaxArgs = 8
@@ -56,6 +60,24 @@ type genericSymbolCacheValue struct {
 	arguments []semantic.Type
 	identity  string
 	name      string
+}
+
+const specializedFuncTypeCacheMaxBindings = 8
+
+type specializedFuncTypeLookupKey struct {
+	base   uintptr
+	result uintptr
+	count  uint8
+	names  [specializedFuncTypeCacheMaxBindings]string
+	types  [specializedFuncTypeCacheMaxBindings]uintptr
+}
+
+type specializedFuncTypeCacheValue struct {
+	base        *semantic.FuncType
+	result      *semantic.Result
+	names       [specializedFuncTypeCacheMaxBindings]string
+	types       [specializedFuncTypeCacheMaxBindings]semantic.Type
+	specialized *semantic.FuncType
 }
 
 func codegenSymbolsByNode(result *semantic.Result, recorders ...*irInputReadRecorder) map[ast.Node]*semantic.Symbol {
