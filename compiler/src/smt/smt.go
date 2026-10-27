@@ -173,21 +173,20 @@ func (s *procSolver) resourceCount() (uint64, bool) {
 }
 
 // certifyCanceled replays an ambiguously canceled independent query with the
-// exact same resource budget and no wall timer. It keeps the original attempt's
-// hang guard, and never treats elapsed wall time as evidence of resource failure.
-// The before/after fuel delta excludes assertion parsing. Z3 clamps its counter
+// exact same resource budget and configured wall timer. It never treats elapsed
+// wall time as evidence of resource failure. The before/after fuel delta
+// excludes assertion parsing. Z3 clamps its counter
 // to the scoped limit on exit, so exhaustion can equal (not exceed) the budget.
 // A recovered SAT/UNSAT is definitive; a failed certification remains retryable.
 func (s *procSolver) certifyCanceled(assertions string) (result Result, certified bool) {
 	if !s.independent || s.warm || s.checkLimit <= 0 || s.broken {
 		return Unknown, false
 	}
-	started := time.Now()
 	setup := "(reset)\n" + s.preamble + assertions
 	if !strings.HasSuffix(setup, "\n") {
 		setup += "\n"
 	}
-	setup += fmt.Sprintf("(set-option :timeout 0)\n(set-option :rlimit %d)\n", s.checkLimit)
+	setup += fmt.Sprintf("(set-option :rlimit %d)\n", s.checkLimit)
 	if lines, sawError, err := s.exchange(setup); err != nil || sawError || len(lines) != 0 {
 		if err != nil {
 			s.broken = true
@@ -215,6 +214,7 @@ func (s *procSolver) certifyCanceled(assertions string) (result Result, certifie
 	}()
 	s.stats.Unknown++ // original canceled check; the replay is accounted below
 	s.stats.Queries++
+	started := time.Now()
 	lines, sawError, err := s.exchange("(check-sat)\n")
 	checked = time.Since(started)
 	if err != nil {

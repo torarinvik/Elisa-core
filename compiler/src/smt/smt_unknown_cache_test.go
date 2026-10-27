@@ -89,7 +89,7 @@ func TestIndependentResourceUnknownHasActualSolverCertificate(t *testing.T) {
 	}
 }
 
-func TestCanceledReplayRequiresNoWallTimerAndFullRelativeFuel(t *testing.T) {
+func TestCanceledReplayPreservesWallTimerAndFullRelativeFuel(t *testing.T) {
 	for _, tc := range []struct {
 		name, after, reason string
 		certified           bool
@@ -120,9 +120,8 @@ func TestCanceledReplayRequiresNoWallTimerAndFullRelativeFuel(t *testing.T) {
 				t.Fatalf("spurious certificate %d %d", resource, transient)
 			}
 			text := commands.String()
-			guard, override := strings.Index(text, "(set-option :timeout 120000)"), strings.LastIndex(text, "(set-option :timeout 0)")
-			if guard < 0 || override <= guard || !strings.Contains(text, "(set-option :rlimit 1000)") {
-				t.Fatal("guarded attempt or exact replay budget lost")
+			if strings.Count(text, "(set-option :timeout 120000)") < 2 || strings.Contains(text, "(set-option :timeout 0)") || !strings.Contains(text, "(set-option :rlimit 1000)") {
+				t.Fatal("configured wall timer or exact replay budget lost")
 			}
 		})
 	}
