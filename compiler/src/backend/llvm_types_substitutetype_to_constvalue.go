@@ -187,6 +187,9 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			IsNativeExtern:         tt.IsNativeExtern,
 			IntrinsicName:          tt.IntrinsicName,
 			Params:                 params,
+			ExplicitParamCount:     tt.ExplicitParamCount,
+			ExplicitParamNames:     append([]string(nil), tt.ExplicitParamNames...),
+			ImplicitParamNames:     append([]string(nil), tt.ImplicitParamNames...),
 			Return:                 substituteType(tt.Return, subst, impls),
 			Variadic:               tt.Variadic,
 		}

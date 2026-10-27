@@ -73,3 +73,20 @@ func substitutedTypeRegion(typ semantic.Type) string {
 		return ""
 	}
 }
+
+func TestFunctionTypeSubstitutionPreservesImplicitStoreABI(t *testing.T) {
+	integer := &semantic.BuiltinType{Name: "i64"}
+	source := &semantic.FuncType{
+		Name: "worker", Params: []semantic.Type{&semantic.TypeParamType{Name: "T"}, &semantic.TypeParamType{Name: "Store"}},
+		ExplicitParamCount: 1, ExplicitParamNames: []string{"value"}, ImplicitParamNames: []string{"__packed_store_Node"}, Return: integer,
+	}
+	got, ok := substituteType(source, map[string]semantic.Type{"T": integer, "Store": integer}, nil).(*semantic.FuncType)
+	if !ok || len(got.Params) != 2 || got.Params[0] != integer || got.Params[1] != integer || got.ExplicitParamCount != 1 || len(got.ExplicitParamNames) != 1 || got.ExplicitParamNames[0] != "value" || len(got.ImplicitParamNames) != 1 || got.ImplicitParamNames[0] != "__packed_store_Node" {
+		t.Fatalf("substitution lost callback ABI: %+v", got)
+	}
+	got.ImplicitParamNames[0] = "changed"
+	got.ExplicitParamNames[0] = "changed"
+	if source.ImplicitParamNames[0] != "__packed_store_Node" || source.ExplicitParamNames[0] != "value" {
+		t.Fatal("substitution aliased the original parameter names")
+	}
+}
