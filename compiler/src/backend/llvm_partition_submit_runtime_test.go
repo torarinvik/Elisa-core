@@ -189,6 +189,10 @@ func TestPartitionedStoreCapturingSubmitRuntime(t *testing.T) {
 	if os.Getenv("ELISA_TEST_SUBMIT_RUNTIME_CHILD") == "1" {
 		mode := os.Getenv("ELISA_TEST_SUBMIT_RUNTIME_MODE")
 		t.Setenv("ELISACORE_PARALLEL_IR", "1")
+		if strings.HasPrefix(mode, "experiment-") {
+			mode = strings.TrimPrefix(mode, "experiment-")
+			t.Setenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT", "1")
+		}
 		source := partitionSubmitRuntimeSource()
 		if strings.HasPrefix(mode, "generic-") {
 			mode = strings.TrimPrefix(mode, "generic-")
@@ -223,7 +227,7 @@ func TestPartitionedStoreCapturingSubmitRuntime(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		args := []string{shim, object, "-o", executable}
-		if strings.HasPrefix(os.Getenv("ELISA_TEST_SUBMIT_RUNTIME_MODE"), "generic-") {
+		if strings.Contains(os.Getenv("ELISA_TEST_SUBMIT_RUNTIME_MODE"), "generic-") {
 			args = append([]string{"-DGENERIC_FIXTURE"}, args...)
 		}
 		if output, err := exec.CommandContext(ctx, "clang", args...).CombinedOutput(); err != nil {
@@ -235,7 +239,7 @@ func TestPartitionedStoreCapturingSubmitRuntime(t *testing.T) {
 		return
 	}
 	root := t.TempDir()
-	for _, mode := range []string{"cold", "warm", "serial", "generic-cold", "generic-warm", "generic-serial"} {
+	for _, mode := range []string{"cold", "warm", "serial", "generic-cold", "generic-warm", "generic-serial", "experiment-cold", "experiment-warm", "experiment-generic-cold", "experiment-generic-warm"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()

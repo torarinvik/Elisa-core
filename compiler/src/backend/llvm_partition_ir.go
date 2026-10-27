@@ -370,6 +370,30 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	return nil
 }
 
+// partitionNativeNameReserved is used only by the opt-in submit experiment.
+// Every source/link/export spelling may be deliberately chosen to collide.
+func (g *llvmGenerator) partitionNativeNameReserved(name string) bool {
+	if g == nil || g.result == nil || g.result.GlobalScope == nil || len(g.result.EASMModules) != 0 {
+		return true
+	}
+	for source, symbol := range g.codegenReadView().GlobalSymbolsMap("partition-synthetic-specialization-reservations") {
+		if source == name || symbol != nil && (symbol.Name == name || symbol.LinkName == name) {
+			return true
+		}
+	}
+	for _, export := range g.result.ExportedFuncs {
+		if export != nil && (export.PublicName == name || export.LinkName == name) {
+			return true
+		}
+	}
+	for _, export := range g.result.ExportedGlobals {
+		if export != nil && export.PublicName == name {
+			return true
+		}
+	}
+	return false
+}
+
 // partitionHelperNamespaceConflicts rejects caller-controlled native symbols
 // in the generated helper namespace. EASM can supply arbitrary native symbols
 // that are not represented in GlobalScope, so it must use whole-module IR.

@@ -40,19 +40,43 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if err != nil {
 		return nil, nil, err
 	}
+	localCapture := false
+	if g.partSyntheticDepth > 0 {
+		var safe bool
+		localCapture, safe = g.partSubmitTypes.classify(orderedArgs)
+		if !safe {
+			return nil, nil, errPartitionDeclined
+		}
+	}
+	if localCapture && g.partitionNativeNameReserved(specializedName) {
+		return nil, nil, errPartitionDeclined
+	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
 	if existing, ok := g.functions[specializedName]; ok {
+		if localCapture && !g.partLocalHelpers[llvmValueName(existing)] {
+			return nil, nil, errPartitionDeclined
+		}
 		return existing, specializedType, nil
+	}
+	if localCapture && C.LLVMGetNamedFunction(g.module, cStringFree(specializedName)) != nil {
+		return nil, nil, errPartitionDeclined
 	}
 	fnValue, err := g.addFunction(specializedName, specializedType)
 	if err != nil {
 		return nil, nil, err
 	}
 	g.setDefinedFunctionLinkage(specializedName, fnValue, specializedType)
+	if localCapture {
+		C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
+		if g.partLocalHelpers == nil {
+			g.partLocalHelpers = make(map[string]bool)
+		}
+		g.partLocalHelpers[llvmValueName(fnValue)] = true
+	}
 	g.functions[specializedName] = fnValue
 	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
 		return nil, nil, err
@@ -92,19 +116,43 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 	if err != nil {
 		return nil, "", nil, err
 	}
+	localCapture := false
+	if g.partSyntheticDepth > 0 {
+		var safe bool
+		localCapture, safe = g.partSubmitTypes.classify(orderedArgs)
+		if !safe {
+			return nil, "", nil, errPartitionDeclined
+		}
+	}
+	if localCapture && g.partitionNativeNameReserved(specializedName) {
+		return nil, "", nil, errPartitionDeclined
+	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
 	if existing, ok := g.functions[specializedName]; ok {
+		if localCapture && !g.partLocalHelpers[llvmValueName(existing)] {
+			return nil, "", nil, errPartitionDeclined
+		}
 		return existing, specializedName, specializedType, nil
+	}
+	if localCapture && C.LLVMGetNamedFunction(g.module, cStringFree(specializedName)) != nil {
+		return nil, "", nil, errPartitionDeclined
 	}
 	fnValue, err := g.addFunction(specializedName, specializedType)
 	if err != nil {
 		return nil, "", nil, err
 	}
 	g.setDefinedFunctionLinkage(specializedName, fnValue, specializedType)
+	if localCapture {
+		C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
+		if g.partLocalHelpers == nil {
+			g.partLocalHelpers = make(map[string]bool)
+		}
+		g.partLocalHelpers[llvmValueName(fnValue)] = true
+	}
 	g.functions[specializedName] = fnValue
 	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
 		return nil, "", nil, err
@@ -136,6 +184,12 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 	}
 	symbolName := legacyGenericExternName(specializationBase, orderedArgs)
 
+	if g.partSyntheticDepth > 0 {
+		local, safe := g.partSubmitTypes.classify(orderedArgs)
+		if !safe || local {
+			return nil, nil, errPartitionDeclined
+		}
+	}
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
 		specializedType = g.cachedSpecializedFuncType(base, typeBindings)

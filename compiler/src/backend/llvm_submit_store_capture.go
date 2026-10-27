@@ -13,6 +13,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -44,8 +45,26 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	argType := workerType.Params[0]
 	retType := workerType.Return
 	pos := expr.Position
-	s.g.partUnsafeHelpers = true
-	prefix := s.g.nextSyntheticName("__submit_capture_")
+	partitionExperiment := s.g.partSynthNS != "" && os.Getenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT") == "1" && !s.g.emitDebugInfo && !s.g.emitTrace && s.g.optLevel == OptimizationLevel0
+	if partitionExperiment {
+		sym, found := s.g.lookupGlobal("pool_submit1")
+		if !found || sym == nil {
+			partitionExperiment = false
+		} else {
+			_, declOK := sym.Node.(*ast.FuncDecl)
+			fn, typeOK := sym.Type.(*semantic.FuncType)
+			if !declOK || !typeOK || !partitionSubmitSupportedSignature(fn) {
+				partitionExperiment = false
+			}
+		}
+	}
+	prefix := ""
+	if partitionExperiment {
+		prefix = s.g.nextSyntheticHelperName("__submit_capture_")
+	} else {
+		s.g.partUnsafeHelpers = true
+		prefix = s.g.nextSyntheticName("__submit_capture_")
+	}
 
 	fields := map[string]semantic.Field{"arg": {Name: "arg", Type: argType}}
 	declFields := []ast.FieldDecl{{Position: lexer.Pos{}, Name: "arg"}}
@@ -57,7 +76,25 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 		declFields = append(declFields, ast.FieldDecl{Position: lexer.Pos{}, Name: fieldName})
 	}
 	capDecl := &ast.StructDecl{Position: lexer.Pos{}, Name: prefix + "_capture", Fields: declFields, ReprC: true}
+	if partitionExperiment {
+		if _, exists := s.g.lookupNamedType(capDecl.Name); exists {
+			return nil, nil, true, errPartitionDeclined
+		}
+		if _, exists := s.g.structTypes[capDecl.Name]; exists {
+			return nil, nil, true, errPartitionDeclined
+		}
+		if C.LLVMGetTypeByName2(s.g.context, cStringFree(capDecl.Name)) != nil {
+			return nil, nil, true, errPartitionDeclined
+		}
+	}
 	capType := &semantic.StructType{Name: capDecl.Name, Fields: fields, ReprC: true, Decl: capDecl}
+	if partitionExperiment {
+		if !s.g.partSubmitTypes.register(capType) {
+			return nil, nil, true, errPartitionDeclined
+		}
+		s.g.partSyntheticDepth++
+		defer func() { s.g.partSyntheticDepth-- }()
+	}
 
 	// The thunk: one parameter, the capture; its body is the direct call with the stores supplied.
 	thunkName := prefix + "_thunk"
@@ -68,6 +105,13 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	}
 	s.g.functions[thunkName] = thunkFn
 	s.g.setDefinedFunctionLinkage(thunkName, thunkFn, thunkType)
+	if partitionExperiment {
+		C.LLVMSetLinkage(thunkFn, C.LLVMPrivateLinkage)
+		if s.g.partLocalHelpers == nil {
+			s.g.partLocalHelpers = make(map[string]bool)
+		}
+		s.g.partLocalHelpers[llvmValueName(thunkFn)] = true
+	}
 	capParam := prefix + "_cap"
 	field := func(name string, t semantic.Type) ast.Expr {
 		f := &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: capParam}, Field: name}
@@ -148,4 +192,62 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	}
 	task := s.buildCall(submitLLVMType, submit, []C.LLVMValueRef{poolValue, thunkFn, capValue}, "submit.capture")
 	return task, submitType.Return, true, nil
+}
+
+// partitionSubmitSupportedSignature restricts the experimental path to the
+// runtime shape whose generated capture is guaranteed to appear in the
+// specialization key and in the argument and callback types. An unfamiliar
+// runtime declaration must retain whole-module code generation.
+func partitionSubmitSupportedSignature(fn *semantic.FuncType) bool {
+	if fn == nil {
+		return false
+	}
+	params := functionSpecializationParams(fn)
+	if !partitionSubmitPlainCallABI(fn, 3) || len(params) != 2 || params[0].Kind != ast.GenericParamType || params[0].Name != "A" || params[1].Kind != ast.GenericParamType || params[1].Name != "R" || len(fn.TypeParams) != 2 || fn.TypeParams[0] != "A" || fn.TypeParams[1] != "R" || len(fn.Params) != 3 {
+		return false
+	}
+	if len(fn.GenericParams) != 0 && (len(fn.GenericParams) != 2 || fn.GenericParams[0].Kind != ast.GenericParamType || fn.GenericParams[0].Name != "A" || fn.GenericParams[1].Kind != ast.GenericParamType || fn.GenericParams[1].Name != "R") {
+		return false
+	}
+	isParam := func(t semantic.Type, name string) bool {
+		p, ok := t.(*semantic.TypeParamType)
+		return ok && p != nil && p.Name == name
+	}
+	isPoolRef := func(t semantic.Type) bool {
+		ref, ok := t.(*semantic.RefType)
+		if !ok || ref == nil || ref.Mutable || ref.State != semantic.RefStateNonNull || ref.Storage != semantic.RefStorageAny || ref.Region != "" || ref.ExplicitStorage || ref.Linear {
+			return false
+		}
+		pool, ok := ref.Elem.(*semantic.StructType)
+		return ok && pool != nil && pool.Builtin && pool.Name == "ThreadPool" && len(pool.TypeParams) == 0 && len(pool.RegionParams) == 0
+	}
+	isTaskResult := func(t semantic.Type) bool {
+		task, ok := t.(*semantic.GenericInstanceType)
+		if !ok || task == nil || (task.Name != "" && task.Name != "Task") || task.Region != "" || len(task.Args) != 2 {
+			return false
+		}
+		base, ok := task.Base.(*semantic.StructType)
+		return ok && base != nil && base.Builtin && base.Name == "Task" && isParam(task.Args[0], "R") && semantic.SameType(task.Args[1], &semantic.BuiltinType{Name: "Pending"})
+	}
+	callback, ok := fn.Params[1].(*semantic.FuncType)
+	return isPoolRef(fn.Params[0]) && ok && partitionSubmitPlainCallABI(callback, 1) && len(callback.TypeParams) == 0 && len(callback.GenericParams) == 0 && len(callback.RegionParams) == 0 && len(callback.Params) == 1 && isParam(callback.Params[0], "A") && isParam(callback.Return, "R") && isParam(fn.Params[2], "A") && isTaskResult(fn.Return)
+}
+
+// The lowering above passes three arguments directly and creates a plain Elisa
+// thunk. Unfamiliar ABI metadata can change the effective function signature or
+// calling convention, so it must use the existing whole-module fallback.
+func partitionSubmitPlainCallABI(fn *semantic.FuncType, explicit int) bool {
+	if fn == nil || fn.Variadic || fn.CallConv != "" || fn.IsNativeExtern || fn.HasAsyncEntry ||
+		fn.HasSegmentAgnostic || fn.HasSegmentEstablishing || fn.HasReentrantSafe || fn.SegmentTransition != semantic.FuncSegmentTransitionNone ||
+		fn.IntrinsicName != "" || fn.CParamPlan != nil || len(fn.ImplicitParamNames) != 0 ||
+		fn.RegionPolymorphic || len(fn.InferredRegionParams) != 0 || fn.ReturnsOwnedRegion ||
+		(fn.ExplicitParamCount != 0 && fn.ExplicitParamCount != explicit) {
+		return false
+	}
+	for _, owned := range fn.OwnedParams {
+		if owned {
+			return false
+		}
+	}
+	return true
 }

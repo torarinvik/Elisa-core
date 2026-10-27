@@ -272,6 +272,8 @@ type llvmGenerator struct {
 	partSynthNS               string
 	partLocalHelpers          map[string]bool
 	partUnsafeHelpers         bool
+	partSyntheticDepth        int
+	partSubmitTypes           submitTypeProvenance
 	wordBits                  int
 	emitDebugInfo             bool
 	di                        *debugInfo
