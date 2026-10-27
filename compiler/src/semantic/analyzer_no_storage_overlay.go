@@ -10,10 +10,29 @@ import (
 // rows only into its private local maps.
 type analyzerNoStorageOverlay struct {
 	base          map[Type]bool
+	viewOnlyBase  map[Type]bool
 	sharesBase    map[Type]bool
 	paramWrites   map[storeScanParamKey]bool
 	helperCalls   map[*ast.CallExpr]string
 	returnUnknown map[*ast.ReturnStmt]bool
+}
+
+func (a *Analyzer) lookupStoreScanViewOnly(t Type) (bool, bool) {
+	if value, present := a.storeScanViewOnlyCache[t]; present {
+		return value, true
+	}
+	if a.noStorageOverlay != nil {
+		value, present := a.noStorageOverlay.viewOnlyBase[t]
+		return value, present
+	}
+	return false, false
+}
+
+func (a *Analyzer) setStoreScanViewOnly(t Type, value bool) {
+	if a.storeScanViewOnlyCache == nil {
+		a.storeScanViewOnlyCache = make(map[Type]bool)
+	}
+	a.storeScanViewOnlyCache[t] = value
 }
 
 func (a *Analyzer) lookupStoreScanNoStorage(t Type) (bool, bool) {

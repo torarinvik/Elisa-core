@@ -664,6 +664,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		}
 		worker.noStorageOverlay = &analyzerNoStorageOverlay{
 			base:          a.storeScanNoStorageCache,
+			viewOnlyBase:  a.storeScanViewOnlyCache,
 			sharesBase:    a.storeScanSharesCache,
 			paramWrites:   a.storeScanParamWriteCache,
 			helperCalls:   a.compilerBuiltinHelperCalls,
@@ -678,9 +679,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	return cloned
 }
 
-// These per-function sets are fully built before insertion and are only read
-// afterward. Specializations can add entries for private declarations, so copy
-// the outer maps while sharing the immutable name sets already cached.
+// These settled caches are read-only after publication. Specializations copy
+// the mutable outer maps while sharing immutable rows, or use a read-through
+// base for the type-only view predicate cache.
 func cloneSpecializationStoreScanBoolSetCache(dst, src *Analyzer, field string) bool {
 	switch field {
 	case "storeScanViewCache":
@@ -689,6 +690,10 @@ func cloneSpecializationStoreScanBoolSetCache(dst, src *Analyzer, field string) 
 		dst.storeScanScalarCache = maps.Clone(src.storeScanScalarCache)
 	case "storeScanReadOnlyCache":
 		dst.storeScanReadOnlyCache = maps.Clone(src.storeScanReadOnlyCache)
+	case "storeScanViewOnlyCache":
+		if src.storeScanViewOnlyCache != nil {
+			dst.storeScanViewOnlyCache = make(map[Type]bool)
+		}
 	default:
 		return false
 	}

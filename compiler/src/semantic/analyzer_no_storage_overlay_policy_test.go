@@ -16,10 +16,10 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filename)
 	allowed := map[string]map[string]bool{
-		"analyzer_no_storage_overlay.go": {"lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true, "lookupStoreScanShares": true, "setStoreScanShares": true, "lookupStoreScanParamWriteCache": true, "setStoreScanParamWriteCache": true, "lookupCompilerBuiltinHelperCall": true, "setCompilerBuiltinHelperCall": true, "lookupReturnElementStmtUnknown": true, "setReturnElementStmtUnknown": true, "clearReturnElementStmtUnknown": true},
+		"analyzer_no_storage_overlay.go": {"lookupStoreScanViewOnly": true, "setStoreScanViewOnly": true, "lookupStoreScanNoStorage": true, "setStoreScanNoStorage": true, "lookupStoreScanShares": true, "setStoreScanShares": true, "lookupStoreScanParamWriteCache": true, "setStoreScanParamWriteCache": true, "lookupCompilerBuiltinHelperCall": true, "setCompilerBuiltinHelperCall": true, "lookupReturnElementStmtUnknown": true, "setReturnElementStmtUnknown": true, "clearReturnElementStmtUnknown": true},
 		// analyzeDeclsParallel rejects every active construction overlay before
 		// clearing canonical per-return scratch maps for its next body pass.
-		"parallel_bodies.go":                {"cloneAnalyzerValueForParallelPolicy": true, "analyzeDeclsParallel": true},
+		"parallel_bodies.go":                {"cloneAnalyzerValueForParallelPolicy": true, "cloneSpecializationStoreScanBoolSetCache": true, "analyzeDeclsParallel": true},
 		"specialization_maps_generated.go":  {"cloneSpecializationOpaqueMap": true},
 		"shared_codegen.go":                 {"BeginSharedCodegen": true},
 		"optimization_result_api.go":        {"IsCompilerBuiltinHelperCall": true},
@@ -45,12 +45,12 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 				continue
 			}
 			goast.Inspect(fn.Body, func(n goast.Node) bool {
-				if selector, ok := n.(*goast.SelectorExpr); ok && (selector.Sel.Name == "storeScanNoStorageCache" || selector.Sel.Name == "storeScanSharesCache" || selector.Sel.Name == "storeScanParamWriteCache" || selector.Sel.Name == "compilerBuiltinHelperCalls" || selector.Sel.Name == "returnElementStmtUnknown") && !allowed[entry.Name()][fn.Name.Name] {
+				if selector, ok := n.(*goast.SelectorExpr); ok && (selector.Sel.Name == "storeScanNoStorageCache" || selector.Sel.Name == "storeScanViewOnlyCache" || selector.Sel.Name == "storeScanSharesCache" || selector.Sel.Name == "storeScanParamWriteCache" || selector.Sel.Name == "compilerBuiltinHelperCalls" || selector.Sel.Name == "returnElementStmtUnknown") && !allowed[entry.Name()][fn.Name.Name] {
 					t.Errorf("raw analyzer cache access bypasses overlay at %s", set.Position(n.Pos()))
 				}
 				if literal, ok := n.(*goast.BasicLit); ok && literal.Kind == token.STRING {
 					value, _ := strconv.Unquote(literal.Value)
-					if (value == "storeScanNoStorageCache" || value == "storeScanSharesCache" || value == "storeScanParamWriteCache" || value == "compilerBuiltinHelperCalls" || value == "returnElementStmtUnknown") && !allowed[entry.Name()][fn.Name.Name] {
+					if (value == "storeScanNoStorageCache" || value == "storeScanViewOnlyCache" || value == "storeScanSharesCache" || value == "storeScanParamWriteCache" || value == "compilerBuiltinHelperCalls" || value == "returnElementStmtUnknown") && !allowed[entry.Name()][fn.Name.Name] {
 						t.Errorf("named analyzer cache reflection needs review at %s", set.Position(n.Pos()))
 					}
 				}
@@ -67,6 +67,12 @@ func TestNoStorageOverlayClosedAccessPolicy(t *testing.T) {
 	}
 	if !strings.Contains(string(policy), "ownedFunctionAnalyses && name == \"storeScanSharesCache\"") {
 		t.Fatal("specialization-only shares cache clone boundary lost")
+	}
+	if !strings.Contains(string(policy), "case \"storeScanViewOnlyCache\"") {
+		t.Fatal("specialization-only view-only cache overlay clone lost")
+	}
+	if !strings.Contains(string(policy), "ownedFunctionAnalyses && cloneSpecializationStoreScanBoolSetCache(cloned.Addr().Interface().(*Analyzer), a, name)") {
+		t.Fatal("specialization-only view-only cache overlay boundary lost")
 	}
 	if !strings.Contains(string(policy), "ownedFunctionAnalyses && name == \"compilerBuiltinHelperCalls\"") {
 		t.Fatal("specialization-only helper map clone boundary lost")

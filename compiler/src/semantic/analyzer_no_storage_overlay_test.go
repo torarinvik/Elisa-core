@@ -4,6 +4,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"fmt"
 	"maps"
 	"reflect"
 	"strings"
@@ -105,6 +106,50 @@ func TestStoreScanSharesOverlayPositiveNegativeMissingAndIsolation(t *testing.T)
 	nested.setStoreScanShares(newContainer, true)
 	if private.storeScanSharesCache[newContainer] || !nested.storeScanSharesCached(container) {
 		t.Fatal("nested worker lost local isolation or inherited base lookup")
+	}
+}
+
+func TestStoreScanViewOnlyOverlayPositiveNegativeMissingAndIsolation(t *testing.T) {
+	viewOnly := &BuiltinType{Name: "i64"}
+	notViewOnly := &DArrayType{Elem: viewOnly}
+	missing := &OptionalType{Value: viewOnly}
+	root := &Analyzer{storeScanViewOnlyCache: map[Type]bool{viewOnly: true, notViewOnly: false}}
+	private := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+	if private.storeScanViewOnlyCache == nil || len(private.storeScanViewOnlyCache) != 0 || private.noStorageOverlay == nil || private.noStorageOverlay.viewOnlyBase == nil {
+		t.Fatal("specialization copied the view-only cache or lost its inherited base")
+	}
+	if !private.storeScanViewOnlyCached(viewOnly) || private.storeScanViewOnlyCached(notViewOnly) {
+		t.Fatal("inherited positive/negative view-only results changed")
+	}
+	if len(private.storeScanViewOnlyCache) != 0 {
+		t.Fatal("inherited lookup materialized local rows")
+	}
+	wantMissing := storeScanTypeIsViewOnly(missing)
+	if got := private.storeScanViewOnlyCached(missing); got != wantMissing {
+		t.Fatal("missing entry computed a different type-property result")
+	}
+	if len(private.storeScanViewOnlyCache) != 1 || private.storeScanViewOnlyCache[missing] != wantMissing {
+		t.Fatal("missing result was not written to the private cache")
+	}
+	private.setStoreScanViewOnly(viewOnly, false)
+	if private.storeScanViewOnlyCached(viewOnly) || !root.storeScanViewOnlyCache[viewOnly] {
+		t.Fatal("private write mutated the canonical cache or failed to override the base")
+	}
+
+	ordinary := cloneAnalyzerValueForBodyWorker(root).Addr().Interface().(*Analyzer)
+	if ordinary.noStorageOverlay != nil || len(ordinary.storeScanViewOnlyCache) != 2 {
+		t.Fatal("ordinary body worker stopped owning a full view-only cache")
+	}
+	ordinary.storeScanViewOnlyCache[viewOnly] = false
+	if !root.storeScanViewOnlyCache[viewOnly] {
+		t.Fatal("ordinary body-worker mutation reached the source cache")
+	}
+
+	for _, source := range []map[Type]bool{nil, {}} {
+		clone := cloneAnalyzerValueForSpecialization(&Analyzer{storeScanViewOnlyCache: source}).Addr().Interface().(*Analyzer).storeScanViewOnlyCache
+		if (clone == nil) != (source == nil) {
+			t.Fatal("nil/empty cache shape changed")
+		}
 	}
 }
 
@@ -422,6 +467,22 @@ func BenchmarkStoreScanSharesOverlayConstruction(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+var storeScanViewOnlyCloneSink *Analyzer
+
+func BenchmarkSpecializationStoreScanViewOnlyCacheClone(b *testing.B) {
+	const entries = 32768
+	cache := make(map[Type]bool, entries)
+	for i := 0; i < entries; i++ {
+		cache[&BuiltinType{Name: fmt.Sprintf("i64_%d", i)}] = i%2 == 0
+	}
+	root := &Analyzer{storeScanViewOnlyCache: cache}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		storeScanViewOnlyCloneSink = cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
 	}
 }
 

@@ -3374,16 +3374,13 @@ func (a *Analyzer) storeScanHoldsNoRegionStorage(t Type) bool {
 func (a *Analyzer) storeScanViewOnlyCached(t Type) bool {
 	cacheable := t != nil && reflect.ValueOf(t).Kind() == reflect.Pointer
 	if cacheable {
-		if cached, ok := a.storeScanViewOnlyCache[t]; ok {
+		if cached, ok := a.lookupStoreScanViewOnly(t); ok {
 			return cached
 		}
 	}
 	result := storeScanTypeIsViewOnly(t)
 	if cacheable {
-		if a.storeScanViewOnlyCache == nil {
-			a.storeScanViewOnlyCache = map[Type]bool{}
-		}
-		a.storeScanViewOnlyCache[t] = result
+		a.setStoreScanViewOnly(t, result)
 	}
 	return result
 }
