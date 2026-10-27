@@ -5,6 +5,7 @@ package backend
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -113,6 +114,7 @@ def main() -> i64:
 }
 
 func TestPartitionedParallelWorkerDeclinesUnsafeIdentity(t *testing.T) {
+	t.Setenv("ELISACORE_PARALLEL_IR", "1")
 	source := parallelForConcurrencyPrelude + `
 packed enum Expr:
     common:
@@ -135,15 +137,26 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	session := NewIncrementalObjectSession(2, 32<<20)
 	session.minWeight = 0
 	session.EnableDiskCache(t.TempDir(), "worker-decline", 64<<20)
-	result.BeginSharedCodegen()
-	defer result.EndSharedCodegen()
-	shared := newSharedCodegenLookups(result)
-	worklists := partitionIRDeclarationWorklists(result, shared.symbolsByNode, 2)
-	var unit, target [32]byte
-	var members []string
-	_, err := session.buildIRPartition(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}, partitionOwner("visit", 2), 2, true, "test", unit, target, worklists[partitionOwner("visit", 2)], &members, shared)
-	if !errors.Is(err, errPartitionDeclined) {
-		t.Fatalf("parallel worker must decline partitioning, got %v", err)
+	func() {
+		result.BeginSharedCodegen()
+		defer result.EndSharedCodegen()
+		shared := newSharedCodegenLookups(result)
+		worklists := partitionIRDeclarationWorklists(result, shared.symbolsByNode, 2)
+		var unit, target [32]byte
+		var members []string
+		_, err := session.buildIRPartition(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}, partitionOwner("visit", 2), 2, true, "test", unit, target, worklists[partitionOwner("visit", 2)], &members, shared)
+		if !errors.Is(err, errPartitionDeclined) {
+			t.Fatalf("parallel worker must decline partitioning, got %v", err)
+		}
+	}()
+	// Exercise the complete fallback after all in-flight partition generators
+	// release the shared semantic view. The fixture has no main to link and run.
+	out := filepath.Join(t.TempDir(), "fallback.o")
+	if err := session.WriteObject(result, out, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
+		t.Fatalf("missing fallback object: %v", err)
 	}
 }
 

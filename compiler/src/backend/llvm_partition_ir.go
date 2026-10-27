@@ -305,31 +305,17 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	if os.Getenv("ELISACORE_PARTITION_SCHEDULE") != "0" {
 		previousMembers = s.disk.loadSchedule(unitID, targetID, parts)
 	}
-	errs := make([]error, parts)
 	workers := runtime.GOMAXPROCS(0)
 	if workers > parts {
 		workers = parts
 	}
-	next := make(chan int, parts)
-	for _, part := range partitionedIRWorkOrderWithReads(result, parts, sharedReads, previousMembers) {
-		next <- part
-	}
-	close(next)
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for part := range next {
-				objects[part], errs[part] = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations[part], &members[part], shared)
-			}
-		}()
-	}
-	wg.Wait()
-	for part := range errs {
-		if errs[part] != nil {
-			return errs[part]
-		}
+	order := partitionedIRWorkOrderWithReads(result, parts, sharedReads, previousMembers)
+	if err := runPartitionIRWorkers(parts, workers, order, func(part int) error {
+		var err error
+		objects[part], err = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations[part], &members[part], shared)
+		return err
+	}); err != nil {
+		return err
 	}
 	s.disk.storeSchedule(unitID, targetID, members)
 	buildDuration := time.Since(start)
@@ -351,6 +337,44 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	}
 	if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
 		fmt.Fprintf(os.Stderr, "[build-timing] partitioned object: ir+partitions %v, merge %v; ir cpu %v (generate %v), bitcode %v, native %v x%d, defs %d owned %d\n", buildDuration.Round(time.Millisecond), time.Since(mergeStart).Round(time.Millisecond), time.Duration(partitionIRNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionGenNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionBitcodeNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionNativeNanos.Swap(0)).Round(time.Millisecond), partitionNativeCount.Swap(0), partitionDefs.Swap(0), partitionOwned.Swap(0))
+	}
+	return nil
+}
+
+// runPartitionIRWorkers stops scheduling new partitions after a decline, but
+// joins every started worker before the shared semantic view can be released.
+func runPartitionIRWorkers(parts, workers int, order []int, build func(int) error) error {
+	errs := make([]error, parts)
+	next := make(chan int, len(order))
+	for _, part := range order {
+		next <- part
+	}
+	close(next)
+	var wg sync.WaitGroup
+	var declined atomic.Bool
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for part := range next {
+				if declined.Load() {
+					continue
+				}
+				errs[part] = build(part)
+				if errors.Is(errs[part], errPartitionDeclined) {
+					declined.Store(true)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, errPartitionDeclined) {
+			return err
+		}
+	}
+	if declined.Load() {
+		return errPartitionDeclined
 	}
 	return nil
 }
