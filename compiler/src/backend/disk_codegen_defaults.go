@@ -12,8 +12,7 @@ import (
 func (s *IncrementalObjectSession) UseDiskIncrementalDefaults() {
 	s.diskDefaults = true
 	if _, explicit := os.LookupEnv("ELISACORE_OBJECT_PARTITIONS"); !explicit && s.diskDefaultsActive() {
-		// 32 reduces per-module setup while keeping cache invalidation reasonably local.
-		s.partitions = 32
+		s.partitions = 96
 	}
 }
 
