@@ -8,6 +8,7 @@ package backend
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
+LLVMMemoryBufferRef elisacoreWriteOptimizedBitcodePreservingUses(LLVMModuleRef module);
 static LLVMMemoryBufferRef elisacoreOptimizedCacheBuffer(const char *data, size_t size) {
  return LLVMCreateMemoryBufferWithMemoryRangeCopy(data, size, "optimized-cache");
 }
@@ -90,7 +91,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 	if err := g.optimizeModule(level); err != nil {
 		return g, err
 	}
-	optimized := C.LLVMWriteBitcodeToMemoryBuffer(g.module)
+	optimized := C.elisacoreWriteOptimizedBitcodePreservingUses(g.module)
 	if optimized != nil {
 		defer C.LLVMDisposeMemoryBuffer(optimized)
 		n := uint64(C.LLVMGetBufferSize(optimized))
@@ -165,4 +166,23 @@ func optimizedModuleRoundTripExact(g *llvmGenerator, data []byte) bool {
 	name := C.LLVMGetModuleIdentifier(g.module, &nameSize)
 	C.LLVMSetModuleIdentifier(module, name, nameSize)
 	return g.printModule() == (&llvmGenerator{module: module}).printModule()
+}
+
+// optimizedModulePreservedBitcodeRoundTripExact is used by cache diagnostics
+// and tests to distinguish LLVM reader normalization from cache failures.
+func optimizedModulePreservedBitcodeRoundTripExact(g *llvmGenerator) (bool, error) {
+	if g == nil || g.module == nil {
+		return false, fmt.Errorf("missing LLVM module")
+	}
+	bitcode := C.elisacoreWriteOptimizedBitcodePreservingUses(g.module)
+	if bitcode == nil {
+		return false, fmt.Errorf("failed to write optimized bitcode")
+	}
+	defer C.LLVMDisposeMemoryBuffer(bitcode)
+	size := uint64(C.LLVMGetBufferSize(bitcode))
+	if size == 0 || size > uint64(^uint(0)>>1) {
+		return false, fmt.Errorf("invalid optimized bitcode size: %d", size)
+	}
+	data := unsafe.Slice((*byte)(unsafe.Pointer(C.LLVMGetBufferStart(bitcode))), int(size))
+	return optimizedModuleRoundTripExact(g, data), nil
 }
