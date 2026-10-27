@@ -62,8 +62,9 @@ def pool_new(workers: usize) -> ThreadPool can[Pool.Create]:
 def pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]:
     pass
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
-    _ = fn(arg)
+def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R can[P], arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+    can P:
+        _ = fn(arg)
     task: Task[R, Pending] = zeroed
     return move task
 

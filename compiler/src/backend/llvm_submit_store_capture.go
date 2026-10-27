@@ -203,7 +203,7 @@ func partitionSubmitSupportedSignature(fn *semantic.FuncType) bool {
 		return false
 	}
 	params := functionSpecializationParams(fn)
-	if !partitionSubmitPlainCallABI(fn, 3) || len(params) != 2 || params[0].Kind != ast.GenericParamType || params[0].Name != "A" || params[1].Kind != ast.GenericParamType || params[1].Name != "R" || len(fn.TypeParams) != 2 || fn.TypeParams[0] != "A" || fn.TypeParams[1] != "R" || len(fn.Params) != 3 {
+	if !partitionSubmitPlainCallABI(fn, 3) || len(params) != 2 || params[0].Kind != ast.GenericParamType || params[0].Name != "A" || params[1].Kind != ast.GenericParamType || params[1].Name != "R" || len(fn.TypeParams) != 2 || fn.TypeParams[0] != "A" || fn.TypeParams[1] != "R" || len(fn.PermissionParams) != 1 || fn.PermissionParams[0] != "P" || len(fn.Params) != 3 {
 		return false
 	}
 	if len(fn.GenericParams) != 0 && (len(fn.GenericParams) != 2 || fn.GenericParams[0].Kind != ast.GenericParamType || fn.GenericParams[0].Name != "A" || fn.GenericParams[1].Kind != ast.GenericParamType || fn.GenericParams[1].Name != "R") {
@@ -215,7 +215,7 @@ func partitionSubmitSupportedSignature(fn *semantic.FuncType) bool {
 	}
 	isPoolRef := func(t semantic.Type) bool {
 		ref, ok := t.(*semantic.RefType)
-		if !ok || ref == nil || ref.Mutable || ref.State != semantic.RefStateNonNull || ref.Storage != semantic.RefStorageAny || ref.Region != "" || ref.ExplicitStorage || ref.Linear {
+		if !ok || ref == nil || !ref.Mutable || ref.State != semantic.RefStateNonNull || ref.Storage != semantic.RefStorageAny || ref.Region != "" || ref.ExplicitStorage || ref.Linear {
 			return false
 		}
 		pool, ok := ref.Elem.(*semantic.StructType)
