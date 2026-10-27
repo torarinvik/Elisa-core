@@ -26,8 +26,8 @@ func TestDiskCodegenDefaultsKeepExplicitOverrides(t *testing.T) {
 	profile := NewIncrementalObjectSession(4, 1<<20)
 	profile.minWeight = 0
 	profile.UseDiskIncrementalDefaults()
-	if profile.partitions != 96 {
-		t.Fatal("disk profile did not select post-O3 cache units")
+	if profile.partitions != 32 {
+		t.Fatal("disk profile did not select 32 post-O3 cache units")
 	}
 	for _, name := range diskPresetFlags[:2] {
 		if profile.diskCodegenFlag(name) {
