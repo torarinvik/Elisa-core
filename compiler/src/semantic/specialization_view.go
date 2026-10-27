@@ -30,6 +30,11 @@ type specializationContext struct {
 	err          error
 }
 
+type specializationBuildOptions struct {
+	inputAudit     bool
+	exprProjection bool
+}
+
 // SpecializeFunction returns nil without reanalysis when no declaration-ordered
 // semantic type arguments were supplied. Nonempty enclosing backend bindings
 // alone do not request a semantic specialization of this function.
@@ -43,6 +48,10 @@ func (r *Result) SpecializeFunctionWithInputAudit(fn *ast.FuncDecl, args []Type)
 }
 
 func (r *Result) specializeFunctionWithInputAudit(fn *ast.FuncDecl, args []Type, audit bool) (*SpecializedFunction, error) {
+	return r.specializeFunctionWithOptions(fn, args, audit, false)
+}
+
+func (r *Result) specializeFunctionWithOptions(fn *ast.FuncDecl, args []Type, audit, exprProjection bool) (*SpecializedFunction, error) {
 	if r == nil || fn == nil {
 		return nil, fmt.Errorf("specialization requires a semantic result and declaration")
 	}
@@ -76,34 +85,33 @@ func (r *Result) specializeFunctionWithInputAudit(fn *ast.FuncDecl, args []Type,
 	if original := r.specializationCanonical[fn]; original != nil {
 		fn = original
 	}
+	build := func() (*SpecializedFunction, error) {
+		if audit || exprProjection {
+			return root.specializePrivateFunction(fn, args, specializationBuildOptions{inputAudit: audit, exprProjection: exprProjection})
+		}
+		return root.specializePrivateFunction(fn, args)
+	}
 	if sh := root.shared; sh != nil {
-		key, keyed := specializationMemoKey(fn, args)
+		key, keyed := specializationMemoKeyForProjection(fn, args, exprProjection)
 		key.inputAudit = audit
 		if keyed {
-			return sh.specialize(key, func() (*SpecializedFunction, error) {
-				if audit {
-					return root.specializePrivateFunction(fn, args, true)
-				}
-				return root.specializePrivateFunction(fn, args)
-			})
+			return sh.specialize(key, build)
 		}
 		// Noncanonical arguments cannot be safely memoized. Preserve their old
 		// serialized behavior without blocking keyed instantiations or analyzer
 		// queries for the full private analysis.
 		sh.unkeyedMu.Lock()
 		defer sh.unkeyedMu.Unlock()
-		if audit {
-			return root.specializePrivateFunction(fn, args, true)
-		}
-		return root.specializePrivateFunction(fn, args)
+		return build()
 	}
-	if audit {
-		return root.specializePrivateFunction(fn, args, true)
-	}
-	return root.specializePrivateFunction(fn, args)
+	return build()
 }
 
-func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, audit ...bool) (*SpecializedFunction, error) {
+func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, options ...specializationBuildOptions) (*SpecializedFunction, error) {
+	var selected specializationBuildOptions
+	if len(options) != 0 {
+		selected = options[0]
+	}
 	if why := r.analyzer.specializationProofReportActivityError(); why != "" {
 		return nil, fmt.Errorf("cannot specialize during %s", why)
 	}
@@ -129,10 +137,13 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, audit 
 	a := cloneAnalyzerValueForSpecialization(&analyzerSnapshot).Addr().Interface().(*Analyzer)
 	a.resolvedTypeNames = resolvedTypeNames
 	isolateWorkerScopes(&analyzerSnapshot, a)
-	targetExprs := map[ast.Expr]struct{}{}
-	collectSpecializedFunctionExprs(fn, targetExprs)
+	var targetExprs map[ast.Expr]struct{}
+	if selected.exprProjection {
+		targetExprs = map[ast.Expr]struct{}{}
+		collectSpecializedFunctionExprs(fn, targetExprs)
+	}
 	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}
-	if len(audit) > 0 && audit[0] {
+	if selected.inputAudit {
 		ctx.inputReads = &specializationInputTrace{}
 	}
 	a.parallel = &parallelWorkerState{worker: 0, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, readShadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}, specialization: ctx}
@@ -196,11 +207,14 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, audit 
 	if err != nil {
 		return nil, err
 	}
-	originalExprs := map[ast.Expr]ast.Expr{}
-	for original, copied := range ctx.syntax.nodes {
-		if expr, ok := original.(ast.Expr); ok {
-			if _, belongs := targetExprs[expr]; belongs {
-				originalExprs[copied.(ast.Expr)] = expr
+	var originalExprs map[ast.Expr]ast.Expr
+	if selected.exprProjection {
+		originalExprs = map[ast.Expr]ast.Expr{}
+		for original, copied := range ctx.syntax.nodes {
+			if expr, ok := original.(ast.Expr); ok {
+				if _, belongs := targetExprs[expr]; belongs {
+					originalExprs[copied.(ast.Expr)] = expr
+				}
 			}
 		}
 	}

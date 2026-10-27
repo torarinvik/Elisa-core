@@ -30,7 +30,7 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 	if r == nil || r.CanonicalCodegenResult().analyzer == nil || fn == nil || len(typeArgs) == 0 {
 		return nil
 	}
-	body, err := r.SpecializeFunction(fn, typeArgs)
+	body, err := r.specializeFunctionWithOptions(fn, typeArgs, false, true)
 	if err != nil {
 		return nil
 	} // Compatibility API; backend uses the error-returning product API.

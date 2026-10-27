@@ -136,11 +136,29 @@ func (sh *sharedCodegen) specialize(key specializationKey, build func() (*Specia
 }
 
 func specializationMemoKey(fn *ast.FuncDecl, typeArgs []Type) (specializationKey, bool) {
+	return specializationMemoKeyForProjection(fn, typeArgs, false)
+}
+
+func specializationMemoKeyForProjection(fn *ast.FuncDecl, typeArgs []Type, exprProjection bool) (specializationKey, bool) {
 	var b strings.Builder
-	for _, t := range typeArgs {
+	// Prefix both domains so no type-key byte sequence can collide with a
+	// compatibility product. Write it during construction to avoid a second
+	// string allocation on each ordinary codegen lookup.
+	var domain byte
+	if exprProjection {
+		domain = 1
+	}
+	if len(typeArgs) == 0 {
+		b.WriteByte(domain)
+	}
+	for i, t := range typeArgs {
 		k, ok := canonicalTypeIDKey(t)
 		if !ok {
 			return specializationKey{}, false
+		}
+		if i == 0 {
+			b.Grow(len(k) + 2)
+			b.WriteByte(domain)
 		}
 		b.WriteString(k)
 		b.WriteByte(0)
