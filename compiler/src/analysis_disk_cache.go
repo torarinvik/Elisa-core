@@ -122,7 +122,7 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 		// These controls only select backend emission strategy. They cannot change
 		// semantic facts or diagnostics, so switching codegen modes must still be
 		// able to restore the same portable analysis snapshot.
-		if name == "ELISACORE_OBJECT_PARTITIONS" || name == "ELISACORE_PARALLEL_IR" || name == "ELISACORE_EXPERIMENT_PARTITION_SUBMIT" {
+		if analysisDiskBackendStrategyEnv[name] {
 			continue
 		}
 		testRunnerCacheWriteString(h, entry)
@@ -164,6 +164,20 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 	}
 	key := hex.EncodeToString(h.Sum(nil))
 	return analysisDiskArtifact{key: key, path: filepath.Join(root, "analysis", key+".state")}, true
+}
+
+// These variables change only how the backend schedules or partitions code
+// generation. They do not affect analysis facts, diagnostics, or source
+// authority, so they must not fragment the portable semantic-state cache.
+var analysisDiskBackendStrategyEnv = map[string]bool{
+	"ELISACORE_OBJECT_PARTITIONS":           true,
+	"ELISACORE_PARALLEL_IR":                 true,
+	"ELISACORE_EXPERIMENT_PARTITION_SUBMIT": true,
+	"ELISACORE_PARALLEL_OPT":                true,
+	"ELISACORE_PARALLEL_OPT_IMPORT":         true,
+	"ELISACORE_IR_IMPORTS":                  true,
+	"ELISACORE_NATIVE_FRAGMENTS":            true,
+	"ELISACORE_PARTITION_SCHEDULE":          true,
 }
 
 // Probe the configured storage by actual I/O, not mode bits (which can lie

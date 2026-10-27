@@ -192,7 +192,15 @@ func TestAnalysisDiskCacheKeyTracksSemanticInputs(t *testing.T) {
 		t.Fatal("backend-only object partition count discarded reusable analysis state")
 	}
 	t.Setenv("ELISACORE_OBJECT_PARTITIONS", "")
-	for _, name := range []string{"ELISACORE_PARALLEL_IR", "ELISACORE_EXPERIMENT_PARTITION_SUBMIT"} {
+	for _, name := range []string{
+		"ELISACORE_PARALLEL_IR",
+		"ELISACORE_EXPERIMENT_PARTITION_SUBMIT",
+		"ELISACORE_PARALLEL_OPT",
+		"ELISACORE_PARALLEL_OPT_IMPORT",
+		"ELISACORE_IR_IMPORTS",
+		"ELISACORE_NATIVE_FRAGMENTS",
+		"ELISACORE_PARTITION_SCHEDULE",
+	} {
 		t.Setenv(name, "1")
 		if key() != original {
 			t.Fatalf("backend-only codegen mode %s discarded reusable analysis state", name)
