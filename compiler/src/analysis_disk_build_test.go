@@ -74,6 +74,29 @@ func analysisDiskBuildTestCheckpoint(t *testing.T, filename string, source []byt
 	return data
 }
 
+func TestAnalysisBootstrapStepLimitIsolatesKnownSlowDeclaration(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured int
+		next       int
+		slow       int
+		want       int
+	}{
+		{name: "unlimited", configured: 0, next: 4, slow: 4, want: 1},
+		{name: "larger explicit limit", configured: 8, next: 4, slow: 4, want: 1},
+		{name: "smaller explicit limit", configured: 1, next: 4, slow: 4, want: 1},
+		{name: "slow declaration later", configured: 3, next: 4, slow: 6, want: 3},
+		{name: "no slow hint", configured: 0, next: 4, slow: -1, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := analysisBootstrapStepLimit(test.configured, test.next, test.slow); got != test.want {
+				t.Fatalf("analysisBootstrapStepLimit(%d, %d, %d) = %d, want %d", test.configured, test.next, test.slow, got, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalysisDiskBootstrapAcrossProcesses(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "program.elisa")

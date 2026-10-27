@@ -184,7 +184,8 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		})
 		checkpointCurrent = false // the following step may mutate its state
 		var err error
-		result, state, err = build.AdvanceBefore(limit, budget, slow)
+		stepLimit := analysisBootstrapStepLimit(limit, done, slow)
+		result, state, err = build.AdvanceBefore(stepLimit, budget, slow)
 		watchdog.Stop()
 		if err != nil {
 			return incomplete(err), nil
@@ -285,6 +286,18 @@ func analysisBootstrapSlowHint(artifact analysisDiskArtifact, next int) int {
 		}
 	}
 	return found
+}
+
+// A known slow declaration at the current boundary gets a step to itself. The
+// first declaration is admitted even when it equals stopBefore, so without a
+// one-item limit that same advance could run into another slow body before the
+// checkpoint is durable. Preserve a configured positive limit when it is
+// already smaller than the isolation limit.
+func analysisBootstrapStepLimit(configured, next, slow int) int {
+	if slow == next && (configured <= 0 || configured > 1) {
+		return 1
+	}
+	return configured
 }
 
 // analysisBootstrapRecordSlow appends a declaration index to the build's hint
