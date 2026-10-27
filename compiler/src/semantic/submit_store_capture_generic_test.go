@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -69,5 +70,43 @@ def main() -> i64:
 		if got := fuzzAnalyzeText(source); got != serial {
 			t.Fatalf("parallel diagnostics differ on run %d:\n%s\nvs serial:\n%s", i, got, serial)
 		}
+	}
+}
+
+func TestGenericSubmitReadOnlyParallelResultMatchesSerial(t *testing.T) {
+	source := submitStoreCapturePrelude + `
+def worker(e: Expr) -> i64:
+    can Abort.Panic:
+        return eval(e)
+
+def submit_generic[T](marker: T, e: Expr) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        nursery workers(2):
+            submit worker(e)
+        return 0
+
+def caller_a(e: Expr) -> i64:
+    return submit_generic[i64](0, e)
+
+def caller_b(e: Expr) -> i64:
+    return submit_generic[i64](1, e)
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        e: Expr = build(10)
+        return caller_a(e) + caller_b(e)
+`
+	t.Setenv("ELISA_PARALLEL_BODIES", "1")
+	serial := Analyze(parseIncrementalSessionFile(t, source))
+	if len(serial.Errors()) != 0 {
+		t.Fatalf("serial errors: %v", serial.Errors())
+	}
+	t.Setenv("ELISA_PARALLEL_BODIES", "4")
+	parallel := Analyze(parseIncrementalSessionFile(t, source))
+	if len(parallel.Errors()) != 0 {
+		t.Fatalf("parallel errors: %v", parallel.Errors())
+	}
+	if !reflect.DeepEqual(serial.Diagnostics, parallel.Diagnostics) || !reflect.DeepEqual(serial.ProofReport, parallel.ProofReport) || !reflect.DeepEqual(serial.ElisionSummary, parallel.ElisionSummary) {
+		t.Fatalf("parallel diagnostics or proof report differ from serial: serial=%v parallel=%v", serial.Diagnostics, parallel.Diagnostics)
 	}
 }

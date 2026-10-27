@@ -264,6 +264,7 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 				fnType, _ = analyzed.(*FuncType)
 			}
 		}
+		fnType = a.privateFuncType(nil, fnType)
 		if fnType != nil {
 			if !fnType.ReturnBorrowedOwnerRefsKnown {
 				a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Func, fnType)

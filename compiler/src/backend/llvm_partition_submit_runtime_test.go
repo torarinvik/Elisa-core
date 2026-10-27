@@ -184,13 +184,11 @@ int64_t fixture_result(void) {
 `
 
 // The children have separate Go/LLVM processes and share only the disk cache.
-// This isolates backend ABI behavior with serial semantic analysis; parallel
-// semantic analysis has a separate, currently investigated ownership race.
+// Both the backend ABI and the default parallel semantic analysis are exercised.
 func TestPartitionedStoreCapturingSubmitRuntime(t *testing.T) {
 	if os.Getenv("ELISA_TEST_SUBMIT_RUNTIME_CHILD") == "1" {
 		mode := os.Getenv("ELISA_TEST_SUBMIT_RUNTIME_MODE")
 		t.Setenv("ELISACORE_PARALLEL_IR", "1")
-		t.Setenv("ELISA_PARALLEL_BODIES", "1")
 		source := partitionSubmitRuntimeSource()
 		if strings.HasPrefix(mode, "generic-") {
 			mode = strings.TrimPrefix(mode, "generic-")

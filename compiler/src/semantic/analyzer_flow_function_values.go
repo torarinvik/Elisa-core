@@ -218,6 +218,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 					return a.functionValueTypeFollowingBinding(sym, valueExpr)
 				}
 				if fnType, ok := sym.Type.(*FuncType); ok {
+					fnType = a.privateFuncType(nil, fnType)
 					a.ensureFunctionValueTypeSummaries(expr, fnType)
 					cloned := a.cloneFunctionValueType(fnType)
 					if cloned == nil {
@@ -238,6 +239,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 				return a.functionValueTypeFollowingBinding(sym, valueExpr)
 			}
 			if fnType, ok := sym.Type.(*FuncType); ok {
+				fnType = a.privateFuncType(nil, fnType)
 				a.ensureFunctionValueTypeSummaries(expr, fnType)
 				cloned := a.cloneFunctionValueType(fnType)
 				if cloned == nil {
@@ -255,6 +257,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 	if !ok {
 		return nil, false
 	}
+	fnType = a.privateFuncType(nil, fnType)
 	a.ensureFunctionValueTypeSummaries(expr, fnType)
 	cloned := a.cloneFunctionValueType(fnType)
 	if cloned == nil {

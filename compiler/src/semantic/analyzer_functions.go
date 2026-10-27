@@ -665,6 +665,42 @@ func reusableDeclReturnProvenance(fn *ast.FuncDecl, source, target *FuncType) (r
 	return cloneRegionRefState(source.ReturnProvenance), true
 }
 
+// privateReturnInferenceDecl keeps speculative body reanalysis off the shared
+// AST during parallel analysis. Even a declaration last owned by this worker
+// may already have been published and imported by another worker.
+//
+// Serial analysis and specialization views already have exclusive ownership.
+// For a regular body worker, copy from the pre-fork snapshot rather than from
+// a possibly-mutating live declaration. Failure is a diagnostic, never a quiet
+// loss of provenance or a fallback to mutating shared syntax.
+func (a *Analyzer) privateReturnInferenceDecl(fn *ast.FuncDecl) (*ast.FuncDecl, func(), bool) {
+	noop := func() {}
+	if a == nil || fn == nil {
+		return nil, noop, false
+	}
+	p := a.parallel
+	if p == nil || p.specialization != nil {
+		return fn, noop, true
+	}
+	// Use a new snapshot even if a quiet-analysis shadow exists: a nested
+	// inference must not rekey or mutate the body its caller is still using.
+	original := a.canonicalFuncDecl(fn)
+	shadow := p.copyDecl(original)
+	if shadow == nil || shadow == original || shadow == fn {
+		a.appendDiagnostic(Diagnostic{Pos: fn.Pos(), Severity: DiagnosticSeverityError, Message: "cannot isolate function syntax for parallel return-provenance analysis"})
+		return nil, noop, false
+	}
+	if p.original == nil {
+		p.original = map[*ast.FuncDecl]*ast.FuncDecl{}
+	}
+	p.original[shadow] = original
+	a.rekeyFuncDeclEntries(fn, shadow, false)
+	return shadow, func() {
+		a.rekeyFuncDeclEntries(shadow, fn, true)
+		delete(p.original, shadow)
+	}, true
+}
+
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
 	a.addProofReportOrigin(fn)
 	defer a.beginProofReportProbe()()
@@ -674,19 +710,32 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
 		return
 	}
+	if a.scalarReturnHasNoReferenceProvenance(fnType) {
+		fnType.ReturnProvenance = regionRefState{}
+		fnType.ReturnProvenanceKnown = true
+		return
+	}
+	original := a.canonicalFuncDecl(fn)
+	if a.returnProvenanceInProgress[original] {
+		return
+	}
+	a.returnProvenanceInProgress[original] = true
+	defer delete(a.returnProvenanceInProgress, original)
+	private, release, ok := a.privateReturnInferenceDecl(fn)
+	if !ok {
+		return
+	}
+	defer release()
+	fn = private
 	if symbol := a.funcDeclSymbols[fn]; symbol != nil {
 		if sourceType, ok := symbol.Type.(*FuncType); ok {
+			sourceType = a.privateFuncType(nil, sourceType)
 			if state, ok := reusableDeclReturnProvenance(fn, sourceType, fnType); ok {
 				fnType.ReturnProvenance = state
 				fnType.ReturnProvenanceKnown = true
 				return
 			}
 		}
-	}
-	if a.scalarReturnHasNoReferenceProvenance(fnType) {
-		fnType.ReturnProvenance = regionRefState{}
-		fnType.ReturnProvenanceKnown = true
-		return
 	}
 	if state, ok := a.directParamReturnProvenance(fn, fnType); ok {
 		fnType.ReturnProvenance = withPackedStoreProvenanceSummary(state)
@@ -698,11 +747,6 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		fnType.ReturnProvenanceKnown = true
 		return
 	}
-	if a.returnProvenanceInProgress[fn] {
-		return
-	}
-	a.returnProvenanceInProgress[fn] = true
-	defer delete(a.returnProvenanceInProgress, fn)
 	defer a.enterFunctionBoundsFacts()()
 
 	restoreFreshShapes := a.enterFreshShapeScope(fn, nil, "infer-provenance")
@@ -909,12 +953,19 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 		fnType.ReturnBorrowedOwnerRefsKnown = true
 		return
 	}
-	if a.returnBorrowedOwnerRefInProgress[fn] {
+	original := a.canonicalFuncDecl(fn)
+	if a.returnBorrowedOwnerRefInProgress[original] {
 		return
 	}
-	a.returnBorrowedOwnerRefInProgress[fn] = true
+	a.returnBorrowedOwnerRefInProgress[original] = true
+	defer delete(a.returnBorrowedOwnerRefInProgress, original)
+	private, release, ok := a.privateReturnInferenceDecl(fn)
+	if !ok {
+		return
+	}
+	defer release()
+	fn = private
 	defer a.enterFunctionBoundsFacts()()
-	defer delete(a.returnBorrowedOwnerRefInProgress, fn)
 
 	// This pass can use a call's concrete callback types. Its summary belongs to
 	// that call, but its expression annotations must not replace the template's

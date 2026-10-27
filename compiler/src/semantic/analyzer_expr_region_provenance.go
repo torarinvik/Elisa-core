@@ -446,6 +446,7 @@ unwrapped:
 				fnType, _ = analyzed.(*FuncType)
 			}
 		}
+		fnType = a.privateFuncType(nil, fnType)
 		if fnType != nil {
 			if !fnType.ReturnProvenanceKnown {
 				if a.suppressLazyFuncSummaryInference {
@@ -641,6 +642,7 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 			return
 		}
 		if sourceType, ok := sym.Type.(*FuncType); ok && sourceType != fnType {
+			sourceType = a.privateFuncType(nil, sourceType)
 			a.ensureFunctionValueTypeSummaries(n, sourceType)
 			if sourceType.ReturnProvenanceKnown {
 				fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
@@ -683,10 +685,13 @@ func (a *Analyzer) inferFuncReturnProvenanceForLocalIdent(ident *ast.Ident, fnTy
 		fnType.ReturnProvenanceKnown = true
 		return true
 	}
-	if sourceType, ok := sym.Type.(*FuncType); ok && sourceType != fnType && hasRegionProvenance(sourceType.ReturnProvenance) {
-		fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
-		fnType.ReturnProvenanceKnown = true
-		return true
+	if sourceType, ok := sym.Type.(*FuncType); ok && sourceType != fnType {
+		sourceType = a.privateFuncType(nil, sourceType)
+		if hasRegionProvenance(sourceType.ReturnProvenance) {
+			fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
+			fnType.ReturnProvenanceKnown = true
+			return true
+		}
 	}
 	if sym.Kind != SymbolLocal || sym.Mutable {
 		return false
