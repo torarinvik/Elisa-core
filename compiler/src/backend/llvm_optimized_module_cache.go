@@ -15,6 +15,8 @@ static LLVMMemoryBufferRef elisacoreOptimizedCacheBuffer(const char *data, size_
 import "C"
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -51,9 +53,10 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 	defer C.LLVMDisposeMessage(triple)
 	defer C.LLVMDisposeMessage(cpu)
 	defer C.LLVMDisposeMessage(features)
-	config, _ := json.Marshal([]any{"optimized-module-v1", int(level), C.GoString(triple), C.GoString(cpu), C.GoString(features), optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3})
+	config, _ := json.Marshal([]any{"optimized-module-v3-authenticated-ir", int(level), C.GoString(triple), C.GoString(cpu), C.GoString(features), optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3})
 	key := string(config)
-	if data := s.disk.load(bytes, key); len(data) > 0 {
+	data, expectedDigest, validEnvelope := decodeOptimizedModuleEnvelope(s.disk.load(bytes, key))
+	if validEnvelope {
 		context := C.LLVMContextCreate()
 		buffer := C.elisacoreOptimizedCacheBuffer((*C.char)(unsafe.Pointer(unsafe.SliceData(data))), C.size_t(len(data)))
 		var module C.LLVMModuleRef
@@ -67,7 +70,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 			C.LLVMSetModuleIdentifier(module, name, nameSize)
 			cached := &llvmGenerator{context: context, module: module, result: g.result, optLevel: g.optLevel, requestedTargetTriple: g.requestedTargetTriple, optimizedForCodegen: true}
 			if err := cached.ensureTargetMachine(); err == nil {
-				if err := cached.verify(); err == nil {
+				if err := cached.verify(); err == nil && sha256.Sum256([]byte(cached.printModule())) == expectedDigest {
 					cached.verifyAutovecExpectations()
 					s.recordStats(func(stats *IncrementalObjectStats) { stats.OptimizedModulesReused++ })
 					if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
@@ -93,11 +96,73 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 		n := uint64(C.LLVMGetBufferSize(optimized))
 		if n <= uint64(s.disk.maxBytes) && n <= uint64(^uint(0)>>1) {
 			data := unsafe.Slice((*byte)(unsafe.Pointer(C.LLVMGetBufferStart(optimized))), int(n))
-			s.disk.store(string(bytes), key, data)
+			// LLVM's reader may normalize intrinsic declarations and alter IR
+			// attributes. Parsing and verification alone do not prove that the
+			// cached module is the one the optimizer actually produced.
+			if optimizedModuleRoundTripExact(g, data) {
+				digest := sha256.Sum256([]byte(g.printModule()))
+				s.disk.store(string(bytes), key, encodeOptimizedModuleEnvelope(digest, data))
+			}
 		}
 	}
 	if os.Getenv("ELISACORE_BUILD_TIMING") == "1" {
 		fmt.Fprintf(os.Stderr, "[build-timing] optimized module disk miss: %v\n", time.Since(start).Round(time.Millisecond))
 	}
 	return g, nil
+}
+
+const optimizedModuleEnvelopeMagic = "ELISACORE-OPTIMIZED-IR-v1\n"
+
+// The disk artifact binds the restored module to the exact printed IR that
+// was produced before serialization. The enclosing disk cache authenticates
+// the whole artifact; the digest is checked again on every replay because
+// reader behavior can vary between processes.
+func encodeOptimizedModuleEnvelope(digest [sha256.Size]byte, bitcode []byte) []byte {
+	result := make([]byte, 0, len(optimizedModuleEnvelopeMagic)+sha256.Size+len(bitcode))
+	result = append(result, optimizedModuleEnvelopeMagic...)
+	result = append(result, digest[:]...)
+	return append(result, bitcode...)
+}
+
+func decodeOptimizedModuleEnvelope(data []byte) ([]byte, [sha256.Size]byte, bool) {
+	var digest [sha256.Size]byte
+	header := len(optimizedModuleEnvelopeMagic) + sha256.Size
+	if len(data) <= header || !bytes.Equal(data[:len(optimizedModuleEnvelopeMagic)], []byte(optimizedModuleEnvelopeMagic)) {
+		return nil, digest, false
+	}
+	copy(digest[:], data[len(optimizedModuleEnvelopeMagic):header])
+	return data[header:], digest, true
+}
+
+// optimizedModuleRoundTripExact proves that a just-produced cache artifact
+// restores to the same printed module, including metadata and attributes. It
+// is intentionally fail-closed, including for reader failures and changes to
+// textual use-list order. A rejected artifact is simply not cached.
+func optimizedModuleRoundTripExact(g *llvmGenerator, data []byte) bool {
+	if g == nil || g.module == nil || len(data) == 0 {
+		return false
+	}
+	context := C.LLVMContextCreate()
+	if context == nil {
+		return false
+	}
+	defer C.LLVMContextDispose(context)
+	buffer := C.elisacoreOptimizedCacheBuffer((*C.char)(unsafe.Pointer(unsafe.SliceData(data))), C.size_t(len(data)))
+	if buffer == nil {
+		return false
+	}
+	var module C.LLVMModuleRef
+	status := C.LLVMParseBitcodeInContext2(context, buffer, &module)
+	C.LLVMDisposeMemoryBuffer(buffer)
+	if status != 0 || module == nil {
+		if module != nil {
+			C.LLVMDisposeModule(module)
+		}
+		return false
+	}
+	defer C.LLVMDisposeModule(module)
+	var nameSize C.size_t
+	name := C.LLVMGetModuleIdentifier(g.module, &nameSize)
+	C.LLVMSetModuleIdentifier(module, name, nameSize)
+	return g.printModule() == (&llvmGenerator{module: module}).printModule()
 }
