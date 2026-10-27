@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 
@@ -25,6 +27,14 @@ func newPersistentObjectSession() *backend.IncrementalObjectSession {
 	if err != nil {
 		return session
 	}
-	session.EnableDiskCache(filepath.Join(root, "partitions"), stamp, 2<<30)
+	library, err := backend.LLVMLibraryIdentity()
+	if err != nil {
+		return session
+	}
+	hash := sha256.New()
+	testRunnerCacheWriteString(hash, "partition-compiler-and-llvm-v1")
+	testRunnerCacheWriteString(hash, stamp)
+	testRunnerCacheWriteString(hash, library)
+	session.EnableDiskCache(filepath.Join(root, "partitions"), hex.EncodeToString(hash.Sum(nil)), 2<<30)
 	return session
 }

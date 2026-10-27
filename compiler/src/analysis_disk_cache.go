@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"elisacore/src/ast"
+	"elisacore/src/backend"
 	"elisacore/src/semantic"
 	"elisacore/src/smt"
 )
@@ -130,9 +131,11 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 			testRunnerCacheWriteString(h, "source-authority="+origin)
 		}
 	}
-	if err := writeNativeCacheTarget(h, options.TargetTriple); err != nil {
+	target, err := backend.ResolveTargetIdentity(options.TargetTriple)
+	if err != nil {
 		return analysisDiskArtifact{}, false
 	}
+	writeResolvedNativeCacheTarget(h, target)
 	if options.EnableSMT {
 		selector := smt.ResolveBinary("")
 		testRunnerCacheWriteString(h, "smt-selector="+selector)

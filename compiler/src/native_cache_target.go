@@ -11,6 +11,11 @@ func writeNativeCacheTarget(hash hash.Hash, triple string) error {
 		return err
 	}
 	writeResolvedNativeCacheTarget(hash, identity)
+	library, err := backend.LLVMLibraryIdentity()
+	if err != nil {
+		return err
+	}
+	testRunnerCacheWriteString(hash, "llvm-library-sha256="+library)
 	return nil
 }
 
