@@ -12,11 +12,40 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"elisacore/src/semantic"
 )
 
-// Opt-in-only qualification. The default path continues to decline submit workers.
-func TestExperimentalPartitionedSubmitUsesIRPartitions(t *testing.T) {
-	t.Setenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT", "1")
+func assertPartitionSubmitSafetyMode(t *testing.T, result *semantic.Result, wantUnsafe bool) {
+	t.Helper()
+	result.BeginSharedCodegen()
+	defer result.EndSharedCodegen()
+	shared := newSharedCodegenLookups(result)
+	work := partitionIRDeclarationWorklists(result, shared.symbolsByNode, 2)
+	for part := range 2 {
+		g, err := compileLLVMModuleConfigured(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", false, false, func(g *llvmGenerator) {
+			g.partBody = func(name string) bool { return partitionOwner(name, 2) == part }
+			g.partSynthNS = fmt.Sprintf("test.submit.%d.", part)
+			g.partitionModuleDecls = work[part]
+			g.hasPartitionModuleDecls = true
+			g.sharedResult = true
+		}, shared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g.partUnsafeHelpers != wantUnsafe {
+			t.Errorf("partition %d unsafe helper flag = %t, want %t", part, g.partUnsafeHelpers, wantUnsafe)
+		}
+		if !strings.Contains(g.printModule(), "__submit_capture_") {
+			t.Errorf("partition %d did not generate the store-capture helper", part)
+		}
+		g.dispose()
+	}
+}
+
+// The supported store-capturing submit shape participates in IR partitions by default.
+func TestPartitionedSubmitUsesIRPartitionsByDefault(t *testing.T) {
+	t.Setenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT", "")
 	t.Setenv("ELISACORE_PARALLEL_IR", "1")
 	for _, tc := range []struct {
 		name   string
@@ -24,6 +53,7 @@ func TestExperimentalPartitionedSubmitUsesIRPartitions(t *testing.T) {
 	}{{"ordinary", partitionSubmitRuntimeSource()}, {"generic", partitionSubmitGenericRuntimeSource()}} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := parseAndAnalyzeBackendTest(t, "experimental_submit_"+tc.name+".elisa", tc.source)
+			assertPartitionSubmitSafetyMode(t, result, false)
 			session := NewIncrementalObjectSession(2, 32<<20)
 			session.minWeight = 0
 			session.EnableDiskCache(t.TempDir(), "submit-prototype", 64<<20)
@@ -34,6 +64,19 @@ func TestExperimentalPartitionedSubmitUsesIRPartitions(t *testing.T) {
 				t.Fatalf("did not use partitioned IR: %+v", stats)
 			}
 		})
+	}
+}
+
+func TestPartitionedSubmitCanFallBackToWholeModule(t *testing.T) {
+	t.Setenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT", "0")
+	t.Setenv("ELISACORE_PARALLEL_IR", "1")
+	result := parseAndAnalyzeBackendTest(t, "submit_opt_out.elisa", partitionSubmitRuntimeSource())
+	assertPartitionSubmitSafetyMode(t, result, true)
+	session := NewIncrementalObjectSession(2, 32<<20)
+	session.minWeight = 0
+	session.EnableDiskCache(t.TempDir(), "submit-opt-out", 64<<20)
+	if err := session.WriteObject(result, filepath.Join(t.TempDir(), "out.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
 	}
 }
 
