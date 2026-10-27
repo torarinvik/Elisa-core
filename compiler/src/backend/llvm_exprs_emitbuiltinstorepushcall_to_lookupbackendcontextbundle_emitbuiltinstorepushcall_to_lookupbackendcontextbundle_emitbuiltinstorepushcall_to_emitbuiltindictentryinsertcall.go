@@ -671,7 +671,8 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 	if method != "put" && method != "get_or_insert" && method != "reserve" {
 		return nil, nil, false, nil
 	}
-	dictType, _, ok := builtinDictReceiverType(s.exprType(fieldExpr.Object))
+	receiverType := s.exprType(fieldExpr.Object)
+	dictType, _, ok := builtinDictReceiverType(receiverType)
 	if !ok || dictType == nil {
 		return nil, nil, false, nil
 	}
@@ -699,7 +700,7 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 		}
 		owner.arenaRef = arenaRef
 	}
-	dictValue, dictType, err := s.emitBuiltinDictReceiverValue(fieldExpr.Object, s.exprType(fieldExpr.Object))
+	dictValue, dictType, err := s.emitBuiltinDictReceiverValue(fieldExpr.Object, receiverType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -769,7 +770,8 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 	if method != "add" && method != "insert" && method != "reserve" {
 		return nil, nil, false, nil
 	}
-	setType, _, ok := builtinSetReceiverType(s.exprType(fieldExpr.Object))
+	receiverType := s.exprType(fieldExpr.Object)
+	setType, _, ok := builtinSetReceiverType(receiverType)
 	if !ok || setType == nil {
 		return nil, nil, false, nil
 	}
@@ -794,7 +796,7 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 		}
 		owner.arenaRef = arenaRef
 	}
-	setValue, setType, err := s.emitBuiltinSetReceiverValue(fieldExpr.Object, s.exprType(fieldExpr.Object))
+	setValue, setType, err := s.emitBuiltinSetReceiverValue(fieldExpr.Object, receiverType)
 	if err != nil {
 		return nil, nil, true, err
 	}
