@@ -39,21 +39,25 @@ type analysisDiskBuildCheckpoint struct {
 func restoreAnalysisDiskBuildCheckpoint(complete analysisDiskArtifact, program *loadedProgram, options semantic.AnalyzeOptions) (*analysisDiskBuildCheckpoint, error) {
 	artifact := analysisBuildArtifact(complete, program.source)
 	started := time.Now()
-	data, err := artifact.read()
+	var checkpoint *analysisDiskBuildCheckpoint
+	err := artifact.withPayload(func(data []byte) error {
+		build, err := semantic.RestoreAnalysisBuild(data)
+		if err != nil {
+			return err
+		}
+		if !build.MatchesInvocation(program.filename, program.source, options) {
+			return fmt.Errorf("checkpoint invocation mismatch")
+		}
+		// Bound eager reservation independently of the admitted state size,
+		// just like the synchronous restore path.
+		capacityHint := min(len(data)+len(data)/16, 1<<30)
+		checkpoint = &analysisDiskBuildCheckpoint{artifact: artifact, build: build, capacityHint: capacityHint, bytes: len(data), started: started}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	build, err := semantic.RestoreAnalysisBuild(data)
-	if err == nil && !build.MatchesInvocation(program.filename, program.source, options) {
-		err = fmt.Errorf("checkpoint invocation mismatch")
-	}
-	if err != nil {
-		return nil, err
-	}
-	// Bound eager reservation independently of the admitted state size, just
-	// like the synchronous restore path.
-	capacityHint := min(len(data)+len(data)/16, 1<<30)
-	return &analysisDiskBuildCheckpoint{artifact: artifact, build: build, capacityHint: capacityHint, bytes: len(data), started: started}, nil
+	return checkpoint, nil
 }
 
 func validateAnalysisDiskBuildCheckpoint(complete analysisDiskArtifact, program *loadedProgram, options semantic.AnalyzeOptions, checkpoint *analysisDiskBuildCheckpoint) error {

@@ -56,22 +56,47 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 				}
 			}
 		}
-		data, err := artifact.read()
+		load := func(candidate analysisDiskArtifact) error {
+			var preparationDone chan analysisScratchPreparation
+			err := candidate.withPayload(func(data []byte) error {
+				pending.loaded = true
+				pending.bytes = len(data)
+				if analysisDiskLikelyBodyEdit(artifact, program.source) {
+					filename, source, tokens := program.filename, program.source, program.tokenCache
+					prepared := semantic.NewLazyParsedRetainedScratch(func() (*ast.File, error) {
+						file, ok := parseProgramWithTokenCache(filename, source, io.Discard, tokens)
+						if !ok {
+							return nil, fmt.Errorf("independent source parse rejected")
+						}
+						return file, nil
+					}, options)
+					pending.preparation = analysisScratchPreparation{prepared: prepared}
+				} else {
+					preparationDone = startAnalysisScratchPreparation(program, options)
+				}
+				// RestoreAnalysisState copies any strings and byte slices it retains,
+				// so the mapping can be released as soon as this call returns.
+				pending.state, pending.err = semantic.RestoreAnalysisState(data)
+				return nil
+			})
+			if preparationDone != nil {
+				pending.preparation = <-preparationDone
+			}
+			return err
+		}
+		err := load(artifact)
 		// A family hint never changes the exact artifact's identity or header.
 		// Only a missing exact artifact may try a validated added-file baseline.
-		if os.IsNotExist(err) {
+		if !pending.loaded && os.IsNotExist(err) {
 			if candidate, ok := analysisDiskAddedFilesBaseline(program, options); ok {
-				data, err = candidate.read()
-				pending.familyReplay = err == nil
+				err = load(candidate)
+				pending.familyReplay = err == nil && pending.loaded
 			}
 		}
 		if err != nil {
 			pending.err = err
 			return
 		}
-		pending.loaded, pending.bytes = true, len(data)
-		lazy := analysisDiskLikelyBodyEdit(artifact, program.source)
-		pending.state, pending.preparation, pending.err = restoreAnalysisWithScratch(data, program, options, lazy)
 	}()
 	return pending
 }
@@ -100,22 +125,7 @@ type analysisScratchPreparation struct {
 // semantic analysis. A separate parse/declaration phase can therefore overlap
 // it. Always join preparation before returning, including rejected snapshots,
 // so fallback analysis and later requests never inherit background work.
-// With lazy set, neither parsing nor declarations run until an update needs them.
-func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options semantic.AnalyzeOptions, lazy bool) (*semantic.RetainedAnalysis, analysisScratchPreparation, error) {
-	if lazy {
-		// Keep invocation inputs, not a second AST. No parsing/declaration work
-		// starts until UpdatePrepared rejects its fast body preparation.
-		filename, source, tokens := program.filename, program.source, program.tokenCache
-		prepared := semantic.NewLazyParsedRetainedScratch(func() (*ast.File, error) {
-			file, ok := parseProgramWithTokenCache(filename, source, io.Discard, tokens)
-			if !ok {
-				return nil, fmt.Errorf("independent source parse rejected")
-			}
-			return file, nil
-		}, options)
-		state, err := semantic.RestoreAnalysisState(data)
-		return state, analysisScratchPreparation{prepared: prepared}, err
-	}
+func startAnalysisScratchPreparation(program *loadedProgram, options semantic.AnalyzeOptions) chan analysisScratchPreparation {
 	done := make(chan analysisScratchPreparation, 1)
 	go func() {
 		started := time.Now()
@@ -127,9 +137,28 @@ func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options sem
 		preparation.elapsed = time.Since(started)
 		done <- preparation
 	}()
+	return done
+}
+
+// restoreAnalysisWithScratch keeps the byte-slice restoration helper used by
+// package tests. Production disk restoration uses withPayload directly so a
+// mapped artifact is released before waiting for eager scratch preparation.
+func restoreAnalysisWithScratch(data []byte, program *loadedProgram, options semantic.AnalyzeOptions, lazy bool) (*semantic.RetainedAnalysis, analysisScratchPreparation, error) {
+	if lazy {
+		filename, source, tokens := program.filename, program.source, program.tokenCache
+		prepared := semantic.NewLazyParsedRetainedScratch(func() (*ast.File, error) {
+			file, ok := parseProgramWithTokenCache(filename, source, io.Discard, tokens)
+			if !ok {
+				return nil, fmt.Errorf("independent source parse rejected")
+			}
+			return file, nil
+		}, options)
+		state, err := semantic.RestoreAnalysisState(data)
+		return state, analysisScratchPreparation{prepared: prepared}, err
+	}
+	done := startAnalysisScratchPreparation(program, options)
 	state, err := semantic.RestoreAnalysisState(data)
-	preparation := <-done
-	return state, preparation, err
+	return state, <-done, err
 }
 
 // analysisDiskBaselineSource is the source the stored state was analyzed from.
