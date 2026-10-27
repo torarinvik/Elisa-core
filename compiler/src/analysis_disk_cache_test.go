@@ -130,7 +130,9 @@ func TestAnalysisDiskCacheFreshProcessNativeExecution(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "native.elisa")
 	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "1", "ELISACORE_RETAINED_SERVER": filepath.Join(dir, "nonexistent.sock")}
+	partitions := []string{"4", "8", "16", "32"}
 	for revision, value := range []string{"7", "7", "8", "7"} {
+		env["ELISACORE_OBJECT_PARTITIONS"] = partitions[revision]
 		var text strings.Builder
 		for i := 0; i < 80; i++ {
 			fmt.Fprintf(&text, "def unused_%d() -> i64:\n    return %d\n\n", i, i)
@@ -185,6 +187,11 @@ func TestAnalysisDiskCacheKeyTracksSemanticInputs(t *testing.T) {
 		return a.key
 	}
 	original := key()
+	t.Setenv("ELISACORE_OBJECT_PARTITIONS", "32")
+	if key() != original {
+		t.Fatal("backend-only object partition count discarded reusable analysis state")
+	}
+	t.Setenv("ELISACORE_OBJECT_PARTITIONS", "")
 	program.source = []byte("def main() -> i32:\n    return 1\n")
 	if key() != original {
 		t.Fatal("body edit discarded reusable analysis state")
