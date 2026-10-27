@@ -150,6 +150,26 @@ func (r *RetainedAnalysis) capture(a *Analyzer, decls []scopedDecl, post func([]
 	r.a, r.decls, r.post = a, decls, post
 }
 
+// pruneFastPrepareDigests drops declarations from older comparison parses. The
+// digest map is part of the retained snapshot graph, so stale keys would keep
+// their source ASTs (including bodies) alive after pristine advances.
+func (r *RetainedAnalysis) pruneFastPrepareDigests(currentDecls []ast.Decl) {
+	if r == nil || len(r.digestOf) == 0 {
+		return
+	}
+	current := make(map[*ast.FuncDecl]struct{})
+	for _, decl := range currentDecls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			current[fn] = struct{}{}
+		}
+	}
+	for fn := range r.digestOf {
+		if _, ok := current[fn]; !ok {
+			delete(r.digestOf, fn)
+		}
+	}
+}
+
 // Update applies an edit given a fresh, unanalyzed parse of the edited source.
 // Changed function bodies move from file into the retained AST, and file
 // becomes the base the next edit is compared against, so the caller must not
@@ -2449,6 +2469,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if plainManaged {
 		plainCommitted = true
 	}
+	r.pruneFastPrepareDigests(newDecls)
 	r.LastStats.Total = time.Since(start)
 	return r.result, nil
 }

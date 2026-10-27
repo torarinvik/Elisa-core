@@ -131,3 +131,62 @@ func TestRetainedFastPrepareDigestIncludesRegionOwnership(t *testing.T) {
 	}
 	assertRetainedCanonicalLiveResultParity(t, cold, warm)
 }
+
+func TestRetainedFastPrepareDropsHistoricalDigestASTs(t *testing.T) {
+	enableRetainedFastPrepareForTest(t)
+	const base = `def calculate(value: i64) -> i64:
+    return value + 1
+`
+	_, state := AnalyzeRetained(retainedParse(t, base), retainedParse(t, base), []byte(base), AnalyzeOptions{})
+	current := base
+	for _, next := range []string{
+		strings.Replace(current, "value + 1", "value + 2", 1),
+		strings.Replace(strings.Replace(current, "value + 1", "value + 2", 1), "value + 2", "value + 3", 1),
+	} {
+		if next == current {
+			t.Fatal("body edit did not apply")
+		}
+		if _, err := state.Update(retainedParse(t, next), retainedParse(t, next), []byte(next)); err != nil {
+			t.Fatal(err)
+		}
+		if !state.LastStats.FastPrepared {
+			t.Fatalf("body edit did not use fast preparation: %+v", state.LastStats)
+		}
+		current = next
+
+		baseline := map[*ast.FuncDecl]bool{}
+		for _, decl := range retainedWalkDecls(state.pristine) {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				baseline[fn] = true
+			}
+		}
+		for fn := range state.digestOf {
+			if !baseline[fn] {
+				t.Fatal("fast-preparation digest retains a historical declaration")
+			}
+		}
+	}
+
+	data, err := state.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreAnalysisState(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := map[*ast.FuncDecl]bool{}
+	for _, decl := range retainedWalkDecls(restored.pristine) {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			baseline[fn] = true
+		}
+	}
+	for fn := range restored.digestOf {
+		if !baseline[fn] {
+			t.Fatal("snapshot retained a digest keyed by a historical declaration")
+		}
+		if len(fn.Body) != 0 {
+			t.Fatal("snapshot retained a digest declaration body")
+		}
+	}
+}
