@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 )
 
-// Frames are contiguous, so the previous end also supplies the next start.
-// Keeping only ends avoids a redundant machine word for every graph object.
-type stateFrame struct{ end int }
+// Keep one body offset for each fixed-size worker batch instead of an end for
+// every object. Workers recover individual ends from the validated wire table.
+const framedDecodeBatchSize = 64
 
 // Keep restored dictionary strings in small immutable allocations rather than
 // one allocation per dictionary entry. An entry larger than this limit remains
@@ -33,13 +33,24 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	if dictionary < uint64(d.at) || dictionary > uint64(len(d.data)) {
 		return fmt.Errorf("invalid state dictionary offset")
 	}
-	if err := d.reserve(uint64(count+1), reflect.TypeFor[stateFrame]().Size()); err != nil {
+	frameBatchCount := count / framedDecodeBatchSize
+	if count%framedDecodeBatchSize != 0 {
+		frameBatchCount++
+	}
+	if err := d.reserve(uint64(frameBatchCount), reflect.TypeFor[int]().Size()); err != nil {
 		return err
 	}
-	frames := make([]stateFrame, count+1)
+	frameStarts := make([]int, frameBatchCount)
 	bodiesStart := d.at
 	cursor := uint64(d.at)
-	for i := range frames {
+	rootStart := bodiesStart
+	for i := 0; i <= count; i++ {
+		if i < count && i%framedDecodeBatchSize == 0 {
+			frameStarts[i/framedDecodeBatchSize] = int(cursor)
+		}
+		if i == count {
+			rootStart = int(cursor)
+		}
 		size := binary.LittleEndian.Uint64(table[i*8:])
 		if size > dictionary-cursor {
 			return fmt.Errorf("state frame exceeds bodies")
@@ -47,7 +58,6 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 		if i < count && descriptions[i+1].alias != nil && size != 0 {
 			return fmt.Errorf("state alias has a body")
 		}
-		frames[i] = stateFrame{int(cursor + size)}
 		cursor += size
 	}
 	if cursor != dictionary {
@@ -84,31 +94,28 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 		defer wg.Done()
 		worker := decoder{registry: d.registry, objects: d.objects, strings: d.strings, framed: true, sharedBudget: budget}
 		for {
-			start := int(next.Add(64)) - 64
+			start := int(next.Add(framedDecodeBatchSize)) - framedDecodeBatchSize
 			if start >= count || cancelled.Load() {
 				return
 			}
-			for i := start; i < min(start+64, count); i++ {
-				if descriptions[i+1].alias != nil {
-					continue
+			frameStart := frameStarts[start/framedDecodeBatchSize]
+			for i := start; i < min(start+framedDecodeBatchSize, count); i++ {
+				frameEnd := frameStart + int(binary.LittleEndian.Uint64(table[i*8:]))
+				if descriptions[i+1].alias == nil {
+					worker.data = payload[frameStart:frameEnd]
+					worker.at = 0
+					if err := worker.fillObject(i+1, descriptions[i+1]); err != nil {
+						cancelled.Store(true)
+						errors <- err
+						return
+					}
+					if worker.at != len(worker.data) {
+						cancelled.Store(true)
+						errors <- fmt.Errorf("trailing state object frame")
+						return
+					}
 				}
-				frame := frames[i]
-				frameStart := bodiesStart
-				if i > 0 {
-					frameStart = frames[i-1].end
-				}
-				worker.data = payload[frameStart:frame.end]
-				worker.at = 0
-				if err := worker.fillObject(i+1, descriptions[i+1]); err != nil {
-					cancelled.Store(true)
-					errors <- err
-					return
-				}
-				if worker.at != len(worker.data) {
-					cancelled.Store(true)
-					errors <- fmt.Errorf("trailing state object frame")
-					return
-				}
+				frameStart = frameEnd
 			}
 		}
 	}
@@ -125,12 +132,8 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	for err := range errors {
 		return err
 	}
-	root := frames[count]
-	d.data = payload[:root.end]
-	d.at = bodiesStart
-	if count > 0 {
-		d.at = frames[count-1].end
-	}
+	d.data = payload[:int(dictionary)]
+	d.at = rootStart
 	return nil
 }
 
