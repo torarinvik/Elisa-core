@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"elisacore/src/backend"
 )
 
 // Content-addressed build cache for `-emit obj`. An object file produced from the
@@ -162,6 +164,33 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		}
 	}
 
+	// Native fragments merge their objects with the request's selected linker.
+	// The environment key records ELISA_LD's spelling, but cannot detect an
+	// executable replaced in place or a different `ld` selected through PATH.
+	// The persistent object cache can return before the backend's fragment key is
+	// consulted, so include the resolved command and strong executable digest in
+	// the outer key whenever that path can run.
+	if buildCacheUsesNativeFragmentMerger(options) {
+		merger := backend.NewIncrementalObjectSession(1, 1)
+		command, executable, err := merger.ObjectMergerCacheInputs()
+		if err != nil {
+			return buildCacheArtifact{}, false
+		}
+		stamp, err := toolchainContentStamp(executable)
+		if err != nil {
+			return buildCacheArtifact{}, false
+		}
+		identity, err := json.Marshal(struct {
+			Command    []string
+			Executable string
+			Digest     string
+		}{Command: command, Executable: executable, Digest: stamp})
+		if err != nil {
+			return buildCacheArtifact{}, false
+		}
+		testRunnerCacheWriteBytes(hash, "native-fragment-merger", identity)
+	}
+
 	root, err := buildCacheRoot()
 	if err != nil {
 		return buildCacheArtifact{}, false
@@ -169,6 +198,13 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	key := hex.EncodeToString(hash.Sum(nil))
 	dir := filepath.Join(root, key)
 	return buildCacheArtifact{key: key, dir: dir, object: filepath.Join(dir, "out.o")}, true
+}
+
+func buildCacheUsesNativeFragmentMerger(options cliOptions) bool {
+	return buildCacheEnabled() &&
+		os.Getenv("ELISACORE_PARTITION_CACHE") != "0" &&
+		os.Getenv("ELISACORE_NATIVE_FRAGMENTS") == "1" &&
+		effectiveOptimizationLevel(options) != backend.OptimizationLevel0
 }
 
 // publishCachedBuildObject atomically installs a freshly built object into the
