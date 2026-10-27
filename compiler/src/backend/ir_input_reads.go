@@ -13,6 +13,11 @@ import (
 type irFunctionBodyRead struct {
 	Declaration, Canonical *ast.FuncDecl
 	Use                    string
+	CanonicalFromResult    bool
+	// Syntax is captured at observation time, before later AST mutation.
+	// It excludes source positions and does not encode semantic facts.
+	SyntaxDigest      [32]byte
+	SyntaxDigestValid bool
 }
 
 type irInputQueryRead struct {
@@ -63,12 +68,25 @@ type irInputReadRecorder struct {
 }
 
 func (r *irInputReadRecorder) body(decl, canonical *ast.FuncDecl, use string) {
+	r.recordBody(decl, canonical, use, false)
+}
+
+// bodyMapped records a private-to-source mapping obtained from the active
+// specialization Result. It does not establish body or fact equivalence.
+func (r *irInputReadRecorder) bodyMapped(decl, canonical *ast.FuncDecl, use string) {
+	r.recordBody(decl, canonical, use, true)
+}
+
+func (r *irInputReadRecorder) recordBody(decl, canonical *ast.FuncDecl, use string, mapped bool) {
 	if r == nil || decl == nil {
 		return
 	}
+	read := irFunctionBodyRead{Declaration: decl, Canonical: canonical, Use: use, CanonicalFromResult: mapped}
+	if index, err := semantic.IndexFunctionNodes(decl); err == nil {
+		read.SyntaxDigest, read.SyntaxDigestValid = index.Fingerprint(), true
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	read := irFunctionBodyRead{decl, canonical, use}
 	if r.seen == nil {
 		r.seen = map[irFunctionBodyRead]bool{}
 	}

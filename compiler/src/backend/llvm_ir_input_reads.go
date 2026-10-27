@@ -21,6 +21,10 @@ func (g *llvmGenerator) functionBodyForInputRead(decl *ast.FuncDecl, use string)
 	canonical := decl
 	if g.inputReads != nil && g.result != nil {
 		canonical = g.result.CanonicalCodegenFunction(decl)
+		if canonical != nil && canonical != decl {
+			g.inputReads.bodyMapped(decl, canonical, use)
+			return decl.Body
+		}
 	}
 	return functionBodyForInputRead(decl, g.inputReads, canonical, use)
 }
