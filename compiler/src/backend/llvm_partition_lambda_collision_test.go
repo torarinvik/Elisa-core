@@ -3,10 +3,15 @@
 package backend
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -216,5 +221,193 @@ def main() -> i64:
 	_, err := session.buildIRPartition(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}, part, 2, true, "test", unit, target, worklists[part], &members, shared)
 	if !errors.Is(err, errPartitionDeclined) {
 		t.Fatalf("submit worker must decline partitioning, got %v", err)
+	}
+}
+
+func TestPartitionedLambdaDoesNotReuseUserLinkName(t *testing.T) {
+	t.Setenv("ELISACORE_PARALLEL_IR", "1")
+	worker := "worker0"
+	part := partitionOwner(worker, 2)
+	var filename, helper string
+	for i := 0; i < 1000; i++ {
+		filename = fmt.Sprintf("lambda_user_collision_%d.elisa", i)
+		abs, err := filepath.Abs(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unit := sha256.Sum256([]byte(abs))
+		helper = fmt.Sprintf("elisa.partition.%x.%d.lambda_0", unit, part)
+		if partitionOwner(helper, 2) == part {
+			break
+		}
+	}
+	source := fmt.Sprintf(`@link_name("%s")
+def evil(n: i64) -> i64:
+    return n + 9
+
+def %s(n: i64) -> i64:
+    f: fn(i64) -> i64 = fn(x: i64) => x + 1
+    return f(n)
+
+def main() -> i64:
+    return %s(3) + evil(3)
+`, helper, worker, worker)
+	result := parseAndAnalyzeBackendTest(t, filename, source)
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := sha256.Sum256([]byte(abs))
+	if !partitionHelperNamespaceConflicts(result, unit, nil) {
+		t.Fatal("failed to detect reserved user link name")
+	}
+	session := NewIncrementalObjectSession(2, 32<<20)
+	session.minWeight = 0
+	session.EnableDiskCache(t.TempDir(), "user-symbol", 64<<20)
+	out := filepath.Join(t.TempDir(), "partitioned.o")
+	if err := session.WriteObject(result, out, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
+	}
+	if got := incrementalObjectNativeStatus(t, out); got != 16 {
+		t.Fatalf("partitioned runtime got %d, want 16", got)
+	}
+	cold := filepath.Join(t.TempDir(), "cold.o")
+	if err := WriteLLVMObjectFileWithOptions(result, cold, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0, Serial: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := incrementalObjectNativeStatus(t, cold); got != 16 {
+		t.Fatalf("cold runtime got %d, want 16", got)
+	}
+}
+
+func TestPartitionLambdaHelperRemainsPrivate(t *testing.T) {
+	source := `def worker(n: i64) -> i64:
+    f: fn(i64) -> i64 = fn(x: i64) => x + 1
+    return f(n)
+`
+	result := parseAndAnalyzeBackendTest(t, "private_lambda.elisa", source)
+	result.BeginSharedCodegen()
+	defer result.EndSharedCodegen()
+	const parts = 2
+	part := partitionOwner("worker", parts)
+	unit := sha256.Sum256([]byte("lambda-private-test"))
+	shared := newSharedCodegenLookups(result)
+	g, err := compileLLVMModuleConfigured(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", false, false, func(g *llvmGenerator) {
+		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
+		g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.", unit, part)
+		g.sharedResult = true
+	}, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if !finishPartitionModule(g.module, part, parts, hex.EncodeToString(unit[:]), g.partLocalHelpers) {
+		t.Fatal("partition unexpectedly declined")
+	}
+	ir := g.printModule()
+	if !strings.Contains(ir, "define private i64 @elisa.partition.") {
+		t.Fatalf("generated helper is not private:\n%s", ir)
+	}
+}
+
+func TestPartitionedGenericReturningLambda(t *testing.T) {
+	t.Setenv("ELISACORE_PARALLEL_IR", "1")
+	names := [2]string{}
+	for n := 0; names[0] == "" || names[1] == ""; n++ {
+		candidate := fmt.Sprintf("returncaller%d", n)
+		p := partitionOwner(candidate, 2)
+		if names[p] == "" {
+			names[p] = candidate
+		}
+	}
+	source := fmt.Sprintf(`def make[T](value: T) -> fn(i64) -> i64:
+    return fn(x: i64) => x + 1
+
+def %s() -> i64:
+    f: fn(i64) -> i64 = make[i64](0)
+    return f(3)
+
+def %s() -> i64:
+    f: fn(i64) -> i64 = make[i64](0)
+    return f(4)
+
+def main() -> i64:
+    return %s() + %s()
+`, names[0], names[1], names[0], names[1])
+	result := parseAndAnalyzeBackendTest(t, "return_lambda.elisa", source)
+	session := NewIncrementalObjectSession(2, 32<<20)
+	session.minWeight = 0
+	session.EnableDiskCache(t.TempDir(), "return-lambda", 64<<20)
+	for i := 0; i < 2; i++ {
+		out := filepath.Join(t.TempDir(), "out.o")
+		if err := session.WriteObject(result, out, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+			t.Fatal(err)
+		}
+		if got := incrementalObjectNativeStatus(t, out); got != 9 {
+			t.Fatalf("iteration %d got %d want 9", i, got)
+		}
+	}
+	if stats := session.Stats(); stats.PartitionsEmitted != 2 || stats.PartitionsReused != 2 {
+		t.Fatalf("did not exercise partition and replay: %+v", stats)
+	}
+	cold := filepath.Join(t.TempDir(), "cold.o")
+	if err := WriteLLVMObjectFileWithOptions(result, cold, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0, Serial: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := incrementalObjectNativeStatus(t, cold); got != 9 {
+		t.Fatalf("cold got %d want 9", got)
+	}
+}
+
+func TestPartitionedLambdaCannotBeInterposedByForeignObject(t *testing.T) {
+	t.Setenv("ELISACORE_PARALLEL_IR", "1")
+	filename := "foreign_lambda_interposition.elisa"
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := sha256.Sum256([]byte(abs))
+	part := partitionOwner("worker", 2)
+	helper := fmt.Sprintf("elisa.partition.%x.%d.lambda_0", unit, part)
+	source := `def worker(n: i64) -> i64:
+    f: fn(i64) -> i64 = fn(x: i64) => x + 1
+    return f(n)
+
+def main() -> i64:
+    return worker(3)
+`
+	result := parseAndAnalyzeBackendTest(t, filename, source)
+	session := NewIncrementalObjectSession(2, 32<<20)
+	session.minWeight = 0
+	session.EnableDiskCache(t.TempDir(), "foreign-interpose", 64<<20)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "elisa.o")
+	if err := session.WriteObject(result, out, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+		t.Fatal(err)
+	}
+	if session.Stats().PartitionsEmitted != 2 {
+		t.Fatal("partitioned IR was not exercised")
+	}
+	assemblerName := helper
+	if runtime.GOOS == "darwin" {
+		assemblerName = "_" + assemblerName
+	}
+	cfile := filepath.Join(dir, "foreign.c")
+	csource := fmt.Sprintf("long hostile(long x) __asm__(%q);\nlong hostile(long x) { return 100; }\n", assemblerName)
+	if err := os.WriteFile(cfile, []byte(csource), 0600); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(dir, "foreign.o")
+	if output, err := exec.Command("clang", "-c", cfile, "-o", foreign).CombinedOutput(); err != nil {
+		t.Fatalf("foreign object: %v %s", err, output)
+	}
+	exe := filepath.Join(dir, "exe")
+	if output, err := exec.Command("clang", out, foreign, "-o", exe).CombinedOutput(); err != nil {
+		t.Fatalf("link: %v %s", err, output)
+	}
+	err = exec.Command(exe).Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 4 {
+		t.Fatalf("interposed result: %v", err)
 	}
 }

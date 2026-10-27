@@ -270,6 +270,7 @@ type llvmGenerator struct {
 	cachedArenaRefType        *semantic.RefType
 	syntheticCounter          int
 	partSynthNS               string
+	partLocalHelpers          map[string]bool
 	partUnsafeHelpers         bool
 	wordBits                  int
 	emitDebugInfo             bool

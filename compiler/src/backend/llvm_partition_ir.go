@@ -187,7 +187,7 @@ func appendPartitionIRDecl(worklists [][]ast.Decl, decl ast.Decl, result *semant
 // finishPartitionModule gives the partition's definitions their final
 // linkage. It reports false when a symbol's identity cannot be matched across
 // partitions; the caller then uses the module-split path.
-func finishPartitionModule(m C.LLVMModuleRef, part, parts int, unit string) bool {
+func finishPartitionModule(m C.LLVMModuleRef, part, parts int, unit string, localHelpers ...map[string]bool) bool {
 	for f := C.LLVMGetFirstFunction(m); f != nil; f = C.LLVMGetNextFunction(f) {
 		if C.LLVMIsDeclaration(f) != 0 {
 			continue
@@ -198,6 +198,10 @@ func finishPartitionModule(m C.LLVMModuleRef, part, parts int, unit string) bool
 				C.LLVMSetLinkage(f, C.LLVMWeakODRLinkage)
 			}
 		case C.LLVMPrivateLinkage, C.LLVMInternalLinkage:
+			// Only helpers explicitly generated in this module are local.
+			if len(localHelpers) != 0 && localHelpers[0][llvmValueName(f)] {
+				continue
+			}
 			if !shareLocalDefinition(f, unit) {
 				return false
 			}
@@ -297,6 +301,9 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	if s.irInputAudit != nil {
 		sharedReads = &irInputReadRecorder{}
 	}
+	if partitionHelperNamespaceConflicts(result, unitID, sharedReads) {
+		return errPartitionDeclined
+	}
 	shared := newSharedCodegenLookups(result, sharedReads)
 	declarations := partitionIRDeclarationWorklists(result, shared.symbolsByNode, parts, sharedReads)
 	objects := make([][]byte, parts)
@@ -339,6 +346,35 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		fmt.Fprintf(os.Stderr, "[build-timing] partitioned object: ir+partitions %v, merge %v; ir cpu %v (generate %v), bitcode %v, native %v x%d, defs %d owned %d\n", buildDuration.Round(time.Millisecond), time.Since(mergeStart).Round(time.Millisecond), time.Duration(partitionIRNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionGenNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionBitcodeNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionNativeNanos.Swap(0)).Round(time.Millisecond), partitionNativeCount.Swap(0), partitionDefs.Swap(0), partitionOwned.Swap(0))
 	}
 	return nil
+}
+
+// partitionHelperNamespaceConflicts rejects caller-controlled native symbols
+// in the generated helper namespace. EASM can supply arbitrary native symbols
+// that are not represented in GlobalScope, so it must use whole-module IR.
+func partitionHelperNamespaceConflicts(result *semantic.Result, unitID [32]byte, reads *irInputReadRecorder) bool {
+	if result == nil || result.GlobalScope == nil || len(result.EASMModules) != 0 {
+		return true
+	}
+	prefix := fmt.Sprintf("elisa.partition.%x.", unitID)
+	for name, symbol := range newIRCodegenReadView(result, reads).GlobalSymbolsMap("partition-helper-symbols") {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+		if symbol != nil && (strings.HasPrefix(symbol.Name, prefix) || strings.HasPrefix(symbol.LinkName, prefix)) {
+			return true
+		}
+	}
+	for _, export := range result.ExportedFuncs {
+		if export != nil && (strings.HasPrefix(export.PublicName, prefix) || strings.HasPrefix(export.LinkName, prefix)) {
+			return true
+		}
+	}
+	for _, export := range result.ExportedGlobals {
+		if export != nil && strings.HasPrefix(export.PublicName, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // runPartitionIRWorkers stops scheduling new partitions after a decline, but
@@ -384,7 +420,7 @@ func runPartitionIRWorkers(parts, workers int, order []int, build func(int) erro
 var errPartitionDeclined = errors.New("partitioned IR declined")
 
 func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, declarations []ast.Decl, members *[]string, shared *sharedCodegenLookups) ([]byte, error) {
-	unit := hex.EncodeToString(unitID[:8])
+	unit := hex.EncodeToString(unitID[:])
 	irStart := time.Now()
 	var inputReads *irInputReadRecorder
 	if s.irInputAudit != nil {
@@ -417,7 +453,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	if g.partUnsafeHelpers {
 		return nil, errPartitionDeclined
 	}
-	if !finishPartitionModule(g.module, part, parts, unit) {
+	if !finishPartitionModule(g.module, part, parts, unit, g.partLocalHelpers) {
 		return nil, errPartitionDeclined
 	}
 	if err := g.ensureTargetMachine(); err != nil {

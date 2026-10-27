@@ -165,6 +165,15 @@ func (s *functionState) emitLambdaHelper(expr *ast.LambdaExpr, funcType *semanti
 		return nil, err
 	}
 	s.g.setDefinedFunctionLinkage(helperName, fnValue, helperType)
+	// The helper is used only inside its defining partition. Keeping it local
+	// also prevents unrelated linked objects from defining the same name.
+	if s.g.partSynthNS != "" {
+		C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
+		if s.g.partLocalHelpers == nil {
+			s.g.partLocalHelpers = make(map[string]bool)
+		}
+		s.g.partLocalHelpers[llvmValueName(fnValue)] = true
+	}
 	if C.LLVMCountBasicBlocks(fnValue) != 0 {
 		return fnValue, nil
 	}
