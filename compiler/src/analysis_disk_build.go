@@ -74,6 +74,14 @@ func validateAnalysisDiskBuildCheckpoint(complete analysisDiskArtifact, program 
 	return nil
 }
 
+// stopAfterFuncAndJoin prevents an AfterFunc callback from outliving the step
+// that owns it. Timer.Stop does not wait when the callback has already started.
+func stopAfterFuncAndJoin(stop func() bool, join func()) {
+	if !stop() {
+		join()
+	}
+}
+
 // An unfinished checkpoint is separate from reusable completed state and admits
 // only this exact source revision. A stopped build reports durable incomplete
 // progress, never a semantic error or artifact. The same normal command resumes
@@ -176,7 +184,9 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		} // Advance's nonpositive budget means unbounded.
 		slow := analysisBootstrapSlowHint(artifact, done)
 		debugAnalysisDisk(stderr, "bootstrap budget=%v elapsed=%v slow-before=%d", budget.Round(time.Millisecond), time.Since(processStartTime).Round(time.Millisecond), slow)
+		watchdogDone := make(chan struct{})
 		watchdog := time.AfterFunc(budget+analysisBootstrapMargin, func() {
+			defer close(watchdogDone)
 			if running := semantic.RunningDeclaration(); running >= 0 {
 				analysisBootstrapRecordSlow(artifact, running)
 				debugAnalysisDisk(stderr, "bootstrap deadline reached in declaration %d", running)
@@ -186,7 +196,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		var err error
 		stepLimit := analysisBootstrapStepLimit(limit, done, slow)
 		result, state, err = build.AdvanceBefore(stepLimit, budget, slow)
-		watchdog.Stop()
+		stopAfterFuncAndJoin(watchdog.Stop, func() { <-watchdogDone })
 		if err != nil {
 			return incomplete(err), nil
 		}

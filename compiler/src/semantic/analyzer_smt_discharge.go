@@ -137,6 +137,21 @@ func (a *Analyzer) closeSMT() {
 	a.smtSolver = nil
 }
 
+// resetSMTForRetainedUpdate begins a new analysis pass on a retained Analyzer.
+// Query text alone does not bind a verdict to the solver binary or resource
+// budget, and the declaration pointers (and therefore smtHistoryFor) can survive
+// an edit. Drop per-pass state so changed solver settings cannot reuse old
+// resource declines or history.
+func (a *Analyzer) resetSMTForRetainedUpdate() {
+	a.closeSMT()
+	a.smtQueryCache = nil
+	a.smtProofCache = nil
+	a.smtProofCacheInitialized = false
+	a.smtUnavailable = false
+	a.smtHistory = nil
+	a.smtHistoryFor = nil
+}
+
 // trySMTProveRefinement attempts to discharge `value is law[predArgs]` with the solver. Returns true
 // only on a sound proof (the solver reported unsat on the negated obligation). It is called after the
 // linear tier declines, so the subject is genuinely outside the affine fragment (e.g. a var*var

@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"elisacore/src/ast"
+	"elisacore/src/smt"
 )
 
 func TestSMTProofCacheStorage(t *testing.T) {
@@ -131,6 +134,59 @@ func TestSMTProofCacheSolverAndBudgetIdentity(t *testing.T) {
 	rebudgeted := newSMTProofCache(directory, solver)
 	if rebudgeted == nil || rebudgeted.contains("query") {
 		t.Fatal("budget change ignored")
+	}
+}
+
+func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
+	priorDeclineCache := smtDeclineCacheEnabled
+	smtDeclineCacheEnabled = true
+	defer func() { smtDeclineCacheEnabled = priorDeclineCache }()
+
+	directory := t.TempDir()
+	solver := filepath.Join(directory, "solver")
+	writeSolver := func(version string) {
+		t.Helper()
+		body := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '%s'\n", version)
+		if err := os.WriteFile(solver, []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSolver("solver-version-1")
+	cacheDirectory := filepath.Join(directory, "cache")
+	t.Setenv("ELISACORE_SMT_CACHE_DIR", cacheDirectory)
+	t.Setenv("ELISA_SMT_RLIMIT", "1000")
+	query := "(assert (= x 1))\n"
+	oldCache := newSMTProofCache(cacheDirectory, solver)
+	if oldCache == nil {
+		t.Fatal("could not establish old cache identity")
+	}
+	oldCache.publishResourceDeclined(query)
+	if _, ok := oldCache.declined(query); !ok {
+		t.Fatal("fixture did not publish a resource decline")
+	}
+
+	a := &Analyzer{
+		smtBinary:                solver,
+		smtQueryCache:            map[string]smtQueryResult{query: {proven: false}},
+		smtProofCache:            oldCache,
+		smtProofCacheInitialized: true,
+		smtUnavailable:           true,
+		smtSolver:                &fixedSMTSolver{result: smt.Unknown},
+		smtHistory:               []string{"old declaration query"},
+		smtHistoryFor:            &ast.FuncDecl{},
+	}
+	writeSolver("solver-version-2")
+	t.Setenv("ELISA_SMT_RLIMIT", "2000")
+	a.resetSMTForRetainedUpdate()
+	if a.smtSolver != nil || a.smtQueryCache != nil || a.smtProofCache != nil || a.smtProofCacheInitialized || a.smtUnavailable || a.smtHistory != nil || a.smtHistoryFor != nil {
+		t.Fatalf("retained SMT state survived reset: solver=%v query=%v proof=%v initialized=%v unavailable=%v history=%v historyFor=%v",
+			a.smtSolver, a.smtQueryCache, a.smtProofCache, a.smtProofCacheInitialized, a.smtUnavailable, a.smtHistory, a.smtHistoryFor)
+	}
+	if _, ok := a.smtCachedQuery(query); ok {
+		t.Fatal("resource decline from the old solver or budget survived retained update")
+	}
+	if a.smtProofCache == nil || a.smtProofCache.identity == oldCache.identity {
+		t.Fatal("new retained pass did not establish the changed solver/budget identity")
 	}
 }
 

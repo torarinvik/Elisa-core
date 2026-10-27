@@ -338,6 +338,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	if a == nil {
 		return fail("retained analysis was discarded by an earlier update")
 	}
+	a.resetSMTForRetainedUpdate()
 	oldDecls, newDecls := retainedWalkDecls(r.pristine), retainedWalkDecls(file)
 	// Pair declarations in order. A new declaration with no partner is accepted
 	// only as an added top-level function with a fresh name: it is declared in the

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"elisacore/src/semantic"
 )
@@ -94,6 +95,43 @@ func TestAnalysisBootstrapStepLimitIsolatesKnownSlowDeclaration(t *testing.T) {
 				t.Fatalf("analysisBootstrapStepLimit(%d, %d, %d) = %d, want %d", test.configured, test.next, test.slow, got, test.want)
 			}
 		})
+	}
+}
+
+func TestStopAfterFuncAndJoinWaitsForStartedCallback(t *testing.T) {
+	callbackDone := make(chan struct{})
+	joined := make(chan struct{})
+	returned := make(chan struct{})
+	go func() {
+		stopAfterFuncAndJoin(func() bool { return false }, func() {
+			close(joined)
+			<-callbackDone
+		})
+		close(returned)
+	}()
+
+	select {
+	case <-joined:
+	case <-time.After(time.Second):
+		t.Fatal("join callback was not reached")
+	}
+	select {
+	case <-returned:
+		t.Fatal("owner returned before the started callback completed")
+	default:
+	}
+
+	close(callbackDone)
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("owner did not return after the callback completed")
+	}
+
+	joinedWhenStopped := false
+	stopAfterFuncAndJoin(func() bool { return true }, func() { joinedWhenStopped = true })
+	if joinedWhenStopped {
+		t.Fatal("joined a callback after successfully stopping its timer")
 	}
 }
 
