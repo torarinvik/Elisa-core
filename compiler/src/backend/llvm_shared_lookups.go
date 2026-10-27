@@ -34,6 +34,10 @@ type sharedCodegenLookups struct {
 	// while one result is lowered, and the canonical key is a pure function of the
 	// type, so every partition of this result shares one encoding per type.
 	typeKeys sync.Map // semantic.Type -> typeMemoKey
+	// specializationParams memoizes the derived source-level specialization
+	// parameters for region-indexed function types. The returned slices are
+	// immutable for the lifetime of this build, like the semantic types above.
+	specializationParams sync.Map // *semantic.FuncType -> []ast.GenericParam
 }
 
 func codegenSymbolsByNode(result *semantic.Result, recorders ...*irInputReadRecorder) map[ast.Node]*semantic.Symbol {

@@ -20,7 +20,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic specialization requires a function declaration and type")
 	}
-	params := functionSpecializationParams(base)
+	params := g.functionSpecializationParams(base)
 	orderedArgs := make([]semantic.Type, 0, len(params))
 	for _, param := range params {
 		name := param.Name
@@ -114,7 +114,7 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic extern specialization requires a function declaration and type")
 	}
-	params := functionSpecializationParams(base)
+	params := g.functionSpecializationParams(base)
 	orderedArgs := make([]semantic.Type, 0, len(params))
 	for _, param := range params {
 		name := param.Name
@@ -195,6 +195,22 @@ func functionSpecializationParams(base *semantic.FuncType) []ast.GenericParam {
 		}
 	}
 	return params
+}
+
+func (g *llvmGenerator) functionSpecializationParams(base *semantic.FuncType) []ast.GenericParam {
+	if base == nil {
+		return nil
+	}
+	if len(base.RegionParams) == 0 || g == nil || g.sharedLookups == nil {
+		return functionSpecializationParams(base)
+	}
+	shared := g.sharedLookups.programLookups()
+	if params, ok := shared.specializationParams.Load(base); ok {
+		return params.([]ast.GenericParam)
+	}
+	params := functionSpecializationParams(base)
+	actual, _ := shared.specializationParams.LoadOrStore(base, params)
+	return actual.([]ast.GenericParam)
 }
 
 func collectNominalRegionParams(t semantic.Type, regions map[string]bool) {

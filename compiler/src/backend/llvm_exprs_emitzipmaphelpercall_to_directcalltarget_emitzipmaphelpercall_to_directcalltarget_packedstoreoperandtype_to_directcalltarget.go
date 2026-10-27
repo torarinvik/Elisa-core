@@ -134,7 +134,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 			// must be monomorphized per call site, exactly like the plain-Ident
 			// generic path below — fnType.Name is the unique __impl__ symbol, so
 			// the mangled specialization name cannot collide across impls.
-			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(functionSpecializationParams(fnType)) > 0 {
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(s.g.functionSpecializationParams(fnType)) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
 				for _, arg := range expr.Args {
 					argTypes = append(argTypes, s.exprType(arg))
@@ -167,7 +167,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				return nil, nil, false, fmt.Errorf("call target %s does not resolve to a function type", lookupName)
 			}
 			direct := sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc
-			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(functionSpecializationParams(fnType)) > 0 {
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(s.g.functionSpecializationParams(fnType)) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
 				for _, arg := range expr.Args {
 					argTypes = append(argTypes, s.exprType(arg))
@@ -176,7 +176,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
 				return value, specialized, direct, err
 			}
-			if decl, ok := sym.Node.(*ast.ExternFuncDecl); ok && len(functionSpecializationParams(fnType)) > 0 {
+			if decl, ok := sym.Node.(*ast.ExternFuncDecl); ok && len(s.g.functionSpecializationParams(fnType)) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
 				for _, arg := range expr.Args {
 					argTypes = append(argTypes, s.exprType(arg))

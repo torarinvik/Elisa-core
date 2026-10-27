@@ -259,7 +259,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 		return nil, nil, fmt.Errorf("specialize expects a function, got %s", sym.Type.String())
 	}
 	params := explicitFunctionApplicationParams(baseType)
-	layoutParams := functionSpecializationParams(baseType)
+	layoutParams := s.g.functionSpecializationParams(baseType)
 	if len(params) == 0 {
 		return nil, nil, fmt.Errorf("function %q is not generic", ident.Name)
 	}
