@@ -4,6 +4,11 @@ import (
 	"elisacore/src/ast"
 )
 
+type functionValueSummaryKey struct {
+	expr   ast.Expr
+	fnType *FuncType
+}
+
 func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {
 	if a.currentFunctionValues == nil || sym == nil {
 		return
@@ -161,6 +166,15 @@ func (a *Analyzer) ensureFunctionValueTypeSummaries(expr ast.Expr, fnType *FuncT
 	if a == nil || fnType == nil {
 		return
 	}
+	if a.functionValueSummaryInProgress == nil {
+		a.functionValueSummaryInProgress = map[functionValueSummaryKey]bool{}
+	}
+	key := functionValueSummaryKey{expr: expr, fnType: fnType}
+	if a.functionValueSummaryInProgress[key] {
+		return
+	}
+	a.functionValueSummaryInProgress[key] = true
+	defer delete(a.functionValueSummaryInProgress, key)
 	if !fnType.ReturnProvenanceKnown {
 		a.inferFuncReturnProvenanceForExpr(expr, fnType)
 	}

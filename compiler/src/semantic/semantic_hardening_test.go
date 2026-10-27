@@ -161,6 +161,7 @@ func TestInferFuncReturnProvenanceForLocalIdentHandlesSelfAliasCycle(t *testing.
 	decl := &ast.VarDeclStmt{Name: "self_alias", Value: &ast.Ident{Name: "self_alias"}}
 	sym := &Symbol{Name: "self_alias", Kind: SymbolLocal, Type: fnType, Node: decl}
 	analyzer.currentScope.Define(sym)
+	analyzer.currentFunctionValues = map[*Symbol]*FuncType{sym: fnType}
 
 	if analyzer.inferFuncReturnProvenanceForLocalIdent(&ast.Ident{Name: "self_alias"}, fnType) {
 		t.Fatal("expected recursive local function alias provenance inference to stop conservatively")
@@ -170,6 +171,9 @@ func TestInferFuncReturnProvenanceForLocalIdentHandlesSelfAliasCycle(t *testing.
 	}
 	if len(analyzer.returnProvenanceLocalInProgress) != 0 {
 		t.Fatal("expected local provenance recursion guard to be cleared after inference")
+	}
+	if len(analyzer.functionValueSummaryInProgress) != 0 {
+		t.Fatal("expected function-value summary recursion guard to be cleared after inference")
 	}
 }
 

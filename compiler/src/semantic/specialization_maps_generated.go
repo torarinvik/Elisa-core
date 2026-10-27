@@ -101,6 +101,7 @@ var specializationOpaqueMapFields = [...]string{
 	"funcDisjointParams",
 	"functionTypes",
 	"functionValueResolveInProgress",
+	"functionValueSummaryInProgress",
 	"getWrappedIndexExprs",
 	"ghostContracts",
 	"ghostDecls",
@@ -572,6 +573,9 @@ func cloneSpecializationOpaqueMap(dst, src *Analyzer, name string, field reflect
 		return true
 	case "functionValueResolveInProgress":
 		dst.functionValueResolveInProgress = maps.Clone(src.functionValueResolveInProgress)
+		return true
+	case "functionValueSummaryInProgress":
+		dst.functionValueSummaryInProgress = maps.Clone(src.functionValueSummaryInProgress)
 		return true
 	case "getWrappedIndexExprs":
 		dst.getWrappedIndexExprs = maps.Clone(src.getWrappedIndexExprs)

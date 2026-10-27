@@ -889,6 +889,9 @@ type Analyzer struct {
 	// re-entering a symbol already on the resolution stack returns "no function-value type" instead of
 	// recursing until the goroutine stack overflows.
 	functionValueResolveInProgress map[*Symbol]bool
+	// functionValueSummaryInProgress prevents return-summary inference from recursively asking for
+	// the same expression/type summary while following a cyclic function-value binding.
+	functionValueSummaryInProgress map[functionValueSummaryKey]bool
 	// projectedFieldResolveInProgress: the same guard for resolveProjectedFieldValueExprAtPath.
 	projectedFieldResolveInProgress map[*Symbol]bool
 	sinkParamInferenceInProgress    map[*ast.FuncDecl]bool
@@ -1452,6 +1455,7 @@ func analyzeWithLookupRecorder(file *ast.File, options AnalyzeOptions, bodies *i
 		returnProvenanceLocalInProgress:   map[*Symbol]bool{},
 		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
 		returnBorrowedOwnerLocalProgress:  map[*Symbol]bool{},
+		functionValueSummaryInProgress:    map[functionValueSummaryKey]bool{},
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
