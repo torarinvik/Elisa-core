@@ -3,10 +3,47 @@ package semantic
 import (
 	"fmt"
 	"reflect"
+	"sync"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
+
+type proofReportBindingRenderer = func(proofContribution, ProofFact) (ProofFact, string)
+
+// Both inputs only read the authored syntax. Join the witness walk before
+// returning, including if binding preparation panics, so retained analysis
+// cannot mutate that syntax while a background walk is still using it.
+func prepareProofReportInputs(capture func() proofReportCoordinateWitnesses, prepareBindings func() proofReportBindingRenderer) (proofReportCoordinateWitnesses, proofReportBindingRenderer) {
+	var witnesses proofReportCoordinateWitnesses
+	var witnessPanic any
+	var witnessPanicked bool
+	var pending sync.WaitGroup
+	pending.Add(1)
+	go func() {
+		defer pending.Done()
+		returned := false
+		defer func() {
+			if !returned {
+				witnessPanic = recover()
+				witnessPanicked = true
+			}
+		}()
+		witnesses = capture()
+		returned = true
+	}()
+	defer func() {
+		pending.Wait()
+		// The old sequential order captured witnesses before preparing
+		// bindings. Preserve that panic precedence even if both fail.
+		if witnessPanicked {
+			panic(witnessPanic)
+		}
+	}()
+	bindings := prepareBindings()
+	pending.Wait()
+	return witnesses, bindings
+}
 
 // prepareProofReportCoordinates builds a source-coordinate rendering adapter.
 // Contribution ownership is already recorded by the producers; coordinates
@@ -21,8 +58,10 @@ func (r *RetainedAnalysis) prepareProofReportCoordinates(file *ast.File, marks m
 	sameFacts := func(left, right []ProofFact) bool {
 		return len(left) != 0 && len(left) == len(right) && &left[0] == &right[0]
 	}
-	witnesses := captureProofReportCoordinateWitnesses(file)
-	renderBindings := r.prepareProofReportBindings(file, marks)
+	witnesses, renderBindings := prepareProofReportInputs(
+		func() proofReportCoordinateWitnesses { return captureProofReportCoordinateWitnesses(file) },
+		func() proofReportBindingRenderer { return r.prepareProofReportBindings(file, marks) },
+	)
 
 	return func(a *Analyzer) string {
 		requests := collectProofReportCoordinateRequests(a.proofLifecycle.Segments, old)
