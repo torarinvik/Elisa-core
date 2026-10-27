@@ -119,7 +119,7 @@ def main() -> i64:
 	}
 }
 
-func TestPartitionedParallelWorkerDeclinesUnsafeIdentity(t *testing.T) {
+func TestPartitionedParallelWorkerUsesPartitionLocalIdentity(t *testing.T) {
 	t.Setenv("ELISACORE_PARALLEL_IR", "1")
 	source := parallelForConcurrencyPrelude + `
 packed enum Expr:
@@ -139,35 +139,90 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
                 _ = value + node.span
     return 0
 `
-	result := parseAndAnalyzeBackendTest(t, "parallel_worker_decline.elisa", source)
+	filename := "parallel_worker_partition_local.elisa"
+	result := parseAndAnalyzeBackendTest(t, filename, source)
 	session := NewIncrementalObjectSession(2, 32<<20)
 	session.minWeight = 0
-	cacheRoot := t.TempDir()
-	session.EnableDiskCache(cacheRoot, "worker-decline", 64<<20)
+	session.EnableDiskCache(t.TempDir(), "worker-partition-local", 64<<20)
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := sha256.Sum256([]byte(abs))
+	part := partitionOwner("visit", 2)
 	func() {
 		result.BeginSharedCodegen()
 		defer result.EndSharedCodegen()
 		shared := newSharedCodegenLookups(result)
 		worklists := partitionIRDeclarationWorklists(result, shared.symbolsByNode, 2)
-		var unit, target [32]byte
-		var members []string
-		_, err := session.buildIRPartition(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}, partitionOwner("visit", 2), 2, true, "test", unit, target, worklists[partitionOwner("visit", 2)], &members, shared)
-		if !errors.Is(err, errPartitionDeclined) {
-			t.Fatalf("parallel worker must decline partitioning, got %v", err)
+		g, err := compileLLVMModuleConfigured(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", false, false, func(g *llvmGenerator) {
+			g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.", unit, part)
+			g.partBody = func(name string) bool { return partitionOwner(name, 2) == part }
+			g.partitionGlobalDeclarationsOnly = part != 0
+			g.sharedResult = true
+			g.partitionModuleDecls = worklists[part]
+			g.hasPartitionModuleDecls = true
+		}, shared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.dispose()
+		if g.partUnsafeHelpers {
+			t.Fatal("parallel worker graph still marks the partition unsafe")
+		}
+		workerName := g.partSynthNS + "__parallel_for_0_worker"
+		worker := g.functions[workerName]
+		if worker == nil || !g.partLocalHelpers[workerName] {
+			t.Fatalf("parallel worker is not recorded as a local helper: %q", workerName)
+		}
+		var submitName string
+		for name, key := range g.genericSymbolKeys {
+			if strings.HasPrefix(name, "pool_submit1$generic_v1$") && strings.Contains(key, g.partSynthNS+"__parallel_for_") {
+				submitName = name
+				break
+			}
+		}
+		if submitName == "" {
+			t.Fatal("parallel-for chunk-specific pool_submit1 specialization was not generated")
+		}
+		if g.functions[submitName] == nil || !g.partLocalHelpers[submitName] {
+			t.Fatalf("parallel-for submit specialization is not partition-local: %q", submitName)
+		}
+		ir := g.printModule()
+		assertPrivateDefinition := func(name string) {
+			t.Helper()
+			for _, line := range strings.Split(ir, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.Contains(line, name) && strings.HasPrefix(line, "define private ") {
+					return
+				}
+			}
+			t.Fatalf("expected a private definition for %q in partition IR", name)
+		}
+		assertPrivateDefinition(workerName)
+		assertPrivateDefinition(submitName)
+		if !finishPartitionModule(g.module, part, 2, hex.EncodeToString(unit[:]), g.partLocalHelpers) {
+			t.Fatal("partition finalization declined parallel worker helpers")
+		}
+		if err := g.verify(); err != nil {
+			t.Fatalf("partitioned parallel worker module did not verify: %v", err)
 		}
 	}()
-	// Exercise the complete fallback after all in-flight partition generators
-	// release the shared semantic view. The fixture has no main to link and run.
-	out := filepath.Join(t.TempDir(), "fallback.o")
+	// Exercise the complete partitioned emitter after the linkage assertions
+	// above. The fixture has no main to link and run.
+	out := filepath.Join(t.TempDir(), "partitioned.o")
 	if err := session.WriteObject(result, out, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
-		t.Fatalf("missing fallback object: %v", err)
+		t.Fatalf("missing partitioned object: %v", err)
+	}
+	if stats := session.Stats(); stats.PartitionsEmitted+stats.DiskPartitionsReused != 2 || stats.SerialFallbacks != 0 {
+		t.Fatalf("parallel worker build did not use both IR partitions: %+v", stats)
 	}
 	paths, err := filepath.Glob(filepath.Join(session.disk.root, "*.schedule"))
 	if err != nil || len(paths) != 1 {
-		t.Fatalf("missing decline schedule: %v %v", paths, err)
+		t.Fatalf("missing successful partition schedule: %v %v", paths, err)
 	}
 	data, err := os.ReadFile(paths[0])
 	if err != nil || len(data) <= sha256.Size {
@@ -177,63 +232,68 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	if err := json.Unmarshal(data[sha256.Size:], &saved); err != nil {
 		t.Fatal(err)
 	}
-	order := partitionedIRWorkOrder(result, 2, saved)
-	found := false
-	for _, name := range saved[order[0]] {
-		if name == partitionScheduleDeclined {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("declined partition was not stored and prioritized: %v", saved)
-	}
-	// A stale hint may only reorder work. Once the unsafe worker is removed,
-	// every partition must complete and successful scheduling clears the hint.
-	worker := "        parallel for node in frozen:\n            if node in frozen is Expr.Int(value: value):\n                _ = value + node.span\n"
-	if !strings.Contains(source, worker) {
-		t.Fatal("parallel fixture changed")
-	}
-	changed := strings.Replace(source, worker, "        pass\n", 1)
-	updated := parseAndAnalyzeBackendTest(t, "parallel_worker_decline.elisa", changed)
-	again := NewIncrementalObjectSession(2, 32<<20)
-	again.minWeight = 0
-	again.EnableDiskCache(cacheRoot, "worker-decline", 64<<20)
-	if err := again.WriteObject(updated, filepath.Join(t.TempDir(), "after.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
-		t.Fatal(err)
-	}
-	stats := again.Stats()
-	if stats.PartitionsEmitted+stats.PartitionsReused != 2 {
-		t.Fatalf("stale hint skipped a partition: %+v", stats)
-	}
-	data, err = os.ReadFile(paths[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data[sha256.Size:], &saved); err != nil {
-		t.Fatal(err)
-	}
 	for _, names := range saved {
 		for _, name := range names {
 			if name == partitionScheduleDeclined {
-				t.Fatal("successful partition build retained stale decline hint")
+				t.Fatal("successful parallel worker schedule contains a decline marker")
 			}
 		}
 	}
-	// Disabled schedules and a no-disk session must still safely fall back.
-	t.Setenv("ELISACORE_PARTITION_SCHEDULE", "0")
-	disabled := NewIncrementalObjectSession(2, 32<<20)
-	disabled.minWeight = 0
-	disabled.EnableDiskCache(t.TempDir(), "disabled-schedule", 64<<20)
-	if err := disabled.WriteObject(result, filepath.Join(t.TempDir(), "disabled.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+}
+
+func TestPartitionedParallelWorkerRuntimeMatchesSerial(t *testing.T) {
+	t.Setenv("ELISACORE_PARALLEL_IR", "1")
+	source := `def pool_new(workers: usize) -> ThreadPool can[Pool.Create]:
+    pool: ThreadPool = zeroed
+    return move pool
+
+def pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]:
+    pass
+
+def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R can[P], arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+    can P:
+        _ = fn(arg)
+    task: Task[R, Pending] = zeroed
+    return move task
+
+def task_group_new() -> TaskGroup:
+    group: TaskGroup = zeroed
+    return move group
+
+def task_group_add[R](group: TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
+    _ = move task
+
+def task_group_wait_all(group: TaskGroup&) -> void can[Pool.WaitAll]:
+    pass
+
+def main() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Abort.Panic]:
+    values: array[i64, 4] = [1, 2, 3, 4]
+    view: view[i64] = readonly(values[0:4])
+    pool workers(2):
+        parallel for value in view:
+            _ = value + 1
+    return 9
+`
+	result := parseAndAnalyzeBackendTest(t, "parallel_worker_runtime.elisa", source)
+	session := NewIncrementalObjectSession(2, 32<<20)
+	session.minWeight = 0
+	session.EnableDiskCache(t.TempDir(), "parallel-worker-runtime", 64<<20)
+	partitioned := filepath.Join(t.TempDir(), "partitioned.o")
+	if err := session.WriteObject(result, partitioned, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
 		t.Fatal(err)
 	}
-	if files, err := filepath.Glob(filepath.Join(disabled.disk.root, "*.schedule")); err != nil || len(files) != 0 {
-		t.Fatalf("disabled scheduling published hints: %v %v", files, err)
+	if stats := session.Stats(); stats.PartitionsEmitted+stats.DiskPartitionsReused != 2 || stats.SerialFallbacks != 0 {
+		t.Fatalf("runtime fixture did not use both IR partitions: %+v", stats)
 	}
-	uncached := NewIncrementalObjectSession(2, 32<<20)
-	uncached.minWeight = 0
-	if err := uncached.WriteObject(result, filepath.Join(t.TempDir(), "uncached.o"), LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
+	if got := incrementalObjectNativeStatus(t, partitioned); got != 9 {
+		t.Fatalf("partitioned runtime got %d, want 9", got)
+	}
+	serial := filepath.Join(t.TempDir(), "serial.o")
+	if err := WriteLLVMObjectFileWithOptions(result, serial, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0, Serial: true}); err != nil {
 		t.Fatal(err)
+	}
+	if got := incrementalObjectNativeStatus(t, serial); got != 9 {
+		t.Fatalf("serial runtime got %d, want 9", got)
 	}
 }
 

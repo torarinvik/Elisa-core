@@ -86,8 +86,16 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 		return err
 	}
 
-	s.g.partUnsafeHelpers = true
-	prefix := s.g.nextSyntheticName("__parallel_for_")
+	partitionLocal := s.g.partSynthNS != "" && s.g.optLevel == OptimizationLevel0 && !s.g.emitDebugInfo && !s.g.emitTrace
+	prefix := ""
+	if partitionLocal {
+		prefix = s.g.nextSyntheticHelperName("__parallel_for_")
+	} else {
+		// Without a partition-qualified nominal type and local specialization,
+		// the generated worker graph can collide or be split across modules.
+		s.g.partUnsafeHelpers = true
+		prefix = s.g.nextSyntheticName("__parallel_for_")
+	}
 	sourceName := prefix + "_source"
 	groupName := prefix + "_group"
 
@@ -133,11 +141,23 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	C.LLVMBuildStore(s.builder, groupValue, groupAlloca)
 	s.defineBinding(groupName, valueBinding{ptr: groupAlloca, typ: groupType})
 
-	workerFn, workerFnType, chunkType, err := s.emitParallelForWorkerFunction(stmt, info, prefix)
+	workerFn, workerFnType, chunkType, err := s.emitParallelForWorkerFunction(stmt, info, prefix, partitionLocal)
 	if err != nil {
 		return err
 	}
-	poolSubmit, poolSubmitType, err := s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.namedType("i64")})
+	partitionLocalSubmit := partitionLocal && s.g.partSubmitTypes.register(chunkType)
+	if partitionLocal && !partitionLocalSubmit {
+		s.g.partUnsafeHelpers = true
+	}
+	var poolSubmit C.LLVMValueRef
+	var poolSubmitType *semantic.FuncType
+	if partitionLocalSubmit {
+		s.g.partSyntheticDepth++
+	}
+	poolSubmit, poolSubmitType, err = s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.namedType("i64")})
+	if partitionLocalSubmit {
+		s.g.partSyntheticDepth--
+	}
 	if err != nil {
 		return err
 	}
@@ -220,7 +240,7 @@ func (s *functionState) emitParallelForStmtWithPool(stmt *ast.ParallelForStmt, i
 	_ = workerFnType
 	return nil
 }
-func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, prefix string) (C.LLVMValueRef, *semantic.FuncType, *semantic.StructType, error) {
+func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, prefix string, partitionLocal bool) (C.LLVMValueRef, *semantic.FuncType, *semantic.StructType, error) {
 	chunkType, err := s.buildParallelForChunkType(info, prefix)
 	if err != nil {
 		return nil, nil, nil, err
@@ -236,6 +256,13 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	}
 	s.g.functions[workerName] = workerFn
 	s.g.setDefinedFunctionLinkage(workerName, workerFn, workerType)
+	if partitionLocal {
+		C.LLVMSetLinkage(workerFn, C.LLVMPrivateLinkage)
+		if s.g.partLocalHelpers == nil {
+			s.g.partLocalHelpers = make(map[string]bool)
+		}
+		s.g.partLocalHelpers[llvmValueName(workerFn)] = true
+	}
 
 	chunkParamName := prefix + "_chunk"
 	sourceLocalName := prefix + "_source"
