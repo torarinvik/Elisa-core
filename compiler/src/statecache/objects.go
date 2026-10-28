@@ -12,7 +12,7 @@ type objectDescription struct {
 }
 
 // Oversized extents are rare. Keep them in a sparse side table so the common
-// object descriptor stays 24 bytes on 64-bit hosts.
+// object descriptor stays one pointer plus eight bytes (16 bytes on 64-bit hosts).
 type wideObjectDescription struct {
 	typeID           uint64
 	length, capacity int

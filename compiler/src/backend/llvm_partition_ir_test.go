@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,18 @@ func TestMemoizedPartitionBodyMatchesUncachedOwnership(t *testing.T) {
 			}
 			if got := ownsBody(name); got != want {
 				t.Fatalf("part %d, repeated %q: memoized owner = %v, want %v", part, name, got, want)
+			}
+		}
+	}
+}
+
+func TestPartitionOwnerMatchesFNV1a64(t *testing.T) {
+	for _, name := range []string{"", "plain_symbol", "generated::nested::symbol", "λ-specialization-🧪"} {
+		hash := fnv.New64a()
+		_, _ = hash.Write([]byte(name))
+		for _, parts := range []int{1, 2, 3, 7, 96} {
+			if got, want := partitionOwner(name, parts), int(hash.Sum64()%uint64(parts)); got != want {
+				t.Fatalf("partitionOwner(%q, %d) = %d, want %d", name, parts, got, want)
 			}
 		}
 	}

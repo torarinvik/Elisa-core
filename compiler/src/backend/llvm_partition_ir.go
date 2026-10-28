@@ -18,7 +18,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,9 +56,12 @@ func llvmValueName(v C.LLVMValueRef) string {
 }
 
 func partitionOwner(name string, parts int) int {
-	h := fnv.New64a()
-	h.Write([]byte(name))
-	return int(h.Sum64() % uint64(parts))
+	hash := uint64(14695981039346656037)
+	for i := 0; i < len(name); i++ {
+		hash ^= uint64(name[i])
+		hash *= 1099511628211
+	}
+	return int(hash % uint64(parts))
 }
 
 func memoizedPartitionBody(part, parts int, previouslyDefined map[string]bool) func(string) bool {
