@@ -105,12 +105,12 @@ func startMemProfile() func() {
 const defaultGCPercent = 1200
 
 // darwinGCPercent replaces defaultGCPercent on macOS. On the Stage1 self-compile body-edit
-// workload (M5, 2026-10-28, 96 O0 partitions, disk caches, no server), two reversed-order pairs
-// measured a 5.48 s median CLI wall at 300 versus 6.54 s at 100; partitioned IR+object time was
-// 3.14 s versus 4.30 s. Both produced the same object and 29,468 diagnostics. Sampled peak RSS
-// differed by 15 MiB (5,329 versus 5,314 MiB) under the existing 60%-of-RAM soft limit. Explicit
-// GOGC still wins.
-const darwinGCPercent = 300
+// workload (M5, 2026-10-28, 96 O0 partitions, disk caches, no server), three runs measured a
+// 4.92 s median CLI wall at 500 versus 5.39 s at 300; partitioned IR+object time was 2.55 s
+// versus 3.10 s. Both reused all native partitions and produced the same object and diagnostics.
+// Peak RSS increased by 68 MiB (7.16 versus 7.08 GB) under the existing 60%-of-RAM soft limit.
+// Explicit GOGC still wins.
+const darwinGCPercent = 500
 
 // defaultMemoryLimitFraction caps the soft heap limit at this share of installed RAM, so the
 // generous GOGC tightens collection instead of swapping on a smaller machine. An explicit

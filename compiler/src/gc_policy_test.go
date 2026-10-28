@@ -6,8 +6,8 @@ import (
 )
 
 func TestDefaultGCPercentPolicy(t *testing.T) {
-	if got := defaultGCPercentFor("darwin"); got != 300 {
-		t.Fatalf("Darwin default GC percent = %d, want 300", got)
+	if got := defaultGCPercentFor("darwin"); got != 500 {
+		t.Fatalf("Darwin default GC percent = %d, want 500", got)
 	}
 	for _, goos := range []string{"linux", "windows", "freebsd"} {
 		if got := defaultGCPercentFor(goos); got != defaultGCPercent {
