@@ -8,7 +8,7 @@ import (
 const sourceCheckpointStride = 256
 const sourceCheckpointLimit = 4096
 const sourceCheckpointBytes = 16 << 20
-const sourceTokenCapacityDivisor = 5
+const sourceTokenCapacityDivisor = 7
 
 type sourceCheckpoint struct {
 	count, required int
