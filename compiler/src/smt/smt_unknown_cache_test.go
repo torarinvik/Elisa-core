@@ -332,3 +332,40 @@ func TestWarmExplicitResourceReasonRemainsUncertified(t *testing.T) {
 		t.Fatalf("warm check attempted independent certification: %q", commands.String())
 	}
 }
+
+func TestCheckAfterHistoryRejectsSolverErrorBeforeFinalCheck(t *testing.T) {
+	var replies bytes.Buffer
+	var commands strings.Builder
+	writer := respondingWriteCloser(func(p []byte) (int, error) {
+		text := string(p)
+		commands.WriteString(text)
+		switch {
+		case strings.Contains(text, "(assert missing_history_symbol)"):
+			replies.WriteString("(error \"unknown constant missing_history_symbol\")\nsat\n")
+		case strings.Contains(text, "(assert false)"):
+			replies.WriteString("unsat\n")
+		}
+		echo := strings.LastIndex(text, "(echo \"")
+		if echo < 0 {
+			t.Fatal("unframed command")
+		}
+		frame, _, _ := strings.Cut(text[echo+7:], "\"")
+		fmt.Fprintln(&replies, frame)
+		return len(p), nil
+	})
+	s := &procSolver{independent: true, checkLimit: 1000, resourceLimit: 2000,
+		stdin: writer, out: bufio.NewReader(&replies)}
+	if result, _ := s.CheckAfterHistory([]string{"(assert missing_history_symbol)"}, "(assert false)", nil, 1000); result != Unknown {
+		t.Fatalf("history error produced %v", result)
+	}
+	resource, transient := s.UnknownCacheEpoch()
+	if resource != 0 || transient != 1 {
+		t.Fatalf("history error cache epochs: resource=%d transient=%d", resource, transient)
+	}
+	if !s.broken {
+		t.Fatal("solver retained after failed history replay")
+	}
+	if strings.Contains(commands.String(), "(assert false)") {
+		t.Fatalf("final query ran after replay error: %q", commands.String())
+	}
+}

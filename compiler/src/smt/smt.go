@@ -835,7 +835,9 @@ func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars
 		}
 		b.WriteString("(check-sat)\n(pop 1)\n")
 	}
-	if _, _, err := s.exchange(b.String()); err != nil {
+	if _, sawError, err := s.exchange(b.String()); err != nil || sawError {
+		// Any failed history command leaves the replayed stack/state uncertain.
+		// Retire this process instead of issuing the final query in a partial replay.
 		s.broken = true
 		s.transientUnknown++
 		return Unknown, nil
