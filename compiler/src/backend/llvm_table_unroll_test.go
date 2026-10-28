@@ -182,10 +182,17 @@ func TestConstantTableUnrollRejectsOversizedStructure(t *testing.T) {
 			}
 			return b.String()
 		}(),
-		"wide_alloca":     strings.Replace(base, "entry: br label %loop", "entry: %p2 = alloca {"+strings.Repeat("i8,", 256)+"i8}\n br label %loop", 1),
-		"wide_gep":        strings.Replace(base, "entry: br label %loop", "entry: %p2 = getelementptr {"+strings.Repeat("i8,", 256)+"i8}, ptr null, i64 0, i32 0\n br label %loop", 1),
-		"wide_byval":      base + "\ndeclare void @byval_func(ptr byval({" + strings.Repeat("i8,", 256) + "i8}))\n",
-		"wide_const_gep":  base + "\n@bytes = external global i8\n@offset = external global i8\n@pg = internal global ptr getelementptr ({" + strings.Repeat("i8,", 256) + "i8}, ptr @bytes, i64 ptrtoint (ptr @offset to i64), i32 0)\n",
+		"wide_alloca":    strings.Replace(base, "entry: br label %loop", "entry: %p2 = alloca {"+strings.Repeat("i8,", 256)+"i8}\n br label %loop", 1),
+		"wide_gep":       strings.Replace(base, "entry: br label %loop", "entry: %p2 = getelementptr {"+strings.Repeat("i8,", 256)+"i8}, ptr null, i64 0, i32 0\n br label %loop", 1),
+		"wide_byval":     base + "\ndeclare void @byval_func(ptr byval({" + strings.Repeat("i8,", 256) + "i8}))\n",
+		"wide_const_gep": base + "\n@bytes = external global i8\n@offset = external global i8\n@pg = internal global ptr getelementptr ({" + strings.Repeat("i8,", 256) + "i8}, ptr @bytes, i64 ptrtoint (ptr @offset to i64), i32 0)\n",
+		"oversized_shuffle_masks": base + "\ndefine void @shuffle(<65536 x i8> %a) {\nentry:\n" + func() string {
+			var b strings.Builder
+			for i := 0; i < 9; i++ {
+				fmt.Fprintf(&b, " %%s%d = shufflevector <65536 x i8> %%a, <65536 x i8> %%a, <65536 x i32> zeroinitializer\n", i)
+			}
+			return b.String()
+		}() + " ret void\n}\n",
 		"wide_type":       base + "\n@wide = internal global {" + strings.Repeat("i8,", 256) + "i8} zeroinitializer\n",
 		"large_triple":    "target triple = \"" + strings.Repeat("x", 2097153) + "\"\n" + base,
 		"large_attribute": strings.Replace(base, "define i64 @test() {", "define i64 @test() #0 {", 1) + "\nattributes #0 = { \"cost\"=\"" + strings.Repeat("x", 2097153) + "\" }\n",
@@ -200,6 +207,9 @@ func TestConstantTableUnrollRejectsOversizedStructure(t *testing.T) {
 			}
 			defer g.dispose()
 			before := g.printModule()
+			if name == "wide_const_gep" && !strings.Contains(before, "getelementptr ({ i8, i8") {
+				t.Fatal("constant GEP folded before test")
+			}
 			if got := unrollConstantTableLoops(g.module, nil); got != 0 {
 				t.Fatalf("oversized structure accepted: %d", got)
 			}
@@ -224,5 +234,41 @@ func TestConstantTableUnrollRejectsLargeFunctionMetadata(t *testing.T) {
 	}
 	if g.printModule() != before {
 		t.Fatal("declined module changed")
+	}
+}
+
+func TestConstantTableUnrollWithinShuffleBudget(t *testing.T) {
+	ir := tableUnrollFixture(12, "", "") + `
+define void @shuffle(<65536 x i8> %a) {
+entry:
+ %s = shufflevector <65536 x i8> %a, <65536 x i8> %a, <65536 x i32> zeroinitializer
+ ret void
+}
+`
+	g, err := parseLLVMIRForSplitHalfTest(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	before := g.printModule()
+	want := 0
+	if tableUnrollSupported() {
+		want = 1
+	}
+	if got := unrollConstantTableLoops(g.module, nil); got != want {
+		t.Fatalf("within-budget shuffle status %d, want %d", got, want)
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+	after := g.printModule()
+	if splitHalfAddFunctionBody(after, "shuffle") != splitHalfAddFunctionBody(before, "shuffle") {
+		t.Fatal("unrelated shuffle function changed")
+	}
+	if want == 1 && strings.Contains(splitHalfAddFunctionBody(after, "test"), "br i1 %done") {
+		t.Fatal("eligible loop did not unroll")
+	}
+	if want == 0 && before != after {
+		t.Fatal("unsupported LLVM changed module")
 	}
 }

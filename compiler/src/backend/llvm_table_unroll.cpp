@@ -157,6 +157,13 @@ bool boundedModule(const Module &M) {
         if (!b.node() || !b.charge(i.getName().size()) || !b.type(i.getType()) ||
             i.getNumOperands() > 256)
           return false;
+        if (auto *shuffle = dyn_cast<ShuffleVectorInst>(&i)) {
+          // Shuffle masks live outside the ordinary operand list. getShuffleMask
+          // returns a borrowed view, avoiding allocation before the size check.
+          size_t count = shuffle->getShuffleMask().size();
+          if (count > 2097152 / sizeof(int) || !b.charge(count * sizeof(int))) return false;
+          if (!b.constant(shuffle->getShuffleMaskForBitcode())) return false;
+        }
         if (auto *alloca = dyn_cast<AllocaInst>(&i)) if (!b.type(alloca->getAllocatedType())) return false;
         if (auto *gep = dyn_cast<GetElementPtrInst>(&i)) if (!b.type(gep->getSourceElementType())) return false;
         if (auto *call = dyn_cast<CallBase>(&i)) {
