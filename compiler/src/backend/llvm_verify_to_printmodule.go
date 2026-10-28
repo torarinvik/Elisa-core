@@ -26,6 +26,9 @@ import (
 )
 
 func (g *llvmGenerator) verify() error {
+	if g.verifyObserver != nil {
+		g.verifyObserver()
+	}
 	var message *C.char
 	status := C.LLVMVerifyModule(g.module, C.LLVMReturnStatusAction, &message)
 	if status == 0 {

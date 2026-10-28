@@ -57,6 +57,7 @@ type partitionIRBuildMode struct {
 	requests           []partitionSpecializationRequest
 	previouslyDefined  map[string]bool
 	specializationOnly bool
+	verifyObserver     func() // optional test observation of verification on cache paths
 	cachePart          int
 	supplementRound    int
 	disposalScope      *llvmDisposalScope

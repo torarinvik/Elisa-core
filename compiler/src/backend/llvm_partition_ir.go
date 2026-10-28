@@ -641,6 +641,8 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.inputReads = inputReads
+		g.deferPartitionCacheVerification = !mode.specializationOnly
+		g.verifyObserver = mode.verifyObserver
 		if mode.specializationOnly {
 			g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.specialization.%d.", unitID, part, mode.supplementRound)
 		} else {
@@ -700,6 +702,13 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 		}
 	}
 	if !finishPartitionModule(g.module, part, parts, unit, g.partLocalHelpers) {
+		// Preserve the pre-cache verifier for a declined partition. Ordinary
+		// partition modules defer only when they may reach the exact cache lookup.
+		if g.deferPartitionCacheVerification {
+			if err := g.verify(); err != nil {
+				return nil, nil, fmt.Errorf("partition %d: %w", part, err)
+			}
+		}
 		return nil, nil, errPartitionDeclined
 	}
 	if err := g.ensureTargetMachine(); err != nil {

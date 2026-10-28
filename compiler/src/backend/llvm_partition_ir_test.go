@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,56 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 )
+
+func TestPartitionIRObjectCacheDefersVerificationUntilMiss(t *testing.T) {
+	source := incrementalObjectFixture(8)
+	edited := strings.Replace(source, "return value + 1\n", "return value + 2\n", 1)
+	cacheRoot := t.TempDir()
+	options := LLVMObjectEmitOptions{OptLevel: OptimizationLevel0, PackedProfile: DefaultPackedLoweringProfile()}
+	var unitID, targetID [32]byte
+	build := func(session *IncrementalObjectSession, src string) ([]byte, int) {
+		result := parseAndAnalyzeBackendTest(t, "partition_verify_cache.elisa", src)
+		declarations := result.ActiveFile().Decls
+		verifications := 0
+		mode := partitionIRBuildMode{
+			cachePart:      0,
+			verifyObserver: func() { verifications++ },
+		}
+		members := []string(nil)
+		object, _, err := session.buildIRPartitionWithMode(result, options, 0, 1, true, "partition-verify-cache-v1", unitID, targetID, declarations, &members, newSharedCodegenLookups(result), mode)
+		if err != nil {
+			t.Fatalf("build partition: %v", err)
+		}
+		return object, verifications
+	}
+	cold := NewIncrementalObjectSession(1, 32<<20)
+	cold.minWeight = 0
+	cold.EnableDiskCache(cacheRoot, "partition-verify-cache-test-v1", 32<<20)
+	first, firstVerifications := build(cold, source)
+	if firstVerifications != 1 {
+		t.Fatalf("cold cache miss verified %d times, want one final-module verification", firstVerifications)
+	}
+	warm := NewIncrementalObjectSession(1, 32<<20)
+	warm.minWeight = 0
+	warm.EnableDiskCache(cacheRoot, "partition-verify-cache-test-v1", 32<<20)
+	second, secondVerifications := build(warm, source)
+	if secondVerifications != 0 {
+		t.Fatalf("exact cache hit verified %d times, want no verification", secondVerifications)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("exact cache hit object differs from the verified cold object")
+	}
+	if got := warm.Stats().DiskPartitionsReused; got != 1 {
+		t.Fatalf("exact cache hit reuse count=%d, want 1", got)
+	}
+	editedObject, editedVerifications := build(warm, edited)
+	if editedVerifications != 1 {
+		t.Fatalf("edited cache miss verified %d times, want one final-module verification (stats: %+v)", editedVerifications, warm.Stats())
+	}
+	if bytes.Equal(first, editedObject) {
+		t.Fatal("body edit unexpectedly produced the same object")
+	}
+}
 
 func partitionIRModuleTextForWorklistTest(t *testing.T, result *semantic.Result, part, parts int, declarations []ast.Decl, useWorklist bool) string {
 	t.Helper()

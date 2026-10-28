@@ -190,17 +190,25 @@ func compileLLVMModuleConfigured(result *semantic.Result, optLevel OptimizationL
 	}
 	g.alignPackedRecordAccesses()
 	g.appendAppleX64SegmentReservations(targetTriple)
-	if err := g.verify(); err != nil {
-		g.dispose()
-		return nil, err
+	// Ordinary partition builds verify after finalization and exact bitcode-cache
+	// lookup. A hit can reuse only an object retained after that same finalized
+	// bitcode passed verification on an earlier miss. Declines and all other
+	// callers keep the eager verifier below.
+	if !g.deferPartitionCacheVerification || g.partUnsafeHelpers {
+		if err := g.verify(); err != nil {
+			g.dispose()
+			return nil, err
+		}
 	}
 	return g, nil
 }
 
 type llvmGenerator struct {
-	inputReads              *irInputReadRecorder // optional diagnostic trace; never cache authority
-	partitionImportWeight   int
-	partitionImportDefaults bool
+	inputReads                      *irInputReadRecorder // optional diagnostic trace; never cache authority
+	deferPartitionCacheVerification bool
+	verifyObserver                  func() // optional test observation of verifier calls
+	partitionImportWeight           int
+	partitionImportDefaults         bool
 	// partitionModuleDecls is a build-local worklist for partitioned IR. A
 	// non-owner function body is absent because partition generation has already
 	// assigned it to its owner; all shared declarations remain present.
