@@ -40,9 +40,15 @@ func buildCacheEnabled() bool {
 }
 
 type buildCacheArtifact struct {
-	key    string
-	dir    string
-	object string
+	key         string
+	dir         string
+	object      string
+	optionsKey  string
+	environment []string
+}
+
+type buildCacheArtifactHandoff struct {
+	artifact buildCacheArtifact
 }
 
 // defaultSMTProofCacheDir places the persistent proof cache beside the build cache unless
@@ -86,6 +92,10 @@ func buildCacheKeyOptions(options cliOptions) cliOptions {
 	return options
 }
 
+func buildCacheOptionsIdentity(options cliOptions) string {
+	return fmt.Sprintf("%+v", buildCacheKeyOptions(options))
+}
+
 // buildCacheObjectArtifactFor derives the cache artifact for an `-emit obj` build.
 // ok=false (no error surfaced) means "not cacheable" — e.g. the source could not
 // be expanded — and callers transparently fall back to a normal build.
@@ -103,6 +113,8 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	if program == nil || program.file != nil || len(program.easm) != 0 {
 		return buildCacheArtifact{}, false
 	}
+	optionsKey := buildCacheOptionsIdentity(options)
+	environment := buildCacheEnvKey()
 	hash := sha256.New()
 	if err := writeNativeCacheTarget(hash, options.targetTriple); err != nil {
 		return buildCacheArtifact{}, false
@@ -111,8 +123,8 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
-	testRunnerCacheWriteString(hash, fmt.Sprintf("options=%+v", buildCacheKeyOptions(options)))
-	for _, entry := range buildCacheEnvKey() {
+	testRunnerCacheWriteString(hash, "options="+optionsKey)
+	for _, entry := range environment {
 		testRunnerCacheWriteString(hash, "env="+entry)
 	}
 
@@ -197,7 +209,38 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	}
 	key := hex.EncodeToString(hash.Sum(nil))
 	dir := filepath.Join(root, key)
-	return buildCacheArtifact{key: key, dir: dir, object: filepath.Join(dir, "out.o")}, true
+	return buildCacheArtifact{
+		key:         key,
+		dir:         dir,
+		object:      filepath.Join(dir, "out.o"),
+		optionsKey:  optionsKey,
+		environment: environment,
+	}, true
+}
+
+func buildCacheObjectArtifactForProgramOrHandoff(options cliOptions, program *loadedProgram) (buildCacheArtifact, bool) {
+	if program != nil && program.cacheHandoff != nil && program.file == nil && len(program.easm) == 0 {
+		artifact := program.cacheHandoff.artifact
+		root, err := buildCacheRoot()
+		if err == nil && artifact.dir == filepath.Join(root, artifact.key) &&
+			artifact.optionsKey == buildCacheOptionsIdentity(options) &&
+			buildCacheEnvironmentEqual(artifact.environment, buildCacheEnvKey()) {
+			return artifact, true
+		}
+	}
+	return buildCacheObjectArtifactForProgram(options, program)
+}
+
+func buildCacheEnvironmentEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func buildCacheUsesNativeFragmentMerger(options cliOptions) bool {
@@ -286,7 +329,7 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	if !okLoad {
 		return 1, true
 	}
-	artifact, ok := buildCacheObjectArtifactForProgram(options, program)
+	artifact, ok := buildCacheObjectArtifactForProgramOrHandoff(options, program)
 	if !ok {
 		return 0, false
 	}
@@ -466,5 +509,6 @@ func tryBuildObjectCacheHitUsing(args []string, stdout, stderr io.Writer, load f
 	if code, hit := restoreCachedBuild(options, artifact, stdout, stderr); hit {
 		return code, true, nil
 	}
+	program.cacheHandoff = &buildCacheArtifactHandoff{artifact: artifact}
 	return 0, false, program
 }

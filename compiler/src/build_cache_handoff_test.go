@@ -66,6 +66,66 @@ func TestBuildObjectCachePrefixHandsOffSnapshot(t *testing.T) {
 	}
 }
 
+func TestBuildCacheArtifactHandoffRequiresMatchingInvocationContext(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "cache")
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", cacheDir)
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	t.Setenv("ELISACORE_BUILD_CACHE_HANDOFF_TEST", "before")
+	source := filepath.Join(dir, "main.elisa")
+	if err := os.WriteFile(source, []byte("def main() -> i64:\n    return 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	options, err := parseArgs([]string{"-emit", "obj", "-o", filepath.Join(dir, "one.o"), source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	program, ok := loadProgramInput(source, io.Discard)
+	if !ok {
+		t.Fatal("could not load source")
+	}
+	const marker = "handoff-marker"
+	markerDir := filepath.Join(cacheDir, marker)
+	program.cacheHandoff = &buildCacheArtifactHandoff{artifact: buildCacheArtifact{
+		key:         marker,
+		dir:         markerDir,
+		object:      filepath.Join(markerDir, "out.o"),
+		optionsKey:  buildCacheOptionsIdentity(options),
+		environment: buildCacheEnvKey(),
+	}}
+
+	// Output paths are deliberately excluded from object identity.
+	options.output = filepath.Join(dir, "two.o")
+	got, valid := buildCacheObjectArtifactForProgramOrHandoff(options, program)
+	if !valid || got.key != marker {
+		t.Fatalf("matching key context was not handed off: artifact=%+v valid=%v", got, valid)
+	}
+
+	// A code-generation option change must force a new artifact identity.
+	options.strictPolicy = !options.strictPolicy
+	got, valid = buildCacheObjectArtifactForProgramOrHandoff(options, program)
+	if !valid || got.key == marker || got.optionsKey == program.cacheHandoff.artifact.optionsKey {
+		t.Fatalf("changed CLI options reused the handed-off key: artifact=%+v valid=%v", got, valid)
+	}
+	options.strictPolicy = !options.strictPolicy
+
+	// Environment flags are part of the object key, even when the source snapshot
+	// and parsed CLI options still match.
+	t.Setenv("ELISACORE_BUILD_CACHE_HANDOFF_TEST", "after")
+	got, valid = buildCacheObjectArtifactForProgramOrHandoff(options, program)
+	if !valid || got.key == marker || buildCacheEnvironmentEqual(got.environment, program.cacheHandoff.artifact.environment) {
+		t.Fatalf("changed environment reused the handed-off key: artifact=%+v valid=%v", got, valid)
+	}
+
+	// Cache-root overrides affect artifact location; a request under a different
+	// root cannot retain the earlier artifact path.
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "other-cache"))
+	got, valid = buildCacheObjectArtifactForProgramOrHandoff(options, program)
+	if !valid || got.key == marker || got.dir == markerDir {
+		t.Fatalf("changed cache root reused the handed-off path: artifact=%+v valid=%v", got, valid)
+	}
+}
+
 func TestLoadedProgramHandoffRequiresMatchingFilename(t *testing.T) {
 	preloaded := &loadedProgram{filename: "first.elisa", source: []byte("first")}
 	other := &loadedProgram{filename: "second.elisa", source: []byte("second")}
