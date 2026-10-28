@@ -62,6 +62,18 @@ func partitionOwner(name string, parts int) int {
 	return int(h.Sum64() % uint64(parts))
 }
 
+func memoizedPartitionBody(part, parts int, previouslyDefined map[string]bool) func(string) bool {
+	owners := make(map[string]bool)
+	return func(name string) bool {
+		if owned, ok := owners[name]; ok {
+			return owned
+		}
+		owned := partitionOwner(name, parts) == part && !previouslyDefined[name]
+		owners[name] = owned
+		return owned
+	}
+}
+
 // partitionIRDeclarationWorklists preserves every shared declaration in every
 // partition while placing ordinary function bodies only in their owner list.
 // Namespace, static-if, and impl wrappers are copied with their children
@@ -648,9 +660,7 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 		} else {
 			g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.", unitID, part)
 		}
-		g.partBody = func(name string) bool {
-			return partitionOwner(name, parts) == part && !mode.previouslyDefined[name]
-		}
+		g.partBody = memoizedPartitionBody(part, parts, mode.previouslyDefined)
 		g.partitionGlobalDeclarationsOnly = mode.specializationOnly || part != 0
 		g.partitionSpecializationQueue = mode.queue
 		g.partitionSpecializationParts = parts

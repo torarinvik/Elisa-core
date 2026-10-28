@@ -15,6 +15,30 @@ import (
 	"elisacore/src/semantic"
 )
 
+func TestMemoizedPartitionBodyMatchesUncachedOwnership(t *testing.T) {
+	const parts = 7
+	for part := 0; part < parts; part++ {
+		previouslyDefined := make(map[string]bool)
+		for i := 0; i < 200; i++ {
+			name := fmt.Sprintf("partitioned_symbol_%d", i)
+			if partitionOwner(name, parts) == part && i%3 == 0 {
+				previouslyDefined[name] = true
+			}
+		}
+		ownsBody := memoizedPartitionBody(part, parts, previouslyDefined)
+		for i := 0; i < 200; i++ {
+			name := fmt.Sprintf("partitioned_symbol_%d", i)
+			want := partitionOwner(name, parts) == part && !previouslyDefined[name]
+			if got := ownsBody(name); got != want {
+				t.Fatalf("part %d, %q: memoized owner = %v, want %v", part, name, got, want)
+			}
+			if got := ownsBody(name); got != want {
+				t.Fatalf("part %d, repeated %q: memoized owner = %v, want %v", part, name, got, want)
+			}
+		}
+	}
+}
+
 func TestPartitionIRObjectCacheDefersVerificationUntilMiss(t *testing.T) {
 	source := incrementalObjectFixture(8)
 	edited := strings.Replace(source, "return value + 1\n", "return value + 2\n", 1)
