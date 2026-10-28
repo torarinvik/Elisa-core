@@ -63,6 +63,52 @@ func TestUnknownCacheEpochRejectsTransportAndErrorReplies(t *testing.T) {
 	}
 }
 
+func TestSatModelRetrievalFailuresAreTransientUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name, modelReply string
+		valid            bool
+	}{
+		{"complete", "((x 7) (y (- 3)))\nelisa-smt-frame-2\n", true},
+		{"missing-variable", "((x 7))\nelisa-smt-frame-2\n", false},
+		{"malformed-pair", "((x 7) (y))\nelisa-smt-frame-2\n", false},
+		{"trailing-garbage", "((x 7) (y 3)) trailing\nelisa-smt-frame-2\n", false},
+		{"solver-error", "(error \"model unavailable\")\nelisa-smt-frame-2\n", false},
+		{"transport-error", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			replies := "sat\nelisa-smt-frame-1\n" + tc.modelReply
+			s := &procSolver{independent: true, stdin: discardWriteCloser{io.Discard}, out: bufio.NewReader(strings.NewReader(replies))}
+			result, model, _ := s.CheckValues("(assert true)", []string{"x", "y"})
+			if tc.valid {
+				if result != Sat || model["x"] != "7" || model["y"] != "-3" {
+					t.Fatalf("complete model result=(%s, %v)", result, model)
+				}
+				resource, transient := s.UnknownCacheEpoch()
+				if resource != 0 || transient != 0 {
+					t.Fatalf("valid model changed unknown epoch: %d %d", resource, transient)
+				}
+				return
+			}
+			if result != Unknown || len(model) != 0 {
+				t.Fatalf("incomplete model result=(%s, %v), want unknown with no values", result, model)
+			}
+			resource, transient := s.UnknownCacheEpoch()
+			if resource != 0 || transient != 1 {
+				t.Fatalf("model failure was not transient: %d %d", resource, transient)
+			}
+		})
+	}
+}
+
+func TestCheckValuesAcceptsRepeatedRequestedSymbols(t *testing.T) {
+	replies := "sat\nelisa-smt-frame-1\n((x 7) (x 7))\nelisa-smt-frame-2\n"
+	s := &procSolver{independent: true, stdin: discardWriteCloser{io.Discard}, out: bufio.NewReader(strings.NewReader(replies))}
+	result, model, _ := s.CheckValues("(assert true)", []string{"x", "x"})
+	if result != Sat || model["x"] != "7" {
+		t.Fatalf("duplicate request result=(%s, %v)", result, model)
+	}
+}
+
 func TestIndependentResourceUnknownHasActualSolverCertificate(t *testing.T) {
 	z3Available(t)
 	solver, err := Open(Options{Independent: true, ResourceLimit: 1000, PerQueryTimeoutMillis: 120000})

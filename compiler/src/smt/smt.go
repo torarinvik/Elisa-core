@@ -416,10 +416,10 @@ func (s *procSolver) exchange(batch string) ([]string, bool, error) {
 	}
 }
 
-// CheckValues runs Check and, on Sat, fetches the model values for `vars` via (get-value ...). A
-// fetch/parse failure degrades to an empty map (the proof verdict is unaffected — values are only a
-// diagnostic). Any solver error inside the query batch makes the verdict Unknown: a query the solver
-// did not fully accept proves nothing either way.
+// CheckValues runs Check and, on Sat, fetches the model values for `vars` via (get-value ...). If a
+// requested model is missing or malformed, the result is Unknown so the caller cannot persist a
+// decline with an incomplete counterexample. Any solver error inside the query batch likewise makes
+// the verdict Unknown: a query the solver did not fully accept proves nothing either way.
 func (s *procSolver) CheckValues(assertions string, vars []string) (Result, map[string]string, time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -551,11 +551,15 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 		// (get-value (v1 v2 ...)) → "((v1 5) (v2 3))" possibly across lines.
 		if raw, verr, gerr := s.exchange("(get-value (" + strings.Join(vars, " ") + "))\n"); gerr != nil {
 			s.broken = true
-		} else if !verr {
-			parseGetValue(strings.Join(raw, " "), values)
+			res = Unknown
+			s.transientUnknown++
+		} else if verr || !parseGetValue(strings.Join(raw, " "), values) || !modelHasEveryValue(values, vars) {
+			res = Unknown
+			s.transientUnknown++
+			values = map[string]string{}
 		}
 	}
-	if !s.independent || s.warm {
+	if (!s.independent || s.warm) && !s.broken {
 		if _, sawError, err := s.exchange("(pop 1)\n"); err != nil || sawError {
 			s.transientUnknown++
 			s.broken = true
@@ -613,50 +617,157 @@ func (s *procSolver) readBalancedSExpr() (string, error) {
 	}
 }
 
-// parseGetValue extracts `name -> value` pairs from a (get-value ...) reply like
-// "((v_a 5) (v_b (- 3)))". Tolerant: it scans for `(<name> <value>)` groups and stores the value
-// text verbatim (negatives render as "(- 3)" → normalized to "-3").
-func parseGetValue(raw string, out map[string]string) {
-	s := strings.TrimSpace(raw)
-	// Strip the single outer parens around the list of pairs.
-	s = strings.TrimPrefix(s, "(")
-	s = strings.TrimSuffix(strings.TrimSpace(s), ")")
+// parseGetValue extracts `name -> value` pairs from a complete `(get-value ...)` result. It accepts
+// nested values such as bitvectors and negative integers, but rejects truncated pairs, duplicate
+// names, and trailing malformed text instead of silently returning a partial counterexample.
+func parseGetValue(raw string, out map[string]string) bool {
+	pos := skipSMTWhitespace(raw, 0)
+	if pos >= len(raw) || raw[pos] != '(' {
+		return false
+	}
+	pos++
 	for {
-		open := strings.IndexByte(s, '(')
-		if open < 0 {
-			return
+		pos = skipSMTWhitespace(raw, pos)
+		if pos >= len(raw) {
+			return false
 		}
-		// Find the matching close for this pair.
-		depth := 0
-		end := -1
-		for i := open; i < len(s); i++ {
-			if s[i] == '(' {
-				depth++
-			} else if s[i] == ')' {
-				depth--
-				if depth == 0 {
-					end = i
-					break
+		if raw[pos] == ')' {
+			pos++
+			break
+		}
+		if raw[pos] != '(' {
+			return false
+		}
+		pos++
+		pos = skipSMTWhitespace(raw, pos)
+		nameStart := pos
+		nameEnd, ok := parseSMTAtom(raw, pos)
+		if !ok {
+			return false
+		}
+		name := raw[nameStart:nameEnd]
+		pos = skipSMTWhitespace(raw, nameEnd)
+		valueStart := pos
+		valueEnd, ok := parseSMTExpression(raw, pos)
+		if !ok {
+			return false
+		}
+		value := strings.TrimSpace(raw[valueStart:valueEnd])
+		if value == "" {
+			return false
+		}
+		// Preserve the established diagnostic spelling for SMT's unary negative form.
+		if strings.HasPrefix(value, "(-") {
+			num := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "(-"), ")"))
+			value = "-" + num
+		}
+		pos = skipSMTWhitespace(raw, valueEnd)
+		if pos >= len(raw) || raw[pos] != ')' {
+			return false
+		}
+		pos++
+		if previous, duplicate := out[name]; duplicate {
+			if previous != value {
+				return false
+			}
+		} else {
+			out[name] = value
+		}
+	}
+	return skipSMTWhitespace(raw, pos) == len(raw)
+}
+
+func modelHasEveryValue(values map[string]string, vars []string) bool {
+	wanted := make(map[string]struct{}, len(vars))
+	for _, name := range vars {
+		wanted[name] = struct{}{}
+	}
+	if len(values) != len(wanted) {
+		return false
+	}
+	for name := range wanted {
+		if _, ok := values[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func skipSMTWhitespace(text string, pos int) int {
+	for pos < len(text) {
+		switch text[pos] {
+		case ' ', '\t', '\n', '\r', '\f', '\v':
+			pos++
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+// parseSMTAtom returns the end of one symbol atom (simple or quoted).
+func parseSMTAtom(text string, pos int) (int, bool) {
+	if pos >= len(text) || text[pos] == '(' || text[pos] == ')' || text[pos] == '"' {
+		return pos, false
+	}
+	if text[pos] == '|' {
+		for end := pos + 1; end < len(text); end++ {
+			if text[end] == '|' {
+				return end + 1, end > pos+1
+			}
+		}
+		return pos, false
+	}
+	end := pos
+	for end < len(text) {
+		if text[end] == '(' || text[end] == ')' || text[end] == '"' || text[end] == '|' || text[end] == ';' || skipSMTWhitespace(text, end) != end {
+			break
+		}
+		end++
+	}
+	return end, end > pos
+}
+
+// parseSMTExpression returns the end of one complete SMT-LIB s-expression.
+func parseSMTExpression(text string, pos int) (int, bool) {
+	if pos >= len(text) {
+		return pos, false
+	}
+	switch text[pos] {
+	case '(':
+		pos++
+		for {
+			pos = skipSMTWhitespace(text, pos)
+			if pos >= len(text) {
+				return pos, false
+			}
+			if text[pos] == ')' {
+				return pos + 1, true
+			}
+			end, ok := parseSMTExpression(text, pos)
+			if !ok {
+				return pos, false
+			}
+			pos = end
+		}
+	case ')', ';':
+		return pos, false
+	case '"':
+		for end := pos + 1; end < len(text); {
+			if text[end] == '"' {
+				if end+1 < len(text) && text[end+1] == '"' {
+					end += 2
+					continue
 				}
+				return end + 1, true
 			}
+			end++
 		}
-		if end < 0 {
-			return
-		}
-		inner := strings.TrimSpace(s[open+1 : end])
-		fields := strings.Fields(inner)
-		if len(fields) >= 2 {
-			name := fields[0]
-			val := strings.Join(fields[1:], " ")
-			val = strings.TrimSpace(val)
-			// Normalize "(- 3)" → "-3".
-			if strings.HasPrefix(val, "(-") {
-				num := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(val, "(-"), ")"))
-				val = "-" + num
-			}
-			out[name] = val
-		}
-		s = s[end+1:]
+		return pos, false
+	case '|':
+		return parseSMTAtom(text, pos)
+	default:
+		return parseSMTAtom(text, pos)
 	}
 }
 
