@@ -46,6 +46,16 @@ func newRequestSourceTokenCache() *sourceTokenCache {
 	return &sourceTokenCache{requestOnly: true}
 }
 
+// releaseRequestTokens drops the standalone request's large token array after
+// every parser using it has finished. Parsed AST strings retain their source
+// bytes as needed, and persistent server caches are left untouched.
+func (c *sourceTokenCache) releaseRequestTokens() {
+	if c == nil || !c.requestOnly {
+		return
+	}
+	c.requestLexed = nil
+}
+
 func newSourceTokenCache(maxEntries, maxBytes int) *sourceTokenCache {
 	if maxEntries <= 0 {
 		maxEntries = defaultCompileServerSessionCacheEntries
@@ -78,7 +88,7 @@ func (c *sourceTokenCache) lexBorrowedWithKey(key sourceTokenKey, source []byte)
 			c.requestKey = key
 			c.requestLexed = lexer.TokenizeSource(filename, source, nil)
 		})
-		if c.requestKey == key {
+		if c.requestLexed != nil && c.requestKey == key {
 			_ = lexer.New(filename, source)
 			return c.requestLexed.BorrowReadOnlyTokens(), c.requestLexed.CopyErrors()
 		}

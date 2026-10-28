@@ -1,18 +1,20 @@
 package main
 
 import (
-	"elisacore/src/ast"
+	"bytes"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"elisacore/src/ast"
 	"elisacore/src/semantic"
 )
 
 func TestAnalysisDiskPreparationJoinsOnPrimaryParseFailure(t *testing.T) {
-	program := &loadedProgram{filename: filepath.Join(t.TempDir(), "bad.elisa"), source: []byte("def : !!!\n")}
-	started, joined := false, false
+	program := &loadedProgram{filename: filepath.Join(t.TempDir(), "bad.elisa"), source: []byte("def : !!!\n"), tokenCache: newRequestSourceTokenCache()}
+	started, joined, joinedWithTokens := false, false, false
 	_, _, ok := analyzeLoadedProgramUsingPreparation(program, io.Discard, semantic.AnalyzeOptions{}, func(*ast.File, semantic.AnalyzeOptions) *semantic.Result {
 		t.Fatal("invalid primary parse reached semantic analysis")
 		return nil
@@ -20,10 +22,72 @@ func TestAnalysisDiskPreparationJoinsOnPrimaryParseFailure(t *testing.T) {
 		started = true
 		done := make(chan struct{})
 		go func() { close(done) }()
-		return func() { <-done; joined = true }
+		return func() {
+			<-done
+			joined = true
+			joinedWithTokens = program.tokenCache.requestLexed != nil
+		}
 	})
-	if ok || !started || !joined {
-		t.Fatalf("parse failure did not join invocation work: ok=%v started=%v joined=%v", ok, started, joined)
+	if ok || !started || !joined || !joinedWithTokens || program.tokenCache.requestLexed != nil {
+		t.Fatalf("parse failure did not join invocation work before releasing request tokens: ok=%v started=%v joined=%v joinedWithTokens=%v tokens=%v", ok, started, joined, joinedWithTokens, program.tokenCache.requestLexed != nil)
+	}
+}
+
+func TestAnalysisPreparationReleasesRequestTokensAfterJoin(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "request.elisa")
+	source := []byte("def value() -> i64:\n    return 21\n\ndef main() -> i64:\n    return value()\n")
+	program := &loadedProgram{filename: filename, source: source, tokenCache: newRequestSourceTokenCache()}
+	backgroundFile := make(chan *ast.File, 1)
+	backgroundErrors := make(chan string, 1)
+	backgroundDone := make(chan struct{})
+	joinedWithTokens := false
+
+	file, result, ok := analyzeLoadedProgramUsingPreparation(program, io.Discard, semantic.AnalyzeOptions{}, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+		if program.tokenCache.requestLexed == nil {
+			t.Error("request token storage was released before semantic analysis")
+		}
+		return semantic.AnalyzeWithOptions(file, options)
+	}, func(semantic.AnalyzeOptions) func() {
+		go func() {
+			defer close(backgroundDone)
+			var diagnostics bytes.Buffer
+			parsed, parsedOK := parseProgramWithTokenCache(filename, source, &diagnostics, program.tokenCache)
+			if !parsedOK {
+				backgroundErrors <- diagnostics.String()
+				return
+			}
+			backgroundFile <- parsed
+		}()
+		return func() {
+			<-backgroundDone
+			joinedWithTokens = program.tokenCache.requestLexed != nil
+		}
+	})
+	if !ok || result == nil || file == nil {
+		t.Fatal("analysis failed")
+	}
+	if !joinedWithTokens {
+		t.Fatal("request token storage was released before prepared parsing joined")
+	}
+	if program.tokenCache.requestLexed != nil {
+		t.Fatal("request token storage remained live after analysis returned")
+	}
+	select {
+	case message := <-backgroundErrors:
+		t.Fatalf("prepared parse failed: %s", message)
+	default:
+	}
+	preparedFile := <-backgroundFile
+	coldFile, coldOK := parseProgram(filename, source, io.Discard)
+	if !coldOK || !reflect.DeepEqual(preparedFile, coldFile) {
+		t.Fatal("dropping request token storage changed the independently parsed AST")
+	}
+	value, isFunction := file.Decls[0].(*ast.FuncDecl)
+	if !isFunction || value.Name != "value" {
+		t.Fatal("analyzed AST strings became invalid after dropping request token storage")
+	}
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", result.Diagnostics)
 	}
 }
 

@@ -192,11 +192,18 @@ func analyzeLoadedProgramUsingPreparation(program *loadedProgram, stderr io.Writ
 	}
 	// Source authority and final semantic options are established before any
 	// speculative restore. Join even when the primary parse rejects the input.
+	var join func()
 	if prepare != nil {
-		if join := prepare(options); join != nil {
-			defer join()
-		}
+		join = prepare(options)
 	}
+	defer func() {
+		if join != nil {
+			join()
+		}
+		if program.tokenCache != nil {
+			program.tokenCache.releaseRequestTokens()
+		}
+	}()
 	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		return analyze(file, options)
 	})
