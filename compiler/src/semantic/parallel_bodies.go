@@ -653,6 +653,14 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			cloned.Addr().Interface().(*Analyzer).returnElementSummaries = cloneSpecializationReturnElementSummaries(a.returnElementSummaries)
 			continue
 		}
+		if ownedFunctionAnalyses && name == "storeFlowSCC" {
+			cloned.Addr().Interface().(*Analyzer).storeFlowSCC = cloneSpecializationFuncDeclSliceMap(a.storeFlowSCC, specializationGraphCacheSchema("storeFlowSCC"))
+			continue
+		}
+		if ownedFunctionAnalyses && name == "callEdgeCache" {
+			cloned.Addr().Interface().(*Analyzer).callEdgeCache = cloneSpecializationFuncDeclSliceMap(a.callEdgeCache, specializationGraphCacheSchema("callEdgeCache"))
+			continue
+		}
 		if ownedFunctionAnalyses && name == "paramStoreTargets" {
 			cloned.Addr().Interface().(*Analyzer).paramStoreTargets = cloneSpecializationParamStoreTargets(a.paramStoreTargets)
 			continue
