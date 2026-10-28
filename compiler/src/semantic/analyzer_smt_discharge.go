@@ -2852,7 +2852,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 			if bound, ok := env[n.Name]; ok {
 				// A container identity alone does not declare a flat array. An actual
 				// array already declared in this query can retain both representations.
-				if tr.lengthOnly[bound] || (tr.stableContainers[bound] && !tr.declaredFlatArrayTerm(bound)) {
+				if strings.HasPrefix(bound, dtTokenPrefix) || tr.lengthOnly[bound] || (tr.stableContainers[bound] && !tr.declaredFlatArrayTerm(bound)) {
 					return "", false
 				}
 				return bound, true
@@ -2898,7 +2898,7 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// exactly what the bare-array Ident case does for `arr[k]`.
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
-				if tr.lengthOnly[bound] {
+				if strings.HasPrefix(bound, dtTokenPrefix) || tr.lengthOnly[bound] {
 					return "", false
 				}
 				return bound, true
