@@ -172,6 +172,13 @@ func (s *procSolver) resourceCount() (uint64, bool) {
 	return count, found
 }
 
+// isAmbiguousCancellation recognizes exact Z3 cancellation reports. Neither
+// string alone certifies resource exhaustion: only a replay with a full fuel
+// delta may do so.
+func isAmbiguousCancellation(reason string) bool {
+	return reason == `(:reason-unknown "canceled")` || reason == `(:reason-unknown "push canceled")`
+}
+
 // certifyCanceled replays an ambiguously canceled independent query with the
 // exact same resource budget and configured wall timer. It never treats elapsed
 // wall time as evidence of resource failure. The before/after fuel delta
@@ -225,7 +232,8 @@ func (s *procSolver) certifyCanceled(assertions string) (result Result, certifie
 	}
 	var after uint64
 	var afterOK bool
-	if s.rlimitLog != nil {
+	if lines[0] == "unknown" || s.rlimitLog != nil {
+		// Snapshot before asking for the reason: a solver may charge that probe.
 		after, afterOK = s.resourceCount()
 		if afterOK && after <= uint64(^uint64(0)>>1) {
 			// Independent physical checks start at reset, like ordinary log rows.
@@ -240,11 +248,8 @@ func (s *procSolver) certifyCanceled(assertions string) (result Result, certifie
 		return Unsat, false
 	case "unknown":
 		reason := s.unknownReason()
-		if reason != `(:reason-unknown "canceled")` && reason != `(:reason-unknown "max. resource limit exceeded")` {
+		if !isAmbiguousCancellation(reason) && reason != `(:reason-unknown "max. resource limit exceeded")` {
 			return Unknown, false
-		}
-		if s.rlimitLog == nil {
-			after, afterOK = s.resourceCount()
 		}
 		return Unknown, afterOK && after >= before && after-before >= uint64(s.checkLimit)
 	}
@@ -533,7 +538,7 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 			reason := s.unknownReason()
 			if reason == `(:reason-unknown "max. resource limit exceeded")` {
 				certified = true
-			} else if reason == `(:reason-unknown "canceled")` {
+			} else if isAmbiguousCancellation(reason) {
 				res, certified = s.certifyCanceled(assertions)
 			}
 		}

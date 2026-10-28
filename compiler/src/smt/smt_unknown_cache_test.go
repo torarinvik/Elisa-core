@@ -141,6 +141,10 @@ func TestCanceledReplayPreservesWallTimerAndFullRelativeFuel(t *testing.T) {
 		certified           bool
 	}{
 		{"exhausted", "1057", `(:reason-unknown "canceled")`, true},
+		{"push-canceled-exhausted", "1057", `(:reason-unknown "push canceled")`, true},
+		{"push-canceled-before-budget", "1056", `(:reason-unknown "push canceled")`, false},
+		{"push-canceled-missing-counter", "", `(:reason-unknown "push canceled")`, false},
+		{"push-canceled-replay-timeout", "1057", `(:reason-unknown "timeout")`, false},
 		{"before-budget", "1056", `(:reason-unknown "canceled")`, false},
 		{"parse-cost-alone", "1000", `(:reason-unknown "canceled")`, false},
 		{"counter-rollback", "56", `(:reason-unknown "canceled")`, false},
@@ -148,10 +152,11 @@ func TestCanceledReplayPreservesWallTimerAndFullRelativeFuel(t *testing.T) {
 		{"timeout", "1057", `(:reason-unknown "timeout")`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			replies := "unknown\nelisa-smt-frame-1\n(:reason-unknown \"canceled\")\nelisa-smt-frame-2\nelisa-smt-frame-3\n(:rlimit-count 57)\nelisa-smt-frame-4\nunknown\nelisa-smt-frame-5\n" + tc.reason + "\nelisa-smt-frame-6\n"
-			if tc.reason == `(:reason-unknown "canceled")` {
-				replies += "(:rlimit-count " + tc.after + ")\nelisa-smt-frame-7\n"
+			firstReason := `(:reason-unknown "canceled")`
+			if strings.HasPrefix(tc.name, "push-canceled-") {
+				firstReason = `(:reason-unknown "push canceled")`
 			}
+			replies := "unknown\nelisa-smt-frame-1\n" + firstReason + "\nelisa-smt-frame-2\nelisa-smt-frame-3\n(:rlimit-count 57)\nelisa-smt-frame-4\nunknown\nelisa-smt-frame-5\n(:rlimit-count " + tc.after + ")\nelisa-smt-frame-6\n" + tc.reason + "\nelisa-smt-frame-7\n"
 			var commands strings.Builder
 			s := &procSolver{independent: true, checkLimit: 1000, preamble: "(set-option :timeout 120000)\n", stdin: discardWriteCloser{&commands}, out: bufio.NewReader(strings.NewReader(replies))}
 			if result, _ := s.Check("(assert true)"); result != Unknown {
@@ -367,5 +372,70 @@ func TestCheckAfterHistoryRejectsSolverErrorBeforeFinalCheck(t *testing.T) {
 	}
 	if strings.Contains(commands.String(), "(assert false)") {
 		t.Fatalf("final query ran after replay error: %q", commands.String())
+	}
+}
+
+func TestPushCanceledReplayFailuresRemainTransient(t *testing.T) {
+	for _, tc := range []struct{ name, tail string }{
+		{"solver-error", "(error \"replay setup failed\")\nelisa-smt-frame-3\n"},
+		{"transport-eof", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			replies := "unknown\nelisa-smt-frame-1\n(:reason-unknown \"push canceled\")\nelisa-smt-frame-2\n" + tc.tail
+			s := &procSolver{independent: true, checkLimit: 1000, stdin: discardWriteCloser{io.Discard}, out: bufio.NewReader(strings.NewReader(replies))}
+			if result, _ := s.Check("(assert true)"); result != Unknown {
+				t.Fatalf("got %v", result)
+			}
+			resource, transient := s.UnknownCacheEpoch()
+			if resource != 0 || transient != 1 {
+				t.Fatalf("failed replay cached: resource=%d transient=%d", resource, transient)
+			}
+		})
+	}
+}
+
+func TestPushCanceledReplaySamplesFuelBeforeReason(t *testing.T) {
+	var replies bytes.Buffer
+	checks := 0
+	reasonCharged := false
+	writer := respondingWriteCloser(func(p []byte) (int, error) {
+		text := string(p)
+		switch {
+		case strings.Contains(text, "(get-info :reason-unknown)"):
+			if checks == 2 {
+				reasonCharged = true
+			}
+			replies.WriteString("(:reason-unknown \"push canceled\")\n")
+		case strings.Contains(text, "(get-info :all-statistics)"):
+			count := 57
+			if checks == 2 {
+				count = 1056 // one unit short, unless the reason query was charged
+				if reasonCharged {
+					count++
+				}
+			}
+			fmt.Fprintf(&replies, "(:rlimit-count %d)\n", count)
+		case strings.Contains(text, "(check-sat)"):
+			checks++
+			replies.WriteString("unknown\n")
+		}
+		echo := strings.LastIndex(text, "(echo \"")
+		if echo < 0 {
+			t.Fatal("missing frame")
+		}
+		frame, _, _ := strings.Cut(text[echo+7:], "\"")
+		fmt.Fprintln(&replies, frame)
+		return len(p), nil
+	})
+	solver := &procSolver{independent: true, checkLimit: 1000, stdin: writer, out: bufio.NewReader(&replies)}
+	if result, _ := solver.Check("(assert true)"); result != Unknown {
+		t.Fatalf("got %v", result)
+	}
+	resource, transient := solver.UnknownCacheEpoch()
+	if resource != 0 || transient != 1 {
+		t.Fatalf("reason probe fuel became a certificate: %d %d", resource, transient)
+	}
+	if !reasonCharged {
+		t.Fatal("replay reason was not checked")
 	}
 }
