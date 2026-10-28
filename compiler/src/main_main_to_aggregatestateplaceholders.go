@@ -19,6 +19,10 @@ import (
 	"unicode"
 )
 
+func init() {
+	semantic.SetSMTProofIdentityResolvers(compilerSourceStamp, toolchainContentStamp)
+}
+
 func main() {
 	// A parallel -emit obj re-runs this executable as a partition worker; it exits here.
 	backend.RunPartitionWorkerIfRequested()

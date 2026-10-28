@@ -137,6 +137,53 @@ func TestSMTProofCacheSolverAndBudgetIdentity(t *testing.T) {
 	}
 }
 
+func TestSMTProofCacheUsesIdentityResolvers(t *testing.T) {
+	directory := t.TempDir()
+	solver := filepath.Join(directory, "solver")
+	if err := os.WriteFile(solver, []byte("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo resolver-test; fi\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	previous := currentSMTProofIdentityResolvers()
+	defer SetSMTProofIdentityResolvers(previous.compilerArtifact, previous.toolchainArtifact)
+	compilerStamp, solverStamp := "compiler-a", "solver-a"
+	compilerCalls, solverCalls := 0, 0
+	SetSMTProofIdentityResolvers(func() (string, error) {
+		compilerCalls++
+		return compilerStamp, nil
+	}, func(path string) (string, error) {
+		solverCalls++
+		if path != solver {
+			t.Fatalf("unexpected toolchain path %q", path)
+		}
+		return solverStamp, nil
+	})
+
+	first := newSMTProofCache(filepath.Join(directory, "proofs"), solver)
+	if first == nil || compilerCalls != 1 || solverCalls != 1 {
+		t.Fatalf("identity resolvers were not used: cache=%v compiler calls=%d solver calls=%d", first, compilerCalls, solverCalls)
+	}
+	first.publish("query")
+
+	compilerStamp = "compiler-b"
+	second := newSMTProofCache(first.directory, solver)
+	if second == nil || second.identity == first.identity || second.contains("query") {
+		t.Fatal("changed compiler resolver identity reused a persistent proof")
+	}
+	if compilerCalls != 2 || solverCalls != 2 {
+		t.Fatalf("identities were not revalidated: compiler calls=%d solver calls=%d", compilerCalls, solverCalls)
+	}
+
+	solverStamp = "solver-b"
+	third := newSMTProofCache(first.directory, solver)
+	if third == nil || third.identity == second.identity || third.contains("query") {
+		t.Fatal("changed solver resolver identity reused a persistent proof")
+	}
+	if compilerCalls != 3 || solverCalls != 3 {
+		t.Fatalf("identities were not revalidated after solver change: compiler calls=%d solver calls=%d", compilerCalls, solverCalls)
+	}
+}
+
 func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 	priorDeclineCache := smtDeclineCacheEnabled
 	smtDeclineCacheEnabled = true

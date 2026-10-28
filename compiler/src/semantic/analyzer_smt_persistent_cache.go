@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"elisacore/src/smt"
@@ -25,6 +26,35 @@ const smtProofCacheSchema = "elisa-exact-smt-proof-v1"
 
 type smtProofCache struct{ directory, identity string }
 type smtProofCacheRecord struct{ Schema, Key, Verdict, Checksum string }
+
+type smtProofIdentityResolvers struct {
+	compilerArtifact  func() (string, error)
+	toolchainArtifact func(string) (string, error)
+}
+
+var (
+	smtProofIdentityResolverMu sync.RWMutex
+	smtProofIdentityResolver   smtProofIdentityResolvers
+)
+
+// SetSMTProofIdentityResolvers lets an embedding compiler share its already
+// validated compiler and toolchain content stamps with the persistent proof
+// cache. Standalone semantic users keep the local hashing fallback.
+func SetSMTProofIdentityResolvers(compilerArtifact func() (string, error), toolchainArtifact func(string) (string, error)) {
+	smtProofIdentityResolverMu.Lock()
+	smtProofIdentityResolver = smtProofIdentityResolvers{
+		compilerArtifact:  compilerArtifact,
+		toolchainArtifact: toolchainArtifact,
+	}
+	smtProofIdentityResolverMu.Unlock()
+}
+
+func currentSMTProofIdentityResolvers() smtProofIdentityResolvers {
+	smtProofIdentityResolverMu.RLock()
+	resolvers := smtProofIdentityResolver
+	smtProofIdentityResolverMu.RUnlock()
+	return resolvers
+}
 
 // Keep the compiler artifact opened from process startup. Renaming a new
 // compiler over its pathname must not identify already-running code as that new build.
@@ -46,6 +76,9 @@ var smtProofCompilerArtifact, smtProofCompilerStat = func() (*os.File, os.FileIn
 }()
 
 func smtProofCompilerHash() (string, error) {
+	if resolver := currentSMTProofIdentityResolvers().compilerArtifact; resolver != nil {
+		return resolver()
+	}
 	return smtProofOpenedArtifactHash(smtProofCompilerArtifact, smtProofCompilerStat)
 }
 
@@ -75,6 +108,9 @@ func smtProofOpenedArtifactHash(artifact *os.File, original os.FileInfo) (string
 }
 
 func smtProofArtifactHash(path string) (string, error) {
+	if resolver := currentSMTProofIdentityResolvers().toolchainArtifact; resolver != nil {
+		return resolver(path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
