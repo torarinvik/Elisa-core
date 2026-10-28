@@ -16,6 +16,7 @@ type decoder struct {
 	data         []byte
 	at           int
 	objects      []reflect.Value
+	wideObjects  map[int]wideObjectDescription
 	depth        int
 	budget       uint64
 	strings      []string

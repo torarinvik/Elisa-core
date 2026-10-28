@@ -57,6 +57,36 @@ type pointerHeaderEntry struct {
 	Next *pointerHeaderEntry
 }
 
+func TestObjectDescriptionUsesWideFallbackOnlyWhenNeeded(t *testing.T) {
+	d := &decoder{budget: 1 << 20}
+	compact, err := d.describeObject(1, 9, 7, 7, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compact.typeID != 9 || compact.length != 7 || compact.capacity != 7 {
+		t.Fatalf("compact descriptor = %+v", compact)
+	}
+	if typeID, length, capacity, ok := d.objectDetails(1, compact); !ok || typeID != 9 || length != 7 || capacity != 7 {
+		t.Fatalf("compact descriptor details = %d, %d, %d, %v", typeID, length, capacity, ok)
+	}
+
+	for _, dimensions := range []struct {
+		length, capacity int
+	}{{8, 9}, {7, 8}} {
+		wide, err := d.describeObject(2, 11, dimensions.length, dimensions.capacity, 7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wide.typeID != 0 {
+			t.Fatalf("wide descriptor retained compact type ID: %+v", wide)
+		}
+		typeID, length, capacity, ok := d.objectDetails(2, wide)
+		if !ok || typeID != 11 || length != dimensions.length || capacity != dimensions.capacity {
+			t.Fatalf("wide descriptor details = %d, %d, %d, %v", typeID, length, capacity, ok)
+		}
+	}
+}
+
 func BenchmarkStatePointerObjects(b *testing.B) {
 	root := make([]*pointerHeaderEntry, 10000)
 	for i := range root {

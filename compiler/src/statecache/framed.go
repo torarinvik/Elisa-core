@@ -92,7 +92,7 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	var wg sync.WaitGroup
 	run := func() {
 		defer wg.Done()
-		worker := decoder{registry: d.registry, objects: d.objects, strings: d.strings, framed: true, sharedBudget: budget}
+		worker := decoder{registry: d.registry, objects: d.objects, wideObjects: d.wideObjects, strings: d.strings, framed: true, sharedBudget: budget}
 		for {
 			start := int(next.Add(framedDecodeBatchSize)) - framedDecodeBatchSize
 			if start >= count || cancelled.Load() {

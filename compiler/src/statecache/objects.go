@@ -7,8 +7,44 @@ import (
 
 type objectDescription struct {
 	typeID           uint64
-	length, capacity int
+	length, capacity uint32
 	alias            *nodeAlias
+}
+
+// Oversized extents are rare. Keep them in a sparse side table so the common
+// object descriptor stays 24 bytes on 64-bit hosts.
+type wideObjectDescription struct {
+	typeID           uint64
+	length, capacity int
+}
+
+func (d *decoder) describeObject(id int, typeID uint64, length, capacity int, compactLimit uint32) (objectDescription, error) {
+	if typeID == 0 || length < 0 || capacity < 0 {
+		return objectDescription{}, fmt.Errorf("invalid state object dimensions")
+	}
+	max := uint64(compactLimit)
+	if uint64(length) <= max && uint64(capacity) <= max {
+		return objectDescription{typeID: typeID, length: uint32(length), capacity: uint32(capacity)}, nil
+	}
+	if err := d.reserve(1, 128); err != nil {
+		return objectDescription{}, err
+	}
+	if d.wideObjects == nil {
+		d.wideObjects = make(map[int]wideObjectDescription)
+	}
+	d.wideObjects[id] = wideObjectDescription{typeID: typeID, length: length, capacity: capacity}
+	return objectDescription{alias: nil}, nil
+}
+
+func (d *decoder) objectDetails(id int, desc objectDescription) (uint64, int, int, bool) {
+	if desc.typeID != 0 {
+		return desc.typeID, int(desc.length), int(desc.capacity), true
+	}
+	wide, ok := d.wideObjects[id]
+	if !ok {
+		return 0, 0, 0, false
+	}
+	return wide.typeID, wide.length, wide.capacity, true
 }
 
 func (d *decoder) readObjects() error {
@@ -42,21 +78,25 @@ func (d *decoder) readObjects() error {
 		if t.Kind() != reflect.Pointer && t.Kind() != reflect.Map && t.Kind() != reflect.Slice {
 			return fmt.Errorf("invalid state object kind")
 		}
-		desc := objectDescription{typeID: typeID}
+		length, capacity := 0, 0
 		if t.Kind() != reflect.Pointer {
-			desc.length, err = d.count()
+			length, err = d.count()
 			if err != nil {
 				return err
 			}
 		}
 		if t.Kind() == reflect.Slice {
-			desc.capacity, err = d.count()
+			capacity, err = d.count()
 			if err != nil {
 				return err
 			}
-			if desc.length > desc.capacity {
+			if length > capacity {
 				return fmt.Errorf("invalid state slice capacity")
 			}
+		}
+		desc, err := d.describeObject(id, typeID, length, capacity, ^uint32(0))
+		if err != nil {
+			return err
 		}
 		owner, err := d.uint()
 		if err != nil {
@@ -109,20 +149,20 @@ func (d *decoder) readObjects() error {
 					}
 				}
 			case reflect.Map:
-				if err := d.reserve(uint64(desc.length), t.Key().Size()+t.Elem().Size()+32); err != nil {
+				if err := d.reserve(uint64(length), t.Key().Size()+t.Elem().Size()+32); err != nil {
 					return err
 				}
-				v = reflect.MakeMapWithSize(t, desc.length)
+				v = reflect.MakeMapWithSize(t, length)
 			case reflect.Slice:
-				if err := d.reserve(uint64(desc.capacity), t.Elem().Size()); err != nil {
+				if err := d.reserve(uint64(capacity), t.Elem().Size()); err != nil {
 					return err
 				}
-				if sliceBatches != nil && smallSliceBatchEligible(t, desc.capacity) {
+				if sliceBatches != nil && smallSliceBatchEligible(t, capacity) {
 					batch := &sliceBatches[typeID-1]
-					batch.remaining += desc.capacity
+					batch.remaining += capacity
 					batch.count++
 				} else {
-					v = reflect.MakeSlice(t, desc.length, desc.capacity)
+					v = reflect.MakeSlice(t, length, capacity)
 				}
 			}
 			d.objects[id] = v
@@ -156,6 +196,10 @@ func (d *decoder) readObjects() error {
 
 func (d *decoder) fillObject(id int, desc objectDescription) error {
 	v := d.objects[id]
+	_, length, _, ok := d.objectDetails(id, desc)
+	if !ok {
+		return fmt.Errorf("missing state object dimensions")
+	}
 	switch v.Kind() {
 	case reflect.Pointer:
 		if err := d.value(v.Elem()); err != nil {
@@ -180,7 +224,7 @@ func (d *decoder) fillObject(id int, desc objectDescription) error {
 			}
 		}
 	case reflect.Map:
-		if desc.length == 0 {
+		if length == 0 {
 			return nil
 		}
 		entry, err := d.mapEntryScratch(v.Type())
@@ -188,7 +232,7 @@ func (d *decoder) fillObject(id int, desc objectDescription) error {
 			return err
 		}
 		key, value := entry.key, entry.value
-		for i := 0; i < desc.length; i++ {
+		for i := 0; i < length; i++ {
 			// Sparse values leave zero fields untouched. Clear both cells before
 			// reuse; SetMapIndex copies the values into the destination map.
 			key.SetZero()
@@ -204,7 +248,7 @@ func (d *decoder) fillObject(id int, desc objectDescription) error {
 			}
 			v.SetMapIndex(key, value)
 		}
-		if v.Len() != desc.length {
+		if v.Len() != length {
 			return fmt.Errorf("duplicate state map key")
 		}
 	}
@@ -222,7 +266,11 @@ func (d *decoder) resolveAlias(id int, descriptions []objectDescription, visitin
 	desc := descriptions[id]
 	// Type IDs were checked before any description was stored. Keeping the ID
 	// avoids retaining a reflected type interface for every graph object.
-	t := d.registry.types[desc.typeID-1]
+	typeID, length, capacity, ok := d.objectDetails(id, desc)
+	if !ok || typeID == 0 || typeID > uint64(len(d.registry.types)) {
+		return fmt.Errorf("missing or invalid state object dimensions")
+	}
+	t := d.registry.types[typeID-1]
 	a := desc.alias
 	if a == nil {
 		return fmt.Errorf("missing state allocation")
@@ -269,10 +317,10 @@ func (d *decoder) resolveAlias(id int, descriptions []objectDescription, visitin
 		}
 		restored = value.Addr()
 	} else {
-		if (value.Kind() != reflect.Array && value.Kind() != reflect.Slice) || value.Type().Elem() != t.Elem() || a.offset > value.Len() || desc.capacity > value.Len()-a.offset {
+		if (value.Kind() != reflect.Array && value.Kind() != reflect.Slice) || value.Type().Elem() != t.Elem() || a.offset > value.Len() || capacity > value.Len()-a.offset {
 			return fmt.Errorf("state alias slice range mismatch")
 		}
-		restored = value.Slice3(a.offset, a.offset+desc.length, a.offset+desc.capacity)
+		restored = value.Slice3(a.offset, a.offset+length, a.offset+capacity)
 		if restored.Type() != t {
 			if !restored.CanConvert(t) {
 				return fmt.Errorf("state alias slice type mismatch")

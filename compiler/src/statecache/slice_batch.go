@@ -1,6 +1,9 @@
 package statecache
 
-import "reflect"
+import (
+	"fmt"
+	"reflect"
+)
 
 const sliceBatchBytes = 1 << 20
 
@@ -27,11 +30,15 @@ func (d *decoder) allocateSliceBatches(descriptions []objectDescription, batches
 		if desc.alias != nil || d.objects[id].IsValid() {
 			continue
 		}
-		t := d.registry.types[desc.typeID-1]
+		typeID, length, capacity, ok := d.objectDetails(id, desc)
+		if !ok || typeID == 0 || typeID > uint64(len(d.registry.types)) {
+			return fmt.Errorf("missing or invalid state slice dimensions")
+		}
+		t := d.registry.types[typeID-1]
 		if t.Kind() != reflect.Slice {
 			continue
 		}
-		batch := &batches[desc.typeID-1]
+		batch := &batches[typeID-1]
 		var value reflect.Value
 		if !batch.typedChecked {
 			batch.typedChecked = true
@@ -41,14 +48,14 @@ func (d *decoder) allocateSliceBatches(descriptions []objectDescription, batches
 		}
 		if batch.typed != nil {
 			var err error
-			value, err = batch.typed.next(desc.length, desc.capacity, d)
+			value, err = batch.typed.next(length, capacity, d)
 			if err != nil {
 				return err
 			}
 		} else if !batch.values.IsValid() && batch.count < 8 {
-			value = reflect.MakeSlice(t, desc.length, desc.capacity)
+			value = reflect.MakeSlice(t, length, capacity)
 		} else {
-			if !batch.values.IsValid() || batch.next+desc.capacity > batch.values.Len() {
+			if !batch.values.IsValid() || batch.next+capacity > batch.values.Len() {
 				if batch.values.IsValid() {
 					// Request capacities were charged while reading descriptors. Charge
 					// any unfilled tail too, since live slices retain that physical block.
@@ -60,13 +67,13 @@ func (d *decoder) allocateSliceBatches(descriptions []objectDescription, batches
 				batch.values = reflect.MakeSlice(reflect.SliceOf(t.Elem()), n, n)
 				batch.next = 0
 			}
-			value = batch.values.Slice3(batch.next, batch.next+desc.length, batch.next+desc.capacity)
-			batch.next += desc.capacity
+			value = batch.values.Slice3(batch.next, batch.next+length, batch.next+capacity)
+			batch.next += capacity
 			if value.Type() != t {
 				value = value.Convert(t)
 			}
 		}
-		batch.remaining -= desc.capacity
+		batch.remaining -= capacity
 		batch.count--
 		d.objects[id] = value
 	}
