@@ -5,6 +5,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"sync"
 
 	"elisacore/src/ast"
 )
@@ -242,9 +243,9 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 	// determine the private ownership closure.
 	for cursor := first; cursor < len(syntax.prepared); cursor++ {
 		node := reflect.ValueOf(syntax.prepared[cursor])
-		for _, path := range specializationASTMapPaths() {
+		for _, path := range specializationASTMapPathsForNode(node.Type()) {
 			source := specializationField(reflect.ValueOf(c.base.analyzer).Elem(), path)
-			if source.IsNil() || !node.Type().AssignableTo(source.Type().Key()) {
+			if source.IsNil() {
 				continue
 			}
 			if value := source.MapIndex(node); value.IsValid() {
@@ -282,9 +283,9 @@ func (c *specializationContext) copyDecl(fn *ast.FuncDecl) *ast.FuncDecl {
 			continue
 		}
 		originalKey, privateKey := reflect.ValueOf(original), reflect.ValueOf(private)
-		for _, path := range specializationASTMapPaths() {
+		for _, path := range specializationASTMapPathsForNode(originalKey.Type()) {
 			source := specializationField(reflect.ValueOf(c.base.analyzer).Elem(), path)
-			if source.IsNil() || !originalKey.Type().AssignableTo(source.Type().Key()) {
+			if source.IsNil() {
 				continue
 			}
 			value := source.MapIndex(originalKey)
@@ -317,6 +318,31 @@ func specializationField(root reflect.Value, path []int) reflect.Value {
 // facts whose values contain declaration references (CFGs, lambda metadata, etc).
 func specializationASTMapPaths() [][]int {
 	return specializationASTMapPathsOnce()
+}
+
+// The Analyzer schema is fixed for the lifetime of the process. Preselect the
+// declaration-fact tables by concrete syntax type, retaining the original path
+// order and AssignableTo rules, instead of rewalking every reflected table for
+// every syntax node in every private specialization.
+var specializationASTPathsByNode sync.Map // map[reflect.Type][][]int
+
+func specializationASTMapPathsForNode(nodeType reflect.Type) [][]int {
+	if cached, ok := specializationASTPathsByNode.Load(nodeType); ok {
+		return cached.([][]int)
+	}
+	rootType := reflect.TypeFor[Analyzer]()
+	var paths [][]int
+	for _, path := range specializationASTMapPaths() {
+		typ := rootType
+		for _, index := range path {
+			typ = typ.Field(index).Type
+		}
+		if nodeType.AssignableTo(typ.Key()) {
+			paths = append(paths, path)
+		}
+	}
+	value, _ := specializationASTPathsByNode.LoadOrStore(nodeType, paths)
+	return value.([][]int)
 }
 
 var specializationASTMapPathsOnce = func() func() [][]int {
