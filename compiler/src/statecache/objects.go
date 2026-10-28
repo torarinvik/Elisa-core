@@ -6,13 +6,13 @@ import (
 )
 
 type objectDescription struct {
-	typeID uint32
-	sizes  uint32
-	alias  *nodeAlias
+	typeID     uint32
+	sizes      uint32
+	aliasIndex uint32 // zero means no alias; otherwise index+1 in decoder.aliases
 }
 
 // Oversized extents are rare. Keep them in a sparse side table so the common
-// object descriptor stays one pointer plus eight bytes (16 bytes on 64-bit hosts).
+// object descriptor remains three pointer-free uint32 values (12 bytes).
 type wideObjectDescription struct {
 	typeID           uint64
 	length, capacity int
@@ -37,7 +37,7 @@ func (d *decoder) describeObject(id int, typeID uint64, length, capacity int, co
 		d.wideObjects = make(map[int]wideObjectDescription)
 	}
 	d.wideObjects[id] = wideObjectDescription{typeID: typeID, length: length, capacity: capacity}
-	return objectDescription{alias: nil}, nil
+	return objectDescription{}, nil
 }
 
 func (d *decoder) objectDetails(id int, desc objectDescription) (uint64, int, int, bool) {
@@ -58,13 +58,12 @@ func (d *decoder) readObjects() error {
 	if err != nil {
 		return err
 	}
+	d.aliases.maxAliases = uint64(count)
 	if err := d.reserve(uint64(count), 128); err != nil {
 		return err
 	}
 	descriptions := make([]objectDescription, count+1)
 	d.objects = make([]reflect.Value, count+1)
-	// The 128-byte per-object metadata reservation covers descriptions,
-	// references, alias bookkeeping and these type-indexed batch headers.
 	// Only large graphs with sufficient per-object slack use batching.
 	var batches []pointerBatch
 	var sliceBatches []sliceBatch
@@ -116,7 +115,10 @@ func (d *decoder) readObjects() error {
 			if err != nil {
 				return err
 			}
-			alias := &nodeAlias{owner: owner}
+			if d.aliases.count == ^uint32(0) {
+				return fmt.Errorf("too many state aliases")
+			}
+			alias := nodeAlias{owner: owner}
 			if err := d.reserve(uint64(n), 16); err != nil {
 				return err
 			}
@@ -136,7 +138,11 @@ func (d *decoder) readObjects() error {
 					return err
 				}
 			}
-			desc.alias = alias
+			aliasIndex, err := d.aliases.append(d, alias)
+			if err != nil {
+				return err
+			}
+			desc.aliasIndex = aliasIndex
 		} else {
 			var v reflect.Value
 			switch t.Kind() {
@@ -193,7 +199,7 @@ func (d *decoder) readObjects() error {
 		return d.readFramedBodies(descriptions)
 	}
 	for id := 1; id <= count; id++ {
-		if descriptions[id].alias == nil {
+		if descriptions[id].aliasIndex == 0 {
 			if err := d.fillObject(id, descriptions[id]); err != nil {
 				return err
 			}
@@ -279,8 +285,8 @@ func (d *decoder) resolveAlias(id int, descriptions []objectDescription, visitin
 		return fmt.Errorf("missing or invalid state object dimensions")
 	}
 	t := d.registry.types[typeID-1]
-	a := desc.alias
-	if a == nil {
+	a, ok := d.aliases.get(desc.aliasIndex)
+	if !ok {
 		return fmt.Errorf("missing state allocation")
 	}
 	if err := d.resolveAlias(int(a.owner), descriptions, visiting, depth+1); err != nil {

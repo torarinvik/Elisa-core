@@ -20,7 +20,7 @@ type pointerBatch struct {
 func (d *decoder) allocatePointerBatches(descriptions []objectDescription, batches []pointerBatch) error {
 	for id := 1; id < len(descriptions); id++ {
 		desc := descriptions[id]
-		if desc.alias != nil || d.objects[id].IsValid() {
+		if desc.aliasIndex != 0 || d.objects[id].IsValid() {
 			continue
 		}
 		typeID := uint64(desc.typeID)

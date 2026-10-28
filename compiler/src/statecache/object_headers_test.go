@@ -67,7 +67,7 @@ func TestObjectDescriptionUsesWideFallbackOnlyWhenNeeded(t *testing.T) {
 	if compact.typeID != 9 || compact.sizes != 7|(7<<16) {
 		t.Fatalf("compact descriptor = %+v", compact)
 	}
-	if got, want := unsafe.Sizeof(compact), unsafe.Sizeof(uintptr(0))+8; got != want {
+	if got, want := unsafe.Sizeof(compact), uintptr(3)*unsafe.Sizeof(uint32(0)); got != want {
 		t.Fatalf("object descriptor size = %d, want %d", got, want)
 	}
 	if typeID, length, capacity, ok := d.objectDetails(1, compact); !ok || typeID != 9 || length != 7 || capacity != 7 {

@@ -27,7 +27,7 @@ func smallSliceBatchEligible(t reflect.Type, capacity int) bool {
 func (d *decoder) allocateSliceBatches(descriptions []objectDescription, batches []sliceBatch) error {
 	for id := 1; id < len(descriptions); id++ {
 		desc := descriptions[id]
-		if desc.alias != nil || d.objects[id].IsValid() {
+		if desc.aliasIndex != 0 || d.objects[id].IsValid() {
 			continue
 		}
 		typeID, length, capacity, ok := d.objectDetails(id, desc)

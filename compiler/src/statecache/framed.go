@@ -55,7 +55,7 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 		if size > dictionary-cursor {
 			return fmt.Errorf("state frame exceeds bodies")
 		}
-		if i < count && descriptions[i+1].alias != nil && size != 0 {
+		if i < count && descriptions[i+1].aliasIndex != 0 && size != 0 {
 			return fmt.Errorf("state alias has a body")
 		}
 		cursor += size
@@ -101,7 +101,7 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 			frameStart := frameStarts[start/framedDecodeBatchSize]
 			for i := start; i < min(start+framedDecodeBatchSize, count); i++ {
 				frameEnd := frameStart + int(binary.LittleEndian.Uint64(table[i*8:]))
-				if descriptions[i+1].alias == nil {
+				if descriptions[i+1].aliasIndex == 0 {
 					worker.data = payload[frameStart:frameEnd]
 					worker.at = 0
 					if err := worker.fillObject(i+1, descriptions[i+1]); err != nil {
