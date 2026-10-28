@@ -653,6 +653,10 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			cloned.Addr().Interface().(*Analyzer).returnElementSummaries = cloneSpecializationReturnElementSummaries(a.returnElementSummaries)
 			continue
 		}
+		if ownedFunctionAnalyses && name == "paramStoreTargets" {
+			cloned.Addr().Interface().(*Analyzer).paramStoreTargets = cloneSpecializationParamStoreTargets(a.paramStoreTargets)
+			continue
+		}
 		if ownedFunctionAnalyses && name == "storeScanFilledCache" {
 			// Filled-local rows are completed fixed-point results. The scanner
 			// only reads them after publication, so copy the mutable cache header
