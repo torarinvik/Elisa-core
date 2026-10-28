@@ -202,10 +202,10 @@ func (d *decoder) fillObject(id int, desc objectDescription) error {
 			if !key.Comparable() {
 				return fmt.Errorf("noncomparable state map key")
 			}
-			if v.MapIndex(key).IsValid() {
-				return fmt.Errorf("duplicate state map key")
-			}
 			v.SetMapIndex(key, value)
+		}
+		if v.Len() != desc.length {
+			return fmt.Errorf("duplicate state map key")
 		}
 	}
 	return nil
