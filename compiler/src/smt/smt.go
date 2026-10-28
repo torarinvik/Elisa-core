@@ -809,6 +809,20 @@ func isZ3(binary string) bool {
 	return base == "z3"
 }
 
+// validHistoryReplies enforces one well-formed verdict per replayed check. The
+// reset and option commands have print-success disabled and emit no replies.
+func validHistoryReplies(lines []string, checks int) bool {
+	if len(lines) != checks {
+		return false
+	}
+	for _, line := range lines {
+		if line != "sat" && line != "unsat" && line != "unknown" {
+			return false
+		}
+	}
+	return true
+}
+
 // CheckAfterHistory decides assertions in a session that first checked each history entry in
 // order, under the session budget, exactly as a push/pop session would have. Its verdict depends
 // only on the history, the query and the budgets, so it is as reproducible as Check; it exists
@@ -835,7 +849,7 @@ func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars
 		}
 		b.WriteString("(check-sat)\n(pop 1)\n")
 	}
-	if _, sawError, err := s.exchange(b.String()); err != nil || sawError {
+	if lines, sawError, err := s.exchange(b.String()); err != nil || sawError || !validHistoryReplies(lines, len(history)) {
 		// Any failed history command leaves the replayed stack/state uncertain.
 		// Retire this process instead of issuing the final query in a partial replay.
 		s.broken = true
