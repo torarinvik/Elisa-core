@@ -3,6 +3,7 @@ package statecache
 import (
 	"reflect"
 	"testing"
+	"unsafe"
 )
 
 type namedPointer *int
@@ -63,25 +64,29 @@ func TestObjectDescriptionUsesWideFallbackOnlyWhenNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if compact.typeID != 9 || compact.length != 7 || compact.capacity != 7 {
+	if compact.typeID != 9 || compact.sizes != 7|(7<<16) {
 		t.Fatalf("compact descriptor = %+v", compact)
+	}
+	if got, want := unsafe.Sizeof(compact), unsafe.Sizeof(uintptr(0))+8; got != want {
+		t.Fatalf("object descriptor size = %d, want %d", got, want)
 	}
 	if typeID, length, capacity, ok := d.objectDetails(1, compact); !ok || typeID != 9 || length != 7 || capacity != 7 {
 		t.Fatalf("compact descriptor details = %d, %d, %d, %v", typeID, length, capacity, ok)
 	}
 
 	for _, dimensions := range []struct {
+		id, typeID       uint64
 		length, capacity int
-	}{{8, 9}, {7, 8}} {
-		wide, err := d.describeObject(2, 11, dimensions.length, dimensions.capacity, 7)
+	}{{2, 11, 8, 9}, {2, 11, 7, 8}, {3, uint64(^uint32(0)) + 1, 7, 7}} {
+		wide, err := d.describeObject(int(dimensions.id), dimensions.typeID, dimensions.length, dimensions.capacity, 7)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if wide.typeID != 0 {
 			t.Fatalf("wide descriptor retained compact type ID: %+v", wide)
 		}
-		typeID, length, capacity, ok := d.objectDetails(2, wide)
-		if !ok || typeID != 11 || length != dimensions.length || capacity != dimensions.capacity {
+		typeID, length, capacity, ok := d.objectDetails(int(dimensions.id), wide)
+		if !ok || typeID != dimensions.typeID || length != dimensions.length || capacity != dimensions.capacity {
 			t.Fatalf("wide descriptor details = %d, %d, %d, %v", typeID, length, capacity, ok)
 		}
 	}

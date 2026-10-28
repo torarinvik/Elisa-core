@@ -6,9 +6,9 @@ import (
 )
 
 type objectDescription struct {
-	typeID           uint64
-	length, capacity uint32
-	alias            *nodeAlias
+	typeID uint32
+	sizes  uint32
+	alias  *nodeAlias
 }
 
 // Oversized extents are rare. Keep them in a sparse side table so the common
@@ -23,8 +23,12 @@ func (d *decoder) describeObject(id int, typeID uint64, length, capacity int, co
 		return objectDescription{}, fmt.Errorf("invalid state object dimensions")
 	}
 	max := uint64(compactLimit)
-	if uint64(length) <= max && uint64(capacity) <= max {
-		return objectDescription{typeID: typeID, length: uint32(length), capacity: uint32(capacity)}, nil
+	if max > uint64(^uint16(0)) {
+		max = uint64(^uint16(0))
+	}
+	if typeID <= uint64(^uint32(0)) && uint64(length) <= max && uint64(capacity) <= max {
+		sizes := uint32(uint16(length)) | uint32(uint16(capacity))<<16
+		return objectDescription{typeID: uint32(typeID), sizes: sizes}, nil
 	}
 	if err := d.reserve(1, 128); err != nil {
 		return objectDescription{}, err
@@ -38,7 +42,9 @@ func (d *decoder) describeObject(id int, typeID uint64, length, capacity int, co
 
 func (d *decoder) objectDetails(id int, desc objectDescription) (uint64, int, int, bool) {
 	if desc.typeID != 0 {
-		return desc.typeID, int(desc.length), int(desc.capacity), true
+		length := int(uint16(desc.sizes))
+		capacity := int(uint16(desc.sizes >> 16))
+		return uint64(desc.typeID), length, capacity, true
 	}
 	wide, ok := d.wideObjects[id]
 	if !ok {
@@ -94,7 +100,7 @@ func (d *decoder) readObjects() error {
 				return fmt.Errorf("invalid state slice capacity")
 			}
 		}
-		desc, err := d.describeObject(id, typeID, length, capacity, ^uint32(0))
+		desc, err := d.describeObject(id, typeID, length, capacity, uint32(^uint16(0)))
 		if err != nil {
 			return err
 		}
@@ -170,7 +176,9 @@ func (d *decoder) readObjects() error {
 		descriptions[id] = desc
 	}
 	if batches != nil {
-		d.allocatePointerBatches(descriptions, batches)
+		if err := d.allocatePointerBatches(descriptions, batches); err != nil {
+			return err
+		}
 		if err := d.allocateSliceBatches(descriptions, sliceBatches); err != nil {
 			return err
 		}

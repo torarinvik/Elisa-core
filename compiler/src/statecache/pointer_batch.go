@@ -1,6 +1,9 @@
 package statecache
 
-import "reflect"
+import (
+	"fmt"
+	"reflect"
+)
 
 const pointerBatchBytes = 64 << 10
 
@@ -14,17 +17,28 @@ type pointerBatch struct {
 // This reduces millions of small allocations without serializing addresses or
 // changing storage aliases. Zero-size/canonical pointers use the ordinary path.
 // Each backing array is at most 64 KiB; live elements keep that block alive.
-func (d *decoder) allocatePointerBatches(descriptions []objectDescription, batches []pointerBatch) {
+func (d *decoder) allocatePointerBatches(descriptions []objectDescription, batches []pointerBatch) error {
 	for id := 1; id < len(descriptions); id++ {
 		desc := descriptions[id]
 		if desc.alias != nil || d.objects[id].IsValid() {
 			continue
 		}
-		t := d.registry.types[desc.typeID-1]
+		typeID := uint64(desc.typeID)
+		if typeID == 0 {
+			var ok bool
+			typeID, _, _, ok = d.objectDetails(id, desc)
+			if !ok {
+				return fmt.Errorf("missing state pointer dimensions")
+			}
+		}
+		if typeID == 0 || typeID > uint64(len(d.registry.types)) {
+			return fmt.Errorf("invalid state pointer type")
+		}
+		t := d.registry.types[typeID-1]
 		if t.Kind() != reflect.Pointer {
 			continue
 		}
-		batch := &batches[desc.typeID-1]
+		batch := &batches[typeID-1]
 		var pointer reflect.Value
 		if !batch.values.IsValid() && batch.remaining < 8 {
 			pointer = newStatePointer(t)
@@ -43,4 +57,5 @@ func (d *decoder) allocatePointerBatches(descriptions []objectDescription, batch
 		}
 		d.objects[id] = pointer
 	}
+	return nil
 }
