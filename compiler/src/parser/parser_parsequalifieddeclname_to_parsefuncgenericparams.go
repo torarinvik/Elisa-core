@@ -631,6 +631,7 @@ func (p *Parser) parseLayoutInt() int64 {
 	base := 0
 	if tok.Kind == lexer.TOKEN_HEX_LIT {
 		base = 16
+		text = strings.ReplaceAll(text, "_", "")
 		text = strings.TrimPrefix(strings.TrimPrefix(text, "0x"), "0X")
 	} else if tok.Kind != lexer.TOKEN_INT_LIT {
 		p.errorAt(tok.Pos, "expected an integer offset/size in layout declaration, got %q", tok.Text)

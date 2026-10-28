@@ -582,8 +582,18 @@ func (l *Lexer) readNumber() Token {
 	if l.peek() == '0' && l.sourceHas(l.pos+1) && (l.sourceByte(l.pos+1) == 'x' || l.sourceByte(l.pos+1) == 'X') {
 		l.advance() // 0
 		l.advance() // x
-		for l.sourceHas(l.pos) && isHexDigit(l.peek()) {
-			l.advance()
+		for l.sourceHas(l.pos) {
+			if isHexDigit(l.peek()) {
+				l.advance()
+				continue
+			}
+			// A separator belongs to the literal only between two hex digits.
+			// Leave a leading, trailing, or repeated underscore for the next token.
+			if l.peek() == '_' && l.pos > start+2 && isHexDigit(l.sourceByte(l.pos-1)) && isHexDigit(l.peekAt(1)) {
+				l.advance()
+				continue
+			}
+			break
 		}
 		text := bytesToStringView(l.sourceSlice(start, l.pos))
 		suffix := l.readTypeSuffix()

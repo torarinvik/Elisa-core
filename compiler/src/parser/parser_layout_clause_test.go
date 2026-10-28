@@ -109,6 +109,17 @@ func TestParseGuestOverlayCanonical(t *testing.T) {
 	}
 }
 
+func TestParseGuestOverlayHexSeparators(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct P layout(guest, size: 0x1_00):\n    value: u64 at 0x0_08 requires size >= 0x0_10\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.LayoutDecl)
+	if !ok || decl.Size != 256 || len(decl.Fields) != 1 || decl.Fields[0].Offset != 8 || decl.Fields[0].RequiresSizeAtLeast != 16 {
+		t.Fatalf("unexpected parsed overlay: %#v", file.Decls[0])
+	}
+}
+
 func TestParseGuestOverlayFieldNeedsOffset(t *testing.T) {
 	_, errs := parseSourceFile(t, "struct P layout(guest, size: 8):\n    size: u64\n")
 	if len(errs) != 1 || !strings.Contains(errs[0], "needs an explicit offset") {

@@ -329,11 +329,15 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return ConstValue{Kind: ConstDict, Dict: entries}, true
 		}
 		elems := make([]ConstValue, 0, len(n.Elems))
+		var expectedElement Type
+		if expectedArray, ok := a.constEvalExpectedType.(*ArrayType); ok && expectedArray != nil && !n.Brace {
+			expectedElement = expectedArray.Elem
+		}
 		for i, elem := range n.Elems {
 			if i < len(n.Spreads) && n.Spreads[i] {
 				return ConstValue{}, false
 			}
-			value, ok := a.evalConstExpr(elem)
+			value, ok := a.evalConstArrayElement(elem, expectedElement)
 			if !ok {
 				return ConstValue{}, false
 			}
@@ -380,6 +384,37 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	default:
 		return ConstValue{}, false
 	}
+}
+
+// evalConstArrayElement applies an array's element type only to a literal
+// integer or a nested array literal. Other expressions keep their existing
+// context, so the target type cannot leak into a condition or call operand.
+func (a *Analyzer) evalConstArrayElement(expr ast.Expr, expected Type) (ConstValue, bool) {
+	inner := expr
+	for {
+		paren, ok := inner.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			break
+		}
+		inner = paren.Inner
+	}
+	useExpected := false
+	switch n := inner.(type) {
+	case *ast.IntLit:
+		// This array compatibility path is limited to u64. The width of usize
+		// and uintptr depends on the target and needs separate range handling.
+		builtin, ok := expected.(*BuiltinType)
+		useExpected = n != nil && n.Suffix == "" && ok && builtin != nil && builtin.Name == "u64"
+	case *ast.ListLitExpr:
+		_, useExpected = expected.(*ArrayType)
+	}
+	if !useExpected {
+		return a.evalConstExpr(expr)
+	}
+	previous := a.constEvalExpectedType
+	a.constEvalExpectedType = expected
+	defer func() { a.constEvalExpectedType = previous }()
+	return a.evalConstExpr(expr)
 }
 
 // constFieldExprRootName is the leading identifier of a dotted name built by constFieldExprName.
