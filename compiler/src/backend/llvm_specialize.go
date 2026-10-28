@@ -51,14 +51,45 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if localCapture && g.partitionNativeNameReserved(specializedName) {
 		return nil, nil, errPartitionDeclined
 	}
+	queueSpecialization := g.partitionSpecializationQueue != nil && !localCapture
 	specializedType := g.specializedFuncTypes[specializedName]
-	if specializedType == nil {
+	if queueSpecialization {
+		candidate := g.cachedSpecializedFuncType(base, typeBindings)
+		if specializedType != nil && !sameSpecializedFunctionType(specializedType, candidate) {
+			return nil, nil, errPartitionDeclined
+		}
+		specializedType = candidate
+	} else if specializedType == nil {
 		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
-		g.specializedFuncTypes[specializedName] = specializedType
+	}
+	if specializedType == nil {
+		return nil, nil, errPartitionDeclined
+	}
+	g.specializedFuncTypes[specializedName] = specializedType
+	if queueSpecialization {
+		if !g.partitionSpecializationQueue.hasName(specializedName) && g.partitionNativeNameReserved(specializedName) {
+			return nil, nil, errPartitionDeclined
+		}
+		if err := g.partitionSpecializationQueue.addFunction(g.result, specializedName, decl, base, specializedType, typeBindings, g.partitionSpecializationParts); err != nil {
+			return nil, nil, err
+		}
 	}
 	if existing, ok := g.functions[specializedName]; ok {
 		if localCapture && !g.partLocalHelpers[llvmValueName(existing)] {
 			return nil, nil, errPartitionDeclined
+		}
+		if queueSpecialization {
+			if g.partLocalHelpers[llvmValueName(existing)] {
+				return nil, nil, errPartitionDeclined
+			}
+			if g.partBody == nil || g.partBody(specializedName) {
+				if C.LLVMCountBasicBlocks(existing) == 0 {
+					if err := g.defineFunctionBodyWithBindings(decl, specializedType, existing, typeBindings); err != nil {
+						return nil, nil, err
+					}
+				}
+				g.markPartitionSpecializationDefined(specializedName)
+			}
 		}
 		return existing, specializedType, nil
 	}
@@ -78,8 +109,14 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 		g.partLocalHelpers[llvmValueName(fnValue)] = true
 	}
 	g.functions[specializedName] = fnValue
+	if queueSpecialization && g.partBody != nil && !g.partBody(specializedName) {
+		return fnValue, specializedType, nil
+	}
 	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
 		return nil, nil, err
+	}
+	if queueSpecialization {
+		g.markPartitionSpecializationDefined(specializedName)
 	}
 	return fnValue, specializedType, nil
 }
@@ -127,14 +164,45 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 	if localCapture && g.partitionNativeNameReserved(specializedName) {
 		return nil, "", nil, errPartitionDeclined
 	}
+	queueSpecialization := g.partitionSpecializationQueue != nil && !localCapture
 	specializedType := g.specializedFuncTypes[specializedName]
-	if specializedType == nil {
+	if queueSpecialization {
+		candidate := g.cachedSpecializedFuncType(base, typeBindings)
+		if specializedType != nil && !sameSpecializedFunctionType(specializedType, candidate) {
+			return nil, "", nil, errPartitionDeclined
+		}
+		specializedType = candidate
+	} else if specializedType == nil {
 		specializedType = g.cachedSpecializedFuncType(base, typeBindings)
-		g.specializedFuncTypes[specializedName] = specializedType
+	}
+	if specializedType == nil {
+		return nil, "", nil, errPartitionDeclined
+	}
+	g.specializedFuncTypes[specializedName] = specializedType
+	if queueSpecialization {
+		if !g.partitionSpecializationQueue.hasName(specializedName) && g.partitionNativeNameReserved(specializedName) {
+			return nil, "", nil, errPartitionDeclined
+		}
+		if err := g.partitionSpecializationQueue.addImplMethod(g.result, specializedName, decl, base, specializedType, implTypeParams, owner, methodName, typeBindings, g.partitionSpecializationParts); err != nil {
+			return nil, "", nil, err
+		}
 	}
 	if existing, ok := g.functions[specializedName]; ok {
 		if localCapture && !g.partLocalHelpers[llvmValueName(existing)] {
 			return nil, "", nil, errPartitionDeclined
+		}
+		if queueSpecialization {
+			if g.partLocalHelpers[llvmValueName(existing)] {
+				return nil, "", nil, errPartitionDeclined
+			}
+			if g.partBody == nil || g.partBody(specializedName) {
+				if C.LLVMCountBasicBlocks(existing) == 0 {
+					if err := g.defineFunctionBodyWithBindings(decl, specializedType, existing, typeBindings); err != nil {
+						return nil, "", nil, err
+					}
+				}
+				g.markPartitionSpecializationDefined(specializedName)
+			}
 		}
 		return existing, specializedName, specializedType, nil
 	}
@@ -154,8 +222,14 @@ func (g *llvmGenerator) ensureSpecializedImplMethod(decl *ast.FuncDecl, base *se
 		g.partLocalHelpers[llvmValueName(fnValue)] = true
 	}
 	g.functions[specializedName] = fnValue
+	if queueSpecialization && g.partBody != nil && !g.partBody(specializedName) {
+		return fnValue, specializedName, specializedType, nil
+	}
 	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
 		return nil, "", nil, err
+	}
+	if queueSpecialization {
+		g.markPartitionSpecializationDefined(specializedName)
 	}
 	return fnValue, specializedName, specializedType, nil
 }

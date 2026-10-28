@@ -308,6 +308,16 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	declarations := partitionIRDeclarationWorklists(result, shared.symbolsByNode, parts, sharedReads)
 	objects := make([][]byte, parts)
 	members := make([][]string, parts)
+	definedSpecializations := make([]map[string]bool, parts)
+	var specializationQueue *partitionSpecializationQueue
+	if options.OptLevel == OptimizationLevel0 {
+		specializationQueue = newPartitionSpecializationQueue()
+	}
+	var auditCollector *partitionIRInputAuditCollector
+	if s.irInputAudit != nil {
+		auditCollector = newPartitionIRInputAuditCollector(parts)
+		defer auditCollector.flush(s.irInputAudit)
+	}
 	var previousMembers [][]string
 	if os.Getenv("ELISACORE_PARTITION_SCHEDULE") != "0" {
 		previousMembers = s.disk.loadSchedule(unitID, targetID, parts)
@@ -320,7 +330,18 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	var declinedPart atomic.Int64
 	if err := runPartitionIRWorkers(parts, workers, order, func(part int) error {
 		var err error
-		objects[part], err = s.buildIRPartition(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations[part], &members[part], shared)
+		var definitions []string
+		mode := partitionIRBuildMode{queue: specializationQueue, cachePart: part}
+		if auditCollector != nil {
+			mode.inputAudit = auditCollector.record
+		}
+		objects[part], definitions, err = s.buildIRPartitionWithMode(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations[part], &members[part], shared, mode)
+		if err == nil && len(definitions) != 0 {
+			definedSpecializations[part] = make(map[string]bool, len(definitions))
+			for _, name := range definitions {
+				definedSpecializations[part][name] = true
+			}
+		}
 		if errors.Is(err, errPartitionDeclined) {
 			declinedPart.CompareAndSwap(0, int64(part+1))
 		}
@@ -346,6 +367,15 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		}
 		return err
 	}
+	if specializationQueue != nil {
+		supplemental, err := s.buildQueuedPartitionSpecializations(result, options, parts, fastCodegen, configKey, unitID, targetID, shared, specializationQueue, definedSpecializations, members, auditCollector, previousMembers)
+		if err != nil {
+			return err
+		}
+		for _, module := range supplemental {
+			objects = append(objects, module.object)
+		}
+	}
 	s.disk.storeSchedule(unitID, targetID, members)
 	buildDuration := time.Since(start)
 	dir, err := os.MkdirTemp(filepath.Dir(outputPath), ".elisa-object-parts-")
@@ -353,7 +383,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		return err
 	}
 	defer os.RemoveAll(dir)
-	files := make([]string, parts)
+	files := make([]string, len(objects))
 	for part := range objects {
 		files[part] = filepath.Join(dir, fmt.Sprintf("part%d.o", part))
 		if err := os.WriteFile(files[part], objects[part], 0600); err != nil {
@@ -368,6 +398,130 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		fmt.Fprintf(os.Stderr, "[build-timing] partitioned object: ir+partitions %v, merge %v; ir cpu %v (generate %v), bitcode %v, native %v x%d, defs %d owned %d\n", buildDuration.Round(time.Millisecond), time.Since(mergeStart).Round(time.Millisecond), time.Duration(partitionIRNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionGenNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionBitcodeNanos.Swap(0)).Round(time.Millisecond), time.Duration(partitionNativeNanos.Swap(0)).Round(time.Millisecond), partitionNativeCount.Swap(0), partitionDefs.Swap(0), partitionOwned.Swap(0))
 	}
 	return nil
+}
+
+type partitionIRSupplementalObject struct {
+	owner       int
+	object      []byte
+	definitions []string
+}
+
+// buildQueuedPartitionSpecializations drains generic bodies discovered during
+// ordinary partition lowering. Each supplemental module emits only bodies
+// owned by one partition; requests discovered while lowering those bodies are
+// picked up in the next round until the shared queue reaches a fixed point.
+func (s *IncrementalObjectSession) buildQueuedPartitionSpecializations(result *semantic.Result, options LLVMObjectEmitOptions, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, shared *sharedCodegenLookups, queue *partitionSpecializationQueue, definedByPart []map[string]bool, members [][]string, audit *partitionIRInputAuditCollector, previousMembers [][]string) ([]partitionIRSupplementalObject, error) {
+	if queue == nil {
+		return nil, nil
+	}
+	if result == nil || parts < 1 || len(definedByPart) != parts || len(members) != parts {
+		return nil, errPartitionDeclined
+	}
+	var supplemental []partitionIRSupplementalObject
+	for round := 0; ; round++ {
+		pending := missingPartitionSpecializations(queue.snapshot(), definedByPart)
+		if len(pending) == 0 {
+			return supplemental, nil
+		}
+		byOwner := make([][]partitionSpecializationRequest, parts)
+		for _, request := range pending {
+			if request.ownerPart < 0 || request.ownerPart >= parts {
+				return nil, errPartitionDeclined
+			}
+			byOwner[request.ownerPart] = append(byOwner[request.ownerPart], request)
+		}
+		ownerOrder := make([]int, 0, len(pending))
+		for owner, requests := range byOwner {
+			if len(requests) != 0 {
+				ownerOrder = append(ownerOrder, owner)
+			}
+		}
+		roundModules := make([]partitionIRSupplementalObject, parts)
+		roundPresent := make([]bool, parts)
+		var declinedOwner atomic.Int64
+		declinedOwner.Store(-1)
+		workers := runtime.GOMAXPROCS(0)
+		if workers > len(ownerOrder) {
+			workers = len(ownerOrder)
+		}
+		err := runPartitionIRWorkers(parts, workers, ownerOrder, func(owner int) error {
+			requests := byOwner[owner]
+			mode := partitionIRBuildMode{
+				queue:              queue,
+				requests:           requests,
+				previouslyDefined:  definedByPart[owner],
+				specializationOnly: true,
+				cachePart:          parts + owner,
+				supplementRound:    round,
+			}
+			if audit != nil {
+				mode.inputAudit = audit.record
+			}
+			object, definitions, err := s.buildIRPartitionWithMode(result, options, owner, parts, fastCodegen, configKey, unitID, targetID, nil, &members[owner], shared, mode)
+			if err != nil {
+				if errors.Is(err, errPartitionDeclined) {
+					declinedOwner.CompareAndSwap(-1, int64(owner))
+				}
+				return err
+			}
+			roundModules[owner] = partitionIRSupplementalObject{owner: owner, object: object, definitions: definitions}
+			roundPresent[owner] = true
+			return nil
+		})
+		if err != nil {
+			if errors.Is(err, errPartitionDeclined) {
+				if owner := int(declinedOwner.Load()); owner >= 0 {
+					s.recordDeclinedPartitionSchedule(unitID, targetID, parts, previousMembers, owner)
+				}
+			}
+			return nil, err
+		}
+		for owner, module := range roundModules {
+			if !roundPresent[owner] {
+				continue
+			}
+			requests := byOwner[owner]
+			defined := make(map[string]bool, len(module.definitions))
+			for _, name := range module.definitions {
+				defined[name] = true
+			}
+			for _, request := range requests {
+				if !defined[request.name] {
+					s.recordDeclinedPartitionSchedule(unitID, targetID, parts, previousMembers, owner)
+					return nil, errPartitionDeclined
+				}
+			}
+			if definedByPart[owner] == nil {
+				definedByPart[owner] = make(map[string]bool)
+			}
+			for _, name := range module.definitions {
+				definedByPart[owner][name] = true
+			}
+			supplemental = append(supplemental, module)
+		}
+	}
+}
+
+func (s *IncrementalObjectSession) recordDeclinedPartitionSchedule(unitID, targetID [32]byte, parts int, previous [][]string, owner int) {
+	if s == nil || s.disk == nil || os.Getenv("ELISACORE_PARTITION_SCHEDULE") == "0" || owner < 0 || owner >= parts {
+		return
+	}
+	if len(previous) != parts {
+		previous = make([][]string, parts)
+	} else {
+		previous = append([][]string(nil), previous...)
+	}
+	for part, names := range previous {
+		filtered := names[:0]
+		for _, name := range names {
+			if name != partitionScheduleDeclined {
+				filtered = append(filtered, name)
+			}
+		}
+		previous[part] = filtered
+	}
+	previous[owner] = append(previous[owner], partitionScheduleDeclined)
+	s.disk.storeSchedule(unitID, targetID, previous)
 }
 
 // partitionNativeNameReserved is used only by the opt-in submit experiment.
@@ -466,19 +620,38 @@ func runPartitionIRWorkers(parts, workers int, order []int, build func(int) erro
 var errPartitionDeclined = errors.New("partitioned IR declined")
 
 func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, declarations []ast.Decl, members *[]string, shared *sharedCodegenLookups) ([]byte, error) {
+	mode := partitionIRBuildMode{cachePart: part, inputAudit: s.irInputAudit}
+	object, _, err := s.buildIRPartitionWithMode(result, options, part, parts, fastCodegen, configKey, unitID, targetID, declarations, members, shared, mode)
+	return object, err
+}
+
+func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Result, options LLVMObjectEmitOptions, part, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, declarations []ast.Decl, members *[]string, shared *sharedCodegenLookups, mode partitionIRBuildMode) ([]byte, []string, error) {
 	unit := hex.EncodeToString(unitID[:])
 	irStart := time.Now()
 	var inputReads *irInputReadRecorder
 	if s.irInputAudit != nil {
 		inputReads = &irInputReadRecorder{}
 		inputReads.shared = shared.inputReads
-		defer func() { s.irInputAudit(part, inputReads.snapshot()) }()
+		defer func() {
+			if mode.inputAudit != nil {
+				mode.inputAudit(part, inputReads.snapshot())
+			}
+		}()
 	}
 	g, err := compileLLVMModuleConfigured(result, options.OptLevel, options.PackedProfile, options.TargetTriple, options.DebugInfo, options.Trace, func(g *llvmGenerator) {
 		g.inputReads = inputReads
-		g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.", unitID, part)
-		g.partBody = func(name string) bool { return partitionOwner(name, parts) == part }
-		g.partitionGlobalDeclarationsOnly = part != 0
+		if mode.specializationOnly {
+			g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.specialization.%d.", unitID, part, mode.supplementRound)
+		} else {
+			g.partSynthNS = fmt.Sprintf("elisa.partition.%x.%d.", unitID, part)
+		}
+		g.partBody = func(name string) bool {
+			return partitionOwner(name, parts) == part && !mode.previouslyDefined[name]
+		}
+		g.partitionGlobalDeclarationsOnly = mode.specializationOnly || part != 0
+		g.partitionSpecializationQueue = mode.queue
+		g.partitionSpecializationParts = parts
+		g.partitionSpecializationOnly = mode.specializationOnly
 		g.sharedResult = true
 		g.partitionModuleDecls = declarations
 		g.hasPartitionModuleDecls = true
@@ -491,19 +664,45 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	}, shared)
 	partitionGenNanos.Add(int64(time.Since(irStart)))
 	if err != nil {
-		return nil, fmt.Errorf("partition %d: %w", part, err)
+		return nil, nil, fmt.Errorf("partition %d: %w", part, err)
 	}
 	defer g.disposeInBackground()
 	// These workers synthesize types that can flow into generic symbol names.
 	// Until their cross-module identity is qualified, use whole-module lowering.
 	if g.partUnsafeHelpers {
-		return nil, errPartitionDeclined
+		return nil, nil, errPartitionDeclined
+	}
+	if mode.specializationOnly {
+		for _, request := range mode.requests {
+			if request.ownerPart != part {
+				return nil, nil, errPartitionDeclined
+			}
+			switch request.kind {
+			case partitionSpecializationFunction:
+				if _, _, err := g.ensureSpecializedFunction(request.decl, request.base, request.bindings); err != nil {
+					return nil, nil, err
+				}
+			case partitionSpecializationImplMethod:
+				if _, _, _, err := g.ensureSpecializedImplMethod(request.decl, request.base, request.implTypeParams, request.impl, request.implMethod, request.bindings); err != nil {
+					return nil, nil, err
+				}
+			default:
+				return nil, nil, errPartitionDeclined
+			}
+		}
+		if g.di != nil {
+			g.di.finalize()
+		}
+		g.alignPackedRecordAccesses()
+		if err := g.verify(); err != nil {
+			return nil, nil, fmt.Errorf("partition %d specialization module: %w", part, err)
+		}
 	}
 	if !finishPartitionModule(g.module, part, parts, unit, g.partLocalHelpers) {
-		return nil, errPartitionDeclined
+		return nil, nil, errPartitionDeclined
 	}
 	if err := g.ensureTargetMachine(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if inputReads != nil {
 		inputReads.mu.Lock()
@@ -513,12 +712,17 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	irDuration := time.Since(irStart)
 	partitionIRNanos.Add(int64(irDuration))
 	var bodies, defs int64
+	var specializationDefinitions []string
 	for f := C.LLVMGetFirstFunction(g.module); f != nil; f = C.LLVMGetNextFunction(f) {
 		isDeclaration := C.LLVMIsDeclaration(f) != 0
 		if !isDeclaration {
 			defs++
+			name := llvmValueName(f)
+			if g.partSpecializationDefinitions[name] {
+				specializationDefinitions = append(specializationDefinitions, name)
+			}
 			if s.disk != nil {
-				*members = append(*members, partitionScheduleStem(llvmValueName(f)))
+				*members = append(*members, partitionScheduleStem(name))
 			}
 		}
 		if !isDeclaration && C.LLVMGetLinkage(f) != C.LLVMWeakODRLinkage {
@@ -551,11 +755,11 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 	if object != nil {
 		// A hit is keyed by these exact bitcode bytes (which name the LLVM producer), and
 		// only modules that passed verification are ever cached, so this module verified.
-		return object, nil
+		return object, specializationDefinitions, nil
 	}
 	verifyStart := time.Now()
 	if err := g.verify(); err != nil {
-		return nil, fmt.Errorf("partition %d: %w", part, err)
+		return nil, nil, fmt.Errorf("partition %d: %w", part, err)
 	}
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.IRTime += time.Since(verifyStart) })
 	triple := C.LLVMGetTargetMachineTriple(g.targetMachine)
@@ -585,7 +789,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		}
 		object, err = emitPreoptimizedPartition(inputBytes, optimizationPipeline(options.OptLevel), triple, cpu, features, fragment)
 		if err != nil {
-			return nil, fmt.Errorf("partition %d: %w", part, err)
+			return nil, nil, fmt.Errorf("partition %d: %w", part, err)
 		}
 	} else {
 		var buffer C.LLVMMemoryBufferRef
@@ -596,7 +800,7 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 				text = C.GoString(message)
 				C.free(unsafe.Pointer(message))
 			}
-			return nil, fmt.Errorf("partition %d: %s", part, text)
+			return nil, nil, fmt.Errorf("partition %d: %s", part, text)
 		}
 		object = C.GoBytes(unsafe.Pointer(C.LLVMGetBufferStart(buffer)), C.int(C.LLVMGetBufferSize(buffer)))
 		C.LLVMDisposeMemoryBuffer(buffer)
@@ -613,9 +817,9 @@ func (s *IncrementalObjectSession) buildIRPartition(result *semantic.Result, opt
 		stats.PartitionsEmitted++
 	})
 	if retainInput {
-		s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, part))
+		s.retainObjectForSlot(retainedInput, configKey, object, incrementalObjectSlot(unitID, targetID, mode.cachePart))
 	}
-	return object, nil
+	return object, specializationDefinitions, nil
 }
 
 // Code generation records types for the expressions it synthesizes. A

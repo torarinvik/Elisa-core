@@ -214,6 +214,13 @@ type llvmGenerator struct {
 	// Source globals are defined by partition zero. Other partitions keep
 	// declarations, while on-demand generated storage retains its own linkage.
 	partitionGlobalDeclarationsOnly bool
+	// partitionSpecializationQueue coordinates O0 body ownership across
+	// independently generated partition modules. Supplemental owner modules
+	// contain only explicitly queued specialization bodies.
+	partitionSpecializationQueue  *partitionSpecializationQueue
+	partitionSpecializationOnly   bool
+	partitionSpecializationParts  int
+	partSpecializationDefinitions map[string]bool
 	// sharedResult is set when other generators read the same Result
 	// concurrently; this generator then writes only its own overlays.
 	sharedResult bool
@@ -478,9 +485,11 @@ func (g *llvmGenerator) emitModule() error {
 			return err
 		}
 	}
-	for _, module := range g.result.EASMModules {
-		if err := g.emitEASMModule(module); err != nil {
-			return err
+	if !g.partitionSpecializationOnly {
+		for _, module := range g.result.EASMModules {
+			if err := g.emitEASMModule(module); err != nil {
+				return err
+			}
 		}
 	}
 	for _, decl := range decls {
@@ -493,12 +502,14 @@ func (g *llvmGenerator) emitModule() error {
 			return err
 		}
 	}
-	for _, exported := range g.result.ExportedFuncs {
-		if err := g.emitExportedFunction(exported); err != nil {
-			return err
+	if !g.partitionSpecializationOnly {
+		for _, exported := range g.result.ExportedFuncs {
+			if err := g.emitExportedFunction(exported); err != nil {
+				return err
+			}
 		}
 	}
-	if g.di != nil {
+	if g.di != nil && !g.partitionSpecializationOnly {
 		g.di.finalize()
 	}
 	return nil

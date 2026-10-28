@@ -217,7 +217,9 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
 		t.Fatalf("missing partitioned object: %v", err)
 	}
-	if stats := session.Stats(); stats.PartitionsEmitted+stats.DiskPartitionsReused != 2 || stats.SerialFallbacks != 0 {
+	if stats := session.Stats(); stats.PartitionsEmitted+stats.DiskPartitionsReused < 2 || stats.SerialFallbacks != 0 {
+		// The emitted-module count can exceed the two declaration partitions
+		// when ordinary code requests a specialization owned by another part.
 		t.Fatalf("parallel worker build did not use both IR partitions: %+v", stats)
 	}
 	paths, err := filepath.Glob(filepath.Join(session.disk.root, "*.schedule"))
@@ -231,6 +233,9 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	var saved [][]string
 	if err := json.Unmarshal(data[sha256.Size:], &saved); err != nil {
 		t.Fatal(err)
+	}
+	if len(saved) != 2 {
+		t.Fatalf("successful parallel worker schedule has %d declaration partitions, want 2", len(saved))
 	}
 	for _, names := range saved {
 		for _, name := range names {
@@ -282,7 +287,7 @@ def main() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Mem
 	if err := session.WriteObject(result, partitioned, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}); err != nil {
 		t.Fatal(err)
 	}
-	if stats := session.Stats(); stats.PartitionsEmitted+stats.DiskPartitionsReused != 2 || stats.SerialFallbacks != 0 {
+	if stats := session.Stats(); stats.PartitionsEmitted+stats.DiskPartitionsReused < 2 || stats.SerialFallbacks != 0 {
 		t.Fatalf("runtime fixture did not use both IR partitions: %+v", stats)
 	}
 	if got := incrementalObjectNativeStatus(t, partitioned); got != 9 {
