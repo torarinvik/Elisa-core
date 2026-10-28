@@ -72,6 +72,7 @@ static char *elisacoreRunOptimizationPipeline(
 
 unsigned elisacoreCanonicalizeSplitHalfUnsignedAdds(LLVMModuleRef Module);
 unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
+unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
 	if (ErrMsg != NULL) {
@@ -346,6 +347,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	}
 	if !g.emitDebugInfo {
 		forwardZeroedLoads(g.module)
+		inferConstantTableRanges(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
@@ -366,6 +368,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	}
 	g.optimizedForCodegen = true
 	return nil
+}
+
+func inferConstantTableRanges(module C.LLVMModuleRef) int {
+	if module == nil {
+		return 0
+	}
+	return int(C.elisacoreInferConstantTableRanges(module))
 }
 
 func forwardZeroedLoads(module C.LLVMModuleRef) int {
