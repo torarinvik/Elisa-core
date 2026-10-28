@@ -14,7 +14,7 @@ import (
 	"elisacore/src/semantic"
 )
 
-func TestAnalysisDiskFamilyAddedFilesAuthorityGuards(t *testing.T) {
+func TestAnalysisDiskFamilySourceAuthorityGuards(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ELISAC_BUILD_CACHE_DIR", dir)
 	root := filepath.Join(dir, "root.elisa")
@@ -32,7 +32,7 @@ func TestAnalysisDiskFamilyAddedFilesAuthorityGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	program.sourceFiles = []string{root, helper}
-	candidate, ok := analysisDiskAddedFilesBaseline(program, options)
+	candidate, ok := analysisDiskFamilyBaseline(program, options)
 	if !ok || candidate != baseline {
 		t.Fatal("added file did not find exact original artifact")
 	}
@@ -41,17 +41,17 @@ func TestAnalysisDiskFamilyAddedFilesAuthorityGuards(t *testing.T) {
 		t.Fatal("candidate envelope was relabeled", err)
 	}
 	options.EnforceStrictProofs = true
-	if _, ok := analysisDiskAddedFilesBaseline(program, options); ok {
+	if _, ok := analysisDiskFamilyBaseline(program, options); ok {
 		t.Fatal("proof policy shared a family")
 	}
 	options.EnforceStrictProofs = false
 	options.TrustedRuntimeSourceFiles = []string{helper}
-	if _, ok := analysisDiskAddedFilesBaseline(program, options); ok {
+	if _, ok := analysisDiskFamilyBaseline(program, options); ok {
 		t.Fatal("changed trust shared a family")
 	}
 	options.TrustedRuntimeSourceFiles = nil
 	program.sourceFiles = []string{helper}
-	if _, ok := analysisDiskAddedFilesBaseline(program, options); ok {
+	if _, ok := analysisDiskFamilyBaseline(program, options); ok {
 		t.Fatal("removed authority shared a family")
 	}
 	program.sourceFiles = []string{root, helper}
@@ -61,7 +61,7 @@ func TestAnalysisDiskFamilyAddedFilesAuthorityGuards(t *testing.T) {
 		if err := os.WriteFile(path, encoded, 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := analysisDiskAddedFilesBaseline(program, options); ok {
+		if _, ok := analysisDiskFamilyBaseline(program, options); ok {
 			t.Fatal("invalid family hint admitted")
 		}
 	}
@@ -102,7 +102,7 @@ func TestAnalysisDiskFamilyFreshProcessAddedIncludeColdOracle(t *testing.T) {
 		cached, cold := filepath.Join(dir, "cached.ll"), filepath.Join(dir, "cold.ll")
 		got, gotCode := runDiskCLIChildResult(t, cacheEnv, "-emit", "llvm", "-o", cached, source)
 		want, wantCode := runDiskCLIChildResult(t, coldEnv, "-emit", "llvm", "-o", cold, source)
-		if !strings.Contains(got, "replay added-file baseline") || strings.Contains(got, "cold analysis") {
+		if !strings.Contains(got, "replay source-family baseline") || strings.Contains(got, "cold analysis") {
 			t.Fatalf("added file did not replay: %s", got)
 		}
 		if gotCode != wantCode || diskDiagnosticTranscript(got) != diskDiagnosticTranscript(want) {
@@ -127,7 +127,7 @@ func TestAnalysisDiskFamilyFreshProcessAddedIncludeColdOracle(t *testing.T) {
 	}
 	object := filepath.Join(dir, "native.o")
 	output := runDiskCLIChild(t, cacheEnv, "-emit", "obj", "-o", object, source)
-	if !strings.Contains(output, "replay added-file baseline") {
+	if !strings.Contains(output, "replay source-family baseline") {
 		t.Fatal("native build did not replay", output)
 	}
 	binary := filepath.Join(dir, "native")
@@ -145,4 +145,69 @@ func TestAnalysisDiskFamilyFreshProcessAddedIncludeColdOracle(t *testing.T) {
 		t.Fatalf("added include native result: %v", err)
 	}
 
+}
+
+func TestAnalysisDiskFamilyFreshProcessRemovedIncludeColdOracle(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "main.elisa")
+	helper := filepath.Join(dir, "helper.elisa")
+	cacheEnv := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	coldEnv := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_ANALYSIS_CACHE_DEBUG": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+	baseline := []byte("include \"helper.elisa\"\n\ndef main() -> i64:\n    return helper()\n")
+	if err := os.WriteFile(source, baseline, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(helper, []byte("def helper() -> i64:\n    return 7\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runDiskCLIChild(t, cacheEnv, "-emit", "llvm", "-o", filepath.Join(dir, "baseline.ll"), source)
+	runDiskCLIChild(t, cacheEnv, "-emit", "obj", "-o", filepath.Join(dir, "baseline.o"), source)
+	if err := os.WriteFile(source, []byte("def main() -> i64:\n    return 43\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cachedIR, coldIR := filepath.Join(dir, "cached.ll"), filepath.Join(dir, "cold.ll")
+	got, gotCode := runDiskCLIChildResult(t, cacheEnv, "-emit", "llvm", "-o", cachedIR, source)
+	want, wantCode := runDiskCLIChildResult(t, coldEnv, "-emit", "llvm", "-o", coldIR, source)
+	if !strings.Contains(got, "replay source-family baseline") || strings.Contains(got, "cold analysis") {
+		t.Fatalf("removed include did not replay the prior source family: %s", got)
+	}
+	if gotCode != wantCode || diskDiagnosticTranscript(got) != diskDiagnosticTranscript(want) {
+		t.Fatalf("cold diagnostic parity failed\ngot=%d %s\nwant=%d %s", gotCode, got, wantCode, want)
+	}
+	if gotCode != 0 {
+		t.Fatalf("removed-include edit rejected: %s", got)
+	}
+	gotBytes, err := os.ReadFile(cachedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBytes, err := os.ReadFile(coldIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotBytes, wantBytes) {
+		t.Fatal("removed-include IR differs from cold", firstLineDiff(string(gotBytes), string(wantBytes)))
+	}
+
+	cachedObject, coldObject := filepath.Join(dir, "cached.o"), filepath.Join(dir, "cold.o")
+	got, gotCode = runDiskCLIChildResult(t, cacheEnv, "-emit", "obj", "-o", cachedObject, source)
+	want, wantCode = runDiskCLIChildResult(t, coldEnv, "-emit", "obj", "-o", coldObject, source)
+	if !strings.Contains(got, "replay source-family baseline") || gotCode != 0 || wantCode != 0 {
+		t.Fatalf("removed-include native compile failed: cached=%d %s cold=%d %s", gotCode, got, wantCode, want)
+	}
+	for _, artifact := range []struct{ object, binary string }{{cachedObject, filepath.Join(dir, "cached")}, {coldObject, filepath.Join(dir, "cold")}} {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		linked, err := exec.CommandContext(ctx, "clang", artifact.object, "-o", artifact.binary).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("link %s: %v %s", artifact.object, err, linked)
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		err = exec.CommandContext(ctx, artifact.binary).Run()
+		cancel()
+		exit, ok := err.(*exec.ExitError)
+		if !ok || exit.ExitCode() != 43 {
+			t.Fatalf("removed-include runtime for %s: %v", artifact.binary, err)
+		}
+	}
 }

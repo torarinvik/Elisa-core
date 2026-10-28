@@ -12,9 +12,10 @@ import (
 )
 
 // A family is only a hint to a complete baseline. Its identity includes every
-// exact-cache input except the included-file set. We accept only added files,
-// keep the original artifact header, and always run checked scratch replay.
-// Changes to trust, diagnostics, compiler, policy or target cannot share a hint.
+// exact-cache input except the included-file set. We accept only a strict subset
+// or superset of source origins, keep the original artifact header, and always
+// run checked scratch replay. Incomparable source sets and changes to trust,
+// diagnostics, compiler, policy or target cannot share a hint.
 type analysisDiskFamily struct {
 	Version int
 	Key     string
@@ -60,7 +61,7 @@ func publishAnalysisDiskFamily(program *loadedProgram, options semantic.AnalyzeO
 	return os.Rename(file.Name(), path)
 }
 
-func analysisDiskAddedFilesBaseline(program *loadedProgram, options semantic.AnalyzeOptions) (analysisDiskArtifact, bool) {
+func analysisDiskFamilyBaseline(program *loadedProgram, options semantic.AnalyzeOptions) (analysisDiskArtifact, bool) {
 	path, ok := analysisDiskFamilyPath(program, options)
 	if !ok {
 		return analysisDiskArtifact{}, false
@@ -82,19 +83,32 @@ func analysisDiskAddedFilesBaseline(program *loadedProgram, options semantic.Ana
 	for _, origin := range program.sourceFiles {
 		current[origin] = true
 	}
-	if len(family.Origins) >= len(current) || !slices.IsSorted(family.Origins) {
+	if len(current) != len(program.sourceFiles) || !slices.IsSorted(family.Origins) || len(family.Origins) == len(current) {
 		return analysisDiskArtifact{}, false
 	}
+	previous := make(map[string]bool, len(family.Origins))
 	for i, origin := range family.Origins {
-		if !current[origin] || i > 0 && family.Origins[i-1] == origin {
+		if i > 0 && family.Origins[i-1] == origin {
 			return analysisDiskArtifact{}, false
 		}
+		previous[origin] = true
+	}
+	previousSubset := true
+	for origin := range previous {
+		previousSubset = previousSubset && current[origin]
+	}
+	currentSubset := true
+	for origin := range current {
+		currentSubset = currentSubset && previous[origin]
+	}
+	if !previousSubset && !currentSubset {
+		return analysisDiskArtifact{}, false
 	}
 	// Derive the candidate from current authority plus the recorded old set.
 	// Never trust a supplied path/key, and never re-label a snapshot envelope.
-	previous := *program
-	previous.sourceFiles = family.Origins
-	candidate, ok := analysisDiskArtifactFor(&previous, options)
+	priorProgram := *program
+	priorProgram.sourceFiles = family.Origins
+	candidate, ok := analysisDiskArtifactFor(&priorProgram, options)
 	if !ok || candidate.key != family.Key {
 		return analysisDiskArtifact{}, false
 	}

@@ -88,7 +88,7 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 		// A family hint never changes the exact artifact's identity or header.
 		// Only a missing exact artifact may try a validated added-file baseline.
 		if !pending.loaded && os.IsNotExist(err) {
-			if candidate, ok := analysisDiskAddedFilesBaseline(program, options); ok {
+			if candidate, ok := analysisDiskFamilyBaseline(program, options); ok {
 				err = load(candidate)
 				pending.familyReplay = err == nil && pending.loaded
 			}

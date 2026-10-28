@@ -301,7 +301,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		if err == nil {
 			state = restored
 			if pending.familyReplay {
-				debugAnalysisDisk(stderr, "replay added-file baseline")
+				debugAnalysisDisk(stderr, "replay source-family baseline")
 			}
 			debugAnalysisDisk(stderr, "restore %s bytes=%d in=%v", artifact.key[:12], pending.bytes, time.Since(started).Round(time.Millisecond))
 			if cached, ok := state.ResultForSource(program.source); ok && !pending.familyReplay {
