@@ -220,7 +220,14 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		v.SetString(s)
+		if v.CanAddr() && v.CanSet() {
+			// All Go string types share the string header representation. The
+			// typed store preserves the GC write barrier, including for named
+			// string types, without reflect's repeated kind and flag checks.
+			*(*string)(unsafe.Pointer(v.UnsafeAddr())) = s
+		} else {
+			v.SetString(s)
+		}
 	default:
 		x, err := d.uint()
 		if err != nil {
