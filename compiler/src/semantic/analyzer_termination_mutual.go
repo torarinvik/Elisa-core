@@ -24,17 +24,41 @@ func (a *Analyzer) collectDirectFunctionCalls(fn *ast.FuncDecl) []*ast.CallExpr 
 	return calls
 }
 
+// Resolve each call during the immutable syntax walk. Scope.Lookup and visible
+// name resolution do not mutate bindings; proof origins are sets, so a second
+// identical lookup adds no new origin. Lookup-recording analyses retain the old
+// path below so its read counters and dependency evidence remain unchanged.
+type directResolvedCall struct {
+	call   *ast.CallExpr
+	callee *ast.FuncDecl
+}
+
+func (a *Analyzer) collectResolvedFunctionCalls(fn *ast.FuncDecl) []directResolvedCall {
+	fn = a.readDecl(fn)
+	var calls []directResolvedCall
+	if fn == nil {
+		return calls
+	}
+	a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
+		call, ok := expr.(*ast.CallExpr)
+		if !ok || call == nil {
+			return false
+		}
+		if callee, ok := a.resolveDirectCallFuncDecl(call); ok && callee != nil {
+			calls = append(calls, directResolvedCall{call, callee})
+		}
+		return false
+	})
+	return calls
+}
+
 func (a *Analyzer) collectRecursiveSCCEdges(root *ast.FuncDecl) []recursionEdge {
 	if root == nil {
 		return nil
 	}
 	// Resolve each reachable body's direct calls once. Recomputing them per reachability
 	// probe re-walked every reachable body for every reachable function.
-	type resolvedCall struct {
-		call   *ast.CallExpr
-		callee *ast.FuncDecl
-	}
-	calls := map[*ast.FuncDecl][]resolvedCall{}
+	calls := map[*ast.FuncDecl][]directResolvedCall{}
 	var order []*ast.FuncDecl
 	var walk func(*ast.FuncDecl)
 	walk = func(fn *ast.FuncDecl) {
@@ -46,13 +70,17 @@ func (a *Analyzer) collectRecursiveSCCEdges(root *ast.FuncDecl) []recursionEdge 
 		}
 		calls[fn] = nil
 		order = append(order, fn)
-		var resolved []resolvedCall
-		for _, call := range a.collectDirectFunctionCalls(fn) {
-			callee, ok := a.resolveDirectCallFuncDecl(call)
-			if !ok || callee == nil {
-				continue
+		var resolved []directResolvedCall
+		if a.lookupTrace == nil {
+			resolved = a.collectResolvedFunctionCalls(fn)
+		} else {
+			// Keep every existing resolver observation in tracing mode.
+			for _, call := range a.collectDirectFunctionCalls(fn) {
+				callee, ok := a.resolveDirectCallFuncDecl(call)
+				if ok && callee != nil {
+					resolved = append(resolved, directResolvedCall{call, callee})
+				}
 			}
-			resolved = append(resolved, resolvedCall{call, callee})
 		}
 		calls[fn] = resolved
 		for _, rc := range resolved {
