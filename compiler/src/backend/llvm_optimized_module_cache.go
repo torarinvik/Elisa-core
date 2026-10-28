@@ -113,10 +113,10 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 
 func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, cpu, features string) string {
 	config, _ := json.Marshal([]any{
-		"optimized-module-v4-split-half-add-authenticated-ir",
+		"optimized-module-v5-zero-forward-authenticated-ir",
 		int(level), triple, cpu, features,
 		optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3,
-		"split-half-u64-add-v1", !g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
+		"zero-forward-v1", "split-half-u64-add-v1", !g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
 	})
 	return string(config)
 }

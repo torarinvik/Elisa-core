@@ -71,6 +71,7 @@ static char *elisacoreRunOptimizationPipeline(
 }
 
 unsigned elisacoreCanonicalizeSplitHalfUnsignedAdds(LLVMModuleRef Module);
+unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
 	if (ErrMsg != NULL) {
@@ -343,6 +344,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if errMessage != nil {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}
+	if !g.emitDebugInfo {
+		forwardZeroedLoads(g.module)
+	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
 	}
@@ -362,6 +366,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	}
 	g.optimizedForCodegen = true
 	return nil
+}
+
+func forwardZeroedLoads(module C.LLVMModuleRef) int {
+	if module == nil {
+		return 0
+	}
+	return int(C.elisacoreForwardZeroedLoads(module))
 }
 
 func canonicalizeSplitHalfUnsignedAdds(module C.LLVMModuleRef) int {
