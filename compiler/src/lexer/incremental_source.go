@@ -10,6 +10,13 @@ const sourceCheckpointLimit = 4096
 const sourceCheckpointBytes = 16 << 20
 const sourceTokenCapacityDivisor = 7
 
+// Spread checkpoints over large inputs while keeping the existing count and
+// byte limits. A byte-based estimate is conservative for typical source text,
+// where several bytes form one token.
+func sourceCheckpointSpacing(sourceBytes int) int {
+	return max(sourceCheckpointStride, 1+(max(0, sourceBytes-1)/sourceCheckpointLimit))
+}
+
 type sourceCheckpoint struct {
 	count, required int
 	state           Lexer
@@ -148,7 +155,7 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 		if convergence != nil && convergence.replay(&builder, l) {
 			break
 		}
-		if count%sourceCheckpointStride == 0 && len(result.checkpoints) < sourceCheckpointLimit {
+		if count%sourceCheckpointSpacing(len(source)) == 0 && len(result.checkpoints) < sourceCheckpointLimit {
 			result.addCheckpoint(*l, result.source, result.source, count, l.readLimit)
 		}
 	}
@@ -170,7 +177,7 @@ func tokenizeFreshSource(result *SourceTokens, l *Lexer, capacity int) *SourceTo
 		if token.Kind == TOKEN_EOF {
 			break
 		}
-		if len(result.tokens)%sourceCheckpointStride == 0 && len(result.checkpoints) < sourceCheckpointLimit {
+		if len(result.tokens)%sourceCheckpointSpacing(len(result.source)) == 0 && len(result.checkpoints) < sourceCheckpointLimit {
 			result.addCheckpoint(*l, result.source, result.source, len(result.tokens), l.readLimit)
 		}
 	}
