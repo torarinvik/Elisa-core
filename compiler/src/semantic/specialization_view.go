@@ -15,11 +15,12 @@ import (
 // rewritten expressions. Nominal types and global declaration identity remain
 // canonical so module ABI/type caches do not acquire a second identity.
 type SpecializedFunction struct {
-	Decl               *ast.FuncDecl
-	Result             *Result
-	originalExprs      map[ast.Expr]ast.Expr
-	inputReads         []SpecializationInputRead
-	inputReadsObserved bool
+	Decl                  *ast.FuncDecl
+	Result                *Result
+	originalExprs         map[ast.Expr]ast.Expr
+	inputReads            []SpecializationInputRead
+	inputReadsObserved    bool
+	uncacheableSMTOutcome bool
 }
 
 type specializationContext struct {
@@ -136,6 +137,10 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 		hasRetained = r.analyzer.retained != nil
 	}()
 	a := cloneAnalyzerValueForSpecialization(&analyzerSnapshot).Addr().Interface().(*Analyzer)
+	// Snapshot taint is a reuse marker, not semantic input. Track outcomes from
+	// this private reanalysis independently so an unrelated earlier Unknown on
+	// the canonical analyzer does not disable clean specialization memo hits.
+	a.smtSnapshotTainted = false
 	a.resolvedTypeNames = resolvedTypeNames
 	isolateWorkerScopes(&analyzerSnapshot, a)
 	var targetExprs map[ast.Expr]struct{}
@@ -193,6 +198,19 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 	}
 	a.withResolutionContext(namespace, a.funcDeclUsings[decl], func() { a.analyzeFuncWithTypeArgs(decl, args) })
 	delete(a.funcAnalysisActive, fn)
+	if a.smtUnavailable || a.smtSnapshotTainted {
+		// A successful specialization can still be conservatively weaker after
+		// an undecided proof or solver startup failure. Carry that fact to the
+		// canonical result so its caller can avoid publishing the resulting object.
+		unlock := r.lockAnalyzer()
+		r.analyzer.smtSnapshotTainted = true
+		if a.smtUnavailable && r.analyzer.smtSolver == nil {
+			// Latch a failed startup when the canonical analyzer has no live solver,
+			// avoiding one failed child-process launch per specialization.
+			r.analyzer.smtUnavailable = true
+		}
+		unlock()
+	}
 	if ctx.err != nil {
 		return nil, ctx.err
 	}
@@ -219,7 +237,12 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 			}
 		}
 	}
-	product := &SpecializedFunction{Decl: decl, Result: view, originalExprs: originalExprs}
+	product := &SpecializedFunction{
+		Decl:                  decl,
+		Result:                view,
+		originalExprs:         originalExprs,
+		uncacheableSMTOutcome: a.smtUnavailable || a.smtSnapshotTainted,
+	}
 	if ctx.inputReads != nil {
 		product.inputReadsObserved = true
 		product.inputReads = append([]SpecializationInputRead(nil), ctx.inputReads.reads...)

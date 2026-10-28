@@ -297,6 +297,9 @@ func compilerSourceRootForCache() (string, error) {
 }
 
 func testRunnerCacheRoot() (string, error) {
+	if root := os.Getenv("ELISA_TEST_RUNNER_CACHE_DIR"); root != "" {
+		return root, nil
+	}
 	if base, err := os.UserCacheDir(); err == nil && base != "" {
 		return filepath.Join(base, "elisacore", "test_runners"), nil
 	}

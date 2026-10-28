@@ -221,6 +221,12 @@ func (b *AnalysisBuild) PostProgress() (int, int) {
 	return b.postNext, len(analysisPostPhaseNames)
 }
 
+// HasUncacheableSMTOutcome reports whether this in-progress build observed a
+// solver outcome that makes its cursor unsafe to publish as a clean checkpoint.
+func (b *AnalysisBuild) HasUncacheableSMTOutcome() bool {
+	return b != nil && b.retained != nil && b.retained.a != nil && (b.retained.a.smtUnavailable || b.retained.a.smtSnapshotTainted)
+}
+
 func (b *AnalysisBuild) MatchesInvocation(filename string, src []byte, options AnalyzeOptions) bool {
 	return b != nil && b.retained != nil && b.file != nil && b.file.Filename == filename && bytes.Equal(b.retained.src, src) && reflect.DeepEqual(b.retained.options, options)
 }
@@ -294,6 +300,9 @@ func (b *AnalysisBuild) MarshalStateWithCapacity(capacity int) ([]byte, error) {
 	if a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
+	if a.smtSnapshotTainted {
+		return nil, fmt.Errorf("solver query outcome was not reusable; retry analysis in the next process")
+	}
 	return semanticStateRegistry().EncodeFramedWithCapacity(b, capacity)
 }
 
@@ -311,6 +320,9 @@ func RestoreAnalysisBuild(data []byte) (*AnalysisBuild, error) {
 	}
 	if b.done {
 		return nil, fmt.Errorf("completed analysis is not a build checkpoint")
+	}
+	if b.retained.a.smtUnavailable || b.retained.a.smtSnapshotTainted {
+		return nil, fmt.Errorf("solver state was transient; retry analysis in the next process")
 	}
 	if why := b.retained.a.proofReportCheckpointError(); why != "" {
 		return nil, fmt.Errorf("proof report checkpoint: %s", why)

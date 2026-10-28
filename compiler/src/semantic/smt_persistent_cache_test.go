@@ -250,6 +250,7 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 		smtProofCache:            oldCache,
 		smtProofCacheInitialized: true,
 		smtUnavailable:           true,
+		smtSnapshotTainted:      true,
 		smtSolver:                &fixedSMTSolver{result: smt.Unknown},
 		smtHistory:               []string{"old declaration query"},
 		smtHistoryFor:            &ast.FuncDecl{},
@@ -257,9 +258,9 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 	writeSolver("solver-version-2")
 	t.Setenv("ELISA_SMT_RLIMIT", "2000")
 	a.resetSMTForRetainedUpdate()
-	if a.smtSolver != nil || a.smtQueryCache != nil || a.smtProofCache != nil || a.smtProofCacheInitialized || a.smtUnavailable || a.smtHistory != nil || a.smtHistoryFor != nil {
-		t.Fatalf("retained SMT state survived reset: solver=%v query=%v proof=%v initialized=%v unavailable=%v history=%v historyFor=%v",
-			a.smtSolver, a.smtQueryCache, a.smtProofCache, a.smtProofCacheInitialized, a.smtUnavailable, a.smtHistory, a.smtHistoryFor)
+	if a.smtSolver != nil || a.smtQueryCache != nil || a.smtProofCache != nil || a.smtProofCacheInitialized || a.smtUnavailable || !a.smtSnapshotTainted || a.smtHistory != nil || a.smtHistoryFor != nil {
+		t.Fatalf("retained SMT state survived reset incorrectly: solver=%v query=%v proof=%v initialized=%v unavailable=%v snapshotTainted=%v history=%v historyFor=%v",
+			a.smtSolver, a.smtQueryCache, a.smtProofCache, a.smtProofCacheInitialized, a.smtUnavailable, a.smtSnapshotTainted, a.smtHistory, a.smtHistoryFor)
 	}
 	if _, ok, _ := a.smtCachedQuery(query); ok {
 		t.Fatal("resource decline from the old solver or budget survived retained update")

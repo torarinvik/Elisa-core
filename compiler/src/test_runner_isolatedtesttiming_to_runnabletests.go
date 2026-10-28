@@ -1292,6 +1292,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 	cacheHit := false
 	compileStarted := false
 	var exePath string
+	runnerCacheIneligible := result.HasUncacheableSMTOutcome()
 	cleanup := func() {}
 	if len(runnableCases) > 0 {
 		compileStarted = true
@@ -1304,7 +1305,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 		var nativeTiming nativeBuildTiming
 		var analyzeTime time.Duration
 		var shimWriteTime time.Duration
-		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr, enableSMT)
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr, enableSMT, runnerCacheIneligible)
 		compileTotal = time.Since(compileStart)
 		analyzeTotal = analyzeTime
 		nativeObjectTotal = nativeTiming.ObjectWrite
@@ -1314,6 +1315,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 		cacheLookupTotal = nativeTiming.CacheLookup
 		cachePublishTotal = nativeTiming.CachePublish
 		cacheHit = nativeTiming.CacheHit
+		runnerCacheIneligible = nativeTiming.UncacheableSMTOutcome
 		if err != nil {
 			cleanup()
 			fmt.Fprintf(stderr, "error: %s\n", err)
@@ -1344,7 +1346,7 @@ func executeSelectedTests(program *loadedProgram, result *semantic.Result, filte
 	cachedCases := toCachedTestCases(testCases)
 	// Publish the early (source-level) cache so the next unchanged run skips the
 	// whole front-end (parse+analyze) and jumps straight to running this binary.
-	if exePath != "" && earlyTestCacheEnabled() {
+	if exePath != "" && earlyTestCacheEnabled() && !runnerCacheIneligible && !result.HasUncacheableSMTOutcome() {
 		if key, keyErr := earlyTestCacheKeyForProgram(program, filter, result.EASMModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, debugInfo, traceInfo, enableSMT); keyErr == nil {
 			publishEarlyTestCache(key, exePath, cachedCases)
 		}

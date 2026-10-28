@@ -27,13 +27,14 @@ func isSurfaceSourcePath(path string) bool {
 }
 
 type loadedProgram struct {
-	tokenCache   *sourceTokenCache
-	filename     string
-	source       []byte
-	file         *ast.File
-	easm         []*easm.Module
-	sourceFiles  []string
-	cacheHandoff *buildCacheArtifactHandoff
+	objectCacheIneligible bool
+	tokenCache            *sourceTokenCache
+	filename              string
+	source                []byte
+	file                  *ast.File
+	easm                  []*easm.Module
+	sourceFiles           []string
+	cacheHandoff          *buildCacheArtifactHandoff
 }
 
 // loadedProgramLoader pins only the matching input to the snapshot loaded by

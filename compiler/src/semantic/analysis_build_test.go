@@ -122,6 +122,47 @@ func TestAnalysisBuildRejectsActiveJournal(t *testing.T) {
 	}
 }
 
+func TestAnalysisBuildContinuesButDeclinesTaintedCheckpoint(t *testing.T) {
+	const source = "def first() -> i64:\n    return 1\n\ndef second() -> i64:\n    return 2\n"
+	b, err := BeginAnalysisBuild(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.retained.a.smtSnapshotTainted = true
+	result, state, err := b.Advance(1, time.Minute)
+	if err != nil || result != nil || state != nil {
+		t.Fatalf("tainted analysis did not continue to the next boundary: result=%v state=%v err=%v", result != nil, state != nil, err)
+	}
+	if _, err := b.MarshalState(); err == nil {
+		t.Fatal("MarshalState accepted an analysis with an uncacheable SMT outcome")
+	}
+	encoded, err := semanticStateRegistry().Encode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := RestoreAnalysisBuild(encoded); restored != nil || err == nil || !strings.Contains(err.Error(), "solver state was transient") {
+		t.Fatalf("RestoreAnalysisBuild admitted a tainted checkpoint: restored=%v err=%v", restored != nil, err)
+	}
+	for _, setUnavailable := range []bool{false, true} {
+		build, err := BeginAnalysisBuild(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if setUnavailable {
+			build.retained.a.smtUnavailable = true
+		} else {
+			build.retained.a.smtSnapshotTainted = true
+		}
+		encoded, err := semanticStateRegistry().Encode(build)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if restored, err := RestoreAnalysisBuild(encoded); restored != nil || err == nil {
+			t.Fatal("RestoreAnalysisBuild admitted transient solver state")
+		}
+	}
+}
+
 func TestAnalysisBuildBoundedBodyBoundaryResumesBothFormats(t *testing.T) {
 	const source = "def value() -> i64:\n    return 7\n"
 	b, err := BeginAnalysisBuild(retainedParse(t, source), retainedParse(t, source), []byte(source), AnalyzeOptions{})

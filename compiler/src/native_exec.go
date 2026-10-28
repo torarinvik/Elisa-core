@@ -46,13 +46,14 @@ type cArchiveManifest struct {
 var processStartTime = time.Now()
 
 type nativeBuildTiming struct {
-	ObjectWrite  time.Duration
-	HeaderGen    time.Duration
-	HeaderWrite  time.Duration
-	Link         time.Duration
-	CacheLookup  time.Duration
-	CachePublish time.Duration
-	CacheHit     bool
+	UncacheableSMTOutcome bool
+	ObjectWrite           time.Duration
+	HeaderGen             time.Duration
+	HeaderWrite           time.Duration
+	Link                  time.Duration
+	CacheLookup           time.Duration
+	CachePublish          time.Duration
+	CacheHit              bool
 }
 
 func buildNativeExecutable(result *semantic.Result, foreignFiles []string, linkFlags []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stderr io.Writer) (string, func(), error) {

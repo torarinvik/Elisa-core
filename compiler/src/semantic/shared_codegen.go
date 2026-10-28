@@ -125,7 +125,10 @@ func (sh *sharedCodegen) specialize(key specializationKey, build func() (*Specia
 
 	sh.memoMu.Lock()
 	defer sh.memoMu.Unlock()
-	if err == nil {
+	// Keep uncacheable products available to callers already joined to this
+	// in-flight build, but never retain them for later same-session reuse. A
+	// subsequent request gets a fresh private analysis and can retry the proof.
+	if err == nil && product != nil && !product.uncacheableSMTOutcome {
 		sh.bodies[key] = product
 	}
 	call.product = product

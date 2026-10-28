@@ -115,7 +115,9 @@ func (a *Analyzer) openSMT() smtSolverHandle {
 		PerQueryTimeoutMillis: 120000,
 	})
 	if err != nil || solver == nil {
+		markTransientSMT()
 		a.smtUnavailable = true
+		a.smtSnapshotTainted = true
 		a.smtStats.Enabled = true
 		return nil
 	}
@@ -713,6 +715,7 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 	a.smtSetLogLabelForQuery(solver, label, logObligation, query)
 	persistentHits := a.smtStats.PersistentCacheHits
 	resourceBefore, transientBefore, canCertify := smtUnknownCacheEpoch(solver)
+	snapshotBefore, snapshotClassified := smtSnapshotUnknownEpoch(solver)
 	res, model := a.smtCheckSliced(solver, query, "(assert (not "+obligation+"))", tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
@@ -734,13 +737,34 @@ func (a *Analyzer) smtCheckQueryWithLogLabel(tr *smtTranslator, hyps string, obl
 		return false, ce
 	}
 	resourceAfter, transientAfter, _ := smtUnknownCacheEpoch(solver)
-	if smtIndependent && canCertify && resourceAfter > resourceBefore && transientAfter == transientBefore {
+	snapshotAfter, _ := smtSnapshotUnknownEpoch(solver)
+	stableHistory := snapshotClassified && snapshotAfter > snapshotBefore
+	resourceCertified := smtIndependent && canCertify && resourceAfter > resourceBefore && transientAfter == transientBefore && !stableHistory
+	if resourceCertified {
 		a.smtProofCache.publishResourceDeclined(key)
 		a.cacheSMTQuery(key, smtQueryResult{proven: false})
+	} else if smtIndependent && canCertify && stableHistory && transientAfter == transientBefore {
+		// The whole program snapshot binds the history, unlike a query-only key.
+		// Do not publish this decline into either query cache.
+	} else {
+		// Do not publish an analysis snapshot whose conservative fallback could
+		// become stale when this query succeeds in a later process. The epochs
+		// span the whole sliced/escalated check above, so a later resource-limited
+		// attempt cannot conceal an earlier transient failure.
+		markTransientSMT()
+		a.smtSnapshotTainted = true
 	}
 	// Every other Unknown is retryable, including unclassified test/third-party solvers.
 
 	return false, ""
+}
+
+func smtSnapshotUnknownEpoch(solver smt.Solver) (uint64, bool) {
+	classified, ok := solver.(interface{ SnapshotUnknownEpoch() uint64 })
+	if !ok {
+		return 0, false
+	}
+	return classified.SnapshotUnknownEpoch(), true
 }
 
 func smtUnknownCacheEpoch(solver smt.Solver) (uint64, uint64, bool) {
@@ -897,6 +921,12 @@ func (a *Analyzer) smtCheckRawQueryWithLogLabel(query string, label string, logO
 		return false, ""
 	}
 	a.smtStats.Declined++
+	if res == smt.Unknown {
+		// Raw checks do not cache Unknown, even when the solver reports a
+		// resource limit, so a retained snapshot must retry this analysis.
+		markTransientSMT()
+		a.smtSnapshotTainted = true
+	}
 	return false, ""
 }
 

@@ -345,7 +345,7 @@ func tryBuildObjectCacheWith(options cliOptions, stdout, stderr io.Writer, load 
 	if capturedStatus.incomplete {
 		rc = analysisIncompleteExitCode
 	}
-	if rc == 0 && !capturedOut.overflow && !capturedErr.overflow {
+	if rc == 0 && !program.objectCacheIneligible && !capturedOut.overflow && !capturedErr.overflow {
 		current, valid := buildCacheObjectArtifactForProgram(options, program)
 		if !valid || current.key != artifact.key {
 			return rc, true

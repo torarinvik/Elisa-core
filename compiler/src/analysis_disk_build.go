@@ -127,6 +127,11 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		fmt.Fprintf(stderr, "error: initial analysis: %v\n", err)
 		return nil
 	}
+	cleanCheckpointAvailable := checkpoint != nil
+	retryFromCleanCheckpoint := func() (*semantic.Result, *semantic.RetainedAnalysis) {
+		reportAnalysisIncomplete(stderr, "initial analysis encountered a transient solver outcome; rerun to retry from the last clean boundary or from source")
+		return nil, nil
+	}
 	if build == nil {
 		// A resumed build owns its pristine AST already. Only a new build needs
 		// another parse; on the full compiler this is millions of unused tokens.
@@ -173,6 +178,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		// Budget uses the actual size even when encoder reservation is capped.
 		// The same process clock governs subsequent final-check work.
 		checkpointCurrent = true
+		cleanCheckpointAvailable = true
 		debugAnalysisDisk(stderr, "bootstrap checkpoint completed=%d/%d post=%d/%d bytes=%d in=%v", done, total, post, phases, len(data), time.Since(saveStart).Round(time.Millisecond))
 		return nil
 	}
@@ -203,6 +209,20 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		stats := build.LastStats
 		debugAnalysisDisk(stderr, "bootstrap step declarations=%d post=%d frames=%d last=%s in=%v slowest=%v at=%v", stats.Declarations, stats.PostPhases, stats.PostFrames, stats.LastPostPhase, stats.Elapsed.Round(time.Millisecond), stats.Slowest.Round(time.Millisecond), stats.SlowestPosition)
 		if result != nil {
+			if result.HasUncacheableSMTOutcome() {
+				if cleanCheckpointAvailable {
+					// Do not publish a result that completed from an earlier checkpoint
+					// after a transient proof outcome: a cold run may discharge that
+					// obligation and produce stronger proof metadata. Keep the last clean
+					// boundary for a fresh process to retry.
+					return retryFromCleanCheckpoint()
+				}
+				// This cold invocation has no durable clean prefix to resume from.
+				// Return its ordinary conservative fallback, but never serialize or
+				// publish it as a reusable result.
+				debugAnalysisDisk(stderr, "bootstrap complete with transient solver outcome; result is non-reusable")
+				return result, state
+			}
 			debugAnalysisDisk(stderr, "bootstrap complete")
 			_ = os.Remove(artifact.path + ".slow")
 			return result, state
@@ -216,22 +236,39 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 		if stats.Declarations > 0 {
 			// Persist the final-body boundary with its already-reserved share.
 			// Recompute post budget from ACTUAL bytes, never a stale startup hint.
+			continueWithoutCheckpoint := false
 			if err := saveCheckpoint(); err != nil {
-				// A read-only cache must not break a tiny build that can
-				// finish in this invocation. Its encoded size is still exact;
-				// without a durable boundary it cannot report resumable work.
-				if !checkpointSized || analysisBootstrapBudget(budgetStateBytes, true) <= 0 {
-					return incomplete(fmt.Errorf("body boundary checkpoint not saved: %w", err)), nil
+				if build.HasUncacheableSMTOutcome() {
+					if cleanCheckpointAvailable {
+						return retryFromCleanCheckpoint()
+					}
+					if analysisBootstrapBudget(max(budgetStateBytes, analysisBootstrapFirstBytes), true) <= 0 {
+						return retryFromCleanCheckpoint()
+					}
+					continueWithoutCheckpoint = true
+					debugAnalysisDisk(stderr, "tainted cold build has no clean checkpoint; continue in memory within remaining budget")
+				} else {
+					// A read-only cache must not break a tiny build that can
+					// finish in this invocation. Its encoded size is still exact;
+					// without a durable boundary it cannot report resumable work.
+					if !checkpointSized || analysisBootstrapBudget(budgetStateBytes, true) <= 0 {
+						return incomplete(fmt.Errorf("body boundary checkpoint not saved: %w", err)), nil
+					}
+					debugAnalysisDisk(stderr, "body boundary not stored: %v; continue within actual sized budget", err)
 				}
-				debugAnalysisDisk(stderr, "body boundary not stored: %v; continue within actual sized budget", err)
 			}
-			debugAnalysisDisk(stderr, "bootstrap body boundary checkpoint capacity=%d; recompute remaining process budget", capacityHint)
+			if !continueWithoutCheckpoint {
+				debugAnalysisDisk(stderr, "bootstrap body boundary checkpoint capacity=%d; recompute remaining process budget", capacityHint)
+			}
 		}
 	}
 	done, total := build.Progress()
 	post, phases := build.PostProgress()
 	if !checkpointCurrent {
 		if err := saveCheckpoint(); err != nil {
+			if build.HasUncacheableSMTOutcome() {
+				return retryFromCleanCheckpoint()
+			}
 			return incomplete(fmt.Errorf("initial analysis stopped at %d/%d declarations, %d/%d final-check phases; checkpoint not saved: %w", done, total, post, phases, err)), nil
 		}
 	}

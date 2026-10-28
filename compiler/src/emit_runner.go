@@ -251,6 +251,11 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 	if !ok {
 		return 1
 	}
+	defer func() {
+		if result.HasUncacheableSMTOutcome() {
+			program.objectCacheIneligible = true
+		}
+	}()
 	if options.explainProofs {
 		printProofReport(stderr, result.ProofReport, options.explainHole)
 		printElisionSummary(stderr, result.ElisionSummary)

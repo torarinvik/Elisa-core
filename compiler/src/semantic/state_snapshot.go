@@ -69,6 +69,9 @@ func (r *RetainedAnalysis) MarshalState() ([]byte, error) {
 	if r.a.smtUnavailable {
 		return nil, fmt.Errorf("solver availability was transient; retry analysis in the next process")
 	}
+	if r.a.smtSnapshotTainted {
+		return nil, fmt.Errorf("solver query outcome was not reusable; retry analysis in the next process")
+	}
 	r.captureBodyUses()
 	r.precomputeBaselineDigests()
 	if !r.ensureFuncNameUsageIndex(r.decls) {
@@ -89,6 +92,9 @@ func RestoreAnalysisState(data []byte) (*RetainedAnalysis, error) {
 	r, ok := value.(*RetainedAnalysis)
 	if !ok || r == nil || r.a == nil || r.result == nil || r.result.analyzer != r.a || r.a.retained != r {
 		return nil, fmt.Errorf("incomplete semantic state")
+	}
+	if r.a.smtUnavailable || r.a.smtSnapshotTainted {
+		return nil, fmt.Errorf("solver state was transient; retry analysis in the next process")
 	}
 	if r.hasFuncNameUsageTransientState() {
 		return nil, fmt.Errorf("function value-name usage update state is transient")
@@ -134,8 +140,20 @@ func (r *RetainedAnalysis) MatchesInvocation(filename string, options AnalyzeOpt
 }
 
 func (r *RetainedAnalysis) ResultForSource(source []byte) (*Result, bool) {
-	if r == nil || r.a == nil || r.result == nil || !bytes.Equal(r.src, source) {
+	if r == nil || r.a == nil || r.result == nil || r.a.smtUnavailable || r.a.smtSnapshotTainted || !bytes.Equal(r.src, source) {
 		return nil, false
 	}
 	return r.result, true
+}
+
+// HasUncacheableSMTOutcome reports whether analysis or code-generation
+// specialization used solver state that cannot safely back a persistent build
+// artifact. Call after generation so private specialization outcomes are seen.
+func (r *Result) HasUncacheableSMTOutcome() bool {
+	if r == nil || r.analyzer == nil {
+		return false
+	}
+	unlock := r.lockAnalyzer()
+	defer unlock()
+	return r.analyzer.smtUnavailable || r.analyzer.smtSnapshotTainted
 }

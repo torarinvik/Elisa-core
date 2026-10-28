@@ -784,6 +784,10 @@ type Analyzer struct {
 	smtBinary          string
 	smtSolver          smtSolverHandle
 	smtUnavailable     bool
+	// smtSnapshotTainted prevents reuse of semantic results produced after a
+	// solver failure or an Unknown that cannot be safely memoized. It is sticky
+	// across retained updates because unaffected bodies may retain those results.
+	smtSnapshotTainted bool
 	smtStats           SMTStats
 	storeScanFillWhy   string               // trace only: last reason storeScanLocalIsFilled rejected a local
 	viewProvWhy        string               // trace only: last view-provenance decline reason

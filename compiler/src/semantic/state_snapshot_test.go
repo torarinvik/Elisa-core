@@ -109,6 +109,63 @@ func TestSemanticStateRejectsTransientFuncNameUsageUpdateState(t *testing.T) {
 	}
 }
 
+func TestSemanticStateRejectsUncacheableSMTOutcome(t *testing.T) {
+	source := []byte(retainedBefore)
+	_, baseline := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), source, AnalyzeOptions{})
+	data, err := baseline.MarshalState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		set  func(*RetainedAnalysis)
+	}{
+		{name: "transient query", set: func(r *RetainedAnalysis) { r.a.smtSnapshotTainted = true }},
+		{name: "solver unavailable", set: func(r *RetainedAnalysis) { r.a.smtUnavailable = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := RestoreAnalysisState(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.set(r)
+			if _, err := r.MarshalState(); err == nil {
+				t.Fatal("MarshalState accepted a non-reusable solver result")
+			}
+			if _, ok := r.ResultForSource(source); ok {
+				t.Fatal("exact-source reuse accepted a non-reusable solver result")
+			}
+			if tc.name == "transient query" {
+				if _, err := r.Update(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), source); err == nil {
+					t.Fatal("retained update reused a tainted analysis")
+				}
+				if !r.a.smtSnapshotTainted {
+					t.Fatal("rejected retained update cleared sticky SMT taint")
+				}
+			}
+			// Bypass MarshalState to exercise the independent restore boundary.
+			encoded, err := semanticStateRegistry().Encode(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restored, err := RestoreAnalysisState(encoded); restored != nil || err == nil || !strings.Contains(err.Error(), "solver state was transient") {
+				t.Fatalf("Restore admitted non-reusable solver state: restored=%v err=%v", restored != nil, err)
+			}
+		})
+	}
+}
+
+func TestResultReportsUncacheableSMTOutcome(t *testing.T) {
+	result := &Result{analyzer: &Analyzer{}}
+	if result.HasUncacheableSMTOutcome() {
+		t.Fatal("clean result rejected for build caching")
+	}
+	result.analyzer.smtSnapshotTainted = true
+	if !result.HasUncacheableSMTOutcome() {
+		t.Fatal("uncacheable SMT outcome was not exposed to build caching")
+	}
+}
+
 func TestSemanticStateClearsClosedStorageViewLoopCallbacks(t *testing.T) {
 	_, r := AnalyzeRetained(retainedParse(t, retainedBefore), retainedParse(t, retainedBefore), []byte(retainedBefore), AnalyzeOptions{})
 	a := r.a

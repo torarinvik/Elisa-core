@@ -107,6 +107,29 @@ func TestSharedCodegenSpecializationMemoDeduplicatesSameKey(t *testing.T) {
 	}
 }
 
+func TestSharedCodegenSpecializationMemoDoesNotRetainUncacheableProduct(t *testing.T) {
+	fn := &ast.FuncDecl{}
+	key := specializationKey{fn: fn, args: "i64"}
+	shared := &sharedCodegen{bodies: make(map[specializationKey]*SpecializedFunction)}
+	transient := &SpecializedFunction{Decl: fn, uncacheableSMTOutcome: true}
+	if product, err := shared.specialize(key, func() (*SpecializedFunction, error) {
+		return transient, nil
+	}); product != transient || err != nil {
+		t.Fatalf("transient specialization returned product %p and error %v", product, err)
+	}
+	want := &SpecializedFunction{Decl: fn}
+	var builds atomic.Int32
+	if product, err := shared.specialize(key, func() (*SpecializedFunction, error) {
+		builds.Add(1)
+		return want, nil
+	}); product != want || err != nil {
+		t.Fatalf("retry returned product %p and error %v, want %p", product, err, want)
+	}
+	if builds.Load() != 1 {
+		t.Fatalf("retry builder ran %d times, want 1", builds.Load())
+	}
+}
+
 func TestSharedCodegenSpecializationMemoRunsDistinctKeysConcurrently(t *testing.T) {
 	shared := &sharedCodegen{bodies: make(map[specializationKey]*SpecializedFunction)}
 	started := make(chan struct{}, 2)

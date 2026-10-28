@@ -104,7 +104,18 @@ type procSolver struct {
 	preamble                          string
 	checkLimit                        int64
 	warm                              bool // CheckAfterHistory: the next check continues the replayed session
+	warmHistoryCertified              bool
 	resourceUnknown, transientUnknown uint64
+	snapshotUnknown                   uint64
+}
+
+// SnapshotUnknownEpoch counts resource-bounded declines that depend on the
+// complete replay history. They are safe only in a snapshot containing that
+// history, never under a query-only persistent proof-cache key.
+func (s *procSolver) SnapshotUnknownEpoch() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshotUnknown
 }
 
 // UnknownCacheEpoch reports monotonic counts of resource-certified and other
@@ -508,7 +519,25 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 		}
 	}
 	start := time.Now()
-	lines, sawError, err := s.exchange(b.String())
+	var lines []string
+	var sawError bool
+	var err error
+	var warmBefore, warmAfter uint64
+	var warmBeforeOK, warmAfterOK bool
+	if s.warm && s.warmHistoryCertified {
+		setup := strings.TrimSuffix(b.String(), "(check-sat)\n")
+		var setupLines []string
+		setupLines, sawError, err = s.exchange(setup)
+		if err == nil && !sawError && len(setupLines) == 0 {
+			warmBefore, warmBeforeOK = s.resourceCount()
+			lines, sawError, err = s.exchange("(check-sat)\n")
+			warmAfter, warmAfterOK = s.resourceCount()
+		} else if err == nil {
+			sawError = true
+		}
+	} else {
+		lines, sawError, err = s.exchange(b.String())
+	}
 	if err != nil {
 		s.broken = true
 		s.stats.Unknown++
@@ -534,6 +563,11 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 	}
 	if res == Unknown {
 		certified := false
+		snapshotCertified := false
+		if !sawError && len(lines) == 1 && lines[0] == "unknown" && s.warm && s.warmHistoryCertified && s.checkLimit > 0 && warmBeforeOK && warmAfterOK && warmAfter >= warmBefore && warmAfter-warmBefore >= uint64(s.checkLimit) {
+			reason := s.unknownReason()
+			snapshotCertified = isAmbiguousCancellation(reason) || reason == `(:reason-unknown "max. resource limit exceeded")`
+		}
 		if !sawError && len(lines) == 1 && lines[0] == "unknown" && s.independent && !s.warm && s.checkLimit > 0 {
 			reason := s.unknownReason()
 			if reason == `(:reason-unknown "max. resource limit exceeded")` {
@@ -543,7 +577,9 @@ func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result
 			}
 		}
 		if res == Unknown {
-			if certified {
+			if snapshotCertified {
+				s.snapshotUnknown++
+			} else if certified {
 				s.resourceUnknown++
 			} else {
 				s.transientUnknown++
@@ -846,15 +882,41 @@ func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars
 	if s.resourceLimit > 0 {
 		fmt.Fprintf(&b, "(set-option :rlimit %d)\n", s.resourceLimit)
 	}
-	for _, entry := range history {
-		b.WriteString("(push 1)\n")
-		b.WriteString(entry)
-		if !strings.HasSuffix(entry, "\n") {
-			b.WriteString("\n")
-		}
-		b.WriteString("(check-sat)\n(pop 1)\n")
+	lines, sawError, err := s.exchange(b.String())
+	historyCertified := err == nil && !sawError && len(lines) == 0 && s.resourceLimit > 0
+	if len(lines) != 0 {
+		sawError = true
 	}
-	if lines, sawError, err := s.exchange(b.String()); err != nil || sawError || !validHistoryReplies(lines, len(history)) {
+	for _, entry := range history {
+		if err != nil || sawError {
+			break
+		}
+		if !strings.HasSuffix(entry, "\n") {
+			entry += "\n"
+		}
+		lines, sawError, err = s.exchange("(push 1)\n" + entry)
+		if err != nil || sawError || len(lines) != 0 {
+			break
+		}
+		before, beforeOK := s.resourceCount()
+		lines, sawError, err = s.exchange("(check-sat)\n")
+		if err != nil || sawError || !validHistoryReplies(lines, 1) {
+			sawError = true
+			break
+		}
+		if lines[0] == "unknown" {
+			after, afterOK := s.resourceCount()
+			reason := s.unknownReason()
+			if !beforeOK || !afterOK || after < before || after-before < uint64(s.resourceLimit) || (!isAmbiguousCancellation(reason) && reason != `(:reason-unknown "max. resource limit exceeded")`) {
+				historyCertified = false
+			}
+		}
+		lines, sawError, err = s.exchange("(pop 1)\n")
+		if err != nil || sawError || len(lines) != 0 {
+			break
+		}
+	}
+	if err != nil || sawError || len(lines) != 0 {
 		// Any failed history command leaves the replayed stack/state uncertain.
 		// Retire this process instead of issuing the final query in a partial replay.
 		s.broken = true
@@ -864,10 +926,12 @@ func (s *procSolver) CheckAfterHistory(history []string, assertions string, vars
 	// The outer verdict key does not include history, and replay does not
 	// retain per-entry unknown reasons. Never memoize a replay decline, even
 	// when its final check exhausts resources; proofs remain reusable.
-	s.transientUnknown++
+	if !historyCertified {
+		s.transientUnknown++
+	}
 
-	s.warm, s.checkLimit = true, rlimit
+	s.warm, s.warmHistoryCertified, s.checkLimit = true, historyCertified, rlimit
 	res, values, _ := s.checkValuesLocked(assertions, vars)
-	s.warm, s.checkLimit = false, s.resourceLimit
+	s.warm, s.warmHistoryCertified, s.checkLimit = false, false, s.resourceLimit
 	return res, values
 }

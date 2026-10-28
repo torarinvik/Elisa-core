@@ -36,12 +36,13 @@ func formatTestLine(status string, name string, detail string) string {
 func compileTestRunnerExecutable(clangPath string, runnerSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
 	return compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerRuntimeShimSource(), easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, false, false, stderr, false)
 }
-func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stderr io.Writer, enableSMT bool) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, stderr io.Writer, enableSMT bool, upstreamUncacheable ...bool) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
 	cacheLookupStart := time.Now()
 	cacheArtifact := testRunnerCacheArtifact{}
+	upstreamTainted := len(upstreamUncacheable) > 0 && upstreamUncacheable[0]
 	// Bypass the content-hash cache when -g/-ftrace is requested: those flags are not part
 	// of the cache key, so a cached plain build would otherwise be returned unsymbolized.
-	if testRunnerCacheEnabled() && !debugInfo && !traceInfo {
+	if testRunnerCacheEnabled() && !debugInfo && !traceInfo && !upstreamTainted {
 		artifact, hit, err := locateCachedTestRunner(runnerSource, shimSource, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, enableSMT)
 		cacheArtifact = artifact
 		lookupElapsed := time.Since(cacheLookupStart)
@@ -92,10 +93,11 @@ func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, 
 	linkForeignFiles := append([]string{shimPath}, foreignFiles...)
 	exePath, nativeCleanup, timing, err := buildNativeExecutableWithClang(clangPath, runnerResult, linkForeignFiles, linkFlags, filepath.Join(tempDir, "generated_runner"), optLevel, packedProfile, targetTriple, debugInfo, traceInfo, stderr)
 	timing.CacheLookup = time.Since(cacheLookupStart)
+	timing.UncacheableSMTOutcome = upstreamTainted || runnerResult.HasUncacheableSMTOutcome()
 	if err != nil {
 		return "", cleanup, timing, analyzeElapsed, shimElapsed, err
 	}
-	if testRunnerCacheEnabled() && cacheArtifact.executable != "" {
+	if testRunnerCacheEnabled() && cacheArtifact.executable != "" && !timing.UncacheableSMTOutcome {
 		publishStart := time.Now()
 		if err := publishCachedTestRunner(cacheArtifact, exePath); err == nil {
 			timing.CachePublish = time.Since(publishStart)

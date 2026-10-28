@@ -338,6 +338,90 @@ func TestWarmExplicitResourceReasonRemainsUncertified(t *testing.T) {
 	}
 }
 
+func TestHistoryWithUnknownCannotCertifyWarmDecline(t *testing.T) {
+	var replies bytes.Buffer
+	writer := respondingWriteCloser(func(p []byte) (int, error) {
+		text := string(p)
+		if strings.Contains(text, "(check-sat)") {
+			if strings.Contains(text, "(reset)") {
+				replies.WriteString("sat\nunknown\n")
+			} else {
+				replies.WriteString("unknown\n")
+			}
+		}
+		echo := strings.LastIndex(text, "(echo \"")
+		if echo < 0 {
+			t.Fatal("unframed command")
+		}
+		frame, _, _ := strings.Cut(text[echo+7:], "\"")
+		fmt.Fprintln(&replies, frame)
+		return len(p), nil
+	})
+	s := &procSolver{independent: true, resourceLimit: 100, checkLimit: 100,
+		stdin: writer, out: bufio.NewReader(&replies)}
+	result, _ := s.CheckAfterHistory([]string{"(assert true)", "(assert false)"}, "(assert true)", nil, 1000)
+	if result != Unknown {
+		t.Fatalf("warm query unexpectedly decided: %v", result)
+	}
+	resource, transient := s.UnknownCacheEpoch()
+	if resource != 0 || transient == 0 {
+		t.Fatalf("history-dependent unknown was certified: resource=%d transient=%d", resource, transient)
+	}
+}
+
+func TestHistorySnapshotCertificateRequiresFullFuel(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		historyFuel   int
+		finalFuel     int
+		reason        string
+		wantCertified bool
+	}{
+		{"full-budget", 100, 1000, "canceled", true},
+		{"history-short", 99, 1000, "canceled", false},
+		{"final-short", 100, 999, "canceled", false},
+		{"wall-timeout", 100, 1000, "timeout", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var replies bytes.Buffer
+			checks, counter := 0, 0
+			writer := respondingWriteCloser(func(p []byte) (int, error) {
+				text := string(p)
+				if strings.Contains(text, "(check-sat)") {
+					checks++
+					if checks == 1 {
+						counter += tc.historyFuel
+					} else {
+						counter += tc.finalFuel
+					}
+					replies.WriteString("unknown\n")
+				}
+				if strings.Contains(text, "(get-info :all-statistics)") {
+					fmt.Fprintf(&replies, "(:rlimit-count %d)\n", counter)
+				}
+				if strings.Contains(text, "(get-info :reason-unknown)") {
+					fmt.Fprintf(&replies, "(:reason-unknown %q)\n", tc.reason)
+				}
+				echo := strings.LastIndex(text, "(echo \"")
+				if echo < 0 {
+					t.Fatal("unframed command")
+				}
+				frame, _, _ := strings.Cut(text[echo+7:], "\"")
+				fmt.Fprintln(&replies, frame)
+				return len(p), nil
+			})
+			s := &procSolver{independent: true, resourceLimit: 100, checkLimit: 100,
+				stdin: writer, out: bufio.NewReader(&replies)}
+			result, _ := s.CheckAfterHistory([]string{"(assert true)"}, "(assert true)", nil, 1000)
+			resource, transient := s.UnknownCacheEpoch()
+			snapshot := s.SnapshotUnknownEpoch()
+			if result != Unknown || resource != 0 || (snapshot == 1) != tc.wantCertified || (transient == 0) != tc.wantCertified {
+				t.Fatalf("result=%v resource=%d transient=%d snapshot=%d", result, resource, transient, snapshot)
+			}
+		})
+	}
+}
+
 func TestCheckAfterHistoryRejectsSolverErrorBeforeFinalCheck(t *testing.T) {
 	var replies bytes.Buffer
 	var commands strings.Builder

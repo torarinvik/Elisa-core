@@ -26,13 +26,30 @@ func TestCheckAfterHistoryRejectsMalformedReplayReplies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var replies bytes.Buffer
 			var commands strings.Builder
+			historyPending, finalPending := false, false
 			writer := respondingWriteCloser(func(p []byte) (int, error) {
 				text := string(p)
 				commands.WriteString(text)
 				if strings.Contains(text, "history_marker") {
-					replies.WriteString(tc.reply)
-				} else if strings.Contains(text, "(assert false)") {
-					replies.WriteString("unsat\n")
+					historyPending = true
+				}
+				if strings.Contains(text, "(assert false)") {
+					finalPending = true
+				}
+				if strings.Contains(text, "(get-info :all-statistics)") {
+					replies.WriteString("(:rlimit-count 0)\n")
+				}
+				if strings.Contains(text, "(get-info :reason-unknown)") {
+					replies.WriteString("(:reason-unknown \"timeout\")\n")
+				}
+				if strings.Contains(text, "(check-sat)") {
+					if historyPending {
+						replies.WriteString(tc.reply)
+						historyPending = false
+					} else if finalPending {
+						replies.WriteString("unsat\n")
+						finalPending = false
+					}
 				}
 				echo := strings.LastIndex(text, "(echo \"")
 				if echo < 0 {
@@ -69,5 +86,17 @@ func TestCheckAfterHistoryRealSolverProtocol(t *testing.T) {
 	result, _ := proc.CheckAfterHistory([]string{"(assert true)", "(assert false)"}, "(assert false)", nil, 6000000)
 	if result != Unsat {
 		t.Fatalf("expected unsat after valid history, got %v", result)
+	}
+}
+
+func TestCheckAfterHistoryRealSolverPreservesCounterexample(t *testing.T) {
+	z3Available(t)
+	solver, err := Open(Options{Independent: true, ResourceLimit: 6000000})
+	if err != nil { t.Fatal(err) }
+	defer solver.Close()
+	proc := solver.(*procSolver)
+	result, model := proc.CheckAfterHistory([]string{"(assert true)"}, "(declare-const x Int)\n(assert (= x 7))", []string{"x"}, 6000000)
+	if result != Sat || model["x"] != "7" {
+		t.Fatalf("history replay lost counterexample: result=%v model=%v", result, model)
 	}
 }

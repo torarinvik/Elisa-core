@@ -35,16 +35,19 @@ func TestParallelSMTWorkerOwnsSolverAndProfile(t *testing.T) {
 	worker.closeSMT()
 	worker.closeSMT()
 	worker.smtUnavailable = true
+	worker.smtSnapshotTainted = true
 	if own.closes != 1 || parentSolver.closes != 0 {
 		t.Fatal("worker closed wrong solver or closed twice")
 	}
 	// Reflection merging must not overwrite the parent's solver or add profile
 	// deltas against a pre-fork baseline. Profiles are folded explicitly once.
 	baseline := cloneAnalyzerValueForParallel(parent)
+	cleanWorker := cloneAnalyzerValueForBodyWorker(parent).Addr().Interface().(*Analyzer)
 	mergeValue(settable(reflect.ValueOf(parent).Elem()), reflect.ValueOf(worker).Elem(), baseline, &parallelWorkerState{})
 	mergeParallelSMTStats(&parent.smtStats, worker.smtStats)
-	if parent.smtSolver != parentSolver || parent.smtUnavailable {
-		t.Fatal("worker merge changed parent solver state")
+	mergeValue(settable(reflect.ValueOf(parent).Elem()), reflect.ValueOf(cleanWorker).Elem(), baseline, &parallelWorkerState{})
+	if parent.smtSolver != parentSolver || parent.smtUnavailable || !parent.smtSnapshotTainted {
+		t.Fatal("worker merge changed parent solver or cleared sticky snapshot taint")
 	}
 	parent.closeSMT()
 	parent.closeSMT()
