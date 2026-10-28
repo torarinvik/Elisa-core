@@ -54,8 +54,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 	defer C.LLVMDisposeMessage(triple)
 	defer C.LLVMDisposeMessage(cpu)
 	defer C.LLVMDisposeMessage(features)
-	config, _ := json.Marshal([]any{"optimized-module-v3-authenticated-ir", int(level), C.GoString(triple), C.GoString(cpu), C.GoString(features), optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3})
-	key := string(config)
+	key := optimizedModuleCacheKey(g, level, C.GoString(triple), C.GoString(cpu), C.GoString(features))
 	data, expectedDigest, validEnvelope := decodeOptimizedModuleEnvelope(s.disk.load(bytes, key))
 	if validEnvelope {
 		context := C.LLVMContextCreate()
@@ -69,7 +68,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 			var nameSize C.size_t
 			name := C.LLVMGetModuleIdentifier(g.module, &nameSize)
 			C.LLVMSetModuleIdentifier(module, name, nameSize)
-			cached := &llvmGenerator{context: context, module: module, result: g.result, optLevel: g.optLevel, requestedTargetTriple: g.requestedTargetTriple, optimizedForCodegen: true}
+			cached := &llvmGenerator{context: context, module: module, result: g.result, optLevel: g.optLevel, requestedTargetTriple: g.requestedTargetTriple, optimizedForCodegen: true, emitDebugInfo: g.emitDebugInfo, emitTrace: g.emitTrace}
 			if err := cached.ensureTargetMachine(); err == nil {
 				if err := cached.verify(); err == nil && sha256.Sum256([]byte(cached.printModule())) == expectedDigest {
 					cached.verifyAutovecExpectations()
@@ -110,6 +109,16 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 		fmt.Fprintf(os.Stderr, "[build-timing] optimized module disk miss: %v\n", time.Since(start).Round(time.Millisecond))
 	}
 	return g, nil
+}
+
+func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, cpu, features string) string {
+	config, _ := json.Marshal([]any{
+		"optimized-module-v4-split-half-add-authenticated-ir",
+		int(level), triple, cpu, features,
+		optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3,
+		"split-half-u64-add-v1", !g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
+	})
+	return string(config)
 }
 
 const optimizedModuleEnvelopeMagic = "ELISACORE-OPTIMIZED-IR-v1\n"

@@ -63,6 +63,9 @@ func TestOptimizedModuleDiskCacheAcrossProcesses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if optimized.emitDebugInfo != g.emitDebugInfo || optimized.emitTrace != g.emitTrace {
+			t.Fatalf("optimized module restore lost debug/trace policy: restored debug=%v trace=%v, source debug=%v trace=%v", optimized.emitDebugInfo, optimized.emitTrace, g.emitDebugInfo, g.emitTrace)
+		}
 		if optimized != g {
 			defer optimized.dispose()
 		}

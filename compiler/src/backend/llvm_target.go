@@ -7,6 +7,7 @@ package backend
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/Error.h>
+#include <llvm-c/IRReader.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
@@ -68,6 +69,8 @@ static char *elisacoreRunOptimizationPipeline(
 	}
 	return LLVMGetErrorMessage(Err);
 }
+
+unsigned elisacoreCanonicalizeSplitHalfUnsignedAdds(LLVMModuleRef Module);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
 	if (ErrMsg != NULL) {
@@ -319,6 +322,12 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 
 	llvmOptimizationMu.Lock()
 	defer llvmOptimizationMu.Unlock()
+	// This narrowly recognizes an i64 add lowered as independent 32-bit low
+	// and high halves. It runs before LLVM's unchanged default<O*> pipeline so
+	// that ordinary optimization can see the native-width addition early.
+	if !g.emitDebugInfo {
+		canonicalizeSplitHalfUnsignedAdds(g.module)
+	}
 	ensureO3UnrollThreshold(optLevel)
 	passPipeline := cString(optimizationBasePipeline(optLevel))
 	defer C.free(unsafe.Pointer(passPipeline))
@@ -353,6 +362,51 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	}
 	g.optimizedForCodegen = true
 	return nil
+}
+
+func canonicalizeSplitHalfUnsignedAdds(module C.LLVMModuleRef) int {
+	if module == nil {
+		return 0
+	}
+	return int(C.elisacoreCanonicalizeSplitHalfUnsignedAdds(module))
+}
+
+func parseLLVMIRForSplitHalfTest(ir string) (*llvmGenerator, error) {
+	context := C.LLVMContextCreate()
+	if context == nil {
+		return nil, fmt.Errorf("failed to create LLVM context for split-half test IR")
+	}
+	text := C.CString(ir)
+	name := C.CString("split-half-add-test")
+	buffer := C.LLVMCreateMemoryBufferWithMemoryRangeCopy(text, C.size_t(len(ir)), name)
+	C.free(unsafe.Pointer(text))
+	C.free(unsafe.Pointer(name))
+	if buffer == nil {
+		C.LLVMContextDispose(context)
+		return nil, fmt.Errorf("failed to create LLVM buffer for split-half test IR")
+	}
+	var module C.LLVMModuleRef
+	var message *C.char
+	// Use the buffer-consuming API for compatibility with LLVM 21, which is
+	// still supported by this project. LLVMParseIRInContext consumes buffer on
+	// both success and parse failure.
+	status := C.LLVMParseIRInContext(context, buffer, &module, &message)
+	if status != 0 || module == nil {
+		detail := "unknown LLVM IR parse error"
+		if message != nil {
+			detail = C.GoString(message)
+			C.LLVMDisposeMessage(message)
+		}
+		if module != nil {
+			C.LLVMDisposeModule(module)
+		}
+		C.LLVMContextDispose(context)
+		return nil, fmt.Errorf("parse split-half test IR: %s", detail)
+	}
+	if message != nil {
+		C.LLVMDisposeMessage(message)
+	}
+	return &llvmGenerator{context: context, module: module}, nil
 }
 
 func (g *llvmGenerator) ensureTargetMachine() error {
