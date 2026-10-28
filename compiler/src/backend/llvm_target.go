@@ -73,6 +73,8 @@ static char *elisacoreRunOptimizationPipeline(
 unsigned elisacoreCanonicalizeSplitHalfUnsignedAdds(LLVMModuleRef Module);
 unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
 unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
+int elisacoreTableUnrollSupported(void);
+int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
 	if (ErrMsg != NULL) {
@@ -348,6 +350,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	if !g.emitDebugInfo {
 		forwardZeroedLoads(g.module)
 		inferConstantTableRanges(g.module)
+		if optLevel == OptimizationLevel3 && unrollConstantTableLoops(g.module, g.targetMachine) == 2 {
+			return fmt.Errorf("constant-table loop unroll failed validation")
+		}
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
@@ -368,6 +373,15 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 	}
 	g.optimizedForCodegen = true
 	return nil
+}
+
+func tableUnrollSupported() bool { return C.elisacoreTableUnrollSupported() != 0 }
+
+func unrollConstantTableLoops(module C.LLVMModuleRef, target C.LLVMTargetMachineRef) int {
+	if module == nil {
+		return 0
+	}
+	return int(C.elisacoreUnrollConstantTableLoops(module, target))
 }
 
 func inferConstantTableRanges(module C.LLVMModuleRef) int {
