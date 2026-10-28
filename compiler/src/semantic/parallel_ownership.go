@@ -431,25 +431,26 @@ type smtFlight struct {
 // awaitSharedSMTQuery returns another worker's verdict for query, waiting while it
 // is being solved. On a miss the caller becomes the query's leader and must
 // resolve or release it.
-func (a *Analyzer) awaitSharedSMTQuery(query string) (smtQueryResult, bool) {
+func (a *Analyzer) awaitSharedSMTQuery(query string) (smtQueryResult, bool, *smtFlight) {
 	p := a.parallel
 	if p == nil || p.smtFlights == nil {
-		return smtQueryResult{}, false
+		return smtQueryResult{}, false, nil
 	}
 	if p.leading[query] != nil {
-		return smtQueryResult{}, false
+		// Same-worker recursion must not wait on or release its caller's flight.
+		return smtQueryResult{}, false, nil
 	}
 	fresh := &smtFlight{done: make(chan struct{})}
 	if v, loaded := p.smtFlights.LoadOrStore(query, fresh); loaded {
 		f := v.(*smtFlight)
 		<-f.done
-		return f.result, f.ok
+		return f.result, f.ok, nil
 	}
 	if p.leading == nil {
 		p.leading = map[string]*smtFlight{}
 	}
 	p.leading[query] = fresh
-	return smtQueryResult{}, false
+	return smtQueryResult{}, false, fresh
 }
 
 func (a *Analyzer) resolveSMTFlight(query string, result smtQueryResult) {
@@ -464,9 +465,12 @@ func (a *Analyzer) resolveSMTFlight(query string, result smtQueryResult) {
 
 // releaseSMTFlight ends a leadership that produced no stable verdict, so waiters
 // solve for themselves and later askers start a new flight.
-func (a *Analyzer) releaseSMTFlight(query string) {
+func (a *Analyzer) releaseSMTFlight(query string, owned *smtFlight) {
+	if owned == nil {
+		return
+	}
 	if p := a.parallel; p != nil {
-		if f := p.leading[query]; f != nil {
+		if f := p.leading[query]; f == owned {
 			delete(p.leading, query)
 			p.smtFlights.CompareAndDelete(query, f)
 			close(f.done)

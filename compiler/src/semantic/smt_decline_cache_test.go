@@ -61,14 +61,14 @@ func TestSMTDeclinePersistentHitWarmsMemoryCache(t *testing.T) {
 	query := "(declare-const x Int)(assert (= x 1))"
 	cache.publishDeclined(query, smt.Sat, "x = 1")
 	analyzer := &Analyzer{smtProofCacheInitialized: true, smtProofCache: cache}
-	first, ok := analyzer.smtCachedQuery(query)
+	first, ok, _ := analyzer.smtCachedQuery(query)
 	if !ok || first.proven || first.ce != "x = 1" {
 		t.Fatalf("first hit: %+v %v", first, ok)
 	}
 	if err := os.Remove(cache.declinePath(cache.key(query))); err != nil {
 		t.Fatal(err)
 	}
-	second, ok := analyzer.smtCachedQuery(query)
+	second, ok, _ := analyzer.smtCachedQuery(query)
 	if !ok || second != first {
 		t.Fatalf("memory hit lost exact decline: %+v %v", second, ok)
 	}

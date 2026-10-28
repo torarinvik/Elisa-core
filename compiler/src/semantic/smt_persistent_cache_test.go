@@ -261,7 +261,7 @@ func TestResetSMTForRetainedUpdateRefreshesSolverAndBudgetState(t *testing.T) {
 		t.Fatalf("retained SMT state survived reset: solver=%v query=%v proof=%v initialized=%v unavailable=%v history=%v historyFor=%v",
 			a.smtSolver, a.smtQueryCache, a.smtProofCache, a.smtProofCacheInitialized, a.smtUnavailable, a.smtHistory, a.smtHistoryFor)
 	}
-	if _, ok := a.smtCachedQuery(query); ok {
+	if _, ok, _ := a.smtCachedQuery(query); ok {
 		t.Fatal("resource decline from the old solver or budget survived retained update")
 	}
 	if a.smtProofCache == nil || a.smtProofCache.identity == oldCache.identity {
