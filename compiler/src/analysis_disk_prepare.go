@@ -176,22 +176,113 @@ func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bo
 	if err != nil {
 		return false
 	}
-	before, after := bytes.Split(baseline, []byte("\n")), bytes.Split(source, []byte("\n"))
-	for len(before) != 0 && len(after) != 0 && bytes.Equal(before[0], after[0]) {
-		before, after = before[1:], after[1:]
+	return analysisDiskLikelyBodyEditSources(baseline, source)
+}
+
+// analysisDiskLikelyBodyEditSources preserves bytes.Split's line semantics
+// without allocating a slice for every line in either source. It is only a
+// scheduling hint; semantic Update still checks the complete body certificate.
+func analysisDiskLikelyBodyEditSources(before, after []byte) bool {
+	if bytes.Equal(before, after) {
+		return true
 	}
-	for len(before) != 0 && len(after) != 0 && bytes.Equal(before[len(before)-1], after[len(after)-1]) {
-		before, after = before[:len(before)-1], after[:len(after)-1]
+	beforeCount, afterCount := bytes.Count(before, []byte("\n"))+1, bytes.Count(after, []byte("\n"))+1
+	beforeForward := analysisDiskForwardLines{data: before}
+	afterForward := analysisDiskForwardLines{data: after}
+	prefixLimit := min(beforeCount, afterCount)
+	prefix := 0
+	for prefix < prefixLimit {
+		beforeNext, afterNext := beforeForward, afterForward
+		beforeLine, beforeOK := beforeNext.next()
+		afterLine, afterOK := afterNext.next()
+		if !beforeOK || !afterOK || !bytes.Equal(beforeLine, afterLine) {
+			break
+		}
+		beforeForward, afterForward = beforeNext, afterNext
+		prefix++
 	}
-	for _, lines := range [][][]byte{before, after} {
-		for _, line := range lines {
-			trimmed := bytes.TrimSpace(line)
-			if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
-				return false
-			}
+
+	beforeReverse := analysisDiskReverseLines{data: before, end: len(before)}
+	afterReverse := analysisDiskReverseLines{data: after, end: len(after)}
+	suffixLimit := min(beforeCount-prefix, afterCount-prefix)
+	suffix := 0
+	for suffix < suffixLimit {
+		beforeNext, afterNext := beforeReverse, afterReverse
+		beforeLine, beforeOK := beforeNext.next()
+		afterLine, afterOK := afterNext.next()
+		if !beforeOK || !afterOK || !bytes.Equal(beforeLine, afterLine) {
+			break
+		}
+		beforeReverse, afterReverse = beforeNext, afterNext
+		suffix++
+	}
+
+	for remaining := beforeCount - prefix - suffix; remaining > 0; remaining-- {
+		line, ok := beforeForward.next()
+		if !ok {
+			return false
+		}
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+			return false
+		}
+	}
+	for remaining := afterCount - prefix - suffix; remaining > 0; remaining-- {
+		line, ok := afterForward.next()
+		if !ok {
+			return false
+		}
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) != 0 && (!analysisDiskIndented(line) || analysisDiskContractClause(trimmed)) {
+			return false
 		}
 	}
 	return true
+}
+
+type analysisDiskForwardLines struct {
+	data   []byte
+	offset int
+	done   bool
+}
+
+func (lines *analysisDiskForwardLines) next() ([]byte, bool) {
+	if lines.done {
+		return nil, false
+	}
+	relativeEnd := bytes.IndexByte(lines.data[lines.offset:], '\n')
+	if relativeEnd < 0 {
+		lines.done = true
+		return lines.data[lines.offset:], true
+	}
+	end := lines.offset + relativeEnd
+	line := lines.data[lines.offset:end]
+	lines.offset = end + 1
+	return line, true
+}
+
+type analysisDiskReverseLines struct {
+	data []byte
+	end  int
+	done bool
+}
+
+func (lines *analysisDiskReverseLines) next() ([]byte, bool) {
+	if lines.done {
+		return nil, false
+	}
+	if lines.end == 0 {
+		lines.done = true
+		return lines.data[:0], true
+	}
+	relativeStart := bytes.LastIndexByte(lines.data[:lines.end], '\n')
+	if relativeStart < 0 {
+		lines.done = true
+		return lines.data[:lines.end], true
+	}
+	line := lines.data[relativeStart+1 : lines.end]
+	lines.end = relativeStart
+	return line, true
 }
 
 // analysisDiskContractClause is a scheduling hint, not an admission check.
