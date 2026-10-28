@@ -290,7 +290,7 @@ func (s *IncrementalObjectSession) partitionedIRApplies(result *semantic.Result,
 
 // writePartitionedObject is WriteObject with partitioned IR generation. The
 // caller has checked that the target is native and the output is a real file.
-func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions, configKey string, unitID, targetID [32]byte) error {
+func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions, configKey string, unitID, targetID [32]byte, disposalScope *llvmDisposalScope) error {
 	start := time.Now()
 	parts := s.partitions
 	fastCodegen := options.OptLevel == OptimizationLevel0
@@ -331,7 +331,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 	if err := runPartitionIRWorkers(parts, workers, order, func(part int) error {
 		var err error
 		var definitions []string
-		mode := partitionIRBuildMode{queue: specializationQueue, cachePart: part}
+		mode := partitionIRBuildMode{queue: specializationQueue, cachePart: part, disposalScope: disposalScope}
 		if auditCollector != nil {
 			mode.inputAudit = auditCollector.record
 		}
@@ -368,7 +368,7 @@ func (s *IncrementalObjectSession) writePartitionedObject(result *semantic.Resul
 		return err
 	}
 	if specializationQueue != nil {
-		supplemental, err := s.buildQueuedPartitionSpecializations(result, options, parts, fastCodegen, configKey, unitID, targetID, shared, specializationQueue, definedSpecializations, members, auditCollector, previousMembers)
+		supplemental, err := s.buildQueuedPartitionSpecializations(result, options, parts, fastCodegen, configKey, unitID, targetID, shared, specializationQueue, definedSpecializations, members, auditCollector, previousMembers, disposalScope)
 		if err != nil {
 			return err
 		}
@@ -410,7 +410,7 @@ type partitionIRSupplementalObject struct {
 // ordinary partition lowering. Each supplemental module emits only bodies
 // owned by one partition; requests discovered while lowering those bodies are
 // picked up in the next round until the shared queue reaches a fixed point.
-func (s *IncrementalObjectSession) buildQueuedPartitionSpecializations(result *semantic.Result, options LLVMObjectEmitOptions, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, shared *sharedCodegenLookups, queue *partitionSpecializationQueue, definedByPart []map[string]bool, members [][]string, audit *partitionIRInputAuditCollector, previousMembers [][]string) ([]partitionIRSupplementalObject, error) {
+func (s *IncrementalObjectSession) buildQueuedPartitionSpecializations(result *semantic.Result, options LLVMObjectEmitOptions, parts int, fastCodegen bool, configKey string, unitID, targetID [32]byte, shared *sharedCodegenLookups, queue *partitionSpecializationQueue, definedByPart []map[string]bool, members [][]string, audit *partitionIRInputAuditCollector, previousMembers [][]string, disposalScope *llvmDisposalScope) ([]partitionIRSupplementalObject, error) {
 	if queue == nil {
 		return nil, nil
 	}
@@ -453,6 +453,7 @@ func (s *IncrementalObjectSession) buildQueuedPartitionSpecializations(result *s
 				specializationOnly: true,
 				cachePart:          parts + owner,
 				supplementRound:    round,
+				disposalScope:      disposalScope,
 			}
 			if audit != nil {
 				mode.inputAudit = audit.record
@@ -666,7 +667,7 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	if err != nil {
 		return nil, nil, fmt.Errorf("partition %d: %w", part, err)
 	}
-	defer g.disposeInBackground()
+	defer g.disposeInBackground(mode.disposalScope)
 	// These workers synthesize types that can flow into generic symbol names.
 	// Until their cross-module identity is qualified, use whole-module lowering.
 	if g.partUnsafeHelpers {

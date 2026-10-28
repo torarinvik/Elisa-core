@@ -257,7 +257,7 @@ def %s() -> i64:
 		t.Fatal("nested specialization was queued before lowering its outer body")
 	}
 
-	supplemental, err := session.buildQueuedPartitionSpecializations(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}, parts, true, "queue-test", unitID, targetID, shared, queue, definedByPart, members, nil, nil)
+	supplemental, err := session.buildQueuedPartitionSpecializations(result, LLVMObjectEmitOptions{OptLevel: OptimizationLevel0}, parts, true, "queue-test", unitID, targetID, shared, queue, definedByPart, members, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("drain specialization queue: %v", err)
 	}

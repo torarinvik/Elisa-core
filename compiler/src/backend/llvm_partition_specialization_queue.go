@@ -59,6 +59,7 @@ type partitionIRBuildMode struct {
 	specializationOnly bool
 	cachePart          int
 	supplementRound    int
+	disposalScope      *llvmDisposalScope
 	inputAudit         func(int, irInputReadReport)
 }
 

@@ -41,6 +41,8 @@ import (
 // frontend analysis or LLVM lowering.
 func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) error {
 	s.recordStats(func(stats *IncrementalObjectStats) { stats.Builds++ })
+	disposalScope := newLLVMDisposalScope(runtime.GOMAXPROCS(0))
+	defer disposalScope.wait()
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
@@ -58,7 +60,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	}
 	filename := result.ActiveFile().Filename
 	if s.partitionedIRApplies(result, options) && !options.Serial && native.Triple == target.Triple && !virtualObjectSource(result) {
-		if done, err := s.tryPartitionedObject(result, outputPath, options); done {
+		if done, err := s.tryPartitionedObject(result, outputPath, options, disposalScope); done {
 			return err
 		}
 	}
@@ -103,7 +105,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	if err != nil {
 		return err
 	}
-	defer g.disposeInBackground()
+	defer g.disposeInBackground(disposalScope)
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
@@ -126,7 +128,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 			return err
 		}
 		if optimized != g {
-			defer optimized.disposeInBackground()
+			defer optimized.disposeInBackground(disposalScope)
 			g = optimized
 		}
 	}
@@ -386,7 +388,7 @@ func virtualObjectSource(result *semantic.Result) bool {
 
 // tryPartitionedObject resolves the partition cache keys and runs the
 // partitioned IR path. done is false when it does not apply.
-func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions) (done bool, err error) {
+func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result, outputPath string, options LLVMObjectEmitOptions, disposalScope *llvmDisposalScope) (done bool, err error) {
 	probe, err := newLLVMGenerator(result)
 	if err != nil {
 		return false, nil
@@ -426,7 +428,7 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 		return true, err
 	}
 	unitID := sha256.Sum256([]byte(origin))
-	err = s.writePartitionedObject(result, outputPath, options, string(config), unitID, sha256.Sum256(config))
+	err = s.writePartitionedObject(result, outputPath, options, string(config), unitID, sha256.Sum256(config), disposalScope)
 	if errors.Is(err, errPartitionDeclined) {
 		return false, nil
 	}

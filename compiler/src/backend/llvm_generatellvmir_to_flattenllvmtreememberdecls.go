@@ -448,25 +448,25 @@ func (g *llvmGenerator) dispose() {
 	}
 }
 
-// disposeInBackground releases the generator like dispose, but tears the module
-// and its context down on another goroutine: a large module takes hundreds of
-// milliseconds to free and nothing waits on it. The context is private to this
-// generator, so freeing it concurrently with other contexts is safe.
-func (g *llvmGenerator) disposeInBackground() {
+// disposeInBackground releases the generator like dispose, then queues module
+// and context teardown on the current object build's bounded cleanup scope. The
+// scope is joined before WriteObject returns so retained requests cannot leave
+// unbounded LLVM allocations behind. Each context is private to this generator.
+func (g *llvmGenerator) disposeInBackground(scope *llvmDisposalScope) {
 	module, context := g.module, g.context
 	g.module, g.context = nil, nil
 	g.dispose()
 	if module == nil && context == nil {
 		return
 	}
-	go func() {
+	scope.schedule(func() {
 		if module != nil {
 			C.LLVMDisposeModule(module)
 		}
 		if context != nil {
 			C.LLVMContextDispose(context)
 		}
-	}()
+	})
 }
 
 func (g *llvmGenerator) emitModule() error {
