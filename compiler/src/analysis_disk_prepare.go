@@ -105,8 +105,12 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 // source sidecar never admits a semantic state; RestoreAnalysisState,
 // MatchesInvocation, and ResultForSource remain the completed-state gates.
 func analysisDiskBaselineSourceMatches(artifact analysisDiskArtifact, source []byte) bool {
-	baseline, err := os.ReadFile(artifact.baselineSourcePath())
-	return err == nil && bytes.Equal(baseline, source)
+	matched := false
+	err := artifact.withBaselineSource(func(baseline []byte) error {
+		matched = bytes.Equal(baseline, source)
+		return nil
+	})
+	return err == nil && matched
 }
 
 func (p *analysisDiskRestoration) join() {
@@ -172,11 +176,12 @@ func analysisDiskLikelyBodyEdit(artifact analysisDiskArtifact, source []byte) bo
 	if semantic.RetainedFastPrepareSetting() != "on" {
 		return false
 	}
-	baseline, err := os.ReadFile(artifact.baselineSourcePath())
-	if err != nil {
-		return false
-	}
-	return analysisDiskLikelyBodyEditSources(baseline, source)
+	likely := false
+	err := artifact.withBaselineSource(func(baseline []byte) error {
+		likely = analysisDiskLikelyBodyEditSources(baseline, source)
+		return nil
+	})
+	return err == nil && likely
 }
 
 // analysisDiskLikelyBodyEditSources preserves bytes.Split's line semantics

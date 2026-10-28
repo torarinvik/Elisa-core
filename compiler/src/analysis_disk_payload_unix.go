@@ -58,3 +58,48 @@ func (a analysisDiskArtifact) withPayload(fn func([]byte) error) (resultErr erro
 	}
 	return fn(mapped[len(header):])
 }
+
+// withBaselineSource keeps the immutable source sidecar file-backed while its
+// bytes are used for restore ordering or scratch-parse scheduling. Publishing
+// uses rename, so the opened inode remains stable for this callback.
+func (a analysisDiskArtifact) withBaselineSource(fn func([]byte) error) (resultErr error) {
+	f, err := os.Open(a.baselineSourcePath())
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	maxInt := int64(int(^uint(0) >> 1))
+	if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > maxInt {
+		return fmt.Errorf("invalid analysis baseline source size")
+	}
+	if info.Size() == 0 {
+		return fn(nil)
+	}
+
+	mapped, err := unix.Mmap(int(f.Fd()), 0, int(info.Size()), unix.PROT_READ, unix.MAP_PRIVATE)
+	if err != nil {
+		data, readErr := os.ReadFile(a.baselineSourcePath())
+		if readErr != nil {
+			return readErr
+		}
+		return fn(data)
+	}
+	defer func() {
+		if err := unix.Munmap(mapped); resultErr == nil && err != nil {
+			resultErr = err
+		}
+	}()
+	after, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if after.Size() != info.Size() {
+		return fmt.Errorf("analysis baseline source size changed during read")
+	}
+	return fn(mapped)
+}
