@@ -163,6 +163,8 @@ type functionState struct {
 	// function (return values, copied call arguments, or assignment initializers). Such locals keep
 	// the caller-owned arena; all other fresh locals may use scratchArena.
 	adoptedEscapeNames map[string]bool
+	adoptedEscapeBody  []ast.Stmt
+	adoptedEscapeReady bool
 	// callerStorageArenas maps a local result name to the caller-owned arena of the aggregate it is
 	// copied into. This is distinct from regionPolyOwner: a void helper can return a storage-carrying
 	// aggregate into a local auto region and immediately push it into a by-reference output parameter.
@@ -606,14 +608,14 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:                  g,
-		decl:               decl,
-		fnValue:            fnValue,
-		fnType:             fnType,
-		builder:            builder,
-		typeMap:            typeBindings,
-		adoptedEscapeNames: adoptedEscapeNamesForBody(bodyStatements, paramNames(decl.Params)...),
-		mainReturnsStatus:  decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
+		g:                 g,
+		decl:              decl,
+		fnValue:           fnValue,
+		fnType:            fnType,
+		builder:           builder,
+		typeMap:           typeBindings,
+		adoptedEscapeBody: bodyStatements,
+		mainReturnsStatus: decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
 	}
 	// A signature-level `can[Scalar]` grants the whole body; `can Scalar:` blocks nest on top
 	// (see the CanStmt case in emitStmt).

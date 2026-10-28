@@ -895,6 +895,22 @@ func (s *functionState) ensureAdoptedScratchArena() error {
 	return nil
 }
 
+// prepareAdoptedEscapeNames delays the reflective AST walk until a function
+// actually enters a synthesized region that adopts its caller's arena. Most
+// emitted functions never create an adopted scratch arena, so scanning their
+// bodies cannot affect code generation.
+func (s *functionState) prepareAdoptedEscapeNames() {
+	if s == nil || s.adoptedEscapeReady {
+		return
+	}
+	var roots []string
+	if s.decl != nil {
+		roots = paramNames(s.decl.Params)
+	}
+	s.adoptedEscapeNames = adoptedEscapeNamesForBody(s.adoptedEscapeBody, roots...)
+	s.adoptedEscapeReady = true
+}
+
 func (s *functionState) adoptedScratchForLocal(name string) C.LLVMValueRef {
 	if s == nil || s.scratchArena == nil {
 		return nil
@@ -935,6 +951,7 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 		// runtime with "not the tail allocation".
 		s.defineBinding(n.Name, valueBinding{ptr: s.regionPolyOwner.arenaRef, typ: s.g.namedType("Arena")})
 		s.treeAllocOwner = s.regionPolyOwner
+		s.prepareAdoptedEscapeNames()
 		if err := s.ensureAdoptedScratchArena(); err != nil {
 			return err
 		}
