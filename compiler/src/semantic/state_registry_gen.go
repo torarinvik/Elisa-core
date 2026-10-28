@@ -892,6 +892,7 @@ func semanticStateTypes() []reflect.Type {
 		reflect.TypeFor[sparseSpecializationMap](),
 		reflect.TypeFor[specializationBuildOptions](),
 		reflect.TypeFor[specializationCall](),
+		reflect.TypeFor[specializationCloneField](),
 		reflect.TypeFor[specializationContext](),
 		reflect.TypeFor[specializationInputTrace](),
 		reflect.TypeFor[specializationKey](),
