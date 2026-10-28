@@ -257,7 +257,7 @@ func (b *smtProofVersionOutput) Write(payload []byte) (int, error) {
 // certified independent resource exhaustion can be published. Generic Unknown
 // (timeouts, transport/protocol errors, unsupported or incomplete solving) must
 // remain retryable. Old uncertified unknown records are rejected by this schema.
-const smtDeclineCacheSchema = "elisa-exact-smt-decline-v2"
+const smtDeclineCacheSchema = "elisa-exact-smt-decline-v3"
 
 // Definitive SAT and certified independent resource declines are cached
 // by default; ELISACORE_SMT_CACHE_DECLINED=0 turns that off.

@@ -3,6 +3,9 @@
 package semantic
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +19,35 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/smt"
 )
+
+func TestSMTDeclineCacheRejectsLegacyIncompleteModelRecords(t *testing.T) {
+	priorDeclineCache := smtDeclineCacheEnabled
+	smtDeclineCacheEnabled = true
+	defer func() { smtDeclineCacheEnabled = priorDeclineCache }()
+
+	cache := &smtProofCache{directory: t.TempDir(), identity: "compiler+solver+options"}
+	query := "(assert (= x 1))\n"
+	key := cache.key(query)
+	legacyCounterexample := "x = -1"
+	legacyChecksum := sha256.Sum256([]byte("elisa-exact-smt-decline-v2\x00" + key + "\x00sat\x00" + legacyCounterexample))
+	legacyPayload, err := json.Marshal(smtDeclineCacheRecord{
+		Schema: "elisa-exact-smt-decline-v2", Key: key, Verdict: "sat", Counterexample: legacyCounterexample,
+		Checksum: hex.EncodeToString(legacyChecksum[:]),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := cache.declinePath(key)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, legacyPayload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cache.declined(query); ok {
+		t.Fatal("legacy SAT decline with potentially incomplete model was reused")
+	}
+}
 
 func TestSMTProofCacheStorage(t *testing.T) {
 	cache := &smtProofCache{directory: t.TempDir(), identity: "compiler+solver+options"}
