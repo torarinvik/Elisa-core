@@ -8,6 +8,7 @@ import (
 const sourceCheckpointStride = 256
 const sourceCheckpointLimit = 4096
 const sourceCheckpointBytes = 16 << 20
+const sourceTokenCapacityDivisor = 5
 
 type sourceCheckpoint struct {
 	count, required int
@@ -69,7 +70,10 @@ func TokenizeSource(filename string, source []byte, previous *SourceTokens) *Sou
 	result := &SourceTokens{filename: strings.Clone(filename), source: copySourceSlice(source)}
 	l := New(result.filename, result.source)
 	l.trackReads = true
-	capacity := max(16, len(source)/4)
+	// Include-heavy compiler inputs have substantial whitespace and comments.
+	// Reserve headroom without pre-zeroing a quarter of every source byte as a
+	// Token; append still grows safely for denser inputs.
+	capacity := max(16, len(source)/sourceTokenCapacityDivisor)
 	if previous == nil || previous.filename != filename {
 		return tokenizeFreshSource(result, l, capacity)
 	}
