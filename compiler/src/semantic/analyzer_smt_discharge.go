@@ -3364,6 +3364,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
+				if strings.HasPrefix(bound, dtTokenPrefix) {
+					return "", false
+				}
 				return bound, true
 			}
 		}
@@ -4478,6 +4481,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		}
 		if env != nil {
 			if bound, ok := env[n.Name]; ok {
+				if strings.HasPrefix(bound, dtTokenPrefix) {
+					return "", false
+				}
 				return bound, true
 			}
 		}

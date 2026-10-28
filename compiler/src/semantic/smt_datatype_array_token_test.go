@@ -23,4 +23,11 @@ func TestSMTArrayTermRejectsDatatypeProjectionToken(t *testing.T) {
 	if term, ok := tr.arrayTermEnv(ident, map[string]string{"view": "v_valid_array"}); !ok || term != "v_valid_array" {
 		t.Fatalf("valid array binding rejected: %q, %v", term, ok)
 	}
+	bad := map[string]string{"view": dtToken("@callproj$0")}
+	if term, ok := tr.termEnv(ident, bad); ok {
+		t.Fatalf("datatype marker leaked into scalar term %q", term)
+	}
+	if term, ok := tr.boolTerm(ident, bad); ok {
+		t.Fatalf("datatype marker leaked into boolean term %q", term)
+	}
 }
