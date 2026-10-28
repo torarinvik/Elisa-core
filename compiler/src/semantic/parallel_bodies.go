@@ -649,6 +649,9 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 		if ownedFunctionAnalyses && cloneSpecializationStoreScanBoolSetCache(cloned.Addr().Interface().(*Analyzer), a, name) {
 			continue
 		}
+		if ownedFunctionAnalyses && cloneSpecializationNestedSetField(cloned.Addr().Interface().(*Analyzer), a, name) {
+			continue
+		}
 		if ownedFunctionAnalyses && name == "returnElementSummaries" {
 			cloned.Addr().Interface().(*Analyzer).returnElementSummaries = cloneSpecializationReturnElementSummaries(a.returnElementSummaries)
 			continue
