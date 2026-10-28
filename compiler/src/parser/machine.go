@@ -1608,7 +1608,7 @@ func (p *Parser) contentNameSuffix(pos lexer.Pos, from, to int) string {
 		h.Write(kind[:])
 		h.Write([]byte(tok.Text))
 		h.Write([]byte{0})
-		h.Write([]byte(tok.Suffix))
+		h.Write([]byte(tok.SuffixString()))
 		h.Write([]byte{0})
 	}
 	key := fmt.Sprintf("%016x", h.Sum64())

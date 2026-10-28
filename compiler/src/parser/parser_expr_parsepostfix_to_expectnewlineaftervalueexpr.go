@@ -286,13 +286,13 @@ func (p *Parser) parsePrimary() ast.Expr {
 	switch p.peek() {
 	case lexer.TOKEN_INT_LIT:
 		tok := p.advance()
-		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix, IsHex: false}
+		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.SuffixString(), IsHex: false}
 	case lexer.TOKEN_FLOAT_LIT:
 		tok := p.advance()
-		return &ast.FloatLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix}
+		return &ast.FloatLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.SuffixString()}
 	case lexer.TOKEN_HEX_LIT:
 		tok := p.advance()
-		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix, IsHex: true}
+		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.SuffixString(), IsHex: true}
 	case lexer.TOKEN_STRING_LIT:
 		tok := p.advance()
 		return &ast.StringLit{Position: tok.Pos, Value: tok.Text}

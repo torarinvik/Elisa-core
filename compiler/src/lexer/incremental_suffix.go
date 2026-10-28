@@ -118,10 +118,6 @@ func (c *sourceTailCopier) token(token Token, epoch int) (Token, bool) {
 	if !ok {
 		return Token{}, false
 	}
-	token.Suffix, ok = c.text(token.Suffix)
-	if !ok {
-		return Token{}, false
-	}
 	if !token.Pos.IsZero() {
 		token.Pos.File = c.filename(token.Pos.File)
 		token.Pos.Offset += c.offsetDelta

@@ -2,7 +2,65 @@ package lexer
 
 import "fmt"
 
-type TokenKind int
+type TokenKind int16
+
+// NumericSuffix is the compact token-level form of a numeric literal's type
+// suffix. AST literals materialize the spelling through String().
+type NumericSuffix uint8
+
+const (
+	NumericSuffixNone NumericSuffix = iota
+	NumericSuffixU8
+	NumericSuffixU16
+	NumericSuffixU32
+	NumericSuffixU64
+	NumericSuffixU
+	NumericSuffixI8
+	NumericSuffixI16
+	NumericSuffixI32
+	NumericSuffixI64
+	NumericSuffixUSize
+	NumericSuffixISize
+	NumericSuffixF32
+	NumericSuffixF64
+)
+
+func (s NumericSuffix) String() string {
+	switch s {
+	case NumericSuffixNone:
+		return ""
+	case NumericSuffixU8:
+		return "u8"
+	case NumericSuffixU16:
+		return "u16"
+	case NumericSuffixU32:
+		return "u32"
+	case NumericSuffixU64:
+		return "u64"
+	case NumericSuffixU:
+		return "u"
+	case NumericSuffixI8:
+		return "i8"
+	case NumericSuffixI16:
+		return "i16"
+	case NumericSuffixI32:
+		return "i32"
+	case NumericSuffixI64:
+		return "i64"
+	case NumericSuffixUSize:
+		return "usize"
+	case NumericSuffixISize:
+		return "isize"
+	case NumericSuffixF32:
+		return "f32"
+	case NumericSuffixF64:
+		return "f64"
+	default:
+		// Never let a malformed cached code silently turn a typed literal into
+		// an untyped one. This spelling cannot be a source identifier.
+		return "\x00<invalid numeric suffix>"
+	}
+}
 
 const (
 	// Special
@@ -143,13 +201,13 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_INDENT:  "INDENT",
 	TOKEN_DEDENT:  "DEDENT",
 
-	TOKEN_IDENT:      "IDENT",
-	TOKEN_INT_LIT:    "INT",
-	TOKEN_FLOAT_LIT:  "FLOAT",
-	TOKEN_HEX_LIT:    "HEX",
-	TOKEN_STRING_LIT: "STRING",
+	TOKEN_IDENT:       "IDENT",
+	TOKEN_INT_LIT:     "INT",
+	TOKEN_FLOAT_LIT:   "FLOAT",
+	TOKEN_HEX_LIT:     "HEX",
+	TOKEN_STRING_LIT:  "STRING",
 	TOKEN_FSTRING_LIT: "FSTRING",
-	TOKEN_CHAR_LIT:   "CHAR",
+	TOKEN_CHAR_LIT:    "CHAR",
 
 	TOKEN_DEF:      "def",
 	TOKEN_ERROR:    "error",
@@ -392,10 +450,12 @@ func (p Pos) String() string {
 
 type Token struct {
 	Kind   TokenKind
+	Suffix NumericSuffix
 	Text   string
 	Pos    Pos
-	Suffix string // for typed literals like 1234u64 -> Suffix="u64"
 }
+
+func (t Token) SuffixString() string { return t.Suffix.String() }
 
 func (t Token) String() string {
 	name, ok := tokenNames[t.Kind]

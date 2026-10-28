@@ -14556,7 +14556,6 @@ func (c *syntaxFastCopier) syntaxCapture363(in lexer.Token) lexer.Token {
 	out := in
 	out.Text = c.syntaxCapture2(in.Text)
 	out.Pos = c.syntaxCapture41(in.Pos)
-	out.Suffix = c.syntaxCapture2(in.Suffix)
 	return out
 }
 
@@ -14982,7 +14981,7 @@ var syntaxFastTypes = map[reflect.Type][]string{
 	reflect.TypeOf(WhileStmt{}):                 {"Position:lexer.Pos", "Hint:ast.BranchHint", "Cond:ast.Expr", "Body:[]ast.Stmt", "Captures:[]string", "RuntimeProgressBackstop:bool"},
 	reflect.TypeOf(ZeroedLit{}):                 {"Position:lexer.Pos"},
 	reflect.TypeOf(lexer.Pos{}):                 {"File:string", "Line:int", "Col:int", "Offset:int", "EndLine:int", "EndCol:int", "EndOffset:int"},
-	reflect.TypeOf(lexer.Token{}):               {"Kind:lexer.TokenKind", "Text:string", "Pos:lexer.Pos", "Suffix:string"},
+	reflect.TypeOf(lexer.Token{}):               {"Kind:lexer.TokenKind", "Suffix:lexer.NumericSuffix", "Text:string", "Pos:lexer.Pos"},
 }
 var syntaxFastSchemaValid = func() bool {
 	for typ, fields := range syntaxFastTypes {

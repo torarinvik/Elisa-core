@@ -649,11 +649,12 @@ var sparseFactSchemas = map[reflect.Type]sparseFactSchema{
 	}},
 	reflect.TypeFor[lexer.Token](): {kind: reflect.Struct, fields: []sparseFactField{
 		{name: "Kind", typ: reflect.TypeFor[lexer.TokenKind](), anonymous: false, tag: ""},
+		{name: "Suffix", typ: reflect.TypeFor[lexer.NumericSuffix](), anonymous: false, tag: ""},
 		{name: "Text", typ: reflect.TypeFor[string](), anonymous: false, tag: ""},
 		{name: "Pos", typ: reflect.TypeFor[lexer.Pos](), anonymous: false, tag: ""},
-		{name: "Suffix", typ: reflect.TypeFor[string](), anonymous: false, tag: ""},
 	}},
-	reflect.TypeFor[lexer.TokenKind](): {kind: reflect.Int},
+	reflect.TypeFor[lexer.NumericSuffix](): {kind: reflect.Uint8},
+	reflect.TypeFor[lexer.TokenKind]():     {kind: reflect.Int16},
 	reflect.TypeFor[numRange](): {kind: reflect.Struct, fields: []sparseFactField{
 		{name: "loKnown", typ: reflect.TypeFor[bool](), anonymous: false, tag: ""},
 		{name: "lo", typ: reflect.TypeFor[int64](), anonymous: false, tag: ""},

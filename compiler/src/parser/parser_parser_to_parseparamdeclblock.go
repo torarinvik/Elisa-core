@@ -1143,8 +1143,8 @@ func (p *Parser) parseAnnotationArg() string {
 	switch p.peek() {
 	case lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT:
 		tok := p.advance()
-		if tok.Suffix != "" {
-			return tok.Text + tok.Suffix
+		if suffix := tok.SuffixString(); suffix != "" {
+			return tok.Text + suffix
 		}
 		return tok.Text
 	case lexer.TOKEN_STRING_LIT:

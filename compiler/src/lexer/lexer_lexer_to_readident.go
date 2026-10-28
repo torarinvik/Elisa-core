@@ -629,7 +629,7 @@ func (l *Lexer) readNumber() Token {
 	}
 	text := bytesToStringView(l.sourceSlice(start, l.pos))
 	suffix := l.readTypeSuffix()
-	if suffix == "f32" || suffix == "f64" {
+	if suffix == NumericSuffixF32 || suffix == NumericSuffixF64 {
 		isFloat = true
 	}
 	if isFloat {
@@ -666,14 +666,15 @@ func (l *Lexer) hasFloatSuffixAt(offset int) bool {
 	}
 	return l.peekAt(offset+2) == '2' && !isIdentChar(l.peekAt(offset+3))
 }
-func (l *Lexer) readTypeSuffix() string {
-	// Read optional type suffix: u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, u, i, f32, f64
+func (l *Lexer) readTypeSuffix() NumericSuffix {
+	// Read an optional recognized suffix: u8/u16/u32/u64/u, i8/i16/i32/i64,
+	// usize/isize, or f32/f64.
 	if !l.sourceHas(l.pos) {
-		return ""
+		return NumericSuffixNone
 	}
 	ch := l.peek()
 	if ch != 'u' && ch != 'i' && ch != 'f' {
-		return ""
+		return NumericSuffixNone
 	}
 	// Check that this looks like a suffix not an identifier continuation preceded by whitespace
 	// Suffixes are immediately attached: 123u64
@@ -686,18 +687,39 @@ func (l *Lexer) readTypeSuffix() string {
 	}
 	suffix := bytesToStringView(l.sourceSlice(start, l.pos))
 
-	// Validate known suffixes
+	// Validate known suffixes and store a small code in the token.
 	switch suffix {
-	case "u8", "u16", "u32", "u64", "u",
-		"i8", "i16", "i32", "i64",
-		"usize", "isize",
-		"f32", "f64":
-		return suffix
+	case "u8":
+		return NumericSuffixU8
+	case "u16":
+		return NumericSuffixU16
+	case "u32":
+		return NumericSuffixU32
+	case "u64":
+		return NumericSuffixU64
+	case "u":
+		return NumericSuffixU
+	case "i8":
+		return NumericSuffixI8
+	case "i16":
+		return NumericSuffixI16
+	case "i32":
+		return NumericSuffixI32
+	case "i64":
+		return NumericSuffixI64
+	case "usize":
+		return NumericSuffixUSize
+	case "isize":
+		return NumericSuffixISize
+	case "f32":
+		return NumericSuffixF32
+	case "f64":
+		return NumericSuffixF64
 	default:
 		// Not a valid suffix, rewind
 		l.pos = start
 		l.col -= len(suffix)
-		return ""
+		return NumericSuffixNone
 	}
 }
 func (l *Lexer) readIdent() Token {

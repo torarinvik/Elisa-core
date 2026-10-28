@@ -198,7 +198,6 @@ func rebaseSourceString(value string, old, new []byte) string {
 }
 func rebaseToken(token Token, old, new []byte) Token {
 	token.Text = rebaseSourceString(token.Text, old, new)
-	token.Suffix = rebaseSourceString(token.Suffix, old, new)
 	token.Pos.File = rebaseSourceString(token.Pos.File, old, new)
 	return token
 }
@@ -242,7 +241,7 @@ func (s *SourceTokens) RetainedBytes(limit int) (int, bool) {
 			return false
 		}
 		for _, t := range tokens {
-			if !add(len(t.Text)) || !add(len(t.Suffix)) || !add(len(t.Pos.File)) {
+			if !add(len(t.Text)) || !add(len(t.Pos.File)) {
 				return false
 			}
 		}
@@ -308,7 +307,7 @@ func checkpointStorageBytes(state Lexer, limit int) (int, bool) {
 		return 0, false
 	}
 	for _, token := range state.pendingToks {
-		if !addText(token.Text) || !addText(token.Suffix) || !addText(token.Pos.File) {
+		if !addText(token.Text) || !addText(token.Pos.File) {
 			return 0, false
 		}
 	}

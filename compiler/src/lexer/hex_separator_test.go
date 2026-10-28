@@ -23,7 +23,7 @@ func TestHexSeparatorsStayBetweenDigits(t *testing.T) {
 			if errors := l.Errors(); len(errors) != 0 {
 				t.Fatalf("lexer errors: %v", errors)
 			}
-			if len(tokens) < 2 || tokens[0].Kind != TOKEN_HEX_LIT || tokens[0].Text != tc.text || tokens[0].Suffix != tc.suffix {
+			if len(tokens) < 2 || tokens[0].Kind != TOKEN_HEX_LIT || tokens[0].Text != tc.text || tokens[0].SuffixString() != tc.suffix {
 				t.Fatalf("first token = %#v; want hex %q suffix %q", tokens, tc.text, tc.suffix)
 			}
 			if tc.tail == "" {
