@@ -12,7 +12,24 @@ import (
 // Values retain the exact old shallow-copy policy, including Extent aliases.
 type analyzerExprFactsOverlay struct {
 	base    map[ast.Expr]OptimizationFacts
+	symbols map[*Symbol]OptimizationFacts
 	deleted map[ast.Expr]bool
+}
+
+// Symbol fact writes remain private to the construction analyzer. The base
+// follows the same frozen canonical lifetime as expression facts.
+func (a *Analyzer) lookupSymbolFacts(sym *Symbol) (OptimizationFacts, bool) {
+	if a == nil {
+		return OptimizationFacts{}, false
+	}
+	if facts, ok := a.symbolFacts[sym]; ok {
+		return facts, true
+	}
+	if a.exprFactsOverlay != nil {
+		facts, ok := a.exprFactsOverlay.symbols[sym]
+		return facts, ok
+	}
+	return OptimizationFacts{}, false
 }
 
 func (a *Analyzer) lookupExprFacts(expr ast.Expr) (OptimizationFacts, bool) {
@@ -98,7 +115,7 @@ func cloneAnalyzerExprFactsOverlay(source *analyzerExprFactsOverlay) *analyzerEx
 	if source == nil {
 		return nil
 	}
-	return &analyzerExprFactsOverlay{base: source.base, deleted: maps.Clone(source.deleted)}
+	return &analyzerExprFactsOverlay{base: source.base, symbols: source.symbols, deleted: maps.Clone(source.deleted)}
 }
 
 func (a *Analyzer) rejectExprFactsOverlayOperation(operation string) error {

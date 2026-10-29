@@ -74,6 +74,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 	var invocationOptions semantic.AnalyzeOptions
 	var earlyDone chan struct{}
 	var earlyStarted time.Time
+	lazy := os.Getenv("ELISACORE_STATE_QUALIFY_LAZY") == "1"
 	_, result, valid := analyzeLoadedProgramUsingPreparation(program, &diagnostics, semanticOptionsForCLI(cli), func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		invocationOptions = options
 		if prefetch {
@@ -82,7 +83,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 				<-earlyDone
 				started = earlyStarted
 			} else {
-				state, preparation, err = restoreAnalysisWithScratch(data, program, options, false)
+				state, preparation, err = restoreAnalysisWithScratch(data, program, options, lazy)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -111,7 +112,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 			started := time.Now()
 			var err error
 			if prefetch {
-				if preparation.file == nil || preparation.prepared == nil {
+				if preparation.prepared == nil || (!lazy && preparation.file == nil) {
 					t.Fatal("replay scratch preparation failed")
 				}
 				result, err = state.UpdatePrepared(file, preparation.file, program.source, preparation.prepared)
@@ -139,7 +140,7 @@ func TestDiskStateNativeCompilerProfile(t *testing.T) {
 		earlyStarted, earlyDone = time.Now(), make(chan struct{})
 		go func() {
 			defer close(earlyDone)
-			state, preparation, err = restoreAnalysisWithScratch(data, program, options, false)
+			state, preparation, err = restoreAnalysisWithScratch(data, program, options, lazy)
 		}()
 		return func() { <-earlyDone }
 	})

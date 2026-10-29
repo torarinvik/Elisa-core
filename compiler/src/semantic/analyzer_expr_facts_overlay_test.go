@@ -32,6 +32,33 @@ func allExprFactsOverlayTestFields() OptimizationFacts {
 	}
 }
 
+func TestSpecializationSymbolFactsOverlayIsolation(t *testing.T) {
+	first, zero, missing := &Symbol{Name: "first"}, &Symbol{Name: "zero"}, &Symbol{Name: "missing"}
+	facts := allExprFactsOverlayTestFields()
+	base := map[*Symbol]OptimizationFacts{first: facts, zero: {}}
+	source := &Analyzer{symbolFacts: base}
+	worker := cloneAnalyzerValueForSpecialization(source).Addr().Interface().(*Analyzer)
+	if got, ok := worker.lookupSymbolFacts(first); !ok || got != facts {
+		t.Fatal("inherited symbol facts lost")
+	}
+	if got, ok := worker.lookupSymbolFacts(zero); !ok || got != (OptimizationFacts{}) {
+		t.Fatal("present zero facts lost")
+	}
+	if _, ok := worker.lookupSymbolFacts(missing); ok {
+		t.Fatal("absent fact became present")
+	}
+	worker.symbolFacts[first] = OptimizationFacts{}
+	worker.symbolFacts[missing] = facts
+	if got, ok := worker.lookupSymbolFacts(first); !ok || got != (OptimizationFacts{}) || base[first] != facts {
+		t.Fatal("private write failed to shadow or mutated the base")
+	}
+	clone := cloneAnalyzerValueForBodyWorker(worker).Addr().Interface().(*Analyzer)
+	clone.symbolFacts[missing] = OptimizationFacts{}
+	if got, ok := worker.lookupSymbolFacts(missing); !ok || got != facts {
+		t.Fatal("nested worker mutated its parent's private facts")
+	}
+}
+
 func TestAnalyzerExprFactsOverlayMatchesExactShallowReference(t *testing.T) {
 	first, zero, absent := &ast.IntLit{Value: "1"}, &ast.IntLit{Value: "2"}, &ast.IntLit{Value: "3"}
 	alias := &ast.IntLit{Value: "4"}

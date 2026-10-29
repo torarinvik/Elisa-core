@@ -39,11 +39,11 @@ func (a *Analyzer) lookupIdentOptimizationFacts(ident *ast.Ident) (OptimizationF
 	}
 	if a.currentScope != nil {
 		if sym, ok := a.currentScope.Lookup(ident.Name); ok {
-			if facts, ok := a.symbolFacts[sym]; ok {
+			if facts, ok := a.lookupSymbolFacts(sym); ok {
 				return facts, true
 			}
 			if root := symbolAliasRoot(sym); root != nil && root != sym {
-				if facts, ok := a.symbolFacts[root]; ok {
+				if facts, ok := a.lookupSymbolFacts(root); ok {
 					return facts, true
 				}
 			}
@@ -51,7 +51,7 @@ func (a *Analyzer) lookupIdentOptimizationFacts(ident *ast.Ident) (OptimizationF
 	}
 	if a.globalScope != nil {
 		if sym, ok := a.globalScope.Lookup(ident.Name); ok {
-			if facts, ok := a.symbolFacts[sym]; ok {
+			if facts, ok := a.lookupSymbolFacts(sym); ok {
 				return facts, true
 			}
 		}
@@ -211,7 +211,7 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 	case *ast.Ident:
 		if sym := a.lookupOptimizationSymbol(n); sym != nil {
 			if a != nil && a.symbolFacts != nil {
-				if facts, ok := a.symbolFacts[sym]; ok && facts.base != "" {
+				if facts, ok := a.lookupSymbolFacts(sym); ok && facts.base != "" {
 					return facts.base
 				}
 			}
