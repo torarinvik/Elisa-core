@@ -143,7 +143,9 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if !d.assignable(typ, t) {
+		// A cached interface word also certifies assignability for this type pair.
+		word, cached := d.ifaceWords[[2]reflect.Type{typ, t}]
+		if !cached && !typ.AssignableTo(t) {
 			return fmt.Errorf("state type %s does not implement %s", typ, t)
 		}
 		// Reference objects already own a stable typed value. Setting the
@@ -162,7 +164,7 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 			if ref >= uint64(len(d.objects)) || d.objects[ref].Type() != typ {
 				return fmt.Errorf("invalid state reference")
 			}
-			d.setInterface(v, d.objects[ref])
+			d.setInterface(v, d.objects[ref], word, cached)
 			return nil
 		}
 		if err := d.reserve(1, typ.Size()); err != nil {
@@ -335,20 +337,12 @@ func (d *decoder) stateString() (string, error) {
 	return s, nil
 }
 
-func (d *decoder) assignable(typ, iface reflect.Type) bool {
-	if _, ok := d.ifaceWords[[2]reflect.Type{typ, iface}]; ok {
-		return true
-	}
-	return typ.AssignableTo(iface)
-}
-
 // setInterface stores x, a pointer or map value already checked assignable to v's interface
 // type, into v. The interface's words are (itab or type, data pointer); for pointer-shaped
 // x the data word is x itself.
-func (d *decoder) setInterface(v, x reflect.Value) {
-	key := [2]reflect.Type{x.Type(), v.Type()}
-	word, ok := d.ifaceWords[key]
-	if !ok {
+func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached bool) {
+	if !cached {
+		key := [2]reflect.Type{x.Type(), v.Type()}
 		if !v.CanAddr() || (x.Kind() != reflect.Pointer && x.Kind() != reflect.Map) {
 			v.Set(x)
 			return
