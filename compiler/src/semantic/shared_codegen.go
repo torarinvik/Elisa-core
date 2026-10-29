@@ -62,10 +62,46 @@ func (r *Result) BeginSharedCodegen() {
 	r.shared = sh
 }
 
+type sharedProofOwnerIndex struct {
+	once    sync.Once
+	byOwner map[*ast.FuncDecl][]*ast.IndexExpr
+}
+
+var sharedProofOwnerIndexes sync.Map // keyed by the lifetime of a sharedCodegen session
+
+// indexProofsOwnedBy returns the canonical proof keys for one declaration.
+// The shared session freezes the root analyzer; serial callers scan its current map.
+func (r *Result) indexProofsOwnedBy(fn *ast.FuncDecl) []*ast.IndexExpr {
+	if r.analyzer == nil {
+		return nil
+	}
+	if sh := r.shared; sh != nil {
+		entry, _ := sharedProofOwnerIndexes.LoadOrStore(sh, &sharedProofOwnerIndex{})
+		index := entry.(*sharedProofOwnerIndex)
+		index.once.Do(func() {
+			index.byOwner = make(map[*ast.FuncDecl][]*ast.IndexExpr)
+			for expr, owner := range r.analyzer.indexBoundsProofOwners {
+				if owner, ok := owner.(*ast.FuncDecl); ok {
+					index.byOwner[owner] = append(index.byOwner[owner], expr)
+				}
+			}
+		})
+		return index.byOwner[fn]
+	}
+	var result []*ast.IndexExpr
+	for expr, owner := range r.analyzer.indexBoundsProofOwners {
+		if owner == fn {
+			result = append(result, expr)
+		}
+	}
+	return result
+}
+
 // EndSharedCodegen restores the analyzer's map and drops the memo: a later
 // update may change the bodies.
 func (r *Result) EndSharedCodegen() {
 	if sh := r.shared; sh != nil {
+		sharedProofOwnerIndexes.Delete(sh)
 		for _, restore := range sh.restore {
 			restore()
 		}

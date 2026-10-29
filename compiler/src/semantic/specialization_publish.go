@@ -315,10 +315,8 @@ func (p *specializationPublication) publish() (*Result, error) {
 		}
 	}
 	// Hide every historical original target proof, including detached nodes.
-	for expr, owner := range c.base.analyzer.indexBoundsProofOwners {
-		if owner == p.canonical {
-			result.specializationProofMask[expr] = true
-		}
+	for _, expr := range c.base.indexProofsOwnedBy(p.canonical) {
+		result.specializationProofMask[expr] = true
 	}
 	// ReassignReclaims is computed after body analysis instead of stored in Analyzer.
 	result.ReassignReclaims = make(map[*ast.AssignStmt]bool)
