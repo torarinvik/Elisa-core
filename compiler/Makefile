@@ -35,6 +35,9 @@ ifneq ($(strip $(LLVM_CONFIG)),)
 ifeq ($(origin CGO_CFLAGS),undefined)
 export CGO_CFLAGS := -O2 -g -I$(shell $(LLVM_CONFIG) --includedir)
 endif
+ifeq ($(origin CGO_CXXFLAGS),undefined)
+export CGO_CXXFLAGS := -O2 -g -I$(shell $(LLVM_CONFIG) --includedir)
+endif
 ifeq ($(origin CGO_LDFLAGS),undefined)
 export CGO_LDFLAGS := -L$(shell $(LLVM_CONFIG) --libdir) -Wl,-rpath,$(shell $(LLVM_CONFIG) --libdir)
 endif
