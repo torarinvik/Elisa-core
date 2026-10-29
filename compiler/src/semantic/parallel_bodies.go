@@ -662,7 +662,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			continue
 		}
 		if ownedFunctionAnalyses && name == "returnElementSummaries" {
-			cloned.Addr().Interface().(*Analyzer).returnElementSummaries = cloneSpecializationReturnElementSummaries(a.returnElementSummaries)
+			cloned.Addr().Interface().(*Analyzer).returnElementSummaries = cloneSpecializationFrozenReturnElementSummaries(a.returnElementSummaries)
 			continue
 		}
 		if ownedFunctionAnalyses && name == "storeFlowSCC" {

@@ -102,4 +102,22 @@ func BenchmarkSpecializationReturnElementSummaryClone(b *testing.B) {
 			regionCloneBenchmarkSink = cloneSpecializationReturnElementSummaries(src)
 		}
 	})
+	b.Run("frozen", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			regionCloneBenchmarkSink = cloneSpecializationFrozenReturnElementSummaries(src)
+		}
+	})
+}
+
+func TestSpecializationFrozenReturnSummaryRowsArePrivate(t *testing.T) {
+	first, other := &ast.FuncDecl{Name: "first"}, &ast.FuncDecl{Name: "other"}
+	nested := regionRefState{Fields: map[string]regionRefState{"leaf": {ParamDeps: intBitSetOf(130)}}}
+	base := map[*ast.FuncDecl]regionRefState{first: nested}
+	worker := cloneSpecializationFrozenReturnElementSummaries(base)
+	delete(worker, first)
+	worker[other] = regionRefState{}
+	if _, ok := base[first]; !ok || len(base) != 1 || !base[first].Fields["leaf"].ParamDeps.Contains(130) {
+		t.Fatal("private row replacement changed the published summary")
+	}
 }

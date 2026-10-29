@@ -52,6 +52,17 @@ func cloneSpecializationReturnElementSummaries(src map[*ast.FuncDecl]regionRefSt
 	return cloneSpecializationReturnElementSummariesGuarded(src, specializationRegionSchema())
 }
 
+// Published return summaries are immutable: consumers inspect their nested
+// provenance, and analysis replaces or removes complete rows. A private outer
+// map isolates those row updates. Fall back to the deep clone if the guarded
+// value schema changes.
+func cloneSpecializationFrozenReturnElementSummaries(src map[*ast.FuncDecl]regionRefState) map[*ast.FuncDecl]regionRefState {
+	if !specializationRegionSchema() {
+		return cloneSpecializationReturnElementSummaries(src)
+	}
+	return maps.Clone(src)
+}
+
 func cloneSpecializationReturnElementSummariesGuarded(src map[*ast.FuncDecl]regionRefState, allowed bool) map[*ast.FuncDecl]regionRefState {
 	if !allowed {
 		return deepCloneValue(reflect.ValueOf(src)).Interface().(map[*ast.FuncDecl]regionRefState)
