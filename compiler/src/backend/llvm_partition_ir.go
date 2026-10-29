@@ -567,6 +567,9 @@ func (g *llvmGenerator) partitionNativeNameReserved(name string) bool {
 // in the generated helper namespace. EASM can supply arbitrary native symbols
 // that are not represented in GlobalScope, so it must use whole-module IR.
 func partitionHelperNamespaceConflicts(result *semantic.Result, unitID [32]byte, reads *irInputReadRecorder) bool {
+	if os.Getenv("ELISACORE_PARTITION_DECLINE_DEBUG") == "1" && result != nil {
+		fmt.Fprintf(os.Stderr, "[partition-decline] namespace check: globalScope=%v easmModules=%d\n", result.GlobalScope != nil, len(result.EASMModules))
+	}
 	if result == nil || result.GlobalScope == nil || len(result.EASMModules) != 0 {
 		return true
 	}
@@ -685,6 +688,9 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	// These workers synthesize types that can flow into generic symbol names.
 	// Until their cross-module identity is qualified, use whole-module lowering.
 	if g.partUnsafeHelpers {
+		if os.Getenv("ELISACORE_PARTITION_DECLINE_DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "[partition-decline] part %d: partUnsafeHelpers\n", part)
+		}
 		return nil, nil, errPartitionDeclined
 	}
 	if mode.specializationOnly {
@@ -714,6 +720,9 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 		}
 	}
 	if !finishPartitionModule(g.module, part, parts, unit, g.partLocalHelpers) {
+		if os.Getenv("ELISACORE_PARTITION_DECLINE_DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "[partition-decline] part %d: finishPartitionModule\n", part)
+		}
 		// Preserve the pre-cache verifier for a declined partition. Ordinary
 		// partition modules defer only when they may reach the exact cache lookup.
 		if g.deferPartitionCacheVerification {
