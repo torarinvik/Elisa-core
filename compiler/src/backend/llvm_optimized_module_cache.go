@@ -99,8 +99,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 			// LLVM's reader may normalize intrinsic declarations and alter IR
 			// attributes. Parsing and verification alone do not prove that the
 			// cached module is the one the optimizer actually produced.
-			if optimizedModuleRoundTripExact(g, data) {
-				digest := sha256.Sum256([]byte(g.printModule()))
+			if digest, exact := optimizedModuleRoundTripExact(g, data); exact {
 				s.disk.store(string(bytes), key, encodeOptimizedModuleEnvelope(digest, data))
 			}
 		}
@@ -153,18 +152,18 @@ func decodeOptimizedModuleEnvelope(data []byte) ([]byte, [sha256.Size]byte, bool
 // restores to the same printed module, including metadata and attributes. It
 // is intentionally fail-closed, including for reader failures and changes to
 // textual use-list order. A rejected artifact is simply not cached.
-func optimizedModuleRoundTripExact(g *llvmGenerator, data []byte) bool {
+func optimizedModuleRoundTripExact(g *llvmGenerator, data []byte) ([sha256.Size]byte, bool) {
 	if g == nil || g.module == nil || len(data) == 0 {
-		return false
+		return [sha256.Size]byte{}, false
 	}
 	context := C.LLVMContextCreate()
 	if context == nil {
-		return false
+		return [sha256.Size]byte{}, false
 	}
 	defer C.LLVMContextDispose(context)
 	buffer := C.elisacoreOptimizedCacheBuffer((*C.char)(unsafe.Pointer(unsafe.SliceData(data))), C.size_t(len(data)))
 	if buffer == nil {
-		return false
+		return [sha256.Size]byte{}, false
 	}
 	var module C.LLVMModuleRef
 	status := C.LLVMParseBitcodeInContext2(context, buffer, &module)
@@ -173,13 +172,17 @@ func optimizedModuleRoundTripExact(g *llvmGenerator, data []byte) bool {
 		if module != nil {
 			C.LLVMDisposeModule(module)
 		}
-		return false
+		return [sha256.Size]byte{}, false
 	}
 	defer C.LLVMDisposeModule(module)
 	var nameSize C.size_t
 	name := C.LLVMGetModuleIdentifier(g.module, &nameSize)
 	C.LLVMSetModuleIdentifier(module, name, nameSize)
-	return g.printModule() == (&llvmGenerator{module: module}).printModule()
+	original := g.printModule()
+	if original != (&llvmGenerator{module: module}).printModule() {
+		return [sha256.Size]byte{}, false
+	}
+	return sha256.Sum256([]byte(original)), true
 }
 
 // optimizedModulePreservedBitcodeRoundTripExact is used by cache diagnostics
@@ -198,5 +201,6 @@ func optimizedModulePreservedBitcodeRoundTripExact(g *llvmGenerator) (bool, erro
 		return false, fmt.Errorf("invalid optimized bitcode size: %d", size)
 	}
 	data := unsafe.Slice((*byte)(unsafe.Pointer(C.LLVMGetBufferStart(bitcode))), int(size))
-	return optimizedModuleRoundTripExact(g, data), nil
+	_, exact := optimizedModuleRoundTripExact(g, data)
+	return exact, nil
 }
