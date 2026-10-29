@@ -60,3 +60,33 @@ func TestSolverCheckBudgetIsScopedToOneQuery(t *testing.T) {
 		t.Fatalf("the session budget must be restored after CheckBudget; got %s", got)
 	}
 }
+
+func TestAlternateRelevancyIsScopedToIndependentQuery(t *testing.T) {
+	z3Available(t)
+	for _, independent := range []bool{false, true} {
+		solver, err := Open(Options{Independent: independent, ResourceLimit: 6000000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		alternate := solver.(interface {
+			CheckAlternateRelevancy(string, []string, int64) (Result, map[string]string, bool)
+		})
+		result, model, supported := alternate.CheckAlternateRelevancy("(declare-const x Int)\n(assert (= x 42))\n", []string{"x"}, 20000)
+		if supported != independent {
+			t.Fatalf("independent=%v supported=%v", independent, supported)
+		}
+		if independent && (result != Sat || model["x"] != "42") {
+			t.Fatalf("alternate result=%s model=%v", result, model)
+		}
+		if independent {
+			result, _, supported := alternate.CheckAlternateRelevancy(rlimitHardQuery, nil, 1000)
+			if !supported || result != Unknown {
+				t.Fatalf("resource-limited alternate result=%s supported=%v", result, supported)
+			}
+		}
+		if result, _ := solver.Check("(declare-const x Int)\n(assert (> x 0))\n(assert (< x 0))"); result != Unsat {
+			t.Fatalf("next query: %s", result)
+		}
+		solver.Close()
+	}
+}

@@ -101,6 +101,7 @@ type procSolver struct {
 	// independent mode (Options.Independent): preamble is replayed after each (reset), under
 	// checkLimit, the budget of the check in progress.
 	independent                       bool
+	z3                                bool
 	preamble                          string
 	checkLimit                        int64
 	warm                              bool // CheckAfterHistory: the next check continues the replayed session
@@ -363,6 +364,7 @@ func Open(opts Options) (Solver, error) {
 
 		resourceLimit: opts.ResourceLimit,
 		independent:   opts.Independent,
+		z3:            isZ3(binary),
 		checkLimit:    opts.ResourceLimit,
 	}
 	s.stats.SpawnMillis = time.Since(start)
@@ -483,6 +485,20 @@ func (s *procSolver) CheckBudgetValues(assertions string, vars []string, rlimit 
 		s.broken = true
 	}
 	return res, values
+}
+
+// CheckAlternateRelevancy retries an independent Z3 query with a different search
+// strategy. The next independent check resets the session and its options.
+func (s *procSolver) CheckAlternateRelevancy(assertions string, vars []string, rlimit int64) (Result, map[string]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.independent || !s.z3 || s.broken || rlimit <= 0 {
+		return Unknown, nil, false
+	}
+	s.checkLimit = rlimit
+	result, values, _ := s.checkValuesLocked("(set-option :smt.relevancy 1)\n"+assertions, vars)
+	s.checkLimit = s.resourceLimit
+	return result, values, true
 }
 
 func (s *procSolver) checkValuesLocked(assertions string, vars []string) (Result, map[string]string, time.Duration) {

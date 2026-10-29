@@ -350,6 +350,17 @@ func (a *Analyzer) smtCheckSliced(solver smt.Solver, query, goalAssert string, v
 	if res != smt.Unknown {
 		return res, model
 	}
+	// Retry the complete query using an alternate Z3 search strategy before
+	// replaying history. Definitive results apply to the same assertions.
+	if alternate, ok := solver.(interface {
+		CheckAlternateRelevancy(string, []string, int64) (smt.Result, map[string]string, bool)
+	}); ok {
+		a.smtSetLogLabelForQuery(solver, "escalated-relevancy", goalAssert, stripped)
+		r, m, supported := alternate.CheckAlternateRelevancy(stripped, vars, smtResourceLimit()*smtEscalationFactor)
+		if supported && r != smt.Unknown {
+			return r, m
+		}
+	}
 	// Some proofs need lemmas a session learns from the body's earlier obligations. Replay them
 	// in one session, then ask again. The history is this body's own asking order, so the
 	// verdict is reproducible; an unsat is cached like any other proof.
