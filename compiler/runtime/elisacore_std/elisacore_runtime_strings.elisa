@@ -229,12 +229,12 @@ def string_view_suffix(view: sview, start: i64) -> sview:
 def string_view_index(view: sview, index: i64) -> i64:
     0 return if view.len < 0
     view_len: usize = view.len.usize()
+    index_usize: usize = index.usize()
+    # Preserve conversion checks for targets with a narrower usize.
     return 0 if:
         view_len.i64() != view.len
-        index < 0 or index >= view.len
-
-    index_usize: usize = index.usize()
-    0 return if index_usize.i64() != index
+        index_usize.i64() != index
+        index_usize >= view_len
     return view.data[index_usize].i64()
 
 def string_view_eq(view: sview, other: cstr?) -> int:
