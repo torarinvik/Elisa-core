@@ -72,6 +72,11 @@ func (a *Analyzer) containerRegionOf(t Type) string {
 	if region, ok := a.containerRegionMemo[t]; ok {
 		return region
 	}
+	if a.noStorageOverlay != nil {
+		if region, ok := a.noStorageOverlay.containerRegions[t]; ok {
+			return region
+		}
+	}
 	region := containerRegion(t)
 	if a.containerRegionMemo == nil {
 		a.containerRegionMemo = map[Type]string{}

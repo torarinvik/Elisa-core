@@ -9,12 +9,13 @@ import (
 // Specialization construction reads canonical memo/fact bases and publishes new
 // rows only into its private local maps.
 type analyzerNoStorageOverlay struct {
-	base          map[Type]bool
-	viewOnlyBase  map[Type]bool
-	sharesBase    map[Type]bool
-	paramWrites   map[storeScanParamKey]bool
-	helperCalls   map[*ast.CallExpr]string
-	returnUnknown map[*ast.ReturnStmt]bool
+	base             map[Type]bool
+	viewOnlyBase     map[Type]bool
+	sharesBase       map[Type]bool
+	paramWrites      map[storeScanParamKey]bool
+	helperCalls      map[*ast.CallExpr]string
+	returnUnknown    map[*ast.ReturnStmt]bool
+	containerRegions map[Type]string
 }
 
 func (a *Analyzer) lookupStoreScanViewOnly(t Type) (bool, bool) {
@@ -153,7 +154,7 @@ func cloneAnalyzerNoStorageOverlay(source *analyzerNoStorageOverlay) *analyzerNo
 	if source == nil {
 		return nil
 	}
-	return &analyzerNoStorageOverlay{base: source.base, sharesBase: source.sharesBase, paramWrites: source.paramWrites, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown}
+	return &analyzerNoStorageOverlay{base: source.base, viewOnlyBase: source.viewOnlyBase, sharesBase: source.sharesBase, paramWrites: source.paramWrites, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown, containerRegions: source.containerRegions}
 }
 func (a *Analyzer) rejectNoStorageOverlayOperation(operation string) error {
 	err := fmt.Errorf("specialization no-storage overlay cannot enter %s", operation)

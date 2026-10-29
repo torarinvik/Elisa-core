@@ -527,3 +527,41 @@ func BenchmarkReturnElementUnknownOverlayConstruction(b *testing.B) {
 		})
 	}
 }
+
+func TestContainerRegionMemoOverlayIsolation(t *testing.T) {
+	inherited := &DArrayType{Region: "outer"}
+	empty := &BuiltinType{Name: "i64"}
+	fresh := &DArrayType{Region: "local"}
+	root := &Analyzer{typeShapesFrozen: true, containerRegionMemo: map[Type]string{inherited: "outer", empty: ""}, storeScanViewOnlyCache: map[Type]bool{empty: true}}
+	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+	if len(worker.containerRegionMemo) != 0 {
+		t.Fatal("eagerly copied inherited rows")
+	}
+	if got := worker.containerRegionOf(inherited); got != "outer" {
+		t.Fatalf("inherited region = %q", got)
+	}
+	if got := worker.containerRegionOf(empty); got != "" || len(worker.containerRegionMemo) != 0 {
+		t.Fatal("empty inherited region not cached")
+	}
+	if got := worker.containerRegionOf(fresh); got != "local" {
+		t.Fatalf("new region = %q", got)
+	}
+	worker.containerRegionMemo[inherited] = "private"
+	if root.containerRegionMemo[inherited] != "outer" {
+		t.Fatal("private write changed base")
+	}
+	nested := cloneAnalyzerValueForBodyWorker(worker).Addr().Interface().(*Analyzer)
+	if got := nested.containerRegionOf(inherited); got != "private" {
+		t.Fatalf("nested local = %q", got)
+	}
+	if got, ok := nested.lookupStoreScanViewOnly(empty); !ok || !got {
+		t.Fatal("nested view-only base lost")
+	}
+	if got := nested.containerRegionOf(fresh); got != "local" {
+		t.Fatalf("nested new = %q", got)
+	}
+	nested.typeShapesFrozen = false
+	if got := nested.containerRegionOf(inherited); got != "outer" {
+		t.Fatalf("unfrozen lookup used memo: %q", got)
+	}
+}

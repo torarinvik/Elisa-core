@@ -459,7 +459,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
-		if ownedFunctionAnalyses && name == "storeScanNoStorageCache" {
+		if ownedFunctionAnalyses && (name == "storeScanNoStorageCache" || name == "containerRegionMemo") {
 			if field.IsNil() {
 				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			} else {
@@ -705,12 +705,13 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			worker.storeScanParamFactsOverlay = &analyzerStoreScanParamFactsOverlay{base: a.storeScanParamFactsCache}
 		}
 		worker.noStorageOverlay = &analyzerNoStorageOverlay{
-			base:          a.storeScanNoStorageCache,
-			viewOnlyBase:  a.storeScanViewOnlyCache,
-			sharesBase:    a.storeScanSharesCache,
-			paramWrites:   a.storeScanParamWriteCache,
-			helperCalls:   a.compilerBuiltinHelperCalls,
-			returnUnknown: a.returnElementStmtUnknown,
+			base:             a.storeScanNoStorageCache,
+			viewOnlyBase:     a.storeScanViewOnlyCache,
+			sharesBase:       a.storeScanSharesCache,
+			paramWrites:      a.storeScanParamWriteCache,
+			helperCalls:      a.compilerBuiltinHelperCalls,
+			returnUnknown:    a.returnElementStmtUnknown,
+			containerRegions: a.containerRegionMemo,
 		}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates, sources: a.iterBindingSources}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
