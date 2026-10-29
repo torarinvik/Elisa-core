@@ -399,3 +399,31 @@ func TestAnalysisDiskBuildCheckpointRevalidatesAtHandoff(t *testing.T) {
 		t.Fatalf("handoff did not reject the old checkpoint and load the current source checkpoint: %s", debug.String())
 	}
 }
+
+func TestAnalysisDiskDistantCheckpointDoesNotShadowCompletedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_ANALYSIS_BOOTSTRAP", "1")
+	previous := analysisDiskBuildPreferredRemaining
+	analysisDiskBuildPreferredRemaining = 0
+	defer func() { analysisDiskBuildPreferredRemaining = previous }()
+	filename := filepath.Join(dir, "program.elisa")
+	baseline := []byte(analysisDiskBootstrapOrderSource)
+	current := []byte(strings.Replace(analysisDiskBootstrapOrderSource, "return 1", "return 9", 1))
+	options := semantic.AnalyzeOptions{}
+	complete := publishAnalysisDiskBuildTestBaseline(t, filename, baseline, options)
+	program := analysisDiskBuildTestProgram(filename, current)
+	buildArtifact := analysisBuildArtifact(complete, current)
+	if err := buildArtifact.publish(analysisDiskBuildTestCheckpoint(t, filename, current, options)); err != nil {
+		t.Fatal(err)
+	}
+
+	pending := startAnalysisDiskRestoration(program, options)
+	pending.join()
+	if pending.build != nil {
+		t.Fatal("a distant exact checkpoint shadowed the completed baseline")
+	}
+	if !pending.loaded || pending.err != nil {
+		t.Fatalf("completed baseline was not restored after the distant checkpoint was rejected: loaded=%v err=%v", pending.loaded, pending.err)
+	}
+}

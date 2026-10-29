@@ -51,6 +51,9 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 			if _, statErr := os.Stat(buildArtifact.path); statErr == nil && !analysisDiskBaselineSourceMatches(artifact, program.source) {
 				pending.buildTried = true
 				pending.build, pending.buildErr = restoreAnalysisDiskBuildCheckpoint(artifact, program, options)
+				if analysisDiskCheckpointShadows(artifact, pending.build) {
+					pending.build = nil
+				}
 				if pending.build != nil {
 					return
 				}
@@ -329,4 +332,23 @@ func (a analysisDiskArtifact) publishBaselineSource(source []byte) error {
 		return err
 	}
 	return os.Rename(f.Name(), a.baselineSourcePath())
+}
+
+// analysisDiskBuildPreferredRemaining is the largest number of unfinished
+// declarations for which an exact checkpoint is preferred over a completed
+// baseline. A distant checkpoint costs several bounded runs to finish, while
+// restoring the baseline and updating it to the current source costs seconds.
+var analysisDiskBuildPreferredRemaining = 256
+
+// analysisDiskCheckpointShadows reports whether an exact checkpoint is distant
+// from completion while the completed baseline it would shadow exists.
+func analysisDiskCheckpointShadows(artifact analysisDiskArtifact, checkpoint *analysisDiskBuildCheckpoint) bool {
+	if checkpoint == nil || checkpoint.build == nil {
+		return false
+	}
+	if _, err := os.Stat(artifact.path); err != nil {
+		return false
+	}
+	done, total := checkpoint.build.Progress()
+	return total-done > analysisDiskBuildPreferredRemaining
 }
