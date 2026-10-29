@@ -331,6 +331,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 						// on repeated edits/reverts in fresh processes.
 						replayed = true
 						debugAnalysisDisk(stderr, "update changed=%d in=%v fast=%v%s", state.LastStats.Changed, time.Since(updateStart).Round(time.Millisecond), state.LastStats.FastPrepared, retainedFastNote(state.LastStats.FastDeclined))
+						debugAnalysisDisk(stderr, "update phases pairing=%v scratch=%v compare=%v bodies=%v post=%v", state.LastStats.Pairing.Round(time.Millisecond), state.LastStats.Scratch.Round(time.Millisecond), state.LastStats.Compare.Round(time.Millisecond), state.LastStats.Bodies.Round(time.Millisecond), state.LastStats.Post.Round(time.Millisecond))
 					}
 				} else {
 					err = fmt.Errorf("scratch parse failed")
