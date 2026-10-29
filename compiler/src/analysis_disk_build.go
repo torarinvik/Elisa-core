@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +16,54 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 )
+
+// diagnoseAnalysisIdentityDrift reports which cache-identity input moved between
+// the start of a bootstrap step and its checkpoint publication. It only logs;
+// the caller still refuses to publish under a changed identity.
+func diagnoseAnalysisIdentityDrift(stderr io.Writer, program *loadedProgram, options semantic.AnalyzeOptions, startEnv, startFiles []string, startOptions []byte) {
+	currentEnv := compilerCacheEnvKey()
+	before, after := map[string]bool{}, map[string]bool{}
+	for _, entry := range startEnv {
+		before[entry] = true
+	}
+	for _, entry := range currentEnv {
+		after[entry] = true
+	}
+	for _, entry := range currentEnv {
+		if !before[entry] {
+			debugAnalysisDisk(stderr, "identity drift: env added %s", entry)
+		}
+	}
+	for _, entry := range startEnv {
+		if !after[entry] {
+			debugAnalysisDisk(stderr, "identity drift: env removed %s", entry)
+		}
+	}
+	previous := map[string]bool{}
+	for _, origin := range startFiles {
+		previous[origin] = true
+	}
+	for _, origin := range program.sourceFiles {
+		if !previous[origin] {
+			debugAnalysisDisk(stderr, "identity drift: source authority added %s", origin)
+		}
+	}
+	for _, origin := range startFiles {
+		found := false
+		for _, current := range program.sourceFiles {
+			if current == origin {
+				found = true
+				break
+			}
+		}
+		if !found {
+			debugAnalysisDisk(stderr, "identity drift: source authority removed %s", origin)
+		}
+	}
+	if currentOptions, err := json.Marshal(options); err != nil || !bytes.Equal(currentOptions, startOptions) {
+		debugAnalysisDisk(stderr, "identity drift: analyze options changed")
+	}
+}
 
 func analysisBuildArtifact(complete analysisDiskArtifact, source []byte) analysisDiskArtifact {
 	sum := sha256.New()
@@ -92,6 +142,12 @@ func advanceAnalysisDiskBuild(program *loadedProgram, file *ast.File, options se
 
 func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.File, options semantic.AnalyzeOptions, complete analysisDiskArtifact, stderr io.Writer, checkpoint *analysisDiskBuildCheckpoint, checkpointTried bool) (*semantic.Result, *semantic.RetainedAnalysis) {
 	artifact := analysisBuildArtifact(complete, program.source)
+	// Snapshot the cache-identity inputs. The publish check recomputes the
+	// identity after analysis; if it drifts, these snapshots say which input
+	// moved instead of failing silently.
+	startEnv := compilerCacheEnvKey()
+	startFiles := append([]string(nil), program.sourceFiles...)
+	startOptions, _ := json.Marshal(options)
 	if checkpoint != nil {
 		if err := validateAnalysisDiskBuildCheckpoint(complete, program, options, checkpoint); err != nil {
 			debugAnalysisDisk(stderr, "declined checkpoint: %v", err)
@@ -168,6 +224,7 @@ func advanceAnalysisDiskBuildWithCheckpoint(program *loadedProgram, file *ast.Fi
 			current, valid := analysisDiskArtifactFor(program, options)
 			if !valid || current.key != complete.key {
 				err = fmt.Errorf("analysis inputs changed during build")
+				diagnoseAnalysisIdentityDrift(stderr, program, options, startEnv, startFiles, startOptions)
 			} else {
 				err = artifact.publish(data)
 			}
