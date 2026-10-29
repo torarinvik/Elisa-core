@@ -62,6 +62,9 @@ func TestProofBindingGeneratorHandlesNamedStringsAndScalarSlices(t *testing.T) {
 	if !bytes.Contains(out.Bytes(), []byte("string(p.Name)")) {
 		t.Fatal("named string must be converted for the event callback")
 	}
+	if !bytes.Contains(out.Bytes(), []byte("retainedLocalGensymName(string(p.Name))")) {
+		t.Fatal("proof-binding fields must filter irrelevant strings before the visitor")
+	}
 	out.Reset()
 	if err := emitProofBindingValue(&out, "p.Flags", types.NewSlice(types.Typ[types.Bool]), 0); err != nil {
 		t.Fatal(err)
@@ -75,6 +78,9 @@ func TestProofBindingGeneratorHandlesNamedStringsAndScalarSlices(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("proofBindingVisitString")) {
 		t.Fatal("string slices must retain source-name blocker events")
+	}
+	if !bytes.Contains(out.Bytes(), []byte("retainedLocalGensymName")) {
+		t.Fatal("proof-binding string slices must filter irrelevant values")
 	}
 }
 

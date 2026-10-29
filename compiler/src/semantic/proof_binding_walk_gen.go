@@ -876,7 +876,9 @@ func proofBindingWalkPtr_ast_AddrOfExpr(p *ast.AddrOfExpr, visit func(any, refle
 
 func proofBindingWalkVal_ast_AddrOfExpr(p *ast.AddrOfExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -901,12 +903,18 @@ func proofBindingWalkPtr_ast_AdoptStmt(p *ast.AdoptStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_AdoptStmt(p *ast.AdoptStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.AdoptStmt](), nil, proofBindingVisitStringField, "Child", string(p.Child), true)
-	visit(p, reflect.TypeFor[ast.AdoptStmt](), nil, proofBindingVisitStringField, "Parent", string(p.Parent), true)
+	if retainedLocalGensymName(string(p.Child)) {
+		visit(p, reflect.TypeFor[ast.AdoptStmt](), nil, proofBindingVisitStringField, "Child", string(p.Child), true)
+	}
+	if retainedLocalGensymName(string(p.Parent)) {
+		visit(p, reflect.TypeFor[ast.AdoptStmt](), nil, proofBindingVisitStringField, "Parent", string(p.Parent), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_AggregateStateTypeExpr(p *ast.AggregateStateTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -923,7 +931,9 @@ func proofBindingWalkPtr_ast_AggregateStateTypeExpr(p *ast.AggregateStateTypeExp
 
 func proofBindingWalkVal_ast_AggregateStateTypeExpr(p *ast.AggregateStateTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -950,11 +960,15 @@ func proofBindingWalkPtr_ast_AliasDecl(p *ast.AliasDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_AliasDecl(p *ast.AliasDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.AliasDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.AliasDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Refs {
 		proofBindingWalkVal_ast_PermissionRef(&p.Refs[i0], visit, seen, owner)
 	}
@@ -974,7 +988,9 @@ func proofBindingWalkPtr_ast_AlignofExpr(p *ast.AlignofExpr, visit func(any, ref
 
 func proofBindingWalkVal_ast_AlignofExpr(p *ast.AlignofExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -999,7 +1015,9 @@ func proofBindingWalkPtr_ast_AllocExpr(p *ast.AllocExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_AllocExpr(p *ast.AllocExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1029,13 +1047,19 @@ func proofBindingWalkPtr_ast_Annotation(p *ast.Annotation, visit func(any, refle
 
 func proofBindingWalkVal_ast_Annotation(p *ast.Annotation, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.Annotation](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.Annotation](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Args {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Args[i0]), false)
+		if retainedLocalGensymName(string(p.Args[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Args[i0]), false)
+		}
 	}
 }
 
@@ -1053,7 +1077,9 @@ func proofBindingWalkPtr_ast_ArrayType(p *ast.ArrayType, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ArrayType(p *ast.ArrayType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1083,7 +1109,9 @@ func proofBindingWalkPtr_ast_AsRefAssignStmt(p *ast.AsRefAssignStmt, visit func(
 
 func proofBindingWalkVal_ast_AsRefAssignStmt(p *ast.AsRefAssignStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1092,7 +1120,9 @@ func proofBindingWalkVal_ast_AsRefAssignStmt(p *ast.AsRefAssignStmt, visit func(
 			proofBindingWalkReflect(reflect.ValueOf(p.Target), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.AsRefAssignStmt](), nil, proofBindingVisitStringField, "AsKind", string(p.AsKind), true)
+	if retainedLocalGensymName(string(p.AsKind)) {
+		visit(p, reflect.TypeFor[ast.AsRefAssignStmt](), nil, proofBindingVisitStringField, "AsKind", string(p.AsKind), true)
+	}
 	if p.Value != nil {
 		if !proofBindingWalkAny(p.Value, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
@@ -1114,7 +1144,9 @@ func proofBindingWalkPtr_ast_AssertByStmt(p *ast.AssertByStmt, visit func(any, r
 
 func proofBindingWalkVal_ast_AssertByStmt(p *ast.AssertByStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1130,7 +1162,9 @@ func proofBindingWalkVal_ast_AssertByStmt(p *ast.AssertByStmt, visit func(any, r
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.AssertByStmt](), nil, proofBindingVisitStringField, "ScopedTheory", string(p.ScopedTheory), true)
+	if retainedLocalGensymName(string(p.ScopedTheory)) {
+		visit(p, reflect.TypeFor[ast.AssertByStmt](), nil, proofBindingVisitStringField, "ScopedTheory", string(p.ScopedTheory), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_AssertHoleStmt(p *ast.AssertHoleStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -1147,7 +1181,9 @@ func proofBindingWalkPtr_ast_AssertHoleStmt(p *ast.AssertHoleStmt, visit func(an
 
 func proofBindingWalkVal_ast_AssertHoleStmt(p *ast.AssertHoleStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1167,7 +1203,9 @@ func proofBindingWalkPtr_ast_AssignStmt(p *ast.AssignStmt, visit func(any, refle
 
 func proofBindingWalkVal_ast_AssignStmt(p *ast.AssignStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1198,11 +1236,15 @@ func proofBindingWalkPtr_ast_AssociatedTypeDecl(p *ast.AssociatedTypeDecl, visit
 
 func proofBindingWalkVal_ast_AssociatedTypeDecl(p *ast.AssociatedTypeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.AssociatedTypeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.AssociatedTypeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.DefaultType != nil {
 		if !proofBindingWalkAny(p.DefaultType, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.DefaultType), visit, seen, owner)
@@ -1225,7 +1267,9 @@ func proofBindingWalkPtr_ast_AugAssignStmt(p *ast.AugAssignStmt, visit func(any,
 func proofBindingWalkVal_ast_AugAssignStmt(p *ast.AugAssignStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	proofBindingWalkPtr_ast_CallExpr(p.CollectionAppend, visit, seen, owner)
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1255,7 +1299,9 @@ func proofBindingWalkPtr_ast_BinaryExpr(p *ast.BinaryExpr, visit func(any, refle
 
 func proofBindingWalkVal_ast_BinaryExpr(p *ast.BinaryExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1286,7 +1332,9 @@ func proofBindingWalkPtr_ast_BitGroupDecl(p *ast.BitGroupDecl, visit func(any, r
 
 func proofBindingWalkVal_ast_BitGroupDecl(p *ast.BitGroupDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1309,11 +1357,15 @@ func proofBindingWalkPtr_ast_BitGroupMemberDecl(p *ast.BitGroupMemberDecl, visit
 
 func proofBindingWalkVal_ast_BitGroupMemberDecl(p *ast.BitGroupMemberDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.BitGroupMemberDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.BitGroupMemberDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -1335,7 +1387,9 @@ func proofBindingWalkPtr_ast_BoolLit(p *ast.BoolLit, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_BoolLit(p *ast.BoolLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1355,7 +1409,9 @@ func proofBindingWalkPtr_ast_BreakStmt(p *ast.BreakStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_BreakStmt(p *ast.BreakStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1375,11 +1431,15 @@ func proofBindingWalkPtr_ast_BuiltinTypeExpr(p *ast.BuiltinTypeExpr, visit func(
 
 func proofBindingWalkVal_ast_BuiltinTypeExpr(p *ast.BuiltinTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.BuiltinTypeExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.BuiltinTypeExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeArgs {
 		if p.TypeArgs[i0] != nil {
 			if !proofBindingWalkAny(p.TypeArgs[i0], visit, seen, owner) {
@@ -1394,7 +1454,9 @@ func proofBindingWalkVal_ast_BuiltinTypeExpr(p *ast.BuiltinTypeExpr, visit func(
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.BuiltinTypeExpr](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	if retainedLocalGensymName(string(p.Region)) {
+		visit(p, reflect.TypeFor[ast.BuiltinTypeExpr](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_CallArgItem(p *ast.CallArgItem, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -1411,7 +1473,9 @@ func proofBindingWalkPtr_ast_CallArgItem(p *ast.CallArgItem, visit func(any, ref
 
 func proofBindingWalkVal_ast_CallArgItem(p *ast.CallArgItem, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1431,7 +1495,9 @@ func proofBindingWalkPtr_ast_CallExpr(p *ast.CallExpr, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_CallExpr(p *ast.CallExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1446,7 +1512,9 @@ func proofBindingWalkVal_ast_CallExpr(p *ast.CallExpr, visit func(any, reflect.T
 		}
 	}
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.ArgForwardPos.File, false)
+		if retainedLocalGensymName(p.ArgForwardPos.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.ArgForwardPos.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.ArgForwardPos).Elem(), visit, seen, owner)
 	}
@@ -1458,7 +1526,9 @@ func proofBindingWalkVal_ast_CallExpr(p *ast.CallExpr, visit func(any, reflect.T
 		}
 	}
 	for i0 := range p.ArgNames {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.ArgNames[i0]), false)
+		if retainedLocalGensymName(string(p.ArgNames[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.ArgNames[i0]), false)
+		}
 	}
 	for i0 := range p.ArgItemOrder {
 		proofBindingWalkVal_ast_CallArgItem(&p.ArgItemOrder[i0], visit, seen, owner)
@@ -1496,7 +1566,9 @@ func proofBindingWalkPtr_ast_CanExpr(p *ast.CanExpr, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_CanExpr(p *ast.CanExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1524,7 +1596,9 @@ func proofBindingWalkPtr_ast_CanStmt(p *ast.CanStmt, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_CanStmt(p *ast.CanStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1538,8 +1612,12 @@ func proofBindingWalkVal_ast_CanStmt(p *ast.CanStmt, visit func(any, reflect.Typ
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.CanStmt](), nil, proofBindingVisitStringField, "As", string(p.As), true)
-	visit(p, reflect.TypeFor[ast.CanStmt](), nil, proofBindingVisitStringField, "HandlerName", string(p.HandlerName), true)
+	if retainedLocalGensymName(string(p.As)) {
+		visit(p, reflect.TypeFor[ast.CanStmt](), nil, proofBindingVisitStringField, "As", string(p.As), true)
+	}
+	if retainedLocalGensymName(string(p.HandlerName)) {
+		visit(p, reflect.TypeFor[ast.CanStmt](), nil, proofBindingVisitStringField, "HandlerName", string(p.HandlerName), true)
+	}
 	for i0 := range p.HandlerArgs {
 		if p.HandlerArgs[i0] != nil {
 			if !proofBindingWalkAny(p.HandlerArgs[i0], visit, seen, owner) {
@@ -1563,7 +1641,9 @@ func proofBindingWalkPtr_ast_CastExpr(p *ast.CastExpr, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_CastExpr(p *ast.CastExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1593,13 +1673,19 @@ func proofBindingWalkPtr_ast_CatchArm(p *ast.CatchArm, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_CatchArm(p *ast.CatchArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.CatchArm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.CatchArm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Payload {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Payload[i0]), false)
+		if retainedLocalGensymName(string(p.Payload[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Payload[i0]), false)
+		}
 	}
 	for i0 := range p.Body {
 		if p.Body[i0] != nil {
@@ -1624,7 +1710,9 @@ func proofBindingWalkPtr_ast_CatchExpr(p *ast.CatchExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_CatchExpr(p *ast.CatchExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1653,11 +1741,15 @@ func proofBindingWalkPtr_ast_CharLit(p *ast.CharLit, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_CharLit(p *ast.CharLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.CharLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	if retainedLocalGensymName(string(p.Value)) {
+		visit(p, reflect.TypeFor[ast.CharLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_CharsetDecl(p *ast.CharsetDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -1676,11 +1768,15 @@ func proofBindingWalkPtr_ast_CharsetDecl(p *ast.CharsetDecl, visit func(any, ref
 
 func proofBindingWalkVal_ast_CharsetDecl(p *ast.CharsetDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.CharsetDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.CharsetDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Terms {
 		proofBindingWalkVal_ast_LexerCharClassTerm(&p.Terms[i0], visit, seen, owner)
 	}
@@ -1700,11 +1796,15 @@ func proofBindingWalkPtr_ast_CheckpointStmt(p *ast.CheckpointStmt, visit func(an
 
 func proofBindingWalkVal_ast_CheckpointStmt(p *ast.CheckpointStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.CheckpointStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.CheckpointStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Target != nil {
 		if !proofBindingWalkAny(p.Target, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Target), visit, seen, owner)
@@ -1735,11 +1835,15 @@ func proofBindingWalkPtr_ast_ConstDecl(p *ast.ConstDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ConstDecl(p *ast.ConstDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ConstDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ConstDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -1768,11 +1872,15 @@ func proofBindingWalkPtr_ast_ConstEnumDecl(p *ast.ConstEnumDecl, visit func(any,
 
 func proofBindingWalkVal_ast_ConstEnumDecl(p *ast.ConstEnumDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ConstEnumDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ConstEnumDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Storage != nil {
 		if !proofBindingWalkAny(p.Storage, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Storage), visit, seen, owner)
@@ -1797,11 +1905,15 @@ func proofBindingWalkPtr_ast_ConstEnumMemberDecl(p *ast.ConstEnumMemberDecl, vis
 
 func proofBindingWalkVal_ast_ConstEnumMemberDecl(p *ast.ConstEnumMemberDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ConstEnumMemberDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ConstEnumMemberDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Value != nil {
 		if !proofBindingWalkAny(p.Value, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
@@ -1823,7 +1935,9 @@ func proofBindingWalkPtr_ast_ContinueStmt(p *ast.ContinueStmt, visit func(any, r
 
 func proofBindingWalkVal_ast_ContinueStmt(p *ast.ContinueStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1843,11 +1957,15 @@ func proofBindingWalkPtr_ast_ContractInclude(p *ast.ContractInclude, visit func(
 
 func proofBindingWalkVal_ast_ContractInclude(p *ast.ContractInclude, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ContractInclude](), nil, proofBindingVisitStringField, "Law", string(p.Law), true)
+	if retainedLocalGensymName(string(p.Law)) {
+		visit(p, reflect.TypeFor[ast.ContractInclude](), nil, proofBindingVisitStringField, "Law", string(p.Law), true)
+	}
 	for i0 := range p.Args {
 		if p.Args[i0] != nil {
 			if !proofBindingWalkAny(p.Args[i0], visit, seen, owner) {
@@ -1871,7 +1989,9 @@ func proofBindingWalkPtr_ast_ContractStmt(p *ast.ContractStmt, visit func(any, r
 
 func proofBindingWalkVal_ast_ContractStmt(p *ast.ContractStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1887,8 +2007,12 @@ func proofBindingWalkVal_ast_ContractStmt(p *ast.ContractStmt, visit func(any, r
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.ContractStmt](), nil, proofBindingVisitStringField, "WildReason", string(p.WildReason), true)
-	visit(p, reflect.TypeFor[ast.ContractStmt](), nil, proofBindingVisitStringField, "UsesName", string(p.UsesName), true)
+	if retainedLocalGensymName(string(p.WildReason)) {
+		visit(p, reflect.TypeFor[ast.ContractStmt](), nil, proofBindingVisitStringField, "WildReason", string(p.WildReason), true)
+	}
+	if retainedLocalGensymName(string(p.UsesName)) {
+		visit(p, reflect.TypeFor[ast.ContractStmt](), nil, proofBindingVisitStringField, "UsesName", string(p.UsesName), true)
+	}
 	for i0 := range p.UsesTypeArgs {
 		if p.UsesTypeArgs[i0] != nil {
 			if !proofBindingWalkAny(p.UsesTypeArgs[i0], visit, seen, owner) {
@@ -1919,7 +2043,9 @@ func proofBindingWalkPtr_ast_DeferStmt(p *ast.DeferStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_DeferStmt(p *ast.DeferStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -1946,11 +2072,15 @@ func proofBindingWalkPtr_ast_DerivedStateDecl(p *ast.DerivedStateDecl, visit fun
 
 func proofBindingWalkVal_ast_DerivedStateDecl(p *ast.DerivedStateDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.DerivedStateDecl](), nil, proofBindingVisitStringField, "StateName", string(p.StateName), true)
+	if retainedLocalGensymName(string(p.StateName)) {
+		visit(p, reflect.TypeFor[ast.DerivedStateDecl](), nil, proofBindingVisitStringField, "StateName", string(p.StateName), true)
+	}
 	if p.Condition != nil {
 		if !proofBindingWalkAny(p.Condition, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Condition), visit, seen, owner)
@@ -1972,11 +2102,15 @@ func proofBindingWalkPtr_ast_DestroyStmt(p *ast.DestroyStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_DestroyStmt(p *ast.DestroyStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.DestroyStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.DestroyStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_DiscardStmt(p *ast.DiscardStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -1993,7 +2127,9 @@ func proofBindingWalkPtr_ast_DiscardStmt(p *ast.DiscardStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_DiscardStmt(p *ast.DiscardStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2018,7 +2154,9 @@ func proofBindingWalkPtr_ast_ElifClause(p *ast.ElifClause, visit func(any, refle
 
 func proofBindingWalkVal_ast_ElifClause(p *ast.ElifClause, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2050,7 +2188,9 @@ func proofBindingWalkPtr_ast_EmitExpr(p *ast.EmitExpr, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_EmitExpr(p *ast.EmitExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2075,16 +2215,22 @@ func proofBindingWalkPtr_ast_EnsuresClause(p *ast.EnsuresClause, visit func(any,
 
 func proofBindingWalkVal_ast_EnsuresClause(p *ast.EnsuresClause, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	proofBindingWalkVal_ast_EnsuresCondition(&p.Condition, visit, seen, owner)
 	proofBindingWalkVal_ast_EnsuresPath(&p.Target, visit, seen, owner)
 	for i0 := range p.StateCases {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.StateCases[i0]), false)
+		if retainedLocalGensymName(string(p.StateCases[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.StateCases[i0]), false)
+		}
 	}
-	visit(p, reflect.TypeFor[ast.EnsuresClause](), nil, proofBindingVisitStringField, "RefinementLaw", string(p.RefinementLaw), true)
+	if retainedLocalGensymName(string(p.RefinementLaw)) {
+		visit(p, reflect.TypeFor[ast.EnsuresClause](), nil, proofBindingVisitStringField, "RefinementLaw", string(p.RefinementLaw), true)
+	}
 	for i0 := range p.RefinementArgs {
 		if p.RefinementArgs[i0] != nil {
 			if !proofBindingWalkAny(p.RefinementArgs[i0], visit, seen, owner) {
@@ -2108,7 +2254,9 @@ func proofBindingWalkPtr_ast_EnsuresCondition(p *ast.EnsuresCondition, visit fun
 
 func proofBindingWalkVal_ast_EnsuresCondition(p *ast.EnsuresCondition, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2128,13 +2276,19 @@ func proofBindingWalkPtr_ast_EnsuresPath(p *ast.EnsuresPath, visit func(any, ref
 
 func proofBindingWalkVal_ast_EnsuresPath(p *ast.EnsuresPath, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.EnsuresPath](), nil, proofBindingVisitStringField, "Root", string(p.Root), true)
+	if retainedLocalGensymName(string(p.Root)) {
+		visit(p, reflect.TypeFor[ast.EnsuresPath](), nil, proofBindingVisitStringField, "Root", string(p.Root), true)
+	}
 	for i0 := range p.Fields {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Fields[i0]), false)
+		if retainedLocalGensymName(string(p.Fields[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Fields[i0]), false)
+		}
 	}
 }
 
@@ -2152,12 +2306,18 @@ func proofBindingWalkPtr_ast_EnumColumnExpr(p *ast.EnumColumnExpr, visit func(an
 
 func proofBindingWalkVal_ast_EnumColumnExpr(p *ast.EnumColumnExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.EnumColumnExpr](), nil, proofBindingVisitStringField, "Enum", string(p.Enum), true)
-	visit(p, reflect.TypeFor[ast.EnumColumnExpr](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	if retainedLocalGensymName(string(p.Enum)) {
+		visit(p, reflect.TypeFor[ast.EnumColumnExpr](), nil, proofBindingVisitStringField, "Enum", string(p.Enum), true)
+	}
+	if retainedLocalGensymName(string(p.Field)) {
+		visit(p, reflect.TypeFor[ast.EnumColumnExpr](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_EnumDecl(p *ast.EnumDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2176,23 +2336,33 @@ func proofBindingWalkPtr_ast_EnumDecl(p *ast.EnumDecl, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_EnumDecl(p *ast.EnumDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Common {
 		proofBindingWalkVal_ast_FieldDecl(&p.Common[i0], visit, seen, owner)
 	}
 	for i0 := range p.Variants {
 		proofBindingWalkVal_ast_EnumVariantDecl(&p.Variants[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "IndexWidth", string(p.IndexWidth), true)
-	visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "Parent", string(p.Parent), true)
-	visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "StoreRegion", string(p.StoreRegion), true)
+	if retainedLocalGensymName(string(p.IndexWidth)) {
+		visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "IndexWidth", string(p.IndexWidth), true)
+	}
+	if retainedLocalGensymName(string(p.Parent)) {
+		visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "Parent", string(p.Parent), true)
+	}
+	if retainedLocalGensymName(string(p.StoreRegion)) {
+		visit(p, reflect.TypeFor[ast.EnumDecl](), nil, proofBindingVisitStringField, "StoreRegion", string(p.StoreRegion), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_EnumPayloadDecl(p *ast.EnumPayloadDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2209,12 +2379,18 @@ func proofBindingWalkPtr_ast_EnumPayloadDecl(p *ast.EnumPayloadDecl, visit func(
 
 func proofBindingWalkVal_ast_EnumPayloadDecl(p *ast.EnumPayloadDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.EnumPayloadDecl](), nil, proofBindingVisitStringField, "Relation", string(p.Relation), true)
-	visit(p, reflect.TypeFor[ast.EnumPayloadDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Relation)) {
+		visit(p, reflect.TypeFor[ast.EnumPayloadDecl](), nil, proofBindingVisitStringField, "Relation", string(p.Relation), true)
+	}
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.EnumPayloadDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -2236,11 +2412,15 @@ func proofBindingWalkPtr_ast_EnumVariantDecl(p *ast.EnumVariantDecl, visit func(
 
 func proofBindingWalkVal_ast_EnumVariantDecl(p *ast.EnumVariantDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.EnumVariantDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.EnumVariantDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Payload {
 		proofBindingWalkVal_ast_EnumPayloadDecl(&p.Payload[i0], visit, seen, owner)
 	}
@@ -2262,11 +2442,15 @@ func proofBindingWalkPtr_ast_ErrorDecl(p *ast.ErrorDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ErrorDecl(p *ast.ErrorDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ErrorDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ErrorDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Tags {
 		proofBindingWalkVal_ast_ErrorVariantDecl(&p.Tags[i0], visit, seen, owner)
 	}
@@ -2286,7 +2470,9 @@ func proofBindingWalkPtr_ast_ErrorSetExpr(p *ast.ErrorSetExpr, visit func(any, r
 
 func proofBindingWalkVal_ast_ErrorSetExpr(p *ast.ErrorSetExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2309,12 +2495,18 @@ func proofBindingWalkPtr_ast_ErrorTagExpr(p *ast.ErrorTagExpr, visit func(any, r
 
 func proofBindingWalkVal_ast_ErrorTagExpr(p *ast.ErrorTagExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ErrorTagExpr](), nil, proofBindingVisitStringField, "SetName", string(p.SetName), true)
-	visit(p, reflect.TypeFor[ast.ErrorTagExpr](), nil, proofBindingVisitStringField, "Tag", string(p.Tag), true)
+	if retainedLocalGensymName(string(p.SetName)) {
+		visit(p, reflect.TypeFor[ast.ErrorTagExpr](), nil, proofBindingVisitStringField, "SetName", string(p.SetName), true)
+	}
+	if retainedLocalGensymName(string(p.Tag)) {
+		visit(p, reflect.TypeFor[ast.ErrorTagExpr](), nil, proofBindingVisitStringField, "Tag", string(p.Tag), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ErrorUnionTypeExpr(p *ast.ErrorUnionTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2331,7 +2523,9 @@ func proofBindingWalkPtr_ast_ErrorUnionTypeExpr(p *ast.ErrorUnionTypeExpr, visit
 
 func proofBindingWalkVal_ast_ErrorUnionTypeExpr(p *ast.ErrorUnionTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2361,11 +2555,15 @@ func proofBindingWalkPtr_ast_ErrorVariantDecl(p *ast.ErrorVariantDecl, visit fun
 
 func proofBindingWalkVal_ast_ErrorVariantDecl(p *ast.ErrorVariantDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ErrorVariantDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ErrorVariantDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Payload {
 		proofBindingWalkVal_ast_ParamDecl(&p.Payload[i0], visit, seen, owner)
 	}
@@ -2385,7 +2583,9 @@ func proofBindingWalkPtr_ast_ExpectPatternStmt(p *ast.ExpectPatternStmt, visit f
 
 func proofBindingWalkVal_ast_ExpectPatternStmt(p *ast.ExpectPatternStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2419,14 +2619,18 @@ func proofBindingWalkPtr_ast_ExportFuncDecl(p *ast.ExportFuncDecl, visit func(an
 
 func proofBindingWalkVal_ast_ExportFuncDecl(p *ast.ExportFuncDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ExportFuncDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ExportFuncDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Params {
 		proofBindingWalkVal_ast_ParamDecl(&p.Params[i0], visit, seen, owner)
 	}
@@ -2435,7 +2639,9 @@ func proofBindingWalkVal_ast_ExportFuncDecl(p *ast.ExportFuncDecl, visit func(an
 			proofBindingWalkReflect(reflect.ValueOf(p.ReturnType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.ExportFuncDecl](), nil, proofBindingVisitStringField, "TargetName", string(p.TargetName), true)
+	if retainedLocalGensymName(string(p.TargetName)) {
+		visit(p, reflect.TypeFor[ast.ExportFuncDecl](), nil, proofBindingVisitStringField, "TargetName", string(p.TargetName), true)
+	}
 	for i0 := range p.TargetTypeArgs {
 		if p.TargetTypeArgs[i0] != nil {
 			if !proofBindingWalkAny(p.TargetTypeArgs[i0], visit, seen, owner) {
@@ -2461,12 +2667,18 @@ func proofBindingWalkPtr_ast_ExportGlobalDecl(p *ast.ExportGlobalDecl, visit fun
 
 func proofBindingWalkVal_ast_ExportGlobalDecl(p *ast.ExportGlobalDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ExportGlobalDecl](), nil, proofBindingVisitStringField, "TargetName", string(p.TargetName), true)
-	visit(p, reflect.TypeFor[ast.ExportGlobalDecl](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	if retainedLocalGensymName(string(p.TargetName)) {
+		visit(p, reflect.TypeFor[ast.ExportGlobalDecl](), nil, proofBindingVisitStringField, "TargetName", string(p.TargetName), true)
+	}
+	if retainedLocalGensymName(string(p.Alias)) {
+		visit(p, reflect.TypeFor[ast.ExportGlobalDecl](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ExportTypeDecl(p *ast.ExportTypeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2485,7 +2697,9 @@ func proofBindingWalkPtr_ast_ExportTypeDecl(p *ast.ExportTypeDecl, visit func(an
 
 func proofBindingWalkVal_ast_ExportTypeDecl(p *ast.ExportTypeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2494,7 +2708,9 @@ func proofBindingWalkVal_ast_ExportTypeDecl(p *ast.ExportTypeDecl, visit func(an
 			proofBindingWalkReflect(reflect.ValueOf(p.ExportedType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.ExportTypeDecl](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	if retainedLocalGensymName(string(p.Alias)) {
+		visit(p, reflect.TypeFor[ast.ExportTypeDecl](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ExprBlock(p *ast.ExprBlock, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2512,7 +2728,9 @@ func proofBindingWalkPtr_ast_ExprBlock(p *ast.ExprBlock, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ExprBlock(p *ast.ExprBlock, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2529,7 +2747,9 @@ func proofBindingWalkVal_ast_ExprBlock(p *ast.ExprBlock, visit func(any, reflect
 		}
 	}
 	for i0 := range p.Captures {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Captures[i0]), false)
+		if retainedLocalGensymName(string(p.Captures[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Captures[i0]), false)
+		}
 	}
 }
 
@@ -2547,7 +2767,9 @@ func proofBindingWalkPtr_ast_ExprStmt(p *ast.ExprStmt, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_ExprStmt(p *ast.ExprStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2574,25 +2796,35 @@ func proofBindingWalkPtr_ast_ExternFuncDecl(p *ast.ExternFuncDecl, visit func(an
 
 func proofBindingWalkVal_ast_ExternFuncDecl(p *ast.ExternFuncDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ExternFuncDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ExternFuncDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	for i0 := range p.PermissionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.PermissionParams[i0]), false)
+		if retainedLocalGensymName(string(p.PermissionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.PermissionParams[i0]), false)
+		}
 	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
 	}
 	for i0 := range p.RegionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		if retainedLocalGensymName(string(p.RegionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		}
 	}
 	for i0 := range p.Permissions {
 		proofBindingWalkVal_ast_PermissionRef(&p.Permissions[i0], visit, seen, owner)
@@ -2652,14 +2884,18 @@ func proofBindingWalkPtr_ast_ExternTypeDecl(p *ast.ExternTypeDecl, visit func(an
 
 func proofBindingWalkVal_ast_ExternTypeDecl(p *ast.ExternTypeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ExternTypeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ExternTypeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ExternVarDecl(p *ast.ExternVarDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2678,14 +2914,18 @@ func proofBindingWalkPtr_ast_ExternVarDecl(p *ast.ExternVarDecl, visit func(any,
 
 func proofBindingWalkVal_ast_ExternVarDecl(p *ast.ExternVarDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ExternVarDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ExternVarDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -2707,14 +2947,18 @@ func proofBindingWalkPtr_ast_FieldDecl(p *ast.FieldDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_FieldDecl(p *ast.FieldDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.FieldDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.FieldDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -2742,7 +2986,9 @@ func proofBindingWalkPtr_ast_FieldExpr(p *ast.FieldExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_FieldExpr(p *ast.FieldExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -2751,7 +2997,9 @@ func proofBindingWalkVal_ast_FieldExpr(p *ast.FieldExpr, visit func(any, reflect
 			proofBindingWalkReflect(reflect.ValueOf(p.Object), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.FieldExpr](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	if retainedLocalGensymName(string(p.Field)) {
+		visit(p, reflect.TypeFor[ast.FieldExpr](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_File(p *ast.File, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2767,7 +3015,9 @@ func proofBindingWalkPtr_ast_File(p *ast.File, visit func(any, reflect.Type, ast
 }
 
 func proofBindingWalkVal_ast_File(p *ast.File, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
-	visit(p, reflect.TypeFor[ast.File](), nil, proofBindingVisitStringField, "Filename", string(p.Filename), true)
+	if retainedLocalGensymName(string(p.Filename)) {
+		visit(p, reflect.TypeFor[ast.File](), nil, proofBindingVisitStringField, "Filename", string(p.Filename), true)
+	}
 	for i0 := range p.Decls {
 		if p.Decls[i0] != nil {
 			if !proofBindingWalkAny(p.Decls[i0], visit, seen, owner) {
@@ -2791,12 +3041,18 @@ func proofBindingWalkPtr_ast_FloatLit(p *ast.FloatLit, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_FloatLit(p *ast.FloatLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.FloatLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
-	visit(p, reflect.TypeFor[ast.FloatLit](), nil, proofBindingVisitStringField, "Suffix", string(p.Suffix), true)
+	if retainedLocalGensymName(string(p.Value)) {
+		visit(p, reflect.TypeFor[ast.FloatLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	}
+	if retainedLocalGensymName(string(p.Suffix)) {
+		visit(p, reflect.TypeFor[ast.FloatLit](), nil, proofBindingVisitStringField, "Suffix", string(p.Suffix), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_FoldExpr(p *ast.FoldExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2813,11 +3069,15 @@ func proofBindingWalkPtr_ast_FoldExpr(p *ast.FoldExpr, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_FoldExpr(p *ast.FoldExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.FoldExpr](), nil, proofBindingVisitStringField, "Keyword", string(p.Keyword), true)
+	if retainedLocalGensymName(string(p.Keyword)) {
+		visit(p, reflect.TypeFor[ast.FoldExpr](), nil, proofBindingVisitStringField, "Keyword", string(p.Keyword), true)
+	}
 	if p.Value != nil {
 		if !proofBindingWalkAny(p.Value, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
@@ -2852,11 +3112,15 @@ func proofBindingWalkPtr_ast_ForStmt(p *ast.ForStmt, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_ForStmt(p *ast.ForStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ForStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ForStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Start != nil {
 		if !proofBindingWalkAny(p.Start, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Start), visit, seen, owner)
@@ -2891,7 +3155,9 @@ func proofBindingWalkVal_ast_ForStmt(p *ast.ForStmt, visit func(any, reflect.Typ
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.ForStmt](), nil, proofBindingVisitStringField, "AutovecReason", string(p.AutovecReason), true)
+	if retainedLocalGensymName(string(p.AutovecReason)) {
+		visit(p, reflect.TypeFor[ast.ForStmt](), nil, proofBindingVisitStringField, "AutovecReason", string(p.AutovecReason), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_FulfillsClause(p *ast.FulfillsClause, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2908,12 +3174,18 @@ func proofBindingWalkPtr_ast_FulfillsClause(p *ast.FulfillsClause, visit func(an
 
 func proofBindingWalkVal_ast_FulfillsClause(p *ast.FulfillsClause, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.FulfillsClause](), nil, proofBindingVisitStringField, "Param", string(p.Param), true)
-	visit(p, reflect.TypeFor[ast.FulfillsClause](), nil, proofBindingVisitStringField, "Law", string(p.Law), true)
+	if retainedLocalGensymName(string(p.Param)) {
+		visit(p, reflect.TypeFor[ast.FulfillsClause](), nil, proofBindingVisitStringField, "Param", string(p.Param), true)
+	}
+	if retainedLocalGensymName(string(p.Law)) {
+		visit(p, reflect.TypeFor[ast.FulfillsClause](), nil, proofBindingVisitStringField, "Law", string(p.Law), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_FuncDecl(p *ast.FuncDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -2932,26 +3204,40 @@ func proofBindingWalkPtr_ast_FuncDecl(p *ast.FuncDecl, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_FuncDecl(p *ast.FuncDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	for i0 := range p.RegionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		if retainedLocalGensymName(string(p.RegionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		}
 	}
 	for i0 := range p.InferredRegionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.InferredRegionParams[i0]), false)
+		if retainedLocalGensymName(string(p.InferredRegionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.InferredRegionParams[i0]), false)
+		}
 	}
-	visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "AmbientGrownContainerRegion", string(p.AmbientGrownContainerRegion), true)
+	if retainedLocalGensymName(string(p.AmbientGrownContainerRegion)) {
+		visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "AmbientGrownContainerRegion", string(p.AmbientGrownContainerRegion), true)
+	}
 	for i0 := range p.PermissionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.PermissionParams[i0]), false)
+		if retainedLocalGensymName(string(p.PermissionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.PermissionParams[i0]), false)
+		}
 	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
@@ -2989,7 +3275,9 @@ func proofBindingWalkVal_ast_FuncDecl(p *ast.FuncDecl, visit func(any, reflect.T
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "DecreasesWild", string(p.DecreasesWild), true)
+	if retainedLocalGensymName(string(p.DecreasesWild)) {
+		visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "DecreasesWild", string(p.DecreasesWild), true)
+	}
 	for i0 := range p.Params {
 		proofBindingWalkVal_ast_ParamDecl(&p.Params[i0], visit, seen, owner)
 	}
@@ -2998,7 +3286,9 @@ func proofBindingWalkVal_ast_FuncDecl(p *ast.FuncDecl, visit func(any, reflect.T
 			proofBindingWalkReflect(reflect.ValueOf(p.ReturnType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "ReturnRegion", string(p.ReturnRegion), true)
+	if retainedLocalGensymName(string(p.ReturnRegion)) {
+		visit(p, reflect.TypeFor[ast.FuncDecl](), nil, proofBindingVisitStringField, "ReturnRegion", string(p.ReturnRegion), true)
+	}
 	for i0 := range p.Body {
 		if p.Body[i0] != nil {
 			if !proofBindingWalkAny(p.Body[i0], visit, seen, owner) {
@@ -3025,7 +3315,9 @@ func proofBindingWalkVal_ast_FuncDecl(p *ast.FuncDecl, visit func(any, reflect.T
 		proofBindingWalkVal_ast_PermissionRef(&p.Forbids[i0], visit, seen, owner)
 	}
 	for i0 := range p.Includes {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Includes[i0]), false)
+		if retainedLocalGensymName(string(p.Includes[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Includes[i0]), false)
+		}
 	}
 	for i0 := range p.Uses {
 		proofBindingWalkPtr_ast_ContractStmt(p.Uses[i0], visit, seen, owner)
@@ -3049,7 +3341,9 @@ func proofBindingWalkPtr_ast_FuncTypeExpr(p *ast.FuncTypeExpr, visit func(any, r
 
 func proofBindingWalkVal_ast_FuncTypeExpr(p *ast.FuncTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3084,16 +3378,26 @@ func proofBindingWalkPtr_ast_GenericParam(p *ast.GenericParam, visit func(any, r
 
 func proofBindingWalkVal_ast_GenericParam(p *ast.GenericParam, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GenericParam](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.GenericParam](), nil, proofBindingVisitStringField, "InterfaceBound", string(p.InterfaceBound), true)
-	for i0 := range p.StateCases {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.StateCases[i0]), false)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GenericParam](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
 	}
-	visit(p, reflect.TypeFor[ast.GenericParam](), nil, proofBindingVisitStringField, "StateOwner", string(p.StateOwner), true)
+	if retainedLocalGensymName(string(p.InterfaceBound)) {
+		visit(p, reflect.TypeFor[ast.GenericParam](), nil, proofBindingVisitStringField, "InterfaceBound", string(p.InterfaceBound), true)
+	}
+	for i0 := range p.StateCases {
+		if retainedLocalGensymName(string(p.StateCases[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.StateCases[i0]), false)
+		}
+	}
+	if retainedLocalGensymName(string(p.StateOwner)) {
+		visit(p, reflect.TypeFor[ast.GenericParam](), nil, proofBindingVisitStringField, "StateOwner", string(p.StateOwner), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GenericType(p *ast.GenericType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -3110,12 +3414,18 @@ func proofBindingWalkPtr_ast_GenericType(p *ast.GenericType, visit func(any, ref
 
 func proofBindingWalkVal_ast_GenericType(p *ast.GenericType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GenericType](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.GenericType](), nil, proofBindingVisitStringField, "Spelling", string(p.Spelling), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GenericType](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Spelling)) {
+		visit(p, reflect.TypeFor[ast.GenericType](), nil, proofBindingVisitStringField, "Spelling", string(p.Spelling), true)
+	}
 	for i0 := range p.Args {
 		if p.Args[i0] != nil {
 			if !proofBindingWalkAny(p.Args[i0], visit, seen, owner) {
@@ -3123,7 +3433,9 @@ func proofBindingWalkVal_ast_GenericType(p *ast.GenericType, visit func(any, ref
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GenericType](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	if retainedLocalGensymName(string(p.Region)) {
+		visit(p, reflect.TypeFor[ast.GenericType](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GenericValueArgTypeExpr(p *ast.GenericValueArgTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -3140,7 +3452,9 @@ func proofBindingWalkPtr_ast_GenericValueArgTypeExpr(p *ast.GenericValueArgTypeE
 
 func proofBindingWalkVal_ast_GenericValueArgTypeExpr(p *ast.GenericValueArgTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3165,7 +3479,9 @@ func proofBindingWalkPtr_ast_GetExpr(p *ast.GetExpr, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_GetExpr(p *ast.GetExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3198,11 +3514,15 @@ func proofBindingWalkPtr_ast_GlobalDecl(p *ast.GlobalDecl, visit func(any, refle
 
 func proofBindingWalkVal_ast_GlobalDecl(p *ast.GlobalDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GlobalDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GlobalDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -3231,11 +3551,15 @@ func proofBindingWalkPtr_ast_GlobalRegionDecl(p *ast.GlobalRegionDecl, visit fun
 
 func proofBindingWalkVal_ast_GlobalRegionDecl(p *ast.GlobalRegionDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GlobalRegionDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GlobalRegionDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarAliasDecl(p *ast.GrammarAliasDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -3252,11 +3576,15 @@ func proofBindingWalkPtr_ast_GrammarAliasDecl(p *ast.GrammarAliasDecl, visit fun
 
 func proofBindingWalkVal_ast_GrammarAliasDecl(p *ast.GrammarAliasDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarAliasDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarAliasDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Params {
 		proofBindingWalkVal_ast_GrammarFnParam(&p.Params[i0], visit, seen, owner)
 	}
@@ -3281,11 +3609,15 @@ func proofBindingWalkPtr_ast_GrammarApplyArg(p *ast.GrammarApplyArg, visit func(
 
 func proofBindingWalkVal_ast_GrammarApplyArg(p *ast.GrammarApplyArg, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarApplyArg](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarApplyArg](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Term != nil {
 		if !proofBindingWalkAny(p.Term, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Term), visit, seen, owner)
@@ -3307,11 +3639,15 @@ func proofBindingWalkPtr_ast_GrammarApplyTerm(p *ast.GrammarApplyTerm, visit fun
 
 func proofBindingWalkVal_ast_GrammarApplyTerm(p *ast.GrammarApplyTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarApplyTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarApplyTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Args {
 		proofBindingWalkVal_ast_GrammarApplyArg(&p.Args[i0], visit, seen, owner)
 	}
@@ -3331,11 +3667,15 @@ func proofBindingWalkPtr_ast_GrammarAssignTerm(p *ast.GrammarAssignTerm, visit f
 
 func proofBindingWalkVal_ast_GrammarAssignTerm(p *ast.GrammarAssignTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarAssignTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarAssignTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Term != nil {
 		if !proofBindingWalkAny(p.Term, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Term), visit, seen, owner)
@@ -3357,7 +3697,9 @@ func proofBindingWalkPtr_ast_GrammarAttemptTerm(p *ast.GrammarAttemptTerm, visit
 
 func proofBindingWalkVal_ast_GrammarAttemptTerm(p *ast.GrammarAttemptTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3382,11 +3724,15 @@ func proofBindingWalkPtr_ast_GrammarBindTerm(p *ast.GrammarBindTerm, visit func(
 
 func proofBindingWalkVal_ast_GrammarBindTerm(p *ast.GrammarBindTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarBindTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarBindTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Term != nil {
 		if !proofBindingWalkAny(p.Term, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Term), visit, seen, owner)
@@ -3408,11 +3754,15 @@ func proofBindingWalkPtr_ast_GrammarCallTerm(p *ast.GrammarCallTerm, visit func(
 
 func proofBindingWalkVal_ast_GrammarCallTerm(p *ast.GrammarCallTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarCallTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarCallTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Args {
 		if p.Args[i0] != nil {
 			if !proofBindingWalkAny(p.Args[i0], visit, seen, owner) {
@@ -3436,11 +3786,15 @@ func proofBindingWalkPtr_ast_GrammarChannelDecl(p *ast.GrammarChannelDecl, visit
 
 func proofBindingWalkVal_ast_GrammarChannelDecl(p *ast.GrammarChannelDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarChannelDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarChannelDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -3467,7 +3821,9 @@ func proofBindingWalkPtr_ast_GrammarChoiceTerm(p *ast.GrammarChoiceTerm, visit f
 
 func proofBindingWalkVal_ast_GrammarChoiceTerm(p *ast.GrammarChoiceTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3494,7 +3850,9 @@ func proofBindingWalkPtr_ast_GrammarConcatTerm(p *ast.GrammarConcatTerm, visit f
 
 func proofBindingWalkVal_ast_GrammarConcatTerm(p *ast.GrammarConcatTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3521,7 +3879,9 @@ func proofBindingWalkPtr_ast_GrammarCutTerm(p *ast.GrammarCutTerm, visit func(an
 
 func proofBindingWalkVal_ast_GrammarCutTerm(p *ast.GrammarCutTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3543,19 +3903,29 @@ func proofBindingWalkPtr_ast_GrammarDecl(p *ast.GrammarDecl, visit func(any, ref
 
 func proofBindingWalkVal_ast_GrammarDecl(p *ast.GrammarDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	for i0 := range p.RegionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		if retainedLocalGensymName(string(p.RegionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		}
 	}
 	for i0 := range p.PermissionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.PermissionParams[i0]), false)
+		if retainedLocalGensymName(string(p.PermissionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.PermissionParams[i0]), false)
+		}
 	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
@@ -3602,7 +3972,9 @@ func proofBindingWalkVal_ast_GrammarDecl(p *ast.GrammarDecl, visit func(any, ref
 			proofBindingWalkReflect(reflect.ValueOf(p.TokenKindType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenEnumName", string(p.TokenEnumName), true)
+	if retainedLocalGensymName(string(p.TokenEnumName)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenEnumName", string(p.TokenEnumName), true)
+	}
 	if p.TokenEnumStorage != nil {
 		if !proofBindingWalkAny(p.TokenEnumStorage, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.TokenEnumStorage), visit, seen, owner)
@@ -3613,14 +3985,30 @@ func proofBindingWalkVal_ast_GrammarDecl(p *ast.GrammarDecl, visit func(any, ref
 			proofBindingWalkReflect(reflect.ValueOf(p.EOFExpr), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenKindField", string(p.TokenKindField), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "CurrentFunc", string(p.CurrentFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "AdvanceFunc", string(p.AdvanceFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "ExpectFunc", string(p.ExpectFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "ExpectKindFunc", string(p.ExpectKindFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "RecordErrorFunc", string(p.RecordErrorFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenLookupFunc", string(p.TokenLookupFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenLookupCompareFunc", string(p.TokenLookupCompareFunc), true)
+	if retainedLocalGensymName(string(p.TokenKindField)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenKindField", string(p.TokenKindField), true)
+	}
+	if retainedLocalGensymName(string(p.CurrentFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "CurrentFunc", string(p.CurrentFunc), true)
+	}
+	if retainedLocalGensymName(string(p.AdvanceFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "AdvanceFunc", string(p.AdvanceFunc), true)
+	}
+	if retainedLocalGensymName(string(p.ExpectFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "ExpectFunc", string(p.ExpectFunc), true)
+	}
+	if retainedLocalGensymName(string(p.ExpectKindFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "ExpectKindFunc", string(p.ExpectKindFunc), true)
+	}
+	if retainedLocalGensymName(string(p.RecordErrorFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "RecordErrorFunc", string(p.RecordErrorFunc), true)
+	}
+	if retainedLocalGensymName(string(p.TokenLookupFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenLookupFunc", string(p.TokenLookupFunc), true)
+	}
+	if retainedLocalGensymName(string(p.TokenLookupCompareFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarDecl](), nil, proofBindingVisitStringField, "TokenLookupCompareFunc", string(p.TokenLookupCompareFunc), true)
+	}
 	for i0 := range p.TokenAliases {
 		proofBindingWalkVal_ast_GrammarTokenAliasDecl(&p.TokenAliases[i0], visit, seen, owner)
 	}
@@ -3661,7 +4049,9 @@ func proofBindingWalkPtr_ast_GrammarDelimitedTerm(p *ast.GrammarDelimitedTerm, v
 
 func proofBindingWalkVal_ast_GrammarDelimitedTerm(p *ast.GrammarDelimitedTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3701,12 +4091,18 @@ func proofBindingWalkPtr_ast_GrammarDynamicClimbTerm(p *ast.GrammarDynamicClimbT
 
 func proofBindingWalkVal_ast_GrammarDynamicClimbTerm(p *ast.GrammarDynamicClimbTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarDynamicClimbTerm](), nil, proofBindingVisitStringField, "TableName", string(p.TableName), true)
-	visit(p, reflect.TypeFor[ast.GrammarDynamicClimbTerm](), nil, proofBindingVisitStringField, "MinPrecName", string(p.MinPrecName), true)
+	if retainedLocalGensymName(string(p.TableName)) {
+		visit(p, reflect.TypeFor[ast.GrammarDynamicClimbTerm](), nil, proofBindingVisitStringField, "TableName", string(p.TableName), true)
+	}
+	if retainedLocalGensymName(string(p.MinPrecName)) {
+		visit(p, reflect.TypeFor[ast.GrammarDynamicClimbTerm](), nil, proofBindingVisitStringField, "MinPrecName", string(p.MinPrecName), true)
+	}
 	proofBindingWalkPtr_ast_GrammarDynamicInfixSpec(p.Spec, visit, seen, owner)
 }
 
@@ -3723,7 +4119,9 @@ func proofBindingWalkPtr_ast_GrammarDynamicInfixSpec(p *ast.GrammarDynamicInfixS
 }
 
 func proofBindingWalkVal_ast_GrammarDynamicInfixSpec(p *ast.GrammarDynamicInfixSpec, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
-	visit(p, reflect.TypeFor[ast.GrammarDynamicInfixSpec](), nil, proofBindingVisitStringField, "FixityRef", string(p.FixityRef), true)
+	if retainedLocalGensymName(string(p.FixityRef)) {
+		visit(p, reflect.TypeFor[ast.GrammarDynamicInfixSpec](), nil, proofBindingVisitStringField, "FixityRef", string(p.FixityRef), true)
+	}
 	if p.ReturnType != nil {
 		if !proofBindingWalkAny(p.ReturnType, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.ReturnType), visit, seen, owner)
@@ -3735,7 +4133,9 @@ func proofBindingWalkVal_ast_GrammarDynamicInfixSpec(p *ast.GrammarDynamicInfixS
 		}
 	}
 	for i0 := range p.CombineParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.CombineParams[i0]), false)
+		if retainedLocalGensymName(string(p.CombineParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.CombineParams[i0]), false)
+		}
 	}
 	if p.Combine != nil {
 		if !proofBindingWalkAny(p.Combine, visit, seen, owner) {
@@ -3758,7 +4158,9 @@ func proofBindingWalkPtr_ast_GrammarEmptyTerm(p *ast.GrammarEmptyTerm, visit fun
 
 func proofBindingWalkVal_ast_GrammarEmptyTerm(p *ast.GrammarEmptyTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3785,11 +4187,15 @@ func proofBindingWalkPtr_ast_GrammarEnvDecl(p *ast.GrammarEnvDecl, visit func(an
 
 func proofBindingWalkVal_ast_GrammarEnvDecl(p *ast.GrammarEnvDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.OverType != nil {
 		if !proofBindingWalkAny(p.OverType, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.OverType), visit, seen, owner)
@@ -3820,18 +4226,32 @@ func proofBindingWalkVal_ast_GrammarEnvDecl(p *ast.GrammarEnvDecl, visit func(an
 			proofBindingWalkReflect(reflect.ValueOf(p.TokenKindType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "TokenGrammarName", string(p.TokenGrammarName), true)
+	if retainedLocalGensymName(string(p.TokenGrammarName)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "TokenGrammarName", string(p.TokenGrammarName), true)
+	}
 	if p.EOFExpr != nil {
 		if !proofBindingWalkAny(p.EOFExpr, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.EOFExpr), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "TokenKindField", string(p.TokenKindField), true)
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "CurrentFunc", string(p.CurrentFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "AdvanceFunc", string(p.AdvanceFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "ExpectFunc", string(p.ExpectFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "ExpectKindFunc", string(p.ExpectKindFunc), true)
-	visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "RecordErrorFunc", string(p.RecordErrorFunc), true)
+	if retainedLocalGensymName(string(p.TokenKindField)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "TokenKindField", string(p.TokenKindField), true)
+	}
+	if retainedLocalGensymName(string(p.CurrentFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "CurrentFunc", string(p.CurrentFunc), true)
+	}
+	if retainedLocalGensymName(string(p.AdvanceFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "AdvanceFunc", string(p.AdvanceFunc), true)
+	}
+	if retainedLocalGensymName(string(p.ExpectFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "ExpectFunc", string(p.ExpectFunc), true)
+	}
+	if retainedLocalGensymName(string(p.ExpectKindFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "ExpectKindFunc", string(p.ExpectKindFunc), true)
+	}
+	if retainedLocalGensymName(string(p.RecordErrorFunc)) {
+		visit(p, reflect.TypeFor[ast.GrammarEnvDecl](), nil, proofBindingVisitStringField, "RecordErrorFunc", string(p.RecordErrorFunc), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarExprTerm(p *ast.GrammarExprTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -3848,7 +4268,9 @@ func proofBindingWalkPtr_ast_GrammarExprTerm(p *ast.GrammarExprTerm, visit func(
 
 func proofBindingWalkVal_ast_GrammarExprTerm(p *ast.GrammarExprTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3878,11 +4300,15 @@ func proofBindingWalkPtr_ast_GrammarFirstTerm(p *ast.GrammarFirstTerm, visit fun
 
 func proofBindingWalkVal_ast_GrammarFirstTerm(p *ast.GrammarFirstTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarFirstTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarFirstTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarFlatRepeatTerm(p *ast.GrammarFlatRepeatTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -3899,7 +4325,9 @@ func proofBindingWalkPtr_ast_GrammarFlatRepeatTerm(p *ast.GrammarFlatRepeatTerm,
 
 func proofBindingWalkVal_ast_GrammarFlatRepeatTerm(p *ast.GrammarFlatRepeatTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -3931,13 +4359,19 @@ func proofBindingWalkPtr_ast_GrammarFnDecl(p *ast.GrammarFnDecl, visit func(any,
 
 func proofBindingWalkVal_ast_GrammarFnDecl(p *ast.GrammarFnDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarFnDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarFnDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
@@ -3969,11 +4403,15 @@ func proofBindingWalkPtr_ast_GrammarFnParam(p *ast.GrammarFnParam, visit func(an
 
 func proofBindingWalkVal_ast_GrammarFnParam(p *ast.GrammarFnParam, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarFnParam](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarFnParam](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	proofBindingWalkVal_ast_GrammarFnType(&p.Type, visit, seen, owner)
 	if p.Default != nil {
 		if !proofBindingWalkAny(p.Default, visit, seen, owner) {
@@ -4001,11 +4439,15 @@ func proofBindingWalkPtr_ast_GrammarFnType(p *ast.GrammarFnType, visit func(any,
 
 func proofBindingWalkVal_ast_GrammarFnType(p *ast.GrammarFnType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarFnType](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	if retainedLocalGensymName(string(p.Kind)) {
+		visit(p, reflect.TypeFor[ast.GrammarFnType](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	}
 	if p.Result != nil {
 		if !proofBindingWalkAny(p.Result, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Result), visit, seen, owner)
@@ -4027,7 +4469,9 @@ func proofBindingWalkPtr_ast_GrammarGuardTerm(p *ast.GrammarGuardTerm, visit fun
 
 func proofBindingWalkVal_ast_GrammarGuardTerm(p *ast.GrammarGuardTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4052,12 +4496,18 @@ func proofBindingWalkPtr_ast_GrammarInfixTableDecl(p *ast.GrammarInfixTableDecl,
 
 func proofBindingWalkVal_ast_GrammarInfixTableDecl(p *ast.GrammarInfixTableDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarInfixTableDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.GrammarInfixTableDecl](), nil, proofBindingVisitStringField, "Result", string(p.Result), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarInfixTableDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Result)) {
+		visit(p, reflect.TypeFor[ast.GrammarInfixTableDecl](), nil, proofBindingVisitStringField, "Result", string(p.Result), true)
+	}
 	for i0 := range p.Levels {
 		proofBindingWalkVal_ast_GrammarPrecedenceLevel(&p.Levels[i0], visit, seen, owner)
 	}
@@ -4078,11 +4528,15 @@ func proofBindingWalkPtr_ast_GrammarInfixTableTerm(p *ast.GrammarInfixTableTerm,
 
 func proofBindingWalkVal_ast_GrammarInfixTableTerm(p *ast.GrammarInfixTableTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarInfixTableTerm](), nil, proofBindingVisitStringField, "TableName", string(p.TableName), true)
+	if retainedLocalGensymName(string(p.TableName)) {
+		visit(p, reflect.TypeFor[ast.GrammarInfixTableTerm](), nil, proofBindingVisitStringField, "TableName", string(p.TableName), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarListTerm(p *ast.GrammarListTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4099,7 +4553,9 @@ func proofBindingWalkPtr_ast_GrammarListTerm(p *ast.GrammarListTerm, visit func(
 
 func proofBindingWalkVal_ast_GrammarListTerm(p *ast.GrammarListTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4136,7 +4592,9 @@ func proofBindingWalkPtr_ast_GrammarLookaheadTerm(p *ast.GrammarLookaheadTerm, v
 
 func proofBindingWalkVal_ast_GrammarLookaheadTerm(p *ast.GrammarLookaheadTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4161,7 +4619,9 @@ func proofBindingWalkPtr_ast_GrammarMatchArm(p *ast.GrammarMatchArm, visit func(
 
 func proofBindingWalkVal_ast_GrammarMatchArm(p *ast.GrammarMatchArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4193,7 +4653,9 @@ func proofBindingWalkPtr_ast_GrammarMatchTerm(p *ast.GrammarMatchTerm, visit fun
 
 func proofBindingWalkVal_ast_GrammarMatchTerm(p *ast.GrammarMatchTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4221,7 +4683,9 @@ func proofBindingWalkPtr_ast_GrammarOptionalTerm(p *ast.GrammarOptionalTerm, vis
 
 func proofBindingWalkVal_ast_GrammarOptionalTerm(p *ast.GrammarOptionalTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4246,7 +4710,9 @@ func proofBindingWalkPtr_ast_GrammarPassTerm(p *ast.GrammarPassTerm, visit func(
 
 func proofBindingWalkVal_ast_GrammarPassTerm(p *ast.GrammarPassTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4266,11 +4732,15 @@ func proofBindingWalkPtr_ast_GrammarPostfixArm(p *ast.GrammarPostfixArm, visit f
 
 func proofBindingWalkVal_ast_GrammarPostfixArm(p *ast.GrammarPostfixArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarPostfixArm](), nil, proofBindingVisitStringField, "OpName", string(p.OpName), true)
+	if retainedLocalGensymName(string(p.OpName)) {
+		visit(p, reflect.TypeFor[ast.GrammarPostfixArm](), nil, proofBindingVisitStringField, "OpName", string(p.OpName), true)
+	}
 	if p.Op != nil {
 		if !proofBindingWalkAny(p.Op, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Op), visit, seen, owner)
@@ -4300,11 +4770,15 @@ func proofBindingWalkPtr_ast_GrammarPostfixTerm(p *ast.GrammarPostfixTerm, visit
 
 func proofBindingWalkVal_ast_GrammarPostfixTerm(p *ast.GrammarPostfixTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarPostfixTerm](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	if retainedLocalGensymName(string(p.LeftName)) {
+		visit(p, reflect.TypeFor[ast.GrammarPostfixTerm](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	}
 	if p.Seed != nil {
 		if !proofBindingWalkAny(p.Seed, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Seed), visit, seen, owner)
@@ -4329,11 +4803,15 @@ func proofBindingWalkPtr_ast_GrammarPrecedenceArm(p *ast.GrammarPrecedenceArm, v
 
 func proofBindingWalkVal_ast_GrammarPrecedenceArm(p *ast.GrammarPrecedenceArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceArm](), nil, proofBindingVisitStringField, "OpName", string(p.OpName), true)
+	if retainedLocalGensymName(string(p.OpName)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceArm](), nil, proofBindingVisitStringField, "OpName", string(p.OpName), true)
+	}
 	if p.Op != nil {
 		if !proofBindingWalkAny(p.Op, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Op), visit, seen, owner)
@@ -4363,13 +4841,21 @@ func proofBindingWalkPtr_ast_GrammarPrecedenceLevel(p *ast.GrammarPrecedenceLeve
 
 func proofBindingWalkVal_ast_GrammarPrecedenceLevel(p *ast.GrammarPrecedenceLevel, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceLevel](), nil, proofBindingVisitStringField, "Assoc", string(p.Assoc), true)
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceLevel](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceLevel](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	if retainedLocalGensymName(string(p.Assoc)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceLevel](), nil, proofBindingVisitStringField, "Assoc", string(p.Assoc), true)
+	}
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceLevel](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.LeftName)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceLevel](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	}
 	if p.Seed != nil {
 		if !proofBindingWalkAny(p.Seed, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Seed), visit, seen, owner)
@@ -4394,16 +4880,24 @@ func proofBindingWalkPtr_ast_GrammarPrecedenceTerm(p *ast.GrammarPrecedenceTerm,
 
 func proofBindingWalkVal_ast_GrammarPrecedenceTerm(p *ast.GrammarPrecedenceTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceTerm](), nil, proofBindingVisitStringField, "Assoc", string(p.Assoc), true)
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceTerm](), nil, proofBindingVisitStringField, "Result", string(p.Result), true)
+	if retainedLocalGensymName(string(p.Assoc)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceTerm](), nil, proofBindingVisitStringField, "Assoc", string(p.Assoc), true)
+	}
+	if retainedLocalGensymName(string(p.Result)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceTerm](), nil, proofBindingVisitStringField, "Result", string(p.Result), true)
+	}
 	for i0 := range p.Levels {
 		proofBindingWalkVal_ast_GrammarPrecedenceLevel(&p.Levels[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarPrecedenceTerm](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	if retainedLocalGensymName(string(p.LeftName)) {
+		visit(p, reflect.TypeFor[ast.GrammarPrecedenceTerm](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	}
 	if p.Seed != nil {
 		if !proofBindingWalkAny(p.Seed, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Seed), visit, seen, owner)
@@ -4428,11 +4922,15 @@ func proofBindingWalkPtr_ast_GrammarProductionDecl(p *ast.GrammarProductionDecl,
 
 func proofBindingWalkVal_ast_GrammarProductionDecl(p *ast.GrammarProductionDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarProductionDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarProductionDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Params {
 		proofBindingWalkVal_ast_ParamDecl(&p.Params[i0], visit, seen, owner)
 	}
@@ -4441,7 +4939,9 @@ func proofBindingWalkVal_ast_GrammarProductionDecl(p *ast.GrammarProductionDecl,
 			proofBindingWalkReflect(reflect.ValueOf(p.ReturnType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarProductionDecl](), nil, proofBindingVisitStringField, "RecoverPolicy", string(p.RecoverPolicy), true)
+	if retainedLocalGensymName(string(p.RecoverPolicy)) {
+		visit(p, reflect.TypeFor[ast.GrammarProductionDecl](), nil, proofBindingVisitStringField, "RecoverPolicy", string(p.RecoverPolicy), true)
+	}
 	if p.RecoverMsg != nil {
 		if !proofBindingWalkAny(p.RecoverMsg, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.RecoverMsg), visit, seen, owner)
@@ -4469,7 +4969,9 @@ func proofBindingWalkVal_ast_GrammarProductionDecl(p *ast.GrammarProductionDecl,
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarProductionDecl](), nil, proofBindingVisitStringField, "ExternalHost", string(p.ExternalHost), true)
+	if retainedLocalGensymName(string(p.ExternalHost)) {
+		visit(p, reflect.TypeFor[ast.GrammarProductionDecl](), nil, proofBindingVisitStringField, "ExternalHost", string(p.ExternalHost), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarRecoverTerm(p *ast.GrammarRecoverTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4486,7 +4988,9 @@ func proofBindingWalkPtr_ast_GrammarRecoverTerm(p *ast.GrammarRecoverTerm, visit
 
 func proofBindingWalkVal_ast_GrammarRecoverTerm(p *ast.GrammarRecoverTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4495,7 +4999,9 @@ func proofBindingWalkVal_ast_GrammarRecoverTerm(p *ast.GrammarRecoverTerm, visit
 			proofBindingWalkReflect(reflect.ValueOf(p.Term), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarRecoverTerm](), nil, proofBindingVisitStringField, "RecoverPolicy", string(p.RecoverPolicy), true)
+	if retainedLocalGensymName(string(p.RecoverPolicy)) {
+		visit(p, reflect.TypeFor[ast.GrammarRecoverTerm](), nil, proofBindingVisitStringField, "RecoverPolicy", string(p.RecoverPolicy), true)
+	}
 	if p.RecoverMsg != nil {
 		if !proofBindingWalkAny(p.RecoverMsg, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.RecoverMsg), visit, seen, owner)
@@ -4529,11 +5035,15 @@ func proofBindingWalkPtr_ast_GrammarRecoveryDecl(p *ast.GrammarRecoveryDecl, vis
 
 func proofBindingWalkVal_ast_GrammarRecoveryDecl(p *ast.GrammarRecoveryDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarRecoveryDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarRecoveryDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Message != nil {
 		if !proofBindingWalkAny(p.Message, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Message), visit, seen, owner)
@@ -4567,7 +5077,9 @@ func proofBindingWalkPtr_ast_GrammarRepeatTerm(p *ast.GrammarRepeatTerm, visit f
 
 func proofBindingWalkVal_ast_GrammarRepeatTerm(p *ast.GrammarRepeatTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4599,7 +5111,9 @@ func proofBindingWalkPtr_ast_GrammarRequiredTerm(p *ast.GrammarRequiredTerm, vis
 
 func proofBindingWalkVal_ast_GrammarRequiredTerm(p *ast.GrammarRequiredTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4629,7 +5143,9 @@ func proofBindingWalkPtr_ast_GrammarReturnTerm(p *ast.GrammarReturnTerm, visit f
 
 func proofBindingWalkVal_ast_GrammarReturnTerm(p *ast.GrammarReturnTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4654,7 +5170,9 @@ func proofBindingWalkPtr_ast_GrammarSeparatedTerm(p *ast.GrammarSeparatedTerm, v
 
 func proofBindingWalkVal_ast_GrammarSeparatedTerm(p *ast.GrammarSeparatedTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4691,7 +5209,9 @@ func proofBindingWalkPtr_ast_GrammarSeqTerm(p *ast.GrammarSeqTerm, visit func(an
 
 func proofBindingWalkVal_ast_GrammarSeqTerm(p *ast.GrammarSeqTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4718,7 +5238,9 @@ func proofBindingWalkPtr_ast_GrammarSingletonTerm(p *ast.GrammarSingletonTerm, v
 
 func proofBindingWalkVal_ast_GrammarSingletonTerm(p *ast.GrammarSingletonTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4748,11 +5270,15 @@ func proofBindingWalkPtr_ast_GrammarSuffixTerm(p *ast.GrammarSuffixTerm, visit f
 
 func proofBindingWalkVal_ast_GrammarSuffixTerm(p *ast.GrammarSuffixTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarSuffixTerm](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	if retainedLocalGensymName(string(p.LeftName)) {
+		visit(p, reflect.TypeFor[ast.GrammarSuffixTerm](), nil, proofBindingVisitStringField, "LeftName", string(p.LeftName), true)
+	}
 	if p.Seed != nil {
 		if !proofBindingWalkAny(p.Seed, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Seed), visit, seen, owner)
@@ -4777,12 +5303,18 @@ func proofBindingWalkPtr_ast_GrammarTokenAliasDecl(p *ast.GrammarTokenAliasDecl,
 
 func proofBindingWalkVal_ast_GrammarTokenAliasDecl(p *ast.GrammarTokenAliasDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarTokenAliasDecl](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
-	visit(p, reflect.TypeFor[ast.GrammarTokenAliasDecl](), nil, proofBindingVisitStringField, "Literal", string(p.Literal), true)
+	if retainedLocalGensymName(string(p.Kind)) {
+		visit(p, reflect.TypeFor[ast.GrammarTokenAliasDecl](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	}
+	if retainedLocalGensymName(string(p.Literal)) {
+		visit(p, reflect.TypeFor[ast.GrammarTokenAliasDecl](), nil, proofBindingVisitStringField, "Literal", string(p.Literal), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarTokenKindTerm(p *ast.GrammarTokenKindTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4799,11 +5331,15 @@ func proofBindingWalkPtr_ast_GrammarTokenKindTerm(p *ast.GrammarTokenKindTerm, v
 
 func proofBindingWalkVal_ast_GrammarTokenKindTerm(p *ast.GrammarTokenKindTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarTokenKindTerm](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	if retainedLocalGensymName(string(p.Kind)) {
+		visit(p, reflect.TypeFor[ast.GrammarTokenKindTerm](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarTokenSetDecl(p *ast.GrammarTokenSetDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4820,11 +5356,15 @@ func proofBindingWalkPtr_ast_GrammarTokenSetDecl(p *ast.GrammarTokenSetDecl, vis
 
 func proofBindingWalkVal_ast_GrammarTokenSetDecl(p *ast.GrammarTokenSetDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarTokenSetDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarTokenSetDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Terms {
 		if p.Terms[i0] != nil {
 			if !proofBindingWalkAny(p.Terms[i0], visit, seen, owner) {
@@ -4855,11 +5395,15 @@ func proofBindingWalkPtr_ast_GrammarTokenSetRefTerm(p *ast.GrammarTokenSetRefTer
 
 func proofBindingWalkVal_ast_GrammarTokenSetRefTerm(p *ast.GrammarTokenSetRefTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarTokenSetRefTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.GrammarTokenSetRefTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarTokenTerm(p *ast.GrammarTokenTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4876,11 +5420,15 @@ func proofBindingWalkPtr_ast_GrammarTokenTerm(p *ast.GrammarTokenTerm, visit fun
 
 func proofBindingWalkVal_ast_GrammarTokenTerm(p *ast.GrammarTokenTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.GrammarTokenTerm](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	if retainedLocalGensymName(string(p.Value)) {
+		visit(p, reflect.TypeFor[ast.GrammarTokenTerm](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_GrammarWhenTerm(p *ast.GrammarWhenTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4897,7 +5445,9 @@ func proofBindingWalkPtr_ast_GrammarWhenTerm(p *ast.GrammarWhenTerm, visit func(
 
 func proofBindingWalkVal_ast_GrammarWhenTerm(p *ast.GrammarWhenTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4906,7 +5456,9 @@ func proofBindingWalkVal_ast_GrammarWhenTerm(p *ast.GrammarWhenTerm, visit func(
 			proofBindingWalkReflect(reflect.ValueOf(p.Cond), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.GrammarWhenTerm](), nil, proofBindingVisitStringField, "TokenKindGate", string(p.TokenKindGate), true)
+	if retainedLocalGensymName(string(p.TokenKindGate)) {
+		visit(p, reflect.TypeFor[ast.GrammarWhenTerm](), nil, proofBindingVisitStringField, "TokenKindGate", string(p.TokenKindGate), true)
+	}
 	if p.Then != nil {
 		if !proofBindingWalkAny(p.Then, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Then), visit, seen, owner)
@@ -4933,7 +5485,9 @@ func proofBindingWalkPtr_ast_GroupedCheckpointStmt(p *ast.GroupedCheckpointStmt,
 
 func proofBindingWalkVal_ast_GroupedCheckpointStmt(p *ast.GroupedCheckpointStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -4967,11 +5521,15 @@ func proofBindingWalkPtr_ast_Ident(p *ast.Ident, visit func(any, reflect.Type, a
 
 func proofBindingWalkVal_ast_Ident(p *ast.Ident, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.Ident](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.Ident](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_IfStmt(p *ast.IfStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -4988,7 +5546,9 @@ func proofBindingWalkPtr_ast_IfStmt(p *ast.IfStmt, visit func(any, reflect.Type,
 
 func proofBindingWalkVal_ast_IfStmt(p *ast.IfStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5030,11 +5590,15 @@ func proofBindingWalkPtr_ast_ImplAssociatedTypeDecl(p *ast.ImplAssociatedTypeDec
 
 func proofBindingWalkVal_ast_ImplAssociatedTypeDecl(p *ast.ImplAssociatedTypeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ImplAssociatedTypeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ImplAssociatedTypeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -5058,14 +5622,18 @@ func proofBindingWalkPtr_ast_ImplDecl(p *ast.ImplDecl, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_ImplDecl(p *ast.ImplDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ImplDecl](), nil, proofBindingVisitStringField, "InterfaceName", string(p.InterfaceName), true)
+	if retainedLocalGensymName(string(p.InterfaceName)) {
+		visit(p, reflect.TypeFor[ast.ImplDecl](), nil, proofBindingVisitStringField, "InterfaceName", string(p.InterfaceName), true)
+	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
 	}
@@ -5081,7 +5649,9 @@ func proofBindingWalkVal_ast_ImplDecl(p *ast.ImplDecl, visit func(any, reflect.T
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.ImplDecl](), nil, proofBindingVisitStringField, "HandlerName", string(p.HandlerName), true)
+	if retainedLocalGensymName(string(p.HandlerName)) {
+		visit(p, reflect.TypeFor[ast.ImplDecl](), nil, proofBindingVisitStringField, "HandlerName", string(p.HandlerName), true)
+	}
 	for i0 := range p.HandlerParams {
 		proofBindingWalkVal_ast_ParamDecl(&p.HandlerParams[i0], visit, seen, owner)
 	}
@@ -5108,13 +5678,19 @@ func proofBindingWalkPtr_ast_ImportDecl(p *ast.ImportDecl, visit func(any, refle
 
 func proofBindingWalkVal_ast_ImportDecl(p *ast.ImportDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ImportDecl](), nil, proofBindingVisitStringField, "Module", string(p.Module), true)
+	if retainedLocalGensymName(string(p.Module)) {
+		visit(p, reflect.TypeFor[ast.ImportDecl](), nil, proofBindingVisitStringField, "Module", string(p.Module), true)
+	}
 	for i0 := range p.Names {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Names[i0]), false)
+		if retainedLocalGensymName(string(p.Names[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Names[i0]), false)
+		}
 	}
 }
 
@@ -5132,7 +5708,9 @@ func proofBindingWalkPtr_ast_InStoreStmt(p *ast.InStoreStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_InStoreStmt(p *ast.InStoreStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5164,7 +5742,9 @@ func proofBindingWalkPtr_ast_IndexExpr(p *ast.IndexExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_IndexExpr(p *ast.IndexExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5207,12 +5787,18 @@ func proofBindingWalkPtr_ast_IntLit(p *ast.IntLit, visit func(any, reflect.Type,
 
 func proofBindingWalkVal_ast_IntLit(p *ast.IntLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.IntLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
-	visit(p, reflect.TypeFor[ast.IntLit](), nil, proofBindingVisitStringField, "Suffix", string(p.Suffix), true)
+	if retainedLocalGensymName(string(p.Value)) {
+		visit(p, reflect.TypeFor[ast.IntLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	}
+	if retainedLocalGensymName(string(p.Suffix)) {
+		visit(p, reflect.TypeFor[ast.IntLit](), nil, proofBindingVisitStringField, "Suffix", string(p.Suffix), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_InterfaceDecl(p *ast.InterfaceDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5231,16 +5817,22 @@ func proofBindingWalkPtr_ast_InterfaceDecl(p *ast.InterfaceDecl, visit func(any,
 
 func proofBindingWalkVal_ast_InterfaceDecl(p *ast.InterfaceDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.InterfaceDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.InterfaceDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
 	}
 	for i0 := range p.Bases {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Bases[i0]), false)
+		if retainedLocalGensymName(string(p.Bases[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Bases[i0]), false)
+		}
 	}
 	for i0 := range p.Members {
 		if p.Members[i0] != nil {
@@ -5265,7 +5857,9 @@ func proofBindingWalkPtr_ast_IsAliasExpr(p *ast.IsAliasExpr, visit func(any, ref
 
 func proofBindingWalkVal_ast_IsAliasExpr(p *ast.IsAliasExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5274,7 +5868,9 @@ func proofBindingWalkVal_ast_IsAliasExpr(p *ast.IsAliasExpr, visit func(any, ref
 			proofBindingWalkReflect(reflect.ValueOf(p.Target), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.IsAliasExpr](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	if retainedLocalGensymName(string(p.Alias)) {
+		visit(p, reflect.TypeFor[ast.IsAliasExpr](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_IsPatternExpr(p *ast.IsPatternExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5291,7 +5887,9 @@ func proofBindingWalkPtr_ast_IsPatternExpr(p *ast.IsPatternExpr, visit func(any,
 
 func proofBindingWalkVal_ast_IsPatternExpr(p *ast.IsPatternExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5318,7 +5916,9 @@ func proofBindingWalkPtr_ast_IterForStmt(p *ast.IterForStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_IterForStmt(p *ast.IterForStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5337,7 +5937,9 @@ func proofBindingWalkVal_ast_IterForStmt(p *ast.IterForStmt, visit func(any, ref
 			proofBindingWalkReflect(reflect.ValueOf(p.PatternFilter), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.IterForStmt](), nil, proofBindingVisitStringField, "PatternFilterSubject", string(p.PatternFilterSubject), true)
+	if retainedLocalGensymName(string(p.PatternFilterSubject)) {
+		visit(p, reflect.TypeFor[ast.IterForStmt](), nil, proofBindingVisitStringField, "PatternFilterSubject", string(p.PatternFilterSubject), true)
+	}
 	if p.WhereFilter != nil {
 		if !proofBindingWalkAny(p.WhereFilter, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.WhereFilter), visit, seen, owner)
@@ -5385,11 +5987,15 @@ func proofBindingWalkPtr_ast_KeywordMapDecl(p *ast.KeywordMapDecl, visit func(an
 
 func proofBindingWalkVal_ast_KeywordMapDecl(p *ast.KeywordMapDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.KeywordMapDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.KeywordMapDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.InputType != nil {
 		if !proofBindingWalkAny(p.InputType, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.InputType), visit, seen, owner)
@@ -5424,11 +6030,15 @@ func proofBindingWalkPtr_ast_KeywordMapEntry(p *ast.KeywordMapEntry, visit func(
 
 func proofBindingWalkVal_ast_KeywordMapEntry(p *ast.KeywordMapEntry, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.KeywordMapEntry](), nil, proofBindingVisitStringField, "Text", string(p.Text), true)
+	if retainedLocalGensymName(string(p.Text)) {
+		visit(p, reflect.TypeFor[ast.KeywordMapEntry](), nil, proofBindingVisitStringField, "Text", string(p.Text), true)
+	}
 	if p.Value != nil {
 		if !proofBindingWalkAny(p.Value, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
@@ -5450,11 +6060,15 @@ func proofBindingWalkPtr_ast_LambdaExpr(p *ast.LambdaExpr, visit func(any, refle
 
 func proofBindingWalkVal_ast_LambdaExpr(p *ast.LambdaExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LambdaExpr](), nil, proofBindingVisitStringField, "Keyword", string(p.Keyword), true)
+	if retainedLocalGensymName(string(p.Keyword)) {
+		visit(p, reflect.TypeFor[ast.LambdaExpr](), nil, proofBindingVisitStringField, "Keyword", string(p.Keyword), true)
+	}
 	for i0 := range p.Params {
 		proofBindingWalkVal_ast_ParamDecl(&p.Params[i0], visit, seen, owner)
 	}
@@ -5493,11 +6107,15 @@ func proofBindingWalkPtr_ast_LayoutDecl(p *ast.LayoutDecl, visit func(any, refle
 
 func proofBindingWalkVal_ast_LayoutDecl(p *ast.LayoutDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LayoutDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LayoutDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Fields {
 		proofBindingWalkVal_ast_LayoutFieldDecl(&p.Fields[i0], visit, seen, owner)
 	}
@@ -5517,12 +6135,18 @@ func proofBindingWalkPtr_ast_LayoutFieldDecl(p *ast.LayoutFieldDecl, visit func(
 
 func proofBindingWalkVal_ast_LayoutFieldDecl(p *ast.LayoutFieldDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LayoutFieldDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.LayoutFieldDecl](), nil, proofBindingVisitStringField, "Type", string(p.Type), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LayoutFieldDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Type)) {
+		visit(p, reflect.TypeFor[ast.LayoutFieldDecl](), nil, proofBindingVisitStringField, "Type", string(p.Type), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LeakStmt(p *ast.LeakStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5539,11 +6163,15 @@ func proofBindingWalkPtr_ast_LeakStmt(p *ast.LeakStmt, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_LeakStmt(p *ast.LeakStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LeakStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LeakStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LetDestructureStmt(p *ast.LetDestructureStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5560,7 +6188,9 @@ func proofBindingWalkPtr_ast_LetDestructureStmt(p *ast.LetDestructureStmt, visit
 
 func proofBindingWalkVal_ast_LetDestructureStmt(p *ast.LetDestructureStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5586,11 +6216,15 @@ func proofBindingWalkPtr_ast_LexerCharClassDecl(p *ast.LexerCharClassDecl, visit
 
 func proofBindingWalkVal_ast_LexerCharClassDecl(p *ast.LexerCharClassDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerCharClassDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LexerCharClassDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Terms {
 		proofBindingWalkVal_ast_LexerCharClassTerm(&p.Terms[i0], visit, seen, owner)
 	}
@@ -5610,13 +6244,21 @@ func proofBindingWalkPtr_ast_LexerCharClassTerm(p *ast.LexerCharClassTerm, visit
 
 func proofBindingWalkVal_ast_LexerCharClassTerm(p *ast.LexerCharClassTerm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerCharClassTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.LexerCharClassTerm](), nil, proofBindingVisitStringField, "Start", string(p.Start), true)
-	visit(p, reflect.TypeFor[ast.LexerCharClassTerm](), nil, proofBindingVisitStringField, "End", string(p.End), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LexerCharClassTerm](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Start)) {
+		visit(p, reflect.TypeFor[ast.LexerCharClassTerm](), nil, proofBindingVisitStringField, "Start", string(p.Start), true)
+	}
+	if retainedLocalGensymName(string(p.End)) {
+		visit(p, reflect.TypeFor[ast.LexerCharClassTerm](), nil, proofBindingVisitStringField, "End", string(p.End), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LexerDecl(p *ast.LexerDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5635,19 +6277,29 @@ func proofBindingWalkPtr_ast_LexerDecl(p *ast.LexerDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_LexerDecl(p *ast.LexerDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.TokenKindType != nil {
 		if !proofBindingWalkAny(p.TokenKindType, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.TokenKindType), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "ModeEnumName", string(p.ModeEnumName), true)
-	visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "GrammarName", string(p.GrammarName), true)
-	visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "KeywordCompareFunc", string(p.KeywordCompareFunc), true)
+	if retainedLocalGensymName(string(p.ModeEnumName)) {
+		visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "ModeEnumName", string(p.ModeEnumName), true)
+	}
+	if retainedLocalGensymName(string(p.GrammarName)) {
+		visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "GrammarName", string(p.GrammarName), true)
+	}
+	if retainedLocalGensymName(string(p.KeywordCompareFunc)) {
+		visit(p, reflect.TypeFor[ast.LexerDecl](), nil, proofBindingVisitStringField, "KeywordCompareFunc", string(p.KeywordCompareFunc), true)
+	}
 	for i0 := range p.Modes {
 		proofBindingWalkVal_ast_LexerModeDecl(&p.Modes[i0], visit, seen, owner)
 	}
@@ -5672,11 +6324,15 @@ func proofBindingWalkPtr_ast_LexerKeywordDecl(p *ast.LexerKeywordDecl, visit fun
 
 func proofBindingWalkVal_ast_LexerKeywordDecl(p *ast.LexerKeywordDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerKeywordDecl](), nil, proofBindingVisitStringField, "Fallback", string(p.Fallback), true)
+	if retainedLocalGensymName(string(p.Fallback)) {
+		visit(p, reflect.TypeFor[ast.LexerKeywordDecl](), nil, proofBindingVisitStringField, "Fallback", string(p.Fallback), true)
+	}
 	for i0 := range p.Entries {
 		proofBindingWalkVal_ast_LexerKeywordEntry(&p.Entries[i0], visit, seen, owner)
 	}
@@ -5696,12 +6352,18 @@ func proofBindingWalkPtr_ast_LexerKeywordEntry(p *ast.LexerKeywordEntry, visit f
 
 func proofBindingWalkVal_ast_LexerKeywordEntry(p *ast.LexerKeywordEntry, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerKeywordEntry](), nil, proofBindingVisitStringField, "Text", string(p.Text), true)
-	visit(p, reflect.TypeFor[ast.LexerKeywordEntry](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	if retainedLocalGensymName(string(p.Text)) {
+		visit(p, reflect.TypeFor[ast.LexerKeywordEntry](), nil, proofBindingVisitStringField, "Text", string(p.Text), true)
+	}
+	if retainedLocalGensymName(string(p.Kind)) {
+		visit(p, reflect.TypeFor[ast.LexerKeywordEntry](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LexerLiteralDecl(p *ast.LexerLiteralDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5718,11 +6380,15 @@ func proofBindingWalkPtr_ast_LexerLiteralDecl(p *ast.LexerLiteralDecl, visit fun
 
 func proofBindingWalkVal_ast_LexerLiteralDecl(p *ast.LexerLiteralDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerLiteralDecl](), nil, proofBindingVisitStringField, "Fallback", string(p.Fallback), true)
+	if retainedLocalGensymName(string(p.Fallback)) {
+		visit(p, reflect.TypeFor[ast.LexerLiteralDecl](), nil, proofBindingVisitStringField, "Fallback", string(p.Fallback), true)
+	}
 	for i0 := range p.Entries {
 		proofBindingWalkVal_ast_LexerLiteralEntry(&p.Entries[i0], visit, seen, owner)
 	}
@@ -5742,12 +6408,18 @@ func proofBindingWalkPtr_ast_LexerLiteralEntry(p *ast.LexerLiteralEntry, visit f
 
 func proofBindingWalkVal_ast_LexerLiteralEntry(p *ast.LexerLiteralEntry, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerLiteralEntry](), nil, proofBindingVisitStringField, "Text", string(p.Text), true)
-	visit(p, reflect.TypeFor[ast.LexerLiteralEntry](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	if retainedLocalGensymName(string(p.Text)) {
+		visit(p, reflect.TypeFor[ast.LexerLiteralEntry](), nil, proofBindingVisitStringField, "Text", string(p.Text), true)
+	}
+	if retainedLocalGensymName(string(p.Kind)) {
+		visit(p, reflect.TypeFor[ast.LexerLiteralEntry](), nil, proofBindingVisitStringField, "Kind", string(p.Kind), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LexerModeDecl(p *ast.LexerModeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5764,11 +6436,15 @@ func proofBindingWalkPtr_ast_LexerModeDecl(p *ast.LexerModeDecl, visit func(any,
 
 func proofBindingWalkVal_ast_LexerModeDecl(p *ast.LexerModeDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LexerModeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LexerModeDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ListComprehensionExpr(p *ast.ListComprehensionExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5785,7 +6461,9 @@ func proofBindingWalkPtr_ast_ListComprehensionExpr(p *ast.ListComprehensionExpr,
 
 func proofBindingWalkVal_ast_ListComprehensionExpr(p *ast.ListComprehensionExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5794,8 +6472,12 @@ func proofBindingWalkVal_ast_ListComprehensionExpr(p *ast.ListComprehensionExpr,
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.ListComprehensionExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.ListComprehensionExpr](), nil, proofBindingVisitStringField, "SecondName", string(p.SecondName), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ListComprehensionExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.SecondName)) {
+		visit(p, reflect.TypeFor[ast.ListComprehensionExpr](), nil, proofBindingVisitStringField, "SecondName", string(p.SecondName), true)
+	}
 	if p.Source != nil {
 		if !proofBindingWalkAny(p.Source, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Source), visit, seen, owner)
@@ -5854,7 +6536,9 @@ func proofBindingWalkPtr_ast_ListLitExpr(p *ast.ListLitExpr, visit func(any, ref
 
 func proofBindingWalkVal_ast_ListLitExpr(p *ast.ListLitExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5893,11 +6577,15 @@ func proofBindingWalkPtr_ast_LmutRebindClaim(p *ast.LmutRebindClaim, visit func(
 
 func proofBindingWalkVal_ast_LmutRebindClaim(p *ast.LmutRebindClaim, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.LmutRebindClaim](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.LmutRebindClaim](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LmutThreadSlot(p *ast.LmutThreadSlot, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5913,7 +6601,9 @@ func proofBindingWalkPtr_ast_LmutThreadSlot(p *ast.LmutThreadSlot, visit func(an
 }
 
 func proofBindingWalkVal_ast_LmutThreadSlot(p *ast.LmutThreadSlot, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
-	visit(p, reflect.TypeFor[ast.LmutThreadSlot](), nil, proofBindingVisitStringField, "ParamName", string(p.ParamName), true)
+	if retainedLocalGensymName(string(p.ParamName)) {
+		visit(p, reflect.TypeFor[ast.LmutThreadSlot](), nil, proofBindingVisitStringField, "ParamName", string(p.ParamName), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_LockStmt(p *ast.LockStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -5930,7 +6620,9 @@ func proofBindingWalkPtr_ast_LockStmt(p *ast.LockStmt, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_LockStmt(p *ast.LockStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -5939,7 +6631,9 @@ func proofBindingWalkVal_ast_LockStmt(p *ast.LockStmt, visit func(any, reflect.T
 			proofBindingWalkReflect(reflect.ValueOf(p.Mutex), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.LockStmt](), nil, proofBindingVisitStringField, "GuardName", string(p.GuardName), true)
+	if retainedLocalGensymName(string(p.GuardName)) {
+		visit(p, reflect.TypeFor[ast.LockStmt](), nil, proofBindingVisitStringField, "GuardName", string(p.GuardName), true)
+	}
 	for i0 := range p.Body {
 		if p.Body[i0] != nil {
 			if !proofBindingWalkAny(p.Body[i0], visit, seen, owner) {
@@ -5963,13 +6657,19 @@ func proofBindingWalkPtr_ast_MachineCoverageState(p *ast.MachineCoverageState, v
 
 func proofBindingWalkVal_ast_MachineCoverageState(p *ast.MachineCoverageState, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MachineCoverageState](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MachineCoverageState](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Tags {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Tags[i0]), false)
+		if retainedLocalGensymName(string(p.Tags[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Tags[i0]), false)
+		}
 	}
 }
 
@@ -5987,7 +6687,9 @@ func proofBindingWalkPtr_ast_MachineCoverageStmt(p *ast.MachineCoverageStmt, vis
 
 func proofBindingWalkVal_ast_MachineCoverageStmt(p *ast.MachineCoverageStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6015,16 +6717,24 @@ func proofBindingWalkPtr_ast_MachineFromArm(p *ast.MachineFromArm, visit func(an
 
 func proofBindingWalkVal_ast_MachineFromArm(p *ast.MachineFromArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MachineFromArm](), nil, proofBindingVisitStringField, "State", string(p.State), true)
+	if retainedLocalGensymName(string(p.State)) {
+		visit(p, reflect.TypeFor[ast.MachineFromArm](), nil, proofBindingVisitStringField, "State", string(p.State), true)
+	}
 	for i0 := range p.Bindings {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Bindings[i0]), false)
+		if retainedLocalGensymName(string(p.Bindings[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Bindings[i0]), false)
+		}
 	}
 	for i0 := range p.DeclaredOut {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.DeclaredOut[i0]), false)
+		if retainedLocalGensymName(string(p.DeclaredOut[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.DeclaredOut[i0]), false)
+		}
 	}
 	for i0 := range p.Body {
 		if p.Body[i0] != nil {
@@ -6052,12 +6762,18 @@ func proofBindingWalkPtr_ast_MachineFromExpr(p *ast.MachineFromExpr, visit func(
 
 func proofBindingWalkVal_ast_MachineFromExpr(p *ast.MachineFromExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MachineFromExpr](), nil, proofBindingVisitStringField, "StartEnum", string(p.StartEnum), true)
-	visit(p, reflect.TypeFor[ast.MachineFromExpr](), nil, proofBindingVisitStringField, "StartState", string(p.StartState), true)
+	if retainedLocalGensymName(string(p.StartEnum)) {
+		visit(p, reflect.TypeFor[ast.MachineFromExpr](), nil, proofBindingVisitStringField, "StartEnum", string(p.StartEnum), true)
+	}
+	if retainedLocalGensymName(string(p.StartState)) {
+		visit(p, reflect.TypeFor[ast.MachineFromExpr](), nil, proofBindingVisitStringField, "StartState", string(p.StartState), true)
+	}
 	for i0 := range p.StartArgs {
 		if p.StartArgs[i0] != nil {
 			if !proofBindingWalkAny(p.StartArgs[i0], visit, seen, owner) {
@@ -6078,7 +6794,9 @@ func proofBindingWalkVal_ast_MachineFromExpr(p *ast.MachineFromExpr, visit func(
 		}
 	}
 	for i0 := range p.HeaderCaptures {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.HeaderCaptures[i0]), false)
+		if retainedLocalGensymName(string(p.HeaderCaptures[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.HeaderCaptures[i0]), false)
+		}
 	}
 	for i0 := range p.Arms {
 		proofBindingWalkVal_ast_MachineFromArm(&p.Arms[i0], visit, seen, owner)
@@ -6104,11 +6822,15 @@ func proofBindingWalkPtr_ast_MachineFromTerminator(p *ast.MachineFromTerminator,
 
 func proofBindingWalkVal_ast_MachineFromTerminator(p *ast.MachineFromTerminator, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MachineFromTerminator](), nil, proofBindingVisitStringField, "Target", string(p.Target), true)
+	if retainedLocalGensymName(string(p.Target)) {
+		visit(p, reflect.TypeFor[ast.MachineFromTerminator](), nil, proofBindingVisitStringField, "Target", string(p.Target), true)
+	}
 	for i0 := range p.Args {
 		if p.Args[i0] != nil {
 			if !proofBindingWalkAny(p.Args[i0], visit, seen, owner) {
@@ -6142,12 +6864,18 @@ func proofBindingWalkPtr_ast_MarkStmt(p *ast.MarkStmt, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_MarkStmt(p *ast.MarkStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MarkStmt](), nil, proofBindingVisitStringField, "RegionName", string(p.RegionName), true)
-	visit(p, reflect.TypeFor[ast.MarkStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.RegionName)) {
+		visit(p, reflect.TypeFor[ast.MarkStmt](), nil, proofBindingVisitStringField, "RegionName", string(p.RegionName), true)
+	}
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MarkStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MatchArm(p *ast.MatchArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6164,7 +6892,9 @@ func proofBindingWalkPtr_ast_MatchArm(p *ast.MatchArm, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_MatchArm(p *ast.MatchArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6201,12 +6931,18 @@ func proofBindingWalkPtr_ast_MatchBindPattern(p *ast.MatchBindPattern, visit fun
 
 func proofBindingWalkVal_ast_MatchBindPattern(p *ast.MatchBindPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchBindPattern](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.MatchBindPattern](), nil, proofBindingVisitStringField, "Binder", string(p.Binder), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MatchBindPattern](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Binder)) {
+		visit(p, reflect.TypeFor[ast.MatchBindPattern](), nil, proofBindingVisitStringField, "Binder", string(p.Binder), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MatchExpr(p *ast.MatchExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6223,7 +6959,9 @@ func proofBindingWalkPtr_ast_MatchExpr(p *ast.MatchExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_MatchExpr(p *ast.MatchExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6256,7 +6994,9 @@ func proofBindingWalkPtr_ast_MatchListPattern(p *ast.MatchListPattern, visit fun
 
 func proofBindingWalkVal_ast_MatchListPattern(p *ast.MatchListPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6283,7 +7023,9 @@ func proofBindingWalkPtr_ast_MatchLiteralPattern(p *ast.MatchLiteralPattern, vis
 
 func proofBindingWalkVal_ast_MatchLiteralPattern(p *ast.MatchLiteralPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6308,7 +7050,9 @@ func proofBindingWalkPtr_ast_MatchOrPattern(p *ast.MatchOrPattern, visit func(an
 
 func proofBindingWalkVal_ast_MatchOrPattern(p *ast.MatchOrPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6335,11 +7079,15 @@ func proofBindingWalkPtr_ast_MatchPatternArg(p *ast.MatchPatternArg, visit func(
 
 func proofBindingWalkVal_ast_MatchPatternArg(p *ast.MatchPatternArg, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchPatternArg](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MatchPatternArg](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Pattern != nil {
 		if !proofBindingWalkAny(p.Pattern, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Pattern), visit, seen, owner)
@@ -6361,7 +7109,9 @@ func proofBindingWalkPtr_ast_MatchRangePattern(p *ast.MatchRangePattern, visit f
 
 func proofBindingWalkVal_ast_MatchRangePattern(p *ast.MatchRangePattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6391,11 +7141,15 @@ func proofBindingWalkPtr_ast_MatchRestPattern(p *ast.MatchRestPattern, visit fun
 
 func proofBindingWalkVal_ast_MatchRestPattern(p *ast.MatchRestPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchRestPattern](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MatchRestPattern](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MatchStmt(p *ast.MatchStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6412,7 +7166,9 @@ func proofBindingWalkPtr_ast_MatchStmt(p *ast.MatchStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_MatchStmt(p *ast.MatchStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6445,11 +7201,15 @@ func proofBindingWalkPtr_ast_MatchStringLiteralPattern(p *ast.MatchStringLiteral
 
 func proofBindingWalkVal_ast_MatchStringLiteralPattern(p *ast.MatchStringLiteralPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchStringLiteralPattern](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	if retainedLocalGensymName(string(p.Value)) {
+		visit(p, reflect.TypeFor[ast.MatchStringLiteralPattern](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MatchStructPattern(p *ast.MatchStructPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6466,18 +7226,24 @@ func proofBindingWalkPtr_ast_MatchStructPattern(p *ast.MatchStructPattern, visit
 
 func proofBindingWalkVal_ast_MatchStructPattern(p *ast.MatchStructPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchStructPattern](), nil, proofBindingVisitStringField, "TypeName", string(p.TypeName), true)
+	if retainedLocalGensymName(string(p.TypeName)) {
+		visit(p, reflect.TypeFor[ast.MatchStructPattern](), nil, proofBindingVisitStringField, "TypeName", string(p.TypeName), true)
+	}
 	for i0 := range p.Args {
 		proofBindingWalkVal_ast_MatchPatternArg(&p.Args[i0], visit, seen, owner)
 	}
 	for i0 := range p.ResolvedArgs {
 		proofBindingWalkPtr_ast_MatchPatternArg(p.ResolvedArgs[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchStructPattern](), nil, proofBindingVisitStringField, "As", string(p.As), true)
+	if retainedLocalGensymName(string(p.As)) {
+		visit(p, reflect.TypeFor[ast.MatchStructPattern](), nil, proofBindingVisitStringField, "As", string(p.As), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MatchTuplePattern(p *ast.MatchTuplePattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6494,7 +7260,9 @@ func proofBindingWalkPtr_ast_MatchTuplePattern(p *ast.MatchTuplePattern, visit f
 
 func proofBindingWalkVal_ast_MatchTuplePattern(p *ast.MatchTuplePattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6521,19 +7289,27 @@ func proofBindingWalkPtr_ast_MatchVariantPattern(p *ast.MatchVariantPattern, vis
 
 func proofBindingWalkVal_ast_MatchVariantPattern(p *ast.MatchVariantPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchVariantPattern](), nil, proofBindingVisitStringField, "EnumName", string(p.EnumName), true)
-	visit(p, reflect.TypeFor[ast.MatchVariantPattern](), nil, proofBindingVisitStringField, "Variant", string(p.Variant), true)
+	if retainedLocalGensymName(string(p.EnumName)) {
+		visit(p, reflect.TypeFor[ast.MatchVariantPattern](), nil, proofBindingVisitStringField, "EnumName", string(p.EnumName), true)
+	}
+	if retainedLocalGensymName(string(p.Variant)) {
+		visit(p, reflect.TypeFor[ast.MatchVariantPattern](), nil, proofBindingVisitStringField, "Variant", string(p.Variant), true)
+	}
 	for i0 := range p.Args {
 		proofBindingWalkVal_ast_MatchPatternArg(&p.Args[i0], visit, seen, owner)
 	}
 	for i0 := range p.ResolvedArgs {
 		proofBindingWalkPtr_ast_MatchPatternArg(p.ResolvedArgs[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MatchVariantPattern](), nil, proofBindingVisitStringField, "As", string(p.As), true)
+	if retainedLocalGensymName(string(p.As)) {
+		visit(p, reflect.TypeFor[ast.MatchVariantPattern](), nil, proofBindingVisitStringField, "As", string(p.As), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MatchWildcardPattern(p *ast.MatchWildcardPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6550,7 +7326,9 @@ func proofBindingWalkPtr_ast_MatchWildcardPattern(p *ast.MatchWildcardPattern, v
 
 func proofBindingWalkVal_ast_MatchWildcardPattern(p *ast.MatchWildcardPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6570,7 +7348,9 @@ func proofBindingWalkPtr_ast_MembershipRangeExpr(p *ast.MembershipRangeExpr, vis
 
 func proofBindingWalkVal_ast_MembershipRangeExpr(p *ast.MembershipRangeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6600,12 +7380,18 @@ func proofBindingWalkPtr_ast_MoveBindArg(p *ast.MoveBindArg, visit func(any, ref
 
 func proofBindingWalkVal_ast_MoveBindArg(p *ast.MoveBindArg, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MoveBindArg](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
-	visit(p, reflect.TypeFor[ast.MoveBindArg](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Field)) {
+		visit(p, reflect.TypeFor[ast.MoveBindArg](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	}
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MoveBindArg](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MoveBindNamePattern(p *ast.MoveBindNamePattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6622,11 +7408,15 @@ func proofBindingWalkPtr_ast_MoveBindNamePattern(p *ast.MoveBindNamePattern, vis
 
 func proofBindingWalkVal_ast_MoveBindNamePattern(p *ast.MoveBindNamePattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MoveBindNamePattern](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.MoveBindNamePattern](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_MoveBindStmt(p *ast.MoveBindStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6643,7 +7433,9 @@ func proofBindingWalkPtr_ast_MoveBindStmt(p *ast.MoveBindStmt, visit func(any, r
 
 func proofBindingWalkVal_ast_MoveBindStmt(p *ast.MoveBindStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6678,11 +7470,15 @@ func proofBindingWalkPtr_ast_MoveBindStructPattern(p *ast.MoveBindStructPattern,
 
 func proofBindingWalkVal_ast_MoveBindStructPattern(p *ast.MoveBindStructPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MoveBindStructPattern](), nil, proofBindingVisitStringField, "TypeName", string(p.TypeName), true)
+	if retainedLocalGensymName(string(p.TypeName)) {
+		visit(p, reflect.TypeFor[ast.MoveBindStructPattern](), nil, proofBindingVisitStringField, "TypeName", string(p.TypeName), true)
+	}
 	for i0 := range p.Args {
 		proofBindingWalkVal_ast_MoveBindArg(&p.Args[i0], visit, seen, owner)
 	}
@@ -6702,7 +7498,9 @@ func proofBindingWalkPtr_ast_MoveBindTuplePattern(p *ast.MoveBindTuplePattern, v
 
 func proofBindingWalkVal_ast_MoveBindTuplePattern(p *ast.MoveBindTuplePattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6725,12 +7523,18 @@ func proofBindingWalkPtr_ast_MoveBindVariantPattern(p *ast.MoveBindVariantPatter
 
 func proofBindingWalkVal_ast_MoveBindVariantPattern(p *ast.MoveBindVariantPattern, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.MoveBindVariantPattern](), nil, proofBindingVisitStringField, "EnumName", string(p.EnumName), true)
-	visit(p, reflect.TypeFor[ast.MoveBindVariantPattern](), nil, proofBindingVisitStringField, "Variant", string(p.Variant), true)
+	if retainedLocalGensymName(string(p.EnumName)) {
+		visit(p, reflect.TypeFor[ast.MoveBindVariantPattern](), nil, proofBindingVisitStringField, "EnumName", string(p.EnumName), true)
+	}
+	if retainedLocalGensymName(string(p.Variant)) {
+		visit(p, reflect.TypeFor[ast.MoveBindVariantPattern](), nil, proofBindingVisitStringField, "Variant", string(p.Variant), true)
+	}
 	for i0 := range p.Args {
 		proofBindingWalkVal_ast_MatchPatternArg(&p.Args[i0], visit, seen, owner)
 	}
@@ -6750,7 +7554,9 @@ func proofBindingWalkPtr_ast_MoveExpr(p *ast.MoveExpr, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_MoveExpr(p *ast.MoveExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6775,7 +7581,9 @@ func proofBindingWalkPtr_ast_MutableType(p *ast.MutableType, visit func(any, ref
 
 func proofBindingWalkVal_ast_MutableType(p *ast.MutableType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6800,13 +7608,21 @@ func proofBindingWalkPtr_ast_NamedType(p *ast.NamedType, visit func(any, reflect
 
 func proofBindingWalkVal_ast_NamedType(p *ast.NamedType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.NamedType](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.NamedType](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
-	visit(p, reflect.TypeFor[ast.NamedType](), nil, proofBindingVisitStringField, "Spelling", string(p.Spelling), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.NamedType](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Region)) {
+		visit(p, reflect.TypeFor[ast.NamedType](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	}
+	if retainedLocalGensymName(string(p.Spelling)) {
+		visit(p, reflect.TypeFor[ast.NamedType](), nil, proofBindingVisitStringField, "Spelling", string(p.Spelling), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_NamespaceDecl(p *ast.NamespaceDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6825,11 +7641,15 @@ func proofBindingWalkPtr_ast_NamespaceDecl(p *ast.NamespaceDecl, visit func(any,
 
 func proofBindingWalkVal_ast_NamespaceDecl(p *ast.NamespaceDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.NamespaceDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.NamespaceDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Decls {
 		if p.Decls[i0] != nil {
 			if !proofBindingWalkAny(p.Decls[i0], visit, seen, owner) {
@@ -6853,7 +7673,9 @@ func proofBindingWalkPtr_ast_NullLit(p *ast.NullLit, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_NullLit(p *ast.NullLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6873,7 +7695,9 @@ func proofBindingWalkPtr_ast_OffsetofExpr(p *ast.OffsetofExpr, visit func(any, r
 
 func proofBindingWalkVal_ast_OffsetofExpr(p *ast.OffsetofExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6882,7 +7706,9 @@ func proofBindingWalkVal_ast_OffsetofExpr(p *ast.OffsetofExpr, visit func(any, r
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.OffsetofExpr](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	if retainedLocalGensymName(string(p.Field)) {
+		visit(p, reflect.TypeFor[ast.OffsetofExpr](), nil, proofBindingVisitStringField, "Field", string(p.Field), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_OptionalBindExpr(p *ast.OptionalBindExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -6899,11 +7725,15 @@ func proofBindingWalkPtr_ast_OptionalBindExpr(p *ast.OptionalBindExpr, visit fun
 
 func proofBindingWalkVal_ast_OptionalBindExpr(p *ast.OptionalBindExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.OptionalBindExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.OptionalBindExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Value != nil {
 		if !proofBindingWalkAny(p.Value, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
@@ -6925,7 +7755,9 @@ func proofBindingWalkPtr_ast_OptionalTypeExpr(p *ast.OptionalTypeExpr, visit fun
 
 func proofBindingWalkVal_ast_OptionalTypeExpr(p *ast.OptionalTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6950,7 +7782,9 @@ func proofBindingWalkPtr_ast_OwnedType(p *ast.OwnedType, visit func(any, reflect
 
 func proofBindingWalkVal_ast_OwnedType(p *ast.OwnedType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -6975,7 +7809,9 @@ func proofBindingWalkPtr_ast_PanicStmt(p *ast.PanicStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_PanicStmt(p *ast.PanicStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7000,12 +7836,18 @@ func proofBindingWalkPtr_ast_ParallelForStmt(p *ast.ParallelForStmt, visit func(
 
 func proofBindingWalkVal_ast_ParallelForStmt(p *ast.ParallelForStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ParallelForStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.ParallelForStmt](), nil, proofBindingVisitStringField, "IndexName", string(p.IndexName), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ParallelForStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.IndexName)) {
+		visit(p, reflect.TypeFor[ast.ParallelForStmt](), nil, proofBindingVisitStringField, "IndexName", string(p.IndexName), true)
+	}
 	if p.Source != nil {
 		if !proofBindingWalkAny(p.Source, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Source), visit, seen, owner)
@@ -7034,11 +7876,15 @@ func proofBindingWalkPtr_ast_ParamContract(p *ast.ParamContract, visit func(any,
 
 func proofBindingWalkVal_ast_ParamContract(p *ast.ParamContract, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ParamContract](), nil, proofBindingVisitStringField, "Param", string(p.Param), true)
+	if retainedLocalGensymName(string(p.Param)) {
+		visit(p, reflect.TypeFor[ast.ParamContract](), nil, proofBindingVisitStringField, "Param", string(p.Param), true)
+	}
 	if p.Pred != nil {
 		if !proofBindingWalkAny(p.Pred, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Pred), visit, seen, owner)
@@ -7060,11 +7906,15 @@ func proofBindingWalkPtr_ast_ParamDecl(p *ast.ParamDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ParamDecl(p *ast.ParamDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ParamDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ParamDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -7091,7 +7941,9 @@ func proofBindingWalkPtr_ast_ParenExpr(p *ast.ParenExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ParenExpr(p *ast.ParenExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7116,7 +7968,9 @@ func proofBindingWalkPtr_ast_PassStmt(p *ast.PassStmt, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_PassStmt(p *ast.PassStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7138,16 +7992,24 @@ func proofBindingWalkPtr_ast_PermissionDecl(p *ast.PermissionDecl, visit func(an
 
 func proofBindingWalkVal_ast_PermissionDecl(p *ast.PermissionDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.PermissionDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.PermissionDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Members {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Members[i0]), false)
+		if retainedLocalGensymName(string(p.Members[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Members[i0]), false)
+		}
 	}
 	for i0 := range p.Includes {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Includes[i0]), false)
+		if retainedLocalGensymName(string(p.Includes[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Includes[i0]), false)
+		}
 	}
 }
 
@@ -7165,12 +8027,18 @@ func proofBindingWalkPtr_ast_PermissionRef(p *ast.PermissionRef, visit func(any,
 
 func proofBindingWalkVal_ast_PermissionRef(p *ast.PermissionRef, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.PermissionRef](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.PermissionRef](), nil, proofBindingVisitStringField, "Member", string(p.Member), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.PermissionRef](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Member)) {
+		visit(p, reflect.TypeFor[ast.PermissionRef](), nil, proofBindingVisitStringField, "Member", string(p.Member), true)
+	}
 	for i0 := range p.TypeArgs {
 		if p.TypeArgs[i0] != nil {
 			if !proofBindingWalkAny(p.TypeArgs[i0], visit, seen, owner) {
@@ -7197,11 +8065,15 @@ func proofBindingWalkPtr_ast_PoolStmt(p *ast.PoolStmt, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_PoolStmt(p *ast.PoolStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.PoolStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.PoolStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Workers != nil {
 		if !proofBindingWalkAny(p.Workers, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Workers), visit, seen, owner)
@@ -7214,7 +8086,9 @@ func proofBindingWalkVal_ast_PoolStmt(p *ast.PoolStmt, visit func(any, reflect.T
 			}
 		}
 	}
-	visit(p, reflect.TypeFor[ast.PoolStmt](), nil, proofBindingVisitStringField, "BorrowedPool", string(p.BorrowedPool), true)
+	if retainedLocalGensymName(string(p.BorrowedPool)) {
+		visit(p, reflect.TypeFor[ast.PoolStmt](), nil, proofBindingVisitStringField, "BorrowedPool", string(p.BorrowedPool), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_PromoteStmt(p *ast.PromoteStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -7231,7 +8105,9 @@ func proofBindingWalkPtr_ast_PromoteStmt(p *ast.PromoteStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_PromoteStmt(p *ast.PromoteStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7240,7 +8116,9 @@ func proofBindingWalkVal_ast_PromoteStmt(p *ast.PromoteStmt, visit func(any, ref
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.PromoteStmt](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	if retainedLocalGensymName(string(p.Region)) {
+		visit(p, reflect.TypeFor[ast.PromoteStmt](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ProofBlockStmt(p *ast.ProofBlockStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -7257,7 +8135,9 @@ func proofBindingWalkPtr_ast_ProofBlockStmt(p *ast.ProofBlockStmt, visit func(an
 
 func proofBindingWalkVal_ast_ProofBlockStmt(p *ast.ProofBlockStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7289,7 +8169,9 @@ func proofBindingWalkPtr_ast_ProofUseStmt(p *ast.ProofUseStmt, visit func(any, r
 
 func proofBindingWalkVal_ast_ProofUseStmt(p *ast.ProofUseStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7316,12 +8198,16 @@ func proofBindingWalkPtr_ast_QuantifierExpr(p *ast.QuantifierExpr, visit func(an
 
 func proofBindingWalkVal_ast_QuantifierExpr(p *ast.QuantifierExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Vars {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Vars[i0]), false)
+		if retainedLocalGensymName(string(p.Vars[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Vars[i0]), false)
+		}
 	}
 	if p.In != nil {
 		if !proofBindingWalkAny(p.In, visit, seen, owner) {
@@ -7349,11 +8235,15 @@ func proofBindingWalkPtr_ast_QueryExpr(p *ast.QueryExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_QueryExpr(p *ast.QueryExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.QueryExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.QueryExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Pattern != nil {
 		if !proofBindingWalkAny(p.Pattern, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Pattern), visit, seen, owner)
@@ -7374,7 +8264,9 @@ func proofBindingWalkVal_ast_QueryExpr(p *ast.QueryExpr, visit func(any, reflect
 			proofBindingWalkReflect(reflect.ValueOf(p.PatternFilter), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.QueryExpr](), nil, proofBindingVisitStringField, "PatternFilterSubject", string(p.PatternFilterSubject), true)
+	if retainedLocalGensymName(string(p.PatternFilterSubject)) {
+		visit(p, reflect.TypeFor[ast.QueryExpr](), nil, proofBindingVisitStringField, "PatternFilterSubject", string(p.PatternFilterSubject), true)
+	}
 	if p.Projection != nil {
 		if !proofBindingWalkAny(p.Projection, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Projection), visit, seen, owner)
@@ -7401,7 +8293,9 @@ func proofBindingWalkPtr_ast_RaiseExpr(p *ast.RaiseExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_RaiseExpr(p *ast.RaiseExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7426,7 +8320,9 @@ func proofBindingWalkPtr_ast_RecordUpdateExpr(p *ast.RecordUpdateExpr, visit fun
 
 func proofBindingWalkVal_ast_RecordUpdateExpr(p *ast.RecordUpdateExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7443,7 +8339,9 @@ func proofBindingWalkVal_ast_RecordUpdateExpr(p *ast.RecordUpdateExpr, visit fun
 		}
 	}
 	for i0 := range p.ArgNames {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.ArgNames[i0]), false)
+		if retainedLocalGensymName(string(p.ArgNames[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.ArgNames[i0]), false)
+		}
 	}
 	for i0 := range p.ResolvedArgs {
 		if p.ResolvedArgs[i0] != nil {
@@ -7468,7 +8366,9 @@ func proofBindingWalkPtr_ast_RecoveryClause(p *ast.RecoveryClause, visit func(an
 
 func proofBindingWalkVal_ast_RecoveryClause(p *ast.RecoveryClause, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7477,7 +8377,9 @@ func proofBindingWalkVal_ast_RecoveryClause(p *ast.RecoveryClause, visit func(an
 			proofBindingWalkReflect(reflect.ValueOf(p.Value), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.RecoveryClause](), nil, proofBindingVisitStringField, "Binding", string(p.Binding), true)
+	if retainedLocalGensymName(string(p.Binding)) {
+		visit(p, reflect.TypeFor[ast.RecoveryClause](), nil, proofBindingVisitStringField, "Binding", string(p.Binding), true)
+	}
 	for i0 := range p.Body {
 		if p.Body[i0] != nil {
 			if !proofBindingWalkAny(p.Body[i0], visit, seen, owner) {
@@ -7501,7 +8403,9 @@ func proofBindingWalkPtr_ast_RefStateLiteralTypeExpr(p *ast.RefStateLiteralTypeE
 
 func proofBindingWalkVal_ast_RefStateLiteralTypeExpr(p *ast.RefStateLiteralTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7521,7 +8425,9 @@ func proofBindingWalkPtr_ast_RefStorageLiteralTypeExpr(p *ast.RefStorageLiteralT
 
 func proofBindingWalkVal_ast_RefStorageLiteralTypeExpr(p *ast.RefStorageLiteralTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7541,7 +8447,9 @@ func proofBindingWalkPtr_ast_RefType(p *ast.RefType, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_RefType(p *ast.RefType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7550,7 +8458,9 @@ func proofBindingWalkVal_ast_RefType(p *ast.RefType, visit func(any, reflect.Typ
 			proofBindingWalkReflect(reflect.ValueOf(p.Elem), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.RefType](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	if retainedLocalGensymName(string(p.Region)) {
+		visit(p, reflect.TypeFor[ast.RefType](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_RefineDecl(p *ast.RefineDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -7569,13 +8479,19 @@ func proofBindingWalkPtr_ast_RefineDecl(p *ast.RefineDecl, visit func(any, refle
 
 func proofBindingWalkVal_ast_RefineDecl(p *ast.RefineDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.RefineDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.RefineDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	for i0 := range p.Params {
 		proofBindingWalkVal_ast_ParamDecl(&p.Params[i0], visit, seen, owner)
@@ -7606,11 +8522,15 @@ func proofBindingWalkPtr_ast_RefinementPredExpr(p *ast.RefinementPredExpr, visit
 
 func proofBindingWalkVal_ast_RefinementPredExpr(p *ast.RefinementPredExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.RefinementPredExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.RefinementPredExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Args {
 		if p.Args[i0] != nil {
 			if !proofBindingWalkAny(p.Args[i0], visit, seen, owner) {
@@ -7634,7 +8554,9 @@ func proofBindingWalkPtr_ast_RefinementTypeExpr(p *ast.RefinementTypeExpr, visit
 
 func proofBindingWalkVal_ast_RefinementTypeExpr(p *ast.RefinementTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7663,18 +8585,26 @@ func proofBindingWalkPtr_ast_RegionStmt(p *ast.RegionStmt, visit func(any, refle
 
 func proofBindingWalkVal_ast_RegionStmt(p *ast.RegionStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.RegionStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.RegionStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Capacity != nil {
 		if !proofBindingWalkAny(p.Capacity, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Capacity), visit, seen, owner)
 		}
 	}
-	visit(p, reflect.TypeFor[ast.RegionStmt](), nil, proofBindingVisitStringField, "OwnerName", string(p.OwnerName), true)
-	visit(p, reflect.TypeFor[ast.RegionStmt](), nil, proofBindingVisitStringField, "Allocator", string(p.Allocator), true)
+	if retainedLocalGensymName(string(p.OwnerName)) {
+		visit(p, reflect.TypeFor[ast.RegionStmt](), nil, proofBindingVisitStringField, "OwnerName", string(p.OwnerName), true)
+	}
+	if retainedLocalGensymName(string(p.Allocator)) {
+		visit(p, reflect.TypeFor[ast.RegionStmt](), nil, proofBindingVisitStringField, "Allocator", string(p.Allocator), true)
+	}
 	for i0 := range p.Body {
 		if p.Body[i0] != nil {
 			if !proofBindingWalkAny(p.Body[i0], visit, seen, owner) {
@@ -7698,11 +8628,15 @@ func proofBindingWalkPtr_ast_ResetStmt(p *ast.ResetStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ResetStmt(p *ast.ResetStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.ResetStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.ResetStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_RestoreCheckpointStmt(p *ast.RestoreCheckpointStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -7719,11 +8653,15 @@ func proofBindingWalkPtr_ast_RestoreCheckpointStmt(p *ast.RestoreCheckpointStmt,
 
 func proofBindingWalkVal_ast_RestoreCheckpointStmt(p *ast.RestoreCheckpointStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.RestoreCheckpointStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.RestoreCheckpointStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_RestoreStmt(p *ast.RestoreStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -7740,12 +8678,18 @@ func proofBindingWalkPtr_ast_RestoreStmt(p *ast.RestoreStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_RestoreStmt(p *ast.RestoreStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.RestoreStmt](), nil, proofBindingVisitStringField, "RegionName", string(p.RegionName), true)
-	visit(p, reflect.TypeFor[ast.RestoreStmt](), nil, proofBindingVisitStringField, "MarkName", string(p.MarkName), true)
+	if retainedLocalGensymName(string(p.RegionName)) {
+		visit(p, reflect.TypeFor[ast.RestoreStmt](), nil, proofBindingVisitStringField, "RegionName", string(p.RegionName), true)
+	}
+	if retainedLocalGensymName(string(p.MarkName)) {
+		visit(p, reflect.TypeFor[ast.RestoreStmt](), nil, proofBindingVisitStringField, "MarkName", string(p.MarkName), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_ReturnStmt(p *ast.ReturnStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -7762,7 +8706,9 @@ func proofBindingWalkPtr_ast_ReturnStmt(p *ast.ReturnStmt, visit func(any, refle
 
 func proofBindingWalkVal_ast_ReturnStmt(p *ast.ReturnStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7787,7 +8733,9 @@ func proofBindingWalkPtr_ast_ScopeStmt(p *ast.ScopeStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ScopeStmt(p *ast.ScopeStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7819,12 +8767,16 @@ func proofBindingWalkPtr_ast_ShorthandMemberExpr(p *ast.ShorthandMemberExpr, vis
 
 func proofBindingWalkVal_ast_ShorthandMemberExpr(p *ast.ShorthandMemberExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Parts {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Parts[i0]), false)
+		if retainedLocalGensymName(string(p.Parts[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Parts[i0]), false)
+		}
 	}
 }
 
@@ -7842,7 +8794,9 @@ func proofBindingWalkPtr_ast_SignalStmt(p *ast.SignalStmt, visit func(any, refle
 
 func proofBindingWalkVal_ast_SignalStmt(p *ast.SignalStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7865,7 +8819,9 @@ func proofBindingWalkPtr_ast_SizeofExpr(p *ast.SizeofExpr, visit func(any, refle
 
 func proofBindingWalkVal_ast_SizeofExpr(p *ast.SizeofExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7890,7 +8846,9 @@ func proofBindingWalkPtr_ast_SliceExpr(p *ast.SliceExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_SliceExpr(p *ast.SliceExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7925,7 +8883,9 @@ func proofBindingWalkPtr_ast_SpecializeExpr(p *ast.SpecializeExpr, visit func(an
 
 func proofBindingWalkVal_ast_SpecializeExpr(p *ast.SpecializeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -7957,12 +8917,16 @@ func proofBindingWalkPtr_ast_StateSetTypeExpr(p *ast.StateSetTypeExpr, visit fun
 
 func proofBindingWalkVal_ast_StateSetTypeExpr(p *ast.StateSetTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Cases {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Cases[i0]), false)
+		if retainedLocalGensymName(string(p.Cases[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Cases[i0]), false)
+		}
 	}
 }
 
@@ -7980,12 +8944,18 @@ func proofBindingWalkPtr_ast_StateTransitionDecl(p *ast.StateTransitionDecl, vis
 
 func proofBindingWalkVal_ast_StateTransitionDecl(p *ast.StateTransitionDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.StateTransitionDecl](), nil, proofBindingVisitStringField, "From", string(p.From), true)
-	visit(p, reflect.TypeFor[ast.StateTransitionDecl](), nil, proofBindingVisitStringField, "To", string(p.To), true)
+	if retainedLocalGensymName(string(p.From)) {
+		visit(p, reflect.TypeFor[ast.StateTransitionDecl](), nil, proofBindingVisitStringField, "From", string(p.From), true)
+	}
+	if retainedLocalGensymName(string(p.To)) {
+		visit(p, reflect.TypeFor[ast.StateTransitionDecl](), nil, proofBindingVisitStringField, "To", string(p.To), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_StaticAssertBlockDecl(p *ast.StaticAssertBlockDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -8004,7 +8974,9 @@ func proofBindingWalkPtr_ast_StaticAssertBlockDecl(p *ast.StaticAssertBlockDecl,
 
 func proofBindingWalkVal_ast_StaticAssertBlockDecl(p *ast.StaticAssertBlockDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8027,7 +8999,9 @@ func proofBindingWalkPtr_ast_StaticAssertBlockStmt(p *ast.StaticAssertBlockStmt,
 
 func proofBindingWalkVal_ast_StaticAssertBlockStmt(p *ast.StaticAssertBlockStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8052,7 +9026,9 @@ func proofBindingWalkPtr_ast_StaticAssertDecl(p *ast.StaticAssertDecl, visit fun
 
 func proofBindingWalkVal_ast_StaticAssertDecl(p *ast.StaticAssertDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8082,7 +9058,9 @@ func proofBindingWalkPtr_ast_StaticAssertItem(p *ast.StaticAssertItem, visit fun
 
 func proofBindingWalkVal_ast_StaticAssertItem(p *ast.StaticAssertItem, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8112,7 +9090,9 @@ func proofBindingWalkPtr_ast_StaticAssertStmt(p *ast.StaticAssertStmt, visit fun
 
 func proofBindingWalkVal_ast_StaticAssertStmt(p *ast.StaticAssertStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8142,7 +9122,9 @@ func proofBindingWalkPtr_ast_StaticBlockStmt(p *ast.StaticBlockStmt, visit func(
 
 func proofBindingWalkVal_ast_StaticBlockStmt(p *ast.StaticBlockStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8169,7 +9151,9 @@ func proofBindingWalkPtr_ast_StaticElifClause(p *ast.StaticElifClause, visit fun
 
 func proofBindingWalkVal_ast_StaticElifClause(p *ast.StaticElifClause, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8201,7 +9185,9 @@ func proofBindingWalkPtr_ast_StaticElifDecl(p *ast.StaticElifDecl, visit func(an
 
 func proofBindingWalkVal_ast_StaticElifDecl(p *ast.StaticElifDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8233,7 +9219,9 @@ func proofBindingWalkPtr_ast_StaticErrorStmt(p *ast.StaticErrorStmt, visit func(
 
 func proofBindingWalkVal_ast_StaticErrorStmt(p *ast.StaticErrorStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8260,7 +9248,9 @@ func proofBindingWalkPtr_ast_StaticGenerateDecl(p *ast.StaticGenerateDecl, visit
 
 func proofBindingWalkVal_ast_StaticGenerateDecl(p *ast.StaticGenerateDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8287,7 +9277,9 @@ func proofBindingWalkPtr_ast_StaticGenerateElifDecl(p *ast.StaticGenerateElifDec
 
 func proofBindingWalkVal_ast_StaticGenerateElifDecl(p *ast.StaticGenerateElifDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8319,7 +9311,9 @@ func proofBindingWalkPtr_ast_StaticGenerateEmitDecl(p *ast.StaticGenerateEmitDec
 
 func proofBindingWalkVal_ast_StaticGenerateEmitDecl(p *ast.StaticGenerateEmitDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8342,11 +9336,15 @@ func proofBindingWalkPtr_ast_StaticGenerateForDecl(p *ast.StaticGenerateForDecl,
 
 func proofBindingWalkVal_ast_StaticGenerateForDecl(p *ast.StaticGenerateForDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.StaticGenerateForDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.StaticGenerateForDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Source != nil {
 		if !proofBindingWalkAny(p.Source, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Source), visit, seen, owner)
@@ -8380,7 +9378,9 @@ func proofBindingWalkPtr_ast_StaticGenerateIfDecl(p *ast.StaticGenerateIfDecl, v
 
 func proofBindingWalkVal_ast_StaticGenerateIfDecl(p *ast.StaticGenerateIfDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8424,7 +9424,9 @@ func proofBindingWalkPtr_ast_StaticIfDecl(p *ast.StaticIfDecl, visit func(any, r
 
 func proofBindingWalkVal_ast_StaticIfDecl(p *ast.StaticIfDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8466,7 +9468,9 @@ func proofBindingWalkPtr_ast_StaticIfStmt(p *ast.StaticIfStmt, visit func(any, r
 
 func proofBindingWalkVal_ast_StaticIfStmt(p *ast.StaticIfStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8510,14 +9514,18 @@ func proofBindingWalkPtr_ast_StoreDecl(p *ast.StoreDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_StoreDecl(p *ast.StoreDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.StoreDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.StoreDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.Fields {
 		proofBindingWalkVal_ast_FieldDecl(&p.Fields[i0], visit, seen, owner)
 	}
@@ -8537,11 +9545,15 @@ func proofBindingWalkPtr_ast_StringLit(p *ast.StringLit, visit func(any, reflect
 
 func proofBindingWalkVal_ast_StringLit(p *ast.StringLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.StringLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	if retainedLocalGensymName(string(p.Value)) {
+		visit(p, reflect.TypeFor[ast.StringLit](), nil, proofBindingVisitStringField, "Value", string(p.Value), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_StructDecl(p *ast.StructDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -8560,29 +9572,43 @@ func proofBindingWalkPtr_ast_StructDecl(p *ast.StructDecl, visit func(any, refle
 
 func proofBindingWalkVal_ast_StructDecl(p *ast.StructDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Annotations {
 		proofBindingWalkVal_ast_Annotation(&p.Annotations[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.StructDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.StructDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	for i0 := range p.RegionParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		if retainedLocalGensymName(string(p.RegionParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.RegionParams[i0]), false)
+		}
 	}
-	visit(p, reflect.TypeFor[ast.StructDecl](), nil, proofBindingVisitStringField, "RegionOwner", string(p.RegionOwner), true)
+	if retainedLocalGensymName(string(p.RegionOwner)) {
+		visit(p, reflect.TypeFor[ast.StructDecl](), nil, proofBindingVisitStringField, "RegionOwner", string(p.RegionOwner), true)
+	}
 	for i0 := range p.GenericParams {
 		proofBindingWalkVal_ast_GenericParam(&p.GenericParams[i0], visit, seen, owner)
 	}
 	for i0 := range p.NamedStateCases {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.NamedStateCases[i0]), false)
+		if retainedLocalGensymName(string(p.NamedStateCases[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.NamedStateCases[i0]), false)
+		}
 	}
 	for i0 := range p.TerminalStateCases {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TerminalStateCases[i0]), false)
+		if retainedLocalGensymName(string(p.TerminalStateCases[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TerminalStateCases[i0]), false)
+		}
 	}
 	for i0 := range p.DerivedStates {
 		proofBindingWalkVal_ast_DerivedStateDecl(&p.DerivedStates[i0], visit, seen, owner)
@@ -8616,11 +9642,15 @@ func proofBindingWalkPtr_ast_StructLitExpr(p *ast.StructLitExpr, visit func(any,
 
 func proofBindingWalkVal_ast_StructLitExpr(p *ast.StructLitExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.StructLitExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.StructLitExpr](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeArgs {
 		if p.TypeArgs[i0] != nil {
 			if !proofBindingWalkAny(p.TypeArgs[i0], visit, seen, owner) {
@@ -8636,7 +9666,9 @@ func proofBindingWalkVal_ast_StructLitExpr(p *ast.StructLitExpr, visit func(any,
 		}
 	}
 	for i0 := range p.ArgNames {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.ArgNames[i0]), false)
+		if retainedLocalGensymName(string(p.ArgNames[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.ArgNames[i0]), false)
+		}
 	}
 	for i0 := range p.Spreads {
 		if p.Spreads[i0] != nil {
@@ -8673,7 +9705,9 @@ func proofBindingWalkPtr_ast_StructTestExpr(p *ast.StructTestExpr, visit func(an
 
 func proofBindingWalkVal_ast_StructTestExpr(p *ast.StructTestExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8710,7 +9744,9 @@ func proofBindingWalkPtr_ast_TailType(p *ast.TailType, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_TailType(p *ast.TailType, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8735,7 +9771,9 @@ func proofBindingWalkPtr_ast_TernaryExpr(p *ast.TernaryExpr, visit func(any, ref
 
 func proofBindingWalkVal_ast_TernaryExpr(p *ast.TernaryExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8772,11 +9810,15 @@ func proofBindingWalkPtr_ast_TokenSetDecl(p *ast.TokenSetDecl, visit func(any, r
 
 func proofBindingWalkVal_ast_TokenSetDecl(p *ast.TokenSetDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.TokenSetDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.TokenSetDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.ElemType != nil {
 		if !proofBindingWalkAny(p.ElemType, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.ElemType), visit, seen, owner)
@@ -8799,7 +9841,9 @@ func proofBindingWalkPtr_ast_TryExpr(p *ast.TryExpr, visit func(any, reflect.Typ
 
 func proofBindingWalkVal_ast_TryExpr(p *ast.TryExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8830,11 +9874,15 @@ func proofBindingWalkPtr_ast_TupleBindName(p *ast.TupleBindName, visit func(any,
 
 func proofBindingWalkVal_ast_TupleBindName(p *ast.TupleBindName, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.TupleBindName](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.TupleBindName](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_TupleBindStmt(p *ast.TupleBindStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -8851,7 +9899,9 @@ func proofBindingWalkPtr_ast_TupleBindStmt(p *ast.TupleBindStmt, visit func(any,
 
 func proofBindingWalkVal_ast_TupleBindStmt(p *ast.TupleBindStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8879,7 +9929,9 @@ func proofBindingWalkPtr_ast_TupleExpr(p *ast.TupleExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_TupleExpr(p *ast.TupleExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -8906,14 +9958,18 @@ func proofBindingWalkPtr_ast_TupleTypeExpr(p *ast.TupleTypeExpr, visit func(any,
 
 func proofBindingWalkVal_ast_TupleTypeExpr(p *ast.TupleTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
 	for i0 := range p.Fields {
 		proofBindingWalkVal_ast_TupleTypeField(&p.Fields[i0], visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.TupleTypeExpr](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	if retainedLocalGensymName(string(p.Region)) {
+		visit(p, reflect.TypeFor[ast.TupleTypeExpr](), nil, proofBindingVisitStringField, "Region", string(p.Region), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_TupleTypeField(p *ast.TupleTypeField, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -8930,11 +9986,15 @@ func proofBindingWalkPtr_ast_TupleTypeField(p *ast.TupleTypeField, visit func(an
 
 func proofBindingWalkVal_ast_TupleTypeField(p *ast.TupleTypeField, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.TupleTypeField](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.TupleTypeField](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -8958,13 +10018,19 @@ func proofBindingWalkPtr_ast_TypeAliasDecl(p *ast.TypeAliasDecl, visit func(any,
 
 func proofBindingWalkVal_ast_TypeAliasDecl(p *ast.TypeAliasDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.TypeAliasDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.TypeAliasDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	for i0 := range p.TypeParams {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		if retainedLocalGensymName(string(p.TypeParams[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.TypeParams[i0]), false)
+		}
 	}
 	if p.Target != nil {
 		if !proofBindingWalkAny(p.Target, visit, seen, owner) {
@@ -8987,7 +10053,9 @@ func proofBindingWalkPtr_ast_TypeExprExpr(p *ast.TypeExprExpr, visit func(any, r
 
 func proofBindingWalkVal_ast_TypeExprExpr(p *ast.TypeExprExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -9012,7 +10080,9 @@ func proofBindingWalkPtr_ast_UnaryExpr(p *ast.UnaryExpr, visit func(any, reflect
 
 func proofBindingWalkVal_ast_UnaryExpr(p *ast.UnaryExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -9038,7 +10108,9 @@ func proofBindingWalkPtr_ast_UnwrapElseExpr(p *ast.UnwrapElseExpr, visit func(an
 
 func proofBindingWalkVal_ast_UnwrapElseExpr(p *ast.UnwrapElseExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -9071,13 +10143,21 @@ func proofBindingWalkPtr_ast_UsingDecl(p *ast.UsingDecl, visit func(any, reflect
 
 func proofBindingWalkVal_ast_UsingDecl(p *ast.UsingDecl, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.UsingDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
-	visit(p, reflect.TypeFor[ast.UsingDecl](), nil, proofBindingVisitStringField, "Member", string(p.Member), true)
-	visit(p, reflect.TypeFor[ast.UsingDecl](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.UsingDecl](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
+	if retainedLocalGensymName(string(p.Member)) {
+		visit(p, reflect.TypeFor[ast.UsingDecl](), nil, proofBindingVisitStringField, "Member", string(p.Member), true)
+	}
+	if retainedLocalGensymName(string(p.Alias)) {
+		visit(p, reflect.TypeFor[ast.UsingDecl](), nil, proofBindingVisitStringField, "Alias", string(p.Alias), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_VarDeclStmt(p *ast.VarDeclStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -9095,11 +10175,15 @@ func proofBindingWalkPtr_ast_VarDeclStmt(p *ast.VarDeclStmt, visit func(any, ref
 
 func proofBindingWalkVal_ast_VarDeclStmt(p *ast.VarDeclStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.VarDeclStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	if retainedLocalGensymName(string(p.Name)) {
+		visit(p, reflect.TypeFor[ast.VarDeclStmt](), nil, proofBindingVisitStringField, "Name", string(p.Name), true)
+	}
 	if p.Type != nil {
 		if !proofBindingWalkAny(p.Type, visit, seen, owner) {
 			proofBindingWalkReflect(reflect.ValueOf(p.Type), visit, seen, owner)
@@ -9131,7 +10215,9 @@ func proofBindingWalkPtr_ast_VariantTestExpr(p *ast.VariantTestExpr, visit func(
 
 func proofBindingWalkVal_ast_VariantTestExpr(p *ast.VariantTestExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -9152,13 +10238,21 @@ func proofBindingWalkPtr_ast_VisitArm(p *ast.VisitArm, visit func(any, reflect.T
 
 func proofBindingWalkVal_ast_VisitArm(p *ast.VisitArm, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.VisitArm](), nil, proofBindingVisitStringField, "TargetName", string(p.TargetName), true)
-	visit(p, reflect.TypeFor[ast.VisitArm](), nil, proofBindingVisitStringField, "BindName", string(p.BindName), true)
-	visit(p, reflect.TypeFor[ast.VisitArm](), nil, proofBindingVisitStringField, "ChildResultsName", string(p.ChildResultsName), true)
+	if retainedLocalGensymName(string(p.TargetName)) {
+		visit(p, reflect.TypeFor[ast.VisitArm](), nil, proofBindingVisitStringField, "TargetName", string(p.TargetName), true)
+	}
+	if retainedLocalGensymName(string(p.BindName)) {
+		visit(p, reflect.TypeFor[ast.VisitArm](), nil, proofBindingVisitStringField, "BindName", string(p.BindName), true)
+	}
+	if retainedLocalGensymName(string(p.ChildResultsName)) {
+		visit(p, reflect.TypeFor[ast.VisitArm](), nil, proofBindingVisitStringField, "ChildResultsName", string(p.ChildResultsName), true)
+	}
 	for i0 := range p.ChildBindings {
 		proofBindingWalkVal_ast_VisitArmChildBinding(&p.ChildBindings[i0], visit, seen, owner)
 	}
@@ -9190,12 +10284,18 @@ func proofBindingWalkPtr_ast_VisitArmChildBinding(p *ast.VisitArmChildBinding, v
 
 func proofBindingWalkVal_ast_VisitArmChildBinding(p *ast.VisitArmChildBinding, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
-	visit(p, reflect.TypeFor[ast.VisitArmChildBinding](), nil, proofBindingVisitStringField, "FieldName", string(p.FieldName), true)
-	visit(p, reflect.TypeFor[ast.VisitArmChildBinding](), nil, proofBindingVisitStringField, "BindName", string(p.BindName), true)
+	if retainedLocalGensymName(string(p.FieldName)) {
+		visit(p, reflect.TypeFor[ast.VisitArmChildBinding](), nil, proofBindingVisitStringField, "FieldName", string(p.FieldName), true)
+	}
+	if retainedLocalGensymName(string(p.BindName)) {
+		visit(p, reflect.TypeFor[ast.VisitArmChildBinding](), nil, proofBindingVisitStringField, "BindName", string(p.BindName), true)
+	}
 }
 
 func proofBindingWalkPtr_ast_WhereRefinementTypeExpr(p *ast.WhereRefinementTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
@@ -9212,7 +10312,9 @@ func proofBindingWalkPtr_ast_WhereRefinementTypeExpr(p *ast.WhereRefinementTypeE
 
 func proofBindingWalkVal_ast_WhereRefinementTypeExpr(p *ast.WhereRefinementTypeExpr, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -9242,7 +10344,9 @@ func proofBindingWalkPtr_ast_WhileStmt(p *ast.WhileStmt, visit func(any, reflect
 
 func proofBindingWalkVal_ast_WhileStmt(p *ast.WhileStmt, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}
@@ -9259,7 +10363,9 @@ func proofBindingWalkVal_ast_WhileStmt(p *ast.WhileStmt, visit func(any, reflect
 		}
 	}
 	for i0 := range p.Captures {
-		visit(nil, nil, nil, proofBindingVisitString, "", string(p.Captures[i0]), false)
+		if retainedLocalGensymName(string(p.Captures[i0])) {
+			visit(nil, nil, nil, proofBindingVisitString, "", string(p.Captures[i0]), false)
+		}
 	}
 }
 
@@ -9277,7 +10383,9 @@ func proofBindingWalkPtr_ast_ZeroedLit(p *ast.ZeroedLit, visit func(any, reflect
 
 func proofBindingWalkVal_ast_ZeroedLit(p *ast.ZeroedLit, visit func(any, reflect.Type, ast.Decl, uint8, string, string, bool), seen map[uintptr]bool, owner ast.Decl) {
 	if proofBindingPositionSchemaValid {
-		visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		if retainedLocalGensymName(p.Position.File) {
+			visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, "File", p.Position.File, false)
+		}
 	} else {
 		proofBindingWalkReflect(reflect.ValueOf(&p.Position).Elem(), visit, seen, owner)
 	}

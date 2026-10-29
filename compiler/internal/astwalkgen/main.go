@@ -527,9 +527,13 @@ func generateProofBinding() ([]byte, error) {
 	return src, nil
 }
 
+// The proof-binding visitor only observes strings that are complete local
+// generated-name candidates. Filter before the indirect call while retaining
+// every such candidate, including source blockers and position filenames.
+// Node visits and the reflective fallback keep their full existing behavior.
 func emitProofBindingField(out *bytes.Buffer, parent *types.Named, field *types.Var) error {
 	if basic, ok := types.Unalias(field.Type()).Underlying().(*types.Basic); ok && basic.Kind() == types.String {
-		fmt.Fprintf(out, "visit(p, reflect.TypeFor[%s](), nil, proofBindingVisitStringField, %q, string(p.%s), true)\n", qual(parent), field.Name(), field.Name())
+		fmt.Fprintf(out, "if retainedLocalGensymName(string(p.%s)) { visit(p, reflect.TypeFor[%s](), nil, proofBindingVisitStringField, %q, string(p.%s), true) }\n", field.Name(), qual(parent), field.Name(), field.Name())
 		return nil
 	}
 	return emitProofBindingValue(out, "p."+field.Name(), field.Type(), 0)
@@ -540,11 +544,11 @@ func emitProofBindingValue(out *bytes.Buffer, expr string, t types.Type, depth i
 	switch tt := t.(type) {
 	case *types.Basic:
 		if tt.Kind() == types.String {
-			fmt.Fprintf(out, "visit(nil, nil, nil, proofBindingVisitString, \"\", string(%s), false)\n", expr)
+			fmt.Fprintf(out, "if retainedLocalGensymName(string(%s)) { visit(nil, nil, nil, proofBindingVisitString, \"\", string(%s), false) }\n", expr, expr)
 		}
 	case *types.Named:
 		if tt.Obj().Pkg() != nil && tt.Obj().Pkg().Path() == "elisacore/src/lexer" && tt.Obj().Name() == "Pos" {
-			fmt.Fprintf(out, "if proofBindingPositionSchemaValid { visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, \"File\", %s.File, false) } else { proofBindingWalkReflect(reflect.ValueOf(&%s).Elem(), visit, seen, owner) }\n", expr, expr)
+			fmt.Fprintf(out, "if proofBindingPositionSchemaValid { if retainedLocalGensymName(%s.File) { visit(nil, reflect.TypeFor[lexer.Pos](), nil, proofBindingVisitPositionFile, \"File\", %s.File, false) } } else { proofBindingWalkReflect(reflect.ValueOf(&%s).Elem(), visit, seen, owner) }\n", expr, expr, expr)
 			return nil
 		}
 		if tt.Obj().Pkg() != nil && tt.Obj().Pkg().Path() == "elisacore/src/ast" {
