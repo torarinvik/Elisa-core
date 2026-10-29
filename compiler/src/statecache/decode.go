@@ -251,7 +251,12 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 			if v.OverflowInt(n) {
 				return fmt.Errorf("state integer overflow")
 			}
-			v.SetInt(n)
+			// A checked, addressable int has the same representation for named types.
+			if v.Kind() == reflect.Int && v.CanAddr() && v.CanSet() {
+				*(*int)(unsafe.Pointer(v.UnsafeAddr())) = int(n)
+			} else {
+				v.SetInt(n)
+			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 			if v.OverflowUint(x) {
 				return fmt.Errorf("state integer overflow")
