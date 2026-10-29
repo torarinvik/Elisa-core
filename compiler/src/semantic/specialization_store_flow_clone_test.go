@@ -5,6 +5,7 @@ package semantic
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 
 	"elisacore/src/ast"
@@ -25,6 +26,33 @@ func assertStoreFlowKindsShared(t *testing.T, source, current *storeFlowSummary)
 		if len(row) != 0 && reflect.ValueOf(current.reachKind[i]).Pointer() != reflect.ValueOf(row).Pointer() {
 			t.Fatal("specialization eagerly copied a reach-kind row")
 		}
+	}
+}
+
+func TestStoreFlowConcurrentSpecializationDetachesAliases(t *testing.T) {
+	first, alias := &ast.FuncDecl{Name: "first"}, &ast.FuncDecl{Name: "alias"}
+	summary := newStoreFlowSummary(1)
+	summary.retConn[0] = true
+	storeFlowInitKinds(summary)
+	summary.retKind[0] = storeFlowEdgeElements
+	base := map[*ast.FuncDecl]*storeFlowSummary{first: summary, alias: summary}
+	var wait sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			worker := cloneStoreFlowSummariesForSpecialization(base)
+			detachStoreFlowKindsForWrite(worker, []*ast.FuncDecl{first})
+			if worker[first] != worker[alias] || worker[first] == summary {
+				t.Error("write barrier broke alias isolation")
+				return
+			}
+			worker[first].retKind[0] = storeFlowEdgeHeader
+		}()
+	}
+	wait.Wait()
+	if summary.retKind[0] != storeFlowEdgeElements {
+		t.Fatal("worker changed canonical summary")
 	}
 }
 
@@ -51,7 +79,7 @@ func assertStoreFlowKindBackingDetached(t *testing.T, source, current *storeFlow
 	}
 }
 
-func TestStoreFlowSpecializationCopiesHeadersAndPreservesAliases(t *testing.T) {
+func TestStoreFlowSpecializationSharesHeadersAndPreservesAliases(t *testing.T) {
 	for _, table := range []map[*ast.FuncDecl]*storeFlowSummary{nil, {}} {
 		cloned := cloneStoreFlowSummariesForSpecialization(table)
 		if (cloned == nil) != (table == nil) || len(cloned) != len(table) {
@@ -67,8 +95,8 @@ func TestStoreFlowSpecializationCopiesHeadersAndPreservesAliases(t *testing.T) {
 	distinct := *summary
 	root := map[*ast.FuncDecl]*storeFlowSummary{first: summary, alias: summary, other: &distinct, missing: nil}
 	worker := cloneStoreFlowSummariesForSpecialization(root)
-	if worker[first] == summary || worker[first] != worker[alias] || worker[first] == worker[other] || worker[missing] != nil {
-		t.Fatal("private summary headers or source alias groups changed")
+	if worker[first] != summary || worker[first] != worker[alias] || worker[first] == worker[other] || worker[missing] != nil {
+		t.Fatal("shared summary headers or source alias groups changed")
 	}
 	if !reflect.DeepEqual(worker[first], summary) || reflect.ValueOf(worker[first].conn).Pointer() != reflect.ValueOf(summary.conn).Pointer() || reflect.ValueOf(worker[first].retConn).Pointer() != reflect.ValueOf(summary.retConn).Pointer() || reflect.ValueOf(worker[first].written).Pointer() != reflect.ValueOf(summary.written).Pointer() || reflect.ValueOf(worker[first].reach).Pointer() != reflect.ValueOf(summary.reach).Pointer() {
 		t.Fatal("immutable summary facts were copied or changed")
@@ -76,7 +104,7 @@ func TestStoreFlowSpecializationCopiesHeadersAndPreservesAliases(t *testing.T) {
 	assertStoreFlowKindsShared(t, summary, worker[first])
 	assertStoreFlowKindsShared(t, &distinct, worker[other])
 
-	detachStoreFlowKindsForWrite(worker, []*ast.FuncDecl{first, alias, other})
+	detachStoreFlowKindsForWrite(worker, []*ast.FuncDecl{first, other})
 	assertStoreFlowKindsDetached(t, summary, worker[first])
 	assertStoreFlowKindsDetached(t, &distinct, worker[other])
 	if worker[first] != worker[alias] {
@@ -88,7 +116,7 @@ func TestStoreFlowSpecializationCopiesHeadersAndPreservesAliases(t *testing.T) {
 	}
 }
 
-func TestStoreFlowSpecializationHeaderBlocksPreserveAliasGroups(t *testing.T) {
+func TestStoreFlowSpecializationSharedHeadersPreserveAliasGroups(t *testing.T) {
 	root := make(map[*ast.FuncDecl]*storeFlowSummary)
 	var first, alias *ast.FuncDecl
 	for index := 0; index < 384; index++ {
@@ -117,8 +145,8 @@ func TestStoreFlowSpecializationHeaderBlocksPreserveAliasGroups(t *testing.T) {
 			}
 			continue
 		}
-		if private == source || !reflect.DeepEqual(private, source) {
-			t.Fatal("block header is shared with the source or changed its facts")
+		if private != source || !reflect.DeepEqual(private, source) {
+			t.Fatal("read-only header was copied or changed its facts")
 		}
 		if previous := groups[source]; previous != nil && previous != private {
 			t.Fatal("source alias group split across private headers")
@@ -129,7 +157,7 @@ func TestStoreFlowSpecializationHeaderBlocksPreserveAliasGroups(t *testing.T) {
 		groups[source], privateOwners[private] = private, source
 		assertStoreFlowKindsShared(t, source, private)
 	}
-	detachStoreFlowKindsForWrite(worker, []*ast.FuncDecl{first, alias})
+	detachStoreFlowKindsForWrite(worker, []*ast.FuncDecl{first})
 	worker[first].retKind[0] = storeFlowEdgeHeader
 	if worker[first] != worker[alias] {
 		t.Fatal("kind detachment split the aliased header")
@@ -203,8 +231,8 @@ func TestStoreFlowSpecializationPublicationBoundaryAndOrdinaryClone(t *testing.T
 	}
 	private := cloneAnalyzerValueForSpecialization(root.analyzer).Addr().Interface().(*Analyzer)
 	ordinary := cloneAnalyzerValueForBodyWorker(root.analyzer).Addr().Interface().(*Analyzer)
-	if private.storeFlowSummaries[settled] == summary {
-		t.Fatal("specialization shared a mutable summary header")
+	if private.storeFlowSummaries[settled] != summary {
+		t.Fatal("specialization did not share the frozen summary header")
 	}
 	assertStoreFlowKindsShared(t, summary, private.storeFlowSummaries[settled])
 	if ordinary.storeFlowSummaries[settled] == summary {
