@@ -38,7 +38,11 @@ func (s *reentrantFlightSolver) Check(query string) (smt.Result, time.Duration) 
 	other := &Analyzer{parallel: &parallelWorkerState{smtFlights: p.smtFlights}}
 	result := make(chan smtQueryResult, 1)
 	started := make(chan struct{})
-	go func() { close(started); v, _, _ := other.awaitSharedSMTQuery(query); result <- v }()
+	go func() {
+		close(started)
+		value, _, _ := other.awaitSharedSMTQuery(query)
+		result <- value
+	}()
 	<-started
 	s.waiter = result
 	return smt.Unsat, 0
@@ -66,10 +70,15 @@ func TestParallelSMTReentrantMissKeepsOuterFlight(t *testing.T) {
 	select {
 	case result := <-solver.waiter:
 		if !result.proven {
-			t.Fatalf("waiter did not receive proven verdict: %+v", result)
+			t.Fatalf("concurrent waiter did not receive proven verdict: %+v", result)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("waiter not released")
+		t.Fatal("concurrent waiter was not released")
+	}
+	other := &Analyzer{parallel: &parallelWorkerState{smtFlights: a.parallel.smtFlights}}
+	shared, hit, flight := other.awaitSharedSMTQuery(solver.query)
+	if !hit || !shared.proven || flight != nil {
+		t.Fatalf("resolved flight was not shared: result=%+v hit=%v flight=%p", shared, hit, flight)
 	}
 	if _, exists := a.parallel.leading[solver.query]; exists {
 		t.Fatal("outer ownership not cleared")
