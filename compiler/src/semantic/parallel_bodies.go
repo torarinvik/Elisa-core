@@ -524,7 +524,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			settable(cloned.Field(i)).Set(reflect.ValueOf(cloneAnalyzerIterBinderElementOverlay(a.iterBinderElementOverlay)))
 			continue
 		}
-		if ownedFunctionAnalyses && name == "iterBinderElementStates" {
+		if ownedFunctionAnalyses && (name == "iterBinderElementStates" || name == "iterBindingSources") {
 			if field.IsNil() {
 				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			} else {
@@ -712,7 +712,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			helperCalls:   a.compilerBuiltinHelperCalls,
 			returnUnknown: a.returnElementStmtUnknown,
 		}
-		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates}
+		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates, sources: a.iterBindingSources}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}
 		if useExprFactsOverlay {
 			worker.exprFactsOverlay = &analyzerExprFactsOverlay{base: a.exprFacts}

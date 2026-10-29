@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+
+	"elisacore/src/ast"
 )
 
 // Construction-only. The canonical table and its inline maps are stable while
@@ -11,6 +13,7 @@ import (
 // value: regionRefState contains writable maps, unlike opaque ExprFacts values.
 type analyzerIterBinderElementOverlay struct {
 	base    map[*Symbol]regionRefState
+	sources map[*Symbol]ast.Expr
 	deleted map[*Symbol]bool
 }
 
@@ -63,7 +66,18 @@ func cloneAnalyzerIterBinderElementOverlay(source *analyzerIterBinderElementOver
 	if source == nil {
 		return nil
 	}
-	return &analyzerIterBinderElementOverlay{base: source.base, deleted: maps.Clone(source.deleted)}
+	return &analyzerIterBinderElementOverlay{base: source.base, sources: source.sources, deleted: maps.Clone(source.deleted)}
+}
+
+func (a *Analyzer) iterBindingSource(symbol *Symbol) (ast.Expr, bool) {
+	if value, ok := a.iterBindingSources[symbol]; ok {
+		return value, true
+	}
+	if a.iterBinderElementOverlay != nil {
+		value, ok := a.iterBinderElementOverlay.sources[symbol]
+		return value, ok
+	}
+	return nil, false
 }
 
 func (a *Analyzer) rejectIterBinderElementOverlayOperation(operation string) error {

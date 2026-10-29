@@ -198,3 +198,34 @@ func TestIterBinderOverlayActualPrivateLoopConstruction(t *testing.T) {
 		t.Fatal("concrete loop changed canonical provenance")
 	}
 }
+
+func TestIterBindingSourceOverlayIsolation(t *testing.T) {
+	inherited, missing, added := &Symbol{}, &Symbol{}, &Symbol{}
+	expression := &ast.Ident{Name: "source"}
+	root := &Analyzer{iterBindingSources: map[*Symbol]ast.Expr{inherited: expression, nil: nil}}
+	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+	if len(worker.iterBindingSources) != 0 {
+		t.Fatal("specialization copied source rows")
+	}
+	if got, ok := worker.iterBindingSource(inherited); !ok || got != expression {
+		t.Fatal("inherited source missing")
+	}
+	if got, ok := worker.iterBindingSource(nil); !ok || got != nil {
+		t.Fatal("inherited nil row missing")
+	}
+	if _, ok := worker.iterBindingSource(missing); ok {
+		t.Fatal("missing row present")
+	}
+	worker.iterBindingSources[inherited] = nil
+	worker.iterBindingSources[added] = expression
+	if got, ok := worker.iterBindingSource(inherited); !ok || got != nil {
+		t.Fatal("nil override lost")
+	}
+	if root.iterBindingSources[inherited] != expression || len(root.iterBindingSources) != 2 {
+		t.Fatal("private write changed canonical table")
+	}
+	ordinary := cloneAnalyzerValueForBodyWorker(root).Addr().Interface().(*Analyzer)
+	if ordinary.iterBinderElementOverlay != nil || ordinary.iterBindingSources[inherited] != expression {
+		t.Fatal("ordinary clone changed")
+	}
+}

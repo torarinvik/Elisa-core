@@ -96,7 +96,7 @@ func (a *Analyzer) ownedStorageRootRegion(expr ast.Expr, seen map[ast.Expr]bool)
 				}
 				if state, tracked := a.lookupIterBinderElementState(sym); tracked {
 					r = a.innerRegion(r, a.innermostTrackedRegion(state))
-				} else if src := a.iterBindingSources[sym]; src != nil {
+				} else if src, _ := a.iterBindingSource(sym); src != nil {
 					r = a.innerRegion(r, a.ownedStorageRootRegion(src, seen))
 				}
 			}

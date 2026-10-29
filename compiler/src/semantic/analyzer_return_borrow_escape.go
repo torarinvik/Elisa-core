@@ -307,7 +307,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 			if flow, ok := a.returnBorrowEnvSymbolFlow(sym); ok {
 				return flow
 			}
-			if source, ok := a.iterBindingSources[sym]; ok && source != nil {
+			if source, ok := a.iterBindingSource(sym); ok && source != nil {
 				localBindings[sym] = true
 				flow := a.returnBorrowFlowForIterSource(sym, source, aliases, active, localBindings)
 				delete(localBindings, sym)
@@ -327,7 +327,7 @@ func (a *Analyzer) returnBorrowFlowForExprInner(expr ast.Expr, aliases map[strin
 			delete(localBindings, sym)
 			return flow
 		}
-		if source, ok := a.iterBindingSources[sym]; ok && source != nil {
+		if source, ok := a.iterBindingSource(sym); ok && source != nil {
 			localBindings[sym] = true
 			flow := a.returnBorrowFlowForIterSource(sym, source, aliases, active, localBindings)
 			delete(localBindings, sym)
@@ -792,9 +792,9 @@ rooted:
 		if flow, exists := aliases[ident.Name]; exists {
 			return flow
 		}
-		if _, iterBinding := a.iterBindingSources[sym]; iterBinding && !localBindings[sym] {
+		if source, iterBinding := a.iterBindingSource(sym); iterBinding && !localBindings[sym] {
 			localBindings[sym] = true
-			flow := a.returnBorrowFlowForArgument(a.iterBindingSources[sym], aliases, active, localBindings)
+			flow := a.returnBorrowFlowForArgument(source, aliases, active, localBindings)
 			delete(localBindings, sym)
 			return flow
 		}
