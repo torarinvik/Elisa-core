@@ -130,3 +130,25 @@ func TestDiskLookupSuppliedKeyStillChecksExactInput(t *testing.T) {
 		t.Fatal("digest selected an entry with different target")
 	}
 }
+
+func TestDiskInputComparisonAcrossChunks(t *testing.T) {
+	original := bytes.Repeat([]byte("01234567"), 9000)
+	chunk := make([]byte, 32*1024)
+	if !diskInputEquals(bytes.NewReader(original), original, chunk) {
+		t.Fatal("equal multi-chunk input rejected")
+	}
+	changed := append([]byte(nil), original...)
+	changed[32*1024+3] ^= 1
+	if diskInputEquals(bytes.NewReader(changed), original, chunk) {
+		t.Fatal("mismatch in later chunk accepted")
+	}
+	if diskInputEquals(bytes.NewReader(original[:len(original)-1]), original, chunk) {
+		t.Fatal("truncated input accepted")
+	}
+	if !diskInputEquals(bytes.NewReader(nil), nil, nil) {
+		t.Fatal("empty input rejected")
+	}
+	if diskInputEquals(bytes.NewReader(original), original, nil) {
+		t.Fatal("nonempty input accepted without a comparison buffer")
+	}
+}

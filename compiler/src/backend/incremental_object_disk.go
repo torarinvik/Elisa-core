@@ -73,7 +73,8 @@ func (d *incrementalObjectDisk) loadKey(bitcode []byte, target string, key [32]b
 		return nil
 	}
 	// Compare in bounded chunks rather than allocate another whole IR buffer.
-	if !diskInputEquals(f, bitcode) || !diskInputEquals(f, []byte(target)) {
+	chunk := make([]byte, min(32*1024, max(len(bitcode), len(target))))
+	if !diskInputEquals(f, bitcode, chunk) || !diskInputEquals(f, []byte(target), chunk) {
 		return nil
 	}
 	object := make([]byte, int(o))
@@ -89,8 +90,10 @@ func (d *incrementalObjectDisk) loadKey(bitcode []byte, target string, key [32]b
 	return object
 }
 
-func diskInputEquals(r io.Reader, expected []byte) bool {
-	var chunk [32 * 1024]byte
+func diskInputEquals(r io.Reader, expected, chunk []byte) bool {
+	if len(chunk) == 0 {
+		return len(expected) == 0
+	}
 	for len(expected) > 0 {
 		n := len(expected)
 		if n > len(chunk) {
