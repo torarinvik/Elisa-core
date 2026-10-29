@@ -673,7 +673,11 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 		g.sharedResult = true
 		g.partitionModuleDecls = declarations
 		g.hasPartitionModuleDecls = true
-		g.partitionImportDefaults = s.diskDefaultsActive()
+		// Imports are the cross-partition inlining path. They default on whenever a partition
+		// is lowered, independent of the disk preset, because explicit PARALLEL flags disable
+		// that preset. ELISACORE_IR_IMPORTS still overrides, and the exact partition bitcode,
+		// which contains every imported body, remains the cache authority.
+		g.partitionImportDefaults = true
 		// LLVM retains GlobalValue names while discarding non-semantic local SSA
 		// names. Set this before lowering to avoid creating source-offset names.
 		if !options.DebugInfo {
