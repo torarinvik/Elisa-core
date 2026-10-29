@@ -376,6 +376,7 @@ var buildCacheEnvIgnored = map[string]bool{
 	"ELISAC_BUILD_CACHE_DIR":                  true,
 	"ELISACORE_SMT_CACHE_DIR":                 true,
 	"ELISACORE_BUILD_TIMING":                  true,
+	"ELISACORE_PARTITION_DECLINE_DEBUG":       true,
 	"ELISACORE_CACHE_DEBUG":                   true,
 	"ELISACORE_CPUPROFILE":                    true,
 	"ELISACORE_CPUPROFILE_SECONDS":            true,
