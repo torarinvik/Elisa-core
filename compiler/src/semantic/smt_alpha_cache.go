@@ -227,7 +227,7 @@ func smtAlphaWalk(query string, visit func(smtAlphaToken, int) bool) bool {
 				return false
 			}
 		default:
-			for i < len(query) && !strings.ContainsRune(" \t\r\n();", rune(query[i])) {
+			for i < len(query) && strings.IndexByte(" \t\r\n();", query[i]) < 0 {
 				if query[i] == '"' || query[i] == '|' {
 					return false
 				}
