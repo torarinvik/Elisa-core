@@ -2488,7 +2488,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 		// The filter is exactly the per-name skip below, so the emitted hypotheses are unchanged.
 		var names []string
 		for name, sym := range sc.Symbols {
-			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+			if sym == nil || sym.Mutable || sym.Kind != SymbolLocal || seen[name] {
 				continue
 			}
 			names = append(names, name)
