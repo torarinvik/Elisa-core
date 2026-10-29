@@ -9,6 +9,7 @@ package backend
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
 LLVMMemoryBufferRef elisacoreWriteOptimizedBitcodePreservingUses(LLVMModuleRef module);
+int elisacoreRestoreOptimizedIntrinsicProgress(LLVMModuleRef module);
 static LLVMMemoryBufferRef elisacoreOptimizedCacheBuffer(const char *data, size_t size) {
  return LLVMCreateMemoryBufferWithMemoryRangeCopy(data, size, "optimized-cache");
 }
@@ -62,7 +63,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 		var module C.LLVMModuleRef
 		status := C.LLVMParseBitcodeInContext2(context, buffer, &module)
 		C.LLVMDisposeMemoryBuffer(buffer)
-		if status == 0 {
+		if status == 0 && C.elisacoreRestoreOptimizedIntrinsicProgress(module) != 0 {
 			// The bitcode reader uses the buffer name as ModuleID; preserve the
 			// original lowering identity rather than exposing the cache filename.
 			var nameSize C.size_t
@@ -112,7 +113,7 @@ func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level 
 
 func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, cpu, features string) string {
 	values := []any{
-		"optimized-module-v7-late-table-range-authenticated-ir",
+		"optimized-module-v8-intrinsic-progress",
 		int(level), triple, cpu, features,
 		optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3,
 		"constant-table-range-v2-late", "constant-table-unroll-v1", "zero-forward-v1", "split-half-u64-add-v1",
@@ -175,6 +176,9 @@ func optimizedModuleRoundTripExact(g *llvmGenerator, data []byte) ([sha256.Size]
 		return [sha256.Size]byte{}, false
 	}
 	defer C.LLVMDisposeModule(module)
+	if C.elisacoreRestoreOptimizedIntrinsicProgress(module) == 0 {
+		return [sha256.Size]byte{}, false
+	}
 	var nameSize C.size_t
 	name := C.LLVMGetModuleIdentifier(g.module, &nameSize)
 	C.LLVMSetModuleIdentifier(module, name, nameSize)

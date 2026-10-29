@@ -12,10 +12,9 @@ import (
 	"testing"
 )
 
-// The LLVM reader can normalize intrinsic attributes and change use-list
-// ordering during bitcode restoration. A module that cannot round-trip
-// exactly must never be served as an optimized-module cache hit.
-func TestOptimizedModuleDiskCacheRejectsLossyRoundTrip(t *testing.T) {
+// The reader may drop intrinsic progress attributes. The cache must restore
+// the original attribute and prove the entire module is identical before reuse.
+func TestOptimizedModuleDiskCacheRestoresIntrinsicProgress(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "submit_evidence.elisa", partitionSubmitGenericRuntimeSource())
 	session := NewIncrementalObjectSession(2, 32<<20)
 	session.EnableDiskCache(t.TempDir(), "roundtrip-regression", 64<<20)
@@ -44,8 +43,8 @@ func TestOptimizedModuleDiskCacheRejectsLossyRoundTrip(t *testing.T) {
 	if len(decl) != 2 || !regexp.MustCompile(`(?m)^attributes #`+decl[1]+` = \{[^\n]*\bmustprogress\b`).MatchString(want) {
 		t.Skip("LLVM did not retain the progress attribute on the overflow intrinsic")
 	}
-	if files, err := os.ReadDir(session.disk.root); err == nil && len(files) != 0 {
-		t.Skip("this LLVM preserved the optimized module exactly on bitcode round-trip")
+	if files, err := os.ReadDir(session.disk.root); err != nil || len(files) == 0 {
+		t.Fatalf("exact restored module was not cached: %v", err)
 	}
 	second := build()
 	defer second.dispose()
@@ -59,8 +58,8 @@ func TestOptimizedModuleDiskCacheRejectsLossyRoundTrip(t *testing.T) {
 	if got := replay.printModule(); got != want {
 		t.Fatal("optimized cache replay changed the module")
 	}
-	if session.Stats().OptimizedModulesReused != 0 {
-		t.Fatal("lossy optimized bitcode must not be admitted to the cache")
+	if session.Stats().OptimizedModulesReused != 1 {
+		t.Fatal("exact restored module was not reused")
 	}
 }
 
@@ -146,5 +145,21 @@ func TestOptimizedModuleDiskCacheRejectsMismatchedIRDigest(t *testing.T) {
 	}
 	if replayed.printModule() != want {
 		t.Fatal("digest mismatch changed the cold rebuild")
+	}
+}
+
+func TestOptimizedModuleMetadataCollisionDeclinesWithoutMutation(t *testing.T) {
+	ir := validationPeelIR + "\n!elisacore.optimized_cache.mustprogress.v1 = !{!0}\n!0 = !{!\"occupied\"}\n"
+	g, err := parseLLVMIRForSplitHalfTest(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	before := g.printModule()
+	if _, err := optimizedModulePreservedBitcodeRoundTripExact(g); err == nil {
+		t.Fatal("cache writer accepted user metadata with its reserved name")
+	}
+	if got := g.printModule(); got != before {
+		t.Fatal("declined cache writer changed the module")
 	}
 }
