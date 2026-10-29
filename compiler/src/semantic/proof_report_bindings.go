@@ -44,7 +44,10 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 	// the returned binder/blocker maps and the quantifier set remain per-root.
 	// Release the largest map before returning the renderer so its backing table
 	// does not remain live across the body update.
-	seenScratch := make(map[uintptr]bool)
+	// Source size is only an allocation hint: every visited pointer is still
+	// checked. Bound the reservation for large inputs dominated by literals.
+	seenCapacity := min(len(r.src)/32, 1<<18)
+	seenScratch := make(map[uintptr]bool, seenCapacity)
 	collect := func(root *ast.File, shift bool) (map[binderIdentity]binder, map[string]bool) {
 		result := map[binderIdentity]binder{}
 		blocked := map[string]bool{}

@@ -91,7 +91,11 @@ func TestDefaultFastPreparationUnsetFreshProcessBodyEditMatchesOffAndCold(t *tes
 				t.Fatal(err)
 			}
 			got, code := runDefaultFastPreparationChild(t, test.mode, cache, false, args...)
-			if code != 0 || strings.Contains(got, "cold analysis") || !strings.Contains(got, "update changed=2") {
+			if test.name == "shadow" {
+				if code != 0 || !strings.Contains(got, "bypass request observer ELISACORE_RETAINED_FAST_PREPARE") {
+					t.Fatalf("shadow observer did not bypass cached analysis: %d %s", code, got)
+				}
+			} else if code != 0 || strings.Contains(got, "cold analysis") || !strings.Contains(got, "update changed=2") {
 				t.Fatalf("actual edit/dependent caller did not replay: %d %s", code, got)
 			}
 			if test.wantFast {
