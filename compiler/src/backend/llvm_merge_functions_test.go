@@ -155,9 +155,41 @@ int main(void) {
 func TestOptimizationPipelineKeepsLevelsAndMergesOnlyO3(t *testing.T) {
 	for _, level := range []OptimizationLevel{OptimizationLevel0, OptimizationLevel1, OptimizationLevel2, OptimizationLevel3} {
 		got := optimizationPipeline(level)
-		if !strings.HasPrefix(got, fmt.Sprintf("default<O%d>", int(level))) || strings.Contains(got, "mergefunc") != (level == OptimizationLevel3) {
+		want := fmt.Sprintf("default<O%d>", int(level))
+		if level != OptimizationLevel0 {
+			want = "function(mem2reg,div-rem-pairs)," + want
+		}
+		if !strings.HasPrefix(got, want) || strings.Contains(got, "mergefunc") != (level == OptimizationLevel3) {
 			t.Fatalf("unexpected pipeline for %d: %s", level, got)
 		}
+	}
+}
+
+// Loop rotation would otherwise separate a loop condition's division from the body's
+// remainder, so an optimized trial-division loop divided twice per iteration.
+func TestOptimizedTrialDivisionLoopSharesOneDivision(t *testing.T) {
+	source := `def is_prime(value: i64) -> bool:
+    if value < 2:
+        return false
+    divisor: mutable i64 = 2
+    while divisor <= value / divisor:
+        if value % divisor == 0:
+            return false
+        divisor <- divisor + 1
+    true
+
+export fn trial_division_probe(value: i64) -> bool = is_prime
+`
+	result := parseAndAnalyzeBackendTest(t, "trial_division_probe.elisa", source)
+	ir, err := GenerateLLVMIRWithOpt(result, OptimizationLevel3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ir, " srem i64 ") {
+		t.Fatalf("optimized trial-division loop still has a separate remainder division:\n%s", ir)
+	}
+	if got := strings.Count(ir, " sdiv i64 "); got != 1 {
+		t.Fatalf("optimized trial-division loop has %d signed divisions, want 1:\n%s", got, ir)
 	}
 }
 

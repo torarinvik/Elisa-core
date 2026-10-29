@@ -307,8 +307,14 @@ func optimizationPipeline(level OptimizationLevel) string {
 	return pipeline
 }
 
+// div-rem-pairs runs before LLVM's default pipeline. Loop rotation otherwise moves a
+// loop condition's division onto the incremented divisor, so the condition's quotient
+// and the body's remainder stop sharing one division and each iteration divides twice.
 func optimizationBasePipeline(level OptimizationLevel) string {
-	return fmt.Sprintf("default<O%d>", int(level))
+	if level == OptimizationLevel0 {
+		return fmt.Sprintf("default<O%d>", int(level))
+	}
+	return fmt.Sprintf("function(mem2reg,div-rem-pairs),default<O%d>", int(level))
 }
 
 func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {

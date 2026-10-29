@@ -115,6 +115,7 @@ func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, 
 	values := []any{
 		"optimized-module-v8-intrinsic-progress",
 		int(level), triple, cpu, features,
+		optimizationBasePipeline(level),
 		optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3,
 		"constant-table-range-v2-late", "constant-table-unroll-v1", "zero-forward-v1", "split-half-u64-add-v1", "little-endian-byte-pack-load-v1",
 		!g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
