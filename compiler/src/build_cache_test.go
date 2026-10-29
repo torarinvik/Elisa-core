@@ -220,3 +220,40 @@ func TestBuildObjectCacheMainAcrossProcesses(t *testing.T) {
 		}
 	}
 }
+
+// Wrapper-only settings must not make the same compiler invocation miss.
+func TestBuildObjectCacheIgnoresSeedWrapperSettings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_BUILD_CACHE", "1")
+	t.Setenv("ELISACORE_TEST_CACHE_DEBUG", "1")
+	src := filepath.Join(dir, "prog.elisa")
+	if err := os.WriteFile(src, []byte("def add(a: i64, b: i64) -> i64:\n    return a + b\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out1 := filepath.Join(dir, "first.o")
+	if stderr := emitObjForCacheTest(t, src, out1); !strings.Contains(stderr, "build-object miss-store") {
+		t.Fatalf("initial miss: %s", stderr)
+	}
+	for _, name := range []string{"ELISA_STAGE1_SEED_MAX_RSS_KB", "ELISA_STAGE1_SEED_OPT_LEVEL", "ELISA_STAGE1_SEED_BOOTSTRAP_BIN", "ELISA_STAGE1_SEED_BOOTSTRAP_KIND", "ELISA_STAGE1_SEED_CLANG", "ELISA_STAGE0_SOURCE_ROOT"} {
+		t.Setenv(name, "changed-wrapper-setting")
+	}
+	if !strings.Contains(strings.Join(buildCacheEnvKey(), "\n"), "ELISA_STAGE1_SEED_MAX_RSS_KB=changed-wrapper-setting") {
+		t.Fatal("test execution environment omitted from general cache identity")
+	}
+	out2 := filepath.Join(dir, "second.o")
+	if stderr := emitObjForCacheTest(t, src, out2); !strings.Contains(stderr, "build-object hit") {
+		t.Fatalf("wrapper setting caused a miss: %s", stderr)
+	}
+	a, err := os.ReadFile(out1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Fatal("cache replay changed object")
+	}
+}

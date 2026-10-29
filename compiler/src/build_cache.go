@@ -114,7 +114,7 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		return buildCacheArtifact{}, false
 	}
 	optionsKey := buildCacheOptionsIdentity(options)
-	environment := buildCacheEnvKey()
+	environment := compilerCacheEnvKey()
 	hash := sha256.New()
 	if err := writeNativeCacheTarget(hash, options.targetTriple); err != nil {
 		return buildCacheArtifact{}, false
@@ -224,7 +224,7 @@ func buildCacheObjectArtifactForProgramOrHandoff(options cliOptions, program *lo
 		root, err := buildCacheRoot()
 		if err == nil && artifact.dir == filepath.Join(root, artifact.key) &&
 			artifact.optionsKey == buildCacheOptionsIdentity(options) &&
-			buildCacheEnvironmentEqual(artifact.environment, buildCacheEnvKey()) {
+			buildCacheEnvironmentEqual(artifact.environment, compilerCacheEnvKey()) {
 			return artifact, true
 		}
 	}
@@ -420,6 +420,26 @@ func buildCacheEnvKey() []string {
 	}
 	sort.Strings(entries)
 	return entries
+}
+
+// compilerCacheEnvKey excludes settings consumed only by the Stage1 wrapper.
+// Test-result caching deliberately keeps them: executed programs may read their
+// environment even when the compiler itself does not.
+func compilerCacheEnvKey() []string {
+	ignored := map[string]bool{
+		"ELISA_STAGE1_SEED_MAX_RSS_KB": true, "ELISA_STAGE1_SEED_OPT_LEVEL": true,
+		"ELISA_STAGE1_SEED_BOOTSTRAP_BIN": true, "ELISA_STAGE1_SEED_BOOTSTRAP_KIND": true,
+		"ELISA_STAGE1_SEED_CLANG": true, "ELISA_STAGE0_SOURCE_ROOT": true,
+	}
+	entries := buildCacheEnvKey()
+	filtered := entries[:0]
+	for _, entry := range entries {
+		name, _, _ := strings.Cut(entry, "=")
+		if !ignored[name] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // These modes observe this invocation or publish files outside the object

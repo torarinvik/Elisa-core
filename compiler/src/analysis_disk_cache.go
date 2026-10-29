@@ -124,7 +124,7 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 		return analysisDiskArtifact{}, false
 	}
 	testRunnerCacheWriteBytes(h, "options", encoded)
-	for _, entry := range buildCacheEnvKey() {
+	for _, entry := range compilerCacheEnvKey() {
 		name, _, _ := strings.Cut(entry, "=")
 		// These controls only select backend emission strategy. They cannot change
 		// semantic facts or diagnostics, so switching codegen modes must still be
