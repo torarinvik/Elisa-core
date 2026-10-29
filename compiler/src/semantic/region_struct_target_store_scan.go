@@ -59,7 +59,7 @@ func maxStoreMode(x, y storeMode) storeMode {
 func (a *Analyzer) calleeStoreModeInto(decl *ast.FuncDecl, other, index int) storeMode {
 	decl = a.readDecl(decl)
 	key := storeScanKey{decl, other, index}
-	if mode, ok := a.storeScanCache[key]; ok {
+	if mode, ok := a.lookupStoreScanMode(key); ok {
 		return mode
 	}
 	saved := a.storeScanCycleHit
@@ -92,7 +92,7 @@ func (a *Analyzer) cacheStoreScan(key storeScanKey, mode storeMode) {
 func (a *Analyzer) calleeStoreModeIntoSeen(decl *ast.FuncDecl, other, index int, seen map[storeScanKey]bool) storeMode {
 	decl = a.readDecl(decl)
 	key := storeScanKey{decl, other, index}
-	if mode, ok := a.storeScanCache[key]; ok {
+	if mode, ok := a.lookupStoreScanMode(key); ok {
 		return mode
 	}
 	if seen[key] {
@@ -2058,7 +2058,7 @@ func (a *Analyzer) calleeReturnModeOf(decl *ast.FuncDecl, other int, seen map[st
 		return storeNone // docs/128: a program-lived parameter's parts are program-lived
 	}
 	key := storeScanKey{decl, other, -1}
-	if mode, ok := a.storeScanCache[key]; ok {
+	if mode, ok := a.lookupStoreScanMode(key); ok {
 		return mode
 	}
 	if seen[key] {

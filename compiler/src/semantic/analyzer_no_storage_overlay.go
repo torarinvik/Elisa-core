@@ -16,6 +16,21 @@ type analyzerNoStorageOverlay struct {
 	helperCalls      map[*ast.CallExpr]string
 	returnUnknown    map[*ast.ReturnStmt]bool
 	containerRegions map[Type]string
+	storeModes       map[storeScanKey]storeMode
+}
+
+// Completed scan results are immutable in the canonical analyzer while
+// specialization construction holds shared codegen. Private writes shadow
+// the base, including storeNone, which is a present and meaningful result.
+func (a *Analyzer) lookupStoreScanMode(key storeScanKey) (storeMode, bool) {
+	if mode, ok := a.storeScanCache[key]; ok {
+		return mode, true
+	}
+	if a.noStorageOverlay != nil {
+		mode, ok := a.noStorageOverlay.storeModes[key]
+		return mode, ok
+	}
+	return storeNone, false
 }
 
 func (a *Analyzer) lookupStoreScanViewOnly(t Type) (bool, bool) {
@@ -154,7 +169,7 @@ func cloneAnalyzerNoStorageOverlay(source *analyzerNoStorageOverlay) *analyzerNo
 	if source == nil {
 		return nil
 	}
-	return &analyzerNoStorageOverlay{base: source.base, viewOnlyBase: source.viewOnlyBase, sharesBase: source.sharesBase, paramWrites: source.paramWrites, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown, containerRegions: source.containerRegions}
+	return &analyzerNoStorageOverlay{base: source.base, viewOnlyBase: source.viewOnlyBase, sharesBase: source.sharesBase, paramWrites: source.paramWrites, helperCalls: source.helperCalls, returnUnknown: source.returnUnknown, containerRegions: source.containerRegions, storeModes: source.storeModes}
 }
 func (a *Analyzer) rejectNoStorageOverlayOperation(operation string) error {
 	err := fmt.Errorf("specialization no-storage overlay cannot enter %s", operation)

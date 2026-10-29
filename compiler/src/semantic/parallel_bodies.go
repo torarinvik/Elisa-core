@@ -459,7 +459,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			}
 			continue
 		}
-		if ownedFunctionAnalyses && (name == "storeScanNoStorageCache" || name == "containerRegionMemo") {
+		if ownedFunctionAnalyses && (name == "storeScanNoStorageCache" || name == "containerRegionMemo" || name == "storeScanCache") {
 			if field.IsNil() {
 				settable(cloned.Field(i)).Set(reflect.Zero(field.Type()))
 			} else {
@@ -712,6 +712,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 			helperCalls:      a.compilerBuiltinHelperCalls,
 			returnUnknown:    a.returnElementStmtUnknown,
 			containerRegions: a.containerRegionMemo,
+			storeModes:       a.storeScanCache,
 		}
 		worker.iterBinderElementOverlay = &analyzerIterBinderElementOverlay{base: a.iterBinderElementStates, sources: a.iterBindingSources}
 		worker.exprTypeOverlay = &analyzerExprTypeOverlay{base: a.exprTypes}

@@ -565,3 +565,36 @@ func TestContainerRegionMemoOverlayIsolation(t *testing.T) {
 		t.Fatalf("unfrozen lookup used memo: %q", got)
 	}
 }
+
+func TestStoreScanModeOverlayIsolation(t *testing.T) {
+	original := &ast.FuncDecl{Name: "original"}
+	inherited := storeScanKey{decl: original, other: 0, index: 1}
+	zero := storeScanKey{decl: original, other: 0, index: 2}
+	fresh := storeScanKey{decl: &ast.FuncDecl{Name: "fresh"}, other: 0, index: 1}
+	root := &Analyzer{storeScanCache: map[storeScanKey]storeMode{inherited: storeHeader, zero: storeNone}}
+	worker := cloneAnalyzerValueForSpecialization(root).Addr().Interface().(*Analyzer)
+	if len(worker.storeScanCache) != 0 {
+		t.Fatal("eagerly copied store mode cache")
+	}
+	if got, ok := worker.lookupStoreScanMode(inherited); !ok || got != storeHeader {
+		t.Fatal("inherited mode lost")
+	}
+	if got, ok := worker.lookupStoreScanMode(zero); !ok || got != storeNone {
+		t.Fatal("inherited zero entry lost")
+	}
+	if _, ok := worker.lookupStoreScanMode(fresh); ok {
+		t.Fatal("missing entry became present")
+	}
+	worker.cacheStoreScan(inherited, storeNone)
+	worker.cacheStoreScan(fresh, storeHeader)
+	if got, _ := worker.lookupStoreScanMode(inherited); got != storeNone || root.storeScanCache[inherited] != storeHeader {
+		t.Fatal("private override leaked")
+	}
+	nested := cloneAnalyzerValueForBodyWorker(worker).Addr().Interface().(*Analyzer)
+	if got, ok := nested.lookupStoreScanMode(zero); !ok || got != storeNone {
+		t.Fatal("nested inherited entry lost")
+	}
+	if got, ok := nested.lookupStoreScanMode(inherited); !ok || got != storeNone {
+		t.Fatal("nested private entry lost")
+	}
+}
