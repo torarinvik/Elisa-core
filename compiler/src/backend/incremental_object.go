@@ -138,9 +138,9 @@ func (s *IncrementalObjectSession) lookupObjectBytes(bitcode []byte, target stri
 	// Exact input comparison makes the digest an index, not reuse authority.
 	if entry == nil || entry.bitcode != input || entry.target != target {
 		s.mu.Unlock()
-		object := s.disk.load(bitcode, target)
+		object := s.disk.loadKey(bitcode, target, key)
 		if object != nil {
-			s.retainObjectInMemory(string(bitcode), target, object, [32]byte{})
+			s.retainObjectInMemoryWithKey(string(bitcode), target, object, [32]byte{}, key)
 			s.recordStats(func(stats *IncrementalObjectStats) { stats.PartitionsReused++; stats.DiskPartitionsReused++ })
 		}
 		return object
@@ -190,11 +190,17 @@ func (s *IncrementalObjectSession) retainObjectForSlot(bitcode, target string, o
 }
 
 func (s *IncrementalObjectSession) retainObjectInMemory(bitcode, target string, object []byte, slot [32]byte) {
+	if len(bitcode)+len(target)+len(object) > s.maxBytes {
+		return
+	}
+	s.retainObjectInMemoryWithKey(bitcode, target, object, slot, incrementalObjectKey(bitcode, target))
+}
+
+func (s *IncrementalObjectSession) retainObjectInMemoryWithKey(bitcode, target string, object []byte, slot, key [32]byte) {
 	cost := len(bitcode) + len(target) + len(object)
 	if cost > s.maxBytes {
 		return
 	}
-	key := incrementalObjectKey(bitcode, target)
 	s.mu.Lock()
 	if s.entries[key] != nil {
 		s.removeObjectLocked(key)

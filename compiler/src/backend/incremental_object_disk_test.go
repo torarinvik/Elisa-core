@@ -114,3 +114,19 @@ func TestObjectDiskCacheConcurrentPublicationAndEviction(t *testing.T) {
 		t.Fatalf("disk budget exceeded: %d", size)
 	}
 }
+
+func TestDiskLookupSuppliedKeyStillChecksExactInput(t *testing.T) {
+	s := NewIncrementalObjectSession(2, 4096)
+	s.EnableDiskCache(t.TempDir(), "compiler", 8192)
+	s.disk.store("original", "target", []byte("object"))
+	key := incrementalObjectKeyBytes([]byte("original"), "target")
+	if got := s.disk.loadKey([]byte("original"), "target", key); !bytes.Equal(got, []byte("object")) {
+		t.Fatal("matching disk entry lost")
+	}
+	if got := s.disk.loadKey([]byte("modified"), "target", key); got != nil {
+		t.Fatal("digest selected an entry with different bitcode")
+	}
+	if got := s.disk.loadKey([]byte("original"), "targex", key); got != nil {
+		t.Fatal("digest selected an entry with different target")
+	}
+}

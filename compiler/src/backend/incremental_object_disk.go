@@ -37,6 +37,10 @@ func (s *IncrementalObjectSession) EnableDiskCache(root, compilerIdentity string
 
 func (d *incrementalObjectDisk) path(bitcode []byte, target string) string {
 	key := incrementalObjectKeyBytes(bitcode, target)
+	return d.pathForKey(key)
+}
+
+func (d *incrementalObjectDisk) pathForKey(key [32]byte) string {
 	return filepath.Join(d.root, hex.EncodeToString(key[:])+".part")
 }
 
@@ -46,7 +50,14 @@ func (d *incrementalObjectDisk) load(bitcode []byte, target string) []byte {
 	if d == nil {
 		return nil
 	}
-	path := d.path(bitcode, target)
+	return d.loadKey(bitcode, target, incrementalObjectKeyBytes(bitcode, target))
+}
+
+func (d *incrementalObjectDisk) loadKey(bitcode []byte, target string, key [32]byte) []byte {
+	if d == nil {
+		return nil
+	}
+	path := d.pathForKey(key)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
