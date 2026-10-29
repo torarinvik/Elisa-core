@@ -81,6 +81,11 @@ func (r *Registry) decodePayload(payload, data []byte, maxBytes uint64) (any, er
 	return v.Interface(), nil
 }
 func (d *decoder) uint() (uint64, error) {
+	if d.at < len(d.data) && d.data[d.at] < 0x80 {
+		value := d.data[d.at]
+		d.at++
+		return uint64(value), nil
+	}
 	v, n := binary.Uvarint(d.data[d.at:])
 	if n <= 0 {
 		return 0, fmt.Errorf("truncated state integer")
