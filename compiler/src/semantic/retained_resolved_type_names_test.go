@@ -176,6 +176,115 @@ def main() -> i32:
 	}
 }
 
+func TestRetainedFastPrepareMatchesShiftedAndAddedBodyTypeSyntax(t *testing.T) {
+	previousMode := retainedFastPrepareMode
+	retainedFastPrepareMode = "on"
+	defer func() { retainedFastPrepareMode = previousMode }()
+
+	// Every edit replaces whole lines: a line insertion anywhere in the file
+	// invalidates the fast-preparation baseline for later updates.
+	const baseline = `module Sample:
+    public:
+        type U8Alias = u8
+
+        struct Box:
+            value: i32
+
+        struct Other:
+            value: i32
+
+        def changed(limit: i32, box: Box) -> i32:
+            tiny: Box = Box{value: 7}
+            much_longer_local: mutable Box = Box{value: 3}
+            return tiny.value + much_longer_local.value + box.value + limit
+
+        def other(byte: U8Alias) -> U8Alias:
+            local: u8 = byte
+            return local
+
+def main() -> i32:
+    return Sample::changed(1, Sample::Box{value: 2})
+`
+	// Swapping the annotations moves each TypeExpr to a different structural
+	// path. The syntax-key set is unchanged, so the witness inventory admits it.
+	shifted := strings.Replace(baseline, `            tiny: Box = Box{value: 7}
+            much_longer_local: mutable Box = Box{value: 3}`, `            much_longer_local: Box = Box{value: 7}
+            tiny: mutable Box = Box{value: 3}`, 1)
+	numeric := strings.Replace(shifted, "Box{value: 7}", "Box{value: 4}", 1)
+	// u8 occurs only in other's header; the body-local annotation replaces a
+	// builtin spelling the body never resolved a canonical name for.
+	aliased := strings.Replace(numeric, "            local: u8 = byte", "            local: U8Alias = byte", 1)
+	// After the alias edit, u8 is no longer anywhere in other's source
+	// inventory, so this edit must decline rather than guess a resolution.
+	unknown := strings.Replace(aliased, "            local: U8Alias = byte", "            local: u8 = byte", 1)
+	if shifted == baseline || numeric == shifted || aliased == numeric || unknown == aliased {
+		t.Fatal("fixture edits did not apply")
+	}
+
+	options := AnalyzeOptions{}
+	_, state := AnalyzeRetained(retainedParse(t, baseline), retainedParse(t, baseline), []byte(baseline), options)
+	if state == nil {
+		t.Fatal("baseline analysis was not retained")
+	}
+	checkpoint, err := state.MarshalState()
+	if err != nil {
+		t.Fatalf("marshal baseline: %v", err)
+	}
+	state, err = RestoreAnalysisState(checkpoint)
+	if err != nil {
+		t.Fatalf("restore baseline: %v", err)
+	}
+
+	edits := []struct {
+		name string
+		src  string
+	}{
+		{"changed", shifted},
+		{"changed", numeric},
+		{"other", aliased},
+	}
+	for index, edit := range edits {
+		oldRows := resolvedTypeNameBodyRowsForTest(state, edit.name)
+		updated, updateErr := state.Update(retainedParse(t, edit.src), retainedParse(t, edit.src), []byte(edit.src))
+		if updateErr != nil {
+			t.Fatalf("edit %d fell back: %v", index, updateErr)
+		}
+		if !state.LastStats.FastPrepared {
+			t.Fatalf("edit %d did not use fast preparation: %+v", index, state.LastStats)
+		}
+		for _, expr := range oldRows {
+			if _, present := state.a.resolvedTypeNames[expr]; present {
+				t.Fatalf("edit %d retained an old body TypeExpr key", index)
+			}
+		}
+		if edit.name == "other" {
+			if rows := resolvedTypeNameBodyRowsForTest(state, "other"); len(rows) == 0 {
+				t.Fatal("header-witnessed alias edit recorded no body type-name row")
+			}
+		}
+		cold := AnalyzeWithOptions(retainedParse(t, edit.src), options)
+		assertResolvedTypeNameParity(t, updated, cold)
+		checkpoint, err = state.MarshalState()
+		if err != nil {
+			t.Fatalf("marshal after edit %d: %v", index, err)
+		}
+		state, err = RestoreAnalysisState(checkpoint)
+		if err != nil {
+			t.Fatalf("restore after edit %d: %v", index, err)
+		}
+	}
+
+	// Unknown syntax must still take the scratch path and match a cold analysis.
+	updated, err := state.Update(retainedParse(t, unknown), retainedParse(t, unknown), []byte(unknown))
+	if err != nil {
+		t.Fatalf("unknown-syntax edit fell back with an error: %v", err)
+	}
+	if state.LastStats.FastPrepared || !strings.Contains(state.LastStats.FastDeclined, "certified inventory") {
+		t.Fatalf("unknown syntax was not declined conservatively: %+v", state.LastStats)
+	}
+	assertResolvedTypeNameParity(t, updated, AnalyzeWithOptions(retainedParse(t, unknown), options))
+}
+
 func TestResolvedTypeNameContributionComparisonRejectsUnplannedOwnerChanges(t *testing.T) {
 	old := resolvedTypeNameContributions{
 		functions: map[string]resolvedTypeNameFunctionContribution{

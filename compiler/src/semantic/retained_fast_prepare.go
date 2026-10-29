@@ -362,26 +362,63 @@ func (r *RetainedAnalysis) shadowPredict(a *Analyzer, edits [][3]*ast.FuncDecl, 
 	fmt.Fprintf(os.Stderr, "[fast-predict] %d edits facts-same=%v scratch-diff=%q -> %s\n", len(edits), same, diff, verdict)
 }
 
+// sourceBodySyntaxWitnessKeys is what a body edit may use: every TypeExpr
+// syntax the function's source header and body already contain. A  projected
+// comparison body carries the body half in its comparison text.
+func (r *RetainedAnalysis) sourceBodySyntaxWitnessKeys(old *ast.FuncDecl) (map[string]bool, error) {
+	keys := map[string]bool{}
+	if old == nil {
+		return nil, fmt.Errorf("missing comparison function")
+	}
+	if len(old.Body) != 0 {
+		bodyKeys, err := resolvedTypeNameSyntaxKeysOf(old.Body)
+		if err != nil {
+			return nil, err
+		}
+		for key := range bodyKeys {
+			keys[key] = true
+		}
+	} else {
+		text := r.comparisonText(old)
+		bodyKeys, err := decodeResolvedTypeNameSyntaxKeys(text.bodyTypeNames)
+		if err != nil {
+			return nil, fmt.Errorf("projected source body has no type-syntax inventory: %w", err)
+		}
+		for key := range bodyKeys {
+			keys[key] = true
+		}
+	}
+	headerKeys, err := resolvedTypeNameHeaderSyntaxKeys(old)
+	if err != nil {
+		return nil, err
+	}
+	for key := range headerKeys {
+		keys[key] = true
+	}
+	return keys, nil
+}
+
 // fastPathBodies returns the edited bodies prepared without the scratch, or a reason the
 // update must wait for it. Only line-preserving edits to function bodies qualify; each
 // edited function's declaration-level facts must equal its previous version's, and no
 // declaration-phase diagnostic may lie inside it.
-func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl, scoped map[*ast.FuncDecl]scopedDecl, oldDecls []ast.Decl) ([][]ast.Stmt, map[string]map[ast.TypeExpr]string, string) {
+func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl, scoped map[*ast.FuncDecl]scopedDecl, oldDecls []ast.Decl) ([][]ast.Stmt, map[string]map[ast.TypeExpr]string, map[string]string, string) {
 	if r.fastPrepareInvalidated != "" {
-		return nil, nil, r.fastPrepareInvalidated
+		return nil, nil, nil, r.fastPrepareInvalidated
 	}
 	if r.pre == nil || r.classify == nil {
-		return nil, nil, "no retained baseline"
+		return nil, nil, nil, "no retained baseline"
 	}
 	if r.pre.resolvedTypeNames.failure != "" {
-		return nil, nil, "resolved type-name ownership baseline is unavailable"
+		return nil, nil, nil, "resolved type-name ownership baseline is unavailable"
 	}
 	if !r.resolvedTypeNameSourceOwnersValid {
-		return nil, nil, "source TypeExpr ownership inventory is unavailable"
+		return nil, nil, nil, "source TypeExpr ownership inventory is unavailable"
 	}
 	functionKeys := retainedPreBodyFunctionKeys(r.decls)
 	bodies := make([][]ast.Stmt, len(edits))
 	resolvedTypeNameRows := map[string]map[ast.TypeExpr]string{}
+	resolvedTypeNameContributions := map[string]string{}
 	for i, e := range edits {
 		live, old, edit := e[0], e[1], e[2]
 		oldTypeSyntax, oldTypeSyntaxErr := "", error(nil)
@@ -394,8 +431,27 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 			oldTypeSyntax, oldTypeSyntaxErr = resolvedTypeNameBodySyntaxFingerprint(old)
 		}
 		newTypeSyntax, newTypeSyntaxErr := resolvedTypeNameBodySyntaxFingerprint(edit)
-		if oldTypeSyntaxErr != nil || newTypeSyntaxErr != nil || oldTypeSyntax != newTypeSyntax {
-			return nil, nil, edit.Name + " changes or cannot certify body type-name syntax"
+		if newTypeSyntaxErr != nil {
+			return nil, nil, nil, edit.Name + " changes or cannot certify body type-name syntax"
+		}
+		syntaxUnchanged := oldTypeSyntaxErr == nil && oldTypeSyntax == newTypeSyntax
+		if !syntaxUnchanged {
+			// Witness extension: an edit may shift TypeExpr paths or repeat syntax the
+			// function already declares in its header or body. Everything is matched by
+			// pointer-free syntax, never by path identity or position.
+			oldKeys, err := r.sourceBodySyntaxWitnessKeys(old)
+			if err != nil {
+				return nil, nil, nil, edit.Name + " changes or cannot certify body type-name syntax"
+			}
+			newKeys, err := resolvedTypeNameSyntaxKeysOf(edit.Body)
+			if err != nil {
+				return nil, nil, nil, edit.Name + " cannot inventory prepared body type-name syntax: " + err.Error()
+			}
+			for key := range newKeys {
+				if !oldKeys[key] {
+					return nil, nil, nil, edit.Name + " introduces body type-name syntax outside the function's certified inventory"
+				}
+			}
 		}
 		op := old.Pos()
 		end := int(^uint(0) >> 1)
@@ -406,17 +462,17 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 		}
 		for _, d := range r.pre.diags {
 			if d.Pos.File == op.File && d.Pos.Line >= op.Line && d.Pos.Line < end {
-				return nil, nil, edit.Name + " holds a declaration-phase diagnostic"
+				return nil, nil, nil, edit.Name + " holds a declaration-phase diagnostic"
 			}
 		}
 		if live.IsLaw {
-			return nil, nil, edit.Name + " is a law"
+			return nil, nil, nil, edit.Name + " is a law"
 		}
 		if classifierFoldShape(old) || classifierFoldShape(edit) {
-			return nil, nil, edit.Name + " may fold into a classifier table"
+			return nil, nil, nil, edit.Name + " may fold into a classifier table"
 		}
 		if r.appendOnlyReports(a, edit, scoped[live]) {
-			return nil, nil, edit.Name + " breaks an append-only store rule"
+			return nil, nil, nil, edit.Name + " breaks an append-only store rule"
 		}
 		before, ok := r.digestOf[old]
 		if !ok {
@@ -427,22 +483,35 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 			if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" || os.Getenv("ELISACORE_RETAINED_FAST_DEBUG") == "1" {
 				fmt.Fprintf(os.Stderr, "[fast-path] %s precomputed=%v\n--- before\n%s\n--- after\n%s\n", edit.Name, ok, before, after)
 			}
-			return nil, nil, edit.Name + " changes declaration-level facts"
+			return nil, nil, nil, edit.Name + " changes declaration-level facts"
 		}
 		body, why := r.fastPrepareBody(a, live, edit, scoped[live])
 		if why != "" {
-			return nil, nil, edit.Name + ": " + why
+			return nil, nil, nil, edit.Name + ": " + why
 		}
 		key := functionKeys[live]
-		rows, err := rebindResolvedTypeNameBodyRows(a, r.resolvedTypeNameSourceOwners, key, body)
-		if err != nil {
-			return nil, nil, edit.Name + ": " + err.Error()
-		}
-		if r.pre.resolvedTypeNames.functions[key].body != "" && len(rows) == 0 {
-			return nil, nil, edit.Name + " lost previously certified body type-name rows"
-		}
-		if len(rows) != 0 {
-			resolvedTypeNameRows[key] = rows
+		if syntaxUnchanged {
+			rows, err := rebindResolvedTypeNameBodyRows(a, r.resolvedTypeNameSourceOwners, key, body)
+			if err != nil {
+				return nil, nil, nil, edit.Name + ": " + err.Error()
+			}
+			if r.pre.resolvedTypeNames.functions[key].body != "" && len(rows) == 0 {
+				return nil, nil, nil, edit.Name + " lost previously certified body type-name rows"
+			}
+			if len(rows) != 0 {
+				resolvedTypeNameRows[key] = rows
+			}
+		} else {
+			// Fast preparation records the declaration-phase rows of the prepared body
+			// on the live analyzer itself; the body replay records the rest exactly as a
+			// cold analysis would. Re-encode that declaration-phase set for the next
+			// update's comparison baseline.
+			contribution, err := resolvedTypeNamePreparedBodyContribution(a, key, r.resolvedTypeNameSourceOwners, body)
+			if err != nil {
+				return nil, nil, nil, edit.Name + ": " + err.Error()
+			}
+			resolvedTypeNameRows[key] = map[ast.TypeExpr]string{}
+			resolvedTypeNameContributions[key] = contribution
 		}
 		if r.digestOf == nil {
 			r.digestOf = map[*ast.FuncDecl]string{}
@@ -450,7 +519,7 @@ func (r *RetainedAnalysis) fastPathBodies(a *Analyzer, edits [][3]*ast.FuncDecl,
 		r.digestOf[edit] = after
 		bodies[i] = body
 	}
-	return bodies, resolvedTypeNameRows, ""
+	return bodies, resolvedTypeNameRows, resolvedTypeNameContributions, ""
 }
 
 // precomputeBaselineDigests records each baseline function's fact digest while its body is

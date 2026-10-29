@@ -39,6 +39,9 @@ func (r *RetainedAnalysis) marshalComparisonProjection() ([]byte, error) {
 		if text.bodyTypeSyntax == "" {
 			text.bodyTypeSyntax, _ = resolvedTypeNameBodySyntaxFingerprint(fn)
 		}
+		if text.bodyTypeNames == "" {
+			text.bodyTypeNames, _ = resolvedTypeNameBodySyntaxInventory(fn)
+		}
 		texts[fn] = text
 		omitted[fn] = true
 	}

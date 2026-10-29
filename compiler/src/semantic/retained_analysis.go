@@ -837,6 +837,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 	var pre *preBodyState
 	var fastBodies [][]ast.Stmt
 	var fastResolvedTypeNameRows map[string]map[ast.TypeExpr]string
+	var fastResolvedTypeNameContributions map[string]string
 	var fastResolvedTypeNameSourceOwners map[ast.TypeExpr]resolvedTypeNameSourceOwner
 	bodyEnvironmentUnchanged := len(added)+len(removed)+len(addedConsts)+len(removedConsts)+len(addedStructs)+len(removedStructs) == 0 &&
 		len(structPairs)+len(constPairs)+len(constEnumPairs)+len(enumPairs)+len(hierarchyPairs) == 0 &&
@@ -855,7 +856,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			why = r.fastLineShiftAuthority(a, marks)
 		}
 		if why == "" {
-			fastBodies, fastResolvedTypeNameRows, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls)
+			fastBodies, fastResolvedTypeNameRows, fastResolvedTypeNameContributions, why = r.fastPathBodies(a, shadowEdits, scoped, oldDecls)
 			if why == "" {
 				var ownershipErr error
 				fastResolvedTypeNameSourceOwners, ownershipErr = resolvedTypeNameFastBodySourceOwners(shadowEdits, fastBodies, retainedPreBodyFunctionKeys(r.decls))
@@ -867,6 +868,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		if why != "" {
 			fastBodies = nil
 			fastResolvedTypeNameRows = nil
+			fastResolvedTypeNameContributions = nil
 			fastResolvedTypeNameSourceOwners = nil
 			r.LastStats.FastDeclined = why
 		}
@@ -875,6 +877,15 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		// The edit leaves every declaration-level result as the retained baseline holds it.
 		// The new prefix is independently relocated; mutating/aliasing the old
 		// baseline would invalidate preBodyDifference and later disk revisions.
+		resolvedTypeNames := r.pre.resolvedTypeNames
+		if len(fastResolvedTypeNameContributions) != 0 {
+			resolvedTypeNames = cloneResolvedTypeNameContributions(resolvedTypeNames)
+			for key, body := range fastResolvedTypeNameContributions {
+				contribution := resolvedTypeNames.functions[key]
+				contribution.body = body
+				resolvedTypeNames.functions[key] = contribution
+			}
+		}
 		diags := append([]Diagnostic(nil), r.pre.diags...)
 		owners := retainedDiagnosticOwners(r.decls, nil, func(decl ast.Decl) ast.Decl {
 			if fn, ok := decl.(*ast.FuncDecl); ok {
@@ -890,7 +901,7 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 			}
 			diags[i].Pos = retainedShiftPos(diags[i].Pos, marks)
 		}
-		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, resolvedTypeNames: r.pre.resolvedTypeNames, resolvedTypeNameSourceOwners: fastResolvedTypeNameSourceOwners, resolvedTypeNameRows: fastResolvedTypeNameRows, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
+		pre = &preBodyState{classification: r.pre.classification, fingerprint: r.pre.fingerprint, global: r.pre.global, resolvedTypeNames: resolvedTypeNames, resolvedTypeNameSourceOwners: fastResolvedTypeNameSourceOwners, resolvedTypeNameRows: fastResolvedTypeNameRows, diags: diags, plainHeaders: r.pre.plainHeaders, plainGlobal: r.pre.plainGlobal, plainInputs: r.pre.plainInputs, plainIdentities: r.pre.plainIdentities, hasProofReport: r.pre.hasProofReport}
 		r.LastStats.FastPrepared = true
 	} else if prepared.AcceptsScratch(scratch) {
 		if err := prepared.materialize(); err != nil {
@@ -2525,6 +2536,7 @@ type funcComparisonText struct {
 	header         string // signature, gensyms normalized
 	gensyms        string // offset-named identifiers the function mentions
 	bodyTypeSyntax string // pointer-free source TypeExpr fingerprint for a projected body
+	bodyTypeNames  string // source TypeExpr syntax-key inventory for a projected body
 }
 
 func retainedText(fn *ast.FuncDecl) funcComparisonText {

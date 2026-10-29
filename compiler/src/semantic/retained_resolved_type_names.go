@@ -30,6 +30,21 @@ type resolvedTypeNameFunctionContribution struct {
 	body   string
 }
 
+// cloneResolvedTypeNameContributions keeps the shared baseline immutable while
+// an accepted fast body edit replaces its own owners' body rows.
+func cloneResolvedTypeNameContributions(in resolvedTypeNameContributions) resolvedTypeNameContributions {
+	out := in
+	out.functions = make(map[string]resolvedTypeNameFunctionContribution, len(in.functions))
+	for key, contribution := range in.functions {
+		out.functions[key] = contribution
+	}
+	out.declarations = make(map[string]string, len(in.declarations))
+	for key, contribution := range in.declarations {
+		out.declarations[key] = contribution
+	}
+	return out
+}
+
 type resolvedTypeNameLocation struct {
 	owner     string
 	region    string
@@ -674,6 +689,217 @@ func resolvedTypeNameFastBodySourceOwners(edits [][3]*ast.FuncDecl, preparedBodi
 		}
 	}
 	return owners, nil
+}
+
+// resolvedTypeNameSyntaxKey names one TypeExpr's pointer-free syntax. Two
+// occurrences in one function resolve through the same declaration scope, so
+// equal keys may be rebound onto one another by a body edit.
+func resolvedTypeNameSyntaxKey(expr ast.TypeExpr) (string, error) {
+	if expr == nil {
+		return "", fmt.Errorf("missing type expression")
+	}
+	digest, _, err := functionSyntaxFingerprint(expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s\x00%s", reflect.TypeOf(expr), hex.EncodeToString(digest[:])), nil
+}
+
+// resolvedTypeNameSyntaxKeysOf collects the syntax keys of every TypeExpr in an
+// AST value. It is the witness inventory a body edit is matched against.
+func resolvedTypeNameSyntaxKeysOf(value any) (map[string]bool, error) {
+	keys := map[string]bool{}
+	active := map[resolvedTypeNamePointer]bool{}
+	work := 0
+	var walk func(reflect.Value, int) error
+	walk = func(value reflect.Value, depth int) error {
+		work++
+		if work > 1_000_000 {
+			return fmt.Errorf("AST type syntax work budget exceeded")
+		}
+		if depth > 2048 {
+			return fmt.Errorf("AST type syntax depth exceeded")
+		}
+		if !value.IsValid() {
+			return nil
+		}
+		typ := value.Type()
+		if typ == resolvedTypeNamePositionType {
+			return nil
+		}
+		switch value.Kind() {
+		case reflect.Interface:
+			if !value.IsNil() {
+				return walk(value.Elem(), depth+1)
+			}
+		case reflect.Pointer:
+			if value.IsNil() || typ.Elem().PkgPath() != resolvedTypeNameASTPackage {
+				return nil
+			}
+			ptr := resolvedTypeNamePointer{typ: typ, ptr: value.Pointer()}
+			if active[ptr] {
+				return fmt.Errorf("cyclic AST body")
+			}
+			active[ptr] = true
+			if expr, ok := value.Interface().(ast.TypeExpr); ok {
+				key, err := resolvedTypeNameSyntaxKey(expr)
+				if err != nil {
+					return err
+				}
+				keys[key] = true
+			}
+			err := walk(value.Elem(), depth+1)
+			delete(active, ptr)
+			return err
+		case reflect.Struct:
+			if typ.PkgPath() != resolvedTypeNameASTPackage {
+				return nil
+			}
+			for i := 0; i < value.NumField(); i++ {
+				field := typ.Field(i)
+				if !resolvedTypeNameFieldMayContainAST(field.Type) {
+					continue
+				}
+				if !value.Field(i).CanInterface() {
+					return fmt.Errorf("unpublished AST field %s.%s", typ, field.Name)
+				}
+				if err := walk(value.Field(i), depth+1); err != nil {
+					return err
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < value.Len(); i++ {
+				if err := walk(value.Index(i), depth+1); err != nil {
+					return err
+				}
+			}
+		case reflect.Map:
+			if typ.Key().Kind() != reflect.String {
+				return fmt.Errorf("unsupported AST map key %s", typ.Key())
+			}
+			keys := value.MapKeys()
+			sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+			for _, key := range keys {
+				if err := walk(value.MapIndex(key), depth+1); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(reflect.ValueOf(value), 0); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// resolvedTypeNameHeaderSyntaxKeys is the source header half of a function's
+// witness inventory. The comparison projection keeps headers.
+func resolvedTypeNameHeaderSyntaxKeys(fn *ast.FuncDecl) (map[string]bool, error) {
+	keys := map[string]bool{}
+	if fn == nil {
+		return nil, fmt.Errorf("missing function")
+	}
+	value := reflect.ValueOf(fn).Elem()
+	typ := value.Type()
+	for i := 0; i < value.NumField(); i++ {
+		field := typ.Field(i)
+		if field.Name == "Body" || !resolvedTypeNameFieldMayContainAST(field.Type) {
+			continue
+		}
+		if !value.Field(i).CanInterface() {
+			return nil, fmt.Errorf("unpublished function header field %s.%s", typ, field.Name)
+		}
+		fieldKeys, err := resolvedTypeNameSyntaxKeysOf(value.Field(i).Interface())
+		if err != nil {
+			return nil, err
+		}
+		for key := range fieldKeys {
+			keys[key] = true
+		}
+	}
+	return keys, nil
+}
+
+// resolvedTypeNameBodySyntaxInventory encodes the source body's syntax-key set
+// for comparison states whose bodies are projected away.
+func resolvedTypeNameBodySyntaxInventory(fn *ast.FuncDecl) (string, error) {
+	if fn == nil {
+		return "", fmt.Errorf("missing function")
+	}
+	keys, err := resolvedTypeNameSyntaxKeysOf(fn.Body)
+	if err != nil {
+		return "", err
+	}
+	return encodeResolvedTypeNameSyntaxKeys(keys)
+}
+
+func encodeResolvedTypeNameSyntaxKeys(keys map[string]bool) (string, error) {
+	sorted := make([]string, 0, len(keys))
+	for key := range keys {
+		sorted = append(sorted, key)
+	}
+	sort.Strings(sorted)
+	encoded, err := json.Marshal(sorted)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func decodeResolvedTypeNameSyntaxKeys(encoded string) (map[string]bool, error) {
+	if encoded == "" {
+		return nil, fmt.Errorf("missing type-syntax inventory")
+	}
+	var sorted []string
+	if err := json.Unmarshal([]byte(encoded), &sorted); err != nil {
+		return nil, fmt.Errorf("type-syntax inventory: %w", err)
+	}
+	keys := make(map[string]bool, len(sorted))
+	for _, key := range sorted {
+		keys[key] = true
+	}
+	return keys, nil
+}
+
+// resolvedTypeNamePreparedBodyContribution re-encodes the declaration-phase
+// body rows the fast preparation just recorded on this body. Rows owned by a
+// shared declaration node are excluded exactly as captureResolvedTypeNameContributions
+// excludes them.
+func resolvedTypeNamePreparedBodyContribution(a *Analyzer, functionKey string, sourceOwners map[ast.TypeExpr]resolvedTypeNameSourceOwner, body []ast.Stmt) (string, error) {
+	if a == nil || functionKey == "" {
+		return "", fmt.Errorf("missing prepared body owner")
+	}
+	locations, err := resolvedTypeNameBodyTypeExprPaths(body)
+	if err != nil {
+		return "", err
+	}
+	ownerKey := "fn:" + functionKey
+	rows := make([]string, 0)
+	for expr, paths := range locations {
+		canonical := a.resolvedTypeNames[expr]
+		if canonical == "" {
+			continue
+		}
+		if owner, known := sourceOwners[expr]; known {
+			if owner.ambiguous || owner.owner != ownerKey || owner.region != "body" {
+				continue
+			}
+		}
+		digest, _, err := functionSyntaxFingerprint(expr)
+		if err != nil {
+			return "", fmt.Errorf("prepared body type syntax: %w", err)
+		}
+		sort.Strings(paths)
+		pathBytes, _ := json.Marshal(paths)
+		rows = append(rows, fmt.Sprintf("%s\x00%s\x00%s\x00%s", string(pathBytes), reflect.TypeOf(expr), hex.EncodeToString(digest[:]), canonical))
+	}
+	sort.Strings(rows)
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func resolvedTypeNameBodySyntaxFingerprint(fn *ast.FuncDecl) (string, error) {
