@@ -45,7 +45,7 @@ func (s *functionState) emitStoreCapturingSubmitCall(expr *ast.CallExpr) (C.LLVM
 	argType := workerType.Params[0]
 	retType := workerType.Return
 	pos := expr.Position
-	partitionExperiment := s.g.partSynthNS != "" && os.Getenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT") != "0" && !s.g.emitDebugInfo && !s.g.emitTrace && s.g.optLevel == OptimizationLevel0
+	partitionExperiment := s.g.partSynthNS != "" && os.Getenv("ELISACORE_EXPERIMENT_PARTITION_SUBMIT") != "0" && !s.g.emitDebugInfo && !s.g.emitTrace
 	if partitionExperiment {
 		sym, found := s.g.lookupGlobal("pool_submit1")
 		if !found || sym == nil {
