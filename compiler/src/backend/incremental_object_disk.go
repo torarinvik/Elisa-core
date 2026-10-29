@@ -142,7 +142,7 @@ func (d *incrementalObjectDisk) prune() {
 		return
 	}
 	type item struct {
-		path string
+		name string
 		size int64
 		used time.Time
 	}
@@ -156,7 +156,7 @@ func (d *incrementalObjectDisk) prune() {
 		if err != nil {
 			continue
 		}
-		files = append(files, item{filepath.Join(d.root, entry.Name()), info.Size(), info.ModTime()})
+		files = append(files, item{entry.Name(), info.Size(), info.ModTime()})
 		total += info.Size()
 	}
 	if total <= d.maxBytes {
@@ -167,7 +167,7 @@ func (d *incrementalObjectDisk) prune() {
 		if total <= d.maxBytes {
 			break
 		}
-		if os.Remove(file.path) == nil {
+		if os.Remove(filepath.Join(d.root, file.name)) == nil {
 			total -= file.size
 		}
 	}
