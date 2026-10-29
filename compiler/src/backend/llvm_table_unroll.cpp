@@ -8,6 +8,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/ConstantRange.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/InlineAsm.h>
@@ -98,6 +99,15 @@ struct ModuleBudget {
 };
 bool boundedAttrs(AttributeSet attrs, ModuleBudget &b) {
   unsigned count = 0;
+  auto chargeRangeEndpoints = [&b](const ConstantRange &range) {
+    uint32_t width = range.getBitWidth();
+    if (width == 0 || width > 65536)
+      return false;
+    if (width <= 64)
+      return true; // APInt stores these bits inline in the range object.
+    size_t endpointBytes = ((size_t(width) + 63) / 64) * sizeof(uint64_t);
+    return b.charge(endpointBytes) && b.charge(endpointBytes);
+  };
   for (Attribute attr : attrs) {
     if (++count > 256 || !b.node())
       return false;
@@ -105,6 +115,22 @@ bool boundedAttrs(AttributeSet attrs, ModuleBudget &b) {
     if (attr.isStringAttribute() && (!b.charge(attr.getKindAsString().size()) ||
                                      !b.charge(attr.getValueAsString().size())))
       return false;
+    if (attr.isConstantRangeAttribute()) {
+      if (!b.charge(sizeof(ConstantRange)) ||
+          !chargeRangeEndpoints(attr.getValueAsConstantRange()))
+        return false;
+    }
+    if (attr.isConstantRangeListAttribute()) {
+      auto ranges = attr.getValueAsConstantRangeList();
+      if (ranges.size() > 256)
+        return false;
+      if (ranges.size() > 2097152 / sizeof(ConstantRange) ||
+          !b.charge(ranges.size() * sizeof(ConstantRange)))
+        return false;
+      for (const ConstantRange &range : ranges)
+        if (!chargeRangeEndpoints(range))
+          return false;
+    }
   }
   return true;
 }

@@ -237,6 +237,29 @@ func TestConstantTableUnrollRejectsLargeFunctionMetadata(t *testing.T) {
 	}
 }
 
+func TestConstantTableUnrollAccountsForLargeRangeAttributes(t *testing.T) {
+	var ir strings.Builder
+	ir.WriteString(tableUnrollFixture(12, "", ""))
+	// Each 65536-bit range attribute owns two APInt endpoints (16 KiB total).
+	// Repeating it across otherwise small functions exceeds the module clone
+	// budget even though the textual attributes themselves look tiny.
+	for index := 0; index < 132; index++ {
+		fmt.Fprintf(&ir, "define void @range%d(i65536 range(i65536 0, 10) %%x) { ret void }\n", index)
+	}
+	g, err := parseLLVMIRForSplitHalfTest(ir.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	before := g.printModule()
+	if got := unrollConstantTableLoops(g.module, nil); got != 0 {
+		t.Fatalf("oversized range attributes accepted: %d", got)
+	}
+	if g.printModule() != before {
+		t.Fatal("range-attribute decline modified module")
+	}
+}
+
 func TestConstantTableUnrollWithinShuffleBudget(t *testing.T) {
 	ir := tableUnrollFixture(12, "", "") + `
 define void @shuffle(<65536 x i8> %a) {
