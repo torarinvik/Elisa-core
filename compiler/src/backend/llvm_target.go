@@ -357,6 +357,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		if optLevel == OptimizationLevel3 && unrollConstantTableLoops(g.module, g.targetMachine) == 2 {
 			return fmt.Errorf("constant-table loop unroll failed validation")
 		}
+		foldLittleEndianBytePacks(g.module)
 	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
