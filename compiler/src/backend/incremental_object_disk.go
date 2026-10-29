@@ -159,6 +159,9 @@ func (d *incrementalObjectDisk) prune() {
 		files = append(files, item{filepath.Join(d.root, entry.Name()), info.Size(), info.ModTime()})
 		total += info.Size()
 	}
+	if total <= d.maxBytes {
+		return
+	}
 	sort.Slice(files, func(i, j int) bool { return files[i].used.Before(files[j].used) })
 	for _, file := range files {
 		if total <= d.maxBytes {
