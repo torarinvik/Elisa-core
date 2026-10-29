@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"maps"
 	"reflect"
 	"sync"
 )
@@ -24,12 +25,11 @@ func cloneSpecializationParamStoreTargetsGuarded(src map[*ast.FuncDecl][]map[int
 	if src == nil {
 		return nil
 	}
-	dst := make(map[*ast.FuncDecl][]map[int]bool, len(src))
+	dst := maps.Clone(src)
 	for decl, row := range src {
-		if row != nil {
-			row = row[:len(row):len(row)]
+		if cap(row) != len(row) {
+			dst[decl] = row[:len(row):len(row)]
 		}
-		dst[decl] = row
 	}
 	return dst
 }
