@@ -213,16 +213,11 @@ func smtAlphaWalk(query string, visit func(smtAlphaToken, int) bool) bool {
 			}
 		case '|':
 			i++
-			for i < len(query) && query[i] != '|' {
-				if query[i] == '\\' {
-					return false
-				}
-				i++
-			}
-			if i == len(query) {
+			end := strings.IndexByte(query[i:], '|')
+			if end < 0 || strings.IndexByte(query[i:i+end], '\\') >= 0 {
 				return false
 			}
-			i++
+			i += end + 1
 			if !visit(smtAlphaToken{query[start:i], 'a'}, depth) {
 				return false
 			}
