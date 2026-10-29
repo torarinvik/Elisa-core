@@ -122,7 +122,11 @@ func analyzeSemanticWithSession(file *ast.File, options semantic.AnalyzeOptions,
 
 func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, session *semantic.IncrementalAnalysisSession) (*ast.File, *semantic.Result, bool) {
 	var pending *analysisDiskRestoration
-	return analyzeLoadedProgramUsingPreparation(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+	var retained *retainedRuntime
+	if session == nil {
+		retained = activeRetained
+	}
+	return analyzeLoadedProgramUsingPreparationWithRetained(program, stderr, options, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		if session == nil && activeRetained == nil && analysisDiskCacheEnabled() && program != nil && program.file == nil {
 			if observer := analysisDiskRequestObserver(); observer != "" {
 				debugAnalysisDisk(stderr, "bypass request observer %s", observer)
@@ -136,7 +140,7 @@ func analyzeLoadedProgramWithSession(program *loadedProgram, stderr io.Writer, o
 			pending = startAnalysisDiskRestoration(program, options)
 		}
 		return pending.join
-	})
+	}, retained)
 }
 
 // Keep provenance/options handling identical for the normal analyzer and
@@ -146,6 +150,10 @@ func analyzeLoadedProgramUsing(program *loadedProgram, stderr io.Writer, options
 }
 
 func analyzeLoadedProgramUsingPreparation(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, prepare func(semantic.AnalyzeOptions) func()) (*ast.File, *semantic.Result, bool) {
+	return analyzeLoadedProgramUsingPreparationWithRetained(program, stderr, options, analyze, prepare, nil)
+}
+
+func analyzeLoadedProgramUsingPreparationWithRetained(program *loadedProgram, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result, prepare func(semantic.AnalyzeOptions) func(), retained *retainedRuntime) (*ast.File, *semantic.Result, bool) {
 	if program == nil {
 		fmt.Fprintf(stderr, "error: missing program input\n")
 		return nil, nil, false
@@ -206,7 +214,7 @@ func analyzeLoadedProgramUsingPreparation(program *loadedProgram, stderr io.Writ
 			program.tokenCache.releaseRequestTokens()
 		}
 	}()
-	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
+	file, result, ok := analyzeProgramWithAnalyzerAndTokens(program.filename, program.source, stderr, options, program.tokenCache, retained, func(file *ast.File, options semantic.AnalyzeOptions) *semantic.Result {
 		return analyze(file, options)
 	})
 	if ok && result != nil {

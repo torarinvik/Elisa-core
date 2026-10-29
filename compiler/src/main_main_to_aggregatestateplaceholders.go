@@ -223,17 +223,24 @@ func analyzeProgramWithOptions(filename string, src []byte, stderr io.Writer, op
 }
 
 func analyzeProgramWithAnalyzer(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
-	return analyzeProgramWithAnalyzerAndTokens(filename, src, stderr, options, nil, analyze)
+	return analyzeProgramWithAnalyzerAndTokens(filename, src, stderr, options, nil, nil, analyze)
 }
 
-func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, cache *sourceTokenCache, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
-	activeRetained.prefetchSource(filename, src)
+func analyzeProgramWithAnalyzerAndTokens(filename string, src []byte, stderr io.Writer, options semantic.AnalyzeOptions, cache *sourceTokenCache, retained *retainedRuntime, analyze func(*ast.File, semantic.AnalyzeOptions) *semantic.Result) (*ast.File, *semantic.Result, bool) {
+	if retained != nil {
+		retained.prefetchSource(filename, src)
+		// A non-retained analyzer may not consume the prefetch. The retained
+		// analyzer normally clears it in parseScratch; this deferred join also
+		// covers parse errors, direct analyzers, and early returns.
+		defer retained.dropPrefetch()
+	}
 	file, ok := parseProgramWithTokenCache(filename, src, stderr, cache)
 	if !ok {
-		activeRetained.dropPrefetch()
 		return nil, nil, false
 	}
-	activeRetained.noteSource(filename, src, file)
+	if retained != nil {
+		retained.noteSource(filename, src, file)
+	}
 
 	analyzeStart := time.Now()
 	result := analyze(file, options)

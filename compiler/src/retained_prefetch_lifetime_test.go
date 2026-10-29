@@ -52,7 +52,7 @@ func TestRetainedMismatchedPrefetchJoinsPreparation(t *testing.T) {
 	}
 }
 
-func TestRetainedFastReturnJoinsPreparation(t *testing.T) {
+func TestRetainedFastReturnDiscardsUnstartedLazyPreparation(t *testing.T) {
 	if os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") != "on" {
 		t.Skip("requires fast mode at process startup")
 	}
@@ -63,17 +63,25 @@ func TestRetainedFastReturnJoinsPreparation(t *testing.T) {
 	_, state := semantic.AnalyzeRetained(prefetchLifetimeParse(t, filename, before), prefetchLifetimeParse(t, filename, before), before, options)
 	current := prefetchLifetimeParse(t, filename, after)
 	scratch := prefetchLifetimeParse(t, filename, after)
-	pending := semantic.NewPendingRetainedScratch(scratch)
+	preparedCalls := make(chan struct{}, 1)
+	prepared := semantic.NewLazyParsedRetainedScratch(func() (*ast.File, error) {
+		preparedCalls <- struct{}{}
+		return prefetchLifetimeParse(t, filename, after), nil
+	}, options)
 	parsed := make(chan struct{})
 	close(parsed)
 	key := filename + "\x00" + fmt.Sprintf("%#v", options)
 	rt := &retainedRuntime{filename: filename, src: after, file: current, state: state,
 		key: key, options: options, log: io.Discard,
-		prefetch: &retainedPrefetch{filename: filename, src: after, done: parsed, file: scratch, ok: true, key: key, prepared: pending}}
+		prefetch: &retainedPrefetch{filename: filename, src: after, done: parsed, file: scratch, ok: true, key: key, prepared: prepared}}
 	done := make(chan struct{})
 	var result *semantic.Result
 	go func() { defer close(done); result = rt.analyze(current, options) }()
-	prefetchLifetimeAwaitPreparation(t, done, pending, options)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fast retained return waited for unused scratch preparation")
+	}
 	if !state.LastStats.FastPrepared {
 		t.Fatalf("test did not exercise fast return: %+v", state.LastStats)
 	}
@@ -88,5 +96,13 @@ func TestRetainedFastReturnJoinsPreparation(t *testing.T) {
 		if result.Diagnostics[i].String() != cold.Diagnostics[i].String() {
 			t.Fatal("cold diagnostic differs")
 		}
+	}
+	// Wait would start an unconsumed lazy scratch. The retained request must
+	// have discarded it instead of leaving work for a later request.
+	prepared.Wait()
+	select {
+	case <-preparedCalls:
+		t.Fatal("fast retained return started unused scratch preparation")
+	default:
 	}
 }

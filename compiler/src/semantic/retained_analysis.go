@@ -283,6 +283,22 @@ func (s *RetainedScratch) Wait() {
 	<-s.ready
 }
 
+// Discard cancels an unstarted lazy scratch without doing analysis. For a
+// pending scratch, it joins the owner's preparation so no request work escapes
+// into a later request's environment or working directory. The owner must call
+// it before UpdatePrepared starts or after UpdatePrepared returns; concurrent
+// use of one scratch by UpdatePrepared and Discard is unsupported.
+func (s *RetainedScratch) Discard() {
+	if s == nil || s.ready == nil {
+		return
+	}
+	if s.lazy != nil {
+		s.reject(fmt.Errorf("retained scratch discarded"))
+		return
+	}
+	s.Wait()
+}
+
 // PrepareRetainedScratch runs Update's scratch declaration phase ahead of time.
 // The scratch file is analyzed in place and must only be passed to
 // UpdatePrepared, with the same options the retained analysis was built with.

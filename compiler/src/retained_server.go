@@ -105,8 +105,8 @@ type retainedPrefetch struct {
 	tokens   []lexer.Token
 	file     *ast.File
 	ok       bool
-	// prepared is set when file was analyzed as an update's scratch; such a
-	// file is handed only to the update, never as an unanalyzed parse.
+	// prepared is set when the file is available as an update's scratch. Its
+	// declaration phase may be complete, pending, or lazy until the update needs it.
 	prepared *semantic.RetainedScratch
 	key      string
 }
@@ -118,26 +118,16 @@ func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
 	if rt == nil {
 		return
 	}
+	// Keep each prefetch owned by exactly one request. A prior direct or failed
+	// analysis may have left one unconsumed; join it before replacing the record.
+	rt.dropPrefetch()
 	pf := &retainedPrefetch{filename: filename, src: src, done: make(chan struct{})}
 	rt.prefetch = pf
 	prepare := rt.state != nil && rt.filename == filename && os.Getenv("ELISACORE_RETAINED_PREPARE_SCRATCH") != "0"
 	options, key := rt.options, rt.key
-	pending := os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") == "on"
+	pending := semantic.RetainedFastPrepareSetting() == "on"
 	go func() {
-		var scratch *semantic.RetainedScratch
-		defer func() {
-			if scratch != nil {
-				// The update may take the scratch before its declaration phase is done
-				// and wait for it only when the edit needs it.
-				close(pf.done)
-				scratch.Prepare(options)
-			}
-		}()
-		defer func() {
-			if scratch == nil {
-				close(pf.done)
-			}
-		}()
+		defer close(pf.done)
 		l := lexer.New(filename, src)
 		pf.tokens = l.Tokenize()
 		if len(l.Errors()) != 0 {
@@ -148,8 +138,9 @@ func (rt *retainedRuntime) prefetchSource(filename string, src []byte) {
 		pf.ok = len(p.Errors()) == 0
 		if prepare && pf.ok {
 			if pending {
-				scratch = semantic.NewPendingRetainedScratch(pf.file)
-				pf.prepared, pf.key = scratch, key
+				// Keep parsing ahead of the request, but leave declaration analysis
+				// lazy: a fast retained update may prove it does not need this scratch.
+				pf.prepared, pf.key = semantic.NewLazyRetainedScratch(pf.file, options), key
 				return
 			}
 			pf.prepared, pf.key = semantic.PrepareRetainedScratch(pf.file, options), key
@@ -163,7 +154,7 @@ func (rt *retainedRuntime) dropPrefetch() {
 		return
 	}
 	<-rt.prefetch.done
-	rt.prefetch.prepared.Wait()
+	rt.prefetch.prepared.Discard()
 	rt.prefetch = nil
 }
 
@@ -175,7 +166,7 @@ func (rt *retainedRuntime) parse() (*ast.File, bool) {
 }
 
 // parseScratch is parse for an update's scratch: with the retained key it may
-// return the prefetched parse with its declaration phase already run.
+// return a prefetched parse with declaration preparation ready or lazy.
 func (rt *retainedRuntime) parseScratch(key string) (*ast.File, bool, *semantic.RetainedScratch) {
 	if pf := rt.prefetch; pf != nil {
 		rt.prefetch = nil
@@ -190,8 +181,8 @@ func (rt *retainedRuntime) parseScratch(key string) (*ast.File, bool, *semantic.
 			}
 		}
 		// A mismatched or otherwise unconsumed scratch still belongs to this
-		// invocation. Join it before discarding the prefetch.
-		pf.prepared.Wait()
+		// invocation. Cancel lazy work or join a real preparation before discarding.
+		pf.prepared.Discard()
 	}
 	if rt.tokensFor == nil || !bytes.Equal(rt.tokensFor, rt.src) {
 		l := lexer.New(rt.filename, rt.src)
@@ -215,17 +206,18 @@ func (rt *retainedRuntime) analyze(file *ast.File, options semantic.AnalyzeOptio
 	if rt.state != nil && rt.key == key {
 		waitStart := time.Now()
 		scratch, ok, prepared := rt.parseScratch(key)
-		// A fast update may not wait for declaration preparation. The request
-		// still owns that background work on every return and fallback path.
-		defer prepared.Wait()
+		// A fast update may not wait for declaration preparation. Lazy work is
+		// discarded without starting; a real pending preparation is joined.
+		defer prepared.Discard()
 		wait := time.Since(waitStart)
 		var result *semantic.Result
 		err := fmt.Errorf("scratch parse failed")
 		if ok {
 			result, err = rt.state.UpdatePrepared(file, scratch, rt.src, prepared)
 		}
-		// Join before any fresh fallback analysis, not just before returning.
-		prepared.Wait()
+		// Release the scratch before any fresh fallback analysis, not just before
+		// returning. Discard starts no lazy work and joins any real pending worker.
+		prepared.Discard()
 		fmt.Fprintf(rt.log, "[retained] scratch parse wait %v, update %v\n", wait.Round(time.Millisecond), (time.Since(waitStart) - wait).Round(time.Millisecond))
 		st := rt.state.LastStats
 		if err != nil {
