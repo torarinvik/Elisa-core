@@ -8,11 +8,14 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/OptimizationRemarkEmitter.h>
+#include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/Support/CBindingWrapping.h>
 #include <llvm/Transforms/Utils/LoopPeel.h>
 #include <llvm/Transforms/Utils/LoopSimplify.h>
 #include <llvm/Transforms/Utils/LoopUtils.h>
+#include <llvm/Transforms/Utils/UnrollLoop.h>
 using namespace llvm;
 extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
   if (!moduleRef) return 0;
@@ -48,6 +51,12 @@ extern "C" unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef moduleRef) {
       formLCSSA(*L, DT, &LI, &SE);
       ValueToValueMapTy values;
       peelLoop(L, 1, false, &LI, &SE, DT, &AC, true, values);
+      // Preserve every load and early exit in order. LLVM's unroller handles
+      // the runtime remainder without speculating accesses past an invalid item.
+      auto &TTI = FAM.getResult<TargetIRAnalysis>(F);
+      auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
+      UnrollLoopOptions options{4, true, true, false, true, false, nullptr, 1000, true, false};
+      UnrollLoop(L, options, &LI, &SE, &DT, &AC, &TTI, &ORE, true);
       ++count;
       break; // Invalidate function analyses before inspecting another loop.
     }

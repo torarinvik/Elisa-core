@@ -73,15 +73,15 @@ func TestValidationPeelLoopSafety(t *testing.T) {
 
 func TestValidationPeelCacheIdentity(t *testing.T) {
 	o3 := optimizedModuleCacheKey(&llvmGenerator{}, OptimizationLevel3, "triple", "cpu", "features")
-	if !strings.Contains(o3, "validation-peel-v1") {
+	if !strings.Contains(o3, "validation-peel-unroll-v2") {
 		t.Fatal("missing peeling policy in O3 cache key")
 	}
 	for _, level := range []OptimizationLevel{OptimizationLevel0, OptimizationLevel1, OptimizationLevel2} {
-		if strings.Contains(optimizedModuleCacheKey(&llvmGenerator{}, level, "triple", "cpu", "features"), "validation-peel-v1") {
+		if strings.Contains(optimizedModuleCacheKey(&llvmGenerator{}, level, "triple", "cpu", "features"), "validation-peel-unroll-v2") {
 			t.Fatal("peeling policy applied at lower optimization level")
 		}
 	}
-	if strings.Contains(optimizedModuleCacheKey(&llvmGenerator{emitDebugInfo: true}, OptimizationLevel3, "triple", "cpu", "features"), "validation-peel-v1") {
+	if strings.Contains(optimizedModuleCacheKey(&llvmGenerator{emitDebugInfo: true}, OptimizationLevel3, "triple", "cpu", "features"), "validation-peel-unroll-v2") {
 		t.Fatal("peeling policy applied to debug builds")
 	}
 }
@@ -105,6 +105,9 @@ func TestValidationPeelRuntime(t *testing.T) {
 	if err := g.verify(); err != nil {
 		t.Fatal(err)
 	}
+	if got := strings.Count(g.printModule(), "load i64"); got < 4 {
+		t.Fatalf("expected unrolled validation loads, got %d", got)
+	}
 	dir := t.TempDir()
 	irPath := filepath.Join(dir, "scan.ll")
 	cPath := filepath.Join(dir, "check.c")
@@ -113,6 +116,8 @@ func TestValidationPeelRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	const driver = `#include <stdint.h>
+#include <sys/mman.h>
+#include <unistd.h>
 extern int64_t scan(const int64_t*, int64_t);
 int main(void) {
  int64_t a[256]; uint64_t state=7;
@@ -122,6 +127,17 @@ int main(void) {
   if (bad>=0) a[bad]=(bad&1)?-1:256;
   if (scan(a,n)!=(bad<0?0:-1)) return 2;
  }
+ // An early invalid element must not cause a load from the protected page.
+ size_t page=(size_t)sysconf(_SC_PAGESIZE);
+ void *map=mmap(0,2*page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+ if (map==MAP_FAILED || mprotect((char*)map+page,page,PROT_NONE)) return 3;
+ for (int count=1;count<=32;count++) {
+  int64_t *p=(int64_t*)((char*)map+page)-count;
+  for (int i=0;i<count;i++) p[i]=1;
+  p[count-1]=-1;
+  if (scan(p,count+1)!=-1) return 4;
+ }
+ munmap(map,2*page);
  return 0;
 }`
 	if err := os.WriteFile(cPath, []byte(driver), 0600); err != nil {
