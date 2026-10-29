@@ -38,8 +38,10 @@ type earlyTestCacheMeta struct {
 }
 
 func earlyTestCacheEnabled() bool {
-	// Shares the master switch with the inner cache.
-	return testRunnerCacheEnabled()
+	// Shares observer gating with the inner cache. The cache-debug mode still
+	// uses the inner cache so it can report hit/miss details, but must pass
+	// through this layer to reach that report.
+	return testRunnerCacheEnabled() && !testRunnerCacheDebugEnabled()
 }
 
 // earlyTestCacheKey hashes everything that determines the built test executable for a
@@ -48,7 +50,7 @@ func earlyTestCacheEnabled() bool {
 func earlyTestCacheKey(source []byte, filter string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool, enableSMT bool) (string, error) {
 	hash := sha256.New()
 	testRunnerCacheWriteString(hash, fmt.Sprintf("runner-smt=%t", enableSMT))
-	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple); err != nil {
+	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, enableSMT); err != nil {
 		return "", err
 	}
 	testRunnerCacheWriteBytes(hash, "source", source)

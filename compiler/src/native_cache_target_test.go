@@ -7,11 +7,11 @@ import (
 )
 
 func TestTestRunnerCacheKeysCodegenEnvironment(t *testing.T) {
-	for _, name := range []string{"ELISACORE_TARGET_CPU", "ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISA_LINEAR_MUTATION"} {
+	for _, name := range append(append([]string{}, nativeToolEnvironmentInputs...), "ELISACORE_TARGET_CPU", "ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NO_LINK_BINDING_CHECK", "ELISA_LINEAR_MUTATION") {
 		t.Run(name, func(t *testing.T) {
 			key := func() string {
 				h := sha256.New()
-				if err := writeCommonTestRunnerCacheInputs(h, nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), ""); err != nil {
+				if err := writeCommonTestRunnerCacheInputs(h, nil, nil, nil, backend.OptimizationLevel0, backend.DefaultPackedLoweringProfile(), "", false); err != nil {
 					t.Fatal(err)
 				}
 				return string(h.Sum(nil))

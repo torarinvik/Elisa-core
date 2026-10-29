@@ -388,7 +388,7 @@ var buildCacheEnvIgnored = map[string]bool{
 	"ELISACORE_TEST_CACHE_DEBUG":              true,
 	"ELISACORE_TEST_PHASE_DEBUG":              true,
 	"ELISACORE_TEST_TIMING":                   true,
-	"ELISACORE_NO_LINK_BINDING_CHECK":         true,
+	"ELISACORE_LLVM_PASS_DEBUG":               true,
 	"ELISACORE_NO_OBJCACHE":                   true,
 	"ELISACORE_RUNTIME_OBJECT_CACHE":          true,
 	"ELISACORE_EMIT_LL":                       true,
@@ -435,6 +435,8 @@ func buildCacheRequestObserverEnabled() bool {
 	}
 	for _, name := range []string{
 		"ELISACORE_BUILD_TIMING",
+		"ELISACORE_LLVM_PASS_DEBUG",
+		"ELISACORE_DUMP_MODULE_ON_VERIFY_FAILURE",
 		"ELISACORE_CPUPROFILE",
 		"ELISACORE_MEMPROFILE",
 		"ELISACORE_EMIT_LL",

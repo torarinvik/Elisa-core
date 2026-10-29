@@ -18,6 +18,7 @@ import (
 	"unsafe"
 
 	"elisacore/src/backend"
+	"elisacore/src/smt"
 )
 
 type testRunnerCacheArtifact struct {
@@ -27,7 +28,53 @@ type testRunnerCacheArtifact struct {
 }
 
 func testRunnerCacheEnabled() bool {
-	return strings.TrimSpace(os.Getenv("ELISACORE_TEST_CACHE")) != "0"
+	return strings.TrimSpace(os.Getenv("ELISACORE_TEST_CACHE")) != "0" && !testRunnerCacheObserverEnabled()
+}
+
+// Test-runner cache hits skip some or all work from the current request. Keep
+// them out of requests that asked to observe or validate that work.
+func testRunnerCacheObserverEnabled() bool {
+	if buildCacheRequestObserverEnabled() || testTimingEnabled() || testPhaseDebugEnabled() {
+		return true
+	}
+	return os.Getenv("ELISACORE_KEEP_TEST_TEMP") != ""
+}
+
+func writeTestRunnerSMTCacheInputs(hash hash.Hash, enableSMT bool) error {
+	if !enableSMT {
+		return nil
+	}
+	solver := smt.ResolveBinary("")
+	testRunnerCacheWriteString(hash, "smt-selector="+solver)
+	if selected, err := exec.LookPath(solver); err == nil {
+		stamp, stampErr := toolchainContentStamp(selected)
+		if stampErr != nil {
+			return stampErr
+		}
+		testRunnerCacheWriteString(hash, "smt-executable="+selected)
+		testRunnerCacheWriteString(hash, "smt-content="+stamp)
+	} else {
+		testRunnerCacheWriteString(hash, "smt-executable=unavailable")
+	}
+	return nil
+}
+
+func writeTestRunnerLinkAuditInputs(hash hash.Hash, targetTriple string) error {
+	if !isMachOTriple(targetTriple) {
+		return nil
+	}
+	nmPath, err := exec.LookPath("nm")
+	if err != nil {
+		testRunnerCacheWriteString(hash, "macho-nm=unavailable")
+		return nil
+	}
+	stamp, err := toolchainContentStamp(nmPath)
+	if err != nil {
+		return err
+	}
+	testRunnerCacheWriteString(hash, "macho-nm="+nmPath)
+	testRunnerCacheWriteString(hash, "macho-nm-content="+stamp)
+	return nil
 }
 
 func testRunnerCacheDebugEnabled() bool {
@@ -113,8 +160,14 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 // source/filter (early cache): build env, toolchain, easm, foreign-with-includes,
 // link flags, the elisacore runtime support, and the compiler's own Go sources.
 // Both cache keys layer their distinguishing inputs on top of this.
-func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) error {
+func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, enableSMT bool) error {
 	if err := writeNativeCacheTarget(hash, targetTriple); err != nil {
+		return err
+	}
+	if err := writeTestRunnerSMTCacheInputs(hash, enableSMT); err != nil {
+		return err
+	}
+	if err := writeTestRunnerLinkAuditInputs(hash, targetTriple); err != nil {
 		return err
 	}
 	for _, entry := range buildCacheEnvKey() {
@@ -200,7 +253,7 @@ func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module
 func testRunnerCacheArtifactFor(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string, enableSMT bool) (testRunnerCacheArtifact, error) {
 	hash := sha256.New()
 	testRunnerCacheWriteString(hash, fmt.Sprintf("runner-smt=%t", enableSMT))
-	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple); err != nil {
+	if err := writeCommonTestRunnerCacheInputs(hash, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple, enableSMT); err != nil {
 		return testRunnerCacheArtifact{}, err
 	}
 	testRunnerCacheWriteBytes(hash, "runner", []byte(runnerSource))

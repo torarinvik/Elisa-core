@@ -7,7 +7,7 @@ import (
 )
 
 func TestSMTObserversPreserveEnvironmentKeyAndBypassReplay(t *testing.T) {
-	observers := []string{"ELISA_SMT_RLIMIT_LOG", "ELISA_SMT_TRACE", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE"}
+	observers := []string{"ELISA_SMT_RLIMIT_LOG", "ELISA_SMT_TRACE", "ELISACORE_CPUPROFILE", "ELISACORE_MEMPROFILE", "ELISACORE_LLVM_PASS_DEBUG", "ELISACORE_DUMP_MODULE_ON_VERIFY_FAILURE"}
 	profileControls := []struct {
 		name, parent, value string
 	}{

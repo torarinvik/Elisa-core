@@ -68,6 +68,13 @@ var analysisDiskRequestObserverVariables = [...]string{
 }
 
 func analysisDiskRequestObserver() string {
+	// Shadow fast preparation validates the current invocation against a fresh
+	// scratch analysis. Replaying semantic or object-cache state would skip that
+	// comparison, and a retained daemon may have captured a different mode at
+	// startup, so keep this request in the local uncached path.
+	if os.Getenv("ELISACORE_RETAINED_FAST_PREPARE") == "shadow" {
+		return "ELISACORE_RETAINED_FAST_PREPARE"
+	}
 	for _, name := range analysisDiskRequestObserverVariables {
 		if os.Getenv(name) != "" {
 			return name

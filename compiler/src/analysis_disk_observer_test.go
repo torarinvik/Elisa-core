@@ -38,6 +38,10 @@ func clearAnalysisDiskObserverEnvironment(t *testing.T) {
 		"ELISACORE_LEXER_CAPACITY_REPORT",
 		"ELISACORE_RETAINED_DEBUG_SPANS",
 		"ELISACORE_RETAINED_FAST_DEBUG",
+		"ELISACORE_RETAINED_FAST_PREPARE",
+		"ELISACORE_TEST_TIMING",
+		"ELISACORE_TEST_PHASE_DEBUG",
+		"ELISACORE_KEEP_TEST_TEMP",
 		"ELISA_BACKEND_PARITY_OUT",
 	} {
 		t.Setenv(name, "")
@@ -77,6 +81,31 @@ func TestAnalysisDiskRequestObserverPredicate(t *testing.T) {
 			t.Setenv(name, "1")
 			if analysisDiskRequestObserverEnabled() {
 				t.Fatalf("%s incorrectly bypassed semantic cache", name)
+			}
+		})
+	}
+	t.Run("retained-fast-prepare-shadow", func(t *testing.T) {
+		clearAnalysisDiskObserverEnvironment(t)
+		t.Setenv("ELISACORE_RETAINED_FAST_PREPARE", "shadow")
+		if analysisDiskRequestObserver() != "ELISACORE_RETAINED_FAST_PREPARE" {
+			t.Fatal("retained fast-prepare shadow mode did not bypass semantic cache")
+		}
+		if !retainedRequestRequiresLocalProcess() {
+			t.Fatal("retained fast-prepare shadow mode did not force local execution")
+		}
+		if !buildCacheRequestObserverEnabled() || !testRunnerCacheObserverEnabled() {
+			t.Fatal("retained fast-prepare shadow mode did not bypass build/test-runner caches")
+		}
+	})
+	for _, mode := range []string{"on", "off"} {
+		t.Run("retained-fast-prepare-"+mode, func(t *testing.T) {
+			clearAnalysisDiskObserverEnvironment(t)
+			t.Setenv("ELISACORE_RETAINED_FAST_PREPARE", mode)
+			if analysisDiskRequestObserverEnabled() || retainedRequestRequiresLocalProcess() {
+				t.Fatalf("retained fast-prepare %s unexpectedly requested observer routing", mode)
+			}
+			if buildCacheRequestObserverEnabled() || testRunnerCacheObserverEnabled() {
+				t.Fatalf("retained fast-prepare %s unexpectedly bypassed build/test-runner caches", mode)
 			}
 		})
 	}

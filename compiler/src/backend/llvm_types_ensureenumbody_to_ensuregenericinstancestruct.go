@@ -296,10 +296,9 @@ func enumIsTagOnly(enum *semantic.EnumType) bool {
 // (no narrowing, no reassembly regression) while u16/u32 enums shrink. SoA/dense/variant-sparse and
 // side-table columns are a separate uintptr-word model and keep the machine word.
 //
-// Set ELISA_AOS_NO_NARROW=1 to force the legacy uintptr slot (for A/B IR diffing / bisecting).
-// CAVEAT: this env toggle changes codegen but is NOT part of the test-runner cache key, so it only
-// takes effect on a cache MISS. When A/B-benchmarking, use physically distinct sources (or a clean
-// cache) for the two builds, or both runs may resolve to the same cached binary.
+// Set ELISA_AOS_NO_NARROW=1 to force legacy uintptr slots for A/B IR diffing or bisecting.
+// Build and test-runner cache identities include this ELISA_* setting, so toggling it selects a
+// distinct artifact.
 func (g *llvmGenerator) aosNarrowSlots(enum *semantic.EnumType) bool {
 	if enum == nil {
 		return false
