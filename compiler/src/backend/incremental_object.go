@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,11 +62,17 @@ const maxNativeObjectPartitions = 128
 // NativeObjectPartitions selects stable codegen units independently of worker
 // concurrency. More units can reduce the amount of O3 work invalidated by an edit.
 // The ordinary default stays one unit per CPU pending full-input qualification.
+// nativeObjectPartitionDefault is the partition count when ELISACORE_OBJECT_PARTITIONS
+// is unset. On the Stage1 self-host, 96 partitions cut the first -O3 body-edit build from
+// 14.6s to 4.7s against 10 partitions. Generated-code runtime was equal on a 300-function
+// probe (1.17s against 1.16s), so the partition count is a latency choice, not a quality one.
+const nativeObjectPartitionDefault = 96
+
 func NativeObjectPartitions() int {
 	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ELISACORE_OBJECT_PARTITIONS"))); err == nil {
 		return min(maxNativeObjectPartitions, max(1, n))
 	}
-	return min(64, max(1, runtime.NumCPU()))
+	return nativeObjectPartitionDefault
 }
 
 // NewIncrementalObjectSession bounds the complete retained bitcode and objects.
