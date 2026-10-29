@@ -38,6 +38,7 @@ func main() {
 	}
 	stopMem()
 	stop()
+	writeCacheInvocationCertificate(os.Args[1:], os.Getenv("ELISACORE_CACHE_CERTIFICATE"), semantic.CacheInvocationCertifiable())
 	os.Exit(code)
 }
 func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {

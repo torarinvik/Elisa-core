@@ -8,3 +8,7 @@ import "fmt"
 func LLVMLibraryIdentity() (string, error) {
 	return "", fmt.Errorf("loaded LLVM image identity is unavailable on this platform")
 }
+
+func LLVMLibraryCacheDependency() (string, string, error) {
+	return "", "", fmt.Errorf("loaded LLVM image identity is unavailable on this platform")
+}

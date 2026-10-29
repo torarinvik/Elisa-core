@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 )
@@ -65,6 +66,27 @@ func LLVMLibraryIdentity() (string, error) {
 		return "", fmt.Errorf("loaded LLVM image unavailable")
 	}
 	return llvmLibrary.stamp()
+}
+
+// LLVMLibraryCacheDependency returns the path and content digest for the LLVM
+// image mapped into this process. Outer compiler caches use this pair to
+// invalidate results when LLVM is replaced without rebuilding Stage0.
+func LLVMLibraryCacheDependency() (string, string, error) {
+	if llvmLibraryError != nil {
+		return "", "", llvmLibraryError
+	}
+	if llvmLibrary == nil || llvmLibrary.file == nil {
+		return "", "", fmt.Errorf("loaded LLVM image unavailable")
+	}
+	path, err := filepath.Abs(llvmLibrary.file.Name())
+	if err != nil {
+		return "", "", err
+	}
+	digest, err := llvmLibrary.stamp()
+	if err != nil {
+		return "", "", err
+	}
+	return path, digest, nil
 }
 
 func (p *pinnedLLVMLibrary) stamp() (string, error) {
