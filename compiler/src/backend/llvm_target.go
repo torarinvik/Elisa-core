@@ -74,6 +74,7 @@ unsigned elisacoreCanonicalizeSplitHalfUnsignedAdds(LLVMModuleRef Module);
 unsigned elisacoreForwardZeroedLoads(LLVMModuleRef Module);
 unsigned elisacoreInferConstantTableRanges(LLVMModuleRef Module);
 int elisacoreTableUnrollSupported(void);
+unsigned elisacorePeelSmallValidationLoops(LLVMModuleRef Module);
 int elisacoreUnrollConstantTableLoops(LLVMModuleRef Module, LLVMTargetMachineRef Target);
 
 static void elisacoreDisposeLLVMErrorMessage(char *ErrMsg) {
@@ -348,6 +349,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}
 	if !g.emitDebugInfo {
+		if optLevel == OptimizationLevel3 {
+			C.elisacorePeelSmallValidationLoops(g.module)
+		}
 		forwardZeroedLoads(g.module)
 		inferConstantTableRanges(g.module)
 		if optLevel == OptimizationLevel3 && unrollConstantTableLoops(g.module, g.targetMachine) == 2 {
@@ -675,4 +679,8 @@ func ResolveTargetIdentity(requestedTriple string) (TargetIdentity, error) {
 		return TargetIdentity{Triple: triple, CPU: C.GoString(name), Features: C.GoString(features)}, nil
 	}
 	return TargetIdentity{Triple: triple, CPU: cpu}, nil
+}
+
+func peelSmallValidationLoops(module C.LLVMModuleRef) int {
+	return int(C.elisacorePeelSmallValidationLoops(module))
 }
