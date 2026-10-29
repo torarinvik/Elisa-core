@@ -364,6 +364,6 @@ func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached b
 		v.Set(x)
 		return
 	}
-	slot := (*[2]unsafe.Pointer)(v.Addr().UnsafePointer())
+	slot := (*[2]unsafe.Pointer)(unsafe.Pointer(v.UnsafeAddr()))
 	slot[0], slot[1] = word, x.UnsafePointer()
 }
