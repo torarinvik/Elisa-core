@@ -171,10 +171,16 @@ func (e *encoder) str(v string) {
 }
 func (e *encoder) value(v reflect.Value) error {
 	e.depth++
-	defer func() { e.depth-- }()
 	if e.depth > 4096 {
+		e.depth--
 		return fmt.Errorf("state graph nesting exceeds limit")
 	}
+	err := e.valueAtDepth(v)
+	e.depth--
+	return err
+}
+
+func (e *encoder) valueAtDepth(v reflect.Value) error {
 	t := v.Type()
 	switch v.Kind() {
 	case reflect.Interface:
