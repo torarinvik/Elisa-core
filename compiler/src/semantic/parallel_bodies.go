@@ -366,6 +366,15 @@ func cloneAnalyzerValueForSpecialization(a *Analyzer) reflect.Value {
 	return cloneAnalyzerValueForParallelPolicy(a, true, true)
 }
 
+var parallelAnalyzerFieldNames = func() []string {
+	t := reflect.TypeFor[Analyzer]()
+	names := make([]string, t.NumField())
+	for i := range names {
+		names[i] = t.Field(i).Name
+	}
+	return names
+}()
+
 func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunctionAnalyses bool) reflect.Value {
 	if a == nil {
 		return reflect.Value{}
@@ -379,7 +388,7 @@ func cloneAnalyzerValueForParallelPolicy(a *Analyzer, useMemoOverlays, ownedFunc
 	useExprFactsOverlay := ownedFunctionAnalyses && !typeHoldsMapInline(reflect.TypeFor[OptimizationFacts]())
 	for i := 0; i < source.NumField(); i++ {
 		field := source.Field(i)
-		name := source.Type().Field(i).Name
+		name := parallelAnalyzerFieldNames[i]
 		if ownedFunctionAnalyses && name == "proofLifecycle" {
 			// The private construction journal contains only concrete work;
 			// publication retains the canonical Result's full public report.
