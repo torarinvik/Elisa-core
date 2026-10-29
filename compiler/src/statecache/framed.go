@@ -80,7 +80,7 @@ func (d *decoder) readFramedBodies(descriptions []objectDescription) error {
 	d.sharedBudget = budget
 	workers := 1
 	if d.registry.parallelDecode && count >= 4096 {
-		workers = min(6, runtime.GOMAXPROCS(0))
+		workers = min(8, runtime.GOMAXPROCS(0))
 	}
 	// Bound the worker cells, channels and scheduling metadata as well as graph storage.
 	if err := d.reserve(uint64(workers), 1024); err != nil {
