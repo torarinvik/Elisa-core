@@ -86,6 +86,9 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 		names[name] = "|" + prefix + strconv.Itoa(i) + "|"
 	}
 	first := true
+	// Only identical token spellings share validation; quoted and unquoted forms
+	// can represent the same name while having different validity rules.
+	lastValidated := ""
 	ok = smtAlphaWalk(query, func(tok smtAlphaToken, _ int) bool {
 		if !first {
 			if out.WriteByte(' ') != nil {
@@ -95,8 +98,11 @@ func smtAlphaWriteQuery(query string, out smtAlphaOutput) bool {
 		first = false
 		if tok.kind == 'a' {
 			if replacement, present := names[smtAlphaSymbol(tok.text)]; present {
-				if !smtAlphaValidSymbol(tok.text) {
-					return false
+				if tok.text != lastValidated {
+					if !smtAlphaValidSymbol(tok.text) {
+						return false
+					}
+					lastValidated = tok.text
 				}
 				_, err := out.WriteString(replacement)
 				return err == nil
