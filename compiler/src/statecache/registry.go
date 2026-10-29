@@ -24,6 +24,7 @@ type Registry struct {
 	access          FieldAccess
 	singletons      map[reflect.Type]reflect.Value
 	sliceAllocators map[reflect.Type]func(int, int) typedSliceAllocator
+	typedMaps       map[reflect.Type]func(*decoder, reflect.Value, int) error
 	parallelDecode  bool
 }
 

@@ -241,6 +241,9 @@ func (d *decoder) fillObject(id int, desc objectDescription) error {
 		if length == 0 {
 			return nil
 		}
+		if insert := d.registry.typedMaps[v.Type()]; insert != nil {
+			return insert(d, v, length)
+		}
 		entry, err := d.mapEntryScratch(v.Type())
 		if err != nil {
 			return err
