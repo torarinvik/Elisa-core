@@ -28,6 +28,7 @@ type specializationContext struct {
 	worker       *Analyzer
 	syntax       *specializationSyntax
 	declarations map[*ast.FuncDecl]*ast.FuncDecl
+	storeTargets map[*ast.FuncDecl][]map[int]bool
 	inputReads   *specializationInputTrace
 	err          error
 }
@@ -122,6 +123,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 	}
 	var analyzerSnapshot Analyzer
 	var resolvedTypeNames map[ast.TypeExpr]string
+	var sharedStoreTargets map[*ast.FuncDecl][]map[int]bool
 	var hasRetained bool
 	func() {
 		// Take a shallow value snapshot while query methods may populate analyzer
@@ -130,6 +132,12 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 		unlock := r.lockAnalyzer()
 		defer unlock()
 		analyzerSnapshot = *r.analyzer
+		if r.shared != nil {
+			// Shared codegen freezes canonical analyzer maps until all workers finish.
+			// Keep this read-only table as a fallback instead of copying it per product.
+			sharedStoreTargets = analyzerSnapshot.paramStoreTargets
+			analyzerSnapshot.paramStoreTargets = nil
+		}
 		// Semantic workers use a separate base memo for this table. A published
 		// codegen Result exposes a concrete map instead, including canonical global
 		// type expressions, so materialize that base before adding private rows.
@@ -148,7 +156,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 		targetExprs = map[ast.Expr]struct{}{}
 		collectSpecializedFunctionExprs(fn, targetExprs)
 	}
-	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}}
+	ctx := &specializationContext{base: r, worker: a, syntax: newSpecializationSyntax(), declarations: map[*ast.FuncDecl]*ast.FuncDecl{}, storeTargets: sharedStoreTargets}
 	if selected.inputAudit {
 		ctx.inputReads = &specializationInputTrace{}
 	}

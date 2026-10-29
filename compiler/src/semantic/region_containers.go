@@ -1915,15 +1915,33 @@ func (a *Analyzer) argInteriorLocalRegion(arg ast.Expr) string {
 // resolved here via the structural store-target summary (paramStoreTargets) + the live interior-taint
 // table. Precise: fires only when the target argument's region provably outlives the source's taint
 // region, so a same-region cohort pass (`stash(mods, m)` both in one region) is accepted.
+func (a *Analyzer) lookupParamStoreTargets(callee *ast.FuncDecl) ([]map[int]bool, bool) {
+	if a == nil {
+		return nil, false
+	}
+	targets, ok := a.paramStoreTargets[callee]
+	if !ok && a.parallel != nil && a.parallel.specialization != nil {
+		original := a.parallel.original[callee]
+		if original == nil {
+			original = callee
+		}
+		targets, ok = a.parallel.specialization.storeTargets[original]
+	}
+	return targets, ok
+}
+
 func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []ast.Expr) {
-	if a == nil || call == nil || a.paramStoreTargets == nil {
+	if a == nil || call == nil {
+		return
+	}
+	if a.paramStoreTargets == nil && (a.parallel == nil || a.parallel.specialization == nil || a.parallel.specialization.storeTargets == nil) {
 		return
 	}
 	callee, ok := a.resolveCalleeFuncDecl(call)
 	if !ok || callee == nil {
 		return
 	}
-	targets, ok := a.paramStoreTargets[callee]
+	targets, ok := a.lookupParamStoreTargets(callee)
 	if !ok {
 		return
 	}
