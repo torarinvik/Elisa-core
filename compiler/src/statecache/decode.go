@@ -29,6 +29,14 @@ type decoder struct {
 	// interface's first word (itab or type), so a pointer-shaped value is stored without
 	// reflect's per-assignment implements check.
 	ifaceWords map[[2]reflect.Type]unsafe.Pointer
+	// A small direct cache avoids hashing common concrete/interface pairs.
+	// Collisions fall back to ifaceWords, retaining the same assignability check.
+	ifaceWordCache [8]cachedInterfaceWord
+}
+
+type cachedInterfaceWord struct {
+	key  [2]reflect.Type
+	word unsafe.Pointer
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
@@ -144,7 +152,17 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 			return err
 		}
 		// A cached interface word also certifies assignability for this type pair.
-		word, cached := d.ifaceWords[[2]reflect.Type{typ, t}]
+		key := [2]reflect.Type{typ, t}
+		entry := &d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))]
+		word, cached := entry.word, false
+		if word != nil && key == entry.key {
+			cached = true
+		} else {
+			word, cached = d.ifaceWords[key]
+			if cached {
+				*entry = cachedInterfaceWord{key, word}
+			}
+		}
 		if !cached && !typ.AssignableTo(t) {
 			return fmt.Errorf("state type %s does not implement %s", typ, t)
 		}
@@ -164,7 +182,7 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 			if ref >= uint64(len(d.objects)) || d.objects[ref].Type() != typ {
 				return fmt.Errorf("invalid state reference")
 			}
-			d.setInterface(v, d.objects[ref], word, cached)
+			d.setInterface(v, d.objects[ref], word, cached, id)
 			return nil
 		}
 		if err := d.reserve(1, typ.Size()); err != nil {
@@ -345,7 +363,7 @@ func (d *decoder) stateString() (string, error) {
 // setInterface stores x, a pointer or map value already checked assignable to v's interface
 // type, into v. The interface's words are (itab or type, data pointer); for pointer-shaped
 // x the data word is x itself.
-func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached bool) {
+func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached bool, id uint64) {
 	if !cached {
 		key := [2]reflect.Type{x.Type(), v.Type()}
 		if !v.CanAddr() || (x.Kind() != reflect.Pointer && x.Kind() != reflect.Map) {
@@ -359,6 +377,7 @@ func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached b
 			d.ifaceWords = map[[2]reflect.Type]unsafe.Pointer{}
 		}
 		d.ifaceWords[key] = word
+		d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))] = cachedInterfaceWord{key, word}
 	}
 	if !v.CanAddr() {
 		v.Set(x)
