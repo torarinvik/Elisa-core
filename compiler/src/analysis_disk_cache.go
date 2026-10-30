@@ -91,6 +91,12 @@ func analysisDiskRequestObserverEnabled() bool { return analysisDiskRequestObser
 // startup environment. Backend parity also depends on a lexer package global
 // captured at startup, but it does not require bypassing semantic disk state.
 func retainedRequestRequiresLocalProcess() bool {
+	// The outer s0cache certificate records process-local SMT taint. A retained
+	// server has independent semantic state, so its result cannot be certified
+	// by this client process. Keep certificate-backed requests local.
+	if os.Getenv("ELISACORE_CACHE_CERTIFICATE") != "" {
+		return true
+	}
 	return analysisDiskRequestObserverEnabled() || os.Getenv("ELISA_BACKEND_PARITY_OUT") != ""
 }
 
