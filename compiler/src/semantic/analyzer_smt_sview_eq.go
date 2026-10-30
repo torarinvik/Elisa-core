@@ -110,9 +110,18 @@ func (tr *smtTranslator) sviewContentEquality(arrL, loL, lenL, arrR, loR, lenR s
 	}
 	symbol := "|@sview_eq_" + strconv.Itoa(len(tr.sviewEqualities)) + "|"
 	tr.sviewEqualities[key] = symbol
+	witness := "|@sview_diff_" + strconv.Itoa(len(tr.sviewEqualities)-1) + "|"
+	header := "(and (>= " + lenL + " 0) (>= " + lenR + " 0) (= " + lenL + " " + lenR + "))"
+	leftByte := "(select " + arrL + " (+ " + loL + " " + witness + "))"
+	rightByte := "(select " + arrR + " (+ " + loR + " " + witness + "))"
+	different := "(and (<= 0 " + witness + ") (< " + witness + " " + lenL + ") (not (= " + leftByte + " " + rightByte + ")))"
+	// The fresh witness is existential in a satisfiability query. Together
+	// these implications are exactly content equality on observable inputs.
 	tr.auxDecls = append(tr.auxDecls,
 		"(declare-const "+symbol+" Bool)\n",
-		"(assert (= "+symbol+" "+eq+"))\n")
+		"(declare-const "+witness+" Int)\n",
+		"(assert (=> "+symbol+" "+eq+"))\n",
+		"(assert (=> "+header+" (or "+symbol+" "+different+")))\n")
 	return symbol
 }
 

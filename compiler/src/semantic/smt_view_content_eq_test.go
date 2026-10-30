@@ -5,23 +5,30 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/smt"
 )
 
 func TestSMTViewEqualityDefinitionsPreserveRelationAndScope(t *testing.T) {
 	tr := &smtTranslator{a: &Analyzer{}}
 	first := tr.sviewContentEquality("left", "offset", "length", "right", "0", "other_length")
 	again := tr.sviewContentEquality("left", "offset", "length", "right", "0", "other_length")
-	if first != again || len(tr.auxDecls) != 2 {
+	if first != again || len(tr.auxDecls) != 4 {
 		t.Fatal("identical windows did not share one definition")
 	}
-	definition := tr.auxDecls[1]
-	if !strings.Contains(definition, "(assert (= "+first+" (and (>= length 0)") ||
+	definition := tr.auxDecls[2]
+	witness := tr.auxDecls[3]
+	if !strings.Contains(definition, "(assert (=> "+first+" (and (>= length 0)") ||
 		!strings.Contains(definition, "(>= other_length 0)") ||
 		!strings.Contains(definition, "(forall ((|@sview_byte_0| Int))") {
 		t.Fatalf("equality lost its exact length/byte definition: %s", definition)
 	}
+	if !strings.Contains(witness, "(or "+first+" (and (<= 0 |@sview_diff_0|)") ||
+		!strings.Contains(witness, "(not (= (select left (+ offset |@sview_diff_0|)) (select right (+ 0 |@sview_diff_0|))))") {
+		t.Fatalf("equality lost its inequality witness: %s", witness)
+	}
 	preamble := tr.factPreamble()
-	if !strings.Contains(preamble, definition) {
+	if !strings.Contains(preamble, definition) || !strings.Contains(preamble, witness) {
 		t.Fatal("exact equality definition was dropped from the solver preamble")
 	}
 	context := smtPreambleContext(preamble)
@@ -39,6 +46,20 @@ func TestSMTViewEqualityDefinitionsPreserveRelationAndScope(t *testing.T) {
 	inline := bound.sviewContentEquality("left", "q_index", "length", "right", "0", "length")
 	if len(bound.auxDecls) != 0 || !strings.Contains(inline, "(forall") || !strings.Contains(inline, "q_index") {
 		t.Fatal("source quantifier binder was hoisted out of scope")
+	}
+}
+
+func TestSMTViewEqualityWitnessMatchesOriginal(t *testing.T) {
+	tr := &smtTranslator{a: &Analyzer{}}
+	eq := tr.sviewContentEquality("left", "lo", "length", "right", "ro", "other_length")
+	inline := (&smtTranslator{}).sviewContentEquality("left", "(ite (= q_index q_index) lo lo)", "length", "right", "ro", "other_length")
+	inline = strings.ReplaceAll(inline, "(ite (= q_index q_index) lo lo)", "lo")
+	decls := "(declare-const left (Array Int Int))\n(declare-const right (Array Int Int))\n" +
+		"(declare-const lo Int)\n(declare-const ro Int)\n(declare-const length Int)\n(declare-const other_length Int)\n"
+	solver := openCOISolver(t, 2_000_000)
+	query := decls + tr.factPreamble() + "(assert (xor " + eq + " " + inline + "))\n"
+	if got, _ := solver.Check(query); got != smt.Unsat {
+		t.Fatalf("witness and inline view equality differ: %v", got)
 	}
 }
 
