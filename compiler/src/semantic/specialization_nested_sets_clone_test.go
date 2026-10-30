@@ -61,3 +61,74 @@ func TestSpecializationNestedSetClone(t *testing.T) {
 		t.Fatal("unexpected field")
 	}
 }
+
+func TestSpecializationNameSetCacheCloneCopiesOuterIndex(t *testing.T) {
+	fn, other := &ast.FuncDecl{Name: "fn"}, &ast.FuncDecl{Name: "other"}
+	for _, name := range []string{"reassignedParamCache", "privateFreshDArrayCache"} {
+		var src Analyzer
+		row := map[string]bool{"param": true}
+		switch name {
+		case "reassignedParamCache":
+			src.reassignedParamCache = map[*ast.FuncDecl]map[string]bool{fn: row}
+		case "privateFreshDArrayCache":
+			src.privateFreshDArrayCache = map[*ast.FuncDecl]map[string]bool{fn: row}
+		}
+
+		var dst Analyzer
+		if !cloneSpecializationNestedSetField(&dst, &src, name) {
+			t.Fatalf("%s was not cloned", name)
+		}
+		var cloned map[*ast.FuncDecl]map[string]bool
+		switch name {
+		case "reassignedParamCache":
+			cloned = dst.reassignedParamCache
+		case "privateFreshDArrayCache":
+			cloned = dst.privateFreshDArrayCache
+		}
+		if !reflect.DeepEqual(cloned[fn], row) {
+			t.Fatalf("%s lost its cached row", name)
+		}
+		cloned[other] = map[string]bool{}
+		delete(cloned, fn)
+		var original map[*ast.FuncDecl]map[string]bool
+		switch name {
+		case "reassignedParamCache":
+			original = src.reassignedParamCache
+		case "privateFreshDArrayCache":
+			original = src.privateFreshDArrayCache
+		}
+		if len(original) != 1 || !reflect.DeepEqual(original[fn], row) {
+			t.Fatalf("%s outer index aliases its source", name)
+		}
+	}
+
+	for _, name := range []string{"reassignedParamCache", "privateFreshDArrayCache"} {
+		var src, dst Analyzer
+		if !cloneSpecializationNestedSetField(&dst, &src, name) {
+			t.Fatalf("%s was not cloned", name)
+		}
+		if name == "reassignedParamCache" && dst.reassignedParamCache != nil {
+			t.Fatal("nil reassigned-parameter cache changed")
+		}
+		if name == "privateFreshDArrayCache" && dst.privateFreshDArrayCache != nil {
+			t.Fatal("nil private-fresh cache changed")
+		}
+	}
+	for _, name := range []string{"reassignedParamCache", "privateFreshDArrayCache"} {
+		var src, dst Analyzer
+		if name == "reassignedParamCache" {
+			src.reassignedParamCache = map[*ast.FuncDecl]map[string]bool{}
+		} else {
+			src.privateFreshDArrayCache = map[*ast.FuncDecl]map[string]bool{}
+		}
+		if !cloneSpecializationNestedSetField(&dst, &src, name) {
+			t.Fatalf("%s was not cloned", name)
+		}
+		if name == "reassignedParamCache" && dst.reassignedParamCache == nil {
+			t.Fatal("empty reassigned-parameter cache became nil")
+		}
+		if name == "privateFreshDArrayCache" && dst.privateFreshDArrayCache == nil {
+			t.Fatal("empty private-fresh cache became nil")
+		}
+	}
+}
