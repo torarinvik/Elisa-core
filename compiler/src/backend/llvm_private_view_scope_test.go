@@ -54,10 +54,26 @@ def foreign(xs: darray[i32]&, i: usize) -> i32:
 	// Force the exact collision seen with source-preserving default/lowering
 	// clones. This controls the lookup boundary, not an accepted source edit.
 	current.Position = foreign.Position
-	g := &llvmGenerator{result: product.Result, sharedLookups: newSharedCodegenLookups(product.Result), sharedResult: true}
+	recorder := &irInputReadRecorder{}
+	g := &llvmGenerator{result: product.Result, sharedLookups: newSharedCodegenLookups(product.Result), sharedResult: true, inputReads: recorder}
 	state := &functionState{g: g}
 	if state.indexBoundsProven(foreign) {
 		t.Fatal("private current proof authorized a typed canonical foreign access")
+	}
+	var ownerObserved, denialObserved bool
+	for _, read := range recorder.snapshot().Codegen {
+		if read.Table != "IndexProofSpan" || read.Key != foreign {
+			continue
+		}
+		if read.Operation == "owner" && read.Result == product.Result && read.Value == root {
+			ownerObserved = true
+		}
+		if read.Operation == "decision" && read.Result == product.Result && read.Value == false {
+			denialObserved = true
+		}
+	}
+	if !ownerObserved || !denialObserved {
+		t.Fatalf("missing foreign proof ownership or denial: owner=%v decision=%v", ownerObserved, denialObserved)
 	}
 	if !state.indexBoundsProven(&ast.IndexExpr{Position: current.Position}) {
 		t.Fatal("current view lost its valid rebuilt-node proof")

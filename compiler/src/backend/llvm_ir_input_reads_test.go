@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 )
 
@@ -194,5 +195,159 @@ func TestIRInputAuditCoversEveryO0UnitAndDefaultO3WholeModule(t *testing.T) {
 				t.Fatal("ordinary session unexpectedly enabled tracing")
 			}
 		})
+	}
+}
+
+// A private codegen overlay may hide a canonical row. The audit must see the
+// writes and that hidden read rather than reporting a canonical lookup.
+func TestIRInputAuditRecordsExprOverlayEffects(t *testing.T) {
+	expr := &ast.Ident{Name: "value"}
+	original := &semantic.BuiltinType{Name: "i64"}
+	replacement := &semantic.BuiltinType{Name: "u64"}
+	result := &semantic.Result{ExprTypes: map[ast.Expr]semantic.Type{expr: original}}
+	recorder := &irInputReadRecorder{}
+	g := &llvmGenerator{result: result, inputReads: recorder, sharedResult: true}
+	g.setResultExprType(expr, replacement)
+	if got, ok := g.resultExprTypeOK(expr); !ok || got != replacement {
+		t.Fatal("overlay write not visible")
+	}
+	g.deleteResultExprType(expr)
+	if _, ok := g.resultExprTypeOK(expr); ok {
+		t.Fatal("overlay delete did not hide canonical row")
+	}
+	if result.ExprTypes[expr] != original {
+		t.Fatal("private effects changed the canonical row")
+	}
+	reads := recorder.snapshot().Codegen
+	want := []string{"overlay-write", "overlay-lookup", "overlay-delete", "overlay-lookup"}
+	if len(reads) != len(want) {
+		t.Fatalf("wrong event count: %+v", reads)
+	}
+	for i, op := range want {
+		if reads[i].Operation != op || reads[i].Key != expr || reads[i].Result != result {
+			t.Fatalf("event %d: %+v", i, reads[i])
+		}
+	}
+	if reads[0].Value != replacement || !reads[1].Present || reads[3].Present {
+		t.Fatal("audit lost write value or hidden read")
+	}
+}
+
+func TestIRInputAuditRecordsDirectExprEffects(t *testing.T) {
+	if forceIROverlay {
+		t.Skip("serial overlay explicitly enabled")
+	}
+	expr := &ast.Ident{Name: "value"}
+	typ := &semantic.BuiltinType{Name: "i64"}
+	result := &semantic.Result{ExprTypes: map[ast.Expr]semantic.Type{}}
+	recorder := &irInputReadRecorder{}
+	g := &llvmGenerator{result: result, inputReads: recorder}
+	g.setResultExprType(expr, typ)
+	if got, ok := g.resultExprTypeOK(expr); !ok || got != typ {
+		t.Fatal("direct write not visible")
+	}
+	g.deleteResultExprType(expr)
+	if _, ok := result.ExprTypes[expr]; ok {
+		t.Fatal("direct delete did not remove row")
+	}
+	reads := recorder.snapshot().Codegen
+	if len(reads) != 3 || reads[0].Operation != "write" || reads[1].Operation != "lookup" || reads[2].Operation != "delete" {
+		t.Fatalf("direct effect sequence: %+v", reads)
+	}
+}
+
+func TestIRInputAuditRecordsIndexProofAuthority(t *testing.T) {
+	for _, proved := range []bool{false, true} {
+		expr := &ast.IndexExpr{}
+		result := &semantic.Result{IndexBoundsProven: map[*ast.IndexExpr]bool{expr: proved}}
+		plain := (&functionState{g: &llvmGenerator{result: result}}).indexBoundsProven(expr)
+		recorder := &irInputReadRecorder{}
+		traced := (&functionState{g: &llvmGenerator{result: result, inputReads: recorder}}).indexBoundsProven(expr)
+		if traced != plain || traced != proved {
+			t.Fatal("proof observations changed the bounds decision")
+		}
+		seen := map[string]bool{}
+		for _, read := range recorder.snapshot().Codegen {
+			if read.Table == "IndexProofSpan" && read.Key == expr && read.Result == result {
+				seen[read.Operation] = true
+				if read.Operation == "decision" && read.Value != proved {
+					t.Fatal("incorrect recorded decision")
+				}
+			}
+		}
+		if !seen["owner"] || !seen["decision"] || (!proved && !seen["blocked"]) {
+			t.Fatalf("missing index proof authority observations: %v", seen)
+		}
+	}
+}
+
+func TestIRInputAuditIndexedLoweringParity(t *testing.T) {
+	const source = `def lookup(xs: array[i64, 3], index: usize) -> i64 can[Abort.Panic]:
+    return xs[index] + xs[1]
+`
+	result := parseAndAnalyzeBackendTest(t, "input-audit-index.elisa", source)
+	var report irInputReadReport
+	compile := func(traced bool) string {
+		var recorder *irInputReadRecorder
+		if traced {
+			recorder = &irInputReadRecorder{}
+		}
+		g, err := compileLLVMModuleConfigured(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "", false, false, func(g *llvmGenerator) { g.inputReads = recorder })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer g.dispose()
+		if err := g.verify(); err != nil {
+			t.Fatal(err)
+		}
+		if traced {
+			report = recorder.snapshot()
+		}
+		return g.printModule()
+	}
+	plain, traced := compile(false), compile(true)
+	if plain != traced {
+		t.Fatal("index proof tracing changed LLVM IR")
+	}
+	decisions := 0
+	for _, read := range report.Codegen {
+		if read.Table == "IndexProofSpan" && read.Operation == "decision" {
+			decisions++
+		}
+	}
+	if decisions < 2 {
+		t.Fatalf("expected proof decisions for both indexes, got %d", decisions)
+	}
+}
+
+func TestIRInputAuditSnapshotsSharedIndexSpans(t *testing.T) {
+	pos := lexer.Pos{File: "index.elisa", Line: 2, Col: 3, Offset: 7}
+	proven := &ast.IndexExpr{Position: pos}
+	result := &semantic.Result{IndexBoundsProven: map[*ast.IndexExpr]bool{proven: true}}
+	recorder := &irInputReadRecorder{}
+	g := &llvmGenerator{result: result, sharedLookups: newSharedCodegenLookups(result), sharedResult: true, inputReads: recorder}
+	state := &functionState{g: g}
+	if !state.indexBoundsProven(&ast.IndexExpr{Position: pos}) {
+		t.Fatal("lost rebuilt index proof")
+	}
+	missing := pos
+	missing.Offset++
+	if state.indexBoundsProven(&ast.IndexExpr{Position: missing}) {
+		t.Fatal("accepted a different position")
+	}
+	found, absent := false, false
+	for _, read := range recorder.snapshot().Codegen {
+		if read.Table != "IndexProofSpan" || read.Operation != "shared-span" || read.Result != result {
+			continue
+		}
+		if read.Key == pos && read.Present && read.Value == true {
+			found = true
+		}
+		if read.Key == missing && !read.Present && read.Value == false {
+			absent = true
+		}
+	}
+	if !found || !absent {
+		t.Fatalf("missing positive or negative span query: found=%v absent=%v", found, absent)
 	}
 }

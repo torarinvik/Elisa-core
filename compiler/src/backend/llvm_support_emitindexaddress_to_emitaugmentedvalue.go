@@ -63,11 +63,19 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 	if expr == nil || s == nil || s.g == nil || s.g.result == nil {
 		return false
 	}
-	view := s.g.result.IndexProofSpanResult(expr)
+	proven := s.indexBoundsProvenImpl(expr)
+	if s.g.inputReads != nil {
+		s.g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: s.g.result, Table: "IndexProofSpan", Operation: "decision", Key: expr, Value: proven, Present: true})
+	}
+	return proven
+}
+
+func (s *functionState) indexBoundsProvenImpl(expr *ast.IndexExpr) bool {
+	view := s.g.indexProofSpanResult(expr)
 	if s.g.semanticReadViewFor(view).ValueIndexBoundsProven(expr) {
 		return true
 	}
-	if view.IndexProofSpanBlocked(expr) {
+	if s.g.indexProofSpanBlocked(view, expr) {
 		return false
 	}
 	current := view == s.g.result
@@ -83,7 +91,7 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 		}
 	}
 	if shared != nil && shared.result == view && view.IndexProofSpanCount() == shared.proofCount {
-		if shared.indexProofSpans()[expr.Position] {
+		if s.g.observedIndexSpan(view, "shared-span", shared.indexProofSpans(), expr.Position) {
 			return true
 		}
 		if !current {
@@ -99,9 +107,19 @@ func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
 			s.g.provenIndexSpansSize = len(s.g.boundsOverlay)
 			s.g.provenIndexSpansResult = view
 		}
-		return s.g.provenIndexSpans[expr.Position]
+		return s.g.observedIndexSpan(view, "overlay-span", s.g.provenIndexSpans, expr.Position)
 	}
-	return s.g.provenIndexPositionsFor(view)[expr.Position]
+	return s.g.observedIndexSpan(view, "derived-span", s.g.provenIndexPositionsFor(view), expr.Position)
+}
+
+// observedIndexSpan snapshots the queried position and membership; it is a
+// diagnostic observation, not authority for reusing generated code.
+func (g *llvmGenerator) observedIndexSpan(view *semantic.Result, operation string, spans map[lexer.Pos]bool, pos lexer.Pos) bool {
+	value, present := spans[pos]
+	if g.inputReads != nil {
+		g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: view, Table: "IndexProofSpan", Operation: operation, Key: pos, Value: value, Present: present})
+	}
+	return value
 }
 
 func (g *llvmGenerator) provenIndexPositions() map[lexer.Pos]bool {

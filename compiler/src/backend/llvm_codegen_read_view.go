@@ -80,6 +80,24 @@ func (g *llvmGenerator) semanticReadViewFor(result *semantic.Result) semantic.Co
 	return semantic.NewCodegenReadView(result, g.inputReads.codegenFactRead)
 }
 
+// indexProofSpanResult records which semantic view owns the queried proof.
+// The observed pointers are diagnostic only and cannot authorize cache reuse.
+func (g *llvmGenerator) indexProofSpanResult(expr *ast.IndexExpr) *semantic.Result {
+	view := g.result.IndexProofSpanResult(expr)
+	if g.inputReads != nil {
+		g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: g.result, Table: "IndexProofSpan", Operation: "owner", Key: expr, Value: view, Present: view != nil})
+	}
+	return view
+}
+
+func (g *llvmGenerator) indexProofSpanBlocked(view *semantic.Result, expr *ast.IndexExpr) bool {
+	blocked := view.IndexProofSpanBlocked(expr)
+	if g.inputReads != nil {
+		g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: view, Table: "IndexProofSpan", Operation: "blocked", Key: expr, Value: blocked, Present: true})
+	}
+	return blocked
+}
+
 func (g *llvmGenerator) lookupGlobal(name string) (*semantic.Symbol, bool) {
 	return g.lookupGlobalSymbol(name, "backend-lookup")
 }

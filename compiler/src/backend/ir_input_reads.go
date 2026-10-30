@@ -150,7 +150,7 @@ func (r *irInputReadRecorder) snapshot() irInputReadReport {
 		Uncovered: []string{
 			"owned and derived AST-keyed semantic facts, including proof/noalias",
 			"semantic getter observations retain opaque AST keys and values without portable canonical encoding",
-			"the two direct ExprTypes mutations are write effects outside the read-observation protocol",
+			"ExprTypes write and overlay-read effects are observed but lack canonical replay and portable encoding",
 			"derived Result APIs and non-schema inputs (optimization facts, index-proof/span, memo and ABI queries) remain outside this recorder",
 			"global declarations, layouts, contracts/defaults/laws, resolution candidate sets",
 			"NamedTypes and GlobalScope values are observed as opaque in-process payloads; canonical value encoding is not implemented",

@@ -870,6 +870,9 @@ func (g *llvmGenerator) usesOverlay() bool { return g.sharedResult || forceIROve
 func (g *llvmGenerator) resultExprTypeOK(expr ast.Expr) (semantic.Type, bool) {
 	if g.exprOverlay != nil {
 		if t, ok := g.exprOverlay[expr]; ok {
+			if g.inputReads != nil {
+				g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: g.result, Table: "ExprTypes", Operation: "overlay-lookup", Key: expr, Value: t, Present: t != nil})
+			}
 			return t, t != nil
 		}
 	}
@@ -883,7 +886,15 @@ func (g *llvmGenerator) resultExprType(expr ast.Expr) semantic.Type {
 }
 
 func (g *llvmGenerator) setResultExprType(expr ast.Expr, t semantic.Type) {
-	if !g.usesOverlay() {
+	overlay := g.usesOverlay()
+	if g.inputReads != nil {
+		operation := "write"
+		if overlay {
+			operation = "overlay-write"
+		}
+		g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: g.result, Table: "ExprTypes", Operation: operation, Key: expr, Value: t, Present: true})
+	}
+	if !overlay {
 		g.result.ExprTypes[expr] = t
 		return
 	}
@@ -896,7 +907,15 @@ func (g *llvmGenerator) setResultExprType(expr ast.Expr, t semantic.Type) {
 // deleteResultExprType removes a record; in the overlay a nil entry hides the
 // shared one, as a delete would.
 func (g *llvmGenerator) deleteResultExprType(expr ast.Expr) {
-	if !g.usesOverlay() {
+	overlay := g.usesOverlay()
+	if g.inputReads != nil {
+		operation := "delete"
+		if overlay {
+			operation = "overlay-delete"
+		}
+		g.inputReads.codegenFactRead(semantic.CodegenFactRead{Result: g.result, Table: "ExprTypes", Operation: operation, Key: expr})
+	}
+	if !overlay {
 		delete(g.result.ExprTypes, expr)
 		return
 	}

@@ -65,6 +65,12 @@ identity: they are checked against the stored revision and passed through the
 incremental update. Corrupt, incompatible or unavailable entries analyze fresh.
 A solver-unavailable result is not persisted across invocations.
 
+These files are local compiler cache artifacts, not authenticated semantic
+certificates. The frame checksum detects accidental corruption but does not
+authenticate an entry; a process able to write the configured build-cache root
+could forge semantic state. Keep the default or overridden cache root writable
+only by trusted processes.
+
 Fresh-process CLI tests compare LLVM IR and diagnostics against cache-disabled
 builds after body, struct-field, contract, permission-row, overload, signature and
 function-add/remove edits and reversions. A weakened-contract negative control
