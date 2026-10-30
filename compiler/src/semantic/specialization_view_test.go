@@ -298,36 +298,49 @@ func TestPrivateSpecializationFunctionAnalysisQueriesUseCurrentBody(t *testing.T
 }
 
 func TestPrivateSpecializationKeepsCanonicalResolvedTypeNameRows(t *testing.T) {
-	result, fn := privateSpecializationFixture(t)
-	before := maps.Clone(result.ResolvedTypeNames)
-	if len(before) == 0 {
-		t.Fatal("fixture must publish canonical type-name rows outside the generic body")
-	}
-	qualified := false
-	for _, name := range before {
-		if name == "Qualified.Entry" {
-			qualified = true
+	for _, shared := range []bool{false, true} {
+		name := "serial"
+		if shared {
+			name = "shared"
 		}
-	}
-	if !qualified {
-		t.Fatal("module-local Entry did not resolve to its canonical Qualified.Entry name")
-	}
+		t.Run(name, func(t *testing.T) {
+			result, fn := privateSpecializationFixture(t)
+			if shared {
+				result.BeginSharedCodegen()
+				defer result.EndSharedCodegen()
+			}
+			before := maps.Clone(result.ResolvedTypeNames)
+			if len(before) == 0 {
+				t.Fatal("fixture must publish canonical type-name rows outside the generic body")
+			}
+			qualified := false
+			for _, name := range before {
+				if name == "Qualified.Entry" {
+					qualified = true
+				}
+			}
+			if !qualified {
+				t.Fatal("module-local Entry did not resolve to its canonical Qualified.Entry name")
+			}
 
-	product, err := result.SpecializeFunction(fn, []Type{result.NamedTypes["i64"]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for expr, name := range before {
-		got, exists := product.Result.LookupResolvedTypeNames(expr)
-		if !exists || got != name {
-			t.Fatalf("canonical type-name row disappeared: %T at %v got=%q exists=%v want=%q", expr, expr.Pos(), got, exists, name)
-		}
-	}
-	if !maps.Equal(before, result.ResolvedTypeNames) {
-		t.Fatal("private materialization changed canonical type-name rows")
-	}
-	if reflect.ValueOf(product.Result.ResolvedTypeNames).Pointer() == reflect.ValueOf(result.ResolvedTypeNames).Pointer() {
-		t.Fatal("private type-name rows share mutable canonical map backing")
+			product, err := result.SpecializeFunction(fn, []Type{result.NamedTypes["i64"]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for expr, name := range before {
+				got, exists := product.Result.LookupResolvedTypeNames(expr)
+				if !exists || got != name {
+					t.Fatalf("canonical type-name row disappeared: %T at %v got=%q exists=%v want=%q", expr, expr.Pos(), got, exists, name)
+				}
+			}
+			if !maps.Equal(before, result.ResolvedTypeNames) {
+				t.Fatal("private materialization changed canonical type-name rows")
+			}
+			if reflect.ValueOf(product.Result.ResolvedTypeNames).Pointer() == reflect.ValueOf(result.ResolvedTypeNames).Pointer() {
+				t.Fatal("private type-name rows share mutable canonical map backing")
+			}
+
+		})
 	}
 }
 

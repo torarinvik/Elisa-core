@@ -123,6 +123,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 	}
 	var analyzerSnapshot Analyzer
 	var resolvedTypeNames map[ast.TypeExpr]string
+	var resolvedTypeNamesBase map[ast.TypeExpr]string
 	var sharedStoreTargets map[*ast.FuncDecl][]map[int]bool
 	var hasRetained bool
 	func() {
@@ -138,10 +139,16 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 			sharedStoreTargets = analyzerSnapshot.paramStoreTargets
 			analyzerSnapshot.paramStoreTargets = nil
 		}
-		// Semantic workers use a separate base memo for this table. A published
-		// codegen Result exposes a concrete map instead, including canonical global
-		// type expressions, so materialize that base before adding private rows.
-		resolvedTypeNames = maps.Clone(r.analyzer.resolvedTypeNames)
+		if r.shared != nil {
+			// Shared codegen freezes canonical declaration facts. Semantic reads
+			// use the existing worker fallback; publication's logical accessors
+			// preserve canonical global names while private writes stay local.
+			resolvedTypeNamesBase = r.ResolvedTypeNames
+			resolvedTypeNames = make(map[ast.TypeExpr]string)
+		} else {
+			// Without the shared-codegen freeze, retain an isolated snapshot.
+			resolvedTypeNames = maps.Clone(analyzerSnapshot.resolvedTypeNames)
+		}
 		hasRetained = r.analyzer.retained != nil
 	}()
 	a := cloneAnalyzerValueForSpecialization(&analyzerSnapshot).Addr().Interface().(*Analyzer)
@@ -160,7 +167,7 @@ func (r *Result) specializePrivateFunction(fn *ast.FuncDecl, args []Type, option
 	if selected.inputAudit {
 		ctx.inputReads = &specializationInputTrace{}
 	}
-	a.parallel = &parallelWorkerState{worker: 0, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, readShadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}, specialization: ctx}
+	a.parallel = &parallelWorkerState{worker: 0, shadows: map[*ast.FuncDecl]*ast.FuncDecl{}, readShadows: map[*ast.FuncDecl]*ast.FuncDecl{}, original: map[*ast.FuncDecl]*ast.FuncDecl{}, specialization: ctx, resolvedTypeNamesBase: resolvedTypeNamesBase}
 	if hasRetained {
 		a.retained = &RetainedAnalysis{windows: map[*ast.FuncDecl][2]int{}, rbDeps: map[*ast.FuncDecl]map[*ast.FuncDecl]bool{}}
 	}
