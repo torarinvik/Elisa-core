@@ -29,14 +29,16 @@ type decoder struct {
 	// interface's first word (itab or type), so a pointer-shaped value is stored without
 	// reflect's per-assignment implements check.
 	ifaceWords map[[2]reflect.Type]unsafe.Pointer
-	// A small direct cache avoids hashing common concrete/interface pairs.
+	// A small direct cache avoids hashing common concrete/interface pairs. Type
+	// IDs are validated against this decoder's fixed registry before lookup.
 	// Collisions fall back to ifaceWords, retaining the same assignability check.
 	ifaceWordCache [8]cachedInterfaceWord
 }
 
 type cachedInterfaceWord struct {
-	key  [2]reflect.Type
-	word unsafe.Pointer
+	id    uint64
+	iface reflect.Type
+	word  unsafe.Pointer
 }
 
 func (r *Registry) Decode(data []byte) (any, error) {
@@ -155,12 +157,12 @@ func (d *decoder) valueAtDepth(v reflect.Value) error {
 		key := [2]reflect.Type{typ, t}
 		entry := &d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))]
 		word, cached := entry.word, false
-		if word != nil && key == entry.key {
+		if word != nil && id == entry.id && t == entry.iface {
 			cached = true
 		} else {
 			word, cached = d.ifaceWords[key]
 			if cached {
-				*entry = cachedInterfaceWord{key, word}
+				*entry = cachedInterfaceWord{id, t, word}
 			}
 		}
 		if !cached && !typ.AssignableTo(t) {
@@ -377,7 +379,7 @@ func (d *decoder) setInterface(v, x reflect.Value, word unsafe.Pointer, cached b
 			d.ifaceWords = map[[2]reflect.Type]unsafe.Pointer{}
 		}
 		d.ifaceWords[key] = word
-		d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))] = cachedInterfaceWord{key, word}
+		d.ifaceWordCache[id%uint64(len(d.ifaceWordCache))] = cachedInterfaceWord{id, v.Type(), word}
 	}
 	if !v.CanAddr() {
 		v.Set(x)
