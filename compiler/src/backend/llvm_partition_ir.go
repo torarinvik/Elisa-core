@@ -920,7 +920,14 @@ func (g *llvmGenerator) setResultIndexBoundsProven(expr *ast.IndexExpr, proven b
 	if g.boundsOverlay == nil {
 		g.boundsOverlay = map[*ast.IndexExpr]bool{}
 	}
+	previous, present := g.boundsOverlay[expr]
 	g.boundsOverlay[expr] = proven
+	// A replacement can change proof authority without changing map size.
+	// Invalidate derived span indexes so rebuilt nodes cannot retain a proof
+	// that the generator has subsequently removed.
+	if (!present || previous != proven) && g.provenIndexSpansResult == g.result {
+		g.provenIndexSpans = nil
+	}
 }
 
 // Start likely misses early, so their native optimization overlaps generation
