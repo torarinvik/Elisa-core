@@ -369,7 +369,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 					return semantic.AnalyzeWithOptions(file, options)
 				}
 			}
-			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, options, artifact, stderr, buildCheckpoint, checkpointTried)
+			result, state = advanceAnalysisDiskBuildWithCheckpoint(program, file, options, artifact, stderr, analysisDiskResumeCheckpoint(buildCheckpoint, pending), checkpointTried)
 		} else {
 			pristine, ok := parseProgram(program.filename, program.source, io.Discard)
 			if !ok {

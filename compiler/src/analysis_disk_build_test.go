@@ -427,3 +427,46 @@ func TestAnalysisDiskDistantCheckpointDoesNotShadowCompletedBaseline(t *testing.
 		t.Fatalf("completed baseline was not restored after the distant checkpoint was rejected: loaded=%v err=%v", pending.loaded, pending.err)
 	}
 }
+
+func TestAnalysisDiskDistantCheckpointIsKeptAsShadowed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ELISAC_BUILD_CACHE_DIR", filepath.Join(dir, "cache"))
+	t.Setenv("ELISACORE_ANALYSIS_BOOTSTRAP", "1")
+	previous := analysisDiskBuildPreferredRemaining
+	analysisDiskBuildPreferredRemaining = 0
+	defer func() { analysisDiskBuildPreferredRemaining = previous }()
+	filename := filepath.Join(dir, "program.elisa")
+	baseline := []byte(analysisDiskBootstrapOrderSource)
+	current := []byte(strings.Replace(analysisDiskBootstrapOrderSource, "return 1", "return 9", 1))
+	options := semantic.AnalyzeOptions{}
+	complete := publishAnalysisDiskBuildTestBaseline(t, filename, baseline, options)
+	program := analysisDiskBuildTestProgram(filename, current)
+	buildArtifact := analysisBuildArtifact(complete, current)
+	if err := buildArtifact.publish(analysisDiskBuildTestCheckpoint(t, filename, current, options)); err != nil {
+		t.Fatal(err)
+	}
+
+	pending := startAnalysisDiskRestoration(program, options)
+	pending.join()
+	if pending.build != nil || pending.shadowed == nil {
+		t.Fatalf("distant exact checkpoint was not kept as shadowed: build=%v shadowed=%v", pending.build != nil, pending.shadowed != nil)
+	}
+	if got := analysisDiskResumeCheckpoint(pending.build, pending); got != pending.shadowed {
+		t.Fatal("a fallen-back baseline must resume the shadowed exact checkpoint")
+	}
+}
+
+func TestAnalysisDiskResumeCheckpointPrecedence(t *testing.T) {
+	shadowed := &analysisDiskBuildCheckpoint{}
+	live := &analysisDiskBuildCheckpoint{}
+	pending := &analysisDiskRestoration{shadowed: shadowed}
+	if got := analysisDiskResumeCheckpoint(live, pending); got != live {
+		t.Fatal("a live exact checkpoint must take precedence over the shadowed one")
+	}
+	if got := analysisDiskResumeCheckpoint(nil, pending); got != shadowed {
+		t.Fatal("without a live checkpoint, the shadowed exact checkpoint must resume")
+	}
+	if got := analysisDiskResumeCheckpoint(nil, nil); got != nil {
+		t.Fatal("without any restoration there is nothing to resume")
+	}
+}

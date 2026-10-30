@@ -15,11 +15,14 @@ import (
 // This future belongs to one invocation. Its owner always joins it, including
 // parse failures. Nothing survives to answer another compiler request.
 type analysisDiskRestoration struct {
-	artifact     analysisDiskArtifact
-	started      time.Time
-	done         chan struct{}
-	state        *semantic.RetainedAnalysis
-	build        *analysisDiskBuildCheckpoint
+	artifact analysisDiskArtifact
+	started  time.Time
+	done     chan struct{}
+	state    *semantic.RetainedAnalysis
+	build    *analysisDiskBuildCheckpoint
+	// shadowed is an exact checkpoint kept aside because a completed baseline was preferred.
+	// It resumes the build if that baseline's update falls back (see advanceAnalysisDiskBuild).
+	shadowed     *analysisDiskBuildCheckpoint
 	buildTried   bool
 	buildErr     error
 	preparation  analysisScratchPreparation
@@ -52,6 +55,7 @@ func startAnalysisDiskRestoration(program *loadedProgram, options semantic.Analy
 				pending.buildTried = true
 				pending.build, pending.buildErr = restoreAnalysisDiskBuildCheckpoint(artifact, program, options)
 				if analysisDiskCheckpointShadows(artifact, pending.build) {
+					pending.shadowed = pending.build
 					pending.build = nil
 				}
 				if pending.build != nil {
@@ -332,6 +336,16 @@ func (a analysisDiskArtifact) publishBaselineSource(source []byte) error {
 		return err
 	}
 	return os.Rename(f.Name(), a.baselineSourcePath())
+}
+
+// analysisDiskResumeCheckpoint chooses the checkpoint a cold start resumes from. When the
+// completed baseline's update fell back, the exact checkpoint it shadowed is the resume point:
+// recomputing from zero on every run never accumulates progress.
+func analysisDiskResumeCheckpoint(build *analysisDiskBuildCheckpoint, pending *analysisDiskRestoration) *analysisDiskBuildCheckpoint {
+	if build != nil || pending == nil {
+		return build
+	}
+	return pending.shadowed
 }
 
 // analysisDiskBuildPreferredRemaining is the largest number of unfinished
