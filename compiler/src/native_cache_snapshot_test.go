@@ -13,9 +13,12 @@ import (
 )
 
 func TestLLCObjectKeyKeepsUserTemporaryPathStrings(t *testing.T) {
+	if !nativeToolFixturesSupported() {
+		t.Skip("cache selector fixtures require ELF or Mach-O images")
+	}
 	dir := t.TempDir()
 	tool := filepath.Join(dir, "llc")
-	if err := os.WriteFile(tool, []byte("test llc identity"), 0700); err != nil {
+	if err := os.WriteFile(tool, nativeToolTestFixture("test llc identity"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	ir := filepath.Join(dir, "program.ll")

@@ -161,7 +161,7 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 		selector := smt.ResolveBinary("")
 		testRunnerCacheWriteString(h, "smt-selector="+selector)
 		if selected, err := exec.LookPath(selector); err == nil {
-			stamp, err := toolchainContentStamp(selected)
+			stamp, err := toolchainNativeContentStamp(selected)
 			if err != nil {
 				return analysisDiskArtifact{}, false
 			}

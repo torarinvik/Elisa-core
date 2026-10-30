@@ -60,6 +60,9 @@ func TestTestRunnerCachesBypassRequestObservers(t *testing.T) {
 }
 
 func TestTestRunnerCacheKeysSolverContents(t *testing.T) {
+	if !nativeToolFixturesSupported() {
+		t.Skip("cache selector fixtures require ELF or Mach-O images")
+	}
 	solver := filepath.Join(t.TempDir(), "z3")
 	writeSolver := func(path string, source string) {
 		t.Helper()
@@ -79,11 +82,11 @@ func TestTestRunnerCacheKeysSolverContents(t *testing.T) {
 		return hex.EncodeToString(h.Sum(nil))
 	}
 	t.Setenv("ELISA_Z3", solver)
-	writeSolver(solver, "#!/bin/sh\n# solver version one\n")
+	writeSolver(solver, string(nativeToolTestFixture("solver version one")))
 	first := key()
 
 	replacement := filepath.Join(filepath.Dir(solver), "z3.new")
-	writeSolver(replacement, "#!/bin/sh\n# solver version two\n")
+	writeSolver(replacement, string(nativeToolTestFixture("solver version two")))
 	if err := os.Rename(replacement, solver); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +96,9 @@ func TestTestRunnerCacheKeysSolverContents(t *testing.T) {
 }
 
 func TestTestRunnerCacheKeysMachONMContents(t *testing.T) {
+	if !nativeToolFixturesSupported() {
+		t.Skip("cache selector fixtures require ELF or Mach-O images")
+	}
 	tools := t.TempDir()
 	nm := filepath.Join(tools, "nm")
 	writeNM := func(path string, source string) {
@@ -113,11 +119,11 @@ func TestTestRunnerCacheKeysMachONMContents(t *testing.T) {
 		return hex.EncodeToString(h.Sum(nil))
 	}
 	t.Setenv("PATH", tools)
-	writeNM(nm, "#!/bin/sh\n# nm version one\n")
+	writeNM(nm, string(nativeToolTestFixture("nm version one")))
 	first := key()
 
 	replacement := filepath.Join(tools, "nm.new")
-	writeNM(replacement, "#!/bin/sh\n# nm version two\n")
+	writeNM(replacement, string(nativeToolTestFixture("nm version two")))
 	if err := os.Rename(replacement, nm); err != nil {
 		t.Fatal(err)
 	}

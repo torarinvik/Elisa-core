@@ -1,12 +1,18 @@
 package main
 
 import (
+	"os/exec"
 	"testing"
 
 	"elisacore/src/backend"
 )
 
 func TestRuntimeObjectCacheKeysCodegenEnvironment(t *testing.T) {
+	if clang, err := exec.LookPath("clang"); err == nil {
+		if _, err := toolchainNativeContentStamp(clang); err != nil {
+			t.Skipf("clang selector is not cacheable: %v", err)
+		}
+	}
 	for _, name := range []string{"ELISACORE_TARGET_CPU", "ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISA_LINEAR_MUTATION"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "0")

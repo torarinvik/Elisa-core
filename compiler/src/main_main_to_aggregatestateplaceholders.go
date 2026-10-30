@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	semantic.SetSMTProofIdentityResolvers(compilerSourceStamp, toolchainContentStamp)
+	semantic.SetSMTProofIdentityResolvers(compilerSourceStamp, toolchainNativeContentStamp)
 }
 
 func main() {

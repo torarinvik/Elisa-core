@@ -226,14 +226,17 @@ func TestAnalysisDiskCacheKeyTracksSemanticInputs(t *testing.T) {
 	if key() == reset {
 		t.Fatal("source authority omitted")
 	}
+	if !nativeToolFixturesSupported() {
+		t.Skip("solver identity fixture requires ELF or Mach-O images")
+	}
 	solver := filepath.Join(dir, "solver")
 	t.Setenv("ELISA_Z3", solver)
 	options.EnableSMT = true
-	if err := os.WriteFile(solver, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+	if err := os.WriteFile(solver, nativeToolTestFixture("solver-v1"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	initialSolver := key()
-	if err := os.WriteFile(solver, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+	if err := os.WriteFile(solver, nativeToolTestFixture("solver-v2"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if key() == initialSolver {

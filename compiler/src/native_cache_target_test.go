@@ -7,7 +7,7 @@ import (
 )
 
 func TestTestRunnerCacheKeysCodegenEnvironment(t *testing.T) {
-	for _, name := range append(append([]string{}, nativeToolEnvironmentInputs...), "ELISACORE_TARGET_CPU", "ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NO_LINK_BINDING_CHECK", "ELISA_LINEAR_MUTATION") {
+	for _, name := range []string{"ELISACORE_TARGET_CPU", "ELISACORE_FAST_MATH", "ELISACORE_STRICT_FP", "ELISACORE_NOALIAS_MUTABLE_REFS", "ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NO_LINK_BINDING_CHECK", "ELISA_LINEAR_MUTATION"} {
 		t.Run(name, func(t *testing.T) {
 			key := func() string {
 				h := sha256.New()
@@ -22,6 +22,25 @@ func TestTestRunnerCacheKeysCodegenEnvironment(t *testing.T) {
 			after := key()
 			if before == after {
 				t.Fatal("changed configuration reused test runner identity")
+			}
+		})
+	}
+}
+
+func TestNativeCacheKeysToolchainEnvironment(t *testing.T) {
+	for _, name := range nativeToolEnvironmentInputs {
+		t.Run(name, func(t *testing.T) {
+			key := func() string {
+				t.Helper()
+				h := sha256.New()
+				writeNativeToolEnvironmentInputs(h)
+				return string(h.Sum(nil))
+			}
+			t.Setenv(name, "first-value")
+			before := key()
+			t.Setenv(name, "second-value")
+			if before == key() {
+				t.Fatalf("changed native tool environment %s reused a cache identity", name)
 			}
 		})
 	}
@@ -45,5 +64,23 @@ func TestNativeCacheResolvedTargetFields(t *testing.T) {
 	}
 	if key(base) != key(base) {
 		t.Fatal("unstable target identity")
+	}
+}
+
+func TestNativeCacheCodegenWorkerCountIsKeyed(t *testing.T) {
+	key := func() string {
+		t.Helper()
+		h := sha256.New()
+		if err := writeNativeCacheTarget(h, ""); err != nil {
+			t.Fatal(err)
+		}
+		return string(h.Sum(nil))
+	}
+	t.Setenv("ELISACORE_CODEGEN_JOBS", "1")
+	serial := key()
+	t.Setenv("ELISACORE_CODEGEN_JOBS", "2")
+	parallel := key()
+	if serial == parallel {
+		t.Fatal("different resolved codegen worker counts reused a native cache identity")
 	}
 }

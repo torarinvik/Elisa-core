@@ -1,38 +1,68 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// transientNativeSolver is a test-only native SMT protocol fixture. Its marker
+// controls whether it reports unknown or execs the real solver, so cache
+// admission is exercised even on the transient path.
+func transientNativeSolver(t *testing.T, dir string) string {
+	t.Helper()
+	clang, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang required for native solver fixture")
+	}
+	source := filepath.Join(dir, "solver.c")
+	binary := filepath.Join(dir, "z3")
+	const program = `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+int main(void) {
+ const char *marker = getenv("TEST_SOLVER_UNKNOWN_MARKER");
+ const char *real = getenv("TEST_SOLVER_REAL");
+ if (!marker || !real) return 2;
+ if (access(marker, F_OK) != 0) { execl(real, "z3", "-in", (char *)0); return 3; }
+ char *line = NULL; size_t capacity = 0;
+ while (getline(&line, &capacity, stdin) >= 0) {
+   if (strstr(line, "(check-sat)")) puts("unknown");
+   if (strstr(line, "(get-info :reason-unknown)")) puts("(:reason-unknown \"timeout\")");
+   if (strstr(line, "(get-info :all-statistics)")) puts("(:rlimit-count 0)");
+   char *echo = strstr(line, "(echo ");
+   if (echo) { char *start = strchr(echo, 34); char *end = start ? strchr(start+1, 34) : NULL; if (end) { *end = 0; puts(start+1); } }
+   fflush(stdout);
+ }
+ free(line); return 0;
+}`
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, clang, "-O0", "-o", binary, source).CombinedOutput(); err != nil {
+		t.Fatalf("build solver fixture: %v: %s", err, out)
+	}
+	if _, err := toolchainNativeContentStamp(binary); err != nil {
+		t.Fatalf("solver fixture is not cache-eligible: %v", err)
+	}
+	return binary
+}
 
 func TestAnalysisDiskTransientSolverDoesNotHideVacuity(t *testing.T) {
 	real, err := exec.LookPath("z3")
 	if err != nil {
 		t.Skip("z3 required")
 	}
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 required")
-	}
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "unknown")
-	solver := filepath.Join(dir, "z3")
-	script := "#!" + python + "\n" + `import os,sys,re
-if not os.path.exists(os.environ['TEST_SOLVER_UNKNOWN_MARKER']):
- os.execv(os.environ['TEST_SOLVER_REAL'], ['z3','-in'])
-for line in sys.stdin:
- if '(check-sat)' in line: print('unknown',flush=True)
- if '(get-info :reason-unknown)' in line: print('(:reason-unknown "timeout")',flush=True)
- if '(get-info :all-statistics)' in line: print('(:rlimit-count 0)',flush=True)
- m=re.search(r'\(echo "([^"]+)"\)',line)
- if m: print(m.group(1),flush=True)
-`
-	if err := os.WriteFile(solver, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
+	solver := transientNativeSolver(t, dir)
 	if err := os.WriteFile(marker, []byte("1"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -80,29 +110,9 @@ func TestRunnerCachesDoNotPublishTransientSolverOutcome(t *testing.T) {
 	if err != nil {
 		t.Skip("z3 required")
 	}
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 required")
-	}
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang required")
-	}
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "unknown")
-	solver := filepath.Join(dir, "z3")
-	script := "#!" + python + "\n" + `import os,sys,re
-if not os.path.exists(os.environ['TEST_SOLVER_UNKNOWN_MARKER']):
- os.execv(os.environ['TEST_SOLVER_REAL'], ['z3','-in'])
-for line in sys.stdin:
- if '(check-sat)' in line: print('unknown',flush=True)
- if '(get-info :reason-unknown)' in line: print('(:reason-unknown "timeout")',flush=True)
- if '(get-info :all-statistics)' in line: print('(:rlimit-count 0)',flush=True)
- m=re.search(r'\(echo "([^"]+)"\)',line)
- if m: print(m.group(1),flush=True)
-`
-	if err := os.WriteFile(solver, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
+	solver := transientNativeSolver(t, dir)
 	if err := os.WriteFile(marker, []byte("1"), 0600); err != nil {
 		t.Fatal(err)
 	}

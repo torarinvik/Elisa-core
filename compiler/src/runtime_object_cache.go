@@ -59,7 +59,7 @@ func runtimeObjectCacheArtifactFor(packedProfile backend.PackedLoweringProfile, 
 	testRunnerCacheWriteString(hash, "targetTriple="+strings.TrimSpace(targetTriple))
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		testRunnerCacheWriteString(hash, "clang="+clangPath)
-		stamp, stampErr := toolchainContentStamp(clangPath)
+		stamp, stampErr := toolchainNativeContentStamp(clangPath)
 		if stampErr != nil {
 			return runtimeObjectCacheArtifact{}, stampErr
 		}

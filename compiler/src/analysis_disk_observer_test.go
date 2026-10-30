@@ -39,6 +39,11 @@ func clearAnalysisDiskObserverEnvironment(t *testing.T) {
 		"ELISACORE_RETAINED_DEBUG_SPANS",
 		"ELISACORE_RETAINED_FAST_DEBUG",
 		"ELISACORE_RETAINED_FAST_PREPARE",
+		"ELISACORE_CACHE_CERTIFICATE",
+		"ELISACORE_PARTITION_DECLINE_DEBUG",
+		"ELISACORE_PART_KEEP",
+		"ELISACORE_RETAINED_PROFILE_DIR",
+		"ELISACORE_RETAINED_HEAPPROFILE",
 		"ELISACORE_TEST_TIMING",
 		"ELISACORE_TEST_PHASE_DEBUG",
 		"ELISACORE_KEEP_TEST_TEMP",
@@ -84,6 +89,23 @@ func TestAnalysisDiskRequestObserverPredicate(t *testing.T) {
 			}
 		})
 	}
+	for _, name := range []string{
+		"ELISACORE_PARTITION_DECLINE_DEBUG",
+		"ELISACORE_PART_KEEP",
+		"ELISACORE_RETAINED_PROFILE_DIR",
+		"ELISACORE_RETAINED_HEAPPROFILE",
+	} {
+		t.Run("build-observer/"+name, func(t *testing.T) {
+			clearAnalysisDiskObserverEnvironment(t)
+			t.Setenv(name, "1")
+			if analysisDiskRequestObserverEnabled() {
+				t.Fatalf("%s unexpectedly bypassed the semantic cache", name)
+			}
+			if !buildCacheRequestObserverEnabled() || !testRunnerCacheObserverEnabled() {
+				t.Fatalf("%s did not bypass object and test-runner caches", name)
+			}
+		})
+	}
 	t.Run("retained-fast-prepare-shadow", func(t *testing.T) {
 		clearAnalysisDiskObserverEnvironment(t)
 		t.Setenv("ELISACORE_RETAINED_FAST_PREPARE", "shadow")
@@ -120,6 +142,13 @@ func TestAnalysisDiskRequestObserverPredicate(t *testing.T) {
 	if !retainedRequestRequiresLocalProcess() {
 		t.Fatal("backend parity did not force local execution for startup-captured lexer state")
 	}
+	t.Run("cache-certificate-forces-local", func(t *testing.T) {
+		clearAnalysisDiskObserverEnvironment(t)
+		t.Setenv("ELISACORE_CACHE_CERTIFICATE", "certificate.json")
+		if !retainedRequestRequiresLocalProcess() {
+			t.Fatal("certificate-backed request may forward to a retained server")
+		}
+	})
 }
 
 func TestAnalysisDiskSemanticParityObserverBypassesWarmState(t *testing.T) {
@@ -260,6 +289,49 @@ func TestRetainedServerObserverRequestRunsLocally(t *testing.T) {
 	expectedSource := fmt.Sprintf("#line 1 %s\n%s", filepath.Clean(canonicalPath), source)
 	if string(recordedSource) != expectedSource {
 		t.Fatalf("server observer request used unexpected source:\n got: %q\nwant: %q", recordedSource, expectedSource)
+	}
+
+	// An outer cache certificate records SMT-taint in this process only. Even
+	// with an explicit retained server selected, certificate-backed requests
+	// must compile locally instead of producing a server result that the client
+	// could incorrectly certify.
+	profileDir := filepath.Join(dir, "certificate-profiles")
+	if err := os.Mkdir(profileDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	certificateEnv := map[string]string{
+		"ELISACORE_RETAINED_SERVER":      socket,
+		"ELISACORE_ANALYSIS_CACHE":       "0",
+		"ELISACORE_BUILD_CACHE":          "0",
+		"ELISACORE_CACHE_CERTIFICATE":    filepath.Join(dir, "invocation-certificate.json"),
+		"ELISACORE_RETAINED_PROFILE_DIR": profileDir,
+		"ELISA_BACKEND_PARITY_OUT":       "",
+	}
+	for _, name := range analysisDiskRequestObserverVariables {
+		certificateEnv[name] = ""
+	}
+	for _, name := range []string{
+		"ELISACORE_ANALYSIS_CACHE_DEBUG",
+		"ELISACORE_BUILD_TIMING",
+		"ELISACORE_CPUPROFILE",
+		"ELISACORE_MEMPROFILE",
+		"ELISACORE_EMIT_LL",
+		"ELISACORE_LEXER_CAPACITY_REPORT",
+		"ELISACORE_RETAINED_DEBUG_SPANS",
+		"ELISACORE_RETAINED_FAST_DEBUG",
+		"ELISACORE_PARTITION_DECLINE_DEBUG",
+		"ELISACORE_PART_KEEP",
+		"ELISACORE_RETAINED_HEAPPROFILE",
+	} {
+		certificateEnv[name] = ""
+	}
+	runDiskCLIChild(t, certificateEnv, "-emit", "llvm", "-o", filepath.Join(dir, "certified.ll"), sourcePath)
+	profiles, err := filepath.Glob(filepath.Join(profileDir, "retained-*.pprof"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("certificate-backed request was forwarded and profiled by retained server: %v", profiles)
 	}
 }
 

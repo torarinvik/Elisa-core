@@ -8,110 +8,53 @@ import (
 	"elisacore/src/backend"
 )
 
-func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	includedPath := filepath.Join(dir, "runtime.inc")
-	bridgePath := filepath.Join(dir, "runtime_bridge.cpp")
-
-	if err := os.WriteFile(includedPath, []byte("#define ELISA_RUNTIME_VALUE 1\n"), 0o644); err != nil {
-		t.Fatalf("write included file: %v", err)
-	}
-	if err := os.WriteFile(bridgePath, []byte("#include \"runtime.inc\"\nint runtime_bridge() { return ELISA_RUNTIME_VALUE; }\n"), 0o644); err != nil {
-		t.Fatalf("write foreign bridge: %v", err)
-	}
-
-	artifact1, err := testRunnerCacheArtifactFor(
-		"runner",
-		"shim",
-		nil,
-		[]string{bridgePath},
-		nil,
-		backend.OptimizationLevel0,
-		backend.DefaultPackedLoweringProfile(),
-		"x86_64-apple-darwin",
-		false)
-	if err != nil {
-		t.Fatalf("first artifact key: %v", err)
-	}
-
-	if err := os.WriteFile(includedPath, []byte("#define ELISA_RUNTIME_VALUE 2\n"), 0o644); err != nil {
-		t.Fatalf("rewrite included file: %v", err)
-	}
-
-	artifact2, err := testRunnerCacheArtifactFor(
-		"runner",
-		"shim",
-		nil,
-		[]string{bridgePath},
-		nil,
-		backend.OptimizationLevel0,
-		backend.DefaultPackedLoweringProfile(),
-		"x86_64-apple-darwin",
-		false)
-	if err != nil {
-		t.Fatalf("second artifact key: %v", err)
-	}
-
-	if artifact1.key == artifact2.key {
-		t.Fatalf("expected quoted include change to alter cache key, got %q twice", artifact1.key)
-	}
-}
-
-func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludesFromIncludeDirs(t *testing.T) {
-	t.Parallel()
+func TestTestRunnerCacheDeclinesForeignCPreprocessorInputs(t *testing.T) {
 	dir := t.TempDir()
 	nativeDir := filepath.Join(dir, "native")
 	includeRoot := filepath.Join(dir, "include")
-	if err := os.MkdirAll(filepath.Join(includeRoot, "shader_recompiler", "frontend"), 0o755); err != nil {
-		t.Fatalf("create include tree: %v", err)
-	}
 	if err := os.MkdirAll(nativeDir, 0o755); err != nil {
 		t.Fatalf("create native dir: %v", err)
 	}
-	includedPath := filepath.Join(includeRoot, "shader_recompiler", "frontend", "instruction.h")
-	bridgePath := filepath.Join(nativeDir, "runtime_bridge.cpp")
-
-	if err := os.WriteFile(includedPath, []byte("#define ELISA_INCLUDED_VALUE 1\n"), 0o644); err != nil {
-		t.Fatalf("write included file: %v", err)
+	if err := os.MkdirAll(includeRoot, 0o755); err != nil {
+		t.Fatalf("create include dir: %v", err)
 	}
-	if err := os.WriteFile(bridgePath, []byte("#include \"shader_recompiler/frontend/instruction.h\"\nint runtime_bridge() { return ELISA_INCLUDED_VALUE; }\n"), 0o644); err != nil {
-		t.Fatalf("write foreign bridge: %v", err)
+	cases := []struct {
+		name      string
+		filename  string
+		source    string
+		linkFlags []string
+	}{
+		{
+			name:     "C angle include through include dir",
+			filename: "runtime_bridge.c",
+			source:   "#include <project_header.h>\nint runtime_bridge(void) { return PROJECT_VALUE; }\n",
+			linkFlags: []string{"-I", includeRoot},
+		},
+		{
+			name:     "C++ macro include with conditional",
+			filename: "runtime_bridge.cpp",
+			source:   "#define HEADER_NAME \"project_header.h\"\n#if USE_PROJECT_HEADER\n#include HEADER_NAME\n#endif\nint runtime_bridge(void) { return 0; }\n",
+		},
 	}
-
-	artifact1, err := testRunnerCacheArtifactFor(
-		"runner",
-		"shim",
-		nil,
-		[]string{bridgePath},
-		[]string{"-I", includeRoot},
-		backend.OptimizationLevel0,
-		backend.DefaultPackedLoweringProfile(),
-		"x86_64-apple-darwin",
-		false)
-	if err != nil {
-		t.Fatalf("first artifact key: %v", err)
-	}
-
-	if err := os.WriteFile(includedPath, []byte("#define ELISA_INCLUDED_VALUE 2\n"), 0o644); err != nil {
-		t.Fatalf("rewrite included file: %v", err)
-	}
-
-	artifact2, err := testRunnerCacheArtifactFor(
-		"runner",
-		"shim",
-		nil,
-		[]string{bridgePath},
-		[]string{"-I", includeRoot},
-		backend.OptimizationLevel0,
-		backend.DefaultPackedLoweringProfile(),
-		"x86_64-apple-darwin",
-		false)
-	if err != nil {
-		t.Fatalf("second artifact key: %v", err)
-	}
-
-	if artifact1.key == artifact2.key {
-		t.Fatalf("expected include-dir quoted include change to alter cache key, got %q twice", artifact1.key)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bridgePath := filepath.Join(nativeDir, tc.filename)
+			if err := os.WriteFile(bridgePath, []byte(tc.source), 0o644); err != nil {
+				t.Fatalf("write foreign bridge: %v", err)
+			}
+			_, err := testRunnerCacheArtifactFor(
+				"runner",
+				"shim",
+				nil,
+				[]string{bridgePath},
+				tc.linkFlags,
+				backend.OptimizationLevel0,
+				backend.DefaultPackedLoweringProfile(),
+				"x86_64-apple-darwin",
+				false)
+			if err == nil {
+				t.Fatal("foreign C++ source with preprocessor dependencies was admitted to the test-runner cache")
+			}
+		})
 	}
 }

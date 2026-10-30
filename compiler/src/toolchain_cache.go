@@ -16,6 +16,7 @@ import (
 type toolchainStampCacheEntry struct {
 	fingerprint string
 	stamp       string
+	native      bool
 }
 
 // Cache content digests while the file identity and metadata stay unchanged. Hashing a
@@ -30,6 +31,14 @@ var (
 )
 
 func toolchainContentStamp(path string) (string, error) {
+	return toolchainContentStampWithNativeRequirement(path, false)
+}
+
+func toolchainNativeContentStamp(path string) (string, error) {
+	return toolchainContentStampWithNativeRequirement(path, true)
+}
+
+func toolchainContentStampWithNativeRequirement(path string, requireNative bool) (string, error) {
 	toolchainStampMu.Lock()
 	defer toolchainStampMu.Unlock()
 	for attempt := 0; attempt < 3; attempt++ {
@@ -45,10 +54,12 @@ func toolchainContentStamp(path string) (string, error) {
 		fingerprint, memoizable := toolchainFileFingerprint(before)
 		if memoizable {
 			if cached, ok := toolchainStampCache[path]; ok && cached.fingerprint == fingerprint {
-				return cached.stamp, nil
+				if !requireNative || cached.native {
+					return cached.stamp, nil
+				}
 			}
 		}
-		file, err := os.Open(path)
+		file, err := openToolchainStampFile(path)
 		if err != nil {
 			return "", err
 		}
@@ -60,6 +71,21 @@ func toolchainContentStamp(path string) (string, error) {
 		if !sameToolchainFileVersion(before, opened) {
 			file.Close()
 			continue
+		}
+		if requireNative {
+			var magic [4]byte
+			if _, err := io.ReadFull(file, magic[:]); err != nil {
+				file.Close()
+				return "", err
+			}
+			if !nativeToolMagic(magic) {
+				file.Close()
+				return "", fmt.Errorf("toolchain %q is not a native executable image", path)
+			}
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				file.Close()
+				return "", err
+			}
 		}
 		// Hash the descriptor whose identity was checked, not a newly opened path.
 		stamp, hashErr := hashOpenToolchainFile(file)
@@ -83,13 +109,23 @@ func toolchainContentStamp(path string) (string, error) {
 		}
 		afterFingerprint, afterMemoizable := toolchainFileFingerprint(after)
 		if afterMemoizable {
-			toolchainStampCache[path] = toolchainStampCacheEntry{fingerprint: afterFingerprint, stamp: stamp}
+			toolchainStampCache[path] = toolchainStampCacheEntry{fingerprint: afterFingerprint, stamp: stamp, native: requireNative}
 		} else {
 			delete(toolchainStampCache, path)
 		}
 		return stamp, nil
 	}
 	return "", fmt.Errorf("toolchain %q changed repeatedly while hashing", path)
+}
+
+func nativeToolMagic(magic [4]byte) bool {
+	switch string(magic[:]) {
+	case "\x7fELF", "\xfe\xed\xfa\xce", "\xce\xfa\xed\xfe", "\xfe\xed\xfa\xcf", "\xcf\xfa\xed\xfe",
+		"\xca\xfe\xba\xbe", "\xbe\xba\xfe\xca", "\xca\xfe\xba\xbf", "\xbf\xba\xfe\xca":
+		return true
+	default:
+		return false
+	}
 }
 
 func sameToolchainFileVersion(a, b os.FileInfo) bool {

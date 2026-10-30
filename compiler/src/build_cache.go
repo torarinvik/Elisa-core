@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"elisacore/src/backend"
@@ -113,13 +114,27 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	if program == nil || program.file != nil || len(program.easm) != 0 {
 		return buildCacheArtifact{}, false
 	}
+	mergerMayRun := buildCacheMayUseObjectMerger(options)
+	var mergerCommand []string
+	var mergerExecutable string
+	// An explicit ELISA_LD command may wrap or delegate to another executable
+	// (for example, `env /custom/ld`). Stamping argv[0] alone cannot detect an
+	// in-place change to the delegated linker, so unsafe selectors bypass the
+	// complete-object cache.
+	if mergerMayRun {
+		var trusted bool
+		mergerCommand, mergerExecutable, trusted = buildCacheDefaultObjectMergerInputs()
+		if !trusted {
+			return buildCacheArtifact{}, false
+		}
+	}
 	optionsKey := buildCacheOptionsIdentity(options)
 	environment := compilerCacheEnvKey()
 	hash := sha256.New()
 	if err := writeNativeCacheTarget(hash, options.targetTriple); err != nil {
 		return buildCacheArtifact{}, false
 	}
-	testRunnerCacheWriteString(hash, "build-object-v3-transcript")
+	testRunnerCacheWriteString(hash, "build-object-v4-transcript")
 	testRunnerCacheWriteString(hash, "goos="+runtime.GOOS)
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
@@ -148,8 +163,11 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	testRunnerCacheWriteString(hash, "compiler-stamp="+stamp)
 
 	if clangPath, err := exec.LookPath("clang"); err == nil {
+		// A launcher script can delegate to a compiler whose replacement is not
+		// represented by this file's digest. Outer-cache certificates apply the
+		// same native-image requirement to selected tools.
 		testRunnerCacheWriteString(hash, "clang="+clangPath)
-		stamp, stampErr := toolchainContentStamp(clangPath)
+		stamp, stampErr := toolchainNativeContentStamp(clangPath)
 		if stampErr != nil {
 			return buildCacheArtifact{}, false
 		}
@@ -165,7 +183,7 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		solver := smt.ResolveBinary("")
 		testRunnerCacheWriteString(hash, "smt-selector="+solver)
 		if selected, err := exec.LookPath(solver); err == nil {
-			stamp, err := toolchainContentStamp(selected)
+			stamp, err := toolchainNativeContentStamp(selected)
 			if err != nil {
 				return buildCacheArtifact{}, false
 			}
@@ -176,19 +194,17 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		}
 	}
 
-	// Native fragments merge their objects with the request's selected linker.
-	// The environment key records ELISA_LD's spelling, but cannot detect an
-	// executable replaced in place or a different `ld` selected through PATH.
-	// The persistent object cache can return before the backend's fragment key is
-	// consulted, so include the resolved command and strong executable digest in
-	// the outer key whenever that path can run.
-	if buildCacheUsesNativeFragmentMerger(options) {
-		merger := backend.NewIncrementalObjectSession(1, 1)
-		command, executable, err := merger.ObjectMergerCacheInputs()
-		if err != nil {
-			return buildCacheArtifact{}, false
-		}
-		stamp, err := toolchainContentStamp(executable)
+	// Partitioned IR, native fragments, and the ordinary parallel object emitter
+	// merge objects with the request's selected linker. The environment key
+	// records ELISA_LD's spelling, but cannot detect an executable replaced in
+	// place or a different `ld` selected through PATH. The persistent object
+	// cache can return before backend partition keys are consulted, so include
+	// the resolved command and strong executable digest whenever a merge path may
+	// run. O0 partitioned IR is enabled unless explicitly disabled; object shape
+	// determines whether it crosses the partition threshold, so conservatively
+	// include the merger for those requests.
+	if mergerMayRun {
+		stamp, err := toolchainNativeContentStamp(mergerExecutable)
 		if err != nil {
 			return buildCacheArtifact{}, false
 		}
@@ -196,7 +212,7 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 			Command    []string
 			Executable string
 			Digest     string
-		}{Command: command, Executable: executable, Digest: stamp})
+		}{Command: mergerCommand, Executable: mergerExecutable, Digest: stamp})
 		if err != nil {
 			return buildCacheArtifact{}, false
 		}
@@ -243,11 +259,98 @@ func buildCacheEnvironmentEqual(left, right []string) bool {
 	return true
 }
 
-func buildCacheUsesNativeFragmentMerger(options cliOptions) bool {
-	return buildCacheEnabled() &&
-		os.Getenv("ELISACORE_PARTITION_CACHE") != "0" &&
-		os.Getenv("ELISACORE_NATIVE_FRAGMENTS") == "1" &&
-		effectiveOptimizationLevel(options) != backend.OptimizationLevel0
+func buildCacheMayUseObjectMerger(options cliOptions) bool {
+	if !buildCacheEnabled() {
+		return false
+	}
+	// writeObjectFile also attempts the ordinary partition-and-merge emitter at
+	// O0 and after whole-module optimization whenever multiple codegen jobs are
+	// available. The cache key precedes module-weight checks, so conservatively
+	// include the selected merger for either path.
+	if buildCacheCodegenJobs() > 1 {
+		return true
+	}
+	if effectiveOptimizationLevel(options) == backend.OptimizationLevel0 {
+		return os.Getenv("ELISACORE_PARALLEL_IR") != "0"
+	}
+	return (os.Getenv("ELISACORE_PARTITION_CACHE") != "0" &&
+		os.Getenv("ELISACORE_NATIVE_FRAGMENTS") == "1") ||
+		strings.TrimSpace(os.Getenv("ELISACORE_PARALLEL_OPT")) == "1"
+}
+
+// Keep this in step with backend.codegenJobs: default min(NumCPU, 16), explicit
+// values clamped to 1..64, and invalid values falling back to the default.
+func buildCacheCodegenJobs() int {
+	if text := strings.TrimSpace(os.Getenv("ELISACORE_CODEGEN_JOBS")); text != "" {
+		if jobs, err := strconv.Atoi(text); err == nil {
+			if jobs < 1 {
+				return 1
+			}
+			if jobs > 64 {
+				return 64
+			}
+			return jobs
+		}
+	}
+	jobs := runtime.NumCPU()
+	if jobs > 16 {
+		jobs = 16
+	}
+	if jobs < 1 {
+		jobs = 1
+	}
+	return jobs
+}
+
+// buildCacheDefaultObjectMergerInputs admits only the platform linker selected
+// through the system path. A user PATH launcher can delegate to another ld that
+// is not represented by ObjectMergerCacheInputs' argv[0] digest. Explicit
+// ELISA_LD commands are also rejected because their arguments may select such a
+// delegate or supply linker scripts.
+func buildCacheDefaultObjectMergerInputs() (command []string, executable string, trusted bool) {
+	if strings.TrimSpace(os.Getenv("ELISA_LD")) != "" {
+		return nil, "", false
+	}
+	selected, err := exec.LookPath("ld")
+	if err != nil || filepath.Base(selected) != "ld" {
+		return nil, "", false
+	}
+	resolved, err := filepath.EvalSymlinks(selected)
+	if err != nil {
+		return nil, "", false
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		// The backend resolves Apple's dispatch shim through xcrun only when the
+		// selected command is this canonical path.
+		if filepath.Clean(selected) != "/usr/bin/ld" || filepath.Clean(resolved) != "/usr/bin/ld" {
+			return nil, "", false
+		}
+	case "linux":
+		if !buildCachePathWithin(resolved, "/usr/bin") && !buildCachePathWithin(resolved, "/bin") {
+			return nil, "", false
+		}
+	default:
+		return nil, "", false
+	}
+	if _, err := toolchainNativeContentStamp(selected); err != nil {
+		return nil, "", false
+	}
+	// On macOS the actual linker is the xcrun-selected toolchain binary, not
+	// /usr/bin/ld. Validate that file too before admitting the complete object.
+	command, executable, err = backend.NewIncrementalObjectSession(1, 1).ObjectMergerCacheInputs()
+	if err != nil {
+		return nil, "", false
+	}
+	if _, err := toolchainNativeContentStamp(executable); err != nil {
+		return nil, "", false
+	}
+	return command, executable, true
+}
+
+func buildCachePathWithin(path, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && !filepath.IsAbs(relative)
 }
 
 // publishCachedBuildObject atomically installs a freshly built object into the
@@ -464,6 +567,10 @@ func buildCacheRequestObserverEnabled() bool {
 		"ELISACORE_LEXER_CAPACITY_REPORT",
 		"ELISACORE_RETAINED_DEBUG_SPANS",
 		"ELISACORE_RETAINED_FAST_DEBUG",
+		"ELISACORE_PARTITION_DECLINE_DEBUG",
+		"ELISACORE_PART_KEEP",
+		"ELISACORE_RETAINED_PROFILE_DIR",
+		"ELISACORE_RETAINED_HEAPPROFILE",
 		"ELISA_BACKEND_PARITY_OUT",
 	} {
 		if os.Getenv(name) != "" {

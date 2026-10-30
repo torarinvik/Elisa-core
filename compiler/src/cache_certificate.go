@@ -48,7 +48,12 @@ func writeCacheInvocationCertificate(args []string, path string, certifiable boo
 				return false
 			}
 		}
-		stamp, err := toolchainContentStamp(absolute)
+		var stamp string
+		if selector != "" {
+			stamp, err = toolchainNativeContentStamp(absolute)
+		} else {
+			stamp, err = toolchainContentStamp(absolute)
+		}
 		if err != nil {
 			return false
 		}

@@ -918,7 +918,7 @@ func llcObjectCacheKey(irPath string, codegenOpt string, targetTriple string, ll
 	if err != nil {
 		return "", false
 	}
-	toolStamp, err := toolchainContentStamp(llcPath)
+	toolStamp, err := toolchainNativeContentStamp(llcPath)
 	if err != nil {
 		return "", false
 	}
@@ -998,7 +998,7 @@ func findLLC() (string, error) {
 		"/usr/local/opt/llvm/bin/llc",
 	}
 	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
 			return candidate, nil
 		}
 	}

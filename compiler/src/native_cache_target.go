@@ -3,6 +3,7 @@ package main
 import (
 	"hash"
 	"os"
+	"strconv"
 
 	"elisacore/src/backend"
 )
@@ -40,6 +41,10 @@ func writeNativeCacheTarget(hash hash.Hash, triple string) error {
 		return err
 	}
 	writeResolvedNativeCacheTarget(hash, identity)
+	// Parallel codegen partitions modules differently by worker count. The
+	// default is host-dependent, so include the resolved value even when no
+	// ELISACORE_CODEGEN_JOBS override is present (cache roots may be shared).
+	testRunnerCacheWriteString(hash, "codegen-jobs="+strconv.Itoa(buildCacheCodegenJobs()))
 	library, err := backend.LLVMLibraryIdentity()
 	if err != nil {
 		return err
@@ -48,10 +53,14 @@ func writeNativeCacheTarget(hash hash.Hash, triple string) error {
 	if err := writeLLCCacheInputs(hash); err != nil {
 		return err
 	}
+	writeNativeToolEnvironmentInputs(hash)
+	return nil
+}
+
+func writeNativeToolEnvironmentInputs(hash hash.Hash) {
 	for _, name := range nativeToolEnvironmentInputs {
 		testRunnerCacheWriteBytes(hash, "native-tool-env:"+name, []byte(os.Getenv(name)))
 	}
-	return nil
 }
 
 func writeLLCCacheInputs(hash hash.Hash) error {
@@ -60,7 +69,7 @@ func writeLLCCacheInputs(hash hash.Hash) error {
 		testRunnerCacheWriteString(hash, "llc=unavailable")
 		return nil
 	}
-	stamp, err := toolchainContentStamp(path)
+	stamp, err := toolchainNativeContentStamp(path)
 	if err != nil {
 		return err
 	}

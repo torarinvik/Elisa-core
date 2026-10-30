@@ -298,7 +298,7 @@ func serverNativeObjectIdentity(req compileServerRequest, program *loadedProgram
 	if runtime.GOOS == "darwin" && executable == "/usr/bin/ld" {
 		return serverNativeIdentity{}, false
 	}
-	mergerStamp, err := toolchainContentStamp(executable)
+	mergerStamp, err := toolchainNativeContentStamp(executable)
 	if err != nil {
 		return serverNativeIdentity{}, false
 	}
