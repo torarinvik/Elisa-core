@@ -61,7 +61,7 @@ func (e *encoder) writeFramedBodies(framing int) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			worker := &encoder{registry: e.registry, objects: e.objects, framed: true, interner: interner}
+			worker := &encoder{registry: e.registry, objects: e.objects, pointerObjects: e.pointerObjects, framed: true, interner: interner}
 			for !failed.Load() {
 				k := int(next.Add(1)) - 1
 				if k >= chunks {

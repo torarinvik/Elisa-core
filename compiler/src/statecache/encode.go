@@ -15,10 +15,18 @@ type identity struct {
 	length   int
 	capacity int
 }
+
+// Pointer and map identities have no slice dimensions. Keep their keys compact
+// because they account for most objects in large AST/semantic snapshots.
+type pointerIdentity struct {
+	typ     reflect.Type
+	pointer uintptr
+}
 type encoder struct {
 	registry        *Registry
 	data            bytes.Buffer
 	objects         map[identity]uint64
+	pointerObjects  map[pointerIdentity]uint64
 	depth           int
 	allocationCount int
 	allocations     []allocation
@@ -52,7 +60,7 @@ func (r *Registry) EncodeFramedWithCapacity(root any, capacity int) ([]byte, err
 }
 
 func (r *Registry) encode(root any, framed bool, capacity int) ([]byte, error) {
-	e := &encoder{registry: r, objects: map[identity]uint64{}, scanning: true, strings: map[string]uint64{}, framed: framed}
+	e := &encoder{registry: r, objects: map[identity]uint64{}, pointerObjects: map[pointerIdentity]uint64{}, scanning: true, strings: map[string]uint64{}, framed: framed}
 	v := reflect.ValueOf(root)
 	if !v.IsValid() || r.ids[v.Type()] == 0 {
 		return nil, fmt.Errorf("unregistered state root")
@@ -202,15 +210,26 @@ func (e *encoder) valueAtDepth(v reflect.Value) error {
 		}
 
 		key := objectIdentity(v)
-		if id := e.objects[key]; id != 0 {
-			e.uint(id)
+		pointerKey := pointerIdentity{typ: key.typ, pointer: key.pointer}
+		var prior uint64
+		if v.Kind() == reflect.Slice {
+			prior = e.objects[key]
+		} else {
+			prior = e.pointerObjects[pointerKey]
+		}
+		if prior != 0 {
+			e.uint(prior)
 			return nil
 		}
 		if !e.scanning {
 			return fmt.Errorf("state graph changed while encoding %s", t)
 		}
 		id := uint64(e.nodes.count + 1)
-		e.objects[key] = id
+		if v.Kind() == reflect.Slice {
+			e.objects[key] = id
+		} else {
+			e.pointerObjects[pointerKey] = id
+		}
 		e.nodes.add(stateNode{value: v})
 		if allocationSize(v) != 0 {
 			e.allocationCount++
