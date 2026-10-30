@@ -67,6 +67,7 @@ func (d *decoder) readObjects() error {
 	// Only large graphs with sufficient per-object slack use batching.
 	var batches []pointerBatch
 	var sliceBatches []sliceBatch
+	hasAliases := false
 	if count >= 4096 && len(d.registry.types) <= count/8 {
 		batches = make([]pointerBatch, len(d.registry.types))
 		sliceBatches = make([]sliceBatch, len(d.registry.types))
@@ -108,6 +109,7 @@ func (d *decoder) readObjects() error {
 			return err
 		}
 		if owner != 0 {
+			hasAliases = true
 			if owner > uint64(count) || owner == uint64(id) || t.Kind() == reflect.Map {
 				return fmt.Errorf("invalid state alias owner")
 			}
@@ -189,10 +191,14 @@ func (d *decoder) readObjects() error {
 			return err
 		}
 	}
-	visiting := make([]bool, count+1)
-	for id := 1; id <= count; id++ {
-		if err := d.resolveAlias(id, descriptions, visiting, 0); err != nil {
-			return err
+	if hasAliases {
+		visiting := make([]bool, count+1)
+		for id := 1; id <= count; id++ {
+			if descriptions[id].aliasIndex != 0 {
+				if err := d.resolveAlias(id, descriptions, visiting, 0); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if d.framed {
