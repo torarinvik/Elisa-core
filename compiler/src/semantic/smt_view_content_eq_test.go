@@ -2,7 +2,45 @@
 
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestSMTViewEqualityDefinitionsPreserveRelationAndScope(t *testing.T) {
+	tr := &smtTranslator{a: &Analyzer{}}
+	first := tr.sviewContentEquality("left", "offset", "length", "right", "0", "other_length")
+	again := tr.sviewContentEquality("left", "offset", "length", "right", "0", "other_length")
+	if first != again || len(tr.auxDecls) != 2 {
+		t.Fatal("identical windows did not share one definition")
+	}
+	definition := tr.auxDecls[1]
+	if !strings.Contains(definition, "(assert (= "+first+" (and (>= length 0)") ||
+		!strings.Contains(definition, "(>= other_length 0)") ||
+		!strings.Contains(definition, "(forall ((|@sview_byte_0| Int))") {
+		t.Fatalf("equality lost its exact length/byte definition: %s", definition)
+	}
+	preamble := tr.factPreamble()
+	if !strings.Contains(preamble, definition) {
+		t.Fatal("exact equality definition was dropped from the solver preamble")
+	}
+	context := smtPreambleContext(preamble)
+	for _, dependency := range []string{"left", "offset", "length", "right", "other_length"} {
+		if !strings.Contains(context, dependency) {
+			t.Fatalf("hypothesis relevance lost %s through equality naming", dependency)
+		}
+	}
+	shadowed := &smtTranslator{}
+	shadowed.sviewContentEquality("left", "(ite (forall ((q_i Int)) (> q_i 0)) q_i 0)", "length", "right", "0", "length")
+	if len(shadowed.auxDecls) != 0 {
+		t.Fatal("nested binder shadowing permitted top-level hoisting")
+	}
+	bound := &smtTranslator{}
+	inline := bound.sviewContentEquality("left", "q_index", "length", "right", "0", "length")
+	if len(bound.auxDecls) != 0 || !strings.Contains(inline, "(forall") || !strings.Contains(inline, "q_index") {
+		t.Fatal("source quantifier binder was hoisted out of scope")
+	}
+}
 
 // View content equality: equal lengths (both non-negative) and equal bytes, over the modeled
 // byte arrays of parameters and their slices.
@@ -47,9 +85,15 @@ def eqbad(a: sview, b: sview) -> bool:
     ensure result implies a[0] == b[1]
     return a == b
 
+def eq_local(a: sview, b: sview) -> bool:
+    requires a.len > 0
+    ensure result implies a[0] == b[0]
+    equal: bool = a == b
+    return equal
+
 `
 	result := analyzeContractStrict(t, "view_eq.elisa", src)
-	for _, name := range []string{"find", "eqsym", "eqbytes"} {
+	for _, name := range []string{"find", "eqsym", "eqbytes", "eq_local"} {
 		if n := ensureFailuresFor(result.Errors(), name); n != 0 {
 			t.Fatalf("%s: expected proof, got %v", name, result.Errors())
 		}

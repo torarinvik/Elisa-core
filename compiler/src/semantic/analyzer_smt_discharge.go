@@ -2823,6 +2823,7 @@ type smtTranslator struct {
 	enumPinnedBinders map[string]*Symbol
 	// sviewArgCount numbers the fresh length-only sview bindings (see bindSMTSViewLengthArg).
 	sviewArgCount          int
+	sviewEqualities        map[smtSViewEqualityKey]string
 	sviewSliceArrays       map[smtSViewSliceKey]string
 	runtimeQuantifierCount int
 	// lengthOnly marks env tokens that carry a container length but no element array

@@ -2,10 +2,16 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
+
+type smtSViewEqualityKey struct {
+	leftArray, leftOffset, leftLength    string
+	rightArray, rightOffset, rightLength string
+}
 
 // Content equality of two views (`text[a:b] == needle`). The runtime (string_views_eq) answers
 // true exactly when both lengths are non-negative, the lengths are equal, and the bytes are equal.
@@ -64,16 +70,50 @@ func (tr *smtTranslator) sviewContentEqualityTerm(n *ast.BinaryExpr, env map[str
 	if !ok {
 		return "", false
 	}
-	k := "q_sveq_" + strconv.Itoa(tr.sviewArgCount)
+	eq := tr.sviewContentEquality(arrL, loL, lenL, arrR, loR, lenR)
+	if n.Op == lexer.TOKEN_BANGEQ {
+		return "(not " + eq + ")", true
+	}
+	return eq, true
+}
+
+// Name a repeated equality with an exact defining assertion. This avoids
+// repeating its quantified byte relation inside every expanded callee clause.
+// The assertion stays visible to smtPreambleContext and hypothesis slicing;
+// this is a definitional extension, never an under-constrained approximation.
+func (tr *smtTranslator) sviewContentEquality(arrL, loL, lenL, arrR, loR, lenR string) string {
+	key := smtSViewEqualityKey{arrL, loL, lenL, arrR, loR, lenR}
+	scoped := false
+	for _, part := range [...]string{arrL, loL, lenL, arrR, loR, lenR} {
+		// Conservatively keep even locally bound q_ names inline: nested
+		// source binders can shadow each other, so a global name scan is insufficient.
+		scoped = scoped || strings.Contains(part, "q_")
+	}
+	if !scoped {
+		if symbol, ok := tr.sviewEqualities[key]; ok {
+			return symbol
+		}
+	}
+	k := "|@sview_byte_" + strconv.Itoa(tr.sviewArgCount) + "|"
 	tr.sviewArgCount++
 	selL := "(select " + arrL + " (+ " + loL + " " + k + "))"
 	selR := "(select " + arrR + " (+ " + loR + " " + k + "))"
 	bytes := "(forall ((" + k + " Int)) (! (=> (and (<= 0 " + k + ") (< " + k + " " + lenL + ")) (= " + selL + " " + selR + ")) :pattern (" + selL + ")))"
 	eq := "(and (>= " + lenL + " 0) (>= " + lenR + " 0) (= " + lenL + " " + lenR + ") " + bytes + ")"
-	if n.Op == lexer.TOKEN_BANGEQ {
-		return "(not " + eq + ")", true
+	// An equality depending on an enclosing source binder must remain inside
+	// that quantifier. Never hoist its definition into a top-level assertion.
+	if scoped {
+		return eq
 	}
-	return eq, true
+	if tr.sviewEqualities == nil {
+		tr.sviewEqualities = make(map[smtSViewEqualityKey]string)
+	}
+	symbol := "|@sview_eq_" + strconv.Itoa(len(tr.sviewEqualities)) + "|"
+	tr.sviewEqualities[key] = symbol
+	tr.auxDecls = append(tr.auxDecls,
+		"(declare-const "+symbol+" Bool)\n",
+		"(assert (= "+symbol+" "+eq+"))\n")
+	return symbol
 }
 
 // sviewEqualityOperand admits a typed view, or a ternary or pure-function call whose view
