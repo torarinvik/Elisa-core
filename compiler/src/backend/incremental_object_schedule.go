@@ -34,7 +34,7 @@ func (d *incrementalObjectDisk) loadSchedule(unit, target [32]byte, parts int) [
 	if d == nil || parts < 1 || parts > maxNativeObjectPartitions {
 		return nil
 	}
-	f, err := os.Open(d.schedulePath(unit, target, parts))
+	f, err := openRegularCacheFile(d.schedulePath(unit, target, parts))
 	if err != nil {
 		return nil
 	}

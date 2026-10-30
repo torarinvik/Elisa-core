@@ -58,7 +58,7 @@ func (d *incrementalObjectDisk) loadKey(bitcode []byte, target string, key [32]b
 		return nil
 	}
 	path := d.pathForKey(key)
-	f, err := os.Open(path)
+	f, err := openRegularCacheFile(path)
 	if err != nil {
 		return nil
 	}
