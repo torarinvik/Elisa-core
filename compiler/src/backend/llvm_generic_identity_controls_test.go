@@ -11,6 +11,29 @@ import (
 	"testing"
 )
 
+func TestGenericInstantiationKeyFramingMatchesFormattedEncoding(t *testing.T) {
+	for _, base := range []string{"", "name:with|separators", "blåbær"} {
+		for _, args := range [][]semantic.Type{nil, {&semantic.BuiltinType{Name: "i64"}, &semantic.BuiltinType{Name: "u8"}}} {
+			for _, layout := range []bool{false, true} {
+				prefix := "specialization-v1|"
+				identity, err := semantic.TypeSymbolKeys(args)
+				if layout {
+					prefix = "nominal-layout-v1|"
+					identity, err = semantic.TypeSymbolKeysForNominalLayout(args)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := fmt.Sprintf("%d:%s|%d|%s%d:%s|", len(base), base, len(args), prefix, len(identity), identity)
+				got, err := genericInstantiationKey(base, args, layout)
+				if err != nil || got != want {
+					t.Fatalf("got %q, want %q, error %v", got, want, err)
+				}
+			}
+		}
+	}
+}
+
 func TestGenericSymbolFramingAndBoundedNames(t *testing.T) {
 	g := &llvmGenerator{}
 	u8 := &semantic.BuiltinType{Name: "u8"}

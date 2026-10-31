@@ -324,7 +324,12 @@ func genericBindingsForArgs(params []ast.GenericParam, args []semantic.Type) map
 }
 func genericInstantiationKey(base string, args []semantic.Type, layout bool) (string, error) {
 	var key strings.Builder
-	fmt.Fprintf(&key, "%d:%s|%d|", len(base), base, len(args))
+	key.WriteString(strconv.Itoa(len(base)))
+	key.WriteByte(':')
+	key.WriteString(base)
+	key.WriteByte('|')
+	key.WriteString(strconv.Itoa(len(args)))
+	key.WriteByte('|')
 	var identity string
 	var err error
 	if layout {
@@ -337,7 +342,10 @@ func genericInstantiationKey(base string, args []semantic.Type, layout bool) (st
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintf(&key, "%d:%s|", len(identity), identity)
+	key.WriteString(strconv.Itoa(len(identity)))
+	key.WriteByte(':')
+	key.WriteString(identity)
+	key.WriteByte('|')
 
 	return key.String(), nil
 }
