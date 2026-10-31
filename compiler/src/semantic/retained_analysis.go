@@ -2705,7 +2705,18 @@ func retainedWriteSyntax(b *strings.Builder, v reflect.Value) {
 	}
 }
 
-func retainedLineKey(p lexer.Pos) string { return fmt.Sprintf("%s:%d:%d", p.File, p.Line, p.Col) }
+func retainedLineKey(p lexer.Pos) string {
+	var digits [41]byte
+	suffix := strconv.AppendInt(digits[:0], int64(p.Line), 10)
+	suffix = append(suffix, ':')
+	suffix = strconv.AppendInt(suffix, int64(p.Col), 10)
+	var key strings.Builder
+	key.Grow(len(p.File) + 1 + len(suffix))
+	key.WriteString(p.File)
+	key.WriteByte(':')
+	key.Write(suffix)
+	return key.String()
+}
 
 var retainedDeclType = reflect.TypeOf((*ast.Decl)(nil)).Elem()
 
