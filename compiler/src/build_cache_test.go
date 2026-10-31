@@ -235,7 +235,7 @@ func TestBuildObjectCacheIgnoresSeedWrapperSettings(t *testing.T) {
 	if stderr := emitObjForCacheTest(t, src, out1); !strings.Contains(stderr, "build-object miss-store") {
 		t.Fatalf("initial miss: %s", stderr)
 	}
-	for _, name := range []string{"ELISA_STAGE1_SEED_MAX_RSS_KB", "ELISA_STAGE1_RSS_POLL_SECONDS", "ELISA_STAGE1_SEED_OPT_LEVEL", "ELISA_STAGE1_SEED_BOOTSTRAP_BIN", "ELISA_STAGE1_SEED_BOOTSTRAP_KIND", "ELISA_STAGE1_SEED_CLANG", "ELISA_STAGE0_SOURCE_ROOT"} {
+	for _, name := range []string{"ELISA_STAGE1_SEED_MAX_RSS_KB", "ELISA_STAGE1_RSS_POLL_SECONDS", "ELISA_STAGE1_SEED_OPT_LEVEL", "ELISA_STAGE1_SEED_BOOTSTRAP_BIN", "ELISA_STAGE1_SEED_BOOTSTRAP_KIND", "ELISA_STAGE1_SEED_CLANG", "ELISA_STAGE0_SOURCE_ROOT", "ELISA_STAGE1_BIN", "ELISA_STAGE1_OBJECT", "ELISA_RUNTIME_OBJ"} {
 		t.Setenv(name, "changed-wrapper-setting")
 	}
 	if !strings.Contains(strings.Join(buildCacheEnvKey(), "\n"), "ELISA_STAGE1_SEED_MAX_RSS_KB=changed-wrapper-setting") {
@@ -243,6 +243,11 @@ func TestBuildObjectCacheIgnoresSeedWrapperSettings(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(buildCacheEnvKey(), "\n"), "ELISA_STAGE1_RSS_POLL_SECONDS=changed-wrapper-setting") {
 		t.Fatal("poll interval omitted from general cache identity")
+	}
+	for _, name := range []string{"ELISA_STAGE1_BIN", "ELISA_STAGE1_OBJECT", "ELISA_RUNTIME_OBJ"} {
+		if !strings.Contains(strings.Join(buildCacheEnvKey(), "\n"), name+"=changed-wrapper-setting") {
+			t.Fatalf("%s omitted from test execution environment identity", name)
+		}
 	}
 	out2 := filepath.Join(dir, "second.o")
 	if stderr := emitObjForCacheTest(t, src, out2); !strings.Contains(stderr, "build-object hit") {
