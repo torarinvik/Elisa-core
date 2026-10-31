@@ -157,7 +157,7 @@ func (g *llvmGenerator) provenIndexPositionsFor(view *semantic.Result) map[lexer
 // a genuine user `arr[i]` access (vs compiler-internal carrier reads): only such
 // accesses receive the debug-mode bounds watchdog, so debug verification stays
 // at the user-operation boundary and never instruments internal machinery.
-func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool, readOnly ...bool) (C.LLVMValueRef, semantic.Type, error) {
 	if expr != nil && expr.Fallback != nil {
 		return nil, nil, fmt.Errorf("safe index fallback is not addressable")
 	}
@@ -180,7 +180,30 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
 	switch t := objType.(type) {
 	case *semantic.ArrayType:
-		arrayPtr, _, err := s.emitAddressOrTemp(expr.Object)
+		object := expr.Object
+		// An effect grant around a direct global read does not create a mutable
+		// lvalue. For a read-only index, however, taking the global's address
+		// avoids copying the complete array just to load one element.
+		if len(readOnly) != 0 && readOnly[0] {
+			unwrapped := object
+			for {
+				paren, ok := unwrapped.(*ast.ParenExpr)
+				if !ok {
+					break
+				}
+				unwrapped = paren.Inner
+			}
+			if grant, ok := unwrapped.(*ast.CanExpr); ok {
+				if ident, ok := grant.Expr.(*ast.Ident); ok {
+					if _, local := s.lookupBinding(ident.Name); !local {
+						if sym, _, found := s.lookupVisibleGlobalSymbol(ident.Name); found && sym.Kind == semantic.SymbolGlobal {
+							object = ident
+						}
+					}
+				}
+			}
+		}
+		arrayPtr, _, err := s.emitAddressOrTemp(object)
 		if err != nil {
 			return nil, nil, err
 		}

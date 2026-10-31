@@ -639,7 +639,7 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	if helperName, operandType, ok := runtimeStringIndexedOperand(s.exprType(expr.Object)); ok {
 		return s.emitRuntimeStringIndexExpr(expr, helperName, operandType)
 	}
-	ptr, elemType, err := s.emitIndexAddress(expr, true)
+	ptr, elemType, err := s.emitIndexAddress(expr, true, true)
 	if err != nil {
 		return nil, nil, err
 	}
