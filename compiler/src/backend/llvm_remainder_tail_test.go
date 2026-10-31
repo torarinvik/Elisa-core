@@ -56,6 +56,7 @@ func TestRemainderTailPass(t *testing.T) {
 		want     int
 	}{
 		{"ordinary", remainderTailIR, 1},
+		{"quotient zero test", strings.Replace(remainderTailIR, "icmp samesign ult i64 %number.116.i, 10", "icmp eq i64 %divtmp.i, 0", 1), 1},
 		{"multiple uses in one instruction", strings.Replace(remainderTailIR, "icmp sgt i64 %addtmp.i, 9", "icmp eq i64 %addtmp.i, %addtmp.i", 1), 1},
 		{"undef input", strings.Replace(remainderTailIR, "[ %.fr.i, %while.cond.preheader.i ]", "[ undef, %while.cond.preheader.i ]", 1), 0},
 		{"exact division", strings.Replace(remainderTailIR, "udiv i64", "udiv exact i64", 1), 0},
