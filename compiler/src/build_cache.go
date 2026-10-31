@@ -670,6 +670,15 @@ func tryBuildObjectCacheHitUsing(args []string, stdout, stderr io.Writer, load f
 	if configureCLIProfile(options) != nil {
 		return 0, false, nil
 	}
+	// Source expansion and hashing the pinned compiler image are independent.
+	// The normal cache-key path still validates the stamp and handles errors.
+	// Join the worker even when loading or cache-key construction fails.
+	compilerStampDone := make(chan struct{})
+	go func() {
+		_, _ = compilerSourceStamp()
+		close(compilerStampDone)
+	}()
+	defer func() { <-compilerStampDone }()
 	program, loaded := load(options.filename, io.Discard)
 	if !loaded {
 		return 0, false, nil
