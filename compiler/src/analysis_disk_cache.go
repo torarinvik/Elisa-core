@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -273,6 +274,17 @@ func (a analysisDiskArtifact) publish(data []byte) error {
 	return os.Rename(f.Name(), a.path)
 }
 
+// Replays at least this long republish the updated state as the baseline
+// (ELISACORE_ANALYSIS_REBASELINE_MS overrides; 0 republishes after every replay).
+func analysisDiskRebaselineAfter() time.Duration {
+	if text := os.Getenv("ELISACORE_ANALYSIS_REBASELINE_MS"); text != "" {
+		if ms, err := strconv.Atoi(text); err == nil && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 5 * time.Second
+}
+
 func debugAnalysisDisk(stderr io.Writer, format string, args ...any) {
 	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
 		fmt.Fprintf(stderr, "[analysis-disk] "+format+"\n", args...)
@@ -290,6 +302,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	checkpointTried := false
 	unchanged := false
 	replayed := false
+	replayElapsed := time.Duration(0)
 	started := time.Now()
 	if pending == nil || pending.artifact.key != artifact.key {
 		pending.join()
@@ -336,6 +349,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 						// the entire graph, and reuses the same identity domain
 						// on repeated edits/reverts in fresh processes.
 						replayed = true
+						replayElapsed = time.Since(updateStart)
 						debugAnalysisDisk(stderr, "update changed=%d in=%v fast=%v%s", state.LastStats.Changed, time.Since(updateStart).Round(time.Millisecond), state.LastStats.FastPrepared, retainedFastNote(state.LastStats.FastDeclined))
 						debugAnalysisDisk(stderr, "update phases pairing=%v scratch=%v compare=%v bodies=%v post=%v", state.LastStats.Pairing.Round(time.Millisecond), state.LastStats.Scratch.Round(time.Millisecond), state.LastStats.Compare.Round(time.Millisecond), state.LastStats.Bodies.Round(time.Millisecond), state.LastStats.Post.Round(time.Millisecond))
 					}
@@ -379,10 +393,18 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		}
 		debugAnalysisDisk(stderr, "cold analysis in=%v", time.Since(coldStart).Round(time.Millisecond))
 	}
-	if replayed {
+	// A baseline far behind the source makes every later process replay every edit
+	// since it was written. Once a replay costs more than rewriting the state, the
+	// updated state (the same graph the retained server keeps across edits) becomes
+	// the new baseline, so the next edit replays only itself.
+	rebaseline := replayed && replayElapsed >= analysisDiskRebaselineAfter()
+	if replayed && !rebaseline {
 		debugAnalysisDisk(stderr, "replay baseline; checkpoint unchanged")
 	}
-	if state != nil && !unchanged && !replayed {
+	if rebaseline {
+		debugAnalysisDisk(stderr, "replay took %v; rebaseline", replayElapsed.Round(time.Millisecond))
+	}
+	if state != nil && !unchanged && (!replayed || rebaseline) {
 		saveStart := time.Now()
 		data, err := state.MarshalState()
 		if err == nil {
