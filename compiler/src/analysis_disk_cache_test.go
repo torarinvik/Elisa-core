@@ -516,3 +516,47 @@ func TestAnalysisDiskCacheConstantEnumMemberEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalysisDiskCacheRebaselinesAfterCostlyReplay(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "program.elisa")
+	env := map[string]string{"ELISAC_BUILD_CACHE_DIR": filepath.Join(dir, "cache"), "ELISACORE_ANALYSIS_CACHE": "1", "ELISACORE_ANALYSIS_CACHE_DEBUG": "1", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": "", "ELISACORE_ANALYSIS_REBASELINE_MS": "0"}
+	base := "def helper(x: i64) -> i64:\n    return x + 1\n\ndef main() -> i64:\n    return helper(6)\n"
+	args := []string{"-emit", "llvm", "-o", filepath.Join(dir, "cached.ll"), source}
+	if err := os.WriteFile(source, []byte(base), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runDiskCLIChild(t, env, args...)
+	edited := strings.Replace(base, "x + 1", "x + 2", 1)
+	added := strings.Replace(edited, "return helper(6)", "return extra(helper(6))", 1) + "\ndef extra(x: i64) -> i64:\n    return x + 4\n"
+	cumulative := strings.Replace(strings.Replace(added, "x + 2", "x + 3", 1), "x + 4", "x + 5", 1)
+	for _, text := range []string{edited, added, cumulative, edited, base} {
+		if err := os.WriteFile(source, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		output := runDiskCLIChild(t, env, args...)
+		if strings.Contains(output, "fallback") || strings.Contains(output, "cold analysis") {
+			t.Fatalf("did not replay: %s", output)
+		}
+		// Each replay republishes, so every step replays only its own edit.
+		if !strings.Contains(output, "rebaseline") || !strings.Contains(output, "[analysis-disk] store") {
+			t.Fatalf("replay did not republish the baseline: %s", output)
+		}
+		cold := map[string]string{"ELISACORE_ANALYSIS_CACHE": "0", "ELISACORE_BUILD_CACHE": "0", "ELISACORE_RETAINED_SERVER": ""}
+		coldPath := filepath.Join(dir, "cold.ll")
+		wantDiagnostics := runDiskCLIChild(t, cold, "-emit", "llvm", "-o", coldPath, source)
+		got, err := os.ReadFile(filepath.Join(dir, "cached.ll"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(coldPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = retainedGensym.ReplaceAll(got, []byte("__${1}_N"))
+		want = retainedGensym.ReplaceAll(want, []byte("__${1}_N"))
+		if !bytes.Equal(got, want) || diskDiagnosticTranscript(output) != diskDiagnosticTranscript(wantDiagnostics) {
+			t.Fatal("rebaselined replay differed from cold compilation")
+		}
+	}
+}

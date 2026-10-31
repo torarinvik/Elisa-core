@@ -192,6 +192,8 @@ var analysisDiskBackendStrategyEnv = map[string]bool{
 	"ELISACORE_IR_IMPORTS":                  true,
 	"ELISACORE_NATIVE_FRAGMENTS":            true,
 	"ELISACORE_PARTITION_SCHEDULE":          true,
+	// Only decides when a replayed state is republished as the baseline.
+	"ELISACORE_ANALYSIS_REBASELINE_MS": true,
 }
 
 // Probe the configured storage by actual I/O, not mode bits (which can lie
