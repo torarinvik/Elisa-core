@@ -29,10 +29,10 @@ type decoder struct {
 	// interface's first word (itab or type), so a pointer-shaped value is stored without
 	// reflect's per-assignment implements check.
 	ifaceWords map[[2]reflect.Type]unsafe.Pointer
-	// A small direct cache avoids hashing common concrete/interface pairs. Type
+	// A direct cache avoids hashing common concrete/interface pairs. Type
 	// IDs are validated against this decoder's fixed registry before lookup.
 	// Collisions fall back to ifaceWords, retaining the same assignability check.
-	ifaceWordCache [8]cachedInterfaceWord
+	ifaceWordCache [64]cachedInterfaceWord
 }
 
 type cachedInterfaceWord struct {
