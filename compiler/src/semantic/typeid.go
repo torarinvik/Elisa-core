@@ -47,8 +47,9 @@ func TryCanonicalTypeID(t Type) (TypeID, bool) {
 }
 
 func canonicalTypeIDKey(t Type) (string, bool) {
-	var b bytes.Buffer
-	b.Grow(64)
+	// Most keys fit without allocating a buffer; String still copies the result.
+	var storage [128]byte
+	b := *bytes.NewBuffer(storage[:0])
 	active := typeIDActivePool.Get().(*typeIDActive)
 	defer func() {
 		// pop clears every used slot, including unsuccessful encoding. Do not
