@@ -291,6 +291,17 @@ func analysisSourceIdentity() (string, error) {
 	return compilerSourceStamp()
 }
 
+// smtSourceStamp is the digest of ./src/smt and its dependencies, embedded the
+// same way. Unsat proof records key on it, so analyzer changes keep them.
+var smtSourceStamp string
+
+func smtSourceIdentity() (string, error) {
+	if len(smtSourceStamp) == 64 {
+		return "smt-source:" + smtSourceStamp, nil
+	}
+	return compilerSourceStamp()
+}
+
 // Replays at least this long republish the updated state as the baseline
 // (ELISACORE_ANALYSIS_REBASELINE_MS overrides; 0 republishes after every replay).
 func analysisDiskRebaselineAfter() time.Duration {

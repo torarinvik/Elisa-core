@@ -241,15 +241,27 @@ ANALYSIS_MAIN_FILES = (
 def analysis_source_digest(root: Path, environment: dict[str, str] | None = None) -> str | None:
     """None when the tree lacks the analysis packages (not the full compiler); the
     build then embeds no stamp and the analysis cache keys on the executable."""
+    return _closure_digest(root, environment, "semantic", ANALYSIS_MAIN_FILES, b"stage0-analysis-source-v1")
+
+
+def smt_source_digest(root: Path, environment: dict[str, str] | None = None) -> str | None:
+    """Digest of the code that turns an SMT query into a verdict (./src/smt and its
+    dependencies). Unsat proof records key on it, so analyzer changes keep them."""
+    return _closure_digest(root, environment, "smt", (), b"stage0-smt-source-v1")
+
+
+def _closure_digest(
+    root: Path, environment: dict[str, str] | None, package: str, main_files: tuple[str, ...], tag: bytes
+) -> str | None:
     root = root.resolve()
     main_dir = (root / "src").resolve()
-    if not (main_dir / "semantic").is_dir() or any(not (main_dir / name).is_file() for name in ANALYSIS_MAIN_FILES):
+    if not (main_dir / package).is_dir() or any(not (main_dir / name).is_file() for name in main_files):
         return None
     if environment is None:
         environment = _validate_go_build_context(root)
     try:
         result = subprocess.run(
-            ["go", "list", "-deps", "-f", "{{.Dir}}", "./src/semantic"],
+            ["go", "list", "-deps", "-f", "{{.Dir}}", f"./src/{package}"],
             cwd=root, check=False, capture_output=True, text=True, timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -258,12 +270,12 @@ def analysis_source_digest(root: Path, environment: dict[str, str] | None = None
         raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {result.stderr.strip()}")
     directories = {Path(line).resolve() for line in result.stdout.splitlines() if line.strip()}
     digest = hashlib.sha256()
-    digest.update(b"stage0-analysis-source-v1\0")
+    digest.update(tag + b"\0")
     digest.update(environment.get("GOVERSION", "").encode("utf-8") + b"\0")
     count = 0
     for identity, path in _source_candidates(root, environment):
         parent = path.parent.resolve()
-        selected = parent in directories or (parent == main_dir and path.name in ANALYSIS_MAIN_FILES) or identity in INPUT_FILES
+        selected = parent in directories or (parent == main_dir and path.name in main_files) or identity in INPUT_FILES
         if not selected:
             continue
         count += 1
@@ -422,7 +434,13 @@ def build(root: Path, binary: Path) -> Path:
     with tempfile.TemporaryDirectory(prefix=f".{binary.name}.stage0-", dir=binary.parent) as staging_dir:
         staged_binary = Path(staging_dir) / binary.name
         analysis_stamp = analysis_source_digest(root, environment)
-        ldflags = ["-ldflags", f"-X main.analysisSourceStamp={analysis_stamp}"] if analysis_stamp else []
+        smt_stamp = smt_source_digest(root, environment)
+        stamps = []
+        if analysis_stamp:
+            stamps.append(f"-X main.analysisSourceStamp={analysis_stamp}")
+        if smt_stamp:
+            stamps.append(f"-X main.smtSourceStamp={smt_stamp}")
+        ldflags = ["-ldflags", " ".join(stamps)] if stamps else []
         command = ["go", "build", "-buildvcs=false", *ldflags, "-o", str(staged_binary), "./src"]
         try:
             result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True)

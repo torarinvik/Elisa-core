@@ -21,6 +21,7 @@ import (
 
 func init() {
 	semantic.SetSMTProofIdentityResolvers(analysisSourceIdentity, toolchainNativeContentStamp)
+	semantic.SetSMTProofSolverIdentityResolver(smtSourceIdentity)
 }
 
 func main() {
