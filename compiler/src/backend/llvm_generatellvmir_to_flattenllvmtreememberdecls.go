@@ -462,9 +462,16 @@ func (g *llvmGenerator) dispose() {
 // unbounded LLVM allocations behind. Each context is private to this generator.
 func (g *llvmGenerator) disposeInBackground(scope *llvmDisposalScope) {
 	module, context := g.module, g.context
+	// LLVM may retain names until its context is destroyed. Transfer the pool
+	// reference to the cleanup instead of releasing it before module teardown.
+	retainCStringLifetime := g.transientCStringLifetime
+	g.transientCStringLifetime = false
 	g.module, g.context = nil, nil
 	g.dispose()
 	if module == nil && context == nil {
+		if retainCStringLifetime {
+			endModuleCStringLifetime()
+		}
 		return
 	}
 	scope.schedule(func() {
@@ -473,6 +480,9 @@ func (g *llvmGenerator) disposeInBackground(scope *llvmDisposalScope) {
 		}
 		if context != nil {
 			C.LLVMContextDispose(context)
+		}
+		if retainCStringLifetime {
+			endModuleCStringLifetime()
 		}
 	})
 }
