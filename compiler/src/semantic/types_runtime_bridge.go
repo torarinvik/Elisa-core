@@ -78,55 +78,56 @@ func stringViewRuntimeType(t Type) (*StructType, bool) {
 	return st, true
 }
 
+// Dispatch once on the first operand; only compatible carrier kinds need a second check.
 func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
-	if da, ok := a.(*DArrayType); ok {
-		if dynArray, ok := dynArrayRuntimeInstance(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
+	switch x := a.(type) {
+	case *DArrayType:
+		if y, ok := dynArrayRuntimeInstance(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: x, DynArray: y}, true
 		}
-	}
-	if dav, ok := a.(*ViewType); ok {
-		if dynArrayView, ok := dynArrayViewRuntimeType(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
+	case *ViewType:
+		if y, ok := dynArrayViewRuntimeType(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: x, DynArrayView: y}, true
 		}
-	}
-	if da, ok := b.(*DArrayType); ok {
-		if dynArray, ok := dynArrayRuntimeInstance(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
+	case *CStrType:
+		if y, ok := u8RuntimeRef(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeCStrU8Ref, CStr: x, U8Ref: y}, true
 		}
-	}
-	if dav, ok := b.(*ViewType); ok {
-		if dynArrayView, ok := dynArrayViewRuntimeType(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
+	case *DictType:
+		if y, ok := dynDictRuntimeInstance(b); ok && dictSupportsRuntimeBackedOps(x) {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: x, DynDict: y}, true
 		}
-	}
-	if cstr, ok := a.(*CStrType); ok {
-		if u8Ref, ok := u8RuntimeRef(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeCStrU8Ref, CStr: cstr, U8Ref: u8Ref}, true
+	case *SViewType:
+		if y, ok := stringViewRuntimeType(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeSViewStringView, SView: x, StringView: y}, true
 		}
-	}
-	if cstr, ok := b.(*CStrType); ok {
-		if u8Ref, ok := u8RuntimeRef(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeCStrU8Ref, CStr: cstr, U8Ref: u8Ref}, true
+	case *GenericInstanceType:
+		if y, ok := b.(*DArrayType); ok {
+			if dyn, ok := dynArrayRuntimeInstance(x); ok {
+				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: y, DynArray: dyn}, true
+			}
 		}
-	}
-	if dict, ok := a.(*DictType); ok {
-		if dynDict, ok := dynDictRuntimeInstance(b); ok && dictSupportsRuntimeBackedOps(dict) {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: dict, DynDict: dynDict}, true
+		if y, ok := b.(*DictType); ok {
+			if dyn, ok := dynDictRuntimeInstance(x); ok && dictSupportsRuntimeBackedOps(y) {
+				return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: y, DynDict: dyn}, true
+			}
 		}
-	}
-	if dict, ok := b.(*DictType); ok {
-		if dynDict, ok := dynDictRuntimeInstance(a); ok && dictSupportsRuntimeBackedOps(dict) {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: dict, DynDict: dynDict}, true
+	case *StructType:
+		if y, ok := b.(*ViewType); ok {
+			if dyn, ok := dynArrayViewRuntimeType(x); ok {
+				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: y, DynArrayView: dyn}, true
+			}
 		}
-	}
-	if sview, ok := a.(*SViewType); ok {
-		if stringView, ok := stringViewRuntimeType(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeSViewStringView, SView: sview, StringView: stringView}, true
+		if y, ok := b.(*SViewType); ok {
+			if str, ok := stringViewRuntimeType(x); ok {
+				return runtimeBridgeMatch{Kind: runtimeBridgeSViewStringView, SView: y, StringView: str}, true
+			}
 		}
-	}
-	if sview, ok := b.(*SViewType); ok {
-		if stringView, ok := stringViewRuntimeType(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeSViewStringView, SView: sview, StringView: stringView}, true
+	case *RefType:
+		if y, ok := b.(*CStrType); ok {
+			if ref, ok := u8RuntimeRef(x); ok {
+				return runtimeBridgeMatch{Kind: runtimeBridgeCStrU8Ref, CStr: y, U8Ref: ref}, true
+			}
 		}
 	}
 	return runtimeBridgeMatch{}, false
