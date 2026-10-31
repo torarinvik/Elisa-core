@@ -2752,6 +2752,23 @@ func retainedWalkDecls(file *ast.File) []ast.Decl {
 			if v.Type().Elem().Kind() == reflect.Uint8 {
 				return
 			}
+			// Function declarations terminate this traversal. Handle the common
+			// declaration-slice case directly while retaining the reflective walk
+			// for other declarations and every other slice shape.
+			if v.Type() == reflect.TypeFor[[]ast.Decl]() {
+				for i := 0; i < v.Len(); i++ {
+					item := v.Index(i)
+					if !item.IsNil() {
+						ptr := item.Elem()
+						if ptr.Type() == reflect.TypeFor[*ast.FuncDecl]() && !ptr.IsNil() && ptr.CanInterface() {
+							out = append(out, ptr.Interface().(*ast.FuncDecl))
+							continue
+						}
+					}
+					visit(item)
+				}
+				return
+			}
 			for i := 0; i < v.Len(); i++ {
 				visit(v.Index(i))
 			}
