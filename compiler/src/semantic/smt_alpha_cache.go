@@ -248,9 +248,9 @@ func (c *smtProofCache) alphaKey(query string) (string, bool) {
 	}
 	hash := sha256.New()
 	// Small obligations need only a small buffer; large ones retain bounded scratch.
-	out := bufio.NewWriterSize(hash, min(4096, max(256, len(query)+len(c.identity)+32)))
+	out := bufio.NewWriterSize(hash, min(4096, max(256, len(query)+len(c.proofID())+32)))
 	// Preserve the exact identity and domain separation used by c.key.
-	_, _ = io.WriteString(out, c.identity)
+	_, _ = io.WriteString(out, c.proofID())
 	_ = out.WriteByte(0)
 	_, _ = out.WriteString("alpha-declared-v1\x00")
 	if !smtAlphaWriteQuery(query, out) || out.Flush() != nil {

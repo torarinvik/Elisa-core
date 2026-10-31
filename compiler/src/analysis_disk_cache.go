@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,7 +115,7 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 	}
 	h := sha256.New()
 	testRunnerCacheWriteString(h, "semantic-disk-state-v1")
-	stamp, err := compilerSourceStamp()
+	stamp, err := analysisSourceIdentity()
 	if err != nil {
 		return analysisDiskArtifact{}, false
 	}
@@ -191,6 +192,8 @@ var analysisDiskBackendStrategyEnv = map[string]bool{
 	"ELISACORE_IR_IMPORTS":                  true,
 	"ELISACORE_NATIVE_FRAGMENTS":            true,
 	"ELISACORE_PARTITION_SCHEDULE":          true,
+	// Only decides when a replayed state is republished as the baseline.
+	"ELISACORE_ANALYSIS_REBASELINE_MS": true,
 }
 
 // Probe the configured storage by actual I/O, not mode bits (which can lie
@@ -273,6 +276,43 @@ func (a analysisDiskArtifact) publish(data []byte) error {
 	return os.Rename(f.Name(), a.path)
 }
 
+// analysisSourceStamp is the digest of the Go inputs that can change analysis
+// results or the saved state's encoding: the packages semantic depends on, the
+// main-package files that build, restore and replay that state, and the module
+// metadata. scripts/stage0_provenance.py computes it and embeds it with -X, so a
+// Stage0 change outside those inputs (backend, runtime, CLI) keeps the analysis
+// cache. A build without it falls back to the whole executable's digest.
+var analysisSourceStamp string
+
+func analysisSourceIdentity() (string, error) {
+	if len(analysisSourceStamp) == 64 {
+		return "analysis-source:" + analysisSourceStamp, nil
+	}
+	return compilerSourceStamp()
+}
+
+// smtSourceStamp is the digest of ./src/smt and its dependencies, embedded the
+// same way. Unsat proof records key on it, so analyzer changes keep them.
+var smtSourceStamp string
+
+func smtSourceIdentity() (string, error) {
+	if len(smtSourceStamp) == 64 {
+		return "smt-source:" + smtSourceStamp, nil
+	}
+	return compilerSourceStamp()
+}
+
+// Replays at least this long republish the updated state as the baseline
+// (ELISACORE_ANALYSIS_REBASELINE_MS overrides; 0 republishes after every replay).
+func analysisDiskRebaselineAfter() time.Duration {
+	if text := os.Getenv("ELISACORE_ANALYSIS_REBASELINE_MS"); text != "" {
+		if ms, err := strconv.Atoi(text); err == nil && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 5 * time.Second
+}
+
 func debugAnalysisDisk(stderr io.Writer, format string, args ...any) {
 	if os.Getenv("ELISACORE_ANALYSIS_CACHE_DEBUG") == "1" {
 		fmt.Fprintf(stderr, "[analysis-disk] "+format+"\n", args...)
@@ -290,6 +330,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 	checkpointTried := false
 	unchanged := false
 	replayed := false
+	replayElapsed := time.Duration(0)
 	started := time.Now()
 	if pending == nil || pending.artifact.key != artifact.key {
 		pending.join()
@@ -336,6 +377,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 						// the entire graph, and reuses the same identity domain
 						// on repeated edits/reverts in fresh processes.
 						replayed = true
+						replayElapsed = time.Since(updateStart)
 						debugAnalysisDisk(stderr, "update changed=%d in=%v fast=%v%s", state.LastStats.Changed, time.Since(updateStart).Round(time.Millisecond), state.LastStats.FastPrepared, retainedFastNote(state.LastStats.FastDeclined))
 						debugAnalysisDisk(stderr, "update phases pairing=%v scratch=%v compare=%v bodies=%v post=%v", state.LastStats.Pairing.Round(time.Millisecond), state.LastStats.Scratch.Round(time.Millisecond), state.LastStats.Compare.Round(time.Millisecond), state.LastStats.Bodies.Round(time.Millisecond), state.LastStats.Post.Round(time.Millisecond))
 					}
@@ -379,10 +421,18 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 		}
 		debugAnalysisDisk(stderr, "cold analysis in=%v", time.Since(coldStart).Round(time.Millisecond))
 	}
-	if replayed {
+	// A baseline far behind the source makes every later process replay every edit
+	// since it was written. Once a replay costs more than rewriting the state, the
+	// updated state (the same graph the retained server keeps across edits) becomes
+	// the new baseline, so the next edit replays only itself.
+	rebaseline := replayed && replayElapsed >= analysisDiskRebaselineAfter()
+	if replayed && !rebaseline {
 		debugAnalysisDisk(stderr, "replay baseline; checkpoint unchanged")
 	}
-	if state != nil && !unchanged && !replayed {
+	if rebaseline {
+		debugAnalysisDisk(stderr, "replay took %v; rebaseline", replayElapsed.Round(time.Millisecond))
+	}
+	if state != nil && !unchanged && (!replayed || rebaseline) {
 		saveStart := time.Now()
 		data, err := state.MarshalState()
 		if err == nil {

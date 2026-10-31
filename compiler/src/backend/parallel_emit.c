@@ -169,7 +169,7 @@ static long long part_function_owners(LLVMModuleRef m, int jobs, long long **own
 	return total;
 }
 
-static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t count, int part, long long import_weight, LLVMModuleRef source) {
+static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t count, int part, long long import_weight, LLVMModuleRef source, const unsigned char *imports) {
 	long long ordinal = 0;
 	LLVMValueRef original = source ? LLVMGetFirstGlobal(source) : NULL;
 	for (LLVMValueRef g = LLVMGetFirstGlobal(m); g; g = LLVMGetNextGlobal(g), ordinal++) {
@@ -195,7 +195,7 @@ static int part_restrict_module(LLVMModuleRef m, const long long *owners, size_t
 		if (owner >= 0) {
 			part_externalize(f, ordinal);
 			if (owner != part) {
-				if (import_weight > 0 && part_function_weight(f) <= import_weight) {
+				if ((imports != NULL && imports[idx] && !LLVMIsDeclaration(f)) || (import_weight > 0 && part_function_weight(f) <= import_weight)) {
 					LLVMSetLinkage(f, LLVMAvailableExternallyLinkage);
 				} else {
 					part_strip_body(f);
@@ -271,7 +271,7 @@ static LLVMModuleRef part_clone_with_owners(
 		? elisacoreCloneSelectedDefinitionsPrechecked(m, owners, count, part, unit_namespace)
 		: elisacoreCloneSelectedDefinitions(m, owners, count, part, unit_namespace);
 	if (clone == NULL) return NULL;
-	int ok = part_restrict_module(clone, owners, count, part, 0, m);
+	int ok = part_restrict_module(clone, owners, count, part, 0, m, NULL);
 	if (ok) elisacorePruneObjectDeclarations(clone);
 	char *message = NULL;
 	if (!ok || LLVMVerifyModule(clone, LLVMReturnStatusAction, &message)) {
@@ -296,7 +296,7 @@ LLVMModuleRef elisacoreCloneObjectPartition(LLVMModuleRef m, int jobs, int part,
 
 extern LLVMModuleRef elisacoreLoadSelectedDefinitions(LLVMContextRef context,
     const char *data, size_t size, const long long *owners, size_t count, int part,
-    const char *unit_namespace, char **error_out);
+    const char *unit_namespace, const unsigned char *imports, char **error_out);
 
 // Partition `part` of the module serialized as `data`, loaded into `context`
 // with the same restriction, pruning and verification as
@@ -304,11 +304,19 @@ extern LLVMModuleRef elisacoreLoadSelectedDefinitions(LLVMContextRef context,
 LLVMModuleRef elisacoreLoadObjectPartition(LLVMContextRef context, const char *data, size_t size,
 	int jobs, int part, const char *unit_namespace, const long long *owners, size_t count,
 	char **error_out) {
+	return elisacoreLoadObjectPartitionImporting(context, data, size, jobs, part, unit_namespace, owners, count, NULL, error_out);
+}
+
+// elisacoreLoadObjectPartition that also keeps the foreign definitions marked in
+// `imports` (one row of elisacoreObjectImportSets, or NULL) as available_externally.
+LLVMModuleRef elisacoreLoadObjectPartitionImporting(LLVMContextRef context, const char *data, size_t size,
+	int jobs, int part, const char *unit_namespace, const long long *owners, size_t count,
+	const unsigned char *imports, char **error_out) {
 	*error_out = NULL;
 	if (jobs < 1 || part < 0 || part >= jobs || owners == NULL) return NULL;
-	LLVMModuleRef m = elisacoreLoadSelectedDefinitions(context, data, size, owners, count, part, unit_namespace, error_out);
+	LLVMModuleRef m = elisacoreLoadSelectedDefinitions(context, data, size, owners, count, part, unit_namespace, imports, error_out);
 	if (m == NULL) return NULL;
-	int ok = part_restrict_module(m, owners, count, part, 0, NULL);
+	int ok = part_restrict_module(m, owners, count, part, 0, NULL, imports);
 	if (ok) elisacorePruneObjectDeclarations(m);
 	char *message = NULL;
 	if (!ok || LLVMVerifyModule(m, LLVMReturnStatusAction, &message)) {
@@ -416,7 +424,7 @@ static int part_worker(const char *bitcode_path, int jobs, int part, const char 
 	long long *owners = NULL;
 	size_t count = 0;
 	part_function_owners(m, jobs, &owners, &count);
-	int ok = part_restrict_module(m, owners, count, part, import_weight, NULL);
+	int ok = part_restrict_module(m, owners, count, part, import_weight, NULL, NULL);
 	free(owners);
 	if (!ok) {
 		return part_fail(error_out, "partition function list does not match the source module");

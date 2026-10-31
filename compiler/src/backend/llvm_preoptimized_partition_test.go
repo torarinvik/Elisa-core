@@ -17,6 +17,10 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 		if os.Getenv("ELISA_TEST_PREOPT_IR") == "1" {
 			t.Setenv("ELISACORE_PARALLEL_IR", "1")
 		}
+		importing := os.Getenv("ELISA_TEST_PREOPT_IMPORT") == "1"
+		if importing {
+			t.Setenv("ELISACORE_PARALLEL_OPT_IMPORT", "100")
+		}
 		source := incrementalObjectFixture(32)
 		revision := os.Getenv("ELISA_TEST_PREOPT_REVISION")
 		want := 54
@@ -48,7 +52,10 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 			t.Fatalf("partitioned IR unexpectedly declined: %+v", stats)
 		}
 		expected := os.Getenv("ELISA_TEST_PREOPT_EMIT")
-		if expected == "4" && stats.PartitionsEmitted != 4 || expected == "1" && stats.PartitionsEmitted != 1 || expected == "0" && stats.PartitionsEmitted != 0 {
+		// An imported body also lives in its importers, so a body edit may
+		// re-optimize them too; a repeated revision still reuses everything.
+		oneEdit := stats.PartitionsEmitted == 1 || importing && stats.PartitionsEmitted >= 1
+		if expected == "4" && stats.PartitionsEmitted != 4 || expected == "1" && !oneEdit || expected == "0" && stats.PartitionsEmitted != 0 {
 			t.Fatalf("expected %s newly optimized partitions: %+v", expected, stats)
 		}
 		if stats.OptimizedModulesReused != 0 || stats.SerialFallbacks != 0 || stats.PartitionsEmitted+stats.DiskPartitionsReused != 4 {
@@ -79,6 +86,13 @@ func TestPreoptimizedPartitionsPersistAcrossProcesses(t *testing.T) {
 	}
 }
 
+// Small foreign callees imported as available_externally copies keep native
+// results identical to a serial build and stay cache-exact across processes.
+func TestPreoptimizedPartitionsWithImportsAcrossProcesses(t *testing.T) {
+	t.Setenv("ELISA_TEST_PREOPT_IMPORT", "1")
+	TestPreoptimizedPartitionsPersistAcrossProcesses(t)
+}
+
 func TestOptimizedPartitionedIRAcrossProcesses(t *testing.T) {
 	t.Setenv("ELISA_TEST_PREOPT_IR", "1")
 	TestPreoptimizedPartitionsPersistAcrossProcesses(t)
@@ -98,7 +112,7 @@ func TestOptimizedPartitionedIRAdmission(t *testing.T) {
 		{"default-O3", "", "1", "0", OptimizationLevel3, true, false},
 		{"explicit-O3", "1", "1", "0", OptimizationLevel3, true, true},
 		{"no-optimizer-workers", "1", "0", "0", OptimizationLevel3, true, false},
-		{"imports-use-module-split", "1", "1", "10", OptimizationLevel3, true, false},
+		{"imports-keep-partitioned-ir", "1", "1", "10", OptimizationLevel3, true, true},
 		{"missing-worker-entry", "1", "1", "0", OptimizationLevel3, false, false},
 		{"disabled", "0", "1", "0", OptimizationLevel0, true, false},
 		{"ordinary-O0", "", "0", "0", OptimizationLevel0, false, true},

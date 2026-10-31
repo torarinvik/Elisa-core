@@ -24,12 +24,17 @@ import (
 // locations move; declined verdicts and their counterexamples remain exact-text.
 const smtProofCacheSchema = "elisa-exact-smt-proof-v1"
 
-type smtProofCache struct{ directory, identity string }
+// identity binds decline records, whose counterexample text the analyzer formats.
+// proofIdentity binds unsat records, which depend only on the exact query text and
+// on how the smt package runs the solver; an embedding compiler may key it on that
+// package alone so analyzer changes keep the proofs.
+type smtProofCache struct{ directory, identity, proofIdentity string }
 type smtProofCacheRecord struct{ Schema, Key, Verdict, Checksum string }
 
 type smtProofIdentityResolvers struct {
 	compilerArtifact  func() (string, error)
 	toolchainArtifact func(string) (string, error)
+	solverArtifact    func() (string, error)
 }
 
 var (
@@ -42,10 +47,17 @@ var (
 // cache. Standalone semantic users keep the local hashing fallback.
 func SetSMTProofIdentityResolvers(compilerArtifact func() (string, error), toolchainArtifact func(string) (string, error)) {
 	smtProofIdentityResolverMu.Lock()
-	smtProofIdentityResolver = smtProofIdentityResolvers{
-		compilerArtifact:  compilerArtifact,
-		toolchainArtifact: toolchainArtifact,
-	}
+	smtProofIdentityResolver.compilerArtifact = compilerArtifact
+	smtProofIdentityResolver.toolchainArtifact = toolchainArtifact
+	smtProofIdentityResolverMu.Unlock()
+}
+
+// SetSMTProofSolverIdentityResolver names the code that turns a query into a
+// solver verdict (the smt package and its dependencies). Unsat records key on it
+// instead of the whole compiler; without it they key on the compiler artifact.
+func SetSMTProofSolverIdentityResolver(solverArtifact func() (string, error)) {
+	smtProofIdentityResolverMu.Lock()
+	smtProofIdentityResolver.solverArtifact = solverArtifact
 	smtProofIdentityResolverMu.Unlock()
 }
 
@@ -151,14 +163,36 @@ func newSMTProofCache(directory, binary string) *smtProofCache {
 	if command.Run() != nil {
 		return nil
 	}
-	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, compilerHash, solverHash, version.String(), runtime.GOOS, runtime.GOARCH)
-
-	return &smtProofCache{directory: directory, identity: fmt.Sprintf("%s\x00rlimit=%d\x00timeout=120000\x00mbqi=true\x00models=true", identity, smtResourceLimit())}
+	proofHash := compilerHash
+	if resolver := currentSMTProofIdentityResolvers().solverArtifact; resolver != nil {
+		if stamp, err := resolver(); err == nil && stamp != "" {
+			proofHash = stamp
+		}
+	}
+	settings := fmt.Sprintf("rlimit=%d\x00timeout=120000\x00mbqi=true\x00models=true", smtResourceLimit())
+	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, compilerHash, solverHash, version.String(), runtime.GOOS, runtime.GOARCH, settings)
+	proofIdentity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", smtProofCacheSchema, proofHash, solverHash, version.String(), runtime.GOOS, runtime.GOARCH, settings)
+	return &smtProofCache{directory: directory, identity: identity, proofIdentity: proofIdentity}
 }
 
 func (c *smtProofCache) key(query string) string {
+	return smtProofCacheKey(c.proofID(), query)
+}
+
+func (c *smtProofCache) proofID() string {
+	if c.proofIdentity != "" {
+		return c.proofIdentity
+	}
+	return c.identity
+}
+
+func (c *smtProofCache) declineKey(query string) string {
+	return smtProofCacheKey(c.identity, query)
+}
+
+func smtProofCacheKey(identity, query string) string {
 	hash := sha256.New()
-	_, _ = hash.Write([]byte(c.identity))
+	_, _ = hash.Write([]byte(identity))
 	_, _ = hash.Write([]byte{0})
 	if len(query) <= 4096 {
 		_, _ = hash.Write([]byte(query))
@@ -279,7 +313,7 @@ func (c *smtProofCache) declined(query string) (string, bool) {
 	if c == nil || !smtDeclineCacheEnabled {
 		return "", false
 	}
-	key := c.key(query)
+	key := c.declineKey(query)
 	f, err := os.Open(c.declinePath(key))
 	if err != nil {
 		return "", false
@@ -319,7 +353,7 @@ func (c *smtProofCache) publishDeclineVerdict(query, verdict, counterexample str
 	if c == nil || !smtDeclineCacheEnabled {
 		return
 	}
-	key := c.key(query)
+	key := c.declineKey(query)
 	path := c.declinePath(key)
 	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
 		return
