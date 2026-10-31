@@ -2922,7 +2922,14 @@ func retainedSpans(decls []ast.Decl, src []byte) []string {
 		if k := bytes.Index(span, []byte("\n#line ")); k >= 0 {
 			span = span[:k+1]
 		}
-		out[i] = retainedWithoutLineDirectives(span)
+		// The first directive after a newline was already trimmed above, so
+		// only a directive at the beginning of this span can remain. Avoid a
+		// second scan of ordinary declaration text.
+		if bytes.HasPrefix(span, []byte("#line ")) {
+			out[i] = retainedWithoutLineDirectives(span)
+		} else {
+			out[i] = string(span)
+		}
 	}
 	return out
 }
