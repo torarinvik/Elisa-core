@@ -4,7 +4,9 @@ package backend
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 
@@ -12,6 +14,45 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 )
+
+func TestBuildSymbolsByNodeMatchesSortedSelection(t *testing.T) {
+	random := rand.New(rand.NewSource(1889))
+	for trial := 0; trial < 500; trial++ {
+		nodes := make([]*ast.FuncDecl, 1+random.Intn(25))
+		for i := range nodes {
+			nodes[i] = &ast.FuncDecl{Name: fmt.Sprint(i)}
+		}
+		symbols := map[string]*semantic.Symbol{"": nil}
+		for i := 0; i < 100; i++ {
+			name := fmt.Sprintf("%03d.%03d", random.Intn(150), i)
+			node := nodes[random.Intn(len(nodes))]
+			symbols[name] = &semantic.Symbol{Name: "name-independent-of-map-key", Node: node}
+			if random.Intn(3) == 0 {
+				symbols["alias."+name] = symbols[name]
+			}
+		}
+		keys := make([]string, 0, len(symbols))
+		for name := range symbols {
+			keys = append(keys, name)
+		}
+		sort.Strings(keys)
+		want := make(map[ast.Node]*semantic.Symbol)
+		for _, name := range keys {
+			if sym := symbols[name]; sym != nil && sym.Node != nil {
+				want[sym.Node] = sym
+			}
+		}
+		got := buildSymbolsByNode(symbols)
+		if len(got) != len(want) {
+			t.Fatalf("trial %d changed index size", trial)
+		}
+		for node, expected := range want {
+			if got[node] != expected {
+				t.Fatalf("trial %d changed sorted winner", trial)
+			}
+		}
+	}
+}
 
 func TestSharedCodegenLookupsKeepSynthesizedProofsPrivate(t *testing.T) {
 	pos := lexer.Pos{File: "proof.elisa", Line: 1, Col: 1, Offset: 0, EndLine: 1, EndCol: 4, EndOffset: 3}
@@ -96,5 +137,26 @@ func TestExternCPartsAvoidsUnsplitPlanAllocations(t *testing.T) {
 	fn.CParamPlan = want
 	if got := externCParts(fn); !reflect.DeepEqual(got, want) {
 		t.Fatal("explicit bounds plan was ignored")
+	}
+}
+
+func BenchmarkSharedCodegenSymbolIndex(b *testing.B) {
+	symbols := make(map[string]*semantic.Symbol, 16000)
+	for i := 0; i < 16000; i++ {
+		name := fmt.Sprintf("Function.%05d", i)
+		node := &ast.FuncDecl{Name: name}
+		symbols[name] = &semantic.Symbol{Name: name, Node: node}
+		if i%100 == 0 {
+			alias := "Alias." + name
+			symbols[alias] = &semantic.Symbol{Name: alias, Node: node}
+		}
+	}
+	result := &semantic.Result{GlobalScope: &semantic.Scope{Symbols: symbols}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if len(newSharedCodegenLookups(result).symbolsByNode) != 16000 {
+			b.Fatal("index changed")
+		}
 	}
 }
