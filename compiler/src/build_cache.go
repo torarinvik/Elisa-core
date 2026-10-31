@@ -156,6 +156,33 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 		testRunnerCacheWriteString(hash, "source-authority="+origin)
 	}
 
+	// The running compiler and the selected solver are independent native inputs.
+	// Hash them concurrently, while keeping every stamp and its original order in
+	// the key. Always join the worker before returning, including on error.
+	type solverStampResult struct {
+		selector string
+		selected string
+		stamp    string
+		err      error
+	}
+	var solverDone chan solverStampResult
+	if options.enableSMT {
+		solverDone = make(chan solverStampResult, 1)
+		go func() {
+			result := solverStampResult{selector: smt.ResolveBinary("")}
+			if selected, err := exec.LookPath(result.selector); err == nil {
+				result.selected = selected
+				result.stamp, result.err = toolchainNativeContentStamp(selected)
+			}
+			solverDone <- result
+		}()
+		defer func() {
+			if solverDone != nil {
+				<-solverDone
+			}
+		}()
+	}
+
 	stamp, err := compilerSourceStamp()
 	if err != nil {
 		return buildCacheArtifact{}, false
@@ -179,16 +206,16 @@ func buildCacheObjectArtifactForProgram(options cliOptions, program *loadedProgr
 	// SMT can change proof diagnostics and strict-proof acceptance even when
 	// source and command spelling are unchanged. Never execute a cached query
 	// closure under an unstamped replacement solver.
-	if options.enableSMT {
-		solver := smt.ResolveBinary("")
-		testRunnerCacheWriteString(hash, "smt-selector="+solver)
-		if selected, err := exec.LookPath(solver); err == nil {
-			stamp, err := toolchainNativeContentStamp(selected)
-			if err != nil {
-				return buildCacheArtifact{}, false
-			}
-			testRunnerCacheWriteString(hash, "smt-executable="+selected)
-			testRunnerCacheWriteString(hash, "smt-content="+stamp)
+	if solverDone != nil {
+		result := <-solverDone
+		solverDone = nil
+		if result.err != nil {
+			return buildCacheArtifact{}, false
+		}
+		testRunnerCacheWriteString(hash, "smt-selector="+result.selector)
+		if result.selected != "" {
+			testRunnerCacheWriteString(hash, "smt-executable="+result.selected)
+			testRunnerCacheWriteString(hash, "smt-content="+result.stamp)
 		} else {
 			testRunnerCacheWriteString(hash, "smt-executable=unavailable")
 		}
