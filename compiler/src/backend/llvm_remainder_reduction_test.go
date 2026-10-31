@@ -129,3 +129,21 @@ func TestRemainderQuotientBranchConditions(t *testing.T) {
 		})
 	}
 }
+
+func TestRemainderQuotientBranchLeavesDarwinComparison(t *testing.T) {
+	ir := strings.Replace(remainderReductionIR, "aarch64-unknown-linux-gnu", "arm64-apple-darwin", 1)
+	g, err := parseLLVMIRForSplitHalfTest(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if got := groupRemainderReductions(g.module); got != 1 {
+		t.Fatalf("grouped %d reductions, want 1", got)
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if out := g.printModule(); !strings.Contains(out, "icmp ult i64 %n, 10") || strings.Contains(out, "icmp eq i64 %q, 0") {
+		t.Fatalf("Darwin comparison changed:\n%s", out)
+	}
+}

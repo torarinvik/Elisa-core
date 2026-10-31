@@ -48,7 +48,7 @@ static bool compareExistingQuotient(ICmpInst *Cmp, Value *Numerator,
   return false;
 }
 
-static bool groupRemainder(BinaryOperator *Sum) {
+static bool groupRemainder(BinaryOperator *Sum, bool UseQuotientBranch) {
   if (!wrappingAdd(Sum))
     return false;
   for (unsigned Side = 0; Side != 2; ++Side) {
@@ -83,9 +83,10 @@ static bool groupRemainder(BinaryOperator *Sum) {
         Sum->setOperand(0, Remainder);
         Sum->setOperand(1, Accumulator);
         Inner->eraseFromParent();
-        for (Instruction &I : *Sum->getParent())
-          if (auto *Cmp = dyn_cast<ICmpInst>(&I))
-            compareExistingQuotient(Cmp, Numerator, Divisor);
+        if (UseQuotientBranch)
+          for (Instruction &I : *Sum->getParent())
+            if (auto *Cmp = dyn_cast<ICmpInst>(&I))
+              compareExistingQuotient(Cmp, Numerator, Divisor);
         return true;
       }
     }
@@ -97,7 +98,8 @@ extern "C" unsigned elisacoreGroupRemainderReductions(LLVMModuleRef Ref) {
   if (!Ref)
     return 0;
   Module *M = unwrap(Ref);
-  if (!Triple(M->getTargetTriple()).isAArch64())
+  Triple Target(M->getTargetTriple());
+  if (!Target.isAArch64())
     return 0;
   unsigned Changed = 0;
   for (Function &F : *M) {
@@ -106,7 +108,7 @@ extern "C" unsigned elisacoreGroupRemainderReductions(LLVMModuleRef Ref) {
     for (BasicBlock &B : F)
       for (Instruction &I : B)
         if (auto *Sum = dyn_cast<BinaryOperator>(&I))
-          Changed += groupRemainder(Sum);
+          Changed += groupRemainder(Sum, Target.isOSLinux());
   }
   return Changed;
 }
