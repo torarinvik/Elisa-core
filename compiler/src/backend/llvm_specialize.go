@@ -23,7 +23,11 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 		return nil, nil, fmt.Errorf("generic specialization requires a function declaration and type")
 	}
 	params := g.functionSpecializationParams(base)
-	orderedArgs := make([]semantic.Type, 0, len(params))
+	var argsBuffer [8]semantic.Type
+	orderedArgs := argsBuffer[:0]
+	if len(params) > len(argsBuffer) {
+		orderedArgs = make([]semantic.Type, 0, len(params))
+	}
 	for _, param := range params {
 		name := param.Name
 		bound, ok := typeBindings[name]

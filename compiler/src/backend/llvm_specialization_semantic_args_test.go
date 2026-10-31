@@ -111,3 +111,51 @@ func TestOrderedSemanticTypeArgsIgnoreEnclosingImplBindings(t *testing.T) {
 		t.Fatal("actual declaration semantic specialization was skipped")
 	}
 }
+
+func BenchmarkEnsureSpecializedFunctionWarm(b *testing.B) {
+	result := parseAndAnalyzeBackendBenchmarkSource(b, "warm_specialization.elisa", "def bounce[T](value: T) -> T:\n    return value\n")
+	symbol := result.GlobalScope.Symbols["bounce"]
+	if symbol == nil {
+		b.Fatal("missing generic function")
+	}
+	decl, ok := symbol.Node.(*ast.FuncDecl)
+	if !ok {
+		b.Fatal("missing declaration")
+	}
+	base, ok := symbol.Type.(*semantic.FuncType)
+	if !ok {
+		b.Fatal("missing function type")
+	}
+	g, err := newLLVMGenerator(result)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer g.dispose()
+	g.sharedLookups = newSharedCodegenLookups(result)
+	bindings := map[string]semantic.Type{"T": &semantic.BuiltinType{Name: "i64"}}
+	if _, _, err := g.ensureSpecializedFunction(decl, base, bindings); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, _, err := g.ensureSpecializedFunction(decl, base, bindings); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestSpecializedFunctionWithMoreThanEightBindings(t *testing.T) {
+	source := `def first[A, B, C, D, E, F, G, H, I](a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H, i: I) -> A:
+    return a
+
+def answer_impl(n: i64) -> i64:
+    return first(n, n, n, n, n, n, n, n, n)
+
+export fn answer(n: i64) -> i64 = answer_impl
+`
+	result := parseAndAnalyzeBackendTest(t, "nine_generic_bindings.elisa", source)
+	if _, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0); err != nil {
+		t.Fatalf("nine-parameter specialization failed: %v", err)
+	}
+}
