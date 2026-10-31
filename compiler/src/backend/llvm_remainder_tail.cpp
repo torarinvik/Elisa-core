@@ -19,7 +19,7 @@ static bool onlyUsers(Value *v, std::initializer_list<Value *> allowed) {
     for (Value *a : allowed)
       if (u == a)
         found = true;
-    if (!found)
+    if (!found && !(isa<ICmpInst>(u) && u->use_empty()))
       return false;
   }
   return true;
@@ -105,7 +105,12 @@ static bool matchAndRewrite(BasicBlock &h) {
   if (!sum || !onlyUsers(n, {q, rem, cmp}) || !onlyUsers(prod, {rem}) ||
       !onlyUsers(rem, {sum}))
     return false;
-  if (h.size() != 8 || q->getParent() != &h || prod->getParent() != &h)
+  unsigned deadComparisons = 0;
+  for (Instruction &i : h)
+    if (isa<ICmpInst>(i) && i.use_empty())
+      ++deadComparisons;
+  if (h.size() != 8 + deadComparisons || q->getParent() != &h ||
+      prod->getParent() != &h)
     return false;
   PHINode *lq = nullptr, *ls = nullptr;
   unsigned phis = 0;
