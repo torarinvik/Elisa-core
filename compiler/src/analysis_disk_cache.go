@@ -115,7 +115,7 @@ func analysisDiskArtifactForAuthority(program *loadedProgram, options semantic.A
 	}
 	h := sha256.New()
 	testRunnerCacheWriteString(h, "semantic-disk-state-v1")
-	stamp, err := compilerSourceStamp()
+	stamp, err := analysisSourceIdentity()
 	if err != nil {
 		return analysisDiskArtifact{}, false
 	}
@@ -274,6 +274,21 @@ func (a analysisDiskArtifact) publish(data []byte) error {
 		return closeErr
 	}
 	return os.Rename(f.Name(), a.path)
+}
+
+// analysisSourceStamp is the digest of the Go inputs that can change analysis
+// results or the saved state's encoding: the packages semantic depends on, the
+// main-package files that build, restore and replay that state, and the module
+// metadata. scripts/stage0_provenance.py computes it and embeds it with -X, so a
+// Stage0 change outside those inputs (backend, runtime, CLI) keeps the analysis
+// cache. A build without it falls back to the whole executable's digest.
+var analysisSourceStamp string
+
+func analysisSourceIdentity() (string, error) {
+	if len(analysisSourceStamp) == 64 {
+		return "analysis-source:" + analysisSourceStamp, nil
+	}
+	return compilerSourceStamp()
 }
 
 // Replays at least this long republish the updated state as the baseline

@@ -227,6 +227,55 @@ def source_digest(root: Path, environment: dict[str, str] | None = None) -> str:
     return digest.hexdigest()
 
 
+# Main-package files that build, restore or replay the semantic analysis state.
+# Together with the packages ./src/semantic depends on and the module metadata
+# they are every Go input that can change analysis results or the saved state.
+ANALYSIS_MAIN_FILES = (
+    "analysis_command_status.go", "analysis_disk_build.go", "analysis_disk_cache.go",
+    "analysis_disk_family.go", "analysis_disk_payload_other.go", "analysis_disk_payload_unix.go",
+    "analysis_disk_prepare.go", "retained_autoserver.go", "retained_server.go",
+    "main_main_to_aggregatestateplaceholders.go",
+)
+
+
+def analysis_source_digest(root: Path, environment: dict[str, str] | None = None) -> str | None:
+    """None when the tree lacks the analysis packages (not the full compiler); the
+    build then embeds no stamp and the analysis cache keys on the executable."""
+    root = root.resolve()
+    main_dir = (root / "src").resolve()
+    if not (main_dir / "semantic").is_dir() or any(not (main_dir / name).is_file() for name in ANALYSIS_MAIN_FILES):
+        return None
+    if environment is None:
+        environment = _validate_go_build_context(root)
+    try:
+        result = subprocess.run(
+            ["go", "list", "-deps", "-f", "{{.Dir}}", "./src/semantic"],
+            cwd=root, check=False, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {error}") from error
+    if result.returncode != 0:
+        raise RuntimeError(f"cannot enumerate Stage0 analysis inputs: {result.stderr.strip()}")
+    directories = {Path(line).resolve() for line in result.stdout.splitlines() if line.strip()}
+    digest = hashlib.sha256()
+    digest.update(b"stage0-analysis-source-v1\0")
+    digest.update(environment.get("GOVERSION", "").encode("utf-8") + b"\0")
+    count = 0
+    for identity, path in _source_candidates(root, environment):
+        parent = path.parent.resolve()
+        selected = parent in directories or (parent == main_dir and path.name in ANALYSIS_MAIN_FILES) or identity in INPUT_FILES
+        if not selected:
+            continue
+        count += 1
+        data = path.read_bytes() if path.is_file() else b""
+        for value in (identity.encode("utf-8"), hashlib.sha256(data).digest()):
+            digest.update(len(value).to_bytes(8, "big"))
+            digest.update(value)
+    if count == 0:
+        return None
+    return digest.hexdigest()
+
+
 def go_build_metadata(binary: Path) -> dict[str, object]:
     try:
         result = subprocess.run(
@@ -372,7 +421,9 @@ def build(root: Path, binary: Path) -> Path:
 
     with tempfile.TemporaryDirectory(prefix=f".{binary.name}.stage0-", dir=binary.parent) as staging_dir:
         staged_binary = Path(staging_dir) / binary.name
-        command = ["go", "build", "-buildvcs=false", "-o", str(staged_binary), "./src"]
+        analysis_stamp = analysis_source_digest(root, environment)
+        ldflags = ["-ldflags", f"-X main.analysisSourceStamp={analysis_stamp}"] if analysis_stamp else []
+        command = ["go", "build", "-buildvcs=false", *ldflags, "-o", str(staged_binary), "./src"]
         try:
             result = subprocess.run(command, cwd=root, check=False, capture_output=True, text=True)
         except OSError as error:
