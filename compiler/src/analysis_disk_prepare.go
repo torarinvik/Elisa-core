@@ -363,6 +363,23 @@ func analysisDiskCheckpointShadows(artifact analysisDiskArtifact, checkpoint *an
 	if _, err := os.Stat(artifact.path); err != nil {
 		return false
 	}
+	// A prior update of this exact source fell back. This marker changes only
+	// restore ordering; the checkpoint is still fully validated before use.
+	if _, err := os.Stat(checkpoint.artifact.path + ".replay-declined"); err == nil {
+		return false
+	}
 	done, total := checkpoint.build.Progress()
 	return total-done > analysisDiskBuildPreferredRemaining
+}
+
+// rememberAnalysisReplayDecline is best-effort: failure only causes another
+// baseline attempt, and the marker never authorizes a cached result.
+func rememberAnalysisReplayDecline(checkpoint *analysisDiskBuildCheckpoint) {
+	if checkpoint == nil {
+		return
+	}
+	f, err := os.OpenFile(checkpoint.artifact.path+".replay-declined", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err == nil {
+		_ = f.Close()
+	}
 }

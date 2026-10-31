@@ -332,6 +332,10 @@ func TestAnalysisDiskBootstrapInvalidCheckpointFallsBackToCompletedState(t *test
 				t.Fatal(err)
 			}
 
+			// A restore-order hint must not authorize a corrupt checkpoint.
+			if err := os.WriteFile(building.path+".replay-declined", nil, 0600); err != nil {
+				t.Fatal(err)
+			}
 			pending := startAnalysisDiskRestoration(program, options)
 			pending.join()
 			if !pending.buildTried || pending.build != nil || pending.buildErr == nil {
@@ -453,6 +457,12 @@ func TestAnalysisDiskDistantCheckpointIsKeptAsShadowed(t *testing.T) {
 	}
 	if got := analysisDiskResumeCheckpoint(pending.build, pending); got != pending.shadowed {
 		t.Fatal("a fallen-back baseline must resume the shadowed exact checkpoint")
+	}
+	rememberAnalysisReplayDecline(pending.shadowed)
+	next := startAnalysisDiskRestoration(program, options)
+	next.join()
+	if next.build == nil || next.shadowed != nil || next.loaded {
+		t.Fatalf("declined replay should prefer the validated checkpoint: build=%v shadowed=%v baseline=%v", next.build != nil, next.shadowed != nil, next.loaded)
 	}
 }
 

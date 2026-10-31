@@ -386,6 +386,9 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 				}
 				if err != nil {
 					debugAnalysisDisk(stderr, "fallback: %v", err)
+					if pending != nil {
+						rememberAnalysisReplayDecline(pending.shadowed)
+					}
 					state = nil
 					result = nil
 					// Update can consume its parse even on a late fallback.
@@ -451,6 +454,7 @@ func analyzeSemanticFromDisk(program *loadedProgram, file *ast.File, options sem
 			building := analysisBuildArtifact(artifact, program.source)
 			_ = os.Remove(building.path)
 			_ = os.Remove(building.path + ".slow")
+			_ = os.Remove(building.path + ".replay-declined")
 			if err := artifact.publishBaselineSource(program.source); err != nil {
 				debugAnalysisDisk(stderr, "baseline source not stored: %v", err)
 			}
