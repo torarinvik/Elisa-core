@@ -42,11 +42,32 @@ type buildCacheTranscript struct {
 
 const buildCacheRawStreams = "raw-streams-v1"
 
+// Cache entries are disposable. Reject links and special files, and use a
+// nonblocking open on supported Unix hosts so a replaced FIFO cannot hang a
+// fresh compiler process before its cache entry is rejected.
+func openBuildCacheRegularFile(path string) (*os.File, error) {
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() {
+		return nil, os.ErrInvalid
+	}
+	f, err := openToolchainStampFile(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	current, pathErr := os.Lstat(path)
+	if err != nil || pathErr != nil || !info.Mode().IsRegular() || !current.Mode().IsRegular() || !os.SameFile(before, info) || !os.SameFile(info, current) {
+		_ = f.Close()
+		return nil, os.ErrInvalid
+	}
+	return f, nil
+}
+
 func readBuildCacheStream(path string, length int) ([]byte, error) {
 	if length < 0 || length > buildCacheStreamLimit {
 		return nil, fmt.Errorf("invalid cached stream length")
 	}
-	f, err := os.Open(path)
+	f, err := openBuildCacheRegularFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +89,7 @@ func buildCacheStreamHash(data []byte) string {
 }
 func readBuildCacheTranscript(artifact buildCacheArtifact) (buildCacheTranscript, bool) {
 	var transcript buildCacheTranscript
-	f, err := os.Open(filepath.Join(artifact.dir, "transcript.json"))
+	f, err := openBuildCacheRegularFile(filepath.Join(artifact.dir, "transcript.json"))
 	if err != nil {
 		return transcript, false
 	}
@@ -95,7 +116,7 @@ func readBuildCacheTranscript(artifact buildCacheArtifact) (buildCacheTranscript
 }
 
 func buildCacheObjectHash(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := openBuildCacheRegularFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +138,7 @@ func buildCacheObjectMatches(artifact buildCacheArtifact, transcript buildCacheT
 // Validate the bytes while copying, then publish the output atomically. Neither
 // corrupt cache bytes nor their diagnostic transcript reach the caller on miss.
 func restoreBuildCacheObject(artifact buildCacheArtifact, output string, transcript buildCacheTranscript) error {
-	in, err := os.Open(artifact.object)
+	in, err := openBuildCacheRegularFile(artifact.object)
 	if err != nil {
 		return err
 	}
