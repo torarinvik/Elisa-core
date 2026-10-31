@@ -56,6 +56,13 @@ func TestGroupRemainderReductions(t *testing.T) {
 			g.dispose()
 			t.Fatalf("reduction grouping or multiply flags changed:\n%s", out)
 		}
+		if strings.Contains(ir, "udiv exact") {
+			if !strings.Contains(out, "icmp ult i64 %n,") {
+				t.Fatalf("exact quotient changed a defined branch:\n%s", out)
+			}
+		} else if !strings.Contains(out, "icmp eq i64 %q, 0") {
+			t.Fatalf("branch did not reuse its quotient:\n%s", out)
+		}
 		if groupRemainderReductions(g.module) != 0 {
 			g.dispose()
 			t.Fatal("grouping is not idempotent")
@@ -90,6 +97,34 @@ func TestGroupRemainderReductionsDeclinesOtherShapes(t *testing.T) {
 			}
 			if err := g.verify(); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRemainderQuotientBranchConditions(t *testing.T) {
+	for _, tc := range []struct {
+		name, ir, want string
+	}{
+		{"unsigned greater or equal", strings.Replace(remainderReductionIR, "icmp ult i64 %n, 10", "icmp uge i64 %n, 10", 1), "icmp ne i64 %q, 0"},
+		{"different divisor", strings.Replace(remainderReductionIR, "icmp ult i64 %n, 10", "icmp ult i64 %n, 11", 1), "icmp ult i64 %n, 11"},
+		{"signed comparison", strings.Replace(remainderReductionIR, "icmp ult i64 %n, 10", "icmp slt i64 %n, 10", 1), "icmp slt i64 %n, 10"},
+		{"same sign", strings.Replace(remainderReductionIR, "icmp ult i64 %n, 10", "icmp samesign ult i64 %n, 10", 1), "icmp eq i64 %q, 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, err := parseLLVMIRForSplitHalfTest(tc.ir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer g.dispose()
+			if got := groupRemainderReductions(g.module); got != 1 {
+				t.Fatalf("grouped %d reductions, want 1", got)
+			}
+			if err := g.verify(); err != nil {
+				t.Fatal(err)
+			}
+			if out := g.printModule(); !strings.Contains(out, tc.want) {
+				t.Fatalf("missing %q in:\n%s", tc.want, out)
 			}
 		})
 	}

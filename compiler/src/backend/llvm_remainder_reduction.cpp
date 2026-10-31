@@ -5,6 +5,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Support/CBindingWrapping.h>
 #include <llvm/TargetParser/Triple.h>
 
@@ -14,6 +15,37 @@ static bool wrappingAdd(BinaryOperator *I) {
   return I && I->getOpcode() == Instruction::Add &&
          I->getType()->isIntegerTy(64) && !I->hasNoSignedWrap() &&
          !I->hasNoUnsignedWrap();
+}
+
+// For an unsigned division by a nonzero constant, N < D iff N / D == 0.
+// Reuse only an already computed, non-exact quotient in the same block: an
+// exact division can be poison where the original comparison was defined.
+static bool compareExistingQuotient(ICmpInst *Cmp, Value *Numerator,
+                                    ConstantInt *Divisor) {
+  if (!Cmp->hasOneUse() || !isa<BranchInst>(*Cmp->user_begin()))
+    return false;
+  auto Pred = Cmp->getPredicate();
+  if (Pred != ICmpInst::ICMP_ULT && Pred != ICmpInst::ICMP_UGE)
+    return false;
+  if (Cmp->getOperand(0) != Numerator || Cmp->getOperand(1) != Divisor)
+    return false;
+  for (Instruction &I : *Cmp->getParent()) {
+    if (&I == Cmp)
+      break;
+    auto *Q = dyn_cast<BinaryOperator>(&I);
+    if (!Q || Q->getOpcode() != Instruction::UDiv || Q->isExact() ||
+        Q->getOperand(0) != Cmp->getOperand(0) || Q->getOperand(1) != Divisor)
+      continue;
+    Cmp->setOperand(0, Q);
+    Cmp->setOperand(1, ConstantInt::get(Q->getType(), 0));
+    Cmp->setPredicate(Pred == ICmpInst::ICMP_ULT ? ICmpInst::ICMP_EQ
+                                                 : ICmpInst::ICMP_NE);
+#if LLVM_VERSION_MAJOR >= 20
+    Cmp->setSameSign(false);
+#endif
+    return true;
+  }
+  return false;
 }
 
 static bool groupRemainder(BinaryOperator *Sum) {
@@ -51,6 +83,9 @@ static bool groupRemainder(BinaryOperator *Sum) {
         Sum->setOperand(0, Remainder);
         Sum->setOperand(1, Accumulator);
         Inner->eraseFromParent();
+        for (Instruction &I : *Sum->getParent())
+          if (auto *Cmp = dyn_cast<ICmpInst>(&I))
+            compareExistingQuotient(Cmp, Numerator, Divisor);
         return true;
       }
     }
