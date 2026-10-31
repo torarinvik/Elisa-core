@@ -504,7 +504,6 @@ func writeSourceWithIncludesPrefixed(out *bytes.Buffer, filename string, include
 		return err
 	}
 	included[abs] = true
-	out.Grow(len(raw))
 	sourceLabel := abs
 	if canonical, err := filepath.EvalSymlinks(abs); err == nil {
 		sourceLabel = filepath.Clean(canonical)
