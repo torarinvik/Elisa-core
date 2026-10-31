@@ -121,7 +121,7 @@ func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, 
 		!g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
 	}
 	if level == OptimizationLevel3 && !g.emitDebugInfo {
-		values = append(values, "validation-peel-unroll-v2")
+		values = append(values, "validation-peel-unroll-v2", "remainder-tail-v1")
 	}
 	config, _ := json.Marshal(values)
 	return string(config)

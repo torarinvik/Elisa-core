@@ -366,6 +366,7 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		foldLittleEndianBytePacks(g.module)
 		if optLevel == OptimizationLevel3 {
 			groupRemainderReductions(g.module)
+			peelRemainderTail(g.module)
 		}
 	}
 	if err := g.verify(); err != nil {
