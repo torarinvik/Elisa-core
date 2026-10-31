@@ -118,7 +118,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	// Cache input is then each exact *unoptimized* partition, so an unchanged
 	// partition skips both optimization and native emission across processes.
 	partitionPipeline := ""
-	if s.diskCodegenFlag("ELISACORE_PARALLEL_OPT") && parallelOptImportWeight() == 0 && partitionWorkersAvailable && options.OptLevel != OptimizationLevel0 &&
+	if s.diskCodegenFlag("ELISACORE_PARALLEL_OPT") && partitionWorkersAvailable && options.OptLevel != OptimizationLevel0 &&
 		!options.Serial && !virtualObjectSource(result) && native.Triple == target.Triple &&
 		int64(C.elisacoreObjectPartitionWeight(g.module)) >= s.minWeight && C.elisacoreSelectiveCloneSupported(g.module) != 0 {
 		partitionPipeline = optimizationPipeline(options.OptLevel)
@@ -198,6 +198,17 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	// clone consumes it synchronously without retaining it; keep the source module
 	// unchanged until all partitions have been cloned, then free it once here.
 	defer C.free(unsafe.Pointer(owners))
+	// Per-partition optimization imports small foreign callees as available_externally
+	// copies (ELISACORE_PARALLEL_OPT_IMPORT instructions or fewer), so inlining still
+	// crosses partitions. Each partition's cache key is its exact bitcode, imported
+	// bodies included, so editing an imported function invalidates its importers.
+	var imports *C.uchar
+	if weight := parallelOptImportWeight(); partitionPipeline != "" && weight > 0 {
+		imports = C.elisacoreObjectImportSets(g.module, owners, ownerCount, C.int(s.partitions), C.longlong(weight))
+		if imports != nil {
+			defer C.free(unsafe.Pointer(imports))
+		}
+	}
 	// The module is serialized once; each worker loads only its partition's bodies
 	// into a private LLVM context, so partitions are prepared, keyed and (on a
 	// miss) compiled concurrently. Cache keys stay the exact partition bitcode.
@@ -238,7 +249,11 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 		go func() {
 			defer wg.Done()
 			for part := range next {
-				objects[part], declined[part], errs[part] = s.buildPartition(part, fastCodegen, partitionPipeline, wholeData, wholeSize, namespace, owners, ownerCount, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
+				var row *C.uchar
+				if imports != nil {
+					row = (*C.uchar)(unsafe.Add(unsafe.Pointer(imports), uintptr(part)*uintptr(ownerCount)))
+				}
+				objects[part], declined[part], errs[part] = s.buildPartition(part, fastCodegen, partitionPipeline, wholeData, wholeSize, namespace, owners, ownerCount, row, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
 			}
 		}()
 	}
@@ -286,12 +301,12 @@ func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath
 // buildPartition loads one partition into a private context, looks its exact
 // bitcode up in the session and compiles it on a miss. declined reports a
 // partition the loader cannot split; the caller then emits the module directly.
-func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pipeline string, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
+func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pipeline string, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, imports *C.uchar, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
 	partitionStart := time.Now()
 	context := C.LLVMContextCreate()
 	defer C.LLVMContextDispose(context)
 	var message *C.char
-	module := C.elisacoreLoadObjectPartition(context, wholeData, wholeSize, C.int(s.partitions), C.int(part), namespace, owners, ownerCount, &message)
+	module := C.elisacoreLoadObjectPartitionImporting(context, wholeData, wholeSize, C.int(s.partitions), C.int(part), namespace, owners, ownerCount, imports, &message)
 	if module == nil {
 		if message != nil {
 			text := C.GoString(message)

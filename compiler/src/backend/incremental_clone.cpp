@@ -15,6 +15,8 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <cstring>
+#include <algorithm>
+#include <vector>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/IPO/StripDeadPrototypes.h>
 #include <cstdint>
@@ -176,7 +178,8 @@ extern "C" LLVMModuleRef elisacoreCloneSelectedDefinitionsPrechecked(
 // distinct contexts may run concurrently. The bitcode must outlive the module.
 extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
     LLVMContextRef context, const char *data, size_t size, const long long *owners,
-    size_t count, int part, const char *unit_namespace, char **error_out) {
+    size_t count, int part, const char *unit_namespace, const unsigned char *imports,
+    char **error_out) {
   using namespace llvm;
   *error_out = nullptr;
   auto buffer = MemoryBuffer::getMemBuffer(StringRef(data, size), "partition", false);
@@ -195,7 +198,8 @@ extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
   for (Function &function : *module) {
     if (index >= count) return nullptr;
     long long owner = owners[index++];
-    if (owner >= 0 && owner != part && !function.isDeclaration()) {
+    bool imported = imports != nullptr && imports[index - 1] != 0;
+    if (owner >= 0 && owner != part && !imported && !function.isDeclaration()) {
       GlobalValue::LinkageTypes linkage = function.getLinkage();
       function.deleteBody();
       omitted.emplace_back(&function, linkage);
@@ -216,4 +220,62 @@ extern "C" LLVMModuleRef elisacoreLoadSelectedDefinitions(
         global.getUnnamedAddr() != GlobalValue::UnnamedAddr::Global))
       global.setName(Twine(unit_namespace) + "." + global.getName());
   return wrap(module.release());
+}
+
+// For every partition, the foreign definitions it imports: partitioned functions of
+// at most `weight` instructions reachable from the partition's own functions through
+// other imported functions. Row `part` of the jobs*count result marks them. They are
+// loaded as available_externally copies, so the optimizer can inline across
+// partitions while each function keeps exactly one emitted definition. NULL when the
+// owner map does not match the module.
+extern "C" unsigned char *elisacoreObjectImportSets(
+    LLVMModuleRef m, const long long *owners, size_t count, int jobs, long long weight) {
+  using namespace llvm;
+  Module &module = *unwrap(m);
+  std::vector<Function *> functions;
+  DenseMap<const Function *, size_t> index;
+  for (Function &function : module) {
+    index[&function] = functions.size();
+    functions.push_back(&function);
+  }
+  if (functions.size() != count || jobs < 1 || weight <= 0) return nullptr;
+  std::vector<std::vector<size_t>> callees(count);
+  std::vector<unsigned char> importable(count, 0);
+  for (size_t i = 0; i < count; i++) {
+    Function &function = *functions[i];
+    if (owners[i] < 0 || function.isDeclaration()) continue;
+    long long instructions = 0;
+    std::vector<size_t> &targets = callees[i];
+    for (BasicBlock &block : function) {
+      for (Instruction &instruction : block) {
+        instructions++;
+        for (Value *operand : instruction.operands()) {
+          if (auto *target = dyn_cast<Function>(operand->stripPointerCasts())) {
+            auto found = index.find(target);
+            if (found != index.end()) targets.push_back(found->second);
+          }
+        }
+      }
+    }
+    std::sort(targets.begin(), targets.end());
+    targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    importable[i] = instructions <= weight && !function.hasPersonalityFn();
+  }
+  unsigned char *sets = static_cast<unsigned char *>(calloc((size_t)jobs * count ? (size_t)jobs * count : 1, 1));
+  if (sets == nullptr) return nullptr;
+  std::vector<size_t> work;
+  for (int part = 0; part < jobs; part++) {
+    unsigned char *row = sets + (size_t)part * count;
+    work.clear();
+    for (size_t i = 0; i < count; i++)
+      if (owners[i] == part) work.insert(work.end(), callees[i].begin(), callees[i].end());
+    while (!work.empty()) {
+      size_t candidate = work.back();
+      work.pop_back();
+      if (owners[candidate] < 0 || owners[candidate] == part || !importable[candidate] || row[candidate]) continue;
+      row[candidate] = 1;
+      work.insert(work.end(), callees[candidate].begin(), callees[candidate].end());
+    }
+  }
+  return sets;
 }
