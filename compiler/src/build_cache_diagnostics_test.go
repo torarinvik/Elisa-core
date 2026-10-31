@@ -98,6 +98,57 @@ func TestBuildCacheTranscriptIntegrityAndCaptureBound(t *testing.T) {
 	}
 }
 
+func TestBuildCacheRawStreamsRejectDamageAndReadLegacy(t *testing.T) {
+	dir := t.TempDir()
+	object := filepath.Join(dir, "built.o")
+	if err := os.WriteFile(object, []byte("object"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifact := buildCacheArtifact{key: "test-key", dir: filepath.Join(dir, "entry"), object: filepath.Join(dir, "entry", "out.o")}
+	want := buildCacheTranscript{Stdout: []byte{0, 255, 'a'}, Stderr: []byte("warning\n")}
+	for _, damage := range []struct {
+		name string
+		data []byte
+	}{
+		{"short", []byte("warn")},
+		{"extra", []byte("warning\n!")},
+		{"changed", []byte("Warning\n")},
+	} {
+		t.Run(damage.name, func(t *testing.T) {
+			if err := publishCachedBuildObject(artifact, object, want); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(artifact.dir, "stderr.bin"), damage.data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := readBuildCacheTranscript(artifact); ok {
+				t.Fatal("damaged raw diagnostic stream admitted")
+			}
+			if err := os.RemoveAll(artifact.dir); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	if err := os.MkdirAll(artifact.dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	want.Key = artifact.key
+	want.ObjectSHA256 = strings.Repeat("a", 64)
+	want.StdoutSHA256 = buildCacheStreamHash(want.Stdout)
+	want.StderrSHA256 = buildCacheStreamHash(want.Stderr)
+	legacy, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifact.dir, "transcript.json"), legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := readBuildCacheTranscript(artifact)
+	if !ok || !bytes.Equal(got.Stdout, want.Stdout) || !bytes.Equal(got.Stderr, want.Stderr) {
+		t.Fatal("legacy transcript did not replay exact bytes")
+	}
+}
+
 func TestBuildObjectCacheDeclinesRequestObservers(t *testing.T) {
 	for _, name := range []string{
 		"ELISACORE_BUILD_TIMING",
@@ -229,7 +280,7 @@ func TestBuildObjectCacheReplaysLargeDiagnosticTranscript(t *testing.T) {
 	options := cliOptions{filename: program.filename, emit: emitObject, output: filepath.Join(dir, "result.o")}
 	load := func(string, io.Writer) (*loadedProgram, bool) { return program, true }
 	// Match the real compiler's warning volume, including non-text bytes. Exercise
-	// both streams near the supported bound so JSON's base64 overhead is covered.
+	// both streams near the supported bound, including non-text payloads.
 	payload := bytes.Repeat([]byte{0xff, 0, 'x', '\n'}, (buildCacheStreamLimit-16)/4)
 	builds := 0
 	build := func(opts cliOptions, _ *loadedProgram, stdout, stderr io.Writer) int {

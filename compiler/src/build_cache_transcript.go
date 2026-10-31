@@ -36,6 +36,30 @@ type buildCacheTranscript struct {
 	Key                        string
 	Stdout, Stderr             []byte
 	StdoutSHA256, StderrSHA256 string
+	Format                     string `json:",omitempty"`
+	StdoutLength, StderrLength int    `json:",omitempty"`
+}
+
+const buildCacheRawStreams = "raw-streams-v1"
+
+func readBuildCacheStream(path string, length int) ([]byte, error) {
+	if length < 0 || length > buildCacheStreamLimit {
+		return nil, fmt.Errorf("invalid cached stream length")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data := make([]byte, length)
+	if _, err := io.ReadFull(f, data); err != nil {
+		return nil, fmt.Errorf("cached stream length mismatch")
+	}
+	var extra [1]byte
+	if n, err := f.Read(extra[:]); n != 0 || err != io.EOF {
+		return nil, fmt.Errorf("cached stream length mismatch")
+	}
+	return data, nil
 }
 
 func buildCacheStreamHash(data []byte) string {
@@ -52,6 +76,19 @@ func readBuildCacheTranscript(artifact buildCacheArtifact) (buildCacheTranscript
 	data, err := io.ReadAll(io.LimitReader(f, 3*buildCacheStreamLimit+1))
 	if err != nil || len(data) > 3*buildCacheStreamLimit || json.Unmarshal(data, &transcript) != nil {
 		return transcript, false
+	}
+	if transcript.Format != "" {
+		if transcript.Format != buildCacheRawStreams || transcript.Stdout != nil || transcript.Stderr != nil {
+			return transcript, false
+		}
+		transcript.Stdout, err = readBuildCacheStream(filepath.Join(artifact.dir, "stdout.bin"), transcript.StdoutLength)
+		if err != nil {
+			return transcript, false
+		}
+		transcript.Stderr, err = readBuildCacheStream(filepath.Join(artifact.dir, "stderr.bin"), transcript.StderrLength)
+		if err != nil {
+			return transcript, false
+		}
 	}
 	valid := len(transcript.ObjectSHA256) == 64 && transcript.Key == artifact.key && len(transcript.Stdout) <= buildCacheStreamLimit && len(transcript.Stderr) <= buildCacheStreamLimit && transcript.StdoutSHA256 == buildCacheStreamHash(transcript.Stdout) && transcript.StderrSHA256 == buildCacheStreamHash(transcript.Stderr)
 	return transcript, valid

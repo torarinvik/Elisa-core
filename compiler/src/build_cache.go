@@ -383,7 +383,20 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string, t
 	transcript.Key = artifact.key
 	transcript.StdoutSHA256 = buildCacheStreamHash(transcript.Stdout)
 	transcript.StderrSHA256 = buildCacheStreamHash(transcript.Stderr)
-	metadata, err := json.Marshal(transcript)
+	if len(transcript.Stdout) > buildCacheStreamLimit || len(transcript.Stderr) > buildCacheStreamLimit {
+		return fmt.Errorf("cached diagnostic stream exceeds limit")
+	}
+	if err := os.WriteFile(filepath.Join(stagingDir, "stdout.bin"), transcript.Stdout, 0600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stagingDir, "stderr.bin"), transcript.Stderr, 0600); err != nil {
+		return err
+	}
+	metadataTranscript := transcript
+	metadataTranscript.Format = buildCacheRawStreams
+	metadataTranscript.StdoutLength, metadataTranscript.StderrLength = len(transcript.Stdout), len(transcript.Stderr)
+	metadataTranscript.Stdout, metadataTranscript.Stderr = nil, nil
+	metadata, err := json.Marshal(metadataTranscript)
 	if err != nil {
 		return err
 	}
