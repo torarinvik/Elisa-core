@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"elisacore/src/ast"
@@ -39,27 +40,17 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 		}
 		return sourceIdentity{reflect.TypeOf(node), p.File, p.Line, p.Col}
 	}
-	// The three eager source roots are walked sequentially before analysis can
-	// mutate the fresh file. Reuse only the pointer-visit set across those walks;
-	// the returned binder/blocker maps and the quantifier set remain per-root.
-	// Release the largest map before returning the renderer so its backing table
-	// does not remain live across the body update.
+	// The three eager source roots are walked concurrently, each with its own
+	// pointer-visit set, and joined before analysis can mutate the fresh file.
+	// The walks only read syntax; the returned binder/blocker maps and the
+	// quantifier set remain per-root.
 	// Source size is only an allocation hint: every visited pointer is still
 	// checked. Bound the reservation for large inputs dominated by literals.
 	seenCapacity := min(len(r.src)/32, 1<<18)
-	seenScratch := make(map[uintptr]bool, seenCapacity)
-	collect := func(root *ast.File, shift bool) (map[binderIdentity]binder, map[string]bool) {
+	collect := func(root *ast.File, shift bool, seen map[uintptr]bool) (map[binderIdentity]binder, map[string]bool) {
 		result := map[binderIdentity]binder{}
 		blocked := map[string]bool{}
 		quantifiers := map[*ast.VarDeclStmt]bool{}
-		seen := seenScratch
-		if seen == nil {
-			// The lazy baseline-source recovery is called after the eager scratch
-			// has been released. It gets a private one-shot map, never stale keys.
-			seen = make(map[uintptr]bool)
-		} else {
-			clear(seen)
-		}
 		visit := func(value any, parentType reflect.Type, owner ast.Decl, event uint8, fieldName, text string, addressable bool) {
 			switch event {
 			case proofBindingVisitPositionFile, proofBindingVisitString:
@@ -132,21 +123,42 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 		proofBindingASTWalkTyped(root, visit, seen)
 		return result, blocked
 	}
-	fresh, blocked := collect(file, false)
 	// Live syntax can retain an older offset epoch. The pristine parse supplies
 	// names from the prior published source epoch; both must bind to one producer.
-	prior := []map[binderIdentity]binder{}
-	for _, source := range []*ast.File{r.a.file, r.pristine} {
-		old, userNames := collect(source, true)
-		prior = append(prior, old)
+	roots := []*ast.File{file, r.a.file, r.pristine}
+	binders := make([]map[binderIdentity]binder, len(roots))
+	names := make([]map[string]bool, len(roots))
+	panics := make([]any, len(roots))
+	panicked := make([]bool, len(roots))
+	var walks sync.WaitGroup
+	for i, root := range roots {
+		walks.Add(1)
+		go func() {
+			defer walks.Done()
+			returned := false
+			defer func() {
+				if !returned {
+					panics[i], panicked[i] = recover(), true
+				}
+			}()
+			binders[i], names[i] = collect(root, i != 0, make(map[uintptr]bool, seenCapacity))
+			returned = true
+		}()
+	}
+	walks.Wait()
+	// Preserve the old sequential order's panic precedence.
+	for i := range roots {
+		if panicked[i] {
+			panic(panics[i])
+		}
+	}
+	fresh, blocked := binders[0], names[0]
+	prior := binders[1:]
+	for _, userNames := range names[1:] {
 		for name := range userNames {
 			blocked[name] = true
 		}
 	}
-	// collect is retained by ensureBaseline for a possible one-shot source parse.
-	// Set the captured variable to nil now so this renderer does not retain the
-	// eager scratch map throughout body analysis.
-	seenScratch = nil
 	type candidates map[string]map[string]bool
 	byOwner := map[sourceIdentity]candidates{}
 	add := func(owner sourceIdentity, from, to string) {
@@ -187,7 +199,7 @@ func (r *RetainedAnalysis) prepareProofReportBindings(file *ast.File, marks map[
 			baselineFailure = why
 			return why
 		}
-		old, userNames := collect(parsed, true)
+		old, userNames := collect(parsed, true, make(map[uintptr]bool))
 		for name := range userNames {
 			blocked[name] = true
 		}

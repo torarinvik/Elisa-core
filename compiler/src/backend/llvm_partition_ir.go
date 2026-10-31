@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1004,10 +1005,16 @@ func partitionedIRWorkOrderWithReads(result *semantic.Result, parts int, recorde
 			order = append(order, part)
 		}
 	}
+	rest := make([]int, 0, parts)
 	for part, want := range preferred {
 		if !want && !declined[part] {
-			order = append(order, part)
+			rest = append(rest, part)
 		}
 	}
-	return order
+	// Largest first, by the previous build's definitions per partition, so no big
+	// partition starts last and stretches the wall time. Order never affects output.
+	if len(previous) != 0 && len(previous[0]) == parts {
+		sort.SliceStable(rest, func(i, j int) bool { return len(previous[0][rest[i]]) > len(previous[0][rest[j]]) })
+	}
+	return append(order, rest...)
 }
