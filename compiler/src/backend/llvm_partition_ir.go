@@ -286,8 +286,11 @@ func (s *IncrementalObjectSession) partitionedIRApplies(result *semantic.Result,
 	if !partitionedIREnabled() {
 		return false
 	}
+	// Partitioned generators import small foreign callees themselves
+	// (importPartitionFunction). ELISACORE_PARALLEL_OPT_IMPORT configures only the
+	// whole-module split, which remains the fallback when a partition declines.
 	if options.OptLevel != OptimizationLevel0 && (!s.diskCodegenFlag("ELISACORE_PARALLEL_IR") ||
-		!s.diskCodegenFlag("ELISACORE_PARALLEL_OPT") || parallelOptImportWeight() != 0 || !partitionWorkersAvailable) {
+		!s.diskCodegenFlag("ELISACORE_PARALLEL_OPT") || !partitionWorkersAvailable) {
 		return false
 	}
 	if s.minWeight == 0 {

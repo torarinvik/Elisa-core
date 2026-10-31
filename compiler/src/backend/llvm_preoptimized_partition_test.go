@@ -112,7 +112,7 @@ func TestOptimizedPartitionedIRAdmission(t *testing.T) {
 		{"default-O3", "", "1", "0", OptimizationLevel3, true, false},
 		{"explicit-O3", "1", "1", "0", OptimizationLevel3, true, true},
 		{"no-optimizer-workers", "1", "0", "0", OptimizationLevel3, true, false},
-		{"imports-use-module-split", "1", "1", "10", OptimizationLevel3, true, false},
+		{"imports-keep-partitioned-ir", "1", "1", "10", OptimizationLevel3, true, true},
 		{"missing-worker-entry", "1", "1", "0", OptimizationLevel3, false, false},
 		{"disabled", "0", "1", "0", OptimizationLevel0, true, false},
 		{"ordinary-O0", "", "0", "0", OptimizationLevel0, false, true},
