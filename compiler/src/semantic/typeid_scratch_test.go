@@ -107,3 +107,29 @@ func BenchmarkCanonicalTypeIDWorkspace(b *testing.B) {
 		})
 	}
 }
+
+func TestCanonicalTypeIDLookupOwnsRegistryKeys(t *testing.T) {
+	original := &RefType{Elem: &BuiltinType{Name: "registry_key_owned_type"}}
+	want, ok := TryCanonicalTypeID(original)
+	if !ok || want == 0 {
+		t.Fatal("missing canonical ID")
+	}
+	// Overwrite short scratch buffers, including while concurrent readers hit
+	// the existing key. The registry must own its stored string.
+	var wg sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				TryCanonicalTypeID(&BuiltinType{Name: "other_registry_key_type"})
+				got, ok := TryCanonicalTypeID(&RefType{Elem: &BuiltinType{Name: "registry_key_owned_type"}})
+				if !ok || got != want {
+					t.Errorf("registry key changed: got %d/%v, want %d", got, ok, want)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}

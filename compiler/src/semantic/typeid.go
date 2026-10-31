@@ -25,24 +25,27 @@ func CanonicalTypeID(t Type) TypeID {
 }
 
 func TryCanonicalTypeID(t Type) (TypeID, bool) {
-	key, ok := canonicalTypeIDKey(t)
-	if !ok {
+	var storage [128]byte
+	b := *bytes.NewBuffer(storage[:0])
+	if !writeTypeIDKeyPooled(&b, t) {
 		return 0, false
 	}
+	key := b.Bytes()
+	// Map lookup may borrow these bytes; insertion below makes an owned string.
 	canonicalTypeIDRegistry.mu.RLock()
-	id, ok := canonicalTypeIDRegistry.ids[key]
+	id, ok := canonicalTypeIDRegistry.ids[string(key)]
 	canonicalTypeIDRegistry.mu.RUnlock()
 	if ok {
 		return id, true
 	}
 	canonicalTypeIDRegistry.mu.Lock()
 	defer canonicalTypeIDRegistry.mu.Unlock()
-	if id, ok := canonicalTypeIDRegistry.ids[key]; ok {
+	if id, ok := canonicalTypeIDRegistry.ids[string(key)]; ok {
 		return id, true
 	}
 	id = canonicalTypeIDRegistry.next
 	canonicalTypeIDRegistry.next++
-	canonicalTypeIDRegistry.ids[key] = id
+	canonicalTypeIDRegistry.ids[string(key)] = id
 	return id, true
 }
 
@@ -50,6 +53,13 @@ func canonicalTypeIDKey(t Type) (string, bool) {
 	// Most keys fit without allocating a buffer; String still copies the result.
 	var storage [128]byte
 	b := *bytes.NewBuffer(storage[:0])
+	if !writeTypeIDKeyPooled(&b, t) {
+		return "", false
+	}
+	return b.String(), true
+}
+
+func writeTypeIDKeyPooled(b *bytes.Buffer, t Type) bool {
 	active := typeIDActivePool.Get().(*typeIDActive)
 	defer func() {
 		// pop clears every used slot, including unsuccessful encoding. Do not
@@ -59,10 +69,7 @@ func canonicalTypeIDKey(t Type) (string, bool) {
 		}
 	}()
 	nextCycleID := 1
-	if !appendTypeIDKey(&b, t, active, &nextCycleID) {
-		return "", false
-	}
-	return b.String(), true
+	return appendTypeIDKey(b, t, active, &nextCycleID)
 }
 
 const maxTypeIDPooledFrames = 64
