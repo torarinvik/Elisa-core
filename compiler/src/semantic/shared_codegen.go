@@ -76,7 +76,10 @@ func (r *Result) indexProofsOwnedBy(fn *ast.FuncDecl) []*ast.IndexExpr {
 		return nil
 	}
 	if sh := r.shared; sh != nil {
-		entry, _ := sharedProofOwnerIndexes.LoadOrStore(sh, &sharedProofOwnerIndex{})
+		entry, ok := sharedProofOwnerIndexes.Load(sh)
+		if !ok {
+			entry, _ = sharedProofOwnerIndexes.LoadOrStore(sh, &sharedProofOwnerIndex{})
+		}
 		index := entry.(*sharedProofOwnerIndex)
 		index.once.Do(func() {
 			index.byOwner = make(map[*ast.FuncDecl][]*ast.IndexExpr)
