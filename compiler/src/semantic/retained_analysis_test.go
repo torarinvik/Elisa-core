@@ -1151,6 +1151,65 @@ func TestRetainedAnalysisAcceptsPlainStructEdits(t *testing.T) {
 	}
 }
 
+// A struct edit and a signature edit in one update: the re-declared function uses the
+// struct, and the struct-user pass must not splice its new body under its old header.
+func TestRetainedStructEditSkipsSignatureReplacedUser(t *testing.T) {
+	before := `
+module Sem:
+    struct Spans:
+        count: mutable usize = 0
+
+    def fill(offsets: darray[u32]&, spans: mutable Spans&) -> void:
+        can Memory.Allocate, Abort.Panic:
+            for row in 0..<offsets.count |spans|:
+                spans.count <- spans.count + 1
+
+def main() -> i32:
+    can Memory.Allocate, Abort.Panic:
+        offsets: darray[u32] = [1, 2]
+        spans: mutable Sem::Spans = Sem::Spans{}
+        Sem::fill(offsets, spans)
+        return 0
+`
+	after := `
+module Sem:
+    struct Spans:
+        count: mutable usize = 0
+        hits: mutable usize = 0
+
+    def fill(regions: darray[u32]&, offsets: darray[u32]&, spans: mutable Spans&) -> void:
+        can Memory.Allocate, Abort.Panic:
+            if regions.count == offsets.count:
+                for row in 0..<regions.count |spans, regions, offsets|:
+                    spans.hits <- spans.hits + 1 if regions[row] == offsets[row]
+            for row in 0..<offsets.count |spans|:
+                spans.count <- spans.count + 1
+
+def main() -> i32:
+    can Memory.Allocate, Abort.Panic:
+        offsets: darray[u32] = [1, 2]
+        spans: mutable Sem::Spans = Sem::Spans{}
+        Sem::fill(offsets, offsets, spans)
+        return 0
+`
+	broken := strings.Replace(after, "spans.hits <- spans.hits", "spans.nope <- spans.hits", 1)
+	options := AnalyzeOptions{}
+	for i, src := range []string{after, broken} {
+		_, retained := AnalyzeRetained(retainedParse(t, before), retainedParse(t, before), []byte(before), options)
+		updated, err := retained.Update(retainedParse(t, src), retainedParse(t, src), []byte(src))
+		if err != nil {
+			t.Fatalf("edit %d fell back: %v", i, err)
+		}
+		fresh := AnalyzeWithOptions(retainedParse(t, src), options)
+		if got, want := retainedDiagnostics(updated), retainedDiagnostics(fresh); got != want {
+			t.Fatalf("edit %d disagrees with a fresh analysis\nretained:\n%s\nfresh:\n%s", i, got, want)
+		}
+		if (i == 1) != (len(fresh.Errors()) != 0) {
+			t.Fatalf("fixture: edit %d has unexpected errors:\n%s", i, retainedDiagnostics(fresh))
+		}
+	}
+}
+
 // A kept diagnostic names body-local gensyms after the byte offset of their expression; a
 // body that moved takes the names a fresh analysis gives it, and only those names.
 func TestRetainedShiftLocalGensyms(t *testing.T) {

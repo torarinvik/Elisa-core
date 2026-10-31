@@ -1188,6 +1188,11 @@ func (r *RetainedAnalysis) UpdatePrepared(file, scratch *ast.File, src []byte, p
 		for _, sp := range splices {
 			spliced[sp.live] = true
 		}
+		for _, fn := range removedLive {
+			// Removed, or re-declared with a new signature: splicing the new body under
+			// the old header would check it against the old parameter list.
+			spliced[fn] = true
+		}
 		memo := map[Type]bool{}
 		var stores map[string]bool
 		if additive {
