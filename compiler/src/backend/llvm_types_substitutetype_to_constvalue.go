@@ -439,12 +439,15 @@ func (g *llvmGenerator) rememberGenericSymbol(name, key, base string) error {
 	if g.genericSymbolKeys == nil {
 		g.genericSymbolKeys = make(map[string]string)
 	}
-	if previous, exists := g.genericSymbolKeys[name]; exists && previous != key {
-		prefix := sanitizeIdentifier(base)
-		if len(prefix) > 48 {
-			prefix = prefix[:48]
+	if previous, exists := g.genericSymbolKeys[name]; exists {
+		if previous != key {
+			prefix := sanitizeIdentifier(base)
+			if len(prefix) > 48 {
+				prefix = prefix[:48]
+			}
+			return fmt.Errorf("generic symbol digest collision for %s", prefix)
 		}
-		return fmt.Errorf("generic symbol digest collision for %s", prefix)
+		return nil
 	}
 	g.genericSymbolKeys[name] = key
 	return nil
