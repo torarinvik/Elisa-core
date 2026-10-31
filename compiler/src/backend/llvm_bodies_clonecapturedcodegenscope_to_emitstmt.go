@@ -539,6 +539,11 @@ func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *s
 			paramArenas[decl.Params[i].Name] = owner.arenaRef
 		}
 	}
+	// Dependencies can only propagate an existing caller-owned arena. With no
+	// seed arena, walking the body cannot add anything to the result.
+	if len(paramArenas) == 0 {
+		return result
+	}
 	dependencies := map[string]map[string]bool{}
 	// ownerOrder lists dependencies' keys in source order (first mutating call). The fixed point
 	// walks owners in this order so that a local copied into several caller aggregates

@@ -7,7 +7,7 @@
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
     "llvm_bodies_clonecapturedcodegenscope_to_emitstmt.go": {
-      "sha256": "c013d15e4b9ab30664cfeb26762624d481360aa50c613d85f81001cb3264a82b",
+      "sha256": "bc930ee808301e341ddda4c20296744879b42e680c794796e5f91c40ae9f8daa",
       "selectors": 8,
       "classification": "reviewed-statement-lambda-or-declaration-branch"
     },
