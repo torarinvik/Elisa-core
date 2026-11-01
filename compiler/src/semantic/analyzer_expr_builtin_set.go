@@ -41,7 +41,7 @@ func builtinSetReceiverTypeExpr(pos lexer.Pos, setType *SetType, mutable bool) a
 }
 
 func runtimeBackedSetSupportDiagnostic(setType *SetType) string {
-	const supported = "runtime-backed set elements must be cstr, an integer type, bool, or a const enum (any type with value equality); floats and aggregates are unsupported"
+	const supported = "runtime-backed set elements must be cstr, sview, an integer type, bool, or a const enum (any type with value equality); floats and aggregates are unsupported"
 	if setType == nil {
 		return supported
 	}

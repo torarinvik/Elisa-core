@@ -335,7 +335,7 @@ func (a *Analyzer) analyzeSetLiteralExpr(expr *ast.ListLitExpr, expected Type) T
 	if setType == nil {
 		setType = &SetType{Elem: elemType, SurfaceName: "set"}
 	}
-	if !dictRuntimeBackedKeyType(setType.Elem) {
+	if !setSupportsRuntimeBackedOps(setType) {
 		a.errorf(expr.Pos(), "%s", runtimeBackedSetSupportDiagnostic(setType))
 		a.exprTypes[expr] = invalidType
 		return invalidType

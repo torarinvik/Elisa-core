@@ -19,7 +19,8 @@ import (
 // runtime-backed hash dict) per the key's CONCRETE type — which is resolved here because the
 // dict generics are monomorphized before codegen, exactly like `==`. A cstr hashes its content
 // (ctx_hash_cstr → FNV-1a); every fixed-size scalar key (integer/bool/char/const enum) is
-// zero-extended to u64 and finalized (ctx_hash_u64 → splitmix64). Both return u64.
+// zero-extended to u64 and finalized (ctx_hash_u64 → splitmix64). String views use
+// length-aware ctx_hash_sview; all hash functions return u64.
 func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil || callIdentName(expr) != "ctx_hash_value" {
 		return nil, nil, false, nil
@@ -38,6 +39,17 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	argValue, _, err := s.emitExpr(expr.Args[0], argType)
 	if err != nil {
 		return nil, nil, true, err
+	}
+
+	// String views hash every byte, including NULs, using the ordinary
+	// internal-call ABI for their {data, len} aggregate.
+	if _, isView := semantic.StripAggregateStateType(argType).(*semantic.SViewType); isView {
+		callee, fnType, err := s.ensureRuntimeFunction("ctx_hash_sview", nil)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		value, resultType, err := s.emitResolvedCall(callee, fnType, true, []C.LLVMValueRef{argValue}, nil)
+		return value, resultType, true, err
 	}
 
 	// cstr key: hash the string content.

@@ -3,7 +3,7 @@ package main
 import "testing"
 
 // Reuse the actual-runtime+heap CLI/native harness committed with Dict repair.
-// Public set keys remain cstr; raw SetBucket[sview] is tested independently.
+// Test both cstr keys and length-aware sview keys against the actual runtime.
 func TestActualSetInactiveStorageNativeAddRemoveRehashAndClear(t *testing.T) {
 	runActualDictInactiveNative(t, `def main() -> int:
     can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
@@ -63,4 +63,44 @@ func TestActualSetInactiveStorageOverflowRejectsBeforeWrite(t *testing.T) {
         arena_set_zero_buckets(&bucket, 9223372036854775807.usize())
         return 9
 `, true)
+}
+
+func TestActualSetStringViewKeysPreserveContentAndLength(t *testing.T) {
+	runActualDictInactiveNative(t, `def main() -> int:
+    can Memory.Allocate, Memory.Release, Abort.Panic, Atomics{Exchange, Store}, Global{Read, Write}:
+        arena: mutable Arena = zeroed
+        defer block:
+            arena_free(&arena)
+        values: mutable set[sview] = arena_set_new[sview](&arena, 8)
+        key_bytes: darray[u8] = [97, 0, 98]
+        equal_bytes: darray[u8] = [120, 120, 97, 0, 98, 121, 121]
+        other_bytes: darray[u8] = [97, 0, 99]
+        key: sview = bytes_view_range_ref(&key_bytes, 0, 3)
+        equal: sview = bytes_view_range_ref(&equal_bytes, 2, 3)
+        other: sview = bytes_view_range_ref(&other_bytes, 0, 3)
+        literal: set[sview] = {key, equal, other}
+        assert literal.count == 2
+        assert equal in literal
+        assert other in literal
+        assert not values.contains(key)
+        assert arena_set_add_or_panic(&arena, &values, key)
+        assert not arena_set_add_or_panic(&arena, &values, equal)
+        assert values.contains(equal)
+        assert not values.has(other)
+        assert arena_set_add_or_panic(&arena, &values, other)
+        assert arena_set_add_or_panic(&arena, &values, sview("", 0, 0))
+        arena_set_reserve_or_panic(&arena, &values, 64)
+        assert values.count == 3
+        assert equal in values
+        assert other in values
+        assert sview("", 0, 0) in values
+        assert arena_set_remove(&values, equal)
+        assert not values.contains(key)
+        assert values.contains(other)
+        assert arena_set_add_or_panic(&arena, &values, equal)
+        arena_set_clear(&values)
+        assert values.count == 0 and values.used == 0
+        assert not values.contains(other)
+        return 0
+`, false)
 }

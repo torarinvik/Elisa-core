@@ -277,6 +277,15 @@ func dictSupportsRuntimeBackedOps(dictType *DictType) bool {
 	return dictType != nil && dictRuntimeBackedKeyType(dictType.Key)
 }
 
+// Runtime string views use byte-content equality and length-aware FNV-1a.
+// Dict source-key normalization has a separate cstr-only contract.
+func runtimeHashableKeyType(keyType Type) bool {
+	if _, ok := StripAggregateStateType(keyType).(*SViewType); ok {
+		return true
+	}
+	return dictRuntimeBackedKeyType(keyType)
+}
+
 func setSupportsRuntimeBackedOps(setType *SetType) bool {
-	return setType != nil && dictRuntimeBackedKeyType(setType.Elem)
+	return setType != nil && runtimeHashableKeyType(setType.Elem)
 }

@@ -5,8 +5,8 @@ import "elisacore/src/ast"
 // analyzeHashBuiltinCall type-checks the compiler-emitted `ctx_hash_value(key)` builtin used by
 // the runtime-backed hash dict. It returns a u64 hash of a hashable key. Like `==`, it is valid
 // over a generic key parameter (the concrete type is known after monomorphization, where the
-// backend picks content-hash for cstr vs value-hash for scalars); the accepted key types mirror
-// dictRuntimeBackedKeyType. The name is `ctx_*`-namespaced so it never shadows a user `hash`.
+// backend picks content-hash for cstr/sview vs value-hash for scalars); the accepted key types mirror
+// runtimeHashableKeyType. The name is `ctx_*`-namespaced so it never shadows a user `hash`.
 func (a *Analyzer) analyzeHashBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 	if expr == nil || callIdentName(expr) != "ctx_hash_value" {
 		return nil, false
@@ -29,8 +29,8 @@ func (a *Analyzer) analyzeHashBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 		return u64Type, true
 	}
 	argType := a.analyzeExpr(expr.Args[0])
-	if !IsInvalidType(argType) && !dictRuntimeBackedKeyType(argType) {
-		a.errorf(expr.Args[0].Pos(), "ctx_hash_value requires a hashable key (cstr, an integer type, bool, or a const enum), got %s", diagnosticTypeString(argType))
+	if !IsInvalidType(argType) && !runtimeHashableKeyType(argType) {
+		a.errorf(expr.Args[0].Pos(), "ctx_hash_value requires a hashable key (cstr, sview, an integer type, bool, or a const enum), got %s", diagnosticTypeString(argType))
 	}
 	a.recordBuiltinHelperFuncType(expr, "ctx_hash_value", u64Type)
 	return u64Type, true

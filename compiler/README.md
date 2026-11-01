@@ -551,6 +551,11 @@ Run the focused disjoint-parameter vectorization gate (docs/84):
 
 The active runtime implementation lives in Elisa core source files under `runtime/elisacore_std/`.
 
+Runtime sets support `sview` keys using length-aware FNV-1a hashing and byte-content
+equality, including embedded NULs. Include the collection helpers when using native
+set operations. Borrowed key bytes must remain alive and unchanged while stored;
+`bytes_view` and `bytes_view_range_ref` construct bounded views of byte arrays.
+
 - `runtime/elisacore_std/elisacore_runtime.elisa` — canonical runtime entrypoint
 - `runtime/elisacore_std/` — staged runtime helpers, wrappers, allocator, collections, stores, and test support
 
