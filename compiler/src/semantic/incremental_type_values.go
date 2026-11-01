@@ -163,6 +163,18 @@ func (env *FunctionTypeEnvironment) reference(t Type) (*functionTypeReference, e
 func functionNominalTypeFingerprint(t Type) ([32]byte, error) {
 	return functionNominalTypeFingerprintWithResult(t, nil)
 }
+
+// DiagnosticCodegenTypeFingerprint captures the supported semantic type graph
+// for comparison experiments. It is not a complete code-generation dependency
+// certificate: callers must separately validate source, results, target settings,
+// proof facts, and every other input. Unsupported graphs fail closed.
+func DiagnosticCodegenTypeFingerprint(t Type, current *Result) ([32]byte, error) {
+	if t == nil || current == nil {
+		return [32]byte{}, fmt.Errorf("missing diagnostic type or result")
+	}
+	return functionNominalTypeFingerprintWithResult(t, current)
+}
+
 func functionNominalTypeFingerprintWithResult(t Type, current *Result) ([32]byte, error) {
 
 	encoder := &functionSyntaxEncoder{seen: map[functionSyntaxPointer]uint64{}, semanticBitSets: true, skipFields: map[reflect.Type]map[string]bool{

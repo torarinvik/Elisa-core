@@ -653,6 +653,7 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	var inputReads *irInputReadRecorder
 	if s.irInputAudit != nil {
 		inputReads = &irInputReadRecorder{}
+		inputReads.codegenObserver = s.irCodegenObserver
 		inputReads.shared = shared.inputReads
 		defer func() {
 			if mode.inputAudit != nil {

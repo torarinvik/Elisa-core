@@ -56,12 +56,14 @@ type irInputReadReport struct {
 type irInputReadRecorder struct {
 	semanticReads []semantic.SpecializationInputRead
 	codegenReads  []semantic.CodegenFactRead
-	mu            sync.Mutex
-	bodies        []irFunctionBodyRead
-	queries       []irInputQueryRead
-	ranges        []irInputRangeRead
-	seen          map[irFunctionBodyRead]bool
-	lowered       bool
+	// Optional diagnostic observer; install before lowering, never during it.
+	codegenObserver func(semantic.CodegenFactRead)
+	mu              sync.Mutex
+	bodies          []irFunctionBodyRead
+	queries         []irInputQueryRead
+	ranges          []irInputRangeRead
+	seen            map[irFunctionBodyRead]bool
+	lowered         bool
 	// shared contains build-setup reads used by every partition (for example
 	// declaration routing and shared symbol indexes). It is not another unit.
 	shared *irInputReadRecorder
@@ -127,6 +129,9 @@ func (r *irInputReadRecorder) rangeRead(read irInputRangeRead) {
 func (r *irInputReadRecorder) codegenFactRead(read semantic.CodegenFactRead) {
 	if r == nil {
 		return
+	}
+	if r.codegenObserver != nil {
+		r.codegenObserver(read)
 	}
 	r.mu.Lock()
 	r.codegenReads = append(r.codegenReads, read)

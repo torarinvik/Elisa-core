@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"elisacore/src/semantic"
 )
 
 // IncrementalObjectSession retains native object partitions across analyzed
@@ -18,22 +20,24 @@ type IncrementalObjectSession struct {
 	// irInputAudit is a diagnostic-only hook. Install before generation; the
 	// callback can run concurrently for different partitions. It has no effect
 	// on artifact admission and every report explicitly records coverage gaps.
-	irInputAudit  func(partition int, report irInputReadReport)
-	diskDefaults  bool // session-local standalone disk-analysis codegen preset
-	disk          *incrementalObjectDisk
-	mu            sync.Mutex // protects the bounded partition map and LRU metadata
-	statsMu       sync.Mutex
-	mergerOnce    sync.Once
-	defaultMerger string
-	partitions    int
-	minWeight     int64
-	maxBytes      int
-	bytes         int
-	clock         uint64
-	entries       map[[32]byte]*incrementalObjectEntry
-	slotCounts    map[[32]byte]int
-	historyGroups int
-	stats         IncrementalObjectStats
+	irInputAudit func(partition int, report irInputReadReport)
+	// Diagnostic-only observation hook; install before generation.
+	irCodegenObserver func(semantic.CodegenFactRead)
+	diskDefaults      bool // session-local standalone disk-analysis codegen preset
+	disk              *incrementalObjectDisk
+	mu                sync.Mutex // protects the bounded partition map and LRU metadata
+	statsMu           sync.Mutex
+	mergerOnce        sync.Once
+	defaultMerger     string
+	partitions        int
+	minWeight         int64
+	maxBytes          int
+	bytes             int
+	clock             uint64
+	entries           map[[32]byte]*incrementalObjectEntry
+	slotCounts        map[[32]byte]int
+	historyGroups     int
+	stats             IncrementalObjectStats
 }
 
 type incrementalObjectEntry struct {

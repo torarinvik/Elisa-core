@@ -92,6 +92,20 @@ func (index *FunctionNodeIndex) Anchor(node PositionedFunctionNode) (FunctionNod
 	return anchors[0], nil
 }
 
+// DiagnosticNodes returns the current indexed nodes for building a temporary
+// process-local lookup. Its keys are not portable and callers must revalidate
+// the owning index before using an anchor.
+func (index *FunctionNodeIndex) DiagnosticNodes() ([]PositionedFunctionNode, error) {
+	if index == nil {
+		return nil, fmt.Errorf("missing function node index")
+	}
+	digest, nodes, err := functionSyntaxFingerprint(index.root)
+	if err != nil || digest != index.digest {
+		return nil, fmt.Errorf("indexed function tree changed")
+	}
+	return nodes, nil
+}
+
 // Anchors validates the source graph once before exporting product references.
 // RebindAll performs the corresponding validation on the destination graph.
 func (index *FunctionNodeIndex) Anchors(nodes []PositionedFunctionNode) ([]FunctionNodeAnchor, error) {
