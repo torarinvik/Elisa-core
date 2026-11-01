@@ -63,8 +63,15 @@ func targetedSpecializationMembership(c *specializationContext) (map[ast.Node]bo
 	return scan.owned, scan.rootSymbols, scan.rootScopes
 }
 
+// sharedRoot reports whether membership can consult a shared current-root
+// session. Without one (including a context with no base) only the root maps
+// collected by this scan answer.
+func (p *specializationPublication) sharedRoot() bool {
+	return p.context.base != nil && p.context.base.shared != nil
+}
+
 func (p *specializationPublication) canonicalNodeMember(node ast.Node) bool {
-	if p.context.base.shared == nil {
+	if !p.sharedRoot() {
 		return p.rootNodes[node]
 	}
 	if answer, known := p.rootNodes[node]; known {
@@ -88,7 +95,7 @@ func (p *specializationPublication) canonicalIdentityMembership() (map[*Symbol]b
 }
 
 func (p *specializationPublication) canonicalSymbolMember(symbol *Symbol) bool {
-	if p.context.base.shared == nil {
+	if !p.sharedRoot() {
 		return p.rootSymbols[symbol]
 	}
 	if answer, known := p.rootSymbols[symbol]; known {
@@ -108,7 +115,7 @@ func (p *specializationPublication) canonicalSymbolMember(symbol *Symbol) bool {
 }
 
 func (p *specializationPublication) canonicalScopeMember(scope *Scope) bool {
-	if p.context.base.shared == nil {
+	if !p.sharedRoot() {
 		return p.rootScopes[scope]
 	}
 	if answer, known := p.rootScopes[scope]; known {
