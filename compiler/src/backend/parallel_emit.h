@@ -19,6 +19,7 @@
 // LoopUnroll reads it only when OptLevel > 2, so -O1/-O2 pipelines in the same process are
 // unaffected. Not thread-safe; the Go side serialises calls with sync.Once.
 void elisacoreEnsureO3UnrollThreshold(int threshold);
+unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef module);
 
 // Clone and restrict a verified module to one post-optimization partition. The
 // caller owns the returned module, in the original context. No original IR is

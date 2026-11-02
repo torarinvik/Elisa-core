@@ -377,6 +377,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			return fmt.Errorf("late LLVM cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
 		}
 	}
+	if optLevel == OptimizationLevel3 && !g.emitDebugInfo {
+		C.elisacoreExpandSmallZeroFills(g.module)
+	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
 	}
@@ -709,4 +712,8 @@ func machineCodegenMode(level OptimizationLevel) int {
 		return 2
 	}
 	return 0
+}
+
+func expandSmallZeroFills(module C.LLVMModuleRef) int {
+	return int(C.elisacoreExpandSmallZeroFills(module))
 }
