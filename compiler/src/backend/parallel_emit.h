@@ -19,6 +19,7 @@
 // LoopUnroll reads it only when OptLevel > 2, so -O1/-O2 pipelines in the same process are
 // unaffected. Not thread-safe; the Go side serialises calls with sync.Once.
 void elisacoreEnsureO3UnrollThreshold(int threshold);
+unsigned elisacoreSpecializeShortTrips(LLVMModuleRef, LLVMTargetMachineRef);
 unsigned elisacoreExpandSmallZeroFills(LLVMModuleRef module);
 unsigned elisacorePackPrivateBoolArrays(LLVMModuleRef, LLVMTargetMachineRef);
 

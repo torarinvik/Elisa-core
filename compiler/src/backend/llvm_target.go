@@ -378,6 +378,9 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 		}
 	}
 	if optLevel == OptimizationLevel3 && !g.emitDebugInfo {
+		if specializeShortTrips(g) == 2 {
+			return fmt.Errorf("short-trip specialization cleanup failed")
+		}
 		C.elisacoreExpandSmallZeroFills(g.module)
 		if packPrivateBoolArrays(g) == 2 {
 			return fmt.Errorf("private Boolean array packing cleanup failed")
