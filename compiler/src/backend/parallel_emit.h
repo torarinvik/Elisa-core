@@ -5,6 +5,13 @@
 #include <llvm-c/TargetMachine.h>
 #include <stddef.h>
 
+#if defined(__APPLE__) && defined(__aarch64__)
+#define ELISACORE_LATE_O3_PIPELINE "function(early-cse,instcombine,loop-simplify,lcssa,loop(indvars),gvn,instcombine,simplifycfg)"
+#else
+#define ELISACORE_LATE_O3_PIPELINE ""
+#endif
+
+
 // Parent side. Returns 0 when the module's partitioned instruction weight is below
 // `min_weight` (nothing written; use the serial path), 1 after writing the module's
 // bitcode to `bitcode_path`, -1 when that write failed.

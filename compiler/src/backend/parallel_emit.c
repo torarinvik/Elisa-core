@@ -224,8 +224,16 @@ void elisacoreEnsureO3UnrollThreshold(int threshold) {
 	done = 1;
 	char flag[64];
 	snprintf(flag, sizeof flag, "-unroll-threshold-aggressive=%d", threshold);
+#if defined(__APPLE__)
+	// ExtTSP improves the measured aggregate Dijkstra workload on Apple ARM.
+	// Configure it in the shared O3 initializer so serial and partition workers
+	// use the same machine-code layout. Linux retains LLVM's default layout.
+	const char *argv[3] = {"elisac", flag, "-enable-ext-tsp-block-placement=true"};
+	LLVMParseCommandLineOptions(3, argv, NULL);
+#else
 	const char *argv[2] = {"elisac", flag};
 	LLVMParseCommandLineOptions(2, argv, NULL);
+#endif
 }
 
 // Same options as elisacoreRunOptimizationPipeline in llvm_target.go.
@@ -374,6 +382,9 @@ static int part_optimize(LLVMModuleRef m, LLVMTargetMachineRef tm, const char *p
 		elisacoreEnsureO3UnrollThreshold(600);
 	}
 	LLVMErrorRef err = LLVMRunPasses(m, pipeline, tm, options);
+	if (err == NULL && strstr(pipeline, "O3") != NULL && ELISACORE_LATE_O3_PIPELINE[0] != 0) {
+		err = LLVMRunPasses(m, ELISACORE_LATE_O3_PIPELINE, tm, options);
+	}
 	LLVMDisposePassBuilderOptions(options);
 	if (err == NULL) {
 		return 1;

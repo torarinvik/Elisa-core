@@ -369,6 +369,13 @@ func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
 			peelRemainderTail(g.module)
 		}
 	}
+	if optLevel == OptimizationLevel3 && C.ELISACORE_LATE_O3_PIPELINE != "" {
+		latePipeline := cString(C.ELISACORE_LATE_O3_PIPELINE)
+		defer C.free(unsafe.Pointer(latePipeline))
+		if message := C.elisacoreRunOptimizationPipeline(g.module, g.targetMachine, latePipeline, aaPipeline, C.int(optimizationInlinerThreshold(optLevel)), debugLogging); message != nil {
+			return fmt.Errorf("late LLVM cleanup failed: %s", disposeLLVMErrorMessage(message, "unknown LLVM pass pipeline error"))
+		}
+	}
 	if err := g.verify(); err != nil {
 		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
 	}
