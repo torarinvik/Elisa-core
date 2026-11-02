@@ -73,6 +73,12 @@ func TestOptimizedModuleDiskCacheAcrossProcesses(t *testing.T) {
 		if hit != (os.Getenv("ELISA_TEST_OPTIMIZED_CACHE_HIT") == "1") {
 			t.Fatalf("unexpected cache hit=%v", hit)
 		}
+		// Emit the restored module before any cold optimization can initialize
+		// process-wide LLVM options and mask a cache-replay configuration bug.
+		restoredObject := filepath.Join(t.TempDir(), "restored-before-cold.o")
+		if err := optimized.writeObjectFile(restoredObject, level); err != nil {
+			t.Fatal(err)
+		}
 		cold, err := compileInput()
 		if err != nil {
 			t.Fatal(err)
@@ -83,6 +89,21 @@ func TestOptimizedModuleDiskCacheAcrossProcesses(t *testing.T) {
 		}
 		if optimized.printModule() != cold.printModule() {
 			t.Fatal("cached optimized IR differs from fresh pipeline")
+		}
+		coldObject := filepath.Join(t.TempDir(), "cold.o")
+		if err := cold.writeObjectFile(coldObject, level); err != nil {
+			t.Fatal(err)
+		}
+		restoredBytes, err := os.ReadFile(restoredObject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		coldBytes, err := os.ReadFile(coldObject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(restoredBytes) != string(coldBytes) {
+			t.Fatal("cached native object differs from cold emission")
 		}
 		object := filepath.Join(t.TempDir(), "cached.o")
 		beforeWriteReuse := session.Stats().OptimizedModulesReused

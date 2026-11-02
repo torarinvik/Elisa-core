@@ -7,6 +7,7 @@ package backend
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
+#include "parallel_emit.h"
 #include <llvm-c/TargetMachine.h>
 LLVMMemoryBufferRef elisacoreWriteOptimizedBitcodePreservingUses(LLVMModuleRef module);
 int elisacoreRestoreOptimizedIntrinsicProgress(LLVMModuleRef module);
@@ -32,6 +33,14 @@ import (
 // which lower identically can reuse O3 without weakening whole-module inlining.
 // A restored module owns a separate context; no generator handles cross contexts.
 func (s *IncrementalObjectSession) optimizeObjectModule(g *llvmGenerator, level OptimizationLevel) (*llvmGenerator, error) {
+	// Cache replay bypasses optimizeModule, but machine-code layout still needs
+	// the same process-wide O3 options as a cache miss.
+	if level == OptimizationLevel3 {
+		llvmOptimizationMu.Lock()
+		ensureO3UnrollThreshold(level)
+		llvmOptimizationMu.Unlock()
+	}
+
 	if g.optimizedForCodegen {
 		return g, nil
 	}
@@ -117,6 +126,7 @@ func optimizedModuleCacheKey(g *llvmGenerator, level OptimizationLevel, triple, 
 		int(level), triple, cpu, features,
 		optimizationBasePipeline(level),
 		optimizationAAPipeline, optimizationInlinerThreshold(level), optimizationUnrollThresholdO3,
+		C.ELISACORE_LATE_O3_PIPELINE,
 		"constant-table-range-v2-late", "constant-table-unroll-v1", "zero-forward-v1", "split-half-u64-add-v1", "little-endian-byte-pack-load-v1",
 		!g.emitDebugInfo, g.emitDebugInfo, g.emitTrace,
 	}
