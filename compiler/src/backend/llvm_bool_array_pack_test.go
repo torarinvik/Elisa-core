@@ -51,17 +51,16 @@ func TestPrivateBoolArrayPackingAndPoisonIsolation(t *testing.T) {
 
 func TestPrivateBoolArrayPackingDeclinesObservableMemory(t *testing.T) {
 	cases := map[string]string{
-		"debug module":         boolArrayProbe + "\n!llvm.dbg.cu = !{}\n!llvm.module.flags = !{!0}\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
-		"too many elements":    strings.ReplaceAll(strings.Replace(boolArrayProbe, "store i32 0, ptr %a, align 4", "store i1 false, ptr %a, align 1", 1), "[4 x i1]", "[65 x i1]"),
-		"dynamic memset":       strings.Replace(boolArrayProbe, " store i32 0, ptr %a, align 4", " call void @llvm.memset.p0.i64(ptr %a, i8 0, i64 %write, i1 false)", 1) + "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)\n",
-		"escape":               strings.Replace(boolArrayProbe, " store i32 0,", " call void @escape(ptr %a)\n store i32 0,", 1) + "declare void @escape(ptr)\n",
-		"volatile":             strings.Replace(boolArrayProbe, "load i1,", "load volatile i1,", 1),
-		"atomic":               strings.Replace(boolArrayProbe, "store i32 0, ptr %a, align 4", "store atomic i32 0, ptr %a monotonic, align 4", 1),
-		"byte load":            strings.Replace(boolArrayProbe, " %r = load i1,", " %byte = load i8, ptr %a, align 1\n %r = load i1,", 1),
-		"nonzero wide store":   strings.Replace(boolArrayProbe, "store i32 0,", "store i32 7,", 1),
-		"metadata":             strings.Replace(boolArrayProbe, "%r = load i1, ptr %q, align 1", "%r = load i1, ptr %q, align 1, !test !0", 1) + "!0 = !{}\n",
-		"size optimized":       strings.Replace(boolArrayProbe, "i1 %value) {", "i1 %value) optsize {", 1),
-		"non inbounds pointer": strings.ReplaceAll(boolArrayProbe, "getelementptr inbounds", "getelementptr"),
+		"debug module":       boolArrayProbe + "\n!llvm.dbg.cu = !{}\n!llvm.module.flags = !{!0}\n!0 = !{i32 2, !\"Debug Info Version\", i32 3}\n",
+		"too many elements":  strings.ReplaceAll(strings.Replace(boolArrayProbe, "store i32 0, ptr %a, align 4", "store i1 false, ptr %a, align 1", 1), "[4 x i1]", "[65 x i1]"),
+		"dynamic memset":     strings.Replace(boolArrayProbe, " store i32 0, ptr %a, align 4", " call void @llvm.memset.p0.i64(ptr %a, i8 0, i64 %write, i1 false)", 1) + "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)\n",
+		"escape":             strings.Replace(boolArrayProbe, " store i32 0,", " call void @escape(ptr %a)\n store i32 0,", 1) + "declare void @escape(ptr)\n",
+		"volatile":           strings.Replace(boolArrayProbe, "load i1,", "load volatile i1,", 1),
+		"atomic":             strings.Replace(boolArrayProbe, "store i32 0, ptr %a, align 4", "store atomic i32 0, ptr %a monotonic, align 4", 1),
+		"byte load":          strings.Replace(boolArrayProbe, " %r = load i1,", " %byte = load i8, ptr %a, align 1\n %r = load i1,", 1),
+		"nonzero wide store": strings.Replace(boolArrayProbe, "store i32 0,", "store i32 7,", 1),
+		"metadata":           strings.Replace(boolArrayProbe, "%r = load i1, ptr %q, align 1", "%r = load i1, ptr %q, align 1, !test !0", 1) + "!0 = !{}\n",
+		"size optimized":     strings.Replace(boolArrayProbe, "i1 %value) {", "i1 %value) optsize {", 1),
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -123,6 +122,12 @@ exit:
 }
 
 func TestPrivateBoolArrayPackingNativeRoundTrips(t *testing.T) {
+	for _, mode := range []string{"inbounds", "plain", "out-and-back"} {
+		t.Run(mode, func(t *testing.T) { boolArrayNativeRoundTrips(t, mode) })
+	}
+}
+
+func boolArrayNativeRoundTrips(t *testing.T, mode string) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("AArch64 optimization")
 	}
@@ -132,7 +137,21 @@ func TestPrivateBoolArrayPackingNativeRoundTrips(t *testing.T) {
 	}
 	ir := boolArrayHeader
 	for _, n := range []int{2, 4, 16, 64} {
-		ir += boolArrayRoundTrip(n)
+		body := boolArrayRoundTrip(n)
+		if mode != "inbounds" {
+			body = strings.ReplaceAll(body, "getelementptr inbounds", "getelementptr")
+		}
+		if mode == "out-and-back" {
+			// Both excursions are legal plain GEPs. One returns from a negative
+			// offset; the other wraps a scaled i64 index to zero byte offset.
+			body = strings.Replace(body,
+				" %w = getelementptr i8, ptr %a, i64 %write",
+				" %outside = getelementptr i8, ptr %a, i64 -129\n %back = add i64 %write, 129\n %w = getelementptr i8, ptr %outside, i64 %back", 1)
+			body = strings.Replace(body,
+				" %q = getelementptr i8, ptr %a, i64 %j",
+				" %wrapped = getelementptr i64, ptr %a, i64 2305843009213693952\n %q = getelementptr i8, ptr %wrapped, i64 %j", 1)
+		}
+		ir += body
 	}
 	g, err := parseLLVMIRForSplitHalfTest(ir)
 	if err != nil {

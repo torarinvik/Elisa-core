@@ -41,7 +41,12 @@ static bool planArray(AllocaInst &A, const DataLayout &DL, BoolArrayPlan &P) {
       auto *I = dyn_cast<Instruction>(U);
       if (!I || I->hasMetadataOtherThanDebugLoc()) return false;
       if (auto *G = dyn_cast<GetElementPtrInst>(I)) {
-        if (G->getPointerOperand() != pointer || !G->isInBounds()) return false;
+        if (G->getPointerOperand() != pointer) return false;
+        // Plain GEPs may leave the allocation and return, including through
+        // wrapping arithmetic. Only the final load/store must be within this
+        // alloca on a defined execution; no address escapes or is observed.
+        // offsetOf reproduces the full wrapping computation without assuming
+        // intermediate GEPs are inbounds.
         P.geps.push_back(G);
         work.push_back(G);
       } else if (auto *L = dyn_cast<LoadInst>(I)) {
