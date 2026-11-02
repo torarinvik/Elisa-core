@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 #if defined(__APPLE__) && defined(__aarch64__)
-#define ELISACORE_LATE_O3_PIPELINE "function(early-cse,instcombine,loop-simplify,lcssa,loop(indvars),gvn,instcombine,simplifycfg)"
+#define ELISACORE_LATE_O3_PIPELINE "function(early-cse,instcombine<max-iterations=8>,loop-simplify,lcssa,loop(indvars),gvn,instcombine<max-iterations=8>,simplifycfg)"
 #else
 #define ELISACORE_LATE_O3_PIPELINE ""
 #endif
