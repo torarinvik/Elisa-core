@@ -149,6 +149,9 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 	// FastISel emits the same semantics several times faster.
 	fastCodegen := options.OptLevel == OptimizationLevel0
 	codegenLevel := "default-codegen"
+	if options.OptLevel == OptimizationLevel3 {
+		codegenLevel = "aggressive-codegen"
+	}
 	if fastCodegen {
 		codegenLevel = "none-codegen"
 	}
@@ -253,7 +256,7 @@ func (s *IncrementalObjectSession) WriteObject(result *semantic.Result, outputPa
 				if imports != nil {
 					row = (*C.uchar)(unsafe.Add(unsafe.Pointer(imports), uintptr(part)*uintptr(ownerCount)))
 				}
-				objects[part], declined[part], errs[part] = s.buildPartition(part, fastCodegen, partitionPipeline, wholeData, wholeSize, namespace, owners, ownerCount, row, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
+				objects[part], declined[part], errs[part] = s.buildPartition(part, options.OptLevel, partitionPipeline, wholeData, wholeSize, namespace, owners, ownerCount, row, configKey, unitID, targetID, machineTriple, machineCPU, machineFeatures)
 			}
 		}()
 	}
@@ -301,7 +304,7 @@ func (s *IncrementalObjectSession) emitDirectObject(g *llvmGenerator, outputPath
 // buildPartition loads one partition into a private context, looks its exact
 // bitcode up in the session and compiles it on a miss. declined reports a
 // partition the loader cannot split; the caller then emits the module directly.
-func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pipeline string, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, imports *C.uchar, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
+func (s *IncrementalObjectSession) buildPartition(part int, level OptimizationLevel, pipeline string, wholeData *C.char, wholeSize C.size_t, namespace *C.char, owners *C.longlong, ownerCount C.size_t, imports *C.uchar, configKey string, unitID, targetID [32]byte, triple, cpu, features *C.char) (object []byte, declined bool, err error) {
 	partitionStart := time.Now()
 	context := C.LLVMContextCreate()
 	defer C.LLVMContextDispose(context)
@@ -352,7 +355,7 @@ func (s *IncrementalObjectSession) buildPartition(part int, fastCodegen bool, pi
 		}
 	} else {
 		var buffer C.LLVMMemoryBufferRef
-		if C.elisacoreEmitPartitionObject(module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
+		if C.elisacoreEmitPartitionObject(module, triple, cpu, features, C.int(machineCodegenMode(level)), &buffer, &message) == 0 {
 			text := "native emission failed"
 			if message != nil {
 				text = C.GoString(message)
@@ -415,6 +418,9 @@ func (s *IncrementalObjectSession) tryPartitionedObject(result *semantic.Result,
 		return false, nil
 	}
 	codegenLevel := "default-codegen"
+	if options.OptLevel == OptimizationLevel3 {
+		codegenLevel = "aggressive-codegen"
+	}
 	if options.OptLevel == OptimizationLevel0 {
 		codegenLevel = "none-codegen"
 	}

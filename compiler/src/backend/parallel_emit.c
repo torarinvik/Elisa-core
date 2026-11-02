@@ -352,7 +352,7 @@ int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char
 		return 0;
 	}
 	LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features,
-		fast ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+		fast == 1 ? LLVMCodeGenLevelNone : fast == 2 ? LLVMCodeGenLevelAggressive : LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
 	if (tm == NULL) {
 		*error_out = strdup("failed to create partition target machine");
 		return 0;
@@ -446,8 +446,12 @@ static int part_worker(const char *bitcode_path, int jobs, int part, const char 
 		if (msg) LLVMDisposeMessage(msg);
 		return r;
 	}
+	const char *requested_mode = getenv("ELISACORE_PART_CODEGEN_MODE");
+	LLVMCodeGenOptLevel machine_level = pipeline != NULL && strstr(pipeline, "O3") != NULL ? LLVMCodeGenLevelAggressive : LLVMCodeGenLevelDefault;
+	if (requested_mode != NULL && strcmp(requested_mode, "1") == 0) machine_level = LLVMCodeGenLevelNone;
+	if (requested_mode != NULL && strcmp(requested_mode, "2") == 0) machine_level = LLVMCodeGenLevelAggressive;
 	LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features,
-		LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+		machine_level, LLVMRelocDefault, LLVMCodeModelDefault);
 	if (tm == NULL) {
 		return part_fail(error_out, "failed to create partition target machine");
 	}

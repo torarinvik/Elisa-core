@@ -33,13 +33,14 @@ static LLVMTargetMachineRef elisacoreCreateTargetMachineForOpt(
 	char *Triple,
 	char *CPU,
 	char *Features,
-	int Unoptimized) {
+	int OptimizationLevel) {
 	return LLVMCreateTargetMachine(
 		Target,
 		Triple,
 		CPU,
 		Features,
-		Unoptimized ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault,
+		OptimizationLevel == 0 ? LLVMCodeGenLevelNone :
+            OptimizationLevel == 3 ? LLVMCodeGenLevelAggressive : LLVMCodeGenLevelDefault,
 		LLVMRelocDefault,
 		LLVMCodeModelDefault);
 }
@@ -519,11 +520,7 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 	cpu, features := cString(identity.CPU), cString(identity.Features)
 	// O0 must also disable machine-code optimization, not only IR passes.
 	// The default machine pipeline spends substantial time on large debug builds.
-	unoptimized := C.int(0)
-	if g.optLevel == OptimizationLevel0 {
-		unoptimized = 1
-	}
-	tm := C.elisacoreCreateTargetMachineForOpt(target, triple, cpu, features, unoptimized)
+	tm := C.elisacoreCreateTargetMachineForOpt(target, triple, cpu, features, C.int(g.optLevel))
 	C.free(unsafe.Pointer(cpu))
 	C.free(unsafe.Pointer(features))
 	if tm == nil {
@@ -701,4 +698,15 @@ func ResolveTargetIdentity(requestedTriple string) (TargetIdentity, error) {
 
 func peelSmallValidationLoops(module C.LLVMModuleRef) int {
 	return int(C.elisacorePeelSmallValidationLoops(module))
+}
+
+// Partition ABI mode: 0 preserves default codegen, 1 is O0, 2 is aggressive O3.
+func machineCodegenMode(level OptimizationLevel) int {
+	if level == OptimizationLevel0 {
+		return 1
+	}
+	if level == OptimizationLevel3 {
+		return 2
+	}
+	return 0
 }

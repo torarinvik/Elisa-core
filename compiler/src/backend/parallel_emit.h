@@ -40,6 +40,7 @@ LLVMModuleRef elisacoreLoadObjectPartitionImporting(LLVMContextRef context, cons
     const unsigned char *imports, char **error_out);
 unsigned char *elisacoreObjectImportSets(LLVMModuleRef m, const long long *owners, size_t count,
     int jobs, long long weight);
+// Codegen mode: 0=default, 1=none, 2=aggressive.
 int elisacoreEmitPartitionObject(LLVMModuleRef m, const char *triple, const char *cpu,
     const char *features, int fast, LLVMMemoryBufferRef *out, char **error_out);
 LLVMModuleRef elisacoreCloneObjectPartitionPrechecked(

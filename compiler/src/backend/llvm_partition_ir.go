@@ -814,8 +814,9 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 		var fragment *nativeFragmentContext
 		if s.diskCodegenFlag("ELISACORE_NATIVE_FRAGMENTS") && s.disk != nil {
 			fragment = &nativeFragmentContext{request: nativeFragmentRequest{
-				Root:      filepath.Join(s.disk.root, "native-fragments-v1"),
-				Namespace: fmt.Sprintf("%x.ir.%d", unitID, part), Target: configKey,
+				CodegenMode: machineCodegenMode(options.OptLevel),
+				Root:        filepath.Join(s.disk.root, "native-fragments-v1"),
+				Namespace:   fmt.Sprintf("%x.ir.%d", unitID, part), Target: configKey,
 				Merger: s.objectMergerCommand(), MaxBytes: s.disk.maxBytes,
 			}, record: func(fragment nativeFragmentStats) {
 				s.recordStats(func(stats *IncrementalObjectStats) {
@@ -834,7 +835,7 @@ func (s *IncrementalObjectSession) buildIRPartitionWithMode(result *semantic.Res
 	} else {
 		var buffer C.LLVMMemoryBufferRef
 		var message *C.char
-		if C.elisacoreEmitPartitionObject(g.module, triple, cpu, features, cBool(fastCodegen), &buffer, &message) == 0 {
+		if C.elisacoreEmitPartitionObject(g.module, triple, cpu, features, C.int(machineCodegenMode(options.OptLevel)), &buffer, &message) == 0 {
 			text := "native emission failed"
 			if message != nil {
 				text = C.GoString(message)

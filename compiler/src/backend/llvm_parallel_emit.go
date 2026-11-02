@@ -261,6 +261,7 @@ func (g *llvmGenerator) emitObjectParallel(outputPath string, jobs int, pipeline
 		partWorkerBitcodeEnv+"="+bitcodePath,
 		partWorkerJobsEnv+"="+strconv.Itoa(jobs),
 		partWorkerPipelineEnv+"="+pipeline,
+		"ELISACORE_PART_CODEGEN_MODE="+strconv.Itoa(machineCodegenMode(g.optLevel)),
 		partWorkerImportEnv+"="+strconv.FormatInt(importWeight, 10),
 		partWorkerTripleEnv+"="+C.GoString(triple),
 		partWorkerCPUEnv+"="+C.GoString(cpu),

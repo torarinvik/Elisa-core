@@ -32,6 +32,7 @@ type nativeFragmentRequest struct {
 	Root, Namespace, Target, Report string
 	Merger                          []string
 	MaxBytes                        int64
+	CodegenMode                     int
 }
 type nativeFragmentStats struct {
 	Emitted, Reused int
@@ -87,7 +88,7 @@ func emitNativeFragments(input, output string, request nativeFragmentRequest, tr
 	emit := func(m C.LLVMModuleRef) ([]byte, error) {
 		var object C.LLVMMemoryBufferRef
 		var msg *C.char
-		if C.elisacoreEmitPartitionObject(m, triple, cpu, features, 0, &object, &msg) == 0 {
+		if C.elisacoreEmitPartitionObject(m, triple, cpu, features, C.int(request.CodegenMode), &object, &msg) == 0 {
 			if msg != nil {
 				defer C.free(unsafe.Pointer(msg))
 				return nil, fmt.Errorf("native fragment: %s", C.GoString(msg))
@@ -134,7 +135,7 @@ func emitNativeFragments(input, output string, request nativeFragmentRequest, tr
 		}
 	}
 	disk := &incrementalObjectDisk{root: request.Root, maxBytes: request.MaxBytes}
-	config, _ := json.Marshal([]string{"native-fragments-v1", request.Target, request.Namespace, fmt.Sprint(nativeFragmentCount), "default-codegen", "default-reloc", "default-code-model"})
+	config, _ := json.Marshal([]string{"native-fragments-v1", request.Target, request.Namespace, fmt.Sprint(nativeFragmentCount), fmt.Sprint(request.CodegenMode), "default-reloc", "default-code-model"})
 	dir, e := os.MkdirTemp(filepath.Dir(output), "fragments-")
 	if e != nil {
 		return stats, e
