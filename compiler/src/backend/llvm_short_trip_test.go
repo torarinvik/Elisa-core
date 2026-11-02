@@ -56,7 +56,7 @@ func TestShortTripSpecializationAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	ir := g.printModule()
-	if !strings.Contains(ir, "short_trip.dispatch") || !strings.Contains(ir, "elisa.short-trip-versioned") || strings.Contains(ir, "define internal") {
+	if !strings.Contains(ir, "freeze i64 %n") || !strings.Contains(ir, "short_trip.dispatch") || !strings.Contains(ir, "elisa.short-trip-versioned") || strings.Contains(ir, "define internal") {
 		t.Fatalf("missing inline fast path:\n%s", ir)
 	}
 	if strings.Count(ir, "call void @llvm.memset") != 1 || strings.Count(ir, "alloca [256 x i64]") != 1 {
@@ -156,5 +156,108 @@ func TestShortTripSpecializationI32Count(t *testing.T) {
 	}
 	if strings.Count(g.printModule(), "call void @llvm.memset") != 1 {
 		t.Fatal("i32 fast path retained initialization")
+	}
+}
+
+func checkedShortTripProbe(op string) string {
+	body := strings.ReplaceAll(shortTripProbe, "@short_trip_probe", "@checked_"+op)
+	body = strings.ReplaceAll(body, "[%next, %loop]", "[%next, %commit]")
+	body = strings.ReplaceAll(body, "[%updated, %loop]", "[%updated, %commit]")
+	body = strings.Replace(body, " %dst =", " %calc = call {i64, i1} @llvm."+op+".with.overflow.i64(i64 %v, i64 2)\n %overflow = extractvalue {i64, i1} %calc, 1\n br i1 %overflow, label %invalid, label %commit\ncommit:\n %checked = extractvalue {i64, i1} %calc, 0\n %dst =", 1)
+	body = strings.Replace(body, "store i64 %v,", "store i64 %checked,", 1)
+	body = strings.Replace(body, "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)", "", 1)
+	return body + "declare {i64, i1} @llvm." + op + ".with.overflow.i64(i64, i64)\n"
+}
+
+func TestShortTripSpecializationPreservesCheckedArithmetic(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("AArch64 optimization")
+	}
+	clang, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang unavailable")
+	}
+	ir := boolArrayHeader + "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1 immarg)\n"
+	for _, op := range []string{"sadd", "ssub", "smul", "uadd", "usub", "umul"} {
+		ir += checkedShortTripProbe(op)
+	}
+	g, err := parseLLVMIRForSplitHalfTest(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if n := specializeShortTrips(g); n != 1 {
+		t.Fatalf("status %d", n)
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(g.printModule(), "short_trip.dispatch:") != 6 {
+		t.Fatal("checked kernels did not specialize")
+	}
+	dir := t.TempDir()
+	obj := filepath.Join(dir, "checked.o")
+	src := filepath.Join(dir, "check.c")
+	bin := filepath.Join(dir, "check")
+	if err := g.writeObjectFile(obj, OptimizationLevel0); err != nil {
+		t.Fatal(err)
+	}
+	code := `#include <stdint.h>
+#include <stddef.h>
+#define DECL(op) extern int64_t checked_##op(const int64_t*,uint64_t);
+DECL(sadd) DECL(ssub) DECL(smul) DECL(uadd) DECL(usub) DECL(umul)
+static int calc(unsigned op, uint64_t a, uint64_t *out) {
+ int64_t s=0; int overflow=0;
+ switch(op){
+ case 0: overflow=__builtin_add_overflow((int64_t)a,INT64_C(2),&s);*out=(uint64_t)s;break;
+ case 1: overflow=__builtin_sub_overflow((int64_t)a,INT64_C(2),&s);*out=(uint64_t)s;break;
+ case 2: overflow=__builtin_mul_overflow((int64_t)a,INT64_C(2),&s);*out=(uint64_t)s;break;
+ case 3: overflow=__builtin_add_overflow(a,UINT64_C(2),out);break;
+ case 4: overflow=__builtin_sub_overflow(a,UINT64_C(2),out);break;
+ case 5: overflow=__builtin_mul_overflow(a,UINT64_C(2),out);break;
+ }return overflow;
+}
+int main(void){
+ int64_t (*functions[])(const int64_t*,uint64_t)={checked_sadd,checked_ssub,checked_smul,checked_uadd,checked_usub,checked_umul};
+ uint64_t edges[]={0,1,2,3,INT64_MAX-2,INT64_MAX-1,INT64_MAX,UINT64_C(1)<<63,(UINT64_C(1)<<63)+1,(UINT64_C(1)<<63)+2,UINT64_MAX-2,UINT64_MAX-1,UINT64_MAX,(UINT64_C(1)<<62)-1,UINT64_C(1)<<62,(UINT64_C(1)<<62)+1,(UINT64_C(3)<<62),(UINT64_C(3)<<62)-1};
+ int64_t v[256];uint64_t state=93172;
+ for(unsigned op=0;op<6;op++)for(unsigned round=0;round<18;round++){
+  for(unsigned j=0;j<256;j++){state^=state<<13;state^=state>>7;state^=state<<17;v[j]=(int64_t)state;}
+  v[0]=(int64_t)edges[round%18];
+  for(unsigned n=0;n<=257;n++){
+   uint64_t expected=(uint64_t)-777,first=0;
+   if(n>0&&n<=256){int overflow=0;for(unsigned j=0;j<n;j++){uint64_t x;overflow|=calc(op,(uint64_t)v[j],&x);if(j==0)first=x;}if(!overflow)expected=first;}
+   if((uint64_t)functions[op](v,n)!=expected)return 1;
+  }
+ }return 0;
+}`
+	if err := os.WriteFile(src, []byte(code), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(clang, "-O2", src, obj, "-o", bin).CombinedOutput(); err != nil {
+		t.Fatalf("link: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(bin).CombinedOutput(); err != nil {
+		t.Fatalf("checked arithmetic: %v\n%s", err, out)
+	}
+}
+
+func TestShortTripSpecializationFreezesEarlyDispatch(t *testing.T) {
+	body := strings.Replace(shortTripProbe, " %badlen =", " %isnull = icmp eq ptr %input, null\n br i1 %isnull, label %invalid, label %length\nlength:\n %badlen =", 1)
+	body += "define i64 @poison_count_early_return() {\n %r = call i64 @short_trip_probe(ptr null, i64 poison)\n ret i64 %r\n}\n"
+	g, err := parseLLVMIRForSplitHalfTest(boolArrayHeader + body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.dispose()
+	if n := specializeShortTrips(g); n != 1 {
+		t.Fatalf("status %d", n)
+	}
+	if err := g.verify(); err != nil {
+		t.Fatal(err)
+	}
+	ir := g.printModule()
+	if !strings.Contains(ir, "%short_trip.count = freeze i64 %n") || !strings.Contains(ir, "icmp eq i64 %short_trip.count, 1") {
+		t.Fatalf("dispatch could branch on poison:\n%s", ir)
 	}
 }

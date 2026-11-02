@@ -75,7 +75,12 @@ static bool eligible(Function &F) {
         if (!Intrinsic || C->isConvergent() || C->cannotDuplicate() || C->hasOperandBundles()) return false;
         switch (Intrinsic->getIntrinsicID()) {
         case Intrinsic::memset: case Intrinsic::lifetime_start:
-        case Intrinsic::lifetime_end: case Intrinsic::trap: case Intrinsic::assume: break;
+        case Intrinsic::lifetime_end: case Intrinsic::trap: case Intrinsic::assume:
+        // Checked arithmetic is cloned with its overflow bit and all branches;
+        // LLVM may remove it only when the specialized path proves it unused.
+        case Intrinsic::sadd_with_overflow: case Intrinsic::ssub_with_overflow:
+        case Intrinsic::smul_with_overflow: case Intrinsic::uadd_with_overflow:
+        case Intrinsic::usub_with_overflow: case Intrinsic::umul_with_overflow: break;
         default: return false;
         }
       }
@@ -126,7 +131,12 @@ extern "C" unsigned elisacoreSpecializeShortTrips(LLVMModuleRef ref, LLVMTargetM
     for (Instruction &I : *Original) if (auto *A = dyn_cast<AllocaInst>(&I)) allocas.push_back(A);
     for (AllocaInst *A : allocas) A->moveBefore(*Entry, Entry->end());
     IRBuilder<> builder(Entry);
-    builder.CreateCondBr(builder.CreateICmpEQ(N, ConstantInt::get(N->getType(), 1)), Small, Original);
+    // The original function may return before observing a poison/undef count
+    // (for example, on a null input). Do not introduce a poison branch. A
+    // frozen one selects a permissible constant specialization; other choices
+    // retain the original body, including its original argument value.
+    Value *DispatchCount = builder.CreateFreeze(N, "short_trip.count");
+    builder.CreateCondBr(builder.CreateICmpEQ(DispatchCount, ConstantInt::get(N->getType(), 1)), Small, Original);
     builder.SetInsertPoint(Small);
     SmallVector<Value *, 4> args;
     for (Argument &A : F->args()) if (&A != N) args.push_back(&A);
